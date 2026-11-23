@@ -576,7 +576,7 @@ pub(super) fn attach_in(
         "UPDATE agent_sessions SET agent_process_id=?2,agent_launcher_lf_process_id=?3,
             agent_started_at=?4,agent_pid=NULL,agent_os_started_at=NULL,agent_ended_at=NULL,
             agent_exit_code=NULL,agent_spawn_state='reserved',agent_command=NULL,
-            agent_interactive=interactive,agent_endpoint=NULL,agent_inbox=NULL,
+            agent_interactive=interactive,agent_endpoint=NULL,agent_inbox=NULL,agent_socket=NULL,
             attachment_token=?5,attached_lf_process_id=?3,attached_pid=?6,
             attached_os_started_at=?7,attached_terminal_id=?8,
             completed_at=CASE WHEN interactive=0 AND moved_to_machine_id IS NULL
@@ -613,14 +613,13 @@ impl SqliteStore {
              UNION ALL SELECT 'Project activation',project_activation_lf_process_id,
                  project_activation_pid,project_activation_os_started_at,
                  project_activation_started_at FROM waves
-                 WHERE project_activation_ended_at IS NULL AND project_activation_pid IS NOT NULL
+                 WHERE project_activation_lf_process_id IS NOT NULL AND project_activation_ended_at IS NULL
+                     AND project_activation_pid IS NOT NULL
              UNION ALL SELECT 'Task run',lf_process_id,run_pid,run_os_started_at,NULL
-                 FROM task_graphs WHERE run_pid IS NOT NULL
-             UNION ALL SELECT 'Auto-Ship',lf_process_id,pid,os_started_at,at FROM task_ship_events
-                 WHERE kind IN ('approved','carried') AND ended_at IS NULL AND pid IS NOT NULL
+                 FROM task_graphs WHERE lf_process_id IS NOT NULL AND run_pid IS NOT NULL
              UNION ALL SELECT 'CI repair',repair_lf_process_id,repair_pid,repair_os_started_at,
                  repair_started_at FROM ci_incidents
-                 WHERE repair_finished_at IS NULL AND repair_pid IS NOT NULL
+                 WHERE repair_lf_process_id IS NOT NULL AND repair_finished_at IS NULL AND repair_pid IS NOT NULL
              UNION ALL SELECT 'Session',attached_lf_process_id,attached_pid,attached_os_started_at,
                  NULL FROM agent_sessions INDEXED BY agent_sessions_attached
                  WHERE attached_lf_process_id IS NOT NULL AND attached_pid IS NOT NULL",
@@ -905,6 +904,15 @@ impl SqliteStore {
             ],
         )?;
         tx.commit()?;
+        Ok(())
+    }
+
+    /// The provider's own exit code, as the launcher that became it saw it.
+    pub fn record_agent_exit_code(&self, agent: &AgentProcessId, code: i32) -> StoreResult<()> {
+        self.conn.lock().expect("store mutex poisoned").execute(
+            "UPDATE agent_sessions SET agent_exit_code=?2 WHERE agent_process_id=?1",
+            params![agent, code],
+        )?;
         Ok(())
     }
 

@@ -15,29 +15,22 @@ use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 
-use super::fact::{Decoded, ProviderFact, ProviderTurn};
 use super::fact_writer::FactWriter;
-use super::pi_decode::Turn;
 use super::Recording;
-use super::{Driver as StreamDriver, HarnessError, SendCurrentOutcome};
+use super::{Driver as StreamDriver, HarnessError};
 use crate::agent::AgentConfig;
 use crate::steer::NativeBoundary;
+use loopflow_harness::fact::{Decoded, ProviderFact, ProviderTurn};
+use loopflow_harness::pi_decode::{self, Turn};
 use loopflow_model::chat::types::{ConversationEvent, Lifecycle};
 use loopflow_model::id::AgentSessionId;
-
-#[derive(Debug)]
-struct Response {
-    value: Value,
-    // Snapshot in stream order: a later settlement cannot change the receipt.
-    turn: Option<String>,
-}
 
 #[derive(Debug, Default)]
 struct State {
     turn: Option<Turn>,
     /// Writes what this process's turns establish; present once started.
     writer: Option<FactWriter>,
-    responses: HashMap<String, oneshot::Sender<Response>>,
+    responses: HashMap<String, oneshot::Sender<Value>>,
     dead: bool,
 }
 
@@ -138,8 +131,7 @@ pub(crate) fn conversation_file(token: &AgentSessionId) -> PathBuf {
         .unwrap_or_else(|| path.to_owned())
 }
 
-pub fn options(config: &AgentConfig, context_file: Option<&Path>) -> Result<Vec<String>> {
-    anyhow::ensure!(config.write_scope != crate::agent::AgentWriteScope::Worktree || config.execution_boundary.is_some(), "Pi has no provider-only worktree sandbox; use a managed Task in an OS environment with the required boundary");
+pub fn options(config: &AgentConfig, context_file: Option<&Path>) -> Vec<String> {
     let mut args = Vec::new();
     if let Some(model) = config.agent.model.clone() {
         args.extend(["--model".into(), model]);
@@ -148,7 +140,7 @@ pub fn options(config: &AgentConfig, context_file: Option<&Path>) -> Result<Vec<
         args.extend(["--append-system-prompt".into(), path.display().to_string()]);
     }
     // Project trust is separate from tool permissions; retain the user's policy.
-    Ok(args)
+    args
 }
 
 impl Driver {
@@ -194,7 +186,8 @@ impl Driver {
         Ok(())
     }
 
-    async fn request_observed(&mut self, mut value: Value) -> Result<Response> {
+    async fn request(&mut self, mut value: Value) -> Result<Value> {
+        let command = value["type"].as_str().unwrap_or("command").to_owned();
         let id = uuid::Uuid::new_v4().to_string();
         value["id"] = json!(id);
         let (tx, rx) = oneshot::channel();
@@ -216,12 +209,7 @@ impl Driver {
             .expect("Pi state lock poisoned")
             .responses
             .remove(&id);
-        result
-    }
-
-    async fn request(&mut self, value: Value) -> Result<Value> {
-        let command = value["type"].as_str().unwrap_or("command").to_owned();
-        let response = self.request_observed(value).await?.value;
+        let response = result?;
         anyhow::ensure!(
             response["success"] == true,
             "Pi {}: {}",
@@ -238,7 +226,7 @@ impl Driver {
         let mut command = Command::new("pi");
         command
             .args(["--mode", "rpc"])
-            .args(options(config, context.as_deref())?);
+            .args(options(config, context.as_deref()));
         if let Some(file) = &resumed {
             command.arg("--session").arg(file);
         }
@@ -252,15 +240,14 @@ impl Driver {
             context.configure_hooks(command.as_std_mut())?;
         }
         super::configure_vendor_std_env(command.as_std_mut())?;
-        if let Some(cwd) = &config.cwd {
-            command.current_dir(cwd);
-        }
         command
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
         let mut child = super::agent_process::spawn(command, None, &owner, self.kind)
-            .with_context(|| crate::agent::missing_agent_message(super::HarnessKind::Pi))?;
+            .with_context(|| {
+                crate::agent::missing_agent_message(loopflow_harness::HarnessKind::Pi)
+            })?;
         let Recording {
             store,
             session,
@@ -304,13 +291,18 @@ impl Driver {
         let events = self.events.clone();
         tokio::spawn(async move {
             let mut lines = BufReader::new(stdout).lines();
+            let mut code = "pi_disconnected";
             let outcome: Result<()> = async {
                 while let Some(line) = lines.next_line().await? {
-                    let value: Value = serde_json::from_str(&line).context("Invalid Pi RPC JSON")?;
+                    let value: Value =
+                        serde_json::from_str(&line).context("Invalid Pi RPC JSON")?;
                     let mut state = state.lock().expect("Pi state lock poisoned");
                     if value["type"] == "response" {
-                        if let Some(tx) = value["id"].as_str().and_then(|id| state.responses.remove(id)) {
-                            let _ = tx.send(Response { value, turn: state.turn.as_ref().map(|turn| turn.id().to_owned()) });
+                        if let Some(tx) = value["id"]
+                            .as_str()
+                            .and_then(|id| state.responses.remove(id))
+                        {
+                            let _ = tx.send(value);
                         }
                         continue;
                     }
@@ -322,16 +314,25 @@ impl Driver {
                     }
                     if value["type"] == "extension_ui_request" {
                         // A headless extension dialog requires a person; never silently answer it.
-                        if matches!(value["method"].as_str(), Some("select" | "confirm" | "input" | "editor")) {
-                            bail!("Pi extension requested interactive input; open this Session in Pi to answer it");
+                        if matches!(
+                            value["method"].as_str(),
+                            Some("select" | "confirm" | "input" | "editor")
+                        ) {
+                            let question = [&value["title"], &value["message"]]
+                                .iter()
+                                .filter_map(|text| text.as_str())
+                                .collect::<Vec<_>>()
+                                .join(" ");
+                            code = loopflow_model::chat::types::UNANSWERED_QUESTION;
+                            bail!(loopflow_harness::fact::unanswered_question("Pi", &question));
                         }
                     }
                     if let Some(turn) = state.turn.as_mut() {
                         let decoded = turn.event(&value);
                         let mapped = state.record(decoded)?;
-                        let complete = mapped.iter().any(|e| {
-                            matches!(e, ConversationEvent::TurnCompleted { .. })
-                        });
+                        let complete = mapped
+                            .iter()
+                            .any(|e| matches!(e, ConversationEvent::TurnCompleted { .. }));
                         for event in mapped {
                             let _ = events.send(event);
                         }
@@ -341,12 +342,23 @@ impl Driver {
                     }
                 }
                 bail!("Pi RPC stream closed")
-            }.await;
+            }
+            .await;
             let mut state = state.lock().expect("Pi state lock poisoned");
             state.dead = true;
             state.responses.clear();
+            // A signal ending lf takes Pi with it: that turn was interrupted.
+            let interrupted = crate::agent::interrupted();
+            let message = outcome
+                .expect_err("Pi reader returns only after an error or EOF")
+                .to_string();
             if let Some(mut turn) = state.turn.take() {
-                let decoded = turn.finish(Lifecycle::Failed);
+                let decoded = if interrupted {
+                    turn.finish(Lifecycle::Interrupted, None)
+                } else {
+                    let error = loopflow_model::chat::types::turn_error(code, &message);
+                    turn.finish(Lifecycle::Failed, Some(error))
+                };
                 let mapped = display(&decoded);
                 if let Err(error) = state.record(decoded) {
                     tracing::warn!(%error, "could not retain Pi failure");
@@ -355,11 +367,12 @@ impl Driver {
                     let _ = events.send(event);
                 }
             }
+            if interrupted {
+                return;
+            }
             let _ = events.send(ConversationEvent::Error {
-                code: "pi_disconnected".into(),
-                message: outcome
-                    .expect_err("Pi reader returns only after an error or EOF")
-                    .to_string(),
+                code: code.into(),
+                message,
                 evidence: None,
             });
         })
@@ -382,7 +395,7 @@ impl StreamDriver for Driver {
         let config = self.config.clone();
         let config = &config;
         self.seed = Some(match &config.skill_invocation {
-            Some(skill) => skill.terminal_input(&Pi, config)?.1,
+            Some(skill) => skill.terminal_input(&loopflow_harness::Pi, config)?.1,
             None => config.task_prompt.clone(),
         });
         if let Err(error) = self.start_process(config).await {
@@ -441,7 +454,7 @@ impl StreamDriver for Driver {
             let mapped = {
                 let mut state = self.state.lock().expect("Pi state lock poisoned");
                 match state.turn.take() {
-                    Some(mut turn) => state.record(turn.finish(Lifecycle::Failed))?,
+                    Some(mut turn) => state.record(turn.finish(Lifecycle::Failed, None))?,
                     None => Vec::new(),
                 }
             };
@@ -451,57 +464,6 @@ impl StreamDriver for Driver {
             return Err(error);
         }
         Ok(())
-    }
-
-    async fn send_current(&mut self, content: &str) -> SendCurrentOutcome {
-        if content.trim().is_empty() {
-            return SendCurrentOutcome::Failed {
-                error: "steer input is empty".into(),
-            };
-        }
-        let turn = self
-            .state
-            .lock()
-            .expect("Pi state lock poisoned")
-            .turn
-            .as_ref()
-            .map(|turn| turn.id().to_owned());
-        let Some(turn) = turn else {
-            return SendCurrentOutcome::NotSteerable;
-        };
-        // Pi owns the queue. An acknowledgment proves acceptance, not incorporation.
-        // Missing responses and a settlement racing the acknowledgment are uncertain.
-        match self
-            .request_observed(json!({"type":"steer", "message":content}))
-            .await
-        {
-            Ok(response) if response.value["success"] == false => SendCurrentOutcome::Failed {
-                error: response.value["error"]
-                    .as_str()
-                    .unwrap_or("Pi rejected steering")
-                    .into(),
-            },
-            Ok(response)
-                if response.value["success"] == true
-                    && response.value["data"]["disposition"] == "queued"
-                    && response.turn.as_deref() == Some(&turn) =>
-            {
-                SendCurrentOutcome::Sent {
-                    provider_turn_id: turn,
-                }
-            }
-            Ok(response) => SendCurrentOutcome::Unknown {
-                provider_turn_id: Some(turn),
-                error: format!(
-                    "Pi steer did not confirm queuing during the active turn (disposition: {})",
-                    response.value["data"]["disposition"]
-                ),
-            },
-            Err(error) => SendCurrentOutcome::Unknown {
-                provider_turn_id: Some(turn),
-                error: error.to_string(),
-            },
-        }
     }
 
     async fn interrupt(&mut self) -> Result<()> {
@@ -603,48 +565,20 @@ pub fn observe_native(
             .map_err(|e| crate::store::StoreError::InvalidData(e.to_string()))?;
             return Ok(());
         }
-        let decoded = super::pi_decode::native(&thread, value)
+        let decoded = pi_decode::native(&thread, value)
             .map_err(|e| crate::store::StoreError::InvalidData(e.to_string()))?;
         writer.record(&decoded)
     })?;
     Ok(())
 }
 
-#[derive(Debug)]
-pub struct Pi;
-
-impl super::Harness for Pi {
+impl super::Launcher for loopflow_harness::Pi {
     fn recognizes(&self, process: &crate::process::OsProcess) -> bool {
         process.command == "node"
             && crate::process::OsProcess::arguments(process.pid)
                 .ok()
                 .flatten()
                 .is_some_and(|args| runs_pi(&args))
-    }
-    fn api_key_env(&self) -> &'static [&'static str] {
-        &[
-            "ANTHROPIC_API_KEY",
-            "OPENAI_API_KEY",
-            "GEMINI_API_KEY",
-            "MOONSHOT_API_KEY",
-        ]
-    }
-    fn recognizes_driver(&self, command: &str) -> bool {
-        (super::command_program(command, "pi")
-            || command
-                .split_whitespace()
-                .any(|arg| arg.contains("/pi-coding-agent/") && arg.ends_with("/cli.js")))
-            && command.split_whitespace().any(|arg| arg == "--mode")
-            && command.split_whitespace().any(|arg| arg == "rpc")
-    }
-    fn transcript_reader(&self) -> fn(&[serde_json::Value]) -> Vec<crate::transcript::Turn> {
-        crate::transcript::pi::read
-    }
-    fn transcript_home(&self) -> PathBuf {
-        std::env::var_os("PI_CODING_AGENT_DIR")
-            .filter(|value| !value.is_empty())
-            .map(PathBuf::from)
-            .unwrap_or_else(|| dirs::home_dir().unwrap_or_default().join(".pi/agent"))
     }
     fn locate_transcript(
         &self,
@@ -655,7 +589,7 @@ impl super::Harness for Pi {
         let path = conversation_file(id);
         Ok(if path.is_file() {
             crate::transcript::Located::Found {
-                source: crate::transcript::Source::File(path),
+                source: loopflow_harness::transcript::Source::File(path),
                 home: None,
             }
         } else {
@@ -664,20 +598,14 @@ impl super::Harness for Pi {
             })
         })
     }
-    fn transcript_markers(&self) -> &'static [&'static [u8]] {
-        &[]
-    }
     fn transcript_retention(
         &self,
         thread: &AgentSessionId,
     ) -> (crate::transcript::RetentionState, Option<i64>) {
-        match crate::transcript::modified(thread.as_str().as_ref()) {
+        match loopflow_harness::transcript::modified(thread.as_str().as_ref()) {
             Some(at) => (crate::transcript::RetentionState::Provider, Some(at)),
             None => (crate::transcript::RetentionState::Facts, None),
         }
-    }
-    fn transcript_root(&self, home: &Path) -> (std::path::PathBuf, usize) {
-        (home.join("sessions"), 1)
     }
     fn recent_transcripts(
         &self,
@@ -685,7 +613,7 @@ impl super::Harness for Pi {
         cwd: &Path,
         since: i64,
         owned: &std::collections::HashSet<&str>,
-    ) -> Vec<(String, crate::transcript::Source, i64)> {
+    ) -> Vec<(String, loopflow_harness::transcript::Source, i64)> {
         let name = cwd
             .to_string_lossy()
             .trim_start_matches('/')
@@ -697,15 +625,17 @@ impl super::Harness for Pi {
             )
             .into_iter()
             .filter(|(_, path, at)| {
-                *at >= since && crate::transcript::recorded_cwd(path).as_deref() == Some(cwd)
+                *at >= since
+                    && loopflow_harness::transcript::recorded_cwd(path).as_deref() == Some(cwd)
             })
-            .map(|(id, path, at)| (id, crate::transcript::Source::File(path), at))
+            .map(|(id, path, at)| (id, loopflow_harness::transcript::Source::File(path), at))
             .collect(),
             owned,
         )
     }
-    fn kind(&self) -> super::HarnessKind {
-        super::HarnessKind::Pi
+    fn classify_failure(&self, code: &str, message: &str) -> Option<crate::agent::AgentFailure> {
+        // Pi retries a transient failure itself.
+        crate::agent::routing_failure(code, message)
     }
     fn capabilities(&self) -> super::Capabilities {
         super::Capabilities {
@@ -714,9 +644,12 @@ impl super::Harness for Pi {
                 managed: super::ThreadName::Reported,
             },
             initial_prompt_on_resume: false,
-            supports_execution_boundary: true,
-            classifies_failures: false,
             native_skills: None,
+            installed_skills: super::InstalledSkills {
+                global: ".agents/skills",
+                repository: ".agents/skills",
+                global_registry: None,
+            },
             turn_limit: false,
             output_schema: false,
             respawns_after_crash: false,
@@ -739,7 +672,7 @@ impl super::Harness for Pi {
     fn open(&self, launch: &super::Launch<'_>) -> Result<super::native_session::NativeClient> {
         let mut client = super::native_session::NativeClient::new(launch)?;
         let (mut args, input) = launch.terminal_input()?;
-        args.extend(options(launch.config, launch.context_file)?);
+        args.extend(options(launch.config, launch.context_file));
         match launch.start {
             super::Start::Resume { thread } => args.extend(resume_args(thread)?),
             super::Start::New => {

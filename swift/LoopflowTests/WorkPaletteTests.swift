@@ -31,6 +31,10 @@ struct WorkPaletteTests {
             #expect(ratio(rgb(ink, environment), workSelection) >= 4.5)
         }
         #expect(definition.terminal.readabilityErrors.isEmpty)
+        let bar = rgb(palette.titlebarBackground, environment)
+        for ink in [palette.titlebarText, palette.titlebarSecondaryText] {
+            #expect(ratio(composite(rgb(ink, environment), over: bar), bar) >= 4.5, "title bar text \(ink) on \(bar)")
+        }
         for surface in surfaces {
             let base = rgb(surface, environment)
             #expect(ratio(rgb(palette.selectionEdge, environment), base) >= 3)
@@ -91,7 +95,7 @@ struct WorkPaletteTests {
                                              app: nil, title: nil, msg: nil)
             for selected in [false, true] {
                 for focused in [false, true] {
-                    let view = ProgramStatusLabel(status: ProgramStatusRecords(seen: true, records: [report]))
+                    let view = try #require(StatusMark(status: ProgramStatusRecords(seen: true, records: [report])))
                         .workSelection(selected)
                         .keyboardFocusRing(focused)
                         .modifier(AppAppearance(appearance: appearance))
@@ -108,9 +112,7 @@ struct WorkPaletteTests {
                 }
             }
         }
-        let unknown = ProgramStatusLabel(status: ProgramStatusRecords(seen: false, records: []))
-            .modifier(AppAppearance(appearance: appearance))
-        #expect(try unknown.inspect().findAll(ViewType.Text.self).isEmpty)
+        #expect(StatusMark(status: ProgramStatusRecords(seen: false, records: [])) == nil)
     }
 
     private func rgb(_ color: Color, _ environment: EnvironmentValues) -> [Double] {

@@ -5,11 +5,11 @@ use std::time::Duration;
 use serde_json::json;
 use tokio::sync::mpsc;
 
-use super::fact::{Decoded, ProviderTurn};
 use super::pi::Driver as PiDriver;
-use super::pi_decode::Turn;
-use super::{Driver, SendCurrentOutcome};
+use super::Driver;
 use crate::agent::AgentConfig;
+use loopflow_harness::fact::{Decoded, ProviderFact, ProviderTurn};
+use loopflow_harness::pi_decode::Turn;
 use loopflow_model::chat::types::{ConversationEvent, ConversationItem, Lifecycle};
 
 async fn completed(rx: &mut mpsc::UnboundedReceiver<ConversationEvent>) -> Vec<ConversationEvent> {
@@ -62,7 +62,7 @@ async fn pi_turns_resume_the_exact_conversation_and_capture_tools_usage() {
     let (tx, mut rx) = mpsc::unbounded_channel();
 
     let mut pi = PiDriver::new(
-        &crate::harness::launch_for_test(crate::harness::HarnessKind::Pi, &config, &recording),
+        &crate::harness::launch_for_test(loopflow_harness::HarnessKind::Pi, &config, &recording),
         tx,
     );
     pi.start().await.unwrap();
@@ -105,7 +105,7 @@ async fn pi_turns_resume_the_exact_conversation_and_capture_tools_usage() {
     let (tx, mut rx) = mpsc::unbounded_channel();
 
     let mut pi = PiDriver::new(
-        &crate::harness::launch_for_test(crate::harness::HarnessKind::Pi, &config, &recording),
+        &crate::harness::launch_for_test(loopflow_harness::HarnessKind::Pi, &config, &recording),
         tx,
     );
     pi.start().await.unwrap();
@@ -133,7 +133,7 @@ async fn pi_headless_resumes_a_conversation_recorded_by_its_id() {
     let (tx, mut rx) = mpsc::unbounded_channel();
 
     let mut pi = PiDriver::new(
-        &crate::harness::launch_for_test(crate::harness::HarnessKind::Pi, &config, &recording),
+        &crate::harness::launch_for_test(loopflow_harness::HarnessKind::Pi, &config, &recording),
         tx,
     );
     pi.start().await.unwrap();
@@ -151,7 +151,7 @@ async fn pi_interrupt_keeps_the_conversation_alive_and_auth_failure_is_not_succe
     let (tx, mut rx) = mpsc::unbounded_channel();
 
     let mut pi = PiDriver::new(
-        &crate::harness::launch_for_test(crate::harness::HarnessKind::Pi, &config, &recording),
+        &crate::harness::launch_for_test(loopflow_harness::HarnessKind::Pi, &config, &recording),
         tx,
     );
     pi.start().await.unwrap();
@@ -197,7 +197,7 @@ async fn pi_crash_closes_open_tools_and_fails_the_turn() {
     let (tx, mut rx) = mpsc::unbounded_channel();
 
     let mut pi = PiDriver::new(
-        &crate::harness::launch_for_test(crate::harness::HarnessKind::Pi, &config, &recording),
+        &crate::harness::launch_for_test(loopflow_harness::HarnessKind::Pi, &config, &recording),
         tx,
     );
     pi.start().await.unwrap();
@@ -286,7 +286,7 @@ async fn pi_rejected_prompt_and_malformed_stream_remain_failures() {
     let (tx, mut rx) = mpsc::unbounded_channel();
 
     let mut pi = PiDriver::new(
-        &crate::harness::launch_for_test(crate::harness::HarnessKind::Pi, &config, &recording),
+        &crate::harness::launch_for_test(loopflow_harness::HarnessKind::Pi, &config, &recording),
         tx,
     );
     pi.start().await.unwrap();
@@ -317,16 +317,28 @@ async fn pi_rejected_prompt_and_malformed_stream_remain_failures() {
 
 #[tokio::test]
 async fn pi_headless_dialogs_and_extension_failures_do_not_hang_or_succeed() {
-    for (input, reason) in [
-        ("dialog", "interactive input"),
-        ("extension error", "context delivery failed"),
+    for (input, failed, reason) in [
+        (
+            "dialog",
+            "unanswered_question",
+            "Pi asked a question with nobody there to answer it: Use the fixture?",
+        ),
+        (
+            "extension error",
+            "pi_disconnected",
+            "context delivery failed",
+        ),
     ] {
         let mut config = crate::agent::AgentConfig::default();
         let (_ledger, _env, recording) = fixture(&mut config);
         let (tx, mut rx) = mpsc::unbounded_channel();
 
         let mut pi = PiDriver::new(
-            &crate::harness::launch_for_test(crate::harness::HarnessKind::Pi, &config, &recording),
+            &crate::harness::launch_for_test(
+                loopflow_harness::HarnessKind::Pi,
+                &config,
+                &recording,
+            ),
             tx,
         );
         pi.start().await.unwrap();
@@ -339,7 +351,7 @@ async fn pi_headless_dialogs_and_extension_failures_do_not_hang_or_succeed() {
             })
         ));
         assert!(
-            matches!(rx.recv().await.unwrap(), ConversationEvent::Error { message, .. } if message.contains(reason))
+            matches!(rx.recv().await.unwrap(), ConversationEvent::Error { code, message, .. } if code == failed && message.contains(reason))
         );
         pi.stop().await.unwrap();
     }
@@ -353,7 +365,7 @@ async fn pi_missing_binary_records_a_failed_launch_without_a_live_process() {
     let (tx, _rx) = mpsc::unbounded_channel();
 
     let mut pi = PiDriver::new(
-        &crate::harness::launch_for_test(crate::harness::HarnessKind::Pi, &config, &recording),
+        &crate::harness::launch_for_test(loopflow_harness::HarnessKind::Pi, &config, &recording),
         tx,
     );
     let error = pi.start().await.unwrap_err().to_string();
@@ -385,10 +397,9 @@ fn pi_model_selection_native_resume_and_credentials_keep_their_owners() {
         cwd: Some(directory.path().into()),
         ..crate::agent::AgentConfig::default()
     };
-    let cmd = crate::harness::HarnessKind::Pi
-        .harness()
+    let cmd = crate::harness::launcher(loopflow_harness::HarnessKind::Pi)
         .open(&crate::harness::Launch {
-            harness: crate::harness::HarnessKind::Pi.harness(),
+            harness: crate::harness::launcher(loopflow_harness::HarnessKind::Pi),
             config: &config,
             recording: &crate::harness::admit_for_test(tempfile::tempdir().unwrap().path()),
             kind: crate::harness::LaunchKind::Batch,
@@ -418,11 +429,11 @@ fn pi_model_selection_native_resume_and_credentials_keep_their_owners() {
         "MOONSHOT_API_KEY",
     ] {
         assert!(crate::provider_auth::api_key_env_allowed(
-            crate::harness::HarnessKind::Pi,
+            loopflow_harness::HarnessKind::Pi,
             name
         ));
         assert!(!crate::provider_auth::provider_env_allowed(
-            crate::harness::HarnessKind::Pi,
+            loopflow_harness::HarnessKind::Pi,
             name
         ));
     }
@@ -472,89 +483,45 @@ fn pi_empty_final_answers_fail_but_tool_steps_and_internal_retries_can_recover()
     ));
 }
 
-#[tokio::test]
-async fn pi_steering_receipts_preserve_one_turn_and_distinguish_uncertainty() {
-    let mut config = crate::agent::AgentConfig::default();
-    let (_ledger, _env, recording) = fixture(&mut config);
-    let (tx, mut rx) = mpsc::unbounded_channel();
+/// What a failed turn's completion records as its error.
+fn completed_error(decoded: Vec<Decoded>) -> serde_json::Value {
+    decoded
+        .into_iter()
+        .find_map(|decoded| match decoded {
+            Decoded::Fact(ProviderFact::TurnCompleted { detail, .. }) => {
+                Some(detail["error"].clone())
+            }
+            _ => None,
+        })
+        .expect("turn completion")
+}
 
-    let mut pi = PiDriver::new(
-        &crate::harness::launch_for_test(crate::harness::HarnessKind::Pi, &config, &recording),
-        tx,
-    );
-    pi.start().await.unwrap();
-    assert_eq!(
-        pi.send_current("idle").await,
-        SendCurrentOutcome::NotSteerable
-    );
-    pi.send_input("wait").await.unwrap();
-    let ConversationEvent::TurnStarted { turn_id } = rx.recv().await.unwrap() else {
-        panic!("turn starts");
+#[test]
+fn a_failed_pi_turn_keeps_why_on_its_completion() {
+    let provider_turn = || ProviderTurn {
+        thread: "/tmp/pi-session.jsonl".into(),
+        turn: "turn".into(),
     };
-    let crate::harness::Recording {
-        store,
-        session,
-        attachment: _,
-    } = recording.clone();
-    let thread = pi.agent_session().unwrap();
-    let origin = store.session_turns(&session).unwrap();
-    assert!(matches!(
-        pi.send_current("reject").await,
-        SendCurrentOutcome::Failed { .. }
-    ));
-    assert!(matches!(
-        pi.send_current("handled").await,
-        SendCurrentOutcome::Unknown { .. }
-    ));
-    assert!(matches!(
-        pi.send_current("malformed").await,
-        SendCurrentOutcome::Unknown { .. }
-    ));
+    let mut turn = Turn::new(provider_turn());
+    turn.event(&json!({"type":"message_end","message":{"role":"assistant","content":[],"stopReason":"error","errorMessage":"429 quota exceeded"}}));
+    let settled = turn.event(&json!({"type":"agent_settled","aborted":false}));
     assert_eq!(
-        pi.send_current("direction 雪").await,
-        SendCurrentOutcome::Sent {
-            provider_turn_id: turn_id.clone()
-        }
+        completed_error(settled),
+        json!({"code":"pi_model_error","message":"429 quota exceeded"})
     );
-    assert_eq!(
-        pi.send_current("finish").await,
-        SendCurrentOutcome::Sent {
-            provider_turn_id: turn_id.clone()
-        }
+
+    let mut turn = Turn::new(provider_turn());
+    let settled = turn.event(&json!({"type":"agent_settled","aborted":false}));
+    assert_eq!(completed_error(settled)["code"], "pi_empty_turn");
+
+    // A model error Pi reported stays the cause when its stream then closes.
+    let mut turn = Turn::new(provider_turn());
+    turn.event(&json!({"type":"message_end","message":{"role":"assistant","content":[],"stopReason":"error","errorMessage":"overloaded"}}));
+    let died = turn.finish(
+        Lifecycle::Failed,
+        Some(json!({"code":"pi_disconnected","message":"Pi RPC stream closed"})),
     );
-    let events = completed(&mut rx).await;
-    assert!(!events
-        .iter()
-        .any(|e| matches!(e, ConversationEvent::TurnStarted { .. })));
-    assert!(
-        matches!(events.last(), Some(ConversationEvent::TurnCompleted {turn_id: id, status: Lifecycle::Completed}) if id == &turn_id)
-    );
-    assert_eq!(pi.agent_session().unwrap(), thread);
-    let start = origin
-        .iter()
-        .find(|turn| turn.started_at.is_some())
-        .unwrap();
-    let turns = store.session_turns(&session).unwrap();
-    let done = turns.iter().find(|turn| turn.ended_at.is_some()).unwrap();
-    // The end completes the turn the start began, keeping its origin.
-    assert_eq!(done.id, start.id);
-    assert_eq!(done.lf_process_id, start.lf_process_id);
-    assert_eq!(done.agent_process_id, start.agent_process_id);
-    assert_eq!(done.task_id, start.task_id);
-    assert_eq!(turns.len(), origin.len());
-    pi.send_input("wait").await.unwrap();
-    assert!(matches!(
-        pi.send_current("late").await,
-        SendCurrentOutcome::Unknown { .. }
-    ));
-    completed(&mut rx).await;
-    pi.send_input("wait").await.unwrap();
-    assert!(matches!(
-        pi.send_current("disconnect").await,
-        SendCurrentOutcome::Unknown { .. }
-    ));
-    completed(&mut rx).await;
-    pi.stop().await.unwrap();
+    assert_eq!(completed_error(died)["code"], "pi_model_error");
 }
 
 #[test]
@@ -573,10 +540,9 @@ fn bare_pi_names_its_thread_and_resumes_it_by_that_id() {
     // A bare Pi's thread is the one its admission assigned.
     let recording = crate::harness::admit_for_test(tempfile::tempdir().unwrap().path());
     let id = recording.assigned_thread().unwrap();
-    let start = crate::harness::HarnessKind::Pi
-        .harness()
+    let start = crate::harness::launcher(loopflow_harness::HarnessKind::Pi)
         .open(&crate::harness::Launch {
-            harness: crate::harness::HarnessKind::Pi.harness(),
+            harness: crate::harness::launcher(loopflow_harness::HarnessKind::Pi),
             config: &config,
             recording: &recording,
             kind: crate::harness::LaunchKind::Batch,
@@ -594,10 +560,9 @@ fn bare_pi_names_its_thread_and_resumes_it_by_that_id() {
 
     // Before Pi wrote the conversation (no reply yet), a resume starts it
     // fresh under the same id.
-    let fresh = crate::harness::HarnessKind::Pi
-        .harness()
+    let fresh = crate::harness::launcher(loopflow_harness::HarnessKind::Pi)
         .open(&crate::harness::Launch {
-            harness: crate::harness::HarnessKind::Pi.harness(),
+            harness: crate::harness::launcher(loopflow_harness::HarnessKind::Pi),
             config: &config,
             recording: &crate::harness::admit_for_test(tempfile::tempdir().unwrap().path()),
             kind: crate::harness::LaunchKind::Batch,
@@ -616,10 +581,9 @@ fn bare_pi_names_its_thread_and_resumes_it_by_that_id() {
     std::fs::create_dir_all(&project).unwrap();
     let file = project.join(format!("2026-11-11T11-22-55-913Z_{id}.jsonl"));
     std::fs::write(&file, format!("{{\"type\":\"session\",\"id\":\"{id}\"}}\n")).unwrap();
-    let resume = crate::harness::HarnessKind::Pi
-        .harness()
+    let resume = crate::harness::launcher(loopflow_harness::HarnessKind::Pi)
         .open(&crate::harness::Launch {
-            harness: crate::harness::HarnessKind::Pi.harness(),
+            harness: crate::harness::launcher(loopflow_harness::HarnessKind::Pi),
             config: &config,
             recording: &crate::harness::admit_for_test(tempfile::tempdir().unwrap().path()),
             kind: crate::harness::LaunchKind::Batch,

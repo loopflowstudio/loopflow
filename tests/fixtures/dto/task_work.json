@@ -35,7 +35,27 @@
       "at": "implement",
       "lf_process_id": "11111111-1111-4111-8111-111111111111",
       "running": true
-    }
+    },
+    "steps": [
+      {
+        "name": "plan",
+        "interactive": false
+      },
+      {
+        "name": "review-design",
+        "interactive": true
+      },
+      {
+        "name": "build",
+        "interactive": false
+      },
+      {
+        "name": "demo",
+        "interactive": true
+      }
+    ],
+    "current_step": 2,
+    "sentence": "build is running implement. You are next needed at demo."
   },
   "graph_processes": [
     {

@@ -15,10 +15,10 @@ use std::sync::{Arc, Mutex};
 use anyhow::Result;
 use serde_json::json;
 
-use super::fact::{Decoded, ProviderFact, Signal};
 use crate::process::SessionAttachment;
 use crate::session::{SessionActivity, SessionPreview, SessionTurnOrigin, TurnContext};
 use crate::store::{RecordingGap, StoreResult};
+use loopflow_harness::fact::{Decoded, ProviderFact, Signal};
 use loopflow_model::chat::types::{ConversationEvent, ConversationItem};
 use loopflow_model::id::AgentSessionId;
 use loopflow_storage::sqlite::SqliteStore;
@@ -401,11 +401,10 @@ mod tests {
     use serde_json::{json, Value};
 
     use super::{FactWriter, SessionActivityTracker};
-    use crate::harness::claude_decode::ClaudeDecoder;
-    use crate::harness::codex_decode::{turn_request, CodexDecoder};
-    use crate::harness::fact::{trace, Decoded, ProviderFact, ProviderTurn, Signal};
-    use crate::harness::opencode_decode::OpenCodeDecoder;
     use crate::process::SessionAttachment;
+    use loopflow_harness::claude_decode::ClaudeDecoder;
+    use loopflow_harness::codex_decode::{turn_request, CodexDecoder};
+    use loopflow_harness::fact::{trace, Decoded, ProviderFact, ProviderTurn, Signal};
     use loopflow_model::chat::types::Lifecycle;
     use loopflow_model::id::LfProcessId;
     use loopflow_storage::sqlite::SqliteStore;
@@ -627,40 +626,6 @@ mod tests {
             !session.available_after(0),
             "a failed turn is not a hand-back"
         );
-    }
-
-    #[test]
-    fn an_opencode_question_waits_until_it_is_answered() {
-        let mut decoder = OpenCodeDecoder::new("ses_trace".into(), None);
-        let mut session = Driven::new(true);
-        let mut seen = Vec::new();
-        for event in trace("opencode_question.jsonl") {
-            session.hear(decoder.event(&event));
-            seen.push((
-                event["type"].as_str().unwrap().to_owned(),
-                session.available_after(0),
-                session.available_after(QUIET),
-            ));
-        }
-        let at = |kind: &str| {
-            seen.iter()
-                .rev()
-                .find(|(seen, _, _)| seen == kind)
-                .map(|(_, now, quiet)| (*now, *quiet))
-                .unwrap()
-        };
-        // A permission the attached LfProcess answers itself is no question, and the tool
-        // it guards is still open.
-        assert_eq!(at("permission.asked"), (false, false));
-        assert_eq!(at("form.created"), (true, true));
-        assert_eq!(at("form.replied"), (false, false), "its tool is open");
-        assert_eq!(at("session.execution.succeeded"), (true, true));
-        // Another conversation going idle on the shared stream neither answers
-        // the question nor hands this turn back.
-        let other = seen
-            .iter()
-            .position(|(kind, _, _)| kind == "session.execution.succeeded");
-        assert_eq!(seen[other.unwrap() + 1].0, "form.replied");
     }
 
     #[test]
@@ -1125,64 +1090,5 @@ mod tests {
         assert!(unknown.started_at.is_some());
         assert_eq!(unknown.lf_process_id, None);
         assert_eq!(unknown.agent_process_id, None);
-    }
-
-    #[test]
-    fn opencode_steers_share_execution_but_keep_the_initiating_capture_after_handoff() {
-        let (home, store, attachment) = attached(false);
-        let sql = rusqlite::Connection::open(home.path().join("facts.db")).unwrap();
-        let mut writer = writer(&store, &attachment);
-        let mut decoder = OpenCodeDecoder::new("native".into(), None);
-        let request = decoder.request(false);
-        writer.outbound(&request).unwrap();
-        let steer = decoder.request(true);
-        writer.outbound(&steer).unwrap();
-        let previous = store.session("conversation").unwrap().unwrap();
-        let mut next = previous.clone();
-        next.artifact_key = Some(crate::session_record::new_artifact_key());
-        crate::store::sessions::replace_session_input(
-            &store,
-            previous.captured,
-            next.clone(),
-            None,
-        )
-        .unwrap();
-        let replacement = LfProcessId::new();
-        sql.execute(
-            "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",
-            [&replacement],
-        )
-        .unwrap();
-        store
-            .record_agent_process_exit("conversation", &attachment, true)
-            .unwrap();
-        attachment::claim_session_attachment(
-            &store,
-            "conversation",
-            Some(&attachment),
-            &replacement,
-        )
-        .unwrap();
-        let messages = vec![
-            json!({"type":"user","id":request}),
-            json!({"type":"assistant","id":"step1","time":{"completed":2},"content":[{"type":"tool","id":"tool","name":"shell","state":{"status":"completed"}}],"tokens":{"input":20,"output":5}}),
-            json!({"type":"user","id":steer}),
-            json!({"type":"assistant","id":"step2","time":{"completed":4},"content":[{"type":"text","text":"Result"}],"tokens":{"input":10,"output":5}}),
-            json!({"type":"idle","id":"idle","outcome":"succeeded","time":{"created":5}}),
-        ];
-        for _ in 0..2 {
-            writer.record(&decoder.messages(&messages).decoded).unwrap();
-        }
-        let completion: (String, Option<String>) = store
-            .conn
-            .lock()
-            .unwrap()
-            .query_row(
-                "SELECT status,error FROM history.turns WHERE ended_at IS NOT NULL AND provider_turn=?1",
-                [&request],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .unwrap();
-        assert_eq!(completion, ("completed".to_owned(), None));
     }
 }

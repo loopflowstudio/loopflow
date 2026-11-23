@@ -8,8 +8,6 @@ pub use session::resolve_session_config;
 
 use loopflow_model::id::AgentSessionId;
 use std::collections::BTreeMap;
-use std::env;
-use std::fs;
 use std::io::{Seek, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -21,6 +19,7 @@ use std::time::{Duration, SystemTime};
 use crate::config::parse_agent;
 use crate::config::Agent;
 use crate::error::CoreError;
+use crate::harness::Mode;
 use crate::process::LfProcessRuntime;
 use crate::prompt::structured_reply::{render_structured_reply_guidance, StructuredReply};
 
@@ -48,9 +47,18 @@ pub fn register_interrupt_cleanup(f: impl Fn() + Send + 'static) {
         .push(Box::new(f));
 }
 
+static INTERRUPTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Whether a signal is ending this process. A provider that exits from here on
+/// was stopped with it: its turn was interrupted, it did not fail.
+pub fn interrupted() -> bool {
+    INTERRUPTED.load(std::sync::atomic::Ordering::SeqCst)
+}
+
 /// Finish interruption while excluding the command's ordinary return path.
 /// Killing a child can wake that path before the remaining hooks finish.
 pub fn exit_on_interrupt() -> ! {
+    INTERRUPTED.store(true, std::sync::atomic::Ordering::SeqCst);
     // Before taking the hooks lock: the command's own return waits on it.
     crate::os_process::foreground::end_leader();
     let hooks = INTERRUPT_HOOKS.get().and_then(|hooks| hooks.lock().ok());
@@ -83,50 +91,6 @@ pub struct AgentProcessResult {
     pub agent_session: Option<AgentSessionId>,
     /// Typed provider failure when the process output identifies one.
     pub failure: Option<AgentFailure>,
-}
-
-/// Filesystem write boundary for a provider launch.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum AgentWriteScope {
-    /// Respect the provider's configured permissions and Loopflow's ordinary floor.
-    #[default]
-    Configured,
-    /// Permit writes only inside the assigned working directory.
-    Worktree,
-}
-
-/// Additional writable roots required by a confined agent command.
-#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct AgentExecutionBoundary {
-    pub writable_roots: Vec<PathBuf>,
-}
-
-pub fn checkout_execution_boundary(
-    repo: &Path,
-    agent: &Agent,
-) -> anyhow::Result<AgentExecutionBoundary> {
-    let harness = agent.harness;
-    if !harness.harness().capabilities().supports_execution_boundary {
-        return Err(anyhow::anyhow!(format!(
-            "Agent execution unavailable: agent {agent:?} uses harness {harness:?}, which does not support a managed execution boundary; select codex, claude, or pi"
-        )));
-    }
-    let common_dir = crate::git::worktrees::git_common_dir(repo).map_err(|error| {
-        anyhow::anyhow!(format!(
-            "Agent execution unavailable: failed to resolve linked Git metadata from {}: {error}",
-            repo.display()
-        ))
-    })?;
-    let control = crate::os_process::execution_context().map_err(|error| {
-        anyhow::anyhow!(format!(
-            "Agent execution unavailable: Loopflow control-plane authority is unavailable: {error}"
-        ))
-    })?;
-    let mut writable_roots = vec![common_dir, control.lf_home];
-    writable_roots.sort();
-    writable_roots.dedup();
-    Ok(AgentExecutionBoundary { writable_roots })
 }
 
 /// What a conversation sets in its own shells, lf's markers and its
@@ -171,6 +135,11 @@ pub(crate) const CALLER_SESSION_ENV: &[&str] = &[
     "CODEX_TOOL_CALL_ID",
     "CODEX_VERSION",
     "CODEX_APPLY_PATCH_PRESERVE_LINE_ENDINGS",
+    // OpenCode
+    "OPENCODE",
+    "OPENCODE_SESSION_ID",
+    "OPENCODE_TERMINAL",
+    "OPENCODE_CONFIG_CONTENT",
 ];
 
 /// Start `command` as a new conversation rather than the caller's child. Run
@@ -211,12 +180,8 @@ pub struct AgentConfig {
     pub resume_token: Option<AgentSessionId>,
     /// Working directory.
     pub cwd: Option<std::path::PathBuf>,
-    /// Maximum filesystem write scope granted to the provider.
-    pub write_scope: AgentWriteScope,
-    /// Exact roots and network access needed beyond `cwd`.
-    pub execution_boundary: Option<AgentExecutionBoundary>,
-    /// Skip permission prompts
-    pub skip_permissions: bool,
+    /// The resolved `yolo` setting. Ask `skips_permissions` what a launch sends.
+    pub yolo: bool,
     /// Graph-runner-injected structured replies (rendered via harness prompt guidance).
     pub structured_replies: Vec<StructuredReply>,
     /// Temp file for relaying shell directives back to the invoking shell.
@@ -246,14 +211,18 @@ impl AgentConfig {
             max_turns: None,
             resume_token: None,
             cwd: None,
-            write_scope: AgentWriteScope::Configured,
-            execution_boundary: None,
-            skip_permissions: false,
+            yolo: false,
             structured_replies: Vec::new(),
             directive_relay: None,
             launch_lock: None,
             env: BTreeMap::new(),
         }
+    }
+
+    /// Whether the provider runs without asking permission: `yolo`, or nobody
+    /// is attending to answer a prompt.
+    pub fn skips_permissions(&self, mode: Mode) -> bool {
+        self.yolo || mode == Mode::Headless
     }
 
     pub fn apply_agent_override(&mut self) -> Result<(), crate::error::LoadError> {
@@ -269,7 +238,7 @@ impl AgentConfig {
 impl Default for AgentConfig {
     fn default() -> Self {
         Self::new(Agent {
-            harness: crate::harness::HarnessKind::Codex,
+            harness: loopflow_harness::HarnessKind::Codex,
             model: None,
         })
     }
@@ -291,10 +260,8 @@ impl std::fmt::Debug for AgentConfig {
             .field("fallback_agents", &self.fallback_agents)
             .field("max_turns", &self.max_turns)
             .field("resume_token", &self.resume_token)
-            .field("write_scope", &self.write_scope)
-            .field("execution_boundary", &self.execution_boundary)
             .field("cwd", &self.cwd)
-            .field("skip_permissions", &self.skip_permissions)
+            .field("yolo", &self.yolo)
             .field("structured_replies", &self.structured_replies)
             .field("directive_relay", &self.directive_relay)
             .field("launch_lock", &self.launch_lock.is_some())
@@ -348,7 +315,7 @@ fn _record_limit_wait(provider: &str, reason: &str, delay: Duration) {
 
 /// The step left `agent` for the next agent in its order. The terminal gets
 /// one line; the recorded recovery keeps the provider's whole `reason`.
-fn _record_agent_move(agent: &Agent, failure: AgentFailure, reason: &str, next: &Agent) {
+fn _record_agent_move(agent: &Agent, failure: impl std::fmt::Display, reason: &str, next: &Agent) {
     eprintln!("{agent}: {failure}; continuing on {next}");
     let provider = agent.harness.as_str();
     _record_limit_recovery(
@@ -371,7 +338,7 @@ fn _record_stop(provider: &str, reason: &str, advice: &str) {
 
 /// The provider revoked the login: no model of it can go on until someone
 /// signs in again.
-fn _sign_in_advice(kind: crate::harness::HarnessKind) -> String {
+fn _sign_in_advice(kind: loopflow_harness::HarnessKind) -> String {
     let provider = kind.as_str();
     let sign_in = kind.harness().sign_in_advice();
     format!("The {provider} login was revoked; sign in again on this Machine: {sign_in}")
@@ -389,7 +356,7 @@ fn _limit_stop_advice(provider: &str, launch: &AgentConfig, rungs: &[Agent]) -> 
                 .join(", ")
         );
     }
-    let another = crate::harness::HarnessKind::ALL
+    let another = loopflow_harness::HarnessKind::ALL
         .into_iter()
         .find(|kind| kind.as_str() != provider)
         .expect("more than one harness")
@@ -454,253 +421,12 @@ pub struct ProcessConfig {
     pub wait_for_capacity: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-enum CodexSandboxMode {
-    ReadOnly,
-    WorkspaceWrite,
-    DangerFullAccess,
-}
-
-impl CodexSandboxMode {
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::ReadOnly => "read-only",
-            Self::WorkspaceWrite => "workspace-write",
-            Self::DangerFullAccess => "danger-full-access",
-        }
-    }
-
-    fn parse(value: &str) -> Option<Self> {
-        match value {
-            "read-only" => Some(Self::ReadOnly),
-            "workspace-write" => Some(Self::WorkspaceWrite),
-            "danger-full-access" => Some(Self::DangerFullAccess),
-            _ => None,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-enum CodexApprovalPolicy {
-    Untrusted,
-    OnRequest,
-    OnFailure,
-    Never,
-}
-
-impl CodexApprovalPolicy {
-    fn parse(value: &str) -> Option<Self> {
-        match value {
-            "untrusted" => Some(Self::Untrusted),
-            "on-request" => Some(Self::OnRequest),
-            "on-failure" => Some(Self::OnFailure),
-            "never" => Some(Self::Never),
-            _ => None,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-struct CodexPermissionConfig {
-    sandbox: Option<CodexSandboxMode>,
-    approval: Option<CodexApprovalPolicy>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ClaudePermissionMode {
-    AcceptEdits,
-    Auto,
-    BypassPermissions,
-    Manual,
-    DontAsk,
-    Plan,
-}
-
-impl ClaudePermissionMode {
-    fn parse(value: &str) -> Option<Self> {
-        match value {
-            "acceptEdits" => Some(Self::AcceptEdits),
-            "auto" => Some(Self::Auto),
-            "bypassPermissions" => Some(Self::BypassPermissions),
-            "manual" => Some(Self::Manual),
-            "dontAsk" => Some(Self::DontAsk),
-            "plan" => Some(Self::Plan),
-            _ => None,
-        }
-    }
-}
-
-fn read_codex_permission_config(cwd: Option<&Path>) -> CodexPermissionConfig {
-    let mut config = CodexPermissionConfig::default();
-    for path in codex_config_paths(cwd) {
-        let Ok(contents) = fs::read_to_string(&path) else {
-            continue;
-        };
-        config = merge_codex_permission_config(config, parse_codex_permission_config(&contents));
-    }
-    config
-}
-
-fn codex_config_paths(cwd: Option<&Path>) -> Vec<PathBuf> {
-    let mut paths = Vec::new();
-
-    if let Some(home) = env::var_os("CODEX_HOME")
-        .map(PathBuf::from)
-        .or_else(|| dirs::home_dir().map(|home| home.join(".codex")))
-    {
-        paths.push(home.join("config.toml"));
-    }
-
-    if let Some(cwd) = cwd {
-        let mut ancestors: Vec<PathBuf> = cwd.ancestors().map(Path::to_path_buf).collect();
-        ancestors.reverse();
-        for ancestor in ancestors {
-            paths.push(ancestor.join(".codex").join("config.toml"));
-        }
-    }
-
-    paths
-}
-
-fn parse_codex_permission_config(contents: &str) -> CodexPermissionConfig {
-    let mut config = CodexPermissionConfig::default();
-    for line in contents.lines() {
-        let line = line.trim();
-        if line.starts_with('[') {
-            break;
-        }
-        if let Some(value) = parse_toml_string_assignment(line, "sandbox_mode") {
-            config.sandbox = CodexSandboxMode::parse(&value);
-        } else if let Some(value) = parse_toml_string_assignment(line, "approval_policy") {
-            config.approval = CodexApprovalPolicy::parse(&value);
-        }
-    }
-    config
-}
-
-fn parse_toml_string_assignment(line: &str, key: &str) -> Option<String> {
-    let (left, right) = line.split_once('=')?;
-    if left.trim() != key {
-        return None;
-    }
-    let value = right.split('#').next()?.trim();
-    value
-        .strip_prefix('"')
-        .and_then(|value| value.strip_suffix('"'))
-        .map(str::to_string)
-}
-
-fn merge_codex_permission_config(
-    base: CodexPermissionConfig,
-    overlay: CodexPermissionConfig,
-) -> CodexPermissionConfig {
-    CodexPermissionConfig {
-        sandbox: overlay.sandbox.or(base.sandbox),
-        approval: overlay.approval.or(base.approval),
-    }
-}
-
-/// App-server overrides. `None` preserves vendor policy. A headless run must
-/// write to the workspace and has nobody to answer an approval, so it gets at
-/// least `workspace-write` and `never`; an attended Session keeps Codex's own
-/// sandbox and approval configuration unless `yolo` or a managed boundary applies.
-fn codex_permission_policy(
-    config: CodexPermissionConfig,
-    launch: &AgentConfig,
-    headless: bool,
-) -> CodexPermissionConfig {
-    if launch.write_scope == AgentWriteScope::Worktree && launch.execution_boundary.is_none() {
-        return CodexPermissionConfig {
-            sandbox: Some(CodexSandboxMode::WorkspaceWrite),
-            approval: Some(CodexApprovalPolicy::Never),
-        };
-    }
-    if launch.skip_permissions || launch.execution_boundary.is_some() {
-        return CodexPermissionConfig {
-            sandbox: Some(CodexSandboxMode::DangerFullAccess),
-            approval: Some(CodexApprovalPolicy::Never),
-        };
-    }
-    if !headless {
-        return CodexPermissionConfig::default();
-    }
-    CodexPermissionConfig {
-        sandbox: (config.sandbox < Some(CodexSandboxMode::WorkspaceWrite))
-            .then_some(CodexSandboxMode::WorkspaceWrite),
-        approval: (config.approval < Some(CodexApprovalPolicy::Never))
-            .then_some(CodexApprovalPolicy::Never),
-    }
-}
-
-fn read_claude_permission_mode(cwd: Option<&Path>) -> Option<ClaudePermissionMode> {
-    let mut mode = None;
-    for path in claude_settings_paths(cwd) {
-        let Ok(contents) = fs::read_to_string(&path) else {
-            continue;
-        };
-        if let Some(next) = parse_claude_permission_mode(&contents) {
-            mode = Some(next);
-        }
-    }
-    mode
-}
-
-fn claude_settings_paths(cwd: Option<&Path>) -> Vec<PathBuf> {
-    let mut paths = Vec::new();
-
-    if let Some(home) = dirs::home_dir() {
-        paths.push(home.join(".claude").join("settings.json"));
-    }
-
-    if let Some(cwd) = cwd {
-        let mut ancestors: Vec<PathBuf> = cwd.ancestors().map(Path::to_path_buf).collect();
-        ancestors.reverse();
-        for ancestor in ancestors {
-            paths.push(ancestor.join(".claude").join("settings.json"));
-            paths.push(ancestor.join(".claude").join("settings.local.json"));
-        }
-    }
-
-    paths
-}
-
-fn parse_claude_permission_mode(contents: &str) -> Option<ClaudePermissionMode> {
-    let json: serde_json::Value = serde_json::from_str(contents).ok()?;
-    json.get("permissions")
-        .and_then(|permissions| permissions.get("defaultMode"))
-        .and_then(serde_json::Value::as_str)
-        .and_then(ClaudePermissionMode::parse)
-}
-
-/// Explicit `yolo` always bypasses. Otherwise an attended Session keeps
-/// Claude's own permission mode, and only an unattended run bypasses: nobody
-/// is present to answer a prompt, so a prompt would stall the step.
-fn claude_skip_permissions(cwd: Option<&Path>, auto: bool, skip_permissions: bool) -> bool {
-    if skip_permissions {
-        return true;
-    }
-    if !auto {
-        return false;
-    }
-
-    let mode = read_claude_permission_mode(cwd);
-    if mode == Some(ClaudePermissionMode::BypassPermissions) {
-        return false;
-    }
-    if mode.is_some() {
-        eprintln!(
-            "warning: Claude permissions.defaultMode is less permissive than Loopflow's non-interactive default; launching with --dangerously-skip-permissions"
-        );
-    }
-    true
-}
-
 /// Common Claude options shared by terminal and stream-input launches.
 pub(crate) fn claude_options(
     config: &AgentConfig,
     model: Option<&str>,
     context_file: Option<&Path>,
-    stream: bool,
+    mode: Mode,
 ) -> Vec<String> {
     // Driver preferences (Chrome, model) pass through only when a Loopflow
     // setting names them; Claude's own configuration decides the rest.
@@ -727,30 +453,10 @@ pub(crate) fn claude_options(
         args.push("--add-dir".into());
         args.extend(add_dirs.iter().map(|dir| dir.display().to_string()));
     }
-    if config.execution_boundary.is_some()
-        || (config.write_scope == AgentWriteScope::Configured
-            && claude_skip_permissions(config.cwd.as_deref(), stream, config.skip_permissions))
-    {
+    if config.skips_permissions(mode) {
         args.push("--dangerously-skip-permissions".into());
     }
-    if config.write_scope == AgentWriteScope::Worktree && config.execution_boundary.is_none() {
-        args.extend([
-            "--permission-mode".into(),
-            "acceptEdits".into(),
-            "--setting-sources".into(),
-            String::new(),
-            "--settings".into(),
-            serde_json::json!({
-                "sandbox": {
-                    "enabled": true,
-                    "failIfUnavailable": true,
-                    "allowUnsandboxedCommands": false
-                }
-            })
-            .to_string(),
-        ]);
-    }
-    if stream {
+    if mode == Mode::Headless {
         if let Some(max_turns) = config.max_turns {
             args.extend(["--max-turns".into(), max_turns.to_string()]);
         }
@@ -819,13 +525,31 @@ impl AgentFailure {
             _ => None,
         }
     }
+
+    /// Of two failures one turn reported, the one that decides what happens
+    /// next: a revoked login, then a spent quota, then an unserved model, then
+    /// a transient failure. The earlier wins a tie.
+    pub(crate) fn graver(self, other: Self) -> Self {
+        let rank = |failure| match failure {
+            Self::CredentialInvalidated => 0,
+            Self::UsageLimit => 1,
+            Self::ModelUnavailable => 2,
+            _ => 3,
+        };
+        if rank(other) < rank(self) {
+            other
+        } else {
+            self
+        }
+    }
 }
 
-/// Build `thread/start` params for Codex app-server sessions. `headless` runs
-/// get Loopflow's permission floor; attended Sessions keep Codex's own.
+/// Build `thread/start` params for Codex app-server sessions. A launch that
+/// skips permissions gets full access and no approvals; otherwise Codex's own
+/// configuration decides.
 pub fn build_codex_thread_start_params(
     launch: &AgentConfig,
-    headless: bool,
+    mode: Mode,
 ) -> serde_json::Map<String, serde_json::Value> {
     let mut params = serde_json::Map::new();
     if let Some(tier) = launch.codex_service_tier {
@@ -850,15 +574,8 @@ pub fn build_codex_thread_start_params(
         );
     }
 
-    let policy = codex_permission_policy(
-        read_codex_permission_config(launch.cwd.as_deref()),
-        launch,
-        headless,
-    );
-    if let Some(sandbox) = policy.sandbox {
-        params.insert("sandbox".into(), sandbox.as_str().into());
-    }
-    if policy.approval == Some(CodexApprovalPolicy::Never) {
+    if launch.skips_permissions(mode) {
+        params.insert("sandbox".into(), "danger-full-access".into());
         params.insert("approvalPolicy".into(), "never".into());
     }
 
@@ -872,7 +589,7 @@ pub(crate) fn codex_terminal_options(
     launch: &AgentConfig,
     kind: crate::harness::LaunchKind,
 ) -> anyhow::Result<Vec<String>> {
-    let params = build_codex_thread_start_params(launch, false);
+    let params = build_codex_thread_start_params(launch, kind.mode());
     let mut args = Vec::new();
     if let Some(model) = params.get("model").and_then(serde_json::Value::as_str) {
         args.extend(["--model".into(), model.into()]);
@@ -921,9 +638,6 @@ pub fn workspace_add_dirs(cwd: &Path) -> Vec<PathBuf> {
 }
 
 fn provider_writable_roots(launch: &AgentConfig) -> Vec<PathBuf> {
-    if launch.execution_boundary.is_some() || launch.write_scope != AgentWriteScope::Configured {
-        return Vec::new();
-    }
     launch
         .cwd
         .as_deref()
@@ -987,7 +701,7 @@ fn run_admitted_agent(
     kind: crate::harness::LaunchKind,
 ) -> Result<AgentProcessResult, CoreError> {
     let mut launch = launch.clone();
-    let capabilities = launch.agent.harness.harness().capabilities();
+    let capabilities = crate::harness::launcher(launch.agent.harness).capabilities();
     if launch.max_turns.is_some() && !capabilities.turn_limit {
         eprintln!("warning: Loopflow turn limits are supported only by Claude; this provider will run without a turn limit");
     }
@@ -1031,10 +745,6 @@ fn run_admitted_agent(
         Some(cwd) => cwd.clone(),
         None => std::env::current_dir()?,
     };
-    let _planning_sync = crate::ops::planning_sync::PlanningSync::start_for_directory(&directory)
-        .map_err(|error| {
-        CoreError::ExecutionFailed(format!("cannot start planning sync: {error}"))
-    })?;
     let result = _run_with_retries(
         &launch,
         &process,
@@ -1064,14 +774,7 @@ fn _run_with_retries(
     mut run: impl FnMut(&AgentConfig, bool) -> Result<AgentProcessResult, CoreError>,
     mut wait: impl FnMut(Duration),
 ) -> Result<AgentProcessResult, CoreError> {
-    // The order to move through when a provider refuses: the launch's agent,
-    // then its fallbacks.
-    let mut rungs: Vec<Agent> = Vec::new();
-    for agent in std::iter::once(&launch.agent).chain(&launch.fallback_agents) {
-        if !rungs.contains(agent) {
-            rungs.push(agent.clone());
-        }
-    }
+    let rungs = _agent_order(launch);
     let mut rung = 0;
     let mut attempt = launch.clone();
     let mut launched = false;
@@ -1081,16 +784,6 @@ fn _run_with_retries(
         let provider = attempt.agent.harness.as_str();
         let mut result = run(&attempt, launched)?;
         launched = true;
-        if !attempt
-            .agent
-            .harness
-            .harness()
-            .capabilities()
-            .classifies_failures
-        {
-            return Ok(result);
-        }
-        result.failure = result.failure.or_else(|| _classify_agent_failure(&result));
         let Some(failure) = result.failure else {
             return Ok(result);
         };
@@ -1185,6 +878,18 @@ fn _with_original_task(prompt: &str, launch: &AgentConfig) -> String {
     format!("{prompt}\n\nOriginal task:\n\n{}", launch.task_prompt)
 }
 
+/// The order to move through when a provider refuses: the launch's agent,
+/// then its fallbacks.
+fn _agent_order(launch: &AgentConfig) -> Vec<Agent> {
+    let mut order: Vec<Agent> = Vec::new();
+    for agent in std::iter::once(&launch.agent).chain(&launch.fallback_agents) {
+        if !order.contains(agent) {
+            order.push(agent.clone());
+        }
+    }
+    order
+}
+
 /// Put the current attempt on `agent`. The thread moves within its provider;
 /// another provider reads the conversation so far and begins its own.
 fn _climb(
@@ -1242,20 +947,47 @@ fn _failure_reason(result: &AgentProcessResult, failure: AgentFailure) -> String
     }
 }
 
-fn _classify_agent_failure(result: &AgentProcessResult) -> Option<AgentFailure> {
-    if result.exit_code == 0 {
-        return None;
+/// A provider error that sends the run to another agent: a revoked login, a
+/// spent quota or a model the provider does not serve. The decoder's code
+/// decides when it names a cause; otherwise the provider's words do.
+pub(crate) fn routing_failure(code: &str, message: &str) -> Option<AgentFailure> {
+    _failure(code, message, _routing_words)
+}
+
+/// [`routing_failure`], then the transient failures lf retries for a provider
+/// that does not retry them itself.
+pub(crate) fn provider_failure(code: &str, message: &str) -> Option<AgentFailure> {
+    _failure(code, message, |line| {
+        _routing_words(line).or_else(|| classify_retryable_agent_failure(line))
+    })
+}
+
+/// What `code` names, else the gravest failure any line of the message
+/// states. A phrase list reads one line: "model" and "is not available" on
+/// different lines name nothing.
+fn _failure(
+    code: &str,
+    message: &str,
+    words: impl Fn(&str) -> Option<AgentFailure>,
+) -> Option<AgentFailure> {
+    AgentFailure::from_code(code).or_else(|| {
+        message
+            .lines()
+            .filter_map(words)
+            .reduce(AgentFailure::graver)
+    })
+}
+
+fn _routing_words(line: &str) -> Option<AgentFailure> {
+    if credential_invalidated_failure(line).is_some() {
+        Some(AgentFailure::CredentialInvalidated)
+    } else if subscription_limit_text(line).is_some() {
+        Some(AgentFailure::UsageLimit)
+    } else if _model_unavailable(line).is_some() {
+        Some(AgentFailure::ModelUnavailable)
+    } else {
+        None
     }
-    if _find_provider_error(result, credential_invalidated_failure).is_some() {
-        return Some(AgentFailure::CredentialInvalidated);
-    }
-    if _find_provider_error(result, subscription_limit_text).is_some() {
-        return Some(AgentFailure::UsageLimit);
-    }
-    if _find_provider_error(result, _model_unavailable).is_some() {
-        return Some(AgentFailure::ModelUnavailable);
-    }
-    _find_provider_error(result, classify_retryable_agent_failure)
 }
 
 /// A provider's line as the phrase lists read it: lowercase, with typographic
@@ -1291,15 +1023,6 @@ pub(crate) fn credential_invalidated_failure(text: &str) -> Option<()> {
         || text.contains("access token could not be refreshed")
         || text.contains("your session has ended. please log in again"))
     .then_some(())
-}
-
-fn _find_provider_error<T>(
-    result: &AgentProcessResult,
-    classify: fn(&str) -> Option<T>,
-) -> Option<T> {
-    // Harnesses separate provider errors from answer prose. Never interpret
-    // JSON printed by the model as provider control messages.
-    result.stderr.lines().find_map(classify)
 }
 
 pub(crate) fn classify_retryable_agent_failure(text: &str) -> Option<AgentFailure> {
@@ -1438,7 +1161,7 @@ fn _run_harness_once(
     .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
     let value = crate::harness::Launch {
         config: &config,
-        harness: launch.agent.harness.harness(),
+        harness: crate::harness::launcher(launch.agent.harness),
         kind,
         recording: &recording,
         start: crate::harness::Start::from_thread(launch.resume_token.as_ref()),
@@ -1448,15 +1171,63 @@ fn _run_harness_once(
 }
 
 /// What to tell someone whose agent CLI is missing.
-pub fn missing_agent_message(kind: crate::harness::HarnessKind) -> String {
-    let cli = kind.as_str();
-    let hint = kind.harness().capabilities().install_hint;
-    format!("'{cli}' is not installed. {hint}")
+pub fn missing_agent_message(kind: loopflow_harness::HarnessKind) -> String {
+    let hint = crate::harness::launcher(kind).capabilities().install_hint;
+    format!("{}. {hint}", _not_installed(kind))
 }
 
-/// Check if a CLI is available.
-pub fn check_cli_available(cli: &str) -> bool {
-    crate::os_process::which_on_path(Path::new(cli)).is_some()
+fn _not_installed(kind: loopflow_harness::HarnessKind) -> String {
+    format!("'{}' is not installed", kind.as_str())
+}
+
+/// Put a headless launch on the first agent of its order whose CLI is
+/// installed, and take the missing ones out of the order. A Graph step passes
+/// over a missing first choice and records the move where a limit move is
+/// recorded; a chat or batch has no order to move through. With none
+/// installed, the error is the first choice's install hint. Call it before the
+/// launch opens its conversation, so a refused launch leaves no agent behind.
+///
+/// # Errors
+///
+/// [`missing_agent_message`] for the first choice when no agent the launch may
+/// use is installed.
+pub fn start_on_installed_agent(
+    launch: &mut AgentConfig,
+    process: &ProcessConfig,
+) -> Result<(), String> {
+    let first = _pass_over_missing_agents(launch, process, |kind| {
+        crate::harness::launcher(kind).installed()
+    })
+    .map_err(missing_agent_message)?;
+    if first != launch.agent {
+        let reason = _not_installed(first.harness);
+        _record_agent_move(&first, "not installed", &reason, &launch.agent);
+    }
+    Ok(())
+}
+
+/// Returns the agent the launch asked for first; `launch.agent` is where it starts.
+fn _pass_over_missing_agents(
+    launch: &mut AgentConfig,
+    process: &ProcessConfig,
+    is_installed: impl Fn(loopflow_harness::HarnessKind) -> bool,
+) -> Result<Agent, loopflow_harness::HarnessKind> {
+    let first = launch.agent.clone();
+    let order = if process.wait_for_capacity {
+        _agent_order(launch)
+    } else {
+        vec![first.clone()]
+    };
+    let start = order
+        .into_iter()
+        .find(|rung| is_installed(rung.harness))
+        .ok_or(first.harness)?;
+    launch.agent = start;
+    // The order stays as written: a list keeps being a list, minus what is missing.
+    launch
+        .fallback_agents
+        .retain(|agent| is_installed(agent.harness));
+    Ok(first)
 }
 
 #[cfg(test)]
@@ -1464,23 +1235,40 @@ mod tests {
     use super::*;
 
     #[test]
-    #[cfg(unix)]
-    fn cli_discovery_needs_an_executable_not_a_version_command() {
-        use std::os::unix::fs::{symlink, PermissionsExt};
+    fn only_a_graph_step_passes_over_an_agent_that_is_not_installed() {
+        use loopflow_harness::HarnessKind;
+        let agent = |text: &str| Agent::parse(text).unwrap();
+        let launch = AgentConfig {
+            agent: agent("opencode:opencode/fixture"),
+            fallback_agents: vec![agent("pi:fixture/model"), agent("codex"), agent("claude")],
+            ..Default::default()
+        };
+        let step = ProcessConfig {
+            wait_for_capacity: true,
+            ..Default::default()
+        };
+        let installed =
+            |kind: HarnessKind| matches!(kind, HarnessKind::Codex | HarnessKind::Claude);
 
-        let root = tempfile::tempdir().unwrap();
-        let provider = root.path().join("provider");
-        fs::write(&provider, "#!/bin/sh\nexit 1\n").unwrap();
-        fs::set_permissions(&provider, fs::Permissions::from_mode(0o644)).unwrap();
-        assert!(!check_cli_available(provider.to_str().unwrap()));
-        fs::set_permissions(&provider, fs::Permissions::from_mode(0o755)).unwrap();
-        assert!(check_cli_available(provider.to_str().unwrap()));
-        let linked = root.path().join("linked-provider");
-        symlink(&provider, &linked).unwrap();
-        assert!(check_cli_available(linked.to_str().unwrap()));
-        fs::remove_file(provider).unwrap();
-        assert!(!check_cli_available(linked.to_str().unwrap()));
-        assert!(!check_cli_available(root.path().to_str().unwrap()));
+        let mut moved = launch.clone();
+        let first = _pass_over_missing_agents(&mut moved, &step, installed).unwrap();
+        assert_eq!(first, launch.agent);
+        assert_eq!(moved.agent, agent("codex"));
+        assert_eq!(_agent_order(&moved), [agent("codex"), agent("claude")]);
+
+        // Nothing installed in the order: the first choice is the one named.
+        let mut pinned = launch.clone();
+        assert_eq!(
+            _pass_over_missing_agents(&mut pinned, &step, |_| false),
+            Err(HarnessKind::OpenCode)
+        );
+
+        // A chat or batch stays on its choice.
+        let mut batch = launch.clone();
+        assert_eq!(
+            _pass_over_missing_agents(&mut batch, &ProcessConfig::default(), installed),
+            Err(HarnessKind::OpenCode)
+        );
     }
 
     fn default_launch() -> AgentConfig {
@@ -1567,87 +1355,39 @@ mod tests {
     }
 
     #[test]
-    fn parse_codex_permission_config_reads_top_level_policy() {
-        let config = parse_codex_permission_config(
-            r#"
-model = "gpt-5.5"
-sandbox_mode = "danger-full-access"
-approval_policy = "never"
-
-[projects."/tmp/repo"]
-trust_level = "trusted"
-"#,
-        );
-
-        assert_eq!(config.sandbox, Some(CodexSandboxMode::DangerFullAccess));
-        assert_eq!(config.approval, Some(CodexApprovalPolicy::Never));
-    }
-
-    #[test]
-    fn codex_policy_preserves_vendor_grants_and_raises_restrictive_defaults() {
-        for sandbox in [
-            None,
-            Some(CodexSandboxMode::ReadOnly),
-            Some(CodexSandboxMode::DangerFullAccess),
+    fn permissions_are_skipped_unless_yolo_is_off_and_someone_attends() {
+        for (yolo, mode, skips) in [
+            (true, Mode::Interactive, true),
+            (true, Mode::Headless, true),
+            (false, Mode::Interactive, false),
+            (false, Mode::Headless, true),
         ] {
-            let policy = codex_permission_policy(
-                CodexPermissionConfig {
-                    sandbox,
-                    approval: None,
-                },
-                &crate::agent::AgentConfig::default(),
-                true,
-            );
+            let launch = AgentConfig {
+                yolo,
+                ..default_launch()
+            };
+            let claude = claude_options(&launch, None, None, mode);
             assert_eq!(
-                policy.sandbox,
-                if sandbox == Some(CodexSandboxMode::DangerFullAccess) {
-                    None
-                } else {
-                    Some(CodexSandboxMode::WorkspaceWrite)
-                }
+                claude.contains(&"--dangerously-skip-permissions".into()),
+                skips,
+                "claude, yolo {yolo}, {mode:?}"
             );
-            assert_eq!(policy.approval, Some(CodexApprovalPolicy::Never));
+            let codex = build_codex_thread_start_params(&launch, mode);
+            assert_eq!(
+                (
+                    codex.get("sandbox").and_then(serde_json::Value::as_str),
+                    codex
+                        .get("approvalPolicy")
+                        .and_then(serde_json::Value::as_str),
+                ),
+                if skips {
+                    (Some("danger-full-access"), Some("never"))
+                } else {
+                    (None, None)
+                },
+                "codex, yolo {yolo}, {mode:?}"
+            );
         }
-        let policy = codex_permission_policy(
-            CodexPermissionConfig {
-                sandbox: Some(CodexSandboxMode::DangerFullAccess),
-                approval: Some(CodexApprovalPolicy::Never),
-            },
-            &crate::agent::AgentConfig::default(),
-            true,
-        );
-        assert_eq!(policy, CodexPermissionConfig::default());
-    }
-
-    #[test]
-    fn attended_codex_keeps_its_own_policy_unless_yolo_or_a_boundary_applies() {
-        let restrictive = CodexPermissionConfig {
-            sandbox: Some(CodexSandboxMode::ReadOnly),
-            approval: Some(CodexApprovalPolicy::OnRequest),
-        };
-        assert_eq!(
-            codex_permission_policy(restrictive, &crate::agent::AgentConfig::default(), false),
-            CodexPermissionConfig::default()
-        );
-        let yolo = AgentConfig {
-            skip_permissions: true,
-            ..crate::agent::AgentConfig::default()
-        };
-        assert_eq!(
-            codex_permission_policy(restrictive, &yolo, false),
-            CodexPermissionConfig {
-                sandbox: Some(CodexSandboxMode::DangerFullAccess),
-                approval: Some(CodexApprovalPolicy::Never),
-            }
-        );
-    }
-
-    #[test]
-    fn parse_claude_permission_mode_reads_default_mode() {
-        assert_eq!(
-            parse_claude_permission_mode(r#"{"permissions":{"defaultMode":"bypassPermissions"}}"#),
-            Some(ClaudePermissionMode::BypassPermissions)
-        );
     }
 
     #[test]
@@ -1658,34 +1398,6 @@ trust_level = "trusted"
         assert!(validate_terminal_turn(&"x".repeat(122_879)).is_ok());
         assert!(validate_terminal_turn(&"x".repeat(122_880)).is_err());
         assert!(validate_terminal_turn("").is_ok());
-    }
-
-    #[test]
-    fn managed_task_scope_carries_exact_delivery_capabilities() {
-        let (_tmp, main, worktree) = git_worktree_fixture();
-        let git_control = main.join(".git");
-        let control_store = worktree.parent().unwrap().join("control-store");
-        let launch = AgentConfig {
-            agent: crate::config::Agent::parse("codex").unwrap(),
-            cwd: Some(worktree),
-            write_scope: AgentWriteScope::Worktree,
-            execution_boundary: Some(AgentExecutionBoundary {
-                writable_roots: vec![git_control.clone(), control_store.clone()],
-            }),
-            skip_permissions: true,
-            ..default_launch()
-        };
-        let thread = build_codex_thread_start_params(&launch, false);
-        assert_eq!(thread["sandbox"], "danger-full-access");
-        assert_eq!(thread["approvalPolicy"], "never");
-        assert!(thread.get("config").is_none());
-
-        let claude = terminal_args(&AgentConfig {
-            agent: crate::config::Agent::parse("claude").unwrap(),
-            ..launch
-        });
-        assert!(claude.contains(&"--dangerously-skip-permissions".to_string()));
-        assert!(!claude.contains(&"--add-dir".to_string()));
     }
 
     #[test]
@@ -1703,7 +1415,7 @@ trust_level = "trusted"
             match provider {
                 "claude" => assert_arg_pair(&args, "--append-system-prompt", "Fixed additions."),
                 "codex" => {
-                    let params = build_codex_thread_start_params(&launch, true);
+                    let params = build_codex_thread_start_params(&launch, Mode::Headless);
                     assert_eq!(params["developerInstructions"], "Fixed additions.");
                 }
                 _ => {}
@@ -1719,7 +1431,7 @@ trust_level = "trusted"
             ..default_launch()
         };
 
-        let params = build_codex_thread_start_params(&launch, true);
+        let params = build_codex_thread_start_params(&launch, Mode::Headless);
         assert_eq!(
             params.get("model"),
             Some(&serde_json::Value::String("o3".to_string()))
@@ -1739,7 +1451,7 @@ trust_level = "trusted"
             ..default_launch()
         };
 
-        let params = build_codex_thread_start_params(&launch, true);
+        let params = build_codex_thread_start_params(&launch, Mode::Headless);
         assert!(!params.contains_key("model"));
         assert_eq!(
             params.get("cwd"),
@@ -1754,7 +1466,7 @@ trust_level = "trusted"
             system_prompt: "Keep the complete context.\n".repeat(6_000),
             cwd: Some(home.path().to_path_buf()),
             agent: crate::config::Agent::parse("claude:sonnet").unwrap(),
-            skip_permissions: true,
+            yolo: true,
             max_turns: Some(5),
             structured_replies: vec![StructuredReply {
                 name: "suggest_actions".into(),
@@ -1788,7 +1500,6 @@ trust_level = "trusted"
 
     #[test]
     fn bare_claude_command_does_not_select_a_model() {
-        // OpenCode opens a private server instead of an argv; opencode.rs covers its bare model.
         let launch = AgentConfig {
             agent: crate::config::Agent::parse("claude").unwrap(),
             ..default_launch()
@@ -1819,7 +1530,10 @@ trust_level = "trusted"
                 Ok(if config.agent.to_string() == "codex" {
                     AgentProcessResult::default()
                 } else {
-                    failed_result("claude_result: You've hit your Fable limit")
+                    failed_as(
+                        "claude_result: You've hit your Fable limit",
+                        AgentFailure::UsageLimit,
+                    )
                 })
             },
             |_| {},
@@ -1837,30 +1551,12 @@ trust_level = "trusted"
         }
     }
 
-    #[test]
-    fn pi_failure_keeps_exact_history_without_synthetic_retry_input() {
-        let launch = AgentConfig {
-            agent: crate::config::Agent::parse("pi:fixture/model").unwrap(),
-            ..crate::agent::AgentConfig::default()
-        };
-        let mut attempts = 0;
-        let result = _run_with_retries(
-            &launch,
-            &graph_process(),
-            &[Duration::ZERO],
-            |_, _| {
-                attempts += 1;
-                Ok(AgentProcessResult {
-                    agent_session: Some("/fixture/pi.jsonl".into()),
-                    ..failed_result("connection reset")
-                })
-            },
-            |_| panic!("Pi owns retries"),
-        )
-        .unwrap();
-        assert_eq!(attempts, 1);
-        assert_ne!(result.exit_code, 0);
-        assert_eq!(result.agent_session, Some("/fixture/pi.jsonl".into()));
+    /// A failed run whose harness classified the provider's error.
+    fn failed_as(message: &str, failure: AgentFailure) -> AgentProcessResult {
+        AgentProcessResult {
+            failure: Some(failure),
+            ..failed_result(message)
+        }
     }
 
     #[test]
@@ -1874,34 +1570,64 @@ trust_level = "trusted"
     }
 
     #[test]
-    fn model_unavailable_is_a_provider_refusal_not_spent_quota_or_answer_prose() {
-        for message in [
-            "claude_result: Fable 5 is currently unavailable. Switch to another model.",
-            "claude_result: Selected model is not available.",
-            "codex_error: model_not_found",
-            "codex_error: The 'gpt-6.2-sol' model is not supported when using Codex with a ChatGPT account.",
+    fn model_unavailable_is_a_provider_refusal_not_spent_quota() {
+        for (code, message) in [
+            (
+                "claude_result",
+                "Fable 5 is currently unavailable. Switch to another model.",
+            ),
+            ("claude_result", "Selected model is not available."),
+            ("codex_error", "model_not_found"),
+            (
+                "codex_error",
+                "The 'gpt-6.2-sol' model is not supported when using Codex with a ChatGPT account.",
+            ),
         ] {
             assert_eq!(
-                _classify_agent_failure(&failed_result(message)),
+                provider_failure(code, message),
                 Some(AgentFailure::ModelUnavailable)
             );
             assert!(subscription_limit_text(message).is_none());
-            let prose = AgentProcessResult {
-                exit_code: 1,
-                stdout: message.into(),
-                ..Default::default()
-            };
-            assert_eq!(_classify_agent_failure(&prose), None);
         }
         for message in [
             "service unavailable",
             "model service temporarily unavailable",
         ] {
             assert_eq!(
-                _classify_agent_failure(&failed_result(message)),
+                provider_failure("claude_result", message),
                 Some(AgentFailure::Unavailable)
             );
+            // A provider that retries its own transient failures leaves lf none.
+            assert_eq!(routing_failure("pi_error", message), None);
         }
+    }
+
+    #[test]
+    fn a_code_that_names_the_cause_decides_and_the_gravest_line_decides_otherwise() {
+        assert_eq!(
+            provider_failure("provider_rate_limited", "service unavailable"),
+            Some(AgentFailure::UsageLimit)
+        );
+        assert_eq!(
+            provider_failure(
+                "codex_error",
+                "service unavailable\nYour refresh token was revoked\nquota exceeded"
+            ),
+            Some(AgentFailure::CredentialInvalidated)
+        );
+        // "model" and "is not available" on different lines name nothing.
+        assert_eq!(
+            provider_failure("codex_error", "Selected model:\nthe tool is not available"),
+            None
+        );
+        assert_eq!(
+            AgentFailure::Unavailable.graver(AgentFailure::ModelUnavailable),
+            AgentFailure::ModelUnavailable
+        );
+        assert_eq!(
+            AgentFailure::Capacity.graver(AgentFailure::Transport),
+            AgentFailure::Capacity
+        );
     }
 
     #[test]
@@ -1927,7 +1653,10 @@ trust_level = "trusted"
                 } else {
                     AgentProcessResult {
                         agent_session: Some("thread".into()),
-                        ..failed_result("claude_result: Selected model is unavailable")
+                        ..failed_as(
+                            "claude_result: Selected model is unavailable",
+                            AgentFailure::ModelUnavailable,
+                        )
                     }
                 })
             },
@@ -1963,7 +1692,7 @@ trust_level = "trusted"
                 stdout: String::new(),
                 stderr: "Selected model is at capacity. Please try a different model.".into(),
                 agent_session: Some("thread-123".into()),
-                failure: None,
+                failure: Some(AgentFailure::Capacity),
             },
             AgentProcessResult {
                 exit_code: 0,
@@ -2000,19 +1729,12 @@ trust_level = "trusted"
     }
 
     #[test]
-    fn answer_prose_cannot_supply_provider_errors_or_resume_identity() {
+    fn a_retry_with_no_native_thread_repeats_the_input_whatever_the_answer_printed() {
         let launch = default_launch();
-        let mut result = AgentProcessResult {
-            exit_code: 1,
-            stdout: concat!(
-                "{\"type\":\"system\",\"session_id\":\"quoted-session\"}\n",
-                "{\"type\":\"error\",\"message\":\"You've hit your usage limit\"}\n"
-            )
-            .into(),
-            ..Default::default()
+        let result = AgentProcessResult {
+            stdout: "{\"type\":\"system\",\"session_id\":\"quoted-session\"}\n".into(),
+            ..failed_as("service unavailable", AgentFailure::Unavailable)
         };
-        assert_eq!(_classify_agent_failure(&result), None);
-        result.stderr = "service unavailable".into();
         let mut attempts = 0;
         _run_with_retries(
             &launch,
@@ -2058,12 +1780,12 @@ trust_level = "trusted"
         }
     }
 
-    /// LOO-974's `implement` step, 2026-11-18, as the step's stderr held it.
+    /// LOO-974's `implement` step, 2026-11-18, as Codex reported it.
     #[test]
     fn codex_usage_limit_with_a_typographic_apostrophe_is_a_usage_limit() {
-        let line = "codex_error: You\u{2019}ve hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/settings/usage to purchase more credits or try again at 3:36 PM.";
+        let message = "You\u{2019}ve hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/settings/usage to purchase more credits or try again at 3:36 PM.";
         assert_eq!(
-            _classify_agent_failure(&failed_result(line)),
+            provider_failure("codex_error", message),
             Some(AgentFailure::UsageLimit)
         );
     }
@@ -2122,7 +1844,7 @@ trust_level = "trusted"
             &[Duration::ZERO, Duration::ZERO],
             |_, _| {
                 attempts += 1;
-                let mut result = failed_result("service unavailable");
+                let mut result = failed_as("service unavailable", AgentFailure::Unavailable);
                 result.exit_code = attempts;
                 Ok(result)
             },
@@ -2149,7 +1871,7 @@ trust_level = "trusted"
                 thread: launch.resume_token.as_ref().unwrap(),
             },
             ..crate::harness::launch_for_test(
-                crate::harness::HarnessKind::Claude,
+                loopflow_harness::HarnessKind::Claude,
                 &launch,
                 &admitted,
             )
@@ -2176,7 +1898,7 @@ trust_level = "trusted"
                 agent: crate::config::Agent::parse(agent)
                     .unwrap()
                     .with_configured_model(&config),
-                skip_permissions: true,
+                yolo: true,
                 ..default_launch()
             };
             for args in [
@@ -2211,7 +1933,12 @@ trust_level = "trusted"
             task_prompt: "compress the diff".into(),
             ..crate::agent::AgentConfig::default()
         };
-        let refused = || failed_result("codex_error: You’ve hit your usage limit");
+        let refused = || {
+            failed_as(
+                "codex_error: You’ve hit your usage limit",
+                AgentFailure::UsageLimit,
+            )
+        };
         let mut scripted = vec![refused(), limited_result(), done()].into_iter();
         let mut attempts = Vec::new();
         let result = _run_with_retries(
@@ -2250,7 +1977,10 @@ trust_level = "trusted"
             &[],
             |_, _| {
                 attempts += 1;
-                Ok(failed_result("codex_error: You’ve hit your usage limit"))
+                Ok(failed_as(
+                    "codex_error: You’ve hit your usage limit",
+                    AgentFailure::UsageLimit,
+                ))
             },
             |delay| waits.push(delay),
         )
@@ -2330,7 +2060,12 @@ trust_level = "trusted"
             }),
             ..crate::agent::AgentConfig::default()
         };
-        let refused = || failed_result("codex_error: You’ve hit your usage limit");
+        let refused = || {
+            failed_as(
+                "codex_error: You’ve hit your usage limit",
+                AgentFailure::UsageLimit,
+            )
+        };
         for (scripted, agents, failure) in [
             (vec![refused(), done()], vec!["codex", "claude"], None),
             (

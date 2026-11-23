@@ -36,11 +36,64 @@ fn main() {
         generate_builtins(&builtins_dir, &out_dir, kind, extension);
     }
 
-    // Re-run if any file in the builtins tree changes
+    let docs_dir = manifest_dir.join("../../docs");
+    generate_docs(&docs_dir, &out_dir.join("builtin_docs.rs"));
+
+    // Re-run if any file in the builtins tree or top-level user docs changes
     println!("cargo:rerun-if-changed={}", builtins_dir.display());
     for entry in walkdir(&builtins_dir) {
         println!("cargo:rerun-if-changed={}", entry.display());
     }
+    println!("cargo:rerun-if-changed={}", docs_dir.display());
+    for entry in top_level_markdown(&docs_dir) {
+        println!("cargo:rerun-if-changed={}", entry.1.display());
+    }
+}
+
+fn generate_docs(docs_dir: &Path, out_path: &Path) {
+    let entries = top_level_markdown(docs_dir);
+    let mut code = String::new();
+    writeln!(code, "pub const BUILTIN_DOCS: &[BuiltinDoc] = &[").expect("write to String");
+    for (slug, path) in &entries {
+        let content = fs::read_to_string(path)
+            .unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
+        let title = first_heading(&content).unwrap_or(slug.as_str());
+        writeln!(
+            code,
+            "    BuiltinDoc {{ slug: {slug:?}, title: {title:?}, content: {content:?} }},"
+        )
+        .expect("write to String");
+    }
+    writeln!(code, "];").expect("write to String");
+    fs::write(out_path, code).unwrap_or_else(|e| panic!("write {}: {e}", out_path.display()));
+}
+
+fn top_level_markdown(dir: &Path) -> Vec<(String, PathBuf)> {
+    let mut entries = Vec::new();
+    let Ok(read_dir) = fs::read_dir(dir) else {
+        return entries;
+    };
+    for entry in read_dir.flatten() {
+        let path = entry.path();
+        if !path.is_file() || path.extension().is_none_or(|ext| ext != "md") {
+            continue;
+        }
+        let slug = path
+            .file_stem()
+            .expect("markdown file has a stem")
+            .to_string_lossy()
+            .to_string();
+        entries.push((slug, path));
+    }
+    entries.sort_by(|a, b| a.0.cmp(&b.0));
+    entries
+}
+
+fn first_heading(content: &str) -> Option<&str> {
+    content
+        .lines()
+        .find_map(|line| line.strip_prefix("# ").map(str::trim))
+        .filter(|title| !title.is_empty())
 }
 
 /// Collect each kind once so registration, shortcuts and categories share names.

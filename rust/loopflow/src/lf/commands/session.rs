@@ -9,7 +9,8 @@ use crate::lf::SessionCommand;
 use crate::lf::SessionConnectionArgs;
 use crate::lf::SessionListArgs;
 use loopflow_execution::ops::human_session::{
-    ConversationLaunch, Opening, SessionRecord, SessionState,
+    ConversationLaunch, Opening, SessionEnd, SessionOutlook, SessionRecord, SessionStarts,
+    SessionState,
 };
 use loopflow_execution::session_record::SessionTitleSource;
 use loopflow_execution::store::{open_store, storage_config_from_env, Store};
@@ -322,7 +323,6 @@ async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Re
             issue: Some(issue),
             repository: Some(repository),
             origin,
-            planning_key,
             from,
             ..
         } => {
@@ -333,10 +333,6 @@ async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Re
                 origin.as_deref(),
             )?;
             let main = loopflow_execution::git::worktrees::main_repo_root(&path)?;
-            if let Some(key) = planning_key {
-                loopflow_execution::ops::planning_sync::adopt_personal_key(&store, &main, key)
-                    .await?;
-            }
             let id = loopflow_model::durable::TaskId::parse(task)?;
             loopflow_execution::ops::human_session::moves::arriving_task(&store, &main, &id, issue)
                 .await?;
@@ -410,6 +406,19 @@ pub struct SessionFacts {
     pub cwd: String,
     /// The provider's current AgentProcess generation.
     pub agent_process_id: Option<loopflow_model::id::AgentProcessId>,
+    /// How its last agent ended, as `lf session list` reads it.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub ended: Option<SessionEnd>,
+    /// The server's starts of it since it last finished a turn.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub start: Option<SessionStarts>,
+    /// Whether it comes up while it is not running, and what brings it.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub outlook: Option<SessionOutlook>,
+    /// All of the above as the server's one sentence; `lf task status`
+    /// prints the Task's conversation's as given.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub status_line: Option<String>,
 }
 
 impl SessionFacts {
@@ -423,6 +432,10 @@ impl SessionFacts {
             available: session.availability.is_some(),
             cwd: session.cwd,
             agent_process_id: session.agent_process_id,
+            ended: session.ended,
+            start: session.start,
+            outlook: session.outlook,
+            status_line: session.status_line,
         }
     }
 }
@@ -806,7 +819,7 @@ async fn resume(
     let cwd = std::env::current_dir()?;
     drop(progress);
     if let Some(message) = message {
-        let id = select(&store, &cwd, target).await?;
+        let id = select(&store, &cwd, target, request_id).await?;
         let session = loopflow_execution::ops::human_session::session_by_id(&store, &id)
             .await?
             .context("Session not found")?;
@@ -849,11 +862,13 @@ async fn resume(
     }
 }
 
-/// The conversation `lf resume` run from `directory` selects.
+/// The conversation `lf resume` run from `directory` selects, recorded as
+/// started by a person unless `request_id` is the recovery pass's own.
 async fn select(
     store: &Arc<Store>,
     directory: &Path,
     target: loopflow_execution::ops::human_session::SessionTarget<'_>,
+    request_id: Option<&str>,
 ) -> anyhow::Result<String> {
     let selected =
         loopflow_execution::ops::human_session::select_connection(store, directory, target).await?;
@@ -862,6 +877,12 @@ async fn select(
             "Nothing to resume here; starting a new conversation."
         ));
     }
+    loopflow_execution::ops::recovery::record_start(
+        &store.sqlite,
+        &selected.id.as_str().into(),
+        request_id,
+        time::OffsetDateTime::now_utc().unix_timestamp(),
+    )?;
     Ok(selected.id)
 }
 
@@ -878,7 +899,7 @@ async fn reopen(
     fork: bool,
     json: bool,
 ) -> anyhow::Result<Opening> {
-    let id = select(store, directory, target).await?;
+    let id = select(store, directory, target, request_id).await?;
     loopflow_execution::ops::human_session::open(
         store,
         directory,
@@ -887,7 +908,10 @@ async fn reopen(
         request_id,
         fork,
         !connection.prepare,
-        json,
+        loopflow_execution::transport::ViewerOptions {
+            json,
+            unfocused: connection.unfocused,
+        },
     )
     .await
 }
@@ -933,7 +957,7 @@ pub(crate) fn prepared(cli: &crate::lf::Cli, directory: &Path) -> anyhow::Result
                     directory,
                     target,
                     false,
-                    false,
+                    Default::default(),
                     request_id.as_deref(),
                     cli.agent.as_deref(),
                 )
@@ -963,7 +987,10 @@ async fn new_thread(
         &std::env::current_dir()?,
         target,
         true,
-        connection.json || cli.json,
+        loopflow_execution::transport::ViewerOptions {
+            json: connection.json || cli.json,
+            unfocused: connection.unfocused,
+        },
         request_id,
         cli.agent.as_deref(),
     )
@@ -981,7 +1008,7 @@ async fn restarted(
     directory: &Path,
     target: loopflow_execution::ops::human_session::SessionTarget<'_>,
     launch: bool,
-    json: bool,
+    viewer: loopflow_execution::transport::ViewerOptions,
     request_id: Option<&str>,
     agent: Option<&str>,
 ) -> anyhow::Result<Opening> {
@@ -995,7 +1022,7 @@ async fn restarted(
         &selected.id,
         agent,
         launch,
-        json,
+        viewer,
         &request_id,
     )
     .await?;

@@ -15,7 +15,7 @@ struct TrackerSyncView: View {
             ForEach(sync.actions) { action in
                 HStack(spacing: Spacing.sm) {
                     Text(action.text)
-                        .font(Typography.body(12))
+                        .font(Typography.text)
                         .foregroundStyle(palette.textSecondary)
                         .textSelection(.enabled)
                         .accessibilityIdentifier("tracker-sync-\(action.id)")
@@ -26,8 +26,8 @@ struct TrackerSyncView: View {
                             .accessibilityIdentifier("tracker-use-mine-\(action.id)")
                     }
                 }
-                .buttonStyle(.borderless)
-                .font(Typography.body(12))
+                .buttonStyle(LoopflowButtonStyle())
+                .font(Typography.text)
             }
         }
         .accessibilityIdentifier("tracker-sync")

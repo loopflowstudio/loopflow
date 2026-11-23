@@ -224,12 +224,13 @@ async fn prepare_abandon(
 }
 
 async fn require_known_prs(repo: &Path, pr: Option<&TaskPr>, issue: &str) -> OpsResult<()> {
-    for url in crate::ops::linear::issue_client()
+    for attachment in crate::ops::linear::issue_client()
         .await?
-        .item_attachment_urls(issue)
+        .item_attachments(issue)
         .await
         .map_err(task_error)?
     {
+        let url = attachment.url;
         if !url.contains("/pull/")
             || pr
                 .and_then(TaskPr::github)

@@ -49,7 +49,7 @@ enum RegistryQueryLocal {
                 name: "Task history", process: process, frameLimit: 32 * 1024 * 1024, silence: nil,
                 configurationChanged: { try ReaderLaunchConfiguration.current() != configuration },
                 decode: { $0 })
-            return LineSubscription(lines: reader.frames, send: reader.send, cancel: reader.cancel)
+            return LineSubscription(lines: reader.frames, send: reader.send, cancel: reader.cancel, unreadable: { nil })
         }.value
     }, subscribeWork: {
         try WorkSubscriptions.observe { ServerClient.subscribe($0) }
@@ -73,7 +73,7 @@ private struct ReaderLaunchConfiguration: Equatable {
     let files: [String]
 
     static func current() throws -> Self {
-        let helper = try LocalWaveAgentLauncher.controlLfPath()
+        let helper = try LocalWaveAgentLauncher.machineLf().path
         let install = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".lf-machine/install")
         let paths = [URL(fileURLWithPath: helper),

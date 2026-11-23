@@ -432,15 +432,13 @@
           "state": "idle",
           "reason": "Waiting for your review at demo",
           "step": null,
-          "captured": null
+          "captured": null,
+          "died": null,
+          "outlook": null
         },
         "run_control": {
           "unavailable": null
         },
-        "ship_control": {
-          "unavailable": null
-        },
-        "shipping": null,
         "pr": {
           "id": "pr_33333333333333333333333333333333",
           "sequence": 1,
@@ -476,7 +474,8 @@
           "open",
           "unstarted",
           "backlog"
-        ]
+        ],
+        "owned_by_you": false
       },
       {
         "task": {
@@ -619,15 +618,13 @@
           "state": "idle",
           "reason": "No active execution",
           "step": null,
-          "captured": null
+          "captured": null,
+          "died": null,
+          "outlook": null
         },
         "run_control": {
           "unavailable": null
         },
-        "ship_control": {
-          "unavailable": null
-        },
-        "shipping": null,
         "pr": null,
         "graph_source": null,
         "section": "backlog",
@@ -635,7 +632,8 @@
         "selection_states": [
           "unstarted",
           "backlog"
-        ]
+        ],
+        "owned_by_you": false
       }
     ],
     "truncated": false
@@ -727,6 +725,12 @@
   "setup": {
     "graph": {
       "value": "code",
+      "source": "repository",
+      "scope": null,
+      "locator": null
+    },
+    "auto": {
+      "value": "on",
       "source": "repository",
       "scope": null,
       "locator": null

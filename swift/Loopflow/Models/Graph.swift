@@ -175,94 +175,97 @@ public struct TaskExecutionSnapshot: Decodable, Sendable, Hashable {
     public let reason: String
     public let step: String?
     public let captured: Int64?
+    /// Where the run's `lf task run` died before the run stopped.
+    public let died: RunDied?
+    /// What happens next to a run that died; `reason` already says it.
+    public let outlook: SessionOutlook?
+
+    enum CodingKeys: String, CodingKey {
+        case state, reason, step, captured, died, outlook
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        state = try values.decode(TaskExecutionState.self, forKey: .state)
+        reason = try values.decode(String.self, forKey: .reason)
+        step = try values.decodeIfPresent(String.self, forKey: .step)
+        captured = try values.decodeIfPresent(Int64.self, forKey: .captured)
+        died = try values.decode(RunDied?.self, forKey: .died)
+        outlook = try values.decode(SessionOutlook?.self, forKey: .outlook)
+    }
+}
+
+/// A Task run's carrier died while the run was at a step.
+public struct RunDied: Decodable, Sendable, Hashable {
+    public let atStep: String
+    /// RFC 3339; nil when nobody recorded the death.
+    public let at: String?
+
+    enum CodingKeys: String, CodingKey {
+        case atStep = "at_step"
+        case at
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        atStep = try values.decode(String.self, forKey: .atStep)
+        at = try values.decode(String?.self, forKey: .at)
+    }
 }
 
 /// One autonomous definition, including an invalid local source.
 public struct GraphCatalogEntry: Decodable, Sendable, Hashable, Identifiable {
     public let name: String
+    /// Its `description:` line; nil when the file has none or does not load.
+    public let description: String?
     public let source: String?
     public let compiled: CompiledGraph?
     public let composition: GraphComposition?
+    /// The Graph as a Task's workflow line draws it; nil exactly when `compiled` is.
+    public let workflow: WorkflowOutline?
     public let unavailable: String?
+    /// The Graphs that include this one with `graph:`; empty for a Graph people start with.
+    public let includedBy: [String]
+    /// What it runs for: a Task, or a Wave's own operation.
+    public let runs: GraphSubject
     public var id: String { name }
-}
 
-/// A graph as a Workflow: `start`, its interactive steps in order, `end`, and
-/// the runs between them. Not a wire type; derived from what Rust sends.
-public struct WorkflowDefinition: Sendable, Hashable {
-    /// What a run from `from` carries the Task to; `name` is the step it runs first.
-    public struct Run: Sendable, Hashable {
-        public let from: String
-        public let to: String
-        public let name: String
+    enum CodingKeys: String, CodingKey {
+        case name, description, source, compiled, composition, workflow, unavailable, runs
+        case includedBy = "included_by"
     }
 
-    public let name: String
-    public let steps: [TaskGraph.InteractiveStep]
-    public let runs: [Run]
-
-    /// A Task's captured graph: each run carries it to the next interactive step.
-    public init(_ graph: TaskGraph) {
-        name = graph.name
-        steps = graph.interactiveSteps
-        let columns = [TaskGraph.start] + steps.map(\.name) + [TaskGraph.end]
-        runs = zip(columns, columns.dropFirst()).map { Run(from: $0, to: $1, name: "") }
-    }
-
-    /// A definition: interactive steps in order, each XOR path's in name order,
-    /// and a run back wherever a step returns to an earlier one.
-    public init(_ compiled: CompiledGraph) {
-        var flat: [GraphNode] = []
-        func walk(_ nodes: [GraphNode]) {
-            for node in nodes {
-                flat.append(node)
-                for path in node.paths.sorted(by: { $0.name < $1.name }) { walk(path.steps) }
-            }
-        }
-        walk(compiled.steps)
-        var steps: [TaskGraph.InteractiveStep] = []
-        // The column each node runs in: 0 after `start`, n after the nth interactive step.
-        var segment: [UInt32: Int] = [:]
-        var first: [Int: String] = [:]
-        for node in flat {
-            if node.interactive {
-                steps.append(TaskGraph.InteractiveStep(name: node.id ?? node.label, skill: node.label, description: nil))
-            } else if first[steps.count] == nil {
-                first[steps.count] = node.label
-            }
-            segment[node.key] = steps.count
-        }
-        let columns = [TaskGraph.start] + steps.map(\.name) + [TaskGraph.end]
-        var runs = zip(columns.indices, columns.indices.dropFirst()).map {
-            Run(from: columns[$0], to: columns[$1], name: first[$0] ?? "")
-        }
-        for node in flat {
-            guard let back = node.returnsTo, let from = segment[node.key],
-                  let target = flat.first(where: { $0.key == back }), let column = segment[target.key] else { continue }
-            // A return into an interactive step arrives there; into any other, at the next one.
-            let to = target.interactive ? column : column + 1
-            let run = Run(from: columns[from], to: columns[to], name: node.label)
-            if to != from + 1, !runs.contains(run) { runs.append(run) }
-        }
-        name = compiled.name
-        self.steps = steps
-        self.runs = runs
+    public init(from decoder: any Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        name = try values.decode(String.self, forKey: .name)
+        description = try values.decode(String?.self, forKey: .description)
+        source = try values.decode(String?.self, forKey: .source)
+        compiled = try values.decode(CompiledGraph?.self, forKey: .compiled)
+        composition = try values.decode(GraphComposition?.self, forKey: .composition)
+        workflow = try values.decode(WorkflowOutline?.self, forKey: .workflow)
+        unavailable = try values.decode(String?.self, forKey: .unavailable)
+        includedBy = try values.decode([String].self, forKey: .includedBy)
+        runs = try values.decode(GraphSubject.self, forKey: .runs)
     }
 }
 
-/// A catalog graph as a Workflow, keeping an invalid source editable.
-public struct WorkflowCatalogEntry: Sendable, Hashable, Identifiable {
-    public let name: String
-    public let source: String?
-    public let workflow: WorkflowDefinition?
-    public let unavailable: String?
-    public var id: String { name }
+/// What a Graph is started on.
+public enum GraphSubject: String, Decodable, Sendable, Hashable {
+    case task, wave
+}
 
-    public init(_ entry: GraphCatalogEntry) {
-        name = entry.name
-        source = entry.source
-        workflow = entry.compiled.map(WorkflowDefinition.init)
-        unavailable = entry.unavailable
+/// A Graph as the workflow line shows it before any Task stands on it.
+public struct WorkflowOutline: Decodable, Sendable, Hashable {
+    /// The Graph's top-level steps in order, as `TaskGraph.steps` carries them.
+    public let steps: [TaskGraph.Step]
+    /// Every step where a person takes part, XOR paths included.
+    public let interactiveSteps: [TaskGraph.InteractiveStep]
+    /// "You take part at explore, ship-review and verify." or "Runs on its own."
+    public let sentence: String
+
+    enum CodingKeys: String, CodingKey {
+        case steps, sentence
+        case interactiveSteps = "interactive_steps"
     }
 }
 

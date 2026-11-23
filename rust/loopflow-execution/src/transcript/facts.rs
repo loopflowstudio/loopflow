@@ -14,11 +14,11 @@
 
 use serde_json::{json, Value};
 
-use super::live::TurnState;
-use super::{seconds, Source, Turn};
-use crate::harness::HarnessKind;
+use loopflow_harness::transcript::live::TurnState;
+use loopflow_harness::transcript::{seconds, Source, Turn};
+use loopflow_harness::HarnessKind;
 use loopflow_model::id::AgentSessionId;
-use loopflow_storage::sqlite::SqliteStore;
+use loopflow_storage::sqlite::{SqliteStore, TurnSpan};
 
 /// How long after a turn's last transcript row its live completion may have
 /// been recorded.
@@ -53,10 +53,10 @@ fn record_current(store: &SqliteStore, session: &str, moment: Moment) -> anyhow:
         return Ok(0);
     };
     let thread = &conversation.thread;
-    Ok(match moment {
+    match moment {
         Moment::TurnEnd => record_ended(store, session, harness, thread, &source),
-        Moment::Exit => record(store, session, harness, thread, &source)?,
-    })
+        Moment::Exit => record(store, session, harness, thread, &source),
+    }
 }
 
 /// Record the usage of each ended turn at the transcript's end; returns how
@@ -70,14 +70,26 @@ fn record_ended(
     harness: HarnessKind,
     thread: &AgentSessionId,
     source: &Source,
-) -> usize {
+) -> anyhow::Result<usize> {
+    let turns = loopflow_harness::transcript::live::last_turns(harness, source);
+    let recorded = if harness == HarnessKind::Pi {
+        store.session_turn_spans(session, thread)?
+    } else {
+        Vec::new()
+    };
     let mut written = 0;
-    for turn in super::live::last_turns(harness, source) {
-        if let (Some(_), Some(ended)) = (&turn.started_at, seconds(&turn.ended_at)) {
-            written += usize::from(usage(store, session, thread, &turn, ended));
-        }
+    for turn in &turns {
+        let (Some(own), Some(_), Some(ended)) = (
+            turn.id.as_deref(),
+            &turn.started_at,
+            seconds(&turn.ended_at),
+        ) else {
+            continue;
+        };
+        let id = pi_turn_id(&recorded, &turns, own, turn, ended);
+        written += usize::from(usage(store, session, thread, id, turn, ended));
     }
-    written
+    Ok(written)
 }
 
 /// Record the usage of every turn in `thread`'s transcript, and the
@@ -90,20 +102,25 @@ fn record(
     thread: &AgentSessionId,
     source: &Source,
 ) -> anyhow::Result<usize> {
-    let turns = super::read(harness, source)?;
+    let turns = loopflow_harness::transcript::read(harness, source)?;
     let last_row = || source.last_written();
-    let recorded = store.session_completions(session, thread)?;
+    let recorded = store.session_turn_spans(session, thread)?;
     let mut written = 0;
     for turn in &turns {
-        let (Some(id), Some(ended)) = (&turn.id, seconds(&turn.ended_at).or_else(last_row)) else {
+        let (Some(own), Some(ended)) = (&turn.id, seconds(&turn.ended_at).or_else(last_row)) else {
             continue;
         };
-        let mut wrote = usage(store, session, thread, turn, ended);
+        let id = if harness == HarnessKind::Pi {
+            pi_turn_id(&recorded, &turns, own, turn, ended)
+        } else {
+            own
+        };
+        let mut wrote = usage(store, session, thread, id, turn, ended);
         let started = seconds(&turn.started_at);
-        if !recorded
-            .iter()
-            .any(|(known, at)| known == id || covers(&turns, known, *at, started, ended))
-        {
+        if !recorded.iter().any(|span| {
+            span.ended_at
+                .is_some_and(|at| span.turn == id || covers(&turns, &span.turn, at, started, ended))
+        }) {
             let completed = completion(harness, turn, started, ended);
             store.record_turn_completion(session, thread, id, ended, &completed);
             wrote = true;
@@ -117,12 +134,10 @@ fn usage(
     store: &SqliteStore,
     session: &str,
     thread: &AgentSessionId,
+    id: &str,
     turn: &Turn,
     ended: i64,
 ) -> bool {
-    let Some(id) = &turn.id else {
-        return false;
-    };
     if let Some(message) = super::answer::final_message(turn) {
         store.record_turn_final_message(session, thread, id, &message);
     }
@@ -130,6 +145,36 @@ fn usage(
         usage @ Value::Object(_) => store.record_turn_usage(session, thread, id, ended, usage),
         _ => false,
     }
+}
+
+/// Pi names turns by session-file entry id. Its RPC driver uses the request
+/// id, so an otherwise unknown entry joins the recorded turn spanning it.
+fn pi_turn_id<'a>(
+    recorded: &'a [TurnSpan],
+    turns: &[Turn],
+    own: &'a str,
+    turn: &Turn,
+    ended: i64,
+) -> &'a str {
+    if recorded.iter().any(|span| span.turn == own) {
+        return own;
+    }
+    let started = seconds(&turn.started_at);
+    recorded
+        .iter()
+        .filter(|span| {
+            !turns
+                .iter()
+                .any(|read| read.id.as_deref() == Some(&span.turn))
+        })
+        .filter(|span| match (span.started_at, started) {
+            (Some(from), Some(started)) => {
+                from <= started + LAG && span.ended_at.is_none_or(|to| ended <= to + LAG)
+            }
+            _ => span.ended_at.is_some_and(|to| (to - ended).abs() <= LAG),
+        })
+        .max_by_key(|span| span.started_at)
+        .map_or(own, |span| &span.turn)
 }
 
 /// Whether the completion recorded for `turn` at `at` accounts for a
@@ -168,13 +213,9 @@ fn completion(harness: HarnessKind, turn: &Turn, started: Option<i64>, ended: i6
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::{Path, PathBuf};
+    use std::path::Path;
 
-    fn fixture(name: &str) -> PathBuf {
-        Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("src/transcript/testdata")
-            .join(name)
-    }
+    use loopflow_harness::transcript::testdata as fixture;
 
     fn store() -> (tempfile::TempDir, SqliteStore) {
         let home = tempfile::tempdir().unwrap();
@@ -271,6 +312,7 @@ mod tests {
                 &thread,
                 &Source::File(path.into()),
             )
+            .unwrap()
         };
 
         // Still running: nothing yet.
@@ -322,6 +364,7 @@ mod tests {
                 &thread,
                 &Source::File(path.clone()),
             )
+            .unwrap()
         };
         assert_eq!(ended(), 1);
         assert_eq!(usage(&store)[0].0, "turn-1");
@@ -525,5 +568,81 @@ mod tests {
         assert_eq!(reading(&usage[0].2).total_input_tokens, Some(100));
         let completed = finished(&store);
         assert_eq!(completed[0].2.status.as_deref(), Some("completed"));
+    }
+    /// Loopflow names a Pi turn by its request id; the session file by its
+    /// entry id. The usage belongs on the turn Loopflow recorded.
+    #[test]
+    fn a_pi_turn_loopflow_recorded_takes_the_session_files_usage() {
+        let (home, store) = store();
+        let path = home.path().join("session.jsonl");
+        let thread = AgentSessionId::from(path.display().to_string().as_str());
+        let message = |id: &str, parent: &str, at: &str, message: Value| {
+            json!({"type":"message","id":id,"parentId":parent,
+                "timestamp":format!("2026-11-10T16:{at}Z"),"message":message})
+        };
+        let answer = |text: &str| {
+            json!({"role":"assistant","model":"gemini-4-argon","stopReason":"stop",
+                "usage":{"input":10,"output":5,"cacheRead":0,"cacheWrite":0,"cost":{"total":0.25}},
+                "content":[{"type":"text","text":text}]})
+        };
+        let entries = [
+            json!({"type":"session","version":3,"id":"s","cwd":"/work"}),
+            message(
+                "u1",
+                "s",
+                "25:03",
+                json!({"role":"user","content":"List files"}),
+            ),
+            message("a1", "u1", "25:09", answer("Two files.")),
+            message(
+                "u2",
+                "a1",
+                "40:00",
+                json!({"role":"user","content":"And now?"}),
+            ),
+            message("a2", "u2", "40:05", answer("Three.")),
+        ];
+        let text = entries
+            .iter()
+            .map(|row| format!("{row}\n"))
+            .collect::<String>();
+        std::fs::write(&path, text).unwrap();
+        let source = Source::File(path);
+        // Loopflow sent the first request before Pi wrote it down, and saw it end.
+        store.record_turn_start("conversation", &thread, "request-1", 1_794_327_900);
+        store.record_turn_completion(
+            "conversation",
+            &thread,
+            "request-1",
+            1_794_327_910,
+            &json!({"status":"completed"}),
+        );
+        // The second is still open when its end is read.
+        store.record_turn_start("conversation", &thread, "request-2", 1_794_328_799);
+        assert_eq!(
+            record_ended(&store, "conversation", HarnessKind::Pi, &thread, &source).unwrap(),
+            2
+        );
+        let record = || record(&store, "conversation", HarnessKind::Pi, &thread, &source);
+        assert_eq!(record().unwrap(), 1);
+        assert_eq!(record().unwrap(), 0);
+
+        let usage = usage(&store);
+        assert_eq!(
+            usage.iter().map(|read| read.0.as_str()).collect::<Vec<_>>(),
+            ["request-1", "request-2"]
+        );
+        assert_eq!(reading(&usage[1].2).output_tokens, Some(5));
+        // Nothing was written under the session file's names.
+        assert_eq!(store.session_turns("conversation").unwrap().len(), 2);
+        let completed = finished(&store);
+        assert_eq!(
+            (completed[0].0.as_str(), completed[0].1),
+            ("request-1", 1_794_327_910)
+        );
+        assert_eq!(
+            (completed[1].0.as_str(), completed[1].1),
+            ("request-2", 1_794_328_805)
+        );
     }
 }

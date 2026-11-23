@@ -109,7 +109,7 @@ pub fn create(
     };
     if let Some(provider) = loopflow_execution::config::load_config_or_default(Some(repo))
         .planning_transport()
-        .remote_name()
+        .map(|tracker| tracker.name())
         // An admitted creation exchanges planning after its answer.
         .filter(|_| receipt.task.tracker_id.is_none() && after.is_none())
     {

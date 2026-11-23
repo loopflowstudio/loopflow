@@ -4,6 +4,7 @@ use std::fs::OpenOptions;
 use std::io::{self, BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
 use std::os::unix::process::CommandExt;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
@@ -49,13 +50,27 @@ impl Client {
         })
     }
 
-    /// The holder at `place`, started first when none is listening. Starting is
-    /// idempotent: a holder that is alive keeps its lock and its socket.
-    pub fn ensure(place: &Place) -> Result<Self> {
+    /// The holder of `build` at `place`, started first when none is listening.
+    /// Starting is idempotent: a holder that is alive keeps its lock and its
+    /// socket.
+    pub fn ensure(place: &Place, build: &str) -> Result<Self> {
         if let Ok(client) = Self::connect(place) {
             return Ok(client);
         }
-        spawn()?;
+        let executable = holder_executable()?;
+        // The executable was replaced since this process started: its holder
+        // binds another build's place, and nobody will bind this one.
+        if let Some(started) = spawn(&executable)?.filter(|started| started != build) {
+            // Twelve digits, as the socket and state directory are named.
+            let short = |build: &str| build.get(..12).unwrap_or(build).to_owned();
+            bail!(
+                "The executable at {} is now build {}; this server is build {} and has been \
+                 replaced since it started. Run `lf install server` to restart it",
+                executable.display(),
+                short(&started),
+                short(build)
+            );
+        }
         let deadline = Instant::now() + STARTUP;
         loop {
             match Self::connect(place) {
@@ -193,10 +208,28 @@ impl Output {
     }
 }
 
-/// Start this build's holder in its own session, so that stopping or replacing
-/// the server's service leaves it running, and wait until it is listening or
-/// has found another holder of this build already there.
-fn spawn() -> Result<()> {
+#[cfg(test)]
+thread_local! {
+    /// A test's stand-in for the executable its holder is started from.
+    pub(super) static HOLDER_EXECUTABLE: std::cell::RefCell<Option<PathBuf>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// The executable a holder is started from: this process's own.
+fn holder_executable() -> io::Result<PathBuf> {
+    #[cfg(test)]
+    if let Some(executable) = HOLDER_EXECUTABLE.with_borrow(Clone::clone) {
+        return Ok(executable);
+    }
+    std::env::current_exe()
+}
+
+/// Start a holder from `executable` in its own session, so that stopping or
+/// replacing the server's service leaves it running, and wait until it is
+/// listening or has found another holder of its build already there. Returns
+/// the build its ready line names; a holder that found the lock taken says
+/// nothing.
+fn spawn(executable: &Path) -> Result<Option<String>> {
     let logs = crate::store::lf_home_dir().join("logs");
     std::fs::create_dir_all(&logs)?;
     let log = OpenOptions::new()
@@ -204,7 +237,7 @@ fn spawn() -> Result<()> {
         .append(true)
         .open(logs.join("holder.log"))
         .with_context(|| format!("Cannot open holder log in {}", logs.display()))?;
-    let mut command = Command::new(std::env::current_exe()?);
+    let mut command = Command::new(executable);
     command
         .args(["holder", "run"])
         .stdin(Stdio::null())
@@ -225,8 +258,8 @@ fn spawn() -> Result<()> {
     std::thread::spawn(move || {
         let _ = child.wait();
     });
-    // A ready line, or end of file from a holder that found the lock taken.
+    // `<pid> <build>`, or end of file from a holder that found the lock taken.
     let mut line = String::new();
     BufReader::new(output).read_line(&mut line)?;
-    Ok(())
+    Ok(line.split_whitespace().nth(1).map(str::to_owned))
 }

@@ -337,28 +337,24 @@ pub(super) fn map_machine_by_id(
 }
 
 /// Completion and abandonment are durable. An open Task's state follows
-/// what it is doing: its Task run's carrier or its ship carrier still has an
-/// OS process, or a Graph run in its work has not ended. Its carrier is the latest Auto-Ship log entry naming one; the
-/// Auto-Ship approval (`shipped_at`) makes that run shipping.
-/// Approved with nothing running, it is idle until recovery restarts its ship process.
+/// what it is doing: its Task run's carrier still has an OS process, or a
+/// Graph run in its work has not ended. The auto setting says who takes the
+/// interactive steps; state never reads it.
 /// A Task with neither a checkout nor a Graph taken up is unstarted; creation
 /// admits a Graph before setup makes the checkout.
 pub(crate) fn task_state_sql(t: &str) -> String {
     format!(
         "CASE WHEN {t}.abandoned_at IS NOT NULL THEN 'abandoned' \
          WHEN {t}.planning_completed=1 THEN 'done' \
-         WHEN EXISTS(SELECT 1 FROM (SELECT e.kind,e.pid FROM task_ship_events e WHERE e.task_id={t}.id \
-             AND e.kind IN ('approved','carried','stopped','withdrawn') ORDER BY e.id DESC LIMIT 1) last \
-             WHERE last.kind IN ('approved','carried') AND last.pid IS NOT NULL) \
-             OR EXISTS(SELECT 1 FROM task_graphs tg WHERE tg.task_id={t}.id AND tg.run_pid IS NOT NULL) \
+         WHEN EXISTS(SELECT 1 FROM task_graphs tg WHERE tg.task_id={t}.id AND tg.run_pid IS NOT NULL) \
              OR EXISTS({open_graphs}) \
-         THEN CASE WHEN {t}.shipped_at IS NOT NULL THEN 'shipping' ELSE 'moving' END \
-         WHEN {t}.shipped_at IS NULL AND EXISTS(SELECT 1 FROM task_graphs tg WHERE tg.task_id={t}.id \
+         THEN 'moving' \
+         WHEN EXISTS(SELECT 1 FROM task_graphs tg WHERE tg.task_id={t}.id \
              AND tg.lf_process_id IS NULL AND tg.step NOT IN ('start','end')) THEN 'active' \
          WHEN NOT EXISTS(SELECT 1 FROM task_checkouts c WHERE c.task_id={t}.id) \
              AND NOT EXISTS(SELECT 1 FROM task_graphs tg WHERE tg.task_id={t}.id) THEN 'unstarted' \
          ELSE 'idle' END",
-        open_graphs = super::task_work::task_open_graph_pairs(&format!("{t}.id"))
+        open_graphs = super::task_work::task_open_graph_pairs(&format!("{t}.id")),
     )
 }
 

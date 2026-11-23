@@ -51,7 +51,7 @@ SCAN_ROOTS = (
     Path(".github/CI.md"),
     Path("rust/loopflow/tests/README.md"),
     Path("tests/e2e/README.md"),
-    Path("VISUAL_DESIGN.md"),
+    Path("DESIGN.md"),
     Path("deploy"),
     Path("docs"),
     Path("release"),
@@ -63,7 +63,6 @@ SCAN_ROOTS = (
     Path("rust/loopflow-storage"),
     Path("swift/Loopflow"),
     Path("swift/LoopflowMac"),
-    Path("swift/DESIGN.md"),
     Path("swift/README.md"),
     Path("website"),
     Path(".lf"),
@@ -255,7 +254,7 @@ def _production_rust(source: str) -> str:
 def _rust_sources(root: Path) -> list[Path]:
     return sorted(
         path
-        for crate in ("loopflow", "loopflow-execution", "loopflow-storage")
+        for crate in ("loopflow", "loopflow-execution", "loopflow-harness", "loopflow-storage")
         for path in (root / "rust" / crate / "src").rglob("*.rs")
     )
 

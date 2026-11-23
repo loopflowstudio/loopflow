@@ -61,6 +61,10 @@
       "source": "codex",
       "text": "Current provider output"
     },
-    "transition": null
+    "transition": null,
+    "ended": null,
+    "start": null,
+    "outlook": null,
+    "status_line": "running"
   }
 ]

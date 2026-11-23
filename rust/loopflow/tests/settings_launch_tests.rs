@@ -50,7 +50,7 @@ fn bad_config_lines_do_not_stop_graph_commands() {
     let preferences = "# default_agent: claude:fable\ndefault_agent: codex\nfuture: {enabled: true}\nbroken: [do-not-print-this-value\nclaude: {model: opus, future: true}\nyolo: perhaps\nskills: {implement: {agent: 'claude:fable', future: true}}\naccount: {claude: [saved]}\naccounts: {claude: {saved: {login_email: saved@example.com}}}\n";
     fs::write(home.path().join("config.yaml"), preferences).unwrap();
     for args in [
-        vec!["--context", "graph", "auto"],
+        vec!["--context", "graph", "code"],
         vec!["config", "settings", "--skill", "implement", "--json"],
     ] {
         let output = command(repo.path(), home.path(), &args).output().unwrap();
@@ -99,7 +99,7 @@ fn bad_config_lines_do_not_stop_graph_commands() {
     )
     .unwrap();
     assert!(
-        command(repo.path(), home.path(), &["--context", "graph", "auto"])
+        command(repo.path(), home.path(), &["--context", "graph", "code"])
             .output()
             .unwrap()
             .status
@@ -107,7 +107,7 @@ fn bad_config_lines_do_not_stop_graph_commands() {
     );
     for args in [
         vec!["set", "--global", "yolo", "perhaps"],
-        vec!["--setting", "yolo=perhaps", "--context", "graph", "auto"],
+        vec!["--setting", "yolo=perhaps", "--context", "graph", "code"],
     ] {
         assert!(!command(repo.path(), home.path(), &args)
             .output()
@@ -420,9 +420,9 @@ fn assert_launch_settings(launch: &serde_json::Value, inspected: &serde_json::Va
         settings["chrome"]["value"] == true,
         "{launch}\n{settings}"
     );
-    // Claude's documented headless floor bypasses prompts independently of yolo.
-    // Explicit false is observable here through chrome and cleared documents;
-    // terminal yolo negation has separate native launch/resume coverage.
+    // A headless run never asks, whatever yolo says. Explicit false is
+    // observable here through chrome and cleared documents; attended yolo
+    // negation has separate native launch/resume coverage.
     assert!(args.contains(&serde_json::json!("--dangerously-skip-permissions")));
     let mut expected = settings["context.docs"]["value"]
         .as_array()
@@ -848,6 +848,10 @@ assert '--input-format' not in args, 'Task worker wrongly selected Claude'
 assert not os.environ.get('LF_AGENT_OVERRIDE'), 'Session choice escaped to child policy'
 if 'SETTINGS_TASK' not in os.environ:
     sys.exit(0)  # a Task conversation checkout started in the background, not a launch under test
+if '--session-id' in args:
+    project = Path(os.environ['CLAUDE_CONFIG_DIR']) / 'projects' / 'fixture'
+    project.mkdir(parents=True, exist_ok=True)
+    (project / (args[args.index('--session-id')+1] + '.jsonl')).write_text('{}\n')
 home = Path(os.environ['LF_HOME'])
 db = sqlite3.connect(home / 'loopflow.db')
 def run(*args):
@@ -1140,7 +1144,8 @@ fn cli_destinations_save_the_declaration_used_by_preparation_and_unset() {
     check(None, "codex:project");
     check(Some("product"), "claude:wave");
     check(Some("8ae21a68-8940-4553-a3ab-135133925e35"), "claude:wave");
-    let private = repo.path().join("lf.config.local.yaml");
+    let private = repo.path().join(".lf/config.local.yaml");
+    std::fs::create_dir_all(private.parent().unwrap()).unwrap();
     let before = fs::read(&private).unwrap();
     let rejected = command(&child, home.path(), &["set", "user.name", "Wrong scope"])
         .output()
@@ -1155,7 +1160,7 @@ fn cli_destinations_save_the_declaration_used_by_preparation_and_unset() {
     run(&["unset", "--shared", "agent"]);
     check(None, "codex:global");
     assert_eq!(fs::read(home.path().join("config.yaml")).unwrap(), global);
-    assert!(!child.join("lf.config.local.yaml").exists());
+    assert!(!child.join(".lf/config.local.yaml").exists());
 }
 
 #[test]
@@ -1246,7 +1251,7 @@ fn context_namespace_agrees_across_files_flags_and_preparation() {
         .as_array()
         .unwrap()
         .contains(&serde_json::json!("private.md")));
-    let saved = fs::read_to_string(repo.path().join("lf.config.local.yaml")).unwrap();
+    let saved = fs::read_to_string(repo.path().join(".lf/config.local.yaml")).unwrap();
     assert!(saved.contains("context:") && saved.contains("docs:"));
 }
 
@@ -1410,15 +1415,16 @@ fn automatic_agent_selection_requires_exactly_one_installed_harness() {
     };
 
     unresolved();
-    for harness in ["claude", "codex", "opencode", "pi"] {
-        install(harness);
+    for harness in loopflow_harness::HarnessKind::ALL {
+        let program = harness.as_str();
+        install(program);
         let agent = inspect();
-        assert_eq!(agent["value"], harness);
+        assert_eq!(agent["value"], harness.as_str());
         assert_eq!(
             agent["candidates"][0]["locator"],
             "PATH (only installed harness)"
         );
-        fs::remove_file(bin.path().join(harness)).unwrap();
+        fs::remove_file(bin.path().join(program)).unwrap();
     }
     install("claude");
     install("codex");

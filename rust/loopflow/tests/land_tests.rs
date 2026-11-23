@@ -1803,7 +1803,7 @@ fn lf_pr_land_returns_before_a_later_check_observes_merge() {
             .query_row("SELECT state FROM pr_landings", [], |row| row.get(0))
             .unwrap();
         assert_eq!(state, "watching");
-        // A later check observes delivery; only a ship process repairs.
+        // A later check observes delivery; only a waiting landing repairs.
         let output = command().args(["pr", "reconcile"]).output().unwrap();
         assert!(
             output.status.success(),

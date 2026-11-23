@@ -7,7 +7,13 @@ The same stand-in `ssh` drives `lf machine add mini` and `lf task move <task>
 `HOME` and explicit `LF_HOME` (unset, `lf` finds the real `~/.lf`), with mini's
 `~/.local/bin/lf` the branch binary and a `~/.gitconfig` identity. A local bare
 origin and `planning: {provider: git, personal: true}` are enough; the move's
-check clones the repository on mini. To leave a move `sent, not arrived`, swap
+check clones the repository on mini. A Task whose conversation ran under a stand-in `claude` moves only once that
+thread has a transcript: the refusal ("the claude transcript of Session … (<thread>)
+is unavailable … nothing moved") names the thread; write one line to
+`$CLAUDE_CONFIG_DIR/projects/<checkout with / and . as ->/<thread>.jsonl` for
+the `/tmp/…` and `/private/tmp/…` spellings and move again. The host is the
+argument before the remote command (`… -- mini <command>`).
+To leave a move `sent, not arrived`, swap
 mini's `lf` for a wrapper that exits 1 on `session receive` without `--check`,
 then read `lf task status`, `lf task list` and `lf machine list` before
 restoring it and repeating the move. A wrapper that runs the real receive and

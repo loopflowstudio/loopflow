@@ -6,7 +6,7 @@ use std::collections::{HashMap, HashSet};
 use crate::task_session::TaskSession;
 use crate::StoreResult;
 use loopflow_model::durable::TaskId;
-use loopflow_model::id::{LfProcessId, LfSessionId};
+use loopflow_model::id::LfProcessId;
 
 use crate::graph_process::{Execution, ExecutionStart};
 
@@ -178,10 +178,12 @@ pub struct SavedTaskGraphRow {
     pub graph: String,
     pub step: String,
     pub run: Option<(String, crate::graph_process::TaskCarrier)>,
+    /// The Task's auto state, which names who takes part next.
+    pub auto: Option<AutoState>,
 }
 
 /// A Task's Graph as another Machine takes it up: the graph it took up, the
-/// step it stands at, and the cursor its run sets out from again, if it is on
+/// step it stands at and the cursor its run sets out from again, if it is on
 /// one. The run's Process stays behind.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SavedTaskGraphRecord {
@@ -197,7 +199,7 @@ fn task_graph_row(
     use rusqlite::OptionalExtension;
     let Some((graph, step, start, carrier)) = conn
         .query_row(
-            "SELECT graph,step,run_start,lf_process_id,run_pid,run_os_started_at
+            "SELECT graph,step,run_start,lf_process_id,run_pid,run_os_started_at,run_died_at
              FROM task_graphs WHERE task_id=?1",
             [task.as_str()],
             |row| {
@@ -211,6 +213,7 @@ fn task_graph_row(
                                 id,
                                 pid: row.get(4)?,
                                 os_started_at: row.get(5)?,
+                                died_at: row.get(6)?,
                             })
                         })
                         .transpose()?,
@@ -222,25 +225,28 @@ fn task_graph_row(
         return Ok(None);
     };
     let run = start.zip(carrier);
-    Ok(Some(SavedTaskGraphRow { graph, step, run }))
+    let auto = auto_in(conn, task)?.map(|mark| mark.state);
+    Ok(Some(SavedTaskGraphRow {
+        graph,
+        step,
+        run,
+        auto,
+    }))
 }
 
 /// Put the Task on a run from `cursor`, carried by `by` as it started at
 /// `start`, if it still stands where the caller read it: at `step`, with `stopped` the run that last left
-/// it, if any. With `ships`, the run reaches `end` and hands the Task off,
-/// granting merge authority unless a person stopped shipping it.
-#[allow(clippy::too_many_arguments)]
+/// it, if any.
 fn start_run_in(
     tx: &rusqlite::Transaction<'_>,
     task: &TaskId,
     (step, stopped): (&str, Option<&LfProcessId>),
     cursor: &str,
     (by, start): (&LfProcessId, &ExecutionStart),
-    ships: bool,
 ) -> StoreResult<bool> {
     let left = tx.execute(
         "UPDATE task_graphs SET run_start=?2,lf_process_id=?3,run_pid=?7,run_os_started_at=?8,
-            updated_at=?4
+            run_died_at=NULL,updated_at=?4
          WHERE task_id=?1 AND step=?5 AND lf_process_id IS ?6",
         rusqlite::params![
             task.as_str(),
@@ -253,317 +259,121 @@ fn start_run_in(
             start.os_started_at
         ],
     )?;
-    if left == 0 {
-        return Ok(false);
-    }
-    // No person takes part on the rest of the graph: running it hands the Task off.
-    if ships {
-        ship_in(
-            tx,
-            task,
-            (by, start),
-            "it runs to the end with no interactive step left",
-            Approval::Route,
-        )?;
-    }
-    Ok(true)
+    Ok(left > 0)
 }
 
-/// A Task handed off to finish on its own: since when, the process that
-/// approved it, this Machine's run carrying it there, and how many times in a
-/// row that run was started again after it failed.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TaskShipping {
-    pub shipped_at: i64,
-    pub approved_by: Option<LfProcessId>,
-    /// The Session whose agent approved it, when one did.
-    pub approving_session: Option<LfSessionId>,
-    pub carrier: Option<Execution>,
-    pub restarts: u32,
-}
-
-/// How a Task comes to ship. A person's stop blocks only a route.
+/// How many times a Task's run was carried again after its carrier died, since
+/// it last finished a step, and when it last was.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Approval {
-    /// `lf ship`: approves it and lifts any stop.
-    Explicit,
-    /// A run reaching `end`: approves it unless a person stopped shipping.
-    Route,
+pub struct TaskRunRestarts {
+    pub count: u32,
+    pub at: Option<i64>,
 }
 
-/// A person's `lf ship --stop`: when, the process that ran it and the
-/// Session whose agent ran it, when one did.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ShipStop {
-    pub at: i64,
-    pub by: Option<LfProcessId>,
-    pub person: Option<String>,
-    pub session: Option<LfSessionId>,
-}
-
-pub(super) fn ship_stop_in(
-    conn: &rusqlite::Connection,
-    task: &TaskId,
-) -> StoreResult<Option<ShipStop>> {
-    Ok(ship_log_in(conn, task)?.stop)
-}
-
-/// One kind of row in a Task's Auto-Ship log (`task_ship_events`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
-#[serde(rename_all = "lowercase")]
-enum ShipEvent {
-    Approved,
-    Carried,
-    Restarted,
-    Stopped,
-    Withdrawn,
-}
-
-impl ShipEvent {
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::Approved => "approved",
-            Self::Carried => "carried",
-            Self::Restarted => "restarted",
-            Self::Stopped => "stopped",
-            Self::Withdrawn => "withdrawn",
-        }
-    }
-}
-
-/// The latest Auto-Ship approval, as a move carries it to the Task's next Machine.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct ShipApproval {
-    pub at: i64,
-    pub by: Option<LfProcessId>,
-    /// The Session whose agent approved it, when one did.
-    pub session: Option<LfSessionId>,
-}
-
-/// What a Task's Auto-Ship log says now.
-#[derive(Debug, Default)]
-struct ShipLog {
-    approval: Option<ShipApproval>,
-    carrier: Option<Execution>,
-    restarts: u32,
-    stop: Option<ShipStop>,
-}
-
-/// Restarts counted in a row. The repair backoff a restart waits
-/// (`ops::pr_landing::repair_backoff`) stops growing after this many, so
-/// later ones add no row; the migration's backfill keeps the same cap.
-pub const SHIP_RESTARTS_COUNTED: u32 = 6;
-
-/// Read from the latest approval or stop: each starts the log over.
-fn ship_log_in(conn: &rusqlite::Connection, task: &TaskId) -> StoreResult<ShipLog> {
-    let mut query = conn.prepare_cached(
-        "SELECT kind,at,lf_process_id,person,pid,os_started_at,ended_at,exit_code,error,caller_session_id
-         FROM task_ship_events WHERE task_id=?1
-         AND id>=IFNULL((SELECT max(id) FROM task_ship_events
-             WHERE task_id=?1 AND kind IN ('approved','stopped')),0)
-         ORDER BY id",
-    )?;
-    let mut rows = query.query([task.as_str()])?;
-    let mut log = ShipLog::default();
-    while let Some(row) = rows.next()? {
-        let at: i64 = row.get(1)?;
-        let process: Option<LfProcessId> = row.get(2)?;
-        let run = |id: &LfProcessId| -> rusqlite::Result<Execution> {
-            Ok(Execution {
-                id: id.clone(),
-                started_at: at,
-                pid: row.get(4)?,
-                os_started_at: row.get(5)?,
-                ended_at: row.get(6)?,
-                exit_code: row.get(7)?,
-                error: row.get(8)?,
-            })
-        };
-        match serde_json::from_value::<ShipEvent>(row.get::<_, String>(0)?.into())? {
-            ShipEvent::Approved => {
-                log = ShipLog {
-                    carrier: process.as_ref().map(run).transpose()?,
-                    approval: Some(ShipApproval {
-                        at,
-                        by: process,
-                        session: row.get(9)?,
-                    }),
-                    ..ShipLog::default()
-                }
-            }
-            ShipEvent::Carried => log.carrier = process.as_ref().map(run).transpose()?,
-            ShipEvent::Restarted => log.restarts += 1,
-            ShipEvent::Stopped => {
-                log = ShipLog {
-                    stop: Some(ShipStop {
-                        at,
-                        by: process,
-                        person: row.get(3)?,
-                        session: row.get(9)?,
-                    }),
-                    ..ShipLog::default()
-                }
-            }
-            ShipEvent::Withdrawn => {
-                log = ShipLog {
-                    stop: log.stop.take(),
-                    ..ShipLog::default()
-                }
-            }
-        }
-    }
-    Ok(log)
-}
-
-/// A Task has one carrier: a new `carried` row replaces the last. An
-/// approving or carrying lf on this Machine records the OS process it runs as.
-fn append_ship_event_in(
-    conn: &rusqlite::Connection,
-    task: &TaskId,
-    event: ShipEvent,
-    at: i64,
-    (process, start): (Option<&LfProcessId>, Option<&ExecutionStart>),
-    (person, session): (Option<&str>, Option<&LfSessionId>),
-) -> StoreResult<()> {
-    if event == ShipEvent::Carried {
-        conn.execute(
-            "DELETE FROM task_ship_events WHERE task_id=?1 AND kind='carried'",
+fn run_restarts_in(conn: &rusqlite::Connection, task: &TaskId) -> StoreResult<TaskRunRestarts> {
+    use rusqlite::OptionalExtension;
+    Ok(conn
+        .query_row(
+            "SELECT restarts,restarted_at FROM task_graphs WHERE task_id=?1",
             [task.as_str()],
-        )?;
+            |row| {
+                Ok(TaskRunRestarts {
+                    count: row.get(0)?,
+                    at: row.get(1)?,
+                })
+            },
+        )
+        .optional()?
+        .unwrap_or(TaskRunRestarts { count: 0, at: None }))
+}
+
+/// Auto, a setting on the Task: whether its interactive steps run headless,
+/// standing in for the person, and whether its landing may merge.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum AutoState {
+    /// `lf task auto on` or an `auto: on` configuration turned it on.
+    On,
+    /// `lf task auto off` turned it off; `-b` leaves it off.
+    Off,
+}
+
+impl AutoState {
+    /// The word people type and the store keeps: `on` or `off`.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::On => "on",
+            Self::Off => "off",
+        }
     }
-    conn.execute(
-        "INSERT INTO task_ship_events(task_id,kind,at,lf_process_id,person,pid,os_started_at,caller_session_id)
-         VALUES(?1,?2,?3,?4,?5,?6,?7,?8)",
+
+    pub(super) fn parse(value: &str) -> StoreResult<Self> {
+        match value {
+            "on" => Ok(Self::On),
+            "off" => Ok(Self::Off),
+            other => Err(crate::StoreError::InvalidData(format!(
+                "unknown auto state {other:?}"
+            ))),
+        }
+    }
+}
+
+/// The Task's auto mark: its state, when it was set and who set it.
+#[derive(
+    Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
+pub struct Auto {
+    pub state: AutoState,
+    pub at: i64,
+    pub by: crate::process::Starter,
+}
+
+/// Write the Task's mark, replacing or keeping (`on_conflict`) one it holds.
+/// Returns how many rows changed.
+fn write_auto_in(
+    conn: &rusqlite::Connection,
+    task: &TaskId,
+    mark: &Auto,
+    on_conflict: &str,
+) -> StoreResult<usize> {
+    Ok(conn.execute(
+        &format!(
+            "INSERT OR {on_conflict} INTO task_auto(task_id,state,set_at,set_by) VALUES(?1,?2,?3,?4)"
+        ),
         rusqlite::params![
             task.as_str(),
-            event.as_str(),
-            at,
-            process.map(LfProcessId::as_str),
-            person,
-            start.and_then(|start| start.pid),
-            start.and_then(|start| start.os_started_at),
-            session.or(start.and_then(|start| start.caller_session.as_ref()))
+            mark.state.as_str(),
+            mark.at,
+            serde_json::to_string(&mark.by)?
         ],
-    )?;
-    Ok(())
+    )?)
 }
 
-pub(super) fn shipping_in(
-    conn: &rusqlite::Connection,
-    task: &TaskId,
-) -> StoreResult<Option<TaskShipping>> {
+pub(super) fn auto_in(conn: &rusqlite::Connection, task: &TaskId) -> StoreResult<Option<Auto>> {
     use rusqlite::OptionalExtension;
-    let Some(shipped_at) = conn
+    let Some((state, at, by)) = conn
         .query_row(
-            "SELECT shipped_at FROM tasks WHERE id=?1 AND shipped_at IS NOT NULL",
+            "SELECT state,set_at,set_by FROM task_auto WHERE task_id=?1",
             [task.as_str()],
-            |row| row.get(0),
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            },
         )
         .optional()?
     else {
         return Ok(None);
     };
-    let log = ship_log_in(conn, task)?;
-    Ok(Some(TaskShipping {
-        shipped_at,
-        approving_session: log
-            .approval
-            .as_ref()
-            .and_then(|approval| approval.session.clone()),
-        approved_by: log.approval.and_then(|approval| approval.by),
-        carrier: log.carrier,
-        restarts: log.restarts,
+    Ok(Some(Auto {
+        state: AutoState::parse(&state)?,
+        at,
+        by: serde_json::from_str(&by)?,
     }))
-}
-
-/// End the Task's handoff, returning what it was, when it was shipping.
-pub(super) fn unship_in(
-    conn: &rusqlite::Connection,
-    task: &TaskId,
-) -> StoreResult<Option<TaskShipping>> {
-    let shipping = shipping_in(conn, task)?;
-    if shipping.is_some() {
-        super::planning_write::local(
-            conn,
-            &crate::work::edit::WorkEdit::for_target(
-                task.as_str(),
-                &[crate::work::edit::WorkValue::TaskShippedAt(None)],
-            ),
-        )?;
-    }
-    let log = ship_log_in(conn, task)?;
-    if log.approval.is_some() || log.carrier.is_some() || log.restarts > 0 {
-        let now = crate::rows::now_unix();
-        append_ship_event_in(
-            conn,
-            task,
-            ShipEvent::Withdrawn,
-            now,
-            (None, None),
-            (None, None),
-        )?;
-    }
-    Ok(shipping)
-}
-
-/// Approve Auto-Ship, carried by `by`. A route writes nothing and returns
-/// `None` while a person's stop stands; an explicit approval lifts the stop.
-fn ship_in(
-    tx: &rusqlite::Transaction<'_>,
-    task: &TaskId,
-    (by, start): (&LfProcessId, &ExecutionStart),
-    note: &str,
-    approval: Approval,
-) -> StoreResult<Option<TaskShipping>> {
-    let state = super::durable::task_state_in(tx, task)?;
-    if state.is_terminal() {
-        return Err(crate::StoreError::InvalidAuthority(format!(
-            "Task is {state}; it cannot ship"
-        )));
-    }
-    let log = ship_log_in(tx, task)?;
-    if approval == Approval::Route && log.stop.is_some() {
-        return Ok(None);
-    }
-    let now = crate::rows::now_unix();
-    let shipping = shipping_in(tx, task)?.is_some();
-    if !shipping {
-        super::planning_write::local(
-            tx,
-            &crate::work::edit::WorkEdit::for_target(
-                task.as_str(),
-                &[crate::work::edit::WorkValue::TaskShippedAt(Some(now))],
-            ),
-        )?;
-        super::children::insert_task_event_in(
-            tx,
-            task,
-            &crate::work::task::TaskEventKind::Progress {
-                summary: format!("Shipping: {note}"),
-            },
-        )?;
-    }
-    // `lf ship` also lifts a stop that stands beside shipping a peer recorded.
-    if !shipping || log.stop.is_some() {
-        append_ship_event_in(
-            tx,
-            task,
-            ShipEvent::Approved,
-            now,
-            (Some(by), Some(start)),
-            (None, None),
-        )?;
-    } else if log.carrier.as_ref().map(|carrier| &carrier.id) != Some(by) {
-        append_ship_event_in(
-            tx,
-            task,
-            ShipEvent::Carried,
-            now,
-            (Some(by), Some(start)),
-            (None, None),
-        )?;
-    }
-    shipping_in(tx, task)
 }
 
 /// The run `carrier` started stopped at `step`, or reached `end`: put the
@@ -575,24 +385,10 @@ fn arrive_in(
     carrier: &LfProcessId,
     step: &str,
 ) -> StoreResult<bool> {
-    use rusqlite::OptionalExtension;
-    // The carrier's OS process, which a hand-off at `end` makes its ship carrier's.
-    let start = tx
-        .query_row(
-            "SELECT run_pid,run_os_started_at FROM task_graphs WHERE task_id=?1 AND lf_process_id=?2",
-            rusqlite::params![task.as_str(), carrier.as_str()],
-            |row| {
-                Ok(ExecutionStart {
-                    started_at: crate::rows::now_unix(),
-                    pid: row.get(0)?,
-                    os_started_at: row.get(1)?,
-                    caller_session: None,
-                })
-            },
-        )
-        .optional()?;
     let arrived = tx.execute(
-        "UPDATE task_graphs SET step=?2,run_start=NULL,lf_process_id=NULL,run_pid=NULL,run_os_started_at=NULL,updated_at=?3
+        "UPDATE task_graphs SET step=?2,run_start=NULL,lf_process_id=NULL,run_pid=NULL,run_os_started_at=NULL,
+             run_died_at=NULL,
+             updated_at=?3,restarts=0,restarted_at=NULL
          WHERE task_id=?1 AND lf_process_id=?4",
         rusqlite::params![
             task.as_str(),
@@ -603,18 +399,6 @@ fn arrive_in(
     )? > 0;
     let ended = arrived && step == END;
     if ended {
-        // A routed path may reach end even though another path had an
-        // interactive step, so launch-time prediction is not sufficient.
-        if !super::durable::task_state_in(tx, task)?.is_terminal() {
-            let start = start.expect("an arrived run was on the Task");
-            ship_in(
-                tx,
-                task,
-                (carrier, &start),
-                "its run reached the end",
-                Approval::Route,
-            )?;
-        }
         super::children::request_completion_in(tx, task, None)?;
     }
     Ok(ended)
@@ -622,7 +406,9 @@ fn arrive_in(
 
 fn set_step_in(tx: &rusqlite::Transaction<'_>, task: &TaskId, step: &str) -> StoreResult<bool> {
     Ok(tx.execute(
-        "UPDATE task_graphs SET step=?2,run_start=NULL,lf_process_id=NULL,run_pid=NULL,run_os_started_at=NULL,updated_at=?3 WHERE task_id=?1",
+        "UPDATE task_graphs SET step=?2,run_start=NULL,lf_process_id=NULL,run_pid=NULL,run_os_started_at=NULL,
+             run_died_at=NULL,
+             updated_at=?3,restarts=0,restarted_at=NULL WHERE task_id=?1",
         rusqlite::params![task.as_str(), step, crate::rows::now_unix()],
     )? > 0)
 }
@@ -973,6 +759,16 @@ impl SqliteStore {
         Ok(())
     }
 
+    /// A Task that moved here holds the auto mark it left with, or none.
+    pub fn place_moved_task_auto(&self, task: &TaskId, mark: Option<&Auto>) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        match mark {
+            Some(mark) => write_auto_in(&conn, task, mark, "REPLACE")?,
+            None => conn.execute("DELETE FROM task_auto WHERE task_id=?1", [task.as_str()])?,
+        };
+        Ok(())
+    }
+
     /// Take up `graph` for the Task as it is defined now, at `start`. It
     /// replaces the Task's earlier Graph.
     pub fn take_up_task_graph(&self, task: &TaskId, graph: &str) -> StoreResult<()> {
@@ -982,6 +778,16 @@ impl SqliteStore {
             rusqlite::params![task.as_str(), graph, START, crate::rows::now_unix()],
         )?;
         Ok(())
+    }
+
+    /// Take `graph` up for a Task that has none. Returns false, writing
+    /// nothing, when it has one: another run took its Graph up first.
+    pub fn take_up_first_task_graph(&self, task: &TaskId, graph: &str) -> StoreResult<bool> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn.execute(
+            "INSERT OR IGNORE INTO task_graphs(task_id,graph,step,updated_at) VALUES(?1,?2,?3,?4)",
+            rusqlite::params![task.as_str(), graph, START, crate::rows::now_unix()],
+        )? > 0)
     }
 
     /// Put the Task on a run from `cursor`, carried by `by`. Returns false,
@@ -994,18 +800,18 @@ impl SqliteStore {
         stopped: Option<&LfProcessId>,
         cursor: &str,
         carrier: (&LfProcessId, &ExecutionStart),
-        ships: bool,
     ) -> StoreResult<bool> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction()?;
-        let started = start_run_in(&tx, task, (step, stopped), cursor, carrier, ships)?;
+        let started = start_run_in(&tx, task, (step, stopped), cursor, carrier)?;
         tx.commit()?;
         Ok(started)
     }
 
     /// The run `carrier` carries finished a step: its next attempt, or the
-    /// next `lf task run`, sets out from `cursor`. A run that no longer
-    /// carries the Task writes nothing.
+    /// next `lf task run`, sets out from `cursor`, and a later death of its
+    /// carrier is carried again at once. A run that no longer carries the
+    /// Task writes nothing.
     pub fn advance_task_graph_run(
         &self,
         task: &TaskId,
@@ -1014,7 +820,7 @@ impl SqliteStore {
     ) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
-            "UPDATE task_graphs SET run_start=?3,updated_at=?4
+            "UPDATE task_graphs SET run_start=?3,updated_at=?4,restarts=0,restarted_at=NULL
              WHERE task_id=?1 AND lf_process_id=?2 AND run_start IS NOT ?3",
             rusqlite::params![
                 task.as_str(),
@@ -1043,11 +849,7 @@ impl SqliteStore {
 
     /// Put the Task at `end` with nothing left to run, requesting completion.
     /// Returns whether it reached `end` now.
-    pub fn end_task_graph(
-        &self,
-        task: &TaskId,
-        by: (&LfProcessId, &ExecutionStart),
-    ) -> StoreResult<bool> {
+    pub fn end_task_graph(&self, task: &TaskId) -> StoreResult<bool> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction()?;
         let ended = tx.execute(
@@ -1055,7 +857,6 @@ impl SqliteStore {
             rusqlite::params![task.as_str(), END, crate::rows::now_unix()],
         )? > 0;
         if ended {
-            ship_in(&tx, task, by, "its run reached the end", Approval::Route)?;
             super::children::request_completion_in(&tx, task, None)?;
         }
         tx.commit()?;
@@ -1072,169 +873,83 @@ impl SqliteStore {
         Ok(set)
     }
 
-    /// Hand the Task off to finish on its own, carried by `by`, lifting any
-    /// stop. Shipping that already began keeps its start; only the carrier changes.
-    pub fn ship_task(
+    /// Set the Task's auto mark, noting it in the Task's history. With
+    /// `unset_only`, a standing mark stays and nothing is written. Returns the
+    /// mark it had.
+    pub fn set_task_auto(
         &self,
         task: &TaskId,
-        by: (&LfProcessId, &ExecutionStart),
-        note: &str,
-    ) -> StoreResult<TaskShipping> {
+        mark: &Auto,
+        unset_only: bool,
+    ) -> StoreResult<Option<Auto>> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction()?;
-        let shipping =
-            ship_in(&tx, task, by, note, Approval::Explicit)?.expect("explicit approval ships");
+        let before = auto_in(&tx, task)?;
+        let on_conflict = if unset_only { "IGNORE" } else { "REPLACE" };
+        if write_auto_in(&tx, task, mark, on_conflict)? == 0 {
+            return Ok(before);
+        }
+        if before.as_ref().map(|before| before.state) != Some(mark.state) {
+            let summary = format!("auto {}: {}", mark.state.as_str(), mark.by);
+            super::children::insert_task_event_in(
+                &tx,
+                task,
+                &crate::work::task::TaskEventKind::Progress { summary },
+            )?;
+        }
         tx.commit()?;
-        Ok(shipping)
+        Ok(before)
     }
 
-    /// Withdraw a Task's Auto-Ship approval. With `stopped_by`, a person
-    /// stopped it: the stop stands, even when it was not shipping, until
-    /// `lf ship` approves it again. Returns the approval and the process that
-    /// carried it, when it was approved.
-    pub fn stop_shipping(
+    /// The Task's auto mark, if anyone set one.
+    pub fn task_auto(&self, task: &TaskId) -> StoreResult<Option<Auto>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        auto_in(&conn, task)
+    }
+
+    /// Tasks checked out here whose run's carrier has not cleared its OS
+    /// process, or was found dead.
+    pub fn local_task_runs(&self) -> StoreResult<Vec<TaskId>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut query = conn.prepare(
+            "SELECT task_id FROM task_graphs WHERE (run_pid IS NOT NULL OR run_died_at IS NOT NULL)
+             AND task_id IN (SELECT task_id FROM task_checkouts)",
+        )?;
+        let rows = query.query_map([], |row| row.get::<_, String>(0))?;
+        rows.map(|id| {
+            TaskId::parse(&id?).map_err(|error| crate::StoreError::InvalidData(error.to_string()))
+        })
+        .collect()
+    }
+
+    /// How many times the Task's run was carried again since it last finished
+    /// a step, and when it last was.
+    pub fn task_run_restarts(&self, task: &TaskId) -> StoreResult<TaskRunRestarts> {
+        run_restarts_in(&self.conn.lock().expect("store mutex poisoned"), task)
+    }
+
+    /// Count one more start of the Task's run, if it still stands where the
+    /// caller read it, carried by the `carrier` that died. Returns false,
+    /// writing nothing, when the carrier recorded its own exit or another
+    /// start came first.
+    pub fn count_task_run_restart(
         &self,
         task: &TaskId,
-        note: &str,
-        stopped_by: Option<ShipStop>,
-    ) -> StoreResult<Option<TaskShipping>> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction()?;
-        let shipping = shipping_in(&tx, task)?;
-        if let Some(by) = stopped_by {
-            append_ship_event_in(
-                &tx,
-                task,
-                ShipEvent::Stopped,
-                by.at,
-                (by.by.as_ref(), None),
-                (by.person.as_deref(), by.session.as_ref()),
-            )?;
-        }
-        unship_in(&tx, task)?;
-        let Some(shipping) = shipping else {
-            tx.commit()?;
-            return Ok(None);
-        };
-        super::children::insert_task_event_in(
-            &tx,
-            task,
-            &crate::work::task::TaskEventKind::Progress {
-                summary: format!("Stopped shipping: {note}"),
-            },
-        )?;
-        tx.commit()?;
-        Ok(Some(shipping))
-    }
-
-    /// When the Task was handed off and the process carrying it, if it is shipping.
-    pub fn task_shipping(&self, task: &TaskId) -> StoreResult<Option<TaskShipping>> {
+        carrier: &LfProcessId,
+        seen: u32,
+    ) -> StoreResult<bool> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        shipping_in(&conn, task)
-    }
-
-    /// The person's stop that keeps a run from approving the Task, if one stands.
-    pub fn task_ship_stop(&self, task: &TaskId) -> StoreResult<Option<ShipStop>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        ship_stop_in(&conn, task)
-    }
-
-    /// Handed-off Tasks whose checkout is on this Machine, with their handoffs.
-    pub fn local_shipping_tasks(&self) -> StoreResult<Vec<(TaskId, TaskShipping)>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let ids = {
-            let mut query = conn.prepare(
-                "SELECT id FROM tasks WHERE shipped_at IS NOT NULL
-                 AND id IN (SELECT task_id FROM task_checkouts)",
-            )?;
-            let rows = query.query_map([], |row| row.get::<_, String>(0))?;
-            rows.collect::<Result<Vec<_>, _>>()?
-        };
-        let mut shipping = Vec::new();
-        for id in ids {
-            let id = TaskId::parse(&id)
-                .map_err(|error| crate::StoreError::InvalidData(error.to_string()))?;
-            if let Some(handoff) = shipping_in(&conn, &id)? {
-                shipping.push((id, handoff));
-            }
-        }
-        Ok(shipping)
-    }
-
-    /// Count one more restart after a failed ship process, up to
-    /// [`SHIP_RESTARTS_COUNTED`].
-    pub fn count_ship_restart(&self, task: &TaskId) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        if ship_log_in(&conn, task)?.restarts >= SHIP_RESTARTS_COUNTED {
-            return Ok(());
-        }
-        let now = crate::rows::now_unix();
-        append_ship_event_in(
-            &conn,
-            task,
-            ShipEvent::Restarted,
-            now,
-            (None, None),
-            (None, None),
-        )
-    }
-
-    /// A ship step completed: the next failure restarts without waiting long.
-    pub fn reset_ship_restarts(&self, task: &TaskId) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        conn.execute(
-            "DELETE FROM task_ship_events WHERE task_id=?1 AND kind='restarted'",
-            [task.as_str()],
-        )?;
-        Ok(())
-    }
-
-    /// The Task's standing Auto-Ship approval, which a move carries along.
-    pub fn task_ship_approval(&self, task: &TaskId) -> StoreResult<Option<ShipApproval>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        if shipping_in(&conn, task)?.is_none() {
-            return Ok(None);
-        }
-        Ok(ship_log_in(&conn, task)?.approval)
-    }
-
-    /// A move arrived carrying `approval`: the Task ships here as it did
-    /// where it came from, from the same start, with no carrier yet.
-    pub fn take_in_ship_approval(&self, task: &TaskId, approval: &ShipApproval) -> StoreResult<()> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction()?;
-        if shipping_in(&tx, task)?.is_none() {
-            super::planning_write::local(
-                &tx,
-                &crate::work::edit::WorkEdit::for_target(
-                    task.as_str(),
-                    &[crate::work::edit::WorkValue::TaskShippedAt(Some(
-                        approval.at,
-                    ))],
-                ),
-            )?;
-        }
-        if ship_log_in(&tx, task)?.approval.as_ref() != Some(approval) {
-            append_ship_event_in(
-                &tx,
-                task,
-                ShipEvent::Approved,
-                approval.at,
-                (approval.by.as_ref(), None),
-                (None, approval.session.as_ref()),
-            )?;
-            // The approving Process ran where the Task came from; nothing carries it here yet.
-            append_ship_event_in(
-                &tx,
-                task,
-                ShipEvent::Carried,
-                approval.at,
-                (None, None),
-                (None, None),
-            )?;
-        }
-        tx.commit()?;
-        Ok(())
+        Ok(conn.execute(
+            "UPDATE task_graphs SET restarts=restarts+1,restarted_at=?4
+             WHERE task_id=?1 AND lf_process_id=?2 AND restarts=?3
+               AND (run_pid IS NOT NULL OR run_died_at IS NOT NULL)",
+            rusqlite::params![
+                task.as_str(),
+                carrier.as_str(),
+                seen,
+                crate::rows::now_unix()
+            ],
+        )? > 0)
     }
 
     /// Each of `tasks`' most recently launched Graph, read for all of them at once.
@@ -1343,40 +1058,58 @@ mod tests {
     }
 
     #[test]
-    fn request_stop_retains_its_person_without_an_os_process() {
+    fn an_auto_off_stands_until_auto_on() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("db");
         let store = crate::test_fixture::open(&path).unwrap();
         let task = store
             .create_task(&crate::work::task::NewTask {
                 id: TaskId::new(),
-                repository_id: crate::test_fixture::repository(&store, "/request-stop"),
+                repository_id: crate::test_fixture::repository(&store, "/auto"),
                 project_id: None,
-                title: "Stop".into(),
+                title: "Auto".into(),
                 description: String::new(),
                 due_date: None,
             })
             .unwrap();
-        let stop = super::ShipStop {
-            at: 25,
-            by: None,
-            person: Some("Casey".into()),
-            session: None,
+        let mark = |state, at| super::Auto {
+            state,
+            at,
+            by: crate::process::Starter::Person {
+                name: Some("Casey".into()),
+            },
         };
-        assert!(store
-            .stop_shipping(&task.id, "Casey", Some(stop.clone()))
-            .unwrap()
-            .is_none());
+        let on = mark(super::AutoState::On, 10);
+        let stopped = mark(super::AutoState::Off, 20);
+        // The Task holds its mark before it takes up a Graph.
+        assert_eq!(store.set_task_auto(&task.id, &on, false).unwrap(), None);
+        assert_eq!(
+            store.set_task_auto(&task.id, &stopped, false).unwrap(),
+            Some(on)
+        );
+        // A configured default keeps a stop; taking up a graph, then another, keeps it too.
+        assert_eq!(
+            store
+                .set_task_auto(&task.id, &mark(super::AutoState::On, 30), true)
+                .unwrap(),
+            Some(stopped.clone())
+        );
+        for graph in ["code", "feature"] {
+            store
+                .take_up_task_graph(&task.id, &format!(r#"{{"name":"{graph}","steps":[]}}"#))
+                .unwrap();
+        }
         drop(store);
         let store = crate::test_fixture::open(&path).unwrap();
-        assert_eq!(store.task_ship_stop(&task.id).unwrap(), Some(stop));
-        let count: i64 = store
-            .conn
-            .lock()
-            .unwrap()
-            .query_row("SELECT count(*) FROM processes", [], |row| row.get(0))
+        assert_eq!(store.task_auto(&task.id).unwrap(), Some(stopped));
+        // `lf task auto on` lifts it.
+        store
+            .set_task_auto(&task.id, &mark(super::AutoState::On, 40), false)
             .unwrap();
-        assert_eq!(count, 0);
+        assert_eq!(
+            store.task_auto(&task.id).unwrap(),
+            Some(mark(super::AutoState::On, 40))
+        );
     }
 
     #[test]
@@ -1423,13 +1156,11 @@ mod tests {
                 assert!(super::arrive_in(&tx, &task, &carrier, super::END).is_err());
             }
             assert!(!at_end(&conn));
-            assert!(super::shipping_in(&conn, &task).unwrap().is_none());
             conn.execute_batch("DROP TRIGGER refuse_request").unwrap();
             let tx = conn.transaction().unwrap();
             assert!(super::arrive_in(&tx, &task, &carrier, super::END).unwrap());
             tx.commit().unwrap();
         }
-        assert!(store.task_shipping(&task).unwrap().is_some());
         let (request, _) = store.task_completion_pending(&task).unwrap().unwrap();
         store
             .fail_task_completion(&task, request, "provider unavailable")
@@ -1531,7 +1262,7 @@ mod tests {
     }
 
     #[test]
-    fn a_moved_task_ships_where_it_arrives_from_its_approval_with_no_carrier() {
+    fn a_moved_task_keeps_its_auto_mark_where_it_arrives() {
         let (laptop_dir, mini_dir) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
         let id = TaskId::new();
         let open = |dir: &tempfile::TempDir| {
@@ -1549,95 +1280,26 @@ mod tests {
             store
         };
         let (laptop, mini) = (open(&laptop_dir), open(&mini_dir));
-        let approver = LfProcessId::new();
-        let shipping = laptop
-            .ship_task(
-                &id,
-                (
-                    &approver,
-                    &crate::graph_process::ExecutionStart::reserved(1),
-                ),
-                "ship",
-            )
-            .unwrap();
-        let approval = laptop.task_ship_approval(&id).unwrap().unwrap();
-        assert_eq!(approval.by, Some(approver.clone()));
-        // Delivered twice, as a retried move is.
-        mini.take_in_ship_approval(&id, &approval).unwrap();
-        mini.take_in_ship_approval(&id, &approval).unwrap();
-        assert_eq!(
-            mini.task_shipping(&id).unwrap(),
-            Some(super::TaskShipping {
-                shipped_at: approval.at,
-                approved_by: Some(approver),
-                approving_session: None,
-                carrier: None,
-                restarts: 0,
-            })
-        );
-        assert_eq!(shipping.shipped_at, approval.at);
-    }
-
-    #[test]
-    fn a_ship_process_failing_all_day_keeps_its_log_short() {
-        let dir = tempfile::tempdir().unwrap();
-        let store = crate::test_fixture::open(&dir.path().join("db")).unwrap();
-        let id = TaskId::new();
-        store
-            .create_task(&crate::work::task::NewTask {
-                id: id.clone(),
-                repository_id: crate::test_fixture::repository(&store, "/shipping"),
-                project_id: None,
-                title: "Ship".into(),
-                description: String::new(),
-                due_date: None,
-            })
-            .unwrap();
-        store
-            .ship_task(
-                &id,
-                (
-                    &LfProcessId::new(),
-                    &crate::graph_process::ExecutionStart::reserved(1),
-                ),
-                "ship",
-            )
-            .unwrap();
-        // A day of restarts at the longest backoff, each carried by a new process.
-        let mut carrier = LfProcessId::new();
-        for _ in 0..48 {
-            store.count_ship_restart(&id).unwrap();
-            carrier = LfProcessId::new();
-            store
-                .ship_task(
-                    &id,
-                    (&carrier, &crate::graph_process::ExecutionStart::reserved(1)),
-                    "ship",
-                )
-                .unwrap();
-        }
-        let shipping = store.task_shipping(&id).unwrap().unwrap();
-        assert_eq!(shipping.restarts, super::SHIP_RESTARTS_COUNTED);
-        assert_eq!(shipping.carrier.map(|run| run.id), Some(carrier));
-        let rows = || -> i64 {
-            let conn = store.conn.lock().unwrap();
-            conn.query_row(
-                "SELECT count(*) FROM task_ship_events WHERE task_id=?1",
-                [id.as_str()],
-                |row| row.get(0),
-            )
-            .unwrap()
+        let on = super::Auto {
+            state: super::AutoState::On,
+            at: 7,
+            by: crate::process::Starter::Person {
+                name: Some("Casey".into()),
+            },
         };
-        // The approval, its carrier and the counted restarts.
-        assert_eq!(rows(), 2 + i64::from(super::SHIP_RESTARTS_COUNTED));
-
-        store.reset_ship_restarts(&id).unwrap();
-        assert_eq!(store.task_shipping(&id).unwrap().unwrap().restarts, 0);
-        assert_eq!(rows(), 2);
+        laptop.set_task_auto(&id, &on, false).unwrap();
+        // It has taken up no Graph. Delivered twice, as a retried move is.
+        let mark = laptop.task_auto(&id).unwrap();
+        mini.place_moved_task_auto(&id, mark.as_ref()).unwrap();
+        mini.place_moved_task_auto(&id, mark.as_ref()).unwrap();
+        assert_eq!(mini.task_auto(&id).unwrap(), Some(on));
+        // Reopened where it went, it comes back with none.
+        laptop.place_moved_task_auto(&id, None).unwrap();
+        assert_eq!(laptop.task_auto(&id).unwrap(), None);
     }
 
     #[test]
-    fn a_released_tasks_shipping_columns_become_its_auto_ship_log() {
+    fn a_released_tasks_ship_log_becomes_its_auto_mark() {
         use crate::migration_runner::{apply_before_migration, upgrade_from_migration};
 
         let conn = rusqlite::Connection::open_in_memory().unwrap();
@@ -1645,52 +1307,78 @@ mod tests {
             &crate::test_fixture::observers(),
             &crate::test_fixture::build(),
             &conn,
-            "task_machine_local",
+            "task_auto",
         );
-        let (shipping, stopped) = (TaskId::new(), TaskId::new());
-        let (approver, carrier) = (LfProcessId::new(), LfProcessId::new());
-        // The carrier failed; the upgrade carries its end onto the ship log.
+        let (shipping, stopped, withdrawn, never) =
+            (TaskId::new(), TaskId::new(), TaskId::new(), TaskId::new());
+        conn.execute_batch(
+            "INSERT INTO repository_plans(id,repo,selected) VALUES('repo_1','/repo',1);",
+        )
+        .unwrap();
+        for (task, issue) in [
+            (&shipping, "SHIP-1"),
+            (&stopped, "SHIP-2"),
+            (&withdrawn, "SHIP-3"),
+            (&never, "SHIP-4"),
+        ] {
+            conn.execute_batch(&format!(
+                "INSERT INTO tasks(id,repository_id,issue_identifier,created_at,shipped_at)
+                 VALUES('{task}','repo_1','{issue}',1,10);"
+            ))
+            .unwrap();
+        }
+        // The stopped Task never ran: it has no Graph, and its stop still arrives.
+        for task in [&shipping, &withdrawn, &never] {
+            conn.execute(
+                "INSERT INTO task_graphs(task_id,graph,step,updated_at)
+                 VALUES(?1,'{\"name\":\"code\",\"steps\":[]}','start',1)",
+                [task.as_str()],
+            )
+            .unwrap();
+        }
         conn.execute_batch(&format!(
-            "INSERT INTO processes(id,trace_id,cwd,started_at) VALUES('{approver}','t1','/repo',1);
-             INSERT INTO processes(id,trace_id,cwd,started_at,completed_at,outcome,exit_code,error)
-             VALUES('{carrier}','t2','/repo',2,12,'failed',1,'provider unavailable');
-             INSERT INTO repository_plans(id,repo,selected) VALUES('repo_1','/repo',1);
-             INSERT INTO tasks(id,repository_id,issue_identifier,created_at,shipped_at,
-                 ship_approved_lf_process_id,ship_lf_process_id,ship_restarts)
-             VALUES('{shipping}','repo_1','SHIP-1',1,10,'{approver}','{carrier}',2);
-             INSERT INTO tasks(id,repository_id,issue_identifier,created_at,ship_stopped_at,
-                 ship_stopped_person)
-             VALUES('{stopped}','repo_1','SHIP-2',1,20,'Casey');"
+            "INSERT INTO task_ship_events(task_id,kind,at,person) VALUES
+                 ('{stopped}','approved',10,NULL),('{stopped}','stopped',20,'Casey'),
+                 ('{shipping}','stopped',5,'Casey'),('{shipping}','approved',30,NULL),
+                 ('{withdrawn}','approved',10,NULL),('{withdrawn}','withdrawn',40,NULL);"
         ))
         .unwrap();
         upgrade_from_migration(
             &crate::test_fixture::observers(),
             &crate::test_fixture::build(),
             &conn,
-            "task_machine_local",
+            "task_auto",
         );
-        let handoff = super::shipping_in(&conn, &shipping).unwrap().unwrap();
+        let mark = |task| super::auto_in(&conn, task).unwrap();
+        let person = |name: Option<&str>| crate::process::Starter::Person {
+            name: name.map(str::to_owned),
+        };
         assert_eq!(
-            (handoff.shipped_at, handoff.approved_by, handoff.restarts),
-            (10, Some(approver), 2)
-        );
-        let run = handoff.carrier.unwrap();
-        assert_eq!(run.id, carrier);
-        assert_eq!(run.result(), crate::graph_process::ExecutionResult::Failed);
-        assert_eq!(run.error.as_deref(), Some("provider unavailable"));
-        assert_eq!(super::ship_stop_in(&conn, &shipping).unwrap(), None);
-        assert_eq!(super::shipping_in(&conn, &stopped).unwrap(), None);
-        assert_eq!(
-            super::ship_stop_in(&conn, &stopped).unwrap(),
-            Some(super::ShipStop {
-                at: 20,
-                by: None,
-                person: Some("Casey".into()),
-                session: None,
+            mark(&shipping),
+            Some(super::Auto {
+                state: super::AutoState::On,
+                at: 30,
+                by: person(None),
             })
         );
-        assert!(conn
-            .execute("UPDATE task_ship_events SET at=0", [])
-            .is_err());
+        assert_eq!(
+            mark(&stopped),
+            Some(super::Auto {
+                state: super::AutoState::Off,
+                at: 20,
+                by: person(Some("Casey")),
+            })
+        );
+        assert_eq!(mark(&withdrawn).unwrap().state, super::AutoState::Off);
+        assert_eq!(mark(&never), None);
+        // A released lf reads no Task as shipping.
+        let shipped: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM tasks WHERE shipped_at IS NOT NULL",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(shipped, 0);
     }
 }

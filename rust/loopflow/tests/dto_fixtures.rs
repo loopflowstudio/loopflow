@@ -296,13 +296,17 @@ fn task_files_share_exact_bases_rename_paths_and_lossless_revisions() {
         changes: loopflow_execution::ops::task::TaskChangesSnapshot,
         diff: loopflow_execution::ops::task::TaskDiffSnapshot,
         file: loopflow_execution::ops::task::TaskFileSnapshot,
+        image: loopflow_execution::ops::task::TaskFileSnapshot,
         save: loopflow_execution::ops::task::TaskFileSave,
     }
     let json = include_str!("../../../tests/fixtures/dto/task_files.json");
     let files: Files = serde_json::from_str(json).unwrap();
     assert_eq!(files.changes.base_commit, files.diff.base_commit);
+    assert_eq!(files.changes.commits[0].parent, files.changes.base_commit);
     assert_eq!(files.changes.files[0].old_path.as_deref(), Some("old.txt"));
+    assert_eq!(files.changes.files[0].changes, 1);
     assert_eq!(files.file.content.as_deref(), Some("\u{feff}notes\r\n"));
+    assert_eq!(files.image.data.as_deref(), Some("iVBORw0KGgo="));
     assert_eq!(
         serde_json::to_value(files).unwrap(),
         serde_json::from_str::<serde_json::Value>(json).unwrap()
@@ -343,6 +347,24 @@ fn task_detail_says_each_fact_once() {
     assert_eq!(
         detail.task.graph.as_ref().unwrap().step.as_deref(),
         Some("demo")
+    );
+    let graph = detail.graph.as_ref().unwrap();
+    assert_eq!(graph.current_step, Some(2));
+    assert_eq!(graph.sentence, "Waiting for you at demo.");
+    let conversation = detail
+        .sessions
+        .iter()
+        .find(|session| Some(&session.id) == detail.conversation.as_ref())
+        .unwrap();
+    assert_eq!(
+        conversation.status_line.as_deref(),
+        Some("died 12:01 (exit 137) · starts again 12:02"),
+        "the server's sentence, printed as given"
+    );
+    assert_eq!(
+        detail.auto.as_ref().unwrap().by.to_string(),
+        "wave config",
+        "a Wave's `auto: on` turned it on"
     );
     assert_eq!(
         serde_json::to_value(&detail).unwrap(),
@@ -413,6 +435,25 @@ fn task_status_preserves_canonical_work_and_tracker_state() {
 }
 
 #[test]
+fn a_died_run_carries_where_it_died_and_the_conversations_outlook() {
+    use loopflow_execution::ops::human_session::SessionOutlookKind;
+    use loopflow_execution::ops::task_execution::TaskExecutionSnapshot;
+    let json = include_str!("../../../tests/fixtures/dto/task_execution_died.json");
+    let execution: TaskExecutionSnapshot = serde_json::from_str(json).unwrap();
+    let value: serde_json::Value = serde_json::from_str(json).unwrap();
+    assert_eq!(serde_json::to_value(&execution).unwrap(), value);
+    assert_eq!(execution.died.as_ref().unwrap().at_step, "implement");
+    let outlook = execution.outlook.as_ref().unwrap();
+    assert_eq!(outlook.kind, SessionOutlookKind::WaitingForYou);
+    assert_eq!(outlook.command.as_deref(), Some("lf task run LOO-12"));
+    for key in ["died", "outlook"] {
+        let mut missing = value.clone();
+        missing.as_object_mut().unwrap().remove(key);
+        assert!(serde_json::from_value::<TaskExecutionSnapshot>(missing).is_err());
+    }
+}
+
+#[test]
 fn graph_compositions_round_trip_distinct_compositions_and_required_children() {
     use loopflow_execution::graph::compiled::GraphCatalogEntry;
     let json = include_str!("../../../tests/fixtures/dto/graph_composition.json");
@@ -430,6 +471,14 @@ fn graph_compositions_round_trip_distinct_compositions_and_required_children() {
     ))
     .unwrap();
     assert!(catalog[0].composition.is_some() && catalog[1].composition.is_none());
+    for field in ["included_by", "runs", "workflow"] {
+        let mut missing = serde_json::to_value(&catalog[0]).unwrap();
+        missing.as_object_mut().unwrap().remove(field);
+        assert!(
+            serde_json::from_value::<GraphCatalogEntry>(missing).is_err(),
+            "{field}"
+        );
+    }
 }
 
 #[test]
@@ -458,7 +507,9 @@ fn prepared_checkout_retains_owning_home_without_starting_execution() {
         snapshot.started_by.as_ref().unwrap().to_string(),
         "Session \"LOO-291 task\" for Maya"
     );
-    assert_eq!(snapshot.ship_stop.as_ref().unwrap().by.to_string(), "Maya");
+    let auto = snapshot.auto.as_ref().unwrap();
+    assert_eq!(auto.state, loopflow_storage::sqlite::AutoState::Off);
+    assert_eq!(auto.by.to_string(), "Maya");
     assert_eq!(
         serde_json::to_value(&snapshot).unwrap(),
         serde_json::from_str::<serde_json::Value>(json).unwrap()
@@ -483,6 +534,25 @@ fn task_work_preserves_sessions_graph_runs_and_graph() {
     );
     assert_eq!(graph.step(), "review-design");
     assert!(graph.waiting_step().is_none());
+    let line: Vec<_> = graph
+        .steps
+        .iter()
+        .map(|step| (step.name.as_str(), step.interactive))
+        .collect();
+    assert_eq!(
+        line,
+        [
+            ("plan", false),
+            ("review-design", true),
+            ("build", false),
+            ("demo", true)
+        ]
+    );
+    assert_eq!(graph.current_step, Some(2));
+    assert_eq!(
+        graph.sentence,
+        "build is running implement. You are next needed at demo."
+    );
     assert_eq!(
         serde_json::to_value(work).unwrap(),
         serde_json::from_str::<serde_json::Value>(input).unwrap()
@@ -603,9 +673,17 @@ fn subscribe_frames_carry_each_reads_json_result() {
             "work_activity" => {
                 read::<loopflow::lf::commands::activity::WorkActivitySnapshot>(&body)
             }
-            "git_destinations" => {
-                read::<Vec<loopflow_execution::store::GitDestination>>(&body["destinations"]);
-                assert_eq!(body["tracker"], "git");
+            "plan_home" => {
+                assert_eq!(body["tracker"], serde_json::Value::Null);
+                assert_eq!(body["plan"]["git"]["remote"], "origin");
+                assert_eq!(body["plan"]["hub"]["machine"], "mini");
+                assert_eq!(body["plan"]["hub"]["unsent"], 1);
+                assert_eq!(body["plan"]["git"]["not_taken"]["count"], 3);
+                assert!(body["plan"]["git"]["not_taken"]["reason"]
+                    .as_str()
+                    .unwrap()
+                    .starts_with("wave design from mini "));
+                assert_eq!(body["plan"]["hub"]["not_taken"], serde_json::Value::Null);
             }
             other => panic!("unknown subscription {other}"),
         }
@@ -706,14 +784,10 @@ fn tracker_sync_preserves_sent_actions_and_losing_values() {
     );
     assert!(sync.lines()[3].contains("linear: null"));
     assert_eq!(sync.actions[1].owner_kind, ActionOwnerKind::Project);
-    assert_eq!(sync.actions[5].seq, None);
-    assert_eq!(sync.actions[5].tracker, TrackerKind::Git);
-    assert_eq!(
-        sync.lines()[5],
-        r#"title · conflicted · lost: "Mine" · git: "Peer title""#
-    );
+    assert_eq!(sync.actions[0].tracker, TrackerKind::Linear);
     let mut unknown = value;
-    unknown["actions"][0]["tracker"] = serde_json::json!("notion");
+    // Released Git lines are gone with Git planning.
+    unknown["actions"][0]["tracker"] = serde_json::json!("git");
     assert!(
         serde_json::from_value::<loopflow_execution::store::planning_sync::TrackerSync>(unknown)
             .is_err()
@@ -974,76 +1048,6 @@ fn session_steers_say_when_each_was_read() {
 }
 
 #[test]
-fn git_destinations_keeps_independent_receipts() {
-    let value: serde_json::Value = serde_json::from_str(include_str!(
-        "../../../tests/fixtures/dto/git_destinations.json"
-    ))
-    .unwrap();
-    let statuses: Vec<loopflow_execution::store::GitDestination> =
-        serde_json::from_value(value.clone()).unwrap();
-    assert_eq!(
-        statuses[0].fetch_error.as_deref(),
-        Some("remote unavailable")
-    );
-    assert!(statuses[0].pending_local);
-    assert_eq!(
-        statuses[0].publication_state.as_deref(),
-        Some("unconfirmed")
-    );
-    assert_eq!(statuses[0].conflicts.len(), 1);
-    assert!(statuses[1].pending_local);
-    assert_eq!(serde_json::to_value(&statuses).unwrap(), value);
-    for field in ["conflicts", "pending_local", "fetch_error"] {
-        let mut missing = value[1].clone();
-        missing.as_object_mut().unwrap().remove(field);
-        assert!(
-            serde_json::from_value::<loopflow_execution::store::GitDestination>(missing).is_err()
-        );
-    }
-}
-
-#[test]
-fn planning_journal_keeps_losing_values_and_its_winners() {
-    let value: serde_json::Value = serde_json::from_str(include_str!(
-        "../../../tests/fixtures/dto/planning_journal.json"
-    ))
-    .unwrap();
-    let journals: Vec<loopflow_execution::store::PlanningJournal> =
-        serde_json::from_value(value.clone()).unwrap();
-    assert_eq!(
-        journals[1].changes["comment-head"]
-            .edit
-            .change
-            .value()
-            .unwrap()["author"],
-        serde_json::json!({"kind": "person", "name": "Maya"})
-    );
-    assert_eq!(
-        journals[1].changes["title-loser"]
-            .edit
-            .change
-            .value()
-            .unwrap(),
-        "Retained title"
-    );
-    assert!(!journals[1].candidates.contains("title-loser"));
-    assert!(journals[1].changes["title-head"]
-        .parents
-        .contains("title-loser"));
-    for journal in &journals {
-        let snapshot = loopflow_execution::planning_exchange::PlanningSnapshot {
-            changes: journal.changes.clone(),
-        };
-        snapshot.validate().unwrap();
-        assert_eq!(
-            journal.candidates,
-            snapshot.winners().map(|(id, _)| id.to_owned()).collect()
-        );
-    }
-    assert_eq!(serde_json::to_value(&journals).unwrap(), value);
-}
-
-#[test]
 fn unplaced_wave_preserves_nullable_machine() {
     let fixture: serde_json::Value = serde_json::from_str(include_str!(
         "../../../tests/fixtures/dto/unplaced_wave.json"
@@ -1230,10 +1234,9 @@ fn desktop_state_retains_outer_and_inner_layouts() {
             .iter()
             .map(|part| part.name.as_str())
             .collect::<Vec<_>>(),
-        ["board", "session", "tiles"]
+        ["backlog", "session", "tiles"]
     );
-    assert_eq!(parts[0].done_days, Some(7));
-    assert_eq!(parts[0].section.as_deref(), Some("backlog"));
+    assert!(parts[0].text.as_deref().unwrap().contains("All 0 · Mine 0"));
     assert_eq!(parts[2].ratio, 0.382);
     assert_eq!(
         parts.iter().map(|part| part.zoomed).collect::<Vec<_>>(),
@@ -1270,7 +1273,8 @@ fn closed_task_pages_round_trip_plan_rows_and_their_continuation() {
 #[test]
 fn retention_summary_keeps_states_expiries_and_policies_exactly() {
     use loopflow_execution::transcript::summary::{AgeBucket, RetentionSummary};
-    use loopflow_execution::transcript::{ExpiryPolicy, RetentionState};
+    use loopflow_execution::transcript::RetentionState;
+    use loopflow_harness::transcript::ExpiryPolicy;
     let json = include_str!("../../../tests/fixtures/dto/retention_summary.json");
     let summary: RetentionSummary = serde_json::from_str(json).unwrap();
     assert_eq!(summary.groups[1].age, AgeBucket::UnderQuarter);

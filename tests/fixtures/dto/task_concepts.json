@@ -54,7 +54,11 @@
           "task_id": "task_22222222222222222222222222222222",
           "unavailable": "Task checkout is unavailable",
           "worktree": "/repo/fix-2"
-        }
+        },
+        "ended": null,
+        "start": null,
+        "outlook": null,
+        "status_line": "unknown"
       },
       {
         "account": null,
@@ -108,7 +112,11 @@
           "task_id": "task_22222222222222222222222222222222",
           "unavailable": "Task checkout is unavailable",
           "worktree": "/repo/fix-2"
-        }
+        },
+        "ended": null,
+        "start": null,
+        "outlook": null,
+        "status_line": "unknown"
       },
       {
         "account": null,
@@ -160,7 +168,11 @@
           "task_id": null,
           "unavailable": "Persistent checkout is unavailable",
           "worktree": "/repo/fix-2"
-        }
+        },
+        "ended": null,
+        "start": null,
+        "outlook": null,
+        "status_line": "unknown"
       },
       {
         "account": null,
@@ -214,7 +226,11 @@
           "task_id": "task_22222222222222222222222222222222",
           "unavailable": "Task checkout is unavailable",
           "worktree": "/repo/fix-2"
-        }
+        },
+        "ended": null,
+        "start": null,
+        "outlook": null,
+        "status_line": "unknown"
       },
       {
         "account": null,
@@ -266,7 +282,11 @@
           "task_id": null,
           "unavailable": "Persistent checkout is unavailable",
           "worktree": "/repo/fix-2"
-        }
+        },
+        "ended": null,
+        "start": null,
+        "outlook": null,
+        "status_line": "unknown"
       }
     ],
     "tasks": [
@@ -292,6 +312,8 @@
         },
         "execution": {
           "captured": null,
+          "died": null,
+          "outlook": null,
           "reason": "No Task Graph has run; independent Sessions may still be active",
           "state": "idle",
           "step": null
@@ -330,15 +352,12 @@
           "work_id": "task_11111111111111111111111111111111"
         },
         "section": "backlog",
+        "owned_by_you": false,
         "selection_states": [
           "open",
           "unstarted",
           "backlog"
         ],
-        "ship_control": {
-          "unavailable": null
-        },
-        "shipping": null,
         "task": {
           "tracker_state": {
             "synced_at": null,
@@ -385,6 +404,8 @@
         },
         "execution": {
           "captured": null,
+          "died": null,
+          "outlook": null,
           "reason": "No Task Graph has run; independent Sessions may still be active",
           "state": "idle",
           "step": null
@@ -442,15 +463,12 @@
           "work_id": "task_22222222222222222222222222222222"
         },
         "section": "working",
+        "owned_by_you": false,
         "selection_states": [
           "open",
           "active",
           "working"
         ],
-        "ship_control": {
-          "unavailable": "Task FIX-2 worktree /repo/fix-2 is missing; restore that exact path on branch \"fix-2\" before `lf task run FIX-2`; Task identity and PR history are unchanged"
-        },
-        "shipping": null,
         "task": {
           "tracker_state": {
             "synced_at": null,
@@ -497,6 +515,8 @@
         },
         "execution": {
           "captured": null,
+          "died": null,
+          "outlook": null,
           "reason": "No Task Graph has run; independent Sessions may still be active",
           "state": "idle",
           "step": null
@@ -527,13 +547,10 @@
           "work_id": "task_33333333333333333333333333333333"
         },
         "section": "abandoned",
+        "owned_by_you": false,
         "selection_states": [
           "done"
         ],
-        "ship_control": {
-          "unavailable": "Linear Task is canceled"
-        },
-        "shipping": null,
         "task": {
           "tracker_state": {
             "synced_at": null,
@@ -580,6 +597,8 @@
         },
         "execution": {
           "captured": null,
+          "died": null,
+          "outlook": null,
           "reason": "No Task Graph has run; independent Sessions may still be active",
           "state": "idle",
           "step": null
@@ -618,13 +637,10 @@
           "work_id": "task_44444444444444444444444444444444"
         },
         "section": "done",
+        "owned_by_you": false,
         "selection_states": [
           "done"
         ],
-        "ship_control": {
-          "unavailable": "Task is complete"
-        },
-        "shipping": null,
         "task": {
           "tracker_state": {
             "synced_at": null,
@@ -728,7 +744,11 @@
           "task_id": "task_22222222222222222222222222222222",
           "unavailable": "Task checkout is unavailable",
           "worktree": "/repo/fix-2"
-        }
+        },
+        "ended": null,
+        "start": null,
+        "outlook": null,
+        "status_line": "running"
       },
       {
         "account": null,
@@ -782,7 +802,11 @@
           "task_id": "task_22222222222222222222222222222222",
           "unavailable": "Task checkout is unavailable",
           "worktree": "/repo/fix-2"
-        }
+        },
+        "ended": null,
+        "start": null,
+        "outlook": null,
+        "status_line": "unknown"
       },
       {
         "account": null,
@@ -834,7 +858,11 @@
           "task_id": null,
           "unavailable": "Persistent checkout is unavailable",
           "worktree": "/repo/fix-2"
-        }
+        },
+        "ended": null,
+        "start": null,
+        "outlook": null,
+        "status_line": "unknown"
       },
       {
         "account": null,
@@ -888,7 +916,11 @@
           "task_id": "task_22222222222222222222222222222222",
           "unavailable": "Task checkout is unavailable",
           "worktree": "/repo/fix-2"
-        }
+        },
+        "ended": null,
+        "start": null,
+        "outlook": null,
+        "status_line": "unknown"
       },
       {
         "account": null,
@@ -940,7 +972,11 @@
           "task_id": null,
           "unavailable": "Persistent checkout is unavailable",
           "worktree": "/repo/fix-2"
-        }
+        },
+        "ended": null,
+        "start": null,
+        "outlook": null,
+        "status_line": "unknown"
       }
     ],
     "tasks": [
@@ -966,6 +1002,8 @@
         },
         "execution": {
           "captured": null,
+          "died": null,
+          "outlook": null,
           "reason": "No Task Graph has run; independent Sessions may still be active",
           "state": "idle",
           "step": null
@@ -1023,16 +1061,13 @@
           "work_id": "task_22222222222222222222222222222222"
         },
         "section": "working",
+        "owned_by_you": false,
         "selection_states": [
           "open",
           "busy",
           "active",
           "working"
         ],
-        "ship_control": {
-          "unavailable": "Task FIX-2 worktree /repo/fix-2 is missing; restore that exact path on branch \"fix-2\" before `lf task run FIX-2`; Task identity and PR history are unchanged"
-        },
-        "shipping": null,
         "task": {
           "tracker_state": {
             "synced_at": null,
@@ -1079,6 +1114,8 @@
         },
         "execution": {
           "captured": null,
+          "died": null,
+          "outlook": null,
           "reason": "No Task Graph has run; independent Sessions may still be active",
           "state": "idle",
           "step": null
@@ -1125,15 +1162,12 @@
           "work_id": "task_11111111111111111111111111111111"
         },
         "section": "working",
+        "owned_by_you": false,
         "selection_states": [
           "open",
           "idle",
           "working"
         ],
-        "ship_control": {
-          "unavailable": "Task FIX-1 worktree /repo/fix-1 is missing; restore that exact path on branch \"\" before `lf task run FIX-1`; Task identity and PR history are unchanged"
-        },
-        "shipping": null,
         "task": {
           "tracker_state": {
             "synced_at": null,
@@ -1180,6 +1214,8 @@
         },
         "execution": {
           "captured": null,
+          "died": null,
+          "outlook": null,
           "reason": "No Task Graph has run; independent Sessions may still be active",
           "state": "idle",
           "step": null
@@ -1210,13 +1246,10 @@
           "work_id": "task_33333333333333333333333333333333"
         },
         "section": "abandoned",
+        "owned_by_you": false,
         "selection_states": [
           "done"
         ],
-        "ship_control": {
-          "unavailable": "Linear Task is canceled"
-        },
-        "shipping": null,
         "task": {
           "tracker_state": {
             "synced_at": null,
@@ -1263,6 +1296,8 @@
         },
         "execution": {
           "captured": null,
+          "died": null,
+          "outlook": null,
           "reason": "No Task Graph has run; independent Sessions may still be active",
           "state": "idle",
           "step": null
@@ -1301,13 +1336,10 @@
           "work_id": "task_44444444444444444444444444444444"
         },
         "section": "done",
+        "owned_by_you": false,
         "selection_states": [
           "done"
         ],
-        "ship_control": {
-          "unavailable": "Task is complete"
-        },
-        "shipping": null,
         "task": {
           "tracker_state": {
             "synced_at": null,
@@ -1411,7 +1443,11 @@
           "task_id": "task_22222222222222222222222222222222",
           "unavailable": "Task checkout is unavailable",
           "worktree": "/repo/fix-2"
-        }
+        },
+        "ended": null,
+        "start": null,
+        "outlook": null,
+        "status_line": "running"
       },
       {
         "account": null,
@@ -1465,7 +1501,11 @@
           "task_id": "task_22222222222222222222222222222222",
           "unavailable": "Task checkout is unavailable",
           "worktree": "/repo/fix-2"
-        }
+        },
+        "ended": null,
+        "start": null,
+        "outlook": null,
+        "status_line": "unknown"
       },
       {
         "account": null,
@@ -1517,7 +1557,11 @@
           "task_id": null,
           "unavailable": "Persistent checkout is unavailable",
           "worktree": "/repo/fix-2"
-        }
+        },
+        "ended": null,
+        "start": null,
+        "outlook": null,
+        "status_line": "unknown"
       },
       {
         "account": null,
@@ -1571,7 +1615,11 @@
           "task_id": "task_22222222222222222222222222222222",
           "unavailable": "Task checkout is unavailable",
           "worktree": "/repo/fix-2"
-        }
+        },
+        "ended": null,
+        "start": null,
+        "outlook": null,
+        "status_line": "unknown"
       },
       {
         "account": null,
@@ -1623,7 +1671,11 @@
           "task_id": null,
           "unavailable": "Persistent checkout is unavailable",
           "worktree": "/repo/fix-2"
-        }
+        },
+        "ended": null,
+        "start": null,
+        "outlook": null,
+        "status_line": "unknown"
       }
     ],
     "tasks": [
@@ -1649,6 +1701,8 @@
         },
         "execution": {
           "captured": null,
+          "died": null,
+          "outlook": null,
           "reason": "No Task Graph has run; independent Sessions may still be active",
           "state": "idle",
           "step": null
@@ -1698,15 +1752,12 @@
           "work_id": "task_22222222222222222222222222222222"
         },
         "section": "backlog",
+        "owned_by_you": false,
         "selection_states": [
           "busy",
           "active",
           "backlog"
         ],
-        "ship_control": {
-          "unavailable": "Task FIX-2 worktree /repo/fix-2 is missing; restore that exact path on branch \"fix-2\" before `lf task run FIX-2`; Task identity and PR history are unchanged"
-        },
-        "shipping": null,
         "task": {
           "tracker_state": {
             "synced_at": null,
@@ -1753,6 +1804,8 @@
         },
         "execution": {
           "captured": null,
+          "died": null,
+          "outlook": null,
           "reason": "No Task Graph has run; independent Sessions may still be active",
           "state": "idle",
           "step": null
@@ -1799,15 +1852,12 @@
           "work_id": "task_11111111111111111111111111111111"
         },
         "section": "working",
+        "owned_by_you": false,
         "selection_states": [
           "open",
           "idle",
           "working"
         ],
-        "ship_control": {
-          "unavailable": "Task FIX-1 worktree /repo/fix-1 is missing; restore that exact path on branch \"\" before `lf task run FIX-1`; Task identity and PR history are unchanged"
-        },
-        "shipping": null,
         "task": {
           "tracker_state": {
             "synced_at": null,
@@ -1854,6 +1904,8 @@
         },
         "execution": {
           "captured": null,
+          "died": null,
+          "outlook": null,
           "reason": "No Task Graph has run; independent Sessions may still be active",
           "state": "idle",
           "step": null
@@ -1884,13 +1936,10 @@
           "work_id": "task_33333333333333333333333333333333"
         },
         "section": "abandoned",
+        "owned_by_you": false,
         "selection_states": [
           "done"
         ],
-        "ship_control": {
-          "unavailable": "Linear Task is canceled"
-        },
-        "shipping": null,
         "task": {
           "tracker_state": {
             "synced_at": null,
@@ -1937,6 +1986,8 @@
         },
         "execution": {
           "captured": null,
+          "died": null,
+          "outlook": null,
           "reason": "No Task Graph has run; independent Sessions may still be active",
           "state": "idle",
           "step": null
@@ -1975,13 +2026,10 @@
           "work_id": "task_44444444444444444444444444444444"
         },
         "section": "done",
+        "owned_by_you": false,
         "selection_states": [
           "done"
         ],
-        "ship_control": {
-          "unavailable": "Task is complete"
-        },
-        "shipping": null,
         "task": {
           "tracker_state": {
             "synced_at": null,
@@ -2085,7 +2133,11 @@
           "task_id": "task_22222222222222222222222222222222",
           "unavailable": "Task checkout is unavailable",
           "worktree": "/repo/fix-2"
-        }
+        },
+        "ended": null,
+        "start": null,
+        "outlook": null,
+        "status_line": "running"
       },
       {
         "account": null,
@@ -2139,7 +2191,11 @@
           "task_id": "task_22222222222222222222222222222222",
           "unavailable": "Task checkout is unavailable",
           "worktree": "/repo/fix-2"
-        }
+        },
+        "ended": null,
+        "start": null,
+        "outlook": null,
+        "status_line": "unknown"
       },
       {
         "account": null,
@@ -2191,7 +2247,11 @@
           "task_id": null,
           "unavailable": "Persistent checkout is unavailable",
           "worktree": "/repo/fix-2"
-        }
+        },
+        "ended": null,
+        "start": null,
+        "outlook": null,
+        "status_line": "unknown"
       },
       {
         "account": null,
@@ -2245,7 +2305,11 @@
           "task_id": "task_22222222222222222222222222222222",
           "unavailable": "Task checkout is unavailable",
           "worktree": "/repo/fix-2"
-        }
+        },
+        "ended": null,
+        "start": null,
+        "outlook": null,
+        "status_line": "unknown"
       },
       {
         "account": null,
@@ -2297,7 +2361,11 @@
           "task_id": null,
           "unavailable": "Persistent checkout is unavailable",
           "worktree": "/repo/fix-2"
-        }
+        },
+        "ended": null,
+        "start": null,
+        "outlook": null,
+        "status_line": "unknown"
       }
     ],
     "tasks": [
@@ -2323,6 +2391,8 @@
         },
         "execution": {
           "captured": null,
+          "died": null,
+          "outlook": null,
           "reason": "No Task Graph has run; independent Sessions may still be active",
           "state": "idle",
           "step": null
@@ -2380,6 +2450,7 @@
           "work_id": "task_22222222222222222222222222222222"
         },
         "section": "working",
+        "owned_by_you": false,
         "selection_states": [
           "open",
           "available",
@@ -2388,10 +2459,6 @@
           "active",
           "working"
         ],
-        "ship_control": {
-          "unavailable": "Task FIX-2 worktree /repo/fix-2 is missing; restore that exact path on branch \"fix-2\" before `lf task run FIX-2`; Task identity and PR history are unchanged"
-        },
-        "shipping": null,
         "task": {
           "tracker_state": {
             "synced_at": null,
@@ -2438,6 +2505,8 @@
         },
         "execution": {
           "captured": null,
+          "died": null,
+          "outlook": null,
           "reason": "No Task Graph has run; independent Sessions may still be active",
           "state": "idle",
           "step": null
@@ -2484,15 +2553,12 @@
           "work_id": "task_11111111111111111111111111111111"
         },
         "section": "working",
+        "owned_by_you": false,
         "selection_states": [
           "open",
           "idle",
           "working"
         ],
-        "ship_control": {
-          "unavailable": "Task FIX-1 worktree /repo/fix-1 is missing; restore that exact path on branch \"\" before `lf task run FIX-1`; Task identity and PR history are unchanged"
-        },
-        "shipping": null,
         "task": {
           "tracker_state": {
             "synced_at": null,
@@ -2539,6 +2605,8 @@
         },
         "execution": {
           "captured": null,
+          "died": null,
+          "outlook": null,
           "reason": "No Task Graph has run; independent Sessions may still be active",
           "state": "idle",
           "step": null
@@ -2569,13 +2637,10 @@
           "work_id": "task_33333333333333333333333333333333"
         },
         "section": "abandoned",
+        "owned_by_you": false,
         "selection_states": [
           "done"
         ],
-        "ship_control": {
-          "unavailable": "Linear Task is canceled"
-        },
-        "shipping": null,
         "task": {
           "tracker_state": {
             "synced_at": null,
@@ -2622,6 +2687,8 @@
         },
         "execution": {
           "captured": null,
+          "died": null,
+          "outlook": null,
           "reason": "No Task Graph has run; independent Sessions may still be active",
           "state": "idle",
           "step": null
@@ -2660,13 +2727,10 @@
           "work_id": "task_44444444444444444444444444444444"
         },
         "section": "done",
+        "owned_by_you": false,
         "selection_states": [
           "done"
         ],
-        "ship_control": {
-          "unavailable": "Task is complete"
-        },
-        "shipping": null,
         "task": {
           "tracker_state": {
             "synced_at": null,
@@ -2770,7 +2834,11 @@
           "task_id": "task_22222222222222222222222222222222",
           "unavailable": "Task checkout is unavailable",
           "worktree": "/repo/fix-2"
-        }
+        },
+        "ended": null,
+        "start": null,
+        "outlook": null,
+        "status_line": "running"
       },
       {
         "account": null,
@@ -2824,7 +2892,11 @@
           "task_id": "task_22222222222222222222222222222222",
           "unavailable": "Task checkout is unavailable",
           "worktree": "/repo/fix-2"
-        }
+        },
+        "ended": null,
+        "start": null,
+        "outlook": null,
+        "status_line": "unknown"
       },
       {
         "account": null,
@@ -2876,7 +2948,11 @@
           "task_id": null,
           "unavailable": "Persistent checkout is unavailable",
           "worktree": "/repo/fix-2"
-        }
+        },
+        "ended": null,
+        "start": null,
+        "outlook": null,
+        "status_line": "unknown"
       },
       {
         "account": null,
@@ -2930,7 +3006,11 @@
           "task_id": "task_22222222222222222222222222222222",
           "unavailable": "Task checkout is unavailable",
           "worktree": "/repo/fix-2"
-        }
+        },
+        "ended": null,
+        "start": null,
+        "outlook": null,
+        "status_line": "unknown"
       },
       {
         "account": null,
@@ -2982,7 +3062,11 @@
           "task_id": null,
           "unavailable": "Persistent checkout is unavailable",
           "worktree": "/repo/fix-2"
-        }
+        },
+        "ended": null,
+        "start": null,
+        "outlook": null,
+        "status_line": "unknown"
       }
     ],
     "tasks": [
@@ -3008,6 +3092,8 @@
         },
         "execution": {
           "captured": null,
+          "died": null,
+          "outlook": null,
           "reason": "No Task Graph has run; independent Sessions may still be active",
           "state": "idle",
           "step": null
@@ -3065,6 +3151,7 @@
           "work_id": "task_22222222222222222222222222222222"
         },
         "section": "working",
+        "owned_by_you": false,
         "selection_states": [
           "open",
           "available",
@@ -3073,10 +3160,6 @@
           "active",
           "working"
         ],
-        "ship_control": {
-          "unavailable": "Task FIX-2 worktree /repo/fix-2 is missing; restore that exact path on branch \"fix-2\" before `lf task run FIX-2`; Task identity and PR history are unchanged"
-        },
-        "shipping": null,
         "task": {
           "tracker_state": {
             "synced_at": null,
@@ -3123,6 +3206,8 @@
         },
         "execution": {
           "captured": null,
+          "died": null,
+          "outlook": null,
           "reason": "No Task Graph has run; independent Sessions may still be active",
           "state": "idle",
           "step": null
@@ -3169,15 +3254,12 @@
           "work_id": "task_11111111111111111111111111111111"
         },
         "section": "working",
+        "owned_by_you": false,
         "selection_states": [
           "open",
           "idle",
           "working"
         ],
-        "ship_control": {
-          "unavailable": "Task FIX-1 worktree /repo/fix-1 is missing; restore that exact path on branch \"\" before `lf task run FIX-1`; Task identity and PR history are unchanged"
-        },
-        "shipping": null,
         "task": {
           "tracker_state": {
             "synced_at": null,
@@ -3224,6 +3306,8 @@
         },
         "execution": {
           "captured": null,
+          "died": null,
+          "outlook": null,
           "reason": "No Task Graph has run; independent Sessions may still be active",
           "state": "idle",
           "step": null
@@ -3254,13 +3338,10 @@
           "work_id": "task_33333333333333333333333333333333"
         },
         "section": "abandoned",
+        "owned_by_you": false,
         "selection_states": [
           "done"
         ],
-        "ship_control": {
-          "unavailable": "Linear Task is canceled"
-        },
-        "shipping": null,
         "task": {
           "tracker_state": {
             "synced_at": null,
@@ -3307,6 +3388,8 @@
         },
         "execution": {
           "captured": null,
+          "died": null,
+          "outlook": null,
           "reason": "No Task Graph has run; independent Sessions may still be active",
           "state": "idle",
           "step": null
@@ -3345,13 +3428,10 @@
           "work_id": "task_44444444444444444444444444444444"
         },
         "section": "done",
+        "owned_by_you": false,
         "selection_states": [
           "done"
         ],
-        "ship_control": {
-          "unavailable": "Task is complete"
-        },
-        "shipping": null,
         "task": {
           "tracker_state": {
             "synced_at": null,

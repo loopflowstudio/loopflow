@@ -10,7 +10,7 @@ use loopflow_execution::machine::connection::{
     find_machine, install_command, local_machine, probe, report_version, update_command,
     ConnectionFailure, FailureKind, INSTALL_COMMAND,
 };
-use loopflow_execution::machine::ssh::REMOTE_PATH;
+use loopflow_execution::machine::ssh::remote_path;
 use loopflow_execution::store::Store;
 use loopflow_model::durable::{DefaultScope, Machine, MachineDefault, MachineSetting};
 
@@ -71,6 +71,7 @@ async fn listings(store: &Store, label: Option<&str>) -> anyhow::Result<Vec<Mach
     if label.is_none() && defaults.iter().any(|d| d.machine_id == local.id) {
         machines.insert(0, local);
     }
+    let hub = loopflow_execution::ops::plan_hub::hub(&store.sqlite)?.map(|hub| hub.id);
     let mut listed = Vec::new();
     for machine in machines {
         let mut tasks = Vec::new();
@@ -84,6 +85,7 @@ async fn listings(store: &Store, label: Option<&str>) -> anyhow::Result<Vec<Mach
             }
         }
         listed.push(MachineListing {
+            hub: hub.as_ref() == Some(&machine.id),
             defaults: defaults
                 .iter()
                 .filter(|d| d.machine_id == machine.id)
@@ -210,6 +212,27 @@ async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
             }
             print_machine(&machine, *json)?;
         }
+        MachineCommand::Hub { machine, clear } => {
+            let selected = match machine {
+                Some(machine) => Some(find_machine(&store, machine).await?),
+                None if *clear => None,
+                None => {
+                    match loopflow_execution::ops::plan_hub::hub(&store.sqlite)? {
+                        Some(hub) => println!("Hub {}.", hub.name()),
+                        None => println!("No hub."),
+                    }
+                    return Ok(());
+                }
+            };
+            loopflow_execution::ops::plan_hub::set_hub(
+                &store.sqlite,
+                selected.as_ref().map(|machine| &machine.id),
+            )?;
+            match selected {
+                Some(hub) => println!("This Machine exchanges its plan with {}.", hub.name()),
+                None => println!("No hub."),
+            }
+        }
         MachineCommand::List { label, json } => {
             let listings = listings(&store, label.as_deref()).await?;
             if *json {
@@ -217,6 +240,9 @@ async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
             } else {
                 for listing in &listings {
                     print_machine(&listing.machine, false)?;
+                    if listing.hub {
+                        println!("  hub: this Machine exchanges its plan with it");
+                    }
                     for default in &listing.defaults {
                         let scope = match &default.scope {
                             DefaultScope::Wave(_) => "Wave",
@@ -351,6 +377,8 @@ pub struct MachineListing {
     #[serde(flatten)]
     machine: Machine,
     defaults: Vec<MachineDefault>,
+    /// This Machine exchanges its plan with it (`lf machine hub`).
+    hub: bool,
     /// Unfinished Tasks it owns, as this Machine reads their ownership.
     tasks: Vec<HeldTask>,
 }
@@ -387,8 +415,10 @@ fn confirm_install(target: &str) -> anyhow::Result<bool> {
 
 async fn install_remote(target: &str) -> anyhow::Result<()> {
     // Recheck on the target: another add may have installed it while we asked.
-    let command =
-        format!("{REMOTE_PATH}; if ! command -v lf >/dev/null 2>&1; then {INSTALL_COMMAND}; fi");
+    let command = format!(
+        "{}; if ! command -v lf >/dev/null 2>&1; then {INSTALL_COMMAND}; fi",
+        remote_path()
+    );
     let status = tokio::process::Command::new("ssh")
         .args(loopflow_execution::machine_route::bounded_ssh_args(
             target, false,

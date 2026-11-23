@@ -39,6 +39,34 @@ fn success(output: Output) -> String {
 }
 
 #[test]
+fn global_skill_sync_summarizes_native_exports_and_skips() {
+    let home = tempfile::tempdir().unwrap();
+    let native = home.path().join(".claude/skills/research");
+    fs::create_dir_all(&native).unwrap();
+    fs::write(
+        native.join("SKILL.md"),
+        "---\ndescription: Research\nallowed-tools: Read\n---\nRead the sources.",
+    )
+    .unwrap();
+    let output = command(home.path(), home.path(), &["self", "sync-skills", "--yes"])
+        .output()
+        .unwrap();
+    assert!(
+        output.stderr.is_empty(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let summary = success(output);
+    assert_eq!(summary.lines().count(), 1);
+    assert!(summary.starts_with("synced skills ("));
+    assert!(!summary.ends_with(", 0 skipped)\n"));
+    assert!(home
+        .path()
+        .join(".agents/skills/research/SKILL.md")
+        .is_file());
+}
+
+#[test]
 fn context_targets_measure_checkout_wave_and_refresh_local_edits() {
     let home = tempfile::tempdir().unwrap();
     let _env = support::EnvGuard::with_home(&[], Some(home.path()));
@@ -273,11 +301,17 @@ fn repository_errors_do_not_prevent_home_command_admission() {
         .unwrap();
     success(output);
     let preferences: loopflow_execution::config::Config = serde_yaml_ng::from_str(
-        &fs::read_to_string(cwd.path().join("lf.config.local.yaml")).unwrap(),
+        &fs::read_to_string(cwd.path().join(".lf/config.local.yaml")).unwrap(),
     )
     .unwrap();
     assert_eq!(preferences.agent().unwrap(), "claude");
-    assert!(!cwd.path().join(".lf").exists());
+    // Your settings are the only thing a bare directory gains.
+    let made: Vec<_> = fs::read_dir(cwd.path().join(".lf"))
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name())
+        .filter(|name| !name.to_string_lossy().ends_with(".lock"))
+        .collect();
+    assert_eq!(made, ["config.local.yaml"]);
 }
 
 #[test]
@@ -1748,7 +1782,13 @@ fn repository_identity_binding_is_explicit_and_does_not_select_planning() {
         .unwrap()
         .to_string_lossy()
         .into_owned();
-    assert!(store.git_destinations(&repo, None).unwrap().is_empty());
+    assert!(store
+        .plan_carrier(
+            &repo,
+            loopflow_execution::store::sqlite::plan_carriers::Carrier::Hub
+        )
+        .unwrap()
+        .is_none());
     assert!(store.list_waves(None).unwrap().is_empty());
     let task: serde_json::Value = serde_json::from_str::<serde_json::Value>(&success(
         command(
@@ -1767,8 +1807,6 @@ fn repository_identity_binding_is_explicit_and_does_not_select_planning() {
     ))
     .unwrap()["task"]
         .clone();
-    let planning_before =
-        serde_json::to_value(store.git_destinations(&repo, None).unwrap()).unwrap();
     let other = loopflow_execution::durable::RepositoryId::new();
     let rebound = command(
         target_home.path(),
@@ -1818,10 +1856,13 @@ fn repository_identity_binding_is_explicit_and_does_not_select_planning() {
     );
     assert!(explained.contains(task["id"].as_str().unwrap()));
     assert!(explained.contains(through_prior.id.as_str()));
-    assert_eq!(
-        serde_json::to_value(store.git_destinations(&repo, None).unwrap()).unwrap(),
-        planning_before
-    );
+    assert!(store
+        .plan_carrier(
+            &repo,
+            loopflow_execution::store::sqlite::plan_carriers::Carrier::Hub
+        )
+        .unwrap()
+        .is_none());
 }
 
 #[test]

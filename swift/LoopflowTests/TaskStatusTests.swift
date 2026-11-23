@@ -7,16 +7,23 @@ struct TaskStatusTests {
             states: states, identifier: nil, primarySession: session, location: nil, argv: nil, unavailable: unavailable)
     }
 
-    @Test func theMostUrgentStateNamesTheTask() {
-        #expect(content([.working, .busy, .blocked]).status.label == "Blocked")
-        #expect(content([.working, .busy, .available]).status.label == "Running")
-        #expect(content([.working, .available]).status.label == "Ready")
-        #expect(content([.autonomous, .shipping]).status.label == "Shipping")
-        #expect(content([.working]).status.label == "Open")
+    @Test("A row says what the Mac row says: the conversation's report, else the lifecycle")
+    func oneVocabulary() {
+        #expect(content([.working, .busy, .blocked]).status == .program(.blocked))
+        #expect(content([.working, .busy, .available]).status?.word == ProgramStatusState.working.label)
+        #expect(content([.working, .available]).status?.word == ProgramStatusState.idle.label)
+        #expect(content([.working, .idle, .auto]).status == .lifecycle(.idle))
+        #expect(content([.working, .moving]).status?.word == "Moving")
+        // A Task with no conversation says its lifecycle too, as the Machine reads it.
+        #expect(content([.unstarted, .backlog], session: nil, unavailable: [
+            "No primary Session is recorded", "Recorded execution location is unavailable",
+        ]).status?.word == "Unstarted")
+        #expect(content([.working]).status == nil)
     }
 
-    @Test func noConversationOrAnUnavailableReadingSaySo() {
-        #expect(content([.blocked], session: nil).status.label == "No conversation yet")
-        #expect(content([.busy], unavailable: ["gone"]).status.label == "Unavailable")
+    @Test func aReadingWithNoStateSaysUnavailableWithItsReasons() {
+        let status = content([.working], unavailable: ["gone"]).status
+        #expect(status?.word == "Unavailable")
+        #expect(status?.detail == "gone")
     }
 }

@@ -284,9 +284,9 @@ pub(crate) fn validate_value(path: &[&str], value: &Value) -> Result<(), LoadErr
 
 fn validate_agent_policy(agent: &str) -> Result<(), LoadError> {
     let (harness, variant) = super::parse_agent(agent);
-    let kind = crate::harness::HarnessKind::parse(&harness).ok_or_else(|| {
+    let kind = loopflow_harness::HarnessKind::parse(&harness).ok_or_else(|| {
         invalid(format!(
-            "unsupported agent harness '{harness}': use 'claude', 'codex', 'opencode', or 'pi'"
+            "unsupported agent harness '{harness}': use 'claude', 'codex', 'opencode', 'pi', or 'agy'"
         ))
     })?;
     if let Some(model) = variant {
@@ -667,11 +667,6 @@ pub(crate) fn resolve_with(
         &mut defaults,
         &["graph"],
         crate::ops::task::DEFAULT_TASK_GRAPH.into(),
-    );
-    insert(
-        &mut defaults,
-        &["planning"],
-        serde_yaml_ng::to_value(super::TrackerConfig::default()).expect("planning serializes"),
     );
     for key in crate::prompt::context_budget::BudgetKey::ALL {
         insert(
@@ -1328,7 +1323,8 @@ mod tests {
                 None,
             )
             .unwrap();
-            assert!(!resolved.config.yolo);
+            // An unreadable `yolo` falls to the default, which is on.
+            assert!(resolved.config.yolo);
             assert!(resolved.config.claude.model.is_none());
             if values.starts_with("context:") {
                 assert_eq!(resolved.config.context.docs, ["README.md"]);
@@ -1808,6 +1804,66 @@ mod tests {
             .context
             .docs
             .is_empty());
+    }
+    #[test]
+    fn diff_hidden_adds_every_layer_and_diff_groups_take_the_nearest_list_whole() {
+        use super::super::catalog::{DiffGroup, DiffPathGroup, DiffRestGroup};
+        let _env = loopflow_test_support::env_lock().lock().unwrap();
+        let builtin = resolve_layers(&[], None).unwrap().config;
+        assert_eq!(builtin.diff_hidden, ["scratch/"]);
+        let titles = |groups: &[DiffGroup]| -> Vec<String> {
+            groups
+                .iter()
+                .map(|group| match group {
+                    DiffGroup::Paths(group) => group.title.clone(),
+                    DiffGroup::Rest(group) => format!("rest: {:?}", group.rest),
+                })
+                .collect()
+        };
+        assert_eq!(
+            titles(&builtin.diff_groups),
+            [
+                "Docs",
+                "Data model",
+                "rest: Some(\"Everything else\")",
+                "Tests",
+                "Generated and lock files"
+            ]
+        );
+
+        let resolved = resolve_layers(
+            &[
+                layer(
+                    ConfigSource::Repository,
+                    SettingScope::Repository,
+                    "diff_hidden: [vendor/]\ndiff_groups: [{title: Model, paths: [model/]}, {rest: null}]",
+                ),
+                layer(
+                    ConfigSource::Personal,
+                    SettingScope::Repository,
+                    "diff_hidden: [tests/]\ndiff_groups: [{rest: Rest}, {title: Mine, paths: [\"*.rs\"]}]",
+                ),
+            ],
+            None,
+        )
+        .unwrap()
+        .config;
+        assert_eq!(resolved.diff_hidden, ["scratch/", "vendor/", "tests/"]);
+        assert_eq!(
+            resolved.diff_groups,
+            [
+                DiffGroup::Rest(DiffRestGroup {
+                    rest: Some("Rest".into())
+                }),
+                DiffGroup::Paths(DiffPathGroup {
+                    title: "Mine".into(),
+                    paths: vec!["*.rs".into()]
+                }),
+            ]
+        );
+        assert!(super::parse_value("diff_groups", "[{rest: null}]").is_ok());
+        assert!(super::parse_value("diff_groups", "[{}]").is_err());
+        assert!(super::parse_value("diff_groups", "[{title: A, paths: [a/], rest: x}]").is_err());
     }
     #[test]
     fn typed_values_reject_unknown_keys_and_wrong_types() {

@@ -1,25 +1,21 @@
 #!/usr/bin/env python3
-"""Capture deterministic control-room evidence from built worlds and fixtures.
+"""Capture deterministic Wave surface fixtures.
 
     uv run python scripts/generate_screenshots.py
 
 Renders the `wave-proof` manifest set so the same states are comparable across
 commits. Each shot launches the Xcode-built app, which renders its own window to
 a PNG (`LOOPFLOW_UI_TEST_SNAPSHOT_PATH`) and exits: no Screen Recording or
-Automation permission, and other windows on the display never appear. A shot
-naming a `world` reads an `lf-world` recipe through the app's bundled `lf`; the
-rest use fixture modes.
+Automation permission, and other windows on the display never appear.
 The website's live product images are a different pipeline: see
 scripts/capture_screenshots.py.
 """
 
 from __future__ import annotations
 
-import json
 import os
 import subprocess
 import sys
-import tempfile
 import time
 from dataclasses import dataclass
 from datetime import datetime
@@ -48,10 +44,7 @@ APP_EXECUTABLE = (
 )
 TIMEOUT = 120
 HEIGHT = 900
-# Fixtures render immediately; this only lets the window settle. World shots
-# read through the bundled lf, like the website's live captures.
 DELAY = 2
-WORLD_DELAY = 8
 
 
 @dataclass(frozen=True)
@@ -59,68 +52,25 @@ class WaveProofShot:
     """One fixture-rendered control-room state at one width."""
 
     name: str
-    mode: str
     width: int
-    view: str | None
-    wave: str | None
-    detail_state: str | None
-    world: str | None
+    detail_state: str
 
 
 def load_shots(path: Path = MANIFEST_PATH) -> list[WaveProofShot]:
     data = yaml.safe_load(path.read_text())
-    return [
-        WaveProofShot(
-            name=raw["name"],
-            mode=raw["mode"],
-            width=raw["width"],
-            view=raw.get("view"),
-            wave=raw.get("wave"),
-            detail_state=raw.get("detail_state"),
-            world=raw.get("world"),
-        )
-        for raw in data["wave-proof"]
-    ]
+    return [WaveProofShot(**raw) for raw in data["wave-proof"]]
 
 
-def shot_environment(shot: WaveProofShot, worlds: dict[str, Path], output: Path) -> dict[str, str]:
-    env = {
-        **os.environ,
-        "LOOPFLOW_UI_TEST_MODE": shot.mode,
+def shot_environment(shot: WaveProofShot, output: Path) -> dict[str, str]:
+    return {
+        **{k: v for k, v in os.environ.items() if not k.startswith("LOOPFLOW_UI_TEST_")},
+        "LOOPFLOW_UI_TEST_MODE": "mock-waves",
+        "LOOPFLOW_UI_TEST_DETAIL_STATE": shot.detail_state,
         "LOOPFLOW_UI_TEST_WIDTH": str(shot.width),
         "LOOPFLOW_UI_TEST_HEIGHT": str(HEIGHT),
-        "LOOPFLOW_UI_TEST_DELAY": str(WORLD_DELAY if shot.world else DELAY),
+        "LOOPFLOW_UI_TEST_DELAY": str(DELAY),
         "LOOPFLOW_UI_TEST_SNAPSHOT_PATH": str(output),
     }
-    if shot.wave:
-        env["LOOPFLOW_UI_TEST_SELECT_BRANCH"] = shot.wave
-    if shot.view:
-        env["LOOPFLOW_UI_TEST_VIEW"] = shot.view
-    if shot.detail_state:
-        env["LOOPFLOW_UI_TEST_DETAIL_STATE"] = shot.detail_state
-    if shot.world:
-        env.update(json.loads((worlds[shot.world] / "env.json").read_text()))
-    return env
-
-
-def build_worlds(recipes: set[str], root: Path) -> dict[str, Path]:
-    """Build each named `lf-world` recipe once into `root`."""
-    if not recipes:
-        return {}
-    subprocess.run(
-        ["cargo", "build", "-p", "loopflow", "--bin", "lf-world"], cwd=REPO_ROOT, check=True
-    )
-    binary = REPO_ROOT / "target/debug/lf-world"
-    worlds = {}
-    for recipe in sorted(recipes):
-        worlds[recipe] = root / recipe
-        subprocess.run(
-            [str(binary), "build", recipe, str(worlds[recipe])],
-            check=True,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-        )
-    return worlds
 
 
 def _write_log(
@@ -171,17 +121,16 @@ def build_app() -> None:
         raise SystemExit(f"app build failed; see {log_path}")
 
 
-def capture(shot: WaveProofShot, worlds: dict[str, Path]) -> Path:
+def capture(shot: WaveProofShot) -> Path:
     output = OUTPUT_DIR / f"{shot.name}.png"
     output.parent.mkdir(parents=True, exist_ok=True)
     output.unlink(missing_ok=True)
-    repo = worlds[shot.world] / "repo" if shot.world else REPO_ROOT
-    args = [str(APP_EXECUTABLE), "--repo", str(repo), "-ui-test-mode", shot.mode]
+    args = [str(APP_EXECUTABLE), "--repo", str(REPO_ROOT)]
     started = time.monotonic()
     result = subprocess.run(
         args,
-        cwd=repo,
-        env=shot_environment(shot, worlds, output),
+        cwd=REPO_ROOT,
+        env=shot_environment(shot, output),
         stdin=subprocess.DEVNULL,
         capture_output=True,
         text=True,
@@ -199,15 +148,13 @@ def main() -> None:
     build_app()
 
     failures = []
-    with tempfile.TemporaryDirectory(prefix="lf-worlds-") as root:
-        worlds = build_worlds({shot.world for shot in shots if shot.world}, Path(root))
-        for shot in shots:
-            print(f"Capturing {shot.name}...")
-            try:
-                print(f"  -> {capture(shot, worlds)}")
-            except (RuntimeError, subprocess.SubprocessError) as exc:
-                failures.append(str(exc))
-                print(f"  FAIL: {exc}", file=sys.stderr)
+    for shot in shots:
+        print(f"Capturing {shot.name}...")
+        try:
+            print(f"  -> {capture(shot)}")
+        except (RuntimeError, subprocess.SubprocessError) as exc:
+            failures.append(str(exc))
+            print(f"  FAIL: {exc}", file=sys.stderr)
 
     if failures:
         raise SystemExit(f"{len(failures)}/{len(shots)} captures failed")

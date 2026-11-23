@@ -10,9 +10,11 @@ use sha2::{Digest, Sha256};
 use crate::error::LoadError;
 use crate::graph::instructions::render_graph_instructions;
 use crate::graph::{compile_graph_with_catalog, DefinitionLoader};
+use crate::harness::launcher;
 use crate::skills::catalog::{is_generated, SkillCatalog, SkillDialect, SkillSource};
 use loopflow_definitions::name::portable_name;
 use loopflow_definitions::text::{skill_description, split_frontmatter};
+use loopflow_harness::HarnessKind;
 
 const SKILL_FILE_NAME: &str = "SKILL.md";
 const LOOPFLOW_MARKER: &str = "loopflow: true";
@@ -41,13 +43,7 @@ pub struct SkillSyncReport {
     pub skipped: Vec<PathBuf>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Vendor {
-    Claude,
-    Codex,
-}
-
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default)]
 struct Export {
     content: String,
     inputs: BTreeMap<String, String>,
@@ -74,6 +70,37 @@ pub fn customize(name: &str, repo: &Path, full: bool) -> Result<PathBuf, LoadErr
     Ok(path)
 }
 
+/// Where sync writes, relative to the home directory or, with `repository`,
+/// to the repository root: each harness's declared directory, once.
+pub fn installed_skill_directories(repository: bool) -> Vec<&'static str> {
+    let mut directories = Vec::new();
+    for kind in HarnessKind::ALL {
+        let installed = launcher(kind).capabilities().installed_skills;
+        let directory = if repository {
+            installed.repository
+        } else {
+            installed.global
+        };
+        if !directories.contains(&directory) {
+            directories.push(directory);
+        }
+    }
+    directories
+}
+
+/// Config files global sync adds its directory to, relative to the home directory.
+pub fn installed_skill_registries() -> Vec<&'static str> {
+    HarnessKind::ALL
+        .into_iter()
+        .filter_map(|kind| {
+            launcher(kind)
+                .capabilities()
+                .installed_skills
+                .global_registry
+        })
+        .collect()
+}
+
 /// Export global or repository definitions without replacing third-party bundles.
 pub fn sync_skills(options: &SkillSyncOptions) -> Result<SkillSyncReport, LoadError> {
     let home = options.global_home.clone().or_else(dirs::home_dir);
@@ -98,40 +125,37 @@ pub fn sync_skills(options: &SkillSyncOptions) -> Result<SkillSyncReport, LoadEr
     let mut compiled_graphs = BTreeMap::new();
     let mut targets = Vec::new();
     let mut report = SkillSyncReport::default();
-    // Resolve and validate the entire export set before touching either provider.
-    for (folder, vendor) in [
-        (".claude/skills", Vendor::Claude),
-        (".agents/skills", Vendor::Codex),
-    ] {
-        let root = base.join(folder);
-        let mut exports = BTreeMap::new();
-        let skills = project_names(catalog.entries().map(|skill| skill.name.as_str()));
-        let mut sources = skills.clone();
-        for (name, source) in &skills {
-            let skill = catalog.exact(source).expect("projected source exists");
-            if repo.as_ref().is_some_and(|repo| {
-                !skill
-                    .path
-                    .as_ref()
-                    .is_some_and(|path| path.starts_with(repo))
-            }) {
-                continue;
-            }
-            exports.insert(
-                name.clone(),
-                Export {
-                    content: render_skill(skill, name, vendor)?,
-                    ..Export::default()
-                },
-            );
+    // Resolve and validate the entire export set before touching any directory.
+    // A skill renders the same everywhere; a Graph recipe names its input files
+    // under the directory it lands in, so Graphs render per directory.
+    let skills = project_names(catalog.entries().map(|skill| skill.name.as_str()));
+    let mut skill_exports = BTreeMap::new();
+    for (name, source) in &skills {
+        let skill = catalog.exact(source).expect("projected source exists");
+        if repo.as_ref().is_some_and(|repo| {
+            !skill
+                .path
+                .as_ref()
+                .is_some_and(|path| path.starts_with(repo))
+        }) {
+            continue;
         }
+        skill_exports.insert(
+            name.clone(),
+            Export {
+                content: render_skill(skill, name)?,
+                ..Export::default()
+            },
+        );
+    }
+    for folder in installed_skill_directories(options.repo.is_some()) {
+        let root = base.join(folder);
+        let mut exports = skill_exports.clone();
+        let mut sources = skills.clone();
         for (name, graph) in project_names(graphs.iter().map(String::as_str)) {
             if skills.contains_key(&name) {
                 let path = root.join(&name).join(SKILL_FILE_NAME);
-                eprintln!(
-                    "warning: skipping Graph {graph:?}: skill owns the native name {name:?} at {}",
-                    path.display()
-                );
+                tracing::debug!(%graph, path = %path.display(), "skill owns the Graph export name");
                 report.skipped.push(path);
                 continue;
             }
@@ -164,7 +188,7 @@ pub fn sync_skills(options: &SkillSyncOptions) -> Result<SkillSyncReport, LoadEr
             exports.insert(
                 name.clone(),
                 Export {
-                    content: render_graph_skill(&graph, &name, vendor, &recipe, &inputs),
+                    content: render_graph_skill(&graph, &name, &recipe, &inputs),
                     inputs,
                 },
             );
@@ -178,18 +202,74 @@ pub fn sync_skills(options: &SkillSyncOptions) -> Result<SkillSyncReport, LoadEr
         targets.push((root, exports, blocked, blocked_sources));
     }
     for (root, exports, blocked, _) in &targets {
-        write_targets(exports, blocked, root, &mut report)?;
+        write_targets(exports, blocked, root, &mut report)
+            .map_err(|error| in_directory(root, error))?;
     }
-    // A failed replacement in either provider must not erase working old exports.
+    // A failed replacement in any directory must not erase working old exports.
     if options.prune {
         for (root, exports, _, blocked_sources) in &targets {
-            prune_targets(exports, blocked_sources, base, root, &mut report)?;
+            prune_targets(exports, blocked_sources, base, root, &mut report)
+                .map_err(|error| in_directory(root, error))?;
+        }
+    }
+    if options.repo.is_none() {
+        for kind in HarnessKind::ALL {
+            let installed = launcher(kind).capabilities().installed_skills;
+            if let Some(registry) = installed.global_registry {
+                let registry = base.join(registry);
+                if register_directory(
+                    &registry,
+                    &std::path::absolute(base.join(installed.global))?,
+                )
+                .map_err(|error| in_directory(&registry, error))?
+                {
+                    report.written.push(registry);
+                }
+            }
         }
     }
     report.written.sort();
     report.pruned.sort();
     report.skipped.sort();
     Ok(report)
+}
+
+/// Add `directory` to a `skills.json`'s `entries`, keeping everything else in
+/// it; true when the file changed.
+fn register_directory(registry: &Path, directory: &Path) -> Result<bool, LoadError> {
+    let directory = directory.to_string_lossy();
+    let mut config = match fs::read_to_string(registry) {
+        Ok(text) => serde_json::from_str::<serde_json::Value>(&text)
+            .map_err(|error| LoadError::Io(format!("not JSON, left as is: {error}")))?,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => serde_json::json!({}),
+        Err(error) => return Err(error.into()),
+    };
+    let entries = config
+        .as_object_mut()
+        .ok_or_else(|| LoadError::Io("not a JSON object, left as is".into()))?
+        .entry("entries")
+        .or_insert_with(|| serde_json::json!([]))
+        .as_array_mut()
+        .ok_or_else(|| LoadError::Io("`entries` is not a list, left as is".into()))?;
+    if entries
+        .iter()
+        .any(|entry| entry["path"].as_str() == Some(directory.as_ref()))
+    {
+        return Ok(false);
+    }
+    entries.push(serde_json::json!({ "path": directory }));
+    fs::create_dir_all(registry.parent().expect("registry has a parent"))?;
+    let text = serde_json::to_string_pretty(&config).expect("JSON value serializes");
+    fs::write(registry, format!("{text}\n"))?;
+    Ok(true)
+}
+
+/// Sync writes several tools' directories; a failure says which one.
+fn in_directory(root: &Path, error: LoadError) -> LoadError {
+    match error {
+        LoadError::Io(message) => LoadError::Io(format!("{}: {message}", root.display())),
+        other => other,
+    }
 }
 
 /// One portable export per source; exact names keep priority over flattened names.
@@ -302,16 +382,10 @@ fn writable_target(
 fn render_graph_skill(
     graph: &str,
     name: &str,
-    vendor: Vendor,
     recipe: &str,
     inputs: &BTreeMap<String, String>,
 ) -> String {
-    let user_only = if vendor == Vendor::Claude {
-        "disable-model-invocation: true\n"
-    } else {
-        ""
-    };
-    format!("---\nname: {name}\ndescription: Follow the {name} Graph in this conversation.\nloopflow: true\nloopflow-kind: graph\nloopflow-graph: {}\nloopflow-inputs: {}\n{user_only}---\n{recipe}", yaml_string(graph), serde_json::to_string(&inputs.keys().collect::<Vec<_>>()).expect("input names serialize"))
+    format!("---\nname: {name}\ndescription: Follow the {name} Graph in this conversation.\nloopflow: true\nloopflow-kind: graph\nloopflow-graph: {}\nloopflow-inputs: {}\ndisable-model-invocation: true\n---\n{recipe}", yaml_string(graph), serde_json::to_string(&inputs.keys().collect::<Vec<_>>()).expect("input names serialize"))
 }
 
 fn write_targets(
@@ -324,10 +398,7 @@ fn write_targets(
         let content = &export.content;
         let path = target_root.join(name).join(SKILL_FILE_NAME);
         if blocked.contains(name) {
-            eprintln!(
-                "warning: skipping export at {}: destination is occupied or needed as a namespace",
-                path.display()
-            );
+            tracing::debug!(path = %path.display(), "skill export destination is occupied");
             report.skipped.push(path);
             continue;
         }
@@ -438,13 +509,7 @@ fn remove_owned_input(directory: &Path, name: &str) -> Result<(), LoadError> {
     Ok(())
 }
 
-fn render_skill(skill: &SkillSource, name: &str, vendor: Vendor) -> Result<String, LoadError> {
-    if matches!(
-        (skill.dialect, vendor),
-        (SkillDialect::Claude, Vendor::Codex) | (SkillDialect::Codex, Vendor::Claude)
-    ) {
-        eprintln!("warning: exporting {} across harnesses; native argument and control declarations are retained, not translated", skill.name);
-    }
+fn render_skill(skill: &SkillSource, name: &str) -> Result<String, LoadError> {
     let content = skill.read()?;
     let (original_frontmatter, body) = split_frontmatter(&content).unwrap_or(("", &content));
     let description = skill_description(&content)
@@ -580,6 +645,45 @@ mod tests {
             global_home: Some(home.path().to_path_buf()),
             repo: None,
         }
+    }
+
+    #[test]
+    fn global_sync_registers_agents_skills_in_antigravity_config_once() {
+        let home = TempDir::new().unwrap();
+        let registry = home.path().join(".gemini/config/skills.json");
+        fs::create_dir_all(registry.parent().unwrap()).unwrap();
+        fs::write(
+            &registry,
+            r#"{"inherits":[{"path":"/team/skills.json"}],"entries":[{"path":"/mine"}]}"#,
+        )
+        .unwrap();
+
+        sync_skills(&options_for(&home)).unwrap();
+        let second = sync_skills(&options_for(&home)).unwrap();
+
+        let config: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&registry).unwrap()).unwrap();
+        let agents = std::path::absolute(home.path().join(".agents/skills")).unwrap();
+        assert_eq!(config["inherits"][0]["path"], "/team/skills.json");
+        assert_eq!(
+            config["entries"],
+            serde_json::json!([{"path": "/mine"}, {"path": agents.to_string_lossy()}])
+        );
+        assert!(!second.written.contains(&registry));
+        assert!(!home.path().join(".gemini/config/skills").exists());
+    }
+
+    #[test]
+    fn global_sync_leaves_an_unreadable_antigravity_config_alone() {
+        let home = TempDir::new().unwrap();
+        let registry = home.path().join(".gemini/config/skills.json");
+        fs::create_dir_all(registry.parent().unwrap()).unwrap();
+        fs::write(&registry, "{ not json").unwrap();
+
+        let error = sync_skills(&options_for(&home)).unwrap_err().to_string();
+
+        assert!(error.contains("skills.json"), "{error}");
+        assert_eq!(fs::read_to_string(&registry).unwrap(), "{ not json");
     }
 
     #[test]

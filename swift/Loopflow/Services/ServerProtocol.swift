@@ -1,10 +1,10 @@
 import Foundation
 
-/// Revision 8 of the server protocol: one connection per client, a negotiated
+/// Revision 9 of the server protocol: one connection per client, a negotiated
 /// revision, requests multiplexed by id. Mirrors `rust/loopflow/src/server/wire.rs`;
 /// carriers add no Work authority.
 public enum ServerProtocol {
-    public static let revision = 8
+    public static let revision = 9
     /// Revision 8 requires `sender` on `request` and `subscribe`; it keeps 7's
     /// write revisions and request IDs, which pending changes rely on.
     public static let minRevision = 8
@@ -297,8 +297,8 @@ public enum ConfigOperation: Encodable, Sendable {
     /// `value` is YAML.
     case configSet(destination: JSONValue, key: String, value: String)
     case configUnset(destination: JSONValue, key: String)
-    /// Appearance's theme file: set to `value`, or read when nil.
-    case configTheme(path: String, value: String?)
+    /// The serving Machine's `theme:`: set to `value` (YAML), or read when nil.
+    case configTheme(value: String?)
 
     public func encode(to encoder: Encoder) throws {
         try tagged.encode(to: encoder, tag: "kind")
@@ -315,9 +315,23 @@ public enum ConfigOperation: Encodable, Sendable {
             TaggedFields("config.set", ["destination": destination, "key": key, "value": value])
         case .configUnset(let destination, let key):
             TaggedFields("config.unset", ["destination": destination, "key": key])
-        case .configTheme(let path, let value):
-            TaggedFields("config.theme", ["path": path, "value": value])
+        case .configTheme(let value):
+            TaggedFields("config.theme", ["value": value])
         }
+    }
+}
+
+/// One key's declaration in one config file, as `config.get`, `config.set` and `config.theme` answer.
+public struct ConfigurationFileValue: Decodable, Sendable {
+    public let path: String
+    public let key: String
+    public let value: JSONValue
+    public let lifecycle: String
+
+    /// `value` when it is a string, as `theme:` is; nil when the file doesn't declare the key.
+    public var text: String? {
+        guard case .string(let text) = value else { return nil }
+        return text
     }
 }
 

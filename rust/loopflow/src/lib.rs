@@ -3,7 +3,6 @@ pub mod build_info;
 mod id_tests;
 pub mod lf;
 pub mod server;
-pub mod world;
 
 #[cfg(test)]
 #[path = "../tests/support/mod.rs"]

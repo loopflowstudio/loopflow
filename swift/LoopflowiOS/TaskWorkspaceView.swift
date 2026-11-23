@@ -1,54 +1,156 @@
 import Loopflow
 import SwiftUI
 
-/// One Task on the phone. Its conversation fills the screen; the Changes that
-/// Desktop shows beside it open over it.
+/// One Task on the phone: where it stands on its Graph, then its conversation.
+/// The Changes that Desktop shows beside it open over it.
 struct TaskWorkspaceView: View {
     let client: RemoteMobileClient
     let feed: TaskFeed
     let task: MobileTask
-    let theme: ThemeDefinition
+    @Environment(\.theme) private var theme
     @Binding var draft: String
     @State private var showsChanges = false
+    /// The Task as the Machine last read it.
+    @State private var reading = Loaded<Reading>.loading
+    /// The conversation that began while the screen was showing.
+    @State private var begun: String?
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
-        content
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) { action.disabled(!feed.pendingChanges.acceptsChanges) }
-            }
-            .overlay { NoticeView(center: feed.notices) }
-    }
-
-    /// The feed's row for this Task, with pending changes made; a Task opened
-    /// from its creation answer has none until the feed lists it.
-    private var row: WorkViewPlan.Content? {
-        feed.shownRepositories.lazy.flatMap(\.tasks).first { $0.work.id == task.id }
-    }
-
-    /// Start a Task not started, Auto-Ship a Working one, stop an Autonomous one.
-    @ViewBuilder private var action: some View {
-        if let row {
-            if row.states.contains(.autonomous) {
-                Button("Stop Auto-Ship", systemImage: "pause.circle") {
-                    feed.request("Stop Auto-Ship", row) { .taskHold(directory: $0, issue: $1) }
-                }
-            } else if row.states.contains(.unstarted) {
-                Button("Start", systemImage: "play.fill") {
-                    feed.request("Start", row) {
-                        .taskRun(directory: $0, issue: $1, graph: nil, from: nil, agent: nil, approve: false)
+        VStack(spacing: 0) {
+            // While the Machine is away the sentence would be an old one.
+            if case .value(let reading) = reading, feed.pendingChanges.acceptsChanges {
+                let refusal = reading.actions?.refusal
+                if reading.work.graph != nil || refusal != nil {
+                    VStack(alignment: .leading, spacing: Spacing.xs) {
+                        if let graph = reading.work.graph {
+                            WorkflowLine(graph: graph, auto: reading.actions?.auto == .on)
+                        }
+                        // A menu item holds two lines; Rust's reason says what to restore, so it is set in full.
+                        if let refusal {
+                            Text(refusal)
+                                .font(Typography.meta)
+                                .foregroundStyle(theme.palette.warning)
+                                .accessibilityIdentifier("task-actions-refusal")
+                        }
                     }
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, Spacing.lg)
+                    .padding(.vertical, Spacing.sm)
+                    .background(theme.palette.background)
+                    .overlay(alignment: .bottom) { Rectangle().fill(theme.palette.border).frame(height: 1) }
                 }
-            } else if row.states.contains(.working) {
-                Button("Auto-Ship", systemImage: "paperplane") {
-                    feed.request("Auto-Ship", row) { .taskShip(directory: $0, issue: $1) }
+            }
+            content
+        }
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) { actions.disabled(!feed.pendingChanges.acceptsChanges) }
+        }
+        .overlay { NoticeView(center: feed.notices) }
+        .task(id: scenePhase == .active) { await watchTask() }
+    }
+
+    /// What the Machine read of one Task: its work (the Graph it took up and
+    /// its Sessions), its row, and its auto mark.
+    struct Reading: Equatable {
+        let work: TaskOverview
+        let row: RoadmapTask?
+        let execution: TaskExecution?
+
+        var actions: TaskActions? { row.map { TaskActions(work: work, row: $0, execution: execution) } }
+        /// Nil until the Task starts.
+        var checkout: String? { row?.reference.workspace?.worktree }
+    }
+
+    /// Follow the Task's reading while the screen shows and the app is active.
+    /// A lost link resumes the same reading; one that cannot start leaves no
+    /// sentence, and the Notice says why the Machine is away.
+    private func watchTask() async {
+        guard scenePhase == .active else { return }
+        let watch = client.observeTask(issue: task.id)
+        defer { watch.cancel() }
+        do {
+            for try await frame in watch.updates {
+                reading = Self.reading(in: frame, task: task.id)
+                await openConversation()
+            }
+        } catch is CancellationError {
+            return
+        } catch {
+            reading = .failed(machineConnectionMessage(error))
+        }
+    }
+
+    /// A Task started from this screen gets its conversation here. A row that
+    /// names none yet is asked again on the next frame.
+    private func openConversation() async {
+        guard task.primarySession == nil, begun == nil else { return }
+        do {
+            begun = try await Self.conversation(after: reading) { [client, id = task.id] repository in
+                try await client.task(id: id, directory: repository)?.primarySession
+            }
+        } catch {
+            feed.notices.post(Notice("The conversation couldn’t be opened: \(machineConnectionMessage(error))",
+                                     key: "task-conversation-\(task.id)"))
+        }
+    }
+
+    /// The conversation to open after `reading`: once it lists a Session, the
+    /// primary one the Task's row names. `primary` reads that row in a repository.
+    static func conversation(after reading: Loaded<Reading>,
+                             primary: (String) async throws -> String?) async throws -> String? {
+        guard case .value(let reading) = reading, !reading.work.sessions.isEmpty,
+              let repository = reading.row?.task.repo else { return nil }
+        return try await primary(repository)
+    }
+
+    /// One frame of the Task's reading.
+    static func reading(in frame: RawJSON, task: String) -> Loaded<Reading> {
+        do {
+            let scope = WorkScope(repo: nil, headless: false, task: task, activity: nil, taskListWave: nil)
+            let frame = try WorkFrame.decode(part: .task, scope: scope, sequence: 0, line: frame.bytes)
+            guard case .task(let part?) = frame.content else {
+                return .failed(frame.unavailable ?? "Task reading is unavailable")
+            }
+            return .value(Reading(work: part.work, row: part.row, execution: part.execution))
+        } catch {
+            return .failed(error.localizedDescription)
+        }
+    }
+
+    /// "Task actions": what `TaskActions` offers, each sending its write from
+    /// the Task's repository. A refused action is disabled; the reason is under the sentence.
+    @ViewBuilder private var actions: some View {
+        if case .value(let reading) = reading, let row = reading.row, let actions = reading.actions,
+           actions.run != nil || actions.auto != nil {
+            let (issue, directory) = (row.task.identifier, row.task.repo)
+            Menu("Task actions", systemImage: "ellipsis.circle") {
+                if let run = actions.run {
+                    item(run.label, symbol: "play.fill", disabled: actions.runRefusal != nil, issue: issue,
+                         write: .taskRun(directory: directory, issue: issue, graph: nil, from: nil, agent: nil, approve: false))
+                }
+                if let auto = actions.auto {
+                    item(auto.offer, symbol: auto == .on ? "pause.circle" : "paperplane", disabled: actions.autoRefusal != nil, issue: issue,
+                         write: auto == .on ? .taskAutoOff(directory: directory, issue: issue)
+                             : .taskAutoOn(directory: directory, issue: issue))
                 }
             }
         }
     }
 
+    private func item(_ name: String, symbol: String, disabled: Bool, issue: String, write: ServedWrite) -> some View {
+        Button {
+            feed.request(name, issue: issue, write: write)
+        } label: {
+            Label(name, systemImage: symbol)
+        }
+        .disabled(disabled)
+    }
+
     @ViewBuilder private var content: some View {
-        if let session = task.primarySession {
-            SessionView(client: client, task: task, session: session, theme: theme, draft: $draft)
+        if let session = task.primarySession ?? begun {
+            SessionView(client: client, task: task, session: session, draft: $draft) { showsChanges = true }
                 .toolbar {
                     ToolbarItem(placement: .topBarTrailing) {
                         Button("Changes", systemImage: "plusminus") { showsChanges = true }
@@ -56,7 +158,7 @@ struct TaskWorkspaceView: View {
                 }
                 .sheet(isPresented: $showsChanges) {
                     NavigationStack {
-                        TaskChangesView(client: client, task: task, theme: theme)
+                        TaskChangesView(client: client, task: task)
                             .navigationTitle("Changes")
                             .navigationBarTitleDisplayMode(.inline)
                             .toolbar {
@@ -67,58 +169,57 @@ struct TaskWorkspaceView: View {
                     .presentationDetents([.medium, .large])
                 }
         } else {
-            TaskChangesView(client: client, task: task, theme: theme)
-                .navigationTitle(task.title)
-                .navigationBarTitleDisplayMode(.inline)
+            Group {
+                switch reading {
+                case .loading:
+                    ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+                case .value(let reading) where reading.checkout == nil:
+                    // Nothing is checked out until the Task starts, so there is nothing to ask the Machine for.
+                    StateView("No changes yet")
+                case .value, .failed:
+                    TaskChangesView(client: client, task: task)
+                }
+            }
+            .background(theme.palette.background)
+            .navigationTitle(task.title)
+            .navigationBarTitleDisplayMode(.inline)
         }
     }
 }
 
 /// A read that is loading, failed or here.
-private enum Loaded<Value> {
+enum Loaded<Value> {
     case loading, failed(String), value(Value)
-}
-
-private struct LoadFailure: View {
-    let message: String
-    let retry: () -> Void
-
-    var body: some View {
-        ContentUnavailableView {
-            Label("Couldn’t load", systemImage: "wifi.exclamationmark")
-        } description: {
-            Text(message)
-        } actions: {
-            Button("Try again", action: retry)
-        }
-    }
 }
 
 /// Files the Task changed from its base, each opening its diff.
 struct TaskChangesView: View {
     let client: RemoteMobileClient
     let task: MobileTask
-    let theme: ThemeDefinition
+    @Environment(\.theme) private var theme
     @State private var changes = Loaded<TaskChangesSnapshot>.loading
 
     var body: some View {
         Group {
             switch changes {
             case .loading: ProgressView()
-            case .failed(let message): LoadFailure(message: message) { Task { await load() } }
+            case .failed(let message):
+                StateView("Couldn’t load", sentence: message) {
+                    Button("Try again") { Task { await load() } }.buttonStyle(LoopflowButtonStyle(.accent))
+                }
             case .value(let changes) where changes.files.isEmpty:
-                ContentUnavailableView("No changes yet", systemImage: "plusminus")
+                StateView("No changes yet")
             case .value(let changes):
                 List(changes.files) { file in
                     NavigationLink {
-                        TaskDiffView(client: client, task: task, path: file.path, theme: theme)
+                        TaskDiffView(client: client, task: task, path: file.path)
                     } label: {
-                        VStack(alignment: .leading, spacing: 4) {
+                        VStack(alignment: .leading, spacing: Spacing.xs) {
                             Text((file.path as NSString).lastPathComponent)
-                                .font(Typography.strong(16))
+                                .font(Typography.textStrong)
                                 .foregroundStyle(theme.palette.text)
                             Text(detail(file))
-                                .font(Typography.caption(13))
+                                .font(Typography.meta)
                                 .foregroundStyle(theme.palette.textSecondary)
                                 .lineLimit(2)
                         }
@@ -147,30 +248,47 @@ struct TaskChangesView: View {
     }
 }
 
+/// Code that scrolls both ways and starts at the top left, as the states beside it do.
+/// A two-axis scroll view centres content shorter or narrower than itself.
+private struct CodeScroll<Content: View>: View {
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        GeometryReader { proxy in
+            ScrollView([.vertical, .horizontal]) {
+                content.frame(minWidth: proxy.size.width, minHeight: proxy.size.height, alignment: .topLeading)
+            }
+        }
+    }
+}
+
 /// One file as it stands in the Task's checkout.
 struct TaskFileView: View {
     let client: RemoteMobileClient
     let task: MobileTask
     let path: String
-    let theme: ThemeDefinition
+    @Environment(\.theme) private var theme
     @State private var file = Loaded<TaskFileSnapshot>.loading
 
     var body: some View {
         Group {
             switch file {
             case .loading: ProgressView()
-            case .failed(let message): LoadFailure(message: message) { Task { await load() } }
+            case .failed(let message):
+                StateView("Couldn’t load", sentence: message) {
+                    Button("Try again") { Task { await load() } }.buttonStyle(LoopflowButtonStyle(.accent))
+                }
             case .value(let file):
                 if let content = file.content {
-                    ScrollView([.vertical, .horizontal]) {
+                    CodeScroll {
                         Text(content)
-                            .font(.system(size: 12, design: .monospaced))
+                            .font(Typography.mono)
                             .foregroundStyle(theme.palette.text)
                             .textSelection(.enabled)
-                            .padding(12)
+                            .padding(Spacing.md)
                     }
                 } else {
-                    ContentUnavailableView(file.state.title, systemImage: "doc")
+                    StateView(file.state.title)
                 }
             }
         }
@@ -192,33 +310,36 @@ struct TaskDiffView: View {
     let client: RemoteMobileClient
     let task: MobileTask
     let path: String
-    let theme: ThemeDefinition
+    @Environment(\.theme) private var theme
     @State private var diff = Loaded<TaskDiffSnapshot>.loading
 
     var body: some View {
         Group {
             switch diff {
             case .loading: ProgressView()
-            case .failed(let message): LoadFailure(message: message) { Task { await load() } }
+            case .failed(let message):
+                StateView("Couldn’t load", sentence: message) {
+                    Button("Try again") { Task { await load() } }.buttonStyle(LoopflowButtonStyle(.accent))
+                }
             case .value(let diff) where diff.binary:
-                ContentUnavailableView("Binary file", systemImage: "doc")
+                StateView("Binary file")
             case .value(let diff):
-                ScrollView([.vertical, .horizontal]) {
+                CodeScroll {
                     LazyVStack(alignment: .leading, spacing: 0) {
                         let lines = Self.lines(diff.patch)
                         ForEach(lines.indices, id: \.self) { index in
                             Text(lines[index].text.isEmpty ? " " : String(lines[index].text))
-                                .font(.system(size: 12, design: .monospaced))
+                                .font(Typography.mono)
                                 .foregroundStyle(theme.palette.text)
-                                .padding(.horizontal, 12)
+                                .padding(.horizontal, Spacing.md)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .background(tint(lines[index].kind))
                         }
                         if diff.truncated {
                             Text("The rest of this diff is too long to show.")
-                                .font(Typography.caption(13))
+                                .font(Typography.meta)
                                 .foregroundStyle(theme.palette.textSecondary)
-                                .padding(12)
+                                .padding(Spacing.md)
                         }
                     }
                 }
@@ -230,7 +351,7 @@ struct TaskDiffView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                NavigationLink("Whole file") { TaskFileView(client: client, task: task, path: path, theme: theme) }
+                NavigationLink("Whole file") { TaskFileView(client: client, task: task, path: path) }
             }
         }
         .task { await load() }

@@ -89,11 +89,11 @@ pub fn explain(destination: &Destination, key: &str) -> Result<Explanation> {
     })
 }
 
-/// `config.theme`: the theme file Appearance owns at `path`, set to `value`
-/// when one is given, read otherwise.
-pub fn theme(path: &Path, value: Option<&str>) -> Result<Declaration> {
+/// `config.theme`: the Machine's `theme:` in `~/.lf/config.yaml`, set to
+/// `value` when one is given, read otherwise.
+pub fn theme(value: Option<&str>) -> Result<Declaration> {
     file_value(
-        path,
+        &crate::config::global_config_path(),
         &["theme"],
         "theme",
         value,
@@ -460,9 +460,9 @@ mod tests {
                 .path()
                 .canonicalize()
                 .unwrap()
-                .join("lf.config.local.yaml"))
+                .join(".lf/config.local.yaml"))
         );
-        assert!(!child.join("lf.config.local.yaml").exists());
+        assert!(!child.join(".lf/config.local.yaml").exists());
         check(
             &private,
             &child,
@@ -486,14 +486,14 @@ mod tests {
             "skills.probe.agent",
             "claude:wave",
         );
-        let private_before = std::fs::read(repo.path().join("lf.config.local.yaml")).unwrap();
+        let private_before = std::fs::read(repo.path().join(".lf/config.local.yaml")).unwrap();
         assert!(edit(&private, "user.name", Some("Wrong scope"), false)
             .unwrap_err()
             .to_string()
             .contains("does not apply"));
         assert!(edit(&shared, "user.name", Some("Wrong owner"), false).is_err());
         assert_eq!(
-            std::fs::read(repo.path().join("lf.config.local.yaml")).unwrap(),
+            std::fs::read(repo.path().join(".lf/config.local.yaml")).unwrap(),
             private_before
         );
         std::fs::rename(child.join(".lf/wave/old"), child.join(".lf/wave/new")).unwrap();

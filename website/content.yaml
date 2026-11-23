@@ -21,7 +21,18 @@ navigation:
   optional: true
 install:
   label: Install
-  href: /#start
+  href: /download
+  install_command: curl -fsSL https://loopflow.studio/install.sh | sh
+  download_url: https://downloads.loopflow.studio/Loopflow-latest.dmg
+footer:
+  text: Loopflow · An open-source software instrument.
+  links:
+  - label: Loopflow Studio
+    href: /studio
+  - label: Get started ↗
+    href: /docs/getting-started
+  - label: Source ↗
+    href: https://github.com/loopflowstudio/loopflow
 # The company page and the short pages under the Company menu. Drafted with Jack
 # Heart on 2026-10-08; copy beyond his quoted lines is draft.
 studio:
@@ -81,25 +92,6 @@ studio:
     label: About · Loopflow Studio
     heading: Jack Heart
     lede: Founder of Loopflow Studio.
-# The homepage's body is home.html. This block holds what other pages share with
-# it: the install command, the download, and the footer.
+# The homepage's body is home.html; this block holds only its title.
 homepage:
   title: how you design, implement, demo, release and study software in harmony
-  install:
-    label: Install
-    install_command: curl -fsSL https://loopflow.studio/install.sh | sh
-    links:
-    - label: Getting started ↗
-      href: /docs/getting-started
-    - label: Source ↗
-      href: https://github.com/loopflowstudio/loopflow
-    download_url: https://downloads.loopflow.studio/Loopflow-latest.dmg
-  footer:
-    text: Loopflow · An open-source software instrument.
-    links:
-    - label: Loopflow Studio
-      href: /studio
-    - label: Get started ↗
-      href: /docs/getting-started
-    - label: Source ↗
-      href: https://github.com/loopflowstudio/loopflow

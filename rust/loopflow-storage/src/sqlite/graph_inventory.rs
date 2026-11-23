@@ -174,14 +174,15 @@ pub fn entry_of(
     })
 }
 
-/// What a reading of Graphs' execution asks of the store once: the input each
-/// step captured last, unended Graph runs in the selected Tasks' work, and
-/// the selected Tasks that never ran their Graph.
+/// Facts read together for Graph execution: each step's latest captured input,
+/// unanswered question and limit recovery, plus the selected Tasks' Graph state.
 #[derive(Debug, Default)]
 pub struct GraphExecutionFacts {
     pub open_graphs: HashMap<TaskId, Vec<Execution>>,
     pub unrun: HashMap<TaskId, UnrunGraph>,
+    pub tasks_with_carrier_records: HashSet<TaskId>,
     pub inputs: HashMap<LfProcessId, (String, String, i64)>,
+    pub unanswered_questions: HashMap<LfProcessId, String>,
     pub limit_recoveries: HashMap<LfProcessId, AgentLimitRecovery>,
 }
 
@@ -580,6 +581,47 @@ impl SqliteStore {
         )))
     }
 
+    /// What the agent of the Graph run `id`'s last failed step asked with
+    /// nobody there to answer, if it failed on that.
+    pub fn graph_unanswered_question(&self, id: &LfProcessId) -> StoreResult<Option<String>> {
+        let mut connection = self.conn.lock().expect("store mutex poisoned");
+        let conn = connection.savepoint()?;
+        let Some(run) = graphs_in(&conn, "g.lf_process_id=?1", &[id])?.pop() else {
+            return Ok(None);
+        };
+        let Some(step) = run
+            .steps
+            .iter()
+            .rev()
+            .find(|step| step.run.result() == ExecutionResult::Failed)
+        else {
+            return Ok(None);
+        };
+        Ok(super::turns::unanswered_questions_in(&conn, &[&step.run.id])?.remove(&step.run.id))
+    }
+
+    /// Whether the Graph run `id` failed at a skill step that opened no
+    /// conversation: lf refused the launch before any agent started, and
+    /// would refuse the same launch again.
+    pub fn graph_failed_before_its_agent(&self, id: &LfProcessId) -> StoreResult<bool> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let Some(run) = graphs_in(&conn, "g.lf_process_id=?1", &[id])?.pop() else {
+            return Ok(false);
+        };
+        let Some(step) = run
+            .steps
+            .last()
+            .filter(|step| step.run.result() == ExecutionResult::Failed)
+        else {
+            return Ok(false);
+        };
+        let skill = run
+            .compiled
+            .node_at(step.key)
+            .is_some_and(|node| node.kind == crate::graph::GraphNodeKind::Skill);
+        Ok(skill && process_inputs(&conn, &[&step.run.id])?.is_empty())
+    }
+
     /// The conversation, captured input and its event a process opened last.
     pub fn process_input(
         &self,
@@ -618,12 +660,23 @@ impl SqliteStore {
             open_graphs.entry(task).or_default().push(run);
         }
         let inputs = process_inputs(&conn, &steps)?;
+        let unanswered_questions = super::turns::unanswered_questions_in(&conn, &steps)?;
         let limit_recoveries = limit_recoveries(&conn, &steps)?;
         let unrun = unrun_graphs_in(&conn, &ids)?;
+        let mut carriers = conn.prepare(
+            "SELECT task_id FROM task_graphs WHERE task_id IN (SELECT value FROM json_each(?1))
+             AND (run_pid IS NOT NULL OR run_died_at IS NOT NULL)",
+        )?;
+        let tasks_with_carrier_records = carriers
+            .query_map([&ids], |row| row.get::<_, String>(0))?
+            .map(|id| TaskId::parse(&id?).map_err(invalid))
+            .collect::<StoreResult<_>>()?;
         Ok(GraphExecutionFacts {
             open_graphs,
             unrun,
+            tasks_with_carrier_records,
             inputs,
+            unanswered_questions,
             limit_recoveries,
         })
     }
@@ -758,10 +811,6 @@ pub(super) fn finish_run_in(
                 project_activation_error=?4,project_activation_pid=NULL,
                 project_activation_os_started_at=NULL
              WHERE project_activation_lf_process_id=?1 AND project_activation_ended_at IS NULL"
-        }
-        RunOwner::ShipCarrier => {
-            "UPDATE task_ship_events SET ended_at=?2,exit_code=?3,error=?4,pid=NULL,os_started_at=NULL
-             WHERE lf_process_id=?1 AND kind IN ('approved','carried') AND ended_at IS NULL"
         }
     };
     conn.execute(sql, params![id, ended_at, exit_code, error])?;

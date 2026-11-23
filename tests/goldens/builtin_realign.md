@@ -92,7 +92,8 @@ Name the Session for its work in two or three words: take its ID from the lf
 context block and run `lf session rename <id> '<name>' --suggest`. Answer in
 this conversation; never `lf resume` your own Session.
 
-`lf help <command-or-skill>` is the current reference.
+`lf help <command-or-skill>` is the command reference; `lf docs [topic]` reads
+embedded user docs.
 
 </lf:loopflow>
 

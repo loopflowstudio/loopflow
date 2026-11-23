@@ -15,7 +15,7 @@ use crate::graph::load_skill;
 use crate::ops::commit::{commit_workflow, message_launch, CommitOptions, MessageAgent};
 use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::progress::Progress;
-use crate::ops::task::StackedSync;
+use crate::ops::task::{StackParentPr, StackedSync};
 use crate::ops::util::{command_exists, stderr_from_output};
 use crate::prompt::change::{Change, ChangeRange};
 
@@ -198,7 +198,7 @@ pub fn create_or_update_pr(
             parent: stack.as_ref().map(|stack| RecordedParent {
                 identifier: &stack.parent_identifier,
                 branch: &stack.parent_branch,
-                merged: stack.parent_merged,
+                merged: stack.parent == StackParentPr::Merged,
             }),
             base: &base_branch,
             default_branch: &default_branch,
@@ -2040,7 +2040,7 @@ fn publication_base(
     let stack = crate::ops::task::task_stack(repo)?;
     let base = match stack.as_ref() {
         Some(stack) => stack
-            .live_parent_branch()
+            .live_parent_branch(default_branch)?
             .unwrap_or(default_branch)
             .to_string(),
         None => pr_target(repo, main_repo, default_branch)?,

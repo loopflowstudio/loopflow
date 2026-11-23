@@ -57,6 +57,7 @@
       "reason": "Merged; complete the Task"
     },
     "section": "working",
+    "owned_by_you": false,
     "actions": {
       "recommended": "open_pr",
       "reason": "merge head head-commits on GitHub"
@@ -245,15 +246,13 @@
       "state": "running",
       "reason": "Worker is running realign",
       "step": null,
-      "captured": null
+      "captured": null,
+      "died": null,
+      "outlook": null
     },
     "run_control": {
       "unavailable": null
     },
-    "ship_control": {
-      "unavailable": null
-    },
-    "shipping": null,
     "pr": {
       "id": "pr_commits",
       "sequence": 1,
@@ -348,6 +347,7 @@
       "reason": "Task is complete"
     },
     "section": "done",
+    "owned_by_you": false,
     "actions": {
       "recommended": "open_pr",
       "reason": "merge head head-commits on GitHub"
@@ -536,15 +536,13 @@
       "state": "running",
       "reason": "Worker is running realign",
       "step": null,
-      "captured": null
+      "captured": null,
+      "died": null,
+      "outlook": null
     },
     "run_control": {
       "unavailable": null
     },
-    "ship_control": {
-      "unavailable": null
-    },
-    "shipping": null,
     "pr": {
       "id": "pr_commits",
       "sequence": 1,
@@ -637,6 +635,7 @@
       "reason": "Task is complete"
     },
     "section": "done",
+    "owned_by_you": false,
     "actions": {
       "recommended": "open_pr",
       "reason": "merge head head-commits on GitHub"
@@ -825,15 +824,13 @@
       "state": "running",
       "reason": "Worker is running realign",
       "step": null,
-      "captured": null
+      "captured": null,
+      "died": null,
+      "outlook": null
     },
     "run_control": {
       "unavailable": null
     },
-    "ship_control": {
-      "unavailable": null
-    },
-    "shipping": null,
     "pr": {
       "id": "pr_commits",
       "sequence": 1,
@@ -902,6 +899,7 @@
       "reason": "Task is ready to start"
     },
     "section": "backlog",
+    "owned_by_you": false,
     "actions": {
       "recommended": null,
       "reason": "Task is ready to start"
@@ -927,15 +925,13 @@
       "state": "idle",
       "reason": "No active execution",
       "step": null,
-      "captured": null
+      "captured": null,
+      "died": null,
+      "outlook": null
     },
     "run_control": {
       "unavailable": null
     },
-    "ship_control": {
-      "unavailable": null
-    },
-    "shipping": null,
     "pr": null,
     "graph_source": null,
     "lifecycle": "unstarted",
@@ -978,6 +974,7 @@
       "reason": "Task is ready to start"
     },
     "section": "backlog",
+    "owned_by_you": false,
     "actions": {
       "recommended": null,
       "reason": "Task is ready to start"
@@ -1003,15 +1000,13 @@
       "state": "idle",
       "reason": "No active execution",
       "step": null,
-      "captured": null
+      "captured": null,
+      "died": null,
+      "outlook": null
     },
     "run_control": {
       "unavailable": null
     },
-    "ship_control": {
-      "unavailable": null
-    },
-    "shipping": null,
     "pr": null,
     "graph_source": null,
     "lifecycle": "unstarted",
@@ -1078,6 +1073,7 @@
       "reason": "Merged; complete the Task"
     },
     "section": "working",
+    "owned_by_you": false,
     "actions": {
       "recommended": "open_pr",
       "reason": "merge head head-commits on GitHub"
@@ -1266,15 +1262,13 @@
       "state": "running",
       "reason": "Worker is running realign",
       "step": null,
-      "captured": null
+      "captured": null,
+      "died": null,
+      "outlook": null
     },
     "run_control": {
       "unavailable": null
     },
-    "ship_control": {
-      "unavailable": null
-    },
-    "shipping": null,
     "pr": {
       "id": "pr_commits",
       "sequence": 1,
@@ -1369,6 +1363,7 @@
       "reason": "Merged; complete the Task"
     },
     "section": "done",
+    "owned_by_you": false,
     "actions": {
       "recommended": "open_pr",
       "reason": "merge head head-commits on GitHub"
@@ -1557,15 +1552,13 @@
       "state": "running",
       "reason": "Worker is running realign",
       "step": null,
-      "captured": null
+      "captured": null,
+      "died": null,
+      "outlook": null
     },
     "run_control": {
       "unavailable": null
     },
-    "ship_control": {
-      "unavailable": null
-    },
-    "shipping": null,
     "pr": {
       "id": "pr_commits",
       "sequence": 1,

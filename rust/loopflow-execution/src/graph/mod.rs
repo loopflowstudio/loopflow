@@ -221,6 +221,8 @@ pub struct XorPath {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct GraphDefinition {
     pub name: String,
+    /// One line saying what running the Graph gets you; `description:` beside `steps:`.
+    pub description: Option<String>,
     pub items: Vec<Step>,
 }
 
@@ -468,6 +470,8 @@ impl<'a> DefinitionLoader<'a> {
         };
         let value: Value = serde_yaml_ng::from_str(&content)
             .map_err(|err| LoadError::InvalidGraph(err.to_string()))?;
+        let description = graph_description(&value)
+            .map_err(|error| LoadError::InvalidGraph(format!("{name}: {error}")))?;
         validate_graph_nesting(&self.sources, &name)?;
         self.sources.push(name.clone());
         let items = parse_graph_items(&value, self);
@@ -521,7 +525,11 @@ impl<'a> DefinitionLoader<'a> {
             Ok(())
         }
         retain_origin(&mut items, &name, source, source_path.as_deref(), "")?;
-        Ok(GraphDefinition { name, items })
+        Ok(GraphDefinition {
+            name,
+            description,
+            items,
+        })
     }
 }
 
@@ -781,6 +789,20 @@ fn resolve_graph_source(name: &str, repo: &Path) -> Result<Option<(String, PathB
 
 fn key(s: &str) -> Value {
     Value::String(s.to_string())
+}
+
+/// A Graph file is a bare list of steps, or `steps:` with an optional `description:`.
+fn graph_description(value: &Value) -> Result<Option<String>, LoadError> {
+    let Value::Mapping(map) = value else {
+        return Ok(None);
+    };
+    match map.get(key("description")) {
+        None => Ok(None),
+        Some(Value::String(text)) => Ok(Some(text.trim().to_string())),
+        Some(_) => Err(LoadError::InvalidGraph(
+            "description must be one line of text".to_string(),
+        )),
+    }
 }
 
 fn parse_graph_items(
@@ -1279,6 +1301,48 @@ mod tests {
                 &super::SkillCatalog::discover(Some(tmp.path())).unwrap(),
             ),
         )
+    }
+
+    #[test]
+    fn every_builtin_graph_has_a_description() {
+        let repo = TempDir::new().unwrap();
+        for name in crate::builtins::builtin_graph_names() {
+            let graph = load_graph(name, repo.path()).unwrap();
+            let description = graph.description.unwrap_or_default();
+            assert!(
+                !description.is_empty() && !description.contains('\n'),
+                "{name} needs a one-line description"
+            );
+        }
+    }
+
+    #[test]
+    fn a_graph_file_reads_its_description_beside_its_steps() {
+        let repo = TempDir::new().unwrap();
+        let graphs = repo.path().join(".lf/graphs");
+        fs::create_dir_all(&graphs).unwrap();
+        fs::write(
+            graphs.join("ship-api.yaml"),
+            "description: Build the endpoint, then deliver.\nsteps:\n- implement\n- interactive: demo\n",
+        )
+        .unwrap();
+        fs::write(graphs.join("bare.yaml"), "- implement\n").unwrap();
+        fs::write(
+            graphs.join("odd.yaml"),
+            "description: [a]\nsteps: [implement]\n",
+        )
+        .unwrap();
+
+        let described = load_graph("ship-api", repo.path()).unwrap();
+        assert_eq!(
+            described.description.as_deref(),
+            Some("Build the endpoint, then deliver.")
+        );
+        assert_eq!(described.items.len(), 2);
+        assert!(described.items[1].interactive);
+        assert_eq!(load_graph("bare", repo.path()).unwrap().description, None);
+        let error = load_graph("odd", repo.path()).unwrap_err().to_string();
+        assert!(error.contains("description must be one line"), "{error}");
     }
 
     #[test]
@@ -2184,6 +2248,7 @@ Design the feature.
         let tmp = TempDir::new().unwrap();
         let graph = GraphDefinition {
             name: "test-or".to_string(),
+            description: None,
             items: vec![
                 Step::new(Target::Skill(Skill::named("gate"))),
                 Step::new(Target::Xor(XorDef {
@@ -2367,6 +2432,7 @@ Design the feature.
         for (name, expected) in [("deep-1", "max depth"), ("deep-2", "cycle detected")] {
             let composed = GraphDefinition {
                 name: name.into(),
+                description: None,
                 items: vec![Step::new(Target::Graph(deepest.clone()))],
             };
             let error = compile_graph(&composed, tmp.path())
@@ -2415,6 +2481,7 @@ Design the feature.
                 compile_graph(
                     &GraphDefinition {
                         name: "pin-missing".into(),
+                        description: None,
                         items,
                     },
                     tmp.path(),

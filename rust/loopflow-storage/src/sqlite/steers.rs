@@ -6,8 +6,8 @@ use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use super::SqliteStore;
 use crate::process::SessionAttachment;
 use crate::steer::{
-    IdleConversation, IdleReach, NativeBoundary, SessionSteerPage, SessionSteerStatus, Steer,
-    SteerAdapter,
+    IdleConversation, IdleReach, Inbox, NativeBoundary, SessionSteerPage, SessionSteerStatus,
+    Steer, SteerAdapter,
 };
 use crate::{StoreError, StoreResult};
 
@@ -54,9 +54,12 @@ impl SqliteStore {
     ) -> StoreResult<T> {
         let _fence = self.lock_session_dispatch(&adapter.session)?;
         // A provider start that changes conversation also moves the resume
-        // reference, on the account it already names.
+        // reference, on the account it already names. A launch whose provider
+        // names the conversation (Antigravity) has published none yet, and a
+        // held terminal leaves no lf process to publish it later: the start
+        // does.
         let resume = match boundary {
-            NativeBoundary::Select { .. } => self.resume_reference(&adapter.session)?,
+            NativeBoundary::Select { .. } => self.resume_input(&adapter.session)?,
             _ => None,
         };
         // A turn in the selected, activated, already observed conversation
@@ -140,9 +143,11 @@ impl SqliteStore {
                 thread,
                 source,
             )?);
-            if let Some((session, input, reference)) =
-                resume.filter(|(_, _, reference)| reference.agent_session.as_str() != thread)
-            {
+            if let Some((session, input, reference)) = resume.filter(|(_, _, reference)| {
+                reference
+                    .as_ref()
+                    .is_none_or(|reference| reference.agent_session.as_str() != thread)
+            }) {
                 history.extend(super::sessions::retain_history_in(
                     &tx,
                     &session,
@@ -150,7 +155,7 @@ impl SqliteStore {
                         &session,
                         &input,
                         &thread.into(),
-                        reference.account_id,
+                        reference.and_then(|reference| reference.account_id),
                     )],
                 )?);
             }
@@ -176,15 +181,16 @@ impl SqliteStore {
         open_tools: Option<usize>,
     ) -> StoreResult<()> {
         self.with_provider_context(adapter, thread, NativeBoundary::Turn, || {
-            let (native, previous_work): (bool, i64) =
+            let (native, previous_work, started_since_turn): (bool, i64, bool) =
                 self.conn.lock().expect("store mutex poisoned").query_row(
-                    "SELECT s.interactive, COALESCE(act.open_tools,0)
+                    "SELECT s.interactive, COALESCE(act.open_tools,0),
+                            s.starts_since_turn>0 OR s.last_started_at IS NOT NULL
                      FROM agent_sessions s
                      LEFT JOIN session_activity act
                        ON act.agent_process_id=s.agent_process_id AND act.session_id=s.id
                      WHERE s.id=?2 AND s.agent_process_id=?1",
                     params![adapter.agent_process_id, adapter.session],
-                    |row| Ok((row.get(0)?, row.get(1)?)),
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
                 )?;
             // A headless run reports through the stream lf owns. A person's
             // conversation reports here, Codex's included: its AgentProcess is
@@ -195,6 +201,16 @@ impl SqliteStore {
             let attachment = self.session_attachment(&adapter.session)?.ok_or_else(|| {
                 StoreError::InvalidAuthority("Native provider has no attachment".into())
             })?;
+            if yielded && started_since_turn {
+                // A finished turn is a conversation that runs: the recovery
+                // pass counts its starts again from none, and starts the
+                // first death after it at once.
+                self.conn.lock().expect("store mutex poisoned").execute(
+                    "UPDATE agent_sessions SET starts_since_turn=0,last_started_at=NULL
+                     WHERE id=?1 AND (starts_since_turn>0 OR last_started_at IS NOT NULL)",
+                    [&adapter.session],
+                )?;
+            }
             self.record_session_activity(
                 &adapter.session,
                 &attachment,
@@ -210,22 +226,43 @@ impl SqliteStore {
         })
     }
 
-    /// Save where an idle Claude conversation takes messages: the inbox key
-    /// file its hook found. Written only when it changes.
-    pub fn record_agent_inbox(&self, adapter: &SteerAdapter, key: &Path) -> StoreResult<()> {
+    /// Save where an idle conversation takes messages: Claude's inbox key in
+    /// `agent_inbox`, an OpenCode or Pi socket in `agent_socket`. Written only
+    /// when it changes, which is the answer.
+    pub fn record_agent_inbox(&self, adapter: &SteerAdapter, inbox: &Inbox) -> StoreResult<bool> {
+        let (column, path) = match inbox {
+            Inbox::Claude(path) => ("agent_inbox", path),
+            Inbox::Socket(path) => ("agent_socket", path),
+        };
         let conn = self.conn.lock().expect("store mutex poisoned");
-        conn.execute(
-            "UPDATE agent_sessions SET agent_inbox=?3 WHERE id=?1 AND agent_process_id=?2
-                AND agent_inbox IS NOT ?3 AND EXISTS(SELECT 1 FROM steer_adapters a
-                WHERE a.agent_process_id=?2 AND a.capability=?4)",
+        let changed = conn.execute(
+            &format!(
+                "UPDATE agent_sessions SET {column}=?3 WHERE id=?1
+                    AND agent_process_id=?2 AND {column} IS NOT ?3 AND EXISTS(SELECT 1
+                    FROM steer_adapters a WHERE a.agent_process_id=?2 AND a.capability=?4)"
+            ),
             params![
                 adapter.session,
                 adapter.agent_process_id,
-                key.to_string_lossy(),
+                path.to_string_lossy(),
                 adapter.capability
             ],
         )?;
-        Ok(())
+        if changed > 0 {
+            // A provider naming its inbox for the first time has run no turn
+            // yet, whatever the one before it on this Session was doing: a
+            // reopened conversation is idle until its first turn says otherwise.
+            // A held terminal's status stream may already have moved the
+            // reading to this provider; with no turn read yet it is still 0.
+            conn.execute(
+                "UPDATE session_activity SET agent_process_id=?2,yielded=1,open_tools=0,pending_input=0,
+                    observed_at=unixepoch(),program_status=CASE WHEN agent_process_id IS ?2 THEN program_status END,cpu_sampled_at=NULL,cpu_quiet_since=NULL,
+                    attachment_token=COALESCE((SELECT attachment_token FROM agent_sessions WHERE id=?1),attachment_token)
+                 WHERE session_id=?1 AND (agent_process_id IS NOT ?2 OR observed_at=0)",
+                params![adapter.session, adapter.agent_process_id],
+            )?;
+        }
+        Ok(changed > 0)
     }
 
     /// Managed conversations whose last boundary was a turn end, on a live
@@ -239,19 +276,24 @@ impl SqliteStore {
         let mut statement = conn.prepare(
             "SELECT s.id,s.agent_process_id,a.capability,s.provider_thread,s.cwd,
                 CASE WHEN s.provider='codex' THEN s.agent_endpoint END,s.agent_inbox,
-                s.agent_pid,s.agent_os_started_at
+                s.agent_pid,s.agent_os_started_at,s.agent_socket
              FROM agent_sessions s INDEXED BY agent_sessions_unended_agent
              JOIN steer_adapters a ON a.agent_process_id=s.agent_process_id
              JOIN session_activity act ON act.session_id=s.id AND act.agent_process_id=s.agent_process_id
              WHERE s.agent_process_id IS NOT NULL AND s.agent_ended_at IS NULL
                AND act.yielded=1 AND s.interactive=1 AND s.provider_thread IS NOT NULL
-               AND (s.provider='codex' AND s.agent_endpoint IS NOT NULL OR s.agent_inbox IS NOT NULL)
+               AND (s.provider='codex' AND s.agent_endpoint IS NOT NULL OR s.agent_inbox IS NOT NULL
+                    OR s.agent_socket IS NOT NULL)
                AND (?1 IS NULL OR s.id=?1)",
         )?;
         let rows = statement.query_map([session], |row| {
-            let reach = match row.get::<_, Option<String>>(5)? {
-                Some(endpoint) => IdleReach::Codex(endpoint.into()),
-                None => IdleReach::Claude(row.get::<_, String>(6)?.into()),
+            // The query keeps only reachable conversations: with no endpoint
+            // or socket, the Claude key is there.
+            let path = |column| row.get::<_, Option<String>>(column);
+            let reach = match (path(5)?, path(9)?) {
+                (Some(endpoint), _) => IdleReach::Codex(endpoint.into()),
+                (None, Some(socket)) => IdleReach::Inbox(Inbox::Socket(socket.into())),
+                (None, None) => IdleReach::Inbox(Inbox::Claude(row.get::<_, String>(6)?.into())),
             };
             let identity = row
                 .get::<_, Option<u32>>(7)?
@@ -285,16 +327,16 @@ impl SqliteStore {
         Ok(())
     }
 
-    /// The Session's published resume reference with the input it belongs to.
-    /// A Session that never published one leaves publication to its launch.
-    fn resume_reference(
+    /// The Session's current input with the resume reference published for
+    /// it, if any.
+    fn resume_input(
         &self,
         session: &str,
     ) -> StoreResult<
         Option<(
             crate::session::LfSession,
             String,
-            crate::session_record::ProviderSessionRef,
+            Option<crate::session_record::ProviderSessionRef>,
         )>,
     > {
         let Some(session) = self.session(session)? else {
@@ -303,9 +345,8 @@ impl SqliteStore {
         let Some(input) = session.artifact_key.clone() else {
             return Ok(None);
         };
-        Ok(self
-            .input_provider_session(&input)?
-            .map(|reference| (session, input, reference)))
+        let reference = self.input_provider_session(&input)?;
+        Ok(Some((session, input, reference)))
     }
 }
 

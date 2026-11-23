@@ -48,14 +48,15 @@ struct WaveRowViewTests {
         #expect(try nameText.string() == "Aurora Melody")
     }
 
-    @Test("Row renders an operational lens")
+    @Test("Row renders its status mark")
     func showsLens() throws {
         let wave = makeWave(status: .ready)
         let row = makeRow(wave: wave)
 
-        // The lens is present, and its accessibility names the reason.
-        let lens = try row.inspect().find(viewWithAccessibilityIdentifier: "wave-lens")
-        #expect(try lens.accessibilityLabel().string().contains("No active Tasks"))
+        // The mark is a dot beside the name; its tooltip and VoiceOver name the reason.
+        let mark = try row.inspect().find(StatusMark<EmptyView>.self).actualView()
+        #expect(mark.phrase == nil)
+        #expect(mark.detail?.contains("No active Tasks") == true)
     }
 
     @Test("Row shows open-task count only when nonzero")

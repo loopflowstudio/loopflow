@@ -1,0 +1,1 @@
+The brief leaves Session closure tentative. The plan chooses to close the Task’s primary provider on pause and retain the conversation. It also chooses a separate Paused board section and an explicit `lf task unpause` that releases the hold before the next run.

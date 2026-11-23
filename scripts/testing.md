@@ -321,52 +321,113 @@ Each worktree keeps its own target directory. Cargo serializes commands sharing
 one target directory, so run one Cargo command at a time in each worktree. Do
 not point sibling worktrees at a shared mutable target directory.
 
-### Optional compilation cache
-
-Machine-local `~/.cargo/config.toml` can set `[build] rustc-wrapper = "sccache"`.
-The repository sets no wrapper; ordinary Cargo builds work without a cache.
-The dev and test profiles disable incremental compilation so library builds can
-use sccache.
-
-Cross-worktree reuse needs sccache with Rust basedir normalization and verbatim
-environment-dependency tracking. Version 0.19.0 does not provide that reuse.
-The cache configuration must list each worktree's absolute root in `basedirs`
-(or `SCCACHE_BASEDIRS`); listing only their shared parent is insufficient. Use
-`SCCACHE_BASEDIRS_VERBATIM_ENV_DEPS` to keep checkout identity values such as
-`CARGO_MANIFEST_DIR`, `CARGO_MANIFEST_PATH` and `LOOPFLOW_BUILD_SOURCE_ROOT`
-verbatim when compiled code reads them.
-
-Cache hits can retain another checkout's absolute debug-source paths. Use the
-isolated build above when those paths no longer resolve. The
-[crate rebuild probe](benchmarks/crate-rebuild/README.md) records source paths
-alongside runtime-identity checks. Use the isolated build for source debugging.
-`scripts/dev-lf` refreshes the derived worktree inventory before building.
-
-Use one machine-wide server for a shared local cache. Before a developer build,
-`scripts/build_cache.py` reads `git worktree list --porcelain -z` and writes
-`~/.cache/loopflow/sccache.json` (under `XDG_CACHE_HOME` when set). Other settings
-follow the Machine's default sccache file. The current canonical root is included, and inventories from other repositories are retained.
-The script selects that file for the build and keeps checkout environment
-dependencies verbatim. It never stops or restarts the daemon: refreshed roots
-apply after its normal idle shutdown, when the next build starts it. Until then,
-a new root can compile with cache misses. Each worktree still owns its target.
-An explicit `SCCACHE_CONF` stays under its caller's control.
-
-Ordinary Cargo uses the Machine's configuration and whichever shared server is
-running; it does not run this inventory refresh. The isolated developer build
-bypasses it. Neither path installs a wrapper or changes the Machine's Cargo
-configuration. The [root upkeep probe](benchmarks/crate-rebuild/README.md) checks
-late-root reuse after an observed idle exit with correct runtime identity.
-
-If the configured wrapper is missing or the cache service fails, build directly:
+### Shared compilation cache
 
 ```bash
-RUSTC_WRAPPER= cargo build -p loopflow --bin lf
+uv run python scripts/build_cache.py install   # run in each repository that shares the cache
+uv run python scripts/build_cache.py status    # in any worktree
 ```
 
-A cache miss costs compilation time. It does not require cleaning the target
-directory or resetting the shared cache. Compare build time and CPU as well as
-cache hits: a high hit rate does not account for linking or test execution.
+```text
+wrapper  ~/.local/share/loopflow/sccache/ca81ec2a…/bin/sccache (pinned)
+daemon   pid 4242, /…/ca81ec2a…/bin/sccache, up 3m; configured idle timeout sccache default (600s) (next start)
+roots    61 of 61 loaded; this checkout loaded
+Rust     258 hits, 1 miss
+cache    6.2 GiB of 10 GiB
+```
+
+Plain `cargo build` shares eligible libraries across worktrees. Each worktree
+keeps its own target. `cargo test` shares registry dependencies and keeps
+incremental state for workspace crates. A fresh target still compiles and links
+test executables, binaries, proc-macros and build scripts. The application's
+`test-support` libraries embed checkout paths and also compile in each root.
+
+The installer builds and checks the pin, then writes `build.rustc-wrapper` and
+`SCCACHE_*` entries in the personal Cargo configuration (`~/.cargo/config.toml`,
+or `~/.cargo/config` when it exists). It keeps other settings,
+the existing cache directory and the size cap. Reinstall to update the hook or
+pass `--revision <sha>` to move the pin. The verified binary and stock 0.19.0
+print the same version. The revision in the installation path and socket name
+identifies the pin. Installing registers the checkout like the hook does, so
+a daemon already serving other repositories loads it. CI uses its own Cargo
+configuration.
+
+Git's `post-checkout` hook registers the worktree in
+`~/.cache/loopflow/sccache.json` (under `XDG_CACHE_HOME` when set). The hook
+carries a copy of the script so older revisions can register. It retains other
+repositories' roots and lets Git finish checkout if registration fails.
+Installation keeps an existing shell hook in place when it can insert the
+registration command. Other hooks move beside it to `post-checkout.before-loopflow`.
+Git runs the saved hook with its original arguments if it is executable.
+
+The daemon reads that list at startup. If the pinned client-side daemon lacks
+this root, registration asks it to stop. The next compile starts its replacement.
+In the two-worktree probe the stop took 11 seconds. The in-flight compiler
+finished, Cargo kept its library and the focused test passed. The cache missed
+that library write. In a separate check, two worktrees built an identical edit
+to `loopflow-definitions`. The first recorded one miss and the second recorded
+one hit and produced a byte-identical library.
+[Run the registration probe](benchmarks/crate-rebuild/README.md#registration-during-a-build).
+
+After a skipped hook, run `status` from the affected worktree. It reads the
+configured roots, the serving executable, its loaded roots and cache counters.
+A stats read resets the idle timer. `status --json` includes both root lists.
+
+| Exit | What status found | Recovery |
+|---|---|---|
+| 0 | The root is listed and any serving daemon has loaded it | Build normally |
+| 3 | The Machine inventory or its pinned client-side daemon lacks the root | `uv run python scripts/build_cache.py register` |
+| 3 | Your `SCCACHE_CONF` or `SCCACHE_BASEDIRS` lacks the root | Add the root and reload your daemon if running |
+| 3 | A caller-owned or server-side daemon lacks a listed root | Restart it with the updated list |
+| 1 | Wrapper, socket owner or configuration error | Check the diagnostic and rerun `install` |
+
+A missing wrapper affects every repository using the personal configuration.
+To build while repairing it, run `RUSTC_WRAPPER= cargo build -p loopflow --bin lf`.
+
+**Edit to passing test.** The test profile enables incremental compilation
+because it won both three-edit comparisons. Times below are median seconds
+across three warm cohorts with two Cargo jobs. Each edit includes a passing
+focused test and its link.
+
+| Workflow | Cache mode | Incremental |
+|---|---:|---:|
+| First application edit in a new worktree | 213 | 210 |
+| Next application edit in that worktree | 40 | 9 |
+| Three application edits, starting in a new worktree | 285 | 228 |
+| First execution edit after the application tests | 90 | 107 |
+| Next execution edit in that worktree | 86 | 15 |
+| Three execution edits after the application tests | 260 | 131 |
+| First execution edit in a new worktree | 272 | Unmeasured |
+
+To use the shared cache for eligible workspace libraries in a focused test:
+
+```bash
+CARGO_INCREMENTAL=0 cargo test -p loopflow-execution --lib skills::catalog::
+```
+
+The installer sets `SCCACHE_ALLOW_INCREMENTAL=1`. Each incremental setting
+uses different registry artifact keys. A fresh cache-mode application test in
+the warm private cache recorded 300 Rust hits and two misses. With incremental
+enabled, it recorded 296 hits, and incremental workspace compiles bypassed the
+cache. The shared Machine cache reached its 10 GiB cap, so entries may be
+evicted between worktrees. The report gives ranges, CPU, memory and compiler
+counters for the warm-cache measurements. Concurrent-worktree capacity is unmeasured.
+[Edit-to-test measurements](benchmarks/crate-rebuild/results/loo-921.html).
+
+**Private cache.** Caller-supplied variables override the installer's Cargo
+settings. Give a build its own directory and socket, then stop that daemon
+using the wrapper path printed by `status`.
+
+```bash
+SCCACHE_DIR=/tmp/my-cache SCCACHE_SERVER_UDS=/tmp/my-cache.sock cargo build -p loopflow --bin lf
+wrapper=$(uv run python scripts/build_cache.py status --json | jq -r .wrapper)
+SCCACHE_SERVER_UDS=/tmp/my-cache.sock "$wrapper" --stop-server
+```
+
+**Source debugging.** Cache hits can retain absolute source paths from another
+checkout. `scripts/dev-lf --isolated-build` compiles in `target/isolated` with
+the cache bypassed. To turn off the Machine cache, remove the installer's
+`rustc-wrapper` and `SCCACHE_*` entries from the personal Cargo configuration.
 
 ## Leave to CI unless the change reaches them
 

@@ -180,11 +180,13 @@ uv sync
 
 `rust/loopflow-terminal/build.rs` downloads the pinned `libghostty-vt` archive once per target
 directory; offline, point `LOOPFLOW_GHOSTTY_VT_DIR` at a directory holding
-`libghostty-vt.a`. Run one cargo command at a time: concurrent builds wait on
+`libghostty-vt.a`. Benchmark compiler receipt wrappers retain the `sccache` basename: cc-rs uses
+it to cache C/C++ build steps too. Run one cargo command at a time: concurrent builds wait on
 one target lock. CI runs the full matrix; locally, run it only to reproduce a
 CI failure. When work needs a tool the Machine lacks, install it (Homebrew on
 macOS) at Machine level and continue. Keep Machine-only tools out of config CI
-reads: sccache runs through `~/.cargo/config.toml`. `scripts/testing.md` holds
+reads: sccache runs through `~/.cargo/config.toml`, written by
+`scripts/build_cache.py install`. `scripts/testing.md` holds
 the command list; module READMEs and `.github/CI.md` own their checks.
 
 # Code Organization

@@ -31,8 +31,9 @@ pub struct Applied {
     pub after: Vec<Entry>,
 }
 
-fn at<'a>(node: &'a Value, path: &[&str]) -> Option<&'a Value> {
-    path.iter().try_fold(node, |node, key| node.get(*key))
+fn at<'a>(node: &'a Value, path: &[impl AsRef<str>]) -> Option<&'a Value> {
+    path.iter()
+        .try_fold(node, |node, key| node.get(key.as_ref()))
 }
 
 fn refs(path: &[String]) -> Vec<&str> {
@@ -55,9 +56,7 @@ pub(super) fn context_field(
         .into_iter()
         .map(|path| [prefix.iter().map(|s| (*s).to_owned()).collect(), path].concat())
         .collect();
-    let existing = paths
-        .iter()
-        .find(|path| at(document, &refs(path)).is_some());
+    let existing = paths.iter().find(|path| at(document, path).is_some());
     if let Some(value) = value {
         settings::validate_value(preference, &value)?;
         if list && preference == ["context", "docs"] {
@@ -139,7 +138,7 @@ impl<'a> Setting<'a> {
         let key = &self.path[self.prefix.len()..];
         let mut paths = Vec::new();
         for prefix in self.prefixes() {
-            let node = at(document, &refs(&prefix)).unwrap_or(&Value::Null);
+            let node = at(document, &prefix).unwrap_or(&Value::Null);
             let mut tails = keys::spellings(&refs(key), self.root);
             if key == ["planning"] {
                 tails.push(vec!["linear".into(), "team".into()]);
@@ -171,7 +170,7 @@ impl<'a> Setting<'a> {
         self.paths(document)
             .into_iter()
             .filter_map(|path| {
-                at(document, &refs(&path)).map(|value| {
+                at(document, &path).map(|value| {
                     Ok(Entry {
                         path,
                         value: serde_json::to_value(value)?,
@@ -186,11 +185,11 @@ impl<'a> Setting<'a> {
             return Ok(None);
         };
         if self.key == "repo.tracker" {
-            if let Some(node) = at(normalized, &refs(&self.prefix)) {
+            if let Some(node) = at(normalized, &self.prefix) {
                 return Ok(Some(keys::tracker_value(node)));
             }
         }
-        match at(normalized, &refs(&self.path)) {
+        match at(normalized, &self.path) {
             Some(value) => Ok(Some(value.clone())),
             None => Ok(Some(serde_yaml_ng::to_value(&first.value)?)),
         }
@@ -203,7 +202,7 @@ impl<'a> Setting<'a> {
         let prefixes = self.prefixes();
         let selected = prefixes
             .iter()
-            .find(|path| at(document, &refs(path)).is_some())
+            .find(|path| at(document, path).is_some())
             .unwrap_or(&self.prefix);
         for prefix in &prefixes {
             let path = refs(prefix);
@@ -240,17 +239,8 @@ impl<'a> Setting<'a> {
             );
         }
         let parsed = text
-            .map(|s| settings::parse_value(self.key, s))
+            .map(|text| self.destination.parse_value(self.key, text))
             .transpose()?;
-        if self.key == "wave.graph" {
-            if let (Some(name), Some(repository)) = (
-                parsed.as_ref().and_then(Value::as_str),
-                &self.destination.repository,
-            ) {
-                let graph = crate::graph::load_authored_graph(name, repository)?;
-                crate::graph::compile_graph(&graph, repository)?;
-            }
-        }
         let key = &self.path[self.prefix.len()..];
         super::edit_document(document, &refs(key), parsed, self.root)?;
         Ok(())
@@ -303,7 +293,7 @@ impl<'a> Setting<'a> {
                 }
                 for entry in entries {
                     ensure!(
-                        at(document, &refs(&entry.path)).is_none(),
+                        at(document, &entry.path).is_none(),
                         Error::conflict(format!(
                             "another declaration occupies {}; refresh before restoring",
                             entry.path.join(".")

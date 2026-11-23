@@ -79,10 +79,15 @@ struct ScopedSettings: View {
     private func row(_ definition: ConfigurationDefinition, in scope: ConfigurationScope) -> some View {
         let key = definition.key
         if let effective = scope.settings[key] {
-            if let file = model.file(for: definition), file.slots[key] != nil {
-                ScopedSettingRow(model: model, definition: definition, effective: effective,
-                    file: file, source: scope.source(key), notices: notices, manager: undoManager)
-                    .settingsRow(key, highlighted: highlightedKey)
+            if let file = model.editableFile(for: definition) {
+                // Search addresses the outer row by catalog key. The editor's draft
+                // belongs to the selected file and its Skill or Graph step.
+                VStack(alignment: .leading) {
+                    ScopedSettingRow(model: model, definition: definition, effective: effective,
+                        file: file, source: scope.source(key), notices: notices, manager: undoManager)
+                        .id(ScopedSettingsModel.RowAddress(file, key))
+                }
+                .settingsRow(key, highlighted: highlightedKey)
             } else {
                 SettingProvenance(title: definition.title, value: effective.value.settingsText, effective: effective)
                     .settingsRow(key, highlighted: highlightedKey)

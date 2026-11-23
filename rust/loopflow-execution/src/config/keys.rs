@@ -98,31 +98,29 @@ pub fn edit_tracker(
     Ok(())
 }
 
+fn owned(parts: &[&str]) -> Vec<String> {
+    parts.iter().copied().map(str::to_owned).collect()
+}
+
 /// The typed path any spelling of a key names.
 pub fn typed(parts: &[&str]) -> Vec<String> {
-    let own = |parts: &[&str]| {
-        parts
-            .iter()
-            .map(|part| (*part).to_owned())
-            .collect::<Vec<_>>()
-    };
     if let Some(path) = tracker_path(parts) {
         return [
             vec!["planning".into()],
-            own(path.get(1..).unwrap_or_default()),
+            owned(path.get(1..).unwrap_or_default()),
         ]
         .concat();
     }
     match parts {
         ["repo", "plan", rest @ ..] | ["plan", rest @ ..] => {
-            [vec!["planning".into()], own(rest)].concat()
+            [vec!["planning".into()], owned(rest)].concat()
         }
-        ["skill", name, rest @ ..] => [vec!["skills".into(), (*name).into()], own(rest)].concat(),
+        ["skill", name, rest @ ..] => [vec!["skills".into(), (*name).into()], owned(rest)].concat(),
         ["wave", "graph"] => vec!["graph".into()],
         ["wave" | "waves", id, rest @ ..] => {
             [vec!["waves".into(), (*id).into()], typed(rest)].concat()
         }
-        _ => own(parts),
+        _ => owned(parts),
     }
 }
 
@@ -132,22 +130,16 @@ pub fn typed_key(key: &str) -> String {
 
 /// The canonical spelling of a typed path.
 pub fn canonical(parts: &[&str], root: Root) -> Vec<String> {
-    let own = |parts: &[&str]| {
-        parts
-            .iter()
-            .map(|part| (*part).to_owned())
-            .collect::<Vec<_>>()
-    };
     match parts {
         ["planning"] => vec!["repo".into(), "tracker".into()],
-        ["skills", name, rest @ ..] => [vec!["skill".into(), (*name).into()], own(rest)].concat(),
+        ["skills", name, rest @ ..] => [vec!["skill".into(), (*name).into()], owned(rest)].concat(),
         ["graph"] if root == Root::General => vec!["wave".into(), "graph".into()],
         ["waves", id, rest @ ..] => [
             vec!["wave".into(), (*id).into()],
             canonical(rest, Root::Wave),
         ]
         .concat(),
-        _ => own(parts),
+        _ => owned(parts),
     }
 }
 
@@ -157,23 +149,17 @@ pub fn canonical_key(key: &str) -> String {
 
 /// Every spelling of a typed path, canonical first, as a document may hold it.
 pub fn spellings(parts: &[&str], root: Root) -> Vec<Vec<String>> {
-    let own = |parts: &[&str]| {
-        parts
-            .iter()
-            .map(|part| (*part).to_owned())
-            .collect::<Vec<_>>()
-    };
     let group = |heads: Vec<Vec<String>>, rest: &[&str]| -> Vec<Vec<String>> {
         heads
             .into_iter()
-            .map(|head| [head, own(rest)].concat())
+            .map(|head| [head, owned(rest)].concat())
             .collect()
     };
     match parts {
         ["context", name] => {
-            let mut paths = vec![own(parts)];
+            let mut paths = vec![owned(parts)];
             if let Some((old, _)) = CONTEXT_ALIASES.iter().find(|(_, new)| new == name) {
-                paths.push(own(&[old]));
+                paths.push(owned(&[old]));
             }
             paths
         }
@@ -208,7 +194,7 @@ pub fn spellings(parts: &[&str], root: Root) -> Vec<Vec<String>> {
                 vec![super::GRAPH_ALIAS.into()],
             ]
         }
-        ["graph"] => vec![own(parts), vec![super::GRAPH_ALIAS.into()]],
+        ["graph"] => vec![owned(parts), vec![super::GRAPH_ALIAS.into()]],
         ["waves", id, rest @ ..] => {
             let tails = spellings(rest, Root::Wave);
             ["wave", "waves"]
@@ -220,7 +206,7 @@ pub fn spellings(parts: &[&str], root: Root) -> Vec<Vec<String>> {
                 })
                 .collect()
         }
-        _ => vec![own(parts)],
+        _ => vec![owned(parts)],
     }
 }
 
@@ -341,9 +327,8 @@ pub fn gather(document: &mut Value, parts: &[&str], root: Root) -> Vec<String> {
         ["skills", _, rest @ ..] => (&parts[..2], rest, Root::General),
         ["graph"] => (parts, &[], root),
         ["waves", _, rest @ ..] => (&parts[..2], rest, Root::Wave),
-        _ => return parts.iter().map(|part| (*part).to_owned()).collect(),
+        _ => return owned(parts),
     };
-    let target: Vec<String> = group.iter().map(|part| (*part).to_owned()).collect();
     // Gather the group's spellings into their own document and fold it, so
     // the same rule as a read decides what the group holds.
     let mut spelled = spellings(group, root);
@@ -369,23 +354,19 @@ pub fn gather(document: &mut Value, parts: &[&str], root: Root) -> Vec<String> {
         .cloned()
         .unwrap_or(Value::Null);
     if !gathered.is_null() {
-        super::settings::insert(
-            document,
-            &target.iter().map(String::as_str).collect::<Vec<_>>(),
-            gathered,
-        );
+        super::settings::insert(document, group, gathered);
     }
     if rest.is_empty() {
-        return target;
+        return owned(group);
     }
-    let node = target
+    let node = group
         .iter()
-        .try_fold(&mut *document, |value, key| value.get_mut(key.as_str()));
+        .try_fold(&mut *document, |value, key| value.get_mut(*key));
     let tail = match node {
         Some(node) => gather(node, rest, inner),
-        None => rest.iter().map(|part| (*part).to_owned()).collect(),
+        None => owned(rest),
     };
-    [target, tail].concat()
+    [owned(group), tail].concat()
 }
 
 /// A definition's canonical key and the other spellings `typed` accepts for it.

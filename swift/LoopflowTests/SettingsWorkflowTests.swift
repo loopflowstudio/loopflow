@@ -210,9 +210,7 @@ struct SettingsWorkflowTests {
     }
 
     @Test func machineRowsShowTheServedIdentityCheckAndEndedRental() async throws {
-        let source = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-        let wire = try JSONDecoder().decode([String: JSONValue].self, from: Data(contentsOf:
-            source.appending(path: "tests/fixtures/dto/machine_status.json")))
+        let wire = try JSONDecoder().decode([String: JSONValue].self, from: loadFixtureData("machine_status.json"))
         let sample = try #require(JSONDecoder().decode([MachineConnectionStatus].self, from: JSONEncoder().encode(wire["status"])).first)
         let id = sample.machine.id
         let read = ServedRead.machineStatus(machine: id)

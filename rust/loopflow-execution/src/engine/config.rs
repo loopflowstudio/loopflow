@@ -203,7 +203,6 @@ fn declaration(
     value: Option<&str>,
     unset: bool,
 ) -> Result<Declaration> {
-    anyhow::ensure!(!(value.is_some() && unset), "choose a value or unset");
     let destination = destination.resolve()?;
     let spelled: Vec<_> = key.split('.').collect();
     if let Some(fields) = crate::config::keys::tracker_path(&spelled) {
@@ -212,19 +211,42 @@ fn declaration(
     }
     let key = &crate::config::keys::typed_key(key);
     crate::config::settings::validate_scope(key, destination.source, destination.scope)?;
-    if let ("graph", Some(value), Some(repository)) =
-        (key.as_str(), value, destination.repository.as_deref())
-    {
-        let parsed = crate::config::settings::parse_value(key, value)?;
-        if let Some(name) = parsed.as_str() {
-            let graph = crate::graph::load_authored_graph(name, repository)?;
-            crate::graph::compile_graph(&graph, repository)?;
-        }
-    }
+    let parsed = value
+        .map(|text| destination.parse_value(key, text))
+        .transpose()?;
     let mut parts: Vec<_> = destination.prefix.iter().map(String::as_str).collect();
     parts.extend(key.split('.'));
     let root = destination.root();
-    file_value(&destination.path, &parts, key, value, unset, root)
+    let path = &destination.path;
+    if parsed.is_some() || unset {
+        crate::config::files::edit(path, &parts, parsed, root)?;
+    }
+    let text = crate::config::files::settings_text(path, root)?;
+    let mut document = Value::Mapping(crate::config::reader::parse(&text, path));
+    crate::config::keys::fold(&mut document);
+    let preference = crate::config::settings::preference_path(key)?;
+    if preference.len() > 1 && preference[0] == "context" {
+        crate::config::normalize_context(&mut document);
+    }
+    let value = parts
+        .iter()
+        .try_fold(&document, |value, part| value.get(*part))
+        .cloned()
+        .unwrap_or(Value::Null);
+    let canonical = match parts.as_slice() {
+        ["planning", field] if *field != "provider" => document["planning"]["provider"]
+            .as_str()
+            .map(|tag| format!("repo.tracker.{tag}.{field}")),
+        _ => None,
+    };
+    Ok(Declaration {
+        path: destination.path,
+        key: canonical.unwrap_or_else(|| crate::config::keys::canonical(&parts, root).join(".")),
+        value,
+        lifecycle: crate::config::catalog::definition(&preference.join("."))
+            .expect("validated key")
+            .lifecycle,
+    })
 }
 
 fn tracker_declaration(
@@ -260,50 +282,6 @@ fn tracker_declaration(
             .unwrap_or(Value::Null),
         lifecycle: crate::config::catalog::definition("planning")
             .expect("tracker is catalogued")
-            .lifecycle,
-    })
-}
-
-/// `parts` is the typed path; the file holds it at its canonical spelling,
-/// which the declaration reports as `key`.
-fn file_value(
-    path: &Path,
-    parts: &[&str],
-    key: &str,
-    value: Option<&str>,
-    unset: bool,
-    root: crate::config::keys::Root,
-) -> Result<Declaration> {
-    let parsed = value
-        .map(|value| crate::config::settings::parse_value(key, value))
-        .transpose()?;
-    if parsed.is_some() || unset {
-        crate::config::files::edit(path, parts, parsed, root)?;
-    }
-    let text = crate::config::files::settings_text(path, root)?;
-    let mut document = Value::Mapping(crate::config::reader::parse(&text, path));
-    crate::config::keys::fold(&mut document);
-    let preference = crate::config::settings::preference_path(key)?;
-    if preference.len() > 1 && preference[0] == "context" {
-        crate::config::normalize_context(&mut document);
-    }
-    let value = parts
-        .iter()
-        .try_fold(&document, |value, part| value.get(*part))
-        .cloned()
-        .unwrap_or(Value::Null);
-    let canonical = match parts {
-        ["planning", field] if *field != "provider" => document["planning"]["provider"]
-            .as_str()
-            .map(|tag| format!("repo.tracker.{tag}.{field}")),
-        _ => None,
-    };
-    Ok(Declaration {
-        path: path.to_owned(),
-        key: canonical.unwrap_or_else(|| crate::config::keys::canonical(parts, root).join(".")),
-        value,
-        lifecycle: crate::config::catalog::definition(&preference.join("."))
-            .expect("validated key")
             .lifecycle,
     })
 }
@@ -390,11 +368,10 @@ fn inspect_selection(
 
 #[cfg(test)]
 mod tests {
-    use super::{explain, get, set, unset as unset_key};
+    use super::{explain, get, set, unset};
     use crate::config::environment::EnvVarGuard;
     use crate::config::files::Destination;
     use loopflow_test_support::TestRepo;
-    use serde_json::{json, Value};
     use std::path::Path;
 
     #[test]
@@ -425,6 +402,22 @@ mod tests {
     }
 
     #[test]
+    fn checked_graph_edits_validate_both_spellings_in_the_checkout() {
+        let repo = tempfile::tempdir().unwrap();
+        let destination = Destination::SharedRepository {
+            repository: repo.path().into(),
+        };
+        let change = super::edit::Change::Set {
+            value: "missing-graph".into(),
+        };
+        for key in ["wave.graph", "graph"] {
+            let error = super::checked_edit(&destination, key, &[], &change).unwrap_err();
+            assert!(error.to_string().contains("missing-graph"), "{error}");
+        }
+        assert!(!destination.resolve().unwrap().path.exists());
+    }
+
+    #[test]
     fn catalogue_wire_shape_includes_feature_category() {
         let fixture: serde_json::Value = serde_json::from_str(include_str!(
             "../../../../tests/fixtures/dto/configuration_catalog.json"
@@ -449,20 +442,6 @@ mod tests {
         }
     }
 
-    fn edit(
-        destination: &Destination,
-        key: &str,
-        value: Option<&str>,
-        unset: bool,
-    ) -> anyhow::Result<Value> {
-        let saved = match (value, unset) {
-            (Some(value), _) => set(destination, key, value),
-            (None, true) => unset_key(destination, key),
-            (None, false) => get(destination, key),
-        }?;
-        Ok(serde_json::to_value(saved)?)
-    }
-
     fn check(
         destination: &Destination,
         repo: &Path,
@@ -470,7 +449,7 @@ mod tests {
         key: &str,
         expected: &str,
     ) {
-        let explained = serde_json::to_value(explain(destination, key).unwrap()).unwrap();
+        let explained = explain(destination, key).unwrap();
         let config = crate::config::load_wave_config(Some(repo), wave)
             .unwrap()
             .unwrap();
@@ -495,10 +474,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(prepared.config.agent.to_string(), expected);
-        assert_eq!(
-            explained["inspections"][0]["settings"]["agent"]["value"],
-            expected
-        );
+        assert_eq!(explained.inspections[0].settings["agent"].value, expected);
     }
 
     #[test]
@@ -547,17 +523,16 @@ mod tests {
             "id: 9ae21a68-8940-4553-a3ab-135133925e35\n",
         )
         .unwrap();
-        edit(&global, "default_agent", Some("codex:global"), false).unwrap();
+        set(&global, "default_agent", "codex:global").unwrap();
         let global_before = std::fs::read(home.path().join("config.yaml")).unwrap();
-        edit(&shared, "agent", Some("claude:shared"), false).unwrap();
-        let saved = edit(&private, "skills.probe.agent", Some("codex:private"), false).unwrap();
+        set(&shared, "agent", "claude:shared").unwrap();
+        let saved = set(&private, "skills.probe.agent", "codex:private").unwrap();
         assert_eq!(
-            saved["path"],
-            json!(repo
-                .path()
+            saved.path,
+            repo.path()
                 .canonicalize()
                 .unwrap()
-                .join(".lf/config.local.yaml"))
+                .join(".lf/config.local.yaml")
         );
         assert!(!child.join(".lf/config.local.yaml").exists());
         check(
@@ -574,8 +549,8 @@ mod tests {
             "skills.probe.agent",
             "codex:private",
         );
-        edit(&other, "skills.probe.agent", Some("claude:other"), false).unwrap();
-        edit(&wave, "skills.probe.agent", Some("claude:wave"), false).unwrap();
+        set(&other, "skills.probe.agent", "claude:other").unwrap();
+        set(&wave, "skills.probe.agent", "claude:wave").unwrap();
         check(
             &wave,
             &child,
@@ -584,11 +559,11 @@ mod tests {
             "claude:wave",
         );
         let private_before = std::fs::read(repo.path().join(".lf/config.local.yaml")).unwrap();
-        assert!(edit(&private, "user.name", Some("Wrong scope"), false)
+        assert!(set(&private, "user.name", "Wrong scope")
             .unwrap_err()
             .to_string()
             .contains("does not apply"));
-        assert!(edit(&shared, "user.name", Some("Wrong owner"), false).is_err());
+        assert!(set(&shared, "user.name", "Wrong owner").is_err());
         assert_eq!(
             std::fs::read(repo.path().join(".lf/config.local.yaml")).unwrap(),
             private_before
@@ -605,7 +580,7 @@ mod tests {
             wave: id.into(),
         };
         assert_eq!(
-            edit(&renamed, "skills.probe.agent", None, false).unwrap()["value"],
+            get(&renamed, "skills.probe.agent").unwrap().value,
             "claude:wave"
         );
         check(
@@ -622,7 +597,7 @@ mod tests {
             "skills.probe.agent",
             "codex:private",
         );
-        edit(&renamed, "skills.probe.agent", None, true).unwrap();
+        unset(&renamed, "skills.probe.agent").unwrap();
         check(
             &renamed,
             &child,
@@ -641,19 +616,18 @@ mod tests {
             repository: child.clone(),
             wave: id.into(),
         };
-        let saved = edit(&shared_wave, "chrome", Some("false"), false).unwrap();
+        let saved = set(&shared_wave, "chrome", "false").unwrap();
         assert_eq!(
-            saved["path"],
-            json!(child
+            saved.path,
+            child
                 .canonicalize()
                 .unwrap()
-                .join(".lf/wave/new/config.yaml"))
+                .join(".lf/wave/new/config.yaml")
         );
-        edit(
+        set(
             &private,
             "graphs.release.steps.work.agent",
-            Some("claude:occurrence"),
-            false,
+            "claude:occurrence",
         )
         .unwrap();
         check(
@@ -663,8 +637,8 @@ mod tests {
             "graphs.release.steps.work.agent",
             "claude:occurrence",
         );
-        edit(&private, "graphs.release.steps.work.agent", None, true).unwrap();
-        edit(&private, "skills.probe.agent", None, true).unwrap();
+        unset(&private, "graphs.release.steps.work.agent").unwrap();
+        unset(&private, "skills.probe.agent").unwrap();
         check(
             &private,
             &child,
@@ -672,7 +646,7 @@ mod tests {
             "skills.probe.agent",
             "claude:shared",
         );
-        edit(&shared, "agent", None, true).unwrap();
+        unset(&shared, "agent").unwrap();
         check(
             &private,
             &child,

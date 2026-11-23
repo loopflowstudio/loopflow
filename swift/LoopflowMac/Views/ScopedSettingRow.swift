@@ -10,27 +10,22 @@ struct ScopedSettingRow: View {
     let notices: NoticeCenter
     let manager: UndoManager?
     private struct Draft {
-        var text: String
+        // A nil text previews removing the declaration from this file.
+        var text: String?
         var file: ConfigurationScope.File
     }
 
     @State private var draft: Draft?
-    @State private var reset: ConfigurationScope.File?
-    @State private var patch: String?
-    @State private var previewError: String?
+    @State private var preview = Reading<String>.loading
     @State private var moveReview: MoveReview?
     @State private var updatedReview = false
     @FocusState private var focused: Bool
 
     private var key: String { definition.key }
     private var slot: ConfigurationScope.Slot? { file.slots[key] }
-    private var address: ScopedSettingsModel.RowAddress { .init(file, key) }
-    private var isCurrentRow: Bool {
-        model.file(for: definition).map { ScopedSettingsModel.RowAddress($0, key) == address } == true
-    }
     private var declared: ConfigurationScope.Authored { slot?.declared ?? .absent }
     private var authored: JSONValue? { declared.value }
-    private var editError: ScopedSettingsModel.RowError? { model.errors[address] }
+    private var editError: ScopedSettingsModel.RowError? { model.errors[.init(file, key)] }
     private var field: String? {
         switch key {
         case "user": "name"
@@ -41,14 +36,13 @@ struct ScopedSettingRow: View {
     }
     private var input: Binding<String> {
         Binding(get: { draft?.text ?? initialText }, set: { text in
-            reset = nil
-            patch = nil
-            if draft == nil { draft = Draft(text: text, file: file) }
+            preview = .loading
+            if draft?.text == nil { draft = Draft(text: text, file: file) }
             else { draft?.text = text }
         })
     }
     private var initialText: String {
-        let value = field.flatMap { authored?[$0] } ?? authored
+        let value = if let field { authored?[field] } else { authored }
         guard let value else { return "" }
         if usesYAML { return value.settingsYAML }
         return value == .null ? "" : value.settingsText
@@ -68,49 +62,44 @@ struct ScopedSettingRow: View {
             } else if file.owner == .personalGlobal && definition.pane != .general && definition.section != .policy {
                 SettingProvenance(title: "Source", value: "", effective: effective)
             }
-            if let reset {
-                Text(patch ?? previewError ?? "Preparing preview…").font(Typography.mono).textSelection(.enabled)
+            if let draft, draft.text == nil {
+                Text(preview.current ?? preview.failure ?? "Preparing preview…").font(Typography.mono).textSelection(.enabled)
                 HStack {
-                    Button("Cancel") { self.reset = nil }
-                    Button("Reset in this file") { save(.reset, to: reset) }.disabled(patch == nil)
-                    if previewError != nil { Button("Refresh") { refreshRow() } }
+                    Button("Cancel") { self.draft = nil }
+                    Button("Reset in this file") { save(.reset, to: draft.file) }.disabled(preview.current == nil)
+                    if preview.failure != nil { Button("Refresh") { refreshRow() } }
                 }
             } else if declared != .absent {
-                Button("Reset layer…") { draft = nil; patch = nil; reset = file }
-                    .controlSize(.small)
+                Button("Reset layer…") {
+                    preview = .loading
+                    draft = Draft(text: nil, file: file)
+                }.controlSize(.small)
             }
             moveControls
         }
         .disabled(model.editsDisabled)
-        .onChange(of: address) {
-            draft = nil
-            reset = nil
-            patch = nil
-            previewError = nil
-            moveReview = nil
-            updatedReview = false
-        }
-        .task(id: PreviewInput(draft: draft?.text, resetting: reset != nil, expected: (reset ?? draft?.file)?.slots[key]?.entries, entries: slot?.entries ?? [])) {
-            patch = nil
-            previewError = nil
+        .task(id: PreviewInput(text: draft?.text, expected: draft?.file.slots[key]?.entries, entries: slot?.entries)) {
+            preview = .loading
+            guard let draft else { return }
             do {
-                let result: String
-                if let reset {
-                    result = try await model.preview(.reset, key: key, file: reset)
-                } else if let draft, usesYAML {
+                let change: ConfigurationChange
+                if let text = draft.text {
+                    guard usesYAML else { return }
                     try await Task.sleep(for: .milliseconds(150))
-                    result = try await model.preview(.set(draft.text), key: key, file: draft.file)
-                } else { return }
-                if !Task.isCancelled { patch = result }
-            } catch { if !Task.isCancelled { previewError = error.localizedDescription } }
+                    change = .set(text)
+                } else { change = .reset }
+                let result = try await model.preview(change, key: key, file: draft.file)
+                if !Task.isCancelled { preview = .available(result) }
+            } catch {
+                if !Task.isCancelled { preview = .unavailable(lastGood: nil, reason: error.localizedDescription) }
+            }
         }
     }
 
     private struct PreviewInput: Equatable {
-        let draft: String?
-        let resetting: Bool
+        let text: String?
         let expected: [ConfigurationEntry]?
-        let entries: [ConfigurationEntry]
+        let entries: [ConfigurationEntry]?
     }
 
     @ViewBuilder private var moveControls: some View {
@@ -152,7 +141,7 @@ struct ScopedSettingRow: View {
                 (authored?["linear_requests"] ?? effective.value["linear_requests"]) == .bool(true)
             }, set: { save(fieldChange(.bool($0), in: file), to: file) }))
             .toggleStyle(.switch)
-        } else if definition.controlType == "boolean" && !definition.nullable {
+        } else if definition.isSwitch {
             ScopedBooleanToggle(model: model, definition: definition, effective: effective,
                                 file: file, notices: notices, manager: manager)
         } else if let choices = definition.choices {
@@ -173,7 +162,6 @@ struct ScopedSettingRow: View {
                            canClearInherited: definition.combination == "append_reset" && file.owner != .personalGlobal, save: { values in
                 await model.apply(.set(JSONValue.array(values.map(JSONValue.string)).settingsYAML), key: key, to: file, notices: notices, manager: manager)
             })
-            .id(address)
         } else if !usesYAML {
             TextField(definition.title, text: input, prompt: Text(declared == .present(.null) ? "Cleared (null)" : "Inherited"))
                 .focused($focused)
@@ -185,12 +173,12 @@ struct ScopedSettingRow: View {
                 TextEditor(text: input).font(Typography.mono).frame(minHeight: 65)
                 HStack {
                     Button("Cancel") { draft = nil }
-                    Button("Apply") { commitText() }.disabled(patch == nil || previewError != nil)
-                }.disabled(draft == nil)
-                if let previewError {
-                    Text(previewError).foregroundStyle(.secondary)
+                    Button("Apply") { commitText() }.disabled(preview.current == nil)
+                }.disabled(draft?.text == nil)
+                if let failure = preview.failure {
+                    Text(failure).foregroundStyle(.secondary)
                     Button("Refresh") { refreshRow() }
-                } else if let patch { Text(patch).font(Typography.mono).textSelection(.enabled) }
+                } else if let patch = preview.current { Text(patch).font(Typography.mono).textSelection(.enabled) }
             }
         }
     }
@@ -198,7 +186,6 @@ struct ScopedSettingRow: View {
     private func promote(_ action: MoveAction) {
         Task {
             let review = await model.promote(action, key: key, file: file, notices: notices, manager: manager)
-            guard isCurrentRow else { return }
             moveReview = review
             if case .confirm = action { updatedReview = review != nil } else { updatedReview = false }
         }
@@ -206,9 +193,8 @@ struct ScopedSettingRow: View {
 
     private func refreshRow() {
         Task {
-            guard let fresh = await model.refresh(key: key, file: file), isCurrentRow else { return }
+            guard let fresh = await model.refresh(key: key, file: file) else { return }
             draft?.file = fresh
-            if reset != nil { reset = fresh }
         }
     }
 
@@ -221,21 +207,20 @@ struct ScopedSettingRow: View {
     }
 
     private func commitText() {
-        guard let draft, !model.editsDisabled else { return }
+        guard let draft, let text = draft.text, !model.editsDisabled else { return }
         let change: ConfigurationChange
         if key == "automation" {
-            change = fieldChange(Int64(draft.text).map(JSONValue.integer) ?? .string(draft.text), in: draft.file)
+            change = fieldChange(Int64(text).map(JSONValue.integer) ?? .string(text), in: draft.file)
         } else if definition.controlType == "string" || key == "user" {
-            change = fieldChange(draft.text.isEmpty ? nil : .string(draft.text), in: draft.file)
-        } else { change = .set(draft.text) }
+            change = fieldChange(text.isEmpty ? nil : .string(text), in: draft.file)
+        } else { change = .set(text) }
         save(change, to: draft.file)
     }
 
     private func save(_ change: ConfigurationChange, to file: ConfigurationScope.File) {
         Task {
-            if await model.apply(change, key: key, to: file, notices: notices, manager: manager), isCurrentRow {
+            if await model.apply(change, key: key, to: file, notices: notices, manager: manager) {
                 draft = nil
-                reset = nil
             }
         }
     }
@@ -275,6 +260,8 @@ extension ConfigurationDefinition {
         if case .array(let options) = schema["anyOf"] { return options.contains { $0["type"] == .string("null") } }
         return false
     }
+
+    var isSwitch: Bool { controlType == "boolean" && !nullable }
 
     var choices: [JSONValue]? {
         if controlType == "boolean" && nullable { return [.bool(true), .bool(false)] }

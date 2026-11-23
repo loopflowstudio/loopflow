@@ -7,10 +7,8 @@ import Testing
 @Suite("Configuration destinations")
 struct ConfigurationSettingsTests {
     @Test func checkoutScopeAndCheckedEditShareTheRustWireShape() throws {
-        let root = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
         let fixture = try JSONDecoder().decode([String: JSONValue].self, from:
-            Data(contentsOf: root.appending(path: "tests/fixtures/dto/configuration_scope.json")))
+            loadFixtureData("configuration_scope.json"))
         func json(_ value: some Encodable) throws -> JSONValue {
             try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(value))
         }
@@ -63,9 +61,7 @@ struct ConfigurationSettingsTests {
     }
 
     @Test func catalogueIncludesFeatureCategory() throws {
-        let root = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-        let fixture = try Data(contentsOf: root.appendingPathComponent("tests/fixtures/dto/configuration_catalog.json"))
+        let fixture = try loadFixtureData("configuration_catalog.json")
         let catalogue = try JSONDecoder().decode([ConfigurationDefinition].self, from: fixture)
         #expect(catalogue.count == 1)
         #expect(catalogue[0].key == "theme")
@@ -73,9 +69,7 @@ struct ConfigurationSettingsTests {
     }
 
     @Test func destinationsMatchRustWithoutIndependentScopeOrPath() throws {
-        let root = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-        let fixture = try Data(contentsOf: root.appendingPathComponent("tests/fixtures/dto/configuration_destinations.json"))
+        let fixture = try loadFixtureData("configuration_destinations.json")
         let expected = try JSONDecoder().decode([JSONValue].self, from: fixture)
         let actual = ConfigurationDestination.allCases.map {
             $0.address(repository: "/project/task", wave: "product")

@@ -29,12 +29,6 @@ enum ConfigurationDestination: String, CaseIterable, Identifiable {
     }
 }
 
-struct ConfigurationExplanation: Decodable {
-    let path: String
-    let key: String
-    let inspections: [ConfigurationInspection]
-}
-
 struct ConfigurationDefinition: Decodable {
     /// The canonical key on its primitive; `shorthands` are the other spellings lf accepts.
     let key: String

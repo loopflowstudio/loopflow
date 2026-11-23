@@ -99,8 +99,8 @@ struct SettingsSearchRow: View {
     let open: () -> Void
 
     private var booleanToggle: ScopedBooleanToggle? {
-        guard case .setting(let definition) = result, definition.controlType == "boolean", !definition.nullable,
-              let file = scope.file(for: definition), file.slots[definition.key] != nil,
+        guard case .setting(let definition) = result, definition.isSwitch,
+              let file = scope.editableFile(for: definition),
               let effective = scope.reading.value?.settings[definition.key] else { return nil }
         return ScopedBooleanToggle(model: scope, definition: definition, effective: effective, file: file,
                                    notices: notices, manager: manager)

@@ -60,8 +60,7 @@ struct ContextSettingsWorkflowTests {
             let prompt = try #require(captured["input"] as? String)
             #expect(prompt.contains("Changed documentation."))
             #expect(prompt.contains("Read the context."))
-            let context = try #require(captured["context"] as? String)
-            return context.contains("-changes.md")
+            return prompt.contains("diff --git a/README.md b/README.md")
         }
         func cliScope(_ directory: URL) async throws -> ConfigurationScope {
             let text = try await lf.run(["config", "scope", "--json"], cwd: directory)
@@ -137,7 +136,7 @@ struct ContextSettingsWorkflowTests {
             navigation.search = "nothing matches this"
             let empty = try window.inspect().find(ViewType.NavigationSplitView.self).sidebarView()
             _ = try empty.find(text: "No matching settings")
-            #expect(try empty.findAll(SettingsSearchRow.self).isEmpty)
+            #expect(empty.findAll(SettingsSearchRow.self).isEmpty)
             let privateOff = try #require(model.file)
             await model.apply(.reset, key: "context.diff", to: privateOff, notices: notices, manager: nil)
             try await awaitReading { model.file?.slots["context.diff"]?.entries.isEmpty == true }

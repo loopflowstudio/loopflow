@@ -17,3 +17,4 @@
 - Require an explicit **Dismiss pending move** action (`Action::Dismiss`) to clear an interrupted 2-file move journal whose files diverged, keeping both config files intact.
 - Label a saved YAML null **Explicit null**. The resolver skips that layer when selecting an effective value, so a lower declaration can still supply the value.
 - Place account browser profiles in General → Advanced alongside other global preferences. Search can reveal an advanced setting before it has an authored value.
+- Keep search anchored to the catalog key across destinations. A draft, its Reset preview and its move confirmation belong to the declaration address until the editor closes.

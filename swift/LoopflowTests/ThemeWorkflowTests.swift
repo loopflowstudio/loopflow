@@ -18,9 +18,7 @@ struct ThemeWorkflowTests {
     }
 
     @Test func themeReadIncludesTheSlotForACheckedEdit() throws {
-        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-        let result = try JSONDecoder().decode(ThemeDeclaration.self, from: Data(contentsOf:
-            root.appending(path: "tests/fixtures/dto/theme_declaration.json")))
+        let result = try JSONDecoder().decode(ThemeDeclaration.self, from: loadFixtureData("theme_declaration.json"))
         #expect(result.entries.map(\.path) == [["theme"]])
         #expect(result.entries.map(\.value) == [result.file.value])
         #expect(result.file.value == .string("dark"))

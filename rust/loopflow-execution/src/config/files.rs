@@ -98,6 +98,18 @@ pub struct ResolvedDestination {
 }
 
 impl ResolvedDestination {
+    /// A graph name must resolve in the checkout where this declaration will live.
+    pub(crate) fn parse_value(&self, key: &str, text: &str) -> Result<Value> {
+        let value = super::settings::parse_value(key, text)?;
+        if matches!(key, "wave.graph" | "graph") {
+            if let (Some(repo), Some(name)) = (&self.repository, value.as_str()) {
+                let graph = crate::graph::load_authored_graph(name, repo)?;
+                crate::graph::compile_graph(&graph, repo)?;
+            }
+        }
+        Ok(value)
+    }
+
     pub fn root(&self) -> super::keys::Root {
         if self.prefix.is_empty() && self.scope == SettingScope::Wave {
             super::keys::Root::Wave
@@ -869,6 +881,8 @@ mod tests {
 
     #[test]
     fn a_private_file_left_in_the_checkout_root_moves_under_lf_already_ignored() {
+        // The polling fixtures temporarily replace PATH to detect Git subprocesses.
+        let _env = loopflow_test_support::env_lock().lock().unwrap();
         let repo = loopflow_test_support::TestRepo::new();
         repo.create_file(super::FORMER_PRIVATE_FILE, "agent: codex # mine\n");
         repo.create_file(".git/info/exclude", "/lf.config.local.yaml\n/keep\n");

@@ -31,4 +31,6 @@ Each item below exists on the branch. The [concept review](concept-review.html) 
 - The headless Desktop Settings, Context, Configuration, Theme, Mobile and Design Discipline suites passed against the branch server on a private Machine.
 - `LOOPFLOW_NATIVE_TESTS=1 swift test --package-path swift --filter searchScrollsToTheLastContextRowInACompactWindow` passed. The mounted 520 × 240 form scrolled to the last Context row and back to the first group.
 - Native window appearance checks passed in System, Light and Dark modes. Rust formatting and Clippy passed with warnings denied.
+- `cargo test -p loopflow-execution --lib config::` passed 113 tests after isolating the private-file migration fixture from concurrent PATH changes.
+- `LOOPFLOW_NATIVE_TESTS=1 swift test --package-path swift --filter 'SettingsWorkflowTests|ConfigurationSettingsTests|hiddenPatternsKeepWhereTheyCameFromAndOnlyYoursChange|themeReadIncludesTheSlotForACheckedEdit'` passed 17 tests against the rebuilt CLI. The launch check reads the README patch delivered to Pi.
 - Gate owns hosted CI. The remaining visual review is the full split window in Light and Dark at different sizes. Run `uv run python scripts/loopflow-dev.py run` against the branch server on a private Machine for that demo.

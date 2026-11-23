@@ -23,7 +23,53 @@
 </style>
 </head>
 <body>
-<h1>File browser QA</h1>
+<h1>File browser QA · second pass</h1>
+<p class="meta">November 23, after the zoom, rail, pane-strip, Grep and Read-chord commits. Branch <code>lf</code> (c932209fe0) and a hook-instrumented isolated Dev bundle on a private Machine under <code>/tmp/lfqf</code>, with the screen locked. Task <code>ff9742</code> in a disposable <code>shop</code> repository: uncommitted edits to <code>main.rs</code> (+3 −1, two <code>render_total</code> calls on line 8) and <code>config.rs</code> (−1), ignored <code>scratch/</code> pages and <code>target/</code>.</p>
+
+<h2>A · Re-checks of what the first pass found wrong</h2>
+<table>
+<tr><th>Finding</th><th>Now</th></tr>
+<tr><td>Session zoom hides presentations</td><td class="ok">Fixed. With the session pane zoomed, <code>lf desktop files src/main.rs:8</code> showed Files beside the conversation with line 8 marked. <code>desktop state</code> read <code>zoomed_pane: null</code> and <code>focused_pane: session</code>, and the window's first responder stayed the Ghostty view.</td></tr>
+<tr><td>Changed in Task omits open files</td><td class="ok">Fixed. <code>main.rs</code> and <code>config.rs</code> appear in both Open &amp; Scratch and Changed in Task, with counts.</td></tr>
+<tr><td>Grep rows for two hits on one line look identical</td><td class="ok">Fixed. The two <code>src/main.rs:8</code> rows show different excerpts, each with its own hit marked.</td></tr>
+<tr><td>Stale presentation bar</td><td class="ok">Fixed. During Edit, two <code>sed -i</code> rewrites badged <code>explore.html</code>, and <code>lf desktop files scratch/notes.md</code> offered “Presented scratch/notes.md · Open ×” inside the layout. Pressing Read cleared the bar, and both offers stayed badged in the rail.</td></tr>
+<tr><td>Pane strip at narrow widths</td><td class="ok">Fixed. In a 900 pt window the strip scrolls so “Files” stays visible; Brief scrolls off to the left.</td></tr>
+<tr><td>Clicking a word may never reach <code>gd</code></td><td class="open">Still open here. The hook's click made the code line's <code>NSTextView</code> first responder (caret on line 8), but the SwiftUI tap never fires in a window that isn't key, so no word is underlined and <code>g d</code> has no target.</td></tr>
+</table>
+<div class="pair">
+<figure><img src="qa/r-zoom.png"><figcaption>Presented beside a zoomed session; terminal focus kept.</figcaption></figure>
+<figure><img src="qa/r-rail.png"><figcaption>An open changed file stays in Changed in Task.</figcaption></figure>
+<figure><img src="qa/r-grep.png"><figcaption>Two hits on line 8, distinct rows.</figcaption></figure>
+<figure><img src="qa/r-narrow.png"><figcaption>900 pt window: the Files tab stays in view.</figcaption></figure>
+<figure><img src="qa/r-edit.png"><figcaption>Edit: scratch rewrite badged, presentation offered.</figcaption></figure>
+<figure><img src="qa/r-read.png"><figcaption>Back to Read: bar gone, offers kept in the rail.</figcaption></figure>
+</div>
+
+<h2>B · Long lines were unreachable (fixed)</h2>
+<p><span class="bad">Broken:</span> the second <code>main.rs:8</code> hit never came into view in the Grep preview. A two-line <code>src/wide.rs</code> (short line 1, a 340-character line 2 ending in the hit) narrowed it down. A QA-only <code>scrolls</code> hook command showed the reader's scroll document at <b>179.5 pt</b>, the width of line 1. The <code>LazyVStack</code> takes its width from the rows it has measured, so any line wider than the first is clipped in both the preview and the Read reader. A person can't scroll to it either. <code>scrollTo</code> fired with anchor x = 1.0, but the content had nowhere to go. When the wide line was line 1, it worked, which is why the first pass saw the pane scroll sideways.</p>
+<p><span class="fixed">Fixed</span> in <code>TaskCodeReader.swift</code>. The parse task measures the widest line, and the stack takes that as its minimum width: 2,541 pt here. The horizontal margin moved inside each row, so jumping to a row's leading edge no longer scrolls the margin away. The original 8 pt shift appeared once the content was wide. <code>theReaderScrollsAsWideAsItsWidestLine</code> mounts the reader headless with a short first line. It fails without the fix and passes with it.</p>
+<div class="pair">
+<figure><img src="qa/r-before.png"><figcaption>Before: line 2's hit selected, preview stuck at the left edge.</figcaption></figure>
+<figure><img src="qa/r-after.png"><figcaption>After: the hit is revealed.</figcaption></figure>
+</div>
+<figure><img src="qa/r-reveal.png"><figcaption>Return on the second <code>main.rs:8</code> hit opens Read scrolled to it.</figcaption></figure>
+<p>After the fix: arrowing between the left and right hits scrolls 0 ↔ 1,960 pt. <code>lf desktop files src/long.rs:2500</code> still lands at y = 37,180 of 45,046. A first attempt that set x with <code>ScrollPosition.scrollTo(x:)</code> reset the vertical position, so it was dropped.</p>
+
+<h2>What works now</h2>
+<p>Presentation beside a zoomed conversation without taking focus. Distinct rail rows. Distinct Grep rows with marked hits. Hits anywhere on a long line, in the preview and in Read. Offers during Edit that clear on leaving it. The narrow pane strip. Scratch rewrites from <code>sed -i</code> badge only real pages.</p>
+<h2>Couldn't reach</h2>
+<p>Word clicks, gutter comment clicks, rail and outline row taps and the bar's Open are SwiftUI tap gestures. None fire from the hook in a window that isn't key, so <code>gd</code>/⌘-click after a click, comments into the conversation, and ⌘↩ remain for a display-capable run. Headless tests cover the models, and <code>selectableFirstResponderReceivesReadChordsThroughTheWindowMonitor</code> covers chord delivery. No peer Machine and no committed step were set up.</p>
+<h2>Still wrong, worst first</h2>
+<table>
+<tr><td>Rail background after the bar leaves</td><td>After “Presented … ×” disappeared on leaving Edit, <code>cacheDisplay</code> snapshots showed the rail's background stopping where the bar had been, still 8 s later. The rail's scroll view frame already reached the bottom, and a window resize redrew it whole. It may be only a stale snapshot; check on a display.</td></tr>
+<tr><td>Line numbers scroll with the code</td><td>A sideways reveal scrolls the gutter out of view along with the code (see the reveal capture). That is how it was built; a pinned gutter is a design choice.</td></tr>
+</table>
+<h2>Checks run</h2>
+<pre>swift build --build-tests --package-path swift
+scripts/test_desktop.sh --skip-build --filter 'TaskFilesTests|TaskFileBrowserJourneyTests'   → 79 passed
+  theReaderScrollsAsWideAsItsWidestLine fails with the minimum width removed</pre>
+
+<h1>File browser QA · first pass</h1>
 <p class="meta">November 23 · branch <code>lf</code> and an isolated Dev bundle (<code>com.loopflow.mac.qafiles.dev</code>) on a private Machine under <code>/tmp/lf-qa-files</code>.
 The screen was locked, so the app was driven through <code>lf desktop</code> and the file-driven QA hook (<code>.lf/qa/QAHook.swift</code>). It ran headless, with no physical keyboard or mouse.</p>
 

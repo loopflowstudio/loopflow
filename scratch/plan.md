@@ -65,6 +65,8 @@ Keep `Brief`, `Diff` and `Files` in the pane strip. Cleanly separate **working-t
 
 Mounted focus, scroll and the 360/620-point layouts continue to gate and display QA after this pass.
 
+**Reader width.** The code reader's scroll content is as wide as its widest line. Before this, a `LazyVStack` sized to the rows it had measured, and lines wider than line 1 were clipped and out of reach. Row margins sit inside each row, so jumping to a line's start keeps the margin. Locked-screen QA on November 23 also checked presentation beside a zoomed session, distinct rail and Grep rows, Edit offers that clear on leaving Edit, and the narrow pane strip (`scratch/qa.html`). Word and gutter taps still need a display.
+
 ## Gate and demo
 
 November 23 presentation and navigation checks:

@@ -189,6 +189,16 @@ enum QAHook {
                 }
             }
             return "key \(String(describing: window.firstResponder.map { type(of: $0) }))"
+        case "scrolls":
+            var lines: [String] = []
+            func visit(_ view: NSView) {
+                if let scroll = view as? NSScrollView, let doc = scroll.documentView {
+                    lines.append("\(type(of: scroll)) visible=\(scroll.contentView.bounds) doc=\(doc.frame.size) at=\(scroll.convert(scroll.bounds, to: nil))")
+                }
+                view.subviews.forEach(visit)
+            }
+            windows.forEach { $0.contentView.map(visit) }
+            return lines.joined(separator: "\n")
         case "responder":
             return windows.map { "\($0.title): \(String(describing: $0.firstResponder.map { type(of: $0) }))" }.joined(separator: "\n")
         default:

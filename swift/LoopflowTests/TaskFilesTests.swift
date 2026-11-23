@@ -472,6 +472,30 @@ struct TaskFilesTests {
         #expect(draft.scrollAnchor(for: visit, text: line, width: 240).x == 0)
     }
 
+    /// A long line below a short first line stays reachable: the reader scrolls as wide as its widest line.
+    @Test func theReaderScrollsAsWideAsItsWidestLine() async throws {
+        let long = "let wide = \"" + String(repeating: "x", count: 300) + "\""
+        let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 400, height: 200),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        defer { window.contentView = nil }
+        let reader = NSHostingView(rootView: TaskCodeReader(path: "wide.rs", text: "// short\n" + long + "\n", ready: {}))
+        reader.frame = window.contentLayoutRect
+        window.contentView = reader
+        func documentWidth() -> CGFloat? {
+            func scroll(_ view: NSView) -> NSScrollView? {
+                (view as? NSScrollView) ?? view.subviews.lazy.compactMap(scroll).first
+            }
+            return scroll(reader)?.documentView?.frame.width
+        }
+        let lineWidth = NSAttributedString(string: long, attributes: [.font: NSFont(name: Typography.monoFace, size: Typography.monoSize)
+            ?? .monospacedSystemFont(ofSize: Typography.monoSize, weight: .regular)]).size().width
+        for _ in 0..<200 where (documentWidth() ?? 0) <= lineWidth {
+            reader.layoutSubtreeIfNeeded()
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(try #require(documentWidth()) > lineWidth)
+    }
+
     @Test func recordedLocalCheckoutUsesTheResidentServerForFileSearch() async throws {
         let place = TaskLocation.recorded(taskID: "owner-task", checkout: "/checkout")
         let owner = TaskLocationObservation(request: "opened", repositoryID: "plan", taskID: "portable",

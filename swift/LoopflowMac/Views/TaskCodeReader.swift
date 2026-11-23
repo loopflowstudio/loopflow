@@ -15,6 +15,7 @@ struct TaskCodeReader: View {
     @Environment(\.theme) private var theme
     @State private var parsedVersion = 0
     @State private var lines: [CodeLine]?
+    @State private var widestLine: CGFloat = 0
 
     @State private var scrolling = false
 
@@ -39,12 +40,14 @@ struct TaskCodeReader: View {
                 let grammar = Grammar.named(path)
                 let tree = grammar?.parse(text)
                 let highlights = tree.flatMap { grammar?.highlights(in: $0, text: text) } ?? []
-                return (CodeLine.read(text, highlights: highlights),
-                        needsOutline ? FileOutline(tree: tree, text: text, path: path) : nil)
+                let lines = CodeLine.read(text, highlights: highlights)
+                return (lines, needsOutline ? FileOutline(tree: tree, text: text, path: path) : nil,
+                        lines.map { CTLineGetTypographicBounds(Self.typeset($0.text), nil, nil, nil) }.max() ?? 0)
             }.value
             guard !Task.isCancelled else { return }
             if let outline = result.1, let version { document?.receive(outline, version: version) }
             lines = result.0
+            widestLine = result.2
             parsedVersion += 1
         }
     }
@@ -55,7 +58,7 @@ struct TaskCodeReader: View {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     if let store {
                         ForEach(store.comments.items.filter { $0.original.path == path && $0.original.source.isFile && $0.detached }) {
-                            ReviewCommentRow(store: store, comment: $0)
+                            ReviewCommentRow(store: store, comment: $0).padding(.horizontal, Spacing.sm)
                         }
                     }
                     ForEach(lines.indices, id: \.self) { index in
@@ -63,8 +66,10 @@ struct TaskCodeReader: View {
                     }
                 }
                 .scrollTargetLayout()
+                // A lazy stack takes its width from the rows it has measured, which leaves longer lines out of reach.
+                .frame(minWidth: 2 * Spacing.sm + gutter(lines.count) + Spacing.md + widestLine, alignment: .leading)
                 .font(Typography.mono)
-                .padding(Spacing.sm)
+                .padding(.vertical, Spacing.sm)
             }
             .defaultScrollAnchor(.topLeading, for: .alignment)
             .onScrollPhaseChange { _, phase in
@@ -124,6 +129,8 @@ struct TaskCodeReader: View {
                 FileSymbolPeek(store: store, peek: peek)
             }
         }
+        // Inside the row, so scrolling to a row's leading edge keeps the margin.
+        .padding(.horizontal, Spacing.sm)
     }
 
     private func changeTone(_ line: Int, in store: TaskFilesStore) -> ThemeTone? {
@@ -154,7 +161,7 @@ struct TaskCodeReader: View {
         } else { label }
     }
 
-    private func typeset(_ text: String) -> CTLine {
+    private nonisolated static func typeset(_ text: String) -> CTLine {
         let font = NSFont(name: Typography.monoFace, size: Typography.monoSize)
             ?? .monospacedSystemFont(ofSize: Typography.monoSize, weight: .regular)
         return CTLineCreateWithAttributedString(NSAttributedString(string: text, attributes: [.font: font]))
@@ -163,11 +170,9 @@ struct TaskCodeReader: View {
     func scrollAnchor(for visit: FileVisit, text: String, width: CGFloat) -> UnitPoint {
         let leading = UnitPoint(x: 0, y: 0.5)
         guard let hit = visit.hit, hit.revision == revision, let range = hit.range(in: text) else { return leading }
-        let line = typeset(text)
-        let gutter = store == nil ? CTLineGetTypographicBounds(typeset(String(visit.line)), nil, nil, nil)
-            : ReviewStream.gutterWidth + Spacing.xs
-        let inset = gutter + Spacing.md
-        let overflow = inset + CTLineGetTypographicBounds(line, nil, nil, nil) - width
+        let line = Self.typeset(text)
+        let inset = Spacing.sm + gutter(visit.line) + Spacing.md
+        let overflow = inset + CTLineGetTypographicBounds(line, nil, nil, nil) + Spacing.sm - width
         guard overflow > 0 else { return leading }
         let start = CTLineGetOffsetForStringIndex(line, range.location, nil)
         let end = CTLineGetOffsetForStringIndex(line, NSMaxRange(range), nil)
@@ -176,8 +181,12 @@ struct TaskCodeReader: View {
         return UnitPoint(x: max(0, min(1, offset / overflow)), y: 0.5)
     }
 
+    private func gutter(_ number: Int) -> CGFloat {
+        store == nil ? CTLineGetTypographicBounds(Self.typeset(String(number)), nil, nil, nil) : ReviewStream.gutterWidth + Spacing.xs
+    }
+
     func target(in text: String, number: Int, at point: CGPoint) -> FileJumps.Target? {
-        let line = typeset(text)
+        let line = Self.typeset(text)
         var index = CTLineGetStringIndexForPosition(line, point)
         guard index != kCFNotFound, point.x >= 0,
               point.x < CTLineGetTypographicBounds(line, nil, nil, nil) else { return nil }

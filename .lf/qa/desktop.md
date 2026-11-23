@@ -525,6 +525,13 @@ WebKit pages only right after a load and goes blank once the display sleeps;
 it, and `webscroll <y>` scrolls the page, which is how the settled HTML reload and
 its scroll restore are checked. BSD `sed -i` writes `scratch/.!<pid>!<page>` and
 renames it: a quick atomic-save check for the scratch rail.
+`scrolls` lists every scroll view's visible rect and document size. It tells a
+scroll that never happened from content too narrow to scroll: the code reader's
+document must be as wide as its widest line. Put the wide line below a short
+line 1 when checking sideways reveals. A shorter line 1 once hid a clipped
+reader. To trace a SwiftUI task, append to a file under the private directory:
+`NSLog` lines did not reach `/usr/bin/log stream` (in zsh, bare `log` is a
+builtin). `sips --cropOffset` takes y, then x.
 
 In-memory view state (the layout picker's `reviewLayout`, Source,
 `TaskFilesStore.sourceFiles`) and the change stepper (`]`) have no

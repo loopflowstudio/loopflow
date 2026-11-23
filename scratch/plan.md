@@ -303,5 +303,8 @@ line, Objective detail and capture heading now show the one Project
 
 Nothing left to build here; `git grep` finds no list-shaped Project on the
 wire or in Swift. Next is gate: Swift DTO suites (`scripts/test_desktop.sh`), the full
-matrix in CI, the `oauth_tests` contention failure checked on the base. Open,
-not this Task: a queued create's field snapshot (page question 3).
+matrix in CI, the `oauth_tests` contention failure checked on the base. Gate also renames Desktop's
+plural Project sheet names (`WaveProjectsView`, `model.projectsWave`,
+`wave-projects`) to the singular (concept review after slice 5, page
+question 1). Open, not this Task: a queued create's field snapshot (page
+question 2).

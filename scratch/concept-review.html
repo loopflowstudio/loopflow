@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>A Wave is one Project — as built, slices 1–4</title>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>A Wave is one Project — as built, slices 1–5</title>
 <style>
 :root {
   --bg: #fbfaf7; --fg: #1d1c1a; --muted: #6b675f; --line: #e2ded5; --card: #ffffff;
@@ -70,9 +70,9 @@ svg .sub { fill: var(--muted); font-size: 11.5px; }
 
 </head><body>
 <main>
-<h1>A Wave is one Project — as built, slices 1–4</h1>
-<p class="lede">LOO-995 concept review after slice 4, 2026-11-23. Branch at 4fad52b15c, read against its base 43e031870e. Replaces the page written after slice 3; slice 4 built its answers 1b, 2b and 3b.</p>
-<p><strong>Area taken:</strong> a Wave and its one Project across a Wave's whole life (create, rename, connect, a Task joining and moving, removal) and every surface that shows it: <code>lf wave status</code>, the roadmap, the wire, Desktop.</p>
+<h1>A Wave is one Project — as built, slices 1–5</h1>
+<p class="lede">LOO-995 concept review after slice 5, its compress and QA, 2026-11-23. Branch at e5d864ce70, read against its base 2656258abf. Replaces the page written after slice 4; slice 5 built its answers 1b and 2a.</p>
+<p><strong>Area taken:</strong> a Wave and its one Project across a Wave's whole life (create, rename, connect, a Task joining and moving, removal) and every surface that shows it: <code>lf wave status</code>, the roadmap, the wire, Desktop's Wave header, backlog and Project sheet.</p>
 
 <h2>One interaction, as built</h2>
 <pre><code>$ lf wave create ledger ; lf task create --wave ledger 'x'
@@ -80,58 +80,42 @@ $ lf wave plan connect ledger 'Ledger'     # links the Wave's Project
 $ lf wave rename ledger books              # Project name follows; Linear gets a project_name action
 $ lf wave status books
   Project   books (linked) · started
-            https://linear.app/…/project/books-…
-$ lf wave status books --json | jq .projects
-  {"state":"ok","items":[{ … one Project … }],"truncated":false}   ← a list, on the wire
+$ lf wave status books --json | jq .project
+  {"state":"ok","value":{ … one Project … }}
 </code></pre>
-<p>Failure and recovery: a Project linked before this branch shows no URL until the next tracker read; a store that cannot be read prints <code>projects unavailable: …</code>, and Desktop says “Project reading is incomplete” when <code>truncated</code> is true, which nothing can make true for one Project.</p>
+<p>Failure and recovery: an unreadable store gives <code>{"state":"unavailable","reason":…}</code> and Desktop says the Project did not load; a Wave that arrived from a released build reads <code>value: null</code> (<code>Project   none</code>) until its first Task makes its Project.</p>
 
 <h2>Do the product's concepts and the code's line up?</h2>
 <div class="table-wrap"><table>
 <tr><th></th><th>What a person knows or does</th><th>What the code has</th><th>What is wrong</th></tr>
-<tr><td><span class="mark yes">yes</span></td><td>A Wave</td><td><code>waves</code>, <code>parent_wave_id</code></td><td></td></tr>
-<tr><td><span class="mark yes">yes</span></td><td>A Wave's Project</td><td><code>projects.wave_id</code> unique not null; id <code>ProjectId::for_wave</code></td><td>One record, one key.</td></tr>
-<tr><td><span class="mark yes">yes</span></td><td>A Task is in a Wave</td><td>read through its Project</td><td></td></tr>
-<tr><td><span class="mark yes">yes</span></td><td>Move a Task</td><td>one rule: the new Wave's Project</td><td></td></tr>
-<tr><td><span class="mark yes">yes</span></td><td>Connect a Wave to Linear</td><td><code>lf wave plan connect</code> sets <code>external_project_id</code></td><td></td></tr>
-<tr><td><span class="mark yes">yes</span></td><td>Rename a Wave</td><td><code>relocate_waves</code> renames its Project, linked or not; linked queues <code>project_name</code></td><td>Was “partly” (1b built).</td></tr>
-<tr><td><span class="mark yes">yes</span></td><td>Remove a Wave</td><td>retires the Project's queued actions; no Project line, no <code>WaveRemoval.projects</code></td><td>Was “partly” (2b built).</td></tr>
-<tr><td><span class="mark yes">yes</span></td><td>See where the Wave lives in Linear</td><td>Wave header: Project name, linked by <code>ProjectSummary.url</code></td><td>Was “partly” (3b built).</td></tr>
-<tr><td><span class="mark no">no</span></td><td>A Wave's Project, as the surfaces read it</td><td><code>WaveDetailSnapshot.projects</code>, <code>WaveRoadmap.projects</code>: <code>Evidence&lt;ProjectSummary&gt;</code> (<code>items</code>, <code>truncated</code>); Swift <code>WorkEvidence&lt;ProjectPlanningSnapshot&gt;</code>, <code>ForEach(projects.items)</code>, <code>.items.first</code>, “Project reading is incomplete”; <code>print_projects</code> loops</td><td>One thing under a list's shape. Every reader takes the first item or loops over one. It is the multi-Project model's last shape, and the next reader has to guess whether a second item can appear.</td></tr>
-<tr><td><span class="mark part">partly</span></td><td>A Task's queued create in Linear</td><td><code>tracker_actions.value_json</code> snapshots <code>task_project</code>; removal rewrites it</td><td>Unchanged; question 5 of the last page, its own Task.</td></tr>
+<tr><td><span class="mark yes">yes</span></td><td>A Wave</td><td><code>waves</code></td><td></td></tr>
+<tr><td><span class="mark yes">yes</span></td><td>A Wave's Project</td><td><code>projects.wave_id</code> unique; <code>project_of_wave(wave) -&gt; Option&lt;Project&gt;</code></td><td></td></tr>
+<tr><td><span class="mark yes">yes</span></td><td>A Wave's Project, as the surfaces read it</td><td><code>project: Reading&lt;Option&lt;ProjectSummary&gt;&gt;</code>; Swift <code>WorkReading</code></td><td>Was “no” (slice 5 built).</td></tr>
+<tr><td><span class="mark yes">yes</span></td><td>A Task is in a Wave; move a Task</td><td>read through its Project; one move rule</td><td></td></tr>
+<tr><td><span class="mark yes">yes</span></td><td>Connect, rename, remove a Wave</td><td><code>connect</code>, <code>relocate_waves</code>, <code>retire_waves</code></td><td></td></tr>
+<tr><td><span class="mark yes">yes</span></td><td>See the Project in the backlog</td><td>title line, Objective detail, capture heading</td><td>QA found it missing; fixed.</td></tr>
+<tr><td><span class="mark part">partly</span></td><td>Open a Wave's Project</td><td><code>WaveProjectsView</code>, <code>model.projectsWave</code>, id <code>wave-projects</code></td><td>Plural names for one Project; the button already says “Project”. Internal only.</td></tr>
+<tr><td><span class="mark part">partly</span></td><td>A Task's queued create in Linear</td><td><code>tracker_actions.value_json</code> snapshots <code>task_project</code></td><td>Unchanged; its own Task.</td></tr>
 </table></div>
 
 <div class="callout">
-<p><strong>Biggest mismatch: the wire says a Wave has a list of Projects.</strong></p>
-<p>Storage, commands and Desktop's header all hold one Project. <code>lf wave status --json</code>, the roadmap stream and every Swift reader still carry <code>projects: {state, items, truncated}</code>, and a test in <code>waves.rs</code> still seeds a completed “Current project” and a “Next project” successor, the rollover this Task removed.</p>
+<p><strong>Biggest mismatch left: none a person sees.</strong> The plural Swift names are a rename for gate; the queued-create snapshot is larger than this Task.</p>
 </div>
 
-<h2>Recommendation <span class="tag prop">proposed, chosen for review</span></h2>
+<h2>Recommendation</h2>
 <div class="cols">
-<div class="panel"><h3>Now</h3>
-<pre><code>pub projects: Evidence&lt;ProjectSummary&gt;
-// {"state":"ok","items":[{…}],"truncated":false}
-
-ForEach(plan.projects.items) { WaveProjectView(…) }
-plan.projects.items.first
-"Project reading is incomplete"</code></pre></div>
-<div class="panel proposed"><h3>After</h3>
-<pre><code>pub project: Reading&lt;Option&lt;ProjectSummary&gt;&gt;
-// {"state":"ok","value":{…}}  or  {"state":"ok","value":null}
-// {"state":"unavailable","reason":"…"}
-
-if let project = plan.project.value { WaveProjectView(…) }
-// no truncation line</code></pre></div>
+<div class="panel"><h3>Now</h3><pre><code>WaveProjectsView, model.projectsWave
+accessibilityIdentifier("wave-projects")</code></pre></div>
+<div class="panel proposed"><h3>After <span class="tag prop">proposed</span></h3><pre><code>WaveProjectSheet, model.projectWave
+accessibilityIdentifier("wave-project")</code></pre></div>
 </div>
-<p><code>Option</code> because a Wave that arrived from a released build has no Project until its first Task, and because 0–1 Projects per Wave is the stated next model. Passed over: leaving the list (cheap now, but it is the one place the code still says “several”), and a bare <code>Option&lt;ProjectSummary&gt;</code> (loses “could not read” versus “none”, which <code>Evidence</code> exists to keep apart).</p>
+<p>Then gate, as the plan says.</p>
 
 <h2>Questions</h2>
 <ol class="q">
-<li>A Wave's Project on the wire:
-  <ol><li>keep <code>projects</code> as a list</li><li><span class="rec">one <code>project</code> reading, <code>Option</code> inside (chosen, slice 5)</span></li><li>bare <code>project: Option&lt;ProjectSummary&gt;</code>, read failures fail the whole snapshot</li></ol></li>
-<li>The single-value reading type:
-  <ol><li><span class="rec">a generic <code>Reading&lt;T&gt;</code> beside <code>Evidence&lt;T&gt;</code>, mirrored in Swift (chosen)</span></li><li>a Project-only enum</li></ol></li>
-<li>A queued tracker create's field snapshot (unchanged from the last page):
+<li>The plural Swift names:
+  <ol><li><span class="rec">rename during gate (chosen)</span></li><li>leave them</li></ol></li>
+<li>A queued tracker create's field snapshot:
   <ol><li>leave; removal patches it (built)</li><li>file a Task: creates read the Task's fields at send time</li></ol></li>
 </ol>
 </main></body></html>

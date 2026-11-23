@@ -472,7 +472,7 @@ Task requires a repository and may belong to a Wave through its planning row.
 Session constructors use the Task’s current membership and reject explicit disagreements.
 A Session links to its Graph run through the step that captured its input
 (`graph_lf_process_id`), and shares that Graph's nullable Task. `work_source`
-is declared, checkout, inherited or bound when known. Historical unknown membership
+is declared, checkout or bound when known. Historical unknown membership
 stays Unknown; absence of evidence does not become Independent.
 
 A Session's permanent assignment is write-once: null to a Task, validating any

@@ -113,6 +113,18 @@ public actor ServerLink {
         "This Loopflow (\(endpoint.client.version)) can't read what the server (\(welcome.build)) sent."
     }
 
+    /// The server (`refused_operation` in `rust/loopflow/src/server/service.rs`) refuses a
+    /// request it can't decode as `invalid`, with the operation's `kind` and a message
+    /// starting "<kind>: ". Released servers send that shape, so it is matched as sent.
+    /// Either build may be the older one, so the sentence names both.
+    private func answered(_ code: String, _ message: String, _ data: JSONValue, _ revisions: Revisions?) -> ServerError {
+        var message = message
+        if code == ServerErrorCode.invalid.rawValue, case .string(let kind) = data["kind"], message.hasPrefix("\(kind): ") {
+            message = "The server (\(welcome.build)) can't read what this Loopflow (\(endpoint.client.version)) asked. Update the older one."
+        }
+        return ServerError(code: code, message: message, data: data, revisions: revisions)
+    }
+
     /// Ends the connection on purpose: requests fail and watches end rather than resume.
     public func close() async {
         fail(RegistryQueryError(Self.closed), resumable: false)
@@ -351,7 +363,7 @@ public actor ServerLink {
         case .ended(let id):
             subscriptions.removeValue(forKey: id)?.end()
         case .error(let id?, let code, let message, let data, let revisions):
-            settle(id, throwing: ServerError(code: code, message: message, data: data, revisions: revisions))
+            settle(id, throwing: answered(code, message, data, revisions))
         case .error(nil, let code, let message, let data, _):
             throw ServerError(code: code, message: message, data: data)
         case .welcome, .status, .bridged, .admitted:

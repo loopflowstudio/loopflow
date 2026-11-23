@@ -4,15 +4,14 @@ import SwiftUI
 struct MobileNewTaskView: View {
     @State private var model: MobileTaskCreation
     @State private var action: Task<Void, Never>?
-    let theme: ThemeDefinition
+    @Environment(\.theme) private var theme
     let onOpen: (MobileTaskOpening) -> Void
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
     @FocusState private var editing: Bool
 
-    init(model: MobileTaskCreation, theme: ThemeDefinition, onOpen: @escaping (MobileTaskOpening) -> Void) {
+    init(model: MobileTaskCreation, onOpen: @escaping (MobileTaskOpening) -> Void) {
         _model = State(initialValue: model)
-        self.theme = theme
         self.onOpen = onOpen
     }
 
@@ -22,7 +21,7 @@ struct MobileNewTaskView: View {
                 VStack(alignment: .leading, spacing: Spacing.xxl) {
                     if !model.draft.savedRequests.isEmpty {
                         NavigationLink {
-                            MobileSavedRequestsView(model: model, theme: theme, onOpen: onOpen)
+                            MobileSavedRequestsView(model: model, onOpen: onOpen)
                         } label: {
                             Label("Saved requests (\(model.draft.savedRequests.count))", systemImage: "tray")
                                 .font(Typography.textStrong)
@@ -102,7 +101,7 @@ struct MobileNewTaskView: View {
                 .font(Typography.textStrong)
             if model.draft.submission == nil, let context = model.context {
                 NavigationLink {
-                    MobileRepositoryPicker(model: model, theme: theme)
+                    MobileRepositoryPicker(model: model)
                 } label: {
                     HStack(spacing: Spacing.md) {
                         Text(context.repositories.first(where: { $0.path == model.draft.directory })?.displayName
@@ -198,7 +197,7 @@ private struct MobileCreationResult: View {
 
 struct MobileSavedRequestsView: View {
     let model: MobileTaskCreation
-    let theme: ThemeDefinition
+    @Environment(\.theme) private var theme
     let onOpen: (MobileTaskOpening) -> Void
 
     var body: some View {
@@ -206,7 +205,7 @@ struct MobileSavedRequestsView: View {
             Section {
                 ForEach(model.draft.savedRequests) { request in
                     NavigationLink {
-                        MobileSavedTaskRequestView(id: request.id, model: model, theme: theme, onOpen: onOpen)
+                        MobileSavedTaskRequestView(id: request.id, model: model, onOpen: onOpen)
                     } label: {
                         VStack(alignment: .leading, spacing: Spacing.sm) {
                             Text(request.outcome?.receipt?.task.title ?? request.submission.request)
@@ -236,7 +235,7 @@ struct MobileSavedRequestsView: View {
 struct MobileSavedTaskRequestView: View {
     let id: UUID
     let model: MobileTaskCreation
-    let theme: ThemeDefinition
+    @Environment(\.theme) private var theme
     let onOpen: (MobileTaskOpening) -> Void
     @State private var action: Task<Void, Never>?
 

@@ -320,29 +320,31 @@ File selection keeps a neutral fill and edge; keyboard focus has a separate outl
 Ordinary controls and links use text roles; the theme’s accent emphasizes deliberate actions.
 Status labels and shapes retain their meaning across palettes.
 Choose **Settings → Appearance** to preview the whole workspace. Pick
-**System**, **Light** or **Dark**, then set **Light theme** and **Dark theme**
-independently; System follows macOS using both. System lists both pickers;
-Light or Dark lists only its own. Each picker
-shows built-ins, then **Yours**, ending with a dashed **Import file…** tile.
-
-Beside the pickers, a sample draws the previewed theme where its colors land in
-the app: a title bar with the repository's name, a selected Task row, the
-status words on the sidebar's surface, and one terminal line:
+**System**, **Light** or **Dark**; System follows macOS and lists both sides,
+Light or Dark lists only its own. Each side's heading names its chosen theme
+(**Light themes · Fjord Light**), then shows built-ins as cards and **Yours**,
+ending with a dashed **Import file…** tile. An imported file joins the side its
+own colors say; in Light or Dark mode the preview switches to that side. Every card is drawn in its
+own theme: a title bar strip, its name as a heading, Busy, Blocked and Error,
+ANSI 1–6, a selected row and a **Run** button:
 
 ```text
-loopflow
-Selected Work    Blocked since 12:07
-Working  Available  Blocked  Failed  Passed
-$ lf task status LOO-515
+▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔
+Fig
+Busy  Blocked  Error
+● ● ● ● ● ●
+[Selected row] [Run]
 ```
 
-A theme whose status words are hard to read on the sidebar shows it here,
-before **Apply**.
+Families sort by name after Loopflow, so a family's light and dark halves sit in
+the same column. Clicking a card previews it in every window; the chosen card is
+ringed in the window's focus color. A theme with unreadable roles shows why
+under the cards, before **Apply**.
 
 ```yaml
 # ~/.lf/config.yaml
-theme: "light:Linen,dark:Hearth"   # System
-theme: "Hearth"                    # Dark (or Light) mode: one name
+theme: "light:Folio,dark:Fig"   # System
+theme: "Fig"                    # Dark (or Light) mode: one name
 ```
 
 **Apply** rewrites only that line; **Cancel**, Escape or closing writes nothing.
@@ -350,28 +352,40 @@ Edit it by hand and every window follows; a misspelled name keeps the last theme
 and names the fix. Absent means Loopflow Light/Dark. A repository's
 `.lf/config.yaml` never sets the theme.
 
-Built-ins are 12 light and 12 dark. **Loopflow Light** keeps the original
-cream/burgundy; **Loopflow Dark** is slate with warm bronze; **Linen** and **Hearth**
-are quieter light and charcoal alternatives.
+Built-ins are 12 families, each a light and a dark theme. **Loopflow Light** keeps
+the original cream/burgundy; **Loopflow Dark** is blue-grey with rose headings and
+links, under the same burgundy title bar. The other eleven are generated from
+specs in `scripts/theme_catalogue.py`: **Fig** is plum with a lime accent, its
+light half **Fig Leaf** a leaf-green ground with plum ink.
 
 Your themes are Ghostty theme files in `~/.lf/themes/`; `~/.config/ghostty/themes/`
 is read too, never written. Names resolve to yours, then built-ins, then Ghostty's.
-A file named like a built-in overrides it. **Customize** on a built-in writes your
-copy; on yours it edits in place. **Delete** removes yours (**Revert to built-in**
-for an override). **Import file…** copies a theme into Yours, accepting only the
-picker's appearance; a dark file in the Light picker explains itself instead.
+A file named like a built-in overrides it. **Customize <name>**, beside Cancel and Apply,
+acts on the card chosen last: on a built-in it writes your copy; on yours it edits in
+place. **Delete <name>** removes yours (**Revert <name> to built-in** for an override).
+**Import file…** copies a theme into Yours on the side its colors say; in Light or
+Dark mode the preview switches to that side.
 
 ```
 background = #171924
 foreground = #cad2ef
 palette = 4=#7aa2f7
-loopflow-accent = #3d59a1    # optional app roles; the rest derive from ANSI colors
+# Optional app roles; the rest derive from ANSI colors.
+loopflow-accent = #3d59a1
+# Optional; without it the bar follows the accent.
+loopflow-titlebar = #242f50
 ```
 
 Files read up to 256 KiB of UTF-8. Six-digit RGB background/foreground are
 required; cursor, selection, `palette = N=#RRGGBB` and `loopflow-` roles are
 optional. Preview explains defaults, repeats and omitted settings. Fonts,
 commands, keybindings, includes and theme references are never followed.
+
+The title bar is its own role. A file that leaves it out gets a bar from its
+accent, darkened where needed (lightened under black text) so the bar's text
+stays readable; a theme you made before the role existed may show a slightly
+darker bar. **Customize** lists **Title bar** under Actions and focus, and saving
+states it: after that, changing **Button** leaves the bar alone.
 
 Unreadable app/default/selection/cursor text prevents Apply; ANSI colors keep
 their source values. Personal non-color Ghostty settings still load; its `theme =` is ignored and its file never written.

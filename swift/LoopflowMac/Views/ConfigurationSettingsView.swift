@@ -189,13 +189,6 @@ struct ConfigurationDefinition: Decodable {
     let description: String
 }
 
-struct ConfigurationFileValue: Decodable {
-    let path: String
-    let key: String
-    let value: JSONValue
-    let lifecycle: String
-}
-
 struct ConfigurationInspection: Decodable {
     let skill: String?
     let occurrence: JSONValue?

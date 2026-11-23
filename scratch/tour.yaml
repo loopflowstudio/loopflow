@@ -1,13 +1,18 @@
-at: 879ca3584ae9291a9063dae841a0d5bde39d4dc3
+at: 1f67a7e742708b92da94172d12edefcc53425ca4
 first:
   - path: swift/README.md
-    why: Option chords in a focused terminal
+    why: Keyboard behavior in focused Session and Shell panes
   - path: swift/LoopflowMac/Services/Ghostty/GhosttyTerminalView.swift
-    why: How AppKit text and physical modifiers reach Ghostty
+    why: How AppKit delivers chords and composed text to Ghostty
+  - path: swift/LoopflowMac/Services/Ghostty/GhosttyManager.swift
+    why: Shortcut defaults and keyboard layout updates
+  - path: swift/LoopflowMac/DesktopActions.swift
+    why: Both Desktop shortcut monitors defer during composition
+  - path: swift/LoopflowMac/Views/WorkPalette.swift
   - path: swift/LoopflowTests/GhosttyModifierInputTests.swift
-    why: Bytes written by each Option key
+    why: Exact terminal bytes and focused menu dispatch
   - path: swift/LoopflowTests/GhosttyTerminalInputTests.swift
-    why: Typing into a mounted terminal after scrolling
+    why: Mounted typing and paste in a split
   - path: scratch/plan.md
-    why: Remaining shortcuts, composition, and held Session checks
+    why: Remaining held Session reattachment check
 hide: []

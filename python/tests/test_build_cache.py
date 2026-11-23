@@ -112,6 +112,7 @@ def test_status_classifies_loaded_roots(tmp_path, monkeypatch, running, loaded, 
     monkeypatch.setattr(build_cache, "daemon_pid", lambda address: 123 if running else None)
     monkeypatch.setattr(build_cache.sys, "platform", "darwin")
     config = tmp_path / "cache.json"
+    monkeypatch.setattr(build_cache, "inventory_path", lambda: config)
     config.write_text(json.dumps({"basedirs": [], "cache": {"disk": {"size": 123}}}))
     monkeypatch.setattr(build_cache, "worktree_roots", lambda repo: {str(tmp_path)})
     monkeypatch.setattr(
@@ -179,12 +180,13 @@ def test_git_worktree_add_registers_even_an_older_revision_before_return(tmp_pat
         "before cache installation",
     )
     monkeypatch.setenv("CARGO_HOME", str(tmp_path / "cargo"))
-    monkeypatch.setenv("SCCACHE_CONF", str(tmp_path / "private/cache.json"))
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "private"))
+    monkeypatch.setenv("SCCACHE_CONF", str(build_cache.inventory_path()))
     monkeypatch.setenv("SCCACHE_SERVER_UDS", str(tmp_path / "private/cache.sock"))
     install_hook(repo)
     tree = tmp_path / "new tree"
     _git(repo, "worktree", "add", "--detach", str(tree))
-    config = json.loads((tmp_path / "private/cache.json").read_text())
+    config = json.loads(build_cache.inventory_path().read_text())
     assert set(config["basedirs"]) == {str(repo.resolve()), str(tree.resolve())}
 
 
@@ -205,6 +207,7 @@ def test_registration_only_stops_an_unloaded_client_side_daemon(
         "SCCACHE_TEST_MARKER": str(marker),
     }
     monkeypatch.setattr(build_cache, "configured_cache", lambda: (wrapper, env))
+    monkeypatch.setattr(build_cache, "inventory_path", lambda: tmp_path / "cache.json")
     monkeypatch.setattr(
         build_cache,
         "cache_status",
@@ -259,3 +262,19 @@ def test_registration_observes_the_same_private_socket_and_inventory_as_cargo(
     _, env = build_cache.configured_cache()
     assert env["SCCACHE_SERVER_UDS"] == "/private/socket"
     assert env["SCCACHE_CONF"] == "/private/inventory"
+
+
+@pytest.mark.parametrize("extension", ["json", "toml"])
+def test_caller_supplied_root_configuration_is_read_only(tmp_path, monkeypatch, extension):
+    _git(tmp_path, "init", "-q")
+    config = tmp_path / f"custom.{extension}"
+    original = '{"basedirs":["/other"]}' if extension == "json" else 'basedirs = ["/other"]\n'
+    config.write_text(original)
+    env = {"SCCACHE_CONF": str(config)}
+    monkeypatch.setattr(build_cache, "configured_cache", lambda: (None, env))
+    build_cache.register(tmp_path)
+    state = build_cache.cache_status(tmp_path, None, env)
+    assert state["listed_roots"] == ["/other"]
+    assert not state["managed_roots"]
+    assert config.read_text() == original
+    assert not list(tmp_path.glob("*.lock"))

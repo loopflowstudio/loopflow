@@ -256,7 +256,7 @@ def _measure(output: Path, cohorts: int, resume: bool, socket: Path) -> None:
         SCCACHE_DIR=str(root / "cache"),
         SCCACHE_SERVER_UDS=str(socket),
         SCCACHE_IDLE_TIMEOUT="0",
-        SCCACHE_CONF=str(root / "roots.json"),
+        SCCACHE_CONF=str(root / "loopflow/sccache.json"),
     )
     receipts = json.loads(receipts_path.read_text()) if receipts_path.exists() else []
     # Register every measured root before starting the private daemon. Creating a
@@ -316,7 +316,11 @@ def _measure(output: Path, cohorts: int, resume: bool, socket: Path) -> None:
             continue
         tree = root / key
         start = time.monotonic()
-        _run(["git", "worktree", "add", "--detach", str(tree), revision], ROOT, env)
+        _run(
+            ["git", "worktree", "add", "--detach", str(tree), revision],
+            ROOT,
+            {**env, "XDG_CACHE_HOME": str(root)},
+        )
         config["trees"][key] = {"path": str(tree), "setup_seconds": time.monotonic() - start}
         _write(state, config)
     refresh(ROOT, Path(env["SCCACHE_CONF"]))

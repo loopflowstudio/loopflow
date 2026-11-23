@@ -86,14 +86,18 @@ def main() -> None:
             CARGO_INCREMENTAL="0",
             SCCACHE_DIR=str(root / "cache"),
             SCCACHE_SERVER_UDS=str(root / "cache.sock"),
-            SCCACHE_CONF=str(root / "roots.json"),
+            SCCACHE_CONF=str(root / "loopflow/sccache.json"),
             SCCACHE_IDLE_TIMEOUT="0",
         )
 
         revision = _run(["git", "rev-parse", "HEAD"], ROOT, env)
 
         def add(tree: Path) -> None:
-            _run(["git", "worktree", "add", "--detach", str(tree), revision], ROOT, env)
+            _run(
+                ["git", "worktree", "add", "--detach", str(tree), revision],
+                ROOT,
+                {**env, "XDG_CACHE_HOME": str(root)},
+            )
             stack.callback(_run, ["git", "worktree", "remove", "--force", str(tree)], ROOT, env)
 
         add(a)

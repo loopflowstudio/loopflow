@@ -247,6 +247,14 @@ def daemon_pid(address: str) -> int | None:
         return struct.unpack("iII", credentials)[0]
 
 
+def _manages_roots(env: dict[str, str]) -> bool:
+    inventory = inventory_path()
+    return (
+        Path(env.get("SCCACHE_CONF", str(inventory))) == inventory
+        and "SCCACHE_BASEDIRS" not in env
+    )
+
+
 def cache_status(repo: Path, wrapper: Path | None, env: dict[str, str]) -> dict:
     expected = Path.home() / ".local/share/loopflow/sccache" / REVISION / "bin/sccache"
     # A revision override is still a pin when its full SHA is carried in the stable path.
@@ -261,8 +269,16 @@ def cache_status(repo: Path, wrapper: Path | None, env: dict[str, str]) -> dict:
         and all(c in "0123456789abcdef" for c in wrapper.parent.parent.name)
     )
     config = Path(env.get("SCCACHE_CONF", str(inventory_path())))
-    refresh(repo, config)
-    listed = json.loads(config.read_text())["basedirs"]
+    managed = _manages_roots(env)
+    if managed:
+        refresh(repo, config)
+    if "SCCACHE_BASEDIRS" in env:
+        listed = [root for root in env["SCCACHE_BASEDIRS"].split(os.pathsep) if root]
+    elif config.exists():
+        parse = json.loads if managed or config.suffix == ".json" else tomllib.loads
+        listed = parse(config.read_text()).get("basedirs", [])
+    else:
+        listed = []
     root = subprocess.check_output(
         ["git", "rev-parse", "--show-toplevel"], cwd=repo, text=True
     ).removesuffix("\n")
@@ -271,6 +287,7 @@ def cache_status(repo: Path, wrapper: Path | None, env: dict[str, str]) -> dict:
         "wrapper": str(wrapper) if wrapper else None,
         "pinned": pinned,
         "listed_roots": listed,
+        "managed_roots": managed,
         "root": root,
         "daemon": None,
         "loaded_roots": [],
@@ -312,7 +329,9 @@ def cache_status(repo: Path, wrapper: Path | None, env: dict[str, str]) -> dict:
 
 def register(repo: Path) -> None:
     wrapper, env = configured_cache()
-    config = Path(env.get("SCCACHE_CONF", str(inventory_path())))
+    if not _manages_roots(env):
+        return
+    config = inventory_path()
     config.parent.mkdir(parents=True, exist_ok=True)
     # Concurrent checkouts must observe the daemon after the preceding registration.
     with config.with_suffix(".register.lock").open("a") as lock:
@@ -353,8 +372,7 @@ def main() -> None:
         if args.command == "install":
             install(Path.cwd(), args.revision)
         elif args.command == "refresh":
-            _, env = configured_cache()
-            refresh(Path.cwd(), Path(env.get("SCCACHE_CONF", str(inventory_path()))))
+            refresh(Path.cwd(), inventory_path(), _default_configuration())
         elif args.command == "register":
             register(Path.cwd())
         else:
@@ -387,6 +405,8 @@ def main() -> None:
                     note = "socket served by another executable"
                 elif result["root"] in loaded:
                     note = "this checkout loaded"
+                elif not result["managed_roots"]:
+                    note = "this checkout is unloaded; roots come from your sccache configuration"
                 else:
                     note = "this checkout is unloaded; run register"
                 print(f"roots    {len(loaded)} of {len(listed)} loaded; {note}")

@@ -36,6 +36,23 @@ Area taken: the whole life of a worktree's build outputs for a loopflow develope
 (cold or seeded), first build, the build cache's one opt-in and one readout, and reclaim by
 <code>lf wt clean --builds</code>. The seed is one stage in that life, so it's reviewed as part of it.</p>
 
+<h2>After the build <span class="tag">REVIEWED 2026-11-22 AT 124ee08174</span></h2>
+<p>The built change matches the model this page proposed: <code>SEED_ENTRIES = (".fingerprint", "build", "deps")</code>
+cloned into <code>debug.seeding</code> and renamed, no delete step, no knob, Cargo's three locks taken
+non-blocking, one <code>.loopflow-seed</code> record behind the <code>status</code> line, the hook's
+null-OID branch beside <code>register</code>. Every pairing below still reads yes.</p>
+<ul>
+<li><b>QA's one mismatch, fixed:</b> a directory clone got a fresh mtime, so an unbuilt seed outranked the
+sibling that had built. The seed now keeps its source's <code>.fingerprint</code> mtime
+(<code>test_an_unbuilt_seed_ranks_as_old_as_its_source</code>).</li>
+<li><b>Question 3 held up:</b> seeds 18–143 commits away compiled 7 units; one at 140 commits compiled 31
+(Cargo.lock drift). Closest merge-base would rank better in that case, but Cargo still decides and the cost
+is 24 units, so newest-built stays.</li>
+<li><b>Still open, not a concept issue:</b> the seeded <code>lf</code> build's 3.1 GB peak RSS
+(<code>scratch/questions.md</code>).</li>
+</ul>
+<p>Outcome: nothing to change. Next is gate.</p>
+
 <h2>The interaction</h2>
 <p>You (or lf, for a Task) run <code>git worktree add ../x main</code>. lf's own add
 (<code>rust/loopflow-execution/src/git/mod.rs</code>, <code>add_worktree</code>) never passes

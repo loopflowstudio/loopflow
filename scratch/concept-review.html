@@ -62,116 +62,140 @@ ol.q ol li { margin: 3px 0; }
 </style>
 </head><body>
 <main>
-<h1>A Wave is one Project — full review after slices 1–5</h1>
-<p class="lede">LOO-995 concept review of the branch at <code>a6d53b0b69</code> against its base <code>43e031870e</code>, including the fifth QA run on a copy of the real store (2026-11-23).</p>
-<p><strong>Area taken:</strong> a Wave and its one Project across the whole lifecycle (create, connect to an existing or new tracker Project, rename, Task create and move, remove, store upgrade) and every surface that reads or describes it: storage, the outbound tracker queue, wire DTOs, CLI, Desktop and user docs. Reviewing the whole area caught a live bug in <code>lf wave plan connect &lt;wave&gt; &lt;project&gt;</code>, a leftover Initiative-era action owner in Wave writes, and live docs that still fail the Task's own completion check.</p>
+<h1>A Wave is one Project — full review after slices 1–6</h1>
+<p class="lede">LOO-995 concept review of the branch at <code>43d899d4ee</code> against its base <code>2656258abf</code> (2026-11-23). Slice 6 fixed the premature <code>createProject</code> on connect, switched Wave lifecycle sync to <code>ActionOwner::Project</code>, renamed the Desktop Project sheet to singular, cleaned up KR/metric docs, and moved named-Project lookup ahead of adding a new Wave.</p>
+<p><strong>Area taken:</strong> a Wave and its one Project across the whole lifecycle (create, connect to an existing or new tracker Project, rename, Task create and move, remove, re-connect after removal, store upgrade) and every surface that reads or describes it: storage, the outbound tracker queue, inbound tracker ingestion, wire DTOs, CLI, Desktop and docs. Walking the full remove → reconnect and rename → connect lifecycles caught two live mismatches in how <code>projects.external_project_id</code> and queued Project actions behave across link changes and Wave removal.</p>
 
-<h2>One interaction, as built — and where it breaks</h2>
-<pre><code># Repository already has repo.tracker.linear.team in .lf/config.yaml.
-# A Linear Project "Billing" already exists with issues.
-$ lf wave plan connect billing 'Billing'
+<h2>Two concrete interactions, as built — and where they break</h2>
 
-What happens today (ops/linear.rs:628 → ops/wave_lifecycle.rs:85):
-  1. connect_async sees Wave "billing" is not in the store yet.
-  2. It calls wave_lifecycle::add(repo, "billing", None).
-  3. add() creates the Wave + local Project, AND immediately calls sync_after_save().
-  4. sync_after_save() drains uncreated() → sends createProject("billing") to Linear.
-     Linear now has a brand-new empty Project named "billing".
-  5. connect_async resumes, finds existing Project "Billing", unlinks the brand-new
-     "billing" Project, and links "Billing".
-     Result: an empty orphan Project "billing" is left behind in Linear.
+<h3>1. Remove a linked Wave, then reconnect its Linear Project (or sync an issue in it)</h3>
+<pre><code># Wave "billing" links Linear Project "Billing" (ext-1).
+$ lf wave remove billing
+# Open Tasks move out; completed Tasks stay in history.
+# Linear Project "Billing" stays in Linear untouched — no live Wave links it now.
 
-Failure / served race (Desktop / Machine server):
-  In a served request, add()'s sync_after_save() runs on a background thread via
-  after_reply while connect_async is looking up "Billing". If createProject is in
-  phase='sent' when link_wave_project_in runs, connect fails with:
-    "Wave …'s Project is being created in the tracker; link it once that lands"
-</code></pre>
-<p>Recovery on the proposed path: <code>connect_async</code> registers the Wave locally without triggering a tracker drain; <code>link_wave_project_in</code> binds the existing Linear Project directly (zero <code>createProject</code> requests, zero race). If linking fails (unknown Project name, offline), the Wave stays registered with a local Project and a retry of <code>lf wave plan connect billing 'Billing'</code> succeeds cleanly.</p>
+# Path A — reconnect "Billing" to a new Wave later:
+$ lf wave plan connect payments 'Billing'
+  1. connect_async finds "Billing" (ext-1) and validates its Team.
+  2. connect_async sees "payments" does not exist yet → calls add_local():
+     Wave "payments" is registered and .lf/wave/payments is committed on main.
+  3. link_wave_project_in → project_accepted_planning checks:
+       SELECT id, wave_id FROM projects WHERE external_project_id = 'ext-1'
+     It hits the RETIRED "billing" Wave's Project (UNIQUE on external_project_id).
+  4. Fails with: "Project ext-1 changed Wave ownership"
+     AND leaves the newly added Wave "payments" behind in the store and Git
+     (whose own Project create will go out on the next drain).
+
+# Path B — same orphan-Wave failure when "Billing" is linked to a LIVE Wave:
+$ lf wave plan connect payments 'Billing'      # while live Wave "billing" holds it
+  Same: add_local() registers and commits "payments" BEFORE link_wave_project_in fails.
+
+# Path C — coworker files LOO-99 in "Billing" after "billing" was removed:
+  Team delta (tracker_events.rs:219): waves list excludes retired Waves → skips LOO-99.
+  lf task sync LOO-99 (linear.rs:777,880 → linear_events.rs:425):
+    project_by_tracker_id &amp; ACCEPTED_WAVE_PROJECTS ignore w.retired_at
+    → imports LOO-99 into the REMOVED Wave "billing".</code></pre>
+
+<h3>2. Rename a Wave before linking it to an existing Linear Project</h3>
+<pre><code># Connected repository, offline or logged out.
+$ lf wave create billing                 # queues create(name="billing") on proj_&lt;uuid&gt;
+$ lf wave rename billing payments        # queues field(project_name="payments") on proj_&lt;uuid&gt;
+
+# Log in and link "payments" to an existing Linear Project "Customer Billing":
+$ lf wave plan connect payments 'Customer Billing'
+  1. link_wave_project_in (sqlite/linear_events.rs:77-81) retires ONLY kind='create':
+       WHERE project_id=?1 AND kind='create' AND phase='queued'
+     The queued field(project_name="payments") action stays phase='queued'.
+  2. project_accepted_planning → reconcile_in sees the queued project_name action,
+     rebases it onto "Customer Billing", and overlays "payments" back over Linear's name.
+  3. Next drain sends projectUpdate(name="payments") to Linear:
+     connecting to an existing Linear Project silently renames it.
+  (Same when relinking an empty Wave from Project A, renamed offline, to Project B.)</code></pre>
 
 <h2>Do the product's concepts and the code's line up?</h2>
 <div class="table-wrap"><table>
 <tr><th></th><th>What a person knows or does</th><th>What the code has</th><th>What is wrong</th></tr>
 <tr><td><span class="mark yes">yes</span></td><td>A Wave has one Project, made with it</td><td><code>waves</code> + <code>projects.wave_id</code> (unique), <code>ProjectId::for_wave</code>, <code>project_of_wave</code></td><td></td></tr>
-<tr><td><span class="mark yes">yes</span></td><td>Surfaces read one Project per Wave</td><td><code>project: Reading&lt;Option&lt;ProjectSummary&gt;&gt;</code>; Swift <code>WorkReading</code>; CLI <code>Project …</code>; Desktop header, Objective detail &amp; backlog</td><td></td></tr>
+<tr><td><span class="mark yes">yes</span></td><td>Surfaces read one Project per Wave</td><td><code>project: Reading&lt;Option&lt;ProjectSummary&gt;&gt;</code>; Swift <code>WorkReading</code>, <code>WaveProjectSheet</code>, <code>WaveHeaderProject</code>, <code>WaveProjectView</code></td><td></td></tr>
 <tr><td><span class="mark yes">yes</span></td><td>A Task belongs to a Wave and moves between Waves</td><td><code>tasks.project_id → projects.wave_id</code>; one rule for create and move</td><td></td></tr>
-<tr><td><span class="mark no">no</span></td><td>Connect a new Wave to an existing Linear Project</td><td><code>connect_async</code> calls <code>wave_lifecycle::add</code>, which runs <code>sync_after_save</code> before <code>link_wave_project_in</code></td><td><strong>Premature drain:</strong> creates a stray empty Linear Project before linking the existing one, or races with <code>after_reply</code> and errors.</td></tr>
-<tr><td><span class="mark no">no</span></td><td>A Wave's tracker object is its Project (Waves have no tracker actions of their own)</td><td><code>ActionOwner::Wave</code> passed to <code>sync_after_save</code> in <code>wave_lifecycle::{add, rename, remove}</code></td><td><strong>Ghost concept from Initiatives:</strong> no tracker action ever has owner <code>Wave</code>, so <code>Scope::First</code> never prioritizes a newly added or renamed Wave's Project in the drain.</td></tr>
-<tr><td><span class="mark no">no</span></td><td>Chapters, KRs and metrics are gone; standalone Tasks travel through Linear</td><td><code>docs/surfaces.md:121</code>, <code>swift/README.md:1014</code>, <code>docs/work.md:460,519,556</code></td><td>Live docs still name "key results", "its metric table" and plural "Projects" (failing LOO-995's <code>grep -ri 'key result\|metric_target'</code> check), and <code>docs/work.md:556</code> claims other Machines do not read back Project-less Tasks while <code>linear_events.rs:581</code> &amp; <code>tracker_events.rs:209</code> do.</td></tr>
-<tr><td><span class="mark part">partly</span></td><td>Open a Wave's Project sheet in Desktop</td><td><code>WaveProjectsView</code>, <code>model.projectsWave</code>, <code>accessibilityIdentifier("wave-projects")</code></td><td>Plural names for one Project. Internal only; rename to singular before gate.</td></tr>
-<tr><td><span class="mark part">partly</span></td><td>Upgrade an existing connected repo with old unlinked live Waves</td><td><code>remove_chapters.sql</code> inserts a local Project with no <code>plan_stamps</code>; <code>uncreated()</code> queues a Linear <code>create</code> for every unbound live Wave</td><td>QA run 5 showed <code>engbot</code> (untouched since 2026-07, no <code>.lf/wave/engbot</code>) gets a Linear Project on first export. Consistent with "every live Wave is one Linear Project", but <code>plan.md</code> previously wrote "local until connected".</td></tr>
-<tr><td><span class="mark part">partly</span></td><td>A Task's queued create in Linear after Wave removal</td><td><code>tracker_actions.value_json</code> snapshots <code>task_project</code>; <code>retire_wave_in</code> rewrites it</td><td>Larger than this Task (drain redesign: read fields at send time).</td></tr>
+<tr><td><span class="mark yes">yes</span></td><td>Connect a new Wave to an existing Linear Project without creating a stray one</td><td><code>connect_async</code> resolves named Project before <code>add_local</code>; <code>wave_lifecycle</code> prioritizes <code>ActionOwner::Project</code></td><td></td></tr>
+<tr><td><span class="mark yes">yes</span></td><td>Chapters, KRs and metrics are gone</td><td>Deleted across storage, execution, CLI, Desktop and live docs (zero live <code>key result</code>/<code>metric_target</code> hits)</td><td></td></tr>
+<tr><td><span class="mark no">no</span></td><td>Removing a Wave unlinks its Linear Project in Loopflow; that Linear Project can be linked to another Wave later, and its issues stay out of Loopflow until then</td><td><code>projects.external_project_id</code> stays set on retired Waves; <code>project_by_tracker_id</code> and <code>ACCEPTED_WAVE_PROJECTS</code> ignore <code>w.retired_at</code>; <code>link_wave_project_in</code> fails on the retired owner</td><td><strong>One column doing two jobs:</strong> active link and historical link collide. Removed Waves block re-linking, and exact issue lookup imports new issues into a removed Wave while Team delta skips them.</td></tr>
+<tr><td><span class="mark no">no</span></td><td>Connecting a Wave to an existing Linear Project adopts it, or refuses cleanly if another live Wave already links it</td><td><code>link_wave_project_in</code> retires only <code>kind='create'</code>; <code>connect_async</code> checks live-Wave ownership only after <code>add_local</code></td><td><strong>Leaked pre-link edits &amp; late conflict check:</strong> a pre-link rename stays queued and renames the existing Linear Project; a live-Wave collision adds and commits the new Wave before failing.</td></tr>
+<tr><td><span class="mark part">partly</span></td><td>CLI help and dev docs reflect singular Project on the wire</td><td><code>lf/mod.rs:1991</code> ("its Tasks, Projects and Sessions"), <code>docs/dev/planning.md:416</code> (<code># projects: one</code>)</td><td>Two leftover plural strings.</td></tr>
+<tr><td><span class="mark part">partly</span></td><td>A Task's queued create in Linear after Wave removal</td><td><code>tracker_actions.value_json</code> snapshots <code>task_project</code>; <code>retire_wave_in</code> rewrites it via <code>json_set</code></td><td>Larger than this Task (drain redesign: read live fields at send time).</td></tr>
 </table></div>
 
 <div class="callout">
-<p><strong>Biggest mismatch: <code>lf wave plan connect &lt;new-wave&gt; &lt;existing-project&gt;</code> creates a duplicate Project in Linear first.</strong></p>
-<p>In the product, connecting a Wave to an existing Linear Project links that Project and creates nothing. In the code, <code>connect_async</code> delegates Wave creation to <code>wave_lifecycle::add</code>, which eagerly drains the tracker queue before <code>connect_async</code> runs <code>link_wave_project_in</code>. Alongside it, <code>wave_lifecycle</code> still passes the Initiative-era <code>ActionOwner::Wave</code> to <code>sync_after_save</code> instead of the Wave's <code>ActionOwner::Project</code>.</p>
+<p><strong>Biggest mismatch: <code>projects.external_project_id</code> conflates a live Wave's active tracker link with a removed Wave's history, and <code>link_wave_project_in</code> carries old queued edits onto the newly linked Project.</strong></p>
+<p>In the product, removing a Wave stops Loopflow from linking its Linear Project (so new issues stay out and another Wave can link it later), and linking a Wave to an existing Linear Project adopts that Project as-is without leaving a stray Wave on failure. In the code, retired Waves still match <code>project_by_tracker_id</code> and <code>ACCEPTED_WAVE_PROJECTS</code>, block re-linking via the unique column, and <code>link_wave_project_in</code> retires only <code>kind='create'</code> while <code>connect_async</code> runs <code>add_local</code> before checking whether another live Wave already links the target Project.</p>
 </div>
 
-<h2>Recommendation (Slice 6)</h2>
+<h2>Recommendation (Slice 7)</h2>
 <div class="cols">
 <div class="panel"><h3>Now (existing)</h3>
-<pre><code>// ops/linear.rs (connect_async)
-None =&gt; {
-  wave_lifecycle::add(repo, &amp;wave, None).await?;
-  // ↑ drains createProject("billing") to Linear!
-}
-...
-Some(key) =&gt; link_wave_project_in(...)
+<pre><code>// sqlite/children.rs:1326
+SELECT ... FROM projects WHERE external_project_id=?1
+// matches retired Waves too!
 
-// ops/wave_lifecycle.rs
-// add(), rename(), remove():
-sync_after_save(&amp;store, &amp;repo,
-  &amp;ActionOwner::Wave(wave_id)) // never matches!
+// sqlite/linear_events.rs:425 (ACCEPTED_WAVE_PROJECTS)
+JOIN waves w ON w.id=COALESCE(?4,l.wave_id) AND w.repo=p.repo
+// no w.retired_at IS NULL!
 
-// Swift
-WaveProjectsView, model.projectsWave, "wave-projects"
+// sqlite/linear_events.rs:77 (link_wave_project_in)
+UPDATE tracker_actions SET phase='retired', ...
+WHERE project_id=?1 AND kind='create' AND phase='queued'
+// leaves field(project_name) queued; fails on retired holder!
 
-// Docs
-docs/surfaces.md: "objective and key results"
-swift/README.md: "key results … metric table"
-docs/work.md: "its Projects", "other Machines do not read back"</code></pre>
+// ops/linear.rs:646 (connect_async)
+validate_project_ownership(&amp;project, &amp;wave, &amp;ctx.team_id)?;
+// does not check live Wave holder before add_local()!</code></pre>
 </div>
 <div class="panel proposed"><h3>After <span class="tag prop">proposed</span></h3>
-<pre><code>// ops/wave_lifecycle.rs
-// add_local() registers Wave + Project + commits files, no sync.
-// add() calls add_local(), then sync_after_save with ActionOwner::Project(own).
-// rename() calls sync_after_save with ActionOwner::Project(own).
-// remove() calls sync_after_save with None (Scope::All, pushes retirement).
+<pre><code>// sqlite/children.rs
+// project_by_tracker_id(): JOIN waves w ... AND w.retired_at IS NULL
+// (observed_task() keeps a separate lookup or raw external fallback so a
+//  lost task_project=None reply after removal never falsely confirms!)
+// tracker_states_in(): skip i.project_id != p.external_project_id
+//  when pw.retired_at IS NOT NULL (keeps retired completed Tasks Available).
+
+// sqlite/linear_events.rs
+// ACCEPTED_WAVE_PROJECTS, observe_order, attach_in item join:
+//   filter w.retired_at IS NULL.
+// link_wave_project_in(): when changing link:
+//   - refuse if another LIVE Wave holds project.id (naming its slug)
+//   - refuse if any action on own is phase='sent' (or create conflicted)
+//   - clear external_project_id=NULL on any RETIRED Wave holding project.id
+//   - retire ALL phase IN ('queued','conflicted') actions on own.
 
 // ops/linear.rs (connect_async)
-None =&gt; {
-  wave_lifecycle::add_local(repo, &amp;wave, None).await?;
-  // no premature drain; link_wave_project_in binds directly,
-  // or None branch drains ActionOwner::Project(own) once.
-}
-
-// Swift
-WaveProjectSheet, model.projectWave, "wave-project"
-
-// Docs
-Remove "key results" / "metric table" / plural "Projects";
-align docs/work.md:556 with Team-delta import of Project-less Tasks.</code></pre>
+// After validate_project_ownership(), before add_local():
+//   if a DIFFERENT live Wave already links project.id, return error naming it.</code></pre>
 </div>
+</div>
+
+<div class="note">
+<p><strong>Counterexample tested and kept:</strong> What if Task <code>T</code> moves out of Wave <code>billing</code> during <code>lf wave remove billing</code>, its <code>field(task_project = None)</code> action is sent to Linear, the reply is lost (<code>phase='sent'</code>), and Linear never applied the move (still reports <code>project_id = Some(ext-1)</code>)? If <code>observed_task()</code> (<code>ops/tracker.rs:386</code>) calls the live-only <code>project_by_tracker_id</code> and maps <code>None</code> to <code>WorkValue::TaskProject(None)</code>, it would compare <code>TaskProject(None) == TaskProject(None)</code> and <em>falsely confirm the lost move</em>. Keeping a raw-table lookup (or falling back to <code>Some(external)</code> when unlinked) in <code>observed_task()</code> prevents false confirmation while still matching the pre-removal baseline so the drain resends cleanly.</p>
+<p><strong>Second counterexample tested:</strong> Reclaiming <code>external_project_id</code> from a retired Wave's Project clears <code>external_project_id</code> on that historical row. Without a guard in <code>tracker_states_in</code> (<code>sqlite/children.rs:1485</code>), historical completed Tasks left in that retired Wave would flip from <code>Available</code> to <code>Invalid</code> because <code>i.project_id IS NOT p.external_project_id</code>. Checking <code>pw.retired_at IS NULL</code> on the membership comparison keeps completed history <code>Available</code>.</p>
 </div>
 
 <div class="note">
 <p><strong>Larger than this Task (stated plainly, not built here):</strong></p>
 <ul>
-<li><strong>Queued create field snapshots:</strong> <code>tracker_actions.value_json</code> snapshots a Task's fields at enqueue so <code>retire_wave_in</code> has to patch <code>task_project</code> on removal. Reading live fields at send time is a tracker-drain redesign of its own.</li>
-<li><strong>Desktop's Project sheet vs inline Objective detail:</strong> <code>BacklogView</code>'s title line already shows <code>WaveHeaderProject</code> and its <code>Objective ›</code> disclosure already shows <code>WaveProjectView</code>; the <code>··· → Project</code> menu opens a 500×420 sheet with the same two lines (also used by <code>openHistoricalReference</code>). Dropping the sheet once historical Project links are retired is a small Desktop UI pass.</li>
+<li><strong>Queued create field snapshots:</strong> <code>tracker_actions.value_json</code> snapshots a Task's fields at enqueue so <code>retire_wave_in</code> patches <code>task_project</code> via <code>json_set</code>. Reading live fields at send time is a tracker-drain redesign of its own.</li>
+<li><strong>Desktop's Project sheet vs inline Objective detail:</strong> <code>BacklogView</code>'s title line already shows <code>WaveHeaderProject</code> and its <code>Objective ›</code> disclosure already shows <code>WaveProjectView</code>; the <code>··· → Project</code> menu opens <code>WaveProjectSheet</code> with the same view (also used by historical Project references). Dropping the sheet once historical Project references are retired is a small Desktop UI pass.</li>
 </ul>
 </div>
 
 <h2>Questions</h2>
 <ol class="q">
-<li><code>lf wave plan connect &lt;new-wave&gt; &lt;project&gt;</code> and <code>ActionOwner::Project</code> in <code>wave_lifecycle</code>:
-  <ol><li><span class="rec">build in Slice 6 (chosen for review)</span> — register locally without premature drain in <code>connect_async</code>; prioritize <code>ActionOwner::Project</code> on add/rename; rename the plural Swift sheet; fix the live docs.</li><li>ship without fixing <code>connect_async</code>'s stray Linear Project creation.</li></ol></li>
+<li>Retired Waves and pre-link edits on <code>lf wave plan connect</code>:
+  <ol><li><span class="rec">build in Slice 7 (chosen for review)</span> — treat only live Waves as holding active tracker links, reclaim retired links on connect, preflight live-Wave collisions before <code>add_local</code>, and retire all queued/conflicted Project actions when linking to a different tracker Project.</li><li>ship without Slice 7 (accept that removing a linked Wave blocks reconnecting its Linear Project and offline renames overwrite newly linked Linear Projects).</li></ol></li>
 <li>Unlinked live Waves already in a connected store on upgrade (e.g. <code>engbot</code> in <code>~/src/loopflow</code>):
-  <ol><li><span class="rec">keep as built (chosen)</span> — every live Wave in a connected repo creates its Linear Project on first export; retire dead Waves like <code>engbot</code> with <code>lf wave remove engbot</code> before or after upgrading.</li><li>keep migration-made Projects local until <code>lf wave plan connect</code> or a new Task joins them (avoids creating Linear Projects for dormant Waves, at the cost of a second "local despite connected" state).</li></ol></li>
+  <ol><li><span class="rec">keep as built (chosen)</span> — every live Wave in a connected repo creates its Linear Project on first export; retire dead Waves with <code>lf wave remove</code> before or after upgrading.</li><li>keep migration-made Projects local until <code>lf wave plan connect</code> or a new Task joins them.</li></ol></li>
 <li>Desktop's <code>WaveProjectSheet</code> (<code>··· → Project</code> in BacklogView):
-  <ol><li><span class="rec">rename to singular and keep for now (chosen for Slice 6)</span></li><li>remove the menu item and sheet once historical Project references no longer need it.</li></ol></li>
+  <ol><li><span class="rec">keep for now (singular names done in Slice 6)</span></li><li>remove the menu item and sheet once historical Project references no longer need it.</li></ol></li>
 <li>Queued tracker create's field snapshot:
-  <ol><li>leave; removal patches it (built)</li><li>file a follow-up Task so creates read live fields at send time.</li></ol></li>
+  <ol><li>leave; removal patches it via <code>json_set</code> (built)</li><li>file a follow-up Task so creates read live fields at send time.</li></ol></li>
 </ol>
 </main></body></html>

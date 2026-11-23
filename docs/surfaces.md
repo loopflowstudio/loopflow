@@ -110,9 +110,11 @@ Each group starts with its newest Task. The order stays put as
 conversations change status.
 
 A drop shows immediately. If another window has already reordered the list,
-the Task still lands on the side of the target you chose. If the Machine
-refuses the drop, both lists show their last confirmed order and a Notice
-explains why, even if the next read fails.
+the Task still lands on the side of the target you chose. A refused drop
+restores the last confirmed order in both lists. A Notice explains a refused
+drop or sort, even if the next read fails.
+Sort takes its order from the Machine. A drag made after Sort still shows
+immediately and saves after the sort.
 
 In **⌘K → Sidebar shows**, choose **Working tasks**, **Available**, or **Busy**.
 The filter keeps the list's order. A Task with both available and busy

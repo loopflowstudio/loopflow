@@ -1854,7 +1854,7 @@ struct SessionsContentView: View {
             guard let record = store.sessions.first(where: { $0.id == id })?.record else { return }
             model.beginSessionBinding(record)
         case .sortWorkingTasks:
-            Task { await model.sortWorkingTasksByStatus() }
+            model.sortWorkingTasksByStatus()
         case .graphLog(let id):
             model.select(.task(id: id))
             navigation.content = .terminals

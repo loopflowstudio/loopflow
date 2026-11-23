@@ -230,6 +230,7 @@ struct WorkPalette: View {
                                 .frame(maxWidth: .infinity, alignment: .leading).padding(Spacing.sm)
                                 .background(selection == row.id ? palette.surfaceMuted : .clear)
                             }.buttonStyle(.plain).id(row.id)
+                            .disabled(row.id == .sortWorkingTasks && !model.canSortWorkingTasks)
                         }
                         if rows.isEmpty { Text("No matching destinations").font(Typography.meta).padding() }
                     }

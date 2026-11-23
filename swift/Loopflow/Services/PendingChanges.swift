@@ -21,13 +21,29 @@ public enum PendingCommand: Equatable, Sendable {
     /// The side chosen in the displayed order. A source missing from the grid
     /// has no preview, but the Machine can still resolve its drop.
     case reorder(machine: String?, member: WorkWorkspaceKey, target: String, side: DropSide?)
+    case sortWorkingTasks(machine: String?, repository: String)
     case renameSession(session: String, title: String)
 
     public var task: String? {
         switch self {
         case .complete(let task), .abandon(let task), .reopen(let task), .claim(let task, _), .unassign(let task),
              .move(let task, _): task
-        case .renameSession, .reorder: nil
+        case .renameSession, .reorder, .sortWorkingTasks: nil
+        }
+    }
+}
+
+private struct WorkingTaskOrder: Hashable {
+    let machine: String?
+    let directory: String
+}
+
+private extension PendingCommand {
+    func workingOrder(in write: ServedWrite) -> WorkingTaskOrder? {
+        switch self {
+        case .sortWorkingTasks(let machine, _), .reorder(let machine, _, _, _):
+            .init(machine: machine, directory: write.cwd)
+        default: nil
         }
     }
 }
@@ -62,6 +78,8 @@ public final class PendingChanges {
     /// Whether change controls are enabled: not while the Machine is away.
     public var acceptsChanges: Bool { link != .away }
 
+    // Drags and sorts of one list reach the Machine in click order, even across a lost link.
+    @ObservationIgnored private var orderWrites: [WorkingTaskOrder: (id: String, task: Task<Void, Never>)] = [:]
     @ObservationIgnored private let send: Send
     @ObservationIgnored private let describe: ((any Error) -> String)?
     /// Each live subscription's last `read_at`; nil when it had no store.
@@ -88,7 +106,13 @@ public final class PendingChanges {
                      answered: @escaping @MainActor () async throws -> Void = {}) -> Task<Void, Never> {
         let requestID = UUID().uuidString
         changes.append(Change(requestID: requestID, command: command, answer: nil))
-        return Task {
+        let order = command.workingOrder(in: write)
+        let previous = order.flatMap { orderWrites[$0]?.task }
+        let task = Task {
+            await previous?.value
+            defer {
+                if let order, orderWrites[order]?.id == requestID { orderWrites.removeValue(forKey: order) }
+            }
             let revisions: Revisions?
             do {
                 revisions = try await deliver(write, requestID: requestID)
@@ -96,8 +120,8 @@ public final class PendingChanges {
                 let notice = Notice("\(subject) couldn't be \(verb): \(message(for: error))", key: requestID, action: show)
                 notices.post(notice)
                 let failure = error as? ServerError
-                if case .reorder = command {
-                    // A drop commits atomically. Revisions on a definite refusal came from another write.
+                if order != nil {
+                    // Order edits commit atomically. Revisions on a definite refusal came from another write.
                     recordAnswer(failure?.mayHaveHappened == true ? failure?.revisions : nil, for: requestID)
                     await notices.reread(keeping: notice) { try? await answered() }
                 } else {
@@ -112,6 +136,8 @@ public final class PendingChanges {
             // A one-shot transport has no revisions. Keep the preview through its reread.
             if revisions == nil { recordAnswer(nil, for: requestID) }
         }
+        if let order { orderWrites[order] = (requestID, task) }
+        return task
     }
 
     /// Start, Run and the two Auto-Ship requests change nothing on screen: the
@@ -244,7 +270,13 @@ public final class PendingChanges {
     /// The repository's Working members in drop order until this reading covers the write.
     public func workingOrder(_ plan: WorkViewPlan?, machine: String?, readAt: Revisions?) -> WorkViewPlan? {
         guard var plan, !changes.isEmpty else { return plan }
-        for change in patches(at: readAt) {
+        let patches = patches(at: readAt)
+        let lastSort = patches.lastIndex { change in
+            guard case .sortWorkingTasks(let origin, let repo) = change.command else { return false }
+            return origin == machine && (repo == plan.repository || repo == plan.repositoryPath)
+        }
+        let afterSort = lastSort.map { $0 + 1 } ?? patches.startIndex
+        for change in patches[afterSort...] {
             guard case .reorder(let origin, let member, let target, let side?) = change.command,
                   origin == machine, member.repository == plan.repository else { continue }
             let members = plan.resolution.members
@@ -285,7 +317,7 @@ public final class PendingChanges {
                 }
             case .unassign:
                 contents.updateStates(of: matches) { $0.subtracting([.working]).union([.backlog]) }
-            case .renameSession, .reorder:
+            case .renameSession, .reorder, .sortWorkingTasks:
                 break
             }
             contents.removeAll { gone.contains($0.work) }
@@ -330,7 +362,7 @@ public final class PendingChanges {
             case .move(_, let target):
                 tasks[index].task.waveId = target
                 if let wave, wave != target { tasks.remove(at: index) }
-            case .renameSession, .reorder:
+            case .renameSession, .reorder, .sortWorkingTasks:
                 break
             }
         }

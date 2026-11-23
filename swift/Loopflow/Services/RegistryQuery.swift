@@ -854,10 +854,6 @@ public struct RegistryQuery: Sendable {
             .desktopDashboardSlots(directory: repoPath, id: id, revision: revision, slots: input)))
     }
 
-    public func sortWorkingTasksByStatus(repoPath: String) async throws {
-        _ = try await write(.desktopSort(directory: repoPath))
-    }
-
     /// Move `member`'s tile into `target`'s place in a saved Dashboard's order.
     public func reorderDashboard(id: String, member: WorkWorkspaceKey, to target: WorkWorkspaceKey, repoPath: String) async throws -> Dashboard {
         try Self.decode(Dashboard.self, from: await write(

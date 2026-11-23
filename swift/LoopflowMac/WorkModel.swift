@@ -3593,13 +3593,24 @@ extension WorkModel {
         } catch { navigation.notices.post(Notice(error.localizedDescription)) }
     }
 
-    func sortWorkingTasksByStatus() async {
-        guard let repoPath else { return }
+    var canSortWorkingTasks: Bool { repoPath != nil && pendingChanges.acceptsChanges }
+
+    @discardableResult
+    func sortWorkingTasksByStatus() -> Task<Void, Never> {
+        guard let repoPath else { return Task {} }
+        guard pendingChanges.acceptsChanges else {
+            navigation.notices.post(Notice(PendingChanges.awayText))
+            return Task {}
+        }
         let scope = repositoryReadingKey(repoPath)
-        do {
-            try await query.sortWorkingTasksByStatus(repoPath: repoPath)
+        let repository = taskListReading.value?.repository ?? selectionPlans.value?.first?.repository ?? repoPath
+        let write = pendingChanges.make(.sortWorkingTasks(machine: scope.machineId, repository: repository),
+            subject: "Working Tasks", verb: "sorted", write: .desktopSort(directory: repoPath),
+            notices: navigation.notices, show: nil) { [self] in
             try await refreshWorkingOrder(in: scope)
-        } catch { navigation.notices.post(Notice(error.localizedDescription)) }
+        }
+        presentSelectionPlans()
+        return write
     }
 
     private func refreshWorkingOrder(in scope: RepositoryReadingKey) async throws {

@@ -77,12 +77,12 @@ struct WorkNavigator: View {
                     HStack {
                         NewTaskRow(model: model)
                         if scope == .repository {
-                            Button { Task { await model.sortWorkingTasksByStatus() } } label: {
+                            Button { model.sortWorkingTasksByStatus() } label: {
                                 Label("Sort by status", systemImage: "arrow.up.arrow.down").labelStyle(.iconOnly)
                             }
                             .buttonStyle(.plain)
                             .help("Sort by status")
-                            .disabled(model.repoPath == nil)
+                            .disabled(!model.canSortWorkingTasks)
                         }
                     }
                     if case .dashboard = scope {

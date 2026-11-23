@@ -114,7 +114,7 @@ struct DashboardWorkspaceTests {
         model.applySelectionPlans([initial], reason: "")
         model.applyTaskList(initial, wave: nil, reason: "")
         #expect(model.searchDestinations("Sort by status").first?.id == .sortWorkingTasks)
-        await model.sortWorkingTasksByStatus()
+        await model.sortWorkingTasksByStatus().value
         #expect(model.navigation.notices.current == nil)
         #expect(model.sidebarTaskIDs == ["b", "a"])
         #expect(model.workingTaskIDs == model.sidebarTaskIDs)

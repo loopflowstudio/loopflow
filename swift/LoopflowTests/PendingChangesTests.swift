@@ -221,6 +221,50 @@ struct PendingChangesTests {
         #expect(changes.apply(to: [rows[3]], readAt: at(4), wave: "other").isEmpty)
     }
 
+    @Test func statusSortSupersedesOnlyEarlierDragsOfItsWorkingList() async throws {
+        let changes = changes()
+        let initial = fixtureWorkingPlan(["a", "b", "c"])
+        func drag(_ source: String, before target: String, machine: String) -> Task<Void, Never> {
+            let member = WorkWorkspaceKey(repository: initial.repository, kind: .task, id: source)
+            return changes.make(.reorder(machine: machine, member: member, target: target, side: .before),
+                subject: source, verb: "reordered", write: .desktopDashboardMove(directory: "/repo", board: "working-tasks",
+                    member: member.selector, destination: "task:" + target, side: .before), notices: notices, show: nil)
+        }
+        func order(_ machine: String) -> [String]? {
+            changes.workingOrder(initial, machine: machine, readAt: at(4))?.resolution.members.map(\.work.id)
+        }
+        let first = drag("c", before: "a", machine: "one")
+        await machine.fail(URLError(.networkConnectionLost))
+        let other = drag("b", before: "a", machine: "two")
+        #expect(order("one") == ["c", "a", "b"])
+        let sort = changes.make(.sortWorkingTasks(machine: "one", repository: initial.repository),
+            subject: "Working Tasks", verb: "sorted", write: .desktopSort(directory: "/repo"), notices: notices, show: nil)
+        #expect(order("one") == ["a", "b", "c"])
+        #expect(order("two") == ["b", "a", "c"])
+        let last = drag("c", before: "b", machine: "one")
+        #expect(order("one") == ["a", "c", "b"])
+        let ids = changes.changes.map(\.requestID)
+        for revision in 5...8 { await machine.answer(at(Int64(revision))) }
+        for write in [first, other, sort, last] { await write.value }
+        #expect(machine.sent.filter { $0 != ids[1] } == [ids[0], ids[0], ids[2], ids[3]])
+        #expect(order("one") == ["a", "c", "b"])
+    }
+
+    @Test func refusedStatusSortKeepsItsNoticeThroughAFailedRead() async {
+        let changes = changes()
+        var reread = false
+        let sort = changes.make(.sortWorkingTasks(machine: nil, repository: repo), subject: "Working Tasks", verb: "sorted",
+            write: .desktopSort(directory: "/repo"), notices: notices, show: nil) {
+            reread = true
+            #expect(changes.changes.isEmpty)
+            notices.read("tasks", "Tasks", from: nil, to: "Read unavailable", link: changes.link)
+        }
+        await machine.fail(ServerError(code: "conflict", message: "Order changed", data: .null, revisions: at(5)))
+        await sort.value
+        #expect(reread)
+        #expect(notices.current?.text == "Working Tasks couldn't be sorted: Order changed")
+    }
+
     @Test(arguments: [nil, URLError.networkConnectionLost, .notConnectedToInternet, .cannotConnectToHost,
                       .cannotFindHost, .dnsLookupFailed, .timedOut])
     func aLostLinkSendsAgainUnderTheSameRequestID(_ code: URLError.Code?) async throws {

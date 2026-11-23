@@ -8,6 +8,7 @@
 - Show each Task's current Graph step in the left bar's row metadata (display only; do not sort by step in this pass).
 - Keep PR #2025's immediate drag feedback, side-aware `DropSide` drops, and refusal recovery.
 
+- A drag and a status sort for the same Working list reach the Machine in click order, including retries. Each drag still previews immediately.
 - Start time uses the first recorded claim, then the first recorded start event, then creation time. Later handoffs keep the Task’s original start time.
 - The status snapshot uses the shared activity flags. A Task with no Blocked, Error, Busy or Available flag occupies the Idle group. Busy wins over Available when both are present.
 - The sidebar uses the Task’s saved Graph cursor while a run carries it, the same position used to resume that Task. A standalone Graph process in the checkout does not move the Task.

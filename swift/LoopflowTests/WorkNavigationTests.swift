@@ -253,6 +253,51 @@ struct WorkNavigationTests {
         }
     }
 
+    @Test func sortRetriesAfterALostReplyAndUpdatesBothLists() async throws {
+        let machine = HeldMachine()
+        let sorted = fixtureWorkingPlan(["b", "a"])
+        let json = String(decoding: try JSONEncoder().encode(sorted), as: UTF8.self)
+        let query = RegistryQuery(change: { write, id in
+            guard case .desktopSort(directory: "/repo") = write else { throw RegistryQueryError("Unexpected write") }
+            return try await machine.send(write, id)
+        }) { args, _ in
+            guard args.starts(with: ["desktop", "view", "show"]) else { throw RegistryQueryError("Unexpected read") }
+            return json
+        }
+        let model = WorkModel(query: query, repoPath: "/repo")
+        let initial = fixtureWorkingPlan(["a", "b"])
+        model.applySelectionPlans([initial], reason: "")
+        model.applyTaskList(initial, wave: nil, reason: "")
+        let write = model.sortWorkingTasksByStatus()
+        await machine.fail(URLError(.networkConnectionLost))
+        await machine.nextSend()
+        #expect(machine.sent.count == 2 && Set(machine.sent).count == 1)
+        #expect(model.sidebarTaskIDs == ["a", "b"])
+        await machine.answer(nil)
+        await write.value
+        #expect(model.sidebarTaskIDs == ["b", "a"])
+        #expect(model.workingTaskIDs == model.sidebarTaskIDs)
+    }
+
+    @Test func sortIsDisabledWhileTheMachineIsAway() async throws {
+        let model = WorkModel(query: RegistryQuery { _, _ in
+            Issue.record("Sort sent a command while the Machine was away")
+            throw RegistryQueryError("Machine away")
+        }, repoPath: "/repo")
+        let changes = model.pendingChanges
+        changes.linkLost()
+        await withCheckedContinuation { continuation in
+            withObservationTracking { _ = changes.link } onChange: { continuation.resume() }
+        }
+        let sidebar = WorkNavigator(model: model, onOpenSession: { _ in })
+        #expect(try sidebar.inspect().find(button: "Sort by status").isDisabled())
+        await model.sortWorkingTasksByStatus().value
+        #expect(changes.changes.isEmpty)
+        #expect(model.navigation.notices.current?.text == PendingChanges.awayText)
+        changes.linkReturned()
+        #expect(try !sidebar.inspect().find(button: "Sort by status").isDisabled())
+    }
+
     private func dropModel(machine: HeldMachine, feed: WorkFeed, side: DropSide) -> WorkModel {
         let query = RegistryQuery(change: { write, requestID in
             let json = try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(write))

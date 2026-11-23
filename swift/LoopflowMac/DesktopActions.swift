@@ -138,10 +138,14 @@ struct DesktopActionContext {
         }
     }
 
-    fileprivate var editableFile: TaskFilesStore? {
+    fileprivate var readingFiles: TaskFilesStore? {
         guard let files = filesBrowser, let workspace,
-              files.shownPage(hasTask: model.task(id: workspace.key.id)?.task != nil) == .files,
-              files.mode == .edit || files.selectedDocument?.canEdit == true else { return nil }
+              files.shownPage(hasTask: model.task(id: workspace.key.id)?.task != nil) == .files else { return nil }
+        return files
+    }
+
+    fileprivate var editableFile: TaskFilesStore? {
+        guard let files = readingFiles, files.mode == .edit || files.selectedDocument?.canEdit == true else { return nil }
         return files
     }
 
@@ -537,6 +541,12 @@ struct DesktopAction {
             keys: [.init(.character("p"), .command)], available: { $0.filesBrowser != nil }) { context in
             guard let files = context.filesBrowser else { throw DesktopTargetError("Open the Task browser to find a file.") }
             files.chooseFile()
+            return nil
+        },
+        DesktopAction("files-grep", "Search Text in Checkout", scope: .pane,
+            keys: [.init(.character("f"), [.shift, .command])], available: { $0.readingFiles != nil }) { context in
+            guard let files = context.readingFiles else { throw DesktopTargetError("Open Files to search the checkout.") }
+            files.chooseFile(.grep)
             return nil
         },
         DesktopAction("files-edit", "Toggle File Editing", scope: .pane,

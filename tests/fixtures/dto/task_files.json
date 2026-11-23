@@ -1,4 +1,33 @@
 {
+  "grep": {
+    "hits": [
+      {
+        "path": "src/nested/Reader.swift",
+        "line": 1,
+        "start": 3,
+        "end": 9,
+        "revision": "d49b198fdd7a62d73eca883aa2fb88b47c02de0dd141509e8741bf43e271d1aa",
+        "excerpt": "// Reader"
+      },
+      {
+        "path": "src/nested/Reader.swift",
+        "line": 2,
+        "start": 5,
+        "end": 11,
+        "revision": "d49b198fdd7a62d73eca883aa2fb88b47c02de0dd141509e8741bf43e271d1aa",
+        "excerpt": "😀 Reader Reader"
+      },
+      {
+        "path": "src/nested/Reader.swift",
+        "line": 2,
+        "start": 12,
+        "end": 18,
+        "revision": "d49b198fdd7a62d73eca883aa2fb88b47c02de0dd141509e8741bf43e271d1aa",
+        "excerpt": "😀 Reader Reader"
+      }
+    ],
+    "truncated": false
+  },
   "find": {
     "paths": ["scratch/notes.md", "src/nested/Reader.swift"],
     "scratch": ["scratch/notes.md"],

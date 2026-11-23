@@ -6900,6 +6900,35 @@
         },
         {
           "additionalProperties": false,
+          "description": "Search the Task checkout for literal text.",
+          "properties": {
+            "issue": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "task.files.grep",
+              "type": "string"
+            },
+            "query": {
+              "type": "string"
+            },
+            "whole_word": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "kind",
+            "issue",
+            "query",
+            "whole_word"
+          ],
+          "type": "object",
+          "x-result": {
+            "$ref": "#/$defs/TaskGrepResults"
+          }
+        },
+        {
+          "additionalProperties": false,
           "description": "`lf task find <issue> [query]`: matching paths across the Task checkout.",
           "properties": {
             "issue": {
@@ -13477,6 +13506,62 @@
           "type": "object"
         }
       ]
+    },
+    "TaskGrepHit": {
+      "properties": {
+        "end": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "excerpt": {
+          "type": "string"
+        },
+        "line": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "path": {
+          "type": "string"
+        },
+        "revision": {
+          "type": "string"
+        },
+        "start": {
+          "description": "Half-open UTF-8 byte offsets in the source line at this revision.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "path",
+        "line",
+        "start",
+        "end",
+        "revision",
+        "excerpt"
+      ],
+      "type": "object"
+    },
+    "TaskGrepResults": {
+      "properties": {
+        "hits": {
+          "items": {
+            "$ref": "#/$defs/TaskGrepHit"
+          },
+          "type": "array"
+        },
+        "truncated": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "hits",
+        "truncated"
+      ],
+      "type": "object"
     },
     "TaskOverview": {
       "description": "Workspace facts without the Task's full history.",

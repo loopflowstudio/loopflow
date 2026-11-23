@@ -4,6 +4,12 @@ import Combine
 import Loopflow
 import Observation
 
+/// A preview follows the selected hit. Each accepted visit can reveal it again.
+struct FileMatchLocation: Equatable {
+    let hit: TaskGrepHit
+    let visitID: UUID?
+}
+
 /// The working document. Its native editor stays with it after the first edit.
 @MainActor
 @Observable
@@ -389,10 +395,10 @@ final class TaskFilesStore {
     var navigator = Navigator.closed
     var filePicker: TaskFilePicker?
 
-    func chooseFile() {
-        guard filePicker == nil else { return }
+    func chooseFile(_ mode: TaskFilePicker.Mode = .files) {
+        guard filePicker?.mode != mode else { return }
         noteInteraction()
-        filePicker = TaskFilePicker(store: self)
+        filePicker = TaskFilePicker(store: self, mode: mode)
     }
     var showsScratch = true
 
@@ -410,7 +416,16 @@ final class TaskFilesStore {
 
     let performanceOwner = UUID()
 
+    private(set) var grepVisit: FileMatchLocation?
+
+    func openMatch(_ hit: TaskGrepHit) {
+        selectFileFromInput(hit.path)
+        mode = .read
+        grepVisit = FileMatchLocation(hit: hit, visitID: UUID())
+    }
+
     func selectFileFromInput(_ path: String) {
+        grepVisit = nil
         if selection == path, page == .files {
             selectFile(path)
             return
@@ -603,6 +618,7 @@ final class TaskFilesStore {
     private(set) var tabs: [WorkFileTab] = []
     var selection: String? {
         didSet {
+            if selection != oldValue { grepVisit = nil }
             if let path = selection, !tabs.contains(where: { $0.path == path }) {
                 tabs.append(WorkFileTab(id: UUID().uuidString, path: path))
             }

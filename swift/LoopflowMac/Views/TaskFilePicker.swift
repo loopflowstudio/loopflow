@@ -12,33 +12,51 @@ final class TaskFilePicker {
     private let preferred: Set<String>
     private(set) weak var previousResponder: NSResponder?
 
+    enum Mode: String, CaseIterable { case files = "Files", grep = "Grep" }
+
+    enum Result: Hashable {
+        case file(String)
+        case match(TaskGrepHit)
+
+        var hit: TaskGrepHit? { if case .match(let hit) = self { hit } else { nil } }
+        var path: String {
+            switch self {
+            case .file(let path): path
+            case .match(let hit): hit.path
+            }
+        }
+    }
+
+    let mode: Mode
     private var inventory: TaskFileInventory?
     var text = "" { didSet { filter() } }
-    private(set) var paths: [String] = []
-    private(set) var selection: String? { didSet { if selection != oldValue { preview = nil } } }
+    private(set) var results: [Result] = []
+    private(set) var selection: Result? { didSet { if selection?.path != oldValue?.path { preview = nil } } }
     private(set) var truncated = false
     private(set) var error: String?
     private(set) var loading = true
 
     enum Preview {
-        case text(String)
+        case text(String, revision: String?)
         case message(String)
     }
     private(set) var preview: Preview?
 
-    init(store: TaskFilesStore) {
+    init(store: TaskFilesStore, mode: Mode = .files) {
+        self.mode = mode
         query = store.query
         issue = store.issue
         let current = store.selection
         open = [current].compactMap { $0 } + store.tabs.reversed().map(\.path).filter { $0 != current }
         let changed = store.comparison == .workingTree(base: "parent") ? store.changes?.files.map(\.path) : nil
         preferred = Set(open + (changed ?? []))
-        previousResponder = NSApp?.keyWindow?.firstResponder
+        previousResponder = store.filePicker?.previousResponder ?? NSApp?.keyWindow?.firstResponder
     }
 
-    var remoteSearch: String? { inventory?.truncated == true && !text.isEmpty ? text : nil }
+    var remoteSearch: String? { !text.isEmpty && (mode == .grep || inventory?.truncated == true) ? text : nil }
 
     func load() async {
+        guard mode == .files else { filter(); return }
         do {
             let result = try await query.taskFind(issue: issue)
             guard !Task.isCancelled else { return }
@@ -52,29 +70,40 @@ final class TaskFilePicker {
     }
 
     private func filter() {
-        guard let inventory else { return }
+        // An inventory failure stays visible while typing. Grep has no initial read.
+        guard mode == .grep || inventory != nil else { return }
         error = nil
         loading = remoteSearch != nil
-        truncated = inventory.truncated
-        if text.isEmpty {
-            let opened = Set(open)
-            paths = open + inventory.paths.filter { !opened.contains($0) }
-        } else if loading {
-            paths = []
+        truncated = inventory?.truncated ?? false
+        if let inventory, !loading {
+            if text.isEmpty {
+                let opened = Set(open)
+                results = (open + inventory.paths.filter { !opened.contains($0) }).map(Result.file)
+            } else {
+                results = ranked(inventory.paths).map(Result.file)
+            }
         } else {
-            paths = ranked(inventory.paths)
+            results = []
         }
-        selection = paths.first
+        selection = results.first
     }
 
     func search(_ needle: String) async {
         do {
             try await Task.sleep(for: .milliseconds(150))
-            let result = try await query.taskFind(issue: issue, query: needle)
-            guard !Task.isCancelled, remoteSearch == needle else { return }
-            paths = ranked(result.paths)
-            selection = paths.first
-            truncated = result.truncated
+            switch mode {
+            case .files:
+                let result = try await query.taskFind(issue: issue, query: needle)
+                guard !Task.isCancelled, remoteSearch == needle else { return }
+                results = ranked(result.paths).map(Result.file)
+                truncated = result.truncated
+            case .grep:
+                let result = try await query.taskGrep(issue: issue, query: needle)
+                guard !Task.isCancelled, remoteSearch == needle else { return }
+                results = result.hits.map(Result.match)
+                truncated = result.truncated
+            }
+            selection = results.first
         } catch {
             guard !Task.isCancelled, remoteSearch == needle else { return }
             self.error = error.localizedDescription
@@ -101,22 +130,22 @@ final class TaskFilePicker {
     }
 
     func move(_ offset: Int) {
-        guard let selection, let index = paths.firstIndex(of: selection) else { return }
-        self.selection = paths[min(max(index + offset, 0), paths.count - 1)]
+        guard let selection, let index = results.firstIndex(of: selection) else { return }
+        self.selection = results[min(max(index + offset, 0), results.count - 1)]
     }
 
     func loadPreview(_ path: String, draft: TaskFileDocument?) async {
-        guard path == selection else { return }
+        guard path == selection?.path else { return }
         if let draft, draft.dirty {
-            preview = .text(draft.text)
+            preview = .text(draft.text, revision: nil)
             return
         }
         do {
             let file = try await query.taskFile(issue: issue, path: path)
-            guard !Task.isCancelled, path == selection else { return }
-            preview = file.content.map(Preview.text) ?? .message(file.state.title)
+            guard !Task.isCancelled, path == selection?.path else { return }
+            preview = file.content.map { .text($0, revision: file.revision) } ?? .message(file.state.title)
         } catch {
-            guard !Task.isCancelled, path == selection else { return }
+            guard !Task.isCancelled, path == selection?.path else { return }
             preview = .message(error.localizedDescription)
         }
     }
@@ -132,9 +161,12 @@ struct TaskFilePickerView: View {
             VStack(spacing: 0) {
                 HStack {
                     Image(systemName: "magnifyingglass")
-                    PaletteSearchField(text: $picker.text, placeholder: "Find file in checkout",
+                    PaletteSearchField(text: $picker.text, placeholder: picker.mode == .files ? "Find file in checkout" : "Search checkout text",
                                        identifier: "files-search", move: picker.move,
-                                       submit: { if let path = picker.selection { open(path) } }, cancel: cancel)
+                                       submit: { if let result = picker.selection { open(result) } }, cancel: cancel)
+                    Picker("Search mode", selection: Binding(get: { picker.mode }, set: { store.chooseFile($0) })) {
+                        ForEach(TaskFilePicker.Mode.allCases, id: \.self) { Text($0.rawValue) }
+                    }.pickerStyle(.menu).labelsHidden().fixedSize()
                     Button(action: cancel) { Image(systemName: "xmark") }
                         .buttonStyle(.plain).accessibilityLabel("Close file picker")
                 }.padding(Spacing.sm)
@@ -164,16 +196,24 @@ struct TaskFilePickerView: View {
                     if picker.loading { ProgressView().controlSize(.small) }
                     else if let error = picker.error { FailureLine("File search unavailable.", machine: error) }
                     else {
-                        if picker.paths.isEmpty { Text("No matching files.").emptyLine() }
-                        ForEach(picker.paths, id: \.self) { path in
-                            Button { open(path) } label: {
-                                Text(verbatim: path).font(Typography.mono).lineLimit(1).truncationMode(.middle)
-                                    .padding(Spacing.xs).frame(maxWidth: .infinity, alignment: .leading)
-                                    .workSelection(path == picker.selection).contentShape(Rectangle())
-                            }.buttonStyle(.plain).id(path).help(path)
+                        if picker.results.isEmpty {
+                            Text(picker.mode == .grep && picker.text.isEmpty ? "Type text to search." : "No matches.").emptyLine()
+                        }
+                        ForEach(picker.results, id: \.self) { result in
+                            Button { open(result) } label: {
+                                VStack(alignment: .leading, spacing: Spacing.xxs) {
+                                    Text(verbatim: result.hit.map { "\($0.path):\($0.line)" } ?? result.path)
+                                        .font(Typography.mono).lineLimit(1).truncationMode(.middle)
+                                    if let hit = result.hit {
+                                        Text(verbatim: hit.excerpt).font(Typography.meta).lineLimit(1)
+                                    }
+                                }
+                                .padding(Spacing.xs).frame(maxWidth: .infinity, alignment: .leading)
+                                .workSelection(result == picker.selection).contentShape(Rectangle())
+                            }.buttonStyle(.plain).id(result).help(result.path)
                         }
                         if picker.truncated {
-                            Text("More paths may match. Refine your search.").font(Typography.meta)
+                            Text("More results may match. Refine your search.").font(Typography.meta)
                         }
                     }
                 }.padding(Spacing.sm)
@@ -183,10 +223,14 @@ struct TaskFilePickerView: View {
     }
 
     @ViewBuilder private var preview: some View {
-        if let path = picker.selection {
+        if let result = picker.selection {
+            let path = result.path
             Group {
                 switch picker.preview {
-                case .text(let text): TaskCodeReader(path: path, text: text, ready: {})
+                case .text(let text, let revision):
+                    TaskCodeReader(path: path, text: text,
+                                   location: result.hit.map { FileMatchLocation(hit: $0, visitID: nil) },
+                                   revision: revision, ready: {})
                 case .message(let message): Text(message).font(Typography.meta)
                 case nil: ProgressView()
                 }
@@ -194,9 +238,12 @@ struct TaskFilePickerView: View {
         }
     }
 
-    private func open(_ path: String) {
+    private func open(_ result: TaskFilePicker.Result) {
         store.filePicker = nil
-        store.selectFileFromInput(path)
+        switch result {
+        case .file(let path): store.selectFileFromInput(path)
+        case .match(let hit): store.openMatch(hit)
+        }
     }
 
     private func cancel() {

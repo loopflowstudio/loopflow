@@ -47,7 +47,8 @@ public enum ServedRead: Equatable, Sendable, Encodable {
     case taskChanges(issue: String, base: String, head: String?)
     case taskDiff(issue: String, path: String?, base: String, head: String?, draft: String?)
     case taskFile(issue: String, path: String, at: String?)
-    case taskFind(issue: String, query: String?, limit: UInt?)
+    case taskFilesGrep(issue: String, query: String, wholeWord: Bool)
+    case taskFilesFind(issue: String, query: String?, limit: UInt?)
     case taskFiles(issue: String, path: String, cursor: String?, showIgnored: Bool)
     case waveList
     case machineSelf
@@ -120,7 +121,9 @@ public enum ServedRead: Equatable, Sendable, Encodable {
                 + (head.map { ["--head", $0] } ?? []) + (draft == nil ? [] : ["--draft"])
         case .taskFile(let issue, let path, let at):
             return ["task", "file", issue, path, "--json"] + argument("--at", at)
-        case .taskFind(let issue, let query, let limit):
+        case .taskFilesGrep(let issue, let query, let wholeWord):
+            return ["task", "grep", issue, "--json"] + (wholeWord ? ["--whole-word"] : []) + ["--", query]
+        case .taskFilesFind(let issue, let query, let limit):
             return ["task", "find", issue, "--json"] + argument("--limit", limit.map(String.init))
                 + (query.map { ["--", $0] } ?? [])
         case .taskFiles(let issue, let path, let cursor, let showIgnored):
@@ -227,7 +230,9 @@ public enum ServedRead: Equatable, Sendable, Encodable {
             TaggedFields("task.diff", ["issue": issue, "path": path, "base": base, "head": head, "draft": draft])
         case .taskFile(let issue, let path, let at):
             TaggedFields("task.file", ["issue": issue, "path": path, "at": at])
-        case .taskFind(let issue, let query, let limit):
+        case .taskFilesGrep(let issue, let query, let wholeWord):
+            TaggedFields("task.files.grep", ["issue": issue, "query": query, "whole_word": wholeWord])
+        case .taskFilesFind(let issue, let query, let limit):
             TaggedFields("task.files.find", ["issue": issue, "query": query, "limit": limit])
         case .taskFiles(let issue, let path, let cursor, let showIgnored):
             TaggedFields("task.files", ["issue": issue, "path": path, "cursor": cursor, "show_ignored": showIgnored])
@@ -1226,8 +1231,12 @@ public struct RegistryQuery: Sendable {
         try await serve(.taskDiff(issue: issue, path: path, base: base, head: head, draft: draft)).decode(TaskDiffSnapshot.self)
     }
 
+    public func taskGrep(issue: String, query: String, wholeWord: Bool = false) async throws -> TaskGrepResults {
+        try await serve(.taskFilesGrep(issue: issue, query: query, wholeWord: wholeWord)).decode(TaskGrepResults.self)
+    }
+
     public func taskFind(issue: String, query: String? = nil, limit: UInt? = nil) async throws -> TaskFileInventory {
-        try await serve(.taskFind(issue: issue, query: query, limit: limit)).decode(TaskFileInventory.self)
+        try await serve(.taskFilesFind(issue: issue, query: query, limit: limit)).decode(TaskFileInventory.self)
     }
 
     /// One page of a checkout directory's immediate entries, directories first;

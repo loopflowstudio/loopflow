@@ -15,6 +15,20 @@ public struct TaskFileEntry: Decodable, Sendable, Hashable, Identifiable {
     }
 }
 
+public struct TaskGrepHit: Decodable, Hashable, Sendable {
+    public let path: String
+    public let line: Int
+    public let start: Int
+    public let end: Int
+    public let revision: String
+    public let excerpt: String
+}
+
+public struct TaskGrepResults: Decodable, Sendable {
+    public let hits: [TaskGrepHit]
+    public let truncated: Bool
+}
+
 public struct TaskFileInventory: Decodable, Sendable {
     public let paths: [String]
     public let scratch: [String]

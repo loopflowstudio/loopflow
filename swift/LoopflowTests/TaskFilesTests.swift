@@ -9,6 +9,7 @@ import ViewInspector
 @testable import LoopflowMac
 
 private struct FilesFixture: Decodable {
+    let grep: TaskGrepResults
     let find: TaskFileInventory
     let directory: TaskDirectory
     let changes: TaskChangesSnapshot
@@ -170,7 +171,8 @@ struct TaskFilesTests {
         await peer.end(stale: false)
     }
 
-    @Test func pickerPreviewsAnUnopenedPeerFileWithoutChangingTheDraftOrTabs() async throws {
+    @Test(arguments: TaskFilePicker.Mode.allCases)
+    func pickerPreviewsAnUnopenedPeerFileWithoutChangingTheDraftOrTabs(mode: TaskFilePicker.Mode) async throws {
         let data = try Data(contentsOf: URL(fileURLWithPath: #filePath).deletingLastPathComponent()
             .deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("tests/fixtures/dto/task_files.json"))
         let nested = "src/nested/Reader.swift"
@@ -182,10 +184,12 @@ struct TaskFilesTests {
             let value: Any
             switch Array(args.dropFirst(5)) {
             case ["find", "TEST-1", "--json"]: value = fixture["find"]!
+            case ["grep", "TEST-1", "--json", "--", "Reader"]: value = fixture["grep"]!
             case ["file", "TEST-1", nested, "--json"]:
                 var file = fixture["file"]! as! [String: Any]
                 file["path"] = nested
-                file["content"] = "struct Reader {}"
+                file["content"] = "// Reader\r\n😀 Reader Reader\r\n"
+                file["revision"] = "d49b198fdd7a62d73eca883aa2fb88b47c02de0dd141509e8741bf43e271d1aa"
                 value = file
             default: throw RegistryQueryError("Unexpected read")
             }
@@ -198,27 +202,43 @@ struct TaskFilesTests {
         await draft.reconcile(snapshot("saved", path: "notes.md"))
         draft.editor.insertText("draft", replacementRange: NSRange(location: 0, length: 5))
         let tabs = store.tabs
-        store.chooseFile()
+        store.chooseFile(mode)
         let picker = try #require(store.filePicker)
         await picker.load()
-        #expect(picker.selection == "notes.md")
         let field = try TaskFilePickerView(store: store, picker: picker).inspect().find(PaletteSearchField.self).actualView()
-        field.move(1)
-        field.move(1)
-        #expect(picker.selection == nested)
-        picker.text = "nstrdr"
-        #expect(picker.paths == [nested])
+        switch mode {
+        case .files:
+            #expect(picker.selection?.path == "notes.md")
+            field.move(1)
+            field.move(1)
+            #expect(picker.selection?.path == nested)
+            picker.text = "nstrdr"
+            #expect(picker.results.map(\.path) == [nested])
+        case .grep:
+            #expect(picker.remoteSearch == nil && picker.selection == nil && !picker.loading)
+            picker.text = "Reader"
+            await picker.search("Reader")
+            field.move(1)
+            field.move(1)
+            let hit = try #require(picker.selection?.hit)
+            #expect(hit.line == 2)
+            #expect(hit.range(in: "😀 Reader Reader") == NSRange(location: 10, length: 6))
+        }
         await picker.loadPreview(nested, draft: nil)
-        guard case .text("struct Reader {}") = picker.preview else {
+        guard case .text("// Reader\r\n😀 Reader Reader\r\n", let revision) = picker.preview else {
             Issue.record("Expected the nested file's source")
             return
         }
-        #expect(store.tabs == tabs)
-        #expect(store.treeRows.isEmpty)
-        #expect(store.documents[nested] == nil)
+        #expect(store.tabs == tabs && store.treeRows.isEmpty && store.documents[nested] == nil)
         #expect(store.selection == "notes.md" && store.mode == .edit)
         #expect(draft.dirty && draft.text == "draft")
         field.submit()
+        if let hit = picker.selection?.hit {
+            #expect(hit.revision == revision)
+            await store.loadFile()
+            let reader = try TaskFilesView(store: store, checkoutBase: nil).inspect().find(TaskCodeReader.self).actualView()
+            #expect(reader.location?.hit == hit && reader.revision == hit.revision)
+        }
         #expect(store.filePicker == nil)
         #expect(store.selection == nested && store.mode == .read)
     }
@@ -230,7 +250,7 @@ struct TaskFilesTests {
         let workspace = fixtureWork(.init(machineId: "local", worktree: "/checkout"))
         let content = PaneContent.browser(taskId: "portable", tabs: [.files], selected: "files", execution: owner)
         let query = RegistryQuery(serve: { read in
-            guard case .taskFind("owner-task", nil, nil) = read else { throw RegistryQueryError("Expected checkout inventory") }
+            guard case .taskFilesFind("owner-task", nil, nil) = read else { throw RegistryQueryError("Expected checkout inventory") }
             return ReadOutput(#"{"paths":["src/local.rs"],"scratch":[],"latest_scratch_page":null,"truncated":false}"#)
         }) { args, _ in
             guard args.starts(with: ["--repo-id", "plan", "task", "location"]), let flag = args.firstIndex(of: "--request") else {
@@ -244,7 +264,7 @@ struct TaskFilesTests {
         store.chooseFile()
         let picker = try #require(store.filePicker)
         await picker.load()
-        #expect(picker.paths == ["src/local.rs"])
+        #expect(picker.results.map(\.path) == ["src/local.rs"])
         #expect(picker.error == nil)
     }
 
@@ -280,8 +300,8 @@ struct TaskFilesTests {
         release.yield()
         await pending.value
         #expect(!picker.truncated && !picker.loading)
-        #expect(picker.paths == ["nested/after.txt"])
-        #expect(picker.selection == "nested/after.txt" && store.selection == nil)
+        #expect(picker.results.map(\.path) == ["nested/after.txt"])
+        #expect(picker.selection?.path == "nested/after.txt" && store.selection == nil)
     }
 
     @Test func presentOrdinaryDocsRetainsEditsAndReusesTheFileTab() async {
@@ -344,6 +364,14 @@ struct TaskFilesTests {
         #expect(throws: Never.self) { try page.inspect().find(viewWithAccessibilityIdentifier: "files-rendered-html") }
         let note = TaskFileReadingView(document: store.document("scratch/plan.md"), baseURL: nil)
         #expect(try note.inspect().find(MarkdownBlocks.self).actualView().source == "# Plan")
+
+        let path = "scratch/plan.md"
+        let hit = TaskGrepHit(path: path, line: 1, start: 2, end: 6, revision: "# Plan", excerpt: "# Plan")
+        store.openMatch(hit)
+        let files = TaskFilesView(store: store, checkoutBase: nil)
+        #expect(try files.inspect().find(TaskCodeReader.self).actualView().location?.hit == hit)
+        store.selectFileFromInput(path)
+        #expect(try files.inspect().find(MarkdownBlocks.self).actualView().source == "# Plan")
     }
 
     @Test func codeOpensInReadAndKeepsItsDraftAndEditorAcrossFiles() async throws {
@@ -372,9 +400,13 @@ struct TaskFilesTests {
         #expect(lines.map(\.text) == ["// 😀", "struct NewStore {}"])
         #expect(lines[1].highlights.contains { $0.ink == .keyword && $0.range == NSRange(location: 0, length: 6) })
 
+        let (grep, _) = try #require(DesktopAction.binding(characters: "f", modifiers: [.shift, .command]))
         store.page = .changes
-        #expect(!edit.available(context))
+        #expect(!edit.available(context) && !grep.available(context))
         store.page = .files
+        try grep.perform(context)
+        #expect(store.filePicker?.mode == .grep)
+        store.filePicker = nil
         #expect(edit.available(context))
         try edit.perform(context)
         let editor = document.editor
@@ -884,6 +916,7 @@ struct TaskFilesTests {
 
     @Test func wirePreservesExactBaseAndLosslessText() throws {
         let fixture = try fixture()
+        #expect(fixture.grep.hits.last?.start == 12)
         #expect(fixture.find.latestScratchPage == fixture.find.scratch.first)
         #expect(fixture.directory.entries.map(\.kind) == [.directory, .file, .symlink])
         #expect(fixture.changes.baseCommit == fixture.diff.baseCommit)

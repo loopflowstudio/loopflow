@@ -637,7 +637,9 @@ below that width (picking a file closes the drawer):
 One picker serves **Files** (⌘P), **Grep** (⇧⌘F) and **Changed** (whole-Task
 changes). Arrow keys preview beside the list on wide panes (narrow panes show
 the list first), Return opens the selected line and Escape returns focus and
-place. With Files focused, **⌘F** opens one inline find bar across Read code,
+place. Grep opens the numbered source line, including in Markdown and HTML.
+The match is highlighted when the displayed text has the searched revision.
+With Files focused, **⌘F** opens one inline find bar across Read code,
 Edit, rendered Markdown, rendered HTML and Diff (images report no text matches),
 with match count, Return / Shift-Return stepping and one-click promotion to
 checkout-wide Grep. **⇧⌘O** builds the open file's outline (types, functions,

@@ -292,6 +292,7 @@ fn session_history_lists_turns_beside_observations() {
 fn task_files_share_exact_bases_rename_paths_and_lossless_revisions() {
     #[derive(serde::Serialize, serde::Deserialize)]
     struct Files {
+        grep: loopflow_execution::ops::task::TaskGrepResults,
         find: loopflow_execution::ops::task::TaskFileInventory,
         directory: loopflow_execution::ops::task::TaskDirectory,
         changes: loopflow_execution::ops::task::TaskChangesSnapshot,

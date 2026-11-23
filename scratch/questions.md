@@ -11,3 +11,5 @@
 - **Implementation order.** Build Read and per-file Edit first so the checkout picker and its preview can share the code reader. The existing Task file read already supplies content from the owning Machine.
 
 - **Checkout inventory cache.** Recheck an idle checkout on the next request after Git’s three-second observation interval. Keep up to 100,000 path entries across idle inventories, most recently used first. A live reading keeps its inventory until it finishes.
+
+- **Opening a grep hit.** Return opens the numbered source even for Markdown and HTML, since a rendered page has no source-line coordinate. Selecting the file normally opens its rendered view. Disk byte ranges highlight only when the reader holds that revision.

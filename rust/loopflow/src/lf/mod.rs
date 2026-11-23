@@ -1202,6 +1202,7 @@ impl TaskCommand {
             | Self::Context { .. }
             | Self::Runs { .. }
             | Self::Find { .. }
+            | Self::Grep { .. }
             | Self::Files { .. }
             | Self::File { .. }
             | Self::Wait { .. } => false,
@@ -2445,6 +2446,16 @@ using lf open's ordinary host selection. Preview and --quote open nothing."
         #[arg(long)]
         json: bool,
     },
+    /// Search for literal text in this Task's checkout
+    Grep {
+        issue: String,
+        query: String,
+        /// Match only at word boundaries
+        #[arg(long)]
+        whole_word: bool,
+        #[arg(long)]
+        json: bool,
+    },
     /// Find files anywhere in this Task's checkout, including scratch
     Find {
         issue: String,
@@ -2598,6 +2609,7 @@ impl TaskCommand {
             | Self::Context { issue, .. }
             | Self::Runs { issue, .. }
             | Self::Find { issue, .. }
+            | Self::Grep { issue, .. }
             | Self::Files { issue, .. }
             | Self::File { issue, .. }
             | Self::Save { issue, .. }
@@ -2633,6 +2645,7 @@ impl TaskCommand {
             | Self::Context { issue, .. }
             | Self::Runs { issue, .. }
             | Self::Find { issue, .. }
+            | Self::Grep { issue, .. }
             | Self::Files { issue, .. }
             | Self::File { issue, .. }
             | Self::Save { issue, .. }

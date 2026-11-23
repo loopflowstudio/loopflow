@@ -24,7 +24,9 @@ use super::waves::list as list_waves;
 use crate::lf::SessionListArgs;
 use loopflow_execution::engine::{Error, ErrorCode};
 use loopflow_execution::machine::connection::local_machine;
-use loopflow_execution::ops::task::{task_changes, task_diff, task_file, task_files, task_find};
+use loopflow_execution::ops::task::{
+    task_changes, task_diff, task_file, task_files, task_find, task_grep,
+};
 use loopflow_execution::read_stream::{Subscription, Transport};
 use loopflow_execution::session::SessionFilter;
 use loopflow_model::durable::RepositoryId;
@@ -164,6 +166,14 @@ pub enum Read {
         issue: String,
         path: String,
         at: Option<String>,
+    },
+    /// Search the Task checkout for literal text.
+    #[serde(rename = "task.files.grep")]
+    #[schemars(extend("x-result" = generator.subschema_for::<loopflow_execution::ops::task::TaskGrepResults>()))]
+    TaskGrep {
+        issue: String,
+        query: String,
+        whole_word: bool,
     },
     /// `lf task find <issue> [query]`: matching paths across the Task checkout.
     #[serde(rename = "task.files.find")]
@@ -475,6 +485,18 @@ impl Read {
                 argv.extend(optional("--at", at.as_ref()));
                 argv
             }
+            Self::TaskGrep {
+                issue,
+                query,
+                whole_word,
+            } => {
+                let mut argv = words(&["task", "grep", issue, "--json"]);
+                if *whole_word {
+                    argv.push("--whole-word".into());
+                }
+                argv.extend(["--".into(), query.clone()]);
+                argv
+            }
             Self::TaskFind {
                 issue,
                 query,
@@ -688,18 +710,28 @@ impl Read {
     /// What `lf <argv>` prints, as a JSON value, read on the caller's thread.
     /// A Task another Machine runs is read by that Machine's server.
     pub fn read(&self) -> anyhow::Result<serde_json::Value> {
+        self.read_until(&|| false)
+    }
+
+    pub(crate) fn read_until(
+        &self,
+        cancelled: &dyn Fn() -> bool,
+    ) -> anyhow::Result<serde_json::Value> {
         if let Self::TaskStatus { directory, issue } = self {
             if let Some(detail) = super::waves::remote_task_detail(directory, issue)? {
                 return Ok(detail);
             }
         }
-        self.read_here()
+        self.read_here_until(cancelled)
     }
 
     /// `read` on this Machine, never sent on: what a request another Machine
     /// sent runs. A command that prints bare text (`config repo --path`) is a
     /// string.
-    pub fn read_here(&self) -> anyhow::Result<serde_json::Value> {
+    pub(crate) fn read_here_until(
+        &self,
+        cancelled: &dyn Fn() -> bool,
+    ) -> anyhow::Result<serde_json::Value> {
         match self {
             Self::SessionHistoryGet { id } => value(&super::history::render(
                 id,
@@ -774,6 +806,11 @@ impl Read {
                 query,
                 limit,
             } => value(&task_find(issue, query.as_deref(), *limit)?),
+            Self::TaskGrep {
+                issue,
+                query,
+                whole_word,
+            } => value(&task_grep(issue, query, *whole_word, cancelled)?),
             Self::TaskFiles {
                 issue,
                 path,
@@ -994,6 +1031,7 @@ impl Read {
             | Self::TaskDiff { .. }
             | Self::TaskFile { .. }
             | Self::TaskFind { .. }
+            | Self::TaskGrep { .. }
             | Self::TaskFiles { .. }
             | Self::WaveList
             | Self::MachineSelf

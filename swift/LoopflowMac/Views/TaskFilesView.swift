@@ -423,7 +423,7 @@ struct TaskFilesView: View {
             if snapshot.state == .text, store.mode == .read {
                 TaskFileReadingView(document: document, baseURL: store.query.remoteMachine == nil
                     ? URL(fileURLWithPath: store.cwd).appendingPathComponent(document.path) : nil,
-                    interacted: store.noteInteraction, ready: { reportVisible(document.path) })
+                    visit: store.grepVisit, interacted: store.noteInteraction, ready: { reportVisible(document.path) })
                     .id(document.path)
             } else if snapshot.state == .text {
                 TaskDocumentView(document: document, isFocused: isFocused, ready: { reportVisible(document.path) })
@@ -447,15 +447,16 @@ struct TaskFileReadingView: View {
     let document: TaskFileDocument
     /// Where relative references resolve; `nil` for a peer's checkout.
     let baseURL: URL?
+    var visit: FileMatchLocation?
     var interacted: () -> Void = {}
     var ready: () -> Void = {}
 
     var body: some View {
         switch (document.path as NSString).pathExtension.lowercased() {
-        case "html":
+        case "html" where visit == nil:
             TaskHTMLView(html: document.text, baseURL: baseURL, interacted: interacted, ready: ready)
                 .accessibilityIdentifier("files-rendered-html")
-        case "md":
+        case "md" where visit == nil:
             ScrollView {
                 MarkdownBlocks(source: document.text).equatable()
                     .frame(maxWidth: 720, alignment: .leading)
@@ -466,7 +467,8 @@ struct TaskFileReadingView: View {
             .accessibilityIdentifier("files-rendered-markdown")
             .onAppear(perform: ready)
         default:
-            TaskCodeReader(path: document.path, text: document.text, ready: ready)
+            TaskCodeReader(path: document.path, text: document.text, location: visit,
+                           revision: document.dirty ? nil : document.snapshot?.revision, ready: ready)
                 .onScrollPhaseChange { _, phase in if phase == .interacting { interacted() } }
         }
     }

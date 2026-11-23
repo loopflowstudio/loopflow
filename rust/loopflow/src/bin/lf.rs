@@ -1300,6 +1300,26 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
                 *difftool,
             )
         }
+        TaskCommand::Grep {
+            issue,
+            query,
+            whole_word,
+            json,
+        } => {
+            let result =
+                loopflow_execution::ops::task::task_grep(issue, query, *whole_word, &|| false)?;
+            if *json {
+                println!("{}", serde_json::to_string_pretty(&result)?);
+            } else {
+                for hit in result.hits {
+                    println!("{}:{}:{}", hit.path, hit.line, hit.excerpt);
+                }
+                if result.truncated {
+                    eprintln!("Search results truncated.");
+                }
+            }
+            Ok(())
+        }
         TaskCommand::Find {
             issue,
             query,
@@ -1521,6 +1541,7 @@ fn reads_task_checkout(cli: &Cli) -> bool {
             cmd: TaskCommand::Location { .. }
                 | TaskCommand::WatchFiles { .. }
                 | TaskCommand::Find { .. }
+                | TaskCommand::Grep { .. }
                 | TaskCommand::File {
                     recoveries: false,
                     ..
@@ -3344,6 +3365,7 @@ fn execute_command(
                 | TaskCommand::Runs { .. }
                 | TaskCommand::File { .. }
                 | TaskCommand::Find { .. }
+                | TaskCommand::Grep { .. }
                 | TaskCommand::Files { .. }
                 | TaskCommand::Save { .. }),
         }) => run_task_command(cli, &std::env::current_dir()?, cmd),

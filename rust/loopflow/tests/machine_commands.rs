@@ -1888,7 +1888,7 @@ fn set_machine_changes_local_preferences_without_copying_or_moving_work() {
 }
 
 #[test]
-fn find_reads_a_checkout_known_only_to_the_addressed_machine() {
+fn search_reads_a_checkout_known_only_to_the_addressed_machine() {
     let machines = preview_machines();
     let repo = loopflow_test_support::TestRepo::new();
     let remote = machines.root.path().join("remote/store");
@@ -1899,7 +1899,7 @@ fn find_reads_a_checkout_known_only_to_the_addressed_machine() {
         .repository_id(repo.path().to_str().unwrap())
         .unwrap()
         .unwrap();
-    repo.create_file("nested/remote-only.swift", "");
+    repo.create_file("nested/remote-only.swift", "// peerReader\r\n😀 Reader");
     let _server = loopflow_test_support::MachineServer::start(env!("CARGO_BIN_EXE_lf"), &remote);
     let result = machines.json(&[
         "--machine",
@@ -1918,6 +1918,26 @@ fn find_reads_a_checkout_known_only_to_the_addressed_machine() {
         serde_json::json!(["nested/remote-only.swift"])
     );
     assert_eq!(result["latest_scratch_page"], Value::Null);
+    let matches = machines.json(&[
+        "--machine",
+        "mini",
+        "--repo-id",
+        repository.as_str(),
+        "task",
+        "grep",
+        registered.task.id.as_str(),
+        "--json",
+        "--whole-word",
+        "--",
+        "Reader",
+    ]);
+    let hits = matches["hits"].as_array().unwrap();
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0]["path"], "nested/remote-only.swift");
+    assert_eq!(hits[0]["line"], 2);
+    assert_eq!(hits[0]["start"], 5);
+    assert_eq!(hits[0]["end"], 11);
+    assert_eq!(matches["truncated"], false);
 }
 
 #[test]

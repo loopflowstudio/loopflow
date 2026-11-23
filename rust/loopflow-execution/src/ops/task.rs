@@ -15,9 +15,12 @@ pub use checkout_explain::{
 };
 mod explain;
 pub use explain::{explain_task_run, TaskRunAction, TaskRunExplanation};
+mod checkout_file;
 mod directory;
 mod find;
+mod grep;
 pub use find::{task_find, TaskFileInventory};
+pub use grep::{task_grep, TaskGrepHit, TaskGrepResults};
 mod handoff;
 mod lifecycle;
 #[cfg(test)]

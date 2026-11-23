@@ -85,7 +85,9 @@ swift/LoopflowMac/TaskFileDocument.swift:318:func reconcile (TaskFileDocument)
 - `lf task grep <ID> <query>` searches the same inventory (literal by default;
   pass `--whole-word` for whole-word references), capping at 100 hits and
   skipping files over 1 MB. `--json` includes 1-based line numbers, UTF-8 byte
-  spans, excerpts, and `truncated`.
+  spans, excerpts, and `truncated`. Each occurrence has its own hit.
+  `start` is inclusive and `end` is exclusive, measured from the start of the
+  line in the file’s reported `revision`.
 - `lf task symbols <ID> <name> [--path <path>]` finds declarations (functions,
   types, methods, and Markdown headings) with their enclosing container, path,
   and line number, capping at 100 hits.

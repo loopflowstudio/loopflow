@@ -299,7 +299,7 @@ public struct RoadmapTask: Decodable, Sendable, Identifiable, Hashable {
     /// Where a Task that never ran its Graph stands, as the server reads it:
     /// starting that Graph, or why its setup stopped.
     public var setupPosition: String? {
-        guard let execution, [.starting, .blocked].contains(execution.state) else { return nil }
+        guard lifecycle != .paused, let execution, [.starting, .blocked].contains(execution.state) else { return nil }
         return execution.reason
     }
 

@@ -110,6 +110,27 @@ struct PendingChangesTests {
                      write: .taskComplete(directory: "/repo", issue: issue), notices: notices, show: nil)
     }
 
+    @Test func pauseMovesBothListsAndARefusalRestoresTheRow() async throws {
+        let changes = changes()
+        let row = try task("LOO-2")
+        let started = try plan(["open", "working", "moving", "busy", "auto"])
+        changes.setPause(.pause, row: row, directory: "/repo", notices: notices, show: nil) {}
+        let held = try #require(changes.apply(to: [row], readAt: at(4)).first)
+        #expect(held.section == .paused && held.lifecycle == .paused && held.runtime?.owner == row.runtime?.owner)
+        let contents = try #require(changes.apply(to: started)?.contents)
+        #expect(Set(contents[1].states) == [.open, .paused, .auto])
+        #expect(contents[0].states.contains(.working))
+        await machine.fail(ServerError(code: "conflict", message: "Task moved", data: .null))
+        #expect(changes.apply(to: started)?.contents == started.value?.contents)
+        #expect(changes.apply(to: [row], readAt: at(4)) == [row])
+
+        changes.setPause(.unpause, row: held, directory: "/repo", notices: notices, show: nil) {}
+        #expect(changes.apply(to: [held], readAt: at(4)).first?.section == .working)
+        let unpaused = changes.apply(to: contents, readAt: at(4))
+        #expect(Set(unpaused[1].states) == [.open, .working, .idle, .auto])
+        await machine.answer(nil)
+    }
+
     @Test func completeHidesTheRowUntilACoveringReading() async throws {
         let changes = changes()
         complete(changes, "LOO-2")

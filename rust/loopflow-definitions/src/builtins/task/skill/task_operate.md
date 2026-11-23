@@ -6,6 +6,7 @@ action_style: procedural
 ---
 Move the Task as far forward as its Graph allows.
 
+A paused Task stays quiet. Report its saved position and stop unless asked to unpause it.
 With no live Graph run, nobody else takes this Task's next step, so it is
 yours. Make routine decisions yourself, ask for judgment in this conversation,
 then continue. Headless, exit when done or stuck. A Task with no owner is

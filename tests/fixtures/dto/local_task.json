@@ -55,6 +55,7 @@
       "workspace": null
     },
     "run_control": {
+      "pausing": false,
       "unavailable": null
     },
     "runtime": {

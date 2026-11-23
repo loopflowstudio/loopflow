@@ -35,7 +35,7 @@ own pair.
 The list shows one repository at a time: tap the title to switch, or pick
 **All repositories** to see each under its name. The filter button chooses what
 to show — **Started** (Desktop's sidebar: Working Tasks), **Ready for
-you**, **Working now**, **Backlog** or **Done** — in the Machine's order, within one Wave when you pick it there. Tasks
+you**, **Working now**, **Paused**, **Backlog** or **Done** — in the Machine's order, within one Wave when you pick it there. Tasks
 with a conversation come first; started Tasks nobody has opened a conversation
 for fold under "N without a conversation". Search covers title and checkout
 path. Pull to refresh.
@@ -71,7 +71,8 @@ the filter is empty, **Clear search** when the search matches nothing.
 
 ## Task
 
-Opening a Task opens its conversation and fits the terminal to the phone. Above
+Opening a paused Task shows its saved Session history. Opening a working Task
+fits its conversation’s terminal to the phone. Above
 it, one sentence says where the Task stands:
 
 ```text
@@ -87,11 +88,13 @@ Mac. A Task that has not taken up a Graph shows no sentence.
 
 - **Start** before the Task has run, **Run** once its Graph has stopped or is
   waiting at a step. While a run carries the Task, neither is there.
+- **Pause** stops a started Task and keeps your ownership. **Unpause** returns
+  it to the list without running its Graph. While cleanup finishes, Unpause is disabled.
 - **Auto-Ship** turns the Task's auto setting on and runs it, as
   `lf task auto on` does; **Stop Auto-Ship** turns it off. Every Task that is
   not completed has one of them.
 
-Each shows a line like "LOO-5 Auto-Ship requested" at the bottom of the
+Run and auto requests show a line like "LOO-5 Auto-Ship requested" at the bottom of the
 screen. An action the Machine already knows it would refuse is greyed, and
 the reason stands in full under the workflow sentence; any other refusal shows
 in that line.

@@ -42,13 +42,15 @@ public struct WorkScope: Equatable, Sendable {
     public let activity: WorkActivityScope?
     /// The Wave whose started Tasks the sidebar lists; nil lists the repository's.
     public let taskListWave: String?
+    public let taskList: TaskList
 
-    public init(repo: String?, headless: Bool, task: String?, activity: WorkActivityScope?, taskListWave: String?) {
+    public init(repo: String?, headless: Bool, task: String?, activity: WorkActivityScope?, taskListWave: String?, taskList: TaskList = .started) {
         self.repo = repo
         self.headless = headless
         self.task = task
         self.activity = activity
         self.taskListWave = taskListWave
+        self.taskList = taskList
     }
 }
 
@@ -82,7 +84,7 @@ public enum WorkPart: String, CaseIterable, Sendable {
         case .planning: return .allPlans
         case .selections: return scope.repo.map { .desktopViewList(directory: $0) }
         case .taskList:
-            return scope.repo.map { .desktopViewGet(directory: $0, expression: TaskList.started.expression(wave: scope.taskListWave)) }
+            return scope.repo.map { .desktopViewGet(directory: $0, expression: scope.taskList.expression(wave: scope.taskListWave)) }
         case .planHome: return scope.repo.map { .repoTracker(directory: $0) }
         case .sessions: return scope.repo.map { .sessionList(directory: $0, headless: scope.headless, after: nil, limit: nil, task: nil) }
         case .task:

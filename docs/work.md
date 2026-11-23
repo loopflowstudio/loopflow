@@ -82,10 +82,7 @@ lf task unpause LOO-12 --run
 
 ```text
 $ lf task pause LOO-12
-LOO-12 paused (build · implement)
-  stopped: Graph run lf_81a, cargo (pid 41202), rustc (pid 41219)
-  session: session_a1 closed (thread retained)
-  kept:    owner Maya on macbook, worktree, PR #2041
+LOO-12 paused
 
 $ lf task status LOO-12
 LOO-12  paused
@@ -97,10 +94,15 @@ LOO-12 · code from implement running as Graph run lf_94c
   follow: lf task status LOO-12
 ```
 
-- **What stops.** The running Graph, its worker, and build processes that worker
-  started (such as `cargo` or `rustc`) exit. Other Tasks' builds, shared caches,
-  and your own shells stay untouched. If a mutating operation (such as `lf land`)
-  is already running, it finishes cleanly and nothing starts after it
+The pause receipt names the Task. If a Graph command is still finishing, the
+receipt says `pausing` and names the run. Status shows the step.
+
+- **What stops.** The running Graph, its worker, and build processes in the
+  worker’s OS session (such as `cargo` or `rustc`) exit. Codex tool shells can
+  start a separate OS session. Builds in that session can survive a pause.
+  Other Tasks' builds, shared caches, and your own shells stay untouched. If a
+  mutating operation such as `lf land` is already running, it finishes and
+  nothing starts after it
   (`Pausing at deliver (pr-land is finishing).`).
 - **What stays.** Your ownership on this Machine, uncommitted files, branch, PR,
   Graph step, `auto` setting, and the primary conversation's thread ID, history,
@@ -111,10 +113,10 @@ LOO-12 · code from implement running as Graph run lf_94c
   `lf task auto on`, `lf resume --task`, server recovery after a restart,
   `wave-operate`, and incoming steers or Linear/Asana comments all leave it
   quiet (steers and comments queue until you unpause).
-- **Resuming.** `lf task unpause LOO-12` returns the Task to Working and lets
-  the server bring back a pause-closed conversation (leaving a conversation quit
-  if you had already quit it before pausing) without replaying the stopped
-  Graph. Add `--run` to continue from the interrupted step in one command.
+- **Resuming.** `lf task unpause LOO-12` lifts the hold. An owned Task returns
+  to Working, and an unassigned Task returns to Backlog. The server can bring
+  back a conversation closed by pause. A conversation you quit stays closed.
+  The Graph stays at its saved step. Add `--run` to continue from that step.
   Unpause refuses while a stopping process or draining operation is still live
   and names it; repeat `lf task pause LOO-12` to retry cleanup if an earlier
   stop was cut short.

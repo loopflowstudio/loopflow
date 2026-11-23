@@ -396,7 +396,7 @@ struct RegistryQueryTests {
           "provider": "codex",
           "owner": {"person": "Jack Heart", "person_id": null, "machine": {"id": null, "label": null}}
         },
-        "graph_name":"feature","graph_source":"repository","latest_graph_process":null,"execution":null,"lifecycle":"unstarted","selection_states":["unstarted","backlog"],"run_control":{"unavailable":null},
+        "graph_name":"feature","graph_source":"repository","latest_graph_process":null,"execution":null,"lifecycle":"unstarted","selection_states":["unstarted","backlog"],"run_control":{"pausing":false,"unavailable":null},
         "next_move": {
           "owner": "task",
           "reason": "ready"

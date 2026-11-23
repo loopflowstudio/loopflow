@@ -8,6 +8,7 @@ extension TaskList {
         case .started: "Started"
         case .available: "Ready for you"
         case .busy: "Working now"
+        case .paused: "Paused"
         case .backlog: "Backlog"
         case .done: "Done"
         }
@@ -67,7 +68,8 @@ final class TaskFeed {
         guard !pendingChanges.changes.isEmpty else { return repositories }
         return repositories.map { entry in
             RepositoryTasks(repository: entry.repository, path: entry.path,
-                            tasks: pendingChanges.apply(to: entry.tasks, readAt: tasks.readAt, wave: wave))
+                            tasks: pendingChanges.apply(to: entry.tasks, readAt: tasks.readAt, wave: wave)
+                                .filter { $0.states.contains(filter.state) })
         }
     }
 

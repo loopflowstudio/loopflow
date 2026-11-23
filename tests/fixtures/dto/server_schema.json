@@ -14424,6 +14424,10 @@
     },
     "TaskRunControl": {
       "properties": {
+        "pausing": {
+          "description": "A pause is still stopping work. Unpause must wait.",
+          "type": "boolean"
+        },
         "unavailable": {
           "type": [
             "string",
@@ -14432,7 +14436,8 @@
         }
       },
       "required": [
-        "unavailable"
+        "unavailable",
+        "pausing"
       ],
       "type": "object"
     },

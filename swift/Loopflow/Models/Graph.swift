@@ -167,6 +167,7 @@ public struct GraphStepGroup: Identifiable, Sendable {
 }
 
 public struct TaskRunControl: Codable, Sendable, Hashable {
+    public let pausing: Bool
     public let unavailable: String?
 }
 

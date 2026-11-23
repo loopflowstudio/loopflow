@@ -750,8 +750,9 @@ Inspect live and unfinished processes before launching more work.
 
 Task status and `plan list` separate the Task's graph position from `execution`,
 which describes its latest Graph as `idle`, `starting`, `running`, `stalled`,
-`blocked` or `unknown`. `run_control` describes the available action; recorded
-history alone is not permission to start a competing Graph. See
+`blocked` or `unknown`. `run_control.unavailable` explains a run refusal.
+While a pause is stopping work, `run_control.pausing` is true and the same
+reason explains why Unpause must wait. See
 [interactive steps and Task states](../orchestration.md#where-a-person-takes-part).
 
 Automatic provider retries within one Process retain earlier failure and usage and

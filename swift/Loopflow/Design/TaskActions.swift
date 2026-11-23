@@ -11,6 +11,21 @@ public struct TaskActions: Equatable {
         public let help: String
     }
 
+    public enum Pause: String, Equatable, Sendable {
+        case pause = "Pause"
+        case unpause = "Unpause"
+
+        public func write(directory: String, issue: String) -> ServedWrite {
+            switch self {
+            case .pause: .taskPause(directory: directory, issue: issue)
+            case .unpause: .taskUnpause(directory: directory, issue: issue, run: false)
+            }
+        }
+    }
+
+    public let pause: Pause?
+    public let pauseRefusal: String?
+
     /// The Task's auto setting, named in the Notice by the action it offers.
     public enum Auto: Equatable {
         case on, off
@@ -36,7 +51,12 @@ public struct TaskActions: Equatable {
     /// same reading's auto mark, and the row's state stands in until then.
     public init(work: TaskOverview?, row: RoadmapTask, execution: TaskExecution?) {
         let issue = row.task.identifier
-        if let graph = work?.graph {
+        let paused = row.lifecycle == .paused
+        pause = paused ? .unpause : row.lifecycle.isWorking ? .pause : nil
+        pauseRefusal = row.runControl.pausing ? row.runControl.unavailable : nil
+        if paused {
+            run = nil
+        } else if let graph = work?.graph {
             run = graph.runAction(issue: issue)
         } else if work != nil {
             // A reading with no Graph: the first run takes one up.
@@ -53,7 +73,7 @@ public struct TaskActions: Equatable {
     public var autoRefusal: String? { auto == .on ? nil : runRefusal }
 
     /// Why an offered action is disabled, said once for both; nil when none is.
-    public var refusal: String? { run != nil || auto == .off ? runRefusal : nil }
+    public var refusal: String? { pauseRefusal ?? (run != nil || auto == .off ? runRefusal : nil) }
 }
 
 public extension TaskGraph {

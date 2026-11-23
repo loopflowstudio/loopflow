@@ -123,15 +123,24 @@ struct TaskWorkspaceView: View {
     /// the Task's repository. A refused action is disabled; the reason is under the sentence.
     @ViewBuilder private var actions: some View {
         if case .value(let reading) = reading, let row = reading.row, let actions = reading.actions,
-           actions.run != nil || actions.auto != nil {
+           actions.run != nil || actions.pause != nil || actions.auto != nil {
             let (issue, directory) = (row.task.identifier, row.task.repo)
+            let requesting = feed.pendingChanges.pauseRequest(for: issue) != nil
             Menu("Task actions", systemImage: "ellipsis.circle") {
                 if let run = actions.run {
-                    item(run.label, symbol: "play.fill", disabled: actions.runRefusal != nil, issue: issue,
+                    item(run.label, symbol: "play.fill", disabled: requesting || actions.runRefusal != nil, issue: issue,
                          write: .taskRun(directory: directory, issue: issue, graph: nil, from: nil, agent: nil, approve: false))
                 }
+                if let pause = actions.pause {
+                    Button(pause.rawValue, systemImage: pause == .pause ? "pause" : "play") {
+                        feed.pendingChanges.setPause(pause, row: row, directory: directory, notices: feed.notices, show: nil) {
+                            await feed.refresh()
+                        }
+                    }
+                    .disabled(requesting || actions.pauseRefusal != nil)
+                }
                 if let auto = actions.auto {
-                    item(auto.offer, symbol: auto == .on ? "pause.circle" : "paperplane", disabled: actions.autoRefusal != nil, issue: issue,
+                    item(auto.offer, symbol: auto == .on ? "pause.circle" : "paperplane", disabled: (requesting && auto == .off) || actions.autoRefusal != nil, issue: issue,
                          write: auto == .on ? .taskAutoOff(directory: directory, issue: issue)
                              : .taskAutoOn(directory: directory, issue: issue))
                 }
@@ -148,9 +157,21 @@ struct TaskWorkspaceView: View {
         .disabled(disabled)
     }
 
+    private var paused: Bool {
+        if case .value(let reading) = reading, let row = reading.row { return row.lifecycle == .paused }
+        return task.paused
+    }
+
     @ViewBuilder private var content: some View {
         if let session = task.primarySession ?? begun {
-            SessionView(client: client, task: task, session: session, draft: $draft) { showsChanges = true }
+            Group {
+                if paused {
+                    PausedSessionHistory(query: client.query, session: session).id(session)
+                } else {
+                    SessionView(client: client, task: task, session: session, draft: $draft) { showsChanges = true }
+                }
+            }
+                .navigationTitle(task.title)
                 .toolbar {
                     ToolbarItem(placement: .topBarTrailing) {
                         Button("Changes", systemImage: "plusminus") { showsChanges = true }
@@ -183,6 +204,31 @@ struct TaskWorkspaceView: View {
             .background(theme.palette.background)
             .navigationTitle(task.title)
             .navigationBarTitleDisplayMode(.inline)
+        }
+    }
+}
+
+/// The primary conversation's saved history while its provider is closed.
+private struct PausedSessionHistory: View {
+    let query: RegistryQuery
+    let session: String
+    @State private var history = Loaded<String>.loading
+
+    var body: some View {
+        Group {
+            switch history {
+            case .loading: ProgressView()
+            case .value(let text):
+                ScrollView {
+                    Text(verbatim: text).textSelection(.enabled).font(Typography.text)
+                        .frame(maxWidth: .infinity, alignment: .leading).padding()
+                }
+            case .failed(let reason): StateView("History unavailable", sentence: reason)
+            }
+        }
+        .task {
+            do { history = .value(try await query.sessionHistoryText(id: session)) }
+            catch { history = .failed(machineConnectionMessage(error)) }
         }
     }
 }

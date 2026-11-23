@@ -146,6 +146,7 @@
         }
       },
       "run_control": {
+        "pausing": false,
         "unavailable": "Task is complete"
       },
       "runtime": {
@@ -775,6 +776,7 @@
           }
         },
         "run_control": {
+          "pausing": false,
           "unavailable": "Task is complete"
         },
         "runtime": {
@@ -1139,6 +1141,7 @@
         }
       },
       "run_control": {
+        "pausing": false,
         "unavailable": "Task is complete"
       },
       "runtime": {
@@ -1742,6 +1745,7 @@
           }
         },
         "run_control": {
+          "pausing": false,
           "unavailable": "Task is complete"
         },
         "runtime": {
@@ -2106,6 +2110,7 @@
         }
       },
       "run_control": {
+        "pausing": false,
         "unavailable": null
       },
       "runtime": {
@@ -2667,6 +2672,7 @@
           }
         },
         "run_control": {
+          "pausing": false,
           "unavailable": null
         },
         "runtime": {

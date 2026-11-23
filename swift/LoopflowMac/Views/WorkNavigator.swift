@@ -40,8 +40,10 @@ struct WorkNavigator: View {
             return model.dashboard(id) == nil ? "This Dashboard is no longer available." : "No Tasks in this Dashboard."
         case .repository, .wave:
             if model.taskListReading.value == nil { return nil }
-            if case .wave = model.navigation.sidebarScope { return "No working Tasks in this Wave." }
-            return "No working Tasks in this list."
+            let scope = model.sidebarWave == nil ? "list" : "Wave"
+            let filter = model.navigation.sidebarFilter
+            let name = filter == .working ? "working" : filter.rawValue.lowercased()
+            return "No \(name) Tasks in this \(scope)."
         }
     }
 
@@ -59,6 +61,7 @@ struct WorkNavigator: View {
     }
 
     var body: some View {
+        @Bindable var navigation = model.navigation
         VStack(spacing: 0) {
             if let status = model.workStatus.progress {
                 WorkReadStatus(status: status)
@@ -81,6 +84,11 @@ struct WorkNavigator: View {
                             Spacer()
                             Text("\(taskIDs.count)").font(Typography.meta).monospacedDigit()
                         }.foregroundStyle(palette.textTertiary).padding(Spacing.sm)
+                    } else {
+                        Picker("Show Tasks", selection: $navigation.sidebarFilter) {
+                            ForEach(WorkNavigation.SidebarFilter.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                        }
+                        .pickerStyle(.menu).labelsHidden().accessibilityLabel("Show Tasks")
                     }
                     // ⌘N counts the rows on screen; sidebar Task IDs are already unique.
                     ForEach(Array(taskIDs.enumerated()), id: \.element) { index, id in
@@ -95,10 +103,11 @@ struct WorkNavigator: View {
                        !taskIDs.contains(where: { model.isSelected(.task(id: $0)) }) {
                         VStack(alignment: .leading, spacing: Spacing.xs) {
                             Text("Open Task is outside this list")
-                            Button("Show working Tasks") {
-                                Perf.userAction(Perf.hierarchyInteraction, scenario: "sidebar_working", id: "outline:\(WorkNavigation.SidebarFilter.working.rawValue)",
+                            let target: WorkNavigation.SidebarFilter = model.task(id: selection.id)?.task.lifecycle == .paused ? .paused : .working
+                            Button(target == .paused ? "Show paused Tasks" : "Show working Tasks") {
+                                Perf.userAction(Perf.hierarchyInteraction, scenario: target == .paused ? "sidebar_paused" : "sidebar_working", id: "outline:\(target.rawValue)",
                                                 repository: model.repoPath, liveSessions: model.liveSessionCount, owner: model.navigation.performanceOwner) {
-                                    model.navigation.sidebarFilter = .working
+                                    model.navigation.sidebarFilter = target
                                     model.navigation.sidebarWaveID = nil
                                 }
                             }

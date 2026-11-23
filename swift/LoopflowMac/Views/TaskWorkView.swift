@@ -89,7 +89,7 @@ struct TaskAutoControl: View {
         let actions = TaskActions(work: model.taskWork[task.id].value, row: task,
                                   execution: model.taskExecution[task.id].value)
         if let auto = actions.auto {
-            let refusal = model.changeRefusal ?? actions.autoRefusal
+            let refusal = auto == .on ? model.changeRefusal : model.runRefusal(task)
             Button(auto.offer) {
                 if auto == .on { model.turnAutoOff(task) } else { model.turnAutoOn(task) }
             }
@@ -133,13 +133,22 @@ struct TaskWorkflowBar: View {
             }
             Spacer(minLength: 0)
             if let run = actions.run {
-                let refusal = model.changeRefusal ?? actions.runRefusal
+                let refusal = model.runRefusal(task)
                 Button(run.label) { model.startTaskFromInput(nil, task: task) }
                     .buttonStyle(LoopflowButtonStyle())
                     .fixedSize()
                     .disabled(refusal != nil)
                     .help(refusal ?? run.help)
                     .accessibilityIdentifier(work.value?.graph == nil ? "task-workflow-start" : "task-workflow-run")
+            }
+            if let pause = actions.pause {
+                let refusal = model.changeRefusal ?? model.pendingChanges.pauseRequest(for: task.task.identifier) ?? actions.pauseRefusal
+                Button(pause.rawValue) { model.setPause(pause, task: task) }
+                    .buttonStyle(LoopflowButtonStyle(pause == .unpause ? .accent : .neutral))
+                    .fixedSize()
+                    .disabled(refusal != nil)
+                    .help(refusal ?? "lf task \(pause.rawValue.lowercased()) \(task.task.identifier)")
+                    .accessibilityIdentifier("task-workflow-pause")
             }
             TaskAutoControl(model: model, task: task)
             Menu {

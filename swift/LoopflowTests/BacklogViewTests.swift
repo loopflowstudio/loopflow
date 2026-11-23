@@ -45,7 +45,7 @@ struct BacklogViewTests {
         condition["state"] = blocked == nil ? "clear" : "blocked"
         condition["reason"] = blocked ?? ""
         row["condition"] = condition
-        row["run_control"] = ["unavailable": unavailable.map { $0 as Any } ?? NSNull()]
+        row["run_control"] = ["pausing": false, "unavailable": unavailable.map { $0 as Any } ?? NSNull()]
         row["execution"] = step.map { ["state": "idle", "reason": "Stopped at \($0)", "step": $0, "captured": NSNull(),
                                               "died": NSNull(), "outlook": NSNull()] as Any }
             ?? NSNull()

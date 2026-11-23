@@ -6,12 +6,12 @@ import Testing
 @Suite("Task actions")
 struct TaskActionsTests {
     /// The shared fixture's first row: a moving Task with auto on that Rust would run.
-    private func row(lifecycle: String = "idle", auto: Bool = false, refusal: String? = nil) throws -> RoadmapTask {
+    private func row(lifecycle: String = "idle", auto: Bool = false, refusal: String? = nil, pausing: Bool = false) throws -> RoadmapTask {
         let root = try #require(JSONSerialization.jsonObject(with: loadFixtureData("roadmap_snapshot.json")) as? [String: Any])
         var row = try #require(((root["tasks"] as? [String: Any])?["items"] as? [[String: Any]])?.first)
         row["lifecycle"] = lifecycle
-        row["selection_states"] = [lifecycle] + (auto ? ["auto"] : [])
-        row["run_control"] = ["unavailable": refusal.map { $0 as Any } ?? NSNull()]
+        row["selection_states"] = [lifecycle == "abandoned" ? "done" : lifecycle] + (auto ? ["auto"] : [])
+        row["run_control"] = ["pausing": pausing, "unavailable": refusal.map { $0 as Any } ?? NSNull()]
         return try JSONDecoder().decode(RoadmapTask.self, from: JSONSerialization.data(withJSONObject: row))
     }
 
@@ -30,6 +30,21 @@ struct TaskActionsTests {
 
     private func actions(_ position: [String: Any]?, _ row: RoadmapTask) throws -> TaskActions {
         TaskActions(work: try work(position), row: row, execution: nil)
+    }
+
+    @Test func pausedTaskOffersUnpauseAfterCleanupAndKeepsAutoOffAvailable() throws {
+        let held = try actions(nil, row(lifecycle: "paused", refusal: "Task is paused"))
+        #expect(held.run == nil)
+        #expect(held.pause == .unpause && held.pauseRefusal == nil)
+        #expect(held.autoRefusal == "Task is paused")
+        let draining = try actions(nil, row(lifecycle: "paused", auto: true, refusal: "land is finishing", pausing: true))
+        #expect(draining.pause == .unpause && draining.pauseRefusal == "land is finishing")
+        #expect(draining.refusal == draining.pauseRefusal)
+        #expect(draining.auto == .on && draining.autoRefusal == nil)
+        #expect(try actions(nil, row()).pause == .pause)
+        for lifecycle in ["unstarted", "done", "abandoned"] {
+            #expect(try actions(nil, row(lifecycle: lifecycle)).pause == nil)
+        }
     }
 
     @Test("Waiting at a step offers Run and Auto-Ship")

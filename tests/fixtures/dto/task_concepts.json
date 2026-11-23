@@ -332,6 +332,7 @@
           "workspace": null
         },
         "run_control": {
+          "pausing": false,
           "unavailable": null
         },
         "runtime": {
@@ -444,6 +445,7 @@
           }
         },
         "run_control": {
+          "pausing": false,
           "unavailable": "Task FIX-2 worktree /repo/fix-2 is missing; restore that exact path on branch \"fix-2\" before `lf task run FIX-2`; Task identity and PR history are unchanged"
         },
         "runtime": {
@@ -537,6 +539,7 @@
           "workspace": null
         },
         "run_control": {
+          "pausing": false,
           "unavailable": "Linear Task is canceled"
         },
         "runtime": {
@@ -620,6 +623,7 @@
           "workspace": null
         },
         "run_control": {
+          "pausing": false,
           "unavailable": "Task is complete"
         },
         "runtime": {
@@ -1045,6 +1049,7 @@
           }
         },
         "run_control": {
+          "pausing": false,
           "unavailable": "Task FIX-2 worktree /repo/fix-2 is missing; restore that exact path on branch \"fix-2\" before `lf task run FIX-2`; Task identity and PR history are unchanged"
         },
         "runtime": {
@@ -1147,6 +1152,7 @@
           }
         },
         "run_control": {
+          "pausing": false,
           "unavailable": "Task FIX-1 worktree /repo/fix-1 is missing; restore that exact path on branch \"\" before `lf task run FIX-1`; Task identity and PR history are unchanged"
         },
         "runtime": {
@@ -1240,6 +1246,7 @@
           "workspace": null
         },
         "run_control": {
+          "pausing": false,
           "unavailable": "Linear Task is canceled"
         },
         "runtime": {
@@ -1323,6 +1330,7 @@
           "workspace": null
         },
         "run_control": {
+          "pausing": false,
           "unavailable": "Task is complete"
         },
         "runtime": {
@@ -1748,6 +1756,7 @@
           }
         },
         "run_control": {
+          "pausing": false,
           "unavailable": "Task FIX-2 worktree /repo/fix-2 is missing; restore that exact path on branch \"fix-2\" before `lf task run FIX-2`; Task identity and PR history are unchanged"
         },
         "runtime": {
@@ -1841,6 +1850,7 @@
           }
         },
         "run_control": {
+          "pausing": false,
           "unavailable": "Task FIX-1 worktree /repo/fix-1 is missing; restore that exact path on branch \"\" before `lf task run FIX-1`; Task identity and PR history are unchanged"
         },
         "runtime": {
@@ -1934,6 +1944,7 @@
           "workspace": null
         },
         "run_control": {
+          "pausing": false,
           "unavailable": "Linear Task is canceled"
         },
         "runtime": {
@@ -2017,6 +2028,7 @@
           "workspace": null
         },
         "run_control": {
+          "pausing": false,
           "unavailable": "Task is complete"
         },
         "runtime": {
@@ -2442,6 +2454,7 @@
           }
         },
         "run_control": {
+          "pausing": false,
           "unavailable": "Task FIX-2 worktree /repo/fix-2 is missing; restore that exact path on branch \"fix-2\" before `lf task run FIX-2`; Task identity and PR history are unchanged"
         },
         "runtime": {
@@ -2546,6 +2559,7 @@
           }
         },
         "run_control": {
+          "pausing": false,
           "unavailable": "Task FIX-1 worktree /repo/fix-1 is missing; restore that exact path on branch \"\" before `lf task run FIX-1`; Task identity and PR history are unchanged"
         },
         "runtime": {
@@ -2639,6 +2653,7 @@
           "workspace": null
         },
         "run_control": {
+          "pausing": false,
           "unavailable": "Linear Task is canceled"
         },
         "runtime": {
@@ -2722,6 +2737,7 @@
           "workspace": null
         },
         "run_control": {
+          "pausing": false,
           "unavailable": "Task is complete"
         },
         "runtime": {
@@ -3147,6 +3163,7 @@
           }
         },
         "run_control": {
+          "pausing": false,
           "unavailable": "Task FIX-2 worktree /repo/fix-2 is missing; restore that exact path on branch \"fix-2\" before `lf task run FIX-2`; Task identity and PR history are unchanged"
         },
         "runtime": {
@@ -3251,6 +3268,7 @@
           }
         },
         "run_control": {
+          "pausing": false,
           "unavailable": "Task FIX-1 worktree /repo/fix-1 is missing; restore that exact path on branch \"\" before `lf task run FIX-1`; Task identity and PR history are unchanged"
         },
         "runtime": {
@@ -3344,6 +3362,7 @@
           "workspace": null
         },
         "run_control": {
+          "pausing": false,
           "unavailable": "Linear Task is canceled"
         },
         "runtime": {
@@ -3427,6 +3446,7 @@
           "workspace": null
         },
         "run_control": {
+          "pausing": false,
           "unavailable": "Task is complete"
         },
         "runtime": {

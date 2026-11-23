@@ -17,3 +17,5 @@ This Codex invocation's tool shell was PID and SID 98288, a child of provider PI
 Carry the original pause time and author in a move. Keep the source hold until the destination acknowledges arrival so claiming back a failed move keeps the Task quiet. A sender from before pause existed omits this field.
 
 Use the CLI pause receipt as the served answer. A plain unpause answers null. With `--run` it answers the same run receipt as `task.run`.
+
+Both app controls send plain unpause. The Mac subscribes to the selected section. The server looks up checkout and Session details for each matching Task, so including held Tasks in every Working read would do unnecessary work.

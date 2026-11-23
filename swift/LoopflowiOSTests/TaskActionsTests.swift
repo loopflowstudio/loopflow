@@ -16,15 +16,29 @@ final class TaskActionsTests: XCTestCase {
     }
 
     /// The Task's reading, with the fixture's Sessions or with none yet.
-    private func reading(sessions: Bool) throws -> Loaded<TaskWorkspaceView.Reading> {
+    private func reading(sessions: Bool, paused: Bool = false) throws -> Loaded<TaskWorkspaceView.Reading> {
         var work = try fixture("task_work.json")
         if !sessions { work["sessions"] = [Any]() }
         let roadmap = try fixture("roadmap_snapshot.json")
-        let row = try XCTUnwrap(((roadmap["tasks"] as? [String: Any])?["items"] as? [[String: Any]])?.first)
+        var row = try XCTUnwrap(((roadmap["tasks"] as? [String: Any])?["items"] as? [[String: Any]])?.first)
+        if paused {
+            row["lifecycle"] = "paused"
+            row["section"] = "paused"
+            row["run_control"] = ["pausing": false, "unavailable": "Task is paused"]
+        }
         return .value(TaskWorkspaceView.Reading(
             work: try JSONDecoder().decode(TaskOverview.self, from: JSONSerialization.data(withJSONObject: work)),
             row: try JSONDecoder().decode(RoadmapTask.self, from: JSONSerialization.data(withJSONObject: row)),
             execution: nil))
+    }
+
+    func testPausedTaskOpensFromItsOwnFilterWithUnpause() throws {
+        XCTAssertEqual(TaskList.paused.title, "Paused")
+        XCTAssertEqual(TaskList.paused.expression(wave: nil), "kind:task state:paused")
+        guard case .value(let held) = try reading(sessions: true, paused: true) else { return XCTFail("missing Task") }
+        XCTAssertEqual(held.actions?.pause, .unpause)
+        XCTAssertNil(held.actions?.run)
+        XCTAssertNil(held.actions?.pauseRefusal)
     }
 
     func testAReadingTheMachineCouldNotMakeShowsNoGraph() throws {

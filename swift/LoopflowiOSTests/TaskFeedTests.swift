@@ -13,14 +13,18 @@ private actor HeldServer: ServerCarrier {
     private var receiving: CheckedContinuation<Data?, any Error>?
     private(set) var writes: [String] = []
     private var refusal: String?
+    private(set) var expression: String?
 
-    init(machineID: String) throws {
+    init(machineID: String, paused: Bool = false) throws {
         self.machineID = machineID
         let url = try XCTUnwrap(Bundle(for: TaskFeedTests.self).url(forResource: "task-reading", withExtension: "json"))
         let response = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any])
         var plan = try XCTUnwrap(response["result"] as? [String: Any])
         var contents = try XCTUnwrap(plan["contents"] as? [[String: Any]])
-        for index in contents.indices { contents[index]["identifier"] = "LOO-\(index + 1)" }
+        for index in contents.indices {
+            contents[index]["identifier"] = "LOO-\(index + 1)"
+            contents[index]["states"] = paused ? ["open", "paused"] : ["open", "working", "idle", "available"]
+        }
         plan["contents"] = contents
         self.plan = plan
     }
@@ -40,6 +44,7 @@ private actor HeldServer: ServerCarrier {
                      "limits": ["max_message": 1_048_576, "max_connections": 64, "max_open": 256,
                                 "max_retained_bytes": 67_108_864]])
         case "subscribe":
+            expression = (json["operation"] as? [String: Any])?["expression"] as? String
             deliver(reading(id, answers: nil))
         case "checkpoint":
             deliver(reading(id, answers: json["checkpoint"]))
@@ -106,6 +111,25 @@ final class TaskFeedTests: XCTestCase {
             guard ContinuousClock.now < deadline else { return XCTFail("condition did not hold in time") }
             try await Task.sleep(for: .milliseconds(10))
         }
+    }
+
+    func testUnpauseLeavesThePausedListAndARefusalBringsTheTaskBack() async throws {
+        let machineID = "HOME_\(UUID().uuidString.lowercased())"
+        let server = try HeldServer(machineID: machineID, paused: true)
+        let feed = feed(server, machineID: machineID)
+        defer { feed.forget() }
+        feed.filter = .paused
+        await feed.start()
+        try await until { identifiers(feed).count == 3 }
+        let expression = await server.expression
+        XCTAssertEqual(expression, "kind:task state:paused")
+        await server.refuse("land is still finishing")
+        feed.pendingChanges.make(.unpause(task: "LOO-2", owned: true), subject: "LOO-2", verb: "unpaused",
+                                 write: .taskUnpause(directory: "/repo", issue: "LOO-2", run: false),
+                                 notices: feed.notices, show: nil)
+        XCTAssertEqual(identifiers(feed), ["LOO-1", "LOO-3"])
+        try await until { feed.notices.current != nil }
+        XCTAssertEqual(identifiers(feed), ["LOO-1", "LOO-2", "LOO-3"])
     }
 
     func testCompleteHidesTheRowBeforeTheMachineAnswers() async throws {

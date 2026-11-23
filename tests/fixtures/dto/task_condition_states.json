@@ -65,6 +65,7 @@
       "outlook": null
     },
     "run_control": {
+      "pausing": false,
       "unavailable": null
     },
     "pr": null,
@@ -361,6 +362,7 @@
       "outlook": null
     },
     "run_control": {
+      "pausing": false,
       "unavailable": "Task is complete"
     },
     "pr": null,
@@ -624,6 +626,7 @@
       "outlook": null
     },
     "run_control": {
+      "pausing": false,
       "unavailable": null
     },
     "pr": null,
@@ -725,6 +728,7 @@
       "outlook": null
     },
     "run_control": {
+      "pausing": false,
       "unavailable": null
     },
     "pr": null,
@@ -991,6 +995,7 @@
       "outlook": null
     },
     "run_control": {
+      "pausing": false,
       "unavailable": null
     },
     "pr": null,
@@ -1092,6 +1097,7 @@
       "outlook": null
     },
     "run_control": {
+      "pausing": false,
       "unavailable": null
     },
     "pr": null,
@@ -1356,6 +1362,7 @@
       "outlook": null
     },
     "run_control": {
+      "pausing": false,
       "unavailable": null
     },
     "pr": {

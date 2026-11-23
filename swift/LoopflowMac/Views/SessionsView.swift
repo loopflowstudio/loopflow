@@ -482,6 +482,7 @@ final class SessionsWorkspaceRegistry {
     private var openings: [WorkWorkspaceKey: Task<Void, Never>] = [:]
     private var sessions: SessionsStore?
     var onWarmthChanged: (() -> Void)?
+    var taskIsPaused: ((String) -> Bool)?
     var canPrepare: (() -> Bool)?
     var onPreparationFinished: (() -> Void)?
     var preparationCount: Int { openings.count }
@@ -611,7 +612,9 @@ final class SessionsWorkspaceRegistry {
         for key in visibleWork.filter({ $0.kind == .task }) + warmPrimaries + recentTasks where !keys.contains(key) {
             keys.append(key)
         }
-        return keys.filter { workspaces[$0]?.canOpenTerminals == true }
+        return keys.filter { key in
+            workspaces[key]?.canOpenTerminals == true && !(key.kind == .task && taskIsPaused?(key.id) == true)
+        }
     }
 
     func openWarmConversations(store: SessionsStore) {
@@ -1563,7 +1566,8 @@ struct SessionsContentView: View {
     /// person chose them. A finished Task shows its record until its conversation
     /// opens; who owns it says nothing about what there is to show.
     private func showsTerminals(_ key: WorkWorkspaceKey, _ task: RoadmapTask?, _ entry: SessionsWorkspace) -> Bool {
-        key.kind != .task || task?.opensConversationAutomatically == true || entry.presentation.content == .terminals
+        if task?.lifecycle == .paused { return false }
+        return key.kind != .task || task?.opensConversationAutomatically == true || entry.presentation.content == .terminals
     }
     private var fileTask: TaskProjection? {
         // A departing repository view must not mount the next repository's

@@ -126,8 +126,10 @@ Click a row to select its retained workspace. The title-bar **Repo › Wave › 
 path follows hierarchy: click a name to go there, or the **›** after it to list and
 search what it contains; Back and **⌘[ / ⌘]** follow visits. **⌘K** searches Work
 across repositories and opens another repository in its own window. Its
-**Sidebar shows** picker filters Working tasks / Available / Busy without
-changing the selected Work. Click a Wave and its name moves into the
+**Sidebar shows** picker and the sidebar’s own filter offer Working tasks,
+Available, Busy, and Paused. The Wave board also lists paused Tasks.
+Open one to read its history and choose **Unpause** in the workflow bar.
+The filter keeps the selected Work open. Click a Wave and its name moves into the
 sidebar header; the rows below keep that same relative Task order until
 **‹ repo** returns to Working Tasks. **⌘1–9** selects the sidebar's Task rows by
 position and **⌃Tab / ⌃⇧Tab** cycles them. Missing slots do nothing. Selecting a

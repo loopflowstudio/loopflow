@@ -47,6 +47,48 @@ struct TaskConceptTests {
         return try #require((phases[0]["tasks"] as? [[String: Any]])?.first { $0["lifecycle"] as? String == "active" })
     }
 
+    @Test func pausedTaskShowsInItsOwnListAndOpensOnUnpause() throws {
+        var wire = try activeTaskWire()
+        wire["lifecycle"] = "paused"
+        wire["section"] = "paused"
+        wire["selection_states"] = ["open", "paused"]
+        wire["run_control"] = ["pausing": false, "unavailable": "Task is paused"]
+        let row = try JSONDecoder().decode(RoadmapTask.self, from: JSONSerialization.data(withJSONObject: wire))
+        let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("Passive rendering") }, repoPath: "/repo")
+        let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: JSONSerialization.data(withJSONObject: [
+            "generated_at": "2026-11-23", "waves": [], "tasks": ["state": "ok", "truncated": false, "items": [wire]]
+        ]))
+        model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [])
+        let key = WorkWorkspaceKey(repository: row.task.repositoryId, kind: .task, id: row.id)
+        let member = WorkViewPlan.Content(work: key, title: row.task.name, states: [.open, .paused],
+                                          identifier: row.task.identifier, primarySession: nil, location: nil, argv: nil, unavailable: [])
+        let plan = fixtureViewPlan(owner: .init(repository: key.repository, kind: .repository, id: key.repository), members: [member])
+        model.applyTaskList(plan, wave: nil, reason: "")
+        #expect(model.sidebarTaskIDs.isEmpty)
+        model.navigation.sidebarFilter = .paused
+        #expect(model.taskListReading.isLoading)
+        #expect(model.workScope.taskList == .paused)
+        model.applyTaskList(plan, wave: nil, list: .paused, reason: "")
+        #expect(model.sidebarTaskIDs == [row.id])
+        #expect(TaskList.paused.expression(wave: "product") == "wave:product kind:task state:paused")
+        let board = BacklogList(tasks: [row], truncated: false, wave: nil, waveNames: [:], state: BacklogState())
+        #expect(board.all.isEmpty && board.paused.map(\.id) == [row.id])
+        #expect(model.startedTaskCount(.repository) == 0)
+        #expect(!row.opensConversationAutomatically)
+        let registry = SessionsWorkspaceRegistry(localMachineId: "local")
+        model.bindWorkspaces(registry, repository: key.repository)
+        registry.open(key, title: row.task.name, location: .init(machineId: "local", worktree: "/tmp/task"))
+        #expect(registry.selectedWork == key && !registry.warmWork.contains(key))
+        let view = try TaskWorkflowBar(model: model, task: row, work: .available(
+            TaskOverview(sessions: [], graphProcesses: [], graph: nil))).inspect()
+        let action = try view.find(viewWithAccessibilityIdentifier: "task-workflow-pause").button()
+        #expect(try action.labelView().text().string() == "Unpause")
+        #expect(!action.isDisabled())
+        try action.tap()
+        #expect(model.pendingChanges.changes.last?.command == .unpause(task: row.task.identifier, owned: row.runtime?.owner != nil))
+        #expect(throws: (any Error).self) { try view.find(button: "Start") }
+    }
+
     @Test func lifecycleAndActionsFollowTheSameRustReading() throws {
         for phase in try phases() {
             let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("Passive rendering") }, repoPath: "/repo")
@@ -102,7 +144,8 @@ struct TaskConceptTests {
             for filter in WorkNavigation.SidebarFilter.allCases {
                 model.navigation.sidebarFilter = filter
                 let expected = phase.tasks.filter { task in
-                    task.selectionStates.contains(.working) && (filter == .working
+                    if filter == .paused { return task.section == .paused }
+                    return task.selectionStates.contains(.working) && (filter == .working
                         || task.selectionStates.contains(filter == .available ? .available : .busy))
                 }.map(\.id)
                 #expect(model.sidebarTaskIDs == expected)

@@ -13,6 +13,8 @@ public enum PendingCommand: Equatable, Sendable {
     /// `owner` is the repository reading's `viewer`: who the Machine names. Working
     /// if it was started; with no viewer, the section moves only.
     case claim(task: String, owner: TaskOwner?)
+    case pause(task: String)
+    case unpause(task: String, owned: Bool)
     /// Backlog.
     case unassign(task: String)
     /// Leaves every list filtered to another Wave; nil leaves it in none.
@@ -22,7 +24,7 @@ public enum PendingCommand: Equatable, Sendable {
     public var task: String? {
         switch self {
         case .complete(let task), .abandon(let task), .reopen(let task), .claim(let task, _), .unassign(let task),
-             .move(let task, _): task
+             .move(let task, _), .pause(let task), .unpause(let task, _): task
         case .renameSession: nil
         }
     }
@@ -72,6 +74,26 @@ public final class PendingChanges {
     }
 
     // MARK: Making changes
+
+    /// The Machine is settling this request. A second click waits for its answer.
+    public func pauseRequest(for issue: String) -> String? {
+        for change in changes where change.answer == nil && change.command.task == issue {
+            switch change.command {
+            case .pause: return "Pause requested"
+            case .unpause: return "Unpause requested"
+            default: continue
+            }
+        }
+        return nil
+    }
+
+    public func setPause(_ action: TaskActions.Pause, row: RoadmapTask, directory: String, notices: NoticeCenter,
+                         show: Notice.Action?, answered: @escaping @MainActor () async -> Void) {
+        let issue = row.task.identifier
+        let command: PendingCommand = action == .pause ? .pause(task: issue) : .unpause(task: issue, owned: row.runtime?.owner != nil)
+        make(command, subject: issue, verb: action == .pause ? "paused" : "unpaused",
+             write: action.write(directory: directory, issue: issue), notices: notices, show: show, answered: answered)
+    }
 
     /// Show `command` on every list now and send `write` under its request ID,
     /// again while the link is lost. The change stays until a reading covers what
@@ -261,12 +283,20 @@ public final class PendingChanges {
                 contents.updateStates(of: matches) { states in
                     states.subtracting([.done]).union([.open, Self.started(states) ? .working : .backlog])
                 }
+            case .pause:
+                contents.updateStates(of: matches) {
+                    $0.subtracting([.working, .backlog, .moving, .active, .idle, .busy, .available, .blocked]).union([.paused])
+                }
+            case .unpause(_, let owned):
+                contents.updateStates(of: matches) { $0.subtracting([.paused]).union([.idle, owned ? .working : .backlog]) }
             case .claim:
                 contents.updateStates(of: matches) { states in
                     Self.started(states) ? states.subtracting([.backlog]).union([.working]) : states
                 }
             case .unassign:
-                contents.updateStates(of: matches) { $0.subtracting([.working]).union([.backlog]) }
+                contents.updateStates(of: matches) {
+                    $0.contains(.paused) ? $0.subtracting([.paused]).union([.backlog, .idle]) : $0.subtracting([.working]).union([.backlog])
+                }
             case .renameSession:
                 break
             }
@@ -303,10 +333,17 @@ public final class PendingChanges {
                 let checkedOut = tasks[index].reference.workspace != nil
                 tasks[index].lifecycle = checkedOut ? .idle : .unstarted
                 tasks[index].section = checkedOut && tasks[index].runtime?.owner != nil ? .working : .backlog
+            case .pause:
+                tasks[index].lifecycle = .paused
+                tasks[index].section = .paused
+            case .unpause(_, let owned):
+                tasks[index].lifecycle = .idle
+                tasks[index].section = owned ? .working : .backlog
             case .claim(_, let owner):
                 if let owner { tasks[index].runtime?.owner = owner }
-                if started { tasks[index].section = .working }
+                if started && tasks[index].lifecycle != .paused { tasks[index].section = .working }
             case .unassign:
+                if tasks[index].lifecycle == .paused { tasks[index].lifecycle = .idle }
                 tasks[index].runtime?.owner = nil
                 tasks[index].section = .backlog
             case .move(_, let target):
@@ -357,7 +394,7 @@ extension [WorkViewPlan.Content] {
     /// reading's own states replace these.
     fileprivate mutating func updateStates(of members: Set<WorkWorkspaceKey>,
                                            _ update: (Set<WorkSelectionState>) -> Set<WorkSelectionState>) {
-        let sections: Set<WorkSelectionState> = [.backlog, .working, .done]
+        let sections: Set<WorkSelectionState> = [.backlog, .working, .paused, .done]
         for index in indices where members.contains(self[index].work) {
             let current = Set(self[index].states)
             let next = update(current)
@@ -372,6 +409,6 @@ extension WorkSelectionState {
     /// Declaration order, so patched states keep a stable order.
     fileprivate static let allOrdered: [WorkSelectionState] = [
         .open, .available, .busy, .blocked, .unstarted, .idle, .active, .moving,
-        .backlog, .working, .done, .auto,
+        .backlog, .working, .paused, .done, .auto,
     ]
 }

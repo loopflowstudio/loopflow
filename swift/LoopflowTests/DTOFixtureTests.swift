@@ -348,6 +348,7 @@ struct DTOFixtureTests {
         #expect(window.session?.action?.label == "Take over")
         #expect(window.session?.observedAt == nil)
         #expect(report.windows[1].task?.actions?.recommended == .run)
+        #expect(report.windows[1].task?.runControl?.pausing == false)
         #expect(report.windows[1].task?.runControl?.unavailable == "Task checkout is on another Machine")
         #expect(window.workspaces.first?.hiddenPanes == ["files-pane"])
         #expect(window.viewParts.isEmpty)

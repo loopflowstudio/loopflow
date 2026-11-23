@@ -51,6 +51,10 @@ extension TaskRowStatus {
     /// someone keeps the reason as its line.
     public init(task: RoadmapTask, program: TaskRowStatus? = nil) {
         let need = task.need
+        if task.lifecycle == .paused {
+            self = .lifecycle(.paused)
+            return
+        }
         if let program {
             self = program
         } else if let need, need != .unknown {
@@ -238,6 +242,7 @@ extension WorkViewPlan.Content {
     /// no conversation opens from here, which every Task without one lists, so
     /// it is the word only when the reading gives no other.
     public var status: TaskRowStatus? {
+        if states.contains(.paused) { return .lifecycle(.paused) }
         if states.contains(.blocked) { return .program(.blocked) }
         if states.contains(.busy) { return .program(.working) }
         if states.contains(.available) { return .program(.idle) }

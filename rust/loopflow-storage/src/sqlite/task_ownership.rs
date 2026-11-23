@@ -996,6 +996,7 @@ impl SqliteStore {
         if !me.matches_task_in(&tx, task)? {
             return Ok(None);
         }
+        super::task_pause::require_settled_in(&tx, task)?;
         if reading_in(&tx, task)?.1.owner.is_none() {
             claim_in(&tx, task, me)?;
         }
@@ -1092,7 +1093,10 @@ impl SqliteStore {
         if !me.matches_task_in(&tx, task)? {
             return Ok(None);
         }
-        let Some((local, holder)) = my_claim_in(&tx, task, me)? else {
+        let claim = my_claim_in(&tx, task, me)?;
+        super::task_pause::clear_in(&tx, task)?;
+        let Some((local, holder)) = claim else {
+            tx.commit()?;
             return Ok(Some(None));
         };
         let person = Person {

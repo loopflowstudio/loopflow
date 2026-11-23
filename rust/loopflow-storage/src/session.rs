@@ -356,6 +356,8 @@ pub struct SessionSummary {
     /// None for a conversation Loopflow never attached to.
     pub agent_process_id: Option<loopflow_model::id::AgentProcessId>,
     pub task_terminal: bool,
+    /// The Task whose hold keeps this primary Session down.
+    pub paused_task: Option<TaskId>,
     /// Its Task names it as the Task's primary conversation.
     pub task_primary: bool,
     /// It is an open Task's conversation in the Task's checkout on this

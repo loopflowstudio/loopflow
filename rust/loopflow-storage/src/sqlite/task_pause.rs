@@ -20,6 +20,37 @@ pub struct StoppingSession {
     pub members: Vec<(u32, i64)>,
 }
 
+/// The Task holding this primary conversation, if it is paused.
+pub(super) fn paused_primary_sql(session: &str) -> String {
+    format!(
+        "SELECT h.task_id FROM task_primary_sessions tp
+             JOIN task_pauses h ON h.task_id=tp.task_id WHERE tp.session_id={session}"
+    )
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskPause {
+    pub at: i64,
+    pub by: Starter,
+}
+
+pub(super) fn require_settled_in(conn: &Connection, task: &TaskId) -> StoreResult<()> {
+    let pending: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM task_pauses WHERE task_id=?1 AND stopping_processes IS NOT NULL)",
+        [task.as_str()], |row| row.get(0))?;
+    if pending {
+        return Err(StoreError::InvalidData(format!(
+            "Task is still stopping; repeat `lf task pause {task}` to finish cleanup"
+        )));
+    }
+    Ok(())
+}
+
+pub(super) fn clear_in(conn: &Connection, task: &TaskId) -> StoreResult<bool> {
+    require_settled_in(conn, task)?;
+    Ok(conn.execute("DELETE FROM task_pauses WHERE task_id=?1", [task.as_str()])? != 0)
+}
+
 pub(super) fn require_unpaused_in(conn: &Connection, task: &TaskId) -> StoreResult<()> {
     let issue: Option<String> = conn.query_row(
         "SELECT t.issue_identifier FROM task_pauses p JOIN tasks t ON t.id=p.task_id WHERE p.task_id=?1",
@@ -30,6 +61,16 @@ pub(super) fn require_unpaused_in(conn: &Connection, task: &TaskId) -> StoreResu
         )));
     }
     Ok(())
+}
+
+fn stopping_processes_in(
+    conn: &Connection,
+    task: &TaskId,
+) -> StoreResult<Option<Vec<StoppingSession>>> {
+    let jobs: Option<String> = conn.query_row(
+        "SELECT stopping_processes FROM task_pauses WHERE task_id=?1 AND stopping_processes IS NOT NULL",
+        [task.as_str()], |r| r.get(0)).optional()?;
+    Ok(jobs.map(|json| serde_json::from_str(&json)).transpose()?)
 }
 
 fn settle_carrier(conn: &Connection, task: &TaskId) -> StoreResult<()> {
@@ -44,6 +85,47 @@ fn settle_carrier(conn: &Connection, task: &TaskId) -> StoreResult<()> {
 impl SqliteStore {
     pub fn require_task_unpaused(&self, task: &TaskId) -> StoreResult<()> {
         require_unpaused_in(&self.conn.lock().expect("store mutex poisoned"), task)
+    }
+
+    pub fn stopping_processes(&self, task: &TaskId) -> StoreResult<Option<Vec<StoppingSession>>> {
+        stopping_processes_in(&self.conn.lock().expect("store mutex poisoned"), task)
+    }
+
+    /// The portable part of a pause. Process identities belong to the source Machine.
+    pub fn task_pause(&self, task: &TaskId) -> StoreResult<Option<TaskPause>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let row = conn
+            .query_row(
+                "SELECT paused_at,paused_by FROM task_pauses WHERE task_id=?1",
+                [task.as_str()],
+                |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)),
+            )
+            .optional()?;
+        row.map(|(at, by)| {
+            Ok(TaskPause {
+                at,
+                by: serde_json::from_str(&by)?,
+            })
+        })
+        .transpose()
+    }
+
+    pub fn place_moved_task_pause(
+        &self,
+        task: &TaskId,
+        pause: Option<&TaskPause>,
+    ) -> StoreResult<()> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        clear_in(&tx, task)?;
+        if let Some(pause) = pause {
+            tx.execute(
+                "INSERT INTO task_pauses(task_id,paused_at,paused_by) VALUES(?1,?2,?3)",
+                params![task.as_str(), pause.at, serde_json::to_string(&pause.by)?],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
     }
 
     /// Only providers launched for a step of this Task's Graph own build jobs.
@@ -79,15 +161,7 @@ impl SqliteStore {
                 ))
             }
             TaskState::Paused => {
-                let saved: Option<String> = tx.query_row(
-                    "SELECT stopping_processes FROM task_pauses WHERE task_id=?1",
-                    [task.as_str()],
-                    |r| r.get(0),
-                )?;
-                return Ok(saved
-                    .map(|s| serde_json::from_str(&s))
-                    .transpose()?
-                    .unwrap_or_default());
+                return Ok(stopping_processes_in(&tx, task)?.unwrap_or_default());
             }
             _ => {}
         }
@@ -116,24 +190,10 @@ impl SqliteStore {
     pub fn release_task_pause(&self, task: &TaskId) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let pending: Option<bool> = tx
-            .query_row(
-                "SELECT stopping_processes IS NOT NULL FROM task_pauses WHERE task_id=?1",
-                [task.as_str()],
-                |r| r.get(0),
-            )
-            .optional()?;
-        match pending {
-            None => return Err(StoreError::InvalidData("Task is not paused".into())),
-            Some(true) => {
-                return Err(StoreError::InvalidData(format!(
-                    "Task is still stopping; repeat `lf task pause {task}` to finish cleanup"
-                )))
-            }
-            Some(false) => (),
+        if !clear_in(&tx, task)? {
+            return Err(StoreError::InvalidData("Task is not paused".into()));
         }
         settle_carrier(&tx, task)?;
-        tx.execute("DELETE FROM task_pauses WHERE task_id=?1", [task.as_str()])?;
         tx.commit()?;
         Ok(())
     }
@@ -142,6 +202,53 @@ impl SqliteStore {
 #[cfg(test)]
 mod tests {
     use crate::sqlite::durable::task_state_sql;
+
+    #[test]
+    fn completing_reopening_and_abandoning_a_task_clear_its_hold() {
+        use crate::execution::TaskState;
+        use crate::process::Starter;
+        use loopflow_model::durable::WorkRef;
+
+        let (_home, store, fixture, _) = crate::test_fixture::task();
+        let id = fixture.id;
+        let task = store
+            .create_task(&crate::work::task::NewTask {
+                id: id.clone(),
+                repository_id: fixture.repository_id,
+                parent_task_id: None,
+                project_id: None,
+                title: "Paused work".into(),
+                description: String::new(),
+                due_date: None,
+            })
+            .unwrap();
+        store
+            .take_up_task_graph(&id, r#"{"name":"code","steps":[]}"#)
+            .unwrap();
+        let pause = || {
+            store
+                .begin_task_pause(&id, &Starter::Person { name: None }, vec![])
+                .unwrap();
+            store.settle_task_pause(&id, false).unwrap();
+        };
+        pause();
+        store.reopen_task(&id, None).unwrap();
+        assert!(store.task_pause(&id).unwrap().is_none());
+
+        pause();
+        let request = store.request_task_completion(&id, None).unwrap().unwrap();
+        store.complete_task(&task, request).unwrap();
+        assert_eq!(store.task_state(&id).unwrap(), TaskState::Done);
+        assert!(store.task_pause(&id).unwrap().is_none());
+
+        store.reopen_task(&id, None).unwrap();
+        pause();
+        store
+            .abandon(&WorkRef::Task(id.clone()), "superseded")
+            .unwrap();
+        assert_eq!(store.task_state(&id).unwrap(), TaskState::Abandoned);
+        assert!(store.task_pause(&id).unwrap().is_none());
+    }
 
     #[test]
     fn board_looks_up_each_hold_by_task_on_a_ten_thousand_task_machine() {
@@ -160,7 +267,7 @@ mod tests {
              SELECT id,'/work/'||id,id FROM tasks WHERE rowid%10=0 AND issue_identifier LIKE 'OPS-%';
              INSERT INTO task_pauses(task_id,paused_at,paused_by)
              SELECT task_id,1,'{\"kind\":\"person\",\"name\":\"test\"}' FROM task_checkouts WHERE worktree LIKE '/work/%';
-             ANALYZE;").unwrap();
+             ANALYZE main;").unwrap();
         let query = format!(
             "SELECT count(*) FROM tasks t WHERE ({})='paused'",
             task_state_sql("t")
@@ -179,9 +286,7 @@ mod tests {
             "{plan:?}"
         );
         let now = std::time::Instant::now();
-        let count = conn
-            .query_row(&query, [], |r| r.get::<_, usize>(0))
-            .unwrap();
+        let count = conn.query_row(&query, [], |r| r.get::<_, i64>(0)).unwrap();
         assert_eq!(count, 1000);
         eprintln!("{count} paused among 10,000 Tasks in {:?}", now.elapsed());
     }

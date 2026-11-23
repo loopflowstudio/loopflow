@@ -611,6 +611,7 @@ impl SqliteStore {
             [id.as_str()],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )?;
+        super::task_pause::clear_in(&tx, id)?;
         if completed || pending {
             tx.execute(
                 "UPDATE tasks SET completion_request=NULL,completion_error=NULL WHERE id=?1",
@@ -2671,6 +2672,7 @@ fn clear_completion_request(conn: &Connection, task: &TaskId) -> StoreResult<()>
 }
 
 fn record_task_completion(conn: &Connection, task: &TaskId) -> StoreResult<()> {
+    super::task_pause::clear_in(conn, task)?;
     clear_completion_request(conn, task)?;
     super::task_state::decide_in(conn, task, "completed")?;
     insert_task_event_in(

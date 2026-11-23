@@ -782,6 +782,54 @@ mod tests {
     }
 
     #[test]
+    fn pause_keeps_updates_off_an_idle_providers_socket() {
+        let session = "paused-inbox";
+        let fixture = fixture(session);
+        let store = &fixture.store;
+        store.choose_task_primary(&fixture.task, session).unwrap();
+        store
+            .take_up_task_graph(&fixture.task, r#"{"name":"code","steps":[]}"#)
+            .unwrap();
+        let (listener, _) = fixture.idle_claude();
+        listener.set_nonblocking(true).unwrap();
+        store
+            .begin_task_pause(
+                &fixture.task,
+                &loopflow_storage::process::Starter::Person { name: None },
+                vec![],
+            )
+            .unwrap();
+        let child = store
+            .create_task(&loopflow_storage::work::task::NewTask {
+                id: loopflow_model::durable::TaskId::new(),
+                parent_task_id: Some(fixture.task.clone()),
+                repository_id: store.task(&fixture.task).unwrap().unwrap().repository_id,
+                project_id: None,
+                title: "Child".into(),
+                description: String::new(),
+                due_date: None,
+            })
+            .unwrap();
+        store
+            .abandon(
+                &loopflow_model::durable::WorkRef::Task(child.id),
+                "superseded",
+            )
+            .unwrap();
+        loopflow_execution::harness::task_updates::write(store, session).unwrap();
+        after_turn(store, session);
+        assert_eq!(
+            listener.accept().unwrap_err().kind(),
+            std::io::ErrorKind::WouldBlock
+        );
+        let queued = store.session_steers(session, 0, 8).unwrap();
+        assert!(queued
+            .items
+            .iter()
+            .any(|item| item.delivered_at.is_none() && item.steer.text.contains("was abandoned")));
+    }
+
+    #[test]
     fn a_restarted_server_still_wakes_a_conversation_idle_since_before() {
         let fixture = fixture("wake-restart");
         let (listener, inbox) = fixture.idle_claude();

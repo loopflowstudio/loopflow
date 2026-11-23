@@ -293,7 +293,7 @@ plan, code and memory and keeps open findings with the work.
 **Load:** one Machine runs hundreds of concurrent agents over about 10,000
 recorded Tasks and every steer, turn and event they wrote. Every agent shares
 one SQLite write lock. Check new queries with `EXPLAIN QUERY PLAN` against a
-store that size.
+store that size. Use `ANALYZE main` in fixtures with an attached read-only history database.
 
 **Harness, transport and hook code (`rust/loopflow-execution/src/harness/**`, `rust/loopflow-harness/**`, `transport*`):**
 lf is a session manager, context adder and hook interjector on top of a

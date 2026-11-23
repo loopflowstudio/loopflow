@@ -2392,6 +2392,13 @@ fn a_move_that_did_not_arrive_shows_in_status_and_the_same_command_delivers_it()
     let (task, worktree) = placed_task(&plan, "retry-move");
     at_explore(&fixture.root.path().join("local/loopflow.db"), &task);
     let session = claude_conversation(&fixture, &worktree, "0199a213-81c0-7800-8aa1-bbab2a035a58");
+    let paused = fixture
+        .command(&["task", "pause", task.as_str()])
+        .current_dir(&plan.local_path)
+        .output()
+        .unwrap();
+    assert_success(&paused);
+    let hold = plan.local.task_pause(&task).unwrap().unwrap();
     fs::write(worktree.join("notes.txt"), "sent once\n").unwrap();
     // Mini answers the check, then falls over receiving what was sent.
     let remote_lf = fixture.root.path().join("remote/.local/bin/lf");
@@ -2473,6 +2480,14 @@ fn a_move_that_did_not_arrive_shows_in_status_and_the_same_command_delivers_it()
         .unwrap();
     assert_eq!(owner.machine.id, Some(mini));
     assert!(plan.local.task_move_in_flight(&task).unwrap().is_none());
+    assert_eq!(plan.remote.task_pause(&task).unwrap(), Some(hold));
+    assert_eq!(plan.local.task_pause(&task).unwrap(), None);
+    assert!(!plan
+        .remote
+        .task_conversations_here()
+        .unwrap()
+        .iter()
+        .any(|c| c.task == task));
     // The conversation that left with the first send arrived with the retry.
     let arrived = plan.remote.session(&session).unwrap().unwrap();
     assert!(arrived.completed_at.is_none());
@@ -2593,6 +2608,40 @@ fn claiming_a_task_back_ends_a_move_that_never_arrived() {
         .unwrap();
     assert_eq!(owner.machine.id, Some(mini));
     assert!(plan.local.task_move_in_flight(&task).unwrap().is_none());
+}
+
+#[test]
+fn retrying_a_move_after_unpause_keeps_the_destination_running() {
+    let fixture = preview_machines();
+    let plan = SharedPlan::cloned(&fixture);
+    let (task, _) = placed_task(&plan, "unpaused-on-arrival");
+    let command = |args: &[&str]| {
+        fixture
+            .command(args)
+            .current_dir(&plan.local_path)
+            .output()
+            .unwrap()
+    };
+    assert_success(&command(&["task", "pause", task.as_str()]));
+    let remote_lf = fixture.root.path().join("remote/.local/bin/lf");
+    let working = fs::read_to_string(&remote_lf).unwrap();
+    executable(
+        &remote_lf,
+        &working.replacen(
+            "exec ",
+            r#"case "$*" in *'session receive') "$LF_BIN" "$@" >/dev/null || exit 1; exit 255;; esac
+exec "#,
+            1,
+        ),
+    );
+    let args = ["task", "move", task.as_str(), "--machine", "mini"];
+    assert!(!command(&args).status.success());
+    assert!(plan.remote.task_pause(&task).unwrap().is_some());
+    plan.remote.release_task_pause(&task).unwrap();
+    executable(&remote_lf, &working);
+    assert_success(&command(&args));
+    assert_eq!(plan.remote.task_pause(&task).unwrap(), None);
+    assert_eq!(plan.local.task_pause(&task).unwrap(), None);
 }
 
 /// Mini took the Task in, but its answer never reached the laptop, which

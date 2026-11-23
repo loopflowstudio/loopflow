@@ -232,6 +232,7 @@ fn summary_fixture() -> crate::session::SessionSummary {
         unviewed: false,
         held: false,
         task_terminal: false,
+        paused_task: None,
         task_primary: false,
         in_task_checkout: false,
         launching: false,

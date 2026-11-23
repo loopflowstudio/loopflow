@@ -120,7 +120,7 @@ impl SqliteStore {
         from: &MachineId,
         to: &MachineId,
     ) -> StoreResult<()> {
-        let here = &self.saved_local_machine()?.id == to;
+        let local = self.saved_local_machine()?.id;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction()?;
         let updated = tx.execute(
@@ -136,7 +136,19 @@ impl SqliteStore {
                 params![task.as_str(), from.as_str(), to.as_str(), now_unix()],
             )?;
         }
-        if here {
+        // A failed send can be claimed back with its hold. An acknowledgement
+        // for an old move cannot release a Task the sender has since reclaimed.
+        if from == &local
+            && updated != 0
+            && super::task_ownership::ownership_in(&tx, task)?
+                .owner
+                .and_then(|owner| owner.machine.id)
+                .as_ref()
+                == Some(to)
+        {
+            super::task_pause::clear_in(&tx, task)?;
+        }
+        if to == &local {
             tx.execute(
                 "UPDATE task_moves SET state='arrived',claim_id=NULL,stopped=NULL,payload=NULL
                  WHERE task_id=?1 AND state IN ('leaving','sent')",

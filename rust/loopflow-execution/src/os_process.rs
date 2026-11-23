@@ -508,9 +508,15 @@ pub(crate) fn terminate_worker_jobs(pid: u32, started: i64) -> Result<()> {
 pub(crate) fn settle_worker_jobs(
     saved: &loopflow_storage::sqlite::task_pause::StoppingSession,
 ) -> Result<()> {
+    stop_worker_members(saved.session, remaining_worker_jobs(saved)?)
+}
+
+pub(crate) fn remaining_worker_jobs(
+    saved: &loopflow_storage::sqlite::task_pause::StoppingSession,
+) -> Result<Vec<OsProcess>> {
     let members = OsProcess::session(saved.session)?;
     if members.is_empty() {
-        return Ok(());
+        return Ok(Vec::new());
     }
     if !members.iter().any(|p| {
         saved
@@ -520,14 +526,14 @@ pub(crate) fn settle_worker_jobs(
     }) {
         // A different leader proves that the kernel recycled the session.
         if members.iter().any(|p| p.pid == saved.session) {
-            return Ok(());
+            return Ok(Vec::new());
         }
         anyhow::bail!(
             "cannot confirm ownership of the remaining jobs in OS session {}",
             saved.session
         );
     }
-    stop_worker_members(saved.session, members)
+    Ok(members)
 }
 
 fn stop_worker_members(session: u32, members: Vec<OsProcess>) -> Result<()> {

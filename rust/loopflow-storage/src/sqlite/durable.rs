@@ -370,6 +370,7 @@ pub(super) fn abandon_task_in(
         params![task.as_str(), at, reason],
     )? == 1;
     if abandoned {
+        super::task_pause::clear_in(conn, task)?;
         super::task_state::decide_in(conn, task, "canceled")?;
         super::task_summaries::write_in(conn, task, super::task_summaries::TaskEnd::Abandoned)?;
     }

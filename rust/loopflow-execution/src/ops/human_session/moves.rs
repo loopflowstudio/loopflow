@@ -60,6 +60,7 @@ pub struct MovedTask {
     /// The Task's auto mark. Absent when nobody set one, and from a released
     /// sender, whose Task arrives with none.
     pub auto: Option<loopflow_storage::sqlite::Auto>,
+    pub paused: Option<loopflow_storage::sqlite::task_pause::TaskPause>,
     /// Absent unless the move stopped a running Graph, which continues where
     /// the Task arrives.
     pub stopped: Option<StoppedGraph>,
@@ -198,6 +199,7 @@ pub async fn send_task(
         .await?
         .ok_or_else(|| anyhow!("no Task {issue} on this Machine"))?;
     let name = &task.identifier;
+    let cleanup = crate::ops::task::pause::cleanup_lock(&task.id)?;
     let moving = store.sqlite.task_move_in_flight(&task.id)?;
     if let Some(MoveInFlight {
         to_machine_id,
@@ -250,6 +252,7 @@ pub async fn send_task(
         ),
         _ => (claim_for(&store.sqlite, &task, to)?, None),
     };
+    drop(cleanup); // The claim now routes pause and unpause to the destination.
     let (stopped, checkout, conversation, taken) =
         match leave(store, &task, worktree.as_deref(), to, conversation, stopped).await {
             Ok(left) => left,
@@ -271,6 +274,7 @@ pub async fn send_task(
             identifier: task.identifier.clone(),
             ownership_marker: loopflow_storage::sqlite::task_ownership::marker(&claim)?,
             graph: crate::store::task_work::task_graph_record(&store.sqlite, &task.id)?,
+            paused: store.sqlite.task_pause(&task.id)?,
             auto: auto.clone(),
             stopped,
             approval: auto
@@ -652,18 +656,24 @@ pub async fn arriving_task(
 /// A moved Task is taken in first: its claim, its checkout on the carried
 /// branch and its Graph. Returns the Session, when one moved.
 pub async fn receive(store: &SharedStore, moved: Move) -> Result<Option<LfSession>> {
-    let task = moved.task.as_ref().map(|task| task.task_id.clone());
+    let Some(task) = moved.task.as_ref() else {
+        return receive_move(store, moved).await;
+    };
+    let task = task.task_id.clone();
+    let _cleanup = crate::ops::task::pause::cleanup_lock(&task)?;
+    let here = crate::store::machines::local_machine(&store.sqlite)?.id;
+    // After a lost reply the person may already have unpaused here.
+    // Acknowledge the original arrival without reapplying its settings.
+    if store.sqlite.task_move_arrived_on(&task, &here)? {
+        return match &moved.session {
+            Some(session) => Ok(store.session(&session.id).await?),
+            None => Ok(None),
+        };
+    }
     let from = moved.from_machine_id.clone();
     let received = receive_move(store, moved).await?;
-    // Arrival acknowledges the conversation as well as the checkout. A failed
-    // transcript import must leave the checked move available for retry.
-    if let Some(task) = task {
-        store.sqlite.record_move_arrived(
-            &task,
-            &from,
-            &crate::store::machines::local_machine(&store.sqlite)?.id,
-        )?;
-    }
+    // A failed transcript import must leave the checked move available for retry.
+    store.sqlite.record_move_arrived(&task, &from, &here)?;
     Ok(received)
 }
 
@@ -801,6 +811,9 @@ async fn take_in_task(
     arriving_task(store, main, &moved.task_id, name).await?;
     // Publish the new claim only after replacing the old carrier. Recovery
     // could otherwise restart the graph this Machine owned before the move.
+    store
+        .sqlite
+        .place_moved_task_pause(&moved.task_id, moved.paused.as_ref())?;
     store
         .sqlite
         .place_moved_task_auto(&moved.task_id, moved.auto.as_ref())?;

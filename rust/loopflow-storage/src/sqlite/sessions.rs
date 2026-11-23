@@ -452,7 +452,7 @@ fn summary_query(page: &str, by_id: bool, now: i64) -> String {
         (SELECT json_group_array(id) FROM ({})),
         a.primary_scope,
         {available},
-        COALESCE(({task_state}) IN ('done','abandoned'),0),
+        NOT {task_open},
         s.id IN (SELECT session_id FROM task_primary_sessions),
         (SELECT act.program_status FROM session_activity act WHERE act.session_id=s.id AND act.agent_process_id IS a.agent_process_id),a.agent_process_id,CASE WHEN a.attached_lf_process_id IS NOT NULL THEN a.attached_terminal_id END,
         (SELECT act.preview FROM session_activity act WHERE act.session_id=s.id AND act.agent_process_id IS a.agent_process_id
@@ -470,7 +470,8 @@ fn summary_query(page: &str, by_id: bool, now: i64) -> String {
          JOIN task_checkouts pc ON pc.task_id=tp.task_id
          WHERE tp.session_id=a.id AND {here}),
         a.agent_pid IS NULL AND a.agent_ended_at IS NULL
-         AND EXISTS(SELECT 1 FROM held_terminals t WHERE t.id=a.held_terminal_id AND t.ended_at IS NULL)
+         AND EXISTS(SELECT 1 FROM held_terminals t WHERE t.id=a.held_terminal_id AND t.ended_at IS NULL),
+        ({paused_primary})
         FROM page s JOIN agent_sessions a ON a.id=s.id
         LEFT JOIN session_events captured ON captured.seq=s.current_capture
         LEFT JOIN graph_process_steps gs ON gs.lf_process_id=captured.lf_process_id
@@ -478,7 +479,8 @@ fn summary_query(page: &str, by_id: bool, now: i64) -> String {
         LEFT JOIN wave_addresses w ON w.id=s.wave_id
         LEFT JOIN tasks t ON t.id=s.task_id
         ORDER BY {order}", super::task_work::session_tasks("a"),
-        task_state = super::durable::task_state_sql("t"),
+        task_open = super::durable::task_open_sql("t"),
+        paused_primary = super::task_pause::paused_primary_sql("a.id"),
         here = super::session_recovery::task_conversation_here_sql("a", "pt", "pc"))
 }
 
@@ -577,6 +579,7 @@ fn read_summary(
                 .filter(|_| live),
             agent_process_id,
             task_terminal: row.get(27)?,
+            paused_task: row.get::<_, Option<String>>(49)?.map(TaskId::from_raw),
             task_primary: row.get(28)?,
             in_task_checkout: row.get(47)?,
             launching: row.get(48)?,

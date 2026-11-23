@@ -58,6 +58,7 @@ pub fn change(repo: &Path, issue: &str, change: OwnershipChange) -> OpsResult<Ta
                     .map_err(message)?;
             }
             OwnershipChange::Unassign => {
+                super::task::pause::before_unassign(&store.sqlite, &task)?;
                 crate::store::ownership::unassign_task(&store.sqlite, &task.id).map_err(message)?;
                 store
                     .sqlite

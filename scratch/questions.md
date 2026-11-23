@@ -13,3 +13,5 @@ Prove worker teardown through `lf task interrupt` first. Use the worker’s OS s
 Use a separate per-Task cleanup lock while signaling. Run admission can then report the committed hold immediately, while a concurrent unpause or repeated pause waits for the first cleanup.
 
 This Codex invocation's tool shell was PID and SID 98288, a child of provider PID 62413 in SID 671. A live tool launched that way needs its own execution identity. The Claude worker-session fixture cannot establish that Codex stopped such a build.
+
+Carry the original pause time and author in a move. Keep the source hold until the destination acknowledges arrival so claiming back a failed move keeps the Task quiet. A sender from before pause existed omits this field.

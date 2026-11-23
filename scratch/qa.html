@@ -1,86 +1,58 @@
 <!doctype html>
-<html><head><meta charset="utf-8"><title>LOO-937 QA: one answer for a checkout's base, on 271f9c4d3b</title>
+<html><head><meta charset="utf-8"><title>LOO-937 QA on 00c1c4168a</title>
 <style>
 body{font:15px/1.5 -apple-system,system-ui,sans-serif;max-width:900px;margin:2em auto;padding:0 1em;color:#222}
 pre{background:#f5f5f2;padding:.8em;overflow-x:auto;font-size:13px}
-h2{margin-top:2em} td,th{padding:.3em .6em;border-bottom:1px solid #ddd;text-align:left;vertical-align:top}
-.ok{color:#16702e}
+h2{margin-top:2em}.ok{color:#176b2c}.warn{color:#9a5b00}
 </style></head><body>
-<h1>LOO-937 QA: one answer for a checkout's base, on 271f9c4d3b</h1>
-<p>Branch-built <code>lf</code> (rebuilt at the compress commit) in a private home (<code>/tmp/lf-qa-base</code>), GitHub-shaped origins rewritten to local bare repositories, <code>.lf/qa/gh-standin.py</code> as <code>gh</code>. Every command ran through a wrapper with <code>LF_*</code> unset and stdin closed. What changed: <code>lf sync</code> and <code>lf pr open</code> both ask <code>checkout_base</code>; publication no longer follows a branch's Git upstream; a merged <code>--stack</code> base falls back to the repository's default branch, not a literal <code>main</code>. The <code>--stack</code> walkthrough on 60fcf050b9 is in this file's history.</p>
+<h1>LOO-937 QA: Task membership from the recorded Task, on 00c1c4168a</h1>
+<p>Branch <code>lf</code> (debug build) against private homes under <code>/tmp/lf-qa-937*</code>, with stand-in <code>claude</code>/<code>codex</code> that exit 1. Baseline: the released <code>lf 0.16.0+5d5bf92c7</code> from <code>/Applications/Loopflow.app</code>. No server was started; nothing was left running.</p>
 
-<h2>1. Stacked Tasks: parent unpushed, pushed, then merged</h2>
-<p>Tasks c5b504 (parent) and a90bba (child), both checked out; one commit in the parent, never pushed.</p>
-<pre>$ lf sync c5b504                       # in the child
-Stacked a90bba on c5b504; pushed c5b504's branch qa/c5b504-parent-work to origin
-Synced onto origin/qa/c5b504-parent-work.
-$ lf pr open --title Child --body 'child body'
-created #100 draft …                    # gh: 100 qa/a90bba-child-work -> qa/c5b504-parent-work
-# parent commits again and publishes (#101); in the child:
-$ lf sync
-Synced onto origin/qa/c5b504-parent-work.   # parent.txt holds p1, p2
-# parent squashed into main, a second main commit, branch deleted, #101 MERGED, 65 s for the cache
-$ lf sync
-Merging main...
-Synced onto main.                       # main2.txt present
-$ lf pr open --title Child --body 'child body 2'
-updated #100 draft …                    # gh: 100 qa/a90bba-child-work -> main</pre>
-<p class="ok">Sync and publish name the same base at every stage.</p>
+<h2>1. Upgrade: history recorded by released lf, opened by the branch</h2>
+<p>Repository with Tasks A and B adopted from worktrees <code>wt/a</code>, <code>wt/b</code>. In each: <code>lf -b graph qa</code>, <code>lf -b default 'hello'</code>, and a prepared primary in A. Then the branch opened the home (migration 135 applied).</p>
+<pre>br A: sessions ['session_3c3c4c41', 'd219d4f2b7324f35'] runs ['46e98eff', '609f0cd0']
+br B: sessions ['session_f2a3a06b'] runs ['49a12879']</pre>
+<p class="ok">Same lists as before the upgrade.</p>
 
-<h2>2. A stacked Task whose parent closed unmerged</h2>
-<pre>$ lf sync                 # parent 2071fe's PR #103 CLOSED
-Error: stack parent 2071fe's PR #103 closed without merging; `lf sync 2071fe` restacks this Task on its branch, `lf sync main` detaches it
-$ lf sync feature-x
-Error: feature-x names no other open Task; name one to restack this Task on it, the default branch to detach it, or omit the target to sync its parent
-$ lf sync main
-Synced onto origin/main.
-$ lf sync                 # detached now
-Synced onto main.
-$ lf pr open --title OC --body b
-created #104 draft …      # -> main</pre>
-<p class="ok"><code>lf sync main</code> detaches without first failing on the closed parent (the stack's branch is read lazily).</p>
+<h2>2. Repository moved, its old path reused by a second clone</h2>
+<p><code>mv repo moved</code>, <code>git worktree repair</code>; <code>git clone origin.git repo</code> with a worktree at the old <code>repo/wt/a</code>, adopted as Task C, which ran a Graph and got a primary. A's Graph runs still record the old <code>repo/wt/a</code> path, now C's checkout.</p>
+<pre>             released lf                      branch
+A  sessions  [session_c3, a6e6f5d11f]         same
+   runs      [4aeefc68]                       same
+C  sessions  [4ee244608d]                     same
+   runs      [b3914df5]                       same
+lf session list --task C   [4ee244608d]       same</pre>
+<p class="ok">No Task picks up another's work through the reused path; <code>lf task status</code> shows each Task's own latest run. Released 0.16 already records the Task at launch, so the two builds agree on new work: what the branch changes for people is old history (backfilled by the migration) and reads that no longer fall back to paths.</p>
+<p>Released lf after the branch migrated the store: <code>lf task list</code> and <code>lf -b graph qa</code> work, and the run records Task A.</p>
 
-<h2>3. A plain checkout whose Git upstream names another branch</h2>
-<p>The clause this slice deleted. <code>lf wt create up</code>, then <code>git branch -u origin/feature-x</code>, one commit.</p>
-<pre>$ git status -sb
-## qa/up...origin/feature-x
-$ lf pr open --title Up --body ub
-created #102 draft …      # gh: 102 qa/up -> main
-$ git status -sb
-## qa/up...origin/qa/up
-origin feature-x: 7210056 main 2   # untouched</pre>
-<p class="ok">Targets the default branch, pushes its own branch, leaves <code>feature-x</code> alone.</p>
+<h2>3. Session list wire</h2>
+<pre>d219d4f2b7324f35  task        ['task_edd3f06add404222a75cc4a8d44fca26']
+72a941fc278f4511  repository  []</pre>
+<p class="ok"><code>task_ids</code> stays a zero-or-one array; a Repository primary names none.</p>
 
-<h2>4. <code>--stack</code> in a repository whose default branch is <code>trunk</code></h2>
-<pre>$ lf wt create kid --stack --plan      # in Task eb43c3's checkout
-base: qa/eb43c3-trunk-parent
-$ lf pr open --title Kid --body kb     # base never pushed
-created #100 draft …                    # -> qa/eb43c3-trunk-parent; origin now has the base
-# parent commits locally; in kid:
-$ lf sync
-Synced onto qa/eb43c3-trunk-parent.     # tp2 arrives before the parent pushes
-# parent publishes #101, squashed into trunk, branch deleted, MERGED
-$ lf sync
-Merging trunk...
-Synced onto trunk.
-$ lf pr open --title Kid --body kb2
-updated #100 draft …                    # -> trunk</pre>
-<p class="ok">The old resolver retargeted a merged base to the literal <code>main</code>; it now follows <code>trunk</code>.</p>
+<h2>4. Working-board order</h2>
+<pre>$ lf desktop dashboard move working-tasks/task:&lt;D&gt; --destination task:&lt;A&gt;
+["task_0cef55…","task_edd3f0…","task_7fcbde…"]
+$ lf task list
+0cef55 · — · Task D standalone
+edd3f0 · QA · Task A work
+7fcbde · QA · Task B work
+$ lf desktop dashboard move working-tasks/task:&lt;A&gt; --destination task:&lt;C&gt;
+Error: edd3f0 and a850ba are in different repositories; nothing changed.   (exit 2)</pre>
+<p class="ok">Rank changes and <code>lf task show</code> reports rank 0; a cross-repository move says why.</p>
 
-<h2>5. Odds and ends</h2>
-<table>
-<tr><th>Case</th><th>Saw</th></tr>
-<tr><td>Plain checkout, origin's main ahead of local main</td><td><code>lf sync</code> "Merging main…", the new commit arrives (local main fetched first)</td></tr>
-<tr><td><code>lf wt list</code> / <code>--json</code> after the upstream read went</td><td>Lists every checkout with PR state; JSON has no <code>base_branch</code></td></tr>
-</table>
+<h2>5. <code>loopflow-persistent</code> read as a Git boolean</h2>
+<p><code>lf wt create persist-qa --persistent</code> writes <code>branch.qa/persist-qa.loopflow-persistent=true</code>. Set to <code>on</code>: <code>lf commit</code> works. Set to <code>ture</code>:</p>
+<pre>Error: git error: read branch.qa/persist-qa.loopflow-persistent: fatal: bad boolean config value 'ture' for 'branch.qa/persist-qa.loopflow-persistent'
+: read branch.qa/persist-qa.loopflow-persistent: fatal: bad boolean config value 'ture' …
+; inspect the affected work before retrying</pre>
+<p class="warn">Refusing is safer than the old silent "not persistent" (landing would remove the checkout), and it names the key. Git's text prints twice: shared Git-error formatting, noted in questions.md, not fixed here.</p>
 
 <h2>Where it stands</h2>
-<p>Works: stacked Task sync and publish through unpushed, pushed, merged and closed parents; detaching; <code>--stack</code> through an unpushed and a merged base; a non-<code>main</code> default branch; a stray Git upstream. Nothing fixed this run.</p>
-<p>Not reached: real GitHub and <code>lf land</code> (the stand-in has no <code>gh pr merge</code>); Desktop's served <code>checkout.create {stack: true}</code>.</p>
-<p>Still wrong, worst first (carried from the last run, unchanged here):</p>
 <ul>
-<li><code>served_reads::server_operations_match_their_lf_commands</code> failing at <code>session bind</code>; gate.</li>
-<li>A <code>--stack</code> base already on origin but behind its local branch isn't pushed, so the child's PR diff shows the parent's unpushed commits until the parent pushes.</li>
-<li>The base push is silent; only the PR's base says it happened.</li>
+<li>Works: membership through upgrade, move and path reuse; Session list filters; latest Graph per Task; rank moves and the cross-repository refusal; released lf on the migrated store.</li>
+<li>Not reached: Desktop's Working board and Session list on screen (no Dev app build here; the wire they read is unchanged and checked above). History with no recorded Task can't be produced by released 0.16; the migration's backfill is covered by <code>upgrade_records_the_task_each_session_belonged_to_by_path</code> and <code>upgrade_gives_graph_runs_that_named_no_task_theirs</code>.</li>
+<li>Still wrong, minor: duplicated Git error text (above).</li>
 </ul>
+<p>Fixed in this pass: nothing; notes in <code>.lf/qa/server.md</code> now name the released binary and the relocate step released lf needs after a move.</p>
 </body></html>

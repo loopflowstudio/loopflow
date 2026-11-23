@@ -295,3 +295,13 @@ any writer, at the cost of every reader seeing the resolved spelling. Left as is
 
 Kept the CLI and Desktop `task_ids` array. The store returns one optional
 Task and the Session surface turns it into the existing zero-or-one list.
+
+## A mistyped `loopflow-persistent` (QA 2026-11-23)
+
+Since `--bool`, `yes`/`on` count as persistent and an unparseable value
+(`ture`) stops `lf commit`, `lf pr`, `lf sync` and `lf land` with Git's "bad
+boolean config value". Before, any value but `true` read as not persistent and
+landing removed the checkout. Kept the refusal: it names the key to fix and
+deletes nothing. The message prints Git's text twice (`OpsError` renders its
+`GitError` source after its own Display, which already includes it); that
+formatting is shared by every Git failure, left for its own change.

@@ -183,7 +183,8 @@ runner turns foreign keys off too, and with them on a table rebuild fails.
 Count before and after, then `pragma foreign_key_check` and `integrity_check`.
 
 For what people see, build the earlier state in a private home with the
-installed `lf` (`whence -p lf`), then run the branch on that home and
+released `lf` (`/Applications/Loopflow.app/Contents/MacOS/lf`; `whence -p lf`
+can be another worktree's `target/debug/lf`, so check `lf --version`), then run the branch on that home and
 alternate the two. Unset `LF_*`, close stdin, set `LF_BIN` to the branch
 binary for branch commands only, and put stand-in `claude` and `codex`
 scripts first on `PATH`. `lf task create '<words>' --worktree <path> --json`
@@ -211,5 +212,8 @@ subdirectory of the checkout is the Task's. To act as another Task, set
 `LF_AS=task:<id>` (a bare id is "invalid Work selector"); a checkout's owner
 still wins over it. To move a repository with its checkouts,
 keep the worktrees inside it, `mv` it, `git worktree repair`, then run
-`lf task list` from the new path. Once every writer has exited, `sqlite3
+`lf task list` from the new path (the branch follows the move; released lf
+answers "occupied without a Git locator" until `lf config repo --relocate
+<repo id>` runs there). Reuse the old path with `git clone` of the origin and
+a worktree at the old checkout path. Once every writer has exited, `sqlite3
 ?mode=ro` cannot open a home's store (no `-shm`); open it read-write.

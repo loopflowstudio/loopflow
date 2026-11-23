@@ -799,14 +799,19 @@ struct GhosttyTerminalInputTests {
             guard case .available(let text, _) = try? view.readText(region: .screen, maxBytes: 16384) else { return "" }
             return text
         }
-        let readyDeadline = ContinuousClock.now + .seconds(3)
-        while !viewport().contains("ready"), ContinuousClock.now < readyDeadline {
-            try await Task.sleep(for: .milliseconds(20))
+        func waitForLine(_ line: String) async throws {
+            let deadline = ContinuousClock.now + .seconds(3)
+            while true {
+                let screen = viewport()
+                if screen.split(separator: "\n").contains(Substring(line)) { return }
+                try #require(ContinuousClock.now < deadline, "Waiting for \(line) in \(screen)")
+                try await Task.sleep(for: .milliseconds(20))
+            }
         }
-        try #require(viewport().contains("ready"))
+        try await waitForLine("ready")
         let scroll = "scroll_to_top"
         #expect(scroll.withCString { ghostty_surface_binding_action(surface, $0, UInt(scroll.utf8.count)) })
-        try #require(viewport().contains("history-1"))
+        try await waitForLine("history-1")
         try #require(!viewport().contains("ready"))
         #expect(window.makeFirstResponder(view))
         let event = try #require(NSEvent.keyEvent(
@@ -814,14 +819,9 @@ struct GhosttyTerminalInputTests {
             windowNumber: window.windowNumber, context: nil, characters: "x",
             charactersIgnoringModifiers: "x", isARepeat: false, keyCode: 7))
         if !view.performKeyEquivalent(with: event) { view.keyDown(with: event) }
-        let deadline = ContinuousClock.now + .seconds(3)
-        // With key.text absent in key-equivalent dispatch, Ghostty emits the
-        // valid Kitty press CSI 120u. The echoing TTY displays ESC as ^[.
-        while !viewport().contains("^[[120u"), ContinuousClock.now < deadline {
-            try await Task.sleep(for: .milliseconds(20))
-        }
+        // These modes still encode ordinary printable keys as text.
+        try await waitForLine("x")
         #expect(viewport().contains("ready"))
-        #expect(viewport().contains("^[[120u"))
     }
 
     @Test("paste shortcuts reach only the focused terminal in a split")

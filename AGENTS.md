@@ -445,7 +445,9 @@ executor; it can stay in Foundation's run loop after the child has exited.
 Headless Swift view tests inspect production leaf views directly when a parent
 needs `@Environment` Observation objects, which ViewInspector can't inject.
 Keep those views internal for `@testable` access. Mounted terminal frame checks
-stay in `.requiresDisplay` suites.
+stay in `.requiresDisplay` suites. Ghostty calls `io_write_cb` on its IO thread.
+Mark the callback `@Sendable` when installing it from a main-actor fixture and
+synchronize access to the bytes it collects.
 
 # Review Ritual
 

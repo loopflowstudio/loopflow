@@ -829,12 +829,14 @@ updated when you switch input sources, or your choice in
 `~/.config/ghostty/config`:
 
 ```ini
-# In ~/.config/ghostty/config; reopen Loopflow after editing.
-macos-option-as-alt = left    # true, left, right, or false
+# In ~/.config/ghostty/config, choose true, left, right, or false.
+# Reopen Loopflow after editing.
+macos-option-as-alt = left
 ```
 
-With `left`, Left Option sends Alt chords (`Option-B` jumps back a word) while
-Right Option types macOS characters (`∫`) and dead-key accents.
+With `left`, Left Option-B sends Escape followed by `b`, the usual shell
+shortcut for moving back a word on a US keyboard. Right Option uses the
+keyboard layout for text and accents. On a US keyboard, Right Option-B types `∫`.
 
 Keystrokes in a focused Session or Shell follow one order:
 

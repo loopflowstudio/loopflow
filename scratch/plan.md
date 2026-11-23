@@ -113,29 +113,21 @@ touch that path, unverified on the base) and
 timed out under the parallel run and passes alone (15 s). clippy
 `--all-targets -D warnings` clean.
 
-## Remaining (slice 3, from the 2026-11-23 concept review)
+## Built (slice 3, from the 2026-11-23 concept review)
 
-`scratch/concept-review.html` reviewed the built branch. Two defects come
-from every Wave now making its own Project:
-
-1. A local Project's name is a copy of the Wave's, taken once in
-   `wave_project_in` (`rust/loopflow-storage/src/sqlite/children.rs`).
-   `lf wave rename` (`ops/wave_lifecycle.rs` `rename`) leaves it stale
-   (QA: `Project scratchpad (local)` on Wave `sandbox`), and a queued Linear
-   `create` sends the old name. Build: rename also writes the Wave's Project
-   `ProjectName`/`ProjectSlug` while `external_project_id IS NULL`, as plan
-   edits so they cross Machines with the Wave's rename. A linked Project keeps
-   the tracker's name; no new tracker action. Chosen for review; passed over:
-   pushing renames to a linked Linear Project.
-2. `lf wave remove` (`ops/wave_lifecycle.rs` `remove`) leaves the retiring
-   Waves' Projects' unsent tracker actions queued, so Linear can get a Project
-   for a removed Wave. Build: removal retires them in the same write
-   (`tracker_actions` phase `retired`).
-
-Shows it worked: `lf wave create scratchpad; lf wave rename scratchpad
-sandbox; lf wave status sandbox` prints `Project   sandbox (local)`; in a
-connected repository, `lf wave add gone; lf wave remove gone; lf repo tracker`
-lists no `create` for `gone`. One focused test each.
+- `relocate_waves` (storage, under `lf wave rename`) writes the Wave's
+  Project `ProjectSlug`/`ProjectName` as plan edits in the same transaction
+  as the Wave's rename, while `external_project_id IS NULL`. A linked Project
+  keeps the tracker's name; nothing new goes to the tracker. A `create`
+  already queued keeps its snapshot of the old name; the rename queues a
+  `project_name` field action behind it, so Linear ends on the new name.
+- `retire_waves` (under `lf wave remove`) retires the queued tracker actions
+  of each retiring Wave's Project in the same write (`its Wave was removed`).
+  A `sent` action is left to resolve.
+- Tests: `tracker_actions::tests::a_removed_waves_project_is_not_created_in_the_tracker`,
+  `…::renaming_a_wave_renames_its_unlinked_project_and_not_a_linked_one`
+  (pass); `cargo clippy -p loopflow-storage --all-targets` clean. The CLI
+  run (`lf wave rename` then `lf wave status`) was not done here; it goes to gate/QA.
 
 Then gate: Swift DTO suite for `WaveRemoval`/`WaveRenamed`, the full matrix
 in CI, and the `oauth_tests` contention failure checked on the base.

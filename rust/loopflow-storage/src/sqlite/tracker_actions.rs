@@ -1471,6 +1471,81 @@ mod tests {
     }
 
     #[test]
+    fn a_removed_waves_project_is_not_created_in_the_tracker() {
+        let (_dir, store) = store();
+        let wave = crate::work::wave::Wave::new(
+            loopflow_model::id::WaveId::new(),
+            "gone".into(),
+            "/repo".into(),
+        );
+        crate::test_fixture::wave(&store, &wave);
+        let project = store.seed_project(wave.id()).unwrap().id;
+        store
+            .enqueue_tracker_creations("/repo", TrackerKind::Linear)
+            .unwrap();
+        assert_eq!(store.unconfirmed_tracker_actions("/repo").unwrap().len(), 1);
+        store
+            .retire_waves(std::slice::from_ref(wave.id()), "removed")
+            .unwrap();
+        assert!(store
+            .unconfirmed_tracker_actions("/repo")
+            .unwrap()
+            .is_empty());
+        let actions = store
+            .tracker_actions_for(&ActionOwner::Project(project))
+            .unwrap();
+        assert_eq!(actions.len(), 1);
+        assert_eq!(actions[0].phase, ActionPhase::Retired);
+    }
+
+    #[test]
+    fn renaming_a_wave_renames_its_unlinked_project_and_not_a_linked_one() {
+        let (_dir, store) = store();
+        let rename = |wave: &crate::work::wave::Wave, to: &str| {
+            store
+                .relocate_waves(&[crate::WaveLocatorUpdate {
+                    wave_id: wave.id().clone(),
+                    expected_repo: "/repo".into(),
+                    expected_slug: wave.slug().into(),
+                    target: crate::work::wave::WaveLocator::new(
+                        crate::address::CanonicalRepo::from_canonical_path("/repo".into()),
+                        to,
+                    )
+                    .unwrap(),
+                }])
+                .unwrap();
+        };
+        let local = crate::work::wave::Wave::new(
+            loopflow_model::id::WaveId::new(),
+            "scratchpad".into(),
+            "/repo".into(),
+        );
+        let linked = crate::work::wave::Wave::new(
+            loopflow_model::id::WaveId::new(),
+            "billing".into(),
+            "/repo".into(),
+        );
+        crate::test_fixture::wave(&store, &local);
+        crate::test_fixture::wave(&store, &linked);
+        let local_project = store.seed_project(local.id()).unwrap().id;
+        let linked_project = store.seed_project(linked.id()).unwrap().id;
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE projects SET external_project_id='lin-1',project_name='Billing 2026' WHERE id=?1",
+                [linked_project.as_str()],
+            )
+            .unwrap();
+        rename(&local, "sandbox");
+        rename(&linked, "payments");
+        let name = |id| store.project(id).unwrap().unwrap().name;
+        assert_eq!(name(&local_project), "sandbox");
+        assert_eq!(name(&linked_project), "Billing 2026");
+    }
+
+    #[test]
     fn a_task_done_before_the_tracker_was_connected_arrives_done() {
         let (_dir, store) = store();
         let done = task(&store, false);

@@ -35,7 +35,5 @@
   slice 3); a linked one keeps the tracker's name, nothing is sent.
 - QA 2026-11-23: Desktop's Wave pane still has a **Projects** button listing
   the Wave's Projects; with one per Wave it lists one. Left as is.
-- QA 2026-11-23: a `create` queued for a Wave's Project before `lf wave
-  remove` likely still sends (read from the code, not run: removal does not
-  retire queued actions); only Projects of Waves removed before the tracker
-  was connected are skipped now.
+- Renaming a Wave overwrites a local Project name someone edited by hand
+  (none of the commands here sets one apart from its Wave's).

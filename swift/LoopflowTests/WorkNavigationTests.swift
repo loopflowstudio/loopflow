@@ -253,18 +253,9 @@ struct WorkNavigationTests {
         }
     }
 
-    private func workingPlan(_ ids: [String]) -> WorkViewPlan {
-        let owner = WorkWorkspaceKey(repository: "repo", kind: .repository, id: "repo")
-        let tasks = ids.map { id in
-            var content = fixtureViewContent(work: .init(repository: "repo", kind: .task, id: id), title: id)
-            content.states = [.working]
-            return content
-        }
-        return fixtureViewPlan(owner: owner, members: tasks)
-    }
-
-    @Test("A refused drop reveals the last reading in the sidebar and grid even when the reread fails")
-    func refusedWorkingTaskDrop() async throws {
+    @Test("A refused drop reveals the last reading in the sidebar and grid even when the reread fails",
+          arguments: [nil, Revisions(["planning": 5])])
+    func refusedWorkingTaskDrop(concurrentWrite: Revisions?) async throws {
         let machine = HeldMachine()
         let feed = WorkFeed()
         let query = RegistryQuery(change: { try await machine.send($0, $1) }, subscribeWork: { await feed.open() }) { _, _ in
@@ -274,9 +265,9 @@ struct WorkNavigationTests {
         let observing = Task { await model.keepWorkCurrent() }
         defer { observing.cancel() }
         let scope = try await feed.request(1)
-        func read(_ ids: [String], sequence: Int) async throws {
-            let plan = workingPlan(ids)
-            await feed.send(WorkFrame(sequence: sequence, answers: scope.id, unavailable: nil, content: .selections([plan]), wire: nil))
+        func read(_ ids: [String], sequence: Int, grid: [String]? = nil) async throws {
+            let plan = fixtureWorkingPlan(ids)
+            await feed.send(WorkFrame(sequence: sequence, answers: scope.id, unavailable: nil, content: .selections([grid.map(fixtureWorkingPlan) ?? plan]), wire: nil))
             await feed.send(WorkFrame(sequence: sequence, answers: scope.id, unavailable: nil, content: .taskList(plan), wire: nil))
             try await eventually { model.taskListReading.current == plan }
         }
@@ -285,13 +276,15 @@ struct WorkNavigationTests {
             #expect(model.workingTaskMembers.map(\.work.id) == ids)
         }
 
-        try await read(["a", "b"], sequence: 1)
-        let write = model.reorderWorkingTask("b", to: "a")
+        // The sidebar can receive the new order before the grid.
+        try await read(["a", "b"], sequence: 1, grid: ["b", "a"])
+        let source = try #require(model.sidebarRows.last?.work)
+        let write = model.reorderWorkingTask(source, to: "a", after: false)
         expectOrder(["b", "a"])
         // Another Task arrived while the Machine was deciding the drop.
         try await read(["c", "a", "b"], sequence: 2)
         expectOrder(["c", "b", "a"])
-        await machine.fail(ServerError(code: "conflict", message: "Order changed", data: .null))
+        await machine.fail(ServerError(code: "conflict", message: "Order changed", data: .null, revisions: concurrentWrite))
         let confirmation = try await feed.request(scope.id + 1)
         expectOrder(["c", "a", "b"])
         for content in [WorkFrame.Content.selections(nil), .taskList(nil), .checkpoint] {
@@ -322,12 +315,13 @@ struct WorkNavigationTests {
             await feed.send(WorkFrame(sequence: sequence, answers: scope.id, unavailable: nil, content: content,
                                       wire: nil, readAt: Revisions(["planning": revision])))
         }
-        let initial = workingPlan(["a", "b", "c"])
-        let moved = workingPlan(["b", "c", "a"])
+        let initial = fixtureWorkingPlan(["a", "b", "c"])
+        let moved = fixtureWorkingPlan(["b", "c", "a"])
         await frame(1, 4, .selections([initial]))
         await frame(1, 4, .taskList(initial))
         try await eventually { model.sidebarTaskIDs == ["a", "b", "c"] }
-        let write = model.reorderWorkingTask("a", to: "c")
+        let source = try #require(model.workingTaskMembers.first?.work)
+        let write = model.reorderWorkingTask(source, to: "c", after: true)
         // The sidebar observed the commit before the answer. A positional swap would undo it.
         await frame(2, 5, .taskList(moved))
         try await eventually { model.taskListReading.value == moved }
@@ -408,7 +402,7 @@ struct WorkNavigationTests {
         drag.move("a", by: 80, at: 90, order: ["a", "b", "c"])
         #expect(drag.landing(on: "b") == .bottom)
         let landed = drag.end()
-        #expect(landed?.0 == "a" && landed?.1 == "b")
+        #expect(landed?.target == "b" && landed?.below == true)
         #expect(drag.source == nil && drag.target == nil && drag.offset == 0)
     }
 

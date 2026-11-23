@@ -89,6 +89,10 @@ The remaining product check is the Loopflow Dev walkthrough at gate.
 - `scripts/test_desktop.sh --filter 'TaskConceptTests|WorkNavigationTests'`
   passed 58 tests. The shared pending-change tests and the one-shot Working Tasks
   writer test passed 17 more.
+- With a concurrent planning revision on a refused drop, the sidebar and grid
+  both kept `c, b, a` after the reread failed. The focused Desktop run now
+  shows the confirmed `c, a, b` for refusals with and without that revision.
+  All 28 selected tests passed.
 
 ## Gate
 

@@ -90,15 +90,15 @@ yourself, call `/usr/bin/log`, since zsh's builtin `log` shadows it:
 /usr/bin/log show --last 1h --predicate 'process == "runningboardd" AND eventMessage CONTAINS "loopflow" AND eventMessage CONTAINS "termination reported by launchd"'
 ```
 
-Working Tasks lists owned, started, unfinished Tasks, on any Machine this store
-records, in the repository's shared Task order: saved drag positions first, then
-planning rank and canonical Task ID. Opening a Task or changing its conversation
-activity never adds or reorders a row. Click a Wave to scope the sidebar to its
-Working Tasks and subwaves; its backlog keeps the open work nobody is running.
-**‹ Repo** returns to Working Tasks. Unstarted Tasks
-open their brief beside **Start**, which runs the Task's Workflow; opening alone
-starts nothing. Waves follow Tasks in the same scrolling sidebar, with counts
-from the planning inventory.
+Working Tasks lists owned, started, unfinished Tasks on any Machine this store
+records. Drag a row in the repository sidebar or Working Tasks grid to change
+its place. The [sidebar guide](../docs/surfaces.md#working-tasks-in-the-sidebar)
+describes the shared order and drop feedback.
+
+Click a Wave to see its Working Tasks and subwaves. Its backlog holds the open
+work nobody is running. **‹ Repo** returns to Working Tasks. Unstarted Tasks
+open their brief beside **Start**, which runs the Task's Workflow. Waves follow
+Tasks in the same scrolling sidebar, with counts from the planning inventory.
 
 **New Wave**, under the sidebar's Waves or in the Portfolio, is one form: a
 name, and a repository picker when there is more than one to choose from.
@@ -127,13 +127,10 @@ Click a row to select its retained workspace. The title-bar **Repo › Wave › 
 path follows hierarchy: click a name to go there, or the **›** after it to list and
 search what it contains; Back and **⌘[ / ⌘]** follow visits. **⌘K** searches Work
 across repositories and opens another repository in its own window. Its
-**Sidebar shows** picker filters **Working tasks**, **Available**, and **Busy**
-in the full Working list's relative order without changing the selected Work; a
-status change can move the open Task between **Available** and **Busy** while
-keeping its workspace open. Click a Wave and its name moves into the
-sidebar header; the rows below keep that same relative Task order until
-**‹ repo** returns to Working Tasks. **⌘1–9** selects the sidebar's visible Task
-rows by position and **⌃Tab / ⌃⇧Tab** cycles them. Missing slots do nothing. Selecting a
+**Sidebar shows** picker filters the rows to **Working tasks**, **Available**,
+or **Busy** while keeping the selected workspace open. **⌘1–9** selects a
+visible row by position and **⌃Tab / ⌃⇧Tab** cycles the rows. Missing slots do
+nothing. Selecting a
 Dashboard's Task, from any of these, keeps the Dashboard in the path, as its tile does.
 With sidebar focus, **⌘F** searches its visible Tasks and Waves; **Search all Work**
 widens the same navigator. **Shift-F10** opens the focused Task's actions without
@@ -194,17 +191,8 @@ second rule. Click the row on any of them and the Task opens.
 The selected row is filled; rows carry no stripe or border. A Wave's count
 beside its name is in the same face as its name.
 
-Drag a Task in the repository sidebar or the Working Tasks grid to save its
-position in the repository's shared Working order on this Machine. Ordinary
-repository and Wave lists, boards, Task pickers, CLI lists, and the phone feed
-keep that relative order after refresh; new Working Tasks without a saved
-position follow saved rows in planning rank and Task ID order. A drop shows at
-once as a preview over the last confirmed reading: if the Machine refuses it,
-the preview clears and a Notice explains why, revealing the last confirmed order
-even when the follow-up read fails. Conversation activity, filtering, and
-opening a Task leave the order intact. Saved Dashboard arrangements, search
-results, the backlog's planning rank, and Done's completion-date ordering keep
-their own order.
+Saved Dashboard arrangements, search results, the backlog's planning rank, and
+Done's completion-date ordering keep their own order.
 
 Each Work keeps one pane layout and document store. The browser offers Brief,
 Diff, Files, Task & workflow, Graph processes and web pages. Rex, Herdr and cmux
@@ -1030,24 +1018,10 @@ codebase tree, and registry health.
 
 ## Work tracking
 
-The sidebar presents the repository's Working Tasks in shared order (saved drag
-positions first, then planning rank and canonical Task ID), then direct Wave
-rows. Opening a Task or changing conversation activity never reorders rows.
-Unstarted Tasks show their brief beside a Start offer in the Session slot without
-joining the working set. Only Start runs anything.
+Work observation keeps the last successful reading on failure. Missing planning
+leaves an unavailable row. Wave navigation retains the sidebar viewport.
 
-The navigator's Working tasks / Available / Busy choice filters presentation
-in the full list's relative order without selecting Work or changing panes,
-clients, focus or drafts. Missing planning keeps an unavailable row. Work
-observation retains its last reading on failure. Wave navigation leaves working
-positions and the sidebar viewport intact.
-
-Title-bar breadcrumbs follow hierarchy as a jump bar: each name navigates, and the
-› after it lists what is inside (repository › Waves, Wave › Tasks) with a filter
-that searches that scope. Back follows visits, and Cmd+K routes
-cross-repository Work to its own window. Cmd+1–9 and Control+Tab follow the
-visible sidebar rows. Each Work owns one retained
-workspace. Dashboard queries compose those workspaces side by side; ordinary
+Each Work owns one retained workspace. Dashboard queries compose those workspaces side by side; ordinary
 navigation selects one destination. Rust owns query membership and arrangement,
 including hidden occurrences and duplicate suppression. Tiles show the primary
 Session or explicit zoom without acquiring a provider.

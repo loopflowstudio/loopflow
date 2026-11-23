@@ -75,35 +75,25 @@ struct DashboardWorkspaceTests {
 
     @Test func sidebarAndGridShareTheOrderTheRustWriterReturns() async throws {
         let ids = ["task_a", "task_b", "task_c"]
-        func plan(_ order: [String]) throws -> String {
-            var json = try #require(JSONSerialization.jsonObject(with: loadFixtureData("view_plan.json")) as? [String: Any])
-            json["dashboard_id"] = NSNull()
-            json["saved_revision"] = NSNull()
-            json["selection"] = ["id": "repository-default", "expression": ["kind": "repository"]]
-            var resolution = try #require(json["resolution"] as? [String: Any])
-            resolution["members"] = order.map { ["source": ["repository-default"], "work": ["repository": "repo_11111111111111111111111111111111", "kind": "task", "id": $0]] }
-            json["resolution"] = resolution
-            return String(decoding: try JSONSerialization.data(withJSONObject: json), as: UTF8.self)
-        }
-        let initial = try plan(ids)
-        let moved = try plan(["task_c", "task_a", "task_b"])
+        let initial = fixtureWorkingPlan(ids)
+        let moved = String(decoding: try JSONEncoder().encode(fixtureWorkingPlan(["task_c", "task_a", "task_b"])), as: UTF8.self)
         let query = RegistryQuery { args, _ in
             switch args {
             case ["desktop", "dashboard", "move", "working-tasks/task:task_c", "--destination", "task:task_a"]: return #"["task_c","task_a","task_b"]"#
-            case ["desktop", "view", "show", "--json"]: return moved
+            case ["desktop", "view", "show", "--json"], ["desktop", "view", "show", "kind:task state:working", "--json"]: return moved
             default: throw RegistryQueryError("Unexpected command \(args)")
             }
         }
         let model = WorkModel(query: query, repoPath: "/repo")
-        model.applySelectionPlans([try JSONDecoder().decode(WorkViewPlan.self, from: Data(initial.utf8))], reason: "")
-        #expect(model.workingTaskIDs == ids)
-        // A sidebar row drop and a grid tile drop both name Work IDs.
-        let row = try #require(model.workingTaskWorkID(row: "task_c"))
-        let dragged = try #require(TaskOrderDrag.taskID(TaskOrderDrag.token(row)))
-        await model.reorderWorkingTask(dragged, to: "task_a").value
+        model.applySelectionPlans([initial], reason: "")
+        model.applyTaskList(initial, wave: nil, reason: "")
+        #expect(model.sidebarTaskIDs == ids)
+        let dragged = try #require(TaskOrderDrag.taskID(TaskOrderDrag.token("task_c")))
+        let member = try #require(model.workingTaskMembers.first { $0.work.id == dragged })
+        await model.reorderWorkingTask(member.work, to: "task_a", after: false).value
         #expect(model.navigation.notices.current == nil)
         #expect(model.workingTaskIDs == ["task_c", "task_a", "task_b"])
-        #expect(model.workingTaskMembers.map(\.work.id) == model.workingTaskIDs)
+        #expect(model.sidebarTaskIDs == model.workingTaskIDs)
     }
 
     @Test func workingTasksOpensOnlyTheTasksItsGridShows() throws {

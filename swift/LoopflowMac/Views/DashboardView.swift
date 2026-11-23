@@ -269,7 +269,11 @@ struct DashboardTile: View {
                 .dropDestination(for: String.self) { values, _ in
                     guard let value = values.first else { return false }
                     if workingTasks, let task = TaskOrderDrag.taskID(value) {
-                        model.reorderWorkingTask(task, to: member.work.id); return true
+                        let source = WorkWorkspaceKey(repository: plan.repository, kind: .task, id: task)
+                        let members = plan.resolution.members
+                        let after = members.firstIndex { $0.work == source }.map { members[$0...].contains(member) }
+                        model.reorderWorkingTask(source, to: member.work.id, after: after)
+                        return true
                     }
                     guard arrangeable, let id = plan.dashboardID, !model.dashboardSaving,
                           let other = plan.resolution.members.first(where: { $0.token == value }), other.work != member.work else { return false }

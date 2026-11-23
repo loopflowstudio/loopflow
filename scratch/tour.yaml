@@ -1,21 +1,19 @@
-at: e1ffa15cdc5ad286f1bb827efbe06690ba2cb43b
+at: 6384dae9865a7731f66ddf4b5a09acf08df99744
 first:
   - path: docs/surfaces.md
-    why: Follow the second sidebar row through a conversation turn.
+    why: Follow one Working row through a turn and drag.
   - path: rust/loopflow-storage/src/sqlite/selections.rs
-    why: Saved position, rank and ID determine order.
+    why: Sort Tasks before projecting their activity.
   - path: rust/loopflow/src/lf/commands/waves.rs
-    why: Compare roadmap, Wave, repository and phone readings.
-  - path: swift/Loopflow/Services/PendingChanges.swift
-    why: Apply the drop until each reading covers its receipt.
+    why: Check roadmap, Wave, repository and phone order together.
+  - path: swift/LoopflowMac/Views/WorkNavigator.swift
+    why: Drag the visible sidebar rows in their displayed order.
   - path: swift/LoopflowMac/WorkModel.swift
-    why: Follow a drop from either display through confirmation.
-  - path: swift/Loopflow/Services/Notice.swift
-    why: Keep the refusal visible through a failed reread.
-  - path: swift/LoopflowTests/TaskConceptTests.swift
-    why: Replay the turn with the second Task selected.
+    why: Preview a drop over each list's confirmed reading.
+  - path: swift/Loopflow/Services/PendingChanges.swift
+    why: Retire each preview when its reading covers the receipt.
   - path: swift/LoopflowTests/WorkNavigationTests.swift
-    why: Watch a refusal and an early confirmation frame.
+    why: Exercise out-of-sync lists and failed reads.
 hide:
   - path: tests/fixtures/dto/task_concepts.json
-    why: Rust observations exercised by the Desktop tests.
+    why: Rust snapshots replayed by Desktop tests.

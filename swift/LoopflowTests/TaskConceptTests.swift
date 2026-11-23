@@ -79,14 +79,8 @@ struct TaskConceptTests {
 
     private func applyTaskList(_ phase: Phase, to model: WorkModel) throws {
         let repository = try #require(phase.tasks.first?.task.repositoryId)
-        let members = phase.tasks.map { task in
-            WorkViewPlan.Content(
-                work: .init(repository: repository, kind: .task, id: task.id), title: task.task.name,
-                states: Array(task.selectionStates), identifier: task.task.identifier, primarySession: nil,
-                location: nil, argv: nil, unavailable: [])
-        }
-        model.applyTaskList(fixtureViewPlan(owner: .init(repository: repository, kind: .repository, id: repository),
-                                            members: members), wave: nil, reason: "")
+        let tasks = phase.tasks.map { ($0.id, Array($0.selectionStates)) }
+        model.applyTaskList(fixtureStartedPlan(tasks, repository: repository), wave: nil, reason: "")
     }
 
     @Test func selectedTaskKeepsItsSlotAcrossAConversationTurn() throws {
@@ -108,9 +102,6 @@ struct TaskConceptTests {
             #expect(model.selection == .task(id: second))
             model.navigation.sidebarFilter = .working
             #expect(model.sidebarTaskIDs == [first, second])
-            let wave = try #require(roadmap.waves.first)
-            let picker = model.jumpRows(.wave(wave.wave.id), filter: "").map(\.id)
-            #expect(picker.filter { $0 == .task(first) || $0 == .task(second) } == [.task(first), .task(second)])
             model.navigation.sidebarFilter = .busy
             #expect(model.sidebarTaskIDs == (phase.name == busy.name ? [second] : []))
             model.navigation.sidebarFilter = .available

@@ -1160,8 +1160,8 @@ public struct RegistryQuery: Sendable {
 
 
     /// Send `change` under `requestID`; a repeat under it gets the first answer.
-    /// Returns the revisions it advanced. A refusal throws a `ServerError` whose
-    /// `revisions` is nil; a change that failed partway carries what it advanced.
+    /// Returns the revisions observed across the write. A Machine failure
+    /// carries its code and revisions in `ServerError`.
     public func change(_ change: ServedWrite, requestID: String) async throws -> Revisions? {
         try await self.change(change, requestID)
     }

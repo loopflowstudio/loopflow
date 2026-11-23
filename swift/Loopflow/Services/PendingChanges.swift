@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import SwiftUI
 
 /// A Task or Session change someone made that the Machine has not shown yet.
 /// The client never decides list membership beyond this table; the next
@@ -17,8 +18,9 @@ public enum PendingCommand: Equatable, Sendable {
     case unassign(task: String)
     /// Leaves every list filtered to another Wave; nil leaves it in none.
     case move(task: String, wave: String?)
-    /// A repository drop keeps the side of the target chosen in the shown order.
-    case reorder(machine: String?, member: WorkWorkspaceKey, target: String, after: Bool)
+    /// The side chosen in the displayed order. A source missing from the grid
+    /// has no preview, but the Machine can still resolve its drop.
+    case reorder(machine: String?, member: WorkWorkspaceKey, target: String, after: Bool?)
     case renameSession(session: String, title: String)
 
     public var task: String? {
@@ -80,35 +82,32 @@ public final class PendingChanges {
     /// the answer advanced. A refusal says "LOO-4 couldn't be completed: … · Show",
     /// `show` going to the Task, and removes the change, or keeps it until a
     /// reading covers what moved while the refused write ran.
-    /// A definite refusal calls `refused` after removing the preview. Other answers
-    /// call `answered` to request the readings that show what changed.
     @discardableResult
-    public func make(_ command: PendingCommand?, subject: String, verb: String, write: ServedWrite, notices: NoticeCenter,
-                     refused: (@MainActor () async -> Void)? = nil, show: Notice.Action?,
-                     answered: @escaping @MainActor () async -> Void = {}) -> Task<Void, Never> {
+    public func make(_ command: PendingCommand, subject: String, verb: String, write: ServedWrite, notices: NoticeCenter,
+                     show: Notice.Action?,
+                     answered: @escaping @MainActor () async throws -> Void = {}) -> Task<Void, Never> {
         let requestID = UUID().uuidString
-        if let command { changes.append(Change(requestID: requestID, command: command, answer: nil)) }
+        changes.append(Change(requestID: requestID, command: command, answer: nil))
         return Task {
             switch await deliver(write, requestID: requestID) {
-            case .answered(let revisions?):
-                self.answered(requestID, revisions: revisions)
-                await answered()
-            case .answered(nil):
-                // A one-shot transport has no read revisions. Keep the preview through its reread.
-                await answered()
-                changes.removeAll { $0.requestID == requestID }
-            case .refused(let reason, let revisions):
-                let notice = Notice("\(subject) couldn't be \(verb): \(reason)", key: requestID, action: show)
+            case .success(let revisions):
+                if let revisions { recordAnswer(revisions, for: requestID) }
+                do { try await answered() }
+                catch { notices.post(Notice(error.localizedDescription)) }
+                // A one-shot transport has no revisions. Keep the preview through its reread.
+                if revisions == nil { changes.removeAll { $0.requestID == requestID } }
+            case .failure(let error):
+                let notice = Notice("\(subject) couldn't be \(verb): \(message(for: error))", key: requestID, action: show)
                 notices.post(notice)
-                // Domains moved while it failed, by it or by another write: the
-                // reading that covers them shows which.
-                guard let revisions else {
-                    changes.removeAll { $0.requestID == requestID }
-                    if let refused { await notices.reread(keeping: notice, refused) }
-                    return
+                let failure = error as? ServerError
+                if case .reorder = command {
+                    // A drop commits atomically. Revisions on a definite refusal came from another write.
+                    recordAnswer(failure?.mayHaveHappened == true ? failure?.revisions : nil, for: requestID)
+                    await notices.reread(keeping: notice) { try? await answered() }
+                } else {
+                    recordAnswer(failure?.revisions, for: requestID)
+                    if failure?.revisions != nil { try? await answered() }
                 }
-                self.answered(requestID, revisions: revisions)
-                await answered()
             }
         }
     }
@@ -123,49 +122,46 @@ public final class PendingChanges {
         notices.post(Notice("\(subject) \(name) requested", key: requestID, action: undo))
         Task {
             switch await deliver(write, requestID: requestID) {
-            case .answered:
+            case .success:
                 await answered()
-            case .refused(let reason, _):
-                notices.post(Notice("\(subject) \(name) couldn't be requested: \(reason)", key: requestID))
+            case .failure(let error):
+                notices.post(Notice("\(subject) \(name) couldn't be requested: \(message(for: error))", key: requestID))
                 refused()
             }
         }
     }
 
-    private enum Delivery {
-        case answered(Revisions?)
-        /// `revisions` are the domains that advanced while the write ran; the
-        /// Machine cannot say whether this write moved them.
-        case refused(String, revisions: Revisions?)
+    private func message(for error: any Error) -> String {
+        (error as? ServerError)?.message ?? describe?(error) ?? error.localizedDescription
     }
 
     /// Send `write` until the Machine answers it. A lost link sends it again under
     /// the same request ID, so the Machine runs it once.
-    private func deliver(_ write: ServedWrite, requestID: String) async -> Delivery {
+    private func deliver(_ write: ServedWrite, requestID: String) async -> Result<Revisions?, any Error> {
         var delay = Duration.milliseconds(250)
         while true {
             do {
                 let revisions = try await send(write, requestID)
                 linkReturned()
-                return .answered(revisions)
+                return .success(revisions)
             } catch let error as ServerError {
                 linkReturned()
-                return .refused(error.message, revisions: error.revisions)
+                return .failure(error)
             } catch where ServerLink.lostLink(error) && !Task.isCancelled {
                 linkLost()
                 try? await Task.sleep(for: delay)
                 delay = min(delay * 2, .seconds(4))
             } catch {
-                return .refused(describe?(error) ?? error.localizedDescription, revisions: nil)
+                return .failure(error)
             }
         }
     }
 
     /// The Machine answered: keep the change until a reading covers `revisions`.
     /// An answer that advanced nothing needs no further reading.
-    private func answered(_ requestID: String, revisions: Revisions) {
+    private func recordAnswer(_ revisions: Revisions?, for requestID: String) {
         guard let index = changes.firstIndex(where: { $0.requestID == requestID }) else { return }
-        guard !revisions.domains.isEmpty else {
+        guard let revisions, !revisions.domains.isEmpty else {
             changes.remove(at: index)
             return
         }
@@ -249,17 +245,12 @@ public final class PendingChanges {
     public func workingOrder(_ plan: WorkViewPlan?, machine: String?, readAt: Revisions?) -> WorkViewPlan? {
         guard var plan, !changes.isEmpty else { return plan }
         for change in patches(at: readAt) {
-            guard case .reorder(let origin, let member, let target, let after) = change.command,
+            guard case .reorder(let origin, let member, let target, let after?) = change.command,
                   origin == machine, member.repository == plan.repository else { continue }
-            var members = plan.resolution.members
+            let members = plan.resolution.members
             guard let from = members.firstIndex(where: { $0.work == member }),
                   let to = members.firstIndex(where: { $0.work.kind == .task && $0.work.id == target }) else { continue }
-            let targetAfterRemoval = from < to ? to - 1 : to
-            let destination = after ? targetAfterRemoval + 1 : targetAfterRemoval
-            if from != destination {
-                members.insert(members.remove(at: from), at: destination)
-                plan.resolution.members = members
-            }
+            plan.resolution.members.move(fromOffsets: IndexSet(integer: from), toOffset: after ? to + 1 : to)
         }
         return plan
     }

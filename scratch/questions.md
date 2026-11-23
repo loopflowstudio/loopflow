@@ -8,3 +8,5 @@
   On transports without read revisions, keep the preview through the one-shot reread.
 - LOO-937's Project-rank redesign is a separate choice about ownership of
   Working order. Carry the activity-independence regression across it.
+- Take the drop side from the list being dragged. The sidebar and grid can
+  receive different revisions, and the sidebar already shows the landing line.

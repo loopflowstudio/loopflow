@@ -94,8 +94,8 @@ public struct ServerError: LocalizedError, Sendable, Equatable {
     public let code: ServerErrorCode?
     public let message: String
     public let data: JSONValue
-    /// The domains a failed write advanced before it failed; nil when it
-    /// changed nothing, so the change was refused.
+    /// Domains that advanced while the write ran, including concurrent writes.
+    /// Nil when the Machine observed no advance.
     public let revisions: Revisions?
 
     public init(code: String, message: String, data: JSONValue, revisions: Revisions? = nil) {
@@ -403,8 +403,8 @@ public enum ServerMessage: Sendable {
     /// `id` is nil before a request exists. An error for a subscription ends it.
     /// `code` is the Rust `ErrorCode`'s wire name: incompatible, invalid,
     /// not_found, conflict, unavailable, outcome_unknown or busy. `data` is
-    /// structured detail, `.null` when there is none. `revisions` is what a
-    /// failed write advanced first; nil when it changed nothing.
+    /// structured detail, `.null` when there is none. `revisions` has the
+    /// same meaning as `ServerError.revisions`.
     case error(id: String?, code: String, message: String, data: JSONValue, revisions: Revisions?)
 
     /// One message's line. The envelope is scanned, not parsed: a reading of

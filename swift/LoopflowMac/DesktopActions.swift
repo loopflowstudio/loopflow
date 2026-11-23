@@ -572,6 +572,13 @@ struct DesktopAction {
             files.chooseFile()
             return nil
         },
+        DesktopAction("files-find-text", "Find in File", scope: .pane,
+            keys: [.init(.character("f"), .command)], available: { $0.readingFiles?.selection != nil }) { context in
+            guard let files = context.readingFiles, files.selection != nil else { throw DesktopTargetError("Open a file to find text.") }
+            files.filePicker = nil
+            if let find = files.find { find.focusRequest = UUID() } else { files.find = FileFind() }
+            return nil
+        },
         DesktopAction("files-grep", "Search Text in Checkout", scope: .pane,
             keys: [.init(.character("f"), [.shift, .command])], available: { $0.readingFiles != nil }) { context in
             guard let files = context.readingFiles else { throw DesktopTargetError("Open Files to search the checkout.") }

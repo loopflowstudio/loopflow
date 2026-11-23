@@ -844,6 +844,7 @@ struct SessionPaneView: View {
                     case .success(let files):
                         TaskFilesView(store: files, checkoutBase: task?.reference.workspace?.baseCommit, task: task,
                             graph: task.flatMap { model.taskWork[$0.id].value?.graph }, isFocused: isFocused, addToConversation: conversationInput())
+                            .background(PaneFocusTarget(isFocused: isFocused, searching: files.filePicker != nil || files.find != nil))
                             .task(id: pane.content.selectedBrowserTab?.id) {
                                 // A tab names its own comparison, never one Graph step's.
                                 files.diffReview.showStep(nil)
@@ -1051,10 +1052,19 @@ struct PaneHoverRegion: NSViewRepresentable {
 // advancing straight to another visible terminal in the same key-view loop.
 private struct PaneFocusTarget: NSViewRepresentable {
     let isFocused: Bool
+    var searching = false
 
     func makeNSView(context: Context) -> FocusView { FocusView() }
 
     func updateNSView(_ view: FocusView, context: Context) {
+        let closedSearch = view.searching && !searching
+        view.searching = searching
+        if closedSearch, isFocused {
+            // SwiftUI removes the search field after updating its siblings.
+            Task { @MainActor [weak view] in
+                if let view, view.focusRequested, !view.searching { view.applyFocus() }
+            }
+        }
         guard view.focusRequested != isFocused else { return }
         view.focusRequested = isFocused
         view.applyFocus()
@@ -1062,6 +1072,7 @@ private struct PaneFocusTarget: NSViewRepresentable {
 
     final class FocusView: NSView {
         var focusRequested = false
+        var searching = false
         override var acceptsFirstResponder: Bool { focusRequested }
 
         override func viewDidMoveToWindow() {
@@ -1070,10 +1081,18 @@ private struct PaneFocusTarget: NSViewRepresentable {
         }
 
         func applyFocus() {
+            guard let window else { return }
             if focusRequested {
-                window?.makeFirstResponder(self)
-            } else if window?.firstResponder === self {
-                window?.makeFirstResponder(nil)
+                if let view = window.firstResponder as? NSView {
+                    // The field editor can live outside its text field's subtree.
+                    let owner = (view as? NSTextView).flatMap { $0.isFieldEditor ? $0.delegate as? NSView : nil } ?? view
+                    let frame = convert(bounds, to: nil)
+                    if owner.isDescendant(of: self) || (!owner.visibleRect.isEmpty &&
+                        frame.contains(owner.convert(owner.visibleRect, to: nil))) { return }
+                }
+                window.makeFirstResponder(self)
+            } else if window.firstResponder === self {
+                window.makeFirstResponder(nil)
             }
         }
     }

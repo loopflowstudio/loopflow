@@ -32,12 +32,14 @@ final class TaskFilesStore {
     /// one reads Files instead.
     func shownPage(hasTask: Bool) -> Page { page == .brief && !hasTask ? .files : page }
     let browser = FilesBrowserState()
+    var find: FileFind?
     var filePicker: TaskFilePicker?
 
     func chooseFile(_ mode: TaskFilePicker.Mode = .files) {
         guard filePicker?.mode != mode else { return }
         jumps.dismiss()
         filePicker = TaskFilePicker(store: self, mode: mode)
+        if mode == .grep, let find { filePicker?.text = find.query }
     }
     let performanceOwner = UUID()
 
@@ -202,10 +204,7 @@ final class TaskFilesStore {
     let workingTree = ComparisonReading(comparison: .workingTree(base: "parent"))
     let diffReview: DiffReviewState
     var workingChanges: TaskChangesSnapshot? { workingTree.changes }
-    var comments: [ReviewComment] {
-        get { diffReview.comments }
-        set { diffReview.comments = newValue }
-    }
+    let comments = ReviewComments()
 
     var documents: [String: TaskFileDocument] { browser.documents }
     private(set) var error: String?
@@ -400,7 +399,7 @@ final class TaskFilesStore {
     }
 
     init(issue: String, cwd: String, query: RegistryQuery = RegistryQueryLocal.shared) {
-        diffReview = DiffReviewState(issue: issue, cwd: cwd, query: query, workingTree: workingTree, browser: browser, pullRequest: pullRequest)
+        diffReview = DiffReviewState(issue: issue, cwd: cwd, query: query, workingTree: workingTree, browser: browser, pullRequest: pullRequest, comments: comments)
         tree = CheckoutTree(issue: issue, query: query)
         self.issue = issue
         self.cwd = cwd
@@ -425,8 +424,13 @@ final class TaskFilesStore {
     func document(_ path: String) -> TaskFileDocument {
         if let document = documents[path] { return document }
         let document = TaskFileDocument(path: path)
+        var anchoredVersion: Int?
         document.onEdit = { [weak self, weak document] in
             guard let self, let document else { return }
+            if anchoredVersion != document.editVersion {
+                anchoredVersion = document.editVersion
+                self.comments.reconcile(document)
+            }
             self.scheduleSave(document)
         }
         browser.documents[path] = document

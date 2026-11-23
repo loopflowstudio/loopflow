@@ -51,10 +51,18 @@ Keep `Brief`, `Diff` and `Files` in the pane strip. Cleanly separate **working-t
 
 **Files chrome and calm updates increment.** Files and Brief read the working tree against the Task parent. Each step or branch review owns its comparison. The breadcrumb and responsive rail use that split for navigation, and the first Files visit picks from the independent scratch inventory. Local and peer watchers offer changed scratch pages and reconcile retained drafts. Presentations enter file history and offer an Open button during Edit or Diff. Same-page HTML updates settle for 800 ms. Files’ Diff steps within the selected file.
 
-1. **Unified Find & line review:** Wire descendant-aware `PaneFocusTarget` and inline `⌘F` across Read, Edit, Markdown, HTML (`callJavaScript`) and Diff, with promotion to Grep (`⇧⌘F`). Check picker focus on acceptance and cancellation. Add typed `ReviewSelection.Source` (`.file` vs. `.diff`), Read gutter change marks, shared `ReviewCommentEditor` / `ReviewCommentsStrip` across Read and Diff. Reconcile focus, edit/save and review tests and `swift/README.md`.
-2. **Polish & full language/CLI coverage:** Verify all core languages + fallback in declaration scanner and local Tree-sitter outline, `gr` references, dirty-buffer live overlays, cache invalidation, truncated states, narrow/wide responsive layouts, and CLI/server reference docs. No change to iOS navigation or existing Diff comparison controls.
+**Unified Find and line review increment.** The Files pane owns ⌘F across source, Edit, rendered Markdown and HTML, and visible per-file Diff rows or sides. ⇧⌘F carries the query to checkout Grep. Read and Diff share one comment editor and batch. Each reference keeps its original working-file, draft or comparison source. Read gutter marks follow the working patch, including deletions.
+
+1. **Polish & full language/CLI coverage:** Verify all core languages + fallback in declaration scanner and local Tree-sitter outline, `gr` references, dirty-buffer live overlays, cache invalidation, truncated states, narrow/wide responsive layouts, and CLI/server reference docs. No change to iOS navigation or existing Diff comparison controls.
 
 ## Gate and demo
+
+**Find and line review checks on November 23**
+
+- `swift build --build-tests --package-path swift` passed. The headless Find test stepped through three occurrences after an emoji, transferred the query to Grep, returned to the same match and left ⌘F available to the terminal pane.
+- `scripts/test_desktop.sh --skip-build --filter 'findInReadStepsOccurrencesAndPromotesTheQueryOnlyFromFiles|readAndDiffCommentsEnterUnsentInputTogether|findCountsOnlyDisplayedDiffSidesAndRenderedMarkdownCells|readGutterMarksInsertionsAndTheSurvivingEdgeOfADeletion|codeOpensInReadAndKeepsItsDraftAndEditorAcrossFiles|readModeRendersHTMLAsAPageAndMarkdownAsBlocks|aTourFileOrdersTheDiffAndHidesItsPathsUntilShown'` passed all seven. A two-line Read comment followed a disk edit and survived a Diff refresh. A failed insertion kept both comments; the next insertion delivered one line with both source references.
+- The headless action registry and two comment model checks passed. The Rust Desktop action fixture and four documented-command checks passed.
+- A headless Chromium page ran the HTML reader’s search and reveal functions: two visible literal matches, including one across inline markup, a highlight on the second, and none after clearing. Display QA covers `htmlFindReadsVisibleTextAcrossMarkupAndKeepsPageState` on WebKit, mounted first-responder ownership on picker Return/Escape and stepping matches into view.
 
 **File browser checks on November 22**
 

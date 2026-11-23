@@ -29,7 +29,7 @@ struct ReviewStream: View {
     var body: some View {
         if reader == .changes {
             // A comment whose file left the comparison still waits to be sent.
-            ForEach(store.comments.filter { store.diffReview.review?.file($0.selection.path) == nil }) { comment in
+            ForEach(store.comments.items.filter { $0.original.source.revision == store.diffReview.revision(for: reader) && store.diffReview.review?.file($0.selection.path) == nil }) { comment in
                 ReviewCommentRow(store: store, comment: comment)
             }
         }
@@ -46,7 +46,7 @@ struct ReviewStream: View {
             if headsFirstFile || file.path != files.first?.path {
                 fileHeader(file, headed: headings[file.path] != nil).id("file:\(file.path)")
             }
-            ForEach(store.comments.filter { $0.detached && $0.selection.path == file.path }) { comment in
+            ForEach(store.comments.items.filter { $0.detached && $0.original.source.revision == store.diffReview.revision(for: reader) && $0.selection.path == file.path }) { comment in
                 ReviewCommentRow(store: store, comment: comment)
             }
             if reader == .changes, store.diffReview.isViewed(file) {
@@ -166,6 +166,43 @@ struct ReviewStream: View {
         }
         rows += change.pairs.compactMap { pair in pair.added.map { .line($0, pair.addedSegments) } }
         return rows
+    }
+
+    /// Use the same rows and folds as the stream, including both columns in Split.
+    func searchCells(in file: ReviewFile) -> [(FileFind.Cell, String)] {
+        var cells: [(FileFind.Cell, String)] = []
+        func append(_ line: ReviewLine?, _ side: ReviewSelection.Side, row: String) {
+            guard let line, let number = side == .old ? line.old : line.new else { return }
+            cells.append((.diff(row: row, side: side, line: number), visibleText(line, path: file.path)))
+        }
+        func pair(_ pair: ReviewPair, row: String) {
+            append(pair.removed, .old, row: row)
+            append(pair.added, .new, row: row)
+        }
+        for block in file.blocks {
+            let row = block.id(in: file.path)
+            switch block {
+            case .context(let line):
+                if split && file.status != .added { append(line, .old, row: row) }
+                append(line, .new, row: row)
+            case .change(let change):
+                for (offset, entry) in rows(of: change, in: file).enumerated() {
+                    switch entry {
+                    case .removals: break
+                    case .line(let line, _): append(line, line.kind == .removed ? .old : .new, row: change.rowID(offset))
+                    case .pair(let value): pair(value, row: change.rowID(offset))
+                    }
+                }
+            case .moved(let move) where move.end == .destination && store.diffReview.expandedMoves.contains(move.id):
+                for value in move.pairs { pair(value, row: row) }
+            default: break
+            }
+        }
+        return cells
+    }
+
+    private func visibleText(_ line: ReviewLine, path: String) -> String {
+        store.diffReview.openedLongLines.contains(line.id(in: path)) ? line.text : line.cut?.shown ?? line.text
     }
 
     @ViewBuilder private func changeRow(_ row: ChangeRow, change: ReviewChange, file: ReviewFile) -> some View {
@@ -299,13 +336,15 @@ struct ReviewStream: View {
     /// ends on it, then the comments left there. `old` and `new` are the line
     /// numbers the row shows.
     @ViewBuilder private func attachments(old: Int?, new: Int?, file: ReviewFile) -> some View {
-        if let selection = store.diffReview.reviewSelection, selection.path == file.path,
-           selection.last == (selection.side == .old ? old : new) {
-            ReviewCommentEditor(store: store, selection: selection, file: file, addToConversation: addToConversation)
+        if let selection = store.comments.selection, selection.path == file.path,
+           case .diff(let side, let revision) = selection.source, revision == store.diffReview.revision(for: reader),
+           selection.last == (side == .old ? old : new) {
+            ReviewCommentEditor(store: store, selection: selection, excerpt: { selection.excerpt(in: file) }, addToConversation: addToConversation)
         }
-        ForEach(store.comments.filter { comment in
-            !comment.detached && comment.selection.path == file.path
-                && comment.selection.last == (comment.selection.side == .old ? old : new)
+        ForEach(store.comments.items.filter { comment in
+            guard case .diff(let side, let revision) = comment.selection.source else { return false }
+            return revision == store.diffReview.revision(for: reader) && !comment.detached && comment.selection.path == file.path
+                && comment.selection.last == (side == .old ? old : new)
         }) { comment in
             ReviewCommentRow(store: store, comment: comment)
         }
@@ -334,9 +373,10 @@ struct ReviewStream: View {
 
     private func isSelected(_ line: ReviewLine, side: ReviewSelection.Side, path: String) -> Bool {
         if side == .new, let number = line.new, presentedLines?.contains(number) == true { return true }
-        return store.diffReview.reviewSelection.map {
-            $0.contains(line, path: path) && (line.kind == .context || $0.side == side)
-        } ?? false
+        guard let selection = store.comments.selection, selection.path == path,
+              selection.source == .diff(side: side, revision: store.diffReview.revision(for: reader)),
+              let number = side == .old ? line.old : line.new else { return false }
+        return (selection.first...selection.last).contains(number)
     }
 
     private func cell(_ line: ReviewLine, segments: [ReviewSegment]?, side: ReviewSelection.Side, file: ReviewFile) -> some View {
@@ -346,6 +386,15 @@ struct ReviewStream: View {
         // A line past the readable length shows its start until asked for the rest.
         let cut = line.cut.flatMap { store.diffReview.openedLongLines.contains(line.id(in: path)) ? nil : $0 }
         let text = cut?.shown ?? line.text
+        let colored = Self.attributed(text, segments: cut == nil ? segments : nil, tone: tone,
+                                      highlights: store.diffReview.highlights(of: file, in: reader)?.spans(for: line) ?? [],
+                                      inks: SyntaxInks.of(theme))
+        let find = reader == .changes ? nil : store.find
+        let highlighted: AttributedString
+        if let cell = find?.current?.cell, case .diff(_, let matchSide, let number) = cell,
+           side == matchSide, number == (side == .old ? line.old : line.new) {
+            highlighted = find?.highlight(colored, in: cell, color: palette.keyboardFocus.opacity(0.45)) ?? colored
+        } else { highlighted = colored }
         return VStack(alignment: .leading, spacing: Spacing.xxs) {
             HStack(alignment: .top, spacing: Spacing.xs) {
                 // A marker as well as color: + and − read without hue.
@@ -353,9 +402,7 @@ struct ReviewStream: View {
                 Text(tone == nil ? " " : line.kind == .added ? "+" : "−")
                     .foregroundStyle(tone?.ink ?? palette.textSecondary)
                     .textSelection(.disabled)
-                Text(Self.attributed(text, segments: cut == nil ? segments : nil, tone: tone,
-                                     highlights: store.diffReview.highlights(of: file, in: reader)?.spans(for: line) ?? [],
-                                     inks: SyntaxInks.of(theme)))
+                Text(highlighted)
                     .lineLimit(store.diffReview.wrapsLines ? nil : 1)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .fixedSize(horizontal: false, vertical: true)
@@ -380,9 +427,9 @@ struct ReviewStream: View {
     /// Copies code without the patch's + and − or the line numbers.
     @ViewBuilder private func copyMenu(_ line: ReviewLine, side: ReviewSelection.Side, file: ReviewFile) -> some View {
         Button("Copy line") { Self.copy(line.text) }
-        if let selection = store.diffReview.reviewSelection, selection.path == file.path, selection.side == side,
+        if let selection = store.comments.selection, selection.path == file.path, selection.source == .diff(side: side, revision: store.diffReview.revision(for: reader)),
            selection.first != selection.last, isSelected(line, side: side, path: file.path) {
-            Button("Copy \(selection.last - selection.first + 1) selected lines") { Self.copy(selection.text(in: file)) }
+            Button("Copy \(selection.last - selection.first + 1) selected lines") { Self.copy(selection.excerpt(in: file).joined(separator: "\n")) }
         }
         Button(side == .old ? "Copy the removed lines shown" : "Copy the new code shown") {
             Self.copy(ReviewSelection.side(side, of: file))
@@ -415,12 +462,8 @@ struct ReviewStream: View {
     }
 
     private func select(_ number: Int, side: ReviewSelection.Side, path: String) {
-        let extend = NSEvent.modifierFlags.contains(.shift)
-        if extend, let current = store.diffReview.reviewSelection, current.path == path, current.side == side {
-            store.diffReview.reviewSelection = current.extended(to: number)
-        } else {
-            store.diffReview.reviewSelection = ReviewSelection(path: path, side: side, first: number, last: number)
-        }
+        store.comments.select(path: path, source: .diff(side: side, revision: store.diffReview.revision(for: reader)),
+                              line: number, extend: NSEvent.modifierFlags.contains(.shift))
     }
 }
 
@@ -511,7 +554,7 @@ struct ReviewFileTitle: View {
 }
 
 /// A line number: it lights under the pointer, and a click selects the line.
-private struct ReviewGutter: View {
+struct ReviewGutter: View {
     let number: Int?
     let selected: Bool
     let tone: ThemeTone?
@@ -572,22 +615,21 @@ private struct LandingFlash: View {
 
 /// Under the selected lines: write a comment that stays there, copy the lines,
 /// or put a bare reference to them into the conversation's unsent input.
-private struct ReviewCommentEditor: View {
+struct ReviewCommentEditor: View {
     @Bindable var store: TaskFilesStore
     let selection: ReviewSelection
-    /// The file as the stream shows it, opened lines included.
-    let file: ReviewFile
+    let excerpt: () -> [String]
     let addToConversation: ((String) -> Bool)?
     @Environment(\.palette) private var palette
     @FocusState private var focused: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.xs) {
-            TextField("Comment on \((selection.path as NSString).lastPathComponent):\(selection.range) · \(selection.side.rawValue)",
-                      text: Bindable(store.diffReview).commentDraft, axis: .vertical)
+            TextField("Comment on \((selection.path as NSString).lastPathComponent):\(selection.range) · \(selection.source.label)",
+                      text: Bindable(store.comments).draft, axis: .vertical)
                 .lineLimit(1...5).textFieldStyle(.plain).font(Typography.text)
                 .focused($focused)
-                .onSubmit { store.diffReview.addComment(in: file) }
+                .onSubmit { store.comments.add(anchor: excerpt()) }
                 .accessibilityIdentifier("changes-comment")
             // One row where it fits; a narrow pane stacks the two pairs.
             ViewThatFits(in: .horizontal) {
@@ -615,18 +657,18 @@ private struct ReviewCommentEditor: View {
     }
 
     private var commentButton: some View {
-        Button("Comment") { store.diffReview.addComment(in: file) }
+        Button("Comment") { store.comments.add(anchor: excerpt()) }
             .buttonStyle(LoopflowButtonStyle(.accent))
-            .disabled(store.diffReview.commentDraft.allSatisfy(\.isWhitespace))
+            .disabled(store.comments.draft.allSatisfy(\.isWhitespace))
             .help("Keep this comment under its lines until you send every comment")
     }
 
     @ViewBuilder private var copyButtons: some View {
-        Button("Copy") { ReviewStream.copy(selection.text(in: file)) }
+        Button("Copy") { ReviewStream.copy(excerpt().joined(separator: "\n")) }
             .buttonStyle(LoopflowButtonStyle())
             .help("Copies the code without + and − or line numbers")
         Button("Reference in conversation") {
-            if addToConversation?(selection.reference(revision: store.diffReview.revision)) == true { store.diffReview.reviewSelection = nil }
+            if addToConversation?(selection.reference) == true { store.comments.selection = nil }
         }
         .buttonStyle(LoopflowButtonStyle())
         .disabled(addToConversation == nil)
@@ -637,7 +679,7 @@ private struct ReviewCommentEditor: View {
 
     /// Esc is bound once, on the row the pane has room for.
     private var cancelButton: some View {
-        Button("Cancel") { store.diffReview.reviewSelection = nil }
+        Button("Cancel") { store.comments.selection = nil }
             .buttonStyle(.plain).foregroundStyle(palette.textSecondary)
             .keyboardShortcut(.cancelAction)
     }
@@ -645,7 +687,7 @@ private struct ReviewCommentEditor: View {
 
 /// A comment waiting under its lines. One whose lines changed says so and
 /// keeps the place it had.
-private struct ReviewCommentRow: View {
+struct ReviewCommentRow: View {
     @Bindable var store: TaskFilesStore
     let comment: ReviewComment
     @Environment(\.palette) private var palette
@@ -660,7 +702,7 @@ private struct ReviewCommentRow: View {
                     .foregroundStyle(comment.detached ? palette.warning : palette.textSecondary)
             }
             Spacer(minLength: 4)
-            Button { store.comments.removeAll { $0.id == comment.id } } label: {
+            Button { store.comments.items.removeAll { $0.id == comment.id } } label: {
                 Image(systemName: "xmark").font(Typography.meta).fontWeight(.semibold).frame(width: 18, height: 18)
                     .contentShape(Rectangle())
             }
@@ -676,7 +718,7 @@ private struct ReviewCommentRow: View {
 
     private var place: String {
         let selection = comment.selection
-        let lines = "\((selection.path as NSString).lastPathComponent):\(selection.range) · \(selection.side.rawValue)"
+        let lines = "\((selection.path as NSString).lastPathComponent):\(selection.range) · \(selection.source.label)"
         return comment.detached ? "\(lines) · these lines have changed since; still sent" : lines
     }
 }
@@ -691,8 +733,8 @@ struct ReviewCommentsStrip: View {
     @Environment(\.palette) private var palette
 
     var body: some View {
-        if !store.comments.isEmpty {
-            let count = store.comments.count
+        if !store.comments.items.isEmpty {
+            let count = store.comments.items.count
             HStack(spacing: Spacing.sm) {
                 Text(count == 1 ? "1 comment" : "\(count) comments").foregroundStyle(palette.accent)
                     .lineLimit(1).accessibilityIdentifier("changes-comment-count")
@@ -724,9 +766,7 @@ struct ReviewCommentsStrip: View {
 
     /// Comments are spent once they are in the conversation; a failed send keeps them.
     private func send() {
-        guard let addToConversation, !store.comments.isEmpty else { return }
-        let message = ReviewComment.message(store.comments, revision: store.diffReview.revision)
-        if addToConversation(message) { store.comments = [] }
+        if let addToConversation { store.comments.insert(into: addToConversation) }
     }
 }
 

@@ -1,5 +1,6 @@
 #if os(macOS)
 import Foundation
+import Observation
 import Loopflow
 
 /// A Task's whole comparison read as one review: every file, its hunks, and the
@@ -237,6 +238,34 @@ struct ReviewFile: Equatable, Sendable, Identifiable {
         self.deletions = deletions
         self.rows = rows
         fingerprint = hasher.finalize()
+    }
+
+    /// An insertion marks its new lines. A pure deletion marks the surviving line above it.
+    var gutterMarks: [Int: ReviewLine.Kind] {
+        var result: [Int: ReviewLine.Kind] = [:]
+        var preceding = 0
+        for block in blocks {
+            switch block {
+            case .hunk(let header):
+                let span = ReviewDiff.hunkSpan(header)
+                preceding = span.new - (span.newCount == 0 ? 0 : 1)
+            case .context(let line):
+                if let number = line.new { preceding = number }
+            case .change(let change):
+                if change.added.isEmpty { result[max(1, preceding)] = .removed }
+                for number in change.added.compactMap(\.new) {
+                    result[number] = .added
+                    preceding = number
+                }
+            case .moved(let move):
+                if move.end == .source { result[max(1, preceding)] = .removed }
+                for number in move.lines.compactMap(\.new) {
+                    result[number] = .added
+                    preceding = number
+                }
+            }
+        }
+        return result
     }
 
     /// The rendered block containing a working-file line.
@@ -667,110 +696,140 @@ enum LongestCommon {
     }
 }
 
-/// Lines you picked in the review, on one side of one file.
+/// A line range keeps the source it was picked from, even after switching comparisons.
 struct ReviewSelection: Equatable, Sendable {
     enum Side: String, Sendable { case old = "before", new = "after" }
+    enum Source: Equatable, Sendable {
+        case file(draft: Bool)
+        case diff(side: Side, revision: String)
+
+        var label: String {
+            switch self {
+            case .file(let draft): draft ? "unsaved draft" : "working file"
+            case .diff(let side, let revision): "\(side.rawValue), \(revision)"
+            }
+        }
+
+        var isFile: Bool { if case .file = self { true } else { false } }
+        var revision: String? { if case .diff(_, let revision) = self { revision } else { nil } }
+    }
     let path: String
-    let side: Side
+    let source: Source
     let first: Int
     let last: Int
 
-    func extended(to line: Int) -> ReviewSelection {
-        ReviewSelection(path: path, side: side, first: min(first, line), last: max(last, line))
-    }
-
-    /// The line's number on this side; nil when the line is not on it.
-    func number(of line: ReviewLine) -> Int? { side == .old ? line.old : line.new }
-
-    func contains(_ line: ReviewLine, path: String) -> Bool {
-        guard path == self.path, let number = number(of: line) else { return false }
-        return (first...last).contains(number)
+    func extended(to line: Int) -> Self {
+        Self(path: path, source: source, first: min(first, line), last: max(last, line))
     }
 
     var range: String { first == last ? "L\(first)" : "L\(first)-\(last)" }
 
-    /// One line for the conversation's unsent input. Desktop types literal text
-    /// only, and a newline there would send, so the code stays in the file and
-    /// the line names exactly where: file, side, lines and the revision compared.
-    func reference(revision: String) -> String {
-        "`\(path):\(range)` (\(side.rawValue), \(revision)) "
-    }
+    var reference: String { "`\(path):\(range)` (\(source.label)) " }
 
-    /// The selected lines as plain text, without patch markers or line numbers.
-    func text(in file: ReviewFile) -> String {
-        let lines = numbered(in: file)
-        return (first...last).compactMap { lines[$0] }.joined(separator: "\n")
-    }
-
-    /// Every line on one side of a file, in order: the new code, or what was removed.
-    static func side(_ side: Side, of file: ReviewFile) -> String {
-        file.lines.filter { side == .new ? $0.kind != .removed : $0.kind == .removed }.map(\.text).joined(separator: "\n")
-    }
-
-    /// This side's lines of a file by number.
     func numbered(in file: ReviewFile) -> [Int: String] {
+        guard case .diff(let side, _) = source else { return [:] }
         var lines: [Int: String] = [:]
         for line in file.lines {
-            if let number = number(of: line) { lines[number] = line.text }
+            if let number = side == .old ? line.old : line.new { lines[number] = line.text }
         }
         return lines
     }
-}
 
-/// A comment you left on lines of the Diff. It waits under its lines until you
-/// send every comment to the conversation as one message.
-struct ReviewComment: Equatable, Sendable, Identifiable {
-    let id: UUID
-    var selection: ReviewSelection
-    let text: String
-    /// The commented lines as they read when you wrote it, to find them again.
-    let anchor: [String]
-    /// The lines are no longer in the Diff as they were; the comment keeps its
-    /// last place and is still sent.
-    var detached = false
-
-    init(id: UUID = UUID(), selection: ReviewSelection, text: String, in file: ReviewFile) {
-        self.id = id
-        self.selection = selection
-        self.text = text
-        let lines = selection.numbered(in: file)
-        anchor = (selection.first...selection.last).map { lines[$0] ?? "" }
+    func excerpt(in file: ReviewFile) -> [String] {
+        let lines = numbered(in: file)
+        return (first...last).compactMap { lines[$0] }
     }
 
-    /// The comment after the file changed: on the nearest lines that still read
-    /// as they did, or detached when none do. Nil is a file that left the Diff.
-    func anchored(in file: ReviewFile?) -> ReviewComment {
+    static func side(_ side: Side, of file: ReviewFile) -> String {
+        file.lines.filter { side == .new ? $0.kind != .removed : $0.kind == .removed }.map(\.text).joined(separator: "\n")
+    }
+}
+
+struct ReviewComment: Equatable, Sendable, Identifiable {
+    let id = UUID()
+    let original: ReviewSelection
+    let text: String
+    let anchor: [String]
+    private var start: Int?
+    var detached: Bool { start == nil }
+    var selection: ReviewSelection {
+        guard let start else { return original }
+        return ReviewSelection(path: original.path, source: original.source,
+                               first: start, last: start + original.last - original.first)
+    }
+
+    init(selection: ReviewSelection, text: String, anchor: [String]) {
+        original = selection
+        self.text = text
+        self.anchor = anchor
+        start = selection.first
+    }
+
+    func anchored(in lines: [Int: String]) -> Self {
         var next = self
-        guard let file else { next.detached = true; return next }
-        let lines = selection.numbered(in: file)
-        let starts = lines.keys.filter { start in
-            anchor.enumerated().allSatisfy { lines[start + $0.offset] == $0.element }
+        next.start = nil
+        guard let first = anchor.first, anchor.count == original.last - original.first + 1 else { return next }
+        for (number, text) in lines where text == first {
+            if anchor.enumerated().allSatisfy({ lines[number + $0.offset] == $0.element }) {
+                guard next.start == nil else { next.start = nil; return next }
+                next.start = number
+            }
         }
-        guard let start = starts.min(by: { (abs($0 - selection.first), $0) < (abs($1 - selection.first), $1) }) else {
-            next.detached = true
-            return next
-        }
-        next.detached = false
-        next.selection = ReviewSelection(path: selection.path, side: selection.side,
-                                         first: start, last: start + selection.last - selection.first)
         return next
     }
 
-    /// Every comment as one line for the conversation's unsent input, each
-    /// naming its file, lines and side.
-    static func message(_ comments: [ReviewComment], revision: String) -> String {
-        func words(_ comment: ReviewComment) -> String {
-            comment.text.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+    static func message(_ comments: [ReviewComment]) -> String {
+        comments.enumerated().map { index, comment in
+            let prefix = comments.count > 1 ? "(\(index + 1)) " : ""
+            let changed = comment.detached ? "· lines since changed " : ""
+            let words = comment.text.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+            return prefix + comment.selection.reference + changed + words
+        }.joined(separator: " ") + " "
+    }
+}
+
+@MainActor @Observable
+final class ReviewComments {
+    var items: [ReviewComment] = []
+    var selection: ReviewSelection? { didSet { if oldValue != selection { draft = "" } } }
+    var draft = ""
+
+    func select(path: String, source: ReviewSelection.Source, line: Int, extend: Bool) {
+        if extend, let current = selection, current.path == path, current.source == source {
+            selection = current.extended(to: line)
+        } else {
+            selection = ReviewSelection(path: path, source: source, first: line, last: line)
         }
-        func place(_ comment: ReviewComment) -> String {
-            let selection = comment.selection
-            return "`\(selection.path):\(selection.range)` (\(selection.side.rawValue)\(comment.detached ? ", lines since changed" : ""))"
+    }
+
+    func add(anchor: [String]) {
+        guard let selection, !draft.allSatisfy(\.isWhitespace) else { return }
+        items.append(ReviewComment(selection: selection, text: draft, anchor: anchor))
+        self.selection = nil
+    }
+
+    func reconcile(_ document: TaskFileDocument) {
+        let indices = items.indices.filter {
+            items[$0].original.path == document.path && items[$0].original.source.isFile
         }
-        if comments.count == 1, let comment = comments.first {
-            return "\(place(comment)): \(words(comment)) (\(revision)) "
+        guard !indices.isEmpty else { return }
+        let lines = document.text.utf8.split(separator: 10, omittingEmptySubsequences: false).enumerated().map {
+            ($0.offset + 1, String(decoding: $0.element.dropLast($0.element.last == 13 ? 1 : 0), as: UTF8.self))
         }
-        let parts = comments.enumerated().map { "(\($0.offset + 1)) \(place($0.element)): \(words($0.element))" }
-        return "\(comments.count) comments on the diff (\(revision)): \(parts.joined(separator: " ")) "
+        let numbered = Dictionary(uniqueKeysWithValues: lines)
+        for index in indices { items[index] = items[index].anchored(in: numbered) }
+    }
+
+    func reconcile(path: String, revision: String, file: ReviewFile?) {
+        for index in items.indices {
+            let selection = items[index].original
+            guard selection.path == path, selection.source.revision == revision else { continue }
+            items[index] = items[index].anchored(in: file.map { selection.numbered(in: $0) } ?? [:])
+        }
+    }
+
+    func insert(into conversation: (String) -> Bool) {
+        if !items.isEmpty, conversation(ReviewComment.message(items)) { items.removeAll() }
     }
 }
 #endif

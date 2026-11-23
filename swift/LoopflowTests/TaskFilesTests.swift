@@ -5,6 +5,7 @@ import GhosttyKit
 import SwiftUI
 import Testing
 import ViewInspector
+import WebKit
 @testable import Loopflow
 @testable import LoopflowMac
 
@@ -519,6 +520,121 @@ struct TaskFilesTests {
         #expect(editor.selectedRange() == NSRange(location: 4, length: 5))
         editor.undoManager?.undo()
         #expect(document.text == "// 😀\r\nstruct NewStore {}")
+    }
+
+    @Test func findInReadStepsOccurrencesAndPromotesTheQueryOnlyFromFiles() async throws {
+        let registry = SessionsWorkspaceRegistry(localMachineId: fixtureMachineId)
+        let location = fixtureWorkspace("/fixture")
+        let workspace = fixtureWork(registry, location)
+        let pane = try #require(workspace.multiplexer.showBrowser(.files, location: location))
+        let query = RegistryQuery { _, _ in throw RegistryQueryError("Search stays in the displayed file") }
+        let files = try workspace.files(for: pane.content, task: nil, query: query)
+        let model = WorkModel(query: query)
+        func context(_ pane: PaneState?) -> DesktopActionContext {
+            DesktopActionContext(model: model, workspaces: registry, workspace: workspace, pane: pane)
+        }
+        files.selectFile("Read.swift")
+        let document = files.document("Read.swift")
+        await document.reconcile(snapshot("// 😀 Read read\r\nfunc read() {}", path: document.path))
+        let binding = try #require(DesktopAction.binding(characters: "f", modifiers: .command, context: context(pane)))
+        try binding.0.perform(context(pane))
+        let find = try #require(files.find)
+        let view = TaskFilesView(store: files, checkoutBase: nil)
+        let field = try view.inspect().find(PaletteSearchField.self).actualView()
+        field.text = "read"
+        let reader = try view.inspect().find(TaskCodeReader.self).actualView()
+        await find.search(lines: CodeLine.read(reader.text, grammar: nil))
+        #expect(find.label == "1 of 3")
+        #expect(find.current?.range == NSRange(location: 6, length: 4))
+        field.submit()
+        #expect(find.label == "2 of 3" && find.current?.range.location == 11)
+        field.submitBackwards?()
+        field.submitBackwards?()
+        #expect(find.label == "3 of 3" && find.current?.cell == .line(2))
+        #expect(document.retainedEditor == nil)
+        let grep = try #require(DesktopAction.binding(characters: "f", modifiers: [.shift, .command], context: context(pane)))
+        try grep.0.perform(context(pane))
+        #expect(files.filePicker?.remoteSearch == "read")
+        let pickerField = try view.inspect().find(TaskFilePickerView.self).find(PaletteSearchField.self).actualView()
+        pickerField.cancel()
+        #expect(files.find === find && files.filePicker == nil)
+        let terminal = try #require(workspace.multiplexer.sessionPane)
+        #expect(DesktopAction.binding(characters: "f", modifiers: .command, context: context(terminal)) == nil)
+    }
+
+    @Test func readAndDiffCommentsEnterUnsentInputTogether() async throws {
+        let files = try twoFileStore()
+        files.selectFile("a.swift")
+        let document = files.document("a.swift")
+        await document.reconcile(snapshot("uno\nsecond\nthird", path: document.path))
+        let view = TaskFilesView(store: files, checkoutBase: nil)
+        let reader = try view.inspect().find(TaskCodeReader.self).actualView()
+        let lines = CodeLine.read(reader.text, grammar: nil)
+        let first = try reader.row(0, in: lines).inspect().find(ReviewGutter.self).actualView()
+        first.select()
+        files.comments.select(path: document.path, source: .file(draft: false), line: 2, extend: true)
+        let editor = try reader.row(1, in: lines).inspect().find(ReviewCommentEditor.self)
+        files.comments.draft = "Read these together"
+        try editor.find(button: "Comment").tap()
+        #expect(files.comments.items.first?.anchor == ["uno", "second"])
+        await document.reconcile(snapshot("above\nuno\nsecond\nthird", path: document.path))
+        #expect(files.comments.items.first?.selection.range == "L2-3")
+        await files.diffReview.loadReview()
+        let file = try #require(files.diffReview.shownReview?.file(document.path))
+        let diff = ReviewStream(store: files, reader: .changes, files: [file], split: false, addToConversation: nil)
+        #expect(try diff.inspect().findAll(ReviewCommentRow.self).isEmpty)
+        let gutter = try #require(try diff.inspect().findAll(ReviewGutter.self).first).actualView()
+        gutter.select()
+        files.comments.draft = "Explain this change"
+        try diff.inspect().find(ReviewCommentEditor.self).find(button: "Comment").tap()
+        var input: [String] = []
+        func send(available: Bool) throws {
+            let strip = ReviewCommentsStrip(store: files, isFocused: true) {
+                if available { input.append($0) }
+                return available
+            }
+            try strip.inspect().find(viewWithAccessibilityIdentifier: "changes-send").button().tap()
+        }
+        try send(available: false)
+        #expect(files.comments.items.count == 2)
+        try send(available: true)
+        #expect(files.comments.items.isEmpty && input.count == 1)
+        let message = try #require(input.first)
+        #expect(message.contains("`a.swift:L2-3` (working file) Read these together"))
+        #expect(message.contains("`a.swift:L1` (after, " + files.diffReview.revision + ") Explain this change"))
+        #expect(!message.contains("\n"))
+    }
+
+    @Test func findCountsOnlyDisplayedDiffSidesAndRenderedMarkdownCells() async throws {
+        let files = try twoFileStore()
+        await files.diffReview.loadReview()
+        let file = try #require(files.diffReview.review?.files.first)
+        let stream = ReviewStream(store: files, reader: .file(file.path), files: [file], split: false, addToConversation: nil)
+        let find = FileFind()
+        find.query = "nine"
+        await find.search(stream.searchCells(in: file))
+        #expect(find.label == "No matches")
+        files.diffReview.reviewLayout = .unified
+        await find.search(stream.searchCells(in: file))
+        #expect(find.current?.cell == .diff(row: "a.swift#o9", side: .old, line: 9))
+        let blocks = MarkdownBlocks.blocks("| key | value |\n|---|---|\n| nine | **nine** |")
+        await find.search(blocks.enumerated().flatMap { $0.element.searchCells(index: $0.offset) })
+        #expect(find.label == "1 of 2")
+        find.step(1)
+        #expect(find.current?.cell == .markdown(block: 1, cell: 1))
+    }
+
+    @Test(.requiresDisplay) func htmlFindReadsVisibleTextAcrossMarkupAndKeepsPageState() async throws {
+        let page = WebPage()
+        let html = "<p>😀 a<b>+b</b></p><p hidden>a+b</p><p>a+B</p><script>window.loads = (window.loads ?? 0) + 1</script>"
+        for try await _ in page.load(html: html, baseURL: URL(fileURLWithPath: "/")) {}
+        let count = try await page.callJavaScript(TaskHTMLView.searchScript, arguments: ["needle": "a+b"], contentWorld: .defaultClient)
+        #expect(count as? Int == 2)
+        _ = try await page.callJavaScript(TaskHTMLView.revealScript, arguments: ["needle": "a+b", "index": 1], contentWorld: .defaultClient)
+        let marked = try await page.callJavaScript("return [...CSS.highlights.get('lf-find')][0].toString()", contentWorld: .defaultClient)
+        #expect(marked as? String == "a+B")
+        let isolated = try await page.callJavaScript("return window.loads === 1 && window.fileFind === undefined", contentWorld: .page)
+        #expect(isolated as? Bool == true)
     }
 
     @Test func aRecoveredDraftStaysReadOnlyWhenTheFileHasDisappeared() async {
@@ -1504,10 +1620,10 @@ struct TaskFilesTests {
         let store = try twoFileStore()
         await store.diffReview.loadReview()
         let first = try #require(store.diffReview.shownReview?.files.first)
-        store.diffReview.reviewSelection = ReviewSelection(path: first.path, side: .new, first: 1, last: 1)
-        store.diffReview.commentDraft = "why"
-        store.diffReview.addComment(in: first)
-        store.diffReview.reviewSelection = ReviewSelection(path: first.path, side: .new, first: 9, last: 9)
+        store.comments.selection = ReviewSelection(path: first.path, source: .diff(side: .new, revision: store.diffReview.revision), first: 1, last: 1)
+        store.comments.draft = "why"
+        store.comments.add(anchor: ["first"])
+        store.comments.selection = ReviewSelection(path: first.path, source: .diff(side: .new, revision: store.diffReview.revision), first: 9, last: 9)
         let path = "swift/LoopflowMac/Views/ADirectoryWithALongName/AnotherOne/TaskChangesViewWithALongName.swift"
         let long = ReviewFile(path: path, oldPath: path + ".old", status: .renamed, blocks: [
             .change(ReviewChange(id: "\(path)#n1", removed: [], added: [
@@ -1597,13 +1713,14 @@ struct TaskFilesTests {
         await store.diffReview.openGap(header, gap: try #require(file.gaps[index]), file: file, reader: .changes)
         #expect(store.diffReview.openedGaps[file.path]?.failure == nil)
         #expect(store.diffReview.opened(file).lines.compactMap(\.new).contains(5))
-        store.diffReview.reviewSelection = ReviewSelection(path: "a.swift", side: .new, first: 5, last: 5)
-        store.diffReview.commentDraft = "what is five?"
-        store.diffReview.addComment(in: file)
-        #expect(store.diffReview.reviewSelection == nil && store.diffReview.commentDraft.isEmpty)
-        #expect(store.comments.map(\.anchor) == [["five"]])
+        store.comments.selection = ReviewSelection(path: "a.swift", source: .diff(side: .new, revision: store.diffReview.revision), first: 5, last: 5)
+        store.comments.draft = "what is five?"
+        let selection = try #require(store.comments.selection)
+        store.comments.add(anchor: selection.excerpt(in: store.diffReview.opened(file)))
+        #expect(store.comments.selection == nil && store.comments.draft.isEmpty)
+        #expect(store.comments.items.map(\.anchor) == [["five"]])
         await store.diffReview.loadReview()
-        #expect(store.comments.map(\.detached) == [false])
+        #expect(store.comments.items.map(\.detached) == [false])
     }
 
     /// Skipped lines that do not load say so under their own file, and the

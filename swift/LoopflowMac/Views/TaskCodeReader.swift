@@ -9,9 +9,11 @@ struct TaskCodeReader: View {
     var location: FileVisit?
     var store: TaskFilesStore?
     var revision: String?
+    var addToConversation: ((String) -> Bool)?
     let ready: () -> Void
     @Environment(\.palette) private var palette
     @Environment(\.theme) private var theme
+    @State private var parsedVersion = 0
     @State private var lines: [CodeLine]?
 
     @FocusState private var focused: Bool
@@ -26,19 +28,13 @@ struct TaskCodeReader: View {
                 ScrollViewReader { proxy in
                     ScrollView([.horizontal, .vertical]) {
                         LazyVStack(alignment: .leading, spacing: 0) {
-                            ForEach(lines.indices, id: \.self) { index in
-                                VStack(alignment: .leading, spacing: 0) {
-                                    HStack(alignment: .firstTextBaseline, spacing: Spacing.md) {
-                                        Text(verbatim: String(lines.count)).hidden()
-                                            .overlay(alignment: .trailing) { Text(verbatim: String(index + 1)) }
-                                            .foregroundStyle(palette.textSecondary)
-                                        source(lines[index], number: index + 1)
-                                    }
-                                    if let store, let peek = store.jumps.peek, peek.name != nil,
-                                       peek.origin.line == index + 1 {
-                                        FileSymbolPeek(store: store, peek: peek)
-                                    }
+                            if let store {
+                                ForEach(store.comments.items.filter { $0.original.path == path && $0.original.source.isFile && $0.detached }) {
+                                    ReviewCommentRow(store: store, comment: $0)
                                 }
+                            }
+                            ForEach(lines.indices, id: \.self) { index in
+                                row(index, in: lines)
                             }
                         }
                         .scrollTargetLayout()
@@ -63,6 +59,17 @@ struct TaskCodeReader: View {
                         }
                         pendingG = key.characters == "g"
                         return pendingG ? .handled : .ignored
+                    }
+                    .task(id: FileFind.Scan(query: store?.find?.query, revision: parsedVersion)) {
+                        if let find = store?.find, !find.query.isEmpty {
+                            await find.search(lines: lines)
+                        }
+                    }
+                    .onChange(of: store?.find?.current) {
+                        if case .line(let line) = store?.find?.current?.cell {
+                            proxy.scrollTo(line - 1, anchor: .center)
+                            store?.jumps.readingLine = line
+                        }
                     }
                     .task(id: location) {
                         if let location { proxy.scrollTo(location.line - 1, anchor: UnitPoint(x: 0, y: 0.5)) }
@@ -89,7 +96,54 @@ struct TaskCodeReader: View {
             guard !Task.isCancelled else { return }
             if let outline = result.1, let version { document?.receive(outline, version: version) }
             lines = result.0
+            parsedVersion += 1
         }
+    }
+
+    func row(_ index: Int, in lines: [CodeLine]) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .firstTextBaseline, spacing: Spacing.md) {
+                if let store {
+                    let number = index + 1
+                    ReviewGutter(number: number, selected: selected(number),
+                                 tone: changeTone(number, in: store)) {
+                        store.comments.select(path: path, source: .file(draft: store.selectedDocument?.dirty == true),
+                                              line: number, extend: NSEvent.modifierFlags.contains(.shift))
+                    }
+                } else {
+                    Text(verbatim: String(index + 1)).foregroundStyle(palette.textSecondary)
+                }
+                source(lines[index], number: index + 1)
+            }
+            if let store {
+                if let selection = store.comments.selection, selected(index + 1), selection.last == index + 1 {
+                    ReviewCommentEditor(store: store, selection: selection, excerpt: {
+                        lines[(selection.first - 1)...index].map(\.text)
+                    }, addToConversation: addToConversation)
+                }
+                ForEach(store.comments.items.filter {
+                    !$0.detached && $0.original.source.isFile && $0.original.path == path && $0.selection.last == index + 1
+                }) { ReviewCommentRow(store: store, comment: $0) }
+            }
+            if let store, let peek = store.jumps.peek, peek.name != nil,
+               peek.origin.line == index + 1 {
+                FileSymbolPeek(store: store, peek: peek)
+            }
+        }
+    }
+
+    private func changeTone(_ line: Int, in store: TaskFilesStore) -> ThemeTone? {
+        guard let review = store.diffReview.fileReview, review.path == path,
+              review.editVersion == store.selectedDocument?.editVersion,
+              review.baseCommit == store.workingChanges?.baseCommit,
+              store.workingTree.counts[path] != nil || store.selectedDocument?.dirty == true,
+              let mark = review.marks[line] else { return nil }
+        return mark == .removed ? palette.failureTone : palette.successTone
+    }
+
+    private func selected(_ number: Int) -> Bool {
+        guard let selection = store?.comments.selection, selection.path == path, selection.source.isFile else { return false }
+        return (selection.first...selection.last).contains(number)
     }
 
     @ViewBuilder private func source(_ line: CodeLine, number: Int) -> some View {
@@ -131,12 +185,12 @@ struct TaskCodeReader: View {
     private func painted(_ line: CodeLine, number: Int) -> AttributedString {
         var value = AttributedString(line.text)
         value.paint(line.highlights, inks: .of(theme))
-        if location?.lines?.contains(number) == true { value.backgroundColor = palette.keyboardFocus.opacity(0.3) }
+        if selected(number) || location?.lines?.contains(number) == true { value.backgroundColor = palette.keyboardFocus.opacity(0.3) }
         if let hit = location?.hit, hit.line == number, hit.revision == revision,
            let range = hit.range(in: line.text), let attributed = Range(range, in: value) {
             value[attributed].backgroundColor = palette.keyboardFocus.opacity(0.3)
         }
-        return value
+        return store?.find?.highlight(value, in: .line(number), color: palette.keyboardFocus.opacity(0.45)) ?? value
     }
 }
 

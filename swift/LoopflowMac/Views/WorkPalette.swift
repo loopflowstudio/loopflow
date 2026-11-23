@@ -445,9 +445,13 @@ struct PaletteSearchField: NSViewRepresentable {
     let submit: () -> Void
     let cancel: () -> Void
 
+    var focusOnMount = true
+    var submitBackwards: (() -> Void)?
+
     func makeCoordinator() -> Coordinator { Coordinator(parent: self) }
     func makeNSView(context: Context) -> SearchField {
         let field = SearchField()
+        field.focusOnMount = focusOnMount
         field.isBordered = false
         field.focusRingType = .none
         field.drawsBackground = false
@@ -464,9 +468,10 @@ struct PaletteSearchField: NSViewRepresentable {
         if field.stringValue != text { field.stringValue = text }
     }
     final class SearchField: NSTextField {
+        var focusOnMount = true
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
-            window?.makeFirstResponder(self)
+            if focusOnMount { window?.makeFirstResponder(self) }
         }
     }
     @MainActor final class Coordinator: NSObject, NSTextFieldDelegate {
@@ -481,7 +486,12 @@ struct PaletteSearchField: NSViewRepresentable {
             switch selector {
             case #selector(NSResponder.moveDown(_:)): parent.move(1)
             case #selector(NSResponder.moveUp(_:)): parent.move(-1)
-            case #selector(NSResponder.insertNewline(_:)): parent.submit()
+            case #selector(NSResponder.insertNewline(_:)):
+                if NSEvent.modifierFlags.contains(.shift), let previous = parent.submitBackwards { previous() }
+                else { parent.submit() }
+            case #selector(NSResponder.insertLineBreak(_:)), #selector(NSResponder.insertNewlineIgnoringFieldEditor(_:)):
+                guard let previous = parent.submitBackwards, NSEvent.modifierFlags.contains(.shift) else { return false }
+                previous()
             case #selector(NSResponder.cancelOperation(_:)): parent.cancel()
             default: return false
             }

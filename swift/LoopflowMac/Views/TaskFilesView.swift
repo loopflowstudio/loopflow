@@ -2,7 +2,6 @@
 import AppKit
 import Loopflow
 import SwiftUI
-import WebKit
 
 /// Compact document controls leave room for the file itself.
 enum TaskFileChrome {
@@ -43,7 +42,9 @@ struct TaskFilesView: View {
                 TaskChangesView(store: store, task: task, isFocused: isFocused, addToConversation: addToConversation)
             case .files:
                 documentRow
+                if let find = store.find { FileFindBar(find: find, store: store, focused: isFocused && store.filePicker == nil) }
                 Divider()
+                ReviewCommentsStrip(store: store, isFocused: isFocused, addToConversation: addToConversation)
                 filesPage
             }
         }
@@ -52,7 +53,7 @@ struct TaskFilesView: View {
         .onGeometryChange(for: CGFloat.self, of: \.size.width) { paneWidth = $0 }
         .overlay {
             if let picker = store.filePicker {
-                TaskFilePickerView(store: store, picker: picker).id(ObjectIdentifier(picker))
+                TaskFilePickerView(store: store, picker: picker, isFocused: isFocused).id(ObjectIdentifier(picker))
             }
         }
         .tint(palette.actionInk)
@@ -66,8 +67,10 @@ struct TaskFilesView: View {
         .task(id: "\(store.selection ?? "")|\(store.mode)") {
             if store.mode != .diff { await store.loadFile() }
         }
+        .onChange(of: store.selection) { store.find?.reset() }
+        .onChange(of: store.mode) { store.find?.reset() }
         .onChange(of: store.selectedDocument?.editVersion) { store.jumps.dismiss() }
-        .task(id: diffIdentity) { if store.mode == .diff { await store.loadDiff() } }
+        .task(id: diffIdentity) { if page == .files, store.mode == .diff { await store.loadDiff() } }
     }
 
     @ViewBuilder private var notice: some View {
@@ -430,15 +433,27 @@ struct TaskFilesView: View {
             if snapshot.state == .text, store.mode == .read {
                 TaskFileReadingView(document: document, baseURL: store.query.remoteMachine == nil
                     ? URL(fileURLWithPath: store.cwd).appendingPathComponent(document.path) : nil,
-                    store: store, visit: store.visit, ready: { reportVisible(document.path) })
+                    store: store, visit: store.visit, addToConversation: addToConversation, ready: { reportVisible(document.path) })
                     .id(document.path)
             } else if snapshot.state == .text {
-                TaskDocumentView(document: document, isFocused: isFocused, ready: { reportVisible(document.path) })
+                TaskDocumentView(document: document, isFocused: isFocused && store.find == nil, ready: { reportVisible(document.path) })
+                    .id(document.path)
+                    .task(id: FileFind.Scan(query: store.find?.query, revision: document.editVersion)) {
+                        if let find = store.find { await find.search([(.editor, document.text)]) }
+                    }
+                    .onChange(of: store.find?.current, initial: true) {
+                        guard isFocused, !document.editor.hasMarkedText(), let match = store.find?.current,
+                              match.cell == .editor, NSMaxRange(match.range) <= document.text.utf16.count else { return }
+                        document.editor.setSelectedRange(match.range)
+                        document.editor.scrollRangeToVisible(match.range)
+                    }
             } else if let data = snapshot.data, NSImage(data: data) != nil {
                 ScrollView { TaskImage(file: snapshot).padding(Spacing.lg) }
+                    .task(id: store.find?.query) { await store.find?.search([]) }
                     .onAppear { reportVisible(snapshot.path) }
             } else {
                 EmptyState(title: snapshot.state.title)
+                    .task(id: store.find?.query) { await store.find?.search([]) }
             }
         } else { ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity) }
     }
@@ -456,120 +471,39 @@ struct TaskFileReadingView: View {
     let baseURL: URL?
     var store: TaskFilesStore?
     var visit: FileVisit?
+    var addToConversation: ((String) -> Bool)?
     var ready: () -> Void = {}
+
+    private var hasChanges: Bool {
+        document.dirty || store?.workingTree.counts[document.path] != nil
+    }
 
     var body: some View {
         switch (document.path as NSString).pathExtension.lowercased() {
         case "html" where visit == nil:
-            TaskHTMLView(html: document.text, baseURL: baseURL, ready: ready)
+            TaskHTMLView(html: document.text, baseURL: baseURL, find: store?.find, ready: ready)
                 .accessibilityIdentifier("files-rendered-html")
         case "md" where visit == nil:
-            ScrollView {
-                MarkdownBlocks(source: document.text).equatable()
-                    .frame(maxWidth: 720, alignment: .leading)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(Spacing.md).textSelection(.enabled)
+            ScrollViewReader { proxy in
+                ScrollView {
+                    MarkdownBlocks(source: document.text, find: store?.find)
+                        .frame(maxWidth: 720, alignment: .leading)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(Spacing.md).textSelection(.enabled)
+                }
+                .onChange(of: store?.find?.current) {
+                    if case .markdown(let index, _) = store?.find?.current?.cell { proxy.scrollTo(MarkdownBlocks.anchor(index), anchor: .center) }
+                }
             }
             .accessibilityIdentifier("files-rendered-markdown")
             .onAppear(perform: ready)
         default:
             TaskCodeReader(path: document.path, text: document.text, location: visit, store: store,
-                           revision: document.dirty ? nil : document.snapshot?.revision, ready: ready)
+                           revision: document.dirty ? nil : document.snapshot?.revision, addToConversation: addToConversation, ready: ready)
+                .task(id: "\(document.editVersion)|\(store?.workingChanges?.baseCommit ?? "")|\(hasChanges)") {
+                    if hasChanges { await store?.diffReview.loadDiff() }
+                }
         }
-    }
-}
-
-/// Pages run their scripts but never reach the network; links open in the browser.
-/// A rewrite reloads in place at the same scroll position.
-struct TaskHTMLView: View {
-    let html: String
-    let baseURL: URL?
-    var ready: () -> Void = {}
-
-    @State private var page: WebPage?
-    @State private var position = ScrollPosition()
-    @State private var offset = CGPoint.zero
-    /// Offsets during a load are the page settling, not the person scrolling.
-    @State private var loading = false
-
-    var body: some View {
-        Group {
-            if let page {
-                WebView(page)
-                    .webViewScrollPosition($position)
-                    .webViewOnScrollGeometryChange(for: CGPoint.self, of: \.contentOffset) { _, new in
-                        if !loading { offset = new }
-                    }
-            } else {
-                Color.clear
-            }
-        }
-        .task(id: html) { await show() }
-    }
-
-    private func show() async {
-        if page != nil {
-            do { try await Task.sleep(for: .milliseconds(800)) } catch { return }
-        }
-        if page == nil {
-            guard let rules = await TaskHTMLRules.offline() else {
-                let blank = WebPage()
-                page = blank
-                await Self.load(blank, html: "<p>Page unavailable: network blocking could not be set up.</p>", baseURL: nil)
-                return
-            }
-            guard !Task.isCancelled else { return }
-            let configuration = WebPage.Configuration()
-            configuration.userContentController.add(rules)
-            page = WebPage(configuration: configuration, navigationDecider: TaskHTMLLinks())
-        }
-        guard let page else { return }
-        let restore = offset
-        loading = true
-        defer { loading = false }
-        guard await Self.load(page, html: html, baseURL: baseURL), !Task.isCancelled else { return }
-        position.scrollTo(point: restore)
-        ready()
-    }
-
-    /// Whether the page finished loading; a superseded or failed load reports false.
-    @discardableResult
-    private static func load(_ page: WebPage, html: String, baseURL: URL?) async -> Bool {
-        do {
-            for try await _ in page.load(html: html, baseURL: baseURL ?? URL(string: "about:blank")!) {}
-            return true
-        } catch { return false }
-    }
-}
-
-/// Links leave the page for the browser; everything else loads in place.
-private struct TaskHTMLLinks: WebPage.NavigationDeciding {
-    func decidePolicy(for action: WebPage.NavigationAction,
-                      preferences: inout WebPage.NavigationPreferences) async -> WKNavigationActionPolicy {
-        guard action.navigationType == .linkActivated, let url = action.request.url,
-              ["http", "https", "mailto"].contains(url.scheme?.lowercased() ?? "") else { return .allow }
-        NSWorkspace.shared.open(url)
-        return .cancel
-    }
-}
-
-/// One compiled rule list blocks every network scheme for rendered pages.
-@MainActor
-private enum TaskHTMLRules {
-    private static var compiled: Task<WKContentRuleList?, Never>?
-    private static let rules = #"""
-    [{"trigger":{"url-filter":"^https?://"},"action":{"type":"block"}},
-     {"trigger":{"url-filter":"^wss?://"},"action":{"type":"block"}},
-     {"trigger":{"url-filter":"^ftp://"},"action":{"type":"block"}}]
-    """#
-
-    static func offline() async -> WKContentRuleList? {
-        let compiled = compiled ?? Task {
-            try? await WKContentRuleListStore.default().compileContentRuleList(
-                forIdentifier: "loopflow-offline-pages", encodedContentRuleList: rules)
-        }
-        Self.compiled = compiled
-        return await compiled.value
     }
 }
 
@@ -606,6 +540,25 @@ private struct TaskFileDiffView: View {
 
     private var reader: DiffReviewState.ReviewReader { .file(review.path) }
 
+    private struct SearchReading: Equatable {
+        let query: String
+        let file: ReviewFile?
+        let layout: DiffReviewState.ReviewLayout
+        let removals, moves, longLines: Set<String>
+        let rendered: Bool
+    }
+
+    private var searchReading: SearchReading? {
+        guard let query = store.find?.query, !query.isEmpty else { return nil }
+        let state = store.diffReview
+        let file = review.diff.file(review.path)
+        return SearchReading(query: query, file: file.map { state.opened($0, in: reader) },
+                             layout: state.layout(width: width), removals: state.openedRemovals,
+                             moves: state.expandedMoves, longLines: state.openedLongLines,
+                             rendered: file.flatMap { state.rendering(of: $0, in: reader) } != nil &&
+                                 state.state(for: reader).sideErrors[review.path] == nil)
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: Spacing.sm) {
@@ -621,19 +574,34 @@ private struct TaskFileDiffView: View {
             .padding(.horizontal, Spacing.sm)
             .frame(height: TaskFileChrome.headerHeight)
             Divider()
-            ReviewCommentsStrip(store: store, isFocused: isFocused, addToConversation: addToConversation)
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 0) {
-                    if review.truncated { ReviewNotice(text: "Diff truncated at 1 MB") }
-                    if review.diff.files.isEmpty {
-                        ReviewNotice(text: "No changes in \(review.path)")
-                    }
-                    ReviewStream(store: store, reader: reader, files: review.diff.files, split: store.diffReview.layout(width: width) == .split,
-                                 addToConversation: addToConversation)
+            let stream = ReviewStream(store: store, reader: reader, files: review.diff.files,
+                                      split: store.diffReview.layout(width: width) == .split, addToConversation: addToConversation)
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        if review.truncated { ReviewNotice(text: "Diff truncated at 1 MB") }
+                        if review.diff.files.isEmpty { ReviewNotice(text: "No changes in \(review.path)") }
+                        stream
+                    }.scrollTargetLayout()
                 }
-                .scrollTargetLayout()
+                .scrollPosition(id: store.diffReview.anchor(reader), anchor: .top)
+                .onChange(of: store.find?.current) {
+                    switch store.find?.current?.cell {
+                    case .diff(let row, _, _): proxy.scrollTo(row, anchor: .center)
+                    case .markdown(let block, _): proxy.scrollTo(MarkdownBlocks.anchor(block), anchor: .center)
+                    case .html(let page, _): proxy.scrollTo("html-side-\(page)", anchor: .center)
+                    default: break
+                    }
+                }
             }
-            .scrollPosition(id: store.diffReview.anchor(reader), anchor: .top)
+            .task(id: searchReading) {
+                guard let find = store.find, !find.query.isEmpty else { return }
+                guard let file = review.diff.file(review.path) else { await find.search([]); return }
+                let state = store.diffReview
+                if let rendering = state.rendering(of: file, in: reader), state.state(for: reader).sideErrors[file.path] == nil {
+                    if rendering == .image || rendering == .svg { await find.search([]) }
+                } else { await find.search(stream.searchCells(in: state.opened(file, in: reader))) }
+            }
             .onGeometryChange(for: CGFloat.self, of: \.size.width) { width = $0 }
             .accessibilityIdentifier("files-diff")
         }

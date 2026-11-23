@@ -633,7 +633,7 @@ struct ChangedFilesSidebar: View {
     private func fileRow(_ file: ReviewFile, in group: ReviewGroup) -> some View {
         let folder = group.id.hasPrefix("path:") && group.title.hasSuffix("/") ? group.title.count : nil
         let place = Self.place(file.path, under: folder)
-        let comments = store.comments.count { $0.selection.path == file.path }
+        let comments = store.comments.items.count { $0.selection.path == file.path && $0.original.source.revision == store.diffReview.revision }
         let viewed = store.diffReview.isViewed(file)
         return Button { jump(file.path) } label: {
             VStack(alignment: .leading, spacing: Spacing.xxs) {

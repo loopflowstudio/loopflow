@@ -75,6 +75,7 @@ final class TaskFileDocument: NSObject, NSTextViewDelegate, @preconcurrency NSTe
         deferredSnapshot = nil
         guard let base = snapshot?.content, let incoming = next.content, next.state == .text else {
             loadSnapshot(next)
+            onEdit?()
             return
         }
         if next.revision == snapshot?.revision {
@@ -85,6 +86,7 @@ final class TaskFileDocument: NSObject, NSTextViewDelegate, @preconcurrency NSTe
         }
         if !dirty, retainedEditor == nil {
             loadSnapshot(next)
+            onEdit?()
             saveMessage = "Updated from disk"
             return
         }

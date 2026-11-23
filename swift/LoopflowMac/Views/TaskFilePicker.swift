@@ -51,7 +51,9 @@ final class TaskFilePicker {
         open = [current].compactMap { $0 } + store.tabs.reversed().map(\.path).filter { $0 != current }
         workingTree = store.workingTree
         preferred = Set(open + (store.workingChanges?.files.map(\.path) ?? []))
-        previousResponder = store.filePicker?.previousResponder ?? NSApp?.keyWindow?.firstResponder
+        let responder = NSApp?.keyWindow?.firstResponder
+        let field = (responder as? NSTextView).flatMap { $0.isFieldEditor ? $0.delegate as? NSView : nil }
+        previousResponder = store.filePicker?.previousResponder ?? field ?? responder
     }
 
     var remoteSearch: String? { !text.isEmpty && (mode == .grep || inventory?.truncated == true) ? text : nil }
@@ -172,6 +174,7 @@ final class TaskFilePicker {
 struct TaskFilePickerView: View {
     let store: TaskFilesStore
     @Bindable var picker: TaskFilePicker
+    var isFocused = true
     @Environment(\.palette) private var palette
 
     var body: some View {
@@ -181,7 +184,7 @@ struct TaskFilePickerView: View {
                     Image(systemName: "magnifyingglass")
                     PaletteSearchField(text: $picker.text, placeholder: picker.mode == .grep ? "Search checkout text" : "Find file",
                                        identifier: "files-search", move: picker.move,
-                                       submit: { if let result = picker.selection { open(result) } }, cancel: cancel)
+                                       submit: { if let result = picker.selection { open(result) } }, cancel: cancel, focusOnMount: isFocused)
                     Picker("Search mode", selection: Binding(get: { picker.mode }, set: { store.chooseFile($0) })) {
                         ForEach(TaskFilePicker.Mode.allCases, id: \.self) { Text($0.rawValue) }
                     }.pickerStyle(.menu).labelsHidden().fixedSize()
@@ -258,6 +261,7 @@ struct TaskFilePickerView: View {
 
     private func open(_ result: TaskFilePicker.Result) {
         store.filePicker = nil
+        store.find = nil
         switch result {
         case .file(let path): store.selectFileFromInput(path)
         case .match(let hit): store.openMatch(hit)

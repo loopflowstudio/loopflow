@@ -322,6 +322,69 @@
       "keys": []
     },
     {
+      "name": "files-find",
+      "title": "Find File in Checkout",
+      "scope": "pane",
+      "arguments": [],
+      "keys": [
+        "⌘P"
+      ]
+    },
+    {
+      "name": "files-find-text",
+      "title": "Find in File",
+      "scope": "pane",
+      "arguments": [],
+      "keys": [
+        "⌘F"
+      ]
+    },
+    {
+      "name": "files-grep",
+      "title": "Search Text in Checkout",
+      "scope": "pane",
+      "arguments": [],
+      "keys": [
+        "⇧⌘F"
+      ]
+    },
+    {
+      "name": "files-outline",
+      "title": "Show File Outline",
+      "scope": "pane",
+      "arguments": [],
+      "keys": [
+        "⇧⌘O"
+      ]
+    },
+    {
+      "name": "files-back",
+      "title": "Previous File Location",
+      "scope": "pane",
+      "arguments": [],
+      "keys": [
+        "⌘["
+      ]
+    },
+    {
+      "name": "files-forward",
+      "title": "Next File Location",
+      "scope": "pane",
+      "arguments": [],
+      "keys": [
+        "⌘]"
+      ]
+    },
+    {
+      "name": "files-edit",
+      "title": "Toggle File Editing",
+      "scope": "pane",
+      "arguments": [],
+      "keys": [
+        "⌃⌘E"
+      ]
+    },
+    {
       "name": "details",
       "title": "Show Task Details",
       "scope": "pane",

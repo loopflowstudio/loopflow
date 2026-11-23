@@ -590,7 +590,9 @@ also copies the selection or the new code shown; selecting text never takes
 the + and −. **Reference in conversation** types
 `path:L4-6 (after, working tree on <sha>)` alone. Files' Read and Diff share the
 same comment queue and **Send to conversation** (⌘↩), formatting each comment
-with its source (working file, unsaved draft, or diff side and revision).
+with the source where you selected its lines (working file, unsaved draft, or
+Diff side and comparison). If its lines disappear or match several places, the
+comment keeps its original reference. A failed insertion keeps the whole batch.
 
 **Files** lets you find, read, jump through, comment on and edit files in the
 Task's checkout beside its conversation. Press **⌘P** and type part of a nested
@@ -646,7 +648,8 @@ The match is highlighted when the displayed text has the searched revision.
 With Files focused, **⌘F** opens one inline find bar across Read code,
 Edit, rendered Markdown, rendered HTML and Diff (images report no text matches),
 with match count, Return / Shift-Return stepping and one-click promotion to
-checkout-wide Grep. **⇧⌘O** builds the open file's outline (types, functions,
+checkout-wide Grep. **⇧⌘F** carries the Find text into Grep. Escape in
+the picker returns to the file and its current match. **⇧⌘O** builds the open file's outline (types, functions,
 methods, Markdown headings) locally from Desktop's bundled Tree-sitter grammars,
 including live unsaved edits. A definition in the current buffer resolves locally.
 Cross-file `⌘-click` / `gd` definitions and `gr` references query the owning

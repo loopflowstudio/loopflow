@@ -22,7 +22,7 @@ struct MarkdownBlocks: View, Equatable {
     }
 
     let source: String
-    @Environment(\.palette) private var palette
+    var find: FileFind?
 
     /// Each block's scroll id, for an outline to jump to.
     static func anchor(_ block: Int) -> String { "markdown-block-\(block)" }
@@ -36,14 +36,29 @@ struct MarkdownBlocks: View, Equatable {
 
     var body: some View {
         let blocks = Perf.measure(Perf.markdownParse, "bytes=\(source.utf8.count)") { Self.blocks(source) }
-        VStack(alignment: .leading, spacing: Spacing.sm) {
-            ForEach(Array(blocks.enumerated()), id: \.offset) { index, block in
-                Row(block: block).id(Self.anchor(index))
+        Rows(blocks: blocks, find: find)
+    }
+
+    private struct Rows: View {
+        let blocks: [Block]
+        let find: FileFind?
+        @Environment(\.palette) private var palette
+
+        var body: some View {
+            VStack(alignment: .leading, spacing: Spacing.sm) {
+                ForEach(Array(blocks.enumerated()), id: \.offset) { index, block in
+                    Row(block: block.highlighted(find, index: index, color: palette.keyboardFocus.opacity(0.45))).id(MarkdownBlocks.anchor(index))
+                }
             }
+            .textSelection(.enabled)
+            .task(id: FileFind.Scan(query: find?.query, revision: blocks)) {
+                if let find, !find.query.isEmpty {
+                    await find.search(blocks.enumerated().flatMap { $0.element.searchCells(index: $0.offset) })
+                }
+            }
+            .tint(palette.linkInk)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .textSelection(.enabled)
-        .tint(palette.linkInk)
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     /// One block as it reads: its list marker, then its text in the block's style.
@@ -144,7 +159,7 @@ struct MarkdownBlocks: View, Equatable {
 
     /// Same source, same blocks: `.equatable()` callers skip the parse when a
     /// parent re-renders for unrelated state.
-    nonisolated static func == (lhs: MarkdownBlocks, rhs: MarkdownBlocks) -> Bool { lhs.source == rhs.source }
+    nonisolated static func == (lhs: MarkdownBlocks, rhs: MarkdownBlocks) -> Bool { lhs.source == rhs.source && lhs.find === rhs.find }
 
     private static func kind(_ leaf: PresentationIntent.Kind, in components: [PresentationIntent.IntentType]) -> Block.Kind {
         switch leaf {
@@ -154,5 +169,20 @@ struct MarkdownBlocks: View, Equatable {
         case .tableCell: return .row(header: components.contains { $0.kind == .tableHeaderRow })
         default: return components.contains { $0.kind == .blockQuote } ? .quote : .paragraph
         }
+    }
+}
+
+
+extension MarkdownBlocks.Block {
+    func searchCells(index: Int) -> [(FileFind.Cell, String)] {
+        cells.enumerated().map { (.markdown(block: index, cell: $0.offset), String($0.element.characters)) }
+    }
+
+    @MainActor func highlighted(_ find: FileFind?, index: Int, color: Color) -> Self {
+        guard let find, case .markdown(let block, let cell) = find.current?.cell,
+              block == index, cells.indices.contains(cell) else { return self }
+        var result = self
+        result.cells[cell] = find.highlight(cells[cell], in: .markdown(block: index, cell: cell), color: color)
+        return result
     }
 }

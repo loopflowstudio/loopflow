@@ -41,7 +41,7 @@ struct ReviewRendered: View {
         if let sides = store.diffReview.state(for: reader).sides(of: file, query: store.query, issue: store.issue) {
             switch rendering {
             case .markdown:
-                ReviewMarkdown(old: sides.old?.content, new: sides.new?.content, split: split).equatable()
+                ReviewMarkdown(old: sides.old?.content, new: sides.new?.content, split: split, find: reader == .changes ? nil : store.find).equatable()
                     .padding(.horizontal, Spacing.md).padding(.vertical, Spacing.sm)
             case .image, .svg, .html:
                 ViewThatFits(in: .horizontal) {
@@ -58,10 +58,11 @@ struct ReviewRendered: View {
     /// Old then new, as pictures or as pages.
     @ViewBuilder private func both(_ sides: DiffReviewState.FileSides) -> some View {
         if rendering == .html {
-            page(sides.old, absent: "Added")
+            let count = [sides.old?.content, sides.new?.content].compactMap { $0 }.count
+            page(sides.old, index: 0, count: count, absent: "Added")
             // Relative references resolve in the working tree only when the new
             // side is the working tree of a checkout on this Machine.
-            page(sides.new, absent: "Deleted", baseURL: sides.commits.head == nil && store.query.remoteMachine == nil
+            page(sides.new, index: 1, count: count, absent: "Deleted", baseURL: sides.commits.head == nil && store.query.remoteMachine == nil
                  ? URL(fileURLWithPath: store.cwd).appendingPathComponent(file.path) : nil)
         } else {
             // No ideal width: a picture's natural size must not decide whether the
@@ -70,9 +71,10 @@ struct ReviewRendered: View {
             TaskImage(file: sides.new, absent: "Deleted").frame(minWidth: 0, idealWidth: 0, maxWidth: .infinity)
         }
     }
-    @ViewBuilder private func page(_ side: TaskFileSnapshot?, absent: String, baseURL: URL? = nil) -> some View {
+    @ViewBuilder private func page(_ side: TaskFileSnapshot?, index: Int, count: Int, absent: String, baseURL: URL? = nil) -> some View {
         if let html = side?.content {
-            TaskHTMLView(html: html, baseURL: baseURL)
+            TaskHTMLView(html: html, baseURL: baseURL, find: reader == .changes ? nil : store.find, pageIndex: index, pageCount: count)
+                .id("html-side-\(index)")
                 .containerRelativeFrame(.vertical)
                 .frame(maxWidth: .infinity)
                 .overlay { RoundedRectangle(cornerRadius: CornerRadius.control).stroke(palette.border) }
@@ -106,25 +108,36 @@ struct ReviewMarkdown: View, Equatable {
     let old: String?
     let new: String?
     let split: Bool
+    var find: FileFind?
     @Environment(\.palette) private var palette
 
     nonisolated static func == (lhs: ReviewMarkdown, rhs: ReviewMarkdown) -> Bool {
-        lhs.old == rhs.old && lhs.new == rhs.new && lhs.split == rhs.split
+        lhs.old == rhs.old && lhs.new == rhs.new && lhs.split == rhs.split && lhs.find === rhs.find
     }
 
     var body: some View {
         let redline = MarkdownRedline(old: old ?? "", new: new ?? "")
+        let rows = redline.entries.map { entry in
+            split ? [column(entry, showing: .removed), column(entry, showing: .added)] : [column(entry)]
+        }
         VStack(alignment: .leading, spacing: Spacing.sm) {
-            ForEach(Array(redline.entries.enumerated()), id: \.offset) { _, entry in
+            ForEach(rows.indices, id: \.self) { index in
                 if split {
                     HStack(alignment: .top, spacing: Spacing.md) {
-                        side(entry, showing: .removed).frame(maxWidth: .infinity, alignment: .leading)
+                        block(rows[index][0], index: index * 2).frame(maxWidth: .infinity, alignment: .leading)
                         Divider()
-                        side(entry, showing: .added).frame(maxWidth: .infinity, alignment: .leading)
+                        block(rows[index][1], index: index * 2 + 1).frame(maxWidth: .infinity, alignment: .leading)
                     }
                 } else {
-                    redlined(entry).frame(maxWidth: 720, alignment: .leading)
+                    block(rows[index][0], index: index * 2).frame(maxWidth: 720, alignment: .leading)
                 }
+            }
+        }
+        .task(id: FileFind.Scan(query: find?.query, revision: rows)) {
+            if let find, !find.query.isEmpty {
+                await find.search(rows.enumerated().flatMap { index, row in
+                    row.enumerated().flatMap { side, column in column?.block.searchCells(index: index * 2 + side) ?? [] }
+                })
             }
         }
         .textSelection(.enabled)
@@ -133,36 +146,34 @@ struct ReviewMarkdown: View, Equatable {
         .accessibilityIdentifier(split ? "changes-markdown-columns" : "changes-markdown-redline")
     }
 
-    @ViewBuilder private func redlined(_ entry: MarkdownRedline.Entry) -> some View {
+    private struct Column: Equatable {
+        let block: MarkdownBlocks.Block
+        var change: ReviewWords.Kind? = nil
+    }
+
+    private func column(_ entry: MarkdownRedline.Entry, showing side: ReviewWords.Kind? = nil) -> Column? {
         switch entry {
-        case .same(let block): MarkdownBlocks.Row(block: block)
-        case .removed(let block): marked(struck(block), tone: palette.failureTone)
-        case .added(let block): marked(block, tone: palette.successTone)
+        case .same(let block): return Column(block: block)
+        case .removed(let block): return side == .added ? nil : Column(block: struck(block), change: .removed)
+        case .added(let block): return side == .removed ? nil : Column(block: block, change: .added)
         case .changed(let old, let new, let words):
-            MarkdownBlocks.Row(block: text(words, old: old, new: new, showing: [.same, .removed, .added]))
+            return Column(block: text(words, old: old, new: new, showing: side.map { [.same, $0] } ?? [.same, .removed, .added]))
         }
     }
 
-    /// One column of an entry: the old blocks on the left, the new on the right.
-    @ViewBuilder private func side(_ entry: MarkdownRedline.Entry, showing kind: ReviewWords.Kind) -> some View {
-        switch entry {
-        case .same(let block): MarkdownBlocks.Row(block: block)
-        case .removed(let block):
-            if kind == .removed { marked(struck(block), tone: palette.failureTone) } else { Color.clear.frame(height: 1) }
-        case .added(let block):
-            if kind == .added { marked(block, tone: palette.successTone) } else { Color.clear.frame(height: 1) }
-        case .changed(let old, let new, let words):
-            MarkdownBlocks.Row(block: text(words, old: old, new: new, showing: [.same, kind]))
-        }
-    }
-
-    /// A block that stands alone, removed or added: filled in its tone with a bar beside it.
-    private func marked(_ block: MarkdownBlocks.Block, tone: ThemeTone) -> some View {
-        MarkdownBlocks.Row(block: block)
-            .padding(.horizontal, Spacing.xs).padding(.vertical, Spacing.xxs)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(tone.fill)
-            .overlay(alignment: .leading) { Rectangle().fill(tone.ink).frame(width: 2) }
+    @ViewBuilder private func block(_ column: Column?, index: Int) -> some View {
+        if let column {
+            let row = MarkdownBlocks.Row(block: column.block.highlighted(find, index: index, color: palette.keyboardFocus.opacity(0.45)))
+            Group {
+                if let change = column.change {
+                    let tone = change == .removed ? palette.failureTone : palette.successTone
+                    row.padding(.horizontal, Spacing.xs).padding(.vertical, Spacing.xxs)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(tone.fill)
+                        .overlay(alignment: .leading) { Rectangle().fill(tone.ink).frame(width: 2) }
+                } else { row }
+            }.id(MarkdownBlocks.anchor(index))
+        } else { Color.clear.frame(height: 1) }
     }
 
     private func struck(_ block: MarkdownBlocks.Block) -> MarkdownBlocks.Block {

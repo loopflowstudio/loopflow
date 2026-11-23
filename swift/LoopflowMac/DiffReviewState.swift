@@ -12,8 +12,11 @@ final class DiffReviewState {
     let browser: FilesBrowserState
     let pullRequest: PullRequestStore
 
+    let comments: ReviewComments
+
     init(issue: String, cwd: String, query: RegistryQuery, workingTree: ComparisonReading,
-         browser: FilesBrowserState, pullRequest: PullRequestStore) {
+         browser: FilesBrowserState, pullRequest: PullRequestStore, comments: ReviewComments) {
+        self.comments = comments
         self.issue = issue
         self.cwd = cwd
         self.query = query
@@ -105,7 +108,6 @@ final class DiffReviewState {
     /// One file at a time; next/previous still crosses into the next file.
     var focusedPath: String? { didSet { refreshTopPath() } }
     var expandedMoves: Set<String> = []
-    var reviewSelection: ReviewSelection? { didSet { if reviewSelection != oldValue { commentDraft = "" } } }
     /// New code reads the file as it is now: added lines marked, removed
     /// lines folded to a mark that opens them.
     enum ReviewLayout: String, CaseIterable { case new = "New code", unified = "Unified", split = "Side by side" }
@@ -200,7 +202,9 @@ final class DiffReviewState {
         reading = []
         fileNotes = fileNotes.filter { paths.contains($0.key) }
         for path in openedGaps.keys where !paths.contains(path) { reviewState.openedGaps[path] = nil }
-        comments = comments.map { paths.contains($0.selection.path) ? $0 : $0.anchored(in: nil) }
+        for path in Set(comments.items.map(\.selection.path)).subtracting(paths) {
+            comments.reconcile(path: path, revision: revision, file: nil)
+        }
         if let focusedPath, !paths.contains(focusedPath) { self.focusedPath = nil }
         review = ReviewDiff(files: changes.files.map {
             known[$0.path] ?? ReviewFile(path: $0.path, oldPath: $0.oldPath, status: .modified, blocks: [])
@@ -312,7 +316,7 @@ final class DiffReviewState {
             files[index] = file
             self.review = ReviewDiff(files: files)
         }
-        comments = comments.map { $0.selection.path == path ? $0.anchored(in: opened(file)) : $0 }
+        comments.reconcile(path: path, revision: revision, file: opened(file))
     }
 
     // MARK: Hidden paths and order
@@ -612,20 +616,6 @@ final class DiffReviewState {
         }
     }
 
-    // MARK: Comments
-
-    /// Comments waiting to be sent, kept for this window like drafts.
-    var comments: [ReviewComment] = []
-    /// The comment being written on the selected lines.
-    var commentDraft = ""
-
-    /// Leave the draft on the selected lines of `file`.
-    func addComment(in file: ReviewFile) {
-        guard let selection = reviewSelection, !commentDraft.allSatisfy(\.isWhitespace) else { return }
-        comments.append(ReviewComment(selection: selection, text: commentDraft, in: opened(file)))
-        reviewSelection = nil
-    }
-
     /// One of the two diff readers: Changes' whole comparison, or Files' Diff of one path.
     enum ReviewReader: Hashable { case changes, file(String) }
 
@@ -786,8 +776,18 @@ final class DiffReviewState {
     var comparisonDescription: String? { comparisonLine.map { String($0.characters) } }
 
     /// The comparison's name for a line sent to the conversation, before it is read too.
+    func revision(for reader: ReviewReader) -> String {
+        if case .file = reader, let fileReview {
+            return (fileReview.draft ? "unsaved draft" : "working tree") + " on " + fileReview.baseCommit.prefix(10)
+        }
+        return revision
+    }
+
     var revision: String {
-        comparisonDescription.map { $0.hasSuffix(".") ? String($0.dropLast()) : $0 } ?? comparison.title
+        guard let changes else { return comparison.title }
+        let base = changes.baseCommit.prefix(10)
+        if comparison.head == nil { return "working tree on " + base }
+        return "\(comparison.title) \(base)..\(changes.headCommit.prefix(10))"
     }
 
     /// "4 changed files", or why there is nothing to count yet. Hidden files,
@@ -815,6 +815,8 @@ final class DiffReviewState {
         let baseCommit: String
         let diff: ReviewDiff
         let truncated: Bool
+        let editVersion: Int?
+        let marks: [Int: ReviewLine.Kind]
         /// Compared with the unsaved draft rather than the file on disk.
         let draft: Bool
     }
@@ -842,8 +844,10 @@ final class DiffReviewState {
                 // A changed comparison of the file on disk means the disk changed.
                 if draft == nil { workingTree.dropSides(path) }
             }
-            comments = comments.map { $0.selection.path == path ? $0.anchored(in: parsed.files.first.map { opened($0, in: .file(path)) }) : $0 }
-            fileReview = FileReview(path: path, baseCommit: base, diff: parsed, truncated: next.truncated, draft: draft != nil)
+            fileReview = FileReview(path: path, baseCommit: base, diff: parsed, truncated: next.truncated,
+                                    editVersion: version, marks: parsed.files.first?.gutterMarks ?? [:], draft: draft != nil)
+            comments.reconcile(path: path, revision: revision(for: .file(path)),
+                               file: parsed.files.first.map { opened($0, in: .file(path)) })
             fileDiffError = nil
         } catch {
             guard !Task.isCancelled, generation == diffGeneration, browser.selection == path, workingChanges?.baseCommit == base else { return }

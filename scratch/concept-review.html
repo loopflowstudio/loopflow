@@ -26,31 +26,32 @@
 <main>
   <header>
     <p>LOO-921 · Concept review · <time datetime="2026-11-22">November 22, 2026</time></p>
-    <h1>Worktree registration should own cache recovery</h1>
-    <p>Based on <code>scripts/build_cache.py</code>, <code>scripts/dev-lf</code>, <code>scripts/testing.md</code>, <code>Cargo.toml</code> and <code>scripts/benchmarks/crate-rebuild/results/loo-921.json</code>.</p>
+    <h1>Worktree registration owns cache recovery</h1>
+    <p>Based on <code>scripts/build_cache.py</code>, <code>scripts/dev-lf</code>, <code>scripts/testing.md</code>, <code>python/tests/test_build_cache.py</code>, <code>python/tests/test_dev_lf.py</code> and <code>scripts/benchmarks/crate-rebuild/results/loo-921.json</code>.</p>
   </header>
 
-  <h2>Existing behavior</h2>
-  <p><strong>Yes, checkout → cache registration → Git hook.</strong> A new linked worktree is recorded in the Machine inventory. If the serving pinned client-side daemon lacks its root, registration requests a stop. Cargo starts a replacement on demand. In the two-worktree run, the focused test passed and one library’s cache write was lost.</p>
-  <p><strong>No, inspect the cache → cache readiness → <code>status</code>.</strong> With the checkout hook skipped, a private fixture started with no daemon and no inventory. Checking status wrote the inventory and returned 0. <code>dev-lf</code> also writes the list, leaving a stale daemon in place. These paths carry over from the idle-based design.</p>
+  <h2>Before this change</h2>
+  <p><strong>No, inspect the cache → cache readiness → <code>status</code>.</strong> After a checkout skipped its hook, checking status created the inventory and returned 0. Starting a build through <code>dev-lf</code> also wrote the list and left a stale daemon serving the old roots.</p>
 
-  <h2>Proposed usage after a skipped or failed hook</h2>
+  <h2>Now, after a skipped or failed hook</h2>
   <pre><code>$ uv run python scripts/build_cache.py status
-roots    this checkout is missing; run register
+roots    0 of 0 loaded; this checkout is missing from the root list; run register
 $ uv run python scripts/build_cache.py register
 $ uv run python scripts/build_cache.py status
-roots    this checkout is listed for the next daemon start
+roots    0 of 2 loaded; this checkout is listed for the next daemon start
 $ cargo test -p loopflow-execution --lib skills::catalog::</code></pre>
   <ul>
-    <li><strong>Inspect → readiness → <code>cache_status</code>.</strong> Read the configured list and the daemon’s loaded roots. A stale daemon also points to <code>register</code>. With a caller-owned list, point to that configuration. Reading stats still resets the idle timer.</li>
-    <li><strong>Recover → worktree registration → <code>register</code>.</strong> The hook and manual command share the inventory update and conditional stop. A registration error still lets Git finish the checkout. A build can proceed and pay for cache misses.</li>
-    <li><strong>Build → local target and shared cache → Cargo.</strong> Remove the passive <code>refresh</code> command and its launcher call. <code>dev-lf --isolated-build</code> still bypasses the cache. The measured incremental test default carries forward.</li>
+    <li><strong>Yes, inspect → readiness → <code>cache_status</code>.</strong> Status reads the configured list and the daemon’s loaded roots. It points to <code>register</code> for a missing Machine root and names the relevant setting for a caller-owned list.</li>
+    <li><strong>Yes, checkout or recover → worktree registration → <code>register</code>.</strong> The hook and manual command share the inventory update and conditional stop. Git can finish a checkout after a registration error. Cargo starts the replacement daemon when it next compiles.</li>
+    <li><strong>Yes, build → local target and shared cache → Cargo.</strong> Ordinary <code>dev-lf</code> builds use Cargo’s configured cache. <code>dev-lf --isolated-build</code> uses a separate target and bypasses the compiler wrappers.</li>
   </ul>
 
-  <h2>Implementation checks</h2>
+  <h2>What the checks showed</h2>
+  <p>The Machine’s installed hook still carries the previous version. Reinstall from the merged checkout to update that copy during verification.</p>
   <ol>
-    <li>With a skipped hook, does <code>status</code> leave the missing inventory alone and does <code>register</code> make the next build ready? Verify both outcomes in a linked-worktree fixture.</li>
-    <li>Does recovery stop only the eligible stale daemon and leave a caller-owned configuration alone? Verify both configurations.</li>
+    <li>Does the skipped-hook path recover? Status returned 3 with the inventory still absent. Registration listed both linked roots, then status returned 0.</li>
+    <li>What survives daemon replacement? The focused test passed and Cargo kept the compiled library. One cache write was lost. The caller-owned daemon stayed running in its separate check.</li>
+    <li>Does the isolated build bypass the cache? The launcher fixture verified the separate target and both compiler wrapper overrides. All 17 focused Python cases passed.</li>
   </ol>
 </main>
 </body>

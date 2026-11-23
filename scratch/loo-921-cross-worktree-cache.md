@@ -61,6 +61,9 @@ capacity as unmeasured unless a separate permitted experiment exists".
   status and caller-owned registration. Machine registration stopped it. The
   next plain Cargo build passed with the second root loaded by a different PID.
 - Gate owns `documented_commands::` and the broader suites.
+- The Machine's installed hook copy was still at the pre-recovery version on
+  November 22. Reinstall from the merged checkout during verification to update
+  the copy and check the live checkout path.
 
 ## Registration and recovery
 

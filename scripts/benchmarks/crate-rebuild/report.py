@@ -266,6 +266,145 @@ build.</p>
     print(output / "loo-921.html")
 
 
+def _seed_probe(source: Path, output: Path) -> None:
+    from seed_probe import ARMS, COMMANDS, validate
+
+    config = json.loads((source / "configuration.json").read_text())
+    receipts = json.loads((source / "receipts.json").read_text())
+    validate(receipts, config["cohorts"])
+    steps = {
+        "add": "<code>git worktree add</code>",
+        "build": "<code>cargo build -p loopflow --bin lf</code>",
+        "test": "Focused <code>cargo test -p loopflow --lib</code>",
+        "total": "Through the passing test",
+    }
+
+    def value(receipt: dict, step: str, metric: str) -> float | None:
+        if step == "total":
+            if metric in ("compiled", "fresh"):
+                return None  # The test counts the build's units again as Fresh.
+            if metric in ("rss_bytes", "tree_rss_bytes"):
+                return max(receipt[s][metric] for s in COMMANDS)
+            parts = [receipt[s].get(metric) for s in ("add", *COMMANDS)]
+            return sum(p for p in parts if p is not None) if parts[1] is not None else None
+        return receipt[step].get(metric)
+
+    def spread(values: list[float], scale: float, digits: int) -> dict:
+        return {
+            "median": statistics.median(values) / scale,
+            "min": min(values) / scale,
+            "max": max(values) / scale,
+            "digits": digits,
+        }
+
+    def table(metric: str, scale: float = 1, digits: int = 1) -> str:
+        rows = []
+        for step, label in steps.items():
+            cells = {}
+            for arm in ARMS:
+                values = [value(r, step, metric) for r in receipts if r["arm"] == arm]
+                if None not in values:
+                    cells[arm] = spread(values, scale, digits)
+            if not cells:
+                continue
+            html_cells = "".join(
+                f"<td>{c['median']:.{digits}f} <small>[{c['min']:.{digits}f}–"
+                f"{c['max']:.{digits}f}]</small></td>"
+                for c in (cells[arm] for arm in ARMS)
+            )
+            seeded, cold = cells["seeded"]["median"], cells["cold"]["median"]
+            change = (
+                f"{seeded - cold:+.{digits}f} ({(seeded - cold) / cold * 100:+.0f}%)"
+                if cold
+                else ""
+            )
+            rows.append(f"<tr><th>{label}</th>{html_cells}<td>{change}</td></tr>")
+        return (
+            "<table><thead><tr><th>Step</th><th>Seeded</th><th>Cold</th><th>Change</th>"
+            f"</tr></thead><tbody>{''.join(rows)}</tbody></table>"
+        )
+
+    seeded = [r for r in receipts if r["seed"]]
+    shared = statistics.median(r["still_seeded_bytes"] / r["target_bytes"] for r in seeded)
+    loads = [r[s][k][0] for r in receipts for s in COMMANDS for k in ("load_before", "load_after")]
+    sources = sorted(
+        {
+            (r["seed"]["source"], r["seed"]["commit"], r["seed"]["commits_apart"])
+            for r in receipts
+            if r["seed"]
+        }
+    )
+    payload = {
+        "configuration": config,
+        "method": {
+            "written_bytes": "Allocated bytes (st_blocks × 512) of regular files under "
+            "target/debug that the command created or replaced, by inode and mtime against "
+            "a walk before it; hard links count once. In a seeded target every other file "
+            "still shares its blocks with the source's clone.",
+            "cpu_seconds": "/usr/bin/time user + sys of the Cargo process tree.",
+            "rss_bytes": "Largest single process, from /usr/bin/time.",
+            "tree_rss_bytes": "Peak of the Cargo process tree, sampled each second.",
+            "units": "Lines Cargo -v prints as Compiling and Fresh.",
+        },
+        "background_load": {"min_1m": min(loads), "max_1m": max(loads)},
+        "seed_sources": sources,
+        "report_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+        "receipts": receipts,
+    }
+    output.mkdir(parents=True, exist_ok=True)
+    (output / "loo-922.json").write_text(json.dumps(payload, indent=2) + "\n")
+    escape = html.escape
+    source_rows = "".join(
+        f"<li><code>{escape(Path(path).name)}</code> at <code>{escape(commit or '?')}</code>, "
+        f"{apart if apart is not None else '?'} commits from the measured revision</li>"
+        for path, commit, apart in sources
+    )
+    document = f"""<!doctype html>
+<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width">
+<title>LOO-922 seeded worktrees</title>
+<style>
+body {{font:16px/1.5 system-ui,sans-serif;max-width:1050px;margin:48px auto;
+padding:0 24px;color:#20252b}}
+h1 {{font-size:32px;letter-spacing:-.03em}} h2 {{margin-top:40px;font-size:22px}}
+code,td {{font-variant-numeric:tabular-nums}} code {{font-size:.9em}}
+table {{width:100%;border-collapse:collapse;margin:16px 0 28px}}
+th,td {{padding:10px;border-bottom:1px solid #ddd;text-align:left}}
+thead {{background:#f4f5f6}} small {{color:#626970;white-space:nowrap}} a {{color:#145b90}}
+</style>
+<h1>LOO-922: a new worktree seeded from a sibling's target, against a cold one</h1>
+<p>{config["cohorts"]} cohorts alternating which arm goes first. Each sample adds a
+worktree through the installed post-checkout hook, builds <code>lf</code>, then passes
+<code>{escape(COMMANDS["test"][7])}</code>. The cold arm runs <code>rm -rf target</code>
+right after the add, and that removal counts toward its add. Values are
+<strong>median [minimum–maximum]</strong>; lower is better.</p>
+<p>Revision <code>{escape(config["revision"])}</code>. The Machine's shared cache and Cargo
+jobs. One-minute load average {min(loads):.0f}–{max(loads):.0f} on {config["cpus"]} logical
+CPUs from other agents; elapsed time moves with it, CPU-seconds less.</p>
+<h2>Elapsed seconds</h2>{table("wall_seconds")}
+<h2>CPU-seconds</h2>{table("cpu_seconds")}
+<h2>Units Cargo compiled</h2>{table("compiled", digits=0)}
+<h2>Units Cargo found fresh</h2>{table("fresh", digits=0)}
+<h2>Target bytes written, GiB</h2>{table("written_bytes", 1024**3, 2)}
+<p>{escape(payload["method"]["written_bytes"])} The method doesn't depend on the source
+keeping its copy; APFS private-size counters would. After the focused test, a median
+{shared * 100:.0f}% of a seeded target's allocated bytes were still the files the seed
+cloned.</p>
+<h2>Largest process RSS, GiB</h2>{table("rss_bytes", 1024**3, 2)}
+<h2>Peak process-tree RSS, GiB</h2>{table("tree_rss_bytes", 1024**3, 2)}
+<h2>Seed sources</h2><p>The newest sibling target with no Cargo running, as the hook
+picked it at each add. The probe removes its own worktrees after each sample, so none
+seeds a later one.</p><ul>{source_rows}</ul>
+<p>Compiler: {escape(config["rustc"].splitlines()[0])}.
+Machine: {escape(config["machine"][4])}, {escape(config["machine"][0])}
+{escape(config["machine"][2])}. Shared-cache counters include other agents' compiles and
+are not recorded.</p>
+<p><a href="loo-922.json">Receipts</a> · <a href="../README.md#seeded-worktrees">Method</a></p>
+</html>
+"""
+    (output / "loo-922.html").write_text(document)
+    print(output / "loo-922.html")
+
+
 def _compiled(receipts: list[dict], label: str, case: str) -> str:
     """What the workspace compiled in this case, the same in every cohort or all variants."""
     variants = {
@@ -285,6 +424,7 @@ def main() -> None:
     source_group = parser.add_mutually_exclusive_group(required=True)
     source_group.add_argument("--input", type=Path)
     source_group.add_argument("--test-loop", type=Path)
+    source_group.add_argument("--seed-probe", type=Path)
     parser.add_argument("--name", help="File stem and page title for --input, e.g. loo-923")
     parser.add_argument(
         "--cache-validation", type=Path, help="root_probe.py output, when it was run"
@@ -293,6 +433,9 @@ def main() -> None:
     args = parser.parse_args()
     if args.test_loop:
         _test_loop(args.test_loop.resolve(), args.output.resolve())
+        return
+    if args.seed_probe:
+        _seed_probe(args.seed_probe.resolve(), args.output.resolve())
         return
     if not args.name:
         parser.error("--name is required with --input")

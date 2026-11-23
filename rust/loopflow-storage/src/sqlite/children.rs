@@ -32,6 +32,44 @@ use loopflow_model::id::WaveId;
 
 use super::{SqliteStore, TaskCheckout};
 
+/// What completing a parent did with one child, in the order they are reported.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    serde::Serialize,
+    serde::Deserialize,
+    schemars::JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum ChildOutcome {
+    /// Its PR had merged.
+    Done,
+    /// It was not merged and was canceled with its parent.
+    Abandoned,
+}
+
+#[derive(Debug)]
+pub struct ChildCompletion {
+    pub task: Task,
+    pub outcome: ChildOutcome,
+    pub pr: Option<TaskPr>,
+    pub step: Option<String>,
+    /// What settling this child did with its own children.
+    pub children: Vec<ChildCompletion>,
+}
+
+#[derive(Debug)]
+pub enum CompletionSettlement {
+    Settled(Vec<ChildCompletion>),
+    WaitingForChildren,
+    Superseded,
+}
+
 const BRANCH_TASK_IDS: &str = "SELECT task_id FROM task_checkouts WHERE branch=?1
     UNION SELECT task_id FROM task_prs WHERE branch=?1";
 
@@ -68,10 +106,11 @@ fn write_task_checkout_in(conn: &Connection, task: &Task) -> StoreResult<()> {
 
 fn task_creation_in(conn: &Connection, task: &TaskId) -> StoreResult<Option<NewTask>> {
     conn.query_row(
-        "SELECT project_id,title,description,due_date,repository_id FROM task_creation_intents WHERE task_id=?1",
+        "SELECT project_id,title,description,due_date,repository_id,parent_task_id FROM task_creation_intents WHERE task_id=?1",
         [task.as_str()],
         |row| {
             Ok(NewTask {
+                parent_task_id: row.get::<_, Option<String>>(5)?.map(TaskId::from_raw),
                 due_date: row.get(3)?,
                 id: task.clone(),
                 project_id: row.get::<_, Option<String>>(0)?.map(ProjectId::from_raw),
@@ -127,6 +166,7 @@ pub(super) fn create_task_in(conn: &Connection, input: &NewTask) -> StoreResult<
         wave_id,
         repository_id: input.repository_id.clone(),
         project_id: input.project_id.clone(),
+        parent_task_id: input.parent_task_id.clone(),
         worktree: None,
         workspace_slug: String::new(),
         branch: String::new(),
@@ -144,15 +184,16 @@ pub(super) fn create_task_in(conn: &Connection, input: &NewTask) -> StoreResult<
     validate_task(&task)?;
     insert_task_row(conn, &task)?;
     conn.execute(
-        "INSERT INTO task_creation_intents(task_id, project_id, title, description, due_date, repository_id)
-         VALUES(?1, ?2, ?3, ?4, ?5, ?6)",
+        "INSERT INTO task_creation_intents(task_id, project_id, title, description, due_date, repository_id, parent_task_id)
+         VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7)",
         params![
             input.id.as_str(),
             input.project_id.as_ref().map(ProjectId::as_str),
             input.title,
             input.description,
             input.due_date,
-            input.repository_id.as_str()
+            input.repository_id.as_str(),
+            input.parent_task_id.as_ref().map(TaskId::as_str)
         ],
     )?;
     task_on(conn, &input.id)?.ok_or(StoreError::NotFound)
@@ -470,6 +511,24 @@ impl SqliteStore {
         Ok(request)
     }
 
+    /// Explicit completion settles the Task and its children together.
+    pub fn request_family_completion(
+        &self,
+        task: &TaskId,
+        note: Option<&str>,
+    ) -> StoreResult<Option<i64>> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let request = request_completion(&tx, task, note, true)?;
+        tx.commit()?;
+        Ok(request)
+    }
+
+    pub fn open_task_child_count(&self, task: &TaskId) -> StoreResult<u32> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        open_task_child_count(&conn, task)
+    }
+
     pub fn task_completion_pending(&self, task: &TaskId) -> StoreResult<Option<(i64, String)>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         Ok(conn.query_row(
@@ -504,25 +563,21 @@ impl SqliteStore {
     }
 
     /// Settle one completion request without changing execution.
-    pub fn complete_task(&self, task: &Task, request: i64) -> StoreResult<bool> {
+    pub fn complete_task(&self, task: &Task, request: i64) -> StoreResult<CompletionSettlement> {
         validate_task(task)?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        validate_task_project(&transaction, task)?;
-        let state = super::durable::task_state_in(&transaction, &task.id)?;
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        validate_task_project(&tx, task)?;
+        let state = super::durable::task_state_in(&tx, &task.id)?;
         if state == TaskState::Done {
-            return Ok(true);
+            return Ok(CompletionSettlement::Settled(Vec::new()));
         }
-        let current_request: Option<i64> = transaction.query_row(
-            "SELECT completion_request FROM tasks WHERE id=?1",
-            [task.id.as_str()],
-            |row| row.get(0),
-        )?;
-        if current_request != Some(request) {
-            return Ok(false);
+        let (current, family, _) = completion_request(&tx, &task.id)?;
+        if current != Some(request) {
+            return Ok(CompletionSettlement::Superseded);
         }
-        let current = active_task_pr_on(&transaction, &task.id)?;
-        if current.is_some_and(|pr| pr.phase() != PrPhase::Merged) {
+        let current_pr = active_task_pr_on(&tx, &task.id)?;
+        if current_pr.is_some_and(|pr| pr.phase() != PrPhase::Merged) {
             return Err(StoreError::InvalidAuthority(
                 "Task requires a verified merge".into(),
             ));
@@ -533,28 +588,21 @@ impl SqliteStore {
                 task.id
             )));
         }
-        transaction.execute(
-            "UPDATE tasks SET completion_request=NULL,completion_error=NULL WHERE id=?1",
-            params![task.id.as_str()],
-        )?;
-        super::task_state::decide_in(&transaction, &task.id, "completed")?;
-        insert_task_event_in(
-            &transaction,
-            &task.id,
-            &TaskEventKind::Completed {
-                summary: "Task completed".into(),
-            },
-        )?;
-        super::task_summaries::write_in(
-            &transaction,
-            &task.id,
-            super::task_summaries::TaskEnd::Done,
-        )?;
-        transaction.commit()?;
-        Ok(true)
+        if !family && open_task_child_count(&tx, &task.id)? > 0 {
+            clear_completion_request(&tx, &task.id)?;
+            tx.commit()?;
+            return Ok(CompletionSettlement::WaitingForChildren);
+        }
+        record_task_completion(&tx, &task.id)?;
+        let children = if family {
+            complete_children(&tx, &task.id)?
+        } else {
+            Vec::new()
+        };
+        tx.commit()?;
+        Ok(CompletionSettlement::Settled(children))
     }
 
-    /// Reopen planning without touching Workflow, placement, PR or Process history.
     pub fn reopen_task(&self, id: &TaskId, note: Option<&str>) -> StoreResult<Task> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -575,7 +623,12 @@ impl SqliteStore {
                 "UPDATE tasks SET completion_request=NULL,completion_error=NULL WHERE id=?1",
                 [id.as_str()],
             )?;
-            super::task_state::decide_in(&tx, id, "unstarted")?;
+            let target = if has_prior_work(&tx, id)? {
+                "started"
+            } else {
+                "unstarted"
+            };
+            super::task_state::decide_in(&tx, id, target)?;
             // Reopening clears auto: it ended with the Task.
             tx.execute("DELETE FROM task_auto WHERE task_id=?1", [id.as_str()])?;
             insert_task_event_in(
@@ -706,6 +759,13 @@ impl SqliteStore {
             wave_id.map(|id| ("p.wave_id", id.as_str())),
             &super::durable::task_open_sql("t"),
         )
+    }
+
+    /// The Tasks filed from `parent`, in filing order, open or closed.
+    pub fn task_children(&self, parent: &TaskId) -> StoreResult<Vec<Task>> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let conn = conn.savepoint()?;
+        children_where(&conn, parent, TASK_VISIBLE)
     }
 
     /// Closed Tasks of one repository (and Wave), newest first, `limit` at a
@@ -1615,6 +1675,7 @@ fn insert_task_row(conn: &Connection, task: &Task) -> StoreResult<()> {
             task.id.as_str(),
             &[
                 Edit::TaskProject(task.project_id.as_ref().map(ToString::to_string)),
+                Edit::TaskParent(task.parent_task_id.as_ref().map(ToString::to_string)),
                 Edit::TaskLinearId(task.tracker_id.as_ref().map(|id| id.as_str().to_owned())),
                 Edit::TaskIdentifier(task.identifier.clone()),
                 Edit::TaskTitle(Some(task.title.clone())),
@@ -1818,12 +1879,12 @@ const TASK_COLUMNS: &str = "SELECT t.id,t.external_issue_id,
         ORDER BY e.seq DESC LIMIT 1),
         json_object('state','current')),
     t.project_id, t.planning_revision, COALESCE(c.branch,''), COALESCE(c.base_commit,''), c.parent_pr_id,
-    t.planning_rank,t.planning_assignee,t.planning_due_date,t.planning_state,t.planning_completed_at,t.repository_id
+    t.planning_rank,t.planning_assignee,t.planning_due_date,t.planning_state,t.planning_completed_at,t.repository_id,t.parent_task_id
     FROM tasks t LEFT JOIN projects p ON p.id=t.project_id
     LEFT JOIN task_checkouts c ON c.task_id=t.id";
 pub(super) const TASK_PR_COLUMNS: &str = "SELECT
     id, task_id, sequence, slug, branch, base_commit,
-    publication_requested_at, after_merge, next_slug, github_number, github_url,
+    publication_requested_at, github_number, github_url,
     merge_commit, abandoned_at, created_at, updated_at,
     github_head_sha, ci_observation, parent_pr_id, github_observation,
     linear_attachment_id, linear_comment_id, linear_link_error,
@@ -1832,7 +1893,7 @@ pub(super) const TASK_PR_COLUMNS: &str = "SELECT
     FROM task_prs";
 const TASK_PR_SELECT: &str = "SELECT
     id, task_id, sequence, slug, branch, base_commit,
-    publication_requested_at, after_merge, next_slug, github_number, github_url,
+    publication_requested_at, github_number, github_url,
     merge_commit, abandoned_at, created_at, updated_at,
     github_head_sha, ci_observation, parent_pr_id, github_observation,
     linear_attachment_id, linear_comment_id, linear_link_error,
@@ -2278,6 +2339,7 @@ fn map_task_columns(
             .map_err(|error| invalid_column(10, error))?,
         wave_id: row.get(4)?,
         project_id: row.get::<_, Option<String>>(11)?.map(ProjectId::from_raw),
+        parent_task_id: row.get::<_, Option<String>>(22)?.map(TaskId::from_raw),
         repository_id: loopflow_model::durable::RepositoryId::parse(&row.get::<_, String>(21)?)
             .map_err(|error| invalid_column(21, error))?,
         worktree: row.get::<_, Option<String>>(5)?.map(PathBuf::from),
@@ -2300,33 +2362,33 @@ fn map_task_columns(
 
 pub(super) fn map_task_pr_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskPr> {
     let publication_requested_at = row.get::<_, Option<i64>>(6)?;
-    let github_number = row.get::<_, Option<i64>>(9)?.map(|number| number as u32);
-    let github_url = row.get::<_, Option<String>>(10)?;
-    let github_head_sha = row.get::<_, Option<String>>(15)?;
+    let github_number = row.get::<_, Option<i64>>(7)?.map(|number| number as u32);
+    let github_url = row.get::<_, Option<String>>(8)?;
+    let github_head_sha = row.get::<_, Option<String>>(13)?;
     let ci_observation = row
-        .get::<_, Option<String>>(16)?
+        .get::<_, Option<String>>(14)?
         .map(|json| serde_json::from_str::<CiObservation>(&json))
         .transpose()
-        .map_err(|error| invalid_column(16, error))?;
+        .map_err(|error| invalid_column(14, error))?;
     let github_observation = row
-        .get::<_, Option<String>>(18)?
+        .get::<_, Option<String>>(16)?
         .map(|json| serde_json::from_str::<GithubObservation>(&json))
         .transpose()
-        .map_err(|error| invalid_column(18, error))?;
+        .map_err(|error| invalid_column(16, error))?;
     let merge = match (
+        row.get::<_, Option<String>>(20)?,
+        row.get::<_, Option<i64>>(21)?,
         row.get::<_, Option<String>>(22)?,
-        row.get::<_, Option<i64>>(23)?,
-        row.get::<_, Option<String>>(24)?,
     ) {
         (Some(mode), Some(requested_at), Some(head_sha)) => Some(PrMergeRequest {
-            mode: mode.parse().map_err(|error| invalid_column(22, error))?,
+            mode: mode.parse().map_err(|error| invalid_column(20, error))?,
             requested_at: crate::rows::unix_to_datetime(requested_at),
             head_sha,
         }),
         (None, None, None) => None,
         _ => {
             return Err(invalid_column(
-                22,
+                20,
                 std::io::Error::new(
                     std::io::ErrorKind::InvalidData,
                     "PR merge request fields must all be present or absent",
@@ -2335,9 +2397,9 @@ pub(super) fn map_task_pr_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskP
         }
     };
     let presentation = match (
+        row.get::<_, Option<String>>(23)?,
+        row.get::<_, Option<String>>(24)?,
         row.get::<_, Option<String>>(25)?,
-        row.get::<_, Option<String>>(26)?,
-        row.get::<_, Option<String>>(27)?,
     ) {
         (Some(title), Some(body), Some(head_sha)) => Some(PrPresentation {
             title,
@@ -2347,7 +2409,7 @@ pub(super) fn map_task_pr_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskP
         (None, None, None) => None,
         _ => {
             return Err(invalid_column(
-                25,
+                23,
                 std::io::Error::new(
                     std::io::ErrorKind::InvalidData,
                     "PR presentation fields must all be present or absent",
@@ -2368,7 +2430,7 @@ pub(super) fn map_task_pr_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskP
                 (None, None) => None,
                 _ => {
                     return Err(invalid_column(
-                        9,
+                        7,
                         std::io::Error::new(
                             std::io::ErrorKind::InvalidData,
                             "GitHub PR number and URL must both be present or absent",
@@ -2387,19 +2449,19 @@ pub(super) fn map_task_pr_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskP
         slug: row.get(3)?,
         branch: row.get(4)?,
         base_commit: row.get(5)?,
-        parent_pr_id: row.get::<_, Option<String>>(17)?.map(TaskPrId::from_raw),
+        parent_pr_id: row.get::<_, Option<String>>(15)?.map(TaskPrId::from_raw),
         publication,
-        merge_commit: row.get(11)?,
+        merge_commit: row.get(9)?,
         abandoned_at: row
-            .get::<_, Option<i64>>(12)?
+            .get::<_, Option<i64>>(10)?
             .map(crate::rows::unix_to_datetime),
         ci_observation,
         github_observation,
-        linear_attachment_id: row.get::<_, Option<String>>(19)?,
-        linear_comment_id: row.get::<_, Option<String>>(20)?,
-        linear_link_error: row.get::<_, Option<String>>(21)?,
-        created_at: crate::rows::unix_to_datetime(row.get(13)?),
-        updated_at: crate::rows::unix_to_datetime(row.get(14)?),
+        linear_attachment_id: row.get::<_, Option<String>>(17)?,
+        linear_comment_id: row.get::<_, Option<String>>(18)?,
+        linear_link_error: row.get::<_, Option<String>>(19)?,
+        created_at: crate::rows::unix_to_datetime(row.get(11)?),
+        updated_at: crate::rows::unix_to_datetime(row.get(12)?),
     };
     pr.validate_persisted()
         .map_err(|error| invalid_column(6, error))?;
@@ -2545,35 +2607,147 @@ pub(super) fn insert_project_event_in(
     })
 }
 
+pub(super) fn open_task_children_where() -> String {
+    format!("{} AND {TASK_VISIBLE}", super::durable::task_open_sql("t"))
+}
+
+pub(super) fn open_task_child_count(conn: &Connection, task: &TaskId) -> StoreResult<u32> {
+    Ok(conn.query_row(
+        &format!(
+            "SELECT COUNT(*) FROM tasks t WHERE t.parent_task_id=?1 AND {}",
+            open_task_children_where()
+        ),
+        [task.as_str()],
+        |row| row.get(0),
+    )?)
+}
+
+fn completion_request(conn: &Connection, task: &TaskId) -> StoreResult<(Option<i64>, bool, bool)> {
+    Ok(conn.query_row(
+        "SELECT t.completion_request,
+                COALESCE(json_extract(e.kind_json,'$.kind')='family_completion_requested',0),
+                t.planning_state IS 'completed'
+         FROM tasks t LEFT JOIN task_events e ON e.id=t.completion_request WHERE t.id=?1",
+        [task.as_str()],
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+    )?)
+}
+
 pub(super) fn request_completion_in(
     conn: &Connection,
     task: &TaskId,
     note: Option<&str>,
 ) -> StoreResult<Option<i64>> {
-    let (completed, pending): (Option<i64>, Option<i64>) = conn.query_row(
-        "SELECT CASE WHEN planning_state='completed' THEN 1 END,completion_request FROM tasks WHERE id=?1",
-        [task.as_str()],
-        |row| Ok((row.get(0)?, row.get(1)?)),
-    )?;
-    if completed.is_some() {
-        return Ok(None);
-    }
-    if pending.is_some() {
+    request_completion(conn, task, note, false)
+}
+
+fn request_completion(
+    conn: &Connection,
+    task: &TaskId,
+    note: Option<&str>,
+    family: bool,
+) -> StoreResult<Option<i64>> {
+    let (pending, family_requested, completed) = completion_request(conn, task)?;
+    if pending.is_some() && (!family || family_requested) {
         return Ok(pending);
     }
-    insert_task_event_in(
-        conn,
-        task,
-        &TaskEventKind::CompletionRequested {
-            reason: note.map(str::to_string),
-        },
-    )?;
+    if completed || (!family && open_task_child_count(conn, task)? > 0) {
+        return Ok(None);
+    }
+    let reason = note.map(str::to_string);
+    let event = if family {
+        TaskEventKind::FamilyCompletionRequested { reason }
+    } else {
+        TaskEventKind::CompletionRequested { reason }
+    };
+    insert_task_event_in(conn, task, &event)?;
     let request = conn.last_insert_rowid();
     conn.execute(
         "UPDATE tasks SET completion_request=?2,completion_error=NULL WHERE id=?1",
         params![task.as_str(), request],
     )?;
     Ok(Some(request))
+}
+
+fn clear_completion_request(conn: &Connection, task: &TaskId) -> StoreResult<()> {
+    conn.execute(
+        "UPDATE tasks SET completion_request=NULL,completion_error=NULL WHERE id=?1",
+        [task.as_str()],
+    )?;
+    Ok(())
+}
+
+fn record_task_completion(conn: &Connection, task: &TaskId) -> StoreResult<()> {
+    clear_completion_request(conn, task)?;
+    super::task_state::decide_in(conn, task, "completed")?;
+    insert_task_event_in(
+        conn,
+        task,
+        &TaskEventKind::Completed {
+            summary: "Task completed".into(),
+        },
+    )?;
+    super::task_summaries::write_in(conn, task, super::task_summaries::TaskEnd::Done)
+}
+
+/// The Tasks filed from `parent` that `filter` admits, in filing order.
+fn children_where(conn: &Connection, parent: &TaskId, filter: &str) -> StoreResult<Vec<Task>> {
+    let mut statement = conn.prepare(&format!(
+        "{TASK_COLUMNS} WHERE t.parent_task_id=?1 AND {filter} ORDER BY t.created_at,t.rowid"
+    ))?;
+    // A few rows: each reads its own identifier, not every Task's.
+    let children = statement
+        .query_map([parent.as_str()], |row| map_task_row(conn, row))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(children)
+}
+
+/// Completing a Task means one thing by any path: a child closed here, done
+/// or abandoned, settles its own children by the same rule.
+fn complete_children(conn: &Connection, parent: &TaskId) -> StoreResult<Vec<ChildCompletion>> {
+    let children = children_where(conn, parent, &open_task_children_where())?;
+    let mut completions = Vec::with_capacity(children.len());
+    for task in children {
+        let pr = active_task_pr_on(conn, &task.id)?;
+        let outcome = if pr.as_ref().is_some_and(|pr| pr.phase() == PrPhase::Merged) {
+            record_task_completion(conn, &task.id)?;
+            ChildOutcome::Done
+        } else {
+            super::durable::abandon_task_in(conn, &task.id, "parent Task completed", now_unix())?;
+            ChildOutcome::Abandoned
+        };
+        let children = complete_children(conn, &task.id)?;
+        let step = conn
+            .query_row(
+                "SELECT step FROM task_graphs WHERE task_id=?1 AND run_start IS NULL",
+                [task.id.as_str()],
+                |row| row.get(0),
+            )
+            .optional()?;
+        completions.push(ChildCompletion {
+            task,
+            outcome,
+            pr,
+            step,
+            children,
+        });
+    }
+    completions.sort_by_key(|child| child.outcome);
+    Ok(completions)
+}
+
+fn has_prior_work(conn: &Connection, task: &TaskId) -> StoreResult<bool> {
+    if super::task_started::task_begun_in(conn, task)? {
+        return Ok(true);
+    }
+    Ok(conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM task_prs WHERE task_id=?1)
+            OR EXISTS(SELECT 1 FROM graph_processes WHERE task_id=?1)
+            OR EXISTS(SELECT 1 FROM task_checkouts WHERE task_id=?1)
+            OR EXISTS(SELECT 1 FROM agent_sessions WHERE task_id=?1)",
+        [task.as_str()],
+        |row| row.get(0),
+    )?)
 }
 
 pub(super) fn tasks_in(conn: &Connection, wave_id: Option<&WaveId>) -> StoreResult<Vec<Task>> {

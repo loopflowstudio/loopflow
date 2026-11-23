@@ -253,6 +253,7 @@
             "id": "task_ab8d3359dc7053bda4afd24ff7e7a7d7",
             "identifier": "INF-123",
             "tracker_id": "issue-81928071-6f48-4343-b343-29dcb93f7cc9",
+            "parent_id": null,
             "name": "Prove Task PR transitions",
             "rank": 0,
             "state": null,

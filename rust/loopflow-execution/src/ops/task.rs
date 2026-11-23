@@ -665,6 +665,19 @@ pub fn repository_for_task(store: &Store, task: &Task) -> OpsResult<PathBuf> {
         .ok_or_else(|| task_error(format!("Task {} repository is unavailable", task.id)))
 }
 
+/// Where a Task's conversations work: its checkout, or the repository's main
+/// checkout once the Task is closed and that checkout is retired.
+pub(crate) async fn task_directory(store: &Store, task: &Task) -> OpsResult<PathBuf> {
+    if task.worktree.as_ref().is_some_and(|path| path.is_dir())
+        || task_work_status(store, task).await? == WorkStatus::Ready
+    {
+        return Ok(task.worktree()?.clone());
+    }
+    Ok(crate::git::worktrees::main_repo_root(
+        &repository_for_task(store, task)?,
+    )?)
+}
+
 pub(crate) async fn task_work_status(store: &Store, task: &Task) -> OpsResult<WorkStatus> {
     let work = store
         .work_for_child(&ChildRef::Task(task.id.clone()))
@@ -2132,6 +2145,7 @@ pub fn task_create(
     title: Option<String>,
     report: Option<String>,
     adoption: TaskAdoptionOptions,
+    parent: Option<String>,
     receipt: Option<loopflow_storage::sqlite::creation::CreationIdentity>,
 ) -> OpsResult<Task> {
     let main = crate::git::worktrees::main_repo_root(repo).map_err(task_error)?;
@@ -2141,8 +2155,10 @@ pub fn task_create(
             identity,
             admit: None,
         });
-        let task =
-            file_task_in(&store, repo, &main, wave, title, report, adoption, receipt).await?;
+        let task = file_task_in(
+            &store, repo, &main, wave, title, report, adoption, parent, receipt,
+        )
+        .await?;
         super::planning_sync::sync_after_save(
             &store,
             &main.to_string_lossy(),
@@ -2160,12 +2176,14 @@ pub fn task_create(
 /// File the Task with its Graph and primary conversation in one transaction,
 /// from retained planning and with no network. Planning exchange follows the
 /// answer (`sync_admitted`); the conversation makes the checkout.
+#[allow(clippy::too_many_arguments)]
 pub fn admit_task(
     repo: &Path,
     wave: Option<&str>,
     title: Option<String>,
     request: Option<String>,
     adoption: TaskAdoptionOptions,
+    parent: Option<String>,
     graph: Option<&str>,
     receipt: loopflow_storage::sqlite::creation::CreationIdentity,
 ) -> OpsResult<Task> {
@@ -2188,6 +2206,7 @@ pub fn admit_task(
             title,
             request,
             adoption,
+            parent,
             Some(receipt),
         )
         .await
@@ -2326,11 +2345,23 @@ async fn file_task_in(
     title: Option<String>,
     report: Option<String>,
     adoption: TaskAdoptionOptions,
+    parent: Option<String>,
     receipt: Option<Receipt<'_>>,
 ) -> OpsResult<Task> {
     let input = resolve_task_create_input(title.as_deref(), report.as_deref())?;
     let source = adoption::resolve_source(store, repo, &adoption).await?;
+    let parent_named = parent.is_some();
+    let parent = match parent.as_deref() {
+        None | Some("none") => None,
+        Some(named) => Some(resolve_parent_task(store, named).await?),
+    };
     if let Some(task) = source.task.as_ref() {
+        if parent_named && task.parent_task_id.as_ref() != parent.as_ref().map(|p| &p.id) {
+            return Err(task_error(format!(
+                "{} already exists; use `lf task update {} --parent <parent|none>` to change its parent",
+                task.identifier, task.identifier
+            )));
+        }
         if let Some(selected) = select_task_creation_wave(store, main, wave).await? {
             if task.wave_id.as_ref() != Some(selected.id()) {
                 return Err(task_error(format!(
@@ -2370,24 +2401,40 @@ async fn file_task_in(
             super::wave_lifecycle::add(repo, name, None).await?;
         }
     }
+    let repository_id =
+        crate::repository::location::ensure_repository(&store.sqlite, &main.to_string_lossy())
+            .map_err(task_error)?;
     let selected = select_task_creation_wave(store, main, wave).await?;
+    // With no Wave named, a follow-up is filed in its parent's Wave and Project.
+    let inherited = parent
+        .as_ref()
+        .filter(|parent| wave.is_none() && parent.repository_id == repository_id)
+        .and_then(|parent| parent.project_id.clone().zip(parent.wave_id.clone()));
+    let (selected, inherited) = match (selected, inherited) {
+        (None, Some((project, wave))) => (
+            store.get_wave(&wave).await.map_err(task_error)?,
+            Some(project),
+        ),
+        (selected, _) => (selected, None),
+    };
     let wave_slug = selected.as_ref().map(|wave| wave.slug().to_string());
     let (creation_project, acquisition) = match selected {
         Some(wave) => {
             let acquisition = super::planning_sync::lock_wave_planning(&wave).await?;
-            let project = super::project::current_project(store, &wave)?.id;
+            let project = match inherited {
+                Some(project) => project,
+                None => super::project::current_project(store, &wave)?.id,
+            };
             (Some(project), Some(acquisition))
         }
         None => (None, None),
     };
-    let repository_id =
-        crate::repository::location::ensure_repository(&store.sqlite, &main.to_string_lossy())
-            .map_err(task_error)?;
     let creation = loopflow_storage::work::task::NewTask {
         due_date: None,
         id: loopflow_model::durable::TaskId::new(),
         repository_id,
         project_id: creation_project,
+        parent_task_id: parent.map(|parent| parent.id),
         title: input.title,
         description: input.report,
     };
@@ -2419,6 +2466,18 @@ async fn file_task_in(
         .await
         .map_err(task_error)?
         .ok_or_else(|| task_error("Created Task is missing"))
+}
+
+pub(crate) async fn resolve_parent_task(store: &SharedStore, named: &str) -> OpsResult<Task> {
+    let unknown = || task_error(format!("--parent names an unknown Task: {named}"));
+    let id = crate::store::children::resolve_task_id(&store.sqlite, named, None)
+        .map_err(task_error)?
+        .ok_or_else(unknown)?;
+    store
+        .get_task(&id)
+        .await
+        .map_err(task_error)?
+        .ok_or_else(unknown)
 }
 
 pub fn resolve_task_create_input(
@@ -2768,20 +2827,25 @@ pub fn task_copied_sessions(
     })
 }
 
-/// Complete the Task without moving its Graph or changing its Processes.
-pub fn task_complete(repo: &Path, issue: &str, note: Option<&str>) -> OpsResult<Task> {
+#[derive(Debug)]
+pub struct TaskCompletion {
+    pub task: Task,
+    pub children: Vec<loopflow_storage::sqlite::children::ChildCompletion>,
+}
+
+/// Complete the Task and settle its children without moving their Graphs.
+pub fn task_complete(repo: &Path, issue: &str, note: Option<&str>) -> OpsResult<TaskCompletion> {
     block_on_task(async {
         let (store, mut task) = resolve_saved_task(repo, None, issue).await?;
-        if let Some(request) = store
+        let children = match store
             .sqlite
-            .request_task_completion(&task.id, note)
+            .request_family_completion(&task.id, note)
             .map_err(task_error)?
         {
-            settle_completion(&store, &mut task, request).await?;
-        } else {
-            reconcile_task_completion(&store, &mut task).await?;
-        }
-        Ok(task)
+            Some(request) => settle_completion(&store, &mut task, request).await?,
+            None => Vec::new(),
+        };
+        Ok(TaskCompletion { task, children })
     })
 }
 
@@ -2963,7 +3027,13 @@ pub fn completion_pending_text(task: &Task, reason: &str) -> String {
     )
 }
 
-async fn settle_completion(store: &SharedStore, task: &mut Task, request: i64) -> OpsResult<()> {
+async fn settle_completion(
+    store: &SharedStore,
+    task: &mut Task,
+    request: i64,
+) -> OpsResult<Vec<loopflow_storage::sqlite::children::ChildCompletion>> {
+    use loopflow_storage::sqlite::children::{ChildOutcome, CompletionSettlement};
+
     let result = async {
         if task_work_status(store, task).await? == WorkStatus::Abandoned {
             return Err(task_error("An abandoned Task cannot be completed"));
@@ -2972,46 +3042,50 @@ async fn settle_completion(store: &SharedStore, task: &mut Task, request: i64) -
         if let Some(refusal) = task_completion_refusal(store, task).await? {
             return Err(task_error(refusal));
         }
-        // Recheck after observation: a newer authored status may have superseded the request.
-        if store
-            .sqlite
-            .task_completion_pending(&task.id)
-            .map_err(task_error)?
-            .map(|(id, _)| id)
-            != Some(request)
-        {
-            return if task_work_status(store, task).await? == WorkStatus::Done {
-                Ok(())
-            } else {
-                Err(task_error(
-                    "Completion request was superseded by newer Task status",
-                ))
-            };
-        }
-        if !store
+        let children = match store
             .complete_task(task, request)
             .await
             .map_err(task_error)?
         {
-            return Err(task_error(
-                "Completion request was superseded by newer Task status",
-            ));
-        }
+            CompletionSettlement::Settled(children) => children,
+            CompletionSettlement::WaitingForChildren => return Ok(Vec::new()),
+            CompletionSettlement::Superseded => {
+                return Err(task_error(
+                    "Completion request was superseded by newer Task status",
+                ));
+            }
+        };
         *task = store
             .get_task(&task.id)
             .await
             .map_err(task_error)?
             .ok_or_else(|| task_error("completed Task is missing"))?;
-        let repo = repository_for_task(store, task)?;
-        super::planning_sync::sync_after_save(
-            store,
-            &repo.to_string_lossy(),
-            &loopflow_storage::sqlite::tracker_actions::ActionOwner::Task(task.id.clone()),
-        )
-        .await;
-        // Cleanup retains live work and unpublished artifacts independently of status.
-        retirement::schedule(store, task).await?;
-        Ok(())
+        let mut settled = children.iter().collect::<Vec<_>>();
+        while let Some(child) = settled.pop() {
+            settled.extend(&child.children);
+            let result = match child.outcome {
+                ChildOutcome::Done => finish_completion(store, &child.task).await,
+                ChildOutcome::Abandoned => {
+                    let close = retirement::close_conversations(&store.sqlite, &child.task.id);
+                    let sync = sync_completion(store, &child.task).await;
+                    let cleanup = match repository_for_task(store, &child.task) {
+                        Ok(repo) => lifecycle::cleanup_abandoned(&repo, store, &child.task, false)
+                            .await
+                            .map(drop),
+                        Err(error) => Err(error),
+                    };
+                    sync.and(close).and(cleanup)
+                }
+            };
+            if let Err(error) = result {
+                crate::journal::request::diagnostic(format_args!(
+                    "{} was settled; follow-up failed: {error}",
+                    child.task.identifier
+                ));
+            }
+        }
+        finish_completion(store, task).await?;
+        Ok(children)
     }
     .await;
     if let Err(error) = &result {
@@ -3021,6 +3095,23 @@ async fn settle_completion(store: &SharedStore, task: &mut Task, request: i64) -
             .map_err(task_error)?;
     }
     result
+}
+
+async fn sync_completion(store: &SharedStore, task: &Task) -> OpsResult<()> {
+    let repo = repository_for_task(store, task)?;
+    super::planning_sync::sync_after_save(
+        store,
+        &repo.to_string_lossy(),
+        &loopflow_storage::sqlite::tracker_actions::ActionOwner::Task(task.id.clone()),
+    )
+    .await;
+    Ok(())
+}
+
+async fn finish_completion(store: &SharedStore, task: &Task) -> OpsResult<()> {
+    sync_completion(store, task).await?;
+    // Cleanup retains live work and unpublished artifacts independently of status.
+    retirement::schedule(store, task).await
 }
 
 /// Publication-state label carried by the PR's Linear linkage.
@@ -3180,10 +3271,11 @@ pub struct TaskEdit {
 
 pub(crate) fn validate_task_edit_input(
     update: &loopflow_storage::work::task::TaskUpdate,
+    parent: Option<&str>,
 ) -> OpsResult<()> {
-    if *update == loopflow_storage::work::task::TaskUpdate::default() {
+    if *update == loopflow_storage::work::task::TaskUpdate::default() && parent.is_none() {
         return Err(task_error(
-            "task edit requires --title, --notes, --rank or --assignee",
+            "task update requires --title, --notes, --rank, --assignee or --parent",
         ));
     }
     if update
@@ -3196,15 +3288,32 @@ pub(crate) fn validate_task_edit_input(
     Ok(())
 }
 
+pub(crate) async fn resolve_parent_update(
+    store: &SharedStore,
+    parent: Option<&str>,
+) -> OpsResult<Option<Option<loopflow_model::durable::TaskId>>> {
+    match parent {
+        None => Ok(None),
+        Some("none") => Ok(Some(None)),
+        Some(named) => resolve_parent_task(store, named)
+            .await
+            .map(|task| Some(Some(task.id))),
+    }
+}
+
 pub fn task_edit(
     repo: &Path,
     issue: &str,
     wave: Option<&str>,
-    update: loopflow_storage::work::task::TaskUpdate,
+    mut update: loopflow_storage::work::task::TaskUpdate,
+    parent: Option<&str>,
 ) -> OpsResult<TaskEdit> {
-    validate_task_edit_input(&update)?;
+    validate_task_edit_input(&update, parent)?;
     block_on_task(async {
         let (store, task) = resolve_saved_task(repo, wave, issue).await?;
+        if update.parent.is_none() {
+            update.parent = resolve_parent_update(&store, parent).await?;
+        }
         let edited = store
             .edit_task(&task.id, task.revision, &update)
             .await

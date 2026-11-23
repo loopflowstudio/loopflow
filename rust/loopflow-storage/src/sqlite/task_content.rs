@@ -124,6 +124,11 @@ impl SqliteStore {
         if let Some(value) = &patch.assignee {
             edits.push(Edit::TaskAssignee(value.clone()));
         }
+        if let Some(value) = &patch.parent {
+            edits.push(Edit::TaskParent(
+                value.as_ref().map(|parent| parent.as_str().to_owned()),
+            ));
+        }
         super::planning_write::local(
             &tx,
             &crate::work::edit::WorkEdit::for_target(id.as_str(), &edits),
@@ -173,6 +178,13 @@ fn validate_edit(
         .is_some_and(|title| title.trim().is_empty())
     {
         return Err(StoreError::InvalidData("Task title cannot be empty".into()));
+    }
+    if let Some(Some(parent)) = &patch.parent {
+        if let Some(refusal) =
+            super::planning_write::parent_refusal(conn, id.as_str(), parent.as_str())?
+        {
+            return Err(StoreError::InvalidAuthority(refusal.into()));
+        }
     }
     Ok(task)
 }
@@ -257,6 +269,7 @@ mod tests {
                 .map(|index| {
                     store
                         .create_task(&NewTask {
+                            parent_task_id: None,
                             id: TaskId::new(),
                             repository_id: repository_id.clone(),
                             project_id: project_id.clone(),

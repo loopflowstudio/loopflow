@@ -1509,10 +1509,12 @@ fn a_task_takes_up_its_waves_graph_and_keeps_the_one_it_named() {
         fields,
         [
             "auto",
+            "children",
             "comments",
             "conversation",
             "graph",
             "graph_processes",
+            "parent",
             "sessions",
             "stack_parent",
             "summary",

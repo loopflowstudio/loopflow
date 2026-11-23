@@ -446,18 +446,23 @@ fn scopes() -> String {
     // UNION terminates even in malformed cyclic ancestry.
     format!("WITH RECURSIVE member_tasks(id) AS MATERIALIZED (
         SELECT tw.id FROM agent_sessions s JOIN tasks tw ON tw.id IN ({}) WHERE s.id=?1
+        ), conducted_tasks(id) AS MATERIALIZED ({}
         ), member_waves(id) AS (
         SELECT wave_id FROM agent_sessions WHERE id=?1
         UNION SELECT pr.wave_id FROM projects pr JOIN tasks t ON t.project_id=pr.id WHERE t.id IN member_tasks
         UNION SELECT w.parent_wave_id FROM waves w JOIN member_waves m ON w.id=m.id WHERE w.parent_wave_id IS NOT NULL
         ), applicable(id) AS (
         SELECT p.id FROM steers p WHERE
-        (p.session_id=?1 OR p.task_id IN member_tasks OR p.wave_id IN member_waves
+        -- A notice (`notice:<Task>:<key>`) is owned by the Task it is about
+        -- and read by the conversations that conduct it, never by its own.
+        (p.session_id=?1 OR (p.task_id IN member_tasks AND p.source NOT LIKE 'notice:%')
+         OR (p.task_id IN conducted_tasks AND p.source LIKE 'notice:%')
+         OR p.wave_id IN member_waves
          OR p.repo=(SELECT repo FROM agent_sessions WHERE id=?1))
         AND NOT EXISTS(SELECT 1 FROM steers newer WHERE newer.source=p.source AND newer.seq>p.seq)
         -- A Task update (`update:<writer Session or ->:<key>`) is for the
         -- Task's interactive conversations, never the Session that caused it.
-        AND (p.source NOT LIKE 'update:%'
+        AND (p.source NOT LIKE 'update:%' AND p.source NOT LIKE 'notice:%'
          OR ((SELECT interactive FROM agent_sessions WHERE id=?1)
              AND p.source NOT LIKE 'update:'||?1||':%'))
         -- A shared steer saved before this Session started and already read
@@ -465,7 +470,9 @@ fn scopes() -> String {
         AND (p.session_id=?1 OR p.created_at>=(SELECT created_at FROM agent_sessions WHERE id=?1)
          OR NOT EXISTS(SELECT 1 FROM steer_delivered d
             WHERE d.steer_id=p.id AND d.session_id!=?1 AND d.delivered_at IS NOT NULL))
-        )", super::task_work::session_tasks("s"))
+        )",
+        super::task_work::session_tasks("s"),
+        super::task_work::conducted_tasks("SELECT id FROM member_tasks"))
 }
 
 /// A claim whose hook never stamped it lapses after this long, and the steer
@@ -648,7 +655,8 @@ impl SqliteStore {
     }
 
     /// Save the Task's new reading and the steers that report what moved
-    /// since `expected`, each as `(source, text)`. Nothing when another
+    /// since `expected`, each as `(source, text)`: updates for its own
+    /// conversations and a notice for the ones that conduct it. Nothing when another
     /// reader wrote first: its steers already say it.
     pub fn save_task_update(
         &self,
@@ -688,11 +696,15 @@ impl SqliteStore {
         Ok(())
     }
 
-    /// A conversation that just started has its Tasks' history in its prompt:
-    /// the updates written so far are not news to it.
+    /// A conversation that just started has its Tasks' history in its prompt
+    /// and reads its children's standing itself: the updates and notices
+    /// written so far are not news to it.
     pub fn baseline_task_updates(&self, session: &str) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let pending = format!("{} AND p.source LIKE 'update:%'", unread());
+        let pending = format!(
+            "{} AND (p.source LIKE 'update:%' OR p.source LIKE 'notice:%')",
+            unread()
+        );
         let any: bool = conn.query_row(&format!("SELECT EXISTS({pending})"), [session], |row| {
             row.get(0)
         })?;

@@ -100,9 +100,31 @@ impl Table {
                 title: Some(title.into()),
                 request: None,
                 wave: None,
+                parent: Default::default(),
                 graph: None,
                 session: session.map(|session| session.id.to_string()),
                 worktree: worktree.map(Path::to_path_buf),
+                run: false,
+                agent: None,
+                approve: false,
+            },
+        )
+        .map(|created| created.receipt.task)
+    }
+
+    /// `lf task create --title TITLE [--wave WAVE] [--parent PARENT]`.
+    fn file(&self, title: &str, wave: Option<&str>, parent: Option<&str>) -> anyhow::Result<Task> {
+        creation::create(
+            &uuid::Uuid::new_v4().to_string(),
+            TaskCreation {
+                directory: self.repo.path().into(),
+                title: Some(title.into()),
+                request: None,
+                wave: wave.map(str::to_owned),
+                parent: parent.map(str::to_owned),
+                graph: None,
+                session: None,
+                worktree: None,
                 run: false,
                 agent: None,
                 approve: false,
@@ -272,6 +294,47 @@ fn a_worktree_inside_a_tasks_checkout_becomes_its_own_tasks_checkout() {
         outer.id
     );
     assert_eq!(table.count("tasks"), 2);
+}
+
+#[test]
+fn explicit_parent_files_children_at_any_depth_without_auto_parenting() {
+    let table = Table::new(false);
+    // Naming a Wave that does not exist makes it, with its first Project.
+    let parent = table.file("Retry requests", Some("billing"), None).unwrap();
+    assert_eq!(parent.parent_task_id, None);
+
+    // No `--parent`: top-level work even when another Task exists.
+    let plain = table.file("Unrelated cleanup", None, None).unwrap();
+    assert_eq!((plain.parent_task_id, plain.project_id), (None, None));
+
+    // Explicit `--parent`: becomes a child and inherits the parent's Wave and Project.
+    let child = table
+        .file("Retry budget per host", None, Some(&parent.identifier))
+        .unwrap();
+    assert_eq!(child.parent_task_id.as_ref(), Some(&parent.id));
+    assert!(parent.project_id.is_some());
+    assert_eq!(
+        (&child.project_id, &child.wave_id),
+        (&parent.project_id, &parent.wave_id)
+    );
+
+    // Explicit `--parent` nests without flattening into siblings.
+    let nested = table.file("Jitter", None, Some(&child.identifier)).unwrap();
+    assert_eq!(nested.parent_task_id.as_ref(), Some(&child.id));
+
+    let apart = table
+        .file("Top-level explicit", None, Some("none"))
+        .unwrap();
+    assert_eq!((apart.parent_task_id, apart.project_id), (None, None));
+
+    let error = refusal(table.file("Lost", None, Some("LOO-404")));
+    assert!(error.contains("LOO-404"), "{error}");
+
+    let children = table.store.sqlite.task_children(&parent.id).unwrap();
+    assert_eq!(
+        children.iter().map(|task| &task.id).collect::<Vec<_>>(),
+        [&child.id]
+    );
 }
 
 #[test]

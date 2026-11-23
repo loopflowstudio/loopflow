@@ -111,6 +111,13 @@ pub(super) fn starting_task_in(
         .map(TaskId::from_raw))
 }
 
+/// The Tasks conducted from the Tasks `members` selects: those filed from one
+/// of them. A conversation conducts its Task's children and nothing below
+/// them; it belongs only to `session_tasks`.
+pub(super) fn conducted_tasks(members: &str) -> String {
+    format!("SELECT id FROM tasks WHERE parent_task_id IN ({members})")
+}
+
 /// Each Task among `task_ids` paired with each Graph started for it. The Graph
 /// recorded its Task at launch, so the pairs come from an index probe per Task.
 fn task_graph_pairs(task_ids: &str) -> String {
@@ -670,6 +677,32 @@ impl SqliteStore {
         .collect()
     }
 
+    /// The Tasks `session` conducts, each with `done` or `abandoned` once it
+    /// closed. A few rows by index: a hook reads this at every boundary.
+    pub fn session_conducted_tasks(
+        &self,
+        session: &str,
+    ) -> StoreResult<Vec<(TaskId, Option<String>)>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut query = conn.prepare(&format!(
+            "SELECT c.id, CASE WHEN c.abandoned_at IS NOT NULL THEN 'abandoned'
+                WHEN c.planning_state='completed' THEN 'done' END
+             FROM agent_sessions a JOIN tasks c ON c.id IN ({})
+             WHERE a.id=?1 ORDER BY c.created_at, c.id",
+            conducted_tasks(&session_tasks("a"))
+        ))?;
+        let rows = query.query_map([session], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
+        })?;
+        rows.map(|row| {
+            let (id, closed) = row?;
+            let id = TaskId::parse(&id)
+                .map_err(|error| crate::StoreError::InvalidData(error.to_string()))?;
+            Ok((id, closed))
+        })
+        .collect()
+    }
+
     /// The Task's overview and, for each of its Graphs in the same order, what
     /// `lf graph show` says of it.
     pub fn task_overview_records(
@@ -1063,6 +1096,7 @@ mod tests {
         let task = |title: &str| {
             store
                 .create_task(&crate::work::task::NewTask {
+                    parent_task_id: None,
                     id: TaskId::new(),
                     repository_id: repository.clone(),
                     project_id: None,
@@ -1162,6 +1196,7 @@ mod tests {
         let task = |worktree: &str| {
             let id = store
                 .create_task(&crate::work::task::NewTask {
+                    parent_task_id: None,
                     id: TaskId::new(),
                     repository_id: repository.clone(),
                     project_id: None,
@@ -1349,6 +1384,7 @@ mod tests {
         let store = crate::test_fixture::open(&path).unwrap();
         let task = store
             .create_task(&crate::work::task::NewTask {
+                parent_task_id: None,
                 id: TaskId::new(),
                 repository_id: crate::test_fixture::repository(&store, "/auto"),
                 project_id: None,
@@ -1458,8 +1494,14 @@ mod tests {
             Some((request, "provider unavailable".into()))
         );
         let retained = store.task(&task).unwrap().unwrap();
-        assert!(store.complete_task(&retained, request).unwrap());
-        assert!(store.complete_task(&retained, request).unwrap());
+        assert!(matches!(
+            store.complete_task(&retained, request).unwrap(),
+            super::super::children::CompletionSettlement::Settled(_)
+        ));
+        assert!(matches!(
+            store.complete_task(&retained, request).unwrap(),
+            super::super::children::CompletionSettlement::Settled(_)
+        ));
         assert!(store.task_completion_pending(&task).unwrap().is_none());
         assert_eq!(
             store.task_graph_row(&task).unwrap().map(|row| row.graph),
@@ -1471,7 +1513,10 @@ mod tests {
         assert_eq!(completed, 1);
         drop(conn);
         store.reopen_task(&task, Some("Continue findings")).unwrap();
-        assert!(!store.complete_task(&retained, request).unwrap());
+        assert!(matches!(
+            store.complete_task(&retained, request).unwrap(),
+            super::super::children::CompletionSettlement::Superseded
+        ));
         assert!(store.task_completion_pending(&task).unwrap().is_none());
         assert_eq!(
             store.task_graph_row(&task).unwrap().map(|row| row.graph),
@@ -1554,6 +1599,7 @@ mod tests {
             let store = crate::test_fixture::open(&dir.path().join("db")).unwrap();
             store
                 .create_task(&crate::work::task::NewTask {
+                    parent_task_id: None,
                     id: id.clone(),
                     repository_id: crate::test_fixture::repository(&store, "/moving"),
                     project_id: None,

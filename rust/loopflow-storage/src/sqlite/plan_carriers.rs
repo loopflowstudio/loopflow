@@ -185,7 +185,8 @@ fn unsent_count(conn: &Connection, repo: &str, sent_seq: i64) -> StoreResult<usi
 }
 
 /// What a record cannot be written without: a comment's Task, a Task's
-/// Project, a Project's Wave, a Wave's parent and the Project it selects.
+/// Project and its parent in the same repository, a Project's Wave, a Wave's
+/// parent and the Project it selects.
 fn needs(conn: &Connection, table: &str, id: &str) -> StoreResult<Vec<(String, String)>> {
     let sql = match table {
         "waves" => {
@@ -193,7 +194,11 @@ fn needs(conn: &Connection, table: &str, id: &str) -> StoreResult<Vec<(String, S
              UNION ALL SELECT 'projects',current_project_id FROM waves WHERE id=?1"
         }
         "projects" => "SELECT 'waves',wave_id FROM projects WHERE id=?1",
-        "tasks" => "SELECT 'projects',project_id FROM tasks WHERE id=?1",
+        "tasks" => {
+            "SELECT 'projects',project_id FROM tasks WHERE id=?1
+             UNION ALL SELECT 'tasks',p.id FROM tasks t JOIN tasks p ON p.id=t.parent_task_id
+                 AND p.repository_id=t.repository_id WHERE t.id=?1"
+        }
         _ => "SELECT 'tasks',task_id FROM task_comments WHERE id=?1",
     };
     let mut query = conn.prepare_cached(sql)?;
@@ -682,6 +687,7 @@ mod tests {
         let task = TaskId::new();
         store
             .create_task(&NewTask {
+                parent_task_id: None,
                 repository_id: crate::test_fixture::repository(store, REPO),
                 id: task.clone(),
                 project_id: Some(project),
@@ -734,6 +740,45 @@ mod tests {
         assert_eq!(title(&hub, &task), "two");
         // What the hub gave is not owed back to it.
         assert_eq!(unsent(&laptop), 0);
+    }
+
+    #[test]
+    fn a_follow_up_reaches_another_machine_under_its_parent() {
+        let dir = tempfile::tempdir().unwrap();
+        let (laptop, hub) = (machine(&dir, "laptop"), machine(&dir, "hub"));
+        let (_, parent) = task(&laptop, "parent");
+        let filed = laptop.task(&parent).unwrap().unwrap();
+        let child = TaskId::new();
+        laptop
+            .create_task(&NewTask {
+                parent_task_id: Some(parent.clone()),
+                repository_id: filed.repository_id.clone(),
+                id: child.clone(),
+                project_id: filed.project_id.clone(),
+                title: "follow-up".into(),
+                description: "Brief".into(),
+                due_date: None,
+            })
+            .unwrap();
+        // Only the child changed last, and a page still holds its parent first.
+        retitle(&laptop, &child, "follow-up, renamed");
+        let page = laptop.plan_records_since(REPO, 0, usize::MAX).unwrap();
+        let at = |id: &TaskId| {
+            page.records
+                .iter()
+                .position(|record| record.id == id.as_str())
+                .unwrap()
+        };
+        assert!(at(&parent) < at(&child));
+
+        exchange(&laptop, &hub);
+        let children = hub.task_children(&parent).unwrap();
+        assert_eq!(children.len(), 1);
+        assert_eq!(children[0].id, child);
+        assert_eq!(
+            hub.task(&child).unwrap().unwrap().parent_task_id,
+            Some(parent)
+        );
     }
 
     fn claim(store: &SqliteStore, task: &TaskId) -> loopflow_model::durable::MachineId {
@@ -944,6 +989,7 @@ mod tests {
                 title: "in another Wave".into(),
                 description: "Brief".into(),
                 due_date: None,
+                parent_task_id: None,
             })
             .unwrap();
         let not_taken = |store: &SqliteStore| {

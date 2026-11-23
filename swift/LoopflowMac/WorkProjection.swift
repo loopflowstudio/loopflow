@@ -292,6 +292,8 @@ final class WorkNavigation {
     var binding: SessionBindingDraft?
     /// The Task whose Abandon… waits for its confirmation.
     var abandoning: String?
+    /// The parent Task whose Complete… waits for confirmation of its open children.
+    var completing: String?
     /// The window's one Notice: refusals, requested changes and failed reads.
     let notices = NoticeCenter()
     var startingTaskSessions: Set<String> = []

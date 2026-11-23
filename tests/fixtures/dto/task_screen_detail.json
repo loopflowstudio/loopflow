@@ -13,6 +13,7 @@
       "actions": []
     },
     "tracker_id": null,
+    "parent_id": null,
     "tracker_state": {
       "state": "available",
       "synced_at": null

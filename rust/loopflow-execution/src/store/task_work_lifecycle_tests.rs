@@ -50,6 +50,7 @@ fn defer_holds_the_lifecycle_and_a_run_is_moving_whatever_its_auto_setting() {
         .unwrap();
     store
         .create_task(&loopflow_storage::work::task::NewTask {
+            parent_task_id: None,
             repository_id: loopflow_storage::test_fixture::repository(&store, "/repo"),
             id: task.clone(),
             project_id: Some(project),
@@ -156,6 +157,7 @@ fn reaching_end_without_remaining_steps_requests_completion_once() {
     let by = LfProcessId::new();
     store
         .create_task(&loopflow_storage::work::task::NewTask {
+            parent_task_id: None,
             repository_id: loopflow_storage::test_fixture::repository(&store, "/repo"),
             id: task.clone(),
             project_id: None,
@@ -187,6 +189,48 @@ fn reaching_end_without_remaining_steps_requests_completion_once() {
     assert!(store.task_completion_pending(&task).unwrap().is_some());
     assert_eq!(store.task_auto(&task).unwrap(), None);
     assert!(!store.end_task_graph(&task).unwrap());
+}
+
+#[test]
+fn reaching_end_leaves_a_task_with_open_children_open() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = crate::store::opening::open_ephemeral(&dir.path().join("db")).unwrap();
+    let [parent, child] = [TaskId::new(), TaskId::new()];
+    for (id, parent_task_id) in [(&parent, None), (&child, Some(parent.clone()))] {
+        store
+            .create_task(&loopflow_storage::work::task::NewTask {
+                parent_task_id,
+                repository_id: loopflow_storage::test_fixture::repository(&store, "/repo"),
+                id: id.clone(),
+                project_id: None,
+                title: "Retry requests".into(),
+                description: String::new(),
+                due_date: None,
+            })
+            .unwrap();
+    }
+    crate::store::task_work::take_up_task_graph(
+        &store,
+        &parent,
+        &crate::task_graph::CapturedGraph {
+            name: "review".into(),
+            steps: Vec::new(),
+        },
+    )
+    .unwrap();
+    store.set_task_graph_step(&parent, "review").unwrap();
+    assert!(store.end_task_graph(&parent).unwrap());
+    assert!(store.task_completion_pending(&parent).unwrap().is_none());
+    assert_eq!(store.open_task_child_count(&parent).unwrap(), 1);
+
+    // Once the child is closed, an explicit request settles as before.
+    store
+        .abandon(&loopflow_model::durable::WorkRef::Task(child), "not needed")
+        .unwrap();
+    assert!(store
+        .request_task_completion(&parent, None)
+        .unwrap()
+        .is_some());
 }
 
 #[tokio::test]

@@ -595,6 +595,7 @@ fn public_task_prefixes_resolve_and_report_ambiguity() {
     for (id, title) in [(first, "First"), (second, "Second")] {
         store
             .create_task(&loopflow_execution::work::task::NewTask {
+                parent_task_id: None,
                 repository_id: loopflow_execution::repository::location::ensure_repository(
                     &store,
                     repo.path().canonicalize().unwrap().to_str().unwrap(),
@@ -2093,6 +2094,7 @@ fn moving_saves_membership_offline_and_retains_inbound_changes() {
         }
         let task = store
             .create_task(&NewTask {
+                parent_task_id: None,
                 repository_id: loopflow_execution::repository::location::ensure_repository(
                     &store,
                     repo.path().canonicalize().unwrap().to_str().unwrap(),
@@ -3177,6 +3179,8 @@ fn observed_issue(
         completed_at: None,
         state: Some("unstarted".into()),
         assignee: None,
+        parent_id: None,
+        parent_observed: true,
         due_date: None,
     }
 }

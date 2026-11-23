@@ -21,6 +21,9 @@ pub struct TaskCreation {
     pub title: Option<String>,
     pub request: Option<String>,
     pub wave: Option<String>,
+    // Top-level retries keep the fingerprint recorded before Tasks could have parents.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parent: Option<String>,
     pub graph: Option<String>,
     pub session: Option<String>,
     pub worktree: Option<PathBuf>,
@@ -176,6 +179,7 @@ pub fn create(id: &str, mut input: TaskCreation) -> Result<Created> {
                 session: input.session.clone(),
                 worktree: input.worktree.clone(),
             };
+            let parent = input.parent.clone();
             step("file_task", || {
                 if admits {
                     crate::ops::task::admit_task(
@@ -184,6 +188,7 @@ pub fn create(id: &str, mut input: TaskCreation) -> Result<Created> {
                         input.title.clone(),
                         input.request.clone(),
                         adoption,
+                        parent,
                         input.graph.as_deref(),
                         identity,
                     )
@@ -194,6 +199,7 @@ pub fn create(id: &str, mut input: TaskCreation) -> Result<Created> {
                         input.title.clone(),
                         input.request.clone(),
                         adoption,
+                        parent,
                         Some(identity),
                     )
                 }

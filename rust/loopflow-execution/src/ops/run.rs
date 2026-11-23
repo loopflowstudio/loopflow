@@ -235,7 +235,7 @@ async fn bind_selected_work(
             pr.as_ref(),
             wave.as_ref().map(Wave::slug),
         );
-        let cwd = task.worktree()?.clone();
+        let cwd = crate::ops::task::task_directory(store, &task).await?;
         return Ok(WorkBinding {
             source: selected.source,
             subjects: wave
@@ -392,6 +392,7 @@ mod tests {
     async fn task(store: &SharedStore, wave: &Wave, project: &Project, worktree: PathBuf) -> Task {
         let now = OffsetDateTime::now_utc();
         let task = Task {
+            parent_task_id: None,
             repository_id: crate::repository::location::ensure_repository(
                 &store.sqlite,
                 wave.repo(),
@@ -477,6 +478,7 @@ mod tests {
         let task = store
             .sqlite
             .create_task(&loopflow_storage::work::task::NewTask {
+                parent_task_id: None,
                 repository_id: crate::repository::location::ensure_repository(
                     &store.sqlite,
                     wave.repo(),

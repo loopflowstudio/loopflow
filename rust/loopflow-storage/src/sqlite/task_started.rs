@@ -17,31 +17,34 @@ impl SqliteStore {
     pub fn task_begun(&self, task: &TaskId) -> StoreResult<bool> {
         let mut connection = self.conn.lock().expect("store mutex poisoned");
         let conn = connection.savepoint()?;
-        let begun: bool = conn.query_row(
-            // A conversation opened in the checkout is preservation evidence
-            // even when the Task has no ownership entry.
-            &format!(
-                "SELECT EXISTS(SELECT 1 FROM task_ownership WHERE task_id=?1)
+        task_begun_in(&conn, task)
+    }
+}
+
+pub(super) fn task_begun_in(conn: &rusqlite::Connection, task: &TaskId) -> StoreResult<bool> {
+    let begun: bool = conn.query_row(
+        // A recorded conversation counts even when the Task has no owner.
+        &format!(
+            "SELECT EXISTS(SELECT 1 FROM task_ownership WHERE task_id=?1)
                  OR EXISTS(SELECT 1 FROM task_events WHERE task_id=?1
                     AND json_extract(kind_json,'$.kind')='started')
                  OR EXISTS({})
                  OR EXISTS(SELECT 1 FROM graph_processes g JOIN graph_process_steps gs
                     ON gs.graph_lf_process_id=g.lf_process_id WHERE g.task_id=?1)",
-                super::task_work::session_ids("?1"),
-            ),
-            [task.as_str()],
-            |row| row.get(0),
-        )?;
-        if begun {
-            return Ok(true);
-        }
-        conn.query_row(
+            super::task_work::session_ids("?1"),
+        ),
+        [task.as_str()],
+        |row| row.get(0),
+    )?;
+    if begun {
+        return Ok(true);
+    }
+    conn.query_row(
             "SELECT EXISTS(SELECT 1 FROM task_graphs tg WHERE tg.task_id=t.id AND NOT (tg.step='start' AND tg.lf_process_id IS NULL)) FROM tasks t WHERE t.id=?1",
             [task.as_str()],
             |row| row.get(0),
         )
         .map_err(Into::into)
-    }
 }
 
 /// The one definition of a started Task that Work surfaces show: a current

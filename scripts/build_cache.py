@@ -156,9 +156,13 @@ def _seed_sources(root: Path) -> list[Path]:
         if Path(path) != root
         and all((Path(path) / "target/debug" / entry).is_dir() for entry in SEED_ENTRIES)
     ]
+    # An unbuilt seed carries its source's mtime; at a tie the source wins.
     return sorted(
         candidates,
-        key=lambda tree: (tree / "target/debug/.fingerprint").stat().st_mtime_ns,
+        key=lambda tree: (
+            (tree / "target/debug/.fingerprint").stat().st_mtime_ns,
+            not (tree / "target" / SEED_RECORD).exists(),
+        ),
         reverse=True,
     )
 

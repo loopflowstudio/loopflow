@@ -211,7 +211,10 @@ and build scripts" becomes the seeded behaviour plus what still compiles.
    Cargo 1.98.1 printed `Compiling app` inside a freshly seeded sibling.
    With the lock files created and held, it reported a lock wait, then built
    and ran the edited binary after release. Busy-source and dependency-reuse
-   checks also passed. Gate runs the full build-cache suite.
+   checks also passed. Realign found `test_an_unbuilt_seed_ranks_as_old_as_its_source`
+   failing 3 of 8 runs: an unbuilt seed ties its source's mtime and
+   `git worktree list` order broke the tie. A source without a seed record now
+   wins ties; 12 of 12 runs and the full suite (26) passed. Gate runs the suite again.
 
 The delivery instruction is “ok lg2m ship it when it works”.
 

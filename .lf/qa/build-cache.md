@@ -26,3 +26,9 @@ seeder skip it. A non-cloning volume: `hdiutil attach -nomount ram://65536`, `ne
 
 In an isolated `HOME` (see the qa skill's shared-cache notes) builds run client-side: no
 sccache daemon starts, so there is nothing to stop.
+
+To exercise the busy-source skip on the real repository, start a build in a fresh seed and
+`touch` its `target/debug/.fingerprint` so it ranks first; the next `git worktree add` must name
+another source. For the reverse race, hold a seed's locks from Python
+(`with build_cache._quiescent(Path("target/debug"))`, `sys.path` pointed at `scripts/`) and run
+`cargo build -v` there: it prints `Blocking waiting for file lock` until the block exits.

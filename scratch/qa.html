@@ -8,6 +8,34 @@ h2{margin-top:1.8em}td,th{padding:.25em .7em;border-bottom:1px solid #ddd;text-a
 .bad{color:#a40}.ok{color:#270}
 </style>
 <h1>LOO-922 QA: seeded worktree targets</h1>
+<h2>Run 2 (2026-11-22, after the first-build lock fix, 5336a5ebaf and 5e305e63c7)</h2>
+<p>Load average 102&ndash;145 on 16 CPUs. The installed hook copy predated the lock fix; <code>build_cache.py install</code> refreshed it from the branch first.</p>
+<h3>Real repository: seed, then add worktrees during the seed's first build</h3>
+<pre>git worktree add --detach ../loopflow.qa922b-w1 HEAD   real 3.38 s
+target/debug: .fingerprint build deps
+status: seed     from ../loopflow.43bf9b-remove-chapters-krs at f22b743572
+.fingerprint mtime = source's (1795415275)</pre>
+<p>Started <code>cargo build -p loopflow --bin lf -v</code> in W1 (lsof: cargo held all three locks). Added W2: seeded from 43bf9b.
+Then <code>touch</code>ed W1's <code>.fingerprint</code> so the building seed ranked newest and added W3: <span class="ok">seeded from 43bf9b, W1 skipped</span>.</p>
+<pre>W1 build: 7 Compiling / 249 Fresh; Finished in 4m 13s; 253.6 real, 82.0 user, 6.2 sys; max RSS 2.28 GB
+lf 0.16.0+65494f600 (build 65494f600 on v0.16.0)   # HEAD 65494f6004
+rustc commands naming the source checkout: 0</pre>
+<h3>Fixture (two crates, one with a build script), real Cargo</h3>
+<ul>
+<li>Tie: an unbuilt seed carries its source's mtime (both 1795415669). A third worktree seeded from the built source, not the seed. <span class="ok">OK</span></li>
+<li>Reverse race: held an unbuilt seed's locks through <code>_quiescent</code> (it created the three lock files), then ran <code>cargo build -v</code> there after editing <code>main.rs</code>:
+<pre>22:34:42 Blocking waiting for file lock on build directory
+released 22:34:46
+22:34:46 Compiling native / 22:34:47 Compiling app / Finished in 7.82s
+./target/debug/app → edited 1</pre></li>
+<li>Read-only source <code>target/debug</code> holding lock files: still seeds (append-open of an existing file works). A read-only, never-built seed would be skipped: cold build, nothing wrong.</li>
+</ul>
+<h3>Run 2 result</h3>
+<ul><li>Works: busy unbuilt seed skipped even when ranked first; Cargo waits for a seeding clone; built source wins ties; real <code>lf</code> build 7/249 with the right version.</li>
+<li>Fixed: nothing needed. Hook on this Machine refreshed.</li>
+<li>Not reached (unchanged from run 1): Linux reflink; a Task started through <code>lf task create --run</code>.</li>
+<li>Open: peak RSS question stays in LOO-1070 (2.28 GB here).</li></ul>
+<h2>Run 1</h2>
 <p>2026-11-22, this Machine, load average 75–121 on 16 CPUs. Real repository, real hook, real Cargo.</p>
 
 <h2>1. lf's Task checkout path, end to end</h2>

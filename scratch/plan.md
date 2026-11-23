@@ -66,9 +66,54 @@ and a clean `foreign_key_check`.
 After merging main (55c12ad9c6, 544 files): `cargo check --workspace
 --all-targets` clean.
 
-Next: the Trackers section (connect links the Wave's Project; Initiative links
-go), then `lf wave status` showing the Project line, then tests outside
-storage that seeded a second Project in one Wave.
+## Built (slice 2, trackers)
+
+- The link is `projects.external_project_id` on the Wave's Project; nothing
+  else says which Wave a tracker Project is. Acceptance binds a tracker
+  Project to a Wave only when it is linking one: the Project's own `create`
+  landing, `connect <wave> <project>`, and the Wave's inventory refresh
+  (which reads only the Project it links). `tracker_wave_projects` is no longer
+  read or written (marked leaving). An issue belongs to the Wave whose Project
+  links its Project; an issue in a Project no Wave links is not imported.
+- `lf wave plan connect <wave> [<project>]` (URL, id or name; `named_project`).
+  Without one, the Wave's Project's `create` goes out. With one, the queued
+  `create` retires; a Project Loopflow already made is replaced while none of
+  the Wave's Tasks is in Linear (otherwise an error says to move them). The
+  receipt is `{wave, project_id, project_name, created, team…, files}`.
+- Gone: Wave `linear: initiative:` reading (the key stays a Wave-only key so
+  released files load), `tracker_wave_sync.initiative` writes, Initiative
+  create/rename/archive/list, Project-to-Initiative attachment and its queued
+  `link` actions (retired in the migration), the held-until-moved-back rule,
+  `membership_unresolved` writes, the blocked-send gate (it only existed for
+  Initiative-less Waves), `lf wave rename --title`, the `initiative(s)` fields of
+  the rename and removal receipts (Rust, Swift, fixtures, server schema).
+- `lf wave status` prints `Project   <name> (local|linked) · <status>`.
+- Fixtures: `planning_repo()` links `project-1`; `local_planning_repo()` does
+  not. `insert_project` (fixture-only) writes with tracker origin so seeding the
+  Wave's own Project queues nothing. Execution store fixtures use
+  `ProjectId::for_wave`; two-Project and Initiative-move cases went.
+
+Learned: in a connected repository `lf wave add` now sends the Wave's Project
+`create` at once, so `connect <wave> <project>` usually meets a Project
+Loopflow already made; that is why connect replaces an empty link.
+
+Checks run (2026-11-22, this slice): execution `ops::linear::`, `linear::`,
+`store::tests::`, `ops::tracker`, `ops::run::`, `ops::task::`,
+`work::wave::config::` pass except
+`oauth_tests::pm_read_linear_oauth_sqlite_contention_has_bounded_failure_and_recovers`
+(fails deterministically here at its refresh-lock deadline; this change does not
+touch that path, unverified on the base) and
+`ops::task::lifecycle_tests::ordinary_task_comments_and_completion_preserve_live_graph_and_arrival`
+(timed out at 300 s under load once). CLI: `local_planning::`,
+`wave_lifecycle::`, `status_tests::`, `repository_team_matrix::`,
+`wave_repository_ownership::`, `lf::commands::waves::tests::`, `lf::tests::`,
+`dto_fixtures::`, `server::schema::tests::` (schema regenerated),
+`documented_commands::`, `task_adoption_tests::`, `planning_lookup_tests::`,
+`golden_prompt` pass; `subscribe::a_paused_watch_and_a_truncated_log_both_catch_up`
+timed out under the parallel run and passes alone (15 s). clippy
+`--all-targets -D warnings` clean.
+
+Next: gate. Swift DTO suite for `WaveRemoval`/`WaveRenamed`; full matrix in CI.
 
 ## Trackers
 

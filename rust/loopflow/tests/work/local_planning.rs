@@ -1085,7 +1085,7 @@ fn project_reads_keep_canonical_identity_after_edits() {
             .map(|name| {
                 serde_json::from_value(serde_json::json!({
                     "id": format!("linear-{name}"), "slug": name, "name": name,
-                    "summary": "", "revision": null, "status": "started", "initiative_ids": ["initiative"],
+                    "summary": "", "revision": null, "status": "started",
                     "team_ids": ["team"]
                 }))
                 .unwrap()
@@ -1094,7 +1094,6 @@ fn project_reads_keep_canonical_identity_after_edits() {
         store
             .seed_inventory(&crate::test_linear_input::InventoryFixture {
                 wave_id: wave.id().clone(),
-                initiative: "initiative".into(),
                 synced_at: 17,
                 snapshot: crate::test_linear_input::Inventory {
                     projects,
@@ -1232,13 +1231,11 @@ fn task_creation_and_edits_save_offline_in_both_connection_modes() {
             name: "Product".into(),
             summary: "".into(),
             status: loopflow_execution::work::project::ProjectStatus::Started,
-            initiative_ids: vec!["initiative".into()],
             team_ids: vec!["fixture-team".into()],
         };
         loopflow_execution::store::sqlite::linear_events::accept_linear_project_in(
             &store,
             wave.id(),
-            "initiative",
             &project,
             17,
             loopflow_storage::planning_sync::TrackerKind::Linear,
@@ -1321,7 +1318,6 @@ fn task_creation_and_edits_save_offline_in_both_connection_modes() {
             store
                 .seed_inventory(&InventoryFixture {
                     wave_id: wave.id().clone(),
-                    initiative: "initiative".into(),
                     synced_at: 18,
                     snapshot: snapshot.clone(),
                 })
@@ -1583,14 +1579,12 @@ fn moving_saves_membership_offline_and_retains_inbound_changes() {
                     summary: project.summary.clone(),
                     description: Some(project.description.clone()),
                     status: project.status,
-                    initiative_ids: vec![name.into()],
                     team_ids: vec!["fixture-team".into()],
                     revision: None,
                 };
                 loopflow_execution::store::sqlite::linear_events::accept_linear_project_in(
                     &store,
                     wave.id(),
-                    name,
                     &observed,
                     1,
                     loopflow_storage::planning_sync::TrackerKind::Linear,
@@ -1703,7 +1697,6 @@ fn moving_saves_membership_offline_and_retains_inbound_changes() {
             // Preserve the duplicate slug: exact provider IDs must beat names.
             other.id = "competing".into();
             other.revision = Some("2026-10-08T14:01:00Z".into());
-            other.initiative_ids = vec!["competing".into()];
             incoming.project = Some(other);
             incoming.item.project_id = Some("competing".into());
             incoming.observed_at += 1;
@@ -2151,7 +2144,7 @@ fn ordinary_task_creation_returns_resolvable_identifier_without_a_public_retry_t
 }
 
 #[test]
-fn wave_sync_without_an_initiative_shows_local_planning() {
+fn wave_sync_without_a_linked_project_shows_local_planning() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(repo.path().join(".lf")).unwrap();
@@ -2190,7 +2183,7 @@ fn wave_sync_without_an_initiative_shows_local_planning() {
     };
     assert!(
         text.starts_with(
-            "inbox: no Linear Initiative; showing local planning (lf wave plan connect inbox)\n"
+            "inbox: links no Linear Project; showing local planning (lf wave plan connect inbox)\n"
         ),
         "{text}"
     );
@@ -2363,14 +2356,12 @@ fn canonical_status_retains_content_and_execution_across_acquisition_states() {
         .unwrap();
     let observed: loopflow_storage::planning::TrackerProject = serde_json::from_value(json!({
         "id":"provider-project", "slug":project.slug, "name":project.name,
-        "summary":"", "description":"Saved Project prose", "status":"started",
-        "initiative_ids":["initiative"], "team_ids":["team"], "revision":null
+        "summary":"", "description":"Saved Project prose", "status":"started", "team_ids":["team"], "revision":null
     }))
     .unwrap();
     loopflow_execution::store::sqlite::linear_events::accept_linear_project_in(
         &store,
         task.wave_id.as_ref().unwrap(),
-        "initiative",
         &observed,
         17,
         loopflow_storage::planning_sync::TrackerKind::Linear,

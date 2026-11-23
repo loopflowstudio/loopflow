@@ -106,8 +106,7 @@ struct DTOFixtureTests {
         let renamed = try RegistryQuery.decode(
             WaveRenamed.self, from: String(decoding: loadFixtureData("wave_renamed.json"), as: UTF8.self))
         #expect(renamed.to == "prod")
-        #expect(renamed.files == .committed(commit: "0f3c2a1d"))
-        #expect(renamed.initiative?.error == "Linear: rate limited")
+        #expect(renamed.files == .uncommitted(reason: "the main checkout has unrelated staged changes"))
         #expect(renamed.summary.count == 1)
     }
 

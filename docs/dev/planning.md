@@ -43,11 +43,7 @@ Wave and Task planning use one local SQLite owner with optional
 repository-wide Linear synchronization. Creation without a Wave makes a standalone repository Task.
 Wave goals, memory and other Markdown live only in `.lf/wave/<name>/` in the
 checkout. Edit them like any other file; context and summaries read them directly.
-Ancestor context uses the same checkout. Linear Initiative creation uses that
-checkout; explicit planning sync reads GOAL.md at the committed local default-branch
-tip, never unmerged branch edits or dirty working files. Default-branch selection
-uses origin/HEAD (main when unset); sync does not fetch or move refs.
-Both use the same 255-character description limit.
+Ancestor context uses the same checkout.
 Sync writes only changed fields; plan-only sends nothing. A missing default-branch
 ref or GOAL.md blocks mutation instead of clearing the tracker summary.
 Creation preserves authored IDs and bytes and writes missing GOAL.md/MEMORY.md
@@ -304,8 +300,8 @@ Machines per repository. Tracker repositories use none of this:
 
 Every change Linear or Asana carries is one `tracker_actions` row, written in the
 transaction that saves it: `create`, `field`, `order`, `state`, `comment`,
-`delete` or `link` (a Project's Initiative, a follow-up relation
-`relation:<id>`, a pull request `pr:<url>`). Each row addresses one owner, a
+`delete` or `link` (a follow-up relation `relation:<id>`, a pull request
+`pr:<url>`). Each row addresses one owner, a
 Wave, Project or Task, on the tracker named by `tracker`, set when it is queued
 from the owner's binding or queued creation. `value_json` is a `WorkValue` in
 store words; `linear/actions.rs` and `asana/actions.rs` turn it into a request
@@ -319,10 +315,7 @@ order of their oldest action, except that the owner a command just saved goes
 first. Within an owner, everything waits behind an unconfirmed `create`; otherwise
 only actions on the same subject wait behind each other. A Task naming a Project
 still being created, and a relation to a Task with no tracker object, hold
-without a request. So does an action its tracker blocks (a Linear Project
-whose Wave has no Initiative): the block is decided before the send, saves its
-error once and keeps the action queued at no cost to the pass. A pass
-with nothing unconfirmed asks the tracker nothing.
+without a request. A pass with nothing unconfirmed asks the tracker nothing.
 `lf task sync <id>` drains one owner now, looking for every sent action at
 once; without a tracker it exchanges the repository's plan by Git and with the hub.
 
@@ -338,8 +331,8 @@ for before anything else on its subject is sent, at most once per
 max(600 s, the delta freshness window). A send that carries our id or reads
 before it adds (Linear comments, every link) is repeated instead. A tracker with
 no form for an action answers `Unsupported` and the action retires with that
-reason: Asana has no Project edits after creation, no order, no Initiatives and
-no follow-up relations. A queued action for a tracker the repository no longer
+reason: Asana has no Project edits after creation, no order and no follow-up
+relations. A queued action for a tracker the repository no longer
 uses retires naming both.
 
 A `create` carries the owner's UUID, which both trackers send as the tracker
@@ -436,10 +429,13 @@ moving one out of every Wave clears it. A Task's Wave is its Project's.
 
 A Project made here has no tracker binding until the drain gives it a
 `create`, including one made before a tracker was connected. A Task's
-`issueCreate` waits for its Project's tracker ID. An import binds the
-first tracker Project it meets in the Wave's Initiative to the Wave's Project
-when that Project has no binding yet and no `create` out for another; once
-bound, other Linear Projects in the Initiative are not imported.
+`issueCreate` waits for its Project's tracker ID. The binding,
+`projects.external_project_id`, is the Wave's link: an issue belongs to the
+Wave whose Project links its tracker Project, and a tracker Project no Wave
+links is not imported. Only three writes bind: the Project's own `create`
+landing, `lf wave plan connect <wave> <project>` (which retires an unsent
+`create`, and moves a link while none of the Wave's Tasks is in the tracker),
+and a Wave's inventory refresh, which reads the Project it links.
 
 A Project's status changes in the tracker, mirrored both ways, or through
 abandonment, which writes `work_state` and `work_terminal_at`. A Task changes
@@ -514,15 +510,11 @@ an unknown destination does not authorize a Task transfer. Restart changes
 execution without rewriting accepted planning. A single Project event does
 not advance the Wave's full-refresh timestamp. Reteam accepts complete issue
 readbacks through that same owner and reconciles confirmed Team relationships
-without changing Initiative ownership or independently newer Project facts.
+without changing Wave ownership or independently newer Project facts.
 
-Full and partial Wave ingestion validate the accepted Project's Initiative before
-recording membership or freshness. Detail refresh resolves that Initiative through
-Wave configuration and the registry, then accepts the association and projects
-facts in one transaction. A durable Project row alone grants no Wave ownership.
-Unconfirmed cold detail retains durable plans; foreign or unmapped ownership at
-the operation boundary reports an error. Both Project and Task projection require
-an exact accepted Initiative match. Snapshot refresh and cold-detail readback
+Detail refresh finds the Wave through the Project that links the issue's tracker
+Project, then accepts and projects facts in one transaction. An issue in a
+Project no Wave links leaves its Task as it was. Snapshot refresh and cold-detail readback
 hold the Wave planning lock through the SQLite commit. Queued workers retain
 shared ownership after their async caller is canceled. Reteam acquires
 participating Wave locks in stable ID order; already-held refresh paths reuse them.
@@ -530,13 +522,9 @@ Cold detail discovers ownership, locks, then reads ownership again. Null detail
 invalidates only the cached revision and event it queried; it cannot invalidate
 a newer accepted Task. Readback follows the issue UUID across identifier changes.
 
-List coverage never removes a Project merely because a later response omits it.
-Without removal evidence, refresh fails and retains the previous event.
-Project revisions do not establish ordering for separate Initiative/Team
-relationships. A contradictory relationship set stays unresolved, retains its
-last-good facts, and blocks managed readers. Replaying a list or detail does not
-clear that uncertainty. Explicit reteam reconciles the exact confirmed Team set
-under refresh ownership; it cannot reconcile a changed Initiative.
+A read that omits the Wave's Project leaves its Tasks as they were. Teams follow
+the later read; explicit reteam reconciles the exact confirmed Team set under
+refresh ownership.
 
 ## Capture a Graph once
 

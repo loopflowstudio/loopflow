@@ -101,14 +101,13 @@ impl Machine {
         let payload = serde_json::json!({
             "projects": [{
                 "id": PROJECT, "slug": "reactive", "name": "Reactive", "summary": "",
-                "status": "started", "initiative_ids": ["initiative-product"], "team_ids": ["team-product"]
+                "status": "started", "team_ids": ["team-product"]
             }],
             "items": items
         });
         self.store
             .seed_inventory(&InventoryFixture {
                 wave_id: self.wave.id().clone(),
-                initiative: "initiative-product".into(),
                 synced_at: time::OffsetDateTime::now_utc().unix_timestamp(),
                 snapshot: serde_json::from_value(payload).unwrap(),
             })

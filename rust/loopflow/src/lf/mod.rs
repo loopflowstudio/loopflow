@@ -3633,7 +3633,7 @@ mod tests {
             vec!["lf", "--repo", "loopflow", "steer", "keep attribution"],
             vec!["lf", "steer", "session_1", "keep attribution"],
             vec!["lf", "steer", "LOO-1", "keep attribution"],
-            vec!["lf", "wave", "rename", "product", "--title", "Product"],
+            vec!["lf", "wave", "rename", "product", "--repo", "../other"],
             vec!["lf", "task", "move", "LOO-1", "--machine", "mini"],
             vec![
                 "lf", "--wave", "product", "config", "set", "machine", "mini",

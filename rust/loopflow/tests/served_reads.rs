@@ -2351,12 +2351,14 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
         Write::WavePlanConnect {
             directory,
             wave,
+            project,
             all,
             team_key,
             team_name,
         } => {
             let mut spelled = words(&["wave", "plan", "connect"]);
             spelled.extend(wave.clone());
+            spelled.extend(project.clone());
             if *all {
                 spelled.push("--all".into());
             }

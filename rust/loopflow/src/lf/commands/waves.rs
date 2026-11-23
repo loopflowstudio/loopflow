@@ -3214,7 +3214,6 @@ mod tests {
             .seed_inventory(
                 crate::test_linear_input::InventoryFixture {
                     wave_id: wave.id().clone(),
-                    initiative: "initiative".into(),
                     synced_at: 1,
                     snapshot: serde_json::from_str(include_str!(
                         "../../../../../tests/fixtures/dto/task_history_planning.json"
@@ -3285,7 +3284,6 @@ mod tests {
             .seed_inventory(
                 crate::test_linear_input::InventoryFixture {
                     wave_id: wave.id().clone(),
-                    initiative: "initiative".into(),
                     synced_at: 1,
                     snapshot: planning.clone(),
                 },
@@ -3391,12 +3389,10 @@ mod tests {
                 .seed_inventory(
                     crate::test_linear_input::InventoryFixture {
                         wave_id: wave.id().clone(),
-                        initiative: "initiative".into(),
                         synced_at: 2,
                         snapshot: serde_json::from_value(serde_json::json!({"projects":[{
                     "id":format!("{repository}-{name}"), "slug":name, "name":name,
-                    "summary":"", "workflow":"feature", "status":"started",
-                    "initiative_ids":["initiative"], "team_ids":["team"]
+                    "summary":"", "workflow":"feature", "status":"started", "team_ids":["team"]
                 }], "items":[]}))
                         .unwrap(),
                     },
@@ -3406,18 +3402,15 @@ mod tests {
                 .unwrap();
             waves.push(wave);
         }
-        super::validate_linear_ownership(&store, &waves[..2], &mut Default::default())
+        // Each Wave's Project links its own tracker Project, across repositories too.
+        super::validate_linear_ownership(&store, &waves, &mut Default::default())
             .await
             .unwrap();
-        let error = super::validate_linear_ownership(&store, &waves, &mut Default::default())
-            .await
-            .unwrap_err();
-        assert!(error.to_string().contains("bound by both"), "{error}");
         // A malformed Wave must not hide a readable sibling or its local Work.
         rusqlite::Connection::open(directory.path().join("registry.db"))
             .unwrap()
             .execute(
-                "UPDATE tracker_projects SET initiative_ids='not-json' WHERE id='first-ear'",
+                "UPDATE tracker_projects SET team_ids='not-json' WHERE id='first-ear'",
                 [],
             )
             .unwrap();
@@ -3475,11 +3468,10 @@ mod tests {
         items.push(item);
         let snapshot = crate::test_linear_input::InventoryFixture {
             wave_id: wave.id().clone(),
-            initiative: "initiative".into(),
             synced_at: 1,
             snapshot: serde_json::from_value(serde_json::json!({"projects":[{
                 "id":"current", "slug":"current", "name":"Current project", "summary":"",
-                "workflow":"feature", "status":"started", "initiative_ids":["initiative"], "team_ids":["team"]
+                "workflow":"feature", "status":"started", "team_ids":["team"]
             }], "items":items}))
             .unwrap(),
         };
@@ -3545,15 +3537,17 @@ mod tests {
             directory.path().display().to_string(),
         );
         store.create_wave(&wave).await.unwrap();
+        // The Wave's own Project, linked to nothing yet.
         assert!(matches!(
             super::project_planning(&store, &wave).await,
-            super::Evidence::Ok { items, truncated: false } if items.is_empty()
+            super::Evidence::Ok { items, truncated: false }
+                if items.len() == 1 && items[0].tracker_id.is_none()
         ));
         store.seed_inventory(crate::test_linear_input::InventoryFixture {
-            wave_id: wave.id().clone(), initiative: "initiative".into(), synced_at: 2,
+            wave_id: wave.id().clone(), synced_at: 2,
             snapshot: serde_json::from_value(serde_json::json!({"projects":[{
                 "id":"999bdbdd-c045-41a6-8ffc-a97c4a40b0b3", "slug":"first", "name":"First project", "summary":"",
-                "workflow":"feature", "status":"started", "initiative_ids":["initiative"], "team_ids":["team"]
+                "workflow":"feature", "status":"started", "team_ids":["team"]
             }], "items":[]})).unwrap(),
         }, None).await.unwrap();
         let super::Evidence::Ok { items, .. } = super::project_planning(&store, &wave).await else {
@@ -3566,14 +3560,14 @@ mod tests {
         );
         let unreadable = crate::test_linear_input::InventoryFixture {
             wave_id: wave.id().clone(),
-            initiative: "initiative".into(),
             synced_at: 3,
             snapshot: crate::test_linear_input::Inventory {
                 projects: vec![],
                 items: vec![],
             },
         };
-        assert!(store.seed_inventory(unreadable, None).await.is_err());
+        // A read that misses the Project keeps it.
+        store.seed_inventory(unreadable, None).await.unwrap();
         assert!(matches!(
             super::project_planning(&store, &wave).await,
             super::Evidence::Ok { items, .. } if items.len() == 1
@@ -3581,7 +3575,7 @@ mod tests {
         // Invalid provider evidence cannot erase the owned plan.
         rusqlite::Connection::open(directory.path().join("registry.db"))
             .unwrap()
-            .execute("UPDATE tracker_projects SET initiative_ids='not-json'", [])
+            .execute("UPDATE tracker_projects SET team_ids='not-json'", [])
             .unwrap();
         let super::Evidence::Ok {
             items,

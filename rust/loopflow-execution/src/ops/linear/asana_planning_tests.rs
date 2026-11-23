@@ -306,7 +306,10 @@ fn asana_task_create_mirrors_task_under_its_loopflow_identity() {
         let team: Vec<_> = projects.iter().filter(|p| p["name"] == "fixture").collect();
         assert_eq!(team.len(), 1);
 
-        assert_eq!(task["memberships"], json!([{"project": {"gid": team[0]["gid"]}}]));
+        assert_eq!(
+            task["memberships"],
+            json!([{"project": {"gid": team[0]["gid"]}}])
+        );
         // Asana renders rich text, so markdown arrives formatted.
         assert_eq!(
             task["html_notes"],
@@ -511,7 +514,11 @@ fn asana_tasks_coworkers_create_become_tasks() {
         // The existing team project was reused; the other is the Wave's.
         assert_eq!(asana.projects.len(), 3);
         assert_eq!(
-            asana.projects.iter().filter(|p| p["name"] == "fixture").count(),
+            asana
+                .projects
+                .iter()
+                .filter(|p| p["name"] == "fixture")
+                .count(),
             1
         );
     });

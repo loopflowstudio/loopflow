@@ -30,7 +30,7 @@ Each child gets a fresh goal, not a slice of the parent's prose:
 4. **Create the children.**
    ```bash
    lf wave create <wave>/<child>                    # registers it and commits its files on main
-   lf wave plan connect <wave>/<child>              # links its Linear Initiative
+   lf wave plan connect <wave>/<child>              # makes its Linear Project
    lf task create --wave <wave>/<child> --title "…" --notes "…"
    ```
    Write each child's `GOAL.md` and `MEMORY.md` in its directory. Each child
@@ -42,5 +42,5 @@ Each child gets a fresh goal, not a slice of the parent's prose:
    its worker. Keep the parent and its Project while its active work
    finishes.
 
-6. **Check.** Each child has a goal, memory and a connected Initiative.
+6. **Check.** Each child has a goal, memory and a linked Project.
    Nothing from the parent is unaccounted for.

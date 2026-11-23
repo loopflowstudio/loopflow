@@ -121,7 +121,7 @@ fn task_run_checks_admission_while_standalone_graphs_run_with_task_context() {
         }
         deliver_state_writes(&registered.store, &registered.task.id);
         runtime
-            .block_on(registered.store.seed_issue(&scope, "linear", record))
+            .block_on(registered.store.seed_issue(&scope, "linear", record, None))
             .unwrap();
         // Old valid planning still admits a launch without reaching the provider.
         rusqlite::Connection::open(home.path().join("loopflow.db"))

@@ -34,7 +34,6 @@ fn write_goal(repo: &Path, wave: &str, initiative: &str) {
 }
 
 fn snapshot(
-    initiative: &str,
     project_id: &str,
     project_slug: &str,
     project_name: &str,
@@ -49,7 +48,6 @@ fn snapshot(
             "name": project_name,
             "summary": "Fixture project",
             "status": "started",
-            "initiative_ids": [initiative],
             "team_ids": ["team-loo"]
         }],
         "items": [{
@@ -69,27 +67,18 @@ fn snapshot(
     .unwrap()
 }
 
-fn put_snapshot(
-    store: &SqliteStore,
-    repo: &Path,
-    wave: &str,
-    initiative: &str,
-    snapshot: Inventory,
-) {
+fn put_snapshot(store: &SqliteStore, repo: &Path, wave: &str, snapshot: Inventory) {
     let registered = store
         .get_wave_at(&loopflow_execution::work::wave::discover(repo, wave).unwrap())
         .unwrap()
         .expect("registered Wave");
     let goal = std::fs::read_to_string(repo.join(".lf/wave").join(wave).join("GOAL.md"))
-        .unwrap_or_else(|_| {
-            format!("---\nlinear:\n  initiative: {initiative}\n---\nFixture Wave.\n")
-        });
+        .unwrap_or_else(|_| "Fixture Wave.\n".to_string());
     std::fs::create_dir_all(repo.join(".lf/wave").join(wave)).unwrap();
     std::fs::write(repo.join(".lf/wave").join(wave).join("GOAL.md"), goal).unwrap();
     store
         .seed_inventory(&InventoryFixture {
             wave_id: registered.id().clone(),
-            initiative: initiative.to_string(),
             synced_at: chrono::Utc::now().timestamp(),
             snapshot,
         })
@@ -190,7 +179,6 @@ fn repository_team_matrix() {
     )
     .unwrap();
     let survival_snapshot = snapshot(
-        "initiative-survival",
         "project-survival",
         "a-real-task",
         "A real task reaches done",
@@ -198,20 +186,12 @@ fn repository_team_matrix() {
         "LOO-1",
         true,
     );
-    put_snapshot(
-        &store,
-        &repo,
-        "survival",
-        "initiative-survival",
-        survival_snapshot.clone(),
-    );
+    put_snapshot(&store, &repo, "survival", survival_snapshot.clone());
     put_snapshot(
         &store,
         &repo,
         "survival/infrastructure",
-        "initiative-infrastructure",
         snapshot(
-            "initiative-infrastructure",
             "project-gmail",
             "gmail",
             "Gmail",
@@ -224,9 +204,7 @@ fn repository_team_matrix() {
         &store,
         &repo,
         "intelligence",
-        "initiative-intelligence",
         snapshot(
-            "initiative-intelligence",
             "project-trace",
             "trace",
             "Trace",
@@ -239,9 +217,7 @@ fn repository_team_matrix() {
         &store,
         foreign_repo.path(),
         "intelligence",
-        "initiative-intelligence",
         snapshot(
-            "initiative-intelligence",
             "project-foreign",
             "foreign",
             "Foreign",
@@ -313,42 +289,6 @@ fn repository_team_matrix() {
     // Reopening the store preserves the local ancestry and foreign collision.
     let reopened = loopflow_execution::store::open_sqlite(&database).unwrap();
     assert_eq!(reopened.list_waves(None).unwrap().len(), 4);
-
-    // Reject ambiguous ownership before replacing accepted planning facts.
-    let mut ambiguous = snapshot(
-        "initiative-infrastructure",
-        "project-ambiguous",
-        "a-real-task",
-        "A real task reaches done",
-        "issue-ambiguous",
-        "LOO-4",
-        false,
-    );
-    ambiguous.projects[0]
-        .initiative_ids
-        .push("initiative-survival".into());
-    let survival = reopened
-        .get_wave_at(&loopflow_execution::work::wave::discover(&repo, "survival").unwrap())
-        .unwrap()
-        .unwrap();
-    let accepted = reopened.list_projects(Some(survival.id())).unwrap();
-    let mut planning = InventoryFixture {
-        wave_id: survival.id().clone(),
-        initiative: "initiative-survival".into(),
-        synced_at: 2,
-        snapshot: survival_snapshot,
-    };
-    planning.snapshot.projects.extend(ambiguous.projects);
-    planning.snapshot.items.extend(ambiguous.items);
-    let error = reopened.seed_inventory(&planning).unwrap_err();
-    assert!(
-        error.to_string().contains("does not belong to Initiative"),
-        "{error}"
-    );
-    assert_eq!(
-        reopened.list_projects(Some(survival.id())).unwrap(),
-        accepted
-    );
     drop(reopened);
     for args in [
         &["wave", "list", "--json"][..],

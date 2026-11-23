@@ -313,8 +313,16 @@ tracker:
 | Start work on the Task | Issue moves to In Progress |
 | Open, land, or abandon its PR | One linked PR on the issue, updated as its state changes |
 
-In Linear, a Wave maps to an Initiative and each of its Projects maps to a
-Linear Project. In Asana, it maps to a team project.
+In Linear, a Wave is one Linear Project and its Tasks are that Project's
+issues. In Asana, it is a team project.
+
+```bash
+lf wave plan connect billing                       # make billing's Project in Linear
+lf wave plan connect billing 'Refunds'             # or link the Linear Project named Refunds
+lf wave plan connect billing https://linear.app/acme/project/refunds-1a2b3c4d5e6f
+```
+
+A Linear Project no Wave links stays out of Loopflow.
 
 ### Offline queue and conflict resolution
 
@@ -354,9 +362,11 @@ Answer a lost line: lf repo tracker answer <id> --keep-theirs, or --use-mine.
   lf task create            DeliverTaskCreation                  1         0         30
   ```
 
-A Project whose Wave is not yet linked to a Linear Initiative stays local, and
-its Tasks wait in the queue until you run `lf wave plan connect <wave>`. A Task
-in no Wave goes to Linear right away, as a team issue.
+In a connected repository a new Wave's Project goes to Linear with it. If that
+send fails, `lf wave status` shows `Project … (local)` and its Tasks wait in the
+queue until `lf wave plan connect <wave>`. Linking another Linear Project
+replaces the one Loopflow made while none of the Wave's Tasks is in Linear yet.
+A Task in no Wave goes to Linear right away, as a team issue.
 
 ## Waves
 
@@ -532,8 +542,8 @@ if setup fails, `lf resume --task <ID>` retries it). See
 `lf task sync` pushes and fetches the repository's plan and exchanges with the
 hub, then prints what each still has unsent. If Linear updates an issue or
 Project without bumping `updatedAt`, Loopflow adopts the fresh reading and
-keeps your local edits queued. Moving a Project to another Initiative in Linear
-is held until moved back, because the Initiative determines which Wave owns it.
+keeps your local edits queued. An issue moved into another Wave's Linear
+Project moves to that Wave.
 
 Every flag: [`lf task`](lf-reference.md#lf-task), [`lf wave`](lf-reference.md#lf-wave).
 

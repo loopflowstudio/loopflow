@@ -11,8 +11,7 @@ async fn migration_preserves_planning_identity_and_removes_snapshot_storage() {
     let wave = WaveId::new();
     let snapshot = json!({"projects":[{
         "id":"project", "slug":"chapter", "name":"Chapter", "summary":"Proof",
-        "metric_targets":[], "workflow":"feature", "status":"started", "krs":[],
-        "initiative_ids":["initiative"], "team_ids":["team"]
+        "metric_targets":[], "workflow":"feature", "status":"started", "krs":[], "team_ids":["team"]
     }],"items":[{
         "id":"issue", "identifier":"FIX-1", "url":null, "name":"Retained title",
         "description":"Retained notes", "rank":2, "completed":false, "state":"unstarted",

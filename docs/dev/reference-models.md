@@ -98,7 +98,7 @@ reject a noncanonical write with `canonical identity required: <table>`.
 
 | Domain | Canonical form |
 | --- | --- |
-| Wave, Trace, LfProcess/Graph, steer, attachment and owned UUIDs; Linear Issue, Project, Initiative, Team, comment, attachment and assignee IDs | Lowercase, punctuation retained (simple, hyphenated, braced, URN) |
+| Wave, Trace, LfProcess/Graph, steer, attachment and owned UUIDs; Linear Issue, Project, Team, comment, attachment and assignee IDs | Lowercase, punctuation retained (simple, hyphenated, braced, URN) |
 | Task, Project, repository, Machine, PR, landing, tool response | Lowercase prefix and UUID (`task_`, `proj_`, `repo_`, `home_`, `pr_`, `landing_`, `response_`) |
 | LfSession (`LfSessionId`) | Lowercase `session_<hex>` or bare 32 hex; other historical names keep their bytes |
 | Task label | Lowercase local `lf-<hex>`; uppercase Linear `<TEAM>-<n>` |

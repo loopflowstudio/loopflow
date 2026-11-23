@@ -524,10 +524,6 @@ pub fn bind_task_planning(repo: &TestRepo) {
         "planning:\n  provider: linear\n  team: team-task-pr-tests\n",
     );
     repo.create_file(".lf/wave/task-pr-tests/GOAL.md", "Keep work.\n");
-    repo.create_file(
-        ".lf/wave/task-pr-tests/config.yaml",
-        "linear:\n  initiative: initiative-task-pr-tests\n",
-    );
     repo.stage_all();
     repo.commit("Bind fixture planning before creating Task checkouts");
 }

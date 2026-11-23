@@ -3447,51 +3447,6 @@
       ],
       "type": "object"
     },
-    "InitiativeArchive": {
-      "properties": {
-        "error": {
-          "description": "Why Linear still has it live; `None` once archived.",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "initiative": {
-          "type": "string"
-        },
-        "wave": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "wave",
-        "initiative",
-        "error"
-      ],
-      "type": "object"
-    },
-    "InitiativeRename": {
-      "properties": {
-        "error": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "initiative": {
-          "type": "string"
-        },
-        "title": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "initiative",
-        "title",
-        "error"
-      ],
-      "type": "object"
-    },
     "Inspection": {
       "description": "The effective settings of one selection: general, or a skill and its\nGraph occurrence, each with every source's candidate.",
       "properties": {
@@ -3663,13 +3618,21 @@
       "additionalProperties": false,
       "properties": {
         "created": {
+          "description": "Whether the Wave's Project is made in Linear rather than linked to one\nthat already existed.",
           "type": "boolean"
         },
         "files": {
           "$ref": "#/$defs/AuthoredFiles",
-          "description": "The binding's files (`.lf/config.yaml`, `.lf/wave/<wave>/config.yaml`) on the main checkout."
+          "description": "The binding's file (`.lf/config.yaml`) on the main checkout."
         },
-        "initiative_id": {
+        "project_id": {
+          "description": "The Linear Project the Wave's Project links; `None` while Loopflow is\nstill making it.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "project_name": {
           "type": "string"
         },
         "team_created": {
@@ -3690,7 +3653,8 @@
       },
       "required": [
         "wave",
-        "initiative_id",
+        "project_id",
+        "project_name",
         "created",
         "team_id",
         "team_key",
@@ -14391,12 +14355,6 @@
         "id": {
           "$ref": "#/$defs/WaveId"
         },
-        "initiatives": {
-          "items": {
-            "$ref": "#/$defs/InitiativeArchive"
-          },
-          "type": "array"
-        },
         "moved": {
           "items": {
             "$ref": "#/$defs/RemovalTask"
@@ -14452,7 +14410,6 @@
         "completed_tasks",
         "projects",
         "sessions",
-        "initiatives",
         "has_files",
         "uncommitted",
         "files",
@@ -14471,17 +14428,6 @@
         },
         "id": {
           "$ref": "#/$defs/WaveId"
-        },
-        "initiative": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/InitiativeRename"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "The connected Initiative's new title, or why Linear kept the old one."
         },
         "renamed": {
           "type": "boolean"
@@ -14502,7 +14448,6 @@
         "to",
         "renamed",
         "files",
-        "initiative",
         "summary"
       ],
       "type": "object"
@@ -16358,12 +16303,13 @@
         },
         {
           "additionalProperties": false,
-          "description": "`lf wave plan connect [<wave>|--all] [--team-key <key>]\n[--team-name <name>] --json`: one receipt per Wave connected.",
+          "description": "`lf wave plan connect [<wave> [<project>]|--all] [--team-key <key>]\n[--team-name <name>] --json`: one receipt per Wave connected.",
           "examples": [
             {
               "all": false,
               "directory": "/repo",
               "kind": "wave.plan.connect",
+              "project": "Refunds",
               "team_key": "LOO",
               "team_name": null,
               "wave": "product"
@@ -16379,6 +16325,12 @@
             "kind": {
               "const": "wave.plan.connect",
               "type": "string"
+            },
+            "project": {
+              "type": [
+                "string",
+                "null"
+              ]
             },
             "team_key": {
               "type": [
@@ -16403,6 +16355,7 @@
             "kind",
             "directory",
             "wave",
+            "project",
             "all",
             "team_key",
             "team_name"
@@ -16420,7 +16373,8 @@
               "files": {
                 "state": "unchanged"
               },
-              "initiative_id": "init_7f3a",
+              "project_id": "5d0c1b2a-3948-4e5f-9a6b-7c8d9e0f1a2b",
+              "project_name": "Refunds",
               "team_created": false,
               "team_id": "team_01",
               "team_key": "LOO",

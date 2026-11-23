@@ -528,18 +528,17 @@ pub fn refresh_status(directory: &std::path::Path, wave: Option<&str>) -> Result
     }
     let wave =
         planning_wave(&repo, wave)?.ok_or_else(|| anyhow::anyhow!("Select a Wave to refresh"))?;
+    if loopflow_execution::ops::linear::wave_link(&repo, &wave)?.is_none() {
+        return Ok(PlanningRefresh::Unconnected(wave));
+    }
     // The Team delta brings changes and comments in and pending saves go out,
     // so a save left by an outage is delivered on the next refresh.
     if let Err(error) = loopflow_execution::ops::planning_sync::refresh_directory(&repo) {
         tracing::debug!(%error, "planning delivery pending before refresh");
     }
-    let linked = tokio::runtime::Runtime::new()?
+    tokio::runtime::Runtime::new()?
         .block_on(loopflow_execution::ops::linear::refresh_wave(&repo, &wave))?;
-    Ok(if linked {
-        PlanningRefresh::Wave(wave)
-    } else {
-        PlanningRefresh::Unconnected(wave)
-    })
+    Ok(PlanningRefresh::Wave(wave))
 }
 
 pub fn reteam(repo: &std::path::Path, apply: bool, json: bool) -> Result<()> {

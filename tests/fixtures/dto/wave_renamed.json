@@ -3,9 +3,8 @@
   "from": "product",
   "to": "prod",
   "renamed": true,
-  "files": {"state": "committed", "commit": "0f3c2a1d"},
-  "initiative": {"initiative": "init_8f2c", "title": "Prod", "error": "Linear: rate limited"},
+  "files": {"state": "uncommitted", "reason": "the main checkout has unrelated staged changes"},
   "summary": [
-    "Linear Initiative init_8f2c kept its title: Linear: rate limited. Repeat the original `lf wave rename` command to retry."
+    ".lf/wave/prod is not committed on the main checkout: the main checkout has unrelated staged changes."
   ]
 }

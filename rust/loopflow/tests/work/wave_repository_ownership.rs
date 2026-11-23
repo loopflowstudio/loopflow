@@ -215,7 +215,6 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
             .seed_inventory(
                 InventoryFixture {
                     wave_id: legacy.id().clone(),
-                    initiative: "initiative-infrastructure".into(),
                     synced_at: 1,
                     snapshot: snapshot.clone(),
                 },
@@ -347,7 +346,6 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
         .seed_inventory(
             InventoryFixture {
                 wave_id: alpha.id().clone(),
-                initiative: "initiative-alpha".to_string(),
                 synced_at: 1,
                 snapshot: crate::test_linear_input::Inventory {
                     projects: vec![],
@@ -414,7 +412,6 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
         .seed_inventory(
             InventoryFixture {
                 wave_id: occupied.id().clone(),
-                initiative: "initiative-occupied".to_string(),
                 synced_at: 1,
                 snapshot: crate::test_linear_input::Inventory {
                     projects: vec![],
@@ -532,12 +529,12 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
     let conn = rusqlite::Connection::open(&database).unwrap();
     assert_eq!(
         conn.query_row(
-            "SELECT initiative FROM tracker_wave_sync WHERE wave_id=?1",
+            "SELECT count(*) FROM tracker_wave_sync WHERE wave_id=?1",
             [alpha.id().as_str()],
-            |r| r.get::<_, String>(0)
+            |r| r.get::<_, i64>(0)
         )
         .unwrap(),
-        "initiative-alpha"
+        1
     );
     assert_eq!(
         store

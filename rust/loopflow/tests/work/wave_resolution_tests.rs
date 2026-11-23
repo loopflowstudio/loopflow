@@ -164,7 +164,6 @@ fn seed(home: &Path, repo: &Path, wave_name: &str) -> Wave {
     store
         .seed_inventory(&InventoryFixture {
             wave_id: wave.id().clone(),
-            initiative: "initiative-1".to_string(),
             synced_at: chrono::Utc::now().timestamp(),
             snapshot: crate::test_linear_input::Inventory {
                 projects: vec![],

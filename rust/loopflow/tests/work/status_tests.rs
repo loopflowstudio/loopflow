@@ -75,7 +75,6 @@ fn put_project_snapshot(home: &Path, wave: &Wave, project: &Project) {
             "summary": "Keep status truthful.",
             "status": "started",
             "sync": {"actions": []},
-            "initiative_ids": ["initiative-infrastructure"],
             "team_ids": ["team-infrastructure"]
         }],
         "items": []
@@ -86,7 +85,6 @@ fn put_project_snapshot(home: &Path, wave: &Wave, project: &Project) {
     store
         .seed_inventory(&InventoryFixture {
             wave_id: wave.id().clone(),
-            initiative: "initiative-infrastructure".to_string(),
             synced_at: OffsetDateTime::now_utc().unix_timestamp(),
             snapshot: serde_json::from_value(payload).expect("parse PM snapshot"),
         })
@@ -282,7 +280,6 @@ fn seed_stale_project_work(home: &Path, current_task: bool) -> InventoryFixture 
                 "name": "Auditability",
                 "summary": "Every claim points to its receipt.",
                 "status": "started",
-                "initiative_ids": ["initiative-product"],
                 "team_ids": ["team-product"]
             }
         ],
@@ -304,7 +301,6 @@ fn seed_stale_project_work(home: &Path, current_task: bool) -> InventoryFixture 
     });
     let snapshot = InventoryFixture {
         wave_id: wave.id().clone(),
-        initiative: "initiative-product".into(),
         synced_at: now.unix_timestamp(),
         snapshot: serde_json::from_value(payload).unwrap(),
     };
@@ -819,12 +815,10 @@ fn exact_task_roadmap_scopes_duplicate_identifiers_to_registered_repositories() 
     );
     loopflow_execution::work::wave::bootstrap::upsert_wave(&store, &other).unwrap();
     snapshot.snapshot.projects[0].id = "other-project".into();
-    snapshot.snapshot.projects[0].initiative_ids = vec!["other-initiative".into()];
     snapshot.snapshot.items[0].id = "other-task".into();
     snapshot.snapshot.items[0].project_id = Some("other-project".into());
     snapshot.snapshot.items[0].completed = true;
     snapshot.wave_id = other.id().clone();
-    snapshot.initiative = "other-initiative".into();
     store.seed_inventory(&snapshot).unwrap();
     assert!(store
         .task_by_issue("PRD-52")

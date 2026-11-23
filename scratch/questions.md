@@ -17,3 +17,16 @@
 - An arriving Project record (Git or hub exchange) for a Wave that already
   holds a different Project fails the unique index. Only a released build can
   send one (it makes Projects per chapter); not handled here.
+- Removing or renaming a Wave no longer touches Linear (the Initiative
+  archive/rename went). Its linked Linear Project is left as it is; archiving
+  it on removal would be a new tracker action.
+- Relinking a Wave whose Project Loopflow already made leaves that made
+  Linear Project in Linear, empty.
+- `WorkValue::ProjectInitiatives` stays deserializable because peers on
+  released lf still send it in Git and hub exchange; nothing here produces it.
+- This repository's own `.lf/wave/*/config.yaml` files still carry
+  `linear: initiative:`; released lf reads them, the branch ignores them.
+- A Wave removal summary now always says "N Project(s) stay readable in
+  history", since every Wave has its Project; `WaveRemoval.projects` equals
+  the number of retiring Waves. Kept as is; dropping the line and field is a
+  wire change for another pass.

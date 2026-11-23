@@ -55,7 +55,9 @@ capacity as unmeasured unless a separate permitted experiment exists".
   The report retains the per-invocation counters and hashes. The opening
   Machine status was 100/100 loaded, 10 GiB/10 GiB occupied.
 - `uv run pytest -q python/tests/{test_build_cache,test_dev_lf}.py` passed all
-  17 cases. A linked checkout with its hook skipped returned 3 without creating
+  17 cases (rerun November 22 after renaming the writer). They cover skipped-hook
+  recovery, the stale daemon, missing inventory with a loaded root, caller-owned
+  configuration and the isolated build. A linked checkout with its hook skipped returned 3 without creating
   the inventory. Manual registration listed both roots and status returned 0.
 - With the installed pin on a private socket, a stale daemon survived both
   status and caller-owned registration. Machine registration stopped it. The

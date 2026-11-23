@@ -48,14 +48,14 @@ def _configured_roots(settings: dict) -> list[str]:
     return roots
 
 
-def refresh(repo: Path, config: Path, settings: dict | None = None) -> None:
+def write_inventory(repo: Path, config: Path, settings: dict | None = None) -> None:
     """Write the next daemon's configuration, leaving the running daemon alone."""
     config.parent.mkdir(parents=True, exist_ok=True)
     with config.with_suffix(".lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         roots = worktree_roots(repo)
         saved = json.loads(config.read_text()) if config.exists() else {}
-        # Keep other repositories using the same Machine cache. Refresh each
+        # Keep other repositories using the same Machine cache. Rewrite each
         # repository's complete inventory so removed worktrees do not accumulate.
         # Git hooks can export the current repository even when cwd points elsewhere.
         other_env = {
@@ -214,7 +214,7 @@ def install(repo: Path, revision: str) -> None:
             stdin=subprocess.DEVNULL,
         )
     subprocess.run([str(wrapper), "--version"], check=True)
-    refresh(repo, inventory_path(), _default_configuration())
+    write_inventory(repo, inventory_path(), _default_configuration())
     install_hook(repo)
     configure_cargo(cargo_configuration(), wrapper, cache_environment(revision))
 
@@ -357,7 +357,7 @@ def register(repo: Path) -> None:
     # Concurrent checkouts must observe the daemon after the preceding registration.
     with config.with_suffix(".register.lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
-        refresh(repo, config)
+        write_inventory(repo, config)
         state = cache_status(repo, wrapper, env)
         if not state["exit_code"]:
             return

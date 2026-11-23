@@ -10,7 +10,7 @@ from pathlib import Path
 
 import build_cache
 import pytest
-from build_cache import configure_cargo, install_hook, refresh
+from build_cache import configure_cargo, install_hook, write_inventory
 
 
 def _git(directory: Path, *args: str) -> None:
@@ -33,11 +33,11 @@ def test_roots_follow_creation_removal_and_multiple_repositories(tmp_path, monke
         "initial",
     )
     config = tmp_path / "cache/config.json"
-    refresh(repo, config, {"cache": {"disk": {"size": 123456}}})
+    write_inventory(repo, config, {"cache": {"disk": {"size": 123456}}})
     assert json.loads(config.read_text())["basedirs"] == [str(repo.resolve())]
     worktree = tmp_path / "later\nworktree with spaces"
     _git(repo, "worktree", "add", "--detach", str(worktree))
-    refresh(worktree, config)
+    write_inventory(worktree, config)
     assert set(json.loads(config.read_text())["basedirs"]) == {
         str(repo.resolve()),
         str(worktree.resolve()),
@@ -45,18 +45,18 @@ def test_roots_follow_creation_removal_and_multiple_repositories(tmp_path, monke
     other = tmp_path / "other repo"
     other.mkdir()
     _git(other, "init", "-q")
-    refresh(other, config)
+    write_inventory(other, config)
     _git(repo, "worktree", "remove", str(worktree))
     with monkeypatch.context() as hook:
         hook.setenv("GIT_DIR", str(repo / ".git"))
-        refresh(repo, config)
+        write_inventory(repo, config)
     assert set(json.loads(config.read_text())["basedirs"]) == {
         str(repo.resolve()),
         str(other.resolve()),
     }
     previous = config.stat().st_mtime_ns
     (repo / "nested").mkdir()
-    refresh(repo / "nested", config)
+    write_inventory(repo / "nested", config)
     assert config.stat().st_mtime_ns == previous
     assert json.loads(config.read_text())["cache"]["disk"]["size"] == 123456
 
@@ -223,7 +223,7 @@ def serving_cache(tmp_path, monkeypatch, pinned_cache):
 
 
 def test_register_stops_the_stale_daemon(tmp_path, serving_cache):
-    refresh(tmp_path, build_cache.inventory_path())
+    write_inventory(tmp_path, build_cache.inventory_path())
     state = build_cache.cache_status(tmp_path, *build_cache.configured_cache())
     assert state["exit_code"] == 3
     assert state["listed_roots"] == [str(tmp_path.resolve())]

@@ -767,7 +767,8 @@ line in `logs/lf.log`; the tool goes on and the next boundary asks again.
 The launch carries its capability as `LF_PROVIDER_CONTEXT` when the server
 records its boundaries and as `LF_BARE_STEER` when no one does. For chats and
 batches, tool and prompt hooks run only `--moment steer`, which reports nothing. Nothing wakes a chat or batch: a chat idle at its prompt reads a
-steer when its person next types.
+steer when its person next types. A work session's start claims none when the
+server can wake it; the wake runs them as a turn.
 
 Every tool hook first compares files and starts `lf` only when a steer may be
 waiting. Saving a steer touches one marker under `steers/` inside the write:
@@ -813,11 +814,16 @@ that lapses for the next boundary:
   A turn already running takes the message as a steer. OpenCode's TUI shows
   the answer but not the message that caused it.
 
-A conversation reopened after it was quit runs no turn until someone types.
-The first boundary that names a new inbox or socket records its provider as
-idle and sends what was saved while it was closed: an OpenCode plugin names
-its socket as it loads, a Pi extension at `session_start`. Claude's start hook
-reads those steers into its context instead, and starts no turn.
+A conversation reopened after it was quit takes what was saved while it was
+closed as a turn, before anyone types. A new provider process's first boundary
+records it idle, whatever the process before it was doing
+(`record_first_boundary`), and that boundary or a later one naming a new inbox
+or socket wakes it. Claude reports its start; Codex runs its start hook only
+inside a turn, so lf's launch reports the start itself once the app-server
+holds the conversation, or the opening prompt before its turn. An OpenCode
+plugin names its socket as it loads, a Pi extension at `session_start`. A
+start the server recorded on a conversation it can wake claims no steers:
+they go to the wake, and the next boundary claims what it could not deliver.
 
 A server that restarts reads the same conversations again. An unreachable
 Claude inbox or socket leaves its news unclaimed. After a failed send the steers arrive

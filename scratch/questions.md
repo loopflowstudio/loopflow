@@ -14,3 +14,9 @@
 
 3. Claude launched with an opening prompt and a waiting steer may run two
    turns (prompt, then the woken steer). Steers arrive once. Left as is.
+
+4. The Start-claim skip asks the store whether the server can wake this
+   conversation (an idle candidate on this AgentProcess) rather than whether
+   the Session is interactive. A work session whose wake has no address yet
+   reads its steers at start, as before. Passed over: `interactive` alone,
+   which leaves such a steer for the first typed turn.

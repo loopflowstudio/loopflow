@@ -138,13 +138,33 @@ prompt once and hears the steer once.
 
 ## Slices
 
-1. **Claude reopen, end to end.** `record_first_boundary`, the call in
-   `answer`, the Start-claim skip. Probe a real Claude work session: quit,
-   steer, resume; watch the turn start and `lf session steers` read
-   delivered. Shows whether Claude takes an inbox message at SessionStart
-   (the risk above).
-2. **Codex reopen.** The `open_native` report; real Codex 0.171 reopen by
-   hand; the `wake::tests` stand-in case.
-3. **Opening prompt and fallbacks.** Prompt-first tests, unreachable-inbox
-   fallback to the typed turn, OpenCode/Pi reopen through `idle_wake.py` to
-   confirm nothing moved; README rewrite.
+1. **Built:** `record_first_boundary` (read first, so later boundaries take no
+   write lock; interactive Sessions only), its call at the top of `answer`,
+   `Reachable` on first-or-new-address, the Start-claim skip. The skip keys on
+   "the server can wake this conversation" (`idle_conversation_candidates`
+   names this process), not on `interactive` alone: a Claude whose inbox key
+   is not yet published still folds the steer into its start, as today,
+   instead of waiting for a typed turn. Tests: `boundary::tests`
+   (`a_reopened_conversation_is_idle_at_its_first_boundary_and_woken_once`,
+   `a_first_boundary_that_is_a_prompt_leaves_the_conversation_working`),
+   `context::tests::a_wakeable_start_leaves_waiting_steers_to_the_wake`.
+   **Not run:** the real Claude reopen probe (the inbox-at-SessionStart risk
+   above). It needs a held terminal and the account's Claude login; run it at
+   qa with the branch `lf` on a private Machine: quit, `lf steer`, `lf resume`,
+   watch for a turn and `lf session steers` reading `delivered`. If Claude
+   drops the early message, the steer shows `delivered` with no turn: then
+   build the bounded `sessions/<pid>.json` `status: idle` wait in the wake.
+2. **Built:** `open_native` reports Start (reopen) or the opening prompt
+   (before `start_turn`) through `hook_request`; `HOOK_DEADLINE` moved to
+   `machine::client`. Test:
+   `wake::tests::a_reopened_codex_work_session_starts_a_turn_on_its_waiting_steer`
+   (stand-in app-server, server side only). **Not run:** real Codex reopen.
+3. **Remaining:** OpenCode/Pi reopen through `idle_wake.py` (the script has no
+   reopen leg yet; add one: quit the TUI, steer, `lf resume`, wait for the
+   marker); the unreachable-inbox fallback test; README rewrite is done.
+
+## Checks
+
+- `cargo nextest run -p loopflow --lib -E 'test(server::boundary::tests::) | test(server::wake::tests::) | test(lf::commands::context::tests::)'`: 25 passed (implement).
+- `cargo test -p loopflow --test integration documented_commands::`: passed (implement).
+- clippy, real Claude/Codex/OpenCode/Pi reopen: gate and qa.

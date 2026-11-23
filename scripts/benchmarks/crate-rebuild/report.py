@@ -111,11 +111,23 @@ def _test_loop(source: Path, output: Path) -> None:
         "attributed to a compiler only when no other interval overlaps. "
         "Two statistics RPCs per workspace compiler are included in timings. "
         "Test compiler time includes linking. Memory is sampled every second; "
-        "sampled peak can miss shorter peaks. Daemon CPU is separate.",
+        "sampled peak can miss shorter peaks. Daemon CPU is separate. "
+        "Published cache observations count all loaded roots and name the measured worktrees.",
         "measurement_drivers": config.get("drivers"),
         "report_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
         "receipts": receipts,
     }
+    measured_roots = {Path(tree["path"]) for tree in config.get("trees", {}).values()}
+    for group in [receipts, *payload["abandoned_attempts"].values()]:
+        for receipt in group:
+            for field in ("stats_before", "stats_after"):
+                stats = receipt.get(field)
+                if stats and "basedirs" in stats:
+                    roots = stats.pop("basedirs")
+                    stats["basedir_count"] = len(roots)
+                    stats["measurement_basedirs"] = [
+                        root for root in roots if Path(root) in measured_roots
+                    ]
     output.mkdir(parents=True, exist_ok=True)
     raw = json.dumps(payload, indent=2) + "\n"
     (output / "loo-921-raw.json.gz").write_bytes(gzip.compress(raw.encode(), mtime=0))

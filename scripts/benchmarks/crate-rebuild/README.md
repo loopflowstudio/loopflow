@@ -78,7 +78,8 @@ Both worktrees use the installed hook and pin with a private inventory, socket
 and cache. Idle exit is disabled for this experiment. `stop.json` records the
 compiler PID observed across registration, the original and replacement daemon
 PIDs, whether the replacement loaded the second root, and the Cargo and test
-outcomes. `cargo.log` holds the build output. When the probe writes to
+outcomes. It also checks whether the execution rlib reached the private disk
+cache and records the cached model rlib as a control. `cargo.log` holds the build output. When the probe writes to
 `registration/` in the measurement directory, the report includes its receipt.
 
 ## Cache probes and the revision comparison

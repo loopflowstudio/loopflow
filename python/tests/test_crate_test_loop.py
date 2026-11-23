@@ -1,5 +1,6 @@
 """Benchmark reports require complete passing cohorts and exclude seed costs."""
 
+import gzip
 import importlib.util
 import json
 from pathlib import Path
@@ -89,11 +90,22 @@ def test_report_selects_incremental_only_when_both_edit_totals_win(
         owner = "app" if row["case"] in probe.CASES[:3] else "execution"
         if owner in winners and row["mode"] == "incremental":
             row["wall_seconds"] *= 0.5
+    rows[0]["stats_before"] = {
+        "stats": {"compile_requests": 2},
+        "basedirs": ["/measurement/a/", "/unrelated-checkout/"],
+    }
     source = tmp_path / "source"
     source.mkdir()
     (source / "receipts.json").write_text(json.dumps(rows))
     (source / "configuration.json").write_text(
-        json.dumps({"cohorts": 3, "revision": "fixture", "rustc": "fixture rustc"})
+        json.dumps(
+            {
+                "cohorts": 3,
+                "revision": "fixture",
+                "rustc": "fixture rustc",
+                "trees": {"a": {"path": "/measurement/a"}},
+            }
+        )
     )
     output = tmp_path / "results"
     report._test_loop(source, output)
@@ -102,7 +114,12 @@ def test_report_selects_incremental_only_when_both_edit_totals_win(
     assert result["concurrent_worktree_capacity"] is None
     assert "10 GiB cap" in result["shared_cache_limit"]
     assert len(result["receipts"]) == 39
-    assert (output / "loo-921-raw.json.gz").exists()
+    raw = json.loads(gzip.decompress((output / "loo-921-raw.json.gz").read_bytes()))
+    assert raw["receipts"][0]["stats_before"] == {
+        "stats": {"compile_requests": 2},
+        "basedir_count": 2,
+        "measurement_basedirs": ["/measurement/a/"],
+    }
     assert "A Rust edit through a passing test" in (output / "loo-921.html").read_text()
     assert result["shared_cache_limit"] in (output / "loo-921.html").read_text()
 

@@ -8,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import zipfile
 from contextlib import ExitStack
 from pathlib import Path
 
@@ -32,6 +33,15 @@ def _execution_compiler(group: int) -> int | None:
         if name == "loopflow_execution" and "link" in emits:
             return int(fields[1])
     return None
+
+
+def _cached_libraries(directory: Path) -> set[str]:
+    libraries = set()
+    for entry in directory.glob("*/*/*"):
+        if entry.is_file() and zipfile.is_zipfile(entry):
+            with zipfile.ZipFile(entry) as archive:
+                libraries.update(name for name in archive.namelist() if name.endswith(".rlib"))
+    return libraries
 
 
 def _wait_for_exit(pid: int) -> bool:
@@ -140,6 +150,14 @@ def main() -> None:
                     build.wait()
         new_pid = build_cache.daemon_pid(env["SCCACHE_SERVER_UDS"])
         stats = json.loads(_run([str(wrapper), "--show-stats", "--stats-format", "json"], a, env))
+        cached = _cached_libraries(root / "cache")
+        artifacts = sorted((a / "target/debug/deps").glob("libloopflow_execution-*.rlib"))
+        observation["cached_control_rlibs"] = sorted(
+            n for n in cached if n.startswith("libloopflow_model-")
+        )
+        observation["interrupted_rlibs"] = {
+            artifact.name: artifact.name in cached for artifact in artifacts
+        }
         observation.update(
             cargo_exit=build.returncode,
             replacement_daemon=new_pid,

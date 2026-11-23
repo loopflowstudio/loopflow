@@ -532,18 +532,37 @@ struct DesktopAction {
             return browserOutcome(workspace)
         },
         DesktopAction("files", "Show Files", scope: .pane,
-            arguments: [.init(name: "path", kind: .string, required: false)], available: taskTool) { context in
-            if let path = context.args["path"] {
-                guard !path.hasPrefix("/"), !path.split(separator: "/").contains("..") else {
-                    throw DesktopArgumentError("Files path must stay inside the checkout; nothing opened.")
+            arguments: [.init(name: "path", kind: .string, required: false), .init(name: "lines", kind: .string, required: false),
+                        .init(name: "mode", kind: .string, required: false)], available: taskTool) { context in
+            guard let path = context.args["path"] else { return try show(.files, context) }
+            guard !path.isEmpty, !path.hasPrefix("/"), !path.split(separator: "/").contains("..") else {
+                throw DesktopArgumentError("Files needs a path inside the checkout.")
+            }
+            let mode = context.args["mode"] ?? "read"
+            guard ["read", "diff"].contains(mode) else { throw DesktopArgumentError("Expected read or diff mode.") }
+            var lines: ClosedRange<Int>?
+            if let address = context.args["lines"] {
+                let ends = address.split(separator: "-", omittingEmptySubsequences: false)
+                guard (1...2).contains(ends.count), let start = Int(ends[0]), let end = ends.last.flatMap({ Int($0) }),
+                      start > 0, start <= end else { throw DesktopArgumentError("Expected LINE or LINE-END.") }
+                lines = start...end
+            }
+            let request = FilesBrowserState.Presentation(path: path, lines: lines, mode: mode == "diff" ? .diff : .read)
+            let workspace = try context.task
+            if let pane = workspace.multiplexer.browserPane, !workspace.multiplexer.collapsedPaneIds.contains(pane.id) {
+                switch pane.content.selectedBrowserTab {
+                case .files, .changes:
+                    let files = try workspace.files(for: pane.content, task: nil, query: RegistryQueryLocal.shared)
+                    if files.holdsPresentation {
+                        files.browser.offer(request)
+                        return browserOutcome(workspace)
+                    }
+                default: break
                 }
             }
             let outcome = try show(.files, context)
-            if let path = context.args["path"] {
-                let workspace = try context.task
-                if let browser = workspace.multiplexer.browserPane {
-                    try workspace.files(for: browser.content, task: nil, query: RegistryQueryLocal.shared).presentFile(path)
-                }
+            if let pane = workspace.multiplexer.browserPane {
+                try workspace.files(for: pane.content, task: nil, query: RegistryQueryLocal.shared).openPresentation(request)
             }
             return outcome
         },
@@ -581,7 +600,6 @@ struct DesktopAction {
             keys: [.init(.character("e"), [.control, .command])], available: { $0.editableFile != nil }) { context in
             guard let files = context.editableFile else { throw DesktopTargetError("Open a text file in Files to edit it.") }
             files.mode = files.mode == .edit ? .read : .edit
-            files.noteInteraction()
             return nil
         },
         DesktopAction("details", "Show Task Details", scope: .pane,

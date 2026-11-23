@@ -117,6 +117,7 @@ struct DTOFixtureTests {
         #expect(frames.map(\.paths) == [["note.txt", ".git/index", ""], []])
         #expect(frames[0].request == frames[1].request)
         #expect(frames[0].checkout == "/repo/task")
+        #expect(frames[0].ignoredScratch == ["scratch/explore.html"])
         #expect(try JSONDecoder().decode([TaskFilesFrame].self, from: JSONEncoder().encode(frames)) == frames)
     }
 

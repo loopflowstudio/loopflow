@@ -71,11 +71,14 @@ public struct TaskFilesFrame: Codable, Equatable, Sendable {
     public let machineID: String
     public let checkout: String
     /// Checkout-relative paths the peer did not find git-ignored: `.git/...` for
-    /// metadata, `""` for a rescan. Empty is a heartbeat.
+    /// metadata, `""` for a rescan. A heartbeat leaves both lists empty.
     public let paths: [String]
+    /// Ignored scratch pages that can update an open document or its rail entry.
+    public let ignoredScratch: [String]
 
     enum CodingKeys: String, CodingKey {
         case request, checkout, paths
+        case ignoredScratch = "ignored_scratch"
         case taskID = "task_id", machineID = "machine_id"
     }
 }

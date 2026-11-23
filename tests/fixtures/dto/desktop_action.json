@@ -307,6 +307,16 @@
           "name": "path",
           "kind": "string",
           "required": false
+        },
+        {
+          "name": "lines",
+          "kind": "string",
+          "required": false
+        },
+        {
+          "name": "mode",
+          "kind": "string",
+          "required": false
         }
       ],
       "keys": []

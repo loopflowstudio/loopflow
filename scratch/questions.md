@@ -15,3 +15,6 @@
 - **Opening a grep hit.** Return opens the numbered source even for Markdown and HTML, since a rendered page has no source-line coordinate. Selecting the file normally opens its rendered view. Disk byte ranges highlight only when the reader holds that revision.
 
 - **Definition lookup order.** Prefer exact declarations in the live source file. When it has none, search the owning checkout. Closing the peek leaves history untouched. The source reader uses the same syntax tree for outline entries and coloring.
+
+- The Open bar shows the most recent offered path. Further presentations of that path replace its previous line range. Other pending paths stay available in Open & Scratch.
+- Line totals for untracked text use the reader’s 1,000,000-byte ceiling. Larger untracked files retain their change stop and omit the line total.

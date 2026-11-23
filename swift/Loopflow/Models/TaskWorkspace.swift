@@ -111,9 +111,26 @@ public struct TaskChangedFile: Decodable, Sendable, Identifiable, Hashable {
     /// Runs of changed lines in the file's patch: the Diff's stops, known
     /// before its lines are read.
     public let changes: Int
+    public struct ChangedLines: Decodable, Hashable, Sendable {
+        public let added: Int
+        public let removed: Int
+    }
+    public let lines: ChangedLines?
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        path = try values.decode(String.self, forKey: .path)
+        oldPath = try values.decodeIfPresent(String.self, forKey: .oldPath)
+        committed = try values.decode(Bool.self, forKey: .committed)
+        staged = try values.decode(Bool.self, forKey: .staged)
+        unstaged = try values.decode(Bool.self, forKey: .unstaged)
+        untracked = try values.decode(Bool.self, forKey: .untracked)
+        changes = try values.decode(Int.self, forKey: .changes)
+        lines = try values.decode(ChangedLines?.self, forKey: .lines)
+    }
 
     enum CodingKeys: String, CodingKey {
-        case path, committed, staged, unstaged, untracked, changes
+        case path, committed, staged, unstaged, untracked, changes, lines
         case oldPath = "old_path"
     }
 }

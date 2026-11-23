@@ -1250,9 +1250,9 @@ public struct RegistryQuery: Sendable {
 
     /// One page of a checkout directory's immediate entries, directories first;
     /// `cursor` is the previous page's `nextCursor`. The empty path is the root.
-    public func taskFiles(issue: String, directory: String, cursor: String? = nil) async throws -> TaskDirectory {
+    public func taskFiles(issue: String, directory: String, cursor: String? = nil, showIgnored: Bool = false) async throws -> TaskDirectory {
         try await serve(.taskFiles(issue: issue, path: directory.isEmpty ? "." : directory,
-                                   cursor: cursor, showIgnored: false)).decode(TaskDirectory.self)
+                                   cursor: cursor, showIgnored: showIgnored)).decode(TaskDirectory.self)
     }
 
     /// One file of the Task worktree, or its read-only version at commit `at`

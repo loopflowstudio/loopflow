@@ -23,8 +23,10 @@ pub struct TaskFilesFrame {
     pub machine_id: MachineId,
     pub checkout: String,
     /// Checkout-relative paths that may change what the view shows: `.git/...`
-    /// for repository metadata, `""` for a rescan. Empty is a heartbeat.
+    /// for repository metadata, `""` for a rescan. A heartbeat leaves both lists empty.
     pub paths: Vec<String>,
+    /// Ignored scratch pages that can refresh a document without invalidating Git comparisons.
+    pub ignored_scratch: Vec<String>,
 }
 
 pub(crate) fn pinned_checkout(issue: &str, expected: &Path) -> Result<TaskCheckout> {
@@ -87,7 +89,7 @@ pub fn watch_task_files(issue: &str, expected: &Path, request: &str) -> Result<(
         input_closed.store(true, Ordering::Release);
         let _ = send.send(Vec::new());
     });
-    let mut paths = vec![String::new()];
+    let mut changes = (vec![String::new()], Vec::new());
     let mut ignore_failed = false;
     loop {
         if closed.load(Ordering::Acquire) {
@@ -106,22 +108,23 @@ pub fn watch_task_files(issue: &str, expected: &Path, request: &str) -> Result<(
             task_id: current.task_id,
             machine_id: machine_id.clone(),
             checkout: expected.to_string_lossy().into_owned(),
-            paths,
+            paths: changes.0,
+            ignored_scratch: changes.1,
         };
         println!("{}", serde_json::to_string(&frame)?);
         std::io::stdout().flush()?;
         let heartbeat = Instant::now() + Duration::from_secs(2);
-        paths = loop {
+        changes = loop {
             // Continuous ignored churn must not starve the heartbeat's ownership recheck.
             let wait = heartbeat.saturating_duration_since(Instant::now());
             if wait.is_zero() {
-                break Vec::new();
+                break (Vec::new(), Vec::new());
             }
             let Ok(first) = events.recv_timeout(wait) else {
-                break Vec::new();
+                break (Vec::new(), Vec::new());
             };
             if closed.load(Ordering::Acquire) {
-                break Vec::new();
+                break (Vec::new(), Vec::new());
             }
             std::thread::sleep(Duration::from_millis(150));
             let batch = first
@@ -129,7 +132,7 @@ pub fn watch_task_files(issue: &str, expected: &Path, request: &str) -> Result<(
                 .chain(events.try_iter().flatten())
                 .collect();
             let relevant = relevant_paths(expected, batch, &mut ignore_failed);
-            if !relevant.is_empty() {
+            if !relevant.0.is_empty() || !relevant.1.is_empty() {
                 break relevant;
             }
         };
@@ -164,15 +167,16 @@ impl EventRoots {
     }
 }
 
-/// Drop git-ignored paths. Metadata and rescans pass; the reader judges them.
+/// Separate ignored scratch pages from comparison changes and discard other ignored writes.
 /// When git cannot judge, every path stays relevant.
-fn relevant_paths(root: &Path, batch: BTreeSet<String>, ignore_failed: &mut bool) -> Vec<String> {
-    if batch.contains("") {
-        return vec![String::new()];
-    }
+fn relevant_paths(
+    root: &Path,
+    batch: BTreeSet<String>,
+    ignore_failed: &mut bool,
+) -> (Vec<String>, Vec<String>) {
     let candidates = batch
         .iter()
-        .filter(|path| *path != ".git" && !path.starts_with(".git/"))
+        .filter(|path| !path.is_empty() && *path != ".git" && !path.starts_with(".git/"))
         .map(String::as_str);
     let ignored = match crate::git::ignored_paths(root, candidates) {
         Ok(ignored) => ignored,
@@ -183,8 +187,11 @@ fn relevant_paths(root: &Path, batch: BTreeSet<String>, ignore_failed: &mut bool
             HashSet::new()
         }
     };
-    batch
+    let (visible, ignored): (Vec<_>, Vec<_>) =
+        batch.into_iter().partition(|path| !ignored.contains(path));
+    let scratch = ignored
         .into_iter()
-        .filter(|path| !ignored.contains(path))
-        .collect()
+        .filter(|path| super::find::is_scratch_page(Path::new(path)))
+        .collect();
+    (visible, scratch)
 }

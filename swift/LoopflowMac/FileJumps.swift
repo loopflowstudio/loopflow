@@ -12,6 +12,7 @@ struct FileVisit: Equatable {
     let line: Int
     let hit: TaskGrepHit?
     let visitID: UUID?
+    var lines: ClosedRange<Int>?
 }
 
 @Observable @MainActor

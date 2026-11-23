@@ -57,6 +57,7 @@
         "staged": false,
         "unstaged": false,
         "untracked": false,
+        "lines": {"added": 1, "removed": 1},
         "changes": 1
       }
     ],

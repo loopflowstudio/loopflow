@@ -626,7 +626,8 @@ below that width (picking a file closes the drawer):
   flood the list; closing a clean file drops it, while dirty drafts stay visible
   until saved or discarded.
 - **Changed in Task** lists whole-Task changes (`+N −M`), unaffected by choosing
-  a step comparison in **Diff**.
+  a step comparison in **Diff**. Untracked files over the 1,000,000-byte reader
+  limit appear by name without line totals.
 - **Checkout** reads directories lazily from the Task's Machine, 500 entries at
   a time (**Load more** for the rest), compacts single-child folders once their
   listing completes, reveals the open file through its ancestors and offers
@@ -718,7 +719,7 @@ writes to `scratch/` (including gitignored paths) badge the file in **Open &
 Scratch** and show a quiet update bar (`Updated scratch/explore.html · Open`),
 leaving your reading position, caret and keyboard focus alone. If the written
 HTML page is already visible, Files waits briefly for writes to settle (~800 ms)
-before reloading once and restoring scroll. The planned presentation command,
+before reloading once and restoring scroll. The presentation command,
 `lf desktop files PATH[:LINE[-END]] [--mode read|diff]`, opens a file in Read
 by default and records the prior position in jump history. During active
 editing or Diff review, a quiet `Presented <path> · Open` bar lets you choose

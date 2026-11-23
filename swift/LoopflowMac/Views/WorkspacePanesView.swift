@@ -717,7 +717,6 @@ struct SessionPaneView: View {
                                        id: "page-\(page.rawValue.lowercased())") {
                                 workspace.showBrowser(.files, from: pane)
                                 files.page = page
-                                files.noteInteraction()
                             }
                         }
                     }
@@ -813,15 +812,12 @@ struct SessionPaneView: View {
                             graph: task.flatMap { model.taskWork[$0.id].value?.graph }, isFocused: isFocused, addToConversation: conversationInput())
                             .task(id: pane.content.selectedBrowserTab?.id) {
                                 // A tab names its own comparison, never one Graph step's.
-                                files.showStep(nil)
+                                files.diffReview.showStep(nil)
                                 if case .changes(let comparison) = pane.content.selectedBrowserTab {
-                                    files.comparison = comparison
+                                    files.diffReview.comparison = comparison
                                     files.page = .changes
-                                    await files.refresh()
-                                } else if files.comparison != .workingTree(base: "parent") {
-                                    files.comparison = .workingTree(base: "parent")
-                                    await files.refresh()
-                                    await files.loadDiff()
+                                } else if files.diffReview.comparison != .workingTree(base: "parent") {
+                                    files.diffReview.comparison = .workingTree(base: "parent")
                                 }
                             }
                             .simultaneousGesture(TapGesture().onEnded { focusPane() })

@@ -150,10 +150,12 @@ impl TaskFileInventory {
     }
 }
 
-fn is_scratch_page(path: &Path) -> bool {
-    path.extension()
-        .and_then(|ext| ext.to_str())
-        .is_some_and(|ext| ext.eq_ignore_ascii_case("md") || ext.eq_ignore_ascii_case("html"))
+pub(super) fn is_scratch_page(path: &Path) -> bool {
+    path.starts_with("scratch")
+        && path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("md") || ext.eq_ignore_ascii_case("html"))
 }
 
 fn match_span(path: &str, query: &str) -> Option<usize> {

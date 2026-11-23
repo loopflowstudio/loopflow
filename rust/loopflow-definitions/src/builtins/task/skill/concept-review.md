@@ -53,7 +53,7 @@ the product's concepts and the code's concepts line up?
 
 One self-contained file, readable in light and dark, that shows the thing
 instead of describing it, marks proposed apart from existing, and ends with
-numbered questions so "2b" is a complete answer. Say its path. Don't change
+numbered questions so "2b" is a complete answer. Present it with `lf desktop files scratch/concept-review.html` and give its path. Don't change
 code.
 
 ## With a person

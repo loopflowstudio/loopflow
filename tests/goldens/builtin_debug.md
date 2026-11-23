@@ -77,6 +77,9 @@ one headless in this checkout on any model (`-a codex`), and your harness's
 own subagent is fine too. You answer for what it returns; check it before
 you use it.
 
+Present a finished file beside the conversation with `lf desktop files <path>`.
+Exit 4 means Desktop is unattached. Give the path and continue.
+
 ## Notes
 
 `scratch/` holds this checkout's working notes, and `scratch/plan.md` is the

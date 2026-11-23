@@ -4,8 +4,8 @@ use super::{
     block_on_task, comparison_context, completion_pending, completion_refusal, file_context,
     file_save, file_store, owning_wave, repository_for_task, resolve_task_agent,
     task_configuration_refusal, task_error, task_event_process_refusal, task_store,
-    task_worktree_blocker, TaskChangedFile, TaskChangesSnapshot, TaskCommit, TaskComparison,
-    TaskDiffSnapshot, TaskFileSnapshot, TaskFileState, TaskSnapshot, TaskWorkspace,
+    task_worktree_blocker, ChangedLines, TaskChangedFile, TaskChangesSnapshot, TaskCommit,
+    TaskComparison, TaskDiffSnapshot, TaskFileSnapshot, TaskFileState, TaskSnapshot, TaskWorkspace,
 };
 use std::collections::BTreeMap;
 use std::path::{Component, Path, PathBuf};
@@ -270,11 +270,13 @@ pub(super) fn changes_snapshot(workspace: TaskComparison<'_>) -> OpsResult<TaskC
     let counts = change_counts(workspace)?;
     files.retain(|path, file| {
         file.old_path = net.get(path).cloned().flatten();
-        file.changes = match counts.get(path) {
+        let counts = match counts.get(path) {
             Some(count) => *count,
             None if file.untracked => untracked_changes(&workspace.checkout.worktree.join(path)),
-            None => 0,
+            None => PatchCount::empty(),
         };
+        file.changes = counts.stops;
+        file.lines = counts.lines;
         net.contains_key(path) || file.untracked
     });
     let (scratch, scratch_truncated) = if workspace.head_commit.is_none() {
@@ -298,10 +300,28 @@ pub(super) fn changes_snapshot(workspace: TaskComparison<'_>) -> OpsResult<TaskC
     })
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub(super) struct PatchCount {
+    pub(super) stops: u64,
+    pub(super) lines: Option<ChangedLines>,
+}
+
+impl PatchCount {
+    fn empty() -> Self {
+        Self {
+            stops: 0,
+            lines: Some(ChangedLines {
+                added: 0,
+                removed: 0,
+            }),
+        }
+    }
+}
+
 /// Each tracked file's runs of changed lines, from the patch the Diff reads:
 /// with its usual context, since Git aligns some changes differently without.
 /// A file with no hunks (binary, a pure rename) is absent.
-fn change_counts(workspace: TaskComparison<'_>) -> OpsResult<BTreeMap<String, u64>> {
+fn change_counts(workspace: TaskComparison<'_>) -> OpsResult<BTreeMap<String, PatchCount>> {
     Ok(count_changes(&git_output_bytes(
         workspace.checkout.worktree,
         &comparison_diff_args(workspace),
@@ -329,13 +349,14 @@ fn comparison_diff_args<'a>(workspace: TaskComparison<'a>) -> Vec<&'a str> {
     args
 }
 
-pub(super) fn count_changes(patch: &[u8]) -> BTreeMap<String, u64> {
+pub(super) fn count_changes(patch: &[u8]) -> BTreeMap<String, PatchCount> {
     let mut counts = BTreeMap::new();
     let mut old_path = None::<String>;
     let mut path = None::<String>;
     // Lines left in the current hunk, old and new side.
     let (mut old, mut new) = (0u64, 0u64);
     let mut previous = b' ';
+    let mut count = PatchCount::empty();
     for line in patch.split(|byte| *byte == b'\n') {
         if old > 0 || new > 0 {
             match line.first() {
@@ -349,28 +370,35 @@ pub(super) fn count_changes(patch: &[u8]) -> BTreeMap<String, u64> {
             }
             let kind = line[0];
             let starts = kind != b' ' && (previous == b' ' || (kind == b'-' && previous == b'+'));
-            if starts {
-                if let Some(path) = path.as_ref().or(old_path.as_ref()) {
-                    *counts.entry(path.clone()).or_insert(0) += 1;
+            if kind != b' ' {
+                count.stops += u64::from(starts);
+                if let Some(lines) = &mut count.lines {
+                    lines.added += u64::from(kind == b'+');
+                    lines.removed += u64::from(kind == b'-');
                 }
             }
             previous = kind;
         } else if line.starts_with(b"diff --git ") {
-            old_path = None;
-            path = None;
-        } else if let Some(name) = line.strip_prefix(b"--- a/") {
-            old_path = Some(patch_path(name));
-        } else if let Some(name) = line.strip_prefix(b"+++ b/") {
-            path = Some(patch_path(name));
+            if let Some(name) = path.take().or(old_path.take()) {
+                counts.insert(name, count);
+            }
+            count = PatchCount::empty();
+        } else if let Some(name) = line.strip_prefix(b"--- ") {
+            old_path = patch_path(name).strip_prefix("a/").map(str::to_owned);
+        } else if let Some(name) = line.strip_prefix(b"+++ ") {
+            path = patch_path(name).strip_prefix("b/").map(str::to_owned);
         } else if line.starts_with(b"@@ ") {
             (old, new) = hunk_lengths(line);
             previous = b' ';
         }
     }
+    if let Some(name) = path.or(old_path) {
+        counts.insert(name, count);
+    }
     counts
 }
 
-/// A path as Git writes it after `a/` or `b/`: C-quoted when it holds
+/// A path as Git writes it: C-quoted when it holds
 /// unusual bytes, followed by a tab when it holds a space.
 fn patch_path(name: &[u8]) -> String {
     let name = name.strip_suffix(b"\t").unwrap_or(name);
@@ -421,16 +449,41 @@ fn hunk_lengths(header: &[u8]) -> (u64, u64) {
 
 /// An untracked file reads as one addition, unless it is empty or binary (a
 /// NUL in Git's first 8,000 bytes), when there is nothing to step to.
-fn untracked_changes(path: &Path) -> u64 {
+fn untracked_changes(path: &Path) -> PatchCount {
     use std::io::Read;
-    match std::fs::symlink_metadata(path) {
-        Ok(metadata) if metadata.file_type().is_symlink() => return 1,
-        Ok(metadata) if metadata.is_file() => {}
-        _ => return 0,
+    let metadata = match std::fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => {
+            return PatchCount {
+                stops: 1,
+                lines: Some(ChangedLines {
+                    added: 1,
+                    removed: 0,
+                }),
+            }
+        }
+        Ok(metadata) if metadata.is_file() => metadata,
+        _ => return PatchCount::empty(),
+    };
+    let limit = if metadata.len() > MAX_FILE_BYTES as u64 {
+        8_000
+    } else {
+        MAX_FILE_BYTES + 1
+    };
+    let mut bytes = Vec::new();
+    let read =
+        std::fs::File::open(path).and_then(|file| file.take(limit as u64).read_to_end(&mut bytes));
+    if read.is_err() || bytes.is_empty() || bytes.iter().take(8_000).any(|b| *b == 0) {
+        return PatchCount::empty();
     }
-    let mut head = Vec::with_capacity(8_000);
-    let read = std::fs::File::open(path).and_then(|file| file.take(8_000).read_to_end(&mut head));
-    u64::from(read.is_ok() && !head.is_empty() && !head.contains(&0))
+    let lines =
+        (metadata.len() <= MAX_FILE_BYTES as u64 && bytes.len() <= MAX_FILE_BYTES).then(|| {
+            ChangedLines {
+                added: bytes.iter().filter(|b| **b == b'\n').count() as u64
+                    + u64::from(!bytes.ends_with(b"\n")),
+                removed: 0,
+            }
+        });
+    PatchCount { stops: 1, lines }
 }
 
 pub fn task_diff(
@@ -954,6 +1007,7 @@ fn record_changed_paths(
                 unstaged: false,
                 untracked: false,
                 changes: 0,
+                lines: None,
             });
         mark(file);
     }

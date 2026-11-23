@@ -1999,8 +1999,9 @@ fn remote_file_observer_keeps_the_recorded_owner_and_streams_changes() {
     let owner = loopflow_execution::store::machines::local_machine(&store)
         .unwrap()
         .id;
-    fs::write(path.join(".gitignore"), "target/\n").unwrap();
+    fs::write(path.join(".gitignore"), "target/\nscratch/\n").unwrap();
     fs::create_dir(path.join("target")).unwrap();
+    fs::create_dir_all(path.join("scratch")).unwrap();
     let rejected = fixture.run(&[
         "--machine",
         "mini",
@@ -2058,12 +2059,18 @@ fn remote_file_observer_keeps_the_recorded_owner_and_streams_changes() {
     // Ignored build output never invalidates; an atomic replacement must, even
     // when dirty status stays dirty.
     fs::write(path.join("target/out"), "build\n").unwrap();
+    fs::write(path.join("scratch/page.html"), "finished").unwrap();
     repo.create_file("replacement", "new peer contents\n");
     fs::rename(path.join("replacement"), path.join("note.txt")).unwrap();
     let mut changed = Vec::new();
+    let mut scratch = Vec::new();
     for _ in 0..5 {
-        changed.extend(read().paths);
-        if changed.iter().any(|path| path == "note.txt") {
+        let frame = read();
+        changed.extend(frame.paths);
+        scratch.extend(frame.ignored_scratch);
+        if changed.iter().any(|path| path == "note.txt")
+            && scratch.iter().any(|path| path == "scratch/page.html")
+        {
             break;
         }
     }
@@ -2071,6 +2078,8 @@ fn remote_file_observer_keeps_the_recorded_owner_and_streams_changes() {
     drop(child.stdin.take());
     let output = child.wait_with_output().unwrap();
     assert_success(&output);
+    assert!(scratch.iter().any(|path| path == "scratch/page.html"));
+    assert!(!changed.iter().any(|path| path == "scratch/page.html"));
     assert!(changed.iter().any(|path| path == "note.txt"));
     assert!(!changed.iter().any(|path| path.starts_with("target")));
     assert!(!fixture.root.path().join("forbidden-effect").exists());

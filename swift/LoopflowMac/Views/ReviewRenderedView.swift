@@ -31,20 +31,21 @@ enum ReviewRendering: Equatable {
 /// both sides, stacked old above new in a pane too narrow for both.
 struct ReviewRendered: View {
     let store: TaskFilesStore
+    let reader: DiffReviewState.ReviewReader
     let file: ReviewFile
     let rendering: ReviewRendering
     let split: Bool
     @Environment(\.palette) private var palette
 
     var body: some View {
-        if let sides = store.sides(of: file) {
+        if let sides = store.diffReview.state(for: reader).sides(of: file, query: store.query, issue: store.issue) {
             switch rendering {
             case .markdown:
                 ReviewMarkdown(old: sides.old?.content, new: sides.new?.content, split: split).equatable()
                     .padding(.horizontal, Spacing.md).padding(.vertical, Spacing.sm)
             case .image, .svg, .html:
                 ViewThatFits(in: .horizontal) {
-                    HStack(alignment: .top, spacing: Spacing.md) { both(sides) }.frame(minWidth: TaskFilesStore.splitWidth)
+                    HStack(alignment: .top, spacing: Spacing.md) { both(sides) }.frame(minWidth: DiffReviewState.splitWidth)
                     VStack(alignment: .leading, spacing: Spacing.md) { both(sides) }
                 }
                 .padding(.horizontal, Spacing.md).padding(.vertical, Spacing.sm)
@@ -55,7 +56,7 @@ struct ReviewRendered: View {
     }
 
     /// Old then new, as pictures or as pages.
-    @ViewBuilder private func both(_ sides: TaskFilesStore.FileSides) -> some View {
+    @ViewBuilder private func both(_ sides: DiffReviewState.FileSides) -> some View {
         if rendering == .html {
             page(sides.old, absent: "Added")
             // Relative references resolve in the working tree only when the new
@@ -71,7 +72,7 @@ struct ReviewRendered: View {
     }
     @ViewBuilder private func page(_ side: TaskFileSnapshot?, absent: String, baseURL: URL? = nil) -> some View {
         if let html = side?.content {
-            TaskHTMLView(html: html, baseURL: baseURL, interacted: store.noteInteraction)
+            TaskHTMLView(html: html, baseURL: baseURL)
                 .containerRelativeFrame(.vertical)
                 .frame(maxWidth: .infinity)
                 .overlay { RoundedRectangle(cornerRadius: CornerRadius.control).stroke(palette.border) }
@@ -86,13 +87,14 @@ struct ReviewRendered: View {
 /// A file whose sides did not read: why, and a way to read them again.
 struct ReviewSidesFailed: View {
     let store: TaskFilesStore
+    let reader: DiffReviewState.ReviewReader
     let file: ReviewFile
     let error: String
 
     var body: some View {
         HStack(spacing: 0) {
             ReviewNotice(text: "Can't render this file: \(error)")
-            Button("Retry") { Task { await store.retrySides(file) } }
+            Button("Retry") { Task { await store.diffReview.state(for: reader).retrySides(file, query: store.query, issue: store.issue) } }
                 .buttonStyle(WorkPlainButtonStyle()).font(Typography.meta)
         }
     }

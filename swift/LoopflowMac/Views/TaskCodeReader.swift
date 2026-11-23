@@ -131,6 +131,7 @@ struct TaskCodeReader: View {
     private func painted(_ line: CodeLine, number: Int) -> AttributedString {
         var value = AttributedString(line.text)
         value.paint(line.highlights, inks: .of(theme))
+        if location?.lines?.contains(number) == true { value.backgroundColor = palette.keyboardFocus.opacity(0.3) }
         if let hit = location?.hit, hit.line == number, hit.revision == revision,
            let range = hit.range(in: line.text), let attributed = Range(range, in: value) {
             value[attributed].backgroundColor = palette.keyboardFocus.opacity(0.3)

@@ -239,6 +239,22 @@ struct ReviewFile: Equatable, Sendable, Identifiable {
         fingerprint = hasher.finalize()
     }
 
+    /// The rendered block containing a working-file line.
+    func row(containing number: Int) -> String? {
+        for block in blocks {
+            switch block {
+            case .context(let line) where line.new == number: return block.id(in: path)
+            case .change(let change):
+                if let offset = change.added.firstIndex(where: { $0.new == number }) {
+                    return status == .added ? change.rowID(offset) : change.id
+                }
+            case .moved(let move) where move.lines.contains(where: { $0.new == number }): return move.id
+            default: continue
+            }
+        }
+        return nil
+    }
+
     /// The id of the file's first row under its header.
     var topID: String { blocks.first?.id(in: path) ?? "\(path)#empty" }
 

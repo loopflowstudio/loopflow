@@ -35,7 +35,7 @@ light and dark, in this order:
 5. Numbered questions, so "2b" is a complete answer.
 
 Show the thing instead of describing it, and keep real code and real output
-larger than the commentary. Say the page's path.
+larger than the commentary. Present the finished page with `lf desktop files scratch/ship-review.html` and give its path.
 
 **Hold a high bar for a Task.** File one only for what is clearly important
 and too big or too scope-expanding to fix here. A small thing is fixed here

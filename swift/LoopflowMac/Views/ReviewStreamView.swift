@@ -9,7 +9,7 @@ import SwiftUI
 /// left under lines are the same in both.
 struct ReviewStream: View {
     @Bindable var store: TaskFilesStore
-    let reader: TaskFilesStore.ReviewReader
+    let reader: DiffReviewState.ReviewReader
     let files: [ReviewFile]
     /// Side by side; callers fall back to unified in a narrow pane.
     let split: Bool
@@ -21,17 +21,22 @@ struct ReviewStream: View {
     @Environment(\.palette) private var palette
     @Environment(\.theme) private var theme
 
+    private var presentedLines: ClosedRange<Int>? {
+        guard case .file(let path) = reader, store.selection == path else { return nil }
+        return store.visit?.lines
+    }
+
     var body: some View {
         if reader == .changes {
             // A comment whose file left the comparison still waits to be sent.
-            ForEach(store.comments.filter { store.review?.file($0.selection.path) == nil }) { comment in
+            ForEach(store.comments.filter { store.diffReview.review?.file($0.selection.path) == nil }) { comment in
                 ReviewCommentRow(store: store, comment: comment)
             }
         }
         ForEach(files) { unopened in
-            let file = store.opened(unopened)
+            let file = store.diffReview.opened(unopened, in: reader)
             // Reading state and notes belong to the whole comparison's per-file reads.
-            let note = reader == .changes ? store.fileNotes[file.path] : nil
+            let note = reader == .changes ? store.diffReview.fileNotes[file.path] : nil
             if let heading = headings[file.path] {
                 Text(heading).font(Typography.textStrong).foregroundStyle(palette.text)
                     .fixedSize(horizontal: false, vertical: true)
@@ -44,33 +49,33 @@ struct ReviewStream: View {
             ForEach(store.comments.filter { $0.detached && $0.selection.path == file.path }) { comment in
                 ReviewCommentRow(store: store, comment: comment)
             }
-            if reader == .changes, store.isViewed(file) {
+            if reader == .changes, store.diffReview.isViewed(file) {
                 // Viewed: folded to its header until you clear it or its lines change.
-            } else if reader == .changes, store.isReading(file) {
-                ReviewNotice(text: "Reading…").id(store.topID(of: file, in: reader))
-                    .onAppear { store.setNear(file.path, true) }
-                    .onDisappear { store.setNear(file.path, false) }
+            } else if reader == .changes, store.diffReview.isReading(file) {
+                ReviewNotice(text: "Reading…").id(store.diffReview.topID(of: file, in: reader))
+                    .onAppear { store.diffReview.setNear(file.path, true) }
+                    .onDisappear { store.diffReview.setNear(file.path, false) }
             } else {
-                if let rendering = store.rendering(of: file, in: reader) {
-                    if let error = store.sideErrors[file.path] {
-                        ReviewSidesFailed(store: store, file: file, error: error).id(ReviewStop.rendered(file.path).id)
+                if let rendering = store.diffReview.rendering(of: file, in: reader) {
+                    if let error = store.diffReview.state(for: reader).sideErrors[file.path] {
+                        ReviewSidesFailed(store: store, reader: reader, file: file, error: error).id(ReviewStop.rendered(file.path).id)
                         // A file with Source falls back to its line Diff.
                         if rendering.hasSource { lines(file, note: note) }
                     } else {
-                        ReviewRendered(store: store, file: file, rendering: rendering, split: split)
+                        ReviewRendered(store: store, reader: reader, file: file, rendering: rendering, split: split)
                             .id(ReviewStop.rendered(file.path).id)
                     }
                 } else {
                     lines(file, note: note)
                 }
             }
-            if let note { ReviewFileNote(note: note) { Task { await store.retryFile(file.path) } } }
+            if let note { ReviewFileNote(note: note) { Task { await store.diffReview.retryFile(file.path) } } }
         }
     }
 
     /// The file's line Diff: its hunks, or what stands in when it has none.
-    @ViewBuilder private func lines(_ file: ReviewFile, note: TaskFilesStore.FileNote?) -> some View {
-        if let machine = store.openedGaps[file.path]?.failure {
+    @ViewBuilder private func lines(_ file: ReviewFile, note: DiffReviewState.FileNote?) -> some View {
+        if let machine = store.diffReview.state(for: reader).openedGaps[file.path]?.failure {
             FailureLine("Skipped lines did not load.", machine: machine).reviewNoticeInset()
         }
         if file.status == .binary {
@@ -89,7 +94,7 @@ struct ReviewStream: View {
 
     /// Where new code dropped lines: how many, and the way to read them.
     private func removalMark(_ count: Int, change: String) -> some View {
-        Button { store.openedRemovals.insert(change) } label: {
+        Button { store.diffReview.openedRemovals.insert(change) } label: {
             HStack(spacing: Spacing.xs) {
                 Rectangle().fill(palette.failureTone.ink).frame(width: 2, height: 12)
                 Text(count == 1 ? "1 old line · Show" : "\(count) old lines · Show")
@@ -154,7 +159,7 @@ struct ReviewStream: View {
         if file.status == .added { return change.added.map { .line($0, nil) } }
         if split { return change.pairs.map(ChangeRow.pair) }
         var rows: [ChangeRow] = []
-        if store.reviewLayout == .new, !store.openedRemovals.contains(change.id) {
+        if store.diffReview.reviewLayout == .new, !store.diffReview.openedRemovals.contains(change.id) {
             if !change.removed.isEmpty { rows.append(.removals(change.removed.count)) }
         } else {
             rows += change.pairs.compactMap { pair in pair.removed.map { .line($0, pair.removedSegments) } }
@@ -185,7 +190,7 @@ struct ReviewStream: View {
         .padding(.leading, Self.gutterWidth + 6).padding(.trailing, Spacing.md).padding(.vertical, Spacing.xs)
         if let gap, !gap.new.isEmpty {
             Button {
-                Task { await store.openGap(header, gap: gap, file: file, reader: reader) }
+                Task { await store.diffReview.openGap(header, gap: gap, file: file, reader: reader) }
             } label: {
                 row.overlay(alignment: .leading) {
                     Image(systemName: "arrow.up.and.down").font(Typography.meta).fontWeight(.semibold)
@@ -208,17 +213,16 @@ struct ReviewStream: View {
     // MARK: Moved code
 
     private func movedView(_ move: ReviewMove, file: ReviewFile) -> some View {
-        let expanded = store.expandedMoves.contains(move.id)
+        let expanded = store.diffReview.expandedMoves.contains(move.id)
         return VStack(alignment: .leading, spacing: 0) {
             Button {
                 if move.end == .source {
-                    store[place: reader] = .init(anchor: move.counterpart, current: move.counterpart)
+                    store.diffReview[place: reader] = .init(anchor: move.counterpart, current: move.counterpart)
                 } else if expanded {
-                    store.expandedMoves.remove(move.id)
+                    store.diffReview.expandedMoves.remove(move.id)
                 } else {
-                    store.expandedMoves.insert(move.id)
+                    store.diffReview.expandedMoves.insert(move.id)
                 }
-                store.noteInteraction()
             } label: {
                 HStack(spacing: Spacing.xs) {
                     Image(systemName: move.end == .source ? "arrow.turn.right.down" : "arrow.left.arrow.right")
@@ -295,7 +299,7 @@ struct ReviewStream: View {
     /// ends on it, then the comments left there. `old` and `new` are the line
     /// numbers the row shows.
     @ViewBuilder private func attachments(old: Int?, new: Int?, file: ReviewFile) -> some View {
-        if let selection = store.reviewSelection, selection.path == file.path,
+        if let selection = store.diffReview.reviewSelection, selection.path == file.path,
            selection.last == (selection.side == .old ? old : new) {
             ReviewCommentEditor(store: store, selection: selection, file: file, addToConversation: addToConversation)
         }
@@ -329,7 +333,8 @@ struct ReviewStream: View {
     }
 
     private func isSelected(_ line: ReviewLine, side: ReviewSelection.Side, path: String) -> Bool {
-        store.reviewSelection.map {
+        if side == .new, let number = line.new, presentedLines?.contains(number) == true { return true }
+        return store.diffReview.reviewSelection.map {
             $0.contains(line, path: path) && (line.kind == .context || $0.side == side)
         } ?? false
     }
@@ -339,7 +344,7 @@ struct ReviewStream: View {
         let tone = tone(of: line, in: file)
         let selected = isSelected(line, side: side, path: path)
         // A line past the readable length shows its start until asked for the rest.
-        let cut = line.cut.flatMap { store.openedLongLines.contains(line.id(in: path)) ? nil : $0 }
+        let cut = line.cut.flatMap { store.diffReview.openedLongLines.contains(line.id(in: path)) ? nil : $0 }
         let text = cut?.shown ?? line.text
         return VStack(alignment: .leading, spacing: Spacing.xxs) {
             HStack(alignment: .top, spacing: Spacing.xs) {
@@ -349,9 +354,9 @@ struct ReviewStream: View {
                     .foregroundStyle(tone?.ink ?? palette.textSecondary)
                     .textSelection(.disabled)
                 Text(Self.attributed(text, segments: cut == nil ? segments : nil, tone: tone,
-                                     highlights: store.highlights(of: file, in: reader)?.spans(for: line) ?? [],
+                                     highlights: store.diffReview.highlights(of: file, in: reader)?.spans(for: line) ?? [],
                                      inks: SyntaxInks.of(theme)))
-                    .lineLimit(store.wrapsLines ? nil : 1)
+                    .lineLimit(store.diffReview.wrapsLines ? nil : 1)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .fixedSize(horizontal: false, vertical: true)
                     .textSelection(.enabled)
@@ -360,7 +365,7 @@ struct ReviewStream: View {
             .accessibilityElement(children: .combine)
             .accessibilityLabel("\(line.kind == .added ? "Added" : line.kind == .removed ? "Removed" : "Line") \(side == .old ? line.old ?? 0 : line.new ?? 0): \(text)")
             if let cut {
-                Button("\(cut.more.formatted()) more characters · Show") { store.openedLongLines.insert(line.id(in: path)) }
+                Button("\(cut.more.formatted()) more characters · Show") { store.diffReview.openedLongLines.insert(line.id(in: path)) }
                     .buttonStyle(WorkPlainButtonStyle()).font(Typography.meta)
                     .padding(.leading, Spacing.md)
                     .accessibilityIdentifier("changes-long-line")
@@ -375,7 +380,7 @@ struct ReviewStream: View {
     /// Copies code without the patch's + and − or the line numbers.
     @ViewBuilder private func copyMenu(_ line: ReviewLine, side: ReviewSelection.Side, file: ReviewFile) -> some View {
         Button("Copy line") { Self.copy(line.text) }
-        if let selection = store.reviewSelection, selection.path == file.path, selection.side == side,
+        if let selection = store.diffReview.reviewSelection, selection.path == file.path, selection.side == side,
            selection.first != selection.last, isSelected(line, side: side, path: file.path) {
             Button("Copy \(selection.last - selection.first + 1) selected lines") { Self.copy(selection.text(in: file)) }
         }
@@ -411,12 +416,11 @@ struct ReviewStream: View {
 
     private func select(_ number: Int, side: ReviewSelection.Side, path: String) {
         let extend = NSEvent.modifierFlags.contains(.shift)
-        if extend, let current = store.reviewSelection, current.path == path, current.side == side {
-            store.reviewSelection = current.extended(to: number)
+        if extend, let current = store.diffReview.reviewSelection, current.path == path, current.side == side {
+            store.diffReview.reviewSelection = current.extended(to: number)
         } else {
-            store.reviewSelection = ReviewSelection(path: path, side: side, first: number, last: number)
+            store.diffReview.reviewSelection = ReviewSelection(path: path, side: side, first: number, last: number)
         }
-        store.noteInteraction()
     }
 }
 
@@ -481,15 +485,14 @@ struct ReviewFileTitle: View {
     }
 
     @ViewBuilder private var actions: some View {
-        if !store.isReading(file), file.status != .binary {
+        if !store.diffReview.isReading(file), file.status != .binary {
             Text("+\(file.additions)").foregroundStyle(palette.successTone.ink).font(Typography.mono).fixedSize()
             Text("−\(file.deletions)").foregroundStyle(palette.failureTone.ink).font(Typography.mono).fixedSize()
         }
         if ReviewRendering.of(file)?.hasSource == true {
-            let source = store.sourceFiles.contains(file.path)
+            let source = store.diffReview.sourceFiles.contains(file.path)
             Button(source ? "Rendered" : "Source") {
-                if source { store.sourceFiles.remove(file.path) } else { store.sourceFiles.insert(file.path) }
-                store.noteInteraction()
+                if source { store.diffReview.sourceFiles.remove(file.path) } else { store.diffReview.sourceFiles.insert(file.path) }
             }
             .buttonStyle(.plain).font(Typography.meta).foregroundStyle(palette.textSecondary).fixedSize()
             .help(source ? "Read \(file.path) rendered" : "Show the lines that changed in \(file.path)")
@@ -498,8 +501,8 @@ struct ReviewFileTitle: View {
         Button("Open") { store.selectFile(file.path, mode: .read) }
             .buttonStyle(.plain).font(Typography.meta).foregroundStyle(palette.textSecondary).fixedSize()
             .help("Read \(file.path) in Files").accessibilityLabel("Read \(file.path) in Files")
-        if viewable, !store.isReading(file) {
-            Toggle("Viewed", isOn: Binding(get: { store.isViewed(file) }, set: { store.setViewed(file, $0) }))
+        if viewable, !store.diffReview.isReading(file) {
+            Toggle("Viewed", isOn: Binding(get: { store.diffReview.isViewed(file) }, set: { store.diffReview.setViewed(file, $0) }))
                 .toggleStyle(.checkbox).controlSize(.small).font(Typography.meta).fixedSize()
                 .help("Fold this file until its lines change")
                 .accessibilityIdentifier("changes-viewed")
@@ -536,14 +539,14 @@ private struct ReviewGutter: View {
 /// stepping redraws the two marks that change, not the stream around them.
 private struct ReviewCurrentMark: View {
     let store: TaskFilesStore
-    let reader: TaskFilesStore.ReviewReader
+    let reader: DiffReviewState.ReviewReader
     let id: String
     @Environment(\.palette) private var palette
 
     var body: some View {
-        if store.current(reader) == id {
+        if store.diffReview.current(reader) == id {
             ZStack(alignment: .leading) {
-                LandingFlash(stepped: store.steppedAt, color: palette.accent)
+                LandingFlash(stepped: store.diffReview.steppedAt, color: palette.accent)
                 Rectangle().fill(palette.accent).frame(width: 3).accessibilityLabel("Current change")
             }
             .allowsHitTesting(false)
@@ -581,10 +584,10 @@ private struct ReviewCommentEditor: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.xs) {
             TextField("Comment on \((selection.path as NSString).lastPathComponent):\(selection.range) · \(selection.side.rawValue)",
-                      text: $store.commentDraft, axis: .vertical)
+                      text: Bindable(store.diffReview).commentDraft, axis: .vertical)
                 .lineLimit(1...5).textFieldStyle(.plain).font(Typography.text)
                 .focused($focused)
-                .onSubmit { store.addComment(in: file) }
+                .onSubmit { store.diffReview.addComment(in: file) }
                 .accessibilityIdentifier("changes-comment")
             // One row where it fits; a narrow pane stacks the two pairs.
             ViewThatFits(in: .horizontal) {
@@ -612,9 +615,9 @@ private struct ReviewCommentEditor: View {
     }
 
     private var commentButton: some View {
-        Button("Comment") { store.addComment(in: file) }
+        Button("Comment") { store.diffReview.addComment(in: file) }
             .buttonStyle(LoopflowButtonStyle(.accent))
-            .disabled(store.commentDraft.allSatisfy(\.isWhitespace))
+            .disabled(store.diffReview.commentDraft.allSatisfy(\.isWhitespace))
             .help("Keep this comment under its lines until you send every comment")
     }
 
@@ -623,7 +626,7 @@ private struct ReviewCommentEditor: View {
             .buttonStyle(LoopflowButtonStyle())
             .help("Copies the code without + and − or line numbers")
         Button("Reference in conversation") {
-            if addToConversation?(selection.reference(revision: store.revision)) == true { store.reviewSelection = nil }
+            if addToConversation?(selection.reference(revision: store.diffReview.revision)) == true { store.diffReview.reviewSelection = nil }
         }
         .buttonStyle(LoopflowButtonStyle())
         .disabled(addToConversation == nil)
@@ -634,7 +637,7 @@ private struct ReviewCommentEditor: View {
 
     /// Esc is bound once, on the row the pane has room for.
     private var cancelButton: some View {
-        Button("Cancel") { store.reviewSelection = nil }
+        Button("Cancel") { store.diffReview.reviewSelection = nil }
             .buttonStyle(.plain).foregroundStyle(palette.textSecondary)
             .keyboardShortcut(.cancelAction)
     }
@@ -722,7 +725,7 @@ struct ReviewCommentsStrip: View {
     /// Comments are spent once they are in the conversation; a failed send keeps them.
     private func send() {
         guard let addToConversation, !store.comments.isEmpty else { return }
-        let message = ReviewComment.message(store.comments, revision: store.revision)
+        let message = ReviewComment.message(store.comments, revision: store.diffReview.revision)
         if addToConversation(message) { store.comments = [] }
     }
 }
@@ -746,7 +749,7 @@ private extension View {
 /// Under a file's lines: why they stop short, or that they were not read,
 /// with the Machine's message and the way to read them again.
 struct ReviewFileNote: View {
-    let note: TaskFilesStore.FileNote
+    let note: DiffReviewState.FileNote
     let retry: () -> Void
 
     var body: some View {
@@ -767,7 +770,7 @@ struct ReviewFileNote: View {
 /// neighbouring changed file past either end.
 struct ReviewStepper: View {
     @Bindable var store: TaskFilesStore
-    let reader: TaskFilesStore.ReviewReader
+    let reader: DiffReviewState.ReviewReader
     let isFocused: Bool
     @Environment(\.palette) private var palette
 
@@ -775,7 +778,7 @@ struct ReviewStepper: View {
         HStack(spacing: 0) {
             arrow("chevron.up", "Previous change", key: "[", offset: -1)
             Divider().frame(height: 14)
-            Text(store.position(reader)).font(Typography.meta).foregroundStyle(palette.text)
+            Text(store.diffReview.position(reader)).font(Typography.meta).foregroundStyle(palette.text)
                 .monospacedDigit().fixedSize().padding(.horizontal, Spacing.sm).frame(minWidth: 54)
                 .accessibilityIdentifier("review-position")
             Divider().frame(height: 14)
@@ -801,12 +804,12 @@ struct ReviewStepper: View {
     }
 
     private func go(_ offset: Int) {
-        guard let stop = store.step(offset, in: reader) else { return }
-        withAnimation(.easeOut(duration: 0.15)) { store[place: reader].anchor = stop.id }
+        guard let stop = store.diffReview.step(offset, in: reader) else { return }
+        withAnimation(.easeOut(duration: 0.15)) { store.diffReview[place: reader].anchor = stop.id }
     }
 }
 
-extension TaskFilesStore {
+extension DiffReviewState {
     /// The reader's scroll anchor, for `scrollPosition(id:)`.
     func anchor(_ reader: ReviewReader) -> Binding<String?> {
         Binding(get: { self[place: reader].anchor }, set: { self.scrolled(to: $0, in: reader) })
@@ -827,7 +830,7 @@ struct ReviewLayoutPicker: View {
             segment(.unified, help: "Removed and added lines together")
             Divider().frame(height: 14)
             segment(.split,
-                    help: narrow ? "Side by side needs a pane at least \(Int(TaskFilesStore.splitWidth)) pt wide" : "Side by side")
+                    help: narrow ? "Side by side needs a pane at least \(Int(DiffReviewState.splitWidth)) pt wide" : "Side by side")
                 .disabled(narrow)
         }
         .background(palette.surface, in: RoundedRectangle(cornerRadius: CornerRadius.row))
@@ -835,12 +838,12 @@ struct ReviewLayoutPicker: View {
         .clipShape(RoundedRectangle(cornerRadius: CornerRadius.row))
     }
 
-    private var narrow: Bool { width < TaskFilesStore.splitWidth }
+    private var narrow: Bool { width < DiffReviewState.splitWidth }
 
-    private func segment(_ layout: TaskFilesStore.ReviewLayout, help: String) -> some View {
+    private func segment(_ layout: DiffReviewState.ReviewLayout, help: String) -> some View {
         // What the stream is actually reading, so a narrow pane shows unified as on.
-        let on = layout == store.layout(width: width)
-        return Button { store.reviewLayout = layout } label: {
+        let on = layout == store.diffReview.layout(width: width)
+        return Button { store.diffReview.reviewLayout = layout } label: {
             Text(layout.rawValue).font(Typography.text).lineLimit(1).fixedSize()
                 .foregroundStyle(on ? palette.background : palette.text)
                 .padding(.horizontal, Spacing.sm).frame(height: 20)

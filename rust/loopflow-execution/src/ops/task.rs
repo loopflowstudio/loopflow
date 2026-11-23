@@ -249,6 +249,17 @@ pub struct TaskChangedFile {
     /// Runs of changed lines in the file's patch, each the Diff's stop: a run
     /// ends at an unchanged line, a hunk's end, or a removal after additions.
     pub changes: u64,
+    /// Text lines in the patch; absent for an untracked file beyond the reader's size limit.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub lines: Option<ChangedLines>,
+}
+
+#[derive(
+    Debug, Copy, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
+pub struct ChangedLines {
+    pub added: u64,
+    pub removed: u64,
 }
 
 /// One commit in a Task's comparison. A Graph step's commits share the subject

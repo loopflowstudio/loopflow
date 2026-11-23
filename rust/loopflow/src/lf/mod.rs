@@ -962,8 +962,12 @@ lf desktop do page -p tiles page=2\n  lf desktop do zoom -p backlog on=true"
         #[command(flatten)]
         target: DesktopTargetArgs,
     },
-    /// Show the Task's Files in the browser
+    /// Show the Task's Files, optionally presenting a checkout-relative path
     Files {
+        #[arg(value_name = "PATH[:LINE[-END]]")]
+        path: Option<String>,
+        #[arg(long, requires = "path", value_parser = ["read", "diff"])]
+        mode: Option<String>,
         #[command(flatten)]
         target: DesktopTargetArgs,
     },

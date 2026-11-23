@@ -657,6 +657,8 @@ struct DesktopPaneControlTests {
         let document = workspace.files(issue: task.id, cwd: identity.worktree).document("note.txt")
         document.editor.string = "unfinished draft"
         document.editor.setSelectedRange(NSRange(location: 2, length: 4))
+        _ = try router.perform(DesktopActionRequest("files", at: source, args: ["path": "scratch/first.html"]))
+        #expect(workspace.files(issue: task.id, cwd: identity.worktree).selection == "scratch/first.html")
         for action in ["files", "graph-log"] {
             let created = try router.perform(DesktopActionRequest(action, at: source))
             let reused = try router.perform(DesktopActionRequest(action, at: source))
@@ -680,7 +682,15 @@ struct DesktopPaneControlTests {
         _ = try router.perform(DesktopActionRequest("files", at: source, args: ["path": "docs/usage.md"]))
         #expect(documents.selection == "note.txt")
         #expect(documents.mode == .edit)
-        #expect(documents.tabs.contains { $0.path == "docs/usage.md" })
+        #expect(documents.browser.presented?.path == "docs/usage.md")
+        documents.mode = .read
+        _ = try router.perform(DesktopActionRequest("files", at: source, args: ["path": "scratch/explore.html"]))
+        #expect(documents.selection == "scratch/explore.html" && documents.visit == nil && documents.mode == .read)
+        _ = try router.perform(DesktopActionRequest("files", at: source, args: ["path": "src/Parser.swift", "lines": "8-12", "mode": "diff"]))
+        #expect(documents.selection == "src/Parser.swift" && documents.visit?.lines == 8...12 && documents.mode == .diff)
+        documents.page = .changes
+        _ = try router.perform(DesktopActionRequest("files", at: source, args: ["path": "README.md"]))
+        #expect(documents.page == .changes && documents.browser.presented?.path == "README.md")
         let shellReceipt = try router.perform(DesktopActionRequest("run", at: source))
         #expect(store.shell(shellReceipt.tab ?? "")?.location == identity)
         #expect(shellReceipt.pane == selected.id)

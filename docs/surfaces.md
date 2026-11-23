@@ -31,7 +31,7 @@ lf open --task LOO-12 --host desktop          # open in Loopflow Desktop
   `lf --task LOO-12 open --link --format markdown` (paste into PRs, Slack, or
   notes; installing `lf` registers the `loopflow:` URL handler).
 
-The planned Desktop presentation command opens a finished page or selects lines
+The Desktop presentation command opens a finished page or selects lines
 in a file for review.
 
 ```bash

@@ -32,7 +32,7 @@ where you expected it?". Never "does this look good?".
 
 A page helps when there's something to compare. Write `scratch/demo.html` with
 before and after, or two variants side by side, and the numbered questions:
-one self-contained file, light and dark. Say its path.
+one self-contained file, light and dark. Present it with `lf desktop files scratch/demo.html` and give its path.
 
 ## Keep their words
 

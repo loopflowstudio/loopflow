@@ -454,6 +454,25 @@
       ],
       "type": "string"
     },
+    "ChangedLines": {
+      "properties": {
+        "added": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "removed": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "added",
+        "removed"
+      ],
+      "type": "object"
+    },
     "Check": {
       "properties": {
         "detail": {
@@ -12133,6 +12152,17 @@
         "committed": {
           "type": "boolean"
         },
+        "lines": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ChangedLines"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Text lines in the patch; absent for an untracked file beyond the reader's size limit."
+        },
         "old_path": {
           "type": [
             "string",
@@ -12159,7 +12189,8 @@
         "staged",
         "unstaged",
         "untracked",
-        "changes"
+        "changes",
+        "lines"
       ],
       "type": "object"
     },

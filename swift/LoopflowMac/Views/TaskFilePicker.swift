@@ -9,10 +9,11 @@ final class TaskFilePicker {
     private let query: RegistryQuery
     private let issue: String
     private let open: [String]
+    private let workingTree: ComparisonReading
     private let preferred: Set<String>
     private(set) weak var previousResponder: NSResponder?
 
-    enum Mode: String, CaseIterable { case files = "Files", grep = "Grep" }
+    enum Mode: String, CaseIterable { case files = "Files", grep = "Grep", changed = "Changed" }
 
     enum Result: Hashable {
         case file(String)
@@ -48,14 +49,17 @@ final class TaskFilePicker {
         issue = store.issue
         let current = store.selection
         open = [current].compactMap { $0 } + store.tabs.reversed().map(\.path).filter { $0 != current }
-        let changed = store.comparison == .workingTree(base: "parent") ? store.changes?.files.map(\.path) : nil
-        preferred = Set(open + (changed ?? []))
+        workingTree = store.workingTree
+        preferred = Set(open + (store.workingChanges?.files.map(\.path) ?? []))
         previousResponder = store.filePicker?.previousResponder ?? NSApp?.keyWindow?.firstResponder
     }
 
     var remoteSearch: String? { !text.isEmpty && (mode == .grep || inventory?.truncated == true) ? text : nil }
 
     func load() async {
+        if mode == .changed, workingTree.changes == nil {
+            await workingTree.refresh(issue: issue, query: query)
+        }
         guard mode == .files else { filter(); return }
         do {
             let result = try await query.taskFind(issue: issue)
@@ -70,6 +74,19 @@ final class TaskFilePicker {
     }
 
     private func filter() {
+        if mode == .changed {
+            guard let changes = workingTree.changes else {
+                error = workingTree.error
+                loading = error == nil
+                return
+            }
+            error = nil
+            let changed = changes.files.map(\.path)
+            results = (text.isEmpty ? changed : ranked(changed)).map(Result.file)
+            selection = results.first
+            loading = false
+            return
+        }
         // An inventory failure stays visible while typing. Grep has no initial read.
         guard mode == .grep || inventory != nil else { return }
         error = nil
@@ -92,6 +109,7 @@ final class TaskFilePicker {
         do {
             try await Task.sleep(for: .milliseconds(150))
             switch mode {
+            case .changed: return
             case .files:
                 let result = try await query.taskFind(issue: issue, query: needle)
                 guard !Task.isCancelled, remoteSearch == needle else { return }
@@ -161,7 +179,7 @@ struct TaskFilePickerView: View {
             VStack(spacing: 0) {
                 HStack {
                     Image(systemName: "magnifyingglass")
-                    PaletteSearchField(text: $picker.text, placeholder: picker.mode == .files ? "Find file in checkout" : "Search checkout text",
+                    PaletteSearchField(text: $picker.text, placeholder: picker.mode == .grep ? "Search checkout text" : "Find file",
                                        identifier: "files-search", move: picker.move,
                                        submit: { if let result = picker.selection { open(result) } }, cancel: cancel)
                     Picker("Search mode", selection: Binding(get: { picker.mode }, set: { store.chooseFile($0) })) {

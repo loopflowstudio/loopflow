@@ -1,11 +1,13 @@
 #if os(macOS)
 import Foundation
 import Loopflow
+import Observation
 
 /// A Task checkout as you browse it: directories read one at a time when
 /// opened, in pages `lf task files` returns. Nothing under a closed directory
 /// is read, so a `node_modules`-sized checkout costs only what you open.
-struct CheckoutTree: Equatable {
+@MainActor @Observable
+final class CheckoutTree {
     /// What is known about one directory. The root is `""`.
     struct Listing: Equatable {
         var entries: [TaskFileEntry] = []
@@ -57,7 +59,7 @@ struct CheckoutTree: Equatable {
     }
 
     /// Mark a read as started; nil when one is running or `more` has nothing left.
-    mutating func begin(_ directory: String, more: Bool) -> Read? {
+    func begin(_ directory: String, more: Bool) -> Read? {
         var listing = listings[directory] ?? Listing()
         guard !listing.loading else { return nil }
         if more, listing.nextCursor == nil { return nil }
@@ -67,7 +69,7 @@ struct CheckoutTree: Equatable {
         return Read(directory: directory, cursor: more ? listing.nextCursor : nil)
     }
 
-    mutating func receive(_ page: TaskDirectory, for directory: String, more: Bool) {
+    func receive(_ page: TaskDirectory, for directory: String, more: Bool) {
         var listing = listings[directory] ?? Listing()
         listing.entries = more ? listing.entries + page.entries : page.entries
         listing.pages = more ? listing.pages + 1 : 1
@@ -77,7 +79,7 @@ struct CheckoutTree: Equatable {
         listings[directory] = listing
     }
 
-    mutating func fail(_ directory: String, reason: String) {
+    func fail(_ directory: String, reason: String) {
         var listing = listings[directory] ?? Listing()
         listing.loading = false
         listing.error = reason
@@ -98,11 +100,174 @@ struct CheckoutTree: Equatable {
 
     // MARK: Opening and closing
 
-    mutating func setExpanded(_ directory: String, _ open: Bool) {
+    func setExpanded(_ directory: String, _ open: Bool) {
         if open { expanded.insert(directory) } else { expanded.remove(directory) }
     }
 
     func isExpanded(_ directory: String) -> Bool { expanded.contains(directory) }
+
+    var showIgnored = false {
+        didSet { if showIgnored != oldValue { resetListings() } }
+    }
+    private var treeGeneration = 0
+    private var reads: [String: Task<Void, Never>] = [:]
+    var offset = CGPoint.zero
+    private let issue: String
+    private let query: RegistryQuery
+
+    init(issue: String, query: RegistryQuery) {
+        self.issue = issue
+        self.query = query
+    }
+
+    private func resetListings() {
+        treeGeneration += 1
+        for read in reads.values { read.cancel() }
+        reads = [:]
+        listings = [:]
+        expanded = []
+        selection = nil
+    }
+
+    func reveal(_ path: String) async {
+        let parent = (path as NSString).deletingLastPathComponent
+        guard await revealDirectory(parent), !Task.isCancelled else { return }
+        if await find(path, in: parent), !Task.isCancelled { selection = path }
+    }
+
+    @discardableResult
+    func revealDirectory(_ path: String) async -> Bool {
+        let generation = treeGeneration
+        var parent = ""
+        for part in path.split(separator: "/") {
+            let child = parent.isEmpty ? String(part) : parent + "/" + part
+            guard await find(child, in: parent), !Task.isCancelled, generation == treeGeneration else { return false }
+            parent = child
+            setExpanded(child, true)
+        }
+        if needsRead(parent) { await readDirectory(parent, more: false) }
+        return generation == treeGeneration && !Task.isCancelled
+    }
+
+    private func find(_ child: String, in parent: String) async -> Bool {
+        let generation = treeGeneration
+        if needsRead(parent) || reads[parent] != nil { await readDirectory(parent, more: false) }
+        while !Task.isCancelled, generation == treeGeneration, let listing = listings[parent] {
+            if listing.entries.contains(where: { $0.path == child }) { return true }
+            guard listing.error == nil, listing.nextCursor != nil else { break }
+            await readDirectory(parent, more: true)
+        }
+        return false
+    }
+
+    /// Read the checkout root the first time the tree is shown.
+    func openRoot() async {
+        if needsRead("") { await readDirectory("", more: false) }
+    }
+
+    /// One page of `directory` through `lf task files`; a remote Task reads
+    /// through its Machine. A failure stays on that directory.
+    func readDirectory(_ directory: String, more: Bool) async {
+        if let pending = reads[directory] { await pending.value; return }
+        let generation = treeGeneration
+        guard let read = begin(directory, more: more) else { return }
+        let pending = Task {
+            defer { if treeGeneration == generation { reads[directory] = nil } }
+            do {
+                let page = try await query.taskFiles(issue: issue, directory: directory, cursor: read.cursor, showIgnored: showIgnored)
+                guard treeGeneration == generation else { return }
+                receive(page, for: directory, more: more)
+            } catch {
+                guard treeGeneration == generation else { return }
+                fail(directory, reason: error.localizedDescription)
+            }
+        }
+        reads[directory] = pending
+        await pending.value
+    }
+
+    /// Retry a failed read where it stopped: the first page, or the next one.
+    func retryDirectory(_ directory: String) async {
+        await readDirectory(directory, more: (listings[directory]?.pages ?? 0) > 0)
+    }
+
+    func setDirectory(_ directory: String, expanded: Bool) async {
+        setExpanded(directory, expanded)
+        selection = directory
+
+        if expanded, needsRead(directory) { await readDirectory(directory, more: false) }
+        if selection == directory, let entry = listings[(directory as NSString).deletingLastPathComponent]?.entries.first(where: { $0.path == directory }) {
+            selection = compact(entry).path
+        }
+    }
+
+    enum Move { case up, down, expand, collapse, open }
+
+    /// The navigator's keys: ↑/↓ move, → opens a directory or enters it, ←
+    /// closes it or goes to its parent, Return opens a file or toggles a directory.
+    func move(_ move: Move) async -> String? {
+        let rows = rows()
+        let current = selection.flatMap { path in rows.compactMap(\.entry).first { $0.path == path } }
+        switch move {
+        case .up, .down:
+            selection = neighbor(move == .up ? -1 : 1, in: rows)
+        case .expand:
+            guard let current, current.kind == .directory else { return nil }
+            if isExpanded(current.path) {
+                selection = neighbor(1, in: rows)
+            } else {
+                await setDirectory(current.path, expanded: true)
+            }
+        case .collapse:
+            guard let current else { return nil }
+            if current.kind == .directory, isExpanded(current.path) {
+                await setDirectory(current.path, expanded: false)
+            } else {
+                if let parent = rows.compactMap(\.entry).last(where: { current.path.hasPrefix($0.path + "/") }) { selection = parent.path }
+            }
+        case .open:
+            guard let current else { return nil }
+            if current.kind == .directory {
+                await setDirectory(current.path, expanded: !isExpanded(current.path))
+            } else {
+                return current.path
+            }
+        }
+        return nil
+    }
+
+    /// Re-read loaded directories a write may have changed, as many pages as were loaded.
+    func rereadDirectories(holding paths: Set<String>) async {
+        for directory in listingsHolding(paths) {
+            let pages = listings[directory]?.pages ?? 0
+            await readDirectory(directory, more: false)
+            while let listing = listings[directory], listing.pages < pages,
+                  listing.nextCursor != nil, listing.error == nil, !Task.isCancelled {
+                await readDirectory(directory, more: true)
+            }
+        }
+    }
+
+    /// Only a complete listing can establish that a directory has one child.
+    private func compact(_ start: TaskFileEntry) -> TaskFileEntry {
+        var entry = start
+        while entry.kind == .directory, isExpanded(entry.path), let listing = listings[entry.path],
+              listing.pages > 0, !listing.loading, listing.error == nil, listing.nextCursor == nil,
+              listing.entries.count == 1, let child = listing.entries.first, child.kind == .directory {
+            entry = child
+        }
+        return entry
+    }
+
+    func label(for entry: TaskFileEntry) -> String {
+        var parent = (entry.path as NSString).deletingLastPathComponent
+        while !parent.isEmpty, let listing = listings[parent], listing.entries.count == 1,
+              listing.pages > 0, !listing.loading, listing.nextCursor == nil, listing.error == nil,
+              isExpanded(parent), listing.entries.first?.kind == .directory {
+            parent = (parent as NSString).deletingLastPathComponent
+        }
+        return parent.isEmpty ? entry.path : String(entry.path.dropFirst(parent.count + 1))
+    }
 
     // MARK: Rows
 
@@ -114,7 +279,8 @@ struct CheckoutTree: Equatable {
 
     private func append(_ directory: String, depth: Int, to rows: inout [Row]) {
         let listing = listings[directory] ?? Listing()
-        for entry in listing.entries {
+        for start in listing.entries {
+            let entry = compact(start)
             rows.append(.entry(entry, depth: depth))
             if entry.kind == .directory, expanded.contains(entry.path) {
                 append(entry.path, depth: depth + 1, to: &rows)

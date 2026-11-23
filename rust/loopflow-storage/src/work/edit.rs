@@ -40,6 +40,29 @@ impl WorkEdit {
     }
 }
 
+/// One field of a record, with when and where its value was written. The
+/// newest stamp is the field's value on every Machine: `at` first, then the
+/// Machine's id.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct StampedValue {
+    #[serde(flatten)]
+    pub value: WorkValue,
+    /// Milliseconds, never behind a stamp its writer had seen.
+    pub at: i64,
+    pub machine: String,
+}
+
+/// A Wave, Project, Task or comment as it travels between Machines: every
+/// field it has, each with its stamp. A hub exchange and a plan ref carry
+/// exactly this.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct StampedRecord {
+    /// `waves`, `projects`, `tasks` or `task_comments`.
+    pub table: String,
+    pub id: String,
+    pub fields: Vec<StampedValue>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Disposition {
     pub planning_state: Option<String>,
@@ -95,21 +118,12 @@ work_values! {
     (TaskDescription, "task_description", Option<String>),
     (TaskRank, "task_rank", u32),
     (TaskAssignee, "task_assignee", Option<String>),
-    // Released peers recorded a Task hold here; nothing reads it.
-    (HistoricalTaskPaused, "task_paused", bool),
-    (TaskShippedAt, "task_shipped_at", Option<i64>),
     (TaskDueDate, "task_due_date", Option<String>),
     (TaskDeletedAt, "task_deleted_at", Option<i64>),
     (TaskUrl, "task_url", Option<String>),
     (TaskBranch, "task_branch", Option<String>),
     (TaskTeam, "task_team", Option<String>),
-    // Regressions are GitHub issues. Stored journal rows and released peers still carry
-    // this field, so it round-trips unread until LOO-730 deletes the rows and column.
-    (HistoricalTaskRegressedIn, "task_regressed_in", Option<String>),
     (CommentTask, "comment_task", String),
-    (HistoricalProjectWorkflow, "workflow", String),
-    // Released peers recorded the Wave default here; it lives in the Wave config.yaml.
-    (HistoricalWaveWorkflow, "wave_workflow", Option<String>),
     (Krs, "krs", Vec<crate::work::project::ProjectKR>),
     (MetricTargets, "metric_targets", Vec<crate::metric::MetricTarget>),
     (Disposition, "disposition", Disposition),

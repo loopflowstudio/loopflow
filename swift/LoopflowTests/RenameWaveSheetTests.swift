@@ -42,8 +42,9 @@ struct RenameWaveSheetTests {
         let view = RenameWaveSheetContent(
             currentName: "product", newName: .constant("ops"), phase: .editing(error: "ops already exists"),
             onRename: { renamed = true }, onDone: {})
-        #expect(try view.inspect().find(viewWithAccessibilityIdentifier: "rename-wave-error").text().string()
-            == "ops already exists")
+        #expect(try view.inspect().find(viewWithAccessibilityIdentifier: "rename-wave-error")
+            .find(text: "ops already exists").string() == "ops already exists")
+        #expect(try view.inspect().find(text: "Not renamed.").string() == "Not renamed.")
         try view.inspect().find(viewWithAccessibilityIdentifier: "rename-wave-confirm").button().tap()
         #expect(renamed)
     }

@@ -5,6 +5,34 @@ import AppKit
 import Loopflow
 import SwiftUI
 
+/// A repository with no Waves, no Tasks and no conversation: this stands in
+/// for its page (`WorkModel.repositoryIsEmpty`) and says what to do next.
+struct NoPlannedWork: View {
+    let model: WorkModel
+    /// Opens the repository's conversation in its workspace.
+    let openConversation: () -> Void
+
+    var body: some View {
+        EmptyState(title: "No planned Work in this repository",
+                   sentence: "Say what you want built, or talk it through first.") {
+            Button("New Task ⌘N") { model.navigation.palette = .newTask }
+                .buttonStyle(LoopflowButtonStyle(.accent))
+                .accessibilityIdentifier("loopflow-work-empty-new-task")
+            Button("Open the repository conversation", action: openConversation)
+                .accessibilityIdentifier("loopflow-work-empty-conversation")
+        }
+        .accessibilityIdentifier("loopflow-work-empty")
+    }
+}
+
+/// Nothing is selected in a plan that has Work.
+struct ChooseWork: View {
+    var body: some View {
+        EmptyState(title: "Choose Work",
+                   sentence: "Pick a Task or a Wave in the sidebar, or press ⌘K to find one in any repository.")
+    }
+}
+
 struct WorkSurfaceView: View {
     @Bindable var model: WorkModel
     var onOpenSession: (SessionRecord) -> Void = { _ in }
@@ -39,19 +67,12 @@ struct WorkSurfaceView: View {
                 .accessibilityIdentifier("loopflow-work-loading")
         } else if snapshot == nil {
             Color.clear
-        } else if visibleWaves.isEmpty, model.visibleWaves.isEmpty, model.visibleTasks.isEmpty {
-            ContentUnavailableView(
-                model.repoPath == nil ? "No planned Work yet" : "No planned Work in this repository",
-                systemImage: "map",
-                description: Text("Open the repository conversation to decide what to work on.")
-            )
-            .accessibilityIdentifier("loopflow-work-empty")
         } else {
             switch model.selection?.kind {
             case nil:
-                ContentUnavailableView("Choose Work", systemImage: "list.bullet")
+                ChooseWork()
             case .wave:
-                if let selection = model.selection { WaveStandupBoard(model: model, view: .wave(selection.id)) }
+                if let selection = model.selection { BacklogView(model: model, view: .wave(selection.id)) }
             case .project:
                 missingSelection
             case .task:
@@ -65,12 +86,12 @@ struct WorkSurfaceView: View {
         @ViewBuilder body: () -> Body
     ) -> some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 26) {
+            VStack(alignment: .leading, spacing: Spacing.xxl) {
                 body()
             }
-            .padding(.horizontal, 36)
-            .padding(.top, 30)
-            .padding(.bottom, 72)
+            .padding(.horizontal, Spacing.xxxl)
+            .padding(.top, Spacing.xxxl)
+            .padding(.bottom, Spacing.xxxl)
             .frame(maxWidth: 1160, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .center)
         }
@@ -90,7 +111,7 @@ struct WorkSurfaceView: View {
                 VStack(alignment: .leading, spacing: Spacing.sm) {
                     HStack(alignment: .firstTextBaseline, spacing: Spacing.md) {
                         Text(task.task.name)
-                            .font(Typography.title)
+                            .serif(.title)
                             .foregroundStyle(palette.text)
                             .textSelection(.enabled)
                             .fixedSize(horizontal: false, vertical: true)
@@ -102,22 +123,24 @@ struct WorkSurfaceView: View {
                             } label: {
                                 Label("New session", systemImage: "plus.bubble")
                             }
-                            .buttonStyle(WorkOutlineButtonStyle())
+                            .buttonStyle(LoopflowButtonStyle())
                             .disabled(model.navigation.startingTaskSessions.contains(task.id))
                             .help("Open an independent conversation with this Task's context in its worktree. No Graph is started.")
                             .accessibilityIdentifier("task-new-session")
                         }
                     }
                     HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
-                        Text(task.condition.reason)
-                            .font(Typography.body(13))
-                            .foregroundStyle(palette.textSecondary)
-                            .accessibilityLabel(taskConditionAccessibilityLabel(task))
+                        if let line = TaskRowStatus(task: task).line {
+                            Text(line)
+                                .font(Typography.text)
+                                .foregroundStyle(palette.textSecondary)
+                                .accessibilityLabel(taskConditionAccessibilityLabel(task))
+                        }
                         Spacer()
                         if let workspace = task.reference.workspace {
                             Button("Worktree") { model.openWorktree(workspace) }
                                 .buttonStyle(WorkPlainButtonStyle())
-                                .font(Typography.body(12.5))
+                                .font(Typography.text)
                         }
                         if let parent = model.taskExecution[task.id].value?.stackParent {
                             TaskStackParentLabel(parent: parent)
@@ -125,7 +148,7 @@ struct WorkSurfaceView: View {
                         if let github = task.pr?.publication?.github {
                             Link("PR #\(github.number)", destination: github.url)
                                 .buttonStyle(WorkLinkStyle())
-                                .font(Typography.body(12.5))
+                                .font(Typography.text)
                         }
                     }
                     .tint(palette.actionInk)
@@ -133,7 +156,7 @@ struct WorkSurfaceView: View {
                     TaskPlanningFactsView(task: task)
                     if task.task.trackerState.state != .available {
                         Text("Tracker state: \(task.task.trackerState.state.rawValue)")
-                            .font(Typography.caption())
+                            .font(Typography.meta)
                             .foregroundStyle(palette.textSecondary)
                     }
                     TrackerSyncView(sync: task.task.sync, repo: task.task.repo)
@@ -141,14 +164,16 @@ struct WorkSurfaceView: View {
                         .id(task.id)
                 }
                 if let unavailable = found.wave?.unavailableTasks.first(where: { $0.taskId == task.id }) {
-                    evidenceBanner(title: "Retained Task · planning unavailable", detail: unavailable.reason)
+                    FailureLine("Planning is unavailable for this Task.", machine: unavailable.reason)
+                        .padding(.horizontal, Spacing.xl)
+                        .padding(.vertical, Spacing.sm)
                 }
                 TaskHistoryView(model: model, task: task)
                     .id(task.id)
                 // Raw records, for when the Workflow and the Graph process log disagree with them.
                 TaskDiagnosticsView(model: model, task: task)
                     .id(task.id)
-                    .font(Typography.body(12))
+                    .font(Typography.text)
                     .foregroundStyle(palette.textSecondary)
                     .accessibilityIdentifier("task-debug")
                 // A Task conversation that is not running, or that the server started again, prints the
@@ -157,7 +182,7 @@ struct WorkSurfaceView: View {
                    conversation.outlook != nil || conversation.start != nil,
                    let line = conversation.statusLine {
                     Label("Conversation: \(line)", systemImage: "arrow.clockwise")
-                        .font(Typography.body(12.5))
+                        .font(Typography.text)
                         .foregroundStyle(palette.textSecondary)
                         .accessibilityIdentifier("task-conversation-line")
                 }
@@ -180,13 +205,13 @@ struct WorkSurfaceView: View {
                             editingTask = task
                         }
                         .buttonStyle(WorkPlainButtonStyle())
-                        .font(Typography.body(12.5))
+                        .font(Typography.text)
                         .foregroundStyle(palette.textTertiary)
                         .accessibilityIdentifier("work-edit-directive")
                     }
                     Group {
                         if task.task.description.isEmpty {
-                            Text("No description recorded.").foregroundStyle(palette.textSecondary)
+                            Text("No description recorded.").emptyLine()
                         } else {
                             MarkdownBlocks(source: task.task.description).equatable()
                         }
@@ -206,37 +231,18 @@ struct WorkSurfaceView: View {
 
     /// A heading and its content, spaced as one unit.
     private func section<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 10) { content() }
+        VStack(alignment: .leading, spacing: Spacing.sm) { content() }
     }
 
     // MARK: - Shared pieces
 
     private var missingSelection: some View {
-        ContentUnavailableView(
-            "Selected Work is unavailable",
-            systemImage: "questionmark.circle",
-            description: Text("This planning read cannot resolve the selection. Its workspace and conversations remain retained.")
-        )
-    }
-
-    private func evidenceBanner(title: String, detail: String) -> some View {
-        HStack(alignment: .top, spacing: Spacing.sm) {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .foregroundStyle(palette.warning)
-            VStack(alignment: .leading, spacing: Spacing.xxs) {
-                Text(title)
-                    .font(Typography.strong(11))
-                    .foregroundStyle(palette.text)
-                Text(detail)
-                    .font(Typography.caption(10))
-                    .foregroundStyle(palette.textSecondary)
-                    .textSelection(.enabled)
-            }
-            Spacer()
+        EmptyState(title: "Selected Work is unavailable",
+                   sentence: "The latest plan does not include it. Its workspace and conversations are kept.") {
+            Button("Read the plan again") { model.rescanWork() }
+                .buttonStyle(LoopflowButtonStyle(.accent))
+                .accessibilityIdentifier("loopflow-work-reread")
         }
-        .padding(.horizontal, Spacing.xl)
-        .padding(.vertical, Spacing.sm)
-        .background(palette.warning.opacity(0.12))
     }
 }
 
@@ -259,19 +265,16 @@ struct TaskDirectiveEditor: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.md) {
             Text("Edit description · \(task.task.identifier)")
-                .font(Typography.strong(14))
+                .font(Typography.textStrong)
             TextEditor(text: $draft)
-                .font(Typography.body(13))
+                .font(Typography.text)
                 .scrollContentBackground(.hidden)
                 .padding(Spacing.sm)
                 .background(palette.surfaceMuted)
                 .accessibilityIdentifier("task-directive-draft")
                 .disabled(isSaving)
             if let saveError {
-                Text(saveError)
-                    .font(Typography.body(12))
-                    .foregroundStyle(palette.warning)
-                    .textSelection(.enabled)
+                FailureLine("Not saved.", machine: saveError)
                     .accessibilityIdentifier("task-directive-error")
             }
             HStack {
@@ -317,7 +320,7 @@ struct TaskStackParentLabel: View {
 
     var body: some View {
         Text("Stacked on \(parent.identifier)")
-            .font(Typography.body(12.5))
+            .font(Typography.text)
             .foregroundStyle(palette.textSecondary)
             .help(help)
             .accessibilityIdentifier("task-stack-parent")

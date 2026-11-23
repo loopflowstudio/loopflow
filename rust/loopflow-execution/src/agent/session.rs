@@ -7,7 +7,6 @@ pub fn resolve_session_config(
     session: &crate::session::LfSession,
     settings: serde_yaml_ng::Value,
     output_schema: Option<&serde_json::Value>,
-    batch: bool,
 ) -> Result<AgentConfig> {
     let _selection = crate::config::settings::select_invocation(settings);
     let store = crate::store::open_sqlite(&crate::store::database_path_from_env()?)?;
@@ -89,7 +88,7 @@ pub fn resolve_session_config(
             .is_none_or(|harness| harness == provider);
     let mut config = AgentConfig {
         cwd: Some(session.cwd.clone()),
-        skip_permissions: current.yolo,
+        yolo: current.yolo,
         chrome: current.chrome,
         codex_service_tier: current.codex.service_tier,
         output_schema: output_schema.cloned(),
@@ -100,10 +99,7 @@ pub fn resolve_session_config(
     }
     if let Some(request) = request {
         if !importing
-            && config
-                .agent
-                .harness
-                .harness()
+            && crate::harness::launcher(config.agent.harness)
                 .capabilities()
                 .initial_prompt_on_resume
         {
@@ -111,17 +107,6 @@ pub fn resolve_session_config(
         }
         config.system_prompt = request.system_prompt;
         config.conversation_context = request.conversation_context;
-    }
-    if batch {
-        if let Some(task) = session
-            .task_id
-            .as_ref()
-            .map(|id| store.task_by_issue(id.as_str()))
-            .transpose()?
-            .flatten()
-        {
-            config.skip_permissions |= super::is_task_checkout(&task, &session.cwd)?;
-        }
     }
     if resumes_native {
         if let Some(native) = session

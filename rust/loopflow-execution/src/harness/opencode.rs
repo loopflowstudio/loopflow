@@ -3,10 +3,10 @@
 //! lf names the conversation (`--session ses_…`), and the context plugin
 //! supplies instructions, context, steers and turn reports in both.
 use crate::harness::LaunchKind;
-use std::process::Stdio;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{anyhow, bail, Result};
 use async_trait::async_trait;
 use serde_json::Value;
 use tokio::io::{AsyncBufReadExt, BufReader};
@@ -14,12 +14,15 @@ use tokio::process::{Child, ChildStdout, Command};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
+use super::common::{Run, Stderr};
+
 use crate::agent::AgentConfig;
-use crate::harness::fact::{Decoded, ProviderFact, ProviderTurn};
 use crate::harness::fact_writer::FactWriter;
-use crate::harness::opencode_decode::Turn;
 use crate::harness::Recording;
 use crate::harness::{Driver as StreamDriver, HarnessError};
+use loopflow_harness::fact::{ProviderFact, ProviderTurn};
+use loopflow_harness::opencode_decode::Turn;
+use loopflow_harness::Harness;
 use loopflow_model::chat::types::ConversationEvent;
 use loopflow_model::id::AgentSessionId;
 
@@ -32,38 +35,17 @@ struct State {
     named: Option<String>,
     /// Writes what the current process's turn establishes.
     writer: Option<FactWriter>,
-    /// lf stopped the current turn's process.
-    interrupted: bool,
 }
 
 impl State {
-    /// Record what a turn established and hand its display events on. A
-    /// record lf could not write is a gap, never a lost conversation event.
-    fn publish(
-        &mut self,
-        decoded: Vec<Decoded>,
-        events: &mpsc::UnboundedSender<ConversationEvent>,
-    ) {
-        if let Some(writer) = self.writer.as_mut() {
-            if let Err(error) = writer.record(&decoded) {
-                tracing::warn!(%error, "failed to record OpenCode activity");
-            }
-        }
-        for decoded in decoded {
-            if let Decoded::Display(event) = decoded {
-                let _ = events.send(event);
-            }
-        }
-    }
-
     /// Start the turn the sent input began. OpenCode names a turn by the user
     /// message it stored for the input, which is how its transcript is read;
     /// a run whose message cannot be found gets a name of lf's own.
     fn begin(&mut self, events: &mpsc::UnboundedSender<ConversationEvent>) -> Option<&mut Turn> {
         if let Some(thread) = self.sent.take() {
-            let home = super::Harness::transcript_home(&OpenCode);
-            let id = crate::transcript::opencode::last_request(
-                &crate::transcript::opencode::store(&home),
+            let home = loopflow_harness::OpenCode.transcript_home();
+            let id = loopflow_harness::transcript::opencode::last_request(
+                &loopflow_harness::transcript::opencode::store(&home),
                 thread.as_str(),
             )
             .filter(|id| self.named.as_ref() != Some(id))
@@ -74,7 +56,8 @@ impl State {
                 turn: id.clone(),
             };
             self.turn = Some(Turn::new(turn.clone()));
-            self.publish(
+            super::common::publish(
+                self.writer.as_mut(),
                 vec![
                     ProviderFact::SessionObserved(thread).into(),
                     ProviderFact::TurnAnswered {
@@ -101,9 +84,7 @@ pub struct Driver {
     kind: LaunchKind,
     thread: Option<AgentSessionId>,
     first_turn: bool,
-    /// The current turn's process, until its exit is recorded.
-    pid: Option<u32>,
-    reader: Option<JoinHandle<()>>,
+    run: Run,
 }
 
 impl Driver {
@@ -120,53 +101,28 @@ impl Driver {
             kind: launch.kind,
             thread: launch.start.thread(),
             first_turn: true,
-            pid: None,
-            reader: None,
+            run: Run::default(),
         }
     }
 
-    /// Record the last process's exit and stop whatever of it is left.
-    async fn settle_process(&mut self) -> Result<()> {
-        if self.pid.take().is_some() {
-            super::agent_process::stop(&self.owner.clone())?;
-        }
-        if let Some(reader) = self.reader.take() {
-            // The process is gone, so its output ends and the reader settles the turn.
-            let _ = reader.await;
-        }
-        Ok(())
-    }
-
-    /// The run for one turn, and the file its stderr goes to.
-    fn command(
-        &self,
-        config: &AgentConfig,
-        thread: &AgentSessionId,
-    ) -> Result<(Command, std::fs::File)> {
+    /// The run for one turn, and where its stderr goes.
+    fn command(&self, config: &AgentConfig, thread: &AgentSessionId) -> Result<(Command, Stderr)> {
         let mut command = Command::new("opencode");
         command.args(["run", "--standalone", "--format", "json", "--auto"]);
         command.args(["--session", thread.as_str()]);
         super::configure_agent_env(&mut command, config);
         command.envs(environment(config, None, self.kind, thread)?);
         super::configure_vendor_std_env(command.as_std_mut())?;
-        let log = match diagnostics(config)? {
-            Some(log) => log,
-            None => tempfile::tempfile()?,
-        };
-        command
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(log.try_clone()?)
-            // The shared stop owns cleanup; dropping a stale handle must not signal.
-            .kill_on_drop(false);
-        Ok((command, log))
+        let stderr = Stderr::pipe(&mut command, config, "opencode")?;
+        Ok((command, stderr))
     }
 
     fn spawn_reader(
         &self,
         mut child: Child,
         stdout: ChildStdout,
-        mut diagnostics: std::fs::File,
+        stderr: Stderr,
+        stopped: Arc<AtomicBool>,
     ) -> JoinHandle<()> {
         let state = self.state.clone();
         let events = self.events.clone();
@@ -184,7 +140,7 @@ impl Driver {
                         // Nobody can answer: end the run before it assumes one.
                         let _ = child.start_kill();
                     }
-                    state.publish(decoded, &events);
+                    super::common::publish(state.writer.as_mut(), decoded, &events);
                 }
             }
             let exited = child.wait().await.is_ok_and(|status| status.success());
@@ -194,42 +150,18 @@ impl Driver {
                 return;
             };
             // Stopped by this driver, or with the lf process a signal is ending.
-            let interrupted = std::mem::take(&mut state.interrupted) || crate::agent::interrupted();
+            let interrupted = stopped.load(Ordering::SeqCst) || crate::agent::interrupted();
             let mut decoded = Vec::new();
             if !exited && !interrupted {
-                use std::io::{Read, Seek};
-                let mut detail = String::new();
-                let _ = diagnostics
-                    .rewind()
-                    .and_then(|()| diagnostics.read_to_string(&mut detail));
+                let detail = stderr.read();
                 if let Some(line) = detail.lines().rev().find(|line| !line.trim().is_empty()) {
                     decoded.extend(turn.fail(line));
                 }
             }
             decoded.extend(turn.finish(exited, interrupted));
-            state.publish(decoded, &events);
+            super::common::publish(state.writer.as_mut(), decoded, &events);
         })
     }
-}
-
-/// OpenCode's stderr, kept beside the launch's capture: its own failures and
-/// the context plugin's recording gaps.
-fn diagnostics(config: &AgentConfig) -> Result<Option<std::fs::File>> {
-    let Some(key) = config.env.get(crate::session_record::CAPTURE_KEY_ENV) else {
-        return Ok(None);
-    };
-    let path = crate::session_record::capture_dir(key)?.join("opencode.stderr.log");
-    let mut options = std::fs::OpenOptions::new();
-    options.create(true).append(true).read(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600);
-    }
-    let log = options
-        .open(&path)
-        .with_context(|| format!("open OpenCode diagnostics {}", path.display()))?;
-    Ok(Some(log))
 }
 
 #[async_trait]
@@ -239,18 +171,17 @@ impl StreamDriver for Driver {
     }
 
     fn pid(&self) -> Option<u32> {
-        self.pid
+        self.run.pid
     }
 
     fn process_group_id(&self) -> Option<u32> {
-        // Admission makes this child the leader of its own group.
-        self.pid.filter(|pid| *pid > 1)
+        self.run.group()
     }
 
     async fn start(&mut self) -> Result<()> {
         if self.thread.is_none() {
-            self.thread = Some(super::Harness::thread_name(
-                &OpenCode,
+            self.thread = Some(super::Launcher::thread_name(
+                &loopflow_harness::OpenCode,
                 self.owner.assigned_thread()?,
             ));
         }
@@ -258,7 +189,8 @@ impl StreamDriver for Driver {
     }
 
     async fn send_input(&mut self, content: &str) -> Result<()> {
-        let Some(message) = build_turn_content(content, &self.config, self.first_turn) else {
+        let Some(message) = super::common::turn_content(content, &self.config, self.first_turn)
+        else {
             return Ok(());
         };
         {
@@ -271,71 +203,34 @@ impl StreamDriver for Driver {
             .thread
             .clone()
             .ok_or_else(|| anyhow!("OpenCode has not started"))?;
-        self.settle_process().await?;
-        {
-            // Each run is a new AgentProcess of the same Session.
-            let Recording {
-                store,
-                session,
-                attachment,
-            } = &mut self.owner;
-            *attachment = match &self.runtime {
-                Some(runtime) => runtime.prepare_agent_process(session, attachment)?,
-                None => crate::process::attachment::prepare_session_agent_process(
-                    store, session, attachment,
-                )?,
-            };
-            self.config.env.insert(
-                crate::process::AGENT_CALLER_ENV.into(),
-                serde_json::to_string(
-                    &attachment.caller(session.clone().into(), crate::journal::current_trace_id()),
-                )?,
-            );
-        }
+        self.run.settle(&self.owner).await?;
+        super::common::next_agent_process(
+            &mut self.owner,
+            self.runtime.as_ref(),
+            &mut self.config,
+        )?;
         let owner = self.owner.clone();
         let mut config = self.config.clone();
         if let Some(context) = &mut config.conversation_context {
             context.identify(&owner.store, &owner.session)?;
         }
-        let (command, diagnostics) = self.command(&config, &thread)?;
+        let (command, stderr) = self.command(&config, &thread)?;
         let mut child = super::agent_process::spawn(command, None, &owner, self.kind)?;
-        self.pid = child.id();
-        let mut stdin = child.stdin.take().expect("OpenCode stdin was piped");
+        let stopped = self.run.began(child.id());
+        let stdin = child.stdin.take().expect("OpenCode stdin was piped");
         let stdout = child.stdout.take().expect("OpenCode stdout was piped");
 
         {
-            let Recording {
-                store,
-                session,
-                attachment,
-            } = owner.clone();
             let mut state = self.state.lock().expect("OpenCode state lock poisoned");
-            state.interrupted = false;
-            state.writer = Some(FactWriter::new(
-                store,
-                session,
-                Some(attachment),
-                Default::default(),
-            ));
+            state.writer = Some(super::common::writer(&owner));
             state.sent = Some(thread);
         }
-        self.reader = Some(self.spawn_reader(child, stdout, diagnostics));
+        self.run.reader = Some(self.spawn_reader(child, stdout, stderr, stopped));
 
         // `opencode run` reads its message from stdin and starts at end of input.
-        let Recording {
-            store,
-            session,
-            attachment,
-        } = owner;
-        let sent = tokio::task::spawn_blocking(move || {
-            store.with_session_dispatch(&session, &attachment, || {
-                super::dispatch::write_fenced(&mut stdin, message.as_bytes())
-            })
-        })
-        .await?;
-        if let Err(error) = sent {
-            self.settle_process().await?;
-            return Err(error.into());
+        if let Err(error) = super::common::send(owner, stdin, message.into_bytes()).await {
+            self.run.settle(&self.owner).await?;
+            return Err(error);
         }
         self.first_turn = false;
         Ok(())
@@ -345,21 +240,16 @@ impl StreamDriver for Driver {
         // A run has no in-band cancel: stopping its process ends the turn, and
         // the next input continues the conversation by its `--session`.
         {
-            let mut state = self.state.lock().expect("OpenCode state lock poisoned");
+            let state = self.state.lock().expect("OpenCode state lock poisoned");
             if state.sent.is_none() && state.turn.is_none() {
                 return Ok(());
             }
-            state.interrupted = true;
         }
-        self.settle_process().await
+        self.run.stop(&self.owner).await
     }
 
     async fn stop(&mut self) -> Result<()> {
-        self.state
-            .lock()
-            .expect("OpenCode state lock poisoned")
-            .interrupted = true;
-        self.settle_process().await
+        self.run.stop(&self.owner).await
     }
 
     fn agent_session(&self) -> Option<AgentSessionId> {
@@ -367,17 +257,173 @@ impl StreamDriver for Driver {
     }
 }
 
-fn build_turn_content(content: &str, config: &AgentConfig, first_turn: bool) -> Option<String> {
-    let task = if first_turn {
-        config.task_prompt.trim()
+fn environment(
+    config: &AgentConfig,
+    context_file: Option<&std::path::Path>,
+    kind: LaunchKind,
+    thread: &AgentSessionId,
+) -> Result<std::collections::BTreeMap<String, String>> {
+    let mut environment = config.env.clone();
+    // An inherited value is the calling OpenCode conversation's, with its plugin.
+    let mut settings: serde_json::Value = environment
+        .get("OPENCODE_CONFIG_CONTENT")
+        .map(|value| serde_json::from_str(value))
+        .transpose()?
+        .unwrap_or_else(|| serde_json::json!({}));
+    if !settings.is_object() {
+        bail!("OPENCODE_CONFIG_CONTENT must be a JSON object");
+    }
+    // The TUI has no `--model`; configuration sets it for workers and work sessions alike.
+    if let Some(model) = &config.agent.model {
+        settings["model"] = serde_json::json!(model);
+    }
+    if config.skips_permissions(kind.mode()) {
+        settings["permissions"] =
+            serde_json::json!([{ "action":"*", "resource":"*", "effect":"allow" }]);
+    }
+    if let Some(context) = &config.conversation_context {
+        crate::harness::context::add_opencode_context(
+            &mut settings,
+            context,
+            &crate::agent::system_prompt_with_structured_replies(config),
+            kind,
+            thread.as_str(),
+        )?;
     } else {
-        ""
-    };
-    let parts: Vec<&str> = [task, content.trim()]
-        .into_iter()
-        .filter(|part| !part.is_empty())
-        .collect();
-    (!parts.is_empty()).then(|| parts.join("\n\n"))
+        let instructions = match context_file {
+            Some(path) => Some(path.to_owned()),
+            None => crate::agent::write_system_prompt_file(config, "opencode")?,
+        };
+        if let Some(path) = instructions {
+            settings
+                .as_object_mut()
+                .expect("configuration is an object")
+                .entry("instructions")
+                .or_insert_with(|| serde_json::json!([]))
+                .as_array_mut()
+                .ok_or_else(|| anyhow::anyhow!("OpenCode instructions must be an array"))?
+                .push(serde_json::json!(path));
+        }
+    }
+    environment.insert("OPENCODE_CONFIG_CONTENT".into(), settings.to_string());
+    Ok(environment)
+}
+
+impl super::Launcher for loopflow_harness::OpenCode {
+    fn locate_transcript(
+        &self,
+        _store: &loopflow_storage::sqlite::SqliteStore,
+        id: &AgentSessionId,
+        _cwd: &std::path::Path,
+    ) -> Result<crate::transcript::Located> {
+        let home = self.transcript_home();
+        let store = loopflow_harness::transcript::opencode::store(&home);
+        Ok(if store.is_file() {
+            crate::transcript::Located::Found {
+                source: loopflow_harness::transcript::Source::OpenCode {
+                    store,
+                    id: id.to_string(),
+                },
+                home: Some(home),
+            }
+        } else {
+            crate::transcript::Located::Gone(crate::transcript::Gap::FileMissing { home })
+        })
+    }
+    fn recent_transcripts(
+        &self,
+        home: &std::path::Path,
+        cwd: &std::path::Path,
+        since: i64,
+        _owned: &std::collections::HashSet<&str>,
+    ) -> Vec<(String, loopflow_harness::transcript::Source, i64)> {
+        let store = loopflow_harness::transcript::opencode::store(home);
+        loopflow_harness::transcript::opencode::written_in(&store, cwd, since)
+            .into_iter()
+            .map(|(id, at)| {
+                (
+                    id.clone(),
+                    loopflow_harness::transcript::Source::OpenCode {
+                        store: store.clone(),
+                        id,
+                    },
+                    at,
+                )
+            })
+            .collect()
+    }
+    fn classify_failure(&self, code: &str, message: &str) -> Option<crate::agent::AgentFailure> {
+        // "Insufficient balance. This request is pay-as-you-go, billed to
+        // OpenCode Models credits." and, for a model it has no route to,
+        // "Model unavailable: opencode/<name>" (2.0.32). OpenCode retries a
+        // transient failure itself.
+        let words = message.to_ascii_lowercase();
+        if words.contains("insufficient balance") {
+            Some(crate::agent::AgentFailure::UsageLimit)
+        } else if words.contains("model unavailable") {
+            Some(crate::agent::AgentFailure::ModelUnavailable)
+        } else {
+            crate::agent::routing_failure(code, message)
+        }
+    }
+    fn capabilities(&self) -> super::Capabilities {
+        super::Capabilities {
+            thread: super::ThreadNaming {
+                bare: super::ThreadName::Assigned,
+                managed: super::ThreadName::Assigned,
+            },
+            initial_prompt_on_resume: false,
+            native_skills: None,
+            installed_skills: super::InstalledSkills {
+                global: ".agents/skills",
+                repository: ".agents/skills",
+                global_registry: None,
+            },
+            turn_limit: false,
+            output_schema: false,
+            respawns_after_crash: false,
+            install_hint: concat!(
+                "Install OpenCode 2 or later with `npm install -g @opencode/cli`; ",
+                "the `opencode-ai` package stops at 1.x.",
+            ),
+        }
+    }
+    fn driver(
+        &self,
+        launch: &super::Launch<'_>,
+        events: mpsc::UnboundedSender<ConversationEvent>,
+        _approval: super::ApprovalPolicy,
+    ) -> Box<dyn super::Driver> {
+        Box::new(Driver::new(launch, events))
+    }
+    fn thread_name(&self, assigned: AgentSessionId) -> AgentSessionId {
+        // OpenCode creates the conversation a `--session` names, and accepts
+        // only names that start with `ses`.
+        format!("ses_{}", assigned.as_str().replace('-', "")).into()
+    }
+    fn open(&self, launch: &super::Launch<'_>) -> Result<super::native_session::NativeClient> {
+        let (_, input) = launch.terminal_input()?;
+        let mut client = super::native_session::NativeClient::new(launch)?;
+        let thread = client
+            .thread
+            .clone()
+            .ok_or_else(|| anyhow!("OpenCode conversation has no name"))?;
+        client
+            .process
+            .envs(environment(
+                launch.config,
+                launch.context_file,
+                launch.kind,
+                &thread,
+            )?)
+            .args(["--standalone", "--session", thread.as_str()]);
+        if let Some(prompt) = input.filter(|prompt| !prompt.is_empty()) {
+            crate::agent::validate_terminal_turn(&prompt)?;
+            client.process.args(["--prompt", &prompt]);
+        }
+        client.stderr = super::common::diagnostics(launch.config, "opencode")?;
+        Ok(client)
+    }
 }
 
 #[cfg(test)]
@@ -385,10 +431,9 @@ mod tests {
     use crate::harness::LaunchKind;
     use crate::process::attachment;
 
-    use super::{
-        build_turn_content, mpsc, AgentConfig, Command, ConversationEvent, Driver, StreamDriver,
-    };
-    use loopflow_model::chat::types::{ConversationItem, Lifecycle};
+    use super::super::common::drive_turn;
+    use super::{mpsc, AgentConfig, Command, Driver, StreamDriver};
+    use loopflow_model::chat::types::Lifecycle;
 
     #[tokio::test]
     async fn stop_clears_the_child_and_its_group() {
@@ -425,13 +470,13 @@ mod tests {
         let (tx, _rx) = mpsc::unbounded_channel();
         let mut harness = Driver::new(
             &crate::harness::launch_for_test(
-                crate::harness::HarnessKind::OpenCode,
+                loopflow_harness::HarnessKind::OpenCode,
                 &crate::agent::AgentConfig::default(),
                 &owner,
             ),
             tx,
         );
-        harness.pid = Some(pid);
+        harness.run.pid = Some(pid);
         assert_eq!(harness.process_group_id(), Some(pid));
         harness.stop().await.unwrap();
         assert_eq!(harness.pid(), None);
@@ -445,7 +490,7 @@ mod tests {
 
     #[test]
     fn build_turn_content_includes_task_prompt_on_first_turn() {
-        let content = build_turn_content(
+        let content = super::super::common::turn_content(
             "",
             &AgentConfig {
                 task_prompt: "task".to_string(),
@@ -496,27 +541,6 @@ mod tests {
         guard
     }
 
-    async fn drive_turn(
-        rx: &mut mpsc::UnboundedReceiver<ConversationEvent>,
-    ) -> (Lifecycle, String, Vec<String>) {
-        let (mut text, mut errors) = (String::new(), Vec::new());
-        loop {
-            let event = tokio::time::timeout(std::time::Duration::from_secs(180), rx.recv())
-                .await
-                .expect("a turn settles")
-                .expect("the driver is alive");
-            match event {
-                ConversationEvent::ItemCompleted {
-                    item: ConversationItem::Message { text: t, phase, .. },
-                    ..
-                } if phase.as_deref() == Some("final") => text = t,
-                ConversationEvent::Error { message, .. } => errors.push(message),
-                ConversationEvent::TurnCompleted { status, .. } => return (status, text, errors),
-                _ => {}
-            }
-        }
-    }
-
     #[tokio::test]
     async fn each_turn_is_one_run_that_continues_the_named_conversation() {
         let ledger = crate::journal::TestLedgerGuard::new();
@@ -536,7 +560,7 @@ mod tests {
         let (tx, mut rx) = mpsc::unbounded_channel();
         let mut harness = Driver::new(
             &crate::harness::launch_for_test(
-                crate::harness::HarnessKind::OpenCode,
+                loopflow_harness::HarnessKind::OpenCode,
                 &config,
                 &recording,
             ),
@@ -593,7 +617,7 @@ mod tests {
         let (tx, mut rx) = mpsc::unbounded_channel();
         let mut harness = Driver::new(
             &crate::harness::launch_for_test(
-                crate::harness::HarnessKind::OpenCode,
+                loopflow_harness::HarnessKind::OpenCode,
                 &config,
                 &recording,
             ),
@@ -622,7 +646,7 @@ mod tests {
         let recording = super::super::admit_for_test(ledger.home());
         let mut harness = Driver::new(
             &crate::harness::launch_for_test(
-                crate::harness::HarnessKind::OpenCode,
+                loopflow_harness::HarnessKind::OpenCode,
                 &config,
                 &recording,
             ),
@@ -637,209 +661,5 @@ mod tests {
         assert_eq!(status, Lifecycle::Completed, "{errors:?}");
         assert!(text.to_uppercase().contains("ALPHA"), "turn text: {text:?}");
         harness.stop().await.expect("stop");
-    }
-}
-
-fn environment(
-    config: &AgentConfig,
-    context_file: Option<&std::path::Path>,
-    kind: LaunchKind,
-    thread: &AgentSessionId,
-) -> Result<std::collections::BTreeMap<String, String>> {
-    let mut environment = config.env.clone();
-    // An inherited value is the calling OpenCode conversation's, with its plugin.
-    let mut settings: serde_json::Value = environment
-        .get("OPENCODE_CONFIG_CONTENT")
-        .map(|value| serde_json::from_str(value))
-        .transpose()?
-        .unwrap_or_else(|| serde_json::json!({}));
-    if !settings.is_object() {
-        bail!("OPENCODE_CONFIG_CONTENT must be a JSON object");
-    }
-    // The TUI has no `--model`; configuration sets it for workers and work sessions alike.
-    if let Some(model) = &config.agent.model {
-        settings["model"] = serde_json::json!(model);
-    }
-    if config.skip_permissions {
-        settings["permissions"] =
-            serde_json::json!([{ "action":"*", "resource":"*", "effect":"allow" }]);
-    }
-    if let Some(context) = &config.conversation_context {
-        crate::harness::context::add_opencode_context(
-            &mut settings,
-            context,
-            &crate::agent::system_prompt_with_structured_replies(config),
-            kind,
-            thread.as_str(),
-        )?;
-    } else {
-        let instructions = match context_file {
-            Some(path) => Some(path.to_owned()),
-            None => crate::agent::write_system_prompt_file(config, "opencode")?,
-        };
-        if let Some(path) = instructions {
-            settings
-                .as_object_mut()
-                .expect("configuration is an object")
-                .entry("instructions")
-                .or_insert_with(|| serde_json::json!([]))
-                .as_array_mut()
-                .ok_or_else(|| anyhow::anyhow!("OpenCode instructions must be an array"))?
-                .push(serde_json::json!(path));
-        }
-    }
-    environment.insert("OPENCODE_CONFIG_CONTENT".into(), settings.to_string());
-    Ok(environment)
-}
-
-#[derive(Debug)]
-pub struct OpenCode;
-
-impl super::Harness for OpenCode {
-    fn provider_env(&self) -> &'static [&'static str] {
-        &["OPENCODE_API_KEY"]
-    }
-    fn api_key_env(&self) -> &'static [&'static str] {
-        &["OPENCODE_API_KEY", "MOONSHOT_API_KEY"]
-    }
-    fn recognizes_driver(&self, command: &str) -> bool {
-        super::command_program(command, "opencode")
-            && command.split_whitespace().any(|arg| arg == "run")
-    }
-    fn transcript_watch_store(&self, home: &std::path::Path) -> Option<std::path::PathBuf> {
-        Some(crate::transcript::opencode::store(home))
-    }
-    fn transcript_root(&self, home: &std::path::Path) -> (std::path::PathBuf, usize) {
-        (home.to_path_buf(), 0)
-    }
-    fn transcript_reader(&self) -> fn(&[serde_json::Value]) -> Vec<crate::transcript::Turn> {
-        crate::transcript::opencode::read
-    }
-    fn transcript_home(&self) -> std::path::PathBuf {
-        std::env::var_os("XDG_DATA_HOME")
-            .filter(|value| !value.is_empty())
-            .map(std::path::PathBuf::from)
-            .unwrap_or_else(|| dirs::home_dir().unwrap_or_default().join(".local/share"))
-            .join("opencode")
-    }
-    fn locate_transcript(
-        &self,
-        _store: &loopflow_storage::sqlite::SqliteStore,
-        id: &AgentSessionId,
-        _cwd: &std::path::Path,
-    ) -> Result<crate::transcript::Located> {
-        let home = self.transcript_home();
-        let store = crate::transcript::opencode::store(&home);
-        Ok(if store.is_file() {
-            crate::transcript::Located::Found {
-                source: crate::transcript::Source::OpenCode {
-                    store,
-                    id: id.to_string(),
-                },
-                home: Some(home),
-            }
-        } else {
-            crate::transcript::Located::Gone(crate::transcript::Gap::FileMissing { home })
-        })
-    }
-    fn recent_transcripts(
-        &self,
-        home: &std::path::Path,
-        cwd: &std::path::Path,
-        since: i64,
-        _owned: &std::collections::HashSet<&str>,
-    ) -> Vec<(String, crate::transcript::Source, i64)> {
-        let store = crate::transcript::opencode::store(home);
-        crate::transcript::opencode::written_in(&store, cwd, since)
-            .into_iter()
-            .map(|(id, at)| {
-                (
-                    id.clone(),
-                    crate::transcript::Source::OpenCode {
-                        store: store.clone(),
-                        id,
-                    },
-                    at,
-                )
-            })
-            .collect()
-    }
-    fn kind(&self) -> super::HarnessKind {
-        super::HarnessKind::OpenCode
-    }
-    fn capabilities(&self) -> super::Capabilities {
-        super::Capabilities {
-            thread: super::ThreadNaming {
-                bare: super::ThreadName::Assigned,
-                managed: super::ThreadName::Assigned,
-            },
-            initial_prompt_on_resume: false,
-            classifies_failures: false,
-            native_skills: None,
-            turn_limit: false,
-            output_schema: false,
-            respawns_after_crash: false,
-            install_hint: concat!(
-                "Install OpenCode 2 or later with `npm install -g @opencode/cli`; ",
-                "the `opencode-ai` package stops at 1.x.",
-            ),
-        }
-    }
-    fn driver(
-        &self,
-        launch: &super::Launch<'_>,
-        events: mpsc::UnboundedSender<ConversationEvent>,
-        _approval: super::ApprovalPolicy,
-    ) -> Box<dyn super::Driver> {
-        Box::new(Driver::new(launch, events))
-    }
-    fn thread_name(&self, assigned: AgentSessionId) -> AgentSessionId {
-        // OpenCode creates the conversation a `--session` names, and accepts
-        // only names that start with `ses`.
-        format!("ses_{}", assigned.as_str().replace('-', "")).into()
-    }
-    fn validate_model(&self, model: &str) -> Result<()> {
-        anyhow::ensure!(is_supported_opencode_model_variant(model), "unsupported OpenCode model '{}': supported variants are 'opencode/*' (excluding claude/codex families) and 'moonshotai/kimi*'", model);
-        Ok(())
-    }
-
-    fn open(&self, launch: &super::Launch<'_>) -> Result<super::native_session::NativeClient> {
-        let (_, input) = launch.terminal_input()?;
-        let mut client = super::native_session::NativeClient::new(launch)?;
-        let thread = client
-            .thread
-            .clone()
-            .ok_or_else(|| anyhow!("OpenCode conversation has no name"))?;
-        client
-            .process
-            .envs(environment(
-                launch.config,
-                launch.context_file,
-                launch.kind,
-                &thread,
-            )?)
-            .args(["--standalone", "--session", thread.as_str()]);
-        if let Some(prompt) = input.filter(|prompt| !prompt.is_empty()) {
-            crate::agent::validate_terminal_turn(&prompt)?;
-            client.process.args(["--prompt", &prompt]);
-        }
-        client.stderr = diagnostics(launch.config)?;
-        Ok(client)
-    }
-}
-
-fn is_supported_opencode_model_variant(variant: &str) -> bool {
-    let variant = variant.trim().to_ascii_lowercase();
-    let Some((provider, model_id)) = variant.split_once('/') else {
-        return false;
-    };
-    if model_id.is_empty() {
-        return false;
-    }
-
-    match provider {
-        "moonshotai" => model_id.starts_with("kimi"),
-        "opencode" => !model_id.contains("claude") && !model_id.contains("codex"),
-        _ => false,
     }
 }

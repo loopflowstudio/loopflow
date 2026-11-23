@@ -323,7 +323,6 @@ async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Re
             issue: Some(issue),
             repository: Some(repository),
             origin,
-            planning_key,
             from,
             ..
         } => {
@@ -334,10 +333,6 @@ async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Re
                 origin.as_deref(),
             )?;
             let main = loopflow_execution::git::worktrees::main_repo_root(&path)?;
-            if let Some(key) = planning_key {
-                loopflow_execution::ops::planning_sync::adopt_personal_key(&store, &main, key)
-                    .await?;
-            }
             let id = loopflow_model::durable::TaskId::parse(task)?;
             loopflow_execution::ops::human_session::moves::arriving_task(&store, &main, &id, issue)
                 .await?;
@@ -913,7 +908,10 @@ async fn reopen(
         request_id,
         fork,
         !connection.prepare,
-        json,
+        loopflow_execution::transport::ViewerOptions {
+            json,
+            unfocused: connection.unfocused,
+        },
     )
     .await
 }
@@ -959,7 +957,7 @@ pub(crate) fn prepared(cli: &crate::lf::Cli, directory: &Path) -> anyhow::Result
                     directory,
                     target,
                     false,
-                    false,
+                    Default::default(),
                     request_id.as_deref(),
                     cli.agent.as_deref(),
                 )
@@ -989,7 +987,10 @@ async fn new_thread(
         &std::env::current_dir()?,
         target,
         true,
-        connection.json || cli.json,
+        loopflow_execution::transport::ViewerOptions {
+            json: connection.json || cli.json,
+            unfocused: connection.unfocused,
+        },
         request_id,
         cli.agent.as_deref(),
     )
@@ -1007,7 +1008,7 @@ async fn restarted(
     directory: &Path,
     target: loopflow_execution::ops::human_session::SessionTarget<'_>,
     launch: bool,
-    json: bool,
+    viewer: loopflow_execution::transport::ViewerOptions,
     request_id: Option<&str>,
     agent: Option<&str>,
 ) -> anyhow::Result<Opening> {
@@ -1021,7 +1022,7 @@ async fn restarted(
         &selected.id,
         agent,
         launch,
-        json,
+        viewer,
         &request_id,
     )
     .await?;

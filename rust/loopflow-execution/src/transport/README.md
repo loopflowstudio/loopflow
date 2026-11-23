@@ -21,7 +21,8 @@ holder to start the agent on a PTY and keeps everything else: the terminal
 registry, one libghostty-vt terminal per held terminal, views, viewing
 records, queued input, the child's control requests and exit settlement.
 
-Transport selects a `LaunchKind` before `delegate` carries it out. Launches
+`local_session_kind` answers which `LaunchKind` runs in this process;
+`delegate` starts a held terminal for the rest and relays its view. Launches
 are bare or managed, with [four launch names](../../../../docs/glossary.md#loopflows-words).
 Only a work session goes to a held terminal; every other kind runs in its
 caller's process.
@@ -33,13 +34,13 @@ caller's process.
 | Resume a chat with no message | chat | its terminal |
 | Resume a bound or primary Session, or open a Task, Wave or repository conversation | work session | held interactive terminal, independent of its viewer |
 | Open a conversation in a held terminal through a Desktop pane or framed `lf --machine` view | work session | held interactive terminal, independent of its viewer |
-| Headless steps of `lf task run` or `lf ship`, and the `ci-fix` run landing starts | worker | headless until the step or repair ends |
+| Headless steps of `lf task run` or `lf task auto on`, and the `ci-fix` run landing starts | worker | headless until the step or repair ends |
 | A Discord answer for a Wave | worker | returns the answer to the bridge |
 | Desktop Task shells | held shell | independent of its viewer, no hooks |
 
-`lf task run` starts no agent itself. `transport::detach_current` reruns it
-detached from its terminal so the Graph outlives the caller; `lf -b task run`
-waits for it.
+`lf task run` and `lf task auto on` start no agent themselves. `transport::detach_current`
+reruns them detached from their terminal so the Graph outlives the caller;
+`lf -b task run` waits for it.
 
 To open a work session from the CLI, `lf` calls `session.start` and becomes
 a view of the returned terminal. With the server unreachable it fails with
@@ -59,11 +60,12 @@ Task it belongs to. Every launch belonging to a Task counts toward its usage
 and receives its steers. Work sessions and workers report turn
 boundaries to the Machine server; chats and batches read their steers directly.
 
-`delegate` returns either a completed delegation or `Here { kind }`. Direct
+A Session reopened in this process runs as the kind `local_session_kind`
+returns; any other goes to a held terminal through `delegate`. Direct
 launches outside a held terminal or worker step choose between a chat and a
 batch. `--batch` selects a batch. Otherwise `--interactive`, a terminal or no
 prompt selects a chat. Reopening a Session with no message reads its binding
-and primary scope once before `delegate`. Chats reopen as chats, and bound and
+and primary scope once to choose its kind. Chats reopen as chats, and bound and
 primary conversations reopen as work sessions. A Desktop pane or a framed
 `lf --machine` viewer is no terminal a chat can own, so a Session it reopens
 is a work session the holder keeps.
@@ -169,7 +171,8 @@ reports where the conversation moved. A Codex launcher does the same into its cl
 server's lifetime worker checks that client's attachment every two seconds
 and stops it when the conversation moves; a failed store read leaves it
 running, and the byte-handling loop never waits for that read. An OpenCode
-launcher becomes `opencode --standalone` the same way. The server strips `LF_SERVER` and
+launcher becomes `opencode --standalone` the same way. The launcher drops the
+pane’s `LF_RELAY_FOCUSED` before requesting a held terminal. The server strips `LF_SERVER` and
 `LF_SERVER_STATUS` from what the holder starts, so an agent in a Desktop pane
 runs like one opened from a CLI.
 
@@ -226,11 +229,15 @@ skipped (output the ring dropped before the server read it, or a native
 client's exit text lf replaced); lf's reports and events travel in `aside`
 frames, which it writes and does not count. The server keeps no spool.
 
-A view that reconnects attaches with `from`, the position its screen shows:
+A view that reconnects attaches with `from`, the position its screen shows, and
+`focused`, the focus state it last had:
 
 ```json
-{"id":1,"kind":"attach","rows":40,"cols":120,"name":null,"from":48213}
+{"id":1,"kind":"attach","rows":40,"cols":120,"name":null,"from":48213,"focused":false}
 ```
+
+Sending its last known focus keeps a background terminal that reconnects on its
+own from taking the size away from the view a person moved to.
 
 The server answers a new viewer identity, reads the PTY bytes from `from`
 out of the holder's ring on a connection of its own, and sends them as `out`
@@ -269,8 +276,9 @@ restart.
 On startup the server greets every `holder-*.sock`, lists it, and hosts each
 running terminal under its existing `TerminalId`. The screen is rebuilt by
 replaying the holder's ring from its start, then one size nudge (one column
-narrower for 0.4 s, and back) asks the agent to repaint what the ring no
-longer holds. The same nudge follows a gap, when the ring passed output the
+narrower for 0.4 s, then back to the size the terminal has by then) asks the
+agent to repaint what the ring no longer holds. A view that takes the size
+during the nudge keeps it. The same nudge follows a gap, when the ring passed output the
 server had not read. Scrollback reaches only as far back as the ring, and a
 terminal mode set before the ring's start is known only if the agent sets it
 again when resized. Replayed output answers none of its queries: they were
@@ -453,7 +461,7 @@ at most 64 KiB; a payload over 4 MiB is a protocol error.
 | `0x12` input | view → server | keystrokes from any attached connection |
 
 ```json
-{"id":1,"kind":"attach","rows":40,"cols":120,"name":"/dev/ttys004","from":null}
+{"id":1,"kind":"attach","rows":40,"cols":120,"name":"/dev/ttys004","from":null,"focused":true}
 {"answers":1,"seq":0,"kind":"attached","viewer":"…","nonce":"…","terminal":true,"owner":"…"}
 {"id":2,"kind":"focus","focused":true}
 ```
@@ -471,17 +479,22 @@ reply carries the `seq` of the last event queued when it was computed. Kinds:
 `owner {viewer,name,held}`, `child_exited {code}`, `detached`, `hint {text}`,
 `return {detach}` and `live`.
 
-Every attached view types; its `input` frames go to the PTY as they arrive.
-Size and colors follow one view, named by `owner` (`held` says whether the
-recipient is it): the view that most recently attached, typed or gained focus.
-When it leaves, the remaining view used most recently takes over. A view may
-report its size (`resize`) and colors (`theme`) at any time; only the sizing
-view's are applied and broadcast, and a view that has not reported colors
-supplies no color override. Focus is DEC mode 1004: every terminal relay turns
-focus reporting on in its own terminal (a Desktop pane runs the same relay in a
-Ghostty surface) and sends `focus {focused}`. A host that reports no focus
-still gets the attach-and-type rule. The agent hears `CSI I`/`CSI O` only if it
-enabled mode 1004 itself.
+Every attached view can type. The sizing view supplies the PTY size and
+colors. The `attached` reply names it in `owner`, and the `owner` event's
+`held` field tells each recipient whether it owns the size. A view without
+reported colors supplies no color override.
+
+A focused attach, focus-in or typing takes the size. An unfocused attach
+takes it only when there is no owner. When the owner leaves, the most
+recently used live view takes over. Older relays omit `focused` on attach,
+which counts as a focused attach.
+
+A relay starts focused when stdin is a terminal unless given `--unfocused`
+or `LF_RELAY_FOCUSED=0`. Desktop sets the variable in every Session pane.
+The relay enables DEC mode 1004 to track focus across reconnects. Ghostty
+reports its current focus when the mode turns on, so a focused pane takes
+the size before the first key. The agent receives focus reports only when
+it enables mode 1004 itself. Focus-out reaches it only from the sizing view.
 
 Only the sizing view's terminal answers the agent's queries. The server drops
 the other views' answers (cursor position, device attributes, OSC color
@@ -512,7 +525,7 @@ from `/dev/null` and closed inherited descriptors except release locks and
 worktree leases. Task steps themselves wait inside their Graph's process tree.
 
 `LF_LAUNCHER_FD` carries the admitted LfProcess ID and a `released` message.
-Server launches, landing watchers and ship restarts record the ID and append
+Server launches, landing watchers and run restarts record the ID and append
 output to `logs/detached.log`. A pipe closing without an ID leaves delivery
 unknown; nothing launches again on that uncertainty. Workers report turns and
 read Task steers while running without a PTY, viewer or screen. Their own

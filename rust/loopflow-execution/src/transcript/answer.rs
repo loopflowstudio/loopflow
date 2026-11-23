@@ -7,8 +7,9 @@ use anyhow::{anyhow, Context, Result};
 use loopflow_model::chat::types::ConversationItem;
 use loopflow_storage::sqlite::SqliteStore;
 
-use super::{json_lines, locate, read, Gap, Located, Source, Turn};
-use crate::harness::HarnessKind;
+use super::{locate, Gap, Located};
+use loopflow_harness::transcript::{json_lines, read, Source, Turn};
+use loopflow_harness::HarnessKind;
 
 /// The final answer of the turn that last answered `input`; `None` when no
 /// turn of it completed, or the turn ended without saying anything.
@@ -125,15 +126,11 @@ mod tests {
     use std::path::{Path, PathBuf};
 
     use super::{input_final_answer, input_final_answer_for_people, last_assistant_message};
-    use crate::harness::HarnessKind;
-    use crate::transcript::Source;
+    use loopflow_harness::transcript::Source;
+    use loopflow_harness::HarnessKind;
 
     fn testdata(name: &str) -> Source {
-        Source::File(
-            Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("src/transcript/testdata")
-                .join(name),
-        )
+        Source::File(loopflow_harness::transcript::testdata(name))
     }
 
     fn transcript(dir: &Path, rows: &[serde_json::Value]) -> Source {
@@ -278,7 +275,8 @@ mod tests {
                 .unwrap()
                 .to_rfc3339()
         };
-        let project = crate::transcript::live::claude_project(&account, Path::new("/work/repo"));
+        let project =
+            loopflow_harness::transcript::live::claude_project(&account, Path::new("/work/repo"));
         std::fs::create_dir_all(&project).unwrap();
         let row = |kind: &str, at: &str, content: serde_json::Value| {
             serde_json::json!({"type":kind,"uuid":format!("{kind}-{at}"),"timestamp":at,

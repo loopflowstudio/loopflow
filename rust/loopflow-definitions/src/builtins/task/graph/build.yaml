@@ -1,4 +1,5 @@
-# Build the plan in chunks, then review the finished change whole.
+description: Build the plan in chunks, then review the finished change whole.
+steps:
 - loop:
     - loop:
         - implement         # one chunk of the plan, fresh context

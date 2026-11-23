@@ -92,7 +92,8 @@ Name the Session for its work in two or three words: take its ID from the lf
 context block and run `lf session rename <id> '<name>' --suggest`. Answer in
 this conversation; never `lf resume` your own Session.
 
-`lf help <command-or-skill>` is the current reference.
+`lf help <command-or-skill>` is the command reference; `lf docs [topic]` reads
+embedded user docs.
 
 </lf:loopflow>
 
@@ -207,6 +208,9 @@ and revise the plan. Never note a contradiction and keep building on it.
 Mark the plan's remaining work in place: what this slice built, what it
 taught, what is next. If you had to discover an undocumented convention, add
 it to the agent guide so the next run doesn't rediscover it.
+
+When the change is ready for someone to read, write its reading order as
+`lf help tour` describes.
 
 This is one step of someone's work. Stay in this checkout and build the Task
 you were given; don't pick up backlog, create a second Task or start a

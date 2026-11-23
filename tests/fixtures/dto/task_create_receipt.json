@@ -164,17 +164,16 @@
         "state": "starting",
         "reason": "Starting code",
         "step": null,
-        "captured": null
+        "captured": null,
+        "died": null,
+        "outlook": null
       },
       "run_control": {
         "unavailable": null
       },
-      "ship_control": {
-        "unavailable": null
-      },
-      "shipping": null,
       "pr": null,
-      "section": "working"
+      "section": "working",
+      "owned_by_you": true
     }
   },
   {
@@ -290,17 +289,16 @@
         "state": "running",
         "reason": "Worker is running implement",
         "step": null,
-        "captured": null
+        "captured": null,
+        "died": null,
+        "outlook": null
       },
       "run_control": {
         "unavailable": null
       },
-      "ship_control": {
-        "unavailable": null
-      },
-      "shipping": null,
       "pr": null,
-      "section": "working"
+      "section": "working",
+      "owned_by_you": true
     }
   }
 ]

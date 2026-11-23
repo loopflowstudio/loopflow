@@ -12,7 +12,7 @@ Real CLIs, real models, branch `lf`, isolated `LF_HOME`, the account's real
 Q=/tmp/lfq; mkdir -p $Q/bin $Q/home; cp target/debug/lf $Q/bin/lf
 # repo with a local identity, a bare origin, and this Graph:
 #   .lf/graphs/qa.yaml:  - step: implement
-#                        - interactive: human-review
+#                        - interactive: ship-review
 #   .lf/config.yaml:     graph: qa
 for v in $(env | grep '^LF_' | cut -d= -f1); do unset $v; done
 export LF_HOME=$Q/home LF_BIN=$Q/bin/lf PATH=$Q/bin:$PATH
@@ -23,7 +23,7 @@ sleep 12; lf steer <id> 'Also give divide a docstring "Return a over b."'
 ```
 
 A Graph item is `step:`, not `skill:`; `interactive:` names a skill that
-exists (`human-review`). Poll `lf task status <id>` for `at human-review`.
+exists (`ship-review`). Poll `lf task status <id>` for `at ship-review`.
 
 What to read afterwards:
 

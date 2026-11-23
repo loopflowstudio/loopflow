@@ -98,7 +98,8 @@ lf task show LOO-123 --json      # ownership: {owner, superseded_by, log}
 ```
 
 A Task is owned by (person, Machine) or unowned. Its append-only ownership log
-holds `claim` and `unclaim` entries; the later entry wins in tracker order, and
+holds `claim` and `unclaim` entries; the later entry wins, in the tracker's
+order or, without a tracker, the order each entry's writer gave it, and
 no current owner is stored beside it. Each entry names its person, the Machine
 it puts the Task on and the Machine that wrote it, so every Machine stores the
 same rows. Moving a Task is a claim by the same person naming another Machine;
@@ -109,7 +110,8 @@ and reopening write no entries; a Done Task shows its last owner as history.
 
 A person is named once, in `people`: by the tracker's user
 (`linear:<user>`, learned when Linear first shows the Task's assignee), else by
-the Git journal's planning user key (`journal:<key>`), with a display name.
+the planning user key a released Git journal recorded (`journal:<key>`), with a
+display name.
 Ownership entries and Machines refer to that row; the Git email names nobody new.
 Entries written before a Machine knew its person still carry only the Git email.
 A claim naming your person is yours; one naming a different person is still
@@ -164,11 +166,11 @@ inside one IMMEDIATE transaction:
 | Someone else's | Your own Wave Machine; your later claim wins |
 
 A write for a Task another Machine runs travels as the operation itself, not
-as a command line. Running, shipping, holding, claiming or unassigning the Task,
-and opening or resuming its Session, reach the writer the same way:
+as a command line. Running, claiming or unassigning the Task, setting
+its auto, and opening or resuming its Session, reach the writer the same way:
 
 ```bash
-lf task hold LOO-123 --json             # LOO-123 runs on mini; mini's server answers
+lf task auto off LOO-123 --json         # LOO-123 runs on mini; mini's server answers
 ssh mini lf server status               # while it runs, the laptop is a connected client
 ```
 
@@ -205,19 +207,21 @@ use the same binding, and `lf repo` covers repositories without Work.
 The same table retains prior IDs as local locators and exactly one selected ID
 per path; Work, provider mappings, pending effects and execution are untouched.
 An ID already bound to another local path is not reassigned. Binding selects no
-planning destination and publishes nothing. A shared code remote
-or equal clone name supplies no identity. `--repository ID` resolves at the target
+planning destination and publishes nothing. An equal clone name supplies no
+identity; a shared remote does only through the ID its plan refs carry. `--repository ID` resolves at the target
 before Process admission, so SSH need not change the Machine's saved default.
-LOO-412 supplies user/shared destination selection and portable Work exchange.
 Ownership entries travel as marked Task comments ("Jack Heart claimed this on
 mini" plus a `loopflow-ownership` HTML comment carrying the entry) through the
-ordinary comment delivery to Linear or the Git planning journal; inbound comments
-are parsed into the log with the Machine that wrote them. In the journal each
-entry sorts after every entry its writing Machine had seen. An unknown Machine remains an entry reference, never an
-invented SSH route.
-The journal does not carry RepositoryId: unbound import creates a local repository
-ID. Explicit association converges established roots on a selected ID without
-rewriting Work; Desktop reassociates retained windows on opening/restoration. This associates repository roots, not divergent
+ordinary comment delivery to Linear, the plan ref or the hub; arriving comments are parsed
+into the log with the Machine that wrote them. An unknown Machine remains an
+entry reference, never an invented SSH route.
+Plan refs and the hub address a repository by its RepositoryId. A plan ref
+carries it: a clone that fetches a ref naming another ID records it as a locator of
+its own checkout, so every clone of one remote answers to every Machine's ID
+without a command and keeps its own. A repository
+with no remote binds each clone by hand (`lf config repo --bind <id>`) before a
+hub can reach it. Explicit association converges
+established roots on a selected ID without rewriting Work; Desktop reassociates retained windows on opening/restoration. This associates repository roots, not divergent
 Task/Wave IDs for one provider object; provider correspondence and uncertain
 effect ownership remain with the common planning writer.
 
@@ -254,6 +258,20 @@ later claim, while the earlier claimant still owns it locally, reports
 steers its live Sessions. Nothing is cancelled. If the log stops showing this
 Machine as owner for any other reason, such as a stale Machine's unclaim, the
 owner claims again.
+
+Without Linear or Asana a claim is first-wins. Each entry carries its `order`,
+taken from its writer's plan clock and past every entry that Machine held for
+the Task, and `seen`, the entry in effect when it was written (itself when
+there was none). Every Machine sorts the log by `order`, then by the writing
+Machine's id. A claim whose `seen` is not the entry in effect just before it
+loses to the claim holding the Task: it stays in the log and names no owner on
+any Machine. When the claim that lost was this Machine's, its Sessions are told
+who claimed first and the Task is interrupted, which stops its Graph and
+changes nothing in its checkout. `lf task claim` then takes the Task over, as a
+claim that has seen the other. `lf task claim` and `lf task run` on a Task
+nobody owns exchange by each carrier first, for at most five seconds, and go
+ahead when that fails. Entries written before `order` and `seen`, and every
+entry with Linear or Asana, never lose.
 
 With Linear, a claim sets the assignee to that Machine's Linear viewer and moves
 backlog, triage or `unstarted` to `started`; unclaim clears the assignee; a move
@@ -393,7 +411,7 @@ label; then the refusal prints the same check and retry. Addressed to mini from 
 runs on the laptop, which holds the move. A leaving move carries on: it
 commits, pushes and takes the conversation, which are safe to repeat. A sent
 move is delivered as it was sent, conversation included, without committing or
-pushing again. For a Task outside Auto-Ship, the move continues a Graph it
+pushing again. For a Task with auto not on, the move continues a Graph it
 stopped, starting it on mini at the saved step. If the Graph does not start,
 the move still stands and prints `lf task run MTG-321 --from 'implement'` to
 start it on the Task's owner.
@@ -403,11 +421,12 @@ If it did, its answer lost, the Task runs on mini and the claim is written
 there. If it did not, or mini is gone, the laptop takes the Task back and the
 move ends.
 
-Auto-Ship approval travels with the move, as the Graph position does. Mini's
-server starts the ship process from the saved Graph position. Each Machine
-keeps approvals and stops as a log (who, when, which process).
-`lf task hold MTG-321` withdraws the approval on either Machine. A Machine
-ships only Tasks it owns. Once a Task has left, its old checkout starts nothing.
+Auto travels with the move, as the Graph position does: it is one setting
+on the Task (on or off, who, when), carried whether or not the Task has run. The continued run is a plain
+`lf task run`; with auto on it stands in at interactive steps on mini, as
+it would have on the laptop. `lf task auto off MTG-321` turns it off on either
+Machine. A Machine ships only Tasks it owns: once a Task has
+left, its old checkout starts nothing.
 
 ## Own and rent Machines
 
@@ -512,7 +531,7 @@ lf machine doctor
 ```
 
 Each owner record (a Session's agent and attachment, a Graph run or step, a
-Task or ship carrier) carries the pid and OS start time of the process it runs
+Task's carrier) carries the pid and OS start time of the process it runs
 as; liveness is one OS lookup against them. The Machine server's liveness pass
 records the end of an owner whose process died without writing it.
 
@@ -574,8 +593,11 @@ no other
 variable selects either. Every variable
 Loopflow sets or reads is listed in [Environment](environment.md). A private Home
 migrates itself on open, including a branch's unmerged migration; editing that
-migration afterwards needs a fresh `LF_HOME`. Loopflow never copies main data into
-it or promotes its contents.
+migration afterwards needs a fresh `LF_HOME`. Nothing in a private Home is
+promoted to the main Machine.
+
+Loopflow Dev opens the main Machine through the installed server and CLI,
+using the Swift app from the current checkout. See [Loopflow for macOS](../../swift/README.md).
 
 Published installation verifies immutable artifacts, validates the candidate on
 a temporary database snapshot, and advances only the main database under the

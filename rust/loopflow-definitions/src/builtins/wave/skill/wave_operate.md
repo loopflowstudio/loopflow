@@ -63,15 +63,16 @@ that fits:
   doesn't complete the Task. A Task at an interactive step is available to the
   person there: never continue past their step, pick a new direction or arm a
   merge they didn't approve.
-- **Finish merged work.** Let a live ship Graph finish. Otherwise, when the
+- **Finish merged work.** Let a live Graph finish. Otherwise, when the
   outcome holds, run `lf task complete <issue>` and reread status. Retry
   completion alone, never by rerunning gate or re-arming a merged PR.
 
 Tasks progress independently of this pass; their Graphs do the work, so don't
 perform a Graph's steps here. `lf task run <issue-id>` continues a Task you
-own to its next interactive step, and `lf task status` follows it. `lf -b
-task run`, `lf ship`, and any run with no interactive step left ahead approve
-Auto-Ship and may merge the PR: only when asked to ship or land. Start
+own to its next interactive step, and `lf task status` follows it. `lf task
+auto on` turns auto on, so the run stands in at interactive steps and may
+merge the PR; `lf -b task run` stands in for its own run, and a run with no
+interactive step left ahead may merge it too. Use them only when asked to ship or land. Start
 remaining work on your Tasks without asking. Don't approve reviews, cancel
 Tasks or change direction.
 

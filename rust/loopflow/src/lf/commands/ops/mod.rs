@@ -17,8 +17,10 @@ use loopflow_execution::ops::{
 };
 use loopflow_execution::output::{column_width, Colors};
 use loopflow_execution::repo::find_repo_root;
-use loopflow_execution::skills::sync_skills;
 use loopflow_execution::skills::SkillSyncOptions;
+use loopflow_execution::skills::{
+    installed_skill_directories, installed_skill_registries, sync_skills,
+};
 use loopflow_execution::work::wave::context::planning_wave;
 use std::io::{self, IsTerminal, Write};
 use std::path::{Path, PathBuf};
@@ -332,15 +334,21 @@ fn pr_status(repo_root: &Path) -> Result<()> {
 
 pub fn run_sync_skills(yes: bool, no_prune: bool, repo: bool) -> Result<()> {
     if !yes && !repo {
+        let directories = installed_skill_directories(false)
+            .into_iter()
+            .chain(installed_skill_registries())
+            .map(|directory| format!("~/{directory}"))
+            .collect::<Vec<_>>()
+            .join(", ");
         if !std::io::stdin().is_terminal() {
             return Err(anyhow!(
-                "skill sync writes under ~/.claude and ~/.agents; rerun with --yes to confirm"
+                "skill sync writes under {directories}; rerun with --yes to confirm"
             ));
         }
         let progress = CliProgress;
-        if !progress
-            .confirm("Write loopflow-generated skills under ~/.claude/skills and ~/.agents/skills?")
-        {
+        if !progress.confirm(&format!(
+            "Write loopflow-generated skills under {directories}?"
+        )) {
             return Err(anyhow!("skill sync cancelled"));
         }
     }
@@ -489,7 +497,7 @@ pub fn sync_planning(
 /// What `lf wave sync` refreshed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PlanningRefresh {
-    /// Git planning: the repository's whole plan.
+    /// No tracker: the repository's whole plan, from the hub.
     Repository,
     /// One Wave, from its Linear Initiative.
     Wave(String),
@@ -507,10 +515,10 @@ impl PlanningRefresh {
 }
 
 /// Refresh shared planning before `wave status --sync` reads it: the Wave from
-/// Linear, or the repository's Git planning ref, whose exchange is per repository.
+/// Linear, or without a tracker the repository's plan by each carrier it has.
 pub fn refresh_status(directory: &std::path::Path, wave: Option<&str>) -> Result<PlanningRefresh> {
     let repo = loopflow_execution::repo::working_directory_in(directory)?;
-    if crate::lf::commands::tracker::plans_through_git(&repo)? {
+    if !loopflow_execution::ops::tracker::connected(&repo.to_string_lossy()) {
         crate::lf::commands::tracker::refresh(&repo)?;
         return Ok(PlanningRefresh::Repository);
     }

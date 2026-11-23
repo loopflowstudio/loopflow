@@ -27,19 +27,21 @@ impl Machines {
         let home = root.path().join("local");
         let remote = root.path().join("remote");
         fs::create_dir_all(&home).unwrap();
+        fs::create_dir_all(remote.join("bin")).unwrap();
         fs::create_dir_all(remote.join(".local/bin")).unwrap();
         fs::create_dir_all(remote.join("project's checkout")).unwrap();
         fs::create_dir_all(root.path().join("bin")).unwrap();
+        // Put transport doubles on the incoming PATH. The remote preamble
+        // appends .local/bin to find lf, after the system tools.
         executable(
             &root.path().join("bin/ssh"),
             &format!(
                 r#"#!/bin/sh
 for arg in "$@"; do remote_command="$arg"; done
-cd '{}' || exit 1
-exec env -i HOME='{}' PATH=/usr/bin:/bin bash -c "$remote_command"
+cd '{remote}' || exit 1
+exec env -i HOME='{remote}' PATH='{remote}/bin:/usr/bin:/bin' bash -c "$remote_command"
 "#,
-                remote.display(),
-                remote.display()
+                remote = remote.display(),
             ),
         );
         // Credential side effects stay inside the fixture even on macOS.
@@ -135,7 +137,7 @@ esac
         fs::rename(bin.join("lf"), bin.join("lf-published")).unwrap();
         // The download side effect is replaced, not the add/install/probe workflow.
         executable(
-            &bin.join("curl"),
+            &self.root.path().join("remote/bin/curl"),
             &format!(
                 r#"#!/bin/sh
 cat <<'INSTALLER'
@@ -238,6 +240,7 @@ fn remote_session_open_returns_an_owner_pinned_terminal_command() {
         "session",
         "resume",
         &id,
+        "--unfocused",
         "--prepare",
         "--json",
     ]);
@@ -301,7 +304,7 @@ fn bare_connect_in_the_repository_opens_its_session_on_your_session_machine() {
         .output()
         .unwrap();
     assert_success(&set);
-    assert!(String::from_utf8_lossy(&set.stdout).contains("lf.config.local.yaml"));
+    assert!(String::from_utf8_lossy(&set.stdout).contains(".lf/config.local.yaml"));
 
     let mut record: Value = serde_json::from_str::<Vec<Value>>(include_str!(
         "../../../tests/fixtures/dto/sessions.json"
@@ -551,11 +554,19 @@ fn broken_existing_lf_and_failed_installer_do_not_register_a_machine() {
         .success());
     assert!(!fixture.root.path().join("installed").exists());
     fs::remove_file(bin.join("lf")).unwrap();
-    executable(&bin.join("curl"), "#!/bin/sh\necho 'exit 1'\n");
+    let attempted = fixture.root.path().join("installer-attempted");
+    executable(
+        &fixture.root.path().join("remote/bin/curl"),
+        &format!(
+            "#!/bin/sh\nprintf '%s\\n' \"touch '{}'\" 'exit 1'\n",
+            attempted.display()
+        ),
+    );
     assert!(!fixture
         .terminal(&["machine", "add", "mini"], "y\n")
         .status
         .success());
+    assert!(attempted.exists());
     assert_eq!(
         fixture.json(&["machine", "list", "--json"]),
         serde_json::json!([])
@@ -635,7 +646,7 @@ fn machine_add_on_the_remote_updates_only_its_registry() {
         ),
     );
     executable(
-        &remote.join(".local/bin/ssh"),
+        &remote.join("bin/ssh"),
         &format!(
             "#!/bin/sh\nprintf 'lf {}\\nhome_33333333333333333333333333333333\\n'\n",
             loopflow::build_info::BUILD_VERSION
@@ -1251,15 +1262,14 @@ fn graph_context_preview_reads_selected_machine_graph_without_executing_steps() 
     assert!(!repo.join(".lf/tmp").exists());
 }
 
-/// Two Homes share one repository plan through Git planning; ownership entries
-/// travel as marked comments and every append runs on the Task's writer.
+/// Two Homes share one repository plan, the remote one as the hub; ownership
+/// entries travel as marked comments and every append runs on the Task's writer.
 struct SharedPlan {
     repository: loopflow_execution::durable::RepositoryId,
     local: loopflow_execution::store::sqlite::SqliteStore,
     remote: loopflow_execution::store::sqlite::SqliteStore,
     local_path: std::path::PathBuf,
     remote_path: std::path::PathBuf,
-    destination: loopflow_execution::planning_git::PlanningDestination,
     _repos: Vec<loopflow_test_support::TestRepo>,
 }
 
@@ -1302,7 +1312,6 @@ impl SharedPlan {
         remote_path: std::path::PathBuf,
     ) -> Self {
         use loopflow_execution::durable::RepositoryId;
-        use loopflow_execution::planning_git::PlanningDestination;
 
         let local =
             loopflow_execution::store::open_sqlite(&fixture.root.path().join("local/loopflow.db"))
@@ -1324,53 +1333,32 @@ impl SharedPlan {
             &repository,
         )
         .unwrap();
-        let destination =
-            PlanningDestination::new("/unused/fixture", "refs/loopflow/planning/shared/owners")
-                .unwrap();
-        for (store, path) in [(&local, &local_path), (&remote, &remote_path)] {
-            store
-                .bind_git_destination(path.to_str().unwrap(), &destination)
-                .unwrap();
-        }
         Self {
             repository,
             local,
             remote,
             local_path,
             remote_path,
-            destination,
             _repos: repos,
         }
     }
 
-    fn to_local(&self) {
-        let journal = self
-            .remote
-            .export_git_plan(self.remote_path.to_str().unwrap(), &self.destination.id())
-            .unwrap();
-        loopflow_execution::store::git_tracker::import_git_plan(
+    /// One exchange as the local Machine makes it with the remote, its hub.
+    fn exchange(&self) {
+        loopflow_storage::test_fixture::exchange(
             &self.local,
             self.local_path.to_str().unwrap(),
-            &self.destination.id(),
-            &uuid::Uuid::new_v4().to_string(),
-            &journal,
-        )
-        .unwrap();
+            &self.remote,
+            self.remote_path.to_str().unwrap(),
+        );
+    }
+
+    fn to_local(&self) {
+        self.exchange();
     }
 
     fn to_remote(&self) {
-        let journal = self
-            .local
-            .export_git_plan(self.local_path.to_str().unwrap(), &self.destination.id())
-            .unwrap();
-        loopflow_execution::store::git_tracker::import_git_plan(
-            &self.remote,
-            self.remote_path.to_str().unwrap(),
-            &self.destination.id(),
-            &uuid::Uuid::new_v4().to_string(),
-            &journal,
-        )
-        .unwrap();
+        self.exchange();
     }
 
     fn task(&self) -> loopflow_execution::durable::TaskId {
@@ -1408,6 +1396,347 @@ impl SharedPlan {
             .unwrap()
             .id
     }
+}
+
+/// Replace the fixture's `ssh` with a relay to mini's `lf server connect`
+/// that `flags/down` makes unreachable and `flags/drop-apply` makes lose the
+/// answer to one `plan.apply` after mini has written it.
+fn hub_ssh(fixture: &Machines, flags: &Path) {
+    fs::create_dir_all(flags).unwrap();
+    let remote = fixture.root.path().join("remote");
+    executable(
+        &fixture.root.path().join("bin/ssh"),
+        &format!(
+            r#"#!/usr/bin/python3
+import os, subprocess, sys, threading
+flags, remote = {flags:?}, {remote:?}
+if os.path.exists(os.path.join(flags, "down")):
+    sys.stderr.write("ssh: connect to host mini port 22: Operation timed out\n")
+    sys.exit(255)
+child = subprocess.Popen(["bash", "-c", sys.argv[-1]], cwd=remote,
+    env={{"HOME": remote, "PATH": "/usr/bin:/bin"}},
+    stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+drop = os.path.join(flags, "drop-apply")
+applying = threading.Event()
+def up():
+    while True:
+        line = sys.stdin.buffer.readline()
+        if not line:
+            break
+        if os.path.exists(drop) and b'"plan.apply"' in line:
+            applying.set()
+        child.stdin.write(line)
+        child.stdin.flush()
+    child.stdin.close()
+threading.Thread(target=up, daemon=True).start()
+while True:
+    line = child.stdout.readline()
+    if not line:
+        break
+    if applying.is_set():
+        os.remove(drop)
+        child.kill()
+        os._exit(255)
+    sys.stdout.buffer.write(line)
+    sys.stdout.buffer.flush()
+sys.exit(child.wait())
+"#,
+            flags = flags.to_str().unwrap(),
+            remote = remote.to_str().unwrap(),
+        ),
+    );
+}
+
+/// Another person's Machine: its own home, identity, store and clone of a
+/// bare remote. It shares the fixture's stand-in `ssh`.
+struct Home {
+    dir: std::path::PathBuf,
+    bin: std::path::PathBuf,
+}
+
+impl Home {
+    fn cloned(fixture: &Machines, name: &str, email: &str, person: &str, bare: &Path) -> Self {
+        let dir = fixture.root.path().join(name);
+        support::seed_store(&dir);
+        fs::write(
+            dir.join(".gitconfig"),
+            format!("[user]\n\temail = {email}\n\tname = {person}\n"),
+        )
+        .unwrap();
+        git(
+            fixture.root.path(),
+            &[
+                "clone",
+                "-q",
+                bare.to_str().unwrap(),
+                dir.join("checkout").to_str().unwrap(),
+            ],
+        );
+        Self {
+            dir,
+            bin: fixture.root.path().join("bin"),
+        }
+    }
+
+    fn checkout(&self) -> std::path::PathBuf {
+        self.dir.join("checkout")
+    }
+
+    fn run(&self, args: &[&str]) -> Output {
+        Command::new(env!("CARGO_BIN_EXE_lf"))
+            .env_clear()
+            .env("HOME", &self.dir)
+            .env("LF_HOME", &self.dir)
+            .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
+            .env("PATH", format!("{}:/usr/bin:/bin", self.bin.display()))
+            .current_dir(self.checkout())
+            .stdin(Stdio::null())
+            .args(args)
+            .output()
+            .unwrap()
+    }
+
+    fn ok(&self, args: &[&str]) -> String {
+        let output = self.run(args);
+        assert_success(&output);
+        String::from_utf8(output.stdout).unwrap()
+    }
+
+    fn store(&self) -> loopflow_execution::store::sqlite::SqliteStore {
+        loopflow_execution::store::open_sqlite(&self.dir.join("loopflow.db")).unwrap()
+    }
+}
+
+/// LOO-938's acceptance over the real carriers: three homes clone one bare
+/// remote and meet through its plan refs; the laptop then names mini its hub
+/// and reaches it with `ssh mini lf server connect`.
+#[test]
+fn the_later_change_shows_on_both_machines_through_the_hub() {
+    let fixture = preview_machines();
+    let plan = SharedPlan::cloned(&fixture);
+    let flags = fixture.root.path().join("ssh-flags");
+    hub_ssh(&fixture, &flags);
+    let laptop = |args: &[&str]| {
+        fixture
+            .command(args)
+            .current_dir(&plan.local_path)
+            .stdin(Stdio::null())
+            .output()
+            .unwrap()
+    };
+    let ok = |args: &[&str]| {
+        let output = laptop(args);
+        assert_success(&output);
+        String::from_utf8(output.stdout).unwrap()
+    };
+    let bare = plan._repos[0].bare_path();
+    let third = Home::cloned(&fixture, "third", "teammate@test.com", "Ada", bare);
+    let teammate = |args: &[&str]| third.ok(args);
+    let teammate_store = || third.store();
+    let remote_path = plan.remote_path.to_str().unwrap();
+
+    // No hub is named: the remote carries the plan.
+    let created: Value =
+        serde_json::from_str(&ok(&["task", "create", "git smoke", "--json"])).unwrap();
+    let task = loopflow_execution::durable::TaskId::parse(created["task"]["id"].as_str().unwrap())
+        .unwrap();
+    let identifier = created["task"]["identifier"].as_str().unwrap().to_owned();
+    let title = |store: &loopflow_execution::store::sqlite::SqliteStore| {
+        store.task(&task).unwrap().map(|task| task.title)
+    };
+    // The save itself pushed it, with no server and nothing asked.
+    let pushed = git(bare, &["for-each-ref", "refs/loopflow/plan"]);
+    assert_eq!(pushed.lines().count(), 1, "{pushed}");
+    assert_eq!(ok(&["repo", "tracker"]).trim(), "Plan: Git origin.");
+    assert_eq!(
+        ok(&["task", "sync", &identifier]).trim(),
+        format!("{identifier}: nothing unsent")
+    );
+    assert_eq!(ok(&["repo", "tracker"]).trim(), "Plan: Git origin.");
+    // The teammate never heard of the laptop: the Task is in the remote.
+    teammate(&["task", "sync", &identifier]);
+    assert_eq!(title(&teammate_store()).as_deref(), Some("git smoke"));
+    let listed = teammate(&["task", "list"]);
+    assert!(listed.contains("git smoke"), "{listed}");
+    // mini's server fetches once a minute. Each clone keeps its repository id
+    // and answers to the others', which is how the hub finds its checkout.
+    loopflow_execution::ops::plan_git::exchange(&plan.remote, remote_path, None).unwrap();
+    assert_eq!(title(&plan.remote).as_deref(), Some("git smoke"));
+    ok(&["task", "sync", &identifier]);
+    let laptop_id = plan
+        .local
+        .repository_id(plan.local_path.to_str().unwrap())
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        plan.remote.repository_path(&laptop_id).unwrap().as_deref(),
+        Some(remote_path)
+    );
+
+    // With a hub, a save is on mini when the command returns.
+    let _mini = loopflow_test_support::MachineServer::start(
+        env!("CARGO_BIN_EXE_lf"),
+        &fixture.root.path().join("remote/store"),
+    );
+    assert_success(&fixture.run(&["machine", "hub", "mini"]));
+    let hub_line = |status: &str| status[status.find("Hub ").expect(status)..].to_owned();
+    ok(&["task", "update", &identifier, "--title", "hub smoke"]);
+    assert_eq!(title(&plan.remote).as_deref(), Some("hub smoke"));
+    ok(&["wave", "create", "billing"]);
+    assert_eq!(hub_line(&ok(&["repo", "tracker"])).trim(), "Hub mini.");
+
+    // mini changes the title, then stops answering; the laptop changes it later.
+    let revision = plan.remote.task(&task).unwrap().unwrap().revision;
+    plan.remote
+        .edit_task(
+            &task,
+            revision,
+            &loopflow_execution::work::task::TaskUpdate {
+                title: Some("one".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    fs::write(flags.join("down"), "").unwrap();
+    ok(&["task", "update", &identifier, "--title", "two"]);
+    let offline = hub_line(&ok(&["repo", "tracker"]));
+    assert!(offline.starts_with("Hub mini, failing since "), "{offline}");
+    assert!(offline.contains(", 1 unsent.\n"), "{offline}");
+    assert!(offline.contains(&format!("  {identifier}\n")), "{offline}");
+    // The hub is off and Git still carries the change to the teammate.
+    assert!(!laptop(&["task", "sync", &identifier]).status.success());
+    teammate(&["task", "sync", &identifier]);
+    assert_eq!(title(&teammate_store()).as_deref(), Some("two"));
+    // A Task made offline is one more record, and the reason is said once.
+    ok(&["task", "create", "made offline"]);
+    let offline = hub_line(&ok(&["repo", "tracker"]));
+    assert!(offline.contains(", 2 unsent.\n"), "{offline}");
+    assert_eq!(
+        offline.matches("Operation timed out").count(),
+        1,
+        "{offline}"
+    );
+
+    // mini answers again, but its answer to the send is lost after it wrote it.
+    fs::remove_file(flags.join("down")).unwrap();
+    fs::write(flags.join("drop-apply"), "").unwrap();
+    assert!(!laptop(&["task", "sync", &identifier]).status.success());
+    assert_eq!(title(&plan.remote).as_deref(), Some("two"));
+    let written = plan
+        .remote
+        .plan_records_since(remote_path, 0, usize::MAX)
+        .unwrap()
+        .seq;
+    // The records go again and change nothing more on mini.
+    assert_eq!(
+        ok(&["task", "sync", &identifier]).trim(),
+        format!("{identifier}: nothing unsent")
+    );
+    assert_eq!(
+        plan.remote
+            .plan_records_since(remote_path, 0, usize::MAX)
+            .unwrap()
+            .seq,
+        written
+    );
+    assert_eq!(title(&plan.local).as_deref(), Some("two"));
+    assert_eq!(title(&plan.remote).as_deref(), Some("two"));
+    assert_eq!(
+        ok(&["repo", "tracker"]).trim(),
+        "Plan: Git origin.\nHub mini."
+    );
+
+    // The teammate may fetch but not push, and names mini their hub: their
+    // change reaches the remote in the laptop's ref, which holds its whole plan.
+    git(
+        &third.checkout(),
+        &["remote", "set-url", "--push", "origin", "/refused/plan.git"],
+    );
+    teammate(&["machine", "add", "mini"]);
+    teammate(&["machine", "hub", "mini"]);
+    teammate(&["task", "update", &identifier, "--title", "three"]);
+    assert_eq!(title(&plan.remote).as_deref(), Some("three"));
+    assert!(!third.run(&["task", "sync", &identifier]).status.success());
+    let refused = teammate(&["repo", "tracker"]);
+    assert!(
+        refused.starts_with("Plan: Git origin, failing since "),
+        "{refused}"
+    );
+    assert!(refused.contains(" unsent.\n"), "{refused}");
+    assert!(refused.contains(&format!("  {identifier}\n")), "{refused}");
+    ok(&["task", "sync", &identifier]);
+    // A fourth home has no hub and never met the teammate.
+    let fourth = Home::cloned(&fixture, "fourth", "fourth@test.com", "Grace", bare);
+    fourth.ok(&["task", "sync", &identifier]);
+    assert_eq!(title(&fourth.store()).as_deref(), Some("three"));
+}
+
+/// Two people claim one Task before either Machine has seen the other's
+/// claim. The first claim holds on both; the other Machine's run is stopped.
+#[test]
+fn of_two_claims_made_apart_the_first_holds_on_both_machines() {
+    use loopflow_execution::work::task::TaskEventKind;
+    let fixture = Machines::new();
+    let repo = loopflow_test_support::TestRepo::new();
+    let ada = Home::cloned(&fixture, "ada", "ada@test.com", "Ada", repo.bare_path());
+    let grace = Home::cloned(
+        &fixture,
+        "grace",
+        "grace@test.com",
+        "Grace",
+        repo.bare_path(),
+    );
+    let created: Value =
+        serde_json::from_str(&ada.ok(&["task", "create", "claimed twice", "--json"])).unwrap();
+    let task = loopflow_execution::durable::TaskId::parse(created["task"]["id"].as_str().unwrap())
+        .unwrap();
+    let identifier = created["task"]["identifier"].as_str().unwrap().to_owned();
+    ada.ok(&["task", "sync", &identifier]);
+    grace.ok(&["task", "sync", &identifier]);
+
+    // Ada's claim goes to the remote with the save. Grace claims while her
+    // remote does not answer, so she has not seen it.
+    ada.ok(&["task", "claim", &identifier]);
+    let origin = repo.bare_path().to_str().unwrap();
+    git(
+        &grace.checkout(),
+        &["remote", "set-url", "origin", "/unreachable/plan.git"],
+    );
+    grace.ok(&["task", "claim", &identifier]);
+    git(&grace.checkout(), &["remote", "set-url", "origin", origin]);
+    let owner = |home: &Home| {
+        loopflow_execution::store::ownership::task_ownership(&home.store(), &task)
+            .unwrap()
+            .owner
+            .and_then(|owner| owner.person_key)
+    };
+    assert_eq!(owner(&grace).as_deref(), Some("grace@test.com"));
+
+    ada.ok(&["task", "sync", &identifier]);
+    grace.ok(&["task", "sync", &identifier]);
+    ada.ok(&["task", "sync", &identifier]);
+    assert_eq!(owner(&ada).as_deref(), Some("ada@test.com"));
+    assert_eq!(owner(&grace).as_deref(), Some("ada@test.com"));
+    let interrupted = |home: &Home| {
+        home.store()
+            .task_events_after(&task, 0)
+            .unwrap()
+            .iter()
+            .any(|event| matches!(event.kind, TaskEventKind::Interrupt))
+    };
+    assert!(interrupted(&grace));
+    assert!(!interrupted(&ada));
+
+    // Grace has seen Ada's claim now: claiming again takes the Task over.
+    grace.ok(&["task", "claim", &identifier]);
+    grace.ok(&["task", "sync", &identifier]);
+    ada.ok(&["task", "sync", &identifier]);
+    assert_eq!(owner(&grace).as_deref(), Some("grace@test.com"));
+    let superseded = loopflow_execution::store::ownership::task_ownership(&ada.store(), &task)
+        .unwrap()
+        .superseded_by
+        .and_then(|owner| owner.person_key);
+    assert_eq!(superseded.as_deref(), Some("grace@test.com"));
 }
 
 #[test]
@@ -1543,7 +1872,7 @@ fn set_machine_changes_local_preferences_without_copying_or_moving_work() {
         .0,
         laptop
     );
-    assert!(!plan.remote_path.join("lf.config.local.yaml").exists());
+    assert!(!plan.remote_path.join(".lf/config.local.yaml").exists());
     assert_eq!(
         loopflow_execution::store::ownership::task_execution_route(&plan.local, &task)
             .unwrap()
@@ -2911,8 +3240,8 @@ fn task_move_hands_nothing_off_when_mini_cannot_receive_it() {
         assert!(stderr.contains(expected), "{stderr}");
     };
 
-    // Mini answers, but its planning has never heard of the Task.
-    refused("not found in the Git tracker");
+    // Mini answers, but its plan has never heard of the Task.
+    refused("not found");
     unchanged();
 
     // Mini does not answer at all.
@@ -2987,10 +3316,10 @@ fn task_move_hands_the_task_back_when_its_checkpoint_cannot_be_pushed() {
         .is_none_or(|task| task.worktree.is_none()));
 }
 
-/// A repository that plans through a personal Git plan on its origin, the
-/// same person on both Machines, and a Task the laptop created in it. Mini
-/// has neither the repository nor a planning key yet.
-fn personal_plan_task(
+/// A laptop whose plan is on mini, its hub, the same person on both
+/// Machines, and a Task the laptop created. Mini has no checkout of the
+/// repository yet, so the Task waits on the laptop to be sent.
+fn hub_plan_task(
     fixture: &Machines,
 ) -> (
     loopflow_test_support::TestRepo,
@@ -3003,15 +3332,7 @@ fn personal_plan_task(
     )
     .unwrap();
     let repo = loopflow_test_support::TestRepo::new();
-    fs::create_dir_all(repo.path().join(".lf")).unwrap();
-    fs::write(
-        repo.path().join(".lf/config.yaml"),
-        "planning:\n  provider: git\n  personal: true\n",
-    )
-    .unwrap();
-    git(repo.path(), &["add", ".lf/config.yaml"]);
-    git(repo.path(), &["commit", "-qm", "plan personally"]);
-    git(repo.path(), &["push", "-q", "origin", "main"]);
+    assert_success(&fixture.run(&["machine", "hub", "mini"]));
     let created = fixture
         .command(&["task", "create", "--title", "Cold move", "--json"])
         .current_dir(repo.path())
@@ -3026,8 +3347,8 @@ fn personal_plan_task(
     (repo, task, identifier)
 }
 
-/// The check clones the repository, takes the laptop's planning key and the
-/// Task, and the move lands. Only planning and origin are shared.
+/// The check clones the repository, the laptop sends the Task's plan to mini,
+/// its hub, and the move lands. Only planning and origin are shared.
 #[test]
 fn task_move_to_a_mini_without_the_repository_takes_it_in_from_planning() {
     let fixture = preview_machines();
@@ -3037,7 +3358,7 @@ fn task_move_to_a_mini_without_the_repository_takes_it_in_from_planning() {
     let _laptop = loopflow_test_support::MachineServer::start(lf, &local_home);
     let _mini = loopflow_test_support::MachineServer::start(lf, &remote_home);
     let _ended = EndRecorded(vec![local_home.clone(), remote_home.clone()]);
-    let (repo, task, identifier) = personal_plan_task(&fixture);
+    let (repo, task, identifier) = hub_plan_task(&fixture);
 
     let moved = fixture
         .command(&["task", "move", &identifier, "--machine", "mini"])
@@ -3071,12 +3392,6 @@ fn task_move_to_a_mini_without_the_repository_takes_it_in_from_planning() {
                 .id
         )
     );
-    let local = loopflow_execution::store::open_sqlite(&local_home.join("loopflow.db")).unwrap();
-    assert_eq!(
-        remote.planning_user_key().unwrap(),
-        local.planning_user_key().unwrap(),
-        "mini reads another person's plan"
-    );
     assert!(
         fixture
             .root
@@ -3090,8 +3405,8 @@ fn task_move_to_a_mini_without_the_repository_takes_it_in_from_planning() {
     );
 }
 
-/// The laptop's run approved Auto-Ship, and the approval travels in planning.
-/// Once the Task moved back, mini's recovery must not start shipping it.
+/// The laptop's run turned auto on, and it travels with the Task's Graph.
+/// Once the Task moved back, mini's recovery must not start it again.
 #[test]
 fn mini_starts_nothing_for_a_task_that_moved_back() {
     let fixture = preview_machines();
@@ -3101,7 +3416,7 @@ fn mini_starts_nothing_for_a_task_that_moved_back() {
     let _laptop = loopflow_test_support::MachineServer::start(lf, &local_home);
     let _mini = loopflow_test_support::MachineServer::start(lf, &remote_home);
     let _ended = EndRecorded(vec![local_home.clone(), remote_home.clone()]);
-    let (repo, task, identifier) = personal_plan_task(&fixture);
+    let (repo, task, identifier) = hub_plan_task(&fixture);
     fs::create_dir_all(repo.path().join(".lf/graphs")).unwrap();
     fs::write(
         repo.path().join(".lf/graphs/hold.yaml"),
@@ -3132,7 +3447,6 @@ fn mini_starts_nothing_for_a_task_that_moved_back() {
             .unwrap();
         assert_success(&output);
         let stderr = String::from_utf8_lossy(&output.stderr);
-        assert!(stderr.contains("Auto-Ship approval moved to"), "{stderr}");
         assert!(!stderr.contains("did not continue"), "{stderr}");
     };
     move_to("mini");
@@ -3161,15 +3475,14 @@ fn mini_starts_nothing_for_a_task_that_moved_back() {
     let ships: i64 = rusqlite::Connection::open(&remote_db)
         .unwrap()
         .query_row(
-            "SELECT count(*) FROM task_ship_events WHERE task_id=?1 AND kind='carried'
-             AND (pid IS NOT NULL OR ended_at IS NOT NULL)",
+            "SELECT count(*) FROM graph_processes WHERE task_id=?1",
             [task.as_str()],
             |row| row.get(0),
         )
         .unwrap();
     assert_eq!(
         ships, 1,
-        "mini should ship only once, while it owns the Task"
+        "mini should run the Task only once, while it owns the Task"
     );
 }
 
@@ -4059,10 +4372,10 @@ tee -a '{record}/input' | env -i HOME='{remote}' PATH=/usr/bin:/bin bash -c "$re
             remote = remote.display(),
         ),
     );
-    let held = fixture.json(&["task", "hold", task.as_str(), "--json"]);
+    let held = fixture.json(&["task", "auto", "off", task.as_str(), "--json"]);
     assert_eq!(
         held,
-        serde_json::json!({"issue": task.as_str(), "stopped": false})
+        serde_json::json!({"issue": task.as_str(), "was_on": false})
     );
 
     let commands = fs::read_to_string(record.join("commands")).unwrap();
@@ -4072,11 +4385,11 @@ tee -a '{record}/input' | env -i HOME='{remote}' PATH=/usr/bin:/bin bash -c "$re
             .any(|line| line == "exec 'lf' 'server' 'connect'"),
         "{commands}"
     );
-    assert!(!commands.contains("hold"), "{commands}");
+    assert!(!commands.contains("auto"), "{commands}");
     let (hello, request) = entry_input(&record);
     assert_eq!(hello["client"]["kind"], "machine");
     assert_eq!(request["sender"]["repository"], plan.repository.as_str());
-    assert_eq!(request["operation"]["kind"], "task.hold");
+    assert_eq!(request["operation"]["kind"], "task.auto.off");
     assert_eq!(request["operation"]["issue"], task.as_str());
 }
 
@@ -4336,7 +4649,7 @@ esac
             ran.display()
         ),
     );
-    let output = fixture.run(&["task", "hold", task.as_str(), "--json"]);
+    let output = fixture.run(&["task", "auto", "off", task.as_str(), "--json"]);
     assert!(!output.status.success());
     let error = String::from_utf8_lossy(&output.stderr);
     assert!(
@@ -4360,7 +4673,7 @@ fn an_lf_that_dies_before_answering_says_so_and_what_it_printed() {
             1,
         ),
     );
-    let output = fixture.run(&["task", "hold", task.as_str(), "--json"]);
+    let output = fixture.run(&["task", "auto", "off", task.as_str(), "--json"]);
     assert_eq!(output.status.code(), Some(1));
     let error = String::from_utf8_lossy(&output.stderr);
     assert!(
@@ -4385,7 +4698,7 @@ fn an_unreachable_destination_names_the_ssh_check_not_its_server() {
             1,
         ),
     );
-    let output = fixture.run(&["task", "hold", task.as_str(), "--json"]);
+    let output = fixture.run(&["task", "auto", "off", task.as_str(), "--json"]);
     assert_eq!(output.status.code(), Some(1));
     let error = String::from_utf8_lossy(&output.stderr);
     assert!(

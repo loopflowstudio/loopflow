@@ -439,7 +439,10 @@ pub(crate) fn unanswered_questions_in(
          ) FROM json_each(?1) step",
     )?;
     let mut questions = HashMap::new();
-    let mut rows = query.query(params![ids, crate::session::UNANSWERED_QUESTION])?;
+    let mut rows = query.query(params![
+        ids,
+        loopflow_model::chat::types::UNANSWERED_QUESTION
+    ])?;
     while let Some(row) = rows.next()? {
         if let Some(question) = row.get::<_, Option<String>>(1)? {
             questions.insert(row.get(0)?, question);

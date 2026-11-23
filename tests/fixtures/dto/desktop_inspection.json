@@ -192,12 +192,10 @@
       "view": null,
       "view_parts": [
         {
-          "name": "board",
-          "kind": "board",
+          "name": "backlog",
+          "kind": "backlog",
           "work": null,
-          "section": "backlog",
-          "done_days": 7,
-          "text": "product · Active\n\n[Backlog 0] · Working 0 · Autonomous 0 · Done 0\n  None",
+          "text": "product · Active\n\nAll 0 · Mine 0 · Available 0\n  No open work nobody is running in this Wave",
           "page": null,
           "pages": null,
           "visible": [],
@@ -205,8 +203,6 @@
           "ratio": 0.618,
           "zoomed": false,
           "actions": [
-            "section",
-            "filter",
             "hide",
             "show",
             "zoom",
@@ -221,8 +217,6 @@
             "kind": "wave",
             "id": "wave_11111111111111111111111111111111"
           },
-          "section": null,
-          "done_days": null,
           "text": null,
           "page": null,
           "pages": null,
@@ -236,8 +230,6 @@
           "name": "tiles",
           "kind": "strip",
           "work": null,
-          "section": null,
-          "done_days": null,
           "text": null,
           "page": 2,
           "pages": 3,

@@ -31,6 +31,8 @@ struct WaveDetailPane: View {
     let onActivateProject: () -> Void
     let onClose: () -> Void
     let onOpenTask: (String) -> Void
+    let onTaskAction: (RoadmapTask, RoadmapTaskAction) -> Void
+    let onOpenWorktree: (TaskWorktreeSnapshot) -> Void
 
     @Environment(\.palette) private var palette
     @State private var showHistory = false
@@ -38,9 +40,6 @@ struct WaveDetailPane: View {
     var body: some View {
         VStack(spacing: 0) {
             header
-            HStack {
-                Button("Project history") { showHistory = true }
-            }.padding(.bottom, 8)
             Divider()
             HSplitView {
                 WavePlanView(
@@ -50,12 +49,12 @@ struct WaveDetailPane: View {
                     isProjectActivationPending: isProjectActivationPending,
                     transportError: transportError,
                     onActivateProject: onActivateProject,
-                    onOpenTask: onOpenTask
+                    onOpenTask: onOpenTask,
+                    onTaskAction: onTaskAction,
+                    onOpenWorktree: onOpenWorktree
                 )
                 .id("\(repoPath)|\(wave.id)")
                 .frame(minWidth: 230, idealWidth: 320, maxWidth: 440, maxHeight: .infinity)
-
-
             }
         }
         .sheet(isPresented: $showHistory) {
@@ -63,21 +62,25 @@ struct WaveDetailPane: View {
         }
     }
 
-
     private var header: some View {
         HStack(spacing: Spacing.sm) {
-            WaveLensView(lens: wave.lens)
+            StatusMark(lens: wave.lens)
             Text(wave.displayName)
-                .font(Typography.sectionTitle())
-                .foregroundStyle(palette.text)
+                .serif(.display)
+                .foregroundStyle(palette.emphasisInk)
+                .lineLimit(1)
+                .accessibilityIdentifier("wave-page-title")
 
             Spacer()
+
+            Button("Project history") { showHistory = true }
+                .buttonStyle(LoopflowButtonStyle())
 
             Button {
                 onClose()
             } label: {
                 Image(systemName: "xmark")
-                    .font(Typography.caption())
+                    .font(Typography.meta)
                     .foregroundStyle(palette.textSecondary)
             }
             .buttonStyle(WorkPlainButtonStyle())
@@ -97,9 +100,10 @@ private struct WavePlanView: View {
     let transportError: String?
     let onActivateProject: () -> Void
     let onOpenTask: (String) -> Void
+    let onTaskAction: (RoadmapTask, RoadmapTaskAction) -> Void
+    let onOpenWorktree: (TaskWorktreeSnapshot) -> Void
 
     @Environment(\.palette) private var palette
-    @State private var selectedTaskID: String?
     @State private var reading = WaveDetailReading()
     @State private var historyFilter = TaskHistoryFilter()
     @State private var historyNow = Date()
@@ -122,13 +126,6 @@ private struct WavePlanView: View {
                 if let portfolio = reading.snapshot?.metricPortfolio {
                     WaveMetricPortfolioView(
                         portfolio: portfolio
-                    )
-                }
-                if let selectedTaskID, let workMap {
-                    WaveWorkInspector(
-                        selectedTaskID: selectedTaskID,
-                        workMap: workMap,
-                        onOpenTask: onOpenTask
                     )
                 }
             }
@@ -176,7 +173,7 @@ private struct WavePlanView: View {
                 closed.append(page)
             } while !more && closed.next != nil && since.map { !closed.reaches($0) } ?? false
         } catch {
-            closed.error = "Completed Tasks unavailable: \(error.localizedDescription)"
+            closed.error = error.localizedDescription
         }
     }
 
@@ -191,7 +188,7 @@ private struct WavePlanView: View {
         let lead = Self.firstSentence(full)
         return VStack(alignment: .leading, spacing: Spacing.sm) {
             Text(full.isEmpty ? "No objective written yet." : lead)
-                .font(Typography.sectionTitle(20))
+                .font(Typography.lede)
                 .foregroundStyle(palette.text)
                 .lineSpacing(3)
                 .textSelection(.enabled)
@@ -200,7 +197,7 @@ private struct WavePlanView: View {
             if !full.isEmpty, full != lead {
                 DisclosureGroup {
                     Text(full)
-                        .font(Typography.body(13))
+                        .font(Typography.text)
                         .foregroundStyle(palette.textSecondary)
                         .lineSpacing(3)
                         .textSelection(.enabled)
@@ -208,7 +205,7 @@ private struct WavePlanView: View {
                         .padding(.top, Spacing.xs)
                 } label: {
                     Text("Full objective")
-                        .font(Typography.caption(11))
+                        .font(Typography.meta)
                         .foregroundStyle(palette.textSecondary)
                 }
                 .tint(palette.actionInk)
@@ -245,7 +242,7 @@ private struct WavePlanView: View {
                 switch workMap.tasks {
                 case .unavailable(let reason):
                     WorkSectionHeading("Tasks")
-                    Text(reason).foregroundStyle(palette.warning)
+                    FailureLine("Tasks did not load.", machine: reason)
                 case .available(let inventory, let truncated):
                     let tasks = closed.merged(after: inventory).filter {
                         historyFilter.includes($0, now: historyNow)
@@ -255,11 +252,14 @@ private struct WavePlanView: View {
                             .onChange(of: historyFilter) { historyNow = Date() }
                     }
                     if truncated { Text("Planning is partial; more Tasks exist.") }
-                    if tasks.isEmpty { Text("No current Tasks").foregroundStyle(palette.textSecondary) }
-                    ForEach(tasks) { task in RoadmapTaskView(task: task, selectedTaskID: $selectedTaskID) }
+                    if tasks.isEmpty { Text("No current Tasks.").emptyLine() }
+                    ForEach(tasks) { task in
+                        PortfolioTaskRow(task: task, onOpen: { onOpenTask(task.id) },
+                            onAction: { action in onTaskAction(task, action) }, onOpenWorktree: onOpenWorktree)
+                    }
                     if historyFilter.showCompleted {
                         if let error = closed.error {
-                            Text(error).foregroundStyle(palette.warning)
+                            FailureLine("Completed Tasks did not load.", machine: error)
                         } else if closed.next != nil {
                             Button("Older completed Tasks") { Task { await loadClosed(more: true) } }
                                 .disabled(closed.isLoading)
@@ -268,7 +268,7 @@ private struct WavePlanView: View {
                 }
             } else {
                 WorkSectionHeading("Tasks")
-                Text("Task status unavailable.").foregroundStyle(palette.textSecondary)
+                Text("Task status unavailable.").emptyLine()
             }
         }.accessibilityIdentifier("wave-tasks")
     }
@@ -317,15 +317,19 @@ struct WaveMetricPortfolioView: View {
                             ),
                             systemImage: "exclamationmark.circle.fill"
                         )
-                        .font(Typography.caption(11))
+                        .font(Typography.meta)
                         .foregroundStyle(palette.failure)
                     }
                 }
                 .accessibilityIdentifier("wave-metric-summary")
 
                 Text(presentation.headline)
-                    .font(Typography.body(12.5))
+                    .font(Typography.text)
                     .foregroundStyle(palette.textSecondary)
+
+                if !portfolio.contractIssues.isEmpty {
+                    WaveContractIssueNotice(summaries: portfolio.contractIssues.map(\.summary))
+                }
 
                 if !portfolio.metrics.isEmpty {
                     // One row per measure: official first, then candidates
@@ -343,31 +347,6 @@ struct WaveMetricPortfolioView: View {
                     .accessibilityIdentifier(official.isEmpty ? "wave-metric-candidates" : "wave-metric-official")
                 }
 
-                if !portfolio.contractIssues.isEmpty {
-                    VStack(alignment: .leading, spacing: Spacing.xs) {
-                        Label(
-                            countLabel(portfolio.contractIssues.count, singular: "contract issue", plural: "contract issues"),
-                            systemImage: "exclamationmark.triangle.fill"
-                        )
-                        .font(Typography.strong(11))
-                        .foregroundStyle(palette.warning)
-                        ForEach(Array(portfolio.contractIssues.enumerated()), id: \.offset) { _, issue in
-                            Text(issue.summary)
-                                .font(Typography.caption(11))
-                                .foregroundStyle(palette.text)
-                                .textSelection(.enabled)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                    }
-                    .padding(.horizontal, Spacing.md)
-                    .padding(.vertical, Spacing.sm)
-                    .background(palette.warning.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
-                    .overlay(alignment: .leading) {
-                        Rectangle().fill(palette.warning).frame(width: 2)
-                    }
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
-                    .accessibilityIdentifier("wave-metric-contract-issues")
-                }
             }
             .accessibilityIdentifier("wave-metric-portfolio")
         }
@@ -375,6 +354,43 @@ struct WaveMetricPortfolioView: View {
 
     private func countLabel(_ count: Int, singular: String, plural: String) -> String {
         "\(count) \(count == 1 ? singular : plural)"
+    }
+}
+
+/// What is wrong with the Wave's metric contracts: the count, each issue's
+/// summary, and Copy, since the wire carries no recovery to offer.
+struct WaveContractIssueNotice: View {
+    let summaries: [String]
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
+                Label("\(summaries.count) contract \(summaries.count == 1 ? "issue" : "issues")",
+                      systemImage: "exclamationmark.triangle")
+                    .font(Typography.textStrong)
+                    .foregroundStyle(palette.warning)
+                Spacer(minLength: Spacing.sm)
+                Button("Copy") {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(summaries.joined(separator: "\n"), forType: .string)
+                }
+                .buttonStyle(LoopflowButtonStyle())
+                .help("Copy the issues")
+                .accessibilityIdentifier("wave-metric-contract-issues-copy")
+            }
+            ForEach(Array(summaries.enumerated()), id: \.offset) { _, summary in
+                Text(summary)
+                    .font(Typography.text)
+                    .foregroundStyle(palette.text)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .padding(.horizontal, Spacing.md)
+        .padding(.vertical, Spacing.sm)
+        .overlay(RoundedRectangle(cornerRadius: CornerRadius.row).strokeBorder(palette.border, lineWidth: 1))
+        .accessibilityIdentifier("wave-metric-contract-issues")
     }
 }
 
@@ -398,16 +414,14 @@ private struct WaveMetricTableHeader: View {
             cell("State").frame(width: MetricColumns.state, alignment: .leading)
         }
         .padding(.horizontal, Spacing.md)
-        .padding(.vertical, 7)
+        .padding(.vertical, Spacing.sm)
         .overlay(alignment: .bottom) { Rectangle().fill(palette.border.opacity(0.8)).frame(height: 1) }
         .accessibilityHidden(true)
     }
 
     private func cell(_ text: String) -> some View {
         Text(text)
-            .textCase(.uppercase)
-            .font(Typography.strong(10.5))
-            .tracking(0.6)
+            .font(Typography.meta)
             .foregroundStyle(palette.textTertiary)
     }
 }
@@ -421,11 +435,11 @@ private struct WaveMetricTableRow: View {
 
     var body: some View {
         let presentation = WaveMetricRowPresentation(metric: metric, owner: "Wave", targetUnavailable: targetUnavailable)
-        VStack(alignment: .leading, spacing: 3) {
+        VStack(alignment: .leading, spacing: Spacing.xxs) {
             HStack(alignment: .firstTextBaseline, spacing: Spacing.md) {
                 HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
                     Text(presentation.name)
-                        .font(Typography.strong(13))
+                        .font(Typography.textStrong)
                         .foregroundStyle(palette.text)
                         .lineLimit(1)
                     if candidate {
@@ -434,37 +448,37 @@ private struct WaveMetricTableRow: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 Text(presentation.value)
-                    .font(Typography.code(12))
+                    .font(Typography.mono)
                     .monospacedDigit()
                     .foregroundStyle(palette.text)
                     .frame(width: MetricColumns.value, alignment: .leading)
                 Text(presentation.target)
-                    .font(Typography.code(12))
+                    .font(Typography.mono)
                     .foregroundStyle(palette.textSecondary)
                     .lineLimit(1)
                     .frame(width: MetricColumns.target, alignment: .leading)
                 Text(presentation.window)
-                    .font(Typography.code(12))
+                    .font(Typography.mono)
                     .foregroundStyle(palette.textSecondary)
                     .frame(width: MetricColumns.window, alignment: .leading)
                 WorkChip(text: presentation.state, tone: metric.evidence.tone)
                     .frame(width: MetricColumns.state, alignment: .leading)
             }
             Text(detail(presentation))
-                .font(Typography.caption(11))
+                .font(Typography.meta)
                 .foregroundStyle(metric.instrumented ? palette.textTertiary : palette.warning)
                 .lineLimit(2)
                 .fixedSize(horizontal: false, vertical: true)
             if let reason = presentation.reason {
                 Text(reason)
-                    .font(Typography.caption(11))
+                    .font(Typography.meta)
                     .foregroundStyle(metric.evidence.tone.ink(in: palette))
                     .textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
         .padding(.horizontal, Spacing.md)
-        .padding(.vertical, 8)
+        .padding(.vertical, Spacing.sm)
         .overlay(alignment: .top) { Rectangle().fill(palette.border.opacity(0.45)).frame(height: 1) }
         .accessibilityIdentifier("wave-metric")
         .accessibilityElement(children: .combine)
@@ -473,7 +487,7 @@ private struct WaveMetricTableRow: View {
     private func detail(_ presentation: WaveMetricRowPresentation) -> String {
         [presentation.description, presentation.instrumentState, presentation.freshness]
             .filter { !$0.isEmpty }
-            .joined(separator: " · ")
+            .joined(separator: ", ")
     }
 }
 
@@ -674,179 +688,24 @@ private extension MetricContractIssue {
     }
 }
 
-private struct RoadmapTaskView: View {
-    let task: RoadmapTask
-    @Binding var selectedTaskID: String?
-
-    @Environment(\.palette) private var palette
-
-    /// State, owner when owned, and who moves next.
-    private var statusLine: String {
-        let state = task.historyLabel
-        let owner = task.runtime?.owner.map { " · \($0.summary)" } ?? ""
-        return "\(state)\(owner) · next: \(task.nextMove.owner.rawValue)"
-    }
-
-    var body: some View {
-        HStack(alignment: .top, spacing: Spacing.sm) {
-            WaveLensView(lens: WaveLens.forTask(task.condition), diameter: 9, accessibilityId: "task-lens")
-                .frame(width: 14)
-                .padding(.top, 2)
-            VStack(alignment: .leading, spacing: Spacing.xxs) {
-                HStack(alignment: .firstTextBaseline, spacing: Spacing.xs) {
-                    Text(task.task.identifier)
-                        .font(Typography.caption(10))
-                        .foregroundStyle(palette.textSecondary)
-                    Text(task.task.name)
-                        .font(Typography.caption(12))
-                        .foregroundStyle(palette.text)
-                        .lineLimit(2)
-                }
-                Text(statusLine)
-                    .font(Typography.caption(10))
-                    .foregroundStyle(palette.textSecondary)
-                if let pr = task.pr {
-                    PrLink(pr: pr)
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(Spacing.sm)
-        .background(palette.background.opacity(0.55))
-        .clipShape(RoundedRectangle(cornerRadius: CornerRadius.sm))
-        .overlay {
-            RoundedRectangle(cornerRadius: CornerRadius.sm)
-                .stroke(isSelected ? palette.selectionEdge : Color.clear, lineWidth: 1)
-        }
-        .contentShape(Rectangle())
-        .accessibilityIdentifier("wave-task")
-        .onTapGesture {
-            selectedTaskID = task.task.id
-        }
-    }
-
-    private var isSelected: Bool {
-        selectedTaskID == task.task.id
-    }
-}
-
-private struct WaveWorkInspector: View {
-    let selectedTaskID: String
-    let workMap: WaveWorkMap
-    let onOpenTask: (String) -> Void
-
-    @Environment(\.palette) private var palette
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: Spacing.sm) {
-            HStack {
-                Text("Selected work")
-                    .font(Typography.caption(10))
-                    .foregroundStyle(palette.textSecondary)
-                Spacer()
-            }
-            if let task {
-                Text("\(task.task.identifier) · \(task.task.name)")
-                    .font(Typography.sectionTitle(15))
-                    .foregroundStyle(palette.text)
-                details(
-                    status: task.historyLabel,
-                    reason: task.condition.reason,
-                    provider: task.runtime?.provider,
-                    location: taskLocation,
-                    pr: task.pr
-                )
-                if task.reference.workspace != nil {
-                    Button("Open Task workspace") {
-                        onOpenTask(task.task.id)
-                    }
-                        .buttonStyle(.borderedProminent)
-                        .controlSize(.small)
-                }
-            }
-        }
-        .padding(Spacing.md)
-        .background(palette.surfaceMuted)
-        .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md))
-    }
-
-    private var task: RoadmapTask? {
-        return workMap.tasks.items
-            .first { $0.task.id == selectedTaskID }
-    }
-
-    private var taskLocation: String? {
-        guard let workspace = task?.reference.workspace else { return nil }
-        guard let branch = workspace.branch else { return workspace.worktree }
-        return "\(workspace.worktree)\n\(branch)"
-    }
-
-    @ViewBuilder
-    private func details(
-        status: String,
-        reason: String,
-        provider: String?,
-        location: String?,
-        pr: PrSnapshot?
-    ) -> some View {
-        Text("\(status) · \(reason)")
-            .font(Typography.caption(11))
-            .foregroundStyle(palette.textSecondary)
-        if let provider {
-            Text("Provider · \(provider)")
-                .font(Typography.caption(10))
-                .foregroundStyle(palette.textSecondary)
-        }
-        if let location {
-            Text(location)
-                .font(.system(size: 10, design: .monospaced))
-                .foregroundStyle(palette.textSecondary)
-                .textSelection(.enabled)
-        }
-        if let pr {
-            PrLink(pr: pr)
-        }
-    }
-}
-
-private struct PrLink: View {
-    let pr: PrSnapshot
-
-    @Environment(\.palette) private var palette
-
-    var body: some View {
-        if let github = pr.publication?.github {
-            Link(
-                "PR #\(github.number) · \(pr.phase.rawValue)",
-                destination: github.url
-            )
-            .font(Typography.caption(10))
-        } else {
-            Text("Pull request · \(pr.phase.rawValue) · \(pr.branch)")
-                .font(Typography.caption(10))
-                .foregroundStyle(palette.textSecondary)
-        }
-    }
-}
-
 struct WaveProjectView: View {
     let project: ProjectPlanningSnapshot
     let repo: String
     @Environment(\.palette) private var palette
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(project.name).font(Typography.sectionTitle(15)).textSelection(.enabled)
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            Text(project.name).font(Typography.lede).textSelection(.enabled)
             TrackerSyncView(sync: project.sync, repo: repo)
             ForEach(project.krs) { kr in
-                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
                     Circle()
                         .fill(kr.holds ? palette.success : Color.clear)
                         .overlay(Circle().strokeBorder(kr.holds ? palette.success : palette.borderStrong, lineWidth: 1.5))
                         .frame(width: 12, height: 12)
                         .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 4 }
                     Text(kr.text)
-                        .font(Typography.body(13))
+                        .font(Typography.text)
                         .lineSpacing(2)
                         .fixedSize(horizontal: false, vertical: true)
                         .textSelection(.enabled)
@@ -854,7 +713,6 @@ struct WaveProjectView: View {
                 .accessibilityElement(children: .combine)
                 .accessibilityValue(kr.holds ? "Holds" : "Open")
             }
-
         }.accessibilityIdentifier("wave-project")
     }
 }

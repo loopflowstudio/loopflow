@@ -38,7 +38,7 @@ extension ShowHiddenMenu {
         }
     }
 
-    /// A Wave view's hidden board, conversation and strip.
+    /// A Wave view's hidden backlog, conversation and strip.
     init(model: WorkModel, view: WorkNavigation.Board) {
         items = WaveViewPart.allCases.filter { model.isHidden($0, in: view) }
             .map { Item(id: $0.rawValue, title: $0.title) }
@@ -64,7 +64,7 @@ struct HideablePart<Content: View>: View {
         content
             .overlay(alignment: .topTrailing) {
                 HoverRevealed(flag: hover) {
-                    HStack(spacing: 2) {
+                    HStack(spacing: Spacing.xxs) {
                         button(zoomed ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right",
                                label: zoomed ? "Zoom out" : "Zoom \(part.title)", id: "wave-zoom-\(part.rawValue)",
                                help: zoomed ? "Return to the view (Esc)" : "Fill the view with the \(part.title.lowercased())") {
@@ -89,7 +89,7 @@ struct HideablePart<Content: View>: View {
                         action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: systemImage)
-                .font(.system(size: 11))
+                .font(Typography.meta)
                 .foregroundStyle(palette.textSecondary)
                 .frame(width: 22, height: 20)
                 .contentShape(Rectangle())
@@ -132,14 +132,14 @@ struct RatioSplit<First: View, Second: View>: View {
     }
 }
 
-/// A Wave view: its conversation and board side by side over its Task strip, each
+/// A Wave view: its conversation and backlog side by side over its Task strip, each
 /// divider dragging. A hidden part gives its room to the rest; a zoomed part fills it.
-struct WaveViewLayout<Session: View, Board: View, Tiles: View>: View {
+struct WaveViewLayout<Session: View, Backlog: View, Tiles: View>: View {
     let model: WorkModel
     let view: WorkNavigation.Board
     let workspace: SessionsWorkspace
     @ViewBuilder let session: Session
-    @ViewBuilder let board: Board
+    @ViewBuilder let backlog: Backlog
     @ViewBuilder let tiles: Tiles
 
     var body: some View {
@@ -154,8 +154,8 @@ struct WaveViewLayout<Session: View, Board: View, Tiles: View>: View {
                         }
                     }
             } else {
-                if !shown(.board) { WaveViewHeader(model: model, view: view) }
-                let top = shown(.board) || shown(.session)
+                if !shown(.backlog) { WaveViewHeader(model: model, view: view) }
+                let top = shown(.backlog) || shown(.session)
                 if top, shown(.tiles) {
                     RatioSplit(axis: .horizontal, ratio: ratios.band,
                                update: { model.navigation.waveRatios[view, default: WaveViewRatios()].band = $0 }) {
@@ -177,15 +177,15 @@ struct WaveViewLayout<Session: View, Board: View, Tiles: View>: View {
     private func shown(_ part: WaveViewPart) -> Bool { !model.isHidden(part, in: view) }
 
     @ViewBuilder private var band: some View {
-        if shown(.session), shown(.board) {
+        if shown(.session), shown(.backlog) {
             RatioSplit(axis: .vertical, ratio: ratios.session,
                        update: { model.navigation.waveRatios[view, default: WaveViewRatios()].session = $0 }) {
                 part(.session)
-            } second: { part(.board) }
+            } second: { part(.backlog) }
         } else if shown(.session) {
             part(.session)
         } else {
-            part(.board)
+            part(.backlog)
         }
     }
 
@@ -193,7 +193,7 @@ struct WaveViewLayout<Session: View, Board: View, Tiles: View>: View {
         HideablePart(part: part, view: view, model: model, workspace: workspace) {
             switch part {
             case .session: session
-            case .board: board
+            case .backlog: backlog
             case .tiles: tiles
             }
         }
@@ -205,10 +205,11 @@ struct WaveViewLayout<Session: View, Board: View, Tiles: View>: View {
 struct ZoomCrumb: View {
     let title: String
     let zoomOut: () -> Void
+    @Environment(\.palette) private var palette
 
     var body: some View {
-        HStack(spacing: 6) {
-            Text("›").foregroundStyle(.secondary)
+        HStack(spacing: Spacing.xs) {
+            Image(systemName: "chevron.right").font(Typography.meta).foregroundStyle(palette.titlebarSecondaryText)
             Text(title).lineLimit(1).fixedSize()
             Button(action: zoomOut) { Image(systemName: "arrow.down.right.and.arrow.up.left") }
                 .frame(width: 24, height: 28).contentShape(Rectangle())

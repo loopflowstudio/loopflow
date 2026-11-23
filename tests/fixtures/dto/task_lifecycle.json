@@ -22,6 +22,8 @@
       },
       "execution": {
         "captured": null,
+        "died": null,
+        "outlook": null,
         "reason": "Graph delivery finished; nothing further is launched",
         "state": "idle",
         "step": null
@@ -164,10 +166,7 @@
         "work_id": "task_9d1de6a17408459aa2db78181c5fb02a"
       },
       "section": "done",
-      "ship_control": {
-        "unavailable": "Task is complete"
-      },
-      "shipping": null,
+      "owned_by_you": false,
       "task": {
         "tracker_state": {
           "synced_at": 1793156337,
@@ -308,6 +307,8 @@
         "created_at": "2026-10-28T02:58:55Z",
         "execution": {
           "captured": null,
+          "died": null,
+          "outlook": null,
           "reason": "Graph delivery finished; nothing further is launched",
           "state": "idle",
           "step": null
@@ -427,12 +428,24 @@
         "wave": "product",
         "work": {
           "graph": {
+            "current_step": null,
             "interactive_steps": [],
             "name": "delivery",
             "position": {
               "kind": "at",
               "step": "end"
-            }
+            },
+            "sentence": "At its end.",
+            "steps": [
+              {
+                "interactive": false,
+                "name": "hold"
+              },
+              {
+                "interactive": false,
+                "name": "task complete FIX-1"
+              }
+            ]
           },
           "graph_processes": [
             {
@@ -451,8 +464,7 @@
         "workspace_slug": "delivery",
         "worktree": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
         "started_by": null,
-        "ship_approval": null,
-        "ship_stop": null,
+        "auto": null,
         "stack_parent": null
       },
       "graph_processes": [
@@ -538,12 +550,24 @@
       ],
       "overview": {
         "graph": {
+          "current_step": null,
           "interactive_steps": [],
           "name": "delivery",
           "position": {
             "kind": "at",
             "step": "end"
-          }
+          },
+          "sentence": "At its end.",
+          "steps": [
+            {
+              "interactive": false,
+              "name": "hold"
+            },
+            {
+              "interactive": false,
+              "name": "task complete FIX-1"
+            }
+          ]
         },
         "graph_processes": [
           {
@@ -567,9 +591,11 @@
             "kind": "claim",
             "machine_id": "home_56b1a8e309681768d26f79bf86b9d93c",
             "machine_label": "Jacks-MacBook-Pro-2",
+            "order": 1793156336000,
             "person": "Jack Heart",
             "person_id": null,
             "person_key": "test@test.com",
+            "seen": "own_ff8db95d30544ba0991c85eb5d7f55db",
             "task_id": "task_9d1de6a17408459aa2db78181c5fb02a",
             "writer_machine_id": "home_56b1a8e309681768d26f79bf86b9d93c"
           }
@@ -624,6 +650,8 @@
         },
         "execution": {
           "captured": null,
+          "died": null,
+          "outlook": null,
           "reason": "Graph delivery finished; nothing further is launched",
           "state": "idle",
           "step": null
@@ -766,10 +794,7 @@
           "work_id": "task_9d1de6a17408459aa2db78181c5fb02a"
         },
         "section": "done",
-        "ship_control": {
-          "unavailable": "Task is complete"
-        },
-        "shipping": null,
+        "owned_by_you": false,
         "task": {
           "tracker_state": {
             "synced_at": 1793156337,
@@ -1003,6 +1028,8 @@
       },
       "execution": {
         "captured": null,
+        "died": null,
+        "outlook": null,
         "reason": "Step Process ad653185-cde7-4ed4-9c19-d91aa2e1192e is running session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpH8HBDJ/hold.py",
         "state": "running",
         "step": "session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpH8HBDJ/hold.py"
@@ -1129,10 +1156,7 @@
         "work_id": "task_9d1de6a17408459aa2db78181c5fb02a"
       },
       "section": "done",
-      "ship_control": {
-        "unavailable": "Task is complete"
-      },
-      "shipping": null,
+      "owned_by_you": false,
       "task": {
         "tracker_state": {
           "synced_at": 1793156337,
@@ -1273,6 +1297,8 @@
         "created_at": "2026-10-28T02:58:55Z",
         "execution": {
           "captured": null,
+          "died": null,
+          "outlook": null,
           "reason": "Step Process ad653185-cde7-4ed4-9c19-d91aa2e1192e is running session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpH8HBDJ/hold.py",
           "state": "running",
           "step": "session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpH8HBDJ/hold.py"
@@ -1392,6 +1418,7 @@
         "wave": "product",
         "work": {
           "graph": {
+            "current_step": 1,
             "interactive_steps": [],
             "name": "delivery",
             "position": {
@@ -1400,7 +1427,18 @@
               "lf_process_id": "1a6eca5d-1b13-4239-981d-abe5e0713e34",
               "running": true,
               "step": "start"
-            }
+            },
+            "sentence": "task complete FIX-1 is running.",
+            "steps": [
+              {
+                "interactive": false,
+                "name": "hold"
+              },
+              {
+                "interactive": false,
+                "name": "task complete FIX-1"
+              }
+            ]
           },
           "graph_processes": [
             {
@@ -1419,8 +1457,7 @@
         "workspace_slug": "delivery",
         "worktree": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
         "started_by": null,
-        "ship_approval": null,
-        "ship_stop": null,
+        "auto": null,
         "stack_parent": null
       },
       "graph_processes": [
@@ -1490,6 +1527,7 @@
       ],
       "overview": {
         "graph": {
+          "current_step": 1,
           "interactive_steps": [],
           "name": "delivery",
           "position": {
@@ -1498,7 +1536,18 @@
             "lf_process_id": "1a6eca5d-1b13-4239-981d-abe5e0713e34",
             "running": true,
             "step": "start"
-          }
+          },
+          "sentence": "task complete FIX-1 is running.",
+          "steps": [
+            {
+              "interactive": false,
+              "name": "hold"
+            },
+            {
+              "interactive": false,
+              "name": "task complete FIX-1"
+            }
+          ]
         },
         "graph_processes": [
           {
@@ -1522,9 +1571,11 @@
             "kind": "claim",
             "machine_id": "home_56b1a8e309681768d26f79bf86b9d93c",
             "machine_label": "Jacks-MacBook-Pro-2",
+            "order": 1793156336000,
             "person": "Jack Heart",
             "person_id": null,
             "person_key": "test@test.com",
+            "seen": "own_ff8db95d30544ba0991c85eb5d7f55db",
             "task_id": "task_9d1de6a17408459aa2db78181c5fb02a",
             "writer_machine_id": "home_56b1a8e309681768d26f79bf86b9d93c"
           }
@@ -1579,6 +1630,8 @@
         },
         "execution": {
           "captured": null,
+          "died": null,
+          "outlook": null,
           "reason": "Step Process ad653185-cde7-4ed4-9c19-d91aa2e1192e is running session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpH8HBDJ/hold.py",
           "state": "running",
           "step": "session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpH8HBDJ/hold.py"
@@ -1705,10 +1758,7 @@
           "work_id": "task_9d1de6a17408459aa2db78181c5fb02a"
         },
         "section": "done",
-        "ship_control": {
-          "unavailable": "Task is complete"
-        },
-        "shipping": null,
+        "owned_by_you": false,
         "task": {
           "tracker_state": {
             "synced_at": 1793156337,
@@ -1942,6 +1992,8 @@
       },
       "execution": {
         "captured": null,
+        "died": null,
+        "outlook": null,
         "reason": "Step Process ad653185-cde7-4ed4-9c19-d91aa2e1192e is running session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpH8HBDJ/hold.py",
         "state": "running",
         "step": "session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpH8HBDJ/hold.py"
@@ -2063,19 +2115,12 @@
         },
         "provider": "codex",
         "reason": "Step Process ad653185-cde7-4ed4-9c19-d91aa2e1192e is running session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpH8HBDJ/hold.py",
-        "status": "shipping",
+        "status": "moving",
         "updated_at": "2026-10-28T02:59:00Z",
         "work_id": "task_9d1de6a17408459aa2db78181c5fb02a"
       },
-      "section": "autonomous",
-      "ship_control": {
-        "unavailable": "Task is already shipping"
-      },
-      "shipping": {
-        "reason": "running from start",
-        "shipped_at": 1793156340,
-        "state": "building"
-      },
+      "section": "working",
+      "owned_by_you": false,
       "task": {
         "tracker_state": {
           "synced_at": 1793156337,
@@ -2135,11 +2180,11 @@
         },
         "wave_id": "b007dd43-6b65-410d-8a0e-c58be2910faf"
       },
-      "lifecycle": "shipping",
+      "lifecycle": "moving",
       "selection_states": [
         "open",
-        "shipping",
-        "autonomous"
+        "moving",
+        "working"
       ]
     },
     "status": {
@@ -2172,6 +2217,8 @@
         "created_at": "2026-10-28T02:58:55Z",
         "execution": {
           "captured": null,
+          "died": null,
+          "outlook": null,
           "reason": "Step Process ad653185-cde7-4ed4-9c19-d91aa2e1192e is running session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpH8HBDJ/hold.py",
           "state": "running",
           "step": "session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpH8HBDJ/hold.py"
@@ -2287,12 +2334,13 @@
         "project_id": "proj_e7b7e8a944a340d0ad66d4701134ce98",
         "provider": "codex",
         "repo_id": "repo_e5aa50b1a744490b8ebb7f1b02455c36",
-        "status": "shipping",
+        "status": "moving",
         "task_id": "task_9d1de6a17408459aa2db78181c5fb02a",
         "updated_at": "2026-10-28T02:59:00Z",
         "wave": "product",
         "work": {
           "graph": {
+            "current_step": 1,
             "interactive_steps": [],
             "name": "delivery",
             "position": {
@@ -2301,7 +2349,18 @@
               "lf_process_id": "1a6eca5d-1b13-4239-981d-abe5e0713e34",
               "running": true,
               "step": "start"
-            }
+            },
+            "sentence": "task complete FIX-1 is running.",
+            "steps": [
+              {
+                "interactive": false,
+                "name": "hold"
+              },
+              {
+                "interactive": false,
+                "name": "task complete FIX-1"
+              }
+            ]
           },
           "graph_processes": [
             {
@@ -2320,8 +2379,7 @@
         "workspace_slug": "delivery",
         "worktree": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
         "started_by": null,
-        "ship_approval": null,
-        "ship_stop": null,
+        "auto": null,
         "stack_parent": null
       },
       "graph_processes": [
@@ -2391,6 +2449,7 @@
       ],
       "overview": {
         "graph": {
+          "current_step": 1,
           "interactive_steps": [],
           "name": "delivery",
           "position": {
@@ -2399,7 +2458,18 @@
             "lf_process_id": "1a6eca5d-1b13-4239-981d-abe5e0713e34",
             "running": true,
             "step": "start"
-          }
+          },
+          "sentence": "task complete FIX-1 is running.",
+          "steps": [
+            {
+              "interactive": false,
+              "name": "hold"
+            },
+            {
+              "interactive": false,
+              "name": "task complete FIX-1"
+            }
+          ]
         },
         "graph_processes": [
           {
@@ -2423,9 +2493,11 @@
             "kind": "claim",
             "machine_id": "home_56b1a8e309681768d26f79bf86b9d93c",
             "machine_label": "Jacks-MacBook-Pro-2",
+            "order": 1793156336000,
             "person": "Jack Heart",
             "person_id": null,
             "person_key": "test@test.com",
+            "seen": "own_ff8db95d30544ba0991c85eb5d7f55db",
             "task_id": "task_9d1de6a17408459aa2db78181c5fb02a",
             "writer_machine_id": "home_56b1a8e309681768d26f79bf86b9d93c"
           }
@@ -2480,6 +2552,8 @@
         },
         "execution": {
           "captured": null,
+          "died": null,
+          "outlook": null,
           "reason": "Step Process ad653185-cde7-4ed4-9c19-d91aa2e1192e is running session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpH8HBDJ/hold.py",
           "state": "running",
           "step": "session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpH8HBDJ/hold.py"
@@ -2601,19 +2675,12 @@
           },
           "provider": "codex",
           "reason": "Step Process ad653185-cde7-4ed4-9c19-d91aa2e1192e is running session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpH8HBDJ/hold.py",
-          "status": "shipping",
+          "status": "moving",
           "updated_at": "2026-10-28T02:59:00Z",
           "work_id": "task_9d1de6a17408459aa2db78181c5fb02a"
         },
-        "section": "autonomous",
-        "ship_control": {
-          "unavailable": "Task is already shipping"
-        },
-        "shipping": {
-          "reason": "running from start",
-          "shipped_at": 1793156340,
-          "state": "building"
-        },
+        "section": "working",
+        "owned_by_you": false,
         "task": {
           "tracker_state": {
             "synced_at": 1793156337,
@@ -2673,11 +2740,11 @@
           },
           "wave_id": "b007dd43-6b65-410d-8a0e-c58be2910faf"
         },
-        "lifecycle": "shipping",
+        "lifecycle": "moving",
         "selection_states": [
           "open",
-          "shipping",
-          "autonomous"
+          "moving",
+          "working"
         ]
       },
       "sync": {

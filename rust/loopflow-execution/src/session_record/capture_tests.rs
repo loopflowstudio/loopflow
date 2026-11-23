@@ -646,7 +646,7 @@ fn manifest_round_trips_the_exact_prepared_process_without_ambient_authority() {
         agent: crate::config::Agent::parse("codex:gpt-5.6").unwrap(),
         max_turns: Some(7),
         resume_token: Some("resume-secret".into()),
-        skip_permissions: true,
+        yolo: true,
         directive_relay: Some("/tmp/directive-secret".into()),
         env: BTreeMap::from([("TOKEN".to_string(), "ambient-secret".to_string())]),
         ..crate::agent::AgentConfig::default()

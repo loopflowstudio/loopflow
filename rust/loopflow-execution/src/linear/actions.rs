@@ -7,7 +7,7 @@ use std::path::Path;
 
 use serde_json::{json, Value};
 
-use super::{LinearClient, OrderedIssue, PlanningResponse};
+use super::{LinearClient, LinearError, OrderedIssue, PlanningResponse};
 use crate::ops::tracker::{
     creation_id, ingest_task, message, now, observed_project, observed_task, opening_state,
     remote_project, remote_task, repository_scope, target_state, value, values, Sent,
@@ -428,27 +428,33 @@ impl LinearClient {
             }
             // PR links spend the reserved budget so they never wait behind sync.
             Some(TaskLink::Pr { url }) => {
-                let posted = store
+                let earlier = store
                     .sqlite
                     .tracker_actions_for(&action.owner)
-                    .map_err(message)?
-                    .iter()
-                    .any(|earlier| {
-                        earlier.subject == action.subject
-                            && matches!(
-                                earlier.phase,
-                                ActionPhase::Confirmed | ActionPhase::Conflicted
-                            )
-                    });
-                Ok(super::urgent(self.pr_link(task, &issue, &url, action, posted)).await)
+                    .map_err(message)?;
+                let earlier = earlier.iter().filter(|e| e.subject == action.subject);
+                let posted = earlier.clone().any(|earlier| {
+                    matches!(
+                        earlier.phase,
+                        ActionPhase::Confirmed | ActionPhase::Conflicted
+                    )
+                });
+                // A confirmed link's remote id is the PR's attachment.
+                let attachment = earlier
+                    .filter(|earlier| earlier.phase == ActionPhase::Confirmed)
+                    .filter_map(|earlier| earlier.remote_id.clone())
+                    .next_back();
+                let link = self.pr_link(task, &issue, &url, action, posted, attachment.as_deref());
+                Ok(super::urgent(link).await)
             }
             None => Err(message("link action names nothing to link")),
         }
     }
 
-    /// The PR as an attachment, whose subtitle is its state, and one managed
-    /// comment. Linear keeps one attachment per URL and the comment keeps one
-    /// id per PR, so sending again refreshes both instead of adding more.
+    /// The PR as one attachment, whose subtitle is its state, and one managed
+    /// comment. Both keep their ids, so a state change updates them in place.
+    /// `posted`: an earlier send posted the comment; `attachment`: the one an
+    /// earlier send confirmed.
     async fn pr_link(
         &self,
         task: &TaskId,
@@ -456,6 +462,7 @@ impl LinearClient {
         url: &str,
         action: &TrackerAction,
         posted: bool,
+        attachment: Option<&str>,
     ) -> Sent {
         let (number, state) = (&action.value["number"], &action.value["state"]);
         let state = state.as_str().unwrap_or("Open");
@@ -470,13 +477,10 @@ impl LinearClient {
                 Err(error) => return Sent::Rejected(error.to_string()),
             },
         };
-        let attachment = match self.link_attachment(issue, url, &title).await {
+        let attachment = match self.attach(issue, url, &title, state, attachment).await {
             Ok(id) => id,
-            Err(error) => return Sent::failed(error),
+            Err(sent) => return sent,
         };
-        if let Err(error) = self.update_attachment(&attachment, &title, state).await {
-            return Sent::failed(error);
-        }
         let commented = if posted || recorded.is_some() {
             self.update_comment(&comment, &body).await
         } else {
@@ -489,6 +493,62 @@ impl LinearClient {
             },
             Err(error) => Sent::failed(error),
         }
+    }
+
+    /// The PR's attachment on `issue`, refreshed to `state`. A recorded
+    /// attachment is updated in place; only a PR without one, or whose
+    /// attachment is gone, is linked.
+    async fn attach(
+        &self,
+        issue: &str,
+        url: &str,
+        title: &str,
+        state: &str,
+        recorded: Option<&str>,
+    ) -> Result<String, Sent> {
+        let attachment = match recorded {
+            Some(id) => match self.update_attachment(id, title, state).await {
+                Ok(()) => return Ok(id.to_owned()),
+                Err(error @ LinearError::RateLimited { .. }) => return Err(Sent::failed(error)),
+                // Whether the attachment is still there decides, not the error text.
+                Err(error) => match self.issue_attachment(issue, url).await? {
+                    Some(found) if found == id => return Err(Sent::failed(error)),
+                    Some(found) => found,
+                    None => self.link_pr(issue, url, title).await?,
+                },
+            },
+            None => self.link_pr(issue, url, title).await?,
+        };
+        self.update_attachment(&attachment, title, state)
+            .await
+            .map_err(Sent::failed)?;
+        Ok(attachment)
+    }
+
+    /// Link the PR. Linear refuses a URL already attached, so that answer
+    /// finds the existing attachment on this issue instead.
+    async fn link_pr(&self, issue: &str, url: &str, title: &str) -> Result<String, Sent> {
+        match self.link_attachment(issue, url, title).await {
+            Ok(id) => Ok(id),
+            Err(LinearError::Message(text)) if text.starts_with(ALREADY_LINKED) => {
+                // Linked to another issue: moving a PR between issues is not a link.
+                self.issue_attachment(issue, url)
+                    .await?
+                    .ok_or(Sent::Unsupported(text))
+            }
+            Err(error) => Err(Sent::failed(error)),
+        }
+    }
+
+    /// The id of `issue`'s attachment for `url`.
+    async fn issue_attachment(&self, issue: &str, url: &str) -> Result<Option<String>, Sent> {
+        Ok(self
+            .item_attachments(issue)
+            .await
+            .map_err(Sent::failed)?
+            .into_iter()
+            .find(|attachment| attachment.url == url)
+            .map(|attachment| attachment.id))
     }
 
     /// A Task response is accepted into Work, which confirms a creation by its id.
@@ -679,6 +739,10 @@ impl LinearClient {
     }
 }
 
+/// What Linear answers when `attachmentLinkURL` names a URL some issue
+/// already has: `This URL has already been linked with LOO-966.`
+const ALREADY_LINKED: &str = "This URL has already been linked with";
+
 /// The id of a PR's managed comment: one per Task and PR URL.
 fn pr_comment_id(task: &TaskId, url: &str) -> OpsResult<String> {
     let id = uuid::Uuid::new_v5(
@@ -845,7 +909,7 @@ mod tests {
 
     use super::pr_comment_id;
     use crate::linear::test_server::{self, json_response};
-    use crate::linear::LinearClient;
+    use crate::linear::{request_log, LinearClient};
     use crate::ops::tracker::Sent;
     use crate::store::Store;
     use loopflow_model::durable::TaskId;
@@ -857,13 +921,63 @@ mod tests {
         json_response(StatusCode::OK, json!({ "data": data }))
     }
 
+    fn refusal(text: &str) -> test_server::QueuedResponse {
+        json_response(StatusCode::OK, json!({ "errors": [{ "message": text }] }))
+    }
+
+    fn linked(id: &str) -> test_server::QueuedResponse {
+        reply(json!({"attachmentLinkURL": {"attachment": {"id": id}}}))
+    }
+
+    fn updated(id: &str) -> test_server::QueuedResponse {
+        reply(json!({"attachmentUpdate": {"attachment": {"id": id}}}))
+    }
+
+    fn attachments(nodes: Value) -> test_server::QueuedResponse {
+        reply(json!({"issue": {"attachments": {
+            "nodes": nodes,
+            "pageInfo": {"hasNextPage": false, "endCursor": null},
+        }}}))
+    }
+
+    const ALREADY: &str = "This URL has already been linked with LOO-1.";
+
+    /// One Task with a Linear issue, in a fresh store.
+    fn task_store(home: &tempfile::TempDir) -> (Store, TaskId) {
+        let path = home.path().join("store.db");
+        let store = Store {
+            sqlite: crate::store::opening::open_ephemeral(&path).unwrap(),
+        };
+        let task = TaskId::new();
+        store
+            .sqlite
+            .create_task(&loopflow_storage::work::task::NewTask {
+                repository_id: loopflow_storage::test_fixture::repository(&store.sqlite, "/repo"),
+                id: task.clone(),
+                project_id: None,
+                title: "Title".into(),
+                description: String::new(),
+                due_date: None,
+            })
+            .unwrap();
+        rusqlite::Connection::open(&path)
+            .unwrap()
+            .execute(
+                "UPDATE tasks SET external_issue_id=?2 WHERE id=?1",
+                [task.as_str(), &uuid::Uuid::new_v4().to_string()],
+            )
+            .unwrap();
+        (store, task)
+    }
+
     /// Queue the PR link in `state` and send it through a Linear stand-in that
-    /// answers `comment`; returns what the tracker said and the request bodies.
+    /// answers `responses` in order; an acknowledged send is confirmed. Returns
+    /// what the tracker said and the GraphQL operation of each request.
     async fn send(
         store: &Store,
         task: &TaskId,
         state: &str,
-        comment: Value,
+        responses: Vec<test_server::QueuedResponse>,
     ) -> (Sent, Vec<String>) {
         let id = store
             .sqlite
@@ -871,12 +985,7 @@ mod tests {
             .unwrap()
             .unwrap();
         let action = store.sqlite.tracker_action(&id).unwrap().unwrap();
-        let (base, requests) = test_server::spawn(vec![
-            reply(json!({"attachmentLinkURL": {"attachment": {"id": "att-1"}}})),
-            reply(json!({"attachmentUpdate": {"attachment": {"id": "att-1"}}})),
-            reply(comment),
-        ])
-        .await;
+        let (base, requests) = test_server::spawn(responses).await;
         let client = LinearClient::with_base_url("secret".into(), None, base);
         let sent = client
             .send_action(store, std::path::Path::new("/repo"), &action)
@@ -906,62 +1015,161 @@ mod tests {
         (sent, bodies)
     }
 
-    #[tokio::test]
-    async fn a_pr_link_posts_one_comment_and_refreshes_it_on_merge() {
-        let home = tempfile::tempdir().unwrap();
-        let path = home.path().join("store.db");
-        let store = Store {
-            sqlite: crate::store::opening::open_ephemeral(&path).unwrap(),
-        };
-        let task = TaskId::new();
-        store
-            .sqlite
-            .create_task(&loopflow_storage::work::task::NewTask {
-                repository_id: loopflow_storage::test_fixture::repository(&store.sqlite, "/repo"),
-                id: task.clone(),
-                project_id: None,
-                title: "Title".into(),
-                description: String::new(),
-                due_date: None,
+    /// Each body's operation name and the attachment id it names, if any.
+    fn operations(bodies: &[String]) -> Vec<String> {
+        bodies
+            .iter()
+            .map(|body| {
+                let body: Value = serde_json::from_str(body).unwrap();
+                let (_, name) = request_log::operation(body["query"].as_str().unwrap());
+                match body["variables"]["id"].as_str() {
+                    Some(id) if name.contains("Attachment") && id.starts_with("att") => {
+                        format!("{name} {id}")
+                    }
+                    _ => name,
+                }
             })
-            .unwrap();
-        rusqlite::Connection::open(&path)
-            .unwrap()
-            .execute(
-                "UPDATE tasks SET external_issue_id=?2 WHERE id=?1",
-                [task.as_str(), &uuid::Uuid::new_v4().to_string()],
-            )
-            .unwrap();
+            .collect()
+    }
+
+    fn acknowledged(attachment: &str) -> Sent {
+        Sent::Acknowledged {
+            revision: None,
+            remote_id: Some(attachment.into()),
+        }
+    }
+
+    #[tokio::test]
+    async fn a_pr_links_once_and_updates_its_attachment_and_comment_on_merge() {
+        let home = tempfile::tempdir().unwrap();
+        let (store, task) = task_store(&home);
         let comment = pr_comment_id(&task, URL).unwrap();
 
         let (sent, opened) = send(
             &store,
             &task,
             "Open",
-            json!({"commentCreate": {"comment": {"id": comment}}}),
+            vec![
+                linked("att-1"),
+                updated("att-1"),
+                reply(json!({"commentCreate": {"comment": {"id": comment}}})),
+            ],
         )
         .await;
-        assert_eq!(
-            sent,
-            Sent::Acknowledged {
-                revision: None,
-                remote_id: Some("att-1".into())
-            }
-        );
+        assert_eq!(sent, acknowledged("att-1"));
         // `subtitle` on attachmentLinkURL is the 400 that shipped in #1010.
         let link: Value = serde_json::from_str(&opened[0]).unwrap();
         assert!(link["variables"].get("subtitle").is_none());
         assert!(opened[2].contains("commentCreate") && opened[2].contains(&comment));
 
-        let (_, merged) = send(
+        let (sent, merged) = send(
             &store,
             &task,
             "Merged",
-            json!({"commentUpdate": {"comment": {"id": comment}}}),
+            vec![
+                updated("att-1"),
+                reply(json!({"commentUpdate": {"comment": {"id": comment}}})),
+            ],
         )
         .await;
-        assert!(merged[1].contains("Merged"));
-        assert!(merged[2].contains("commentUpdate") && merged[2].contains(&comment));
-        assert!(!merged.iter().any(|body| body.contains("commentCreate")));
+        assert_eq!(sent, acknowledged("att-1"));
+        assert_eq!(
+            operations(&merged),
+            ["UpdateAttachment att-1", "UpdateComment"]
+        );
+        assert!(merged[0].contains("Merged"));
+        assert!(merged[1].contains(&comment));
+    }
+
+    #[tokio::test]
+    async fn a_pr_already_linked_to_its_issue_confirms_with_that_attachment() {
+        let home = tempfile::tempdir().unwrap();
+        let (store, task) = task_store(&home);
+        let comment = pr_comment_id(&task, URL).unwrap();
+
+        let (sent, bodies) = send(
+            &store,
+            &task,
+            "Open",
+            vec![
+                refusal(ALREADY),
+                attachments(json!([
+                    {"id": "att-other", "url": "https://example.com"},
+                    {"id": "att-9", "url": URL},
+                ])),
+                updated("att-9"),
+                reply(json!({"commentCreate": {"comment": {"id": comment}}})),
+            ],
+        )
+        .await;
+        assert_eq!(sent, acknowledged("att-9"));
+        assert_eq!(
+            operations(&bodies),
+            [
+                "LinkAttachment",
+                "IssueAttachments",
+                "UpdateAttachment att-9",
+                "SyncComment"
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_pr_linked_to_another_issue_retires_with_linears_answer() {
+        let home = tempfile::tempdir().unwrap();
+        let (store, task) = task_store(&home);
+
+        let (sent, bodies) = send(
+            &store,
+            &task,
+            "Open",
+            vec![refusal(ALREADY), attachments(json!([]))],
+        )
+        .await;
+        assert_eq!(sent, Sent::Unsupported(ALREADY.into()));
+        assert_eq!(operations(&bodies), ["LinkAttachment", "IssueAttachments"]);
+    }
+
+    #[tokio::test]
+    async fn a_removed_attachment_is_linked_again() {
+        let home = tempfile::tempdir().unwrap();
+        let (store, task) = task_store(&home);
+        let comment = pr_comment_id(&task, URL).unwrap();
+        send(
+            &store,
+            &task,
+            "Open",
+            vec![
+                linked("att-1"),
+                updated("att-1"),
+                reply(json!({"commentCreate": {"comment": {"id": comment}}})),
+            ],
+        )
+        .await;
+
+        let (sent, bodies) = send(
+            &store,
+            &task,
+            "Merged",
+            vec![
+                refusal("Entity not found: Attachment"),
+                attachments(json!([])),
+                linked("att-2"),
+                updated("att-2"),
+                reply(json!({"commentUpdate": {"comment": {"id": comment}}})),
+            ],
+        )
+        .await;
+        assert_eq!(sent, acknowledged("att-2"));
+        assert_eq!(
+            operations(&bodies),
+            [
+                "UpdateAttachment att-1",
+                "IssueAttachments",
+                "LinkAttachment",
+                "UpdateAttachment att-2",
+                "UpdateComment"
+            ]
+        );
     }
 }

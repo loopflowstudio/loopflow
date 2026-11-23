@@ -35,6 +35,14 @@ address and its lock remain stable so already-running relays can recover across
 the rename. There is one listener, with no alias or alternate protocol path.
 Work and credentials stay in place.
 
+For a repository without Linear or Asana the service also reads the shared
+plan. A save, here or in the CLI, sends its own records at once
+(`plan_carriers::send`: the hub, and a Git push with no fetch, five seconds at
+most). The service reads and sends (`plan_carriers::sync`) after each command
+it answers that names a directory, and fetches every such repository's plan
+refs every 60 s, which is when another Machine's change arrives with no hub.
+[Without a tracker](../../../../docs/dev/planning.md#without-a-tracker-stamps-and-carriers) has the carriers.
+
 ## Recovery pass
 
 ```sh
@@ -61,19 +69,20 @@ first reading after start is the restart and reboot case. Each reading:
    counts the start (`agent_sessions.starts_since_turn`, `last_started_at`)
    before it goes through `session.continue`'s path with request
    `recover:<session>:<ended agent, or new>:<attempt>`, so one death starts one
-   provider across server restarts. `lf task run`, `lf ship` and
+   provider across server restarts. `lf task run`, `lf task auto on` and
    `lf task checkout` only prepare the Session; this pass starts it. That
    first start counts only if it fails, so the first death after it comes
    back at once; its terminal holds later passes off. The pass's
    `lf session resume` carries that request as `--request-id`; a resume with
    any other request, or none, is a person's, and sets the count to zero and
    clears `start_failure`.
-3. **Carries Task runs.** A shipping or moving Task whose recorded carrier is
-   dead gets `lf --task <ID> ship` or `lf task run <ID>` again, from its
-   checkpoint. A carrier that exits on its own clears its OS process; one
-   found dead died, and retention, which clears it too, records when
-   (`task_graphs.run_died_at`). One count serves both (`task_graphs.restarts`,
-   `restarted_at`), reset when the run finishes a step.
+3. **Carries Task runs.** A Task whose `lf task run` carrier is dead gets
+   `lf task run <ID>` again, from its checkpoint; with auto on it stands
+   in at interactive steps by itself. A carrier that exits on its own clears
+   its OS process; one found dead died, and retention, which clears it too,
+   records when (`task_graphs.run_died_at`). The pass counts those starts
+   (`task_graphs.restarts`, `restarted_at`), reset when the run finishes a
+   step, and waits for a person after five.
 
 Store retention runs beside the pass, on the maintenance thread
 (`maintenance.rs`): at start and every hour it ends owners whose OS process
@@ -107,7 +116,7 @@ way `lf machine doctor`'s `ptys` check reads it. Only a Task's work session is
 started; a Wave's or repository's work session, a chat and a batch are
 reported, never started.
 
-## Local protocol, revision 8
+## Local protocol, revision 9
 
 One connection per client over the same-user Unix socket. Every message is one
 JSON object per line (`serde_json` never emits a raw newline). Control messages
@@ -141,15 +150,15 @@ subscriptions carry `sender`, what the receiving server cannot know; a
 Machine's null `sender` is `invalid`, and a client on this Machine sends null:
 
 ```text
-→ {"type":"hello","revision":8,"min_revision":8,"client":{"kind":"machine",…}}
+→ {"type":"hello","revision":9,"min_revision":8,"client":{"kind":"machine",…}}
 ← {"type":"welcome",…}
-→ {"type":"request","id":"…","operation":{"kind":"task.hold","directory":"/laptop/repo",…},"select":null,"sender":{"repository":"repo_…","selection":{"profile":{…},"participant":"…","agent":null,"settings":null,"source":null},"secrets":{}}}
+→ {"type":"request","id":"…","operation":{"kind":"task.auto.off","directory":"/laptop/repo",…},"select":null,"sender":{"repository":"repo_…","selection":{"profile":{…},"participant":"…","agent":null,"settings":null,"source":null},"secrets":{}}}
 ← {"type":"response","id":"…","result":{…}}
 ```
 
 The server runs the operation in its own checkout of `repository` (the
 operation's `directory` is the sender's), and starts any launch (`task.run`,
-`task.ship`) with `selection` and `secrets`: the values `forward.env` names,
+`task.auto.on`) with `selection` and `secrets`: the values `forward.env` names,
 which nothing prints (`Debug` shows names). Files `forward.files` names are
 delivered over SSH first. The sender waits 120 s for an answer; past that the
 request fails, naming the Machine and `ssh <route> lf server status`.
@@ -169,9 +178,9 @@ rather than the connection. The root accepts any message either side sends;
 `x-min-revision` are this build's range. Each operation's kind is a `const` as
 on the wire, and `x-result` beside it names what `response.result` carries.
 For a write, that schema derives from the Rust type the operation returns.
-For example, `task.ship` returns `TaskShip`: its `state` is `shipping`,
-`already_shipping` or `at_end`, with the fields described by that variant.
-`lf --task <issue> ship --json` prints the same result. Use the operation's
+For example, `task.auto.on` returns `TaskRun`: its `state` is `running`,
+`waiting` or `ended`, with the fields described by that variant.
+`lf task auto on <issue> --json` prints the same result. Use the operation's
 `x-result` to decode it; `response.result` adds no extra result-type tag.
 
 Where a recorded exchange exists, `examples` holds the request's operation and
@@ -194,19 +203,19 @@ a described kind with exactly its fields, every client fixture must be encoded
 by a test and every server fixture must decode.
 
 ```text
-→ {"type":"hello","revision":8,"min_revision":8,"client":{"kind":"desktop","platform":"macos","name":"Loopflow","version":"0.15.1"}}
-← {"type":"welcome","client_id":"…","revision":8,"server_revision":8,"min_revision":8,"instance":"…","build":"0.15.1","executable_sha256":"…","machine":{…},"limits":{"max_message":1048576,"max_connections":64,"max_open":256,"max_retained_bytes":67108864}}
-→ {"type":"request","id":"a","operation":{"kind":"plan.list","directory":"/","wave":null,"task":null,"all":true},"select":null,"request_id":null}
-→ {"type":"subscribe","id":"b","operation":{"kind":"session.list","directory":"/repo","headless":false,"after":null,"limit":null,"task":null},"select":["id","title","state"],"resume":null}
+→ {"type":"hello","revision":9,"min_revision":8,"client":{"kind":"desktop","platform":"macos","name":"Loopflow","version":"0.15.1"}}
+← {"type":"welcome","client_id":"…","revision":9,"server_revision":9,"min_revision":8,"instance":"…","build":"0.15.1","executable_sha256":"…","machine":{…},"limits":{"max_message":1048576,"max_connections":64,"max_open":256,"max_retained_bytes":67108864}}
+→ {"type":"request","id":"a","operation":{"kind":"plan.list","directory":"/","wave":null,"task":null,"all":true},"select":null,"request_id":null,"sender":null}
+→ {"type":"subscribe","id":"b","operation":{"kind":"session.list","directory":"/repo","headless":false,"after":null,"limit":null,"task":null},"select":["id","title","state"],"resume":null,"sender":null}
 ← {"type":"response","id":"a","trace_id":"…","result":{…}}
 ← {"type":"response","id":"b","trace_id":"…","result":null}
 ← {"type":"reading","id":"b","checkpoint":"opaque-reading-token","frame":{"answers":null,"unavailable":null,"body":{…}}}
 → {"type":"checkpoint","id":"b","checkpoint":3}
 ← {"type":"reading","id":"b","checkpoint":"opaque-reading-token","frame":{"answers":3,…}}
 → {"type":"cancel","id":"b"}
-→ {"type":"request","id":"c","operation":{"kind":"task.run","directory":"/repo","issue":"LOO-1","graph":null,"from":null,"agent":null,"approve":false},"select":null,"request_id":null}
-← {"type":"response","id":"c","trace_id":"…","result":{"state":"running","issue":"LOO-1","run":"code from start","ships":false,"graph_process":"…","log":"…"}}
-→ {"type":"subscribe","id":"d","operation":{"kind":"task.wait","issue":"LOO-1","until":"submitted"},"select":null,"resume":null}
+→ {"type":"request","id":"c","operation":{"kind":"task.run","directory":"/repo","issue":"LOO-1","graph":null,"from":null,"agent":null,"approve":false},"select":null,"request_id":null,"sender":null}
+← {"type":"response","id":"c","trace_id":"…","result":{"state":"running","issue":"LOO-1","run":"code from start","merges":false,"graph_process":"…","log":"…"}}
+→ {"type":"subscribe","id":"d","operation":{"kind":"task.wait","issue":"LOO-1","until":"submitted"},"select":null,"resume":null,"sender":null}
 ← {"type":"reading","id":"d","checkpoint":"another-token","frame":{"answers":null,"unavailable":null,"body":{"reached":true,"task":{…}}}}
 ← {"type":"ended","id":"d"}
 ```
@@ -219,7 +228,7 @@ unavailable or uninitialized) and limits. The negotiated revision is the whole
 compatibility check: a server that speaks it offers every operation below, so
 no capability list travels. With no revision in
 common it answers `error {code: incompatible}` naming the side to update in
-its message and in `data.update` (`client` or `server`), then closes. This build speaks revision 8; the shape lets a later server speak
+its message and in `data.update` (`client` or `server`), then closes. This build speaks revisions 8 and 9; the shape lets a later server speak
 two. A revision-1 client's four-byte length prefix starts below `0x20`; the
 server answers it a revision-1 framed `incompatible` error carrying `instance`
 and closes. That sniff is the whole compatibility layer and goes with revision 1.
@@ -261,8 +270,10 @@ installation use it so readiness never opens Work or speaks the full protocol;
 `hello` gave and `requests` counts its requests, subscriptions included. The
 `open` and `retained_bytes` fields report current admitted work and retained-byte
 accounting, including pending producers. The
-identity is for diagnostics and grants nothing. Local readiness compares the executable hash with the selected
-installation, an installation check that never applies to a remote client.
+identity is for diagnostics and grants nothing. `ready` means the server answers at a revision the asking build speaks; a
+different executable is not an error, so a branch build reports the installed
+server ready. Installation alone compares `executable_sha256` with the selected
+installation, to decide whether to register again.
 
 After `welcome`, many requests share the connection. A `request` carries an `id`
 (1–128 bytes, unique among the connection's unanswered requests) and an
@@ -372,15 +383,15 @@ case names one operation, including distinct claim/unassign and pin/unpin writes
 | `task.detail` | `lf task detail <issue>` | read |
 | `task.list` (`closed: true`) | `lf task list --closed --wave <wave>` | read |
 | `task.changes` | `lf task changes <issue>` | read |
-| `task.diff`, `task.file` | `lf task diff`, `lf task file` | read |
+| `task.diff`, `task.file`, `task.files` | `lf task diff`, `lf task file`, `lf task files` | read |
 | `task.context` | `lf task context <issue>` | read |
 | `task.runs` | `lf task runs <issue>` | read |
 | `task.wait` | `lf task wait <issue> --until <state>` | `engine::task` |
 | `task.create` | `lf task create [--session <id>] [--run] --request-id <id>` | write |
 | `creation.get` | `lf server receipt <request-id> --json` | read; no creation or launch |
 | `task.run` | `lf task run <issue>` | `engine::task` |
-| `task.ship` | `lf ship` | `engine::task` |
-| `task.hold` | `lf task hold <issue>` | `engine::task` |
+| `task.auto.on` | `lf task auto on <issue>` | `engine::task` |
+| `task.auto.off` | `lf task auto off <issue>` | `engine::task` |
 | `task.steer` | `lf steer <issue> <message>` | `engine::task`; the thread entry the store saves as the Task's steer |
 | `task.report` | `lf task report <issue> <message>` | `engine::task` |
 | `task.interrupt` | `lf task interrupt <issue>` | `engine::task` |
@@ -396,6 +407,7 @@ case names one operation, including distinct claim/unassign and pin/unpin writes
 | `session.rename`, `.bind`, `.resume`, `.new` | `lf session <verb>`, `lf resume` | write |
 | `session.steer` | `lf [--wave <wave>] steer [<id>] <message>` | write; `engine::session::steer` |
 | `session.boundary` | none; provider hooks through `lf __context-block` ([Turn and tool boundaries](#turn-and-tool-boundaries)) | server |
+| `plan.changes`, `plan.apply` | none; another Machine whose hub this is (`lf machine hub`), over `lf server connect` | server; stamped records in both directions, `ops::plan_hub::changes_here`, `apply_here` (revision 9); `plan.apply` answers how many records the hub could not write, which the sender keeps unsent |
 | `session.status` | `lf session observe-status <id> --terminal <terminal> --stream <stream> --sequence <n>`, the snapshot on stdin | write; one Program Status reading from the terminal showing a Session. A stream's first reading replaces any earlier stream; a late reading never replaces a newer one |
 | `wave.list`, `wave.graph` | `lf wave list`, `lf wave graph show` | read |
 | `wave.plan` | `lf wave plan <wave>` | read |
@@ -419,7 +431,7 @@ case names one operation, including distinct claim/unassign and pin/unpin writes
 | `work.resolve` | `lf open <url> --link`; a `work` noun would shadow the builtin `work` skill | read |
 | `config.catalog`, `.settings`, `.get`, `.explain` | `lf config catalog`, `lf config settings`, `lf config get`, `lf config explain` | `engine::config` |
 | `config.set`, `.unset` | `lf config set`, `lf config unset` (`lf set`, `lf unset`) | `engine::config` |
-| `config.theme` | none; Appearance's theme file | `engine::config` |
+| `config.theme` | none; the Machine's `theme:`, read by Desktop and the phone | `engine::config` |
 | `pr.publish`, `.open`, `.submit`, `.arm`, `.abandon`, `.reconcile`, `.request_review` | `lf pr publish`, `lf pr open`, `lf pr submit`, `lf pr arm`, `lf pr abandon`, `lf pr reconcile`, `lf pr request-review` | write; `engine::pr::publish`, `open`, `submit`, `arm`, `abandon`, `reconcile`, `request_review` |
 | `pr.land` | `lf pr land` (`lf land`) | write; `engine::pr::land` (detached; the Process carrying the landing) |
 | `pr.checks`, `.reviews` | `lf pr checks`, `lf pr reviews` | read; `engine::pr::checks` (no `--subscribe`), `reviews` |
@@ -455,8 +467,8 @@ the phone's `view.select` Task list and its creation destinations all read it.
   step}` resolves them with their sources, and `config.get`, `config.set
   {value}`, `config.unset` and `config.explain` take `{destination, key}`, where
   a destination names an owner (`personal_global`, `shared_repo {repo}`,
-  …), never a file plus a scope. `config.theme {path, value}` is Appearance's
-  theme file. A failed or uncertain save is never replayed; setting values are
+  …), never a file plus a scope. `config.theme {value}` reads or sets the
+  serving Machine's `theme:`. A failed or uncertain save is never replayed; setting values are
   omitted from request telemetry.
 - A read uses the existing `Read` shape and answers with the JSON the command
   prints, serialized once. A command that prints bare text
@@ -504,19 +516,19 @@ the phone's `view.select` Task list and its creation destinations all read it.
   sends `ended {id}` and nothing more for it. Requested once, it is that reading now, as
   `lf task wait --timeout 0s --json` prints it.
 - The core loop is `engine::task`, which the CLI handlers call too.
-  `task.run {directory, issue, graph, from, agent, approve}` and `task.ship
+  `task.run {directory, issue, graph, from, agent, approve}` and `task.auto.on
   {directory, issue}` outlive the request, so the server starts their
-  command (`lf [-b] [-a <agent>] task run …`, `lf --task <issue> ship`)
+  command (`lf [-b] [-a <agent>] task run …`, `lf task auto on <issue>`)
   as a detached process and answers what that process reports once it
-  knows: `{state: running, ships, graph_process, log}` when the
-  Graph registers, `waiting {step}` or `ended` when nothing ran, `shipping
-  {process, log}`, or the refusal it printed. The connection never waits on
-  the run. `approve` is `-b`: every step headless to `end`, approving
-  Auto-Ship; without it the run stops before the next interactive step, and
-  one with none ahead reaches `end` as bare `lf task run` does. A null `agent`
-  uses each step's configured harness. `lf task run <issue> --json` and `lf
-  ship --json` print the same value. `task.hold` withdraws the approval
-  (`{issue, stopped}`), `task.steer` and `task.report {message}` save to the
+  knows: `{state: running, merges, graph_process, log}` when the
+  Graph registers, `waiting {step}` or `ended` when nothing ran, or the
+  refusal it printed; `task.auto.on` answers the same after turning auto
+  on. The connection never waits on the run. `approve` is `-b`: every step
+  headless to `end`, writing no auto; without it
+  the run stands in at interactive steps only while auto is on, and
+  otherwise stops before the next one. A null `agent` uses each step's
+  configured harness. `lf task run <issue> --json` and `lf task auto on --json`
+  print the same value. `task.auto.off {directory, issue, reason}` turns auto off (`{issue, was_on}`); only `task.auto.on` turns it on, `task.steer` and `task.report {message}` save to the
   thread and return it, and `task.interrupt` returns its receipt.
 - A write uses the shared `Write` shape. `Write::run` calls the shared Rust
   function its CLI handler calls and returns the typed value; the CLI prints
@@ -526,7 +538,7 @@ the phone's `view.select` Task list and its creation destinations all read it.
   which makes the checkout and starts the Graph after the answer.
   A null `wave` selects the repository. Both paths return the same creation
   receipt, described below. A write whose Work
-  lives on another Machine (`task.run`, `task.ship`, `task.hold`,
+  lives on another Machine (`task.run`, `task.auto.on`, `task.auto.off`,
   `task.claim`, `task.unassign`, `session.resume`) goes to that Machine's
   server over SSH and returns its answer; it never falls back to
   local execution. Requests create no Process rows; diagnostics the shared
@@ -937,7 +949,7 @@ only.
 | `task.steer` | `task_id`, `steer {id,sequence,source,revision,author,text}`, `comment`: immutable direction and the original `TaskComment` when present (`null` for other direction) |
 | `graph.step_finished` | `task_id`, `graph_process_id`, `step`: the same `GraphStepProcess` as a Task reading, including its recorded outcome |
 
-`task.shipped` means a PR merge was recorded, not that Auto-Ship was enabled or
+`task.shipped` means a PR merge was recorded, not that auto was turned on or
 the Task was completed. `graph.step_finished` includes failed and interrupted
 steps; inspect `step.outcome` before presenting a successful finish.
 
@@ -1003,7 +1015,7 @@ operation returns in `response.result`.
 | `task.detail` | Task, PR, checks, Graph processes, comments and current Session |
 | `session.card` | Session, liveness, occupied terminal and last line |
 
-Use `section` to place a Task in Backlog, Working, Autonomous, Done or
+Use `section` to place a Task in Backlog, Working, Done or
 Abandoned; `state` describes its progress within that grouping. To populate a
 board row's detail, request `task.detail`; for its Session, request `session.card`.
 A card observes the Session: reading it does not resume a provider, attach a
@@ -1316,7 +1328,7 @@ provider. A lost
 connection alone does not establish process death.
 
 Desktop reconnects to the same held terminal with bounded backoff. See
-[connection loss](../../../../docs/server.md#keep-editing-through-a-connection-loss)
+[connection loss](../../../../docs/server.md#keep-working-through-a-connection-loss)
 for connection status and recovery controls outside terminal bytes.
 
 The Loopflow Session, provider conversation, serving AgentProcess and the

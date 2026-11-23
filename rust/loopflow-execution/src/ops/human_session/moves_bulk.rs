@@ -128,7 +128,7 @@ async fn move_agent(
         session.id.as_str(),
         Some(agent),
         false,
-        false,
+        Default::default(),
         &uuid::Uuid::new_v4().to_string(),
     )
     .await
@@ -151,7 +151,7 @@ pub async fn apply_pending_move(store: &SharedStore, session: &str) -> Result<()
         session,
         Some(&agent),
         false,
-        false,
+        Default::default(),
         &uuid::Uuid::new_v4().to_string(),
     )
     .await?;

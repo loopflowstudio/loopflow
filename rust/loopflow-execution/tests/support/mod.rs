@@ -529,25 +529,40 @@ pub fn select_wave_graph(
     wave: &WaveId,
     name: &str,
 ) {
+    set_wave_setting(repo, store, wave, "graph", name);
+}
+
+/// Set `key` in a Wave's committed `config.yaml` in `repo`.
+#[allow(dead_code)] // Shared helper compiled into integration tests without Wave settings.
+pub fn set_wave_setting(
+    repo: &Path,
+    store: &loopflow::store::sqlite::SqliteStore,
+    wave: &WaveId,
+    key: &str,
+    value: &str,
+) {
     let wave = store.get_wave(wave).unwrap().unwrap();
     let path = repo.join(".lf/wave").join(wave.slug()).join("config.yaml");
     let mut config: serde_yaml_ng::Mapping = fs::read_to_string(&path)
         .ok()
         .and_then(|content| serde_yaml_ng::from_str(&content).ok())
         .unwrap_or_default();
-    config.insert("graph".into(), name.into());
+    config.insert(key.into(), value.into());
     fs::create_dir_all(path.parent().unwrap()).unwrap();
     fs::write(&path, serde_yaml_ng::to_string(&config).unwrap()).unwrap();
     for args in [
         vec!["add", "--", path.to_str().unwrap()],
-        vec!["commit", "--quiet", "-m", "Select the Wave's graph"],
+        vec!["commit", "--quiet", "-m", "Set the Wave's configuration"],
     ] {
         let status = std::process::Command::new("git")
             .current_dir(repo)
             .args(args)
             .status()
             .unwrap();
-        assert!(status.success(), "git could not commit the Wave's graph");
+        assert!(
+            status.success(),
+            "git could not commit the Wave's configuration"
+        );
     }
 }
 

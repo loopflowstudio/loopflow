@@ -15,10 +15,10 @@ use std::sync::{Arc, Mutex};
 use anyhow::Result;
 use serde_json::json;
 
-use super::fact::{Decoded, ProviderFact, Signal};
 use crate::process::SessionAttachment;
 use crate::session::{SessionActivity, SessionPreview, SessionTurnOrigin, TurnContext};
 use crate::store::{RecordingGap, StoreResult};
+use loopflow_harness::fact::{Decoded, ProviderFact, Signal};
 use loopflow_model::chat::types::{ConversationEvent, ConversationItem};
 use loopflow_model::id::AgentSessionId;
 use loopflow_storage::sqlite::SqliteStore;
@@ -401,10 +401,10 @@ mod tests {
     use serde_json::{json, Value};
 
     use super::{FactWriter, SessionActivityTracker};
-    use crate::harness::claude_decode::ClaudeDecoder;
-    use crate::harness::codex_decode::{turn_request, CodexDecoder};
-    use crate::harness::fact::{trace, Decoded, ProviderFact, ProviderTurn, Signal};
     use crate::process::SessionAttachment;
+    use loopflow_harness::claude_decode::ClaudeDecoder;
+    use loopflow_harness::codex_decode::{turn_request, CodexDecoder};
+    use loopflow_harness::fact::{trace, Decoded, ProviderFact, ProviderTurn, Signal};
     use loopflow_model::chat::types::Lifecycle;
     use loopflow_model::id::LfProcessId;
     use loopflow_storage::sqlite::SqliteStore;

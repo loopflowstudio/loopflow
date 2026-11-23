@@ -161,7 +161,7 @@ pub fn selected_linear_team(repo: &Path) -> OpsResult<Option<String>> {
         .unwrap_or_default()
         .planning_transport();
     Ok(match transport {
-        crate::config::TrackerConfig::Linear { team } => {
+        Some(crate::config::TrackerConfig::Linear { team }) => {
             team.filter(|team| !team.trim().is_empty())
         }
         _ => None,
@@ -1899,7 +1899,10 @@ fn block_on_linear<T>(future: impl Future<Output = OpsResult<T>>) -> OpsResult<T
 }
 
 fn linear_error(err: LinearError) -> OpsError {
-    OpsError::Message(err.to_string())
+    match err {
+        LinearError::RateLimited { .. } => OpsError::Tracker(err.into()),
+        LinearError::Message(text) => OpsError::Message(text),
+    }
 }
 
 #[cfg(test)]
@@ -2095,13 +2098,7 @@ mod tests {
                             assert!(!result.created && !result.team_created);
                         }
                         let config = crate::config::load_config(Some(&repo)).unwrap().unwrap();
-                        assert_eq!(
-                            config.planning_transport(),
-                            crate::config::TrackerConfig::Git {
-                                remote: "personal".into(),
-                                plan: crate::config::GitPlan::Shared("private".into()),
-                            }
-                        );
+                        assert_eq!(config.planning_transport(), None);
                         assert_eq!(
                             selected_linear_team(&repo).unwrap().as_deref(),
                             Some("team-1")
@@ -2157,8 +2154,10 @@ mod tests {
                     "description": "<!-- loopflow-repository: loopflowstudio/fixture -->"
                 }]}}});
                 let (url, requests) = test_server::spawn(vec![
+                    // Adding the Wave checks its tracker before the Initiative lookup.
                     json_response(StatusCode::OK, team.clone()),
                     json_response(StatusCode::OK, team.clone()),
+                    json_response(StatusCode::OK, team),
                     json_response(
                         StatusCode::OK,
                         json!({"data": {"initiatives": {"nodes": [], "pageInfo": {"hasNextPage": false, "endCursor": null}}}}),
@@ -2167,7 +2166,6 @@ mod tests {
                         StatusCode::OK,
                         json!({"data": {"initiativeCreate": {"initiative": {"id": "6f1d2c3b-4a5e-4f60-8a71-9b2c3d4e5f60"}}}}),
                     ),
-                    json_response(StatusCode::OK, team),
                     projects_response(json!([])),
                 ])
                 .await;
@@ -2243,9 +2241,9 @@ mod tests {
                 .unwrap();
             assert_eq!(
                 config.planning_transport(),
-                crate::config::TrackerConfig::Linear {
+                Some(crate::config::TrackerConfig::Linear {
                     team: Some("team-product".into())
-                }
+                })
             );
             assert_eq!(config.agent.as_deref(), Some("codex"));
             let updated = std::fs::read_to_string(goal).unwrap();

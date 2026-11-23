@@ -28,7 +28,7 @@ struct ToolTabTests {
         files.selectFile("first.txt", mode: .edit)
         let document = files.document("first.txt")
         await document.reconcile(TaskFileSnapshot(recoveries: [], issueIdentifier: work.id, taskId: work.id,
-            path: "first.txt", content: "base", state: .text, revision: "base-revision", readOnlyReason: nil, sizeBytes: 4))
+            path: "first.txt", content: "base", data: nil, state: .text, revision: "base-revision", readOnlyReason: nil, sizeBytes: 4))
         document.editor.string = "unsaved draft"
         files.selectFile("second.txt", mode: .edit)
         let tabs = files.tabs
@@ -60,7 +60,7 @@ struct ToolTabTests {
         #expect(reopenedFiles.document("first.txt").text == "unsaved draft")
         #expect(!reopenedFiles.document("first.txt").canSave)
         await reopenedFiles.document("first.txt").reconcile(TaskFileSnapshot(recoveries: [], issueIdentifier: work.id,
-            taskId: work.id, path: "first.txt", content: "base", state: .text, revision: "base-revision", readOnlyReason: nil, sizeBytes: 4))
+            taskId: work.id, path: "first.txt", content: "base", data: nil, state: .text, revision: "base-revision", readOnlyReason: nil, sizeBytes: 4))
         #expect(reopenedFiles.document("first.txt").text == "unsaved draft")
         #expect(reopenedFiles.document("first.txt").canSave)
     }

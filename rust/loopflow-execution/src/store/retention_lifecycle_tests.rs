@@ -92,7 +92,7 @@ fn a_killed_runner_ends_unknown_and_its_task_stops_moving() {
     assert_eq!(store.task_state(&task).unwrap(), TaskState::Idle);
     // Clearing the carrier kept that it died, so the recovery pass still
     // carries the run again.
-    let died = crate::ops::task::ship::died_run(&store, &task)
+    let died = crate::ops::task::run_recovery::died_run(&store, &task)
         .unwrap()
         .expect("a carrier retention ended died");
     assert_eq!(died.carrier.as_str(), carrier);

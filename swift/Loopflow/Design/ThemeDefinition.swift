@@ -31,6 +31,8 @@ public struct ThemeRGB: Equatable, Hashable, Sendable {
         return (max(first, second) + 0.05) / (min(first, second) + 0.05)
     }
     var prefersLightText: Bool { contrast(Self(0xFFFFFF)) > contrast(Self(0)) }
+    /// White or black, whichever reads better on this color.
+    public var contrastingText: Self { Self(prefersLightText ? 0xFFFFFF : 0) }
     public func mixed(with other: Self, amount: Double) -> Self {
         let c: [UInt32] = zip(channels, other.channels).map { first, second in
             let blended = first * (1.0 - amount) + second * amount
@@ -82,7 +84,7 @@ public struct TerminalPalette: Equatable, Sendable {
 }
 
 /// A complete theme. Its name is its identity: config and files refer to it by name.
-public struct ThemeDefinition: Identifiable, Sendable {
+public struct ThemeDefinition: Identifiable, Hashable, Sendable {
     public let name: String
     public let palette: LoopflowPalette
     public let terminal: TerminalPalette
@@ -91,7 +93,8 @@ public struct ThemeDefinition: Identifiable, Sendable {
     public var colorScheme: ColorScheme { isDark ? .dark : .light }
     public static let light = builtin("Loopflow Light")
     public static let dark = builtin("Loopflow Dark")
-    /// The fixed catalogue: Loopflow's own pair first, then each appearance's companions by name.
+    /// The fixed catalogue: Loopflow's own pair first, then the families by name. Every family's
+    /// themes start with its name, so both appearances list the families in one order.
     public static let builtins: [Self] = {
         guard let directory = Bundle.loopflowResources.url(forResource: "Themes", withExtension: nil)?
             .appendingPathComponent("Catalogue", isDirectory: true) else {
@@ -103,11 +106,9 @@ public struct ThemeDefinition: Identifiable, Sendable {
                 guard theme.readabilityErrors.isEmpty else { throw ThemeError("\(theme.name): \(theme.readabilityErrors.joined(separator: "; "))") }
                 return theme
             }
-            precondition(themes.filter(\.isDark).count == 12 && themes.count == 24, "Bundled catalogue requires 12 light and 12 dark themes")
-            let order = ["Loopflow Light": 0, "Loopflow Dark": 0, "Linen": 1, "Hearth": 1]
             return themes.sorted { first, second in
-                if order[first.name] != order[second.name] { return (order[first.name] ?? 2) < (order[second.name] ?? 2) }
-                return first.name < second.name
+                let loopflow = (first.name.hasPrefix("Loopflow "), second.name.hasPrefix("Loopflow "))
+                return loopflow.0 != loopflow.1 ? loopflow.0 : first.name < second.name
             }
         } catch { preconditionFailure("Invalid bundled theme: \(error)") }
     }()
@@ -120,6 +121,12 @@ public struct ThemeDefinition: Identifiable, Sendable {
     public init(name: String, palette: LoopflowPalette, terminal: TerminalPalette) {
         self.name = name; self.palette = palette; self.terminal = terminal
     }
+    /// Two themes are equal when they color the same.
+    public static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.name == rhs.name && lhs.palette.definition == rhs.palette.definition && lhs.terminal == rhs.terminal
+    }
+    // The colors are only Equatable; the name spreads themes well enough.
+    public func hash(into hasher: inout Hasher) { hasher.combine(name) }
 }
 
 private struct ThemeKey: EnvironmentKey { static let defaultValue = ThemeDefinition.light }

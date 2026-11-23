@@ -190,7 +190,7 @@
         },
         "runtime": {
           "work_id": "issue-now",
-          "status": "shipping",
+          "status": "moving",
           "completion_pending": null,
           "reason": "ready",
           "updated_at": "2026-07-14T23:44:00Z",
@@ -202,6 +202,7 @@
           "reason": "ready"
         },
         "section": "backlog",
+        "owned_by_you": false,
         "actions": {
           "recommended": "run",
           "reason": "resume the parked Task"
@@ -390,25 +391,20 @@
           "state": "running",
           "reason": "Worker is running realign",
           "step": null,
-          "captured": null
+          "captured": null,
+          "died": null,
+          "outlook": null
         },
         "run_control": {
           "unavailable": null
         },
-        "ship_control": {
-          "unavailable": "Task is already shipping"
-        },
-        "shipping": {
-          "shipped_at": 1792600000,
-          "state": "landing",
-          "reason": "CI running on #1650"
-        },
         "pr": null,
         "graph_source": null,
-        "lifecycle": "shipping",
+        "lifecycle": "moving",
         "selection_states": [
-          "shipping",
-          "backlog"
+          "moving",
+          "backlog",
+          "auto"
         ]
       },
       {
@@ -469,6 +465,7 @@
           "reason": "merge pull request head abc1234 on GitHub"
         },
         "section": "backlog",
+        "owned_by_you": false,
         "actions": {
           "recommended": "open_pr",
           "reason": "merge head abc1234 on GitHub"
@@ -659,15 +656,13 @@
           "state": "idle",
           "reason": "Waiting for your review at demo",
           "step": null,
-          "captured": null
+          "captured": null,
+          "died": null,
+          "outlook": null
         },
         "run_control": {
           "unavailable": null
         },
-        "ship_control": {
-          "unavailable": null
-        },
-        "shipping": null,
         "pr": {
           "id": "pr-review",
           "sequence": 1,
@@ -738,6 +733,7 @@
           "reason": "Task is ready to start"
         },
         "section": "backlog",
+        "owned_by_you": false,
         "actions": {
           "recommended": null,
           "reason": "Task is ready to start"
@@ -763,15 +759,13 @@
           "state": "idle",
           "reason": "No active execution",
           "step": null,
-          "captured": null
+          "captured": null,
+          "died": null,
+          "outlook": null
         },
         "run_control": {
           "unavailable": null
         },
-        "ship_control": {
-          "unavailable": null
-        },
-        "shipping": null,
         "pr": null,
         "graph_source": null,
         "lifecycle": "unstarted",
@@ -838,6 +832,7 @@
           "reason": "Linear Task is complete"
         },
         "section": "done",
+        "owned_by_you": false,
         "actions": {
           "recommended": "no_action",
           "reason": "Task is completed"
@@ -863,15 +858,13 @@
           "state": "idle",
           "reason": "No active execution",
           "step": null,
-          "captured": null
+          "captured": null,
+          "died": null,
+          "outlook": null
         },
         "run_control": {
           "unavailable": null
         },
-        "ship_control": {
-          "unavailable": null
-        },
-        "shipping": null,
         "pr": null,
         "graph_source": null,
         "lifecycle": "done",

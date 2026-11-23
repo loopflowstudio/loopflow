@@ -54,9 +54,12 @@ impl SqliteStore {
     ) -> StoreResult<T> {
         let _fence = self.lock_session_dispatch(&adapter.session)?;
         // A provider start that changes conversation also moves the resume
-        // reference, on the account it already names.
+        // reference, on the account it already names. A launch whose provider
+        // names the conversation (Antigravity) has published none yet, and a
+        // held terminal leaves no lf process to publish it later: the start
+        // does.
         let resume = match boundary {
-            NativeBoundary::Select { .. } => self.resume_reference(&adapter.session)?,
+            NativeBoundary::Select { .. } => self.resume_input(&adapter.session)?,
             _ => None,
         };
         // A turn in the selected, activated, already observed conversation
@@ -140,9 +143,11 @@ impl SqliteStore {
                 thread,
                 source,
             )?);
-            if let Some((session, input, reference)) =
-                resume.filter(|(_, _, reference)| reference.agent_session.as_str() != thread)
-            {
+            if let Some((session, input, reference)) = resume.filter(|(_, _, reference)| {
+                reference
+                    .as_ref()
+                    .is_none_or(|reference| reference.agent_session.as_str() != thread)
+            }) {
                 history.extend(super::sessions::retain_history_in(
                     &tx,
                     &session,
@@ -150,7 +155,7 @@ impl SqliteStore {
                         &session,
                         &input,
                         &thread.into(),
-                        reference.account_id,
+                        reference.and_then(|reference| reference.account_id),
                     )],
                 )?);
             }
@@ -325,16 +330,16 @@ impl SqliteStore {
         Ok(())
     }
 
-    /// The Session's published resume reference with the input it belongs to.
-    /// A Session that never published one leaves publication to its launch.
-    fn resume_reference(
+    /// The Session's current input with the resume reference published for
+    /// it, if any.
+    fn resume_input(
         &self,
         session: &str,
     ) -> StoreResult<
         Option<(
             crate::session::LfSession,
             String,
-            crate::session_record::ProviderSessionRef,
+            Option<crate::session_record::ProviderSessionRef>,
         )>,
     > {
         let Some(session) = self.session(session)? else {
@@ -343,9 +348,8 @@ impl SqliteStore {
         let Some(input) = session.artifact_key.clone() else {
             return Ok(None);
         };
-        Ok(self
-            .input_provider_session(&input)?
-            .map(|reference| (session, input, reference)))
+        let reference = self.input_provider_session(&input)?;
+        Ok(Some((session, input, reference)))
     }
 }
 

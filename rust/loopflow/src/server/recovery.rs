@@ -123,7 +123,7 @@ impl Watcher {
         } else if self.seen.is_some_and(|(seen, _)| {
             (seen.planning, seen.processes) != (revisions.planning, revisions.processes)
         }) {
-            // A move can restore Auto-Ship while settlement is throttled.
+            // A move can bring a Task with auto on while settlement is throttled.
             // Revisit that change even if nothing else writes to the store.
             self.runs_due = self
                 .runs_due

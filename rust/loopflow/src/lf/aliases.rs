@@ -60,7 +60,6 @@ pub const MOVED: &[Moved] = &[
         &["task", "list", "--closed"],
     ),
     moved(&["task", "diff"], &["--files"], &["task", "changes"]),
-    moved(&["ship"], &["--stop"], &["task", "hold"]),
     moved(&["desktop", "sessions"], &[], &["session", "list"]),
     moved(&["desktop", "wave"], &[], &["wave", "plan"]),
     moved(&["wave", "status"], &["--sync"], &["wave", "sync"]),
@@ -72,8 +71,6 @@ pub const MOVED: &[Moved] = &[
     moved(&["planning"], &[], &["repo", "tracker"]),
     moved(&["planning"], &["list"], &["plan", "list"]),
     moved(&["planning"], &["status"], &["repo", "tracker"]),
-    moved(&["planning"], &["key"], &["repo", "tracker", "key"]),
-    moved(&["planning"], &["journal"], &["repo", "tracker", "journal"]),
     moved(&["desktop", "plans"], &[], &["desktop", "view", "list"]),
     moved(
         &["desktop", "view"],

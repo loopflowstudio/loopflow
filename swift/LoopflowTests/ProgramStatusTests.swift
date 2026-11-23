@@ -52,7 +52,7 @@ struct ProgramStatusTests {
             let record = try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: session))
             #expect(SessionProgramStatus(sessions: [record], unavailable: nil).label == label)
             if let label {
-                let view = ProgramStatusLabel(status: surface.snapshot)
+                let view = try #require(StatusMark(status: surface.snapshot))
                 #expect(try view.inspect().find(text: label).string() == label)
             } else {
                 #expect(surface.snapshot.seen)
@@ -249,7 +249,7 @@ struct ProgramStatusTests {
 
     @Test @MainActor func labelRendersProgramTextLiterally() throws {
         let value = report(.blocked, msg: "**Proceed?** [answer](https://example.com)")
-        let view = ProgramStatusLabel(status: ProgramStatusRecords(seen: true, records: [value]))
+        let view = try #require(StatusMark(status: ProgramStatusRecords(seen: true, records: [value])))
         #expect(try view.inspect().find(text: value.displayText).string() == value.displayText)
     }
 }

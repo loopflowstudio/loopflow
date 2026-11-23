@@ -1,5 +1,5 @@
-import Foundation
 import Loopflow
+import SwiftUI
 
 /// Presentation of shared Session evidence; never Task completion or graph position.
 enum SessionProgramStatus {
@@ -40,47 +40,27 @@ enum SessionProgramStatus {
         }
     }
 
-    /// Freshness changes presentation only, never the underlying execution status.
-    func preview(now: Date, fallback: String, sessions: [SessionRecord] = []) -> (text: String, help: String, age: String?) {
-        let candidate: SessionRecord?
-        switch self {
-        case .unavailable: candidate = nil
-        case .reported(_, let report) where report.state == .idle || report.state == .done: candidate = nil
-        default: candidate = session ?? sessions.min(by: Self.precedes)
-        }
-        if let session = candidate, session.programStatus?.seen != true || session.programStatus?.summary != nil,
-           session.state == .active || session.state == .detached, let excerpt = session.preview,
-           !excerpt.providerThread.isEmpty, !excerpt.providerTurn.isEmpty,
-           session.agentProcessId != nil {
-            let age = now.timeIntervalSince1970 - Double(excerpt.observedAt)
-            let available = session.availability == .available
-            if age >= 0, available || age <= 30 {
-                let safe = ProgramStatusReport.displaySafe(excerpt.text)
-                if !safe.isEmpty {
-                    let line = safe.split(separator: "\n").last.map(String.init) ?? safe
-                    let label = age < 60 ? "\(Int(age))s" : age < 3600 ? "\(Int(age / 60))m" : "\(Int(age / 3600))h"
-                    return (line, "\(session.title) (\(session.id)) · \(excerpt.source) · \(Int(age))s ago\n\(safe)", label)
-                }
-            }
-        }
-        let summary = fallback.split(separator: "\n").first
-            .map { ProgramStatusReport.displaySafe(String($0)) } ?? "No current activity"
-        let detail: String
-        if case .unavailable(let reason) = self { detail = "Activity unavailable · \(reason)\nSummary · \(summary)" }
-        else { detail = "Summary · \(summary)" }
-        return ("Summary · \(summary)", detail, nil)
+    /// What a blocked program is asking, in its own words.
+    var ask: String? {
+        guard case .reported(_, let report) = self, report.state == .blocked,
+              let text = [report.msg, report.title].compactMap({ $0.map(ProgramStatusReport.displaySafe) })
+                .first(where: { !$0.isEmpty }) else { return nil }
+        return text
     }
 
-    var label: String? {
+    /// The row's status; nil when nothing reports and the row says its lifecycle.
+    var row: TaskRowStatus? {
         switch self {
         case .reported(_, let report):
-            let kind = report.kind.map { " · \($0.rawValue.capitalized)" } ?? ""
-            let progress = report.progress.map { " · \($0)%" } ?? ""
-            return "\(report.state.label)\(kind)\(progress)"
-        case .available: return "Available · inferred"
-        case .unknown, .unavailable: return nil
+            .program(report.state, kind: report.kind, progress: report.progress, detail: help, ask: ask)
+        case .available: .program(.idle, inferred: true, detail: help)
+        case .unknown: nil
+        case .unavailable: .unread(help)
         }
     }
+
+    var label: String? { row?.word }
+    var tone: WorkTone? { row?.tone }
 
     var help: String {
         switch self {
@@ -91,13 +71,51 @@ enum SessionProgramStatus {
         case .unavailable(let reason): return "Current program status unavailable: \(reason)"
         }
     }
+}
 
-    var tone: WorkTone? {
-        switch self {
-        case .reported(_, let report):
-            report.state.workTone
-        case .available: .available
-        case .unknown, .unavailable: nil
+extension TaskRowStatus {
+    init(task: RoadmapTask, status: SessionProgramStatus) {
+        self.init(task: task, program: status.row)
+    }
+}
+
+extension TaskRow where Trailing == EmptyView {
+    /// A Portfolio row has planning and no Session readings.
+    init(task: RoadmapTask, context: String? = nil) {
+        self.init(id: task.id, title: task.task.name, identifier: task.task.identifier, link: task.reference.issueUrl,
+                  status: TaskRowStatus(task: task), context: context)
+    }
+}
+
+/// The ⌘N hint at a row's trailing edge: shown while ⌘ is held, else while the row is hovered.
+struct TaskRowSlotHint: View {
+    let hint: String?
+    let shown: Bool
+    let hover: HoverFlag?
+
+    var body: some View {
+        if let hint {
+            if let hover, !shown {
+                HoverRevealed(flag: hover) { Text(hint) }
+            } else {
+                Text(hint)
+            }
+        }
+    }
+}
+
+extension TaskRow where Trailing == TaskRowSlotHint {
+    /// The Mac sidebar's row, from what the Work model and its Sessions hold.
+    init(id: String, presentation: WorkModel.TaskPresentation, task: RoadmapTask?, status: SessionProgramStatus,
+         auto: Bool = false, selected: Bool = false, muted: Bool = false,
+         slotHint: String? = nil, showsSlotHint: Bool = false, hover: HoverFlag? = nil) {
+        self.init(id: id, title: presentation.title, identifier: task?.task.identifier ?? presentation.identifier,
+                  link: task?.reference.issueUrl,
+                  status: task.map { TaskRowStatus(task: $0, status: status) } ?? status.row, auto: auto,
+                  // A row named by its list before planning answers says so.
+                  context: presentation.context ?? (task == nil ? "Loading planning…" : nil),
+                  selected: selected, muted: muted) {
+            TaskRowSlotHint(hint: slotHint, shown: showsSlotHint, hover: hover)
         }
     }
 }
@@ -106,20 +124,18 @@ enum SessionProgramStatus {
 /// Existing provider and terminal metadata, with no process-name guessing.
 struct PaneProgramHeading: Equatable {
     let name: String
-    let symbol: String
     let context: String
     let detail: String
 
     init(provider: String?, title: String, directory: String?, fallback: String) {
         switch provider?.lowercased() {
-        case "codex": name = "Codex"; symbol = "terminal"
-        case "claude": name = "Claude"; symbol = "sparkle"
-        case "pi": name = "Pi"; symbol = "terminal"
-        case "opencode": name = "OpenCode"; symbol = "chevron.left.forwardslash.chevron.right"
-        case .some(let value) where !value.isEmpty:
-            name = ProgramStatusReport.displaySafe(value); symbol = "bubble.left"
-        default:
-            name = fallback; symbol = fallback == "Shell" ? "terminal" : "rectangle"
+        case "codex": name = "Codex"
+        case "claude": name = "Claude"
+        case "pi": name = "Pi"
+        case "opencode": name = "OpenCode"
+        case "agy": name = "Antigravity"
+        case .some(let value) where !value.isEmpty: name = ProgramStatusReport.displaySafe(value)
+        default: name = fallback
         }
         let title = ProgramStatusReport.displaySafe(title)
         let folder = directory.map { URL(fileURLWithPath: $0).lastPathComponent }

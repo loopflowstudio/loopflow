@@ -15,13 +15,13 @@ use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 
-use super::fact::{Decoded, ProviderFact, ProviderTurn};
 use super::fact_writer::FactWriter;
-use super::pi_decode::Turn;
 use super::Recording;
 use super::{Driver as StreamDriver, HarnessError};
 use crate::agent::AgentConfig;
 use crate::steer::NativeBoundary;
+use loopflow_harness::fact::{Decoded, ProviderFact, ProviderTurn};
+use loopflow_harness::pi_decode::{self, Turn};
 use loopflow_model::chat::types::{ConversationEvent, Lifecycle};
 use loopflow_model::id::AgentSessionId;
 
@@ -245,7 +245,9 @@ impl Driver {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
         let mut child = super::agent_process::spawn(command, None, &owner, self.kind)
-            .with_context(|| crate::agent::missing_agent_message(super::HarnessKind::Pi))?;
+            .with_context(|| {
+                crate::agent::missing_agent_message(loopflow_harness::HarnessKind::Pi)
+            })?;
         let Recording {
             store,
             session,
@@ -321,8 +323,8 @@ impl Driver {
                                 .filter_map(|text| text.as_str())
                                 .collect::<Vec<_>>()
                                 .join(" ");
-                            code = loopflow_storage::session::UNANSWERED_QUESTION;
-                            bail!(super::common::unanswered_question("Pi", &question));
+                            code = loopflow_model::chat::types::UNANSWERED_QUESTION;
+                            bail!(loopflow_harness::fact::unanswered_question("Pi", &question));
                         }
                     }
                     if let Some(turn) = state.turn.as_mut() {
@@ -354,7 +356,7 @@ impl Driver {
                 let decoded = if interrupted {
                     turn.finish(Lifecycle::Interrupted, None)
                 } else {
-                    let error = loopflow_storage::session::turn_error(code, &message);
+                    let error = loopflow_model::chat::types::turn_error(code, &message);
                     turn.finish(Lifecycle::Failed, Some(error))
                 };
                 let mapped = display(&decoded);
@@ -393,7 +395,7 @@ impl StreamDriver for Driver {
         let config = self.config.clone();
         let config = &config;
         self.seed = Some(match &config.skill_invocation {
-            Some(skill) => skill.terminal_input(&Pi, config)?.1,
+            Some(skill) => skill.terminal_input(&loopflow_harness::Pi, config)?.1,
             None => config.task_prompt.clone(),
         });
         if let Err(error) = self.start_process(config).await {
@@ -563,48 +565,20 @@ pub fn observe_native(
             .map_err(|e| crate::store::StoreError::InvalidData(e.to_string()))?;
             return Ok(());
         }
-        let decoded = super::pi_decode::native(&thread, value)
+        let decoded = pi_decode::native(&thread, value)
             .map_err(|e| crate::store::StoreError::InvalidData(e.to_string()))?;
         writer.record(&decoded)
     })?;
     Ok(())
 }
 
-#[derive(Debug)]
-pub struct Pi;
-
-impl super::Harness for Pi {
+impl super::Launcher for loopflow_harness::Pi {
     fn recognizes(&self, process: &crate::process::OsProcess) -> bool {
         process.command == "node"
             && crate::process::OsProcess::arguments(process.pid)
                 .ok()
                 .flatten()
                 .is_some_and(|args| runs_pi(&args))
-    }
-    fn api_key_env(&self) -> &'static [&'static str] {
-        &[
-            "ANTHROPIC_API_KEY",
-            "OPENAI_API_KEY",
-            "GEMINI_API_KEY",
-            "MOONSHOT_API_KEY",
-        ]
-    }
-    fn recognizes_driver(&self, command: &str) -> bool {
-        (super::command_program(command, "pi")
-            || command
-                .split_whitespace()
-                .any(|arg| arg.contains("/pi-coding-agent/") && arg.ends_with("/cli.js")))
-            && command.split_whitespace().any(|arg| arg == "--mode")
-            && command.split_whitespace().any(|arg| arg == "rpc")
-    }
-    fn transcript_reader(&self) -> fn(&[serde_json::Value]) -> Vec<crate::transcript::Turn> {
-        crate::transcript::pi::read
-    }
-    fn transcript_home(&self) -> PathBuf {
-        std::env::var_os("PI_CODING_AGENT_DIR")
-            .filter(|value| !value.is_empty())
-            .map(PathBuf::from)
-            .unwrap_or_else(|| dirs::home_dir().unwrap_or_default().join(".pi/agent"))
     }
     fn locate_transcript(
         &self,
@@ -615,7 +589,7 @@ impl super::Harness for Pi {
         let path = conversation_file(id);
         Ok(if path.is_file() {
             crate::transcript::Located::Found {
-                source: crate::transcript::Source::File(path),
+                source: loopflow_harness::transcript::Source::File(path),
                 home: None,
             }
         } else {
@@ -624,20 +598,14 @@ impl super::Harness for Pi {
             })
         })
     }
-    fn transcript_markers(&self) -> &'static [&'static [u8]] {
-        &[]
-    }
     fn transcript_retention(
         &self,
         thread: &AgentSessionId,
     ) -> (crate::transcript::RetentionState, Option<i64>) {
-        match crate::transcript::modified(thread.as_str().as_ref()) {
+        match loopflow_harness::transcript::modified(thread.as_str().as_ref()) {
             Some(at) => (crate::transcript::RetentionState::Provider, Some(at)),
             None => (crate::transcript::RetentionState::Facts, None),
         }
-    }
-    fn transcript_root(&self, home: &Path) -> (std::path::PathBuf, usize) {
-        (home.join("sessions"), 1)
     }
     fn recent_transcripts(
         &self,
@@ -645,7 +613,7 @@ impl super::Harness for Pi {
         cwd: &Path,
         since: i64,
         owned: &std::collections::HashSet<&str>,
-    ) -> Vec<(String, crate::transcript::Source, i64)> {
+    ) -> Vec<(String, loopflow_harness::transcript::Source, i64)> {
         let name = cwd
             .to_string_lossy()
             .trim_start_matches('/')
@@ -657,15 +625,17 @@ impl super::Harness for Pi {
             )
             .into_iter()
             .filter(|(_, path, at)| {
-                *at >= since && crate::transcript::recorded_cwd(path).as_deref() == Some(cwd)
+                *at >= since
+                    && loopflow_harness::transcript::recorded_cwd(path).as_deref() == Some(cwd)
             })
-            .map(|(id, path, at)| (id, crate::transcript::Source::File(path), at))
+            .map(|(id, path, at)| (id, loopflow_harness::transcript::Source::File(path), at))
             .collect(),
             owned,
         )
     }
-    fn kind(&self) -> super::HarnessKind {
-        super::HarnessKind::Pi
+    fn classify_failure(&self, code: &str, message: &str) -> Option<crate::agent::AgentFailure> {
+        // Pi retries a transient failure itself.
+        crate::agent::routing_failure(code, message)
     }
     fn capabilities(&self) -> super::Capabilities {
         super::Capabilities {
@@ -674,8 +644,12 @@ impl super::Harness for Pi {
                 managed: super::ThreadName::Reported,
             },
             initial_prompt_on_resume: false,
-            classifies_failures: false,
             native_skills: None,
+            installed_skills: super::InstalledSkills {
+                global: ".agents/skills",
+                repository: ".agents/skills",
+                global_registry: None,
+            },
             turn_limit: false,
             output_schema: false,
             respawns_after_crash: false,

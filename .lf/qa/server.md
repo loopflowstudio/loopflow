@@ -2,6 +2,13 @@ Read when QA runs a branch-built `lf`, its server or a private Machine (`LF_HOME
 
 # Private Machine
 
+In a shallow checkout the build panics ordering migrations (`CREATE INDEX
+… graph_processes …`), and `rust/loopflow-storage/migration-order.txt` lags
+main. Deepen with `git fetch --shallow-since=<months ago> origin main`, write
+`_migration_order(Path('.'))` from `scripts/test_task_installation.py` to a
+file (import with `sys.path` on `scripts/`) and build with
+`LOOPFLOW_MIGRATION_ORDER=<file>`.
+
 For live server QA, build `cargo build -p loopflow --bin lf`, then use a fresh
 Git repository with a local Git identity and a private `LF_HOME`. Put Desktop
 QA homes under a short path such as `/tmp/lf-qa-*`: macOS
@@ -14,6 +21,8 @@ Run `lf server run` in the foreground and read its socket from `lf server status
 the socket is hashed under `/tmp`, not inside `LF_HOME`. Speak the documented
 newline JSON protocol, disconnect before an answer, then look up
 `lf server receipt qa-report --json` before retrying identical content.
+Commands that print "Opening loopflow://…" (`lf desktop view`) leave the
+private Machine: the installed app opens the repository under the real `~/.lf`.
 Stop every server and holder launched for the walkthrough: a private home's
 `lf holder run` outlives its server, and the providers it holds are its direct
 children. For input and resize checks without a provider login, hold a real
@@ -87,9 +96,9 @@ Never open a copy of the Machine's own store with `lf`, a read included:
 `lf session list`, `lf session history`, `lf task status|list|show`,
 `lf wave status|list|show` and `lf plan list` run recovery first
 (`ops/recovery.rs`), which follows the real worktrees and PIDs the copy
-records. It starts `lf --task <id> ship` in the real checkout of any approved
-Task whose ship process has exited, and can stop a headless agent the stale
-copy takes for orphaned. A copy
+records. It starts `lf task run <id>` in the real checkout of any Task whose
+run's carrier has exited, and can stop a headless agent the stale copy takes
+for orphaned. A copy
 (`sqlite3 "file:$HOME/.lf/loopflow.db?mode=ro" ".backup <copy>"`) is for
 `sqlite3` only: counts, `EXPLAIN QUERY PLAN`, timing a statement. For
 returning-state checks, build the earlier state in a private home with the

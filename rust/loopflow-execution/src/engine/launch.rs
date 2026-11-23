@@ -1,6 +1,6 @@
 //! Start an `lf` execution detached from its caller and wait for its result.
 //!
-//! A served request has no Process to carry a Task run or a ship, and must not
+//! A served request has no Process to carry a Task run, and must not
 //! hold one open. The operation starts the same command a terminal would,
 //! as a detached lf process of its own, with `LF_LAUNCH_REPORT=<path>`. The
 //! command writes its typed result there once it knows it, as its CLI prints

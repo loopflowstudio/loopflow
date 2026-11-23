@@ -229,10 +229,8 @@ struct ServerProtocolTests {
              #"{"kind":"config.explain","destination":{"kind":"personal_global"},"key":"theme"}"#),
             (.configUnset(destination: destination, key: "theme"),
              #"{"kind":"config.unset","destination":{"kind":"personal_global"},"key":"theme"}"#),
-            (.configTheme(path: "/theme.yaml", value: nil),
-             #"{"kind":"config.theme","path":"/theme.yaml","value":null}"#),
-            (.configTheme(path: "/theme.yaml", value: "Hearth"),
-             #"{"kind":"config.theme","path":"/theme.yaml","value":"Hearth"}"#),
+            (.configTheme(value: nil), #"{"kind":"config.theme","value":null}"#),
+            (.configTheme(value: "Hearth"), #"{"kind":"config.theme","value":"Hearth"}"#),
         ]
         for (operation, json) in operations {
             let encoded = try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(operation))
@@ -249,8 +247,8 @@ struct ServerProtocolTests {
     @Test func coreLoopWritesShareTheRustWriteContract() throws {
         let writes: [(String, String, ServedWrite)] = [
             ("task_run", "run-1", .taskRun(directory: "/repo", issue: "LOO-1", graph: nil, from: "implement", agent: "claude", approve: false)),
-            ("task_ship", "ship-1", .taskShip(directory: "/repo", issue: "LOO-1")),
-            ("task_hold", "hold-1", .taskHold(directory: "/repo", issue: "LOO-1")),
+            ("task_auto_on", "auto-on-1", .taskAutoOn(directory: "/repo", issue: "LOO-1")),
+            ("task_auto_off", "auto-1", .taskAutoOff(directory: "/repo", issue: "LOO-1")),
             ("task_steer", "steer-1", .taskSteer(directory: "/repo", issue: "LOO-1", message: "Keep the API small")),
             ("task_report", "report-1", .taskReport(directory: "/repo", issue: "LOO-1", message: "Demo recorded")),
             ("task_interrupt", "interrupt-1", .taskInterrupt(directory: "/repo", issue: "LOO-1")),
@@ -296,8 +294,8 @@ struct ServerProtocolTests {
         ]
         for (name, id, write) in writes {
             do {
-                // Auto-Ship names itself so a repeat after a lost reply runs once.
-                let requestID = name == "task_ship" ? "5d0f7f5e-1c1a-4a53-9d39-2f7c7a1b0e01" : nil
+                // `task.auto.on` names itself so a repeat after a lost reply runs once.
+                let requestID = name == "task_auto_on" ? "5d0f7f5e-1c1a-4a53-9d39-2f7c7a1b0e01" : nil
                 #expect(try encoded(.request(id: id, operation: .command(write), select: nil, requestID: requestID)) == value(name), "\(name)")
             } catch { Issue.record("\(name): \(error)") }
         }
@@ -308,14 +306,16 @@ struct ServerProtocolTests {
         }
         #expect(running["state"] == .string("running"))
         #expect(running["graph_process"] == .string("85c31c1e-850c-4821-878d-55527b6dba46"))
-        guard case .response(_, _, .object(let shipping)) = try answer("task_shipping") else {
-            Issue.record("Missing task.ship result"); return
+        guard case .response(_, _, .object(let autoOn)) = try answer("task_auto_on_answer") else {
+            Issue.record("Missing task.auto.on result"); return
         }
-        #expect(shipping["state"] == .string("shipping"))
-        guard case .response(_, _, .object(let held)) = try answer("task_held") else {
-            Issue.record("Missing task.hold result"); return
+        // `task.auto.on` returns the run, as `task.run` does.
+        #expect(autoOn["state"] == .string("running"))
+        #expect(autoOn["merges"] == .bool(true))
+        guard case .response(_, _, .object(let autoOff)) = try answer("task_auto_off_answer") else {
+            Issue.record("Missing task.auto.off result"); return
         }
-        #expect(held["stopped"] == .bool(true))
+        #expect(autoOff["was_on"] == .bool(true))
         guard case .response(_, _, .object(let steered)) = try answer("session_steered") else {
             Issue.record("Missing session.steer result"); return
         }

@@ -1,8 +1,6 @@
 use crate::harness::LaunchKind;
 use crate::process::OsProcess;
-use crate::transcript::is_user_input;
-use crate::transcript::json_lines;
-use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
+use std::collections::{HashMap, VecDeque};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -16,33 +14,15 @@ use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
 use crate::agent::AgentConfig;
-use crate::harness::claude_decode::ClaudeDecoder;
 use crate::harness::common::TurnInProgressGuard;
-use crate::harness::fact::{Decoded, ProviderFact};
 use crate::harness::fact_writer::{FactWriter, RequestOrigins};
 use crate::harness::Recording;
 use crate::harness::{Driver as StreamDriver, HarnessError};
 use crate::provider_auth::Provider;
-use loopflow_model::chat::types::{ConversationEvent, Lifecycle, TurnUsage};
+use loopflow_harness::claude_decode::ClaudeDecoder;
+use loopflow_harness::fact::{Decoded, ProviderFact};
+use loopflow_model::chat::types::{ConversationEvent, Lifecycle};
 use loopflow_model::id::AgentSessionId;
-
-/// Claude's token fields, shared by live stream and saved transcript decoding.
-pub(crate) fn usage(value: &serde_json::Value) -> TurnUsage {
-    let tokens = |key: &str| value.get(key).and_then(serde_json::Value::as_u64);
-    let input_tokens = tokens("input_tokens");
-    let cache_read_tokens = tokens("cache_read_input_tokens");
-    let cache_write_tokens = tokens("cache_creation_input_tokens");
-    TurnUsage {
-        input_tokens,
-        total_input_tokens: input_tokens
-            .map(|input| input + cache_read_tokens.unwrap_or(0) + cache_write_tokens.unwrap_or(0)),
-        cache_read_tokens,
-        cache_write_tokens,
-        output_tokens: tokens("output_tokens"),
-        reasoning_tokens: tokens("reasoning_tokens"),
-        ..TurnUsage::default()
-    }
-}
 
 /// One persistent `claude -p --input-format stream-json` process drives every
 /// turn of a run. `send_input` writes the seed message; the process stays alive
@@ -589,7 +569,7 @@ mod activity_tests {
         let (tx, _rx) = mpsc::unbounded_channel();
         let mut harness = Driver::new(
             &crate::harness::launch_for_test(
-                crate::harness::HarnessKind::Claude,
+                loopflow_harness::HarnessKind::Claude,
                 &crate::agent::AgentConfig::default(),
                 &crate::harness::admit_for_test(tempfile::tempdir().unwrap().path()),
             ),
@@ -669,7 +649,7 @@ mod tests {
             );
             let mut harness = Driver::new(
                 &crate::harness::launch_for_test(
-                    crate::harness::HarnessKind::Claude,
+                    loopflow_harness::HarnessKind::Claude,
                     &config,
                     &recording,
                 ),
@@ -768,7 +748,7 @@ mod tests {
                     AgentConfig {
                         agent: crate::config::Agent::parse(settings.agent().unwrap()).unwrap(),
                         chrome: settings.chrome,
-                        skip_permissions: settings.yolo,
+                        yolo: settings.yolo,
                         cwd: Some(home.into()),
                         ..crate::agent::AgentConfig::default()
                     },
@@ -780,7 +760,7 @@ mod tests {
                 );
                 let mut harness = Driver::new(
                     &crate::harness::launch_for_test(
-                        crate::harness::HarnessKind::Claude,
+                        loopflow_harness::HarnessKind::Claude,
                         &config,
                         &recording,
                     ),
@@ -900,7 +880,7 @@ mod tests {
         let (config, recording) = (config, recording);
         let mut harness = Driver::new(
             &crate::harness::launch_for_test(
-                crate::harness::HarnessKind::Claude,
+                loopflow_harness::HarnessKind::Claude,
                 &config,
                 &recording,
             ),
@@ -934,7 +914,7 @@ mod tests {
         let (tx, _rx) = mpsc::unbounded_channel();
         let mut harness = Driver::new(
             &crate::harness::launch_for_test(
-                crate::harness::HarnessKind::Claude,
+                loopflow_harness::HarnessKind::Claude,
                 &crate::agent::AgentConfig::default(),
                 &crate::harness::admit_for_test(tempfile::tempdir().unwrap().path()),
             ),
@@ -1065,7 +1045,7 @@ done
         let (config, recording) = claude.attach("first");
         let mut first = Driver::new(
             &crate::harness::launch_for_test(
-                crate::harness::HarnessKind::Claude,
+                loopflow_harness::HarnessKind::Claude,
                 &config,
                 &recording,
             ),
@@ -1088,7 +1068,7 @@ done
                 thread: &agent_session,
             },
             ..crate::harness::launch_for_test(
-                crate::harness::HarnessKind::Claude,
+                loopflow_harness::HarnessKind::Claude,
                 &config,
                 &recording,
             )
@@ -1134,7 +1114,7 @@ done
         let (config, admitted) = claude.attach("step");
         let mut harness = Driver::new(
             &crate::harness::launch_for_test(
-                crate::harness::HarnessKind::Claude,
+                loopflow_harness::HarnessKind::Claude,
                 &config,
                 &admitted,
             ),
@@ -1196,7 +1176,7 @@ done
         let recording = super::super::admit_for_test(_ledger.home());
         let mut harness = Driver::new(
             &crate::harness::launch_for_test(
-                crate::harness::HarnessKind::Claude,
+                loopflow_harness::HarnessKind::Claude,
                 &config,
                 &recording,
             ),
@@ -1231,22 +1211,6 @@ done
     }
 }
 
-fn claude_input_time(path: &Path, id: &str) -> Option<i64> {
-    json_lines(path)
-        .filter_map(|row| {
-            if row["sessionId"].as_str() != Some(id) || !is_user_input(&row) {
-                return None;
-            }
-            let at = time::OffsetDateTime::parse(
-                row["timestamp"].as_str()?,
-                &time::format_description::well_known::Rfc3339,
-            )
-            .ok()?;
-            i64::try_from(at.unix_timestamp_nanos() / 1_000_000).ok()
-        })
-        .max()
-}
-
 /// The conversation each live Claude process has open, from the
 /// `sessions/<pid>.json` Claude keeps in its home and rewrites when `/clear`
 /// or `/resume` changes it. Claude versions before 2.1.318 may keep none.
@@ -1278,38 +1242,13 @@ fn conversation_owners(home: &Path, by_pid: &HashMap<u32, &OsProcess>) -> HashMa
         .collect()
 }
 
-#[derive(Debug)]
-pub struct Claude;
-
-impl super::Harness for Claude {
-    fn human_input_times(&self, home: &Path, wanted: &BTreeSet<&str>) -> BTreeMap<String, i64> {
-        wanted
-            .iter()
-            .filter_map(|id| {
-                let path = crate::transcript::transcript(self.kind(), home, id)?;
-                Some(((*id).to_owned(), claude_input_time(&path, id)?))
-            })
-            .collect()
-    }
+impl super::Launcher for loopflow_harness::Claude {
     fn conversation_owners(
         &self,
         home: &Path,
         processes: &HashMap<u32, &OsProcess>,
     ) -> HashMap<u32, String> {
         conversation_owners(home, processes)
-    }
-    fn transcript_completion_detail(
-        &self,
-        turn: &crate::transcript::Turn,
-        detail: &mut serde_json::Value,
-    ) {
-        detail["result_id"] = serde_json::Value::Null;
-        detail["subtype"] = serde_json::Value::Null;
-        detail["errors"] = if turn.receipt.errors.is_empty() {
-            serde_json::Value::Null
-        } else {
-            turn.receipt.errors.clone().into()
-        };
     }
 
     fn recognizes(&self, process: &crate::process::OsProcess) -> bool {
@@ -1330,53 +1269,8 @@ impl super::Harness for Claude {
                     .is_some_and(|dir| dir.file_name().is_some_and(|name| name == "claude"))
         })
     }
-    fn model_rungs(&self) -> &'static [&'static str] {
-        &crate::config::CLAUDE_MODEL_RUNGS
-    }
-    fn sign_in_advice(&self) -> &'static str {
-        "run `claude`, then /login"
-    }
-    fn provider_env(&self) -> &'static [&'static str] {
-        &["CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"]
-    }
     fn provider(&self) -> Option<crate::provider_auth::Provider> {
         Some(crate::provider_auth::Provider::Claude)
-    }
-    fn transcript_reader(&self) -> fn(&[serde_json::Value]) -> Vec<crate::transcript::Turn> {
-        crate::transcript::claude::read
-    }
-    fn transcript_id<'a>(&self, name: &'a str) -> Option<&'a str> {
-        name.strip_suffix(".jsonl")
-    }
-    fn direct_transcript(
-        &self,
-        home: &std::path::Path,
-        cwd: &std::path::Path,
-        id: &str,
-    ) -> Option<std::path::PathBuf> {
-        Some(crate::transcript::live::claude_project(home, cwd).join(format!("{id}.jsonl")))
-    }
-    fn transcript_siblings(&self) -> bool {
-        true
-    }
-    fn expiry_policy(&self, home: Option<&std::path::Path>) -> crate::transcript::ExpiryPolicy {
-        let settings = home.map(|home| home.join("settings.json"));
-        let days = settings
-            .as_deref()
-            .and_then(|path| std::fs::read(path).ok())
-            .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
-            .and_then(|value| value["cleanupPeriodDays"].as_u64())
-            .and_then(|days| u32::try_from(days).ok());
-        match days {
-            Some(days) => crate::transcript::ExpiryPolicy::ClaudeCleanup {
-                days,
-                settings: settings.map(|path| path.display().to_string()),
-            },
-            None => crate::transcript::ExpiryPolicy::ClaudeCleanup {
-                days: 30,
-                settings: None,
-            },
-        }
     }
     fn recent_transcripts(
         &self,
@@ -1384,21 +1278,21 @@ impl super::Harness for Claude {
         cwd: &std::path::Path,
         since: i64,
         owned: &std::collections::HashSet<&str>,
-    ) -> Vec<(String, crate::transcript::Source, i64)> {
+    ) -> Vec<(String, loopflow_harness::transcript::Source, i64)> {
         crate::transcript::raw::unowned(
             crate::transcript::raw::in_directory(
-                &crate::transcript::live::claude_project(home, cwd),
+                &loopflow_harness::transcript::live::claude_project(home, cwd),
                 |path| Some(path.file_stem()?.to_str()?.to_owned()),
             )
             .into_iter()
             .filter(|(_, _, at)| *at >= since)
-            .map(|(id, path, at)| (id, crate::transcript::Source::File(path), at))
+            .map(|(id, path, at)| (id, loopflow_harness::transcript::Source::File(path), at))
             .collect(),
             owned,
         )
     }
-    fn kind(&self) -> super::HarnessKind {
-        super::HarnessKind::Claude
+    fn classify_failure(&self, code: &str, message: &str) -> Option<crate::agent::AgentFailure> {
+        crate::agent::provider_failure(code, message)
     }
     fn capabilities(&self) -> super::Capabilities {
         super::Capabilities {
@@ -1407,8 +1301,12 @@ impl super::Harness for Claude {
                 managed: super::ThreadName::Assigned,
             },
             initial_prompt_on_resume: false,
-            classifies_failures: true,
             native_skills: Some(crate::skills::catalog::SkillDialect::Claude),
+            installed_skills: super::InstalledSkills {
+                global: ".claude/skills",
+                repository: ".claude/skills",
+                global_registry: None,
+            },
             turn_limit: true,
             output_schema: true,
             respawns_after_crash: true,
@@ -1426,9 +1324,6 @@ impl super::Harness for Claude {
     ) -> Box<dyn super::Driver> {
         Box::new(Driver::new(launch, events))
     }
-    fn title_args(&self, name: &str) -> Vec<String> {
-        vec!["--name".into(), name.into()]
-    }
 
     fn open(&self, launch: &super::Launch<'_>) -> Result<super::native_session::NativeClient> {
         let mut client = super::native_session::NativeClient::new(launch)?;
@@ -1438,7 +1333,7 @@ impl super::Harness for Claude {
             launch.config,
             model.as_deref(),
             launch.context_file,
-            false,
+            launch.kind.mode(),
         ));
         if let Some(thread) = &client.thread {
             args.extend([
@@ -1497,7 +1392,7 @@ pub fn stream_args(
         config,
         model.as_deref(),
         context_file,
-        true,
+        super::Mode::Headless,
     ));
     if let Some(thread) = thread {
         args.extend(["--resume".into(), thread.to_string()]);

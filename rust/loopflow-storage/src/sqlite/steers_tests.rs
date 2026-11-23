@@ -650,6 +650,26 @@ fn a_cleared_conversation_is_what_reconnect_resumes_on_the_same_account() {
     assert_eq!(resumed.account_id, Some(account));
 }
 
+/// Antigravity names its conversation at its first start, and a held terminal
+/// leaves no launcher to publish it afterwards.
+#[test]
+fn a_start_names_what_reconnect_resumes_when_the_launch_named_nothing() {
+    let (_home, store, adapter) = fixture();
+    let session = store.session("session").unwrap().unwrap();
+    let input = session.artifact_key.unwrap();
+    assert!(store.input_provider_session(&input).unwrap().is_none());
+    store
+        .with_provider_context(
+            &adapter,
+            "reported",
+            NativeBoundary::Select { source: "startup" },
+            || Ok(()),
+        )
+        .unwrap();
+    let resumed = store.input_provider_session(&input).unwrap().unwrap();
+    assert_eq!(resumed.agent_session.as_str(), "reported");
+}
+
 #[test]
 fn activation_never_moves_an_existing_selection() {
     let (_home, store, adapter) = fixture();

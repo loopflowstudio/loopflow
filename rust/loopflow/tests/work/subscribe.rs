@@ -598,52 +598,16 @@ fn an_offline_comment_reaches_the_open_task_status() {
 }
 
 #[test]
-fn git_destinations_receipts_reach_an_open_watch() {
-    use loopflow_execution::planning_git::PlanningDestination;
-    use loopflow_execution::store::GitDestination;
-
+fn the_plan_s_home_follows_the_tracker_setting_in_an_open_watch() {
     let home = Machine::new();
     let subscription = home.subscribe(&["planning", "status"]);
     let repo = home.wave.repo();
-    let read = |accept: &dyn Fn(&[GitDestination]) -> bool| {
-        let body = subscription.body(Duration::from_secs(10), |body| {
-            serde_json::from_value::<Vec<GitDestination>>(body["destinations"].clone())
-                .is_ok_and(|statuses| accept(&statuses))
-        });
-        serde_json::from_value::<Vec<GitDestination>>(body["destinations"].clone()).unwrap()
+    let read = |accept: &dyn Fn(&serde_json::Value) -> bool| {
+        subscription.body(Duration::from_secs(10), |body| accept(body))
     };
-    assert!(read(&|statuses| statuses.is_empty()).is_empty());
-    // Non-Git Work folders still display stored status; foreground acquisition
-    // reports the unavailable destination without discarding local planning.
-    let destination = PlanningDestination::new(
-        home.path().join("offline.git").to_str().unwrap(),
-        "refs/loopflow/planning/shared/team",
-    )
-    .unwrap();
-    let id = home.store.bind_git_destination(repo, &destination).unwrap();
-    home.store.export_git_plan(repo, &id).unwrap();
-    let statuses = read(&|statuses| {
-        statuses
-            .iter()
-            .any(|status| status.id == id && status.selected_records > 0)
-    });
-    assert!(!statuses[0].active);
-    assert_eq!(statuses.len(), 1);
-    assert!(statuses[0].pending_local);
-
-    home.raw()
-        .execute(
-            "UPDATE git_tracker_destinations SET fetched_revision='fetched',
-         publication_revision='attempted',publication_state='unconfirmed',
-         publication_error='reply lost' WHERE id=?1",
-            [&id],
-        )
-        .unwrap();
-    let statuses = read(&|statuses| {
-        statuses[0].publication_state.as_deref() == Some("unconfirmed")
-            && statuses[0].fetched_revision.as_deref() == Some("fetched")
-    });
-    assert_eq!(statuses[0].imported_revision, None);
+    let here = read(&|body| body["plan"].is_object());
+    assert_eq!(here["tracker"], serde_json::Value::Null);
+    assert_eq!(here["plan"]["hub"], serde_json::Value::Null);
     let config_dir = Path::new(repo).join(".lf");
     std::fs::create_dir_all(&config_dir).unwrap();
     std::fs::write(
@@ -651,17 +615,16 @@ fn git_destinations_receipts_reach_an_open_watch() {
         "planning: {provider: linear}\n",
     )
     .unwrap();
-    assert!(read(&|statuses| statuses.is_empty()).is_empty());
+    let linear = read(&|body| body["tracker"] == "linear");
+    assert_eq!(linear["plan"], serde_json::Value::Null);
+    // The released `provider: git` reads as no tracker.
     std::fs::write(
         config_dir.join("config.yaml"),
         "planning: {provider: git, shared: team}\n",
     )
     .unwrap();
-    let statuses = read(&|statuses| !statuses.is_empty());
-    assert_eq!(
-        statuses[0].publication_state.as_deref(),
-        Some("unconfirmed")
-    );
+    let released = read(&|body| body["plan"].is_object());
+    assert_eq!(released["tracker"], serde_json::Value::Null);
 }
 
 /// The `git` commands one `lf wave show --all --json` runs, recorded by a shim

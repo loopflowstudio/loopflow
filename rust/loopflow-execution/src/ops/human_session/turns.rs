@@ -9,9 +9,9 @@ use std::path::Path;
 use anyhow::Result;
 
 use super::{SessionAvailability, SessionGraphMembership, SessionRecord, SessionState};
-use crate::harness::HarnessKind;
 use crate::session_record::SessionTitleSource;
-use crate::transcript::live::SessionTurn;
+use loopflow_harness::transcript::live::SessionTurn;
+use loopflow_harness::HarnessKind;
 use loopflow_model::durable::TaskId;
 use loopflow_storage::sqlite::SqliteStore;
 
@@ -225,7 +225,7 @@ fn home_relative(path: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::transcript::live::TurnState;
+    use loopflow_harness::transcript::live::TurnState;
 
     fn turn(state: TurnState) -> Option<SessionTurn> {
         Some(SessionTurn {

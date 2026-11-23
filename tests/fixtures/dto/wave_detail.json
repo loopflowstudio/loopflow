@@ -200,6 +200,7 @@
             ]
           },
           "tracker_id": "issue-1",
+          "parent_id": null,
           "tracker_state": {
             "state": "available",
             "synced_at": null
@@ -575,6 +576,7 @@
             ]
           },
           "tracker_id": null,
+          "parent_id": "ts_22222222222222222222222222222222",
           "tracker_state": {
             "state": "available",
             "synced_at": null

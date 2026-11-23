@@ -9,6 +9,7 @@ use loopflow_test_support::TestRepo;
 fn task(store: &SqliteStore, repo: &TestRepo) -> Task {
     store
         .create_task(&NewTask {
+            parent_task_id: None,
             repository_id: crate::repository::location::ensure_repository(
                 store,
                 repo.path().to_str().unwrap(),

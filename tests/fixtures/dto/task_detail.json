@@ -5,6 +5,7 @@
     "title": "Route incoming mail",
     "wave": "infrastructure",
     "project": "Gmail",
+    "parent_id": null,
     "state": "active",
     "reason": "Review the demo in the Task's conversation",
     "graph": {
@@ -133,5 +134,7 @@
     "identifier": "LOO-1",
     "branch": "jack/loo-1-parse-mail",
     "pr_number": 1718
-  }
+  },
+  "parent": null,
+  "children": []
 }

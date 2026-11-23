@@ -113,7 +113,7 @@ struct WaveLensTests {
 
     private func makeTask(state: String, reason: String) throws -> RoadmapTask {
         let json = """
-        {"task":{"repo_id":"repo_00000000000040008000000000000001","repo":"/src/loopflow","project_id":"project-1","wave_id":"wave-1","id":"\(reason)","identifier":"W2-1","name":"n","description":"","rank":1,"state":"unstarted","completed_at":null, "due_date": null, "tracker_state": {"state": "available", "synced_at": null}, "tracker_id": null, "sync": {"actions": []},"assignee":null},
+        {"task":{"repo_id":"repo_00000000000040008000000000000001","repo":"/src/loopflow","project_id":"project-1","wave_id":"wave-1","id":"\(reason)","identifier":"W2-1","name":"n","description":"","rank":1,"state":"unstarted","completed_at":null, "due_date": null, "tracker_state": {"state": "available", "synced_at": null}, "tracker_id": null, "parent_id": null, "sync": {"actions": []},"assignee":null},
         "reference":{"issue_url":null,"workspace":null},"runtime":null,
         "graph_name":"feature","graph_source":"repository","latest_graph_process":null,"execution":null,"lifecycle":"unstarted","selection_states":["unstarted","backlog"],"run_control":{"unavailable":null},
         "next_move":{"owner":"task","reason":"\(reason)"},

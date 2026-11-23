@@ -39,7 +39,7 @@ struct ServerClientTests {
     private static func submission(peer: ServerPeer) async throws -> String {
         let link = try await ServerLink.open(.unix(path: peer.path))
         let change = ServedWrite.taskCreate(directory: "/repo", requestID: "creation-one", title: nil,
-            request: "A bounded request", wave: nil, graph: nil, session: nil, run: true)
+            request: "A bounded request", wave: nil, parent: nil, graph: nil, session: nil, run: true)
         let payload = try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(change))
         let result = try await link.request(.submittedCreation(payload))
         await link.close()

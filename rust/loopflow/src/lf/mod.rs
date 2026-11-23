@@ -2268,7 +2268,10 @@ using lf open's ordinary host selection. Preview and --quote open nothing."
         #[arg(long)]
         json: bool,
     },
-    /// Complete a Task without moving its Graph
+    /// Complete a Task without moving its Graph; settles open children (merged → done, others → abandoned)
+    #[command(
+        after_help = "Completing a parent Task settles every open descendant: children whose PR merged are marked done, and all other open children are abandoned (closing their PRs and deleting their branches). Abandoned Tasks cannot be reopened."
+    )]
     Complete {
         issue: String,
         /// Why, kept in the Task's completion request
@@ -2289,7 +2292,7 @@ using lf open's ordinary host selection. Preview and --quote open nothing."
     },
     /// Create a Task; with --run, also start its Graph
     #[command(
-        after_help = "Plain creation files new work, regardless of the current checkout or invoking Session. --run starts the created Task; it does not select work to adopt. Pass --session SESSION or --worktree PATH to adopt existing work, with or without --run. Find Loopflow Session IDs with `lf session list --json`; an agent keeping its chat passes its own ID explicitly. Explicit-source retries return the same Task. Main and Wave checkouts stay shared. Adoption preserves files, branch, history and live attachment; creation alone starts no Graph and turns no auto on. Remote calls use sources on the selected Machine."
+        after_help = "Plain creation files new top-level work and never adopts the current checkout or invoking Session. Pass --parent ID to file a Task under another Task (inheriting its Wave unless --wave is set). --run starts the created Task; it does not select work to adopt. Pass --session SESSION or --worktree PATH to adopt existing work, with or without --run. Find Loopflow Session IDs with `lf session list --json`; an agent keeping its chat passes its own ID explicitly. Explicit-source retries return the same Task. Main and Wave checkouts stay shared. Adoption preserves files, branch, history and live attachment; creation alone starts no Graph and turns no auto on. Remote calls use sources on the selected Machine."
     )]
     Create {
         /// Retry a submitted creation with the same identity and content
@@ -2311,6 +2314,9 @@ using lf open's ordinary host selection. Preview and --quote open nothing."
         /// Explicit Wave membership; omitted creates a standalone Task
         #[arg(long)]
         wave: Option<String>,
+        /// File this Task as a child of another Task (ID or identifier); omitted files top-level work
+        #[arg(long, value_name = "ID")]
+        parent: Option<String>,
         /// Task title; omitted when stdin supplies the report and first line
         #[arg(long)]
         title: Option<String>,
@@ -2462,7 +2468,7 @@ using lf open's ordinary host selection. Preview and --quote open nothing."
     },
     /// Cancel unfinished placed work, clean up delivery, then trash the tracker item
     Delete { issue: String },
-    /// Update a Task's title or notes, before or after placement
+    /// Update a Task's title, notes, rank, assignee or parent
     Update {
         issue: String,
         #[arg(long)]
@@ -2475,6 +2481,9 @@ using lf open's ordinary host selection. Preview and --quote open nothing."
         /// Assignee identity; tracker user ID in connected plans
         #[arg(long)]
         assignee: Option<String>,
+        /// Parent Task ID or identifier, or `none` to clear
+        #[arg(long, value_name = "ID")]
+        parent: Option<String>,
         #[arg(short = 'w', long)]
         wave: Option<String>,
         /// Print the edited Task's ID and planning sync

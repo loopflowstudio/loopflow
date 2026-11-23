@@ -18,6 +18,7 @@ fn machine_defaults_route_unowned_tasks_until_one_is_claimed() {
     let new_task = |title: &str| {
         store
             .create_task(&loopflow_storage::work::task::NewTask {
+                parent_task_id: None,
                 repository_id: repository.clone(),
                 id: TaskId::new(),
                 project_id: Some(project.id.clone()),
@@ -113,6 +114,7 @@ fn a_waves_capacity_takes_its_new_tasks_until_a_nearer_machine_does() {
     let repository = crate::repository::location::ensure_repository(&store, repo).unwrap();
     let task = store
         .create_task(&loopflow_storage::work::task::NewTask {
+            parent_task_id: None,
             repository_id: repository.clone(),
             id: TaskId::new(),
             project_id: Some(project.id.clone()),

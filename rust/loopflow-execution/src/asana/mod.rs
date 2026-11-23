@@ -415,6 +415,8 @@ impl AsanaClient {
             project_id,
             team_id: in_scope.then(|| self.team.clone()),
             assignee: task.assignee.map(|assignee| assignee.gid),
+            parent_id: None,
+            parent_observed: false,
         })
     }
 

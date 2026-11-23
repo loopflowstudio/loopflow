@@ -18,6 +18,7 @@ use loopflow_model::durable::{RepositoryId, TaskOwner};
 #[derive(Debug)]
 pub struct TaskDetailFacts {
     pub states: HashMap<TaskId, TaskState>,
+    pub open_children: HashMap<TaskId, u32>,
     pub active_prs: HashMap<TaskId, TaskPr>,
     /// Predecessor PRs the Tasks are stacked on.
     pub parent_prs: HashMap<TaskPrId, TaskPr>,
@@ -48,6 +49,17 @@ impl SqliteStore {
         let json = ids_json(ids.iter().map(TaskId::as_str));
         let facts = TaskDetailFacts {
             states: states_in(&snapshot, &json)?,
+            open_children: keyed(
+                &snapshot,
+                &format!(
+                    "SELECT parent_task_id, COUNT(*) FROM tasks t
+                     WHERE parent_task_id IN (SELECT value FROM json_each(?1)) AND {}
+                     GROUP BY parent_task_id",
+                    super::children::open_task_children_where()
+                ),
+                &json,
+                |row| Ok((TaskId::from_raw(row.get::<_, String>(0)?), row.get::<_, u32>(1)?)),
+            )?,
             active_prs: keyed(
                 &snapshot,
                 &format!(

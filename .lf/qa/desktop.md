@@ -329,6 +329,25 @@ them. Nothing here needs WindowServer focus.
 - Portfolio buttons answer hook clicks: Start on a Roadmap row runs the Graph.
   With the `LF_BIN` wrapper holding `help graph`, the row reads "Moving" until
   `touch <dir>/go`, then "Waiting".
+- The app prepends the person's own tool directories (`~/.local/bin` …) to
+  `PATH`, so a conversation it reopens runs the real `claude` in the private
+  `HOME`. Put the stand-in in `$LF_HOME/bin`, which stays first.
+- A Session's provider transition is written when the SessionStart hook
+  reports. To get `started`, then `resumed`, have the stand-in read
+  `--settings`, run `hooks.SessionStart[0].hooks[0].command`, and pipe
+  `{"session_id":…,"cwd":…,"hook_event_name":"SessionStart","source":"startup|resume"}`
+  into it. Then kill the provider: the pane reopens it with `--resume`. The
+  transition is the `transition` column on `agent_sessions` and a
+  `Provider transition:` line in `lf session history show <session>`.
+- Connection bar: stopping the private server shows "Reconnecting…", then the
+  relay's "Session unavailable…" with **Retry connection**. Killing the pane's
+  `lf session attach` shows nothing, because the app starts a new relay within
+  1.5 s. `tree 0` gives the bar's label and button frames. The hook's `press` is
+  refused once the button hides.
+- Composited pixels without Quartz in Python: a `swift` script calling
+  `CGWindowListCopyWindowInfo` prints the window number for `screencapture
+  -l`. A window behind others shows a stale Ghostty frame; read the terminal
+  with `lf --task <id> desktop capture -p session`.
 - Stand-in providers exit at once here, so a Session pane shows "Process
   exited" under its opening overlay. That is the stand-in, not the pane.
 - Rows show Available and Busy from live conversations. Start each Task's

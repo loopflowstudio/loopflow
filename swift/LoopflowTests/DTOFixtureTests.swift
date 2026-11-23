@@ -24,6 +24,15 @@ struct DTOFixtureTests {
         #expect(card.session.raw == false)
     }
 
+    @Test func providerTransitionRoundTrips() throws {
+        let data = try loadFixtureData("provider_transition.json")
+        let transition = try JSONDecoder().decode(ProviderTransition.self, from: data)
+        #expect(transition.kind == .forked)
+        let encoded = try JSONEncoder().encode(transition)
+        let wire = try #require(JSONSerialization.jsonObject(with: data) as? NSDictionary)
+        #expect(try JSONSerialization.jsonObject(with: encoded) as? NSDictionary == wire)
+    }
+
     @Test func sessionEncodingKeepsRequiredNullableTurnFields() throws {
         let session = try JSONDecoder().decode(SessionRecord.self, from: loadFixtureData("session.json"))
         let encoded = try JSONEncoder().encode(session)
@@ -706,6 +715,8 @@ struct DTOFixtureTests {
         #expect(detail.tasks.items[0].task.sync.actions[0].kind == "create")
         #expect(detail.tasks.items[0].task.id == detail.tasks.items[0].runtime?.workId)
         #expect(detail.tasks.items[0].task.trackerId == "issue-1")
+        // A Task filed from another names it; top-level work carries null.
+        #expect(detail.tasks.items.map(\.task.parentId) == [nil, detail.tasks.items[0].task.id])
         #expect(detail.tasks.items[0].task.completedAt == nil)
         #expect(detail.tasks.items[0].pr?.publication?.github?.number == 912)
         #expect(detail.tasks.items[0].pr?.id == "pr_33333333333333333333333333333333")
@@ -1130,12 +1141,11 @@ struct DTOFixtureTests {
                 from: JSONSerialization.data(withJSONObject: task))
         }
     }
+}
 
-    private func loadFixture(_ name: String) throws -> [String: Any] {
-        let data = try loadFixtureData(name)
-        let json = try JSONSerialization.jsonObject(with: data)
-        return try #require(json as? [String: Any])
-    }
+func loadFixture(_ name: String) throws -> [String: Any] {
+    let json = try JSONSerialization.jsonObject(with: loadFixtureData(name))
+    return try #require(json as? [String: Any])
 }
 
 func loadFixtureData(_ name: String) throws -> Data {

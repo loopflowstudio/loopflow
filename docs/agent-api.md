@@ -40,6 +40,14 @@ lf task wait INF-123 --until terminal                 # block until done or aban
 independently as its own PR. Never delegate the entire problem or the single
 blocker in front of you; resolve that inline.
 
+**Children:** pass `--parent <ID>` on `lf task create` (or `lf task update <ID>
+--parent <parent|none>`) to attach or detach a child Task; plain `lf task
+create` always files top-level work. The parent's interactive conversations
+conduct its direct children: they hear when a child stops at an interactive
+step, a run of it fails or stops, its PR merges, or it is completed or
+abandoned. Acting on that notice is in scope. Steers saved for a child are not
+delivered to its parent.
+
 **Stacking rule:** always use `lf task run --stack-on <ID>` or `lf sync <ID>`
 (and `lf sync main` to detach). Never `git merge` another Task's branch or run
 `gh pr edit --base` directly, because `lf` tracks the stack relationship for

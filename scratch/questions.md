@@ -37,3 +37,6 @@
   the Wave's Projects; with one per Wave it lists one. Left as is.
 - Renaming a Wave overwrites a local Project name someone edited by hand
   (none of the commands here sets one apart from its Wave's).
+- Concept review after slice 3: a queued Task `create` snapshots
+  `task_project`; `retire_wave_in` rewrites it on removal. Reading fields at
+  send time instead is a tracker-drain redesign, its own Task (page question 5).

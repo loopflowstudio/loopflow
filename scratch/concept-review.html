@@ -70,62 +70,62 @@ svg .sub { fill: var(--muted); font-size: 11.5px; }
 
 </head><body>
 <main>
-<h1>A Wave is one Project — as built</h1>
-<p class="lede">LOO-995 concept review, pass after slices 1 and 2, 2026-11-23. Branch at 1e1e114989, read against origin/main (7487986a30). Replaces the 2026-11-22 page, which reviewed the plan before it was built.</p>
-<p><b>Area taken:</b> a Wave and its one Project across a Wave's whole life — create, rename, connect to a tracker, a Task joining and moving, removal — locally and in a Linear repository. That is what the branch now builds; the earlier page took only the tracker link.</p>
+<h1>A Wave is one Project — as built, slices 1–3</h1>
+<p class="lede">LOO-995 concept review, pass after slice 3, 2026-11-23. Branch at 855ed4dd5e, read against its base 494eae3d55. Replaces the page written after slices 1 and 2, whose two "no" rows slice 3 built.</p>
+<p><b>Area taken:</b> a Wave and its one Project across a Wave's whole life — create, rename, connect, a Task joining and moving, removal — locally and in a Linear repository, with every slice in it.</p>
 
 <h2>One interaction, as built</h2>
-<pre><code>$ lf wave create scratchpad
-$ lf wave status scratchpad        # Project   scratchpad (local) · started
-$ lf task create --wave scratchpad 'x'
-$ lf wave rename scratchpad sandbox
-$ lf wave status sandbox           # Project   scratchpad (local) · started   ← stale (QA 2026-11-23)
-$ lf repo tracker ... connect Linear
-                                   # the Project's create goes out named "scratchpad"</code></pre>
-<p>Failure two, read from code: in a connected repository <code>lf wave add</code> queues the Project's <code>create</code> at once. <code>lf wave remove</code> before the drain sends leaves that action queued, so Linear gets a Project for a Wave that no longer exists. <code>uncreated</code> (<code>tracker_actions.rs:970</code>) skips retired Waves when queuing, but nothing retires what is already queued.</p>
-<p>Both failures are new with this branch: on main a Wave's Projects came from chapters or the Initiative; here every Wave makes one from its own name.</p>
+<pre><code>$ lf wave create ledger ; lf task create --wave ledger 'x'
+$ lf wave rename ledger books
+$ lf wave status books             # Project   books (local) · started      (QA second run)
+$ lf repo tracker                  # books create · queued, books name · queued
+$ lf wave create pay/refunds ; lf task create --wave pay/refunds 'Partial refund'
+$ lf wave remove pay/refunds       # 1 open Task moved to pay.
+                                   # refunds' create retired "its Wave was removed";
+                                   # the Task's queued create now names pay's Project</code></pre>
+<p>Failure and recovery: renaming a linked Wave leaves the Project on Linear's name and sends nothing; the next import still mirrors Linear. Removing a Wave before its Project's <code>create</code> was sent retires it in the same write; a <code>sent</code> one is left to resolve.</p>
 
 <h2>Do the product's concepts and the code's line up?</h2>
 <div class="table-wrap"><table>
 <tr><th></th><th>What a person knows or does</th><th>What the code has</th><th>What is wrong</th></tr>
 <tr><td><span class="mark yes">yes</span></td><td>A Wave</td><td><code>waves</code>, <code>parent_wave_id</code></td><td></td></tr>
-<tr><td><span class="mark yes">yes</span></td><td>A Wave's Project</td><td><code>projects.wave_id</code> unique not null; id <code>ProjectId::for_wave</code></td><td>One record, one key. The Initiative, <code>tracker_wave_projects</code>, the climb and the tie-break are gone.</td></tr>
+<tr><td><span class="mark yes">yes</span></td><td>A Wave's Project</td><td><code>projects.wave_id</code> unique not null; id <code>ProjectId::for_wave</code></td><td>One record, one key.</td></tr>
 <tr><td><span class="mark yes">yes</span></td><td>A Task is in a Wave</td><td>read through its Project; no <code>tasks.wave_id</code></td><td></td></tr>
 <tr><td><span class="mark yes">yes</span></td><td>Move a Task</td><td>one rule: the new Wave's Project</td><td></td></tr>
-<tr><td><span class="mark yes">yes</span></td><td>Connect a Wave to Linear</td><td><code>lf wave plan connect &lt;wave&gt; [&lt;project&gt;]</code> sets <code>external_project_id</code></td><td>Linking is the only thing that says which Wave a tracker Project is.</td></tr>
-<tr><td><span class="mark no">no</span></td><td>A Wave's name</td><td><code>waves.name</code> <b>and</b> a local Project's <code>projects.name</code>/<code>slug</code>, copied once in <code>wave_project_in</code> (<code>children.rs:2352</code>)</td><td>One idea under two names. Rename moves one; status and the Linear <code>create</code> show the other.</td></tr>
-<tr><td><span class="mark no">no</span></td><td>Remove a Wave</td><td>retires the Wave; its Project's queued <code>create</code> stays live</td><td>The action has no owner that ends it with the Wave.</td></tr>
-<tr><td><span class="mark part">partly</span></td><td>"No history"</td><td>removal summary: "N Project(s) stay readable in history"; <code>WaveRemoval.projects</code></td><td>Always equals the Waves removed. Says something the model no longer has. Wire field; noted, not changed here.</td></tr>
-<tr><td><span class="mark part">partly</span></td><td>Desktop Wave pane</td><td>a <b>Projects</b> button listing one</td><td>A list for a one-to-one thing. Noted, not changed here.</td></tr>
+<tr><td><span class="mark yes">yes</span></td><td>Connect a Wave to Linear</td><td><code>lf wave plan connect &lt;wave&gt; [&lt;project&gt;]</code> sets <code>external_project_id</code></td><td>The link is the only thing that says which Wave a tracker Project is.</td></tr>
+<tr><td><span class="mark yes">yes</span></td><td>A Wave's name</td><td><code>relocate_waves</code> writes the unlinked Project's <code>ProjectSlug</code>/<code>ProjectName</code> as plan edits in the rename's transaction</td><td>Was "no". Still two columns, but one writer keeps them equal while unlinked; linked, Linear owns the name.</td></tr>
+<tr><td><span class="mark yes">yes</span></td><td>Remove a Wave</td><td><code>retire_wave_in</code> retires the Project's queued actions in the removal's write</td><td>Was "no".</td></tr>
+<tr><td><span class="mark part">partly</span></td><td>A Task's queued <code>create</code> in Linear</td><td><code>tracker_actions.value_json</code> snapshots <code>task_project</code> at queue time; a move queues a field action behind it; removal rewrites the snapshot</td><td>The snapshot is a copy of where the Task is. Removal has to patch it because the create would name a Project Linear never gets. Larger than this work, below.</td></tr>
+<tr><td><span class="mark part">partly</span></td><td>"No history"</td><td>removal summary "N Project(s) stay readable in history"; <code>WaveRemoval.projects</code></td><td>Always equals the Waves removed. Wire field; noted, not changed.</td></tr>
+<tr><td><span class="mark part">partly</span></td><td>Desktop Wave pane</td><td>a <b>Projects</b> button listing one</td><td>A list for a one-to-one thing. Noted, not changed.</td></tr>
 </table></div>
 
 <div class="callout">
-<p><b>Biggest mismatch: a local Project's name is a second copy of the Wave's name.</b></p>
-<p>Until a Project is linked, its name has no source but the Wave. Once linked, Linear owns it and the import mirrors it. So "whose name is it" has one answer at each moment, and the code should hold that answer, not a copy.</p>
+<p><b>Biggest remaining mismatch: a queued tracker <code>create</code> carries a snapshot of the Task's fields.</b></p>
+<p>The Wave-name copy is closed. What is left has the same shape one layer down: a queued <code>create</code> holds the Task's Project as it was when queued, and a later move adds a field action that sends the same value again. Removal now patches the snapshot (<code>retire_wave_in</code>), which works but is the second place that knows a queued payload's layout.</p>
 </div>
 
-<h2>Recommendation <span class="tag prop">proposed</span></h2>
+<h2>Larger than this work <span class="tag prop">not proposed here</span></h2>
 <div class="cols">
-<div class="panel"><h3>Before</h3>
-<p>Wave create copies the name into the Project. Rename edits <code>waves</code> and the authored files. The Project keeps the old name forever; the queued <code>create</code> sends it.</p>
-<p>Remove retires the Wave; a queued <code>create</code> still sends.</p></div>
-<div class="panel proposed"><h3>After</h3>
-<p><code>lf wave rename</code> renames the Wave's Project too while it is unlinked (<code>external_project_id IS NULL</code>): name and slug follow, the queued <code>create</code> reads the new name. A linked Project keeps Linear's name; renaming in Loopflow does not write to Linear (no new tracker action).</p>
-<p><code>lf wave remove</code> retires the unsent tracker actions of the retiring Waves' unlinked Projects, so nothing is created for a removed Wave.</p></div>
+<div class="panel"><h3>Now</h3>
+<p>A <code>create</code> stores its field values at queue time. Each later edit queues a field action. Anything that invalidates a stored value must find and rewrite it.</p></div>
+<div class="panel proposed"><h3>What it would take</h3>
+<p>A queued <code>create</code> stores only its owner; the drain reads the Task's current fields when it sends, and edits made before the send queue nothing. That changes the tracker drain and every action kind, and touches retry and conflict handling on <code>sent</code> actions, so it is its own Task, not a fix to this one. The branch is right as it stands: QA's second run showed the patched create reaching pay's Project.</p></div>
 </div>
-<p class="small">Made for review: rename follows only while unlinked. Passed over: always pushing a rename to a linked Linear Project (a new tracker <code>update</code> action — scope, not a fix), and dropping the local Project's name column (released lf reads <code>projects.name</code>). Both are reversible.</p>
-<p>Normal path: rename <code>scratchpad</code>→<code>sandbox</code>, status says <code>Project sandbox (local)</code>. Failure: rename after linking — status keeps the Linear name, which is right because that is where the person sees it. Recovery: none needed; the next import still mirrors Linear's name. Counterexample tried: a rename arriving from another Machine over Git — if the Project edit is an ordinary <code>ProjectName</code> plan edit with its stamp, it crosses with the Wave's rename; implement checks this (not run).</p>
+<p class="small">Nothing in this pass changes the plan: slice 3 built the previous page's recommendation, QA ran both paths through the CLI, and the remaining rows are wire or Desktop changes already listed for another pass.</p>
 
 <h2>Questions</h2>
 <ol class="q">
 <li>When a linked Wave is renamed in Loopflow:
- <ol><li>keep Linear's name (built after this pass)</li><li>also rename the Linear Project (new tracker action)</li></ol></li>
+ <ol><li>keep Linear's name (built)</li><li>also rename the Linear Project (new tracker action)</li></ol></li>
 <li>The removal line "N Projects stay readable in history":
  <ol><li>keep</li><li>drop the line and <code>WaveRemoval.projects</code> (wire change)</li></ol></li>
 <li>Desktop's <b>Projects</b> button:
  <ol><li>leave</li><li>replace with the Project's name and link in the Wave header</li></ol></li>
 <li>A child Wave's Project is named <code>refunds</code> on the branch, <code>billing/refunds</code> by installed lf; upgraded homes keep the old name:
  <ol><li>leave</li><li>rename-follows fixes it on the next rename only — fine</li><li>migrate unlinked Projects' names to their Wave's</li></ol></li>
+<li>A queued tracker <code>create</code>'s field snapshot:
+ <ol><li>leave; removal patches it (built)</li><li>file a Task: creates read the Task's fields at send time, edits before the send queue nothing</li></ol></li>
 </ol>
 </main>
 </body></html>

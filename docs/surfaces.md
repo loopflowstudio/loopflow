@@ -306,17 +306,26 @@ Press **⌘,** to open Settings. Search for a pane, label, configuration key,
 alias or description. Select a result with ↑/↓ and Return to reveal the
 control. A switch in the results edits the destination shown beside it.
 
-**Applies to** selects Global, a checkout or a Wave. Expand **Advanced** to
-inspect a Skill or Graph step. **Save in** selects the file to edit. A checkout
-or Wave starts on your personal settings when available. The header names the
-active Skill or Graph step. Use **Inspect general work** to clear it. A step
-needs an `id:` before you can save preferences for it.
+**General**, **Appearance**, **Shortcuts**, **Agents**, **Machines**, and
+**Mobile** hold personal preferences. Use **Machines** to check connections
+and set the plan hub. **Open ~/.lf/config.yaml** opens the global file for
+settings such as Machine pools and SSH forwarding.
 
-**This Machine (Global)** writes to `~/.lf/config.yaml` and keeps the selected
-**Save in** destination for other settings. Machine placement is personal.
-At Wave scope, **Git & Release** offers a shortcut to the checkout.
+**Project & Wave Config** holds agent overrides, Context, Git & Release, and
+Machine placement. It opens on the active checkout or the first repository
+in your portfolio. Use **Choose Checkout…** to select another directory.
+**Applies to** selects a checkout or Wave. **Save in** selects your file or
+the shared file. Saving the first setting creates the file. **Open file…**
+opens it in its associated app.
+A dot beside the pane means the selected file declares a setting. Switching to
+a personal pane keeps the checkout and destination ready for your return.
 
-For example, open **Context** on a checkout where the shared file sets
+Expand **Advanced** to inspect a Skill or Graph step. Use **Inspect general
+work** to clear that target. A step needs an `id:` before you can save its
+preferences. Git & Release applies to the repository. While viewing a Wave,
+**Inspect repository settings** returns to its checkout.
+
+For example, open **Project & Wave Config** on a checkout where the shared file sets
 `context.diff: true` and your file sets it to `false`. Choose **Shared
 repository settings**. The switch shows **On**. **In effect** still shows
 **Off · My repository settings**. Expand it to see the candidates and paths.
@@ -338,14 +347,11 @@ repository settings**. The switch shows **On**. **In effect** still shows
   keeps the last reading visible and pauses edits until the read succeeds.
   Settings and the CLI share the same [configuration files](config.md).
 
-| Sidebar group | Panes |
-| --- | --- |
-| App | **General** includes Task file autosave and global preferences. **Appearance** selects themes or opens the color editor. **Shortcuts** shows the keyboard reference. **Mobile** shows a green dot and pairing code when [phone access](server.md#phone-access) is ready. |
-| Workflow | **Agents** groups the pin, starting preference and fallback order with their effective agent order. **Context** controls launch inputs. **Git & Release** includes the repository tracker. |
-| Infrastructure | **Machines** shows placement, connections and forwarding. While open, it checks up to four registered identities at once and distinguishes connection errors from ended rentals. |
-
-A dot beside a scoped pane means the selected non-global file declares a
-setting there, even when another file overrides it.
+**Appearance** selects themes or opens the color editor. **Shortcuts** shows
+the keyboard reference. **Mobile** shows a green dot and pairing code when
+[phone access](server.md#phone-access) is ready. While **Machines** is open,
+it checks up to four registered identities at once and distinguishes
+connection errors from ended rentals.
 
 ## Script Desktop
 

@@ -2,36 +2,61 @@
 
 > Visual redesign of the settings pane. make it more like a standard Apple Settings pane, sort of like Rex
 
-Jack Heart chose “vision c” at explore. [Vision C](design.md) and its [prototype](explore.html#vision-c) record the direction. The [concept review](concept-review.html) audits the built branch against its base and specifies the fixes below. [Choices for review](questions.md) records the defaults. User docs: [Surfaces](../docs/surfaces.md#settings), [Configuration](../docs/config.md#inspect-effective-settings), [Connect clients](../docs/server.md#phone-access), and [Loopflow for macOS](../swift/README.md).
+Direction on record: [demo-notes.md](demo-notes.md) (verbatim feedback from Jack Heart during the live demo of PR #2033), [design.md](design.md), [explore.html](explore.html), and [concept-review.html](concept-review.html). User docs: [Surfaces](../docs/surfaces.md#settings), [Configuration](../docs/config.md#inspect-effective-settings), [Connect clients](../docs/server.md#phone-access), and [Loopflow for macOS](../swift/README.md).
 
-## Done when
+## Policy B & visual polish
 
-⌘, opens a native macOS Settings window with a searchable sidebar and grouped Apple Settings forms. App contains General, Appearance, Shortcuts and Mobile. Workflow contains Agents, Context and Git & Release. Infrastructure contains Machines. Use system chrome and accent with colored symbols. Theme cards show their own colors, and the chosen theme reaches Desktop, Ghostty and iPhone through the existing appearance path.
+During the live demo of PR #2033, Jack chose **Policy B** (`1b`, `2a`) plus a visual polish pass over the sidebar and controls:
 
-In the Workflow and Machines panes, **Applies to** names the exact work being inspected — Global, a checkout, a Wave, and any active Skill or Graph step — and **Save in** chooses the declaration audience (`My` vs `Shared`) at that scope. A setting’s own applicability never hijacks `Save in` into a ghost destination. Global-only Machine settings edit `~/.lf/config.yaml` directly in a clearly labeled **This Machine (Global)** section, and Git & Release explains clearly when a Wave is selected.
+**Built in this slice.** The seven-pane sidebar has two dividers, monochrome symbols, and a capsule search field. Personal preferences and Project & Wave Config have independent live readings. The project pane holds Context, Git & Release, agent overrides, and Machine placement. Search can open either an agent default or its scoped override. File-only global results reveal the global file button.
 
-Each row edits the declaration in its file, preserving the three-way distinction between absent, explicit `null`, and an authored value. Coupled agent policy (`agent`, `default_agent`, `agents`) is grouped in one section with one shared effective result. Inactive compatibility keys and internal Desktop state stay out of the main forms (reachable through Advanced/search). Server writes invalidate the file observation cache synchronously so rapid edits never hit stale slots. A single-row validation or conflict error stays on that row without locking the rest of Settings; only a read failure marks the scope stale. Interrupted 2-file moves surface on the row and can be either resumed or explicitly dismissed if a file diverged. Search opens its pane, scrolls the form to the row and highlights it briefly.
+**Next slice.** Replace the declaration placeholders in scalar and ordered-list controls with their actual value or runtime default. Keep Reset and explicit null distinct, make precedence quiet, and check the Light and Dark window at compact and wide sizes. The resolver returns the combined agent order for `agents` and `default_agent`; displaying that list as the starting preference would give the wrong answer.
 
-## Built
+**Checks for this slice**
 
-Each item below exists on the branch. The [concept review](concept-review.html) sets out why.
+- `scripts/test_desktop.sh --filter 'sidebarSeparatesPersonalPreferencesFromProjectConfiguration|sharedCheckoutKeepsItsDestinationThroughValidationAndGlobalMachineEdits|checkoutDiffFromSettingsToLaunch|DesignDisciplineTests'` — all seven passed across the build and the focused rerun. The file assertion resolves the macOS `/tmp` symlink before comparing URLs.
+- `cargo test -p loopflow --test integration documented_commands::` — four passed.
+- `uv run python scripts/check_swift_multiplatform_boundaries.py` — passed.
+- Live Light and Dark windows and compact scrolling remain for visual QA.
 
-- **Live configuration.** `observe::invalidate_path` (`rust/loopflow-execution/src/observe.rs`) runs from `config::files` atomic writes and from promotion journal writes. It refreshes the observed file, its metadata and the parent listing, then wakes subscriptions. Three checked writes in a row read back through `config.scope`.
-- **Error boundaries.** `ScopedSettingsModel.errors` is keyed by `RowAddress`. A validation error or a stale-slot conflict stays on its row. Only a save in progress or a scope read failure disables edits.
-- **Applies to / Save in.** The header shows the active Skill or step. `Save in` offers only My/Shared at the selected scope, and none at Global. Machines has *Connection health* (read from `config.scope`, keeps the last check while probing, Refresh button), *Placement* and *This Machine (Global)*, which writes `~/.lf/config.yaml` without changing `Save in`. At Wave scope, Git & Release shows one repository banner.
-- **Forms.** Curated sections per pane (`ScopedSettings.swift`), including one Agent Policy section with a shared result. Inactive and internal keys live under Advanced and stay searchable. `ConfigurationScope.Authored` keeps absent, explicit null and value apart. Nullable fields accept an explicit null, which the resolver skips. `land` is a `LandMethod` enum in `catalog.rs`. `user.name` and `logs.linear_requests` have native controls.
-- **Recoverable moves.** `promotion::Action::Dismiss` removes a diverged journal under the move locks and leaves both files untouched. The row shows Finish and Dismiss actions, and a refreshed preview asks for another review.
-- **Search and Appearance.** `settingsForm(highlighted:)` puts the `ScrollViewReader` inside each pane's `Form` and yields once before scrolling. Rows carry `.id(key)`. ThemeChooser keeps its controls and errors inside Sections.
-- **Earlier passes.** The split window, sidebar groups, `AutosaveToggle`, shared `KeyboardShortcutsView`, `MobileSetup`, `AppearanceStore` instant-apply with Undo, `ThemeEditor` drafts, `config.scope` subscription (median 16.4 ms, p95 125.6 ms across 47 entries), checked YAML patching, the locked 2-file move, the `machine.status` probe and legacy Wave `GOAL.md` adoption.
-- **What the integration tests exposed.** YAML deserialization on its own accepts null as an empty map. A separate read after saving could show an intermediate value after Undo, because the subscription suppresses identical frames, so the editor confirms writes on its own subscription.
+### 1. Clear policy for what belongs in `⌘,` Settings (Policy B · `2a`)
 
-## Checks and remaining demo
+Separate calm **personal/app preferences** from **scoped repo/Wave `config.yaml` overrides** (following Rex, T3 Code, Rune, Zed, and Cursor):
 
-- The Rust checked-edit, promotion, schema, shared DTO, nullable declaration, cache invalidation, file subscription, served configuration, and documented-command tests passed.
-- The headless Desktop Settings, Context, Configuration, Theme, Mobile and Design Discipline suites passed against the branch server on a private Machine.
-- `LOOPFLOW_NATIVE_TESTS=1 swift test --package-path swift --filter searchScrollsToTheLastContextRowInACompactWindow` passed. The mounted 520 × 240 form scrolled to the last Context row and back to the first group.
-- Native window appearance checks passed in System, Light and Dark modes. Rust formatting and Clippy passed with warnings denied.
-- `cargo test -p loopflow-execution --lib config::` passed 113 tests after isolating the private-file migration fixture from concurrent PATH changes.
-- `LOOPFLOW_NATIVE_TESTS=1 swift test --package-path swift --filter 'SettingsWorkflowTests|ConfigurationSettingsTests|hiddenPatternsKeepWhereTheyCameFromAndOnlyYoursChange|themeReadIncludesTheSlotForACheckedEdit'` passed 17 tests against the rebuilt CLI. The launch check reads the README patch delivered to Pi.
-- QA round 2 ([qa.html](qa.html)) drove live edits, row errors, explicit null, interrupted moves, This Machine (Global) and search through the branch server and an isolated Dev bundle. It fixed the setting error wording, a repeated Dismiss, the null label and exact-key search ranking.
-- Gate owns hosted CI. The remaining visual review is the full split window in Light and Dark at different sizes. Run `uv run python scripts/loopflow-dev.py run` against the branch server on a private Machine for that demo.
+- **Main sidebar panes are personal/global only** (`~/.lf/config.yaml` + Desktop prefs) — **no `Applies to`**, **no `Save in`**, **no `"Inherited"`**, **no per-row `Source` disclosures**, and **no raw YAML map textareas**:
+  1. **General** — Display name (`user.name`), Autosave Task Files, Repositories folder (`repo_root`), Release channel (`stream`), Log Linear requests (`logs.linear_requests`), plus an **"Open `~/.lf/config.yaml`"** button.
+  2. **Appearance** — Appearance mode (`System` / `Light` / `Dark`), Theme cards (instant-apply + `⌘Z` Undo), Customize (`ThemeEditor` keeps Apply/Cancel).
+  3. **Shortcuts** — Grouped read-only keyboard shortcuts (shared with standalone Keyboard Shortcuts window).
+  4. **Agents** — Personal defaults in `~/.lf/config.yaml`: Primary agent (`agent`), Starting preference (`default_agent`), Fallback order (`agents`), Run without asking (`yolo`), Claude model (`claude.model`), Codex service tier (`codex.service_tier`), Claude Chrome integration (`chrome`), Default Graph (`wave.graph`), Auto-ship new Tasks (`auto`), Automatic retries (`automation.retries`). Every control shows its **actual active or built-in default value** (never `"Inherited"`). Show a quiet `Reset` button only when the setting is explicitly set in `~/.lf/config.yaml`.
+  5. **Machines** — Live **Connection health** (up to 4 concurrent SSH probes, Refresh), **Plan hub** (`hub`), plus **"Open `~/.lf/config.yaml`"** (and collapsed Advanced disclosure if needed) for map keys (`pools`, `ondemands`, `machines`, `connections`, `forward.*`) instead of stacking raw YAML textboxes on the main pane.
+  6. **Mobile** — Tailscale switch + live green sidebar readiness dot + QR pairing + Copy/Share/Refresh.
+- **One dedicated `Project & Wave Config` pane** (at the bottom of the sidebar, separated by a quiet divider) owns scoped repository/Wave/Skill/Graph-step overrides — including **Context** (`context.*`) and **Git & Release** (`land`, `merge_method`, `pr`, `diff_hidden`, `diff_groups`, `release`, `repo.tracker`), plus scoped **Agents** and **Machine placement** (`machine`):
+  - Reuses the existing Rust `config.scope`, `config.preview`, `config.edit`, `config.promote`, `observe::invalidate_path`, Undo, and crash-journal Dismiss infrastructure intact.
+  - Defaults **Applies to** to the active checkout (falling back to the first portfolio checkout or a Choose Checkout prompt when none is open), with **Save in** (`My` vs. `Shared`), **Advanced** Skill/Graph-step targeting, and an **"Open file…"** button for the selected YAML file.
+  - **No `"Inherited"` as a control's displayed value anywhere.** Every picker/toggle displays the **actual effective value** (for example, `Standard (Default)` or `GitHub PR (from Global)` or `Off`), while still preserving absent / `Explicit null` / authored value distinctions in the file writer. Show a subtle override indicator + `Reset` / expandable `In effect` precedence ladder + `Move to…` only where meaningful (when overridden, losing to another layer, or expanded by the person) instead of stacking `"Inherited · …"` disclosures under every unset row.
+  - Keep complex map/inactive keys (`diff_groups`, `release`, `context.budgets`, `isolate`, `summaries`, `summary_tokens`, `portfolio`, `auth_browsers`) out of the primary form under a collapsed **Advanced** section + **"Open file…"** (still searchable).
+
+### 2. Visual polish pass (`1b` + demo feedback)
+
+- **Quiet dividers instead of sidebar section text headers (`1b`):** Remove the `"App"`, `"Workflow"`, `"Infrastructure"` text headers in the sidebar. Group panes cleanly with native dividers:
+  - `General`, `Appearance`, `Shortcuts`
+  - *(divider)*
+  - `Agents`, `Machines`, `Mobile`
+  - *(divider)*
+  - `Project & Wave Config` (shows subtle override dot when the inspected checkout/Wave file has overrides)
+- **Minimalist monochrome SF Symbols:** Delete the rainbow colored square badges (`pane.badge.color` rounded rects). Use crisp, minimalist monochrome SF Symbols that adapt naturally to sidebar selection and Light/Dark mode.
+- **More rounded sidebar search box:** Replace the 4 pt `CornerRadius.control` search box with a pill/capsule shape (`Capsule()` with subtle fill/border and clean padding) that feels native to macOS Settings.
+- **Hand-named macOS Settings labels:** Give every visible setting a natural macOS Settings title (no raw key-derived `"Repo Root"`, `"Linear Requests"`, `"Codex · Service Tier"`, `"Supported Harnesses"`).
+- **Clean spacing & contrast:** Tighten visual rhythm in Light and Dark modes across window sizes while keeping every explicit measure, font, and color compliant with `DesignDisciplineTests`.
+
+### 3. Keep docs, search, and tests aligned
+
+- Update cross-pane search (`SettingsSearch.swift`) so searching any catalog key routes cleanly to its Policy B home (`General`, `Agents`, `Machines`, `Appearance`, or `Project & Wave Config` for `Context` / `Git & Release` / scoped keys) and highlights the row.
+- Update `docs/surfaces.md`, `swift/README.md`, and `scratch/questions.md` to reflect Policy B (6 personal panes + `Project & Wave Config`, monochrome sidebar with dividers, no `"Inherited"` display values).
+- Update `SettingsWorkflowTests`, `ContextSettingsWorkflowTests`, `DesignDisciplineTests`, and `documented_commands` to cover the new Policy B navigation, real-value default display (no `"Inherited"` on Global pickers), monochrome sidebar/divider layout, and `"Open file…"` actions.
+
+## Already built on this branch (keep intact)
+
+- Rust bulk `config.scope` read/subscription (median 16.4 ms, p95 125.6 ms across 47 entries), `observe::invalidate_path` synchronous cache invalidation, `config.preview` / `config.edit` checked YAML writer preserving comments and 3-way absent/`null`/value semantics, `LandMethod` enum, `config.promote` atomic/resumable 2-file move + idempotent `Action::Dismiss`, `machine.status` concurrent SSH probes, and `lf config scope` CLI command.
+- Swift `ScopedSettingsModel`, `SettingsUndo`, `AppearanceStore` instant-apply + Undo + staged `ThemeEditor`, `AutosaveToggle`, shared `KeyboardShortcutsView`, lifted `MobileSetup`, and `MachineConnections`.
+- All Rust tests (`config::` 113, `promotion::` 2, `served_reads`, `documented_commands`, clippy `-D warnings`) and DTO fixtures (`tests/fixtures/dto/`).

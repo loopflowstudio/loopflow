@@ -313,10 +313,11 @@ File selection keeps a neutral fill and edge; keyboard focus has a separate outl
 Ordinary controls and links use text roles; the theme’s accent emphasizes deliberate actions.
 Status labels and shapes retain their meaning across palettes.
 Press **⌘,** to open [Settings](../docs/surfaces.md#settings). Search for a
-control or choose a pane in the sidebar. In Workflow and Machines, **Applies
-to** selects the work and **Save in** selects the file to edit. In Machines,
-**This Machine (Global)** always edits the global file. The placement row
-follows the selected work.
+control or choose a pane in the sidebar. **Agents** sets your personal defaults.
+**Machines** shows connection health and the plan hub. Open **Project & Wave
+Config** for checkout and Wave overrides, Context, Git & Release, and Machine
+placement. **Save in** selects your file or the shared file, and **Open file…**
+opens it in its associated app.
 
 Choose **Settings → Appearance** (**⌘,**) to pick a theme for every window,
 Ghostty, and iPhone. Pick **System**, **Light**, or **Dark**; System follows

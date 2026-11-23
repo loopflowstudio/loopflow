@@ -25,43 +25,43 @@ struct ScopedSettings: View {
                     AutosaveToggle(notices: notices, undoManager: undoManager)
                         .settingsRow(SettingsMatch.autosave.id, highlighted: highlightedKey)
                 }
-            } else {
+            } else if pane == .project {
                 scopeSelector
             }
-            if let scope = model.reading.value {
+            if pane == .project && model.checkout == nil {
+                Text("Choose a checkout to edit its settings.")
+            } else if let scope = model.reading.value {
                 if pane == .machines {
-                    MachineConnections(location: model.location,
-                        declaration: scope.files.first { $0.owner == .personalGlobal }?.slots["machines"]?.declared)
+                    MachineConnections(location: model.location, declaration: model.file?.slots["machines"]?.declared)
                 }
-                if pane == .git, model.wave != nil {
-                    Section {
-                        Text("Git & Release settings apply to the repository as a whole.")
-                        Button("Inspect repository settings") { model.select(checkout: model.checkout) }
-                    }
-                } else {
-                    if case .step = model.target, pane != .general,
-                       scope.files.allSatisfy({ $0.slots["agent"] == nil }) {
-                        Section { Text("This Graph step is read-only. Give it an id: in its Graph YAML to edit step preferences.") }
-                    }
-                    ForEach(SettingsSection.allCases.filter { $0.pane == pane }) { group in
-                        Section(group.rawValue) {
-                            ForEach(group.keys, id: \.self) { key in
-                                if let definition = model.catalogue.first(where: { $0.key == key }) {
-                                    row(definition, in: scope)
-                                }
-                            }
-                            if group == .policy, let order = scope.settings["agents"] {
-                                SettingProvenance(title: "Effective agent order", value: order.value.settingsText, effective: order)
+                if case .step = model.target, scope.files.allSatisfy({ $0.slots["agent"] == nil }) {
+                    Section { Text("This Graph step is read-only. Give it an id: in its Graph YAML to edit step preferences.") }
+                }
+                ForEach(SettingsSection.allCases.filter { $0.appears(in: pane, wave: model.wave) }) { group in
+                    Section(group.rawValue) {
+                        ForEach(group.keys, id: \.self) { key in
+                            if let definition = model.catalogue.first(where: { $0.key == key }) {
+                                row(definition, in: scope)
                             }
                         }
+                        if group == .policy, pane == .project, let order = scope.settings["agents"] {
+                            SettingProvenance(title: "Effective agent order", value: order.value.settingsText, effective: order)
+                        }
                     }
-                    let other = model.catalogue.filter { $0.pane == pane && $0.isAdvanced }
+                }
+                if pane == .project {
+                    if model.wave != nil {
+                        Section("Git & Release") {
+                            Button("Inspect repository settings") { model.select(checkout: model.checkout) }
+                        }
+                    }
+                    let other = model.catalogue.filter {
+                        $0.pane == .project && $0.section == nil && !$0.isContainer &&
+                            (model.wave == nil || $0.applicability != "repository")
+                    }
                     if !other.isEmpty {
                         Section {
-                            DisclosureGroup("Advanced", isExpanded: Binding(
-                                get: { advanced || other.contains { $0.key == highlightedKey } },
-                                set: { advanced = $0 }
-                            )) {
+                            DisclosureGroup("Advanced settings", isExpanded: $advanced) {
                                 ForEach(other, id: \.key) { row($0, in: scope) }
                             }
                             .onChange(of: highlightedKey, initial: true) { _, key in
@@ -70,9 +70,32 @@ struct ScopedSettings: View {
                         }
                     }
                 }
+                if let file = model.file {
+                    Section {
+                        Button(pane == .project ? "Open file…" : "Open ~/.lf/config.yaml") {
+                            openFile(file)
+                        }
+                        .help(file.path)
+                        .settingsRow(highlightedFileKey, highlighted: highlightedKey)
+                    }
+                }
             } else if model.reading.isLoading { ProgressView("Loading settings") }
         }
         .settingsForm(highlighted: highlightedKey)
+    }
+
+    private var highlightedFileKey: String {
+        if let highlightedKey, model.catalogue.contains(where: { $0.key == highlightedKey && $0.opensFile }) {
+            return highlightedKey
+        }
+        return "configuration-file"
+    }
+
+    private func openFile(_ file: ConfigurationScope.File) {
+        do {
+            let url = try file.prepareForOpening()
+            if !NSWorkspace.shared.open(url) { throw RegistryQueryError("Could not open \(file.path)") }
+        } catch { notices.post(Notice(error.localizedDescription)) }
     }
 
     @ViewBuilder
@@ -105,7 +128,6 @@ struct ScopedSettings: View {
     private var scopeSelector: some View {
         Section {
             Menu {
-                Button("Global") { model.select(checkout: nil) }
                 ForEach(checkouts, id: \.self) { path in
                     Button(URL(fileURLWithPath: path).lastPathComponent) { model.select(checkout: path) }.help(path)
                 }
@@ -147,7 +169,7 @@ struct ScopedSettings: View {
     }
 
     private var scopeTitle: String {
-        var parts = [model.checkout.map { URL(fileURLWithPath: $0).lastPathComponent } ?? "Global"]
+        var parts = [model.checkout.map { URL(fileURLWithPath: $0).lastPathComponent } ?? "Choose checkout"]
         if let wave = model.wave { parts.append(waves.first { $0.id == wave }?.displayName ?? wave) }
         switch model.target {
         case .general: break
@@ -161,43 +183,46 @@ struct ScopedSettings: View {
 enum SettingsSection: String, CaseIterable, Identifiable {
     case profile = "Profile & Workspace", updates = "Updates & Diagnostics"
     case policy = "Agent Policy", execution = "Execution", harnesses = "Harnesses"
-    case diff = "Diff & Clipboard", files = "Files & Budgets"
-    case pullRequests = "Git & Pull Requests", diffView = "Diff View", release = "Planning & Release"
-    case placement = "Placement", machine = "This Machine (Global)"
+    case diff = "Context", files = "Context Files"
+    case pullRequests = "Git & Release", diffView = "Diff View", release = "Planning & Release"
+    case placement = "Machine Placement", machine = "Planning"
 
     var id: Self { self }
     var pane: SettingsPane {
         switch self {
         case .profile, .updates: .general
         case .policy, .execution, .harnesses: .agents
-        case .diff, .files: .context
-        case .pullRequests, .diffView, .release: .git
-        case .placement, .machine: .machines
+        case .diff, .files, .pullRequests, .diffView, .release, .placement: .project
+        case .machine: .machines
         }
+    }
+
+    func appears(in selected: SettingsPane, wave: String?) -> Bool {
+        if selected == .project {
+            switch self {
+            case .pullRequests, .diffView, .release: return wave == nil
+            case .policy, .execution, .harnesses: return true
+            default: break
+            }
+        }
+        return selected == pane
     }
 
     var keys: [String] {
         switch self {
         case .profile: ["user", "repo_root"]
-        case .updates: ["stream", "logs", "session"]
+        case .updates: ["stream", "logs"]
         case .policy: ["agent", "default_agent", "agents"]
-        case .execution: ["yolo", "wave.graph", "auto", "automation", "supported_harnesses"]
+        case .execution: ["yolo", "wave.graph", "auto", "automation"]
         case .harnesses: ["claude.model", "codex.service_tier", "chrome"]
         case .diff: ["context.diff", "context.diff_files", "context.paste"]
-        case .files: ["context.docs", "context.exclude", "context.budgets"]
+        case .files: ["context.docs", "context.exclude"]
         case .pullRequests: ["land", "merge_method", "pr"]
-        case .diffView: ["diff_hidden", "diff_groups"]
-        case .release: ["repo.tracker", "release"]
+        case .diffView: ["diff_hidden"]
+        case .release: ["repo.tracker"]
         case .placement: ["machine"]
-        case .machine: ["hub", "machines", "connections", "pools", "ondemands", "forward.env", "forward.files"]
+        case .machine: ["hub"]
         }
-    }
-}
-
-extension ConfigurationScope.File {
-    func hasOverrides(in pane: SettingsPane, catalog: [ConfigurationDefinition]) -> Bool {
-        guard owner != .personalGlobal else { return false }
-        return catalog.contains { $0.pane == pane && slots[$0.key]?.entries.isEmpty == false }
     }
 }
 
@@ -206,22 +231,56 @@ extension ConfigurationDefinition {
     var pane: SettingsPane {
         if key == "theme" { return .appearance }
         if let section { return section.pane }
-        return category == "Agents" ? .agents : .general
+        if applicability != "personal" { return .project }
+        return category == "Machines" ? .machines : .general
     }
-    var isAdvanced: Bool { section == nil && !isContainer && pane != .appearance }
+    var opensFile: Bool { section == nil && (pane == .general || pane == .machines) }
     var isContainer: Bool { ["context", "claude", "codex", "forward"].contains(key) }
     var title: String {
         switch key {
-        case "automation": "Automatic retries"
-        case "agent": "Pin"
+        case "user": "Display name"
+        case "repo_root": "Repositories folder"
+        case "stream": "Release channel"
+        case "logs": "Log Linear requests"
+        case "agent": "Primary agent"
         case "default_agent": "Starting preference"
         case "agents": "Fallback order"
-        case "user": "Display name"
-        case "logs": "Log Linear requests"
+        case "yolo": "Run without asking"
+        case "wave.graph": "Default Graph"
+        case "auto": "Auto-ship new Tasks"
+        case "automation": "Automatic retries"
+        case "claude.model": "Claude model"
+        case "codex.service_tier": "Codex service tier"
+        case "chrome": "Claude Chrome integration"
+        case "hub": "Plan hub"
+        case "machine": "Preferred Machines"
         case "context.diff": "Include diff in agent context"
+        case "context.diff_files": "Include full file contents"
+        case "context.paste": "Include clipboard contents"
         case "context.docs": "Additional documents"
+        case "context.exclude": "Excluded documents"
+        case "context.budgets": "Context budgets"
+        case "land": "Landing method"
+        case "merge_method": "Merge method"
+        case "pr": "Create pull requests after pushing"
+        case "diff_hidden": "Hide files from Task diffs"
+        case "diff_groups": "Diff groups"
         case "repo.tracker": "Repository tracker"
-        default: key.replacingOccurrences(of: "_", with: " ").replacingOccurrences(of: ".", with: " · ").capitalized
+        case "release": "Release targets"
+        case "session": "Session lifetime"
+        case "machines": "Registered Machines"
+        case "connections": "Connection addresses"
+        case "pools": "Machine pools"
+        case "ondemands": "On-demand Machines"
+        case "forward.env": "Forward environment variables"
+        case "forward.files": "Forward files"
+        case "auth_browsers": "Account browser profiles"
+        case "portfolio": "Portfolio selection"
+        case "supported_harnesses": "Available harnesses"
+        case "isolate": "Isolated launches"
+        case "summaries": "Session summaries"
+        case "summary_tokens": "Summary token budget"
+        default: description
         }
     }
 }

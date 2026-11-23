@@ -10,16 +10,16 @@ import ViewInspector
 @Suite("Settings navigation and preferences")
 @MainActor
 struct SettingsWorkflowTests {
-    @Test func settingsOpensOnGeneralAndKeepsTheExistingPanesReachable() throws {
+    @Test func sidebarSeparatesPersonalPreferencesFromProjectConfiguration() throws {
         var navigation = SettingsNavigation()
         let appearance = AppearanceStore(paths: .temporary(), systemDark: false)
         let window = SettingsWindow(navigation: Binding(get: { navigation }, set: { navigation = $0 }),
                                     appearance: appearance, checkout: nil, portfolio: PortfolioService())
         let split = try window.inspect().find(ViewType.NavigationSplitView.self)
         let sidebar = try split.sidebarView()
-        for pane in SettingsPane.allCases {
-            #expect(try sidebar.find(text: pane.rawValue).string() == pane.rawValue)
-        }
+        #expect(try sidebar.findAll(ViewType.Label.self).map { try $0.title().find(ViewType.Text.self).string() } ==
+            ["General", "Appearance", "Shortcuts", "Agents", "Machines", "Mobile", "Project & Wave Config"])
+        #expect(sidebar.findAll(ViewType.Divider.self).count == 2)
         #expect(try split.detailView().find(ViewType.Toggle.self).labelView().text().string() == "Autosave Task Files")
 
         navigation.search = "  CuTs "
@@ -33,6 +33,8 @@ struct SettingsWorkflowTests {
         _ = try window.inspect().find(MobileSettings.self)
         navigation.open(.machines)
         _ = try window.inspect().find(ScopedSettings.self)
+        navigation.open(.project)
+        _ = try window.inspect().find(text: "Choose a checkout to edit its settings.")
         navigation.open(.appearance)
         #expect(navigation.search.isEmpty)
         _ = try window.inspect().find(ThemeChooser.self)
@@ -98,38 +100,65 @@ struct SettingsWorkflowTests {
         model.select(checkout: repo.path)
         let notices = NoticeCenter()
         let watch = Task { await model.observe() }
-        func pane(_ pane: SettingsPane) -> ScopedSettings {
-            ScopedSettings(model: model, pane: pane, checkouts: [repo.path], waves: [], notices: notices)
+        let personal = ScopedSettingsModel(location: server.location())
+        let personalWatch = Task { await personal.observe() }
+        var navigation = SettingsNavigation()
+        let window = SettingsWindow(navigation: Binding(get: { navigation }, set: { navigation = $0 }),
+            appearance: AppearanceStore(paths: .temporary(), systemDark: false), checkout: repo.path,
+            portfolio: PortfolioService(), personal: personal, project: model)
+        func pane(_ pane: SettingsPane) throws -> ScopedSettings {
+            navigation.open(pane)
+            return try window.inspect().find(ScopedSettings.self).actualView()
         }
         do {
             let deadline = ContinuousClock.now + .seconds(10)
-            while model.file == nil {
+            while model.file == nil || personal.file == nil {
                 try #require(model.reading.failure == nil && ContinuousClock.now < deadline,
                              "\(model.reading.failure ?? "Waiting for the checkout")")
                 try await Task.sleep(for: .milliseconds(20))
             }
-            try pane(.agents).inspect().find(ViewType.Picker.self).select(value: ConfigurationDestination.sharedRepository)
+            try pane(.project).inspect().find(ViewType.Picker.self).select(value: ConfigurationDestination.sharedRepository)
             let shared = try #require(model.file)
-            let agents = try pane(.agents).inspect()
+            let agents = try pane(.project).inspect()
             _ = try agents.find(text: "Effective agent order")
             let chrome = try agents.find(viewWithId: "chrome").find(ViewType.Picker.self)
             #expect(try chrome.selectedValue(ConfigurationScope.Authored.self) == .present(.null))
 
             #expect(await !model.apply(.set("no-such-graph"), key: "wave.graph", to: shared, notices: notices, manager: nil))
-            let graph = try pane(.agents).inspect().find(viewWithId: "wave.graph")
+            let graph = try pane(.project).inspect().find(viewWithId: "wave.graph")
             let typo = try #require(model.errors[.init(shared, "wave.graph")])
             _ = try graph.find(text: typo.message)
             #expect(typo.recovery == nil)
             #expect(try !graph.find(ViewType.TextField.self).isDisabled())
 
+            _ = try agents.find(button: "Switch Save in to My repository settings")
+            _ = try agents.find(button: "Open file…")
+            let config = try shared.prepareForOpening()
+            #expect(try String(contentsOf: config, encoding: .utf8) == "chrome: null\n")
+            let global = try #require(personal.file)
+            let globalURL = try global.prepareForOpening()
+            #expect(globalURL.resolvingSymlinksInPath() == home.appending(path: "config.yaml").resolvingSymlinksInPath())
+            #expect(FileManager.default.fileExists(atPath: globalURL.path))
+            navigation.search = "yolo"
+            let results = try window.inspect().find(ViewType.NavigationSplitView.self).sidebarView()
+            let globalResult = try results.find(viewWithId: "yolo")
+            _ = try globalResult.find(text: ConfigurationDestination.personalGlobal.title)
+            try globalResult.find(ViewType.Button.self).tap()
+            #expect(navigation.pane == .agents && navigation.highlightedKey == "yolo")
+            navigation.search = "yolo"
+            try results.find(viewWithId: "project.yolo").find(ViewType.Button.self).tap()
+            #expect(navigation.pane == .project && navigation.highlightedKey == "yolo")
+            #expect(model.file?.owner == .sharedRepository)
             let machines = try pane(.machines).inspect()
-            _ = try machines.find(button: "Switch Save in to My repository settings")
+            _ = try machines.find(button: "Open ~/.lf/config.yaml")
+            #expect(machines.findAll(ViewType.TextEditor.self).isEmpty)
+            #expect(try pane(.agents).model.file?.owner == .personalGlobal)
             let hub = try machines.find(viewWithId: "hub").find(ScopedSettingRow.self).actualView()
             #expect(hub.file.owner == .personalGlobal)
             let machineID = "home_11111111111111111111111111111111"
-            #expect(await model.apply(.set(machineID), key: "hub", to: hub.file, notices: notices, manager: nil))
+            #expect(await personal.apply(.set(machineID), key: "hub", to: hub.file, notices: notices, manager: nil))
             #expect(model.destination == .sharedRepository)
-            #expect(model.file?.hasOverrides(in: .agents, catalog: model.catalogue) == true)
+            #expect(model.file?.hasOverrides == true)
             #expect(try String(contentsOf: home.appending(path: "config.yaml"), encoding: .utf8).contains(machineID))
             #expect(model.errors[.init(shared, "wave.graph")] != nil)
             #expect(await model.apply(.set("code"), key: "wave.graph", to: shared, notices: notices, manager: nil))
@@ -138,7 +167,7 @@ struct SettingsWorkflowTests {
             for enabled in [true, false] {
                 let file = try #require(model.file)
                 #expect(await model.apply(.set(String(enabled)), key: "chrome", to: file, notices: notices, manager: nil))
-                let picker = try pane(.agents).inspect().find(viewWithId: "chrome").find(ViewType.Picker.self)
+                let picker = try pane(.project).inspect().find(viewWithId: "chrome").find(ViewType.Picker.self)
                 #expect(try picker.selectedValue(ConfigurationScope.Authored.self) == .present(.bool(enabled)))
             }
             let onDisk = try #require(model.file)
@@ -150,21 +179,26 @@ struct SettingsWorkflowTests {
         } catch {
             watch.cancel()
             await watch.value
+            personalWatch.cancel()
+            await personalWatch.value
             await server.stop()
             throw error
         }
         watch.cancel()
         await watch.value
+        personalWatch.cancel()
+        await personalWatch.value
         await server.stop()
     }
 
-    @Test(.requiresDisplay) func searchScrollsToTheLastContextRowInACompactWindow() async throws {
-        try await withThemeServer { location, _ in
+    @Test(.requiresDisplay) func searchScrollsBetweenProjectSectionsInACompactWindow() async throws {
+        try await withThemeServer { location, paths in
             _ = NSApplication.shared
             let model = ScopedSettingsModel(location: location)
+            model.select(checkout: paths.config.deletingLastPathComponent().path)
             let notices = NoticeCenter()
             func pane(_ key: String?) -> ScopedSettings {
-                ScopedSettings(model: model, pane: .context, checkouts: [], waves: [], notices: notices, highlightedKey: key)
+                ScopedSettings(model: model, pane: .project, checkouts: [], waves: [], notices: notices, highlightedKey: key)
             }
             let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 520, height: 240),
                                   styleMask: [.titled], backing: .buffered, defer: false)
@@ -195,9 +229,9 @@ struct SettingsWorkflowTests {
                 }
                 let scroll = try #require(scrollView(in: host))
                 let document = try #require(scroll.documentView)
-                host.rootView = pane("context.budgets")
+                host.rootView = pane("configuration-file")
                 try await waitFor { scroll.documentVisibleRect.maxY >= document.bounds.maxY - 45 }
-                host.rootView = pane("context.diff")
+                host.rootView = pane("agent")
                 try await waitFor { scroll.documentVisibleRect.maxY < document.bounds.midY + scroll.contentSize.height / 2 }
             } catch {
                 watch.cancel()

@@ -339,8 +339,7 @@ as text instead.
 - Sidebar rows ignore hook clicks. Navigate with search:
   `field Search settings|context.paste`, then `return <window title>` opens
   the first match. An exact catalog key or title ranks first. The form's
-  `NSClipView origin` in `views` shows the scroll; the window's minimum is
-  760×648, so only Agents (≈1040 pt) and Machines (≈900 pt) scroll.
+  `NSClipView origin` in `views` shows the scroll in Project & Wave Config.
 - Switch clicks toggle both ways on Settings rows (`yolo` On→Off wrote
   `yolo: false`). The first click after a launch is often swallowed.
 - `field Inherited|<text>` types into the first text row with that
@@ -355,11 +354,13 @@ as text instead.
 - The Undo notice and the Refresh button are missing from `tree`, and the
   window's `undoManager` is not the one SwiftUI registers with. Click Refresh
   by position (the first click after a change is often swallowed).
-- Each written value is in `$LF_HOME/config.yaml`; hand edits and a broken
+- Personal config edits are in `$LF_HOME/config.yaml`. Project & Wave Config
+  writes to the selected destination. Hand edits and a broken
   file reach the open pane within a few seconds. Kill the private server to
   see the stale reading; restarting it needs Refresh.
-- Menus (Applies to, Save in) don't open, so a checkout or Wave scope is not
-  reachable here; `ContextSettingsWorkflowTests` drives those.
+- Project & Wave Config opens on the active checkout. Menus (Applies to,
+  Save in) don't open through the hook. `ContextSettingsWorkflowTests`
+  drives destination changes.
 - The hook's `tree` and `views` block the main thread for seconds; the
   matching "main thread stalled" lines in `lf.log` are the hook's.
 

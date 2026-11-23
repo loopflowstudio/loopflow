@@ -4,7 +4,7 @@ import SwiftUI
 enum SettingsMatch: Identifiable {
     case pane(SettingsPane)
     case autosave, appearanceMode, theme, mobileAccess
-    case setting(ConfigurationDefinition)
+    case setting(ConfigurationDefinition, SettingsPane)
 
     var pane: SettingsPane {
         switch self {
@@ -12,7 +12,7 @@ enum SettingsMatch: Identifiable {
         case .autosave: .general
         case .appearanceMode, .theme: .appearance
         case .mobileAccess: .mobile
-        case .setting(let definition): definition.pane
+        case .setting(_, let pane): pane
         }
     }
 
@@ -23,11 +23,16 @@ enum SettingsMatch: Identifiable {
         case .appearanceMode: "appearance-mode"
         case .theme: "theme"
         case .mobileAccess: "mobile-access"
-        case .setting(let definition): definition.key
+        case .setting(let definition, _): definition.key
         }
     }
 
-    var id: String { key ?? pane.rawValue }
+    var id: String {
+        if case .setting(let definition, .project) = self, definition.pane != .project {
+            return "project." + definition.key
+        }
+        return key ?? pane.rawValue
+    }
 
     var title: String {
         switch self {
@@ -36,7 +41,7 @@ enum SettingsMatch: Identifiable {
         case .appearanceMode: "Appearance mode"
         case .theme: "Theme"
         case .mobileAccess: "Mobile access"
-        case .setting(let definition): definition.title
+        case .setting(let definition, _): definition.title
         }
     }
 
@@ -47,7 +52,9 @@ enum SettingsMatch: Identifiable {
         case .appearanceMode: [title, "System Light Dark"]
         case .theme: [title, "Customize or import a theme"]
         case .mobileAccess: [title, "Tailscale iPhone pairing QR code and Machine address"]
-        case .setting(let definition): [title, definition.key, definition.description, definition.lifecycle] + definition.shorthands
+        case .setting(let definition, _):
+            [title, definition.key, definition.description, definition.lifecycle, definition.section?.rawValue,
+             definition.editedField.map { definition.key + "." + $0 }].compactMap { $0 } + definition.shorthands
         }
     }
 }
@@ -58,11 +65,14 @@ extension SettingsNavigation {
         guard !query.isEmpty else { return [] }
         var rows = SettingsPane.allCases.map(SettingsMatch.pane)
         rows += [.autosave, .appearanceMode, .theme, .mobileAccess]
-        rows += catalogue.filter { !$0.isContainer && $0.pane != .appearance }.map(SettingsMatch.setting)
+        for definition in catalogue where !definition.isContainer && definition.pane != .appearance {
+            rows.append(.setting(definition, definition.pane))
+            if definition.pane == .agents { rows.append(.setting(definition, .project)) }
+        }
         let found = rows.filter { row in
             var terms = row.terms
             if case .theme = row, let theme = catalogue.first(where: { $0.key == row.key }) {
-                terms += SettingsMatch.setting(theme).terms
+                terms += SettingsMatch.setting(theme, .appearance).terms
             }
             return terms.contains { $0.localizedCaseInsensitiveContains(query) }
         }
@@ -104,7 +114,7 @@ struct SettingsSearchRow: View {
     let open: () -> Void
 
     private var booleanToggle: ScopedBooleanToggle? {
-        guard case .setting(let definition) = result, definition.isSwitch,
+        guard case .setting(let definition, _) = result, definition.isSwitch,
               let file = scope.editableFile(for: definition),
               let effective = scope.reading.value?.settings[definition.key] else { return nil }
         return ScopedBooleanToggle(model: scope, definition: definition, effective: effective, file: file,
@@ -128,7 +138,7 @@ struct SettingsSearchRow: View {
             Button(action: open) {
                 VStack(alignment: .leading, spacing: Spacing.xxs) {
                     Text(result.title)
-                    if case .setting(let definition) = result, definition.lifecycle == "inactive" {
+                    if case .setting(let definition, _) = result, definition.lifecycle == "inactive" {
                         Text("Inactive").font(Typography.meta).foregroundStyle(.secondary)
                     }
                     if let toggle {

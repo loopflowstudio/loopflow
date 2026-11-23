@@ -46,8 +46,8 @@ final class ScopedSettingsModel {
     var file: ConfigurationScope.File? { reading.value?.files.first { $0.owner == destination } }
 
     func editableFile(for definition: ConfigurationDefinition) -> ConfigurationScope.File? {
-        let owner = definition.applicability == "personal" ? .personalGlobal : destination
-        return reading.value?.files.first { $0.owner == owner && $0.slots[definition.key] != nil }
+        guard let file, file.slots[definition.key] != nil else { return nil }
+        return file
     }
 
     var editsDisabled: Bool { saving || reading.failure != nil }

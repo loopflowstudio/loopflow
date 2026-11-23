@@ -26,14 +26,6 @@ struct ScopedSettingRow: View {
     private var declared: ConfigurationScope.Authored { slot?.declared ?? .absent }
     private var authored: JSONValue? { declared.value }
     private var editError: ScopedSettingsModel.RowError? { model.errors[.init(file, key)] }
-    private var field: String? {
-        switch key {
-        case "user": "name"
-        case "logs": "linear_requests"
-        case "automation": "retries"
-        default: nil
-        }
-    }
     private var input: Binding<String> {
         Binding(get: { draft?.text ?? initialText }, set: { text in
             preview = .loading
@@ -42,7 +34,7 @@ struct ScopedSettingRow: View {
         })
     }
     private var initialText: String {
-        let value = if let field { authored?[field] } else { authored }
+        let value = if let field = definition.editedField { authored?[field] } else { authored }
         guard let value else { return "" }
         if usesYAML { return value.settingsYAML }
         return value == .null ? "" : value.settingsText
@@ -59,8 +51,6 @@ struct ScopedSettingRow: View {
                 SettingProvenance(title: declared == .absent ? "Inherited" : "In effect",
                     value: [effective.value.settingsText, source].compactMap { $0 }.joined(separator: " · "),
                     effective: effective, files: model.reading.value?.files ?? [], key: key, path: file.path)
-            } else if file.owner == .personalGlobal && definition.pane != .general && definition.section != .policy {
-                SettingProvenance(title: "Source", value: "", effective: effective)
             }
             if let draft, draft.text == nil {
                 Text(preview.current ?? preview.failure ?? "Preparing preview…").font(Typography.mono).textSelection(.enabled)
@@ -132,7 +122,7 @@ struct ScopedSettingRow: View {
     }
 
     private var usesYAML: Bool {
-        definition.controlType != "string" && definition.controlType != "integer" && field == nil
+        definition.controlType != "string" && definition.controlType != "integer" && definition.editedField == nil
     }
 
     @ViewBuilder private var control: some View {
@@ -199,7 +189,7 @@ struct ScopedSettingRow: View {
     }
 
     private func fieldChange(_ value: JSONValue?, in file: ConfigurationScope.File) -> ConfigurationChange {
-        guard let field else { return value.map { .set($0.settingsYAML) } ?? .reset }
+        guard let field = definition.editedField else { return value.map { .set($0.settingsYAML) } ?? .reset }
         var fields: [String: JSONValue] = [:]
         if case .present(.object(let existing)) = file.slots[key]?.declared { fields = existing }
         fields[field] = value
@@ -248,6 +238,15 @@ struct ScopedBooleanToggle: View {
 }
 
 extension ConfigurationDefinition {
+    var editedField: String? {
+        switch key {
+        case "user": "name"
+        case "logs": "linear_requests"
+        case "automation": "retries"
+        default: nil
+        }
+    }
+
     var controlSchema: [String: JSONValue] {
         guard case .object(let root) = schema else { return [:] }
         if case .array(let options) = root["anyOf"], case .object(let first) = options.first,

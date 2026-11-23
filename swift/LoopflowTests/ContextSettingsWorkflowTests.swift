@@ -73,6 +73,8 @@ struct ContextSettingsWorkflowTests {
         let model = ScopedSettingsModel(location: server.location())
         let notices = NoticeCenter()
         model.select(checkout: repo.path)
+        let personal = ScopedSettingsModel(location: server.location())
+        let personalWatch = Task { await personal.observe() }
         var watch = Task { await model.observe() }
         func awaitReading(_ condition: () -> Bool, sourceLocation: SourceLocation = #_sourceLocation) async throws {
             let deadline = ContinuousClock.now + .seconds(10)
@@ -85,23 +87,27 @@ struct ContextSettingsWorkflowTests {
 
         do {
             _ = try await server.status()
-            try await awaitReading { model.file != nil }
+            try await awaitReading { model.file != nil && personal.file != nil }
             #expect(model.file?.slots["context.diff"]?.entries.isEmpty == true)
-            let view = ScopedSettings(model: model, pane: .context, checkouts: [repo.path], waves: [], notices: notices)
-            let toggle = try view.inspect().find(ViewType.Toggle.self)
+            let privateFile = try #require(model.file)
+            #expect(throws: RegistryQueryError.self) { try privateFile.prepareForOpening() }
+            #expect(!fm.fileExists(atPath: privateFile.path))
+            let view = ScopedSettings(model: model, pane: .project, checkouts: [repo.path], waves: [], notices: notices)
+            let toggle = try view.inspect().find(viewWithId: "context.diff").find(ViewType.Toggle.self)
             #expect(try toggle.isOn())
             #expect(try await launchHasDiff(in: repo))
             try toggle.tap()
             try await awaitReading { model.file?.slots["context.diff"]?.declared.value == .bool(false) }
+            #expect(try privateFile.prepareForOpening().path == privateFile.path)
             #expect(try await !launchHasDiff(in: repo))
 
             let picker = try view.inspect().find(ViewType.Picker.self)
             try picker.select(value: ConfigurationDestination.sharedRepository)
-            #expect(try view.inspect().find(ViewType.Toggle.self).isOn())
+            #expect(try view.inspect().find(viewWithId: "context.diff").find(ViewType.Toggle.self).isOn())
             var navigation = SettingsNavigation(search: " Diff ")
             let window = SettingsWindow(navigation: Binding(get: { navigation }, set: { navigation = $0 }),
                                         appearance: AppearanceStore(paths: .temporary(), systemDark: false),
-                                        checkout: repo.path, portfolio: PortfolioService(), scope: model)
+                                        checkout: repo.path, portfolio: PortfolioService(), personal: personal, project: model)
             func diffResult() throws -> InspectableView<ViewType.ClassifiedView> {
                 try window.inspect().find(ViewType.NavigationSplitView.self).sidebarView().find(viewWithId: "context.diff")
             }
@@ -116,20 +122,21 @@ struct ContextSettingsWorkflowTests {
             #expect(try String(contentsOf: shared, encoding: .utf8) == original.replacingOccurrences(of: "true", with: "false"))
             try diffResult().find(ViewType.Button.self).tap()
             #expect(navigation.search.isEmpty)
-            #expect(navigation.pane == .context)
+            #expect(navigation.pane == .project)
             let detail = try window.inspect().find(ViewType.NavigationSplitView.self).detailView()
             let revealed = try detail.find(viewWithId: "context.diff")
             #expect(try revealed.accessibilityTraits().contains(.isSelected))
             #expect(try !revealed.find(ViewType.Toggle.self).isOn())
             try detail.find(button: "Undo").tap()
             try await awaitReading { model.file?.slots["context.diff"]?.declared.value == .bool(true) }
-            #expect(try #require(model.file).hasOverrides(in: .context, catalog: model.catalogue))
+            #expect(try #require(model.file).hasOverrides)
             #expect(model.reading.value?.source("context.diff") == ConfigurationDestination.personalRepository.title)
             #expect(try await !launchHasDiff(in: repo))
 
             try picker.select(value: ConfigurationDestination.personalRepository)
             for (query, key) in [("linear.team", "repo.tracker"), ("branch diff", "context.diff"),
-                                 ("context.diff_files", "context.diff_files"), ("Starting preference", "default_agent")] {
+                                 ("context.diff_files", "context.diff_files"), ("Starting preference", "default_agent"),
+                                 ("Git & Release", "land"), ("logs.linear_requests", "logs")] {
                 navigation.search = query
                 #expect(navigation.matches(in: model.catalogue).contains { $0.id == key })
             }
@@ -201,11 +208,15 @@ struct ContextSettingsWorkflowTests {
         } catch {
             watch.cancel()
             await watch.value
+            personalWatch.cancel()
+            await personalWatch.value
             await server.stop()
             throw error
         }
         watch.cancel()
         await watch.value
+        personalWatch.cancel()
+        await personalWatch.value
         await server.stop()
     }
     @Test func scopedEditsAndPromoteRoundTripThroughTheCLI() async throws {

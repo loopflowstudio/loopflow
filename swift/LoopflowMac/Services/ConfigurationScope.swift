@@ -59,6 +59,24 @@ struct ConfigurationScope: Codable {
         let slots: [String: Slot]
         var id: JSONValue { destination }
 
+        var hasOverrides: Bool {
+            owner != .personalGlobal && slots.values.contains { !$0.entries.isEmpty }
+        }
+
+        func prepareForOpening() throws -> URL {
+            let url = URL(fileURLWithPath: path)
+            if !FileManager.default.fileExists(atPath: path) {
+                // The scoped writer also installs the Git exclusion for a private checkout file.
+                guard owner == .personalGlobal else {
+                    throw RegistryQueryError("Save a setting here to create \(path).")
+                }
+                try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+                do { try Data("{}\n".utf8).write(to: url, options: .withoutOverwriting) }
+                catch CocoaError.fileWriteFileExists { /* Another editor created it. */ }
+            }
+            return url
+        }
+
         var owner: ConfigurationDestination? {
             guard case .string(let kind) = destination["kind"] else { return nil }
             return ConfigurationDestination(rawValue: kind)

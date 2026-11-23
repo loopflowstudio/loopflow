@@ -1,5 +1,6 @@
 //! Saved selection and layout intent share one transaction and one Work snapshot.
 use super::sessions::{SessionProjection, SessionProjectionInputs};
+use super::task_work::{END, START};
 use super::SqliteStore;
 use crate::execution::{TaskSection, TaskState};
 
@@ -567,12 +568,15 @@ fn fill_graph_steps_in(
     let mut rows = query.query([super::children::ids_json(tasks)])?;
     let mut steps = HashMap::<String, String>::new();
     while let Some(row) = rows.next()? {
-        let parked = row.get(1)?;
+        let parked: String = row.get(1)?;
+        let parked = (!matches!(parked.as_str(), START | END)).then_some(parked);
         let step = match row.get::<_, Option<String>>(3)? {
-            Some(cursor) => running_step(&row.get::<_, String>(2)?, &cursor)?.unwrap_or(parked),
+            Some(cursor) => running_step(&row.get::<_, String>(2)?, &cursor)?.or(parked),
             None => parked,
         };
-        steps.insert(row.get(0)?, step);
+        if let Some(step) = step {
+            steps.insert(row.get(0)?, step);
+        }
     }
     for content in plans.iter_mut().flat_map(|plan| &mut plan.contents) {
         content.graph_step = steps.get(&content.work.id).cloned();

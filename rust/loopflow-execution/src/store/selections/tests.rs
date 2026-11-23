@@ -377,23 +377,32 @@ fn sidebar_step_follows_the_captured_cursor_and_disappears_without_a_graph() {
     store
         .take_up_task_graph(&id, &serde_json::to_string(&graph).unwrap())
         .unwrap();
+    assert_eq!(step(), None, "before the first step");
+    store.set_task_graph_step(&id, "end").unwrap();
+    assert_eq!(step(), None, "after the last step");
     store.set_task_graph_step(&id, "review").unwrap();
     assert_eq!(step().as_deref(), Some("review"));
     let carrier = store.test_lf_process();
-    store
-        .conn
-        .lock()
-        .unwrap()
-        .execute(
-            "UPDATE task_graphs SET lf_process_id=?2,run_start=?3 WHERE task_id=?1",
-            rusqlite::params![
-                id.as_str(),
-                carrier,
-                serde_json::to_string(&cursor).unwrap()
-            ],
-        )
-        .unwrap();
+    let started = loopflow_storage::graph_process::ExecutionStart::reserved(1);
+    let run_from = |step: &str, cursor: &str| {
+        assert!(store
+            .start_task_graph_run(&id, step, None, cursor, (&carrier, &started))
+            .unwrap());
+    };
+    run_from("review", &serde_json::to_string(&cursor).unwrap());
     assert_eq!(step().as_deref(), Some("implement"));
+    let past_end = serde_json::to_string(&crate::graph::runner::ExecutionCursor {
+        index: graph.steps.len(),
+        ..Default::default()
+    })
+    .unwrap();
+    store
+        .advance_task_graph_run(&id, &carrier, &past_end)
+        .unwrap();
+    assert_eq!(step().as_deref(), Some("review"));
+    store.set_task_graph_step(&id, "end").unwrap();
+    run_from("end", &past_end);
+    assert_eq!(step(), None);
 }
 
 #[test]

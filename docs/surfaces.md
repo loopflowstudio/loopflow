@@ -100,8 +100,8 @@ Drag a row in the repository sidebar or the Working Tasks grid to save its
 position on this Machine. Wave views, `lf task list`, `lf wave show`, and the
 phone feed follow the same relative order. Working Tasks start newest first,
 with canonical Task ID breaking ties. New arrivals appear above rows you’ve
-arranged. Each sidebar row shows its current Graph step beside its status
-when the Task has taken up a Graph.
+arranged. Sidebar and phone rows show the current Graph step beside the status
+while a Task is at a step.
 
 Choose **Sort by status** in the repository sidebar or from **⌘K**, or run
 `lf desktop sort`. This puts Blocked Tasks first, followed by Error, Available,

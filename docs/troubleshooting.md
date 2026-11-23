@@ -99,10 +99,11 @@ lf server status   # readiness, socket, build, and connection error
 lf doctor          # installation and store health
 ```
 
-- **Opening… Input paused / Reconnecting…**: agents run in a separate
+- **Reconnecting… / Session unavailable**: agents run in a separate
   `lf holder run` process, so they keep working while the server restarts. Keep
-  the pane open; click **Refresh session** or **Retry connection** if automatic
-  retries stop (neither restarts the agent or replays input).
+  the pane open; click **Retry connection** if automatic retries stop, or
+  **Refresh session** in the pane strip if the status connection is lost
+  (neither restarts the agent or replays input).
 - **Disabled background access**: re-enable Loopflow in macOS System Settings
   (or the Linux user service).
 - **This Loopflow (…) can't read what the server (…) sent**: the app and the

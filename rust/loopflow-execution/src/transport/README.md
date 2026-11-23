@@ -270,8 +270,8 @@ An exit record the launcher hands over is kept beside it in
 `exit-record.json` until it is settled, and its native client's announcement
 in `native-client.json` until that client ends. A launcher that execs its
 provider never announces it again, so a server that takes the terminal up
-reads it there; without it a Desktop pane would stay **Opening…** after a
-restart.
+reads it there; without it a Desktop pane would stay paused waiting for
+readiness after a restart.
 
 On startup the server greets every `holder-*.sock`, lists it, and hosts each
 running terminal under its existing `TerminalId`. The screen is rebuilt by
@@ -359,10 +359,11 @@ the view quits in the same instant.
 
 ### Desktop status
 
-Desktop shows **Opening… Input paused** until attachment and native input
-readiness are acknowledged. Initial retries keep that label;
-**Reconnecting…** follows a previously acknowledged connection. Workspace
-preparation uses the same display and keeps its last available screen.
+Desktop pauses input until attachment and native input readiness are
+acknowledged, showing a quiet spinner (over any retained screen) before mount
+and no header text on the mounted terminal. Initial retries stay quiet without
+a banner; **Reconnecting…** follows a previously acknowledged connection.
+Workspace preparation keeps its last available screen.
 Connection feedback overlays the screen without changing the terminal's size;
 the first retained screen uses the new pane's dimensions and cursor position.
 The relay stays alive when its server connection drops. Its native status row

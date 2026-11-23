@@ -228,12 +228,32 @@ New Sessions take their title from the request, Skill, or Task (a name you set
 is never overwritten by `--suggest`). Titles propagate via OSC terminal titles
 and host-specific tabs (cmux, tmux).
 
-If Desktop restarts or loses its connection, selecting your Task reconnects to
-the same running provider with its draft intact. If a pane stays paused, click
-**Refresh session** in its toolbar (never resends input or restarts Graphs).
-The pane's connection row shows whether you reattached to the **Same process**,
-**Resumed in a new process**, **Forked**, or started a **New conversation**.
+Open a Task in Desktop and the pane shows a quiet spinner (over any retained
+screen) while preparing, pausing input until the provider accepts it. There is
+no opening or transition header below the toolbar strip: the terminal starts
+directly below the provider and status strip—after a reattach, a resume in a
+new process, a fork, or a fresh start.
+
+A connection bar appears over the terminal only when a connection drops,
+becomes unavailable, or ends:
+
+| Message | What happened | What to do |
+|---|---|---|
+| **Reconnecting… Input paused; last screen may be stale.** | Connection dropped while the held provider keeps running | Keep working in other panes; output catches up with your draft intact |
+| **Session unavailable. Input paused; last screen may be stale.** | Automatic retries stopped (or a specific relay error appeared) | Click **Retry connection** in the bar to ask the relay to reconnect |
+| **Connection status unavailable. Input paused.** | The viewer lost its status channel to the relay | Click **Refresh session** in the pane strip to reopen the viewer |
+| **Session ended.** (or a retirement or takeover reason) | The terminal closed cleanly or another client took over | Click **Refresh session** in the pane strip to reopen the conversation |
+
+**Retry connection** appears only while the relay can still receive it. Neither
+**Retry connection** nor **Refresh session** resends input or restarts Graphs.
 See [Connect clients](server.md) for server recovery details.
+
+To inspect recorded provider changes (starts, resumes in a new process, forks,
+or provider switches):
+
+```bash
+lf session history <session>
+```
 
 Interactive Sessions keep provider auth or capacity refusals visible and never
 auto-retry; resolve the login or switch harnesses with `-a` on `lf resume`.
@@ -247,8 +267,9 @@ See [Native authentication](subscriptions.md).
   attach command (SSH for remote Machines) without launching a provider.
 - **Headless sessions.** `lf resume` refuses headless Sessions and points you
   to `lf resume --task <ID>`.
-- **History.** `lf session history <session>` prints recorded starts, turns,
-  provider switches, and completions.
+- **History.** `lf session history <session>` prints recorded turns and events,
+  including starts, resumes in a new process, forks, provider switches, and
+  completions.
 
 Every flag: [`lf session`](lf-reference.md#lf-session).
 

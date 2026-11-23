@@ -221,9 +221,12 @@ with **Retry**. Desktop prepares two conversations at a time, starting with the
 selected Work, then visible tiles, the repository and Waves, and recent working
 Tasks. The window renders while they open.
 A prepared conversation starts its provider at once, before any pane shows it;
-selecting the Work shows the running terminal. One **Opening… Input paused**
-reading remains through preparation, attachment and native input readiness. The
-terminal owns that display once mounted; there is no second workspace overlay.
+selecting the Work shows the running terminal. While preparing, the pane shows
+a quiet spinner (over any retained screen) with no header text; once mounted,
+input stays paused until attachment and native input readiness arrive, without
+an opening or transition banner above the terminal. The terminal starts
+directly below the provider and status strip—after a reattach, resume in a new
+process, fork, or fresh start.
 
 Recent unfinished Tasks stay warm for immediate return: Desktop retains sixteen, plus
 any additional panes on screen; a Task admitted from a Dashboard tile stays warm after
@@ -264,18 +267,30 @@ Finite CLI requests time out after 30 seconds. Canceling preparation ends only
 that request; running Sessions continue. If a change times out, refresh to learn
 its result before retrying.
 
-Session panes receive their relay's status and send Retry over one
+Session panes receive their relay's status and send **Retry connection** over one
 private Unix connection. Quiet streams schedule no reads, including in retained
-hidden panes. Status loss pauses input while the relay continues; a fresh status
-connection supplies the current reading without replaying actions. Closing a pane
-stops observation and removes its private socket directory. Input waits for a
-connected reading with native readiness; a saved screen cannot enable input.
+hidden panes. Normal opening and connected states show no connection bar; the
+bar appears only for failure, disconnection, or end states: **Reconnecting…
+Input paused; last screen may be stale.**, **Session unavailable. Input paused;
+last screen may be stale.** (or the relay's error), **Connection status
+unavailable. Input paused.**, or **Session ended.** (or a retirement or
+takeover reason). **Retry connection**
+appears in the bar while the pane is unavailable and the relay can still receive
+it; clicking it asks the relay to reconnect without restarting the provider or
+replaying input. Status loss pauses input while the relay continues and hides
+**Retry connection**; use **Refresh session** in the pane strip to reopen the
+viewer for the same Session. A fresh status connection supplies the current
+reading without replaying actions. Closing a pane stops observation and removes
+its private socket directory. Input waits for a connected reading with native
+readiness; a saved screen cannot enable input.
 The terminal view tells Ghostty when it gains or loses focus (first responder in
 the key window); the relay turns Ghostty's focus reports into the holder's
 `focus` requests, so the pane being looked at sets the size.
 
 Pane headers name the known provider, conversation and directory; arbitrary terminal
 titles remain context under **Shell**, without guessing which program is running.
+Recorded provider changes (starts, resumes in a new process, forks, and provider
+switches) stay in `lf session history <session>` rather than in the pane header.
 
 Open a Task's **Graph processes** page to see its current position and readiness,
 then expand a run, loop position and step for recorded timing and exit evidence.
@@ -591,7 +606,8 @@ Open **•••** or press Command-/ for the selected Task’s actions. Row con
 menus use the same actions for the clicked Task. Command-T adds a shell tab. The main Session's menu switches between **Claude**,
 **Codex**, **OpenCode**, **Pi** and **Antigravity**, continuing the same Session with its history.
 **Refresh session** reconnects the pane to that conversation, including after a
-failed launch or stale connection. It keeps the provider's history and running
+failed launch, a lost status connection (when **Retry connection** is not
+offered), or a stale viewer. It keeps the provider's history and running
 process, and takes over a conversation a native client holds. The control
 stays visible when the Session is the only pane. The same action is available
 through `lf desktop do refresh-session -p session`.
@@ -1400,7 +1416,7 @@ context changes. Native cancellation releases the client's wait; a lost reply
 remains unknown without replay.
 
 Terminal recovery must preserve the exact owner and draft.
-Opening shows **Opening… Input paused** through attachment and native readiness;
+Opening pauses input without a header through attachment and native readiness;
 **Reconnecting…** follows a previously acknowledged connection.
 Connection feedback overlays the terminal, so clearing it does not resize the
 provider or move its cursor. Both mount layout and pre-mount sizing keep the same

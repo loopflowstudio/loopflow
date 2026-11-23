@@ -597,8 +597,14 @@ fn resolve_task(
         };
     resolve_task_id(store, selector, repo.as_deref())?
         .map(|task| {
-            loopflow_execution::store::ownership::task_execution_route(store, &task)
-                .map_err(Into::into)
+            use loopflow_execution::store::ownership::{task_execution_route, task_pause_route};
+            match cli.command {
+                Some(Commands::Task {
+                    cmd: TaskCommand::Pause { .. },
+                }) => task_pause_route(store, &task),
+                _ => task_execution_route(store, &task),
+            }
+            .map_err(Into::into)
         })
         .transpose()
 }

@@ -125,7 +125,8 @@ receipt says `pausing` and names the run. Status shows the step.
   processes are still stopping, then clears the pause and returns the Task to
   Backlog. `lf task complete`, `lf task abandon`, and `lf task reopen` also
   clear the pause. `lf task move LOO-12 --machine mini` carries the pause to the
-  destination Machine so it arrives quiet.
+  destination Machine so it arrives quiet. You can still pause on the source
+  while the move is pushing the checkout.
 
 Use `lf task interrupt LOO-12` instead when you only want to stop the running
 Graph while staying in Working with the conversation open.

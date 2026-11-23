@@ -252,7 +252,7 @@ pub async fn send_task(
         ),
         _ => (claim_for(&store.sqlite, &task, to)?, None),
     };
-    drop(cleanup); // The claim now routes pause and unpause to the destination.
+    drop(cleanup); // Pause may still stop the source while its checkpoint is pushed.
     let (stopped, checkout, conversation, taken) =
         match leave(store, &task, worktree.as_deref(), to, conversation, stopped).await {
             Ok(left) => left,
@@ -263,6 +263,8 @@ pub async fn send_task(
         };
     let (session, history) =
         taken.map_or((None, None), |(session, history)| (Some(session), history));
+    // A pause on the sender either joins this payload or sees the sent move.
+    let _cleanup = crate::ops::task::pause::cleanup_lock(&task.id)?;
     let auto = store.sqlite.task_auto(&task.id)?;
     let moved = Move {
         from_machine_id: crate::store::machines::local_machine(&store.sqlite)?.id,

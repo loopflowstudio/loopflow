@@ -3622,6 +3622,93 @@ fn task_move_leaves_a_live_graph_running_on_mini() {
     );
 }
 
+#[test]
+fn pause_during_move_arrives_with_the_stopped_build_cursor() {
+    use loopflow_execution::process::OsProcess;
+    use loopflow_execution::test_support::task_graph::{
+        hold_build_jobs, holding_claude, worker_job,
+    };
+
+    let fixture = preview_machines();
+    let plan = SharedPlan::cloned(&fixture);
+    let lf = env!("CARGO_BIN_EXE_lf");
+    let root = fixture.root.path();
+    let home = root.join("local");
+    let remote = root.join("remote/store");
+    let path = format!("{}:/usr/bin:/bin", root.join("bin").display());
+    executable(&root.join("bin/claude"), &holding_claude());
+    let (task, worktree) = placed_task(&plan, "pause-moving-build");
+    let primary = claude_conversation(&fixture, &worktree, "0199a213-81c0-7800-8aa1-bbab2a035a56");
+    plan.local.choose_task_primary(&task, &primary).unwrap();
+    let _laptop = loopflow_test_support::MachineServer::start_with_path(lf, &home, &path);
+    let _mini = loopflow_test_support::MachineServer::start(lf, &remote);
+    let _ended = EndRecorded(vec![home.clone(), remote]);
+    fs::create_dir_all(worktree.join(".lf/graphs")).unwrap();
+    fs::write(
+        worktree.join(".lf/graphs/build.yaml"),
+        "- implement\n- interactive: {name: demo, id: review}\n",
+    )
+    .unwrap();
+    let _writer = hold_build_jobs(&home);
+    let command = |args: &[&str]| {
+        fixture
+            .command(args)
+            .current_dir(&worktree)
+            .output()
+            .unwrap()
+    };
+    assert_success(&command(&[
+        "task",
+        "run",
+        task.as_str(),
+        "build",
+        "-a",
+        "claude",
+    ]));
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    while !home.join("holding").exists() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "worker did not start its build"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    let build = worker_job(&home, "build");
+    let cursor = plan.local.task_graph_record(&task).unwrap().unwrap();
+
+    // The source has claimed the Task for mini and stopped its Graph, but
+    // still owns the checkpoint. Pause before git delivers that checkpoint.
+    executable(
+        &plan.local_path.join(".git/hooks/pre-push"),
+        &format!("#!/bin/sh\ncd '{}' || exit 1\nexec env -i HOME='{home}' LF_HOME='{home}' LF_BIN='{lf}' PATH='{path}' '{lf}' task pause {task} </dev/null\n",
+            plan.local_path.display(), home = home.display()),
+    );
+    assert_success(&command(&[
+        "task",
+        "move",
+        task.as_str(),
+        "--machine",
+        "mini",
+    ]));
+    assert!(
+        OsProcess::read(build.pid)
+            .unwrap()
+            .is_none_or(|p| !p.matches_start(build.pid, build.started_at)),
+        "build survived the move"
+    );
+    assert!(plan.local.task_pause(&task).unwrap().is_none());
+    assert!(plan.remote.task_pause(&task).unwrap().is_some());
+    assert_eq!(
+        plan.remote.task_graph_record(&task).unwrap().unwrap(),
+        cursor
+    );
+    assert!(
+        plan.remote.task_graphs(&task).unwrap().is_empty(),
+        "mini restarted the worker"
+    );
+    assert!(live_graph(&home.join("loopflow.db"), &task).is_none());
+}
+
 /// A move killed after it stopped the Graph, before it pushed: the laptop's
 /// claim names mini and the move is leaving, with the step it stopped. Status
 /// says so, and the same command carries the move on: the checkpoint is

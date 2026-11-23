@@ -12,6 +12,7 @@ use loopflow_storage::work::task::Task;
 use super::{auto, block_on_task, retirement, task_error, task_store, SharedStore};
 use crate::harness::agent_process;
 use crate::ops::OpsResult;
+use crate::store::ownership::{task_execution_route, task_pause_route, TaskRoute};
 
 pub(crate) fn admission(task: &TaskId) -> OpsResult<File> {
     lock(&format!("admit-{task}"))
@@ -27,7 +28,7 @@ pub(crate) fn cleanup_lock(task: &TaskId) -> OpsResult<File> {
     lock(&format!("pause-{task}"))
 }
 
-async fn resolve(issue: &str) -> OpsResult<(SharedStore, Task, File)> {
+async fn resolve(issue: &str, route: TaskRoute) -> OpsResult<(SharedStore, Task, File)> {
     let store = task_store().await?;
     let task = store
         .get_task_by_issue(issue)
@@ -35,10 +36,7 @@ async fn resolve(issue: &str) -> OpsResult<(SharedStore, Task, File)> {
         .map_err(task_error)?
         .ok_or_else(|| crate::ops::OpsError::TaskNotFound(issue.to_owned()))?;
     let cleanup = cleanup_lock(&task.id)?;
-    let route = store
-        .task_execution_route(&task.id)
-        .await
-        .map_err(task_error)?;
+    let route = route(&store.sqlite, &task.id).map_err(task_error)?;
     if route.machine_id != store.local_machine().await.map_err(task_error)?.id {
         return Err(task_error(format!(
             "Task {issue} runs on Machine {}",
@@ -72,7 +70,7 @@ fn draining(store: &SqliteStore, task: &TaskId) -> OpsResult<Option<String>> {
 
 pub fn pause(issue: &str) -> OpsResult<String> {
     block_on_task(async {
-        let (store, task, _cleanup) = resolve(issue).await?;
+        let (store, task, _cleanup) = resolve(issue, task_pause_route).await?;
         let sqlite = &store.sqlite;
         // Serialize cleanup and unpause independently of run admission. Runs
         // see the hold as soon as the interrupt commits, even during a stop.
@@ -184,7 +182,7 @@ pub(crate) fn before_unassign(store: &SqliteStore, task: &Task) -> OpsResult<()>
 
 pub fn unpause(issue: &str) -> OpsResult<()> {
     block_on_task(async {
-        let (store, task, _cleanup) = resolve(issue).await?;
+        let (store, task, _cleanup) = resolve(issue, task_execution_route).await?;
         if let Some(jobs) = store
             .sqlite
             .stopping_processes(&task.id)

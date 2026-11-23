@@ -1170,7 +1170,9 @@ impl Write {
     /// The Machine a Task or Session write goes to when its Work runs
     /// elsewhere, with the write naming that Work exactly. `None` runs it here.
     fn remote(&self) -> anyhow::Result<Option<Remote>> {
-        use loopflow_execution::machine::task::{remote_ownership_writer, remote_task};
+        use loopflow_execution::machine::task::{
+            remote_ownership_writer, remote_pause, remote_task,
+        };
         // A run starts agents there, which carry what `forward` names.
         let (route, launching) = match self {
             Self::SessionResume { .. } => return self.remote_session(),
@@ -1178,9 +1180,8 @@ impl Write {
                 (remote_task(issue)?, true)
             }
             Self::TaskUnpause { issue, run, .. } => (remote_task(issue)?, *run),
-            Self::TaskPause { issue, .. } | Self::TaskAutoOff { issue, .. } => {
-                (remote_task(issue)?, false)
-            }
+            Self::TaskPause { issue, .. } => (remote_pause(issue)?, false),
+            Self::TaskAutoOff { issue, .. } => (remote_task(issue)?, false),
             Self::TaskClaim { issue, .. } | Self::TaskUnassign { issue, .. } => {
                 (remote_ownership_writer(issue)?, false)
             }

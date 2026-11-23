@@ -233,6 +233,8 @@ pub(crate) fn promote_task(
     }
 }
 
+pub(crate) type TaskRoute = fn(&SqliteStore, &TaskId) -> StoreResult<TaskExecutionRoute>;
+
 pub fn task_execution_route(store: &SqliteStore, task: &TaskId) -> StoreResult<TaskExecutionRoute> {
     loop {
         let scope = store.task_scope(task)?;
@@ -251,6 +253,16 @@ pub fn task_execution_route(store: &SqliteStore, task: &TaskId) -> StoreResult<T
             });
         }
     }
+}
+
+/// A move can still carry a pause from its source until the payload is sent.
+pub fn task_pause_route(store: &SqliteStore, task: &TaskId) -> StoreResult<TaskExecutionRoute> {
+    let mut route = task_execution_route(store, task)?;
+    let here = super::machines::local_machine(store)?.id;
+    if route.machine_id != here && store.task_is_leaving(task)? {
+        route.machine_id = here;
+    }
+    Ok(route)
 }
 
 pub(crate) fn held_planning(

@@ -23,3 +23,5 @@ Both app controls send plain unpause. The Mac subscribes to the selected section
 Use a real local Git merge to exercise a draining land. Its pre-merge-commit hook can run pause while the command is inside the mutation.
 
 Leave separate-session Codex jobs outside signal authority until the spawn can identify the tool session. On 0.171.0 the live terminal exposed no OS PID. The zsh startup experiment missed an explicit sh tool. The plan records the two orphans and the provider replies.
+
+A source-side pause during a move belongs to the sender until it records the sent payload. After that, pause routes to the destination. Exercise the transfer with the private two-Machine fixture in `machine_commands.rs` and pause from the source's pre-push hook.

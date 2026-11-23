@@ -1,6 +1,7 @@
 //! Task routing and what a command or operation sent over SSH carries.
 use crate::durable::TaskExecutionRoute;
 use crate::ops::task::remote::TaskSource;
+use crate::store::ownership::{task_execution_route, task_pause_route, TaskRoute};
 use anyhow::{anyhow, Result};
 use loopflow_model::durable::TaskId;
 use loopflow_storage::sqlite::SqliteStore;
@@ -164,17 +165,29 @@ impl crate::machine::wire::Selection {
 /// The route of the Task `selector` names, when its Work lives on another
 /// Machine. Reads records only.
 pub fn remote_task(selector: &str) -> Result<Option<TaskExecutionRoute>> {
+    remote_task_via(selector, task_execution_route)
+}
+
+pub fn remote_pause(selector: &str) -> Result<Option<TaskExecutionRoute>> {
+    remote_task_via(selector, task_pause_route)
+}
+
+fn remote_task_via(selector: &str, resolve: TaskRoute) -> Result<Option<TaskExecutionRoute>> {
     let Some(store) = read_registry()? else {
         return Ok(None);
     };
-    remote_task_in(&store, selector)
+    remote_task_in(&store, selector, resolve)
 }
 
-fn remote_task_in(store: &SqliteStore, selector: &str) -> Result<Option<TaskExecutionRoute>> {
+fn remote_task_in(
+    store: &SqliteStore,
+    selector: &str,
+    resolve: TaskRoute,
+) -> Result<Option<TaskExecutionRoute>> {
     let Some(task) = resolve_task_id(store, selector, None)? else {
         return Ok(None);
     };
-    let route = crate::store::ownership::task_execution_route(store, &task)?;
+    let route = resolve(store, &task)?;
     Ok((route.machine_id != crate::store::machines::local_machine(store)?.id).then_some(route))
 }
 
@@ -186,7 +199,7 @@ pub fn remote_ownership_writer(selector: &str) -> Result<Option<TaskExecutionRou
     let Some(store) = read_registry()? else {
         return Ok(None);
     };
-    let Some(route) = remote_task_in(&store, selector)? else {
+    let Some(route) = remote_task_in(&store, selector, task_execution_route)? else {
         return Ok(None);
     };
     let Some(moving) = store.task_move_in_flight(&route.task_id)? else {

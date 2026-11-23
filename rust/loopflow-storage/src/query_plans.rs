@@ -554,8 +554,10 @@ mod tests {
             .begin_task_move_prepared(&task, &mini, &facts)
             .unwrap()
             .is_some());
-        store.record_move_sent(&task, "{}").unwrap();
         let traced = statements(&store, || {
+            assert!(store.task_is_leaving(&task).unwrap());
+            store.record_move_sent(&task, "{}").unwrap();
+            assert!(!store.task_is_leaving(&task).unwrap());
             assert!(store.task_move_in_flight(&task).unwrap().is_some());
         });
         let scans = growing_scans(&store, &traced);

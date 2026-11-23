@@ -729,10 +729,7 @@ async fn connect_async(
         .map_err(|error| OpsError::Message(error.to_string()))?
         .ok_or_else(|| OpsError::Message(format!("wave/{wave} has no Project")))?;
     let project_id = project.tracker_id.map(|id| id.as_str().to_owned());
-    // A Project Loopflow made in Linear carries the Wave Project's own id.
-    let created = project_id
-        .as_deref()
-        .is_some_and(|id| id.replace('-', "") == own.as_str().trim_start_matches("proj_"));
+    let created = project_id.as_deref().is_some_and(|id| own.made_as(id));
     Ok(LinearInitResult {
         wave,
         project_id,

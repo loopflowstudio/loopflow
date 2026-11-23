@@ -503,9 +503,7 @@ fn project_accepted_planning(
                         [own.as_str()],
                         |row| Ok((row.get(0)?, row.get(1)?)),
                     )?;
-                let carries_own_id =
-                    own.as_str().trim_start_matches("proj_") == external.replace('-', "");
-                if linked || (creating && !carries_own_id) {
+                if linked || (creating && !own.made_as(&external)) {
                     continue;
                 }
                 own

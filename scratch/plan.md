@@ -5,10 +5,14 @@
 ## Done when
 
 The terminal opens directly below the provider and status strip for fresh,
-resumed, forked and reattached Sessions. Before the terminal mounts, the
-opening placeholder shows a quiet spinner over any retained output. VoiceOver
-labels it “Opening session.” The mounted terminal draws in place while input
-and focus restoration wait for attachment and native readiness.
+resumed, forked and reattached Sessions. One spinner shows at a time: an empty
+pane delays briefly (~180 ms) and shows a centered regular-size spinner
+(VoiceOver label “Opening session”) while the strip keeps its Refresh icon; over
+a retained screen during refresh (or while a mounted terminal finishes
+connecting), the pane body stays clear of overlays (retained text lightly
+dimmed) and the pane strip’s Refresh slot shows a quiet spinner until the pane
+is usable. Input and focus restoration still wait for attachment and native
+readiness.
 
 Only reconnecting, unavailable and ended Sessions show a connection bar.
 **Retry connection** asks a reachable relay to reconnect. **Refresh session**

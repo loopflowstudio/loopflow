@@ -314,12 +314,39 @@ struct WorkspacePanesTests {
         #expect(throws: (any Error).self) { try view.inspect().find(text: header) }
     }
 
-    @Test func openingSessionShowsProgressOverItsRetainedScreen() throws {
-        let view = SessionOpeningView(screen: "Last terminal line")
-        _ = try view.inspect().find(text: "Last terminal line")
+    @Test func openingSessionShowsCenteredSpinnerWhenEmpty() throws {
+        let delayed = SessionOpeningView(screen: nil)
+        #expect(throws: (any Error).self) { try delayed.inspect().find(ViewType.ProgressView.self) }
+
+        let view = SessionOpeningView(screen: nil, spinnerDelay: .zero)
         let spinner = try view.inspect().find(ViewType.ProgressView.self)
         #expect(try spinner.accessibilityLabel().string() == "Opening session")
         #expect(throws: (any Error).self) { try view.inspect().find(text: "Opening… Input paused.") }
+    }
+
+    @Test func openingSessionKeepsRetainedScreenClearOfSpinner() throws {
+        let view = SessionOpeningView(screen: "Last terminal line", spinnerDelay: .zero)
+        _ = try view.inspect().find(text: "Last terminal line")
+        #expect(throws: (any Error).self) { try view.inspect().find(ViewType.ProgressView.self) }
+        #expect(throws: (any Error).self) { try view.inspect().find(text: "Opening… Input paused.") }
+    }
+
+    @Test func openingSessionShowsOneSpinnerAtATime() throws {
+        let (workspace, view) = taskPanes()
+        let record = try session("primary", ["provider": "claude"])
+        view.sessions.reconcile([record])
+        workspace.multiplexer.load(sessionId: record.id, location: location)
+        workspace.conversationRequest = UUID()
+        // Empty pane: centered placeholder owns the spinner, strip keeps its Refresh icon.
+        let emptyRefresh = try view.inspect().find(viewWithAccessibilityIdentifier: "pane-refresh-session")
+        #expect(throws: (any Error).self) { try emptyRefresh.find(ViewType.ProgressView.self) }
+
+        // Retained scrollback: placeholder stays clear, strip takes the spinner.
+        let terminal = try #require(workspace.multiplexer.focusedPane.terminal)
+        view.sessions.noteSurfaceClosed(terminal, output: "Previous output")
+        _ = view.sessions.release(record.id)
+        let retainedRefresh = try view.inspect().find(viewWithAccessibilityIdentifier: "pane-refresh-session")
+        _ = try retainedRefresh.find(ViewType.ProgressView.self)
     }
 
     @Test("Every Task pane hides on hover and the header's Show… restores it")

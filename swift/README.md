@@ -220,9 +220,11 @@ Selecting one shows its opening progress, the live conversation, or a failure
 with **Retry**. Desktop prepares two conversations at a time, starting with the
 selected Work, then visible tiles, the repository and Waves, and recent working
 Tasks. The window renders while they open.
-While Desktop prepares a conversation, the pane shows a spinner over any retained
-screen. A prepared conversation starts its provider immediately. Selecting the
-Work shows the terminal directly below the provider and status strip.
+While Desktop prepares a conversation, an empty pane delays briefly before
+showing a centered spinner; refreshing over a retained screen keeps the text
+clear and shows progress in the pane strip's Refresh slot. A prepared
+conversation starts its provider immediately. Selecting the Work shows the
+terminal directly below the provider and status strip.
 
 Recent unfinished Tasks stay warm for immediate return: Desktop retains sixteen, plus
 any additional panes on screen; a Task admitted from a Dashboard tile stays warm after

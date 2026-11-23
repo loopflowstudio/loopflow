@@ -228,10 +228,12 @@ New Sessions take their title from the request, Skill, or Task (a name you set
 is never overwritten by `--suggest`). Titles propagate via OSC terminal titles
 and host-specific tabs (cmux, tmux).
 
-When you open a Task, Desktop shows a spinner over any saved screen. The
-terminal opens directly below the provider and status strip. You can type once
-the terminal is attached and the provider is ready. After a Desktop restart,
-selecting the Task reattaches to its running provider with your draft intact.
+When you open a Task, an empty pane shows a centered spinner after a short delay
+so fast opens don't flash; refreshing over saved output keeps the scrollback
+clear and shows progress in the pane strip. The terminal opens directly below
+the provider and status strip. You can type once the terminal is attached and
+the provider is ready. After a Desktop restart, selecting the Task reattaches to
+its running provider with your draft intact.
 
 If the connection drops, the last screen stays visible. The message over the
 terminal tells you how to continue.

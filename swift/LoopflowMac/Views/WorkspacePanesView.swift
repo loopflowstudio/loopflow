@@ -115,25 +115,47 @@ struct ConversationPlaceholder: View {
 }
 
 /// Opening keeps available history readable until the terminal takes its place.
+/// An empty pane delays its centered spinner briefly so fast opens never flash;
+/// retained output stays clear of overlays while the pane strip shows progress.
 struct SessionOpeningView: View {
     let screen: String?
+    var spinnerDelay: Duration = .milliseconds(180)
     @Environment(\.palette) private var palette
+    @State private var showsSpinner: Bool
+
+    init(screen: String?, spinnerDelay: Duration = .milliseconds(180)) {
+        self.screen = screen
+        self.spinnerDelay = spinnerDelay
+        _showsSpinner = State(initialValue: spinnerDelay <= .zero)
+    }
 
     var body: some View {
-        ZStack(alignment: .topLeading) {
+        Group {
             if let screen {
                 ScrollView {
                     Text(screen).font(Typography.mono)
                         .foregroundStyle(palette.text)
+                        .opacity(0.6)
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            } else {
+                ZStack {
+                    if showsSpinner {
+                        ProgressView()
+                            .accessibilityLabel("Opening session")
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .task(id: spinnerDelay) {
+                    guard !showsSpinner else { return }
+                    try? await Task.sleep(for: spinnerDelay)
+                    guard !Task.isCancelled else { return }
+                    showsSpinner = true
+                }
             }
-            ProgressView()
-                .accessibilityLabel("Opening session")
-                .controlSize(.small).padding(Spacing.sm).background(palette.background)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 }
 
@@ -335,6 +357,20 @@ struct SessionPaneView: View {
 
     private var showsStrip: Bool { item != nil || (store.visibleLayout?.allPanes.count ?? 0) > 1 }
 
+    /// Show progress in the Refresh slot only when the pane already has content
+    /// (retained scrollback or a mounted terminal), so an empty pane never shows two spinners.
+    private var showsStripSpinner: Bool {
+        guard let item else { return false }
+        let hasPaneContent = item.surface != nil || item.lastScreen != nil
+        if changingSession { return hasPaneContent }
+        switch item.state {
+        case .opening: return item.lastScreen != nil
+        case .prepared: return sessions.attachment(item.id) == .opening
+        case .pending: return model.conversationIsOpening(workspace) && item.lastScreen != nil
+        case .live, .failed, .ended: return false
+        }
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             if showsStrip {
@@ -408,9 +444,7 @@ struct SessionPaneView: View {
             .help("Choose this Session's agent or open a companion pane\n\(programHeading.detail)")
             .accessibilityIdentifier("pane-program-\(pane.id)")
             if let item {
-                stripButton("arrow.clockwise", label: "Refresh session", id: "pane-refresh-session",
-                    help: "Reconnect this pane to the existing conversation.",
-                    disabled: changingSession) {
+                Button {
                     workspace.visit()
                     changingSession = true
                     Perf.userAction(.reconnect, scenario: "refresh_to_typing", id: item.id,
@@ -423,7 +457,26 @@ struct SessionPaneView: View {
                             Perf.reconnected(id: item.id, owner: workspace.performanceOwner)
                         }
                     }
+                } label: {
+                    Group {
+                        if showsStripSpinner {
+                            ProgressView()
+                                .controlSize(.mini)
+                                .accessibilityLabel("Opening session")
+                        } else {
+                            Image(systemName: "arrow.clockwise")
+                                .font(Typography.meta)
+                                .foregroundStyle(theme.palette.textSecondary)
+                        }
+                    }
+                    .frame(width: 22, height: 20)
+                    .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
+                .disabled(changingSession)
+                .help("Reconnect this pane to the existing conversation.")
+                .accessibilityLabel(showsStripSpinner ? "Opening session" : "Refresh session")
+                .accessibilityIdentifier("pane-refresh-session")
             }
             if let session = primarySession {
                 stripButton("plus.bubble", label: "Reset session", id: "pane-reset-session",

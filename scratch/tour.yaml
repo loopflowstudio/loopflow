@@ -1,0 +1,17 @@
+at: c2e606e2d9ece31f2af8a482abd7535d280bc31f
+first:
+  - path: docs/ops.md
+    why: Modal sizing, quote and return receipt
+  - path: rust/loopflow-storage/src/rental.rs
+    why: Admission prices the limits and records the sizing mode
+  - path: rust/loopflow-storage/src/sqlite/rentals.rs
+    why: Stored terms distinguish historical costs from ceiling estimates
+  - path: rust/loopflow/src/lf/commands/rental.rs
+    why: Configure, quote and list rentals
+  - path: rust/loopflow-execution/src/rental/sandbox.py
+    why: Modal receives CPU, memory and time limits
+  - path: rust/loopflow-storage/src/sqlite/rentals_tests.rs
+    why: Historical records and capped admissions
+  - path: python/tests/test_rental_bridge.py
+    why: Check both SDK requests and an expired deadline
+hide: []

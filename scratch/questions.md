@@ -19,6 +19,8 @@
 - Font registration takes its inventory from the packaged TrueType files,
   with the Fonts directory taking precedence over the bundle root.
 
+- A pinned selection read shares Task details across all its plans. Retained tiles without current Work keep their unavailable explanation.
+
 ## Open threads (not in B1)
 
 - Sorting by Graph step (`B2` in `explore.html`).

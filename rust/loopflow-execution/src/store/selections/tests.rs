@@ -406,6 +406,45 @@ fn sidebar_step_follows_the_captured_cursor_and_disappears_without_a_graph() {
 }
 
 #[test]
+fn repository_and_wave_tiles_open_only_the_unfinished_primary() {
+    let (_dir, store, repo) = fixture();
+    let session = store.test_session("conversation", &crate::session_record::new_artifact_key());
+    let db = || store.conn.lock().unwrap();
+    db().execute(
+        "INSERT INTO task_primary_sessions(task_id,session_id)
+        SELECT id,?1 FROM tasks WHERE issue_identifier='FIX-2'",
+        [&session.id],
+    )
+    .unwrap();
+
+    let check = |primary: Option<&str>| {
+        let tiles: Vec<_> = selections::selection_plans(&store, &repo)
+            .unwrap()
+            .into_iter()
+            .flat_map(|plan| plan.contents)
+            .filter(|content| content.identifier.as_deref() == Some("FIX-2"))
+            .collect();
+        assert_eq!(tiles.len(), 2);
+        for tile in tiles {
+            assert_eq!(tile.title, "Idle");
+            assert_eq!(tile.location.unwrap().cwd, "/repo/fix-2");
+            assert_eq!(tile.primary_session.as_deref(), primary);
+            assert_eq!(
+                tile.argv.and_then(|args| args.last().cloned()).as_deref(),
+                primary
+            );
+        }
+    };
+    check(Some("conversation"));
+    db().execute(
+        "UPDATE agent_sessions SET completed_at=2 WHERE id=?1",
+        [&session.id],
+    )
+    .unwrap();
+    check(None);
+}
+
+#[test]
 fn a_wave_scoped_reading_skips_repositories_without_that_wave() {
     let (_dir, store, _repo) = fixture();
     store

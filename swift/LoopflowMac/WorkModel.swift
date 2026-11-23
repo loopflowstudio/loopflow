@@ -2233,9 +2233,11 @@ final class WorkModel {
     func taskPresentation(id: String, repository: String? = nil) -> TaskPresentation {
         let records = taskRecords(id: id)
         let workID = records.first.map { $0.task.runtime?.workId ?? $0.task.id } ?? id
-        var candidates = records.map {
+        let candidates = records.map {
             TaskPresentation(title: $0.task.task.name, identifier: $0.task.task.identifier, context: $0.context)
         }
+        if let current = candidates.first(where: { $0.context == nil }) { return current }
+        var retained = candidates.first
         let sources = [
             (plans: taskListReading.value.map { [$0] } ?? [], error: taskListReading.failure),
             (plans: selectionPlans.value ?? [], error: selectionPlans.failure),
@@ -2251,12 +2253,13 @@ final class WorkModel {
             if let member = contents.first(where: {
                 $0.title != $0.work.id && !$0.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             }) {
-                candidates.append(TaskPresentation(title: member.title, identifier: member.identifier,
-                    context: source.error != nil ? "Last known" : nil))
+                let candidate = TaskPresentation(title: member.title, identifier: member.identifier,
+                    context: source.error != nil ? "Last known" : nil)
+                if candidate.context == nil { return candidate }
+                if retained == nil { retained = candidate }
             }
         }
-        // Prefer current identity in source order before falling back to retained identity.
-        if let chosen = candidates.first(where: { $0.context == nil }) ?? candidates.first { return chosen }
+        if let retained { return retained }
         let failed = roadmap.failure != nil || taskListReading.failure != nil
             || selectionPlans.failure != nil || missingFacts
         if let repository = repository ?? workspaceRepository, let retained = workspaceRegistry?.retained(.init(repository: repository, kind: .task, id: workID)),
@@ -2307,8 +2310,8 @@ final class WorkModel {
     func isSelected(_ reference: WorkReference) -> Bool {
         if selection == reference { return true }
         guard let selection, selection.kind == .task, reference.kind == .task else { return false }
-        return task(id: selection.id)?.task.id == task(id: reference.id)?.task.id
-            && task(id: selection.id) != nil
+        guard let selected = task(id: selection.id) else { return false }
+        return selected.task.id == task(id: reference.id)?.task.id
     }
 
     private func select(_ requested: WorkReference?, preservingOpening: Bool, recordingHistory: Bool = true) {
@@ -3602,15 +3605,29 @@ extension WorkModel {
             navigation.notices.post(Notice(PendingChanges.awayText))
             return Task {}
         }
-        let scope = repositoryReadingKey(repoPath)
         let repository = taskListReading.value?.repository ?? selectionPlans.value?.first?.repository ?? repoPath
-        let write = pendingChanges.make(.sortWorkingTasks(machine: scope.machineId, repository: repository),
-            subject: "Working Tasks", verb: "sorted", write: .desktopSort(directory: repoPath),
-            notices: navigation.notices, show: nil) { [self] in
+        return editWorkingOrder(.sortWorkingTasks(machine: observingMachineId, repository: repository),
+            subject: "Working Tasks", verb: "sorted", write: .desktopSort(directory: repoPath))
+    }
+
+    /// Both drop surfaces place the Task on the side chosen in the displayed order.
+    @discardableResult
+    func reorderWorkingTask(_ member: WorkWorkspaceKey, to target: String, side: DropSide?) -> Task<Void, Never> {
+        guard member.id != target, let repoPath else { return Task {} }
+        return editWorkingOrder(.reorder(machine: observingMachineId, member: member, target: target, side: side),
+            subject: taskPresentation(id: member.id).identifier ?? member.id, verb: "reordered",
+            write: .desktopDashboardMove(directory: repoPath, board: "working-tasks", member: member.selector,
+                                         destination: "task:" + target, side: side))
+    }
+
+    private func editWorkingOrder(_ command: PendingCommand, subject: String, verb: String, write: ServedWrite) -> Task<Void, Never> {
+        let scope = repositoryReadingKey(write.cwd)
+        let task = pendingChanges.make(command, subject: subject, verb: verb, write: write,
+                                       notices: navigation.notices, show: nil) { [self] in
             try await refreshWorkingOrder(in: scope)
         }
         presentSelectionPlans()
-        return write
+        return task
     }
 
     private func refreshWorkingOrder(in scope: RepositoryReadingKey) async throws {
@@ -3623,22 +3640,6 @@ extension WorkModel {
             if taskListReading.value != nil { await refreshTaskList() }
             try await grid
         }
-    }
-
-    /// Both drop surfaces place the Task on the side chosen in the displayed order.
-    @discardableResult
-    func reorderWorkingTask(_ member: WorkWorkspaceKey, to target: String, side: DropSide?) -> Task<Void, Never> {
-        guard member.id != target, let repoPath else { return Task {} }
-        let scope = repositoryReadingKey(repoPath)
-        let move = PendingCommand.reorder(machine: scope.machineId, member: member, target: target, side: side)
-        let write = pendingChanges.make(move, subject: taskPresentation(id: member.id).identifier ?? member.id, verb: "reordered",
-            write: .desktopDashboardMove(directory: repoPath, board: "working-tasks", member: member.selector,
-                                         destination: "task:" + target, side: side),
-            notices: navigation.notices, show: nil) { [self] in
-            try await refreshWorkingOrder(in: scope)
-        }
-        presentSelectionPlans()
-        return write
     }
 
     private func refreshDashboard(_ id: String, repoPath: String) async throws {

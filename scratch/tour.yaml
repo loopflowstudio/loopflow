@@ -1,41 +1,39 @@
-at: ecf3ac66eb0041a0f05285eb6c27f4be41af0a3f
+at: 12f2df83e8b2fd37052b002a2f91ecad0e920c47
 first:
   - path: docs/surfaces.md
-    why: Follow a sidebar Task through prompts, sorts and drops.
+    why: Follow a Working Task through a prompt and drop.
   - path: rust/loopflow-storage/src/work/selection.rs
-    why: Read activity flags, attention membership and drop placement.
+    why: Defines membership, row fields and drop placement.
   - path: rust/loopflow-storage/src/sqlite/selections.rs
-    why: Resolve row steps and sort Working Tasks by status.
-  - path: swift/Loopflow/Design/TaskRow.swift
-    why: See which status a phone row displays.
-  - path: swift/LoopflowiOS/TaskListView.swift
-    why: Show the current Graph step on phone rows.
+    why: Orders Tasks and fills their tiles across plans.
   - path: rust/loopflow-execution/src/store/selections.rs
-    why: Retry an edit against the latest saved order.
+    why: Acquires snapshots and retries competing order writes.
   - path: rust/loopflow/src/lf/commands/desktop.rs
-    why: Follow CLI and served writes to one editor.
+    why: Routes CLI and served edits to storage.
   - path: swift/LoopflowMac/WorkModel.swift
-    why: Trace membership, shortcuts and previews across both surfaces.
-  - path: swift/LoopflowMac/Views/WorkNavigator.swift
-    why: See the Graph step and status sort button.
+    why: Submits sorts and drags, then refreshes both lists.
   - path: swift/Loopflow/Services/PendingChanges.swift
-    why: Follow drags and sorts through retries and refusal.
+    why: Keeps drag previews and writes in click order.
+  - path: swift/LoopflowMac/Views/WorkNavigator.swift
+    why: Displays Graph steps and the status sort.
+  - path: swift/LoopflowiOS/TaskListView.swift
+    why: Displays the same steps on the phone.
   - path: rust/loopflow-storage/src/sqlite/sessions.rs
-    why: Read a finished interactive turn as available.
+    why: Determines when a finished turn becomes available.
   - path: rust/loopflow-execution/src/transport/hosted.rs
-    why: See how typing dismisses a finished report.
+    why: Clears finished reports when typing resumes.
   - path: scripts/app_bundle.py
-    why: Package SwiftPM fonts with every Desktop build.
+    why: Packages SwiftPM resources with Desktop.
   - path: swift/Loopflow/AppBootstrap.swift
-    why: Register and resolve the packaged faces.
+    why: Finds and registers bundled fonts.
+  - path: rust/loopflow-execution/src/store/selections/tests.rs
+    why: Checks shared tile fields across repository and Wave.
   - path: rust/loopflow/src/lf/commands/waves.rs
-    why: Check mixed reports through filters and status sorts.
+    why: Checks roadmap order against Desktop and phone.
   - path: rust/loopflow/tests/served_reads.rs
-    why: Drop from competing clients on a private Machine.
+    why: Exercises drops from competing clients.
   - path: swift/LoopflowTests/PendingChangesTests.swift
-    why: Watch a sort supersede an earlier drag.
-  - path: swift/LoopflowTests/DashboardWorkspaceTests.swift
-    why: Exercise the sort from the command palette.
+    why: Exercises retries and refused writes.
 hide:
   - path: tests/fixtures/dto/server_schema.json
     why: Generated from the Rust protocol.

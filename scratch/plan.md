@@ -103,6 +103,13 @@ Recorded in [concept-review.html](concept-review.html#questions):
   button, ⌘K sort, grid drag, ⌘1–9, ⌃Tab, live OSC 7501 `done` pane, iOS
   Simulator feed) remains for gate.
 
+## Compression checks
+
+- `cargo fmt --all --check` and `cargo clippy --all-targets -- -D warnings` passed.
+- `cargo test -p loopflow-execution --lib store::selections::tests::` passed 25 tests, including repository and Wave tiles before and after their primary Session closes.
+- `scripts/test_desktop.sh --skip-build --filter 'statusSortSupersedes|refusedStatusSort|sortRetriesAfter|sortIsDisabled|sortByStatusUpdates|refusedWorkingTaskDrop|workingTaskDropAcrossReceipt|TaskPlanningReadabilityTests|sidebarAndGridShareTheOrder'` passed 21 tests after a Swift test build.
+- `EXPLAIN QUERY PLAN` on a private 10,011-Task store with 1,000 seeded Graph rows showed indexed lookups for Tasks, primary Sessions, checkouts, Graphs and the local Machine. The batch returned all 300 selected rows.
+
 ## Docs
 
 - `docs/surfaces.md`

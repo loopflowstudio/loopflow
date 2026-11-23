@@ -7,10 +7,12 @@ use crate::execution::{TaskSection, TaskState};
 use crate::work::selection::{
     move_into_place, Arrangement, Dashboard, DashboardId, DashboardReading, DropSide, Selection,
     SelectionError, SelectionExpression, SelectionId, SelectionResolution, SelectionState,
-    SelectionWork, SlotLayout, ViewPlan, WorkWorkspaceKey, WorkWorkspaceKind,
+    SelectionWork, SlotLayout, ViewContent, ViewLocation, ViewPlan, WorkWorkspaceKey,
+    WorkWorkspaceKind,
 };
 use crate::{StoreError, StoreResult};
-use loopflow_model::durable::RepositoryId;
+use loopflow_model::durable::{MachineId, RepositoryId};
+use loopflow_model::id::LfSessionId;
 use loopflow_model::program_status::State;
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use std::cmp::Reverse;
@@ -447,161 +449,178 @@ fn definitions(catalog: &[Dashboard]) -> BTreeMap<DashboardId, Selection> {
 /// Selection IDs of the built-in plan behind each Wave view.
 pub const WAVE_DEFAULT_PREFIX: &str = "wave-default:";
 
-fn plan_in(
-    conn: &Connection,
-    repository: &RepositoryId,
-    selection: Selection,
-    saved: Option<&Dashboard>,
-    queries: &BTreeMap<DashboardId, Selection>,
-    work: &[SelectionWork],
-) -> StoreResult<ViewPlan> {
-    use crate::work::selection::{ViewContent, ViewLocation};
-    let resolution = selection
-        .resolve(repository.as_str(), work, queries)
-        .map_err(StoreError::from)?;
-    let mut arrangement = saved.map_or_else(
-        || Arrangement::automatic(&[]),
-        |saved| saved.arrangement.clone(),
-    );
-    arrangement.reconcile(&resolution);
-    let selected: BTreeSet<_> = arrangement
-        .order
-        .iter()
-        .map(|member| member.work.clone())
-        .collect();
-    let mut contents = Vec::new();
-    for key in selected {
-        let facts = work.iter().find(|item| item.key == key);
-        let mut content = ViewContent {
-            work: key.clone(),
-            title: facts.map_or_else(|| key.id.clone(), |item| item.name.clone()),
-            states: facts.map_or_else(BTreeSet::new, |item| item.states.clone()),
-            identifier: None,
-            graph_step: None,
-            primary_session: None,
-            location: None,
-            argv: None,
-            unavailable: Vec::new(),
-        };
-        if facts.is_none() {
-            content
-                .unavailable
-                .push("Work is unavailable; retained intent only".into());
-        } else if key.kind == WorkWorkspaceKind::Task {
-            let task_id = loopflow_model::durable::TaskId::parse(&key.id).map_err(invalid)?;
-            let task = super::children::task_on(conn, &task_id)?.ok_or(StoreError::NotFound)?;
-            content.identifier = Some(task.identifier);
-            content.title = task.title;
-            let primary = super::sessions::primary_session_in(
-                conn,
-                &crate::session::PrimaryScope::Task(task_id.clone()),
-            )?;
-            content.primary_session = primary.as_ref().map(|session| session.id.to_string());
-            if primary.is_none() {
-                content
-                    .unavailable
-                    .push("No primary Session is recorded".into());
-            }
-            if let Some(checkout) = super::children::task_checkout_in(conn, &task_id)? {
-                content.location = Some(ViewLocation {
-                    machine_id: super::durable::map_local_machine(conn)?.id.to_string(),
-                    cwd: checkout.worktree.display().to_string(),
-                });
-            }
-            if content.location.is_none() {
-                content
-                    .unavailable
-                    .push("Recorded execution location is unavailable".into());
-            }
-        }
-        contents.push(content);
+/// The built-in and saved views of one repository share these selection facts.
+struct RepositoryViews<'a> {
+    repository: &'a RepositoryId,
+    path: String,
+    work: &'a [SelectionWork],
+    by_key: HashMap<&'a WorkWorkspaceKey, &'a SelectionWork>,
+    catalog: Vec<Dashboard>,
+    queries: BTreeMap<DashboardId, Selection>,
+}
+
+impl<'a> RepositoryViews<'a> {
+    fn read(
+        conn: &Connection,
+        repository: &'a RepositoryId,
+        work: &'a [SelectionWork],
+    ) -> StoreResult<Self> {
+        let catalog = catalog_in(conn, repository)?;
+        Ok(Self {
+            repository,
+            path: repository_path_in(conn, repository)?,
+            work,
+            by_key: work.iter().map(|item| (&item.key, item)).collect(),
+            queries: definitions(&catalog),
+            catalog,
+        })
     }
-    // A Wave view's built-in plan fills its footer strip, the repository's included
-    // (the repository page is its default Wave); saved and unsaved queries start golden.
-    let default_slots = if selection.id.0.starts_with(WAVE_DEFAULT_PREFIX)
-        || selection.id == repository_default().id
-    {
-        SlotLayout::strip(3)
-    } else {
-        SlotLayout::golden()
-    };
-    Ok(ViewPlan {
-        name: saved.and_then(|saved| saved.name.clone()),
-        pinned: saved.is_some_and(|saved| saved.pinned),
-        dashboard_id: saved.map(|saved| saved.id.clone()),
-        repository: repository.to_string(),
-        repo_path: repository_path_in(conn, repository)?,
-        selection,
-        saved_revision: saved.map(|saved| saved.revision),
-        resolution,
-        projection: arrangement.project(),
-        arrangement,
-        slots: saved
-            .and_then(|saved| saved.slots.clone())
-            .unwrap_or(default_slots),
-        contents,
-        // The application resolves the claimant: it reads Git, not the store.
-        viewer: None,
-    })
+
+    fn selected(&self, selection: Selection) -> StoreResult<ViewPlan> {
+        let saved = selection
+            .referenced_query()
+            .and_then(|id| self.catalog.iter().find(|saved| &saved.id == id));
+        self.plan(
+            saved.map_or(selection, |saved| saved.selection.clone()),
+            saved,
+        )
+    }
+
+    fn plan(&self, selection: Selection, saved: Option<&Dashboard>) -> StoreResult<ViewPlan> {
+        let resolution = selection
+            .resolve(self.repository.as_str(), self.work, &self.queries)
+            .map_err(StoreError::from)?;
+        let mut arrangement = saved.map_or_else(
+            || Arrangement::automatic(&[]),
+            |saved| saved.arrangement.clone(),
+        );
+        arrangement.reconcile(&resolution);
+        let selected: BTreeSet<_> = arrangement
+            .order
+            .iter()
+            .map(|member| member.work.clone())
+            .collect();
+        let contents = selected
+            .into_iter()
+            .map(|key| {
+                let facts = self.by_key.get(&key);
+                ViewContent {
+                    identifier: facts
+                        .filter(|_| key.kind == WorkWorkspaceKind::Task)
+                        .map(|item| item.name.clone()),
+                    title: facts.map_or_else(|| key.id.clone(), |item| item.name.clone()),
+                    states: facts.map_or_else(BTreeSet::new, |item| item.states.clone()),
+                    work: key,
+                    graph_step: None,
+                    primary_session: None,
+                    location: None,
+                    argv: None,
+                    unavailable: if facts.is_some() {
+                        Vec::new()
+                    } else {
+                        vec!["Work is unavailable; retained intent only".into()]
+                    },
+                }
+            })
+            .collect();
+        // A Wave view's built-in plan fills its footer strip, the repository's included
+        // (the repository page is its default Wave); saved and unsaved queries start golden.
+        let default_slots = if selection.id.0.starts_with(WAVE_DEFAULT_PREFIX)
+            || selection.id == repository_default().id
+        {
+            SlotLayout::strip(3)
+        } else {
+            SlotLayout::golden()
+        };
+        Ok(ViewPlan {
+            name: saved.and_then(|saved| saved.name.clone()),
+            pinned: saved.is_some_and(|saved| saved.pinned),
+            dashboard_id: saved.map(|saved| saved.id.clone()),
+            repository: self.repository.to_string(),
+            repo_path: self.path.clone(),
+            selection,
+            saved_revision: saved.map(|saved| saved.revision),
+            resolution,
+            projection: arrangement.project(),
+            arrangement,
+            slots: saved
+                .and_then(|saved| saved.slots.clone())
+                .unwrap_or(default_slots),
+            contents,
+            // The application resolves the claimant: it reads Git, not the store.
+            viewer: None,
+        })
+    }
 }
 
 /// Resolve the captured cursor in execution, where the Graph's step names live.
 type RunningStep = fn(&str, &str) -> StoreResult<Option<String>>;
 
-fn fill_graph_steps_in(
+fn fill_task_contents_in(
     conn: &Connection,
     plans: &mut [ViewPlan],
     running_step: RunningStep,
 ) -> StoreResult<()> {
-    let tasks: BTreeSet<_> = plans
-        .iter()
-        .flat_map(|plan| &plan.contents)
-        .filter(|content| {
-            content.work.kind == WorkWorkspaceKind::Task && content.identifier.is_some()
-        })
-        .map(|content| content.work.id.as_str())
-        .collect();
-    let mut query = conn.prepare(
-        "SELECT task_id,step,CASE WHEN run_start IS NOT NULL THEN graph END,run_start
-         FROM task_graphs WHERE task_id IN (SELECT value FROM json_each(?1))",
-    )?;
-    let mut rows = query.query([super::children::ids_json(tasks)])?;
-    let mut steps = HashMap::<String, String>::new();
-    while let Some(row) = rows.next()? {
-        let parked: String = row.get(1)?;
-        let parked = (!matches!(parked.as_str(), START | END)).then_some(parked);
-        let step = match row.get::<_, Option<String>>(3)? {
-            Some(cursor) => running_step(&row.get::<_, String>(2)?, &cursor)?.or(parked),
-            None => parked,
-        };
-        if let Some(step) = step {
-            steps.insert(row.get(0)?, step);
+    // A Task may appear in several plans. One row supplies all of its tiles.
+    let mut tasks = HashMap::<String, Vec<&mut ViewContent>>::new();
+    for content in plans.iter_mut().flat_map(|plan| &mut plan.contents) {
+        if content.identifier.is_some() {
+            tasks
+                .entry(content.work.id.clone())
+                .or_default()
+                .push(content);
         }
     }
-    for content in plans.iter_mut().flat_map(|plan| &mut plan.contents) {
-        content.graph_step = steps.get(&content.work.id).cloned();
+    let mut query = conn.prepare(
+        "SELECT t.id,t.issue_title,s.id,c.worktree,(SELECT id FROM machines WHERE is_local=1),
+                g.step,g.run_start,CASE WHEN g.run_start IS NOT NULL THEN g.graph END
+         FROM tasks t
+         LEFT JOIN task_primary_sessions p ON p.task_id=t.id
+         LEFT JOIN agent_sessions s ON s.id=p.session_id AND s.completed_at IS NULL
+         LEFT JOIN task_checkouts c ON c.task_id=t.id
+         LEFT JOIN task_graphs g ON g.task_id=t.id
+         WHERE t.id IN (SELECT value FROM json_each(?1))",
+    )?;
+    let mut rows = query.query([super::children::ids_json(tasks.keys().map(String::as_str))])?;
+    while let Some(row) = rows.next()? {
+        let id: String = row.get(0)?;
+        let title: String = row.get(1)?;
+        let primary = row.get::<_, Option<LfSessionId>>(2)?.map(String::from);
+        let location = match row.get(3)? {
+            Some(cwd) => Some(ViewLocation {
+                cwd,
+                machine_id: MachineId::from_raw(row.get::<_, String>(4)?).to_string(),
+            }),
+            None => None,
+        };
+        let parked = row
+            .get::<_, Option<String>>(5)?
+            .filter(|step| !matches!(step.as_str(), START | END));
+        let step = match row.get::<_, Option<String>>(6)? {
+            Some(cursor) => running_step(&row.get::<_, String>(7)?, &cursor)?.or(parked),
+            None => parked,
+        };
+        for content in tasks
+            .remove(&id)
+            .expect("query selects only the requested Tasks")
+        {
+            content.title.clone_from(&title);
+            content.graph_step.clone_from(&step);
+            content.primary_session.clone_from(&primary);
+            content.location.clone_from(&location);
+            if primary.is_none() {
+                content
+                    .unavailable
+                    .push("No primary Session is recorded".into());
+            }
+            if location.is_none() {
+                content
+                    .unavailable
+                    .push("Recorded execution location is unavailable".into());
+            }
+        }
     }
     Ok(())
-}
-
-fn plan_selection_in(
-    conn: &Connection,
-    repository: &RepositoryId,
-    selection: Selection,
-    work: &[SelectionWork],
-) -> StoreResult<ViewPlan> {
-    let catalog = catalog_in(conn, repository)?;
-    let saved = selection
-        .referenced_query()
-        .and_then(|id| catalog.iter().find(|saved| &saved.id == id));
-    plan_in(
-        conn,
-        repository,
-        saved.map_or(selection, |saved| saved.selection.clone()),
-        saved,
-        &definitions(&catalog),
-        work,
-    )
 }
 
 #[derive(Debug)]
@@ -635,8 +654,8 @@ impl SqliteStore {
             return Ok(None);
         };
         let work = work_in(&snapshot, repository, projection)?;
-        let mut plan = plan_selection_in(&snapshot, repository, selection, &work)?;
-        fill_graph_steps_in(&snapshot, std::slice::from_mut(&mut plan), running_step)?;
+        let mut plan = RepositoryViews::read(&snapshot, repository, &work)?.selected(selection)?;
+        fill_task_contents_in(&snapshot, std::slice::from_mut(&mut plan), running_step)?;
         Ok(Some(plan))
     }
 
@@ -674,15 +693,13 @@ impl SqliteStore {
                 {
                     continue;
                 }
-                plans.push(plan_selection_in(
-                    &snapshot,
-                    &repository,
-                    selection.clone(),
-                    &work,
-                )?);
+                plans.push(
+                    RepositoryViews::read(&snapshot, &repository, &work)?
+                        .selected(selection.clone())?,
+                );
             }
         }
-        fill_graph_steps_in(&snapshot, &mut plans, running_step)?;
+        fill_task_contents_in(&snapshot, &mut plans, running_step)?;
         Ok(Some(plans))
     }
 
@@ -698,49 +715,25 @@ impl SqliteStore {
         let Some(snapshot) = inputs.pin(&mut conn)? else {
             return Ok(None);
         };
-        let catalog = catalog_in(&snapshot, repository)?;
-        let queries = definitions(&catalog);
         let work = work_in(&snapshot, repository, projection)?;
-        let mut plans = vec![plan_in(
-            &snapshot,
-            repository,
-            repository_default(),
-            None,
-            &queries,
-            &work,
-        )?];
+        let views = RepositoryViews::read(&snapshot, repository, &work)?;
+        let mut plans = vec![views.plan(repository_default(), None)?];
         for wave in work
             .iter()
             .filter(|item| item.key.kind == WorkWorkspaceKind::Wave)
         {
-            plans.push(plan_in(
-                &snapshot,
-                repository,
-                Selection {
-                    id: crate::work::selection::SelectionId(format!(
-                        "{WAVE_DEFAULT_PREFIX}{}",
-                        wave.key.id
-                    )),
-                    expression: crate::work::selection::SelectionExpression::Wave {
-                        wave: loopflow_model::id::WaveId::parse(&wave.key.id).map_err(invalid)?,
-                    },
+            let selection = Selection {
+                id: SelectionId(format!("{WAVE_DEFAULT_PREFIX}{}", wave.key.id)),
+                expression: SelectionExpression::Wave {
+                    wave: loopflow_model::id::WaveId::parse(&wave.key.id).map_err(invalid)?,
                 },
-                None,
-                &queries,
-                &work,
-            )?);
+            };
+            plans.push(views.plan(selection, None)?);
         }
-        for saved in &catalog {
-            plans.push(plan_in(
-                &snapshot,
-                repository,
-                saved.selection.clone(),
-                Some(saved),
-                &queries,
-                &work,
-            )?);
+        for saved in &views.catalog {
+            plans.push(views.plan(saved.selection.clone(), Some(saved))?);
         }
-        fill_graph_steps_in(&snapshot, &mut plans, running_step)?;
+        fill_task_contents_in(&snapshot, &mut plans, running_step)?;
         Ok(Some(plans))
     }
 

@@ -449,4 +449,21 @@ struct B {
             assert_eq!((hits[0].line, hits[0].container.as_deref()), (2, Some("A")));
         }
     }
+
+    #[test]
+    fn javascript_arrows_and_unlisted_languages_declare_by_keyword() {
+        for (path, source, kind) in [
+            (
+                "x.jsx",
+                "// const read = () => {}\nconst read = async () => {}",
+                "function",
+            ),
+            ("x.zig", "const a = 1;\npub fn read() void {}", "fn"),
+        ] {
+            let mut hits = vec![];
+            assert!(declarations(path, source, "read", &mut hits));
+            let found: Vec<_> = hits.iter().map(|h| (h.line, h.kind.as_str())).collect();
+            assert_eq!(found, [(2, kind)], "{path}");
+        }
+    }
 }

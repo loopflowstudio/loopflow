@@ -55,9 +55,14 @@ Keep `Brief`, `Diff` and `Files` in the pane strip. Cleanly separate **working-t
 
 **Reference lookup and browser journey.** The focused reader accepts `gr` on the clicked identifier. The owning Machine returns whole-word occurrences with their byte ranges. Each stays in the inline list until picked, even a single hit on the current line. Picking a result records the source line and closes the list.
 
-**Remaining.** Check the declaration scanner and outline across the planned languages and fallback, dirty-buffer overlays, truncated states and CLI/server reference docs. Mounted focus, scroll and the 360/620-point layouts go to gate and display QA.
+**Remaining.** Nothing to build. Mounted focus, scroll and the 360/620-point layouts go to gate and display QA.
 
 ## Gate and demo
+
+**Coverage checks on November 23**
+
+- `cargo test -p loopflow-execution --lib ops::task::symbols::` passed all four scanner cases. They cover Swift, Rust, TypeScript, JavaScript arrows, Python, Go, Markdown and a keyword fallback for an unlisted extension (`.zig`), along with the 100-hit cutoff.
+- `aDirtyDraftDropsItsStaleDiskDeclarationsFromTheCheckoutLookup` passed. A dirty draft drops its own disk hit, and the one remaining checkout declaration opens immediately. Truncated, empty and failed lookups are covered by `anIncompleteLookupCannotTakeTheReaderToAUniqueDefinition`. `docs/workspaces.md` documents `lf task find|grep|symbols`, and the generated server schema covers the served reads.
 
 **Reference lookup and journey checks on November 23**
 

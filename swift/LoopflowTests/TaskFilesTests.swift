@@ -280,6 +280,20 @@ struct TaskFilesTests {
         #expect(store.visit?.line == 4)
     }
 
+    @Test func aDirtyDraftDropsItsStaleDiskDeclarationsFromTheCheckoutLookup() async throws {
+        let store = TaskFilesStore(issue: "TEST-1", cwd: "/peer", query: RegistryQuery { args, _ in
+            guard args.last == "lookup" else { throw RegistryQueryError("Expected a declaration lookup") }
+            return #"{"hits":[{"path":"Draft.swift","name":"lookup","kind":"func","container":null,"line":1},{"path":"Other.swift","name":"lookup","kind":"func","container":"Reader","line":3}],"truncated":false}"#
+        })
+        store.autosave = false
+        store.selectFile("Draft.swift")
+        let doc = store.document("Draft.swift")
+        await doc.reconcile(snapshot("func lookup() {}", path: doc.path))
+        doc.editor.insertText("lookup()", replacementRange: NSRange(location: 0, length: doc.text.utf16.count))
+        await store.jumps.search(.definition("lookup"), line: 1, in: store)?.value
+        #expect(store.selection == "Other.swift" && store.visit?.line == 3 && store.jumps.peek == nil)
+    }
+
     @Test(arguments: [TaskFilePicker.Mode.files, .grep])
     func pickerPreviewsAnUnopenedPeerFileWithoutChangingTheDraftOrTabs(mode: TaskFilePicker.Mode) async throws {
         let data = try Data(contentsOf: URL(fileURLWithPath: #filePath).deletingLastPathComponent()

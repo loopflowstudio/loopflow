@@ -44,3 +44,5 @@
   `~/src/loopflow` that is `spend` (already queued on installed lf) and
   `engbot` (untouched since 2026-07, no `.lf/wave/engbot`). Six kept linked
   Projects are named "… — Chapter …" in Linear.
+- Tracker issue observations identify their Project by its external ID. Local
+  Project slugs and local IDs remain selectors for commands that accept them.

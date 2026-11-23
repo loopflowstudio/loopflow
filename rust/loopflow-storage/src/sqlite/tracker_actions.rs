@@ -516,35 +516,23 @@ pub(crate) fn retire_wave_in(conn: &Connection, wave: &WaveId) -> StoreResult<()
          WHERE phase='queued' AND project_id IN (SELECT id FROM projects WHERE wave_id=?1)",
         [wave],
     )?;
-    let creations: Vec<(String, String, Option<String>, String)> = conn
-        .prepare(
-            "SELECT e.id,p.id,t.project_id,e.value_json FROM tracker_actions e
-             JOIN tasks t ON t.id=e.task_id JOIN projects p ON p.wave_id=?1
-             WHERE e.kind='create' AND e.phase='queued'
-               AND EXISTS(SELECT 1 FROM json_each(e.value_json) v
-                   WHERE json_extract(v.value,'$.field')='task_project'
-                     AND json_extract(v.value,'$.value')=p.id)",
-        )?
-        .query_map([wave], |row| {
-            Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
-        })?
-        .collect::<Result<_, _>>()?;
-    for (action, removed, current, values) in creations {
-        let values: Vec<WorkValue> =
-            crate::work::edit::known_values(serde_json::from_str(&values)?)?
-                .into_iter()
-                .map(|value| match value {
-                    WorkValue::TaskProject(Some(project)) if project == removed => {
-                        WorkValue::TaskProject(current.clone())
-                    }
-                    value => value,
-                })
-                .collect();
-        conn.execute(
-            "UPDATE tracker_actions SET value_json=?2 WHERE id=?1",
-            params![action, serde_json::to_string(&values)?],
-        )?;
-    }
+    // Edit only the membership in the saved payload. Another build may have
+    // queued fields this build does not know. The phase pair selects the
+    // unconfirmed index before narrowing to unsent creates.
+    conn.execute(
+        "WITH moved AS (
+             SELECT e.seq, field.fullkey || '.value' AS path, t.project_id
+             FROM tracker_actions e JOIN tasks t ON t.id=e.task_id
+             JOIN json_each(e.value_json) field
+             JOIN projects p ON p.wave_id=?1
+             WHERE e.phase IN ('queued','sent') AND e.phase='queued' AND e.kind='create'
+               AND json_extract(field.value,'$.field')='task_project'
+               AND json_extract(field.value,'$.value')=p.id
+         )
+         UPDATE tracker_actions SET value_json=json_set(value_json,moved.path,moved.project_id)
+         FROM moved WHERE tracker_actions.seq=moved.seq",
+        [wave],
+    )?;
     Ok(())
 }
 
@@ -1563,6 +1551,17 @@ mod tests {
         store
             .enqueue_tracker_creations("/repo", TrackerKind::Linear)
             .unwrap();
+        let future_field = json!({"field":"future_task_field","value":{"count":4}});
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE tracker_actions SET value_json=json_insert(value_json,'$[#]',json(?2))
+             WHERE task_id=?1 AND kind='create'",
+                rusqlite::params![moved.as_str(), future_field.to_string()],
+            )
+            .unwrap();
         // `lf wave remove` moves the Wave's Tasks out, then retires it.
         store
             .move_task(&moved, Some(&gone_project), Some(kept.id()))
@@ -1586,6 +1585,7 @@ mod tests {
             .unwrap()["value"]
             .clone();
         assert_eq!(project, json!(kept_project.as_str()));
+        assert!(creation.value.as_array().unwrap().contains(&future_field));
     }
 
     #[test]

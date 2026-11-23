@@ -94,16 +94,14 @@ pub(crate) async fn add_local(
         &[authored_path(wave.slug())],
         &format!("lf wave add: {}", wave.slug()),
     );
-    let mut added = WaveAdded {
+    Ok(WaveAdded {
         id: wave.id().clone(),
         name: wave.slug().to_string(),
         created,
         main_checkout: main,
+        summary: uncommitted_summary(wave.slug(), &files),
         files,
-        summary: Vec::new(),
-    };
-    added.summary = uncommitted_summary(&added.name, &added.files);
-    Ok(added)
+    })
 }
 
 async fn sync_wave_project(store: &Store, repo: &str, wave: &WaveId) -> OpsResult<()> {

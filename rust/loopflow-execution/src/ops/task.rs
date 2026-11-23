@@ -2112,9 +2112,8 @@ async fn place_prepared_task(
             .await
             .map_err(task_error)?
             .ok_or_else(|| task_error("Task is unavailable"))?;
-        let wave = owning_wave(store, &task).await?;
-        let acquisition = match wave {
-            Some(wave) => Some(super::planning_sync::lock_wave_planning(&wave).await?),
+        let acquisition = match &task.wave_id {
+            Some(wave) => Some(super::planning_sync::lock_wave_planning(wave).await?),
             None => None,
         };
         let current = store
@@ -2466,7 +2465,7 @@ async fn file_task_in(
     };
     let wave_slug = selected.as_ref().map(|wave| wave.slug().to_string());
     let acquisition = match &selected {
-        Some(wave) => Some(super::planning_sync::lock_wave_planning(wave).await?),
+        Some(wave) => Some(super::planning_sync::lock_wave_planning(wave.id()).await?),
         None => None,
     };
     let creation = loopflow_storage::work::task::NewTask {
@@ -3395,24 +3394,17 @@ pub fn task_move_membership(repo: &Path, issue: &str, wave: Option<&str>) -> Ops
             ),
             None => None,
         };
-        let mut waves: Vec<_> = owning_wave(&store, &task)
-            .await?
-            .into_iter()
-            .chain(destination.clone())
-            .collect();
-        waves.sort_by(|a, b| a.id().as_str().cmp(b.id().as_str()));
-        waves.dedup_by(|a, b| a.id() == b.id());
+        let destination = destination.as_ref().map(Wave::id);
+        let mut waves: Vec<_> = task.wave_id.iter().chain(destination).collect();
+        waves.sort_unstable_by_key(|wave| wave.as_str());
+        waves.dedup();
         let mut guards = Vec::new();
-        for wave in &waves {
+        for wave in waves {
             guards.push(super::planning_sync::lock_wave_planning(wave).await?);
         }
         store
             .sqlite
-            .move_task(
-                &task.id,
-                task.project_id.as_ref(),
-                destination.as_ref().map(Wave::id),
-            )
+            .move_task(&task.id, task.project_id.as_ref(), destination)
             .map_err(task_error)?;
         drop(guards);
         super::planning_sync::sync_after_save(

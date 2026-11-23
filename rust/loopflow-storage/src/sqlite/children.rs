@@ -135,13 +135,16 @@ pub(super) fn create_task_in(
     if input.title.trim().is_empty() {
         return Err(StoreError::InvalidData("Task title cannot be empty".into()));
     }
-    let project_id = match (wave, &input.project_id) {
-        (Some(wave), _) => Some(wave_project_in(conn, wave)?),
-        (None, project) => project.clone(),
-    };
-    let wave_id = match &project_id {
-        Some(project) => project_wave_in(conn, project.as_str())?,
-        None => None,
+    let (project_id, wave_id) = match (wave, &input.project_id) {
+        (Some(wave), _) => (Some(wave_project_in(conn, wave)?), Some(wave.clone())),
+        (None, Some(project)) => {
+            let wave = conn
+                .prepare_cached("SELECT wave_id FROM projects WHERE id=?1")?
+                .query_row([project.as_str()], |row| row.get(0))
+                .optional()?;
+            (Some(project.clone()), wave)
+        }
+        (None, None) => (None, None),
     };
     let project = project_id.as_ref().map(ProjectId::as_str);
     let rank: u32 = conn.query_row(
@@ -1279,6 +1282,7 @@ impl SqliteStore {
 
     /// Save `project` as the store holds it, the Wave's own Project included;
     /// nothing is queued for the tracker. Fixtures seed saved Projects this way.
+    #[cfg(any(test, feature = "test-support"))]
     pub fn insert_project(&self, project: &Project) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -1319,28 +1323,16 @@ impl SqliteStore {
         Ok(project_in(&conn, project_id).optional()?)
     }
 
-    pub fn project_by_project(&self, project: &str) -> StoreResult<Option<Project>> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let snapshot = conn.savepoint()?;
-        if let Ok(project_id) = ProjectId::parse(project) {
-            if let Some(project) = project_in(&snapshot, &project_id).optional()? {
-                return Ok(Some(project));
-            }
-        }
-        let query = format!(
-            "{PROJECT_COLUMNS}
-             WHERE external_project_id=?2 OR project_slug=?1
-             ORDER BY (external_project_id=?2) DESC, created_at DESC, id DESC
-             LIMIT 1"
-        );
-        snapshot
+    pub fn project_by_tracker_id(&self, external: &str) -> StoreResult<Option<Project>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let project = conn
+            .prepare_cached(&format!("{PROJECT_COLUMNS} WHERE external_project_id=?1"))?
             .query_row(
-                &query,
-                params![project, loopflow_model::id::canonical_uuid(project)],
+                [loopflow_model::id::canonical_uuid(external)],
                 map_project_row,
             )
-            .optional()
-            .map_err(StoreError::from)
+            .optional()?;
+        Ok(project)
     }
 
     /// The Wave's Project, which its Tasks are in; for a Wave that has none
@@ -2443,13 +2435,6 @@ pub(crate) fn held_wave_project_in(
         .optional()?)
 }
 
-pub(crate) fn project_wave_in(conn: &Connection, project: &str) -> StoreResult<Option<WaveId>> {
-    Ok(conn
-        .prepare_cached("SELECT wave_id FROM projects WHERE id=?1")?
-        .query_row([project], |row| row.get(0))
-        .optional()?)
-}
-
 const PROJECT_COLUMNS: &str = "SELECT
     id, external_project_id, project_slug, project_name, description,
     wave_id, pm_snapshot_synced_at,
@@ -2825,6 +2810,27 @@ mod local_planning_tests {
             params![ProjectId::new().as_str(), billing.id()],
         );
         assert!(second.is_err());
+    }
+
+    #[test]
+    fn tracker_project_lookup_requires_the_external_id() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = crate::test_fixture::open(&dir.path().join("db")).unwrap();
+        let wave = crate::work::wave::Wave::new(WaveId::new(), "billing".into(), "/repo".into());
+        crate::test_fixture::wave(&store, &wave);
+        let mut project = store.project_of_wave(wave.id()).unwrap().unwrap();
+        project.tracker_id = Some(crate::planning::LinearProjectId::from_raw(
+            wave.id().as_str(),
+        ));
+        store.insert_project(&project).unwrap();
+
+        let lookup = |id| store.project_by_tracker_id(id).unwrap().map(|p| p.id);
+        assert_eq!(lookup(&project.slug), None);
+        assert_eq!(lookup(project.id.as_str()), None);
+        assert_eq!(
+            lookup(&wave.id().to_string().to_uppercase()),
+            Some(project.id)
+        );
     }
 
     #[test]

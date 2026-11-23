@@ -224,20 +224,3 @@ pub(crate) async fn refresh_task_input(
         selector,
     ))
 }
-
-pub async fn capture_inventory(
-    wave: &crate::work::wave::Wave,
-    context: &super::LinearRepository,
-    store: &Store,
-) -> crate::ops::OpsResult<crate::test_linear_input::Inventory> {
-    let projects: Vec<_> = super::checked_project_with_store(context, wave, store)
-        .await?
-        .into_iter()
-        .collect();
-    let items = context
-        .client
-        .list_project_issues(&projects)
-        .await
-        .map_err(super::linear_error)?;
-    Ok(crate::test_linear_input::Inventory { projects, items })
-}

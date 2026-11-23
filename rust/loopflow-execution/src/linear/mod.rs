@@ -36,31 +36,6 @@ pub struct TeamBinding {
     pub created: bool,
 }
 
-pub(crate) fn validate_project_ownership(
-    wave: &str,
-    expected_team_id: Option<&str>,
-    project: &TrackerProject,
-) -> LinearResult<()> {
-    let [team_id] = project.team_ids.as_slice() else {
-        return Err(LinearError::Message(format!(
-            "Linear Project `{}` ({}) in wave/{wave} belongs to {} Teams [{}]; expected exactly one repository Team",
-            project.name,
-            project.id,
-            project.team_ids.len(),
-            project.team_ids.join(", ")
-        )));
-    };
-    if expected_team_id.is_some_and(|expected| expected != team_id) {
-        return Err(LinearError::Message(format!(
-            "Linear Project `{}` ({}) in wave/{wave} belongs to Team {team_id}; expected repository Team {}",
-            project.name,
-            project.id,
-            expected_team_id.expect("checked as Some")
-        )));
-    }
-    Ok(())
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum LinearError {
     /// Saved delivery errors show this text, so it stays the same across
@@ -886,17 +861,6 @@ impl LinearClient {
                 })
             })
             .collect()
-    }
-
-    pub(crate) async fn list_project_issues(
-        &self,
-        projects: &[TrackerProject],
-    ) -> LinearResult<Vec<TrackerItem>> {
-        let lists = futures_util::future::try_join_all(
-            projects.iter().map(|project| self.list_items(&project.id)),
-        )
-        .await?;
-        Ok(lists.into_iter().flatten().collect())
     }
 
     pub(crate) async fn list_items(&self, project_id: &str) -> LinearResult<Vec<TrackerItem>> {

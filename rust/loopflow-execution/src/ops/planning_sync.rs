@@ -1,7 +1,6 @@
 //! Local-save delivery to the repository's tracker or plan carriers, and the planning
 //! store and locks every planning command shares.
 
-use crate::work::wave::Wave;
 use std::fs::OpenOptions;
 use std::future::Future;
 use std::path::Path;
@@ -221,7 +220,9 @@ pub(super) async fn open_planning_store(config: &StorageConfig) -> OpsResult<Sto
     .map_err(|err| OpsError::Message(format!("failed to open planning store: {err}")))
 }
 
-pub(crate) async fn lock_wave_planning(wave: &Wave) -> OpsResult<Arc<crate::store::PlanningLocks>> {
+pub(crate) async fn lock_wave_planning(
+    wave: &WaveId,
+) -> OpsResult<Arc<crate::store::PlanningLocks>> {
     // Keep the existing lock inode namespace shared with already-running callers.
     let path = crate::store::lf_home_dir().join("chapter-locks");
     #[cfg(any(test, feature = "test-support"))]
@@ -234,7 +235,7 @@ pub(crate) async fn lock_wave_planning(wave: &Wave) -> OpsResult<Arc<crate::stor
         .write(true)
         .create(true)
         .truncate(false)
-        .open(path.join(format!("{}.lock", wave.id())))
+        .open(path.join(format!("{wave}.lock")))
         .map_err(|error| OpsError::Message(error.to_string()))?;
     // The OS releases the lock if the holder exits.
     for _ in 0..300 {

@@ -386,7 +386,7 @@ pub(crate) async fn remote_project(
 pub(crate) async fn observed_task(store: &Store, item: &TrackerItem) -> Observed {
     let project = match &item.project_id {
         Some(external) => store
-            .get_project_by_project(external)
+            .project_by_tracker_id(external)
             .await
             .ok()
             .flatten()

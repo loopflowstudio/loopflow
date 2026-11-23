@@ -329,6 +329,12 @@ Project-less Team issue.
 - The KR/metric text scan finds only migrations, their fixtures and the
   schema inventory of columns marked leaving.
 
+Compress after slice 6: 46 focused Rust tests passed for Project lookup,
+Wave removal, migration, tracker delivery, connect, reteam, Task moves and
+Session binding. The OS-installation adoption test is ignored locally.
+A 10,000-Task SQLite fixture used the external-ID index for Project lookup
+and `tracker_actions_unconfirmed` to update queued creates on Wave removal.
+
 ## Remains
 
 1. Gate: Swift DTO and desktop suites (`scripts/test_desktop.sh`), full matrix

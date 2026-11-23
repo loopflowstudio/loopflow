@@ -423,7 +423,7 @@ fn observe_order(
 // Both durable projections read the tracker Projects a Wave's Project links,
 // or the one being linked to Wave ?4.
 const ACCEPTED_WAVE_PROJECTS: &str = "
-    SELECT p.repo,p.tracker,p.id,p.observed_at,p.archived,p.task_order_json,p.revision,p.slug,p.name,p.summary,p.status,p.team_ids,p.description,p.description_revision,p.description_observed_at,w.id AS wave_id FROM tracker_projects p
+    SELECT p.*, w.id AS wave_id FROM tracker_projects p
     LEFT JOIN projects l ON l.external_project_id=p.id
     JOIN waves w ON w.id=COALESCE(?4,l.wave_id) AND w.repo=p.repo
     WHERE p.repo=?1 AND p.tracker=?2 AND p.archived=0";
@@ -563,7 +563,7 @@ fn project_accepted_planning(
     // their IDs, local order and pending disposition; new Tasks receive only Work.
     let mut query = tx.prepare(&format!(
         "WITH accepted AS ({ACCEPTED_WAVE_PROJECTS})
-         SELECT target.id,NULL,i.observed_at,p.id,i.id,
+         SELECT target.id,i.observed_at,p.id,i.id,
              i.revision,i.identifier,
              i.name,i.description,
              i.rank,i.url,
@@ -574,10 +574,9 @@ fn project_accepted_planning(
          LEFT JOIN projects p ON p.external_project_id=i.project_id
          LEFT JOIN accepted observed ON observed.id=i.project_id AND observed.wave_id=p.wave_id
          LEFT JOIN tasks target ON target.external_issue_id=i.id
-         LEFT JOIN projects current ON current.id=target.project_id
          WHERE i.repo=?1 AND i.tracker=?2 AND i.needs_refresh=0
          AND i.id IN (SELECT value FROM json_each(?3))
-         AND ((observed.id IS NOT NULL AND observed.wave_id=p.wave_id)
+         AND (observed.id IS NOT NULL
               OR (i.project_id_observed=1 AND i.claimed_project_id IS NULL))
          AND (target.id IS NULL OR target.repository_id=(SELECT id FROM repository_plans WHERE repo=?1 AND selected=1))
          AND NOT EXISTS(SELECT 1 FROM tracker_events c WHERE c.issue_id=i.id
@@ -587,26 +586,26 @@ fn project_accepted_planning(
         .query_map(params![repo, tracker, item_ids, linking], |row| {
             Ok((
                 row.get::<_, Option<String>>(0)?,
-                row.get::<_, i64>(2)?,
-                row.get::<_, String>(4)?,
-                row.get::<_, Option<String>>(5)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, Option<String>>(4)?,
                 vec![
-                    Edit::TaskProject(row.get(3)?),
-                    Edit::TaskLinearId(Some(row.get(4)?)),
-                    Edit::TaskIdentifier(row.get(6)?),
-                    Edit::TaskTitle(Some(row.get(7)?)),
-                    Edit::TaskDescription(Some(row.get(8)?)),
-                    Edit::TaskRank(row.get(9)?),
-                    Edit::TaskUrl(row.get(10)?),
-                    Edit::TaskBranch(row.get(11)?),
-                    Edit::TaskTeam(row.get(12)?),
-                    Edit::TaskAssignee(row.get(13)?),
-                    Edit::TaskDueDate(row.get(14)?),
+                    Edit::TaskProject(row.get(2)?),
+                    Edit::TaskLinearId(Some(row.get(3)?)),
+                    Edit::TaskIdentifier(row.get(5)?),
+                    Edit::TaskTitle(Some(row.get(6)?)),
+                    Edit::TaskDescription(Some(row.get(7)?)),
+                    Edit::TaskRank(row.get(8)?),
+                    Edit::TaskUrl(row.get(9)?),
+                    Edit::TaskBranch(row.get(10)?),
+                    Edit::TaskTeam(row.get(11)?),
+                    Edit::TaskAssignee(row.get(12)?),
+                    Edit::TaskDueDate(row.get(13)?),
                 ],
                 Disposition {
-                    planning_state: row.get(15)?,
-                    planning_completed: i64::from(row.get::<_, bool>(16)?),
-                    planning_completed_at: row.get(17)?,
+                    planning_state: row.get(14)?,
+                    planning_completed: i64::from(row.get::<_, bool>(15)?),
+                    planning_completed_at: row.get(16)?,
                 },
             ))
         })?

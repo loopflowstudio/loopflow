@@ -209,7 +209,10 @@ async fn check_scope(store: &Store, repository: &str, fresh_for: i64) -> OpsResu
             // issue is this repository's, and ingestion imports it only when
             // it is in no Project at all.
             let linked = match &project {
-                Some(project) => super::linear::linking_project(store, &project.id).await?,
+                Some(project) => store
+                    .project_by_tracker_id(&project.id)
+                    .await
+                    .map_err(message)?,
                 None => None,
             };
             match linked {

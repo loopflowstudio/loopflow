@@ -319,6 +319,7 @@ impl Store {
         .await
     }
 
+    #[cfg(any(test, feature = "test-support"))]
     pub async fn create_project(&self, project: &Project) -> StoreResult<()> {
         let project = project.clone();
         run_sqlite(&self.sqlite, move |store| store.insert_project(&project)).await
@@ -329,10 +330,10 @@ impl Store {
         run_sqlite(&self.sqlite, move |store| store.project(&project_id)).await
     }
 
-    pub async fn get_project_by_project(&self, project: &str) -> StoreResult<Option<Project>> {
-        let project = project.to_string();
+    pub async fn project_by_tracker_id(&self, external: &str) -> StoreResult<Option<Project>> {
+        let external = external.to_owned();
         run_sqlite(&self.sqlite, move |store| {
-            store.project_by_project(&project)
+            store.project_by_tracker_id(&external)
         })
         .await
     }

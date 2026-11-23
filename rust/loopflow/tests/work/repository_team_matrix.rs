@@ -4,7 +4,7 @@ use crate::test_linear_input::{Inventory, InventoryFixture, SeedLinearSqlite};
 use std::path::Path;
 use std::process::{Command, Output};
 
-use loopflow_execution::ops::linear::{canonical_wave_title_path, list_local_waves};
+use loopflow_execution::ops::linear::list_local_waves;
 use loopflow_execution::store::sqlite::SqliteStore;
 use loopflow_execution::work::wave::Wave;
 use loopflow_model::id::WaveId;
@@ -230,18 +230,10 @@ fn repository_team_matrix() {
 
     let old_home = std::env::var_os("LF_HOME");
     std::env::set_var("LF_HOME", &home);
-    // Stored discovery and durable ancestry make nested titles legible.
+    // Discovery lists nested Waves by their full address.
     assert_eq!(
         list_local_waves(&repo).unwrap(),
         ["intelligence", "survival", "survival/infrastructure"]
-    );
-    assert_eq!(
-        canonical_wave_title_path(&repo, "survival/infrastructure").unwrap(),
-        "Survival / Infrastructure"
-    );
-    assert_eq!(
-        canonical_wave_title_path(&repo, "intelligence").unwrap(),
-        "Intelligence"
     );
     // SAFETY: restore the process environment before exercising subprocesses.
     unsafe {

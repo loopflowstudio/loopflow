@@ -4,7 +4,7 @@
 //! facts through the shared writer; ordinary readers consume saved Work.
 
 use super::planning_sync::{lock_wave_planning, planning_store};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::future::Future;
 use std::path::Path;
 use std::sync::Arc;
@@ -23,7 +23,8 @@ use crate::store::{
     StorageConfig, Store,
 };
 use crate::work::wave::Wave;
-use loopflow_storage::planning::TrackerProject;
+use loopflow_model::id::WaveId;
+use loopflow_storage::planning::{TrackerItem, TrackerProject};
 use loopflow_storage::sqlite::tracker_actions::ActionOwner;
 use loopflow_storage::work::task::Task;
 use loopflow_storage::work::wave::normalize_wave_name;
@@ -243,9 +244,9 @@ pub(crate) async fn issue_client() -> OpsResult<LinearClient> {
 }
 
 /// The Linear Project `wave` links: its Project's tracker id, once it has one.
-pub(crate) async fn linked_project(store: &Store, wave: &Wave) -> OpsResult<Option<String>> {
+async fn linked_project(store: &Store, wave: &WaveId) -> OpsResult<Option<String>> {
     Ok(store
-        .project_of_wave(wave.id())
+        .project_of_wave(wave)
         .await
         .map_err(|error| OpsError::Message(error.to_string()))?
         .and_then(|project| project.tracker_id)
@@ -263,27 +264,10 @@ pub fn wave_link(repo: &Path, wave: &str) -> OpsResult<Option<String>> {
             .await
             .map_err(|error| OpsError::Message(error.to_string()))?
         {
-            Some(registered) => linked_project(&store, &registered).await,
+            Some(registered) => linked_project(&store, registered.id()).await,
             None => Ok(None),
         }
     })
-}
-
-/// The Wave Project that links the Linear Project `external`, if one does.
-pub(crate) async fn linking_project(
-    store: &Store,
-    external: &str,
-) -> OpsResult<Option<loopflow_storage::work::project::Project>> {
-    Ok(store
-        .get_project_by_project(external)
-        .await
-        .map_err(|error| OpsError::Message(error.to_string()))?
-        .filter(|project| {
-            project
-                .tracker_id
-                .as_ref()
-                .is_some_and(|id| id.as_str() == external)
-        }))
 }
 
 /// This repository's live Waves whose Project links a Linear Project.
@@ -299,11 +283,10 @@ async fn linked_waves(repo: &Path, store: &Store) -> OpsResult<Vec<(Wave, String
         if wave.is_retired() {
             continue;
         }
-        if let Some(project) = linked_project(store, &wave).await? {
+        if let Some(project) = linked_project(store, wave.id()).await? {
             linked.push((wave, project));
         }
     }
-    linked.sort_by(|(left, _), (right, _)| left.slug().cmp(right.slug()));
     Ok(linked)
 }
 
@@ -557,7 +540,7 @@ pub(crate) async fn refresh_inventory(
                 "no Wave {wave} here; run `lf wave add {wave}` first"
             ))
         })?;
-    let locks = lock_wave_planning(&registered).await?;
+    let locks = lock_wave_planning(registered.id()).await?;
     refresh_inventory_locked(&registered, ctx, &store, locks).await
 }
 
@@ -568,14 +551,9 @@ pub(crate) async fn refresh_inventory_locked(
     locks: Arc<crate::store::PlanningLocks>,
 ) -> OpsResult<bool> {
     let observed_at = time::OffsetDateTime::now_utc().unix_timestamp();
-    let Some(project) = checked_project_with_store(ctx, wave, store).await? else {
+    let Some((project, items)) = read_wave_inventory(ctx, wave, store).await? else {
         return Ok(false);
     };
-    let items = ctx
-        .client
-        .list_project_issues(std::slice::from_ref(&project))
-        .await
-        .map_err(linear_error)?;
     crate::linear::events::accept_linear_inventory(
         store,
         wave.id().clone(),
@@ -616,20 +594,17 @@ async fn connect_async(
     let store = planning_store().await?;
     let locator = crate::work::wave::discover(repo, &wave)
         .map_err(|error| OpsError::Message(error.to_string()))?;
-    let registered = match store
+    let wave_id = match store
         .get_wave_at(&locator)
         .await
-        .map_err(|error| OpsError::Message(error.to_string()))?
+        .map_err(super::tracker::message)?
     {
-        Some(registered) => registered,
+        Some(registered) => registered.id().clone(),
         None => {
             progress.status(&format!("adding Wave {wave}"));
-            let added = super::wave_lifecycle::add_local(&store, repo, &wave, None).await?;
-            store
-                .get_wave(&added.id)
-                .await
-                .map_err(|error| OpsError::Message(error.to_string()))?
-                .ok_or_else(|| OpsError::Message(format!("Wave {wave} was not added")))?
+            super::wave_lifecycle::add_local(&store, repo, &wave, None)
+                .await?
+                .id
         }
     };
 
@@ -672,9 +647,9 @@ async fn connect_async(
 
     let own = store
         .sqlite
-        .wave_project(registered.id())
+        .wave_project(&wave_id)
         .map_err(|error| OpsError::Message(error.to_string()))?;
-    let linked = linked_project(&store, &registered).await?;
+    let linked = linked_project(&store, &wave_id).await?;
     let ctx = resolve_repository_context(repo).await?;
     match options.project.as_deref() {
         Some(key) => {
@@ -691,9 +666,8 @@ async fn connect_async(
                     "linking wave/{wave} to Linear Project `{}`",
                     project.name
                 ));
-                let locks = lock_wave_planning(&registered).await?;
+                let locks = lock_wave_planning(&wave_id).await?;
                 let observed_at = time::OffsetDateTime::now_utc().unix_timestamp();
-                let wave_id = registered.id().clone();
                 crate::store::run_planning_write(&store.sqlite, Some(locks), move |sqlite| {
                     loopflow_storage::sqlite::linear_events::link_wave_project_in(
                         &sqlite,
@@ -792,13 +766,12 @@ pub(crate) async fn inspect_task_planning_async(
             .or_else(|| existing.project_id.clone());
         let mut locks = None;
         if let Some(discovered) = discovered {
-            if let Some(local) = linking_project(&store, &discovered).await? {
-                let registered = store
-                    .get_wave(&local.wave_id)
-                    .await
-                    .map_err(|error| OpsError::Message(error.to_string()))?
-                    .ok_or_else(|| OpsError::Message("Project Wave is missing".into()))?;
-                locks = Some(lock_wave_planning(&registered).await?);
+            if let Some(local) = store
+                .project_by_tracker_id(&discovered)
+                .await
+                .map_err(super::tracker::message)?
+            {
+                locks = Some(lock_wave_planning(&local.wave_id).await?);
                 observed_at = time::OffsetDateTime::now_utc().unix_timestamp();
                 observation = repository
                     .client
@@ -896,7 +869,12 @@ pub(crate) async fn fetch_task(
     let team = repository_team_id(repo)?;
     let store = planning_store().await?;
     if let Some(project) = &issue_state.project_id {
-        if linking_project(&store, project).await?.is_none() {
+        if store
+            .project_by_tracker_id(project)
+            .await
+            .map_err(super::tracker::message)?
+            .is_none()
+        {
             return Err(OpsError::Message(format!(
                 "Linear Project {project} is linked by no Wave; run `lf wave plan connect <wave> {project}`"
             )));
@@ -933,14 +911,10 @@ pub(crate) async fn fetch_task(
 
 // ── reteam ──────────────────────────────────────────────────────────
 
-fn project_needs_reteam(bound_team: &str, project_team_ids: &[String]) -> bool {
-    project_team_ids.len() != 1 || project_team_ids[0] != bound_team
-}
-
-#[derive(Debug)]
-struct ReteamIdentifierUpdate {
-    wave: String,
-    issue_id: String,
+struct LockedWave {
+    wave: Wave,
+    project: String,
+    locks: Arc<crate::store::PlanningLocks>,
 }
 
 struct ResolvedReteamContext {
@@ -1008,9 +982,8 @@ async fn reteam_async(
 
 async fn accept_reteam_project(
     resolved: &ResolvedReteamContext,
-    wave: &crate::work::wave::Wave,
+    linked: &LockedWave,
     project: &TrackerProject,
-    locks: Arc<crate::store::PlanningLocks>,
     expected_teams: &[String],
 ) -> OpsResult<()> {
     let observed_at = time::OffsetDateTime::now_utc().unix_timestamp();
@@ -1032,10 +1005,10 @@ async fn accept_reteam_project(
     }
     crate::linear::events::reconcile_linear_project_teams(
         &resolved.store,
-        wave.id(),
+        linked.wave.id(),
         confirmed,
         observed_at,
-        locks,
+        linked.locks.clone(),
     )
     .await
     .map_err(|error| OpsError::Message(error.to_string()))
@@ -1043,9 +1016,8 @@ async fn accept_reteam_project(
 
 async fn accept_reteam_task(
     resolved: &ResolvedReteamContext,
-    wave: &crate::work::wave::Wave,
+    linked: &LockedWave,
     issue: &str,
-    locks: Arc<crate::store::PlanningLocks>,
 ) -> OpsResult<(String, bool)> {
     let observed_at = time::OffsetDateTime::now_utc().unix_timestamp();
     let (item, project) = resolved
@@ -1071,11 +1043,11 @@ async fn accept_reteam_task(
         .is_some_and(|previous| previous != identifier);
     crate::linear::events::accept_linear_issue(
         &resolved.store,
-        wave.repo(),
+        linked.wave.repo(),
         item,
         Some(project),
         observed_at,
-        Some(locks),
+        Some(linked.locks.clone()),
     )
     .await
     .map_err(|error| OpsError::Message(error.to_string()))?;
@@ -1105,19 +1077,18 @@ async fn apply_or_plan_repository_reteam(
             "repository has no Waves linked to Linear Projects".to_string(),
         ));
     }
-    let waves: Vec<String> = linked
-        .iter()
-        .map(|(wave, _)| wave.slug().to_string())
-        .collect();
+    // Acquire locks by stable ID, then present and process Waves by name.
     linked.sort_by(|(left, _), (right, _)| left.id().as_str().cmp(right.id().as_str()));
-    let mut locked_waves = BTreeMap::new();
-    let mut links = Vec::new();
+    let mut locked_waves = Vec::with_capacity(linked.len());
     for (wave, project) in linked {
-        let locks = lock_wave_planning(&wave).await?;
-        links.push((wave.slug().to_string(), project));
-        locked_waves.insert(wave.slug().to_string(), (wave, locks));
+        let locks = lock_wave_planning(wave.id()).await?;
+        locked_waves.push(LockedWave {
+            wave,
+            project,
+            locks,
+        });
     }
-    links.sort();
+    locked_waves.sort_by(|a, b| a.wave.slug().cmp(b.wave.slug()));
     let mut project_moves = Vec::new();
     let mut moves = Vec::new();
     let mut identifier_updates = Vec::new();
@@ -1125,17 +1096,21 @@ async fn apply_or_plan_repository_reteam(
     let mut already = 0usize;
     let mut task_updates = 0usize;
 
-    for (wave, linked) in &links {
-        progress.status(&format!("preflighting wave/{wave} Project {linked}"));
+    for entry in &locked_waves {
+        let name = entry.wave.slug();
+        progress.status(&format!(
+            "preflighting wave/{name} Project {}",
+            entry.project
+        ));
         let project = resolved
             .repository
             .client
-            .project_ownership(linked)
+            .project_ownership(&entry.project)
             .await
             .map_err(linear_error)?;
-        if project_needs_reteam(team_id, &project.team_ids) {
+        if project.team_ids.as_slice() != [team_id.as_str()] {
             project_moves.push(LinearReteamProjectMove {
-                wave: wave.clone(),
+                wave: name.to_owned(),
                 id: project.id.clone(),
                 name: project.name.clone(),
                 from_teams: project.team_ids.clone(),
@@ -1177,30 +1152,29 @@ async fn apply_or_plan_repository_reteam(
                             OpsError::Message(format!("failed to read task registry: {error}"))
                         })?;
                 if registered_identifier.is_some_and(|identifier| identifier != item.identifier) {
-                    identifier_updates.push(ReteamIdentifierUpdate {
-                        wave: wave.clone(),
-                        issue_id: item.id,
-                    });
+                    identifier_updates.push((entry, item.id));
                 }
             } else {
-                moves.push(LinearReteamMove {
-                    wave: wave.clone(),
-                    project_id: project.id.clone(),
-                    id: item.id,
-                    old_identifier: item.identifier,
-                    title: item.name,
-                    new_identifier: None,
-                });
+                moves.push((
+                    entry,
+                    LinearReteamMove {
+                        wave: name.to_owned(),
+                        project_id: project.id.clone(),
+                        id: item.id,
+                        old_identifier: item.identifier,
+                        title: item.name,
+                        new_identifier: None,
+                    },
+                ));
             }
         }
-        projects.push((wave, project));
+        projects.push((entry, project));
     }
 
     if apply {
         // Linear requires the destination Team on a Project before its Issues
         // can move. Expand first; narrowing is the final tracker phase.
-        for (wave, project) in &projects {
-            let (wave, locks) = &locked_waves[*wave];
+        for (entry, project) in &projects {
             let mut expected_teams = project.team_ids.clone();
             if !expected_teams.contains(team_id) {
                 expected_teams.push(team_id.clone());
@@ -1215,28 +1189,26 @@ async fn apply_or_plan_repository_reteam(
                     .await
                     .map_err(linear_error)?;
             }
-            accept_reteam_project(resolved, wave, project, locks.clone(), &expected_teams).await?;
+            accept_reteam_project(resolved, entry, project, &expected_teams).await?;
         }
-        for update in identifier_updates {
-            let (wave, locks) = &locked_waves[&update.wave];
-            let (_, changed) =
-                accept_reteam_task(resolved, wave, &update.issue_id, locks.clone()).await?;
+        for (entry, issue) in identifier_updates {
+            let (_, changed) = accept_reteam_task(resolved, entry, &issue).await?;
             task_updates += usize::from(changed);
         }
 
-        for mv in &mut moves {
+        for (entry, mv) in &mut moves {
             let marker = reteam_comment_marker(&mv.old_identifier, team_key);
-            let comment_bodies = resolved
+            let issue = resolved
                 .repository
                 .client
                 .fetch_issue(&mv.id)
                 .await
-                .map_err(linear_error)?
+                .map_err(linear_error)?;
+            if !issue
                 .comments
-                .into_iter()
-                .map(|comment| comment.body)
-                .collect::<Vec<_>>();
-            if !comment_bodies.iter().any(|body| body.contains(&marker)) {
+                .iter()
+                .any(|comment| comment.body.contains(&marker))
+            {
                 resolved
                     .repository
                     .client
@@ -1254,9 +1226,8 @@ async fn apply_or_plan_repository_reteam(
                 .move_item_to_team(&mv.id, team_id)
                 .await
                 .map_err(linear_error)?;
-            let (wave, locks) = &locked_waves[&mv.wave];
             let (confirmed_identifier, changed) =
-                accept_reteam_task(resolved, wave, &mv.id, locks.clone()).await?;
+                accept_reteam_task(resolved, entry, &mv.id).await?;
             if confirmed_identifier != new_identifier {
                 return Err(OpsError::Message(format!(
                     "Task {} move is not confirmed",
@@ -1267,9 +1238,8 @@ async fn apply_or_plan_repository_reteam(
             mv.new_identifier = Some(new_identifier);
         }
 
-        for (wave, project) in &projects {
-            let (wave, locks) = &locked_waves[*wave];
-            if project_needs_reteam(team_id, &project.team_ids) {
+        for (entry, project) in &projects {
+            if project.team_ids.as_slice() != [team_id.as_str()] {
                 progress.status(&format!(
                     "narrowing Project `{}` onto team {team_key}",
                     project.name
@@ -1281,32 +1251,32 @@ async fn apply_or_plan_repository_reteam(
                     .await
                     .map_err(linear_error)?;
             }
-            accept_reteam_project(
-                resolved,
-                wave,
-                project,
-                locks.clone(),
-                std::slice::from_ref(team_id),
-            )
-            .await?;
+            accept_reteam_project(resolved, entry, project, std::slice::from_ref(team_id)).await?;
         }
 
         // Confirm the complete inventory after moving issues and narrowing Teams.
-        for wave in &waves {
-            let (registered, locks) = &locked_waves[wave];
-            refresh_inventory_locked(registered, &resolved.repository, store, locks.clone())
-                .await?;
+        for entry in &locked_waves {
+            refresh_inventory_locked(
+                &entry.wave,
+                &resolved.repository,
+                store,
+                entry.locks.clone(),
+            )
+            .await?;
         }
     }
 
     Ok(LinearReteamResult {
         repository: resolved.repository.repo_id.to_string(),
-        waves,
+        waves: locked_waves
+            .iter()
+            .map(|entry| entry.wave.slug().to_owned())
+            .collect(),
         team_id: team_id.to_string(),
         team_key: team_key.to_string(),
         applied: apply,
         project_moves,
-        moves,
+        moves: moves.into_iter().map(|(_, mv)| mv).collect(),
         already,
         task_updates,
     })
@@ -1388,7 +1358,7 @@ async fn refresh_async(
         else {
             continue;
         };
-        let Some(linked) = linked_project(&store, &registered).await? else {
+        let Some(linked) = linked_project(&store, registered.id()).await? else {
             diagnostics.push(format!(
                 "wave/{wave} links no Linear Project; run `lf wave plan connect {wave}`"
             ));
@@ -1531,14 +1501,13 @@ fn default_team_key(repository: &str) -> String {
     }
 }
 
-/// The Linear Project `wave` links, as Linear holds it now; `None` when it
-/// links none or the Project has left the repository's Team.
-pub(super) async fn checked_project_with_store(
+/// The linked Project and its issues, when the Project belongs to this Team.
+async fn read_wave_inventory(
     ctx: &LinearRepository,
     wave: &Wave,
     store: &Store,
-) -> OpsResult<Option<TrackerProject>> {
-    let Some(linked) = linked_project(store, wave).await? else {
+) -> OpsResult<Option<(TrackerProject, Vec<TrackerItem>)>> {
+    let Some(linked) = linked_project(store, wave.id()).await? else {
         return Ok(None);
     };
     let project = ctx
@@ -1546,15 +1515,16 @@ pub(super) async fn checked_project_with_store(
         .project_ownership(&linked)
         .await
         .map_err(linear_error)?;
-    if project_is_foreign(&project, &ctx.team_id) {
+    if !project.team_ids.is_empty() && !project.team_ids.contains(&ctx.team_id) {
         return Ok(None);
     }
     validate_project_ownership(&project, wave.slug(), &ctx.team_id)?;
-    Ok(Some(project))
-}
-
-pub(super) fn project_is_foreign(project: &TrackerProject, team_id: &str) -> bool {
-    !project.team_ids.is_empty() && !project.team_ids.iter().any(|id| id == team_id)
+    let items = ctx
+        .client
+        .list_items(&project.id)
+        .await
+        .map_err(linear_error)?;
+    Ok(Some((project, items)))
 }
 
 fn validate_project_ownership(
@@ -1562,14 +1532,22 @@ fn validate_project_ownership(
     wave: &str,
     team_id: &str,
 ) -> OpsResult<()> {
-    crate::linear::validate_project_ownership(wave, Some(team_id), project).map_err(|error| {
-        OpsError::Message(format!(
-            "{error}. Repair the associations and run `lf wave status {wave} --sync`."
-        ))
-    })
+    let expected = match project.team_ids.as_slice() {
+        [team] if team == team_id => return Ok(()),
+        [team] => format!("Team {team}; expected repository Team {team_id}"),
+        teams => format!(
+            "{} Teams [{}]; expected exactly one repository Team",
+            teams.len(),
+            teams.join(", ")
+        ),
+    };
+    Err(OpsError::Message(format!(
+        "Linear Project `{}` ({}) in wave/{wave} belongs to {expected}. Repair the associations and run `lf wave status {wave} --sync`.",
+        project.name, project.id
+    )))
 }
 
-pub(super) fn title_case(slug: &str) -> String {
+fn title_case(slug: &str) -> String {
     slug.split(['-', '_', '/'])
         .filter(|part| !part.is_empty())
         .map(|word| {
@@ -1584,73 +1562,6 @@ pub(super) fn title_case(slug: &str) -> String {
         })
         .collect::<Vec<_>>()
         .join(" ")
-}
-
-pub fn canonical_wave_title_path(repo: &Path, wave: &str) -> OpsResult<String> {
-    block_on_linear(canonical_wave_title_path_async(repo, wave))
-}
-
-async fn canonical_wave_title_path_async(repo: &Path, wave: &str) -> OpsResult<String> {
-    let store = planning_store().await?;
-    canonical_wave_title_path_with_store(repo, wave, &store).await
-}
-
-async fn canonical_wave_title_path_with_store(
-    repo: &Path,
-    wave: &str,
-    store: &Store,
-) -> OpsResult<String> {
-    let locator = crate::work::wave::discover(repo, wave)
-        .map_err(|error| OpsError::Message(error.to_string()))?;
-    let Some(mut current) = store
-        .get_wave_at(&locator)
-        .await
-        .map_err(|error| OpsError::Message(format!("failed to read Wave ancestry: {error}")))?
-    else {
-        if wave.contains('/') {
-            return Err(OpsError::Message(format!(
-                "nested wave/{wave} has no durable registry ancestry; start or prepare its promotion first"
-            )));
-        }
-        return Ok(title_case(wave));
-    };
-
-    let main = crate::git::worktrees::main_repo_root(repo).unwrap_or_else(|_| repo.to_path_buf());
-    let main = std::fs::canonicalize(&main).unwrap_or(main);
-    let mut seen = BTreeSet::new();
-    let mut segments = Vec::new();
-    loop {
-        if !seen.insert(current.id().as_str().to_string()) {
-            return Err(OpsError::Message(format!(
-                "Wave ancestry for wave/{wave} contains a cycle at {}",
-                current.id()
-            )));
-        }
-        let current_repo = std::fs::canonicalize(current.repo())
-            .unwrap_or_else(|_| Path::new(current.repo()).to_path_buf());
-        if current_repo != main {
-            return Err(OpsError::Message(format!(
-                "Wave ancestry for wave/{wave} crosses repositories at {} ({})",
-                current.slug(),
-                current.repo()
-            )));
-        }
-        segments.push(title_case(current.name()));
-        let Some(parent_id) = current.parent_wave_id().cloned() else {
-            break;
-        };
-        current = store
-            .get_wave(&parent_id)
-            .await
-            .map_err(|error| OpsError::Message(format!("failed to read Wave ancestry: {error}")))?
-            .ok_or_else(|| {
-                OpsError::Message(format!(
-                    "Wave ancestry for wave/{wave} is incomplete: parent {parent_id} is missing"
-                ))
-            })?;
-    }
-    segments.reverse();
-    Ok(segments.join(" / "))
 }
 
 fn block_on_linear<T>(future: impl Future<Output = OpsResult<T>>) -> OpsResult<T> {
@@ -1729,7 +1640,6 @@ mod tests {
     async fn link_wave(store: &Store, repo: &Path, wave: &str, node: &Value) {
         let locator = crate::work::wave::discover(repo, wave).unwrap();
         let wave = store.get_wave_at(&locator).await.unwrap().unwrap();
-        store.sqlite.wave_project(wave.id()).unwrap();
         let project: TrackerProject = serde_json::from_value(json!({
             "id": node["id"], "revision": null,
             "slug": crate::linear::project_slug(node["name"].as_str().unwrap()),
@@ -2649,7 +2559,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn refresh_reads_projects_and_their_issues() {
+    async fn refresh_reads_the_linked_project_and_its_issues() {
         let (base_url, requests) = test_server::spawn(vec![
             project_readback(&project_node("project-123", "Scan")),
             issues_response(json!([
@@ -2667,12 +2577,13 @@ mod tests {
         let store = isolated_pm_store(repo.path()).await;
         let wave = scan_linked_to(&store, repo.path()).await;
 
-        let result = test_fixture::capture_inventory(&wave, &ctx, &store)
+        let (project, items) = read_wave_inventory(&ctx, &wave, &store)
             .await
-            .expect("fetch succeeds");
-        assert_eq!(result.projects.len(), 1);
-        assert_eq!(result.items.len(), 1);
-        assert_eq!(result.items[0].name, "First");
+            .unwrap()
+            .unwrap();
+        assert_eq!(project.id, "project-123");
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].name, "First");
         assert_eq!(
             requests.lock().await[1].authorization.as_deref(),
             Some("Bearer linear-secret")
@@ -2705,18 +2616,13 @@ mod tests {
         let store = isolated_pm_store(repo.path()).await;
         let wave = scan_linked_to(&store, repo.path()).await;
 
-        let snapshot = test_fixture::capture_inventory(&wave, &ctx, &store)
+        let (_, items) = read_wave_inventory(&ctx, &wave, &store)
             .await
+            .unwrap()
             .unwrap();
-        assert_eq!(snapshot.items[0].project_id.as_deref(), Some("successor"));
-        assert_eq!(
-            snapshot.items[0].revision.as_deref(),
-            Some("2026-10-05T12:00:00Z")
-        );
-        assert_eq!(snapshot.items[1].project_id, None);
-        assert_eq!(
-            snapshot.items[1].revision.as_deref(),
-            Some("2026-10-05T12:00:01Z")
-        );
+        assert_eq!(items[0].project_id.as_deref(), Some("successor"));
+        assert_eq!(items[0].revision.as_deref(), Some("2026-10-05T12:00:00Z"));
+        assert_eq!(items[1].project_id, None);
+        assert_eq!(items[1].revision.as_deref(), Some("2026-10-05T12:00:01Z"));
     }
 }

@@ -223,7 +223,7 @@ Execution follows the application tests in the same target; the separate executi
 measured
 only in cache mode. These totals each contain three semantic edits, including the first build.</p>
 <table><tr><th>Owner</th><th>Mode</th><th>Seconds</th></tr>{totals_html}</table>
-<p>Measured default: incremental <strong>{"on" if incremental else "off"}</strong>.
+<p>Measured test-profile default: incremental <strong>{"on" if incremental else "off"}</strong>.
 Incremental must win both three-edit totals to become the default.</p>
 <h2>Client CPU-seconds</h2>{table("cpu_seconds")}
 <h2>Daemon CPU-seconds (separate)</h2>{table("daemon_cpu_seconds")}

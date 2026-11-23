@@ -310,14 +310,13 @@ Rust     258 hits, 1 miss
 cache    6.2 GiB of 10 GiB
 ```
 
-After `install`, plain `cargo` in a new worktree takes unchanged workspace
-libraries from a cache every worktree on the Machine shares. A crate you edited
-compiles, and so does everything that depends on it. Binaries, test
-executables, proc-macros and build scripts always compile and link, so a full
-hit rate still leaves a build to wait for. Each worktree keeps its own target.
-Application unit tests also build execution with `test-support` and
-`loopflow-test-support`. Those libraries embed checkout-local fixture paths,
-so they compile in each root too.
+After `install`, plain `cargo build` reuses eligible Rust libraries across
+worktrees. `cargo test` keeps incremental state for workspace crates and
+shares registry dependencies through the cache. Each worktree owns its
+target. A fresh target still compiles and links test executables, binaries,
+proc-macros and build scripts. Application tests also build execution with
+`test-support` and `loopflow-test-support`. Those libraries embed checkout
+paths, so they compile in each root even with incremental off.
 
 `install` builds one pinned sccache revision into
 `~/.local/share/loopflow/sccache/<revision>/`, runs it once, and only then
@@ -374,20 +373,34 @@ before another worktree needs them. Warm measurements in a private cache show
 the cost of a surviving entry; they do not measure how often shared entries
 survive. Installation leaves the cap unchanged.
 
-**Repeated edits.** The dev and test profiles turn incremental compilation off,
-because an incremental crate is never cached. To trade the cache for faster
-rebuilds of the one crate you keep editing:
+**Edit to passing test.** The test profile enables incremental compilation
+because it won both three-edit comparisons. Times below are median seconds
+across three warm cohorts with two Cargo jobs. Each edit includes a passing
+focused test and its link.
+
+| Workflow | Cache mode | Incremental |
+|---|---:|---:|
+| First application edit in a new worktree | 213 | 210 |
+| Next application edit in that worktree | 40 | 9 |
+| Three application edits, starting in a new worktree | 285 | 228 |
+| First execution edit after the application tests | 90 | 107 |
+| Next execution edit in that worktree | 86 | 15 |
+| Three execution edits after the application tests | 260 | 131 |
+| First execution edit in a new worktree | 272 | Unmeasured |
+
+To use the shared cache for eligible workspace libraries in a focused test:
 
 ```bash
-CARGO_INCREMENTAL=1 cargo test -p loopflow-execution --lib skills::catalog::
+CARGO_INCREMENTAL=0 cargo test -p loopflow-execution --lib skills::catalog::
 ```
 
-The installer sets `SCCACHE_ALLOW_INCREMENTAL=1`, which the pin requires for
-this opt-in. Workspace crates then skip the cache in that command; dependencies
-still use the cache, with separate keys for the other incremental setting.
-[The test-loop results](benchmarks/crate-rebuild/results/loo-921.html) give what
-a new worktree and a repeated edit cost through a passing test in each mode, and
-the default follows those rows.
+The dev profile keeps incremental off. The installer sets
+`SCCACHE_ALLOW_INCREMENTAL=1` for the test profile and command-line overrides.
+Registry dependencies use separate artifact keys for each mode. The private
+warm cache served 300 Rust hits and two misses on each fresh cache-mode
+application test. With incremental enabled, it served 296 Rust hits and the
+incremental workspace compiles bypassed the cache. Ranges, CPU cost, memory,
+compiler invocations and counters are in the [test-loop report](benchmarks/crate-rebuild/results/loo-921.html).
 
 **A private cache.** Set a directory and a socket for one command, and it gets
 its own daemon and counters while keeping the pinned binary and the root list:

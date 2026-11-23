@@ -54,10 +54,11 @@ load average before and after. A `--test` compile's seconds include its link.
 With more than one job, a workspace crate's hit or miss is stated only where no
 other compile overlapped it; the per-command counters are exact either way.
 
-The report gives the median and range per row and mode, and the sum *new
-worktree plus three edits* that decides whether incremental compilation stays
-off by default. It states concurrent-worktree capacity as unmeasured: the peak
-tree RSS and CPU-seconds describe one loop.
+The report gives the median and range per row and mode. It also totals the
+first edit and two further edits in each cohort. The application starts in a
+fresh worktree. The execution test starts after the application tests in that
+target. Incremental must win both median totals to become the test-profile default.
+Concurrent-worktree capacity is unmeasured.
 
 The shared Machine cache reached its 10 GiB cap during LOO-921 (2026-11-16).
 The private warm-cache rows measure the cost of surviving entries, not their
@@ -79,8 +80,9 @@ and cache. Idle exit is disabled for this experiment. `stop.json` records the
 compiler PID observed across registration, the original and replacement daemon
 PIDs, whether the replacement loaded the second root, and the Cargo and test
 outcomes. It also checks whether the execution rlib reached the private disk
-cache and records the cached model rlib as a control. `cargo.log` holds the build output. When the probe writes to
-`registration/` in the measurement directory, the report includes its receipt.
+cache and records the cached model rlib as a control. `cargo.log` holds the
+build output. The report includes the receipt from `registration/` in the
+measurement directory.
 
 ## Cache probes and the revision comparison
 

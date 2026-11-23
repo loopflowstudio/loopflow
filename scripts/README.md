@@ -33,7 +33,8 @@ uv run python scripts/build_cache.py install   # once per Machine: pinned sccach
 uv run python scripts/build_cache.py status    # which wrapper and daemon, and whether this checkout's root is loaded
 ```
 
-Plain `cargo` in a new worktree can reuse unchanged workspace libraries.
+Plain `cargo build` in a new worktree can reuse unchanged workspace libraries.
+Focused tests keep incremental state for repeated edits.
 Git registers its root before checkout returns. If the pinned daemon lacks the
 root, registration stops it and the next compile loads the list. An in-flight
 client compile can finish across that stop and lose its cache write.

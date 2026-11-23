@@ -24,7 +24,7 @@ use super::waves::list as list_waves;
 use crate::lf::SessionListArgs;
 use loopflow_execution::engine::{Error, ErrorCode};
 use loopflow_execution::machine::connection::local_machine;
-use loopflow_execution::ops::task::{task_changes, task_diff, task_file, task_files};
+use loopflow_execution::ops::task::{task_changes, task_diff, task_file, task_files, task_find};
 use loopflow_execution::read_stream::{Subscription, Transport};
 use loopflow_execution::session::SessionFilter;
 use loopflow_model::durable::RepositoryId;
@@ -164,6 +164,16 @@ pub enum Read {
         issue: String,
         path: String,
         at: Option<String>,
+    },
+    /// `lf task find <issue> [query]`: matching paths across the Task checkout.
+    #[serde(rename = "task.files.find")]
+    #[schemars(extend("x-result" = generator.subschema_for::<loopflow_execution::ops::task::TaskFileInventory>()))]
+    TaskFind {
+        issue: String,
+        #[serde(deserialize_with = "Option::deserialize")]
+        query: Option<String>,
+        #[serde(deserialize_with = "Option::deserialize")]
+        limit: Option<usize>,
     },
     /// `lf task files <issue> <path> [--cursor <cursor>] [--show-ignored]`:
     /// one page of a Task checkout directory's immediate entries.
@@ -465,6 +475,20 @@ impl Read {
                 argv.extend(optional("--at", at.as_ref()));
                 argv
             }
+            Self::TaskFind {
+                issue,
+                query,
+                limit,
+            } => {
+                let mut argv = words(&["task", "find", issue, "--json"]);
+                if let Some(limit) = limit {
+                    argv.extend(["--limit".into(), limit.to_string()]);
+                }
+                if let Some(query) = query {
+                    argv.extend(["--".into(), query.clone()]);
+                }
+                argv
+            }
             Self::TaskFiles {
                 issue,
                 path,
@@ -745,6 +769,11 @@ impl Read {
             Self::TaskFile { issue, path, at } => {
                 value(&task_file(issue, path, at.as_deref(), false)?)
             }
+            Self::TaskFind {
+                issue,
+                query,
+                limit,
+            } => value(&task_find(issue, query.as_deref(), *limit)?),
             Self::TaskFiles {
                 issue,
                 path,
@@ -964,6 +993,7 @@ impl Read {
             | Self::TaskChanges { .. }
             | Self::TaskDiff { .. }
             | Self::TaskFile { .. }
+            | Self::TaskFind { .. }
             | Self::TaskFiles { .. }
             | Self::WaveList
             | Self::MachineSelf

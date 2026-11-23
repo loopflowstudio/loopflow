@@ -79,7 +79,9 @@ swift/LoopflowMac/TaskFileDocument.swift:318:func reconcile (TaskFileDocument)
 - `lf task find <ID> [query]` returns tracked, nonignored untracked, and
   `scratch/` paths (up to 100 ranked matches for a query, or the full inventory
   when no query is given and the checkout fits within 2,000 paths). Add `--json`
-  for `scratch` paths, `latest_scratch_page`, and `truncated`.
+  for `scratch` paths, `latest_scratch_page`, and `truncated`. Use `--limit N`
+  to set how many paths a reply contains. A query searches the full inventory
+  even when the initial list was truncated.
 - `lf task grep <ID> <query>` searches the same inventory (literal by default;
   pass `--whole-word` for whole-word references), capping at 100 hits and
   skipping files over 1 MB. `--json` includes 1-based line numbers, UTF-8 byte

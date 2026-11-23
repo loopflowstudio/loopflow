@@ -20,7 +20,6 @@ struct TaskFilesView: View {
     /// Types into the Task conversation without sending.
     var addToConversation: ((String) -> Bool)? = nil
     @Environment(\.palette) private var palette
-    @FocusState private var navigatorFocused: Bool
     @FocusState private var treeFocused: Bool
     @State private var treePosition = ScrollPosition()
 
@@ -45,13 +44,14 @@ struct TaskFilesView: View {
         }
         .background(palette.background)
         .background {
-            // ⌘P from any page opens Files with its navigator.
-            HStack {
-                Button("Choose file") { toggleNavigator() }
-                    .keyboardShortcut("p", modifiers: .command)
-                Button("Pin file navigation") { store.togglePinnedNavigator() }
-                    .keyboardShortcut("b", modifiers: [.control, .command])
-            }.disabled(!isFocused).hidden().accessibilityHidden(true).frame(width: 0, height: 0)
+            Button("Pin file navigation") { store.togglePinnedNavigator() }
+                .keyboardShortcut("b", modifiers: [.control, .command])
+                .disabled(!isFocused).hidden().accessibilityHidden(true).frame(width: 0, height: 0)
+        }
+        .overlay {
+            if let picker = store.filePicker {
+                TaskFilePickerView(store: store, picker: picker).id(ObjectIdentifier(picker))
+            }
         }
         .tint(palette.actionInk)
         .task(id: "\(page)|\(checkoutBase ?? "")") {
@@ -155,12 +155,12 @@ struct TaskFilesView: View {
         let wasFiles = store.page == .files
         store.page = .files
         if wasFiles || store.navigator == .closed { store.toggleNavigator() }
-        navigatorFocused = store.navigator != .closed
+        treeFocused = store.navigator != .closed
     }
 
     private func dismissNavigator() {
         store.dismissNavigator()
-        navigatorFocused = false
+        treeFocused = false
         if let editor = store.selectedDocument?.retainedEditor, editor.window != nil {
             editor.window?.makeFirstResponder(editor)
         }
@@ -169,22 +169,9 @@ struct TaskFilesView: View {
     private var navigator: some View {
         VStack(spacing: 0) {
             HStack {
-                Image(systemName: "magnifyingglass").foregroundStyle(palette.textSecondary)
-                TextField("Find in scratch and opened folders", text: $store.search)
-                    .textFieldStyle(.plain).focused($navigatorFocused)
-                    .accessibilityIdentifier("files-search")
-                    .onSubmit {
-                        if let path = store.scratchPaths.first {
-                            read(path)
-                        } else if let entry = store.treeRows.compactMap(\.entry).first(where: { $0.kind != .directory }) {
-                            read(entry.path)
-                        }
-                    }
-                    .onKeyPress(.downArrow) {
-                        treeFocused = true
-                        Task { await store.moveTree(.down) }
-                        return .handled
-                    }
+                Button("Find File…") { store.chooseFile() }
+                    .buttonStyle(.plain)
+                Spacer()
                 Button { store.togglePinnedNavigator() } label: {
                     Image(systemName: store.navigator == .pinned ? "pin.slash" : "pin")
                 }
@@ -213,8 +200,6 @@ struct TaskFilesView: View {
                         ForEach(store.treeRows) { row in treeRow(row, badges: badges) }
                         if let reason = store.changesError {
                             FailureLine("Comparison unavailable.", machine: reason)
-                        } else if !store.search.isEmpty, store.scratchPaths.isEmpty, store.treeRows.isEmpty {
-                            Text("No matching files.").emptyLine()
                         }
                     }.padding(Spacing.sm)
                 }
@@ -244,7 +229,7 @@ struct TaskFilesView: View {
         .task { await store.openTree() }
         .onAppear {
             treePosition.scrollTo(point: store.treeOffset)
-            if store.navigator == .dropdown { navigatorFocused = true }
+            if store.navigator == .dropdown { treeFocused = true }
         }
         .onExitCommand { dismissNavigator() }
     }
@@ -253,7 +238,7 @@ struct TaskFilesView: View {
         let indent = CGFloat(row.depth) * 12
         switch row {
         case .entry(let entry, _):
-            let label = store.search.isEmpty ? (entry.path as NSString).lastPathComponent : entry.path
+            let label = (entry.path as NSString).lastPathComponent
             Button {
                 if entry.kind == .directory {
                     Task { await store.setDirectory(entry.path, expanded: !store.tree.isExpanded(entry.path)) }
@@ -306,7 +291,7 @@ struct TaskFilesView: View {
                     .frame(width: 24, height: 28).contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .help("Show or hide file browser (⌘P)")
+            .help("Show or hide file browser")
             .accessibilityLabel("Show or hide file browser")
             .accessibilityIdentifier("files-toggle-navigator")
             if let document = store.selectedDocument, document.snapshot?.state == .text {

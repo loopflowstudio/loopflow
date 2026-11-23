@@ -15,6 +15,26 @@ public struct TaskFileEntry: Decodable, Sendable, Hashable, Identifiable {
     }
 }
 
+public struct TaskFileInventory: Decodable, Sendable {
+    public let paths: [String]
+    public let scratch: [String]
+    public let latestScratchPage: String?
+    public let truncated: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case paths, scratch, truncated
+        case latestScratchPage = "latest_scratch_page"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        paths = try values.decode([String].self, forKey: .paths)
+        scratch = try values.decode([String].self, forKey: .scratch)
+        latestScratchPage = try values.decode(String?.self, forKey: .latestScratchPage)
+        truncated = try values.decode(Bool.self, forKey: .truncated)
+    }
+}
+
 public struct TaskDirectory: Decodable, Sendable, Hashable {
     public let path: String
     public let entries: [TaskFileEntry]

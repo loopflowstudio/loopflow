@@ -128,17 +128,21 @@ struct DesktopActionContext {
         }
     }
 
-    fileprivate var editableFile: TaskFilesStore? {
+    fileprivate var filesBrowser: TaskFilesStore? {
         guard let pane, let workspace, tab == nil || tab == pane.content.selectedTabID else { return nil }
         switch pane.content.selectedBrowserTab {
         case .files, .changes:
             let task = model.task(id: workspace.key.id)?.task
-            guard let files = try? workspace.files(for: pane.content, task: task, query: RegistryQueryLocal.shared),
-                  files.shownPage(hasTask: task != nil) == .files,
-                  files.mode == .edit || files.selectedDocument?.canEdit == true else { return nil }
-            return files
+            return try? workspace.files(for: pane.content, task: task, query: RegistryQueryLocal.shared)
         default: return nil
         }
+    }
+
+    fileprivate var editableFile: TaskFilesStore? {
+        guard let files = filesBrowser, let workspace,
+              files.shownPage(hasTask: model.task(id: workspace.key.id)?.task != nil) == .files,
+              files.mode == .edit || files.selectedDocument?.canEdit == true else { return nil }
+        return files
     }
 
     /// The addressed pane's terminal: a shell's addressed or selected tab, or the session.
@@ -528,6 +532,12 @@ struct DesktopAction {
                 }
             }
             return outcome
+        },
+        DesktopAction("files-find", "Find File in Checkout", scope: .pane,
+            keys: [.init(.character("p"), .command)], available: { $0.filesBrowser != nil }) { context in
+            guard let files = context.filesBrowser else { throw DesktopTargetError("Open the Task browser to find a file.") }
+            files.chooseFile()
+            return nil
         },
         DesktopAction("files-edit", "Toggle File Editing", scope: .pane,
             keys: [.init(.character("e"), [.control, .command])], available: { $0.editableFile != nil }) { context in

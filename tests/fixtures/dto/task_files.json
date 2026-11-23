@@ -1,4 +1,10 @@
 {
+  "find": {
+    "paths": ["scratch/notes.md", "src/nested/Reader.swift"],
+    "scratch": ["scratch/notes.md"],
+    "latest_scratch_page": "scratch/notes.md",
+    "truncated": false
+  },
   "changes": {
     "issue_identifier": "TEST-1",
     "task_id": "task-files",

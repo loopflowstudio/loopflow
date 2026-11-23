@@ -387,7 +387,13 @@ final class TaskFilesStore {
     func shownPage(hasTask: Bool) -> Page { page == .brief && !hasTask ? .files : page }
     enum Navigator { case closed, dropdown, pinned }
     var navigator = Navigator.closed
-    var search = ""
+    var filePicker: TaskFilePicker?
+
+    func chooseFile() {
+        guard filePicker == nil else { return }
+        noteInteraction()
+        filePicker = TaskFilePicker(store: self)
+    }
     var showsScratch = true
 
     func toggleNavigator() {
@@ -489,7 +495,7 @@ final class TaskFilesStore {
     }
 
     var scratchPaths: [String] {
-        (changes?.scratch ?? []).filter(matchesSearch)
+        changes?.scratch ?? []
     }
 
     // MARK: Checkout tree
@@ -500,7 +506,7 @@ final class TaskFilesStore {
     var treeOffset = CGPoint.zero
 
     var treeRows: [CheckoutTree.Row] {
-        tree.rows(matching: search, also: (changes?.files ?? []).map(\.path))
+        tree.rows()
     }
 
     var changeBadges: [String: CheckoutChange] {
@@ -584,9 +590,6 @@ final class TaskFilesStore {
         }
     }
 
-    private func matchesSearch(_ path: String) -> Bool {
-        search.isEmpty || path.localizedCaseInsensitiveContains(search)
-    }
     enum Mode: String, CaseIterable {
         case read = "Read"
         case edit = "Edit"

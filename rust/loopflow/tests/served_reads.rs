@@ -752,6 +752,86 @@ fn screen_reads_are_compact_passive_and_match_cli() {
 }
 
 #[test]
+fn find_reaches_beyond_the_initial_page_on_the_checkout_machine() {
+    use loopflow::lf::commands::read::Read;
+    use std::os::unix::fs::symlink;
+
+    let home = tempfile::tempdir().unwrap();
+    let _env = EnvGuard::with_home(&[], Some(home.path()));
+    std::env::set_var("LF_HOME", home.path().canonicalize().unwrap());
+    let repo = TestRepo::new();
+    repo.create_file("ignored/tracked", "");
+    repo.create_file("deleted", "");
+    repo.stage_all();
+    repo.commit("Tracked before ignore rules");
+    support::register_task_without_pr(home.path(), repo.path(), "main", &repo.head_sha());
+    repo.create_file(".gitignore", "scratch/\nignored/\n");
+    repo.create_file("ignored/build", "");
+    repo.create_file("scratch/notes.md", "");
+    repo.create_file("scratch/page.HTML", "");
+    let stamp = std::time::SystemTime::UNIX_EPOCH + Duration::from_secs(123);
+    for name in ["scratch/notes.md", "scratch/page.HTML"] {
+        fs::File::open(repo.path().join(name))
+            .unwrap()
+            .set_modified(stamp)
+            .unwrap();
+    }
+    repo.create_file("z/nested/Reader.swift", "struct Reader {}");
+    fs::remove_file(repo.path().join("deleted")).unwrap();
+    fs::write(home.path().join("outside.txt"), "outside checkout").unwrap();
+    symlink(home.path().join("outside.txt"), repo.path().join("outside")).unwrap();
+    symlink("z/nested/Reader.swift", repo.path().join("linked")).unwrap();
+
+    let cli = |query: &[&str]| -> Value {
+        let mut args = vec!["task", "find", "INF-123", "--json"];
+        args.extend_from_slice(query);
+        serde_json::from_str(&read(repo.path(), home.path(), &args, None)).unwrap()
+    };
+    let inventory = cli(&[]);
+    assert_eq!(inventory["truncated"], false);
+    assert_eq!(inventory["latest_scratch_page"], "scratch/notes.md");
+    assert_eq!(
+        inventory["scratch"],
+        serde_json::json!(["scratch/notes.md", "scratch/page.HTML"])
+    );
+    let paths = inventory["paths"].as_array().unwrap();
+    for path in [
+        "z/nested/Reader.swift",
+        "ignored/tracked",
+        "linked",
+        "scratch/notes.md",
+    ] {
+        assert!(paths.contains(&Value::from(path)));
+    }
+    for path in ["deleted", "outside", "ignored/build"] {
+        assert!(!paths.contains(&Value::from(path)));
+    }
+    fs::File::open(repo.path().join("scratch/page.HTML"))
+        .unwrap()
+        .set_modified(stamp + Duration::from_secs(1))
+        .unwrap();
+    for i in 0..2_100 {
+        repo.create_file(&format!("src/file-{i:04}"), "");
+    }
+    let page = cli(&[]);
+    assert_eq!(page["paths"].as_array().unwrap().len(), 2_000);
+    assert_eq!(page["truncated"], true);
+    assert_eq!(page["latest_scratch_page"], "scratch/page.HTML");
+    let _server = Server::start(repo.path(), home.path());
+    let found = server_read(Read::TaskFind {
+        issue: "INF-123".into(),
+        query: Some("nstrdr".into()),
+        limit: None,
+    });
+    assert_eq!(found, cli(&["--", "nstrdr"]));
+    assert_eq!(found["paths"], serde_json::json!(["z/nested/Reader.swift"]));
+    assert_eq!(found["truncated"], false);
+    let limited = cli(&["--limit", "3", "file"]);
+    assert_eq!(limited["paths"].as_array().unwrap().len(), 3);
+    assert_eq!(limited["truncated"], true);
+}
+
+#[test]
 fn server_operations_match_their_lf_commands() {
     use loopflow::lf::commands::activity::HistoryWindow;
     use loopflow::lf::commands::read::Read;
@@ -892,6 +972,7 @@ fn server_operations_match_their_lf_commands() {
         | Read::TaskChanges { .. }
         | Read::TaskDiff { .. }
         | Read::TaskFile { .. }
+        | Read::TaskFind { .. }
         | Read::TaskFiles { .. }
         | Read::WaveList
         | Read::MachineSelf
@@ -964,6 +1045,11 @@ fn server_operations_match_their_lf_commands() {
                     issue: "INF-123".into(),
                     path: "edit.txt".into(),
                     at: Some("parent".into()),
+                },
+                Read::TaskFind {
+                    issue: "INF-123".into(),
+                    query: Some("edt".into()),
+                    limit: None,
                 },
                 Read::TaskFiles {
                     issue: "INF-123".into(),

@@ -1888,6 +1888,39 @@ fn set_machine_changes_local_preferences_without_copying_or_moving_work() {
 }
 
 #[test]
+fn find_reads_a_checkout_known_only_to_the_addressed_machine() {
+    let machines = preview_machines();
+    let repo = loopflow_test_support::TestRepo::new();
+    let remote = machines.root.path().join("remote/store");
+    let registered =
+        support::register_task_without_pr(&remote, repo.path(), "main", &repo.head_sha());
+    let store = loopflow_execution::store::open_sqlite(&remote.join("loopflow.db")).unwrap();
+    let repository = store
+        .repository_id(repo.path().to_str().unwrap())
+        .unwrap()
+        .unwrap();
+    repo.create_file("nested/remote-only.swift", "");
+    let _server = loopflow_test_support::MachineServer::start(env!("CARGO_BIN_EXE_lf"), &remote);
+    let result = machines.json(&[
+        "--machine",
+        "mini",
+        "--repo-id",
+        repository.as_str(),
+        "task",
+        "find",
+        registered.task.id.as_str(),
+        "--json",
+        "--",
+        "rmt",
+    ]);
+    assert_eq!(
+        result["paths"],
+        serde_json::json!(["nested/remote-only.swift"])
+    );
+    assert_eq!(result["latest_scratch_page"], Value::Null);
+}
+
+#[test]
 fn remote_file_observer_keeps_the_recorded_owner_and_streams_changes() {
     use loopflow_execution::durable::RepositoryId;
     use loopflow_execution::ops::task::TaskFilesFrame;

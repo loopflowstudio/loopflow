@@ -9,6 +9,7 @@ import ViewInspector
 @testable import LoopflowMac
 
 private struct FilesFixture: Decodable {
+    let find: TaskFileInventory
     let directory: TaskDirectory
     let changes: TaskChangesSnapshot
     let diff: TaskDiffSnapshot
@@ -169,43 +170,118 @@ struct TaskFilesTests {
         await peer.end(stale: false)
     }
 
-    @Test func chooserFiltersScratchAndParentChangesAndPreservesDrafts() async throws {
-        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
-            .deletingLastPathComponent().deletingLastPathComponent()
-        let data = try Data(contentsOf: root.appendingPathComponent("tests/fixtures/dto/task_files.json"))
-        let store = TaskFilesStore(issue: "TEST-1", cwd: "/fixture", query: RegistryQuery { args, _ in
-            guard args.contains("parent") else { throw RegistryQueryError("Expected recorded parent") }
-            let value = try JSONSerialization.jsonObject(with: data) as! [String: Any]
-            return String(decoding: try JSONSerialization.data(withJSONObject: value["changes"]!), as: UTF8.self)
-        })
-        await store.refresh()
-        #expect(store.navigator == .closed)
-        #expect(store.scratchPaths == ["scratch/notes.md"])
-        #expect(store.changes?.files.map(\.path) == ["new.txt"])
+    @Test func pickerPreviewsAnUnopenedPeerFileWithoutChangingTheDraftOrTabs() async throws {
+        let data = try Data(contentsOf: URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("tests/fixtures/dto/task_files.json"))
+        let nested = "src/nested/Reader.swift"
+        let query = RegistryQuery { args, cwd in
+            guard cwd == nil, args.starts(with: ["--machine", "peer", "--repo-id", "plan", "task"]) else {
+                throw RegistryQueryError("Expected the owning Machine")
+            }
+            let fixture = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+            let value: Any
+            switch Array(args.dropFirst(5)) {
+            case ["find", "TEST-1", "--json"]: value = fixture["find"]!
+            case ["file", "TEST-1", nested, "--json"]:
+                var file = fixture["file"]! as! [String: Any]
+                file["path"] = nested
+                file["content"] = "struct Reader {}"
+                value = file
+            default: throw RegistryQueryError("Unexpected read")
+            }
+            return String(decoding: try JSONSerialization.data(withJSONObject: value), as: UTF8.self)
+        }.onMachine("peer", repository: "plan")
+        let store = TaskFilesStore(issue: "TEST-1", cwd: "/peer/checkout", query: query)
         store.autosave = false
-        let document = store.document("scratch/notes.md")
-        await document.reconcile(snapshot("original"))
-        document.editor.insertText("draft", replacementRange: NSRange(location: 0, length: 8))
-        store.toggleNavigator()
-        store.search = "NOTES"
-        #expect(store.scratchPaths == ["scratch/notes.md"])
+        store.selectFile("notes.md", mode: .edit)
+        let draft = store.document("notes.md")
+        await draft.reconcile(snapshot("saved", path: "notes.md"))
+        draft.editor.insertText("draft", replacementRange: NSRange(location: 0, length: 5))
+        let tabs = store.tabs
+        store.chooseFile()
+        let picker = try #require(store.filePicker)
+        await picker.load()
+        #expect(picker.selection == "notes.md")
+        let field = try TaskFilePickerView(store: store, picker: picker).inspect().find(PaletteSearchField.self).actualView()
+        field.move(1)
+        field.move(1)
+        #expect(picker.selection == nested)
+        picker.text = "nstrdr"
+        #expect(picker.paths == [nested])
+        await picker.loadPreview(nested, draft: nil)
+        guard case .text("struct Reader {}") = picker.preview else {
+            Issue.record("Expected the nested file's source")
+            return
+        }
+        #expect(store.tabs == tabs)
         #expect(store.treeRows.isEmpty)
-        store.selectFile("scratch/notes.md", mode: .edit)
-        #expect(store.navigator == .closed)
-        #expect(store.selectedDocument === document)
-        #expect(document.text == "draft")
-        store.togglePinnedNavigator()
-        store.search = "new"
-        #expect(store.scratchPaths.isEmpty)
-        // A search reaches changed files even in folders never opened.
-        #expect(store.treeRows.compactMap(\.entry?.path) == ["new.txt"])
-        store.selectFile("new.txt", mode: .diff)
-        #expect(store.navigator == .pinned)
-        store.dismissNavigator()
-        #expect(store.navigator == .pinned)
-        store.togglePinnedNavigator()
-        #expect(store.navigator == .closed)
-        #expect(document.text == "draft")
+        #expect(store.documents[nested] == nil)
+        #expect(store.selection == "notes.md" && store.mode == .edit)
+        #expect(draft.dirty && draft.text == "draft")
+        field.submit()
+        #expect(store.filePicker == nil)
+        #expect(store.selection == nested && store.mode == .read)
+    }
+
+    @Test func recordedLocalCheckoutUsesTheResidentServerForFileSearch() async throws {
+        let place = TaskLocation.recorded(taskID: "owner-task", checkout: "/checkout")
+        let owner = TaskLocationObservation(request: "opened", repositoryID: "plan", taskID: "portable",
+            machineID: "local", observedAt: 1, location: place)
+        let workspace = fixtureWork(.init(machineId: "local", worktree: "/checkout"))
+        let content = PaneContent.browser(taskId: "portable", tabs: [.files], selected: "files", execution: owner)
+        let query = RegistryQuery(serve: { read in
+            guard case .taskFind("owner-task", nil, nil) = read else { throw RegistryQueryError("Expected checkout inventory") }
+            return ReadOutput(#"{"paths":["src/local.rs"],"scratch":[],"latest_scratch_page":null,"truncated":false}"#)
+        }) { args, _ in
+            guard args.starts(with: ["--repo-id", "plan", "task", "location"]), let flag = args.firstIndex(of: "--request") else {
+                throw RegistryQueryError("Only location validation uses the CLI")
+            }
+            let reading = TaskLocationObservation(request: args[flag + 1], repositoryID: "plan", taskID: "portable",
+                machineID: "local", observedAt: 2, location: place)
+            return String(decoding: try JSONEncoder().encode([reading]), as: UTF8.self)
+        }
+        let store = try workspace.files(for: content, task: nil, query: query)
+        store.chooseFile()
+        let picker = try #require(store.filePicker)
+        await picker.load()
+        #expect(picker.paths == ["src/local.rs"])
+        #expect(picker.error == nil)
+    }
+
+    @Test func largeCheckoutPickerKeepsTheLatestSearchWhenAnEarlierReplyArrives() async throws {
+        let (started, start) = AsyncStream<Void>.makeStream()
+        let (released, release) = AsyncStream<Void>.makeStream()
+        let query = RegistryQuery { args, _ in
+            guard args.starts(with: ["task", "find", "TEST-1", "--json"]) else { throw RegistryQueryError("Expected find") }
+            let paths: [String]
+            switch args.last {
+            case "before":
+                start.yield()
+                for await _ in released { break }
+                paths = ["before.txt"]
+            case "after": paths = ["nested/after.txt"]
+            default: paths = ["first.txt"]
+            }
+            let value: [String: Any] = ["paths": paths, "scratch": [], "latest_scratch_page": NSNull(),
+                                        "truncated": args.last == "--json"]
+            return String(decoding: try JSONSerialization.data(withJSONObject: value), as: UTF8.self)
+        }
+        let store = TaskFilesStore(issue: "TEST-1", cwd: "/checkout", query: query)
+        let picker = TaskFilePicker(store: store)
+        await picker.load()
+        #expect(picker.truncated)
+        picker.text = "before"
+        let before = try #require(picker.remoteSearch)
+        let pending = Task { await picker.search(before) }
+        for await _ in started { break }
+        picker.text = "after"
+        #expect(picker.loading && picker.selection == nil)
+        await picker.search("after")
+        release.yield()
+        await pending.value
+        #expect(!picker.truncated && !picker.loading)
+        #expect(picker.paths == ["nested/after.txt"])
+        #expect(picker.selection == "nested/after.txt" && store.selection == nil)
     }
 
     @Test func presentOrdinaryDocsRetainsEditsAndReusesTheFileTab() async {
@@ -808,6 +884,7 @@ struct TaskFilesTests {
 
     @Test func wirePreservesExactBaseAndLosslessText() throws {
         let fixture = try fixture()
+        #expect(fixture.find.latestScratchPage == fixture.find.scratch.first)
         #expect(fixture.directory.entries.map(\.kind) == [.directory, .file, .symlink])
         #expect(fixture.changes.baseCommit == fixture.diff.baseCommit)
         #expect(fixture.changes.files[0].oldPath == "old.txt")

@@ -16,6 +16,8 @@ pub use checkout_explain::{
 mod explain;
 pub use explain::{explain_task_run, TaskRunAction, TaskRunExplanation};
 mod directory;
+mod find;
+pub use find::{task_find, TaskFileInventory};
 mod handoff;
 mod lifecycle;
 #[cfg(test)]

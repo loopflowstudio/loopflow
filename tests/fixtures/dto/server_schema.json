@@ -6900,6 +6900,43 @@
         },
         {
           "additionalProperties": false,
+          "description": "`lf task find <issue> [query]`: matching paths across the Task checkout.",
+          "properties": {
+            "issue": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "task.files.find",
+              "type": "string"
+            },
+            "limit": {
+              "format": "uint",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "query": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "issue",
+            "query",
+            "limit"
+          ],
+          "type": "object",
+          "x-result": {
+            "$ref": "#/$defs/TaskFileInventory"
+          }
+        },
+        {
+          "additionalProperties": false,
           "description": "`lf task files <issue> <path> [--cursor <cursor>] [--show-ignored]`:\none page of a Task checkout directory's immediate entries.",
           "properties": {
             "cursor": {
@@ -13168,6 +13205,38 @@
       "required": [
         "path",
         "kind"
+      ],
+      "type": "object"
+    },
+    "TaskFileInventory": {
+      "properties": {
+        "latest_scratch_page": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "paths": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "scratch": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "truncated": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "paths",
+        "scratch",
+        "latest_scratch_page",
+        "truncated"
       ],
       "type": "object"
     },

@@ -106,19 +106,7 @@ struct CheckoutTree: Equatable {
 
     // MARK: Rows
 
-    /// Every visible row, top to bottom. With a search, loaded entries and
-    /// `also` (changed files you may not have opened) whose path matches, flat;
-    /// directories you never opened are not searched.
-    func rows(matching search: String = "", also: [String] = []) -> [Row] {
-        if !search.isEmpty {
-            var matches: [String: TaskFileEntry] = [:]
-            for entry in listings.values.flatMap(\.entries) { matches[entry.path] = entry }
-            for path in also where matches[path] == nil { matches[path] = TaskFileEntry(path: path, kind: .file) }
-            return matches.values
-                .filter { $0.path.localizedCaseInsensitiveContains(search) }
-                .sorted { $0.path < $1.path }
-                .map { .entry($0, depth: 0) }
-        }
+    func rows() -> [Row] {
         var rows: [Row] = []
         append("", depth: 0, to: &rows)
         return rows

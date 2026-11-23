@@ -395,15 +395,17 @@ final class SessionsWorkspace {
                   entry.execution?.taskID == execution?.taskID,
                   entry.execution?.location == execution?.location,
                   retained.cwd == checkout,
-                  retained.query.remoteMachine == (execution?.machineID ?? query.remoteMachine),
+                  entry.execution?.machineID == execution?.machineID,
+                  execution != nil || retained.query.remoteMachine == query.remoteMachine,
                   execution == nil || retained.issue == issue else {
                 throw RegistryQueryError("The Task file location changed. Its previous drafts are retained, not redirected.")
             }
             return retained
         }
         // Retained documents keep their original transport; build it only once.
-        let fileQuery = execution.map {
-            query.onMachine($0.machineID, repository: $0.repositoryID).pinTaskLocation(to: $0)
+        let fileQuery = execution.map { owner in
+            let route = owner.machineID == localMachineId ? query : query.onMachine(owner.machineID, repository: owner.repositoryID)
+            return route.pinTaskLocation(to: owner)
         } ?? query
         return files(issue: issue, cwd: checkout, query: fileQuery, execution: execution)
     }

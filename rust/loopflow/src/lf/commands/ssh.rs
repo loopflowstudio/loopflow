@@ -101,6 +101,7 @@ pub(super) fn run_with_io(
                 | crate::lf::TaskCommand::Claim { .. }
                 | crate::lf::TaskCommand::Unassign { .. }
                 | crate::lf::TaskCommand::WatchFiles { .. }
+                | crate::lf::TaskCommand::Find { .. }
                 | crate::lf::TaskCommand::Files { .. }
                 | crate::lf::TaskCommand::File { .. }
                 | crate::lf::TaskCommand::Diff { .. }
@@ -151,10 +152,22 @@ pub(super) fn run_with_io(
     // Automatic routing already chose both Machine and plan. Keep that reading
     // together rather than combining its Machine with a second plan reading.
     let routed = task_route.is_some();
+    let find = match &cli.command {
+        Some(crate::lf::Commands::Task {
+            cmd:
+                crate::lf::TaskCommand::Find {
+                    issue,
+                    query,
+                    limit,
+                    json,
+                },
+        }) => Some((issue, query, limit, json)),
+        _ => None,
+    };
     let work_route = match task_route {
         Some(route) => Some(route),
         // A path/name addresses the destination's filesystem, not the caller's.
-        None if cli.repo.is_some() => None,
+        None if cli.repo.is_some() || find.is_some() => None,
         None => super::work_route::resolve(cli)?,
     };
     if let Some(route) = work_route
@@ -187,6 +200,31 @@ pub(super) fn run_with_io(
         None if cli.repo.is_some() => None,
         None => loopflow_execution::machine::task::current_repository(directory)?,
     };
+    // The checkout's server shares one inventory across a peer picker's keystrokes.
+    if let (Some((issue, query, limit, true)), Some(repository), false) =
+        (find, &repository, preview)
+    {
+        use loopflow_execution::machine::wire::{Secrets, Selection, Sender};
+        let sender = Sender {
+            repository: repository.clone(),
+            selection: Selection::capture(directory, None)?,
+            secrets: Secrets::default(),
+        };
+        let mut connection =
+            loopflow_execution::machine::client::Connection::open_on(&target, sender, None)?;
+        let read = super::read::Read::TaskFind {
+            issue: work_route
+                .as_ref()
+                .map_or_else(|| issue.clone(), |route| route.task_id.to_string()),
+            query: query.clone(),
+            limit: *limit,
+        };
+        let answer = connection.request(crate::server::wire::Operation::Read(read))?;
+        return output(
+            &mut io,
+            &format!("{}\n", serde_json::to_string_pretty(&answer.result)?),
+        );
+    }
     // A plain command reads what it runs with from its environment.
     let mut environment =
         loopflow_execution::machine::wire::Selection::capture(directory, source.clone())?

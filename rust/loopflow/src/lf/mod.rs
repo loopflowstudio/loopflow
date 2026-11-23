@@ -1201,6 +1201,7 @@ impl TaskCommand {
             | Self::Changes { .. }
             | Self::Context { .. }
             | Self::Runs { .. }
+            | Self::Find { .. }
             | Self::Files { .. }
             | Self::File { .. }
             | Self::Wait { .. } => false,
@@ -2444,6 +2445,16 @@ using lf open's ordinary host selection. Preview and --quote open nothing."
         #[arg(long)]
         json: bool,
     },
+    /// Find files anywhere in this Task's checkout, including scratch
+    Find {
+        issue: String,
+        query: Option<String>,
+        /// Maximum paths to return
+        #[arg(long)]
+        limit: Option<usize>,
+        #[arg(long)]
+        json: bool,
+    },
     /// List one directory in this Task's worktree
     Files {
         issue: String,
@@ -2586,6 +2597,7 @@ impl TaskCommand {
             | Self::Changes { issue, .. }
             | Self::Context { issue, .. }
             | Self::Runs { issue, .. }
+            | Self::Find { issue, .. }
             | Self::Files { issue, .. }
             | Self::File { issue, .. }
             | Self::Save { issue, .. }
@@ -2620,6 +2632,7 @@ impl TaskCommand {
             | Self::Changes { issue, .. }
             | Self::Context { issue, .. }
             | Self::Runs { issue, .. }
+            | Self::Find { issue, .. }
             | Self::Files { issue, .. }
             | Self::File { issue, .. }
             | Self::Save { issue, .. }

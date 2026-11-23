@@ -794,7 +794,7 @@ fn net_changed_paths(workspace: TaskComparison<'_>) -> OpsResult<BTreeMap<String
     Ok(paths)
 }
 
-pub(super) fn scratch_paths(root: &Path) -> OpsResult<(Vec<String>, bool)> {
+pub(super) fn scratch_paths(root: &Path) -> std::io::Result<(Vec<String>, bool)> {
     // Bound traversal as well as returned files. Never descend into symlinks.
     let mut pending = vec![root.join("scratch")];
     let mut paths = Vec::new();
@@ -804,7 +804,7 @@ pub(super) fn scratch_paths(root: &Path) -> OpsResult<(Vec<String>, bool)> {
             Ok(metadata) if metadata.is_dir() => {}
             Ok(_) => continue,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
-            Err(error) => return Err(error.into()),
+            Err(error) => return Err(error),
         }
         for entry in std::fs::read_dir(directory)? {
             let entry = entry?;
@@ -812,6 +812,9 @@ pub(super) fn scratch_paths(root: &Path) -> OpsResult<(Vec<String>, bool)> {
             if visited > 2_000 {
                 paths.sort();
                 return Ok((paths, true));
+            }
+            if entry.file_name() == ".git" {
+                continue;
             }
             let kind = entry.file_type()?;
             if kind.is_dir() {

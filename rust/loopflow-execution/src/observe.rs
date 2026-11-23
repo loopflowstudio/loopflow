@@ -9,10 +9,12 @@ use std::process::{Command, Output};
 use std::sync::{Arc, LazyLock, Mutex, Weak};
 use std::time::{Duration, SystemTime};
 
+use crate::ops::task::TaskFileInventory;
 use crate::process::OsProcess;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 enum Fact {
+    CheckoutFiles(PathBuf),
     Git(PathBuf, Vec<String>),
     Github(PathBuf, Vec<String>),
     File(PathBuf),
@@ -49,6 +51,7 @@ struct FileMetadata {
 
 #[derive(Debug, Clone)]
 enum Answer {
+    CheckoutFiles(Result<Arc<TaskFileInventory>, Failure>),
     Output(Result<Output, Failure>),
     File(Result<String, Failure>),
     Directory(Result<Vec<PathBuf>, Failure>),
@@ -68,6 +71,7 @@ impl PartialEq for Answer {
                 a.status == b.status && a.stdout == b.stdout && a.stderr == b.stderr
             }
             (Self::Output(Err(a)), Self::Output(Err(b))) => a == b,
+            (Self::CheckoutFiles(a), Self::CheckoutFiles(b)) => a == b,
             (Self::File(a), Self::File(b)) => a == b,
             (Self::Directory(a), Self::Directory(b)) => a == b,
             (Self::Bytes(a), Self::Bytes(b)) => a == b,
@@ -92,7 +96,7 @@ enum Source {
 impl Fact {
     fn source(&self) -> Source {
         match self {
-            Self::Git(..) => Source::Git,
+            Self::Git(..) | Self::CheckoutFiles(..) => Source::Git,
             Self::Github(..) => Source::Github,
             _ => Source::Local,
         }
@@ -100,7 +104,7 @@ impl Fact {
 
     fn interval(&self) -> Duration {
         Duration::from_secs(match self {
-            Self::Git(..) => 3,
+            Self::Git(..) | Self::CheckoutFiles(..) => 3,
             Self::Github(..) | Self::Clock => 60,
             // Transcript watches say when to look sooner; these bound a missed event.
             Self::Turn(..) => TURN_RECONCILE.as_secs(),
@@ -111,6 +115,9 @@ impl Fact {
 
     fn observe(&self) -> Answer {
         match self {
+            Self::CheckoutFiles(path) => {
+                Answer::CheckoutFiles(retained(TaskFileInventory::scan(path).map(Arc::new)))
+            }
             Self::Git(path, args) | Self::Github(path, args) => {
                 let mut command = Command::new(if matches!(self, Self::Git(..)) {
                     "git"
@@ -293,21 +300,35 @@ impl Cache {
                         entry.used.elapsed().unwrap_or_default() < Duration::from_secs(300)
                     })
             });
+            if source == Source::Git {
+                trim_idle_checkouts(&mut entries);
+            }
             entries
                 .iter()
-                .filter(|(fact, _)| fact.source() == source)
+                .filter(|(fact, entry)| {
+                    fact.source() == source
+                        && (!matches!(fact, Fact::CheckoutFiles(_)) || Arc::strong_count(entry) > 1)
+                })
                 .map(|(fact, entry)| (fact.clone(), entry.clone()))
                 .collect::<Vec<_>>()
         };
         for (fact, entry) in entries {
-            if entry.try_lock().map_or(true, |entry| {
-                entry.answer.is_none()
+            let checked = {
+                let Ok(entry) = entry.try_lock() else {
+                    continue;
+                };
+                if entry.answer.is_none()
                     || entry.checked.elapsed().unwrap_or_default() < fact.interval()
-            }) {
-                continue;
-            }
+                {
+                    continue;
+                }
+                entry.checked
+            };
             let answer = fact.observe();
             let mut entry = entry.lock().expect("observed fact");
+            if entry.checked != checked {
+                continue; // A request refreshed this checkout during the scan.
+            }
             if entry.answer.as_ref() != Some(&answer) {
                 entry.answer = Some(answer);
                 entry.revision += 1;
@@ -396,8 +417,15 @@ impl Cache {
             })
             .clone();
         let mut observed = entry.lock().expect("observed fact");
-        if observed.answer.is_none() {
-            observed.answer = Some(fact.observe());
+        if observed.answer.is_none()
+            || (matches!(fact, Fact::CheckoutFiles(_))
+                && observed.checked.elapsed().unwrap_or_default() >= fact.interval())
+        {
+            let answer = fact.observe();
+            if observed.answer.as_ref() != Some(&answer) {
+                observed.answer = Some(answer);
+                observed.revision += 1;
+            }
             observed.checked = SystemTime::now();
         }
         observed.used = SystemTime::now();
@@ -423,6 +451,37 @@ impl Cache {
     pub(crate) fn computations(&self, key: impl Fn(&Derived) -> bool) -> usize {
         let computations = self.computations.lock().unwrap();
         computations.iter().filter(|computed| key(computed)).count()
+    }
+}
+
+/// Keep the most recently searched inventories. Live readings own their entries
+/// until they finish, including a checkout larger than the idle cache.
+fn trim_idle_checkouts(entries: &mut HashMap<Fact, SharedEntry>) {
+    let mut idle: Vec<_> = entries
+        .iter()
+        .filter_map(|(fact, slot)| {
+            if !matches!(fact, Fact::CheckoutFiles(_)) || Arc::strong_count(slot) != 1 {
+                return None;
+            }
+            let entry = slot.try_lock().ok()?;
+            let Some(Answer::CheckoutFiles(Ok(files))) = &entry.answer else {
+                return None;
+            };
+            Some((
+                entry.used,
+                files.paths.len() + files.scratch.len(),
+                fact.clone(),
+            ))
+        })
+        .collect();
+    idle.sort_unstable_by_key(|(used, _, _)| std::cmp::Reverse(*used));
+    let mut remaining = 100_000usize;
+    for (_, paths, fact) in idle {
+        if paths > remaining {
+            entries.remove(&fact);
+        } else {
+            remaining -= paths;
+        }
     }
 }
 
@@ -542,6 +601,13 @@ fn read(fact: Fact) -> Answer {
 
 fn absolute(path: &Path) -> PathBuf {
     std::path::absolute(path).unwrap_or_else(|_| path.to_owned())
+}
+
+pub(crate) fn checkout_files(path: &Path) -> io::Result<Arc<TaskFileInventory>> {
+    let Answer::CheckoutFiles(answer) = read(Fact::CheckoutFiles(absolute(path))) else {
+        unreachable!("checkout files returns an inventory")
+    };
+    restored(answer)
 }
 
 pub fn git(path: &Path, args: &[&str]) -> io::Result<Output> {
@@ -705,6 +771,32 @@ mod tests {
         // A new server starts with no retained observations.
         let replacement = Arc::new(Cache::default());
         assert_eq!(replacement.capture(status).0, second);
+    }
+
+    #[test]
+    fn checkout_inventory_observes_ignore_membership_and_scratch_changes() {
+        let repo = loopflow_test_support::TestRepo::new();
+        let cache = Arc::new(Cache::default());
+        let inventory = || super::checkout_files(repo.path()).unwrap();
+        let (first, dependencies) = cache.capture(inventory);
+        assert!(first.latest_scratch_page.is_none());
+        repo.create_file(".gitignore", "scratch/\nwork/\n");
+        repo.create_file("work/ignored", "");
+        repo.create_file("scratch/live.md", "");
+        cache.refresh_all();
+        let updated = cache.capture(inventory).0;
+        assert!(dependencies.changed());
+        assert_eq!(
+            updated.latest_scratch_page.as_deref(),
+            Some("scratch/live.md")
+        );
+        assert!(!updated.paths.iter().any(|path| path == "work/ignored"));
+        repo.create_file(".gitignore", "scratch/\n");
+        std::fs::remove_file(repo.path().join("scratch/live.md")).unwrap();
+        cache.refresh_all();
+        let updated = cache.capture(inventory).0;
+        assert!(updated.latest_scratch_page.is_none());
+        assert!(updated.paths.iter().any(|path| path == "work/ignored"));
     }
 
     #[test]

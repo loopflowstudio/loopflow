@@ -190,7 +190,8 @@ struct WorkPalette: View {
                     Button("Search all Work") { model.navigation.palette = .search }.buttonStyle(LoopflowButtonStyle())
                 }
             }
-            PaletteSearchField(text: $search, move: move, submit: {
+            PaletteSearchField(text: $search, placeholder: "Go to a Task, Wave or repository",
+                               identifier: "work-palette-search", move: move, submit: {
                 if let id = selection { activate(id) }
             }, cancel: { model.navigation.palette = nil })
             .frame(height: 24)
@@ -435,9 +436,11 @@ struct WorkflowCatalogInspector: View {
 
 /// The field editor owns arrows while typing; handle its navigation commands
 /// directly rather than relying on SwiftUI's unfocused move-command responder.
-private struct PaletteSearchField: NSViewRepresentable {
+struct PaletteSearchField: NSViewRepresentable {
     @Environment(\.palette) private var palette
     @Binding var text: String
+    let placeholder: String
+    let identifier: String
     let move: (Int) -> Void
     let submit: () -> Void
     let cancel: () -> Void
@@ -449,8 +452,8 @@ private struct PaletteSearchField: NSViewRepresentable {
         field.focusRingType = .none
         field.drawsBackground = false
         field.font = NSFont(name: Typography.sansFace, size: Typography.textSize) ?? .systemFont(ofSize: Typography.textSize)
-        field.placeholderString = "Go to a Task, Wave or repository"
-        field.setAccessibilityIdentifier("work-palette-search")
+        field.placeholderString = placeholder
+        field.setAccessibilityIdentifier(identifier)
         field.delegate = context.coordinator
         return field
     }
@@ -474,6 +477,7 @@ private struct PaletteSearchField: NSViewRepresentable {
             parent.text = field.stringValue
         }
         func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
+            guard !textView.hasMarkedText() else { return false }
             switch selector {
             case #selector(NSResponder.moveDown(_:)): parent.move(1)
             case #selector(NSResponder.moveUp(_:)): parent.move(-1)

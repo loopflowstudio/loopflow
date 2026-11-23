@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>LOO-1068 concept review: a reopened work session hears its steers</title>
+<style>
+  :root { color-scheme: light dark;
+    --bg:#fbfaf7; --fg:#1d1d1b; --muted:#6b6862; --line:#dedad2; --card:#ffffff;
+    --yes:#2f7d4a; --no:#b4462f; --new:#2856a8; --newbg:#eaf0fb; --oldbg:#f6ece9; }
+  @media (prefers-color-scheme: dark) { :root {
+    --bg:#16171a; --fg:#e8e6e1; --muted:#9a968f; --line:#33353a; --card:#1e2024;
+    --yes:#6cc28a; --no:#e5866f; --new:#8fb3f5; --newbg:#1d2738; --oldbg:#33221e; } }
+  body { background:var(--bg); color:var(--fg); font:15px/1.55 -apple-system, "Helvetica Neue", sans-serif;
+    max-width:920px; margin:2.5rem auto; padding:0 1.25rem; }
+  h1 { font-size:1.6rem; margin-bottom:.2rem } h2 { margin-top:2.4rem; font-size:1.2rem }
+  .lede { color:var(--muted) } code { font:13px ui-monospace, Menlo, monospace }
+  table { border-collapse:collapse; width:100%; margin:1rem 0; background:var(--card) }
+  th, td { border:1px solid var(--line); padding:.5rem .65rem; vertical-align:top; text-align:left }
+  th { font-weight:600 }
+  .yes { color:var(--yes); font-weight:700 } .no { color:var(--no); font-weight:700 }
+  .new { border-left:4px solid var(--new); background:var(--newbg); padding:.6rem .9rem; margin:1rem 0 }
+  .old { border-left:4px solid var(--no); background:var(--oldbg); padding:.6rem .9rem; margin:1rem 0 }
+  .tag { font-size:.8rem; padding:.05rem .4rem; border-radius:3px; border:1px solid currentColor }
+  .tag.new-t { color:var(--new) } .tag.built { color:var(--yes) }
+  .flow { display:grid; grid-template-columns:repeat(4,1fr); gap:.5rem; margin:1rem 0 }
+  .flow div { background:var(--card); border:1px solid var(--line); border-radius:6px; padding:.6rem; font-size:.9rem }
+  .flow b { display:block; margin-bottom:.25rem }
+  ol.q li { margin:.6rem 0 } ol.q ol { list-style:lower-alpha }
+</style>
+</head>
+<body>
+
+<h1>Does a reopened work session hear its steers the way people expect?</h1>
+<p class="lede">Area reviewed: how a steer reaches a person's managed conversation — the hook's claim at a
+boundary, the server's wake of an idle conversation, and what "idle" means — with all of LOO-1068
+(slices 1–3, against <code>3578f78f6d</code>) in it. Chosen because the Task changes who owns a waiting
+steer at the moment a provider process starts, which touches all three.</p>
+
+<h2>What a person knows</h2>
+<div class="flow">
+  <div><b>Steer</b><code>lf steer &lt;task&gt; '…'</code> — direction for the conversation.</div>
+  <div><b>Working</b>The conversation hears it at its next tool or prompt.</div>
+  <div><b>Idle</b>It starts a turn on it now, before anyone types.</div>
+  <div><b>Reopened</b><code>lf resume</code> after quitting: it is idle, so the same as above.</div>
+</div>
+<p>One promise: <em>a steer arrives once, as soon as the conversation can take it.</em> "Reopened" is not a
+separate concept to a person; it is idle. Before this Task the code disagreed on two of four providers.</p>
+
+<h2>Pairings</h2>
+<table>
+<tr><th>Product concept</th><th>Code concept</th><th></th><th>Notes</th></tr>
+<tr><td>Steer</td><td><code>steers</code> row, claimed by <code>steer::claim</code> or <code>wake</code>, stamped <code>delivered</code></td>
+  <td class="yes">yes</td><td>Claims are exclusive; two claimers deliver once.</td></tr>
+<tr><td>Idle conversation</td><td><code>session_activity.yielded=1</code> for the current AgentProcess + an address → <code>idle_conversation_candidates</code></td>
+  <td class="yes">yes</td><td><span class="tag built">built</span> Now one rule: a new provider process is idle at its
+  first boundary (<code>record_first_boundary</code>). Before, idleness on reopen was a side effect of naming an inbox, so Claude and Codex never got it.</td></tr>
+<tr><td>Hears it when idle</td><td><code>wake</code>, reached from three triggers: steer/update revision (watcher), <code>After::TurnEnd</code>, <code>After::Reachable</code></td>
+  <td class="no">partly</td><td>"Became idle" has two names (<code>TurnEnd</code>, <code>Reachable</code>). Pre-existing; see "outside this work".</td></tr>
+<tr><td>Hears it at next boundary</td><td>hook <code>read_news</code> → <code>steer::claim</code></td>
+  <td class="yes">yes</td><td><span class="tag built">built</span> A Start on a wakeable work session claims nothing; the wake owns it. Decided with the same predicate the wake uses (<code>idle_conversation_candidates</code>), so there is one answer, not two.</td></tr>
+<tr><td>Where it can be reached</td><td><code>agent_inbox</code> · <code>agent_socket</code> · <code>agent_endpoint</code> (Codex), written by <code>record_agent_inbox</code> and <code>record_session_connection</code></td>
+  <td class="no">partly</td><td>One idea, three columns and two writers. Pre-existing and harmless; the candidates query is its one reader.</td></tr>
+<tr><td>The provider started</td><td>Claude/OpenCode/Pi: their own hook. Codex: <b>lf's launch sends a <code>SessionStart</code>/<code>UserPromptSubmit</code> payload it wrote itself</b></td>
+  <td class="no">no</td><td>One name for two reporters, and the label is wrong on a new conversation (below).</td></tr>
+</table>
+
+<h2>Biggest mismatch: Codex's start is reported in Codex's voice</h2>
+<p>Codex runs its start hook only inside its first turn, so the launch reports the start itself
+(<code>codex.rs::report_first_boundary</code>). That part is right: the launch is the one place that knows
+the process opened, its address and whether an opening prompt is coming. What is off is the payload. It is
+shaped as Codex's own hook, with <code>"source":"resume"</code> hard-coded.</p>
+<div class="old"><b>Existing (built)</b><br>
+<code>{"hook_event_name":"SessionStart","session_id":thread,"source":"resume"}</code> on every launch with no opening prompt.
+A new work session launched with no prompt (<code>saved</code> is <code>None</code>) writes a <code>resume</code> provider transition into its history
+(<code>with_provider_context</code> → <code>provider_transitions::observe_in</code>) for a conversation that was never resumed.</div>
+<div class="new"><b>Proposed</b> <span class="tag new-t">plan</span><br>
+<code>"source"</code> is <code>"resume"</code> when the launch resumed a saved thread and <code>"startup"</code> otherwise — what Codex's own hook would have said.
+Keep the shape; no wire change. A <code>BoundaryMoment::Open</code> would name it more honestly but is a wire change for one caller
+(<code>SessionBoundary</code> is <code>deny_unknown_fields</code>), and the history label is what a person can see.</div>
+
+<h2>Counterexamples tried</h2>
+<table>
+<tr><th>Path</th><th>What happens</th><th></th></tr>
+<tr><td>Claude reopen, waiting steer</td><td>Start names inbox → first → idle → wake writes inbox; hook sees a wakeable conversation and claims nothing. One turn on the steer.</td><td class="yes">holds</td></tr>
+<tr><td>Codex reopen, waiting steer</td><td>Launch's Start → first → idle → <code>turn/start</code> on the app-server before the TUI joins. Codex's later in-turn Start is not first.</td><td class="yes">holds</td></tr>
+<tr><td>Codex with an opening prompt</td><td>Launch reports the prompt first → working; the wake sends nothing; the steer is claimed inside the opening turn.</td><td class="yes">holds</td></tr>
+<tr><td>Claude with an opening prompt</td><td>Prompt, then the woken steer as a second turn. Delivered once.</td><td class="yes">accepted (questions #3)</td></tr>
+<tr><td>Wake can't reach the inbox</td><td>Start skipped the claim; the next prompt boundary claims it. Same as before this Task.</td><td class="yes">holds</td></tr>
+<tr><td>Server silent at Codex launch, back by the first typed turn</td><td>Codex's in-turn <code>SessionStart</code> becomes the first boundary and records the conversation idle mid-turn; the wake may send <code>turn/start</code> into a running turn. Claims stay exclusive, so the steer still arrives once (as a steer, or at the next boundary after a refused send); the turn's Stop corrects the state.</td><td class="no">rare; noted, not fixed</td></tr>
+<tr><td>Claude drops an inbox message sent during startup</td><td>Steer stamped <code>delivered</code>, never heard. Unanswered until a real Claude reopen (slice 4).</td><td class="no">open risk</td></tr>
+</table>
+
+<h2>Outside this work</h2>
+<p>The wake has three entry points for two ideas: <em>news arrived</em> (watcher on steer and Task-update revisions) and
+<em>a conversation became idle</em> (<code>After::TurnEnd</code> → <code>after_turn</code>, and <code>After::Reachable</code>). Making "became idle"
+a store revision the watcher reads would delete <code>After::Reachable</code> and Codex's synthetic report together. It costs a
+migration and triggers on <code>session_activity</code>, which changes every turn on every agent, and turns each turn end into a
+Machine-wide <code>idle_conversations(None)</code> scan instead of today's one-Session read. Not worth it at this Machine's load
+without measuring; a separate Task if pursued.</p>
+
+<h2>Verdict</h2>
+<p>The concepts line up. The change made the model smaller: "a new process is idle until its first turn" has one owner, and the inbox write
+went back to saving an address. One label to fix before qa, one rare edge to know about, one risk only a real Claude can answer.</p>
+
+<h2>Questions</h2>
+<ol class="q">
+  <li>Codex's launch report:
+    <ol><li>keep the Codex-shaped payload, fix <code>source</code> (planned)</li>
+        <li>add <code>BoundaryMoment::Open</code> now and accept the wire change</li></ol></li>
+  <li>The server-silent-at-launch Codex edge:
+    <ol><li>leave it (planned)</li>
+        <li>on a failed report, the launch records the first boundary in the store itself, so the watcher's first reading after a restart wakes it</li></ol></li>
+  <li>Wake entry points:
+    <ol><li>leave three (planned)</li>
+        <li>file a Task to make "became idle" a store revision, measured against a 10,000-Task store first</li></ol></li>
+</ol>
+</body>
+</html>

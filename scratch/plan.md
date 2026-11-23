@@ -154,7 +154,17 @@ prompt once and hears the steer once.
    fixture moved its model to a `fixture` provider id: OpenCode 2.0.32 asked
    for a Console login on the built-in `opencode` provider, so the wake leg
    had not been reaching the model on this Machine.
-4. **Next (qa), real providers:** the same reopen by hand on real Claude and Codex
+4. **Next, before qa:** `report_first_boundary` sends `"source":"resume"`
+   only when `open_native` resumed a saved thread (`saved.is_some()`),
+   `"startup"` otherwise. Today a new work session launched with no prompt
+   writes a `resume` provider transition into its history
+   (`with_provider_context` → `provider_transitions::observe_in`). Pass the
+   source in; no wire change.
+   Known edge, left as is: if the server misses Codex's launch report and
+   answers its in-turn `SessionStart`, that becomes the first boundary and
+   records the conversation idle mid-turn. Claims stay exclusive, so the steer
+   arrives once; the turn's Stop corrects the state.
+5. **Then (qa), real providers:** the same reopen by hand on real Claude and Codex
    with the branch `lf` (held terminal, the account's logins). Claude's run
    answers the inbox-at-SessionStart risk above: `delivered` with no turn
    means Claude dropped the early message; then build the bounded

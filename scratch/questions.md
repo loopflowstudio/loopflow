@@ -15,3 +15,10 @@
 
 3. Claude launched with an opening prompt and a waiting steer may run two
    turns (prompt, then the woken steer). Steers arrive once. Left as is.
+
+4. Concept review (`scratch/concept-review.html`): Codex's launch report
+   keeps its Codex-shaped payload with a truthful `source`. Passed over:
+   making "a conversation became idle" a store revision the watcher reads,
+   which would delete `After::Reachable` and the synthetic report but adds
+   triggers on `session_activity` (written every turn) and a Machine-wide
+   idle scan per turn end. A separate Task if wanted.

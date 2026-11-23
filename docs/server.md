@@ -83,20 +83,29 @@ setting and never re-register it behind your back.
 ## Phone access
 
 ```bash
-lf server mobile            # enable private remote access over this host's Tailscale
-lf server mobile --status   # check approval and live readiness
-lf server mobile --off      # disable remote access; local Sessions keep running
+lf server mobile            # approve this Machine and print its HTTPS address
+lf server mobile --status   # show the saved approval and current readiness
+lf server mobile --off      # close phone connections
 ```
 
-A phone signed into the same Tailscale user connects to this server with one
-pairing and opens Tasks owned by this Machine or any remote Machine this server
-reaches (SSH hosts, pools, and rentals). Each Task workspace shows **Files**
-(directory tree and file contents, including unchanged files), **Changes**,
-**Shell**, and **Session** against the Task's owning Machine — showing
-**Not started** before a checkout exists, and an explicit error naming the
-Machine when it is unreachable instead of an empty diff or local shell.
-Enabling local server access or adding SSH Machines does not enable phone
-access. For local-only use, no network port is opened; keep the local Unix
-socket private.
+Pair a phone signed into the same Tailscale account once to attach to running
+Sessions and open Tasks on this Machine or any SSH host, pool, or rental it can
+reach. **Files** shows the owning Machine’s directory tree and file contents,
+including unchanged files. **Changes**, **Shell**, and **Session** use that same
+Machine. The workspace shows **Not started** before a checkout exists and names
+the owning Machine in the error if it is unreachable.
+
+Setup requires a user-owned, untagged Machine with MagicDNS and HTTPS
+certificates enabled. For a custom daemon socket, set `TS_SOCKET` for the
+setup command and for an `lf server run` you start yourself. Service
+installation does not forward the setup command's `TS_SOCKET`.
+
+The server checks Tailscale directly through its LocalAPI. If Tailscale stops,
+signs out, or changes owner, phone connections close and local Sessions keep
+running. When the approved account returns, the saved QR address works again.
+Retries start after five seconds and back off to once every 30 seconds.
+
+Local server access and SSH Machines work independently of phone access.
+Local-only access uses the private Unix socket without opening a network port.
 
 Next: [Surfaces](surfaces.md) · [Connection troubleshooting](troubleshooting.md#desktop-cannot-connect).

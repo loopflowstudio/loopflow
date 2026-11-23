@@ -182,3 +182,22 @@ $ lf repo tracker | grep create
 <ol><li>Upgrading this Machine creates a Linear Project for <code>engbot</code>, a Wave nobody has touched since July (and <code>spend</code>, already queued). Designed (scratch/questions.md); retiring <code>engbot</code> first with <code>lf wave remove engbot</code> avoids it.</li>
 <li>Kept Projects read "… — Chapter …" in <code>lf wave status</code> and Desktop; renaming them is a Linear edit for their owner.</li>
 <li>Installed <code>lf</code> 5d5bf92c7 can't find LOO-1081; not this branch, not investigated.</li></ol>
+
+<h2>Sixth run, 2026-11-23: slice 6 (connect a new Wave) and its compress</h2>
+<p>Branch binary at 0f3ec9d6a, then rebuilt with the fix below. Private Machine at <code>/tmp/lf-qa-s6</code>: a fresh repository with a bare <code>origin</code>, <code>lf config set --shared repo.tracker.linear.team team-qa-123</code>, no Linear login, so every send stops at "No Linear credential found" and the queue shows what would go out.</p>
+<table><tr><th>Scenario</th><th>Result</th></tr>
+<tr><td><code>lf wave plan connect billing 'Billing Q4'</code> for a Wave nobody made yet, no login</td><td><b>Broken, fixed.</b> Printed <code>adding Wave billing</code>, then the credential error, exit 1. Left behind: Wave <code>billing</code> registered, <code>.lf/wave/billing</code> committed (<code>lf wave add: billing</code>), and its own Project's <code>create</code> queued. After <code>lf account connect linear</code>, the next save or the server's minute sends that create and makes a Linear Project "billing" beside the one asked for, before connect is retried. A typo in the Project name (<code>no Linear Project matches</code>) leaves the same.</td></tr>
+<tr><td>Same, after the fix (<code>lf wave plan connect refunds 'Refunds'</code>)</td><td>Credential error, exit 1; no Wave, no commit, no queued action. <code>lf wave list</code> and <code>lf repo tracker</code> unchanged.</td></tr>
+<tr><td><code>lf wave create ops</code>, two Tasks in <code>billing</code>, <code>lf task move &lt;t2&gt; --wave ops</code></td><td>One Project per Wave (<code>proj_…</code>, named for it); each Task's <code>create</code> names its Project; the move queues a <code>task_project</code> field action behind the create. <code>lf repo tracker</code>: 5 open.</td></tr>
+<tr><td><code>lf wave rename billing payments</code></td><td>Project renamed to <code>payments</code>; <code>lf wave status payments</code> lists <code>create</code> then <code>name</code> queued.</td></tr>
+<tr><td><code>lf wave remove ops</code> holding the moved Task</td><td>"1 open Task moved to the repository."; ops' <code>create</code> retired ("its Wave was removed"), the Task's queued move retired ("superseded by a later save") and a <code>task_project: null</code> queued.</td></tr>
+<tr><td><code>lf wave remove growth</code> holding a Task created there</td><td>The Task's queued <code>create</code> now carries <code>task_project: null</code> with title, description and the other four fields as they were (the compress's <code>json_set</code>).</td></tr>
+</table>
+<h3>Fixed</h3>
+<p><code>connect_async</code> (<code>rust/loopflow-execution/src/ops/linear.rs</code>) resolves the credential, Team and named Linear Project before it adds an unknown Wave. Test: <code>ops::linear::task_planning_tests::connect_naming_a_missing_project_adds_no_wave</code> fails on 0f3ec9d6a (a Wave is registered) and passes now; the four other connect tests pass.</p>
+<h3>Not reached</h3>
+<ul><li>A connect that succeeds, the add and rename sending their Project ahead of 40 older ones, and issues bound by tracker ID: lf's Linear login is OAuth only, and the real one writes to the real workspace. Execution's stand-in tests cover these.</li>
+<li>Desktop: slice 6 renamed <code>WaveProjectsView</code> to <code>WaveProjectSheet</code> and its menu identifier; no behaviour changed, so the app was not launched.</li></ul>
+<h3>Still wrong, worst first</h3>
+<ol><li>A Wave created in a connected repository while logged out still queues its Project's <code>create</code>; connecting it to an existing Linear Project later retires it, but only if connect runs before the first send. By design (every Wave is a Linear Project).</li>
+<li>Not this branch: <code>lf config set --shared repo.tracker.linear.team …</code> prints <code>saved; DomainAction</code>, a type name.</li></ol>

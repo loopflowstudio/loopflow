@@ -335,6 +335,12 @@ Session binding. The OS-installation adoption test is ignored locally.
 A 10,000-Task SQLite fixture used the external-ID index for Project lookup
 and `tracker_actions_unconfirmed` to update queued creates on Wave removal.
 
+QA after slice 6 (`scratch/qa.html`, sixth run): a connect naming a Project
+that then failed (no login, a mistyped name) had already added the Wave, whose
+own Project's `create` would go out on the next send. Connect now finds the
+Linear Project before adding the Wave
+(`task_planning_tests::connect_naming_a_missing_project_adds_no_wave`).
+
 ## Remains
 
 1. Gate: Swift DTO and desktop suites (`scripts/test_desktop.sh`), full matrix

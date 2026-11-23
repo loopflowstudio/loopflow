@@ -214,3 +214,8 @@ lists none. Its first command applies the branch's migrations; the Linear
 credential then fails to read, so every tracker action stays queued and
 `lf repo tracker` lists what an upgrade would send. Delete the copy after
 (about 1.4 GB with its backup).
+
+`lf wave plan connect <new wave> <project>` with no Linear login fails at the
+credential before it touches the Wave: no Wave, commit or queued action is
+left. To see what a failed connect leaves, compare `lf wave list` and
+`lf repo tracker` before and after, and read `tracker_actions` from a copy.

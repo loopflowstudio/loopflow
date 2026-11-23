@@ -52,6 +52,34 @@ fn connect_links_a_new_wave_without_creating_a_linear_project() {
 }
 
 #[test]
+fn connect_naming_a_missing_project_adds_no_wave() {
+    with_planning_task(|runtime, fixture, repo, _, state| {
+        super::test_fixture::commit_planning_repo(repo);
+        runtime.block_on(state.lock()).export_mode = true;
+        let error = super::connect(
+            repo,
+            &super::LinearInitOptions {
+                wave: Some("ops".into()),
+                project: Some("Refunds".into()),
+                ..Default::default()
+            },
+            &NullProgress,
+        )
+        .unwrap_err();
+
+        assert!(error
+            .to_string()
+            .contains("no Linear Project matches `Refunds`"));
+        let locator = crate::work::wave::discover(repo, "ops").unwrap();
+        assert!(runtime
+            .block_on(fixture.store.get_wave_at(&locator))
+            .unwrap()
+            .is_none());
+        assert!(!repo.join(".lf/wave/ops").exists());
+    });
+}
+
+#[test]
 fn adding_and_renaming_waves_send_their_projects_ahead_of_older_work() {
     with_planning_task(|runtime, fixture, repo, _, state| {
         super::test_fixture::commit_planning_repo(repo);

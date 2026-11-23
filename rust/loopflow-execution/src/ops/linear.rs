@@ -594,20 +594,6 @@ async fn connect_async(
     let store = planning_store().await?;
     let locator = crate::work::wave::discover(repo, &wave)
         .map_err(|error| OpsError::Message(error.to_string()))?;
-    let wave_id = match store
-        .get_wave_at(&locator)
-        .await
-        .map_err(super::tracker::message)?
-    {
-        Some(registered) => registered.id().clone(),
-        None => {
-            progress.status(&format!("adding Wave {wave}"));
-            super::wave_lifecycle::add_local(&store, repo, &wave, None)
-                .await?
-                .id
-        }
-    };
-
     let repo_id = repository_id(repo)?;
     // Connecting selects a transport; it must first preserve the existing binding.
     let existing_team = selected_linear_team(repo)?;
@@ -645,13 +631,10 @@ async fn connect_async(
         super::wave_lifecycle::AuthoredFiles::Unchanged
     };
 
-    let own = store
-        .sqlite
-        .wave_project(&wave_id)
-        .map_err(|error| OpsError::Message(error.to_string()))?;
-    let linked = linked_project(&store, &wave_id).await?;
     let ctx = resolve_repository_context(repo).await?;
-    match options.project.as_deref() {
+    // Find the named Project before adding a Wave: a Wave added for a connect
+    // that then fails would export a `create` for a Project of its own.
+    let named = match options.project.as_deref() {
         Some(key) => {
             progress.status(&format!("looking for Linear Project `{key}`"));
             let project = ctx
@@ -661,6 +644,30 @@ async fn connect_async(
                 .map_err(linear_error)?
                 .ok_or_else(|| OpsError::Message(format!("no Linear Project matches `{key}`")))?;
             validate_project_ownership(&project, &wave, &ctx.team_id)?;
+            Some(project)
+        }
+        None => None,
+    };
+    let wave_id = match store
+        .get_wave_at(&locator)
+        .await
+        .map_err(super::tracker::message)?
+    {
+        Some(registered) => registered.id().clone(),
+        None => {
+            progress.status(&format!("adding Wave {wave}"));
+            super::wave_lifecycle::add_local(&store, repo, &wave, None)
+                .await?
+                .id
+        }
+    };
+    let own = store
+        .sqlite
+        .wave_project(&wave_id)
+        .map_err(|error| OpsError::Message(error.to_string()))?;
+    let linked = linked_project(&store, &wave_id).await?;
+    match named {
+        Some(project) => {
             if linked.as_deref() != Some(project.id.as_str()) {
                 progress.status(&format!(
                     "linking wave/{wave} to Linear Project `{}`",

@@ -95,7 +95,7 @@ fn task_create_honors_the_selected_wave_and_graph_before_admission() {
     let fixture = CreationFixture::new();
     fixture.repo.push();
     let service = Service::start(&fixture);
-    let wave = |args: &[&str]| {
+    let cli = |args: &[&str]| {
         let output = fixture.run(args);
         assert!(
             output.status.success(),
@@ -116,8 +116,8 @@ fn task_create_honors_the_selected_wave_and_graph_before_admission() {
             .connect()
             .request(json!({"kind":"wave.graph", "directory": fixture.repo.path(), "wave": id}))
     };
-    let removed = wave(&["wave", "add", "product", "--json"])["id"].clone();
-    wave(&["wave", "remove", "product", "--json"]);
+    let removed = cli(&["wave", "add", "product", "--json"])["id"].clone();
+    cli(&["wave", "remove", "product", "--json"]);
     let db = rusqlite::Connection::open(fixture.home.path().join("loopflow.db")).unwrap();
     let assert_empty = || {
         for table in [
@@ -151,7 +151,7 @@ fn task_create_honors_the_selected_wave_and_graph_before_admission() {
         )
         .unwrap();
     assert_eq!(live, 0);
-    let replacement = wave(&["wave", "add", "product", "--json"])["id"].clone();
+    let replacement = cli(&["wave", "add", "product", "--json"])["id"].clone();
     assert_ne!(removed, replacement);
     refuse_removed();
     assert!(preview(&removed).is_err());
@@ -163,16 +163,16 @@ fn task_create_honors_the_selected_wave_and_graph_before_admission() {
     assert_eq!(error.data, Some(json!({"graph":"removed-workflow"})));
     assert_empty();
 
-    wave(&["wave", "rename", "product", "renamed", "--json"]);
+    cli(&["wave", "rename", "product", "renamed", "--json"]);
     let current = preview(&replacement).unwrap().result;
     assert_eq!(current["wave_id"], replacement);
     assert_eq!(current["wave"], "renamed");
     let filed = create("after-rename", &replacement, None).unwrap().result;
     assert_eq!(filed["row"]["task"]["wave_id"], replacement);
-    wave(&["wave", "remove", "renamed", "--json"]);
+    cli(&["wave", "remove", "renamed", "--json"]);
     let replay = create("after-rename", &replacement, None).unwrap().result;
     assert_eq!(replay["task"]["id"], filed["task"]["id"]);
-    let cli = fixture.run(&[
+    let replay = cli(&[
         "task",
         "create",
         "Keep this brief",
@@ -182,13 +182,23 @@ fn task_create_honors_the_selected_wave_and_graph_before_admission() {
         "after-rename",
         "--json",
     ]);
-    assert!(
-        cli.status.success(),
-        "{}",
-        String::from_utf8_lossy(&cli.stderr)
-    );
-    let cli: serde_json::Value = serde_json::from_slice(&cli.stdout).unwrap();
-    assert_eq!(cli["task"]["id"], filed["task"]["id"]);
+    assert_eq!(replay["task"]["id"], filed["task"]["id"]);
+
+    // A CLI name may still provision a Wave and then file into it again.
+    let by_name = || {
+        cli(&[
+            "task",
+            "create",
+            "Another brief",
+            "--wave",
+            "product",
+            "--json",
+        ])
+    };
+    let provisioned = by_name()["row"]["task"]["wave_id"].clone();
+    assert!(provisioned.is_string());
+    assert_ne!(provisioned, replacement);
+    assert_eq!(by_name()["row"]["task"]["wave_id"], provisioned);
 }
 
 #[test]

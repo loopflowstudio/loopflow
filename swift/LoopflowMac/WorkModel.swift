@@ -85,12 +85,9 @@ struct TaskReadings<Value> {
 
 enum NewTaskAction: Equatable {
     case file
-    case start(graph: String?)
+    case start
 
-    var graph: String? {
-        if case .start(let graph) = self { return graph }
-        return nil
-    }
+    var refusalTitle: String { self == .file ? "Not filed." : "Not started." }
 }
 
 /// One resolved opening: its companion must never outlive or drift from the Session.
@@ -2632,16 +2629,16 @@ final class WorkModel {
 
     /// Only a confirmed refusal returns to the draft. A saved submission whose
     /// answer is unknown stays with recovery on its original Machine.
-    func submitTask(_ action: NewTaskAction, request: String, wave: WaveSnapshot?,
-                    requestID: String = UUID().uuidString, fileWorkflow: String? = nil, replacing: String? = nil) async throws {
+    func submitTask(_ action: NewTaskAction, request: String, wave: CreationWave?,
+                    graph: String? = nil, requestID: String = UUID().uuidString, replacing: String? = nil) async throws {
         let owner = navigation
         let presentation = owner.paletteGeneration
         let destination = destinationGeneration
         let machine = observingMachineId
         let created: TaskCreated?
         do {
-            let answer = try await query.createTask(request: request, wave: wave.map { .existing(id: $0.id) }, graph: action.graph ?? fileWorkflow,
-                                                    run: action != .file, cwd: repoPath, requestID: requestID, replacing: replacing)
+            let answer = try await query.createTask(request: request, wave: wave, graph: graph,
+                                                    run: action == .start, cwd: repoPath, requestID: requestID, replacing: replacing)
             created = answer
             if case .start = action {
                 let receipt = answer.receipt

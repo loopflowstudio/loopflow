@@ -241,7 +241,7 @@ struct WorkDestinationTests {
         let registry = SessionsWorkspaceRegistry(localMachineId: nil)
         model.bindWorkspaces(registry, repository: "repo")
         model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [], fixed: true)
-        try await model.submitTask(.start(graph: nil), request: "fix the flaky retry test", wave: nil)
+        try await model.submitTask(.start, request: "fix the flaky retry test", wave: nil)
         #expect(model.selection == .task(id: task.id))
         let workspace = try #require(registry.retained(model.workspaceKey(for: model.selection, repository: "repo")))
         #expect(workspace.conversationError != nil)
@@ -272,7 +272,7 @@ struct WorkDestinationTests {
         let (model, registry) = destinationModel(query: query, repoPath: task.task.repo)
         registry.canPrepare = { false } // Warm primaries are not this Task's reads.
         model.applyFixture(roadmap: .available(without), waves: .available([]), workActivity: .loading, repos: [], fixed: true)
-        try await model.submitTask(.start(graph: nil), request: "fix the flaky retry test", wave: nil)
+        try await model.submitTask(.start, request: "fix the flaky retry test", wave: nil)
         #expect(model.selection == .task(id: task.id))
         #expect(model.task(id: task.id)?.task.id == task.id)
         #expect(installedSession(model, registry)?.id == record.id)
@@ -315,7 +315,7 @@ struct WorkDestinationTests {
         model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [])
         model.navigation.palette = .newTask
         let originalNavigation = model.navigation
-        let creating = Task { try await model.submitTask(.start(graph: nil), request: "earlier request", wave: nil) }
+        let creating = Task { try await model.submitTask(.start, request: "earlier request", wave: nil) }
         let deadline = ContinuousClock.now + .seconds(3)
         while !(await barrier.contains("creation")), ContinuousClock.now < deadline { await Task.yield() }
         try #require(await barrier.contains("creation"))

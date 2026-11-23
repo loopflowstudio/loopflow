@@ -26,8 +26,7 @@ private final class NewTaskDraft {
             request = recovered.request
             scope = recovered.wave
             graph = recovered.graph
-            replacing = recovered.id
-            refuse(recovered.run ? .start(graph: graph) : .file, error: recovered.refusal)
+            refuse(recovered.action, error: recovered)
         } else {
             scope = waveID.map { .existing(id: $0) }
         }
@@ -59,13 +58,11 @@ struct NewTaskSheet: View {
     }
 
     private var wave: WaveSnapshot? {
-        guard case .existing(let id) = draft.scope else { return nil }
+        guard case .existing(let id) = draft.scope, !draft.unavailableWaves.contains(id) else { return nil }
         return model.wave(id: id)?.wave
     }
     private var destination: WorkNavigation.Board? {
-        guard let scope = draft.scope else { return .repository }
-        guard case .existing(let id) = scope, !draft.unavailableWaves.contains(id) else { return nil }
-        return wave.map { .wave($0.id) }
+        draft.scope == nil ? .repository : wave.map { .wave($0.id) }
     }
     private var canSubmit: Bool { !trimmed.isEmpty && destination != nil && !draft.isSending }
     private var trimmed: String { draft.request.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -104,7 +101,7 @@ struct NewTaskSheet: View {
                     if destination != nil { await model.loadGraphDefault(wave: wave) }
                 }
             if case .refused(let action, let reason) = draft.submission {
-                FailureLine(action == .file ? "Not filed." : "Not started.", machine: reason)
+                FailureLine(action.refusalTitle, machine: reason)
                     .accessibilityElement(children: .contain)
                     .accessibilityIdentifier(action == .file ? "new-task-file-error" : "new-task-error")
             }
@@ -134,7 +131,7 @@ struct NewTaskSheet: View {
                 Button("Cancel") { dismiss() }
                     .buttonStyle(LoopflowButtonStyle())
                     .keyboardShortcut(.cancelAction)
-                Button(startLabel) { submit(.start(graph: draft.graph)) }
+                Button(startLabel) { submit(.start) }
                     .buttonStyle(LoopflowButtonStyle(.accent))
                     .keyboardShortcut(.return, modifiers: .command)
                     .disabled(!canSubmit)
@@ -216,8 +213,8 @@ struct NewTaskSheet: View {
         // Begin in this sheet's repository before navigation can change.
         Task.immediate {
             do {
-                try await model.submitTask(action, request: trimmed, wave: wave, requestID: requestID,
-                                           fileWorkflow: action == .file ? draft.graph : nil, replacing: draft.replacing)
+                try await model.submitTask(action, request: trimmed, wave: draft.scope, graph: draft.graph,
+                                           requestID: requestID, replacing: draft.replacing)
             } catch {
                 draft.refuse(action, error: error)
             }

@@ -67,7 +67,7 @@ struct NewTaskTests {
     private func model(catalog: OSAllocatedUnfairLock<String> = .init(initialState: "[]"),
                        planning: String? = nil, submissions: CreationSubmissions? = nil,
                        subscribe: (@Sendable () async throws -> WorkObservation)? = nil,
-                       write: @escaping @Sendable (ServedWrite) async throws -> String) async throws -> WorkModel {
+                       write: (@Sendable (ServedWrite) async throws -> String)? = nil) async throws -> WorkModel {
         let initial = String(decoding: try loadFixtureData("roadmap_snapshot.json"), as: UTF8.self)
         let model = WorkModel(query: RegistryQuery(write: write, submissions: submissions, subscribeWork: subscribe) { args, _ in
             if args.starts(with: ["plan", "list"]), !args.contains("--task") { return planning ?? initial }
@@ -94,13 +94,13 @@ struct NewTaskTests {
           arguments: [true, false])
     func startChoice(explicit: Bool) async throws {
         let admitted = try json(fixtureArray("task_create_receipt.json")[0])
-        let model = try await model(catalog: .init(initialState: catalogWithCode())) { change in
+        let model = try await model(catalog: .init(initialState: catalogWithCode()), write: { change in
             if case .taskCreate(_, _, _, let request, let wave, let graph, nil, true) = change {
                 #expect(request == "a brief" && wave == (explicit ? .existing(id: "wave-1") : nil))
                 #expect(graph == (explicit ? "code" : nil))
             } else { Issue.record("Start sent \(change)") }
             return admitted
-        }
+        })
         let product = try #require(model.visibleRoadmaps.first?.wave)
         model.navigation.sidebarWaveID = product.id
         let sheet = NewTaskSheet(model: model)
@@ -139,7 +139,7 @@ struct NewTaskTests {
     @Test("A removed Wave needs an explicit destination before File or Start", arguments: [true, false])
     func removedWave(planningCaughtUp: Bool) async throws {
         let (row, filed, planning, _) = try filing()
-        let model = try await model(catalog: .init(initialState: catalogWithCode())) { change in
+        let model = try await model(catalog: .init(initialState: catalogWithCode()), write: { change in
             if case .taskCreate(_, _, _, _, .existing(let id), _, _, _) = change {
                 throw ServerError(code: "not_found", message: "The selected Wave is no longer available in this repository.",
                                   data: .object(["wave_id": .string(id)]))
@@ -148,7 +148,7 @@ struct NewTaskTests {
                 throw RegistryQueryError("Unexpected File: \(change)")
             }
             return filed
-        }
+        })
         let wave = try #require(model.visibleRoadmaps.first?.wave)
         model.navigation.sidebarWaveID = wave.id
         let sheet = NewTaskSheet(model: model)
@@ -182,20 +182,22 @@ struct NewTaskTests {
         let admitted = try json(fixtureArray("task_create_receipt.json")[0])
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }
-        let attempts = OSAllocatedUnfairLock<[ServedWrite]>(initialState: [])
+        let attempts = OSAllocatedUnfairLock<[String]>(initialState: [])
         let journal = CreationSubmissions(directory: directory, machine: { "original" }, lookup: { _ in ReadOutput("null") },
             send: { data in
                 let payload = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+                let id = try #require(payload["request_id"] as? String)
+                attempts.withLock { $0.append(id) }
+                #expect(payload["run"] as? Bool == true)
+                #expect(payload["wave"] as? [String: String] == ["id": "wave-1"])
                 if payload["graph"] as? String == "code" {
+                    #expect(payload["request"] as? String == "draft")
                     throw ServerError(code: "invalid", message: "Workflow unavailable", data: .object(["graph": .string("code")]))
                 }
+                #expect(payload["graph"] is NSNull && payload["request"] as? String == "edited draft")
                 return admitted
             })
-        let model = try await model(catalog: .init(initialState: catalogWithCode())) { change in
-            guard case .taskCreate(_, let id, _, _, _, _, _, _) = change else { throw RegistryQueryError("Expected Start") }
-            attempts.withLock { $0.append(change) }
-            return try await journal.submit(change, requestID: id)
-        }
+        let model = try await model(catalog: .init(initialState: catalogWithCode()), submissions: journal)
         let wave = try #require(model.visibleRoadmaps.first?.wave)
         let sheet = NewTaskSheet(model: model)
         try sheet.inspect().find(button: wave.displayName).tap()
@@ -215,15 +217,9 @@ struct NewTaskTests {
         try sheet.inspect().find(button: "Start with feature ⌘↩").tap()
         try await eventually { model.selection?.kind == .task }
         #expect(model.navigation.palette == nil)
-        let writes = attempts.withLock { $0 }
-        try #require(writes.count == 2)
-        guard case .taskCreate(_, let first, nil, "draft", let originalWave, "code", nil, true) = writes[0],
-              case .taskCreate(_, let second, nil, "edited draft", let finalWave, nil, nil, true) = writes[1] else {
-            Issue.record("Unexpected Start submissions: \(writes)")
-            return
-        }
-        #expect(originalWave == .existing(id: wave.id) && finalWave == originalWave)
-        #expect(first != second)
+        let ids = attempts.withLock { $0 }
+        #expect(Set(ids).count == 2 && ids.count == 2)
+        let second = try #require(ids.last)
         #expect(try await journal.pending().map(\.id) == [second])
         await CreationRecovery.shared.presented([second])
     }
@@ -238,10 +234,7 @@ struct NewTaskTests {
                 _ = try await server.send(payload)
                 throw RegistryQueryError("Connection lost after admission")
             })
-        let model = try await model { change in
-            guard case .taskCreate(_, let id, _, _, _, _, _, _) = change else { throw RegistryQueryError("Expected Start") }
-            return try await journal.submit(change, requestID: id)
-        }
+        let model = try await model(submissions: journal)
         let sheet = NewTaskSheet(model: model)
         try sheet.inspect().find(ViewType.TextField.self).setInput("start once")
         try sheet.inspect().find(button: "Start with code ⌘↩").tap()
@@ -258,7 +251,7 @@ struct NewTaskTests {
     }
 
     @Test("A lost creation refused on replay reopens as an editable draft across restart",
-          arguments: [NewTaskAction.start(graph: "code"), .file])
+          arguments: [NewTaskAction.start, .file])
     func editDraftAfterLostReply(action: NewTaskAction) async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -279,12 +272,7 @@ struct NewTaskTests {
         }
         let first = journal()
         let catalog = OSAllocatedUnfairLock(initialState: try catalogWithCode())
-        func window(_ submissions: CreationSubmissions) async throws -> WorkModel {
-            try await self.model(catalog: catalog, submissions: submissions) { _ in
-                throw RegistryQueryError("Unexpected write")
-            }
-        }
-        let initial = try await window(first)
+        let initial = try await model(catalog: catalog, submissions: first)
         let sheet = NewTaskSheet(model: initial)
         try sheet.inspect().find(button: #require(initial.visibleRoadmaps.first?.wave.displayName)).tap()
         try sheet.inspect().find(ViewType.TextField.self).setInput("keep these words")
@@ -294,7 +282,7 @@ struct NewTaskTests {
         let original = try #require(await first.pending().first)
         let recovery = CreationRecovery(submissions: first)
         await recovery.refresh()
-        #expect(recovery.items.first?.draft?.id == original.id)
+        #expect(try await first.pending().first?.refusedDraft?.id == original.id)
         #expect(sends.withLock { $0 } == [original.payload, original.payload])
         if action == .file {
             let command = try #require(JSONSerialization.jsonObject(with: original.payload) as? [String: Any])
@@ -304,7 +292,7 @@ struct NewTaskTests {
 
         let cold = journal()
         let restarted = CreationRecovery(submissions: cold)
-        let model = try await window(cold)
+        let model = try await model(catalog: catalog, submissions: cold)
         model.navigation.palette = nil
         let notices = model.navigation.notices
         if notices.event != nil { notices.dismiss() }
@@ -484,13 +472,13 @@ struct NewTaskTests {
         let current = try RegistryQuery.decode(RoadmapSnapshot.self, from: after)
         let sent = AsyncStream<Void>.makeStream()
         let reply = AsyncStream<Void>.makeStream()
-        let model = try await model(planning: before) { _ in
+        let model = try await model(planning: before, write: { _ in
             sent.continuation.finish()
             for await _ in reply.stream {}
             return receipt
-        }
+        })
         let wave = try #require(model.visibleRoadmaps.first?.wave)
-        let filing = Task { try await model.submitTask(.file, request: row.task.name, wave: wave) }
+        let filing = Task { try await model.submitTask(.file, request: row.task.name, wave: .existing(id: wave.id)) }
         for await _ in sent.stream {}
         model.applyFixture(roadmap: .available(current), waves: .available([]), workActivity: .loading, repos: [])
         reply.continuation.finish()
@@ -538,7 +526,7 @@ struct NewTaskTests {
     @Test("Leaving the filed selection releases its receipt row", arguments: Departure.allCases)
     func leaveFiledBrief(departure: Departure) async throws {
         let (row, receipt, before, _) = try filing()
-        let model = try await model(planning: before) { _ in receipt }
+        let model = try await model(planning: before, write: { _ in receipt })
         model.confirmMachine("original")
         try await model.submitTask(.file, request: row.task.name, wave: nil)
         let view = try #require(model.navigation.waveView)
@@ -570,10 +558,7 @@ struct NewTaskTests {
                 for await _ in reply.stream {}
                 return receipt
             })
-        let model = try await model(planning: before) { change in
-            guard case .taskCreate(_, let id, _, _, _, _, _, _) = change else { throw RegistryQueryError("Expected File") }
-            return try await journal.submit(change, requestID: id)
-        }
+        let model = try await model(planning: before, submissions: journal)
         let filing = Task { try await model.submitTask(.file, request: row.task.name, wave: nil) }
         for await _ in sent.stream {}
         model.selectDashboard("another")

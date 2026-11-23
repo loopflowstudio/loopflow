@@ -23,3 +23,5 @@ When recovery confirms a refusal, **Edit draft** brings back the saved request o
 I used the Wave resolver’s UUID convention for `lf task create --wave`. A UUID selects the existing Wave. The saved string keeps its original fingerprint. Desktop records the ID object so an older Machine cannot treat it as a name to provision.
 
 In a recovered sheet, Cancel keeps the last saved draft and Discard draft removes it. File keeps the menu’s named workflow in the Desktop journal so Edit draft can restore the selection. Only Start includes it in the Machine command.
+
+For a CLI name, use the Wave returned by the first lookup. Look it up again after provisioning. Admission still checks the selected Wave inside the transaction.

@@ -142,12 +142,8 @@ public actor CreationSubmissions {
     }
 
     /// Saves `change` under `requestID` for its Machine; saving it again is a no-op.
-    public func record(_ change: ServedWrite, requestID: String) async throws -> SubmittedCreation {
-        return try await record(change, requestID: requestID, fileWorkflow: nil, replacing: nil)
-    }
-
-    private func record(_ change: ServedWrite, requestID: String, fileWorkflow: String?,
-                        replacing: String?) async throws -> SubmittedCreation {
+    public func record(_ change: ServedWrite, requestID: String, fileWorkflow: String? = nil,
+                       replacing: String? = nil) async throws -> SubmittedCreation {
         var record = SubmittedCreation(requestID: requestID, destination: try await currentMachine(),
             payload: try JSONEncoder().encode(change), version: ServerProtocol.revision, submittedAt: Date())
         record.fileWorkflow = fileWorkflow

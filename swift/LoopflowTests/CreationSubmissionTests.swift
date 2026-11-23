@@ -179,7 +179,7 @@ struct CreationSubmissionTests {
         let record = try await original.record(start("one", graph: "removed"), requestID: "one")
         let recovery = CreationRecovery(submissions: original)
         await recovery.refresh()
-        let draft = try #require(recovery.items.first?.draft)
+        let draft = try #require(await original.pending().first?.refusedDraft)
         #expect(draft.wave == .name("product") && draft.graph == "removed")
 
         let correction = start("two", graph: nil)
@@ -206,7 +206,7 @@ struct CreationSubmissionTests {
             try await original.submit(start("three", graph: nil), requestID: "three", replacing: draft.id)
         }
         await recovery.refresh()
-        let corrected = try #require(recovery.items.first?.draft)
+        let corrected = try #require(await original.pending().first?.refusedDraft)
         #expect(corrected.id == "two" && corrected.graph == nil)
         try await recovery.discardDraft(corrected.id)
         #expect(try await original.pending().isEmpty && recovery.items.isEmpty)
@@ -324,10 +324,10 @@ struct CreationSubmissionTests {
         recovery.report(to: notices) { _ in Issue.record("Expected a receipt") }
         await recovery.refresh()
         let item = try #require(recovery.items.first)
-        #expect(item.complete)
         #expect(item.text == "Server explanation")
         // The window's Notice stands for the saved creation; its action opens the result.
         #expect(notices.current?.text == "Server explanation")
+        #expect(notices.current?.action?.title == "Show result")
         #expect(notices.current?.kind == .condition)
         notices.current?.action?.perform()
         #expect(recovery.inspecting?.id == item.id)
@@ -338,7 +338,7 @@ struct CreationSubmissionTests {
         try FileManager.default.setAttributes([.immutable: false], ofItemAtPath: file.path)
         #expect(try await client.pending().count == 1)
         await recovery.refresh()
-        #expect(recovery.items.first?.complete == true)
+        #expect(notices.current?.action?.title == "Show result")
         #expect(await server.submissions.count == 1)
         await recovery.presented([item.id])
         #expect(try await client.pending().isEmpty)

@@ -4,6 +4,10 @@ import Observation
 import SwiftUI
 import Loopflow
 
+extension RefusedTaskDraft {
+    var action: NewTaskAction { run ? .start : .file }
+}
+
 extension CreationSubmissions {
     static let shared = CreationSubmissions(
         directory: WorkCache.homeDirectory.appendingPathComponent("submissions"),
@@ -22,11 +26,15 @@ final class CreationRecovery {
     struct Item: Identifiable {
         let id: String
         let text: String
-        let complete: Bool
-        let resource: Resource?
-        var draft: RefusedTaskDraft?
+        enum Action {
+            case inspect(Resource)
+            case edit(RefusedTaskDraft)
+        }
+        var action: Action?
     }
-    struct Resource {
+    struct Resource: Identifiable {
+        let id: String
+        let complete: Bool
         let destination: String
         let directory: String
         let task: String?
@@ -45,7 +53,7 @@ final class CreationRecovery {
         didSet { postNotices(replacing: oldValue) }
     }
     /// The recovered creation whose inspector is open.
-    var inspecting: Item?
+    var inspecting: Resource?
     @ObservationIgnored private var centers: [WeakCenter] = []
 
     private struct WeakCenter {
@@ -63,13 +71,11 @@ final class CreationRecovery {
     }
 
     private func notice(_ item: Item, editDraft: @escaping (RefusedTaskDraft) -> Void) -> Notice {
-        if let draft = item.draft {
-            return Notice(item.text, key: "creation-\(item.id)", action: Notice.Action("Edit draft") {
-                editDraft(draft)
-            }, kind: .condition)
-        }
-        let action = item.resource.map { _ in
-            Notice.Action(item.complete ? "Show result" : "Inspect") { [weak self] in self?.inspecting = item }
+        let action: Notice.Action? = switch item.action {
+        case .edit(let draft): Notice.Action("Edit draft") { editDraft(draft) }
+        case .inspect(let resource):
+            Notice.Action(resource.complete ? "Show result" : "Inspect") { [weak self] in self?.inspecting = resource }
+        case nil: nil
         }
         return Notice(item.text, key: "creation-\(item.id)", action: action, kind: .condition)
     }
@@ -103,7 +109,7 @@ final class CreationRecovery {
             catch {
                 presentations.removeValue(forKey: id)
                 items.removeAll { $0.id == id }
-                items.append(Item(id: id, text: error.localizedDescription, complete: false, resource: nil))
+                items.append(Item(id: id, text: error.localizedDescription))
             }
         }
     }
@@ -142,23 +148,22 @@ final class CreationRecovery {
                     }
                     let encoder = JSONEncoder()
                     encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-                    let resource = Resource(destination: record.destination, directory: directory,
+                    let resource = Resource(id: record.id, complete: receipt.disposition == .complete,
+                        destination: record.destination, directory: directory,
                         task: receipt.taskId, session: receipt.sessionId,
                         receipt: String(decoding: try encoder.encode(receipt), as: UTF8.self))
-                    current.append(Item(id: record.id, text: receipt.explanation,
-                        complete: receipt.disposition == .complete, resource: resource))
+                    current.append(Item(id: record.id, text: receipt.explanation, action: .inspect(resource)))
                 } catch let draft as RefusedTaskDraft {
-                    let action = draft.run ? "Not started." : "Not filed."
-                    current.append(Item(id: draft.id, text: "\(action) \(draft.localizedDescription)",
-                                        complete: false, resource: nil, draft: draft))
+                    current.append(Item(id: draft.id, text: "\(draft.action.refusalTitle) \(draft.localizedDescription)",
+                                        action: .edit(draft)))
                 } catch {
-                    current.append(Item(id: record.id, text: "Creation \(record.id): \(error.localizedDescription)", complete: false, resource: nil))
+                    current.append(Item(id: record.id, text: "Creation \(record.id): \(error.localizedDescription)"))
                 }
             }
             // A mounted view may have retired a request while lookup awaited I/O.
             let pending = Set(try await submissions.pending().map(\.id))
             items = current.filter { pending.contains($0.id) }
-        } catch { items = [Item(id: "storage", text: error.localizedDescription, complete: false, resource: nil)] }
+        } catch { items = [Item(id: "storage", text: error.localizedDescription)] }
     }
 }
 
@@ -170,10 +175,10 @@ struct CreationNotices: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .sheet(item: $recovery.inspecting) { item in
-                if let resource = item.resource { RecoveredCreationInspector(resource: resource, presented: {
-                    if item.complete { await recovery.presented([item.id]) }
-                }) }
+            .sheet(item: $recovery.inspecting) { resource in
+                RecoveredCreationInspector(resource: resource) {
+                    if resource.complete { await recovery.presented([resource.id]) }
+                }
             }
             .task(id: ObjectIdentifier(notices)) {
                 recovery.report(to: notices, editDraft: editDraft)

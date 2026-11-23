@@ -60,3 +60,7 @@ On an unlocked display, use the Workflow menu, correct a refused Start with **Us
 - [QA](qa.html) drove File in the repository and Wave, inherited Start, a removed Wave and server restart in an isolated Dev bundle. The named-workflow menu, live confirmed refusal after send and live lost reply were untested.
 
 `scripts/test_desktop.sh --filter 'NewTaskTests|BacklogViewTests|CreationSubmissionTests|WorkDestinationTests/(newTask|lateCreationReply)'` built Desktop and passed 39 tests in five suites after compression. The unlocked-display demo remains for QA.
+
+Compression checks. `scripts/test_desktop.sh --skip-build --filter 'NewTaskTests|CreationSubmissionTests|WorkDestinationTests/(newTask|lateCreationReply)'` passed 30 tests after rebuilding Desktop. Three Rust integration tests passed for Wave selection and provisioning, lost-reply replay, and CLI/served Session adoption.
+
+`cargo clippy --all-targets -- -D warnings` passed after compression.

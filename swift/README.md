@@ -171,7 +171,8 @@ Approve the plan?
 
 The word is the first of these that applies:
 
-1. A program can report **Busy**, **Available**, **Blocked**, or **Error**.
+1. When programs report, the row shows the highest-priority report.
+   **Blocked** takes precedence over **Error**, then **Busy**, then **Available**.
    A finished turn on a live interactive Session reads **Available** once its
    programs have stopped reporting work. A blocked program's line is what it asked.
 2. **Blocked** or **Waiting**, when the Task's condition says so and no

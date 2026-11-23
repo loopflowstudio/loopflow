@@ -3603,7 +3603,25 @@ mod tests {
             selections::edit_task_order(&store.sqlite, &repo, TaskOrderEdit::SortByStatus).unwrap(),
             [active, other]
         );
-        report_states(8, &[State::Blocked, State::Working]);
+        report_states(8, &[State::Working, State::Idle]);
+        check_filters(&[active], &[active]);
+        assert_eq!(
+            selections::edit_task_order(&store.sqlite, &repo, TaskOrderEdit::SortByStatus).unwrap(),
+            [other, active]
+        );
+        report_states(9, &[State::Working, State::Error]);
+        check_filters(&[], &[active]);
+        let errors = selections::view_plan(&store.sqlite, &repo, Some("state:error")).unwrap();
+        assert_eq!(errors.resolution.task_ids(), [active]);
+        assert!(errors
+            .resolution
+            .attention
+            .contains(&errors.resolution.members[0].work));
+        assert_eq!(
+            selections::edit_task_order(&store.sqlite, &repo, TaskOrderEdit::SortByStatus).unwrap(),
+            [active, other]
+        );
+        report_states(10, &[State::Blocked, State::Working]);
         // A conflicting planning label never withdraws started execution.
         db.execute(
             "UPDATE tasks SET planning_state='completed' WHERE id=?1",

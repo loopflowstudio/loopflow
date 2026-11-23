@@ -38,7 +38,7 @@ struct WorkSelectionTests {
     @Test func everyStateRustSendsDecodes() throws {
         let states = try JSONDecoder().decode(
             [WorkSelectionState].self, from: loadFixtureData("selection_states.json"))
-        #expect(states.contains(.working) && states.contains(.auto))
+        #expect(states == WorkSelectionState.allCases)
     }
 
     @Test func queryPlansArriveFromTheirSubscription() throws {

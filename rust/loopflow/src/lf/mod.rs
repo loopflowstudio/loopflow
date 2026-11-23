@@ -779,7 +779,7 @@ pub enum DesktopCommand {
         #[arg(long, global = true, id = "portfolio_json")]
         json: bool,
     },
-    /// Sort this repository’s Working Tasks once by status (Blocked, Available, Idle, Busy)
+    /// Sort this repository’s Working Tasks once by status (Blocked, Error, Available, Idle, Busy)
     Sort,
     /// Read a saved Dashboard (its arrangement and slots) as JSON; `lf desktop dashboard slots` replaces the slots
     Layout {

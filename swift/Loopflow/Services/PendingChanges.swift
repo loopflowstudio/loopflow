@@ -381,15 +381,7 @@ extension [WorkViewPlan.Content] {
             let next = update(current)
             let section = next.subtracting(current).intersection(sections)
             let kept = section.isEmpty ? next : next.subtracting(sections.subtracting(section))
-            self[index].states = WorkSelectionState.allOrdered.filter(kept.contains)
+            self[index].states = WorkSelectionState.allCases.filter(kept.contains)
         }
     }
-}
-
-extension WorkSelectionState {
-    /// Declaration order, so patched states keep a stable order.
-    fileprivate static let allOrdered: [WorkSelectionState] = [
-        .open, .available, .busy, .blocked, .unstarted, .idle, .active, .moving,
-        .backlog, .working, .done, .auto,
-    ]
 }

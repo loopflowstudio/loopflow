@@ -239,6 +239,7 @@ extension WorkViewPlan.Content {
     /// it is the word only when the reading gives no other.
     public var status: TaskRowStatus? {
         if states.contains(.blocked) { return .program(.blocked) }
+        if states.contains(.error) { return .program(.error) }
         if states.contains(.busy) { return .program(.working) }
         if states.contains(.available) { return .program(.idle) }
         if let state = states.lazy.compactMap({ TaskState(rawValue: $0.rawValue) }).first { return .lifecycle(state) }

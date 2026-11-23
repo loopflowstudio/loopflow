@@ -50,7 +50,7 @@ LOO-5  Busy  Auto
 ```
 
 The word is the one the Mac shows for that Task: what its conversation reports
-(**Blocked**, **Busy**, **Available**), or its lifecycle word (**Unstarted**,
+(**Blocked**, **Error**, **Busy**, **Available**), or its lifecycle word (**Unstarted**,
 **Idle**, **Active**, **Moving**, **Done**) while nothing reports. **Auto**
 follows while Auto-Ship is on. A Task whose reading carries
 neither says **Unavailable**. The row carries no stripe: colour is on the word.

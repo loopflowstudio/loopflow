@@ -213,7 +213,7 @@ struct TaskConceptTests {
                 try JSONDecoder().decode(RoadmapTask.self, from: JSONSerialization.data(withJSONObject: missing))
             }
         }
-        row["selection_states"] = ["active", "working", "available", "busy", "blocked"]
+        row["selection_states"] = ["active", "working", "available", "busy", "blocked", "error"]
         let wire = String(decoding: try JSONSerialization.data(withJSONObject: row), as: UTF8.self)
         let quiet = try #require(WorkCache.quietRoadmap(wire))
         let restored = try JSONDecoder().decode(RoadmapTask.self, from: Data(quiet.utf8))

@@ -9,7 +9,9 @@ struct TaskStatusTests {
 
     @Test("A row says what the Mac row says: the conversation's report, else the lifecycle")
     func oneVocabulary() {
-        #expect(content([.working, .busy, .blocked]).status == .program(.blocked))
+        #expect(content([.working, .error]).status == .program(.error))
+        #expect(content([.working, .error, .busy]).status == .program(.error))
+        #expect(content([.working, .error, .busy, .blocked]).status == .program(.blocked))
         #expect(content([.working, .busy, .available]).status?.word == ProgramStatusState.working.label)
         #expect(content([.working, .available]).status?.word == ProgramStatusState.idle.label)
         #expect(content([.working, .idle, .auto]).status == .lifecycle(.idle))

@@ -8929,6 +8929,7 @@
           "enum": [
             "open",
             "blocked",
+            "error",
             "idle",
             "active",
             "moving",

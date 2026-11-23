@@ -10,6 +10,7 @@ use crate::work::selection::{
 };
 use crate::{StoreError, StoreResult};
 use loopflow_model::durable::RepositoryId;
+use loopflow_model::program_status::State;
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use std::cmp::Reverse;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -269,15 +270,26 @@ impl TaskOrderEdit<'_> {
     }
 }
 
-fn status_bucket(states: &BTreeSet<SelectionState>) -> u8 {
+#[derive(PartialEq, Eq, PartialOrd, Ord)]
+enum StatusBucket {
+    Blocked,
+    Error,
+    Available,
+    Idle,
+    Busy,
+}
+
+fn status_bucket(states: &BTreeSet<SelectionState>) -> StatusBucket {
     if states.contains(&SelectionState::Blocked) {
-        0
-    } else if states.contains(&SelectionState::Available) {
-        1
+        StatusBucket::Blocked
+    } else if states.contains(&SelectionState::Error) {
+        StatusBucket::Error
     } else if states.contains(&SelectionState::Busy) {
-        3
+        StatusBucket::Busy
+    } else if states.contains(&SelectionState::Available) {
+        StatusBucket::Available
     } else {
-        2
+        StatusBucket::Idle
     }
 }
 
@@ -373,15 +385,13 @@ fn task_activity_in(
                 .iter()
                 .flat_map(|status| &status.records)
             {
-                match report.state {
-                    loopflow_model::program_status::State::Working => {
-                        activity.states.insert(SelectionState::Busy);
-                    }
-                    loopflow_model::program_status::State::Blocked => {
-                        activity.states.insert(SelectionState::Blocked);
-                    }
-                    _ => {}
-                }
+                let state = match report.state {
+                    State::Working => SelectionState::Busy,
+                    State::Blocked => SelectionState::Blocked,
+                    State::Error => SelectionState::Error,
+                    _ => continue,
+                };
+                activity.states.insert(state);
             }
         }
     }
@@ -978,5 +988,58 @@ impl SqliteStore {
             ));
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{SelectionTask, TaskOrderEdit};
+    use crate::work::selection::{
+        SelectionState, SelectionWork, WorkWorkspaceKey, WorkWorkspaceKind,
+    };
+
+    #[test]
+    fn status_sort_groups_by_row_status_then_newest_start() {
+        use SelectionState::{Available, Blocked, Busy, Error};
+        let rows: &[(&str, &[SelectionState])] = &[
+            ("error", &[Error]),
+            ("busy", &[Busy]),
+            ("idle", &[]),
+            ("available", &[Available]),
+            ("blocked", &[Busy, Error, Blocked]),
+            ("busy-and-available", &[Busy, Available]),
+            ("busy-and-error", &[Busy, Error]),
+        ];
+        let tasks = rows
+            .iter()
+            .enumerate()
+            .map(|(at, &(id, states))| SelectionTask {
+                started_at: Some(at as i64),
+                rank: 0,
+                work: SelectionWork {
+                    key: WorkWorkspaceKey {
+                        repository: "repo".into(),
+                        kind: WorkWorkspaceKind::Task,
+                        id: id.into(),
+                    },
+                    name: id.into(),
+                    parent_wave: None,
+                    states: states.iter().copied().collect(),
+                    activity_known: true,
+                },
+            })
+            .collect();
+        assert_eq!(
+            TaskOrderEdit::SortByStatus.apply(tasks, &[]).unwrap(),
+            [
+                "blocked",
+                "busy-and-error",
+                "error",
+                "available",
+                "idle",
+                "busy-and-available",
+                "busy"
+            ]
+        );
     }
 }

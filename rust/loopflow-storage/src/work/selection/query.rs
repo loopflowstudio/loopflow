@@ -145,6 +145,7 @@ impl Selection {
                         SelectionState::Available
                         | SelectionState::Busy
                         | SelectionState::Blocked
+                        | SelectionState::Error
                             if !item.activity_known =>
                         {
                             None
@@ -382,6 +383,7 @@ impl Parser {
                 "available" => SelectionState::Available,
                 "busy" => SelectionState::Busy,
                 "blocked" => SelectionState::Blocked,
+                "error" => SelectionState::Error,
                 "unstarted" => SelectionState::Unstarted,
                 "idle" => SelectionState::Idle,
                 "active" => SelectionState::Active,

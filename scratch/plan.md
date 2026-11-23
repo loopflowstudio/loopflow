@@ -12,44 +12,26 @@ Latest concept review: [Built B1 concept review](concept-review.html).
 
 ## Remaining work (from B1 concept review at `1e3b4007ce`)
 
-Reviewing the full built B1 change across Working Task order, status, Graph step,
-write recovery, and fonts found three concrete conceptual mismatches. Fix them
-in this order so the first slice proves the shared status model immediately:
+Slice 1 is built. The next slice is Sort write recovery.
 
-### Slice 1 — Unify “status” between Task rows and **Sort by status**
+### Slice 1 — Shared status for Task rows and Sort by status
 
-Today, row display (`ProgramStatusState.summaryOrder` on Mac and
-`WorkViewPlan.Content.status` on iOS) ranks `Blocked > Error > Busy > Available`,
-while `status_bucket` in `rust/loopflow-storage/src/sqlite/selections.rs` ranks
-`Blocked > Available > Idle > Busy` and ignores `Error`. As a result, clicking
-**Sort by status** puts a dual-session row labeled **Busy** above **Idle** rows,
-and drops a red **Error** row below **Available** rows.
+Sort saves Blocked, Error, Available, Idle, Busy, newest first within each group.
+A Task with both Busy and Available sorts as Busy and matches both filters.
+Current OSC 7501 errors appear on phone rows, match `state:error`, and appear
+in selection attention. Desktop drops cached Error on restore alongside other
+live activity. Pending Task edits retain all states in declaration order.
 
-What follows across layers:
-- **Rust storage & query (`rust/loopflow-storage/src/work/selection.rs`, `query.rs`, `sqlite/selections.rs`):**
-  - Add `SelectionState::Error` (wire `"error"`, query parser `"error"`).
-  - In `task_activity_in`, map `program_status::State::Error` to `SelectionState::Error`.
-  - Include `SelectionState::Error` in `SelectionResolution.attention` alongside `Available` and `Blocked`.
-  - Align `status_bucket` with the row's own summary precedence:
-    - `0`: `Blocked`
-    - `1`: `Error`
-    - `2`: `Available` (when not `Busy`)
-    - `3`: `Idle` (neither `Blocked`, `Error`, `Available`, nor `Busy`)
-    - `4`: `Busy` (when neither `Blocked` nor `Error`)
-    Check `Blocked` → `Error` → `Busy` → `Available` → `Idle` when choosing the
-    bucket (returning `0`, `1`, `4`, `2`, `3`). Dual-state Tasks (`Available` +
-    `Busy`) still carry both flags in `SelectionState`, so `state:available` and
-    `state:busy` filters keep their exact set membership while the sort bucket
-    matches the word **Busy** printed on the row.
-- **Swift shared & iOS (`swift/Loopflow/Models/WorkSelection.swift`, `Design/TaskRow.swift`, `Services/PendingChanges.swift`):**
-  - Add `WorkSelectionState.error` and include it in `PendingChanges`'s known state set.
-  - In `WorkViewPlan.Content.status`, check `.error` right after `.blocked` (returning `.program(.error)`) so iOS displays `Error` consistently with Mac's `ProgramStatusState.summaryOrder`.
-- **CLI help, DTO fixtures & docs (`rust/loopflow/src/lf/mod.rs`, `tests/fixtures/dto/`, `docs/surfaces.md`):**
-  - Update `DesktopCommand::Sort` help and `docs/surfaces.md` to list `Blocked, Error, Available, Idle, Busy`.
-  - Update `tests/fixtures/dto/server_schema.json` (and any schema/selection tests) for `SelectionState::Error`.
-- **Verification:**
-  - Rust unit test covering `[Blocked, Working]`, `[Error]`, `[Error, Working]`, `[Available]`, `[]` (Idle), `[Working, Available]`, and `[Working]` through `TaskOrderEdit::SortByStatus` and verifying `state:error` query + `attention`.
-  - Swift `TaskStatusTests` covering `[.working, .error]` and `[.working, .error, .busy]` on `WorkViewPlan.Content.status`.
+On a private copy of the QA Machine with seeded Session reports, `lf desktop sort`
+returned Bravo (Blocked), Charlie (Error + Busy), Delta (Available), Hotel and
+Foxtrot (Idle), Alpha (Busy + Available). `lf desktop view show 'state:error'`
+returned Charlie in both members and attention. Alpha appeared in both the Busy
+and Available queries.
+
+- `cargo test -p loopflow-storage --lib status_sort_groups_by_row_status_then_newest_start` passed.
+- `cargo test -p loopflow --lib task_concepts_share_lifecycle_activity_membership_and_order` passed.
+- `scripts/test_desktop.sh --filter 'TaskStatusTests|TaskConceptTests/missingKeysFailAndSavedActivityCannotReturn|WorkSelectionTests/everyStateRustSendsDecodes'` passed all four tests.
+- `server::schema::tests::the_checked_in_schema_is_what_describe_prints` passed against the regenerated fixture.
 
 ### Slice 2 — Route **Sort by status** through `PendingChanges`
 

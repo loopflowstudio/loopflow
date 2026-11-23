@@ -110,6 +110,7 @@ pub enum SelectionState {
     /// Session axis: a current Task Session report says it is working.
     Busy,
     Blocked,
+    Error,
     /// Task axis: effective lifecycle, including withdrawal of never-started work.
     Unstarted,
     Idle,
@@ -281,7 +282,8 @@ impl Selection {
             .filter(|item| {
                 selected.contains(&item.key)
                     && (item.states.contains(&SelectionState::Available)
-                        || item.states.contains(&SelectionState::Blocked))
+                        || item.states.contains(&SelectionState::Blocked)
+                        || item.states.contains(&SelectionState::Error))
             })
             .map(|item| item.key.clone())
             .collect();

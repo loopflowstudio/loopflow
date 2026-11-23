@@ -76,7 +76,7 @@ lf desktop dashboard query attention 'state:available or state:blocked'
 ```
 
 Queries support `wave:`, `task:`, `kind:task|wave`, and
-`state:open|available|busy|blocked|unstarted|idle|active|moving|backlog|working|done|auto`
+`state:open|available|busy|blocked|error|unstarted|idle|active|moving|backlog|working|done|auto`
 (`auto`: an open Task with auto on), combined with whitespace (AND), `or`, and parentheses.
 
 ### Changes show at once
@@ -104,8 +104,9 @@ arranged. Each sidebar row shows its current Graph step beside its status
 when the Task has taken up a Graph.
 
 Choose **Sort by status** in the repository sidebar or from **⌘K**, or run
-`lf desktop sort`. This puts Blocked Tasks first, then Available, Idle and
-Busy. Each group starts with its newest Task. The order stays put as
+`lf desktop sort`. This puts Blocked Tasks first, followed by Error, Available,
+Idle and Busy. A Task with both busy and available conversations sorts as Busy.
+Each group starts with its newest Task. The order stays put as
 conversations change status.
 
 A drop shows immediately. If another window has already reordered the list,

@@ -12,9 +12,9 @@ Latest concept review: [Built B1 concept review](concept-review.html).
 
 ## Remaining work (from B1 concept review at `1e3b4007ce`)
 
-Slice 1 is built. The next slice is Sort write recovery.
+Slice 1 is built. Slices 2 and 3 remain; Slice 2 (Sort write recovery) is next.
 
-### Slice 1 — Shared status for Task rows and Sort by status
+### Slice 1 (built at `820bcdc384`) — Shared status for Task rows and Sort by status
 
 Sort saves Blocked, Error, Available, Idle, Busy, newest first within each group.
 A Task with both Busy and Available sorts as Busy and matches both filters.

@@ -70,3 +70,34 @@ pub fn explain(destination: &Destination, key: &str) -> anyhow::Result<()> {
     println!("{}", serde_json::to_string_pretty(&explained)?);
     Ok(())
 }
+
+pub fn scope(directory: &Path, subscribe: bool) -> anyhow::Result<()> {
+    if subscribe {
+        return subscribe_scope(
+            directory.to_owned(),
+            loopflow_execution::read_stream::Transport::Stdio,
+        )
+        .map(drop);
+    }
+    let scope = loopflow_execution::engine::config::scope(directory)?;
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&loopflow_execution::read_stream::selected_answer(&scope)?)?
+    );
+    Ok(())
+}
+
+pub(super) fn subscribe_scope(
+    directory: std::path::PathBuf,
+    transport: loopflow_execution::read_stream::Transport,
+) -> anyhow::Result<Option<loopflow_execution::read_stream::Subscription>> {
+    loopflow_execution::read_stream::start(
+        loopflow_execution::read_stream::Watch::Files,
+        (),
+        move |_, ()| {
+            let directory = directory.clone();
+            async move { loopflow_execution::engine::config::scope(&directory) }
+        },
+        transport,
+    )
+}

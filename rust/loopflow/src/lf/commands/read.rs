@@ -202,6 +202,10 @@ pub enum Read {
         graph: Option<String>,
         step: Option<String>,
     },
+    /// Checkout settings with the declarations in both editable files.
+    #[serde(rename = "config.scope")]
+    #[schemars(extend("x-result" = generator.subschema_for::<loopflow_execution::engine::config::Scope>()))]
+    ConfigScope { directory: PathBuf },
     /// `lf config get <key> <destination flags> --json`: one file's declaration.
     #[serde(rename = "config.get")]
     #[schemars(extend("x-result" = generator.subschema_for::<loopflow_execution::engine::config::Declaration>()))]
@@ -482,6 +486,7 @@ impl Read {
             Self::MachineSelf => words(&["machine", "self", "--json"]),
             Self::DesktopPortfolio => words(&["desktop", "portfolio", "--json"]),
             Self::ConfigCatalog => words(&["config", "catalog", "--json"]),
+            Self::ConfigScope { directory } => at(directory, &["config", "scope", "--json"]),
             Self::ConfigGet { destination, key } => {
                 destination_argv(destination, &["config", "get", key, "--json"])
             }
@@ -770,6 +775,9 @@ impl Read {
                 graph.as_deref(),
                 step.as_deref(),
             )?),
+            Self::ConfigScope { directory } => {
+                value(&loopflow_execution::engine::config::scope(directory)?)
+            }
             Self::ConfigCatalog => value(&loopflow_execution::engine::config::catalog()),
             Self::ConfigGet { destination, key } => {
                 value(&loopflow_execution::engine::config::get(destination, key)?)
@@ -941,6 +949,7 @@ impl Read {
             | Self::TaskDetail { directory, .. }
             | Self::TaskGet { directory, .. }
             | Self::TaskStatus { directory, .. }
+            | Self::ConfigScope { directory }
             | Self::ConfigSettings { directory, .. }
             | Self::DesktopLayout { directory, .. }
             | Self::RepoPeople { directory }
@@ -1013,6 +1022,9 @@ impl Read {
             events,
         };
         let subscription = match self {
+            Self::ConfigScope { directory } => {
+                super::setting::subscribe_scope(directory, transport)
+            }
             Self::DesktopViewList { directory } => {
                 super::desktop::subscribe_plans(None, directory, transport)
             }
@@ -1118,6 +1130,36 @@ fn value(value: &impl Serialize) -> anyhow::Result<serde_json::Value> {
 #[cfg(test)]
 mod tests {
     use super::Read;
+
+    #[test]
+    fn checkout_scope_and_checked_edit_share_the_desktop_wire_shape() {
+        use loopflow_execution::{config::files::context_diff::Applied, engine::config::Scope};
+        use serde_json::{from_value, to_value, Value};
+        let fixture: Value = serde_json::from_str(include_str!(
+            "../../../../../tests/fixtures/dto/configuration_scope.json"
+        ))
+        .unwrap();
+        let check = |key: &str, value: Value| assert_eq!(value, fixture[key]);
+        check(
+            "read",
+            to_value(from_value::<Read>(fixture["read"].clone()).unwrap()).unwrap(),
+        );
+        check(
+            "write",
+            to_value(
+                from_value::<crate::lf::commands::write::Write>(fixture["write"].clone()).unwrap(),
+            )
+            .unwrap(),
+        );
+        check(
+            "scope",
+            to_value(from_value::<Scope>(fixture["scope"].clone()).unwrap()).unwrap(),
+        );
+        check(
+            "receipt",
+            to_value(from_value::<Applied>(fixture["receipt"].clone()).unwrap()).unwrap(),
+        );
+    }
 
     /// The JSON Desktop's `ServedRead` encodes.
     #[test]

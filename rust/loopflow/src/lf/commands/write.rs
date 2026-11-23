@@ -1064,6 +1064,15 @@ writes! {
     } => loopflow_execution::engine::config::Declaration;
     { destination, key } => loopflow_execution::engine::config::unset(destination, key)?,
 
+    /// Change the checkout's Diff declaration if its authored spellings still match.
+    #[serde(rename = "config.edit_diff")]
+    ConfigEditDiff {
+        destination: loopflow_execution::config::files::Destination,
+        expected: loopflow_execution::config::files::context_diff::Declarations,
+        change: loopflow_execution::config::files::context_diff::Change,
+    } => loopflow_execution::config::files::context_diff::Applied;
+    { destination, expected, change } => loopflow_execution::engine::config::edit_diff(destination, expected, change)?,
+
     /// The Machine's `theme:` choice: set to `value`, or read when null.
     /// Desktop owns its Apply/Cancel transaction and the phone reads it; no
     /// CLI spells it.
@@ -1138,6 +1147,7 @@ macro_rules! directory_of {
             | Write::AccountDisconnect { .. }
             | Write::AccountConnect { .. }
             | Write::ConfigSet { .. }
+            | Write::ConfigEditDiff { .. }
             | Write::ConfigUnset { .. }
             | Write::ConfigTheme { .. } => None,
         }

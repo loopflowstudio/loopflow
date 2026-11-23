@@ -8,11 +8,78 @@ use serde::Serialize;
 use serde_yaml_ng::Value;
 use std::path::{Path, PathBuf};
 
-use crate::config::files::Destination;
+use crate::config::files::{context_diff, Destination};
 
 /// `config.catalog`: every typed setting, its schema and its policies.
 pub fn catalog() -> Vec<&'static crate::config::catalog::Definition> {
     crate::config::catalog::definitions()
+}
+
+/// What applies in the checkout, alongside the files Settings can edit there.
+#[derive(Debug, Serialize, serde::Deserialize, schemars::JsonSchema)]
+pub struct Scope {
+    pub context_diff: crate::config::settings::EffectiveSetting,
+    pub files: Vec<ScopeFile>,
+}
+
+#[derive(Debug, Serialize, serde::Deserialize, schemars::JsonSchema)]
+pub struct ScopeFile {
+    pub destination: Destination,
+    pub path: PathBuf,
+    /// Every authored spelling, including a flat key shadowed by the nested one.
+    pub diff: context_diff::Declarations,
+    pub reset_preview: String,
+}
+
+pub fn scope(directory: &Path) -> Result<Scope> {
+    crate::observe::reading(|| {
+        anyhow::ensure!(
+            crate::observe::is_dir(directory),
+            "Checkout {} is unavailable",
+            directory.display()
+        );
+        let repository = crate::repo::working_directory_in(directory)?;
+        let resolved = crate::config::resolved(Some(&repository), None)?;
+        let context_diff = resolved
+            .settings
+            .get("context.diff")
+            .ok_or_else(|| anyhow::anyhow!("missing context.diff in resolved settings"))?
+            .clone();
+        let mut files = Vec::new();
+        for destination in [
+            Destination::PersonalRepository {
+                repository: repository.clone(),
+            },
+            Destination::SharedRepository { repository },
+        ] {
+            let path = destination.resolve()?.path;
+            let (diff, reset_preview) = context_diff::inspect(&path)?;
+            files.push(ScopeFile {
+                destination,
+                path,
+                diff,
+                reset_preview,
+            });
+        }
+        Ok(Scope {
+            context_diff,
+            files,
+        })
+    })
+}
+
+/// Apply a change only to the declarations shown in the checkout's Context pane.
+pub fn edit_diff(
+    destination: &Destination,
+    expected: &context_diff::Declarations,
+    change: &context_diff::Change,
+) -> Result<context_diff::Applied> {
+    let resolved = destination.resolve()?;
+    anyhow::ensure!(
+        resolved.scope == crate::config::settings::SettingScope::Repository,
+        "choose a repository destination"
+    );
+    context_diff::apply(&resolved.path, expected, change)
 }
 
 /// `config.get`: the declaration of `key` at `destination`, null when none.
@@ -214,7 +281,11 @@ fn file_value(
     if parsed.is_some() || unset {
         crate::config::files::edit(path, parts, parsed, root)?;
     }
-    let document = crate::config::files::read(path)?;
+    let mut document = crate::config::files::read(path)?;
+    let preference = crate::config::settings::preference_path(key)?;
+    if preference.len() > 1 && preference[0] == "context" {
+        crate::config::normalize_context(&mut document);
+    }
     let value = parts
         .iter()
         .try_fold(&document, |value, part| value.get(*part))
@@ -230,11 +301,9 @@ fn file_value(
         path: path.to_owned(),
         key: canonical.unwrap_or_else(|| crate::config::keys::canonical(parts, root).join(".")),
         value,
-        lifecycle: crate::config::catalog::definition(
-            &crate::config::settings::preference_path(key)?.join("."),
-        )
-        .expect("validated key")
-        .lifecycle,
+        lifecycle: crate::config::catalog::definition(&preference.join("."))
+            .expect("validated key")
+            .lifecycle,
     })
 }
 

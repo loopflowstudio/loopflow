@@ -113,6 +113,8 @@ pub fn require_store(store: Option<SharedStore>) -> Result<SharedStore> {
 /// name `history.*`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Watch {
+    /// Observed files only; the reading needs no Work database.
+    Files,
     /// State in `loopflow.db` only.
     State,
     /// State, Session history and turns.
@@ -123,6 +125,7 @@ pub enum Watch {
 /// result of a read that watches `watch`.
 fn changed(watch: Watch, old: StoreRevisions, new: StoreRevisions) -> bool {
     match watch {
+        Watch::Files => false,
         Watch::History => old != new,
         Watch::State => {
             StoreRevisions { history: 0, ..old } != StoreRevisions { history: 0, ..new }
@@ -505,7 +508,10 @@ where
     ) -> Result<Self> {
         let database = crate::store::database_path_from_env()?;
         let inbox: Arc<dyn Inbox> = shared.clone();
-        follow_store(&database, &inbox, parent);
+        // Stdio uses the same observer to notice its parent exiting.
+        if watch != Watch::Files || parent.is_some() {
+            follow_store(&database, &inbox, parent);
+        }
         Ok(Self {
             shared,
             database,
@@ -550,7 +556,7 @@ where
             }
             mailbox.closed
         };
-        if self.store.is_none() && self.database.exists() {
+        if self.watch != Watch::Files && self.store.is_none() && self.database.exists() {
             #[cfg(any(test, feature = "test-support"))]
             let _open = Stage::new("reader_store_open");
             let config = StorageConfig::sqlite(self.database.clone());

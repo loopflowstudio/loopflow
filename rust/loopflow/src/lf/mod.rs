@@ -1479,6 +1479,7 @@ impl ConfigCommand {
             Self::User { .. }
             | Self::Settings { .. }
             | Self::Catalog { .. }
+            | Self::Scope { .. }
             | Self::Get { .. }
             | Self::Explain { .. } => false,
             Self::Set { .. } | Self::Unset { .. } => true,
@@ -2963,6 +2964,16 @@ pub enum ConfigCommand {
     Catalog {
         #[arg(long)]
         json: bool,
+    },
+    /// Inspect Context settings and both editable files for this checkout
+    Scope {
+        #[arg(long)]
+        json: bool,
+        /// Print a reading whenever a settings file changes, until stdin closes
+        #[arg(short = 's', long, requires = "json")]
+        subscribe: bool,
+        #[command(flatten)]
+        selection: Selection,
     },
     /// Show effective settings and their sources without launching
     Settings {

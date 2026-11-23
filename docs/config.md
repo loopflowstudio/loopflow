@@ -145,6 +145,7 @@ lf config settings --skill implement --explain # every candidate, file, and why 
 lf config settings --skill implement --all     # include built-in defaults
 lf config settings --graph release --step write-code --json
 lf config catalog --json                       # every supported key, type, and scope
+lf config scope --json                         # checkout Diff, My and Shared declarations
 lf context --json                              # context budgets and current usage
 ```
 

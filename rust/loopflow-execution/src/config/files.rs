@@ -1,5 +1,7 @@
 //! One editor for personal and shared preference files. Locks protect LF writers;
 //! a content comparison also detects hand edits made while an edit is prepared.
+pub mod context_diff;
+
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -577,6 +579,15 @@ pub fn edit(
     update(path, |document| {
         let written = super::keys::gather(document, parts, root);
         let written: Vec<&str> = written.iter().map(String::as_str).collect();
+        let settings = match parts {
+            ["waves", _, settings @ ..] => settings,
+            _ => parts,
+        };
+        let preference = super::settings::preference_parts(settings)?;
+        if preference == ["context", "diff"] {
+            let prefix = &written[..written.len() - preference.len()];
+            return context_diff::edit_at(document, prefix, value);
+        }
         if written.len() >= 2 && written[written.len() - 2] == "machine" {
             if let Some(placement) = written[..written.len() - 1]
                 .iter()
@@ -604,14 +615,7 @@ pub fn edit(
             }
             None => remove(document, &written),
         };
-        let offset = if parts.first() == Some(&"waves") {
-            2
-        } else {
-            0
-        };
-        let settings = &parts[offset..];
-        let preference = super::settings::preference_parts(settings)?.len();
-        let root_index = parts.len() - preference;
+        let root_index = parts.len() - preference.len();
         let mut typed = document.clone();
         super::keys::fold(&mut typed);
         if let Some(value) = parts[..=root_index]

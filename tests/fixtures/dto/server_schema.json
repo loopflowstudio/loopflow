@@ -142,6 +142,31 @@
       ],
       "type": "string"
     },
+    "Applied": {
+      "properties": {
+        "after": {
+          "additionalProperties": false,
+          "properties": {
+            "context.diff": true,
+            "diff": true
+          },
+          "type": "object"
+        },
+        "before": {
+          "additionalProperties": false,
+          "properties": {
+            "context.diff": true,
+            "diff": true
+          },
+          "type": "object"
+        }
+      },
+      "required": [
+        "before",
+        "after"
+      ],
+      "type": "object"
+    },
     "Arrangement": {
       "description": "Occurrence order. Geometry belongs to the slot layout; members fill it in order.",
       "properties": {
@@ -453,6 +478,62 @@
         "Loopflow"
       ],
       "type": "string"
+    },
+    "Change": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "set",
+              "type": "string"
+            },
+            "value": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "kind",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "reset",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "declarations": {
+              "additionalProperties": false,
+              "properties": {
+                "context.diff": true,
+                "diff": true
+              },
+              "type": "object"
+            },
+            "kind": {
+              "const": "restore",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "declarations"
+          ],
+          "type": "object"
+        }
+      ]
     },
     "Check": {
       "properties": {
@@ -7062,6 +7143,27 @@
         },
         {
           "additionalProperties": false,
+          "description": "Checkout settings with the declarations in both editable files.",
+          "properties": {
+            "directory": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "config.scope",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "directory"
+          ],
+          "type": "object",
+          "x-result": {
+            "$ref": "#/$defs/Scope"
+          }
+        },
+        {
+          "additionalProperties": false,
           "description": "`lf config get <key> <destination flags> --json`: one file's declaration.",
           "properties": {
             "destination": {
@@ -8591,6 +8693,54 @@
         "object",
         "boolean"
       ]
+    },
+    "Scope": {
+      "description": "What applies in the checkout, alongside the files Settings can edit there.",
+      "properties": {
+        "context_diff": {
+          "$ref": "#/$defs/EffectiveSetting"
+        },
+        "files": {
+          "items": {
+            "$ref": "#/$defs/ScopeFile"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "context_diff",
+        "files"
+      ],
+      "type": "object"
+    },
+    "ScopeFile": {
+      "properties": {
+        "destination": {
+          "$ref": "#/$defs/Destination"
+        },
+        "diff": {
+          "additionalProperties": false,
+          "description": "Every authored spelling, including a flat key shadowed by the nested one.",
+          "properties": {
+            "context.diff": true,
+            "diff": true
+          },
+          "type": "object"
+        },
+        "path": {
+          "type": "string"
+        },
+        "reset_preview": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "destination",
+        "path",
+        "diff",
+        "reset_preview"
+      ],
+      "type": "object"
     },
     "Secrets": {
       "additionalProperties": {
@@ -18606,6 +18756,40 @@
           "type": "object",
           "x-result": {
             "$ref": "#/$defs/Declaration"
+          }
+        },
+        {
+          "additionalProperties": false,
+          "description": "Change the checkout's Diff declaration if its authored spellings still match.",
+          "properties": {
+            "change": {
+              "$ref": "#/$defs/Change"
+            },
+            "destination": {
+              "$ref": "#/$defs/Destination"
+            },
+            "expected": {
+              "additionalProperties": false,
+              "properties": {
+                "context.diff": true,
+                "diff": true
+              },
+              "type": "object"
+            },
+            "kind": {
+              "const": "config.edit_diff",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "destination",
+            "expected",
+            "change"
+          ],
+          "type": "object",
+          "x-result": {
+            "$ref": "#/$defs/Applied"
           }
         },
         {

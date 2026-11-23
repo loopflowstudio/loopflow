@@ -1,0 +1,18 @@
+{
+  "read": {"kind": "config.scope", "directory": "/project"},
+  "scope": {
+    "context_diff": {
+      "value": false,
+      "candidates": [
+        {"key": "context.diff", "source": "repository", "scope": "repository", "target": {"kind": "general"}, "value": true, "reason": "overridden by a higher declaration", "locator": "/project/.lf/config.yaml"},
+        {"key": "context.diff", "source": "personal", "scope": "repository", "target": {"kind": "general"}, "value": false, "reason": "selected", "locator": "/project/.lf/config.local.yaml"}
+      ]
+    },
+    "files": [
+      {"destination": {"kind": "personal_repo", "repo": "/project"}, "path": "/project/.lf/config.local.yaml", "diff": {"context.diff": false}, "reset_preview": "- context: {diff: false}"},
+      {"destination": {"kind": "shared_repo", "repo": "/project"}, "path": "/project/.lf/config.yaml", "diff": {"diff": true}, "reset_preview": "- diff: true"}
+    ]
+  },
+  "write": {"kind": "config.edit_diff", "destination": {"kind": "personal_repo", "repo": "/project"}, "expected": {"context.diff": false}, "change": {"kind": "reset"}},
+  "receipt": {"before": {"context.diff": false}, "after": {}}
+}

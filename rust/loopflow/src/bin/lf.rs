@@ -1658,6 +1658,23 @@ fn run() -> anyhow::Result<()> {
                         );
                     }
                     Some(Commands::Config {
+                        cmd:
+                            loopflow::lf::ConfigCommand::Scope {
+                                subscribe,
+                                selection,
+                                ..
+                            },
+                    }) => {
+                        journal::mark_effect_free_read();
+                        loopflow_execution::read_stream::select_output(
+                            (!selection.select.is_empty()).then(|| selection.select.clone()),
+                        );
+                        return loopflow::lf::commands::setting::scope(
+                            &configuration_directory(&cli)?,
+                            *subscribe,
+                        );
+                    }
+                    Some(Commands::Config {
                         cmd: loopflow::lf::ConfigCommand::Catalog { json },
                     }) => {
                         journal::mark_effect_free_read();
@@ -3053,6 +3070,11 @@ fn execute_command(
             }
             loopflow::lf::ConfigCommand::Migrate { accept } => {
                 loopflow_execution::config::migrate::run(*accept)
+            }
+            loopflow::lf::ConfigCommand::Scope { subscribe, .. } => {
+                in_directory_runtime(args, |repo| {
+                    loopflow::lf::commands::setting::scope(repo, *subscribe)
+                })
             }
             loopflow::lf::ConfigCommand::Catalog { json } => {
                 loopflow::lf::commands::config::catalog(*json)

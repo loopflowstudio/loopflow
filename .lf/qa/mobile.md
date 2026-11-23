@@ -1,45 +1,40 @@
-Read when the change touches `lf server mobile`, the Tailscale LocalAPI client or the phone listener.
-
 # Phone access against the Mac's real Tailscale
 
-The App Store Tailscale runs as `IPNExtension`; the branch finds it in-process.
-A private `LF_HOME` reaches the real tailnet: `lf server mobile` saves an
-approval for this Mac's node and binds the tailnet addresses at a new port.
-Put a trap `tailscale` script first on `PATH` that appends to a log; it must
-stay empty.
+Use a fresh private `LF_HOME` and the same branch binary for all commands.
+Put a `tailscale` script first on `PATH` that appends one line per invocation
+to a private log. Start `lf server run` in that environment and wait for
+`lf server status` to report ready before running `lf server mobile`.
+This keeps the server under the test's control. Capture its PID for cleanup.
 
-Starting a server from `lf server mobile` (or any command) in a private home
-registers a KeepAlive launchd job `com.loopflow.server.<hash>` whose plist is
-`$LF_HOME/server.plist`. Killing the PID respawns it, and its environment
-carries `LF_HOME` only, not `TS_SOCKET`. To run the server yourself, first
-`launchctl bootout gui/$(id -u)/com.loopflow.server.<hash>` (hash from
-`lf server status`'s socket path), then start `lf server run` detached with
-closed stdin. Boot the job out again when done.
+## Idle phone connection
 
-## A phone from this Mac
+Paste the reported HTTPS address into Loopflow on an iPhone signed into
+the same Tailscale account. On a single-account Mac, an iOS Simulator can
+use the same address after `touch "$LF_HOME/mobile-same-device"`. Open the
+Task list and leave it connected for at least two minutes. Record readiness
+and the trap's invocation count at both ends of the window.
 
-A connection from this Mac is the owner's own node, which admission refuses
-(TLS completes, then `curl` reports an empty reply). `touch
-$LF_HOME/mobile-same-device` admits it. Drive the WebSocket with
-`uv run -q --with websockets python -I phone.py wss://<endpoint>`: send
-`{"type":"hello","revision":9,"min_revision":8,"client":{"kind":"ios","platform":"ios","name":"QA","version":"0.16.0"}}`
-to `/v1/machine`, expect `welcome`, then a `plan.list` request.
+Use local timestamps from `date '+%F %T'` for the start and end. On a quiet
+Mac there should be zero Tailscale configuration records in this window.
 
-## Stopping the daemon without touching the real tailnet
+```sh
+/usr/bin/log show --info --start "$start" --end "$end" \
+  --predicate 'process == "nehelper" AND eventMessage CONTAINS[c] "Tailscale"'
+```
 
-Quitting Tailscale cuts the Machine's other connections. Instead start the
-server with `TS_SOCKET=<path>` and serve that path with a small Python proxy
-that adds `Authorization: Basic base64(":<token>")` and forwards to
-`127.0.0.1:<port>`; read `sameuserproof-<port>-<token>` from
-`lsof -nP -p $(pgrep -x IPNExtension)`. Log each request line: bind reads
-`status` and `cert/<dns>`, maintenance reads `status?peers=false` every 5 s.
-Kill the proxy for an outage, restart it for recovery. A socket that accepts
-and never answers stands in for a hung daemon.
+In a separate window, invoke the installed Tailscale CLI once by its full
+path with `status --json` and discard stdout. Run the same log query for
+that window to confirm it shows the configuration activity. Keep unrelated
+Tailscale activity out of both measurements.
 
-## nehelper churn
+Run `lf server mobile --off`. The phone disconnects and the local server
+keeps its instance. Stop the private server by its captured PID.
 
-Bracket an idle window with `date '+%F %T'` and count
-`/usr/bin/log show --info --start … --end … --predicate 'process == "nehelper" AND eventMessage CONTAINS[c] "Tailscale"'`.
-One `"/Applications/Tailscale*.app/Contents/MacOS/Tailscale" status --json`
-in a separate window is the control: it logs a configuration delegate and two
-removals.
+## Daemon outage and recovery
+
+The `server_mobile_changes_preserve_local_connections_and_saved_disable`
+transport fixture exercises an outage without interrupting the Mac's tailnet.
+It holds a phone connection and local subscription open, changes the daemon
+owner, stops the private socket, and brings the approved owner back at the
+same address. The virtual-clock test in `server/remote.rs` holds requests
+open to exercise status and cancellation while the daemon is unresponsive.

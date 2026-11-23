@@ -91,8 +91,8 @@ lf server mobile --off      # close phone connections
 A phone signed into the same Tailscale account can attach to running Sessions.
 Setup requires a user-owned, untagged Machine with MagicDNS and HTTPS
 certificates enabled. For a custom daemon socket, set `TS_SOCKET` for the
-setup command and for an `lf server run` you start yourself; the server lf
-starts as a service carries only `LF_HOME`.
+setup command and for an `lf server run` you start yourself. Service
+installation does not forward the setup command's `TS_SOCKET`.
 
 The server checks Tailscale directly through its LocalAPI. If Tailscale stops,
 signs out, or changes owner, phone connections close and local Sessions keep

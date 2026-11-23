@@ -387,8 +387,33 @@ create starts at main, a later parent commit arrives through `lf sync`);
 `server::schema::tests::`, `server::wire::`, `lf::commands::write::tests::`,
 `machine::wire::`, `documented_commands::`, `golden_prompt` passed. Not run
 here: clippy, Swift `ServerProtocolTests` (the change touched
-`RegistryQuery.swift`) — gate runs both. Nothing else remains in the plan;
-next is gate.
+`RegistryQuery.swift`) — gate runs both. Next: "one answer for a checkout's base" below, then gate.
+
+## Next: one answer for a checkout's base (concept review on f07ab06545)
+
+Choice made for review (page `scratch/concept-review.html`, question 1a):
+"what this checkout builds on" has three homes and `lf sync` and
+`lf pr open` read different subsets. Sync asks the Task stack, then
+`loopflow-base`, then main; publish (`publication_base` → `pr_target`) asks
+the same plus the branch's Git upstream when it names another branch
+(`WorktreeState.base_branch`). The upstream clause is the earlier attempt
+`--stack` replaces: lf's push (`push_with_upstream_if_needed`) runs a bare
+`git push` once an upstream is set, so an upstream of `origin/parent` is
+refused or pushes onto the parent. Passed over: teaching sync the upstream
+too (keeps the broken push), and leaving two readers.
+
+1. One function in `ops` (e.g. `checkout_base(repo, default_branch)`):
+   the Task stack's live parent, else `stacked_base` unless its PR merged
+   (`branch_pr_merged`), else the default branch. `run_sync_in`'s default
+   target and `publication_base` both call it; `resolve_pr_target` keeps
+   only the push-an-unpushed-base step.
+2. Delete `pr_target`'s `list_worktrees` upstream clause,
+   `WorktreeState.base_branch` and what fills it (`LocalBranch.upstream` if
+   nothing else reads it), `worktree_list_preserves_namespaced_upstream_branch`
+   and the two `base_branch` asserts in `worktrees.rs` tests.
+3. Tests: `sync_tests::a_checkout_created_with_stack_builds_on_this_branch_and_sync_follows_it`
+   and the stacked-Task sync/publish tests pass unchanged; `git::worktrees::`
+   and `ops::pr::` focused. Then gate.
 
 ## Built: one Git-root rule (human review of the ownership split, 2026-11-23)
 
@@ -462,7 +487,7 @@ reused path lists under A only, C's under C. `ops::human_session::` 52
 passed (realign, 2026-11-23). Compress after it: a Task's Graphs and open
 Sessions read `task_id` directly; `task_checkout_machine_keeps_session_filters_beside_other_machines`
 had relied on path membership and now records each Session's Task
-(`store::task_work_lifecycle_tests:: ops::human_session::` 57 passed). Concept review on `39ac96a0f9` (2026-11-23) found no mismatch left inside this Task (`scratch/concept-review.html`). Next: gate.
+(`store::task_work_lifecycle_tests:: ops::human_session::` 57 passed). Concept review on `39ac96a0f9` (2026-11-23) found no mismatch left inside this Task then; the page on `f07ab06545` replaces it.
 
 ## Earlier: implement (concept review after the plan hub, 2026-11-22)
 

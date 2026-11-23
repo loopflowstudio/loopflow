@@ -34,7 +34,7 @@ func waitForSession(_ view: GhosttyMetalView, at location: SourceLocation = #_so
 
 /// The same prepared Session a Desktop pane opens, on a private Machine with a stand-in provider.
 @MainActor
-func withPreparedSession(provider providerScript: String,
+func withPreparedSession(harness: String = "claude", provider providerScript: String,
                          run: (BuiltLf, LocalServerFixture, SessionRecord) async throws -> Void) async throws {
     let root = URL(fileURLWithPath: "/tmp").appendingPathComponent("lf-session-proof-\(UUID().uuidString)")
     let home = root.appendingPathComponent("home")
@@ -42,7 +42,7 @@ func withPreparedSession(provider providerScript: String,
     try fm.createDirectory(at: home.appendingPathComponent("bin"), withIntermediateDirectories: true)
     defer { try? fm.removeItem(at: root) }
     let binary = try BuiltLf.binary("lf")
-    let provider = home.appendingPathComponent("bin/claude")
+    let provider = home.appendingPathComponent("bin/\(harness)")
     try providerScript.write(to: provider, atomically: true, encoding: .utf8)
     let entry = home.appendingPathComponent("bin/lf")
     try "#!/bin/sh\nif [ \"$1\" = install ] && [ \"$2\" = server ]; then exit 0; fi\nexec \(shellEscape(binary)) \"$@\"\n"
@@ -54,7 +54,7 @@ func withPreparedSession(provider providerScript: String,
         _ = try await lf.run(args, executable: "/usr/bin/git")
     }
     // Preparing the Session finishes first-open migrations before the server readiness check.
-    let prepared = try await lf.run(["session", "resume", "--prepare", "--json", "-a", "claude"])
+    let prepared = try await lf.run(["session", "resume", "--prepare", "--json", "-a", harness])
     let record = try JSONDecoder().decode(SessionRecord.self, from: Data(prepared.utf8))
     let server = LocalServerFixture(lf)
     do {

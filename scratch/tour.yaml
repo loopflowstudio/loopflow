@@ -1,24 +1,24 @@
-at: 6f7682cc8cce1f1b6045e0c34335fc878a8e1def
+at: df0a77582e7ba30ed8b3ae05c419910f62e39dc6
 first:
   - path: swift/README.md
-    why: Modified Return and Option in a focused pane
-  - path: swift/LoopflowMac/Services/Ghostty/GhosttyTerminalView.swift
-    why: AppKit interpretation, composition and Ghostty key delivery
+    why: Keyboard behavior in a focused Session or Shell
   - path: swift/LoopflowMac/Services/Ghostty/GhosttyManager.swift
-    why: Shortcut defaults and keyboard layout changes
+    why: Terminal bindings and precedence for personal settings
+  - path: swift/LoopflowMac/Services/Ghostty/GhosttyTerminalView.swift
+    why: Menu dispatch, AppKit composition and terminal input encoding
   - path: swift/LoopflowMac/DesktopActions.swift
     why: Desktop shortcuts defer while the terminal composes text
   - path: swift/LoopflowMac/Views/WorkPalette.swift
   - path: swift/LoopflowTests/GhosttyModifierInputTests.swift
-    why: Shell bytes, shortcut ownership and composition
+    why: Terminal bytes, menu ownership and command dispatch
   - path: swift/LoopflowTests/SessionModifierInputTests.swift
-    why: Provider reports each chord before and after reopening
+    why: Provider reports before and after reopening
   - path: swift/LoopflowTests/DesktopTerminalFixtures.swift
     why: Keyboard events and the private Session fixture
   - path: swift/LoopflowTests/SessionConnectionProofTests.swift
     why: Mounted Session recovery and input gating
   - path: swift/LoopflowTests/GhosttyTerminalInputTests.swift
-    why: Restored scrollback and paste in split panes
+    why: Prompt jumps, restored scrollback and paste
   - path: scratch/plan.md
-    why: Check results and pending physical keyboard checks
+    why: Test results and remaining physical keyboard checks
 hide: []

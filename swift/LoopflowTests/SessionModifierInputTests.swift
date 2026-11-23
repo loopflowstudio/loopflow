@@ -7,8 +7,8 @@ import Testing
 
 @MainActor
 struct SessionModifierInputTests {
-    @Test("A held Session receives modified Returns once before and after reopening")
-    func modifiedReturnAcrossReattachment() async throws {
+    @Test("A held Session receives modified Returns and shifted text before and after reopening")
+    func modifiedKeysAcrossReattachment() async throws {
         _ = NSApplication.shared
         let manager = GhosttyManager.shared
         manager.initialize()
@@ -22,7 +22,8 @@ struct SessionModifierInputTests {
         open STDIN, '<', '/dev/tty' or die $!;
         system('stty', 'raw', '-echo') == 0 or die 'stty';
         $| = 1;
-        print "\e[>1uready\r\n";
+        # Antigravity requests modifyOtherKeys level 2, then Kitty flags 5.
+        print "\e[>4;2m\e[>5uready\r\n";
         $/ = 'x';
         for my $round (1..2) {
             alarm 20;
@@ -50,9 +51,11 @@ struct SessionModifierInputTests {
                 for flags: NSEvent.ModifierFlags in [[], .shift, .control] {
                     view.keyDown(with: try terminalKeyEvent("\r", 36, flags))
                 }
+                view.keyDown(with: try terminalKeyEvent("?", 44, .shift))
+                view.keyDown(with: try terminalKeyEvent("A", 0, .shift))
                 // An ordinary x delimits the entire batch, including any duplicate final chord.
                 view.keyDown(with: try terminalKeyEvent("x", 7))
-                ready = "bytes-\(round)=0d1b5b31333b32751b5b31333b3575"
+                ready = "bytes-\(round)=0d1b5b31333b32751b5b31333b35753f41"
                 try await waitForLine(ready, in: view)
                 if round == 1 {
                     await pool.release(terminal)?.value

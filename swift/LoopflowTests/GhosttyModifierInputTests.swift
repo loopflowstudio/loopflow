@@ -50,6 +50,20 @@ struct GhosttyModifierInputTests {
         }
     }
 
+    @Test("Shift-/ and Shift-A keep their text under modifyOtherKeys and Kitty", arguments: [
+        ("\u{1b}[>4;2m", "?\u{1b}[27;2;65~"),
+        ("\u{1b}[>4;2m\u{1b}[>5u", "?A"),
+    ])
+    func shiftedPrintables(mode: String, bytes: String) async throws {
+        try await expectInput(bytes, after: mode, focused: true) { view in
+            for (text, code): (String, UInt16) in [("?", 44), ("A", 0)] {
+                let down = try terminalKeyEvent(text, code, .shift)
+                if !view.performKeyEquivalent(with: down) { view.keyDown(with: down) }
+                view.keyUp(with: try terminalKeyEvent(text, code, .shift, type: .keyUp))
+            }
+        }
+    }
+
     @Test("Lifting left Shift while right Shift is held sends a release")
     func sideAwareRelease() async throws {
         let left = NSEvent.ModifierFlags(rawValue: UInt(NX_DEVICELSHIFTKEYMASK))

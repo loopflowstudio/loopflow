@@ -2,6 +2,12 @@
 
 > “Scope is Loopflow Desktop: modifier keys are not working in desktop sessions.” — Jack Heart
 
+> “Observed live in Desktop: Shift does not work at all in agy sessions specifically (e.g. Shift+/ produces / instead of ?, Shift+a produces a), while working in other sessions in the same Desktop app.” — Jack Heart
+
+> “Also include in this fix: sessions launched from Desktop / lf server (not from Rex or an existing terminal) have no color in agy and some claude sessions, whereas sessions started in Rex first (e.g. LOO-996) keep color.” — Jack Heart
+
+Verify shifted text through a held Session using the modes requested by the installed `agy`, and check the unsent draft in its TUI before and after reattaching. Set missing or empty `TERM` and `COLORTERM` at the registry's common launch path. Check the environment seen by a real PTY child with and without caller-provided values.
+
 Done when a focused Desktop Session delivers terminal-owned chords to the running program with their modifiers intact, including after reopening the Session. Desktop shortcuts and macOS app menus still work over a focused terminal, Ghostty terminal bindings run once without standalone-app defaults swallowing chords, Option text / dead keys / IME composition type and cancel cleanly, and the same keyboard behavior applies in a Desktop Shell.
 
 ## Model and design

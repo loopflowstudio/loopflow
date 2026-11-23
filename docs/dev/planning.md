@@ -424,7 +424,7 @@ $ lf wave plan product --json            # projects: one, status started
 ```
 
 A Wave is exactly one Project: the `projects` row with its `wave_id`, which a
-unique index keeps to one. `upsert_wave_prepared` makes it with a new Wave,
+unique index keeps to one. Registering a new Wave (`commit_wave_bootstrap`, `upsert_wave_prepared`) makes it,
 named for the Wave and `started`; its id is `ProjectId::for_wave`, the Wave's
 own UUID, so Machines that make it separately make the same record. A Wave
 that arrived without one (from a released build) gets it when its first Task
@@ -436,10 +436,10 @@ moving one out of every Wave clears it. A Task's Wave is its Project's.
 
 A Project made here has no tracker binding until the drain gives it a
 `create`, including one made before a tracker was connected. A Task's
-`issueCreate` waits for its Project's tracker ID. The tracker Project an
-import accepts is the Wave's own: the one already bound to it, or one carrying
-the Wave's Project id. Any other Linear Project in the Wave's Initiative is not
-imported.
+`issueCreate` waits for its Project's tracker ID. An import binds the
+first tracker Project it meets in the Wave's Initiative to the Wave's Project
+when that Project has no binding yet and no `create` out for another; once
+bound, other Linear Projects in the Initiative are not imported.
 
 A Project's status changes in the tracker, mirrored both ways, or through
 abandonment, which writes `work_state` and `work_terminal_at`. A Task changes

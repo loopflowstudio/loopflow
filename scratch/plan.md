@@ -48,9 +48,10 @@ real records with a name, summary and status that start and end.
   carries that UUID.
 - Migration collapses and fills as below, then `projects_wave` (unique)
   replaces `idx_projects_wave`; `tracker_wave_projects.position` leaving.
-- Linear import takes a tracker Project only when it is already the Wave's or
-  carries the Wave's Project id; other Projects in the Initiative are skipped,
-  so the unique index never fails an import.
+- Linear import binds the first tracker Project it meets in the Wave's
+  Initiative to the Wave's unbound Project (unless the Project's own `create`
+  is out and this is not it); once bound, others are skipped, so the unique
+  index never fails an import. Slice 2 replaces the Initiative with connect.
 - Docs: `docs/work.md`, `docs/dev/planning.md`, `reference.md`,
   `reference-models.md`, glossary, `AGENTS.md`, `split-wave`.
 

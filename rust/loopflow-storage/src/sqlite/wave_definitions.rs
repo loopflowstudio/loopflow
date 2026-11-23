@@ -106,6 +106,8 @@ impl SqliteStore {
                 ),
                 crate::sqlite::planning_write::WriteOrigin::Local,
             )?;
+            // A Wave is made with its one Project.
+            super::children::wave_project_in(&tx, &wave.id)?;
         }
         tx.commit()?;
         Ok(true)

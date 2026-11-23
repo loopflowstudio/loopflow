@@ -435,7 +435,7 @@ fn promotion_refuses_a_replaced_caller_for_either_title_source() {
 }
 
 #[test]
-fn a_task_filed_or_moved_into_a_wave_with_no_project_has_none() {
+fn a_task_filed_or_moved_into_a_wave_is_in_its_project() {
     let (_home, store) = store();
     let repo = TestRepo::new();
     let wave =
@@ -453,6 +453,7 @@ fn a_task_filed_or_moved_into_a_wave_with_no_project_has_none() {
         None,
     )
     .unwrap();
+    let project = store.wave_project(&wave).unwrap();
     let fail = |sql: &str| store.conn.lock().unwrap().execute_batch(sql).unwrap();
 
     fail("CREATE TRIGGER reject BEFORE INSERT ON tasks BEGIN SELECT RAISE(ABORT,'injected'); END;");
@@ -468,9 +469,9 @@ fn a_task_filed_or_moved_into_a_wave_with_no_project_has_none() {
         None,
     );
     assert!(filed.is_err());
-    assert!(store.list_projects(Some(&wave)).unwrap().is_empty());
+    assert_eq!(store.list_projects(Some(&wave)).unwrap().len(), 1);
     fail("DROP TRIGGER reject;
-          CREATE TRIGGER reject BEFORE UPDATE OF wave_id ON tasks BEGIN SELECT RAISE(ABORT,'injected'); END;");
+          CREATE TRIGGER reject BEFORE UPDATE OF project_id ON tasks BEGIN SELECT RAISE(ABORT,'injected'); END;");
     assert!(store.move_task(&standalone.id, None, Some(&wave)).is_err());
     assert_eq!(store.task(&standalone.id).unwrap().unwrap().wave_id, None);
     fail("DROP TRIGGER reject;");
@@ -487,11 +488,11 @@ fn a_task_filed_or_moved_into_a_wave_with_no_project_has_none() {
     )
     .unwrap();
     store.move_task(&standalone.id, None, Some(&wave)).unwrap();
-    assert!(store.list_projects(Some(&wave)).unwrap().is_empty());
+    assert_eq!(store.list_projects(Some(&wave)).unwrap().len(), 1);
     for task in [filed, store.task(&standalone.id).unwrap().unwrap()] {
         assert_eq!(
-            (task.wave_id.as_ref(), task.project_id),
-            (Some(&wave), None)
+            (task.wave_id.as_ref(), task.project_id.as_ref()),
+            (Some(&wave), Some(&project))
         );
     }
     let listed = store.list_tasks(Some(&wave)).unwrap();

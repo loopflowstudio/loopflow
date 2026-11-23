@@ -871,8 +871,7 @@ fn linear_on_demand_adopts_new_open_issues_without_allocating_execution() {
             let mut issue = state.lock().await.issues[0].clone();
             issue["id"] = json!("new-open-issue");
             issue["identifier"] = json!("FIX-352");
-            issue["title"] = json!("New work in another Project");
-            issue["project"]["id"] = json!("new-project");
+            issue["title"] = json!("New work in the Wave's Project");
             mark_issue_updated(&mut issue);
             state.lock().await.issues.push(issue);
             rusqlite::Connection::open(&fixture.database)
@@ -889,8 +888,8 @@ fn linear_on_demand_adopts_new_open_issues_without_allocating_execution() {
                 .unwrap()
                 .unwrap();
             assert_eq!(adopted.wave_id, task.wave_id);
-            assert_eq!(adopted.title, "New work in another Project");
-            assert_ne!(adopted.project_id, task.project_id);
+            assert_eq!(adopted.title, "New work in the Wave's Project");
+            assert_eq!(adopted.project_id, task.project_id);
             assert!(adopted.worktree.is_none());
             assert!(
                 crate::store::task_work::task_graph(&fixture.store.sqlite, &adopted.id)

@@ -1175,7 +1175,11 @@ async fn cold_detail_resolves_configured_wave_before_projecting() {
                     assert!(result.refresh_error.is_some());
                     assert_eq!(current, original);
                     assert_eq!(
-                        fixture.store.list_projects(None).await.unwrap(),
+                        fixture
+                            .store
+                            .list_projects(Some(&original.wave_id))
+                            .await
+                            .unwrap(),
                         vec![original]
                     );
                 }

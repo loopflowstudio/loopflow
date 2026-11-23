@@ -630,8 +630,9 @@ fn register_task_fixture(
         "task-pr-tests".to_string(),
         worktree.display().to_string(),
     );
+    // The Wave's own Project, which creating the Wave makes.
     let project = Project {
-        id: ProjectId::new(),
+        id: ProjectId::for_wave(wave.id()),
 
         summary: String::new(),
         status: loopflow::work::project::ProjectStatus::Started,

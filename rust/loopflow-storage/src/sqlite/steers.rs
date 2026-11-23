@@ -6,8 +6,8 @@ use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use super::SqliteStore;
 use crate::process::SessionAttachment;
 use crate::steer::{
-    IdleConversation, IdleReach, NativeBoundary, SessionSteerPage, SessionSteerStatus, Steer,
-    SteerAdapter, SteerWake,
+    IdleConversation, IdleReach, Inbox, NativeBoundary, SessionSteerPage, SessionSteerStatus,
+    Steer, SteerAdapter, SteerWake,
 };
 use crate::{StoreError, StoreResult};
 
@@ -226,22 +226,43 @@ impl SqliteStore {
         })
     }
 
-    /// Save where an idle Claude conversation takes messages: the inbox key
-    /// file its hook found. Written only when it changes.
-    pub fn record_agent_inbox(&self, adapter: &SteerAdapter, key: &Path) -> StoreResult<()> {
+    /// Save where an idle conversation takes messages: Claude's inbox key in
+    /// `agent_inbox`, an OpenCode or Pi socket in `agent_socket`. Written only
+    /// when it changes, which is the answer.
+    pub fn record_agent_inbox(&self, adapter: &SteerAdapter, inbox: &Inbox) -> StoreResult<bool> {
+        let (column, path) = match inbox {
+            Inbox::Claude(path) => ("agent_inbox", path),
+            Inbox::Socket(path) => ("agent_socket", path),
+        };
         let conn = self.conn.lock().expect("store mutex poisoned");
-        conn.execute(
-            "UPDATE agent_sessions SET agent_inbox=?3 WHERE id=?1 AND agent_process_id=?2
-                AND agent_inbox IS NOT ?3 AND EXISTS(SELECT 1 FROM steer_adapters a
-                WHERE a.agent_process_id=?2 AND a.capability=?4)",
+        let changed = conn.execute(
+            &format!(
+                "UPDATE agent_sessions SET {column}=?3 WHERE id=?1
+                    AND agent_process_id=?2 AND {column} IS NOT ?3 AND EXISTS(SELECT 1
+                    FROM steer_adapters a WHERE a.agent_process_id=?2 AND a.capability=?4)"
+            ),
             params![
                 adapter.session,
                 adapter.agent_process_id,
-                key.to_string_lossy(),
+                path.to_string_lossy(),
                 adapter.capability
             ],
         )?;
-        Ok(())
+        if changed > 0 {
+            // A provider naming its inbox for the first time has run no turn
+            // yet, whatever the one before it on this Session was doing: a
+            // reopened conversation is idle until its first turn says otherwise.
+            // A held terminal's status stream may already have moved the
+            // reading to this provider; with no turn read yet it is still 0.
+            conn.execute(
+                "UPDATE session_activity SET agent_process_id=?2,yielded=1,open_tools=0,pending_input=0,
+                    observed_at=unixepoch(),program_status=CASE WHEN agent_process_id IS ?2 THEN program_status END,cpu_sampled_at=NULL,cpu_quiet_since=NULL,
+                    attachment_token=COALESCE((SELECT attachment_token FROM agent_sessions WHERE id=?1),attachment_token)
+                 WHERE session_id=?1 AND (agent_process_id IS NOT ?2 OR observed_at=0)",
+                params![adapter.session, adapter.agent_process_id],
+            )?;
+        }
+        Ok(changed > 0)
     }
 
     /// Managed conversations whose last boundary was a turn end, on a live
@@ -255,19 +276,24 @@ impl SqliteStore {
         let mut statement = conn.prepare(
             "SELECT s.id,s.agent_process_id,a.capability,s.provider_thread,s.cwd,
                 CASE WHEN s.provider='codex' THEN s.agent_endpoint END,s.agent_inbox,
-                s.agent_pid,s.agent_os_started_at
+                s.agent_pid,s.agent_os_started_at,s.agent_socket
              FROM agent_sessions s INDEXED BY agent_sessions_unended_agent
              JOIN steer_adapters a ON a.agent_process_id=s.agent_process_id
              JOIN session_activity act ON act.session_id=s.id AND act.agent_process_id=s.agent_process_id
              WHERE s.agent_process_id IS NOT NULL AND s.agent_ended_at IS NULL
                AND act.yielded=1 AND s.interactive=1 AND s.provider_thread IS NOT NULL
-               AND (s.provider='codex' AND s.agent_endpoint IS NOT NULL OR s.agent_inbox IS NOT NULL)
+               AND (s.provider='codex' AND s.agent_endpoint IS NOT NULL OR s.agent_inbox IS NOT NULL
+                    OR s.agent_socket IS NOT NULL)
                AND (?1 IS NULL OR s.id=?1)",
         )?;
         let rows = statement.query_map([session], |row| {
-            let reach = match row.get::<_, Option<String>>(5)? {
-                Some(endpoint) => IdleReach::Codex(endpoint.into()),
-                None => IdleReach::Claude(row.get::<_, String>(6)?.into()),
+            // The query keeps only reachable conversations: with no endpoint
+            // or socket, the Claude key is there.
+            let path = |column| row.get::<_, Option<String>>(column);
+            let reach = match (path(5)?, path(9)?) {
+                (Some(endpoint), _) => IdleReach::Codex(endpoint.into()),
+                (None, Some(socket)) => IdleReach::Inbox(Inbox::Socket(socket.into())),
+                (None, None) => IdleReach::Inbox(Inbox::Claude(row.get::<_, String>(6)?.into())),
             };
             let identity = row
                 .get::<_, Option<u32>>(7)?

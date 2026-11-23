@@ -84,14 +84,14 @@ queue the steers as Claude's next turn while the prompt runs. Claims are
 exclusive, so the steers arrive once; the prompt and the wake each run
 once. Codex avoids the race by reporting the prompt first. Accepted as is.
 
-## Risk to answer in the first slice
+## Risk the real Claude reopen answers (slice 5)
 
-Claude's inbox at SessionStart. The wake writes a `priority:"next"` message
-with no acknowledgement and stamps it delivered. If Claude, still starting,
-drops a message that early, the steer is lost, not delayed. Probe on a real
-Claude reopen before building the rest; if dropped, the wake for a first
-Claude boundary waits for Claude's `sessions/<pid>.json` `status` to read
-`idle` (bounded, one retry) rather than sending at once.
+Claude's inbox at SessionStart, still unanswered. The wake writes a
+`priority:"next"` message with no acknowledgement and stamps it delivered. If
+Claude, still starting, drops a message that early, the steer is lost, not
+delayed. If the real Claude reopen shows that, the wake for a first Claude
+boundary waits for Claude's `sessions/<pid>.json` `status` to read `idle`
+(bounded, one retry) rather than sending at once.
 
 ## Done when
 

@@ -2,10 +2,11 @@ use crate::process::attachment;
 use crate::store::selections;
 
 use loopflow_model::durable::RepositoryId;
+use loopflow_storage::sqlite::selections::TaskOrderEdit;
 use loopflow_storage::sqlite::SqliteStore;
 use loopflow_storage::work::selection::{
-    Arrangement, ArrangementMode, DashboardId, Selection, SelectionExpression, SelectionId,
-    WorkWorkspaceKind,
+    Arrangement, ArrangementMode, DashboardId, Selection, SelectionError, SelectionExpression,
+    SelectionId, WorkWorkspaceKind,
 };
 
 fn fixture() -> (tempfile::TempDir, SqliteStore, RepositoryId) {
@@ -281,9 +282,16 @@ fn one_task_order_reorders_working_tasks_and_every_plan_and_arrivals_prepend() {
         [one, two]
     );
     assert_eq!(
-        selections::reorder_task(&store, &repo, two, one, None)
-            .unwrap()
-            .unwrap(),
+        selections::edit_task_order(
+            &store,
+            &repo,
+            TaskOrderEdit::Move {
+                task: two,
+                target: one,
+                side: None
+            }
+        )
+        .unwrap(),
         [two, one]
     );
     assert_eq!(
@@ -320,7 +328,7 @@ fn one_task_order_reorders_working_tasks_and_every_plan_and_arrivals_prepend() {
     );
     // Sorting idle Tasks ignores their saved slots and planning ranks.
     assert_eq!(
-        selections::sort_tasks_by_status(&store, &repo).unwrap(),
+        selections::edit_task_order(&store, &repo, TaskOrderEdit::SortByStatus).unwrap(),
         [three, one, two]
     );
 
@@ -329,10 +337,13 @@ fn one_task_order_reorders_working_tasks_and_every_plan_and_arrivals_prepend() {
     // refusal names it and nothing is written.
     let done = "task_44444444444444444444444444444444";
     for (task, to) in [(done, one), (one, done)] {
-        assert_eq!(
-            selections::reorder_task(&store, &repo, task, to, None).unwrap(),
-            Err(done)
-        );
+        let edit = TaskOrderEdit::Move {
+            task,
+            target: to,
+            side: None,
+        };
+        assert!(matches!(selections::edit_task_order(&store, &repo, edit),
+            Err(crate::store::StoreError::Selection(SelectionError::NotWorking(id))) if id == done));
     }
     assert_eq!(store.revisions().unwrap(), revisions);
     assert_eq!(
@@ -1171,32 +1182,22 @@ fn a_dashboard_changed_after_preparation_rejects_the_prepared_write() {
 fn a_task_order_changed_after_preparation_keeps_the_new_order() {
     let (_dir, store, repo) = fixture();
     let reading = crate::store::session_projection::Reading::acquire(&store, 500, None).unwrap();
-    let (read, work) = store
-        .task_order_inputs(
-            &repo,
-            &reading.inputs,
-            &reading.values,
-            loopflow_storage::sqlite::selections::WorkingOrder::Saved,
-        )
-        .unwrap()
-        .unwrap();
-    let later: Vec<_> = work
-        .into_iter()
-        .filter(|item| item.key.kind == WorkWorkspaceKind::Task)
-        .map(|item| item.key.id)
-        .collect();
+    let prepare = || {
+        store
+            .prepare_task_order(
+                &repo,
+                &reading.inputs,
+                &reading.values,
+                TaskOrderEdit::SortByStatus,
+            )
+            .unwrap()
+            .unwrap()
+    };
+    let (read, later) = prepare();
     assert!(!later.is_empty());
     assert!(store.commit_task_order(&repo, &read, &later).unwrap());
     assert!(!store.commit_task_order(&repo, &read, &[]).unwrap());
-    let (retained, _) = store
-        .task_order_inputs(
-            &repo,
-            &reading.inputs,
-            &reading.values,
-            loopflow_storage::sqlite::selections::WorkingOrder::Saved,
-        )
-        .unwrap()
-        .unwrap();
+    let (retained, _) = prepare();
     assert_eq!(retained, later);
 }
 

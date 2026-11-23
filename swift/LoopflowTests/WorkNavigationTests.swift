@@ -169,7 +169,7 @@ struct WorkNavigationTests {
         #expect(model.navigation.showsSelection)
         #expect(model.navigation.selectedSessionId == nil)
         #expect(model.breadcrumb == nil)
-        #expect(model.workingTaskMembers.map(\.work.id) == ["issue-review", "issue-now"])
+        #expect(model.boardTiles(.workingTasks).map(\.work.id) == ["issue-review", "issue-now"])
         model.select(.task(id: "issue-now"))
         #expect(model.navigation.destination == .entered(from: .workingTasks, work: .task(id: "issue-now")))
         #expect(model.breadcrumb?.task?.task.id == "issue-now")
@@ -281,7 +281,7 @@ struct WorkNavigationTests {
         }
         func expectOrder(_ ids: [String]) {
             #expect(model.sidebarTaskIDs == ids)
-            #expect(model.workingTaskMembers.map(\.work.id) == ids)
+            #expect(model.boardTiles(.workingTasks).map(\.work.id) == ids)
         }
 
         // The sidebar can receive the new order before the grid.
@@ -325,7 +325,7 @@ struct WorkNavigationTests {
         await frame(1, 4, .selections([initial]))
         await frame(1, 4, .taskList(initial))
         try await eventually { model.sidebarTaskIDs == ["a", "b", "c"] }
-        let source = try #require(model.workingTaskMembers.first?.work)
+        let source = try #require(model.boardTiles(.workingTasks).first?.work)
         let write = model.reorderWorkingTask(source, to: "c", side: .after)
         // The sidebar observed the commit before the answer. A positional swap would undo it.
         await frame(2, 5, .taskList(moved))
@@ -433,7 +433,7 @@ struct WorkNavigationTests {
         }
         model.applySelectionPlans([fixtureViewPlan(owner: .init(repository: "repo", kind: .repository, id: "repo"), members: tasks)], reason: "")
         model.selectWorkingTasksDashboard()
-        let member = try #require(model.workingTaskMembers.first { $0.work.id == "issue-now" })
+        let member = try #require(model.boardTiles(.workingTasks).first { $0.work.id == "issue-now" })
         model.enterTile(member.work, origin: nil)
         #expect(model.navigation.trailBoard == .workingTasks)
         #expect(model.breadcrumb?.task?.task.id == "issue-now")

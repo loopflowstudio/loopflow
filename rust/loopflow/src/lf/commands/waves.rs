@@ -1849,8 +1849,6 @@ async fn snapshot_tasks(
             &task.task.id,
             task.task.rank,
             starts.get(&task.task.id).copied(),
-            &task.selection_states,
-            loopflow_storage::sqlite::selections::WorkingOrder::Saved,
         )
     });
     unavailable_tasks.sort_by(|left, right| {
@@ -3322,6 +3320,7 @@ mod tests {
         use loopflow_execution::store::selections;
         use loopflow_model::durable::{RepositoryId, TaskId};
         use loopflow_model::program_status::{Records, Report, State};
+        use loopflow_storage::sqlite::selections::TaskOrderEdit;
         use loopflow_storage::work::selection::{Selection, SelectionState};
         let directory = tempfile::tempdir().unwrap();
         let database = directory.path().join("registry.db");
@@ -3525,9 +3524,16 @@ mod tests {
         check_order(&read(&store, "hand_back").await, [other, active]);
         check_filters(&[active], &[]);
 
-        selections::reorder_task(&store.sqlite, &repo, active, other, None)
-            .unwrap()
-            .unwrap();
+        selections::edit_task_order(
+            &store.sqlite,
+            &repo,
+            TaskOrderEdit::Move {
+                task: active,
+                target: other,
+                side: None,
+            },
+        )
+        .unwrap();
         check_order(&read(&store, "after_drag").await, [active, other]);
         report_states(4, &[State::Done, State::Working]);
         db.execute_batch(include_str!(
@@ -3583,18 +3589,18 @@ mod tests {
         // The snapshot promotes an available or blocked conversation once. A prompt
         // makes it busy without moving it until the next explicit sort.
         assert_eq!(
-            selections::sort_tasks_by_status(&store.sqlite, &repo).unwrap(),
+            selections::edit_task_order(&store.sqlite, &repo, TaskOrderEdit::SortByStatus).unwrap(),
             [active, other]
         );
         report_states(6, &[State::Working]);
         check_order(&read(&store, "busy_after_sort").await, [active, other]);
         assert_eq!(
-            selections::sort_tasks_by_status(&store.sqlite, &repo).unwrap(),
+            selections::edit_task_order(&store.sqlite, &repo, TaskOrderEdit::SortByStatus).unwrap(),
             [other, active]
         );
         report_states(7, &[State::Done]);
         assert_eq!(
-            selections::sort_tasks_by_status(&store.sqlite, &repo).unwrap(),
+            selections::edit_task_order(&store.sqlite, &repo, TaskOrderEdit::SortByStatus).unwrap(),
             [active, other]
         );
         report_states(8, &[State::Blocked, State::Working]);

@@ -282,7 +282,7 @@ struct DesktopAction {
             let model = context.model
             let id = try context.string("tile")
             let tiles: [WorkMemberRef]? = switch model.navigation.destination {
-            case .workingTasks: model.workingTaskMembers
+            case .workingTasks: model.boardTiles(.workingTasks)
             case .dashboard, .view: model.selectedViewPlan?.projection.visible
             case .work: model.navigation.waveView.map { model.boardTiles($0) }
             case .entered: nil

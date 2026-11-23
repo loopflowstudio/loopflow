@@ -1083,7 +1083,7 @@ final class WorkModel {
         sidebarTaskIDs.enumerated().map { index, id in
             let presentation = taskPresentation(id: id)
             return DesktopListEntry(position: index + 1,
-                work: WorkWorkspaceKey(repository: repository, kind: .task, id: task(id: id)?.task.id ?? id),
+                work: WorkWorkspaceKey(repository: repository, kind: .task, id: resolvedTaskID(id)),
                 identifier: presentation.identifier, title: presentation.title)
         }
     }
@@ -1094,7 +1094,7 @@ final class WorkModel {
             let repository = workspaceRepository ?? repository
             guard let work else { return WorkWorkspaceKey(repository: repository, kind: .repository, id: repository) }
             return work.kind == .task
-                ? WorkWorkspaceKey(repository: repository, kind: .task, id: task(id: work.id)?.task.id ?? work.id)
+                ? WorkWorkspaceKey(repository: repository, kind: .task, id: resolvedTaskID(work.id))
                 : WorkWorkspaceKey(repository: repository, kind: .wave, id: work.id)
         }
         switch navigation.destination {
@@ -2131,7 +2131,7 @@ final class WorkModel {
     /// tile does; the strip turns to the Task's page.
     func select(_ requested: WorkReference?) {
         if let requested, requested.kind == .task, let board = navigation.trailBoard,
-           taskIDs(on: board).contains(task(id: requested.id)?.task.id ?? requested.id) {
+           taskIDs(on: board).contains(resolvedTaskID(requested.id)) {
             return enter(requested, from: board)
         }
         select(requested, preservingOpening: false)
@@ -2173,10 +2173,12 @@ final class WorkModel {
         taskIDs(in: boardTiles(board))
     }
 
+    private func resolvedTaskID(_ id: String) -> String { task(id: id)?.task.id ?? id }
+
     /// Members name Tasks by Work ID; rows use the planning ID when it is known.
     private func taskIDs(in members: [WorkMemberRef]) -> [String] {
         var seen = Set<String>()
-        return members.map { task(id: $0.work.id)?.task.id ?? $0.work.id }
+        return members.map { resolvedTaskID($0.work.id) }
             .filter { seen.insert($0).inserted }
     }
 
@@ -2192,10 +2194,10 @@ final class WorkModel {
         let contents = Dictionary(plan.contents.map { ($0.work, $0) }, uniquingKeysWith: { first, _ in first })
         var seen = Set<String>()
         return plan.taskTiles.compactMap { member in
-            let id = task(id: member.work.id)?.task.id ?? member.work.id
+            let id = resolvedTaskID(member.work.id)
             guard seen.insert(id).inserted else { return nil }
-            return SidebarTaskRow(id: id, work: member.work, states: contents[member.work]?.states ?? [],
-                                  graphStep: contents[member.work]?.graphStep)
+            let content = contents[member.work]
+            return SidebarTaskRow(id: id, work: member.work, states: content?.states ?? [], graphStep: content?.graphStep)
         }
     }
 
@@ -3171,7 +3173,7 @@ final class WorkModel {
 
     func clearSelectionIfOutsideScope() {
         guard navigation.dashboardID == nil, let selection else { return }
-        if selection.kind == .task, taskRows(taskList).contains(where: { $0.id == selection.id }) { return }
+        if selection.kind == .task, taskIDs(in: taskList?.taskTiles ?? []).contains(selection.id) { return }
         if selectionPlans.value?.contains(where: { plan in
             plan.contents.contains { $0.work.reference == selection }
         }) == true { return }
@@ -3431,9 +3433,6 @@ extension WorkModel {
         selectDestination(.workingTasks, recordingHistory: true)
     }
 
-    /// The Working Tasks Dashboard's Tasks, in the sidebar's order.
-    var workingTaskMembers: [WorkMemberRef] { boardTiles(.workingTasks) }
-
     /// Entering from a Wave view turns its strip to the entered Task's page.
     func enter(_ work: WorkReference, from board: WorkNavigation.Board) {
         showWaveTile(work, in: board)
@@ -3443,7 +3442,7 @@ extension WorkModel {
     /// Turn a Wave view's footer to the page holding `work`; positions count the whole list.
     private func showWaveTile(_ work: WorkReference, in view: WorkNavigation.Board) {
         guard let plan = boardPlan(view),
-              let index = taskIDs(in: plan.taskTiles).firstIndex(of: task(id: work.id)?.task.id ?? work.id) else { return }
+              let index = taskIDs(in: plan.taskTiles).firstIndex(of: resolvedTaskID(work.id)) else { return }
         navigation.boardPages[view] = index / max(1, plan.slots.count)
     }
 

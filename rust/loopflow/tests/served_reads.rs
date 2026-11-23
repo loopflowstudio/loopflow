@@ -2088,14 +2088,35 @@ struct Server(std::process::Child);
 
 impl Server {
     fn start(repo: &Path, home: &Path) -> Self {
-        let server = Self(isolated_lf(repo, home, &["server", "run"]));
-        let deadline = std::time::Instant::now() + Duration::from_secs(20);
-        // This test binary is another executable than the server's, and the
-        // server is as ready for it as for its own `lf`.
-        while !loopflow_execution::machine::client::status().unwrap().ready {
-            assert!(std::time::Instant::now() < deadline, "server did not start");
-            std::thread::sleep(Duration::from_millis(20));
-        }
+        use std::io::{ErrorKind, Write};
+        use std::os::unix::net::UnixStream;
+
+        let mut server = Self(isolated_lf(repo, home, &["server", "run"]));
+        let path = loopflow::server::socket_path().unwrap();
+        let mut socket = loop {
+            match UnixStream::connect(&path) {
+                Ok(socket) => break socket,
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        ErrorKind::NotFound | ErrorKind::ConnectionRefused
+                    ) =>
+                {
+                    assert!(
+                        server.0.try_wait().unwrap().is_none(),
+                        "server exited before listening on {}",
+                        path.display()
+                    );
+                    std::thread::sleep(Duration::from_millis(20));
+                }
+                Err(error) => panic!("connect to {}: {error}", path.display()),
+            }
+        };
+        // The listener binds before the server hashes its executable. Wait for the
+        // answer on this connection, including on a cold debug build.
+        socket.write_all(b"{\"type\":\"status\"}\n").unwrap();
+        let answer: Value = serde_json::from_reader(socket).unwrap();
+        assert_eq!(answer["type"], "status", "{answer}");
         server
     }
 }

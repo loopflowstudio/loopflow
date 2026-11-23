@@ -3,12 +3,12 @@ use crate::store::session_projection::Reading;
 use crate::store::{StoreError, StoreResult};
 use loopflow_model::durable::RepositoryId;
 use loopflow_storage::sqlite::selections::{
-    repository_default, TaskSelectionReading, WorkingOrder,
+    repository_default, TaskOrderEdit, TaskSelectionReading,
 };
 use loopflow_storage::sqlite::SqliteStore;
 use loopflow_storage::work::selection::{
-    move_into_place, Arrangement, ArrangementEdit, ArrangementMode, Dashboard, DashboardId,
-    DashboardReading, DropSide, Selection, SelectionResolution, ViewPlan,
+    Arrangement, ArrangementEdit, ArrangementMode, Dashboard, DashboardId, DashboardReading,
+    Selection, SelectionResolution, ViewPlan,
 };
 fn invalid(error: impl std::fmt::Display) -> StoreError {
     StoreError::InvalidData(error.to_string())
@@ -293,57 +293,20 @@ pub fn save_dashboard(
     }
 }
 
-/// Moves `task` beside `to` in the shared Working order. The inner `Err` names
-/// whichever of the two is not a Working Task here; nothing is written then.
-pub fn reorder_task<'a>(
+pub fn edit_task_order(
     store: &SqliteStore,
     repository: &RepositoryId,
-    task: &'a str,
-    to: &'a str,
-    side: Option<DropSide>,
-) -> StoreResult<Result<Vec<String>, &'a str>> {
-    edit_working_order(store, repository, WorkingOrder::Saved, |order| {
-        let position = |id: &'a str| order.iter().position(|working| working == id).ok_or(id);
-        let from = position(task)?;
-        let target = position(to)?;
-        move_into_place(order, from, target, side);
-        Ok(())
-    })
-}
-
-pub fn sort_tasks_by_status(
-    store: &SqliteStore,
-    repository: &RepositoryId,
+    edit: TaskOrderEdit<'_>,
 ) -> StoreResult<Vec<String>> {
-    edit_working_order(store, repository, WorkingOrder::ByStatus, |_| Ok(()))?
-}
-
-fn edit_working_order<E>(
-    store: &SqliteStore,
-    repository: &RepositoryId,
-    order_by: WorkingOrder,
-    edit: impl Fn(&mut Vec<String>) -> Result<(), E>,
-) -> StoreResult<Result<Vec<String>, E>> {
     for _ in 0..3 {
         let reading = Reading::acquire(store, loopflow_storage::rows::now_unix(), None)?;
-        let Some((read, work)) =
-            store.task_order_inputs(repository, &reading.inputs, &reading.values, order_by)?
+        let Some((read, order)) =
+            store.prepare_task_order(repository, &reading.inputs, &reading.values, edit)?
         else {
             continue;
         };
-        let mut order: Vec<_> = work
-            .into_iter()
-            .filter(|row| {
-                row.states
-                    .contains(&loopflow_storage::work::selection::SelectionState::Working)
-            })
-            .map(|row| row.key.id)
-            .collect();
-        if let Err(absent) = edit(&mut order) {
-            return Ok(Err(absent));
-        }
         if store.commit_task_order(repository, &read, &order)? {
-            return Ok(Ok(order));
+            return Ok(order);
         }
     }
     Err(StoreError::Stale(

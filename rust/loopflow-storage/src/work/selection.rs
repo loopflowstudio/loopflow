@@ -192,6 +192,8 @@ fn wave_descendants<'a>(
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum SelectionError {
+    #[error("{0} is not a Working Task here; nothing changed.")]
+    NotWorking(String),
     #[error("ambiguous Work reference: {0}; use its canonical ID")]
     Ambiguous(String),
     #[error("invalid query: {0}")]

@@ -14,6 +14,9 @@
 - The terminal's own completed program report reads “Finished”. On a Task row a live finished turn reads “Available” when the Machine reports availability.
 - A missing bundled face falls back at the same type size, with a system serif for the New Task heading.
 
+- Font registration takes its inventory from the packaged TrueType files,
+  with the Fonts directory taking precedence over the bundle root.
+
 ## Open threads (not in B1)
 
 - Sorting by Graph step (`B2` in `explore.html`).

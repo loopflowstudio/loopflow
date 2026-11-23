@@ -31,41 +31,33 @@ extension Bundle {
 /// The bundled weights are the only ones `Typography` may request; anything
 /// else is synthesized by CoreText and renders heavier than the design.
 enum AppFontRegistration {
-    private static let fontFiles = [
-        "OldStandard-Regular.ttf",
-        "AtkinsonHyperlegibleNext-Regular.ttf",
-        "AtkinsonHyperlegibleNext-Italic.ttf",
-        "AtkinsonHyperlegibleNext-SemiBold.ttf",
-        "AtkinsonHyperlegibleNext-SemiBoldItalic.ttf",
-        "SplineSansMono-Regular.ttf",
-        "SplineSansMono-Bold.ttf",
-        "SplineSansMono-Italic.ttf",
-        "SplineSansMono-BoldItalic.ttf",
-    ]
-
     private static let faces: [String: URL] = {
-        var faces: [String: URL] = [:]
         let bundle = Bundle.loopflowResources
-        for file in fontFiles {
-            let name = (file as NSString).deletingPathExtension
-            let ext = (file as NSString).pathExtension
-            guard let url = bundle.url(forResource: name, withExtension: ext, subdirectory: "Fonts")
-                ?? bundle.url(forResource: name, withExtension: ext),
-                  let descriptors = CTFontManagerCreateFontDescriptorsFromURL(url as CFURL) as? [CTFontDescriptor],
+        let urls = (bundle.urls(forResourcesWithExtension: "ttf", subdirectory: "Fonts") ?? [])
+            + (bundle.urls(forResourcesWithExtension: "ttf", subdirectory: nil) ?? [])
+        var faces: [String: URL] = [:]
+        for resource in urls {
+            // CoreText needs the absolute file URL to select this copy of the face.
+            let url = resource.absoluteURL
+            guard let descriptors = CTFontManagerCreateFontDescriptorsFromURL(url as CFURL) as? [CTFontDescriptor],
                   let face = descriptors.first,
-                  let postScriptName = CTFontDescriptorCopyAttribute(face, kCTFontNameAttribute) as? String else { continue }
+                  let name = CTFontDescriptorCopyAttribute(face, kCTFontNameAttribute) as? String,
+                  faces[name] == nil else { continue }
             CTFontManagerRegisterFontsForURL(url as CFURL, .process, nil)
-            faces[postScriptName] = url
+            faces[name] = url
         }
         return faces
     }()
 
-    /// Resolve the packaged face, including when an installed font shares its name.
-    static func font(_ name: String, size: CGFloat, descriptor: CTFontDescriptor? = nil) -> CTFont? {
+    /// Start from the packaged file even when an installed font shares its name.
+    static func font(_ name: String, size: CGFloat, commonLigaturesOff: Bool = false) -> CTFont? {
         guard let url = faces[name] else { return nil }
-        let base = descriptor ?? CTFontDescriptorCreateWithNameAndSize(name as CFString, size)
-        let source = CTFontDescriptorCreateCopyWithAttributes(base, [kCTFontURLAttribute: url] as CFDictionary)
-        let font = CTFontCreateWithFontDescriptor(source, size, nil)
+        var face = CTFontDescriptorCreateWithAttributes([kCTFontURLAttribute: url, kCTFontNameAttribute: name] as CFDictionary)
+        if commonLigaturesOff {
+            face = CTFontDescriptorCreateCopyWithFeature(face, NSNumber(value: kLigaturesType),
+                                                         NSNumber(value: kCommonLigaturesOffSelector))
+        }
+        let font = CTFontCreateWithFontDescriptor(face, size, nil)
         return CTFontCopyPostScriptName(font) as String == name ? font : nil
     }
 

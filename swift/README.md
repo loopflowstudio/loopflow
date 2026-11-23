@@ -130,8 +130,7 @@ across repositories and opens another repository in its own window. Its
 **Sidebar shows** picker filters the rows to **Working tasks**, **Available**,
 or **Busy** while keeping the selected workspace open. **⌘1–9** selects a
 visible row by position and **⌃Tab / ⌃⇧Tab** cycles the rows. Missing slots do
-nothing. Selecting a
-Dashboard's Task, from any of these, keeps the Dashboard in the path, as its tile does.
+nothing. Selecting a Dashboard's Task keeps the Dashboard in the path, as its tile does.
 With sidebar focus, **⌘F** searches its visible Tasks and Waves; **Search all Work**
 widens the same navigator. **Shift-F10** opens the focused Task's actions without
 changing the open workspace.
@@ -160,13 +159,8 @@ its checkout. Repository and Wave primary conversations keep their own scope,
 even in a Task checkout. The Task's conversation list and breadcrumb Session
 picker use the same membership.
 
-In the sidebar, a Task’s current Graph step appears beside its ID and status.
-Working Tasks start newest first, and new arrivals go above the saved order.
-**Sort by status** in the repository sidebar or **⌘K** saves a one-time order
-of Blocked, Available, Idle and Busy Tasks.
-
-A Task's row is its whole title, wrapped rather than cut, then its ID and one
-status word. A row that needs someone adds one line saying why:
+A sidebar row shows the Task’s full title, then its ID, current Graph step
+when available, and one status word. A row that needs someone adds one line saying why:
 
 ```text
 Loopflow for Mac's Task workspace matches

@@ -148,12 +148,7 @@ private struct Serif: ViewModifier {
 
     func body(content: Content) -> some View {
         let size = step.size * scale
-        let descriptor = CTFontDescriptorCreateCopyWithFeature(
-            CTFontDescriptorCreateWithNameAndSize(Typography.serifFace as CFString, size),
-            NSNumber(value: kLigaturesType),
-            NSNumber(value: kCommonLigaturesOffSelector)
-        )
-        let font = AppFontRegistration.font(Typography.serifFace, size: size, descriptor: descriptor)
+        let font = AppFontRegistration.font(Typography.serifFace, size: size, commonLigaturesOff: true)
         content.font(font.map { Font($0) } ?? .system(size: size, design: .serif)).tracking(-0.03 * size)
     }
 }

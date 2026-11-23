@@ -128,3 +128,32 @@ Tracker: linear. 2 open · 0 lost.
 <ol><li>The URL keeps the old slug after a rename (<code>…/ledger-abc123</code> under <code>journal</code>) until the next tracker read. Whether Linear still opens the old slug was not checked.</li>
 <li><code>lf wave status</code> aligns its rows unevenly (<code>machine      unplaced</code>, <code>Project   …</code>); not this branch.</li>
 <li><code>lf config set --shared repo.tracker.linear.team</code> prints "saved; DomainAction" (seen before; not this branch).</li></ol>
+<h2>Fourth run, 2026-11-23: slice 5 (one Project on the wire) and the mounted Wave backlog</h2>
+<p>Branch <code>lf</code> at cd21c7b658 plus this run's fix, private Machine <code>/tmp/lf-qa-995/g</code>, fresh repository with a bare origin, no tracker. An isolated Desktop bundle (<code>com.loopflow.mac.qa995.dev</code>, QA hook) on that Machine, driven with the screen locked; removed afterwards.</p>
+<table><tr><th>Scenario</th><th>Result</th></tr>
+<tr><td>Plan demo: <code>billing</code>, <code>billing/refunds</code>, a Task in refunds, move to billing</td><td>Works. <code>lf wave status --json</code> has one <code>project</code> key (<code>{"state":"ok","value":{…,"url":null}}</code>), no list. The Task lists under billing only after the move.</td></tr>
+<tr><td>A Wave with no Project, arriving from another Machine's plan ref</td><td><code>Project   none</code>; JSON <code>"value": null</code>; <code>lf plan list --json</code> the same. Its first Task makes the Project (<code>Project   orphan (local) · started</code>).</td></tr>
+<tr><td>Desktop: open a Wave's backlog (sidebar click)</td><td>Before the fix: name and Objective only; the Wave's Project appeared nowhere on the page people land on (main showed it there). Fixed, below.</td></tr>
+<tr><td>Desktop after the fix: unlinked, then linked (link written into the store, relaunch)</td><td><code>refunds</code> beside the title; the Objective disclosure shows the goal, then the Project with its status. Linked, the label is a <code>Link</code> (view test); it draws in <code>actionInk</code>, which this theme sets to <code>textSecondary</code>, so it looks like the plain label.</td></tr>
+</table>
+<p><img src="qa/backlog-before-fix.png" width="560" alt="Wave backlog before the fix: no Project"> <img src="qa/backlog-objective-open.png" width="560" alt="Wave backlog after the fix, Objective open"></p>
+<p><img src="qa/backlog-header-linked.png" width="560" alt="Header with linked Project"></p>
+<pre>$ lf wave status loose            # pushed by another Machine, no Project
+loose  ready
+  Project   none
+$ lf wave status loose --json | jq .project
+{"state": "ok", "value": null}</pre>
+<h3>Fixed</h3>
+<ul><li>The Wave backlog's title line shows the Wave's one Project (<code>WaveHeaderProject</code>, a link when the URL is known; "Project unavailable." on a failed read), its Objective detail shows the Project's status and tracker sync, and <code>lf desktop capture -p backlog</code>'s heading names it. The merge that removed chapters had dropped all three with <code>currentProject</code>.</li>
+<li><code>BacklogViewTests/backlogRendersItsRowsAndOpensOneBrief</code> asserts the linked label and the heading line.</li></ul>
+<h3>Checks</h3>
+<ul><li><code>scripts/test_desktop.sh --filter 'BacklogViewTests|WaveDetailReadingTests|DTOFixtureTests|WorkModelTests'</code>: 115 pass (me).</li>
+<li>Full matrix: CI at gate.</li></ul>
+<h3>Not reached</h3>
+<ul><li><code>lf desktop capture -p backlog</code> against the QA bundle: "No Desktop window shows repo_…" while the window showed the repository; the heading is covered by the test above.</li>
+<li>The Backlog ⋯ menu's Project sheet: menus answer no hook click.</li>
+<li>A linked Project through a real tracker read: needs a Linear login.</li></ul>
+<h3>Still wrong, worst first</h3>
+<ol><li>A linked Project's name draws in the same ink as plain text (<code>actionInk</code> = <code>textSecondary</code>); nothing says it opens Linear until hover. Design-system choice, not this branch.</li>
+<li>The sidebar's Wave list showed three of four Waves (Orphan missing until another Wave was selected); not investigated, likely not this branch.</li>
+<li><code>lf task move</code> prints <code>task_…: membership saved</code>, a raw id and internal word (same on main).</li></ol>

@@ -294,6 +294,11 @@ Project (the unique index says so) went with the list. Storage `project_`,
 CLI `waves::tests::`, `local_planning::`, `planning_lookup_tests::` pass;
 clippy clean.
 
+QA after slice 5 (`scratch/qa.html`, fourth run): the Wave backlog showed no
+Project at all (the chapter removal dropped `currentProject` there); its title
+line, Objective detail and capture heading now show the one Project
+(`BacklogViewTests`, 115 Swift tests pass).
+
 ## Remains
 
 Nothing left to build here; `git grep` finds no list-shaped Project on the

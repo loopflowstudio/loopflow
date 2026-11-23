@@ -247,7 +247,11 @@ them. Nothing here needs WindowServer focus.
 - Theme: `lf set --global theme "<name>"` on the private Machine, then
   relaunch. An imported theme is a file in `$LF_HOME/themes/`; Ghostty.app's
   `Contents/Resources/ghostty/themes/` has many.
-- A Wave's backlog: `open -g -b <bundle id> 'loopflow://<repo>/wave/<wave>'`.
+- A Wave's backlog: `open -g -b <bundle id> 'loopflow://<repo>/wave/<wave>'`. In
+  one run it left the repository backlog showing; a click on a sidebar Wave
+  row then selected the row below the one aimed at, and a relaunch reopens
+  the last selected Wave. Store writes made with `sqlite3` behind the server
+  reach the app only after a relaunch.
   The Portfolio: `loopflow://portfolio`. It lists Waves only for repositories
   under its folder (`$HOME/src`); a symlink there works, but a Task click then
   opens a second repository window for the symlinked path that stays on

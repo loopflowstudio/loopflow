@@ -197,3 +197,9 @@ and insert a `tracker_projects` row with the same `id`, `repo` (the
 `url`. `lf wave status <wave>` then prints `(linked)` and the URL under it.
 This skips the tracker read itself, so it shows the branch's handling of a
 link, not the import.
+
+A Wave with no Project (`Project   none`, `"project": {"state": "ok",
+"value": null}`) only arrives from another Machine: push a `waves/<uuid>.json`
+record (`wave_name`, `wave_parent`, a `home_<32 hex>` machine) with the
+`repository` file as above and `lf task sync <id>`. Its first Task makes the
+Project.

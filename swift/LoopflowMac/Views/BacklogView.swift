@@ -413,10 +413,13 @@ struct BacklogList {
 
     // MARK: Text
 
-    /// A Wave's heading lines: name, status and objective.
+    /// A Wave's heading lines: name and status, objective, then its Project.
     static func heading(_ roadmap: WaveRoadmap) -> [String] {
         var lines = ["\(roadmap.wave.displayName) · \(roadmap.wave.status.label)"]
         if let objective = roadmap.wave.goal.split(separator: "\n").first { lines.append(String(objective)) }
+        if let project = roadmap.project.present {
+            lines.append("\(project.name) · \(project.status.rawValue.capitalized)")
+        }
         return lines
     }
 
@@ -667,6 +670,13 @@ struct BacklogView: View {
             Text(roadmap?.wave.displayName ?? model.repositoryName).serif(.display)
                 .foregroundStyle(palette.emphasisInk).lineLimit(1)
                 .layoutPriority(1).accessibilityIdentifier("wave-title")
+            if let roadmap {
+                if let error = roadmap.project.unavailableReason {
+                    FailureLine("Project unavailable.", machine: error).lineLimit(1)
+                } else if let project = roadmap.project.present {
+                    WaveHeaderProject(project: project)
+                }
+            }
             if let roadmap, showsObjective {
                 Button {
                     state.wrappedValue.showsObjective.toggle()
@@ -725,9 +735,12 @@ struct BacklogView: View {
 
     /// The Wave's objective, then its Project as the Portfolio draws it.
     private func objective(_ roadmap: WaveRoadmap) -> some View {
-        Text(roadmap.wave.goal.isEmpty ? "No objective recorded." : roadmap.wave.goal)
-            .font(Typography.text).foregroundStyle(palette.textSecondary).textSelection(.enabled)
-            .accessibilityIdentifier("wave-objective-detail")
+        VStack(alignment: .leading, spacing: Spacing.sm) {
+            Text(roadmap.wave.goal.isEmpty ? "No objective recorded." : roadmap.wave.goal)
+                .font(Typography.text).foregroundStyle(palette.textSecondary).textSelection(.enabled)
+            if let project = roadmap.project.present { WaveProjectView(project: project, repo: roadmap.wave.repo) }
+        }
+        .accessibilityIdentifier("wave-objective-detail")
     }
 
     // MARK: Notices

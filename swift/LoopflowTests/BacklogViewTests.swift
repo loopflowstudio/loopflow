@@ -313,6 +313,10 @@ struct BacklogViewTests {
         let view = WorkNavigation.Board.wave(roadmap.wave.id)
         let backlogView = BacklogView(model: model, view: view)
         #expect(try backlogView.inspect().find(viewWithAccessibilityIdentifier: "wave-title").text().string() == roadmap.wave.displayName)
+        // The Wave's one Project sits beside its name, linked to the tracker; the capture names it too.
+        let project = try #require(roadmap.project.present)
+        #expect(try backlogView.inspect().find(viewWithAccessibilityIdentifier: "wave-header-project").find(ViewType.Link.self).labelView().text().string() == project.name)
+        #expect(BacklogList.heading(roadmap).last == "\(project.name) · Started")
         let backlog = model.backlog(view)
         #expect(!backlog.rows.isEmpty)
         for row in backlog.rows { _ = try backlogView.inspect().find(viewWithAccessibilityIdentifier: "wave-row-\(row.id)") }

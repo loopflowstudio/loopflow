@@ -166,11 +166,8 @@ fn worktree_task(cli: &Cli, directory: &Path) -> Result<Option<String>> {
     let Some(store) = read_registry()? else {
         return Ok(None);
     };
-    let Ok(root) = loopflow_execution::git::worktree_root(directory) else {
-        return Ok(None);
-    };
     Ok(store
-        .task_checkout_owner(&root)?
+        .task_checkout_owner(directory)?
         .map(|task| task.to_string()))
 }
 

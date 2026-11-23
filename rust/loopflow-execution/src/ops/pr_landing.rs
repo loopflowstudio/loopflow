@@ -1197,8 +1197,7 @@ async fn create_landing(
     })?;
     let repo_id = crate::repository::RepoId::discover(&worktree)
         .map_err(|error| OpsError::Message(error.to_string()))?;
-    let root = crate::git::worktree_root(&worktree).map_err(OpsError::from)?;
-    let task = crate::ops::task::checkout_owner(store, &root).await?;
+    let task = crate::ops::task::checkout_owner(store, &worktree).await?;
     let task_id = match task {
         Some(task) => {
             let task_pr = store

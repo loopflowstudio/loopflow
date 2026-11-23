@@ -288,6 +288,22 @@ writes! {
     } => loopflow_model::comment::TaskComments;
     { issue, message, .. } => task::report(directory, issue, None, message)?,
 
+    /// Stop work and hold the Task on its execution Machine. Returns the pause receipt.
+    #[serde(rename = "task.pause")]
+    TaskPause { directory: PathBuf, issue: String } => String;
+    { issue, .. } => match remote {
+        Some(remote) => remote.call()?,
+        None => loopflow_execution::ops::task::pause::pause(issue)?,
+    },
+
+    /// Lift the hold. Returns the run when requested, otherwise null.
+    #[serde(rename = "task.unpause")]
+    TaskUnpause { directory: PathBuf, issue: String, run: bool } => Option<task::TaskRun>;
+    { issue, run, .. } => match remote {
+        Some(remote) => remote.call()?,
+        None => task::unpause(directory, issue, *run, None, false, environment)?,
+    },
+
     /// `lf task interrupt <issue> --json`.
     #[serde(rename = "task.interrupt")]
     TaskInterrupt { directory: PathBuf, issue: String } => loopflow_execution::ops::task::TaskControlResult;
@@ -1097,6 +1113,8 @@ macro_rules! directory_of {
             | Write::TrackerAnswer { directory, .. }
             | Write::TaskSteer { directory, .. }
             | Write::TaskReport { directory, .. }
+            | Write::TaskPause { directory, .. }
+            | Write::TaskUnpause { directory, .. }
             | Write::TaskInterrupt { directory, .. }
             | Write::TaskMove { directory, .. }
             | Write::TaskSave { directory, .. }
@@ -1159,7 +1177,10 @@ impl Write {
             Self::TaskRun { issue, .. } | Self::TaskAutoOn { issue, .. } => {
                 (remote_task(issue)?, true)
             }
-            Self::TaskAutoOff { issue, .. } => (remote_task(issue)?, false),
+            Self::TaskUnpause { issue, run, .. } => (remote_task(issue)?, *run),
+            Self::TaskPause { issue, .. } | Self::TaskAutoOff { issue, .. } => {
+                (remote_task(issue)?, false)
+            }
             Self::TaskClaim { issue, .. } | Self::TaskUnassign { issue, .. } => {
                 (remote_ownership_writer(issue)?, false)
             }
@@ -1182,6 +1203,8 @@ impl Write {
         let mut write = self.clone();
         if let Self::TaskRun { issue, .. }
         | Self::TaskAutoOn { issue, .. }
+        | Self::TaskPause { issue, .. }
+        | Self::TaskUnpause { issue, .. }
         | Self::TaskAutoOff { issue, .. }
         | Self::TaskClaim { issue, .. }
         | Self::TaskUnassign { issue, .. } = &mut write

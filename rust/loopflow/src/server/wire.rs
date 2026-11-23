@@ -130,6 +130,8 @@ mod tests {
                 "../../../loopflow-execution/tests/fixtures/dto/server/task_auto_off.json"
             ),
             include_str!("../../../loopflow-execution/tests/fixtures/dto/server/task_steer.json"),
+            include_str!("../../../loopflow-execution/tests/fixtures/dto/server/task_pause.json"),
+            include_str!("../../../loopflow-execution/tests/fixtures/dto/server/task_unpause.json"),
             include_str!("../../../loopflow-execution/tests/fixtures/dto/server/task_report.json"),
             include_str!(
                 "../../../loopflow-execution/tests/fixtures/dto/server/task_interrupt.json"

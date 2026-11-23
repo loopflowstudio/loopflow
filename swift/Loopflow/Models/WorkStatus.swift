@@ -54,6 +54,7 @@ public enum TaskState: String, Codable, Sendable, Hashable {
     case active
     /// A Graph runs for it.
     case moving
+    case paused
     case done
     case abandoned
 

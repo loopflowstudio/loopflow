@@ -2555,12 +2555,18 @@ using lf open's ordinary host selection. Preview and --quote open nothing."
         cmd: AutoCommand,
     },
     /// Stop the Task's work and conversation while keeping its checkout and claim
-    Pause { issue: String },
+    Pause {
+        issue: String,
+        #[arg(long)]
+        json: bool,
+    },
     /// Lift the hold on a Task and optionally run its interrupted step
     Unpause {
         issue: String,
         #[arg(long)]
         run: bool,
+        #[arg(long)]
+        json: bool,
     },
     /// Stop the Task's running Graph or Task run and its scheduled automation
     Interrupt {
@@ -2610,7 +2616,7 @@ impl TaskCommand {
             | Self::Delete { issue }
             | Self::Update { issue, .. }
             | Self::Report { issue, .. }
-            | Self::Pause { issue }
+            | Self::Pause { issue, .. }
             | Self::Unpause { issue, .. }
             | Self::Interrupt { issue, .. }
             | Self::Wait { issue, .. } => Some(issue),
@@ -2646,7 +2652,7 @@ impl TaskCommand {
             | Self::Delete { issue }
             | Self::Update { issue, .. }
             | Self::Report { issue, .. }
-            | Self::Pause { issue }
+            | Self::Pause { issue, .. }
             | Self::Unpause { issue, .. }
             | Self::Interrupt { issue, .. }
             | Self::Wait { issue, .. } => Some(issue),

@@ -184,6 +184,29 @@ pub fn report(
     crate::ops::task::task_comment(&repo, issue, wave, Some(message), false).map_err(written)
 }
 
+/// Lift the hold on this Machine, optionally starting a fresh run at the saved cursor.
+pub fn unpause(
+    directory: &Path,
+    issue: &str,
+    start: bool,
+    agent: Option<&str>,
+    approve: bool,
+    environment: &[(String, String)],
+) -> Result<Option<TaskRun>> {
+    crate::ops::task::pause::unpause(issue).map_err(written)?;
+    if !start {
+        return Ok(None);
+    }
+    run(directory, issue, None, None, agent, approve, environment)
+        .map(Some)
+        .map_err(|error| {
+            Error::new(
+                ErrorCode::OutcomeUnknown,
+                format!("{issue} unpaused; {error}"),
+            )
+        })
+}
+
 /// `task.interrupt`: stop the Task's live Graph or Task run and its scheduled
 /// automation, as `lf task interrupt <issue>` does. The receipt says what the
 /// interrupt reached, or that nothing ran.
@@ -242,7 +265,7 @@ fn written(error: impl Into<anyhow::Error>) -> Error {
     Error::written(&error.into())
 }
 
-fn missing(issue: &str) -> Error {
+pub(super) fn missing(issue: &str) -> Error {
     Error::new(ErrorCode::NotFound, format!("no Task exists for {issue:?}"))
         .with(serde_json::json!({ "task": issue }))
 }

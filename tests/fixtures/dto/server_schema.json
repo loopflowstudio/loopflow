@@ -8984,6 +8984,7 @@
             "idle",
             "active",
             "moving",
+            "paused",
             "working",
             "done"
           ],
@@ -14491,6 +14492,7 @@
       "oneOf": [
         {
           "enum": [
+            "paused",
             "done",
             "abandoned"
           ],
@@ -14798,6 +14800,11 @@
         {
           "const": "moving",
           "description": "A Graph runs for it. Its auto setting says whether the run stands in\nat interactive steps or stops there for a person.",
+          "type": "string"
+        },
+        {
+          "const": "paused",
+          "description": "Execution is held until explicitly unpaused.",
           "type": "string"
         },
         {
@@ -16971,6 +16978,82 @@
           "type": "object",
           "x-result": {
             "$ref": "#/$defs/TaskComments"
+          }
+        },
+        {
+          "additionalProperties": false,
+          "description": "Stop work and hold the Task on its execution Machine. Returns the pause receipt.",
+          "examples": [
+            {
+              "directory": "/repo",
+              "issue": "LOO-1",
+              "kind": "task.pause"
+            }
+          ],
+          "properties": {
+            "directory": {
+              "type": "string"
+            },
+            "issue": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "task.pause",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "directory",
+            "issue"
+          ],
+          "type": "object",
+          "x-result": {
+            "type": "string"
+          }
+        },
+        {
+          "additionalProperties": false,
+          "description": "Lift the hold. Returns the run when requested, otherwise null.",
+          "examples": [
+            {
+              "directory": "/repo",
+              "issue": "LOO-1",
+              "kind": "task.unpause",
+              "run": true
+            }
+          ],
+          "properties": {
+            "directory": {
+              "type": "string"
+            },
+            "issue": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "task.unpause",
+              "type": "string"
+            },
+            "run": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "kind",
+            "directory",
+            "issue",
+            "run"
+          ],
+          "type": "object",
+          "x-result": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/TaskRun"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         {

@@ -12,6 +12,12 @@ use crate::rows::now_unix;
 use crate::work::task::TaskEventKind;
 use crate::{StoreError, StoreResult};
 
+/// Unsettled cleanup may still have a recorded worker OS session.
+#[derive(Debug, Clone, Copy)]
+pub struct PauseCleanup {
+    pub worker_session: Option<u32>,
+}
+
 /// Members observed together in a worker's private OS session, before its
 /// leader was asked to exit. A surviving member pins the session on retry.
 #[derive(Debug, Serialize, Deserialize)]
@@ -51,14 +57,16 @@ pub(super) fn clear_in(conn: &Connection, task: &TaskId) -> StoreResult<bool> {
     Ok(conn.execute("DELETE FROM task_pauses WHERE task_id=?1", [task.as_str()])? != 0)
 }
 
+pub fn run_refusal(issue: &str) -> String {
+    format!("Task is paused; run `lf task unpause {issue}` to resume it")
+}
+
 pub(super) fn require_unpaused_in(conn: &Connection, task: &TaskId) -> StoreResult<()> {
     let issue: Option<String> = conn.query_row(
         "SELECT t.issue_identifier FROM task_pauses p JOIN tasks t ON t.id=p.task_id WHERE p.task_id=?1",
         [task.as_str()], |row| row.get(0)).optional()?;
     if let Some(issue) = issue {
-        return Err(StoreError::InvalidData(format!(
-            "Task is paused; run `lf task unpause {issue}` to resume it"
-        )));
+        return Err(StoreError::InvalidData(run_refusal(&issue)));
     }
     Ok(())
 }

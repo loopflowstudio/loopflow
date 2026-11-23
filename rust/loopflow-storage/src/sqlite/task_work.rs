@@ -177,6 +177,13 @@ fn latest_task_graphs(
         .collect()
 }
 
+/// Cleanup can outlive the worker that originally held the Graph cursor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PauseStage {
+    Stopping,
+    Held,
+}
+
 /// The Task's Graph row: the graph it took up, the step it stands at or its
 /// run left, and that run with the cursor its next attempt sets out from: where
 /// it began, then the step after the last one it finished.
@@ -187,6 +194,7 @@ pub struct SavedTaskGraphRow {
     pub run: Option<(String, crate::graph_process::TaskCarrier)>,
     /// The Task's auto state, which names who takes part next.
     pub auto: Option<AutoState>,
+    pub pause: Option<PauseStage>,
 }
 
 /// A Task's Graph as another Machine takes it up: the graph it took up, the
@@ -204,9 +212,10 @@ fn task_graph_row(
     task: &TaskId,
 ) -> StoreResult<Option<SavedTaskGraphRow>> {
     use rusqlite::OptionalExtension;
-    let Some((graph, step, start, carrier)) = conn
+    let Some((graph, step, start, carrier, stopping)) = conn
         .query_row(
-            "SELECT graph,step,run_start,lf_process_id,run_pid,run_os_started_at,run_died_at
+            "SELECT graph,step,run_start,lf_process_id,run_pid,run_os_started_at,run_died_at,
+                    (SELECT stopping_processes IS NOT NULL FROM task_pauses WHERE task_id=?1)
              FROM task_graphs WHERE task_id=?1",
             [task.as_str()],
             |row| {
@@ -224,6 +233,7 @@ fn task_graph_row(
                             })
                         })
                         .transpose()?,
+                    row.get::<_, Option<bool>>(7)?,
                 ))
             },
         )
@@ -238,6 +248,13 @@ fn task_graph_row(
         step,
         run,
         auto,
+        pause: stopping.map(|stopping| {
+            if stopping {
+                PauseStage::Stopping
+            } else {
+                PauseStage::Held
+            }
+        }),
     }))
 }
 

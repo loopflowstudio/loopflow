@@ -33,7 +33,7 @@ async fn resolve(issue: &str) -> OpsResult<(SharedStore, Task, File)> {
         .get_task_by_issue(issue)
         .await
         .map_err(task_error)?
-        .ok_or_else(|| task_error(format!("no Task exists for {issue:?}")))?;
+        .ok_or_else(|| crate::ops::OpsError::TaskNotFound(issue.to_owned()))?;
     let cleanup = cleanup_lock(&task.id)?;
     let route = store
         .task_execution_route(&task.id)

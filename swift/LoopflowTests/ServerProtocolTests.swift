@@ -251,6 +251,8 @@ struct ServerProtocolTests {
             ("task_auto_off", "auto-1", .taskAutoOff(directory: "/repo", issue: "LOO-1")),
             ("task_steer", "steer-1", .taskSteer(directory: "/repo", issue: "LOO-1", message: "Keep the API small")),
             ("task_report", "report-1", .taskReport(directory: "/repo", issue: "LOO-1", message: "Demo recorded")),
+            ("task_pause", "pause-1", .taskPause(directory: "/repo", issue: "LOO-1")),
+            ("task_unpause", "unpause-1", .taskUnpause(directory: "/repo", issue: "LOO-1", run: true)),
             ("task_interrupt", "interrupt-1", .taskInterrupt(directory: "/repo", issue: "LOO-1")),
             ("session_steer", "steer-2", .sessionSteer(directory: "/repo", session: nil, wave: "product",
                                                        message: "Ship the smallest slice first")),

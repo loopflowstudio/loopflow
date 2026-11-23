@@ -1373,24 +1373,29 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
             &loopflow_execution::engine::task::report(repo, issue, wave.as_deref(), message)?,
             *json,
         ),
-        TaskCommand::Pause { issue } => {
-            println!("{}", loopflow_execution::ops::task::pause::pause(issue)?);
+        TaskCommand::Pause { issue, json } => {
+            let receipt = loopflow_execution::ops::task::pause::pause(issue)?;
+            if *json {
+                println!("{}", serde_json::to_string(&receipt)?);
+            } else {
+                println!("{receipt}");
+            }
             Ok(())
         }
-        TaskCommand::Unpause { issue, run } => {
-            loopflow_execution::ops::task::pause::unpause(issue)?;
-            println!("{issue} unpaused");
-            if *run {
-                let run = loopflow_execution::engine::task::run(
-                    repo,
-                    issue,
-                    None,
-                    None,
-                    cli.agent.as_deref(),
-                    cli.batch,
-                    &[],
-                )?;
-                if let Some(text) = run.render() {
+        TaskCommand::Unpause { issue, run, json } => {
+            let receipt = loopflow_execution::engine::task::unpause(
+                repo,
+                issue,
+                *run,
+                cli.agent.as_deref(),
+                cli.batch,
+                &[],
+            )?;
+            if *json {
+                println!("{}", serde_json::to_string(&receipt)?);
+            } else {
+                println!("{issue} unpaused");
+                if let Some(text) = receipt.and_then(|run| run.render()) {
                     println!("{text}");
                 }
             }

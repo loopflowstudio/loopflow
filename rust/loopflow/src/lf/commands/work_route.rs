@@ -147,7 +147,7 @@ fn launch_task(cli: &Cli) -> Option<&str> {
             cmd:
                 TaskCommand::Claim { issue, .. }
                 | TaskCommand::Unassign { issue, .. }
-                | TaskCommand::Pause { issue }
+                | TaskCommand::Pause { issue, .. }
                 | TaskCommand::Unpause { issue, .. },
         }) => Some(issue.as_str()),
         _ => cli.task.as_deref(),

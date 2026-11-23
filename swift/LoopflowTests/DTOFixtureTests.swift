@@ -12,6 +12,7 @@ struct DTOFixtureTests {
         #expect(!board.tasks.items.isEmpty)
         #expect(board.tasks.items[0].identifier == "W2-144")
         let detail = try JSONDecoder().decode(TaskDetail.self, from: loadFixtureData("task_screen_detail.json"))
+        #expect(detail.state == .paused && detail.section == .paused)
         #expect(detail.checks?.failingChecks.first?.name == "rust-test")
         #expect(detail.currentSession?.state == .unknown)
         let card = try JSONDecoder().decode(SessionCard.self, from: loadFixtureData("session_card.json"))

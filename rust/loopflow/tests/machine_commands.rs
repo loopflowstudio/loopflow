@@ -4311,6 +4311,112 @@ fn served_ownership_routes_to_its_writer_and_never_falls_back_locally() {
     drop(server);
 }
 
+#[test]
+fn served_pause_holds_the_remote_cursor_and_status_names_unpause() {
+    use loopflow::lf::commands::write::Write as Mutation;
+    use loopflow::server::wire::Operation;
+    use loopflow_execution::machine::client::Connection;
+    use loopflow_execution::task_graph::CapturedGraph;
+    use loopflow_storage::sqlite::task_work::SavedTaskGraphRecord;
+
+    let fixture = preview_machines();
+    let (plan, task) = task_on_mini(&fixture);
+    let graph = CapturedGraph::load("code", &plan.remote_path)
+        .unwrap()
+        .unwrap();
+    let cursor = graph.find("implement").unwrap().cursor();
+    plan.remote
+        .place_moved_task_graph(
+            &task,
+            &SavedTaskGraphRecord {
+                graph: serde_json::to_string(&graph).unwrap(),
+                step: "start".into(),
+                run_start: Some(serde_json::to_string(&cursor).unwrap()),
+            },
+            Some(&plan.remote.test_lf_process()),
+        )
+        .unwrap();
+
+    let _mini = served_mini(&fixture);
+    let (_server, socket) = served(&fixture);
+    let send = |write| {
+        Connection::open_at(Path::new(&socket))
+            .unwrap()
+            .request(Operation::Write(write))
+    };
+    let pause = |issue: &str| Mutation::TaskPause {
+        directory: plan.local_path.clone(),
+        issue: issue.to_owned(),
+    };
+    let unpause = || Mutation::TaskUnpause {
+        directory: plan.local_path.clone(),
+        issue: task.to_string(),
+        run: false,
+    };
+    let missing = send(pause("MISSING-9999"))
+        .unwrap_err()
+        .downcast::<loopflow_execution::engine::Error>()
+        .unwrap();
+    assert_eq!(
+        missing.code,
+        loopflow_execution::engine::ErrorCode::NotFound
+    );
+
+    let receipt = send(pause(task.as_str())).unwrap().result;
+    let status = fixture
+        .command(&["task", "status", task.as_str(), "--json"])
+        .current_dir(&plan.local_path)
+        .output()
+        .unwrap();
+    assert_success(&status);
+    let status: Value = serde_json::from_slice(&status.stdout).unwrap();
+    let issue = status["task"]["identifier"].as_str().unwrap();
+    let refusal = format!("Task is paused; run `lf task unpause {issue}` to resume it");
+    assert_eq!(receipt, format!("{issue} paused"));
+    assert_eq!(status["task"]["state"], "paused");
+    assert_eq!(status["task"]["reason"], refusal);
+    assert_eq!(
+        status["graph"]["sentence"],
+        "Paused at build. `lf task unpause` resumes it."
+    );
+    assert_eq!(status["graph"]["position"]["at"], "implement");
+
+    let remote = fixture.root.path().join("remote");
+    let rows = Command::new(remote.join(".local/bin/lf"))
+        .env_clear()
+        .env("HOME", &remote)
+        .env("PATH", "/usr/bin:/bin")
+        .current_dir(&plan.remote_path)
+        .args(["task", "list", "--state", "paused", "--json"])
+        .output()
+        .unwrap();
+    assert_success(&rows);
+    let rows: Vec<Value> = serde_json::from_slice(&rows.stdout).unwrap();
+    let row = rows
+        .iter()
+        .find(|r| r["task"]["id"] == task.as_str())
+        .unwrap();
+    assert_eq!(row["section"], "paused");
+    assert_eq!(
+        row["actions"],
+        serde_json::json!({"recommended":"no_action","reason":"Task is paused"})
+    );
+    assert_eq!(row["run_control"]["unavailable"], refusal);
+    assert!(plan.local.task_pause(&task).unwrap().is_none());
+    assert!(send(unpause()).unwrap().result.is_null());
+    assert!(plan.remote.task_pause(&task).unwrap().is_none());
+
+    send(pause(task.as_str())).unwrap();
+    executable(
+        &fixture.root.path().join("bin/ssh"),
+        "#!/bin/sh\necho 'peer unavailable' >&2\nexit 255\n",
+    );
+    let error = send(unpause()).unwrap_err();
+    assert!(error.to_string().contains("unavailable"), "{error}");
+    assert!(plan.remote.task_pause(&task).unwrap().is_some());
+    assert!(plan.local.task_pause(&task).unwrap().is_none());
+}
+
 /// A Task mini runs and mini's records claim, read back to the laptop.
 fn task_on_mini(fixture: &Machines) -> (SharedPlan, loopflow_execution::durable::TaskId) {
     let plan = SharedPlan::new(fixture);

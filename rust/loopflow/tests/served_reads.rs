@@ -1257,6 +1257,8 @@ fn server_operations_match_their_lf_commands() {
         | Write::TaskAutoOn { .. }
         | Write::TaskSteer { .. }
         | Write::TaskReport { .. }
+        | Write::TaskPause { .. }
+        | Write::TaskUnpause { .. }
         | Write::TaskInterrupt { .. }
         | Write::TaskSave { .. }
         | Write::SessionSteer { .. }
@@ -2160,6 +2162,20 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
             path(directory),
             words(&["task", "report", issue, message, "--json"]),
         ),
+        Write::TaskPause { directory, issue } => {
+            (path(directory), words(&["task", "pause", issue, "--json"]))
+        }
+        Write::TaskUnpause {
+            directory,
+            issue,
+            run,
+        } => {
+            let mut args = words(&["task", "unpause", issue, "--json"]);
+            if *run {
+                args.push("--run".into());
+            }
+            (path(directory), args)
+        }
         Write::TaskInterrupt { directory, issue } => (
             path(directory),
             words(&["task", "interrupt", issue, "--json"]),

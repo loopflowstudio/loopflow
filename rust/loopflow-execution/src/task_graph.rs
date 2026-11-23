@@ -13,6 +13,7 @@ use crate::error::LoadError;
 use crate::graph::runner::{ExecutionCursor, NestedCursor};
 use crate::graph::{compile_graph, load_authored_graph, ConcreteSkill, ConcreteStep};
 use loopflow_definitions::text::first_prose_line;
+use loopflow_storage::sqlite::task_work::PauseStage;
 use loopflow_storage::sqlite::{Auto, AutoState};
 
 pub use loopflow_storage::sqlite::task_work::{END, START};
@@ -453,6 +454,10 @@ pub struct TaskGraphRun<'a> {
     pub running: bool,
 }
 
+fn paused_sentence(step: &str) -> String {
+    format!("Paused at {step}. `lf task unpause` resumes it.")
+}
+
 impl TaskGraph {
     /// Where the Task stands on `graph`: waiting at `step`, or carried on from
     /// it by `run`. `auto` on names auto, not a person, as the next to take part.
@@ -461,6 +466,7 @@ impl TaskGraph {
         step: String,
         run: Option<TaskGraphRun<'_>>,
         auto: Option<AutoState>,
+        pause: Option<PauseStage>,
     ) -> Self {
         let (steps, indices) = workflow(&graph.steps);
         let top = |place: &Place| {
@@ -477,6 +483,11 @@ impl TaskGraph {
                         None => (graph.find(step), format!("Waiting at {step}.")),
                     },
                 };
+                let sentence = match pause {
+                    Some(PauseStage::Stopping) => format!("Pausing at {step}."),
+                    Some(PauseStage::Held) => paused_sentence(&step),
+                    None => sentence,
+                };
                 (
                     TaskGraphPosition::At { step },
                     place.as_ref().map(top),
@@ -490,7 +501,21 @@ impl TaskGraph {
                     .map_or_else(|| step.clone(), |place| graph.step_name(place));
                 let current = place.as_ref().map(top);
                 let label = current.map_or(at.as_str(), |index| &steps[index as usize].name);
-                let sentence = if !run.running {
+                let sentence = if let Some(pause) = pause {
+                    if run.running || pause == PauseStage::Stopping {
+                        let verb = if run.running
+                            && place.as_ref().is_some_and(|place| {
+                                matches!(graph.step_at(place), ConcreteStep::Command(_))
+                            }) {
+                            "finishing"
+                        } else {
+                            "stopping"
+                        };
+                        format!("Pausing at {label} ({at} is {verb}).")
+                    } else {
+                        paused_sentence(label)
+                    }
+                } else if !run.running {
                     format!("Stopped at {label}. `lf task run` starts it again.")
                 } else {
                     let running = if label == at {
@@ -661,7 +686,7 @@ mod tests {
         let graph = CapturedGraph::load("feature", repo.path())
             .unwrap()
             .unwrap();
-        let at = |step: &str| TaskGraph::read(&graph, step.into(), None, None);
+        let at = |step: &str| TaskGraph::read(&graph, step.into(), None, None, None);
         let mark = |state| Auto {
             state,
             at: 0,
@@ -701,6 +726,7 @@ mod tests {
                         running,
                     }),
                 auto,
+                None,
             )
         };
         let start = read("start", None, None);
@@ -751,6 +777,62 @@ mod tests {
     }
 
     #[test]
+    fn a_paused_workflow_names_the_stopping_step_until_cleanup_finishes() {
+        use loopflow_storage::sqlite::task_work::PauseStage;
+        let repo = tempfile::tempdir().unwrap();
+        let graph = CapturedGraph::load("code", repo.path()).unwrap().unwrap();
+        for (step, pause, running, sentence) in [
+            (
+                "implement",
+                PauseStage::Stopping,
+                true,
+                "Pausing at build (implement is stopping).",
+            ),
+            (
+                "implement",
+                PauseStage::Stopping,
+                false,
+                "Pausing at build (implement is stopping).",
+            ),
+            (
+                "implement",
+                PauseStage::Held,
+                false,
+                "Paused at build. `lf task unpause` resumes it.",
+            ),
+            (
+                "land --wait-and-fix",
+                PauseStage::Held,
+                true,
+                "Pausing at deliver (land --wait-and-fix is finishing).",
+            ),
+        ] {
+            let cursor = graph.find(step).unwrap().cursor();
+
+            let run = TaskGraphRun {
+                cursor: &cursor,
+                lf_process_id: "carrier".into(),
+                running,
+            };
+            assert_eq!(
+                TaskGraph::read(&graph, "start".into(), Some(run), None, Some(pause)).sentence,
+                sentence
+            );
+        }
+        assert_eq!(
+            TaskGraph::read(
+                &graph,
+                "ship-review".into(),
+                None,
+                Some(AutoState::On),
+                Some(PauseStage::Held)
+            )
+            .sentence,
+            "Paused at ship-review. `lf task unpause` resumes it."
+        );
+    }
+
+    #[test]
     fn a_step_two_parts_share_is_placed_by_the_cursor_not_its_name() {
         let repo = tempfile::tempdir().unwrap();
         let graph = CapturedGraph::load("code", repo.path()).unwrap().unwrap();
@@ -771,6 +853,7 @@ mod tests {
                         lf_process_id: "lfp_1".into(),
                         running: true,
                     }),
+                    None,
                     None,
                 );
                 line.steps[line.current_step.unwrap() as usize].name.clone()

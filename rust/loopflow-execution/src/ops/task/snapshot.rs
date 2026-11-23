@@ -15,7 +15,6 @@ use crate::ops::error::OpsResult;
 use crate::ops::task_actions::{derive_task_actions, TaskActionEvidence, TaskActionModel};
 use crate::store::SharedStore;
 use base64::Engine as _;
-use loopflow_storage::child::ChildRef;
 use loopflow_storage::work::task::{PrPhase, Task, TaskPr};
 use sha2::{Digest, Sha256};
 
@@ -39,20 +38,12 @@ pub(super) async fn read_task_snapshot(store: &SharedStore, task: Task) -> OpsRe
         ),
         None => None,
     };
-    let work = store
-        .work_for_child(&ChildRef::Task(task.id.clone()))
-        .await
-        .map_err(|error| task_error(format!("failed to resolve Task Work: {error}")))?;
     let latest_event = store
         .latest_task_event(&task.id)
         .await
         .map_err(|error| task_error(format!("failed to read latest task event: {error}")))?;
     let pr = store.active_task_pr(&task.id).await.map_err(task_error)?;
     let active = pr.as_ref().filter(|pr| pr.is_active());
-    let work_status = store
-        .work_status(&work)
-        .await
-        .map_err(|error| task_error(format!("failed to derive Task Work status: {error}")))?;
     let mut execution = crate::ops::task_execution::task_execution(store, &task)
         .await
         .map_err(task_error)?;
@@ -108,7 +99,7 @@ pub(super) async fn read_task_snapshot(store: &SharedStore, task: Task) -> OpsRe
                 .or_else(|| task_event_process_refusal(latest_event.as_ref()).map(str::to_string))
         };
         let action_evidence = TaskActionEvidence {
-            status: work_status.clone(),
+            status,
             execution: Some(&execution),
             latest_pr_phase: pr.as_ref().map(TaskPr::phase),
             latest_pr_merge_request: pr.as_ref().and_then(TaskPr::merge_request),

@@ -120,6 +120,11 @@ impl Error {
         if let Some(named) = error.chain().find_map(|cause| cause.downcast_ref::<Self>()) {
             return named.clone();
         }
+        if let Some(crate::ops::OpsError::TaskNotFound(issue)) =
+            error.downcast_ref::<crate::ops::OpsError>()
+        {
+            return task::missing(issue);
+        }
         let code = error.chain().find_map(|cause| {
             if let Some(store) = cause.downcast_ref::<StoreError>() {
                 return match store {

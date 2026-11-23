@@ -15,3 +15,5 @@ Use a separate per-Task cleanup lock while signaling. Run admission can then rep
 This Codex invocation's tool shell was PID and SID 98288, a child of provider PID 62413 in SID 671. A live tool launched that way needs its own execution identity. The Claude worker-session fixture cannot establish that Codex stopped such a build.
 
 Carry the original pause time and author in a move. Keep the source hold until the destination acknowledges arrival so claiming back a failed move keeps the Task quiet. A sender from before pause existed omits this field.
+
+Use the CLI pause receipt as the served answer. A plain unpause answers null. With `--run` it answers the same run receipt as `task.run`.

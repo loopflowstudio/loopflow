@@ -298,6 +298,8 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
     case repoTrackerAnswer(directory: String, action: String, answer: LostAnswer)
     case taskSteer(directory: String, issue: String, message: String)
     case taskReport(directory: String, issue: String, message: String)
+    case taskPause(directory: String, issue: String)
+    case taskUnpause(directory: String, issue: String, run: Bool)
     case taskInterrupt(directory: String, issue: String)
     case taskMove(directory: String, issue: String, wave: String?, machine: String?)
     case taskSave(directory: String, issue: String, path: String, revision: String, content: String)
@@ -405,6 +407,8 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
             return ["repo", "tracker", "answer", action, answer == .keepTheirs ? "--keep-theirs" : "--use-mine", "--json"]
         case .taskSteer(_, let issue, let message): return ["steer", issue, message, "--json"]
         case .taskReport(_, let issue, let message): return ["task", "report", issue, message, "--json"]
+        case .taskPause(_, let issue): return ["task", "pause", issue, "--json"]
+        case .taskUnpause(_, let issue, let run): return ["task", "unpause", issue, "--json"] + Self.flags([("--run", run)])
         case .taskInterrupt(_, let issue): return ["task", "interrupt", issue, "--json"]
         case .taskMove(_, let issue, let wave, let machine):
             if let machine { return ["task", "move", issue, "--machine", machine, "--json"] }
@@ -591,6 +595,10 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
             TaggedFields("task.steer", ["directory": directory, "issue": issue, "message": message])
         case .taskReport(let directory, let issue, let message):
             TaggedFields("task.report", ["directory": directory, "issue": issue, "message": message])
+        case .taskPause(let directory, let issue):
+            TaggedFields("task.pause", ["directory": directory, "issue": issue])
+        case .taskUnpause(let directory, let issue, let run):
+            TaggedFields("task.unpause", ["directory": directory, "issue": issue, "run": run])
         case .taskInterrupt(let directory, let issue):
             TaggedFields("task.interrupt", ["directory": directory, "issue": issue])
         case .taskMove(let directory, let issue, let wave, let machine):

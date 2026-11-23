@@ -394,6 +394,8 @@ case names one operation, including distinct claim/unassign and pin/unpin writes
 | `task.auto.off` | `lf task auto off <issue>` | `engine::task` |
 | `task.steer` | `lf steer <issue> <message>` | `engine::task`; the thread entry the store saves as the Task's steer |
 | `task.report` | `lf task report <issue> <message>` | `engine::task` |
+| `task.pause` | `lf task pause <issue>` | Stop work on the execution Machine and return its receipt |
+| `task.unpause` | `lf task unpause <issue> [--run]` | Lift the hold there and return the requested run, or null |
 | `task.interrupt` | `lf task interrupt <issue>` | `engine::task` |
 | `task.update` | `lf task update <issue>` | write |
 | `task.move`, `.claim`, `.unassign`, `.save`, `.complete`, `.reopen`, `.abandon` | `lf task <verb>` | write |

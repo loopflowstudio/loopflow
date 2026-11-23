@@ -69,7 +69,7 @@ fn read_task_graph(row: TaskGraphRow) -> TaskGraph {
         lf_process_id: process.id.to_string(),
         running: carrier_may_run(process),
     });
-    TaskGraph::read(&row.graph, row.step, run, row.auto)
+    TaskGraph::read(&row.graph, row.step, run, row.auto, row.pause)
 }
 
 #[cfg(test)]
@@ -100,6 +100,7 @@ mod tests {
                 },
             )),
             auto: None,
+            pause: None,
         };
         let running = |row| match read_task_graph(row).position {
             TaskGraphPosition::Run { running, .. } => running,
@@ -188,6 +189,7 @@ pub struct TaskGraphRow {
     pub step: String,
     pub run: Option<(ExecutionCursor, TaskCarrier)>,
     pub auto: Option<loopflow_storage::sqlite::AutoState>,
+    pub pause: Option<loopflow_storage::sqlite::task_work::PauseStage>,
 }
 
 /// A Task's Graph as another Machine takes it up: the graph it took up, the
@@ -210,6 +212,7 @@ fn decode_row(row: super::sqlite::task_work::SavedTaskGraphRow) -> StoreResult<T
             .transpose()
             .map_err(crate::store::StoreError::from)?,
         auto: row.auto,
+        pause: row.pause,
     })
 }
 pub fn task_graph_row(store: &SqliteStore, task: &TaskId) -> StoreResult<Option<TaskGraphRow>> {

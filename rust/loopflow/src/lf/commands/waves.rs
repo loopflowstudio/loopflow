@@ -2309,14 +2309,47 @@ async fn snapshot_task_detail(
         .get(&task.id)
         .is_some_and(|step| step == loopflow_execution::task_graph::END);
     let finished = loopflow_execution::ops::task_actions::Finished::of(
-        &status.work_status(),
+        status,
         pr.as_ref().map(TaskPr::phase),
         at_end,
     );
     let conducting = finished
-        .filter(|_| open_children > 0 && execution.state != TaskExecutionState::Running)
+        .filter(|_| {
+            status != TaskState::Paused
+                && open_children > 0
+                && execution.state != TaskExecutionState::Running
+        })
         .map(|finished| finished.reason(open_children));
-    let next_move = if let Some(reason) = conducting.clone() {
+    let run_control = loopflow_execution::ops::task_run::task_run_control(
+        &loopflow_execution::ops::task_run::TaskRunEvidence {
+            status,
+            issue: &task.identifier,
+            running_step: execution
+                .step
+                .as_deref()
+                .filter(|_| execution.state == TaskExecutionState::Running),
+            pause_cleanup: facts.pause_cleanup.get(&task.id).copied(),
+            // Shared completion withdraws an unstarted Task, never moves its Graph.
+            plan_terminal_reason: loopflow_execution::linear::terminal_reason(
+                task.state.as_deref(),
+            )
+            .filter(|_| matches!(runtime.status, TaskState::Unstarted)),
+            worktree_blocker: worktree_blocker
+                .as_ref()
+                .map(|blocker| blocker.reason.as_str()),
+            launch_refusal: launch_refusal.as_deref(),
+        },
+    );
+    let next_move = if let Some(reason) = run_control
+        .unavailable
+        .as_ref()
+        .filter(|_| status == TaskState::Paused)
+    {
+        NextMove {
+            owner: NextMoveOwner::User,
+            reason: reason.clone(),
+        }
+    } else if let Some(reason) = conducting.clone() {
         NextMove {
             owner: NextMoveOwner::Task,
             reason,
@@ -2371,7 +2404,7 @@ async fn snapshot_task_detail(
         .and_then(|parent_id| facts.parent_prs.get(parent_id))
         .map(TaskPr::phase);
     let action_evidence = TaskActionEvidence {
-        status: runtime.status.work_status(),
+        status: runtime.status,
         execution: Some(&execution),
         latest_pr_phase: pr.as_ref().map(TaskPr::phase),
         latest_pr_merge_request: pr.as_ref().and_then(TaskPr::merge_request),
@@ -2396,21 +2429,6 @@ async fn snapshot_task_detail(
         observed_at,
     );
     let actions = derive_task_actions(&action_evidence);
-    let work_status = runtime.status.work_status();
-    let run_control = loopflow_execution::ops::task_run::task_run_control(
-        &loopflow_execution::ops::task_run::TaskRunEvidence {
-            status: Some(&work_status),
-            // Shared completion withdraws an unstarted Task, never moves its Graph.
-            plan_terminal_reason: loopflow_execution::linear::terminal_reason(
-                task.state.as_deref(),
-            )
-            .filter(|_| matches!(runtime.status, TaskState::Unstarted)),
-            worktree_blocker: worktree_blocker
-                .as_ref()
-                .map(|blocker| blocker.reason.as_str()),
-            launch_refusal: launch_refusal.as_deref(),
-        },
-    );
     let (graph_name, graph_source) = reads
         .selections
         .get(&task.id)
@@ -4771,7 +4789,7 @@ mod tests {
                 outlook: None,
             };
             let actions = TaskActionEvidence {
-                status: WorkStatus::Ready,
+                status: TaskState::Idle,
                 execution: Some(&execution),
                 latest_pr_phase: None,
                 latest_pr_merge_request: None,
@@ -4823,7 +4841,7 @@ mod tests {
                         },
                         condition.local_progress.clone(),
                         Some(&TaskActionEvidence {
-                            status: runtime.status.work_status(),
+                            status: runtime.status,
                             ..actions
                         }),
                         None,
@@ -4843,7 +4861,7 @@ mod tests {
                             ..condition.local_progress.clone()
                         },
                         Some(&TaskActionEvidence {
-                            status: runtime.status.work_status(),
+                            status: runtime.status,
                             execution: None,
                             completion_refusal: Some("Pull request has not merged"),
                             ..actions
@@ -4895,7 +4913,7 @@ mod tests {
                     reason: Some("Task worktree is missing".into()),
                 },
                 Some(&TaskActionEvidence {
-                    status: status.work_status(),
+                    status,
                     execution: Some(&failed),
                     latest_pr_phase: None,
                     latest_pr_merge_request: None,
@@ -4927,7 +4945,7 @@ mod tests {
             reason: None,
         };
         let action_evidence = TaskActionEvidence {
-            status: WorkStatus::Ready,
+            status: TaskState::Idle,
             execution: None,
             latest_pr_phase: Some(PrPhase::Open),
             latest_pr_merge_request: None,

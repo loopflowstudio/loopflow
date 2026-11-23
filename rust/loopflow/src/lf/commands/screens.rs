@@ -288,6 +288,14 @@ mod tests {
         .unwrap();
         let decoded: TaskDetail = serde_json::from_value(detail.clone()).unwrap();
         assert_eq!(
+            decoded.state,
+            loopflow_execution::durable::TaskState::Paused
+        );
+        assert_eq!(
+            decoded.section,
+            loopflow_execution::durable::TaskSection::Paused
+        );
+        assert_eq!(
             decoded.checks.as_ref().unwrap().failing_checks[0].name,
             "rust-test"
         );

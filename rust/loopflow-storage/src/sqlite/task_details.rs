@@ -7,6 +7,7 @@ use rusqlite::Connection;
 use super::children::{
     ids_json, map_task_event_row, map_task_pr_row, tracker_states_in, TASK_PR_COLUMNS,
 };
+use super::task_pause::PauseCleanup;
 use super::SqliteStore;
 use crate::execution::TaskState;
 use crate::planning_sync::TrackerActions;
@@ -18,6 +19,8 @@ use loopflow_model::durable::{RepositoryId, TaskOwner};
 #[derive(Debug)]
 pub struct TaskDetailFacts {
     pub states: HashMap<TaskId, TaskState>,
+    /// Unsettled pauses, with the first worker OS session awaiting cleanup when recorded.
+    pub pause_cleanup: HashMap<TaskId, PauseCleanup>,
     pub open_children: HashMap<TaskId, u32>,
     pub active_prs: HashMap<TaskId, TaskPr>,
     /// Predecessor PRs the Tasks are stacked on.
@@ -47,8 +50,26 @@ impl SqliteStore {
         let snapshot = conn.savepoint()?;
         let ids: Vec<TaskId> = tasks.iter().map(|task| task.id.clone()).collect();
         let json = ids_json(ids.iter().map(TaskId::as_str));
+        let states = states_in(&snapshot, &json)?;
+        let paused: Vec<_> = states
+            .iter()
+            .filter(|(_, state)| **state == TaskState::Paused)
+            .map(|(id, _)| id.as_str())
+            .collect();
+        let pause_cleanup = if paused.is_empty() {
+            HashMap::new()
+        } else {
+            keyed(
+                &snapshot,
+                "SELECT task_id,json_extract(stopping_processes,'$[0].session') FROM task_pauses
+                 WHERE task_id IN (SELECT value FROM json_each(?1)) AND stopping_processes IS NOT NULL",
+                &ids_json(paused),
+                |row| Ok((TaskId::from_raw(row.get::<_, String>(0)?), PauseCleanup { worker_session: row.get(1)? })),
+            )?
+        };
         let facts = TaskDetailFacts {
-            states: states_in(&snapshot, &json)?,
+            states,
+            pause_cleanup,
             open_children: keyed(
                 &snapshot,
                 &format!(

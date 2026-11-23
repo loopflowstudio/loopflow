@@ -1052,16 +1052,14 @@ writes! {
     } => loopflow_execution::engine::config::Declaration;
     { destination, key } => loopflow_execution::engine::config::unset(destination, key)?,
 
-    /// Appearance's theme file at `path`: set to `value`, or read when null.
-    /// Desktop owns its Apply/Cancel transaction; no CLI spells it.
+    /// The Machine's `theme:` choice: set to `value`, or read when null.
+    /// Desktop owns its Apply/Cancel transaction and the phone reads it; no
+    /// CLI spells it.
     #[serde(rename = "config.theme")]
     ConfigTheme {
-        path: PathBuf,
         value: Option<String>,
     } => loopflow_execution::engine::config::Declaration;
-    { path, value: theme } => {
-        loopflow_execution::engine::config::theme(path, theme.as_deref())?
-    },
+    { value: theme } => loopflow_execution::engine::config::theme(theme.as_deref())?,
 }
 
 /// The directory a write runs in, borrowed as `$write` is: none for a
@@ -1454,10 +1452,12 @@ mod tests {
 
     #[test]
     fn a_write_returns_its_declared_type() {
-        let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("theme.yaml");
+        let _lock = loopflow_execution::journal::test_env_lock();
+        let _restore = crate::test_ambient::EnvGuard::clear(&["LF_HOME"]);
+        let home = tempfile::tempdir().unwrap();
+        std::env::set_var("LF_HOME", home.path());
+        let path = home.path().join("config.yaml");
         let result = Write::ConfigTheme {
-            path: path.clone(),
             value: Some("dark".into()),
         }
         .run()

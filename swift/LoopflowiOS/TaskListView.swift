@@ -83,11 +83,9 @@ final class TaskFeed {
         }
     }
 
-    /// Start, Auto on and Auto off: the Notice says the change was requested.
-    func request(_ name: String, _ task: WorkViewPlan.Content, _ write: (String, String) -> ServedWrite) {
-        guard let directory = directory(of: task) else { return }
-        let issue = task.identifier ?? task.work.id
-        pendingChanges.request(name, subject: issue, write: write(directory, issue), notices: notices) { [weak self] in
+    /// Start, Run, Auto-Ship and Stop Auto-Ship: the Notice says the change was requested.
+    func request(_ name: String, issue: String, write: ServedWrite) {
+        pendingChanges.request(name, subject: issue, write: write, notices: notices) { [weak self] in
             try? await self?.observation?.refresh()
         }
     }
@@ -193,6 +191,8 @@ final class TaskFeed {
 
 struct TaskListView: View {
     let client: RemoteMobileClient
+    /// Read again on connect and whenever the app returns to the foreground.
+    let machineTheme: MachineTheme
     let onForget: () -> Void
     let onChangeAddress: () -> Void
     @State private var feed: TaskFeed
@@ -206,12 +206,12 @@ struct TaskListView: View {
     @State private var notices: NoticeCenter
     /// The repository shown, by durable ID; empty shows every repository.
     @AppStorage("repository") private var repository = ""
-    @Environment(\.colorScheme) private var colorScheme
     @Environment(\.scenePhase) private var scenePhase
-    private var theme: ThemeDefinition { colorScheme == .dark ? .dark : .light }
+    @Environment(\.theme) private var theme
 
-    init(client: RemoteMobileClient, onForget: @escaping () -> Void, onChangeAddress: @escaping () -> Void) {
+    init(client: RemoteMobileClient, machineTheme: MachineTheme, onForget: @escaping () -> Void, onChangeAddress: @escaping () -> Void) {
         self.client = client
+        self.machineTheme = machineTheme
         self.onForget = onForget
         self.onChangeAddress = onChangeAddress
         let notices = NoticeCenter()
@@ -263,14 +263,14 @@ struct TaskListView: View {
                             DisclosureGroup("\(section.quiet.count) without a conversation") {
                                 ForEach(section.quiet, id: \.work) { link($0) }
                             }
-                            .font(Typography.caption(14))
+                            .font(Typography.meta)
                             .foregroundStyle(theme.palette.textSecondary)
                             .listRowBackground(theme.palette.background)
                         }
                     } header: {
                         if shown.isEmpty {
                             Text(name(section.repository))
-                                .font(Typography.strong(14))
+                                .font(Typography.meta)
                                 .foregroundStyle(theme.palette.textSecondary)
                                 .textCase(nil)
                         }
@@ -285,9 +285,13 @@ struct TaskListView: View {
                     ProgressView()
                 } else if sections.isEmpty && feed.loaded {
                     if search.isEmpty {
-                        ContentUnavailableView("No \(feed.filter.title.lowercased()) Tasks", systemImage: "checkmark.circle")
+                        StateView("No \(feed.filter.title.lowercased()) Tasks") {
+                            Button("New Task", action: newTask).buttonStyle(LoopflowButtonStyle(.accent))
+                        }
                     } else {
-                        ContentUnavailableView.search(text: search)
+                        StateView("No results for “\(search)”") {
+                            Button("Clear search") { search = "" }.buttonStyle(LoopflowButtonStyle(.accent))
+                        }
                     }
                 }
             }
@@ -304,6 +308,7 @@ struct TaskListView: View {
                 }
             }
             .searchable(text: $search, prompt: "Search Tasks")
+            .textInputAutocapitalization(.never)
             .onChange(of: feed.reading) { _, _ in feed.observed() }
             .navigationDestination(isPresented: Binding(get: { selectedTask != nil }, set: { if !$0 { selectedTask = nil } })) {
                 if let selectedTask { workspace(selectedTask) }
@@ -312,7 +317,7 @@ struct TaskListView: View {
                 if let created { workspace(created) }
             }
             .sheet(item: $creation, onDismiss: { showingCreated = created != nil }) { model in
-                MobileNewTaskView(model: model, theme: theme) { opening in
+                MobileNewTaskView(model: model) { opening in
                     opening.presented()
                     created = opening.task
                     creation = nil
@@ -338,10 +343,7 @@ struct TaskListView: View {
                     .accessibilityValue(feed.filter.title)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        created = nil
-                        creation = MobileTaskCreation(client: client)
-                    } label: { Image(systemName: "plus") }
+                    Button(action: newTask) { Image(systemName: "plus") }
                         .accessibilityLabel("New Task")
                 }
                 ToolbarItem(placement: .topBarTrailing) {
@@ -369,11 +371,18 @@ struct TaskListView: View {
             Button("OK") { captureError = nil }
         } message: { Text(captureError ?? "") }
         .tint(theme.palette.accentInk)
-        .environment(\.palette, theme.palette)
         .onChange(of: repository) { feed.wave = nil }
+        .task(id: scenePhase == .active) {
+            if scenePhase == .active { await machineTheme.refresh(client) }
+        }
         .task(id: [feed.filter.rawValue, feed.wave ?? "", String(scenePhase == .active)]) {
             if scenePhase == .active { await feed.start() } else { feed.stop() }
         }
+    }
+
+    private func newTask() {
+        created = nil
+        creation = MobileTaskCreation(client: client)
     }
 
     /// A repository's folder name; one the Machine cannot place keeps its short ID,
@@ -387,7 +396,11 @@ struct TaskListView: View {
             if task.primarySession != nil { Perf.opening(task.work.id) }
             selectedTask = MobileTask(task)
         } label: {
-            HStack { row(task); Spacer(); Image(systemName: "chevron.right").font(.caption).foregroundStyle(.secondary) }
+            // The list reading carries no issue link: the whole row opens the Task.
+            TaskRow(id: task.work.id, title: task.title, identifier: task.identifier, status: task.status,
+                    auto: task.states.contains(.auto))
+                .contentShape(Rectangle())
+                .accessibilityElement(children: .combine)
         }
             .buttonStyle(.plain)
             .swipeActions(edge: .trailing) {
@@ -395,38 +408,14 @@ struct TaskListView: View {
                     .tint(theme.palette.success)
                     .disabled(!feed.pendingChanges.acceptsChanges)
             }
-            .listRowInsets(EdgeInsets(top: 12, leading: 20, bottom: 12, trailing: 16))
+            // With the row's own padding the title starts where the section header does.
+            .listRowInsets(EdgeInsets(top: Spacing.xs, leading: Spacing.xs, bottom: Spacing.xs, trailing: Spacing.xs))
             .listRowBackground(theme.palette.background)
     }
 
     private func workspace(_ task: MobileTask) -> some View {
-        TaskWorkspaceView(client: client, feed: feed, task: task, theme: theme, draft: Binding(
+        TaskWorkspaceView(client: client, feed: feed, task: task, draft: Binding(
             get: { drafts[task.id] ?? "" },
             set: { drafts[task.id] = $0 }))
-    }
-
-    private func row(_ task: WorkViewPlan.Content) -> some View {
-        HStack(alignment: .top, spacing: 12) {
-            RoundedRectangle(cornerRadius: 2)
-                .fill(task.status.tone.ink(in: theme.palette))
-                .frame(width: 3)
-                .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 6) {
-                Text(task.title)
-                    .font(Typography.strong(17))
-                    .foregroundStyle(theme.palette.text)
-                    .fixedSize(horizontal: false, vertical: true)
-                HStack(spacing: 6) {
-                    Text(task.status.label)
-                        .foregroundStyle(task.status.tone.ink(in: theme.palette))
-                    if let identifier = task.identifier {
-                        Text(identifier).foregroundStyle(theme.palette.textSecondary)
-                    }
-                }
-                .font(Typography.caption(13))
-            }
-        }
-        .padding(.vertical, 2)
-        .accessibilityElement(children: .combine)
     }
 }

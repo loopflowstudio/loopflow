@@ -82,7 +82,7 @@ lf set --global skill.review.agents codex    # review: Codex only, everywhere
 ### Private vs. shared repo and Wave settings
 
 ```bash
-lf set skill.design.agent claude                     # private repo preference (lf.config.local.yaml)
+lf set skill.design.agent claude                     # private repo preference (.lf/config.local.yaml)
 lf --wave frontend set skill.implement.agent claude  # private Wave preference
 lf --wave frontend set --shared default_agent claude # committed to .lf/wave/frontend/config.yaml
 lf unset skill.design.agent                          # remove override and reveal the next value
@@ -157,7 +157,7 @@ the same Explain and Unset controls.
 | File | Applies to | Committed? |
 |---|---|---|
 | `~/.lf/config.yaml` (`LF_HOME` overrides `~/.lf`) | Your global preferences | No |
-| `./lf.config.local.yaml` | Your private repo and Wave preferences (shared across Task worktrees, auto-excluded from Git) | No |
+| `.lf/config.local.yaml` | Your private repo and Wave preferences (shared across Task worktrees, auto-excluded from Git) | No |
 | `.lf/config.yaml` | Team repo defaults | Yes |
 | `.lf/wave/<name>/config.yaml` | Team Wave defaults | Yes |
 
@@ -167,7 +167,7 @@ Each setting resolves independently:
 
 1. Command-line flags (`-a`, `--setting`)
 2. Environment (`LF_SETTINGS`, `LF_AGENT_OVERRIDE`, `LF_YOLO_OVERRIDE`, `LF_CHROME_OVERRIDE`, `LF_USER_NAME`)
-3. Personal config (`lf.config.local.yaml`, `~/.lf/config.yaml`)
+3. Personal config (`.lf/config.local.yaml`, `~/.lf/config.yaml`)
 4. Repository config (`.lf/wave/<name>/config.yaml`, `.lf/config.yaml`, Skill frontmatter, Graph step)
 5. Built-in defaults
 
@@ -199,6 +199,8 @@ high as `agents`.
 | Changed file paths | `--diff files` | `context: {diff_files: true}` |
 | Raw diff reference | `--diff patch` | `context: {diff: true}` |
 | Exclude from LF context | — | `context: {exclude: ["*.test.ts", dist]}` |
+| Hide from a Task's Diff in Desktop | — | `diff_hidden: [vendor/]` (path substrings; adds across layers, `[]` clears) |
+| Headings of a Task's Diff in Desktop | — | `diff_groups` (replaces as a unit) |
 | Clipboard | `-c, --clipboard` | `context: {paste: true}` |
 | Claude Chrome tool | `--chrome on` / `--chrome off` | `chrome: true` / `false` |
 | Permission prompts | `--yolo` (skip) · `--setting yolo=false` (ask) | `yolo: false` (ask when attended; default skips) |
@@ -261,11 +263,14 @@ lf -b -a agy:gemini-3.8-flash-high implement
 lf task run LOO-12 -a agy               # every step of the Task
 ```
 
+Loopflow's skills and Graphs appear in `agy`'s `/skills` after `lf install`
+([Skill and Graph discovery](#skill-and-graph-discovery)).
+
 Bare `agy` uses the model `agy` is set to; `agy:<model>` takes a name from
 `agy models`. Antigravity owns its
 sign-in and conversations under `~/.gemini/antigravity-cli`; Loopflow gives
 each launch its instructions and hooks in a folder under the checkout's
-`.lf/prompts/` and writes nothing to `~/.gemini`. A step gets the Task's
+`.lf/prompts/`; a launch writes nothing to `~/.gemini`. A step gets the Task's
 context and hears `lf steer` after its next tool. A spent quota, a signed-out
 `agy` or an unserved model moves a Graph step to the next `agents` entry:
 
@@ -368,12 +373,34 @@ builtins**. Within each scope, Loopflow checks `.lf/skills`, `.claude/skills`,
 (supporting both single `.md` files and `<name>/SKILL.md` bundles). Inspect
 resolution with `lf list skill` and `lf help <skill>`.
 
-Export Loopflow skills and Graphs into native Claude/Codex skill directories:
+Every harness also lists Loopflow's skills and Graphs in its own skill menu.
+`lf install` writes them; run the sync yourself after adding a personal skill:
 
 ```bash
-lf self sync-skills --yes   # personal + builtins → ~/.claude/skills and ~/.agents/skills
-lf self sync-skills --repo  # repo skills + Graphs → checkout directories
+lf self sync-skills --yes
+# synced skills (3 written, 0 pruned, 0 skipped)
+agy -p "/skills" | cut -f1    # implement, kickoff, code, … beside Antigravity's own
 ```
+
+| Harness | Personal skills and builtins | `--repo`: this repository's skills and Graphs |
+|---|---|---|
+| Claude Code | `~/.claude/skills` | `.claude/skills` |
+| Codex, OpenCode, Pi, Antigravity | `~/.agents/skills` | `.agents/skills` |
+
+Antigravity doesn't scan `~/.agents/skills` on its own, so sync adds that
+directory to `~/.gemini/config/skills.json`, keeping the file's other entries;
+it then also lists skills other tools installed there. Both home directories
+are written whichever harnesses are installed. A
+session that was already open picks up the change with `/skills reload` in
+Antigravity or `/reload` in Pi. Pi loads a repository's `.agents/skills` only
+in a project you trust: answer its prompt or run `/trust`; `pi -p` needs
+`--approve`.
+
+Generated files carry `loopflow: true` in their frontmatter. Sync replaces and
+prunes only those (`--no-prune` keeps the stale ones); a skill you or another
+tool put under the same name is kept and counted as skipped. Graph exports
+carry `disable-model-invocation: true`, so a harness that honors the key
+(Claude Code, Pi) runs a Graph only when you name it.
 
 ## Remote work
 
@@ -421,8 +448,10 @@ Loopflow sends no method override.
 ## FAQ
 
 **How do worktrees and separate clones share preferences?**
-Task worktrees share their main checkout's `lf.config.local.yaml`. Separate
-clones of the same repo keep independent private preferences.
+Task worktrees share their main checkout's `.lf/config.local.yaml`. Separate
+clones of the same repo keep independent private preferences. A
+`lf.config.local.yaml` left in the checkout root by an earlier release moves
+there the first time LF looks for it.
 
 **What happens when a Wave is renamed?**
 Private Wave preferences are keyed by the Wave's UUID, so renaming or moving a

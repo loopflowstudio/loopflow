@@ -55,36 +55,25 @@ class TestAccessibility:
 
 
 class TestFocusStates:
-    """Test that interactive elements have visible focus states."""
+    """Keyboard focus shows the site's ring, and only that ring."""
 
-    def test_buttons_have_focus_visible(self, page: Page, server: str):
-        """All buttons should have visible focus indicator."""
-        page.goto(server)
+    @pytest.mark.parametrize("path", ["/", "/download", "/docs"])
+    def test_keyboard_focus_shows_one_ring(self, page: Page, server: str, path: str):
+        page.goto(f"{server}{path}")
         page.wait_for_load_state("networkidle")
-
-        # Find all buttons and links
-        buttons = page.locator("button, a.btn, [role='button']")
-        count = buttons.count()
-
-        for i in range(min(count, 10)):  # Test first 10
-            button = buttons.nth(i)
-            if not button.is_visible():
-                continue
-
-            button.focus()
-
-            # Check that focus is visible (has outline or other indicator)
-            outline = button.evaluate("el => getComputedStyle(el).outline")
-            box_shadow = button.evaluate("el => getComputedStyle(el).boxShadow")
-
-            has_focus_indicator = (outline != "none" and "0px" not in outline) or (
-                box_shadow != "none"
+        for _ in range(30):
+            page.keyboard.press("Tab")
+            name, outline_width, box_shadow = page.evaluate(
+                """() => {
+                    const el = document.activeElement, style = getComputedStyle(el);
+                    return [el.textContent.trim().slice(0, 30) || el.getAttribute('aria-label'),
+                            parseFloat(style.outlineWidth), style.boxShadow];
+                }"""
             )
-
-            if not has_focus_indicator:
-                # Get element description for error message
-                text = button.text_content() or button.get_attribute("aria-label") or "unknown"
-                pytest.fail(f"Button '{text[:30]}' has no visible focus state")
+            assert outline_width >= 2, f"'{name}' has no focus outline"
+            # Pico draws a translucent blue box-shadow ring under ours.
+            colored = [c for c in box_shadow.split("rgba(")[1:] if not c.startswith("0, 0, 0, 0)")]
+            assert box_shadow == "none" or not colored, f"'{name}' shows {box_shadow}"
 
 
 class TestAriaLabels:
@@ -131,7 +120,7 @@ class TestColorContrast:
             "getComputedStyle(document.documentElement).getPropertyValue('--text-secondary').trim()"
         )
         bg_color = page.evaluate(
-            "getComputedStyle(document.documentElement).getPropertyValue('--bg').trim()"
+            "getComputedStyle(document.documentElement).getPropertyValue('--background').trim()"
         )
 
         # Basic sanity check - colors should be defined

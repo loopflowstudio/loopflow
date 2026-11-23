@@ -17,6 +17,8 @@ struct RoadmapViewTests {
         // or interrupt action.
         #expect(tasks[0].actions.recommended == .run)
         #expect(roadmapTaskAction(tasks[0]) == .run)
+        // Its Graph has run, so the row says what its page says.
+        #expect(RoadmapTaskAction.run.label(tasks[0]) == "Run")
 
         // An explicit User merge request advertises Open PR: the server
         // recommends the exact head, and the app does not re-derive it.
@@ -25,6 +27,7 @@ struct RoadmapViewTests {
 
         // No Task Work yet, and a terminal Task offers nothing.
         #expect(roadmapTaskAction(tasks[2]) == .run)
+        #expect(RoadmapTaskAction.run.label(tasks[2]) == "Start")
         #expect(roadmapTaskAction(tasks[3]) == nil)
     }
 
@@ -46,10 +49,26 @@ struct RoadmapViewTests {
         let view = RoadmapView(model: model, onOpenWave: { _ in }, onOpenTask: { opened = ($0, $1) })
         let section = try view.inspect().find(NowSectionView.self).actualView()
         let row = try #require(section.section.rows.first)
-        try view.inspect().find(viewWithAccessibilityIdentifier: "loopflow-task-\(row.task.id)").callOnTapGesture()
+        try view.inspect().find(viewWithAccessibilityIdentifier: "loopflow-task-\(row.task.id)")
+            .find(ViewType.Button.self, where: { try $0.accessibilityIdentifier() == "task-row-open-\(row.task.id)" }).tap()
+        // The row says why the Task is on the Now list.
+        #expect(try view.inspect().find(text: row.task.condition.reason).string() == row.task.condition.reason)
         #expect(opened?.0 == row.wave!.repo)
         #expect(opened?.1 == row.task.id)
         #expect(model.selection == nil)
+    }
+
+    @Test @MainActor func aWaveOnTheRoadmapIsASectionUnderItsNameWithNoFrame() throws {
+        let snapshot = try loadRoadmapFixture()
+        let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("No read needed") })
+        model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [])
+        let wave = try #require(model.visibleRoadmaps.first)
+        let section = try RoadmapWaveSection(roadmap: wave, onOpenWave: {}, onOpenTask: { _ in },
+                                             onTaskAction: { _, _ in }, onOpenWorktree: { _ in })
+            .inspect().find(viewWithAccessibilityIdentifier: "loopflow-wave-\(wave.wave.id)")
+        #expect(try section.find(text: wave.wave.name).string() == wave.wave.name)
+        #expect(throws: (any Error).self) { try section.overlay() }
+        #expect(throws: (any Error).self) { try section.background() }
     }
 
     private func loadRoadmapFixture(sourceFile: String = #filePath) throws -> RoadmapSnapshot {

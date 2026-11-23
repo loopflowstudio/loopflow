@@ -817,8 +817,6 @@ struct WorkDestinationTests {
             let helper = host.appendingPathComponent("lf")
             try "#!/bin/sh\nexit 93\n".write(to: helper, atomically: true, encoding: .utf8)
             try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: helper.path)
-            try JSONSerialization.data(withJSONObject: ["lf_path": helper.path])
-                .write(to: host.appendingPathComponent("LoopflowDevControl.json"))
             let process = Process()
             process.executableURL = owned
             process.arguments = ["--test-bundle-path", try #require(Bundle(for: RemoteCompanionBundleMarker.self).executablePath),
@@ -2203,10 +2201,9 @@ struct WorkDestinationTests {
         let saved = try JSONEncoder().encode(RepositoryWorkspace(id: "plan", path: "/src/repo", machine: machine))
         let restored = try JSONDecoder().decode(RepositoryWorkspace.self, from: saved)
         #expect(restored.opened(on: machine) == restored)
-        // A world or a copy launched from the same bundle gets none of the Machine's windows.
-        #expect(restored.opened(on: "/tmp/w1/home") == nil)
-        // A copy holds the Machine's plans; its window is still another window.
-        #expect(restored != RepositoryWorkspace(id: "plan", path: "/src/repo", machine: "/Users/demo/.lf-copy/home"))
+        let privateHome = "/tmp/loopflow-test/home"
+        #expect(restored.opened(on: privateHome) == nil)
+        #expect(restored != RepositoryWorkspace(id: "plan", path: "/src/repo", machine: privateHome))
         // Windows saved before they named their Machine belong to none.
         let unnamed = try JSONDecoder().decode(RepositoryWorkspace.self, from: Data(#"{"id":"plan","path":"/src/repo"}"#.utf8))
         #expect(unnamed.opened(on: machine) == nil)

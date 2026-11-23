@@ -459,7 +459,19 @@ struct DTOFixtureTests {
         #expect(graph.interactiveSteps.map(\.description) == ["you review the plan", "you try the change"])
         #expect(graph.position == .run(step: "review-design", at: "implement", lfProcessId: work.graphProcesses[0].id, running: true))
         #expect(graph.waitingStep == nil)
+        #expect(graph.steps.map(\.name) == ["plan", "review-design", "build", "demo"])
+        #expect(graph.steps.map(\.interactive) == [false, true, false, true])
+        #expect(graph.currentStep == 2)
+        #expect(graph.sentence == "build is running implement. You are next needed at demo.")
         #expect(try JSONDecoder().decode(TaskWork.self, from: JSONEncoder().encode(work)) == work)
+        // `current_step` is required even when null.
+        var absent = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        var absentGraph = try #require(absent["graph"] as? [String: Any])
+        absentGraph.removeValue(forKey: "current_step")
+        absent["graph"] = absentGraph
+        #expect(throws: DecodingError.self) {
+            try JSONDecoder().decode(TaskWork.self, from: JSONSerialization.data(withJSONObject: absent))
+        }
         // Every position field is required.
         var wire = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
         var wireGraph = try #require(wire["graph"] as? [String: Any])

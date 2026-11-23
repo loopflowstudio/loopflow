@@ -12,7 +12,7 @@ per record, plus `repository`. Read one with
 `git -C <bare> show "<ref>:tasks/<2 hex>/<task id>.json"`; in zsh write
 `"${ref}:path"`, since `$ref:r` is a modifier.
 
-`lf config get repo.tracker` reads your `lf.config.local.yaml`; pass `--shared`
+`lf config get repo.tracker` reads your `.lf/config.local.yaml`; pass `--shared`
 for the committed `.lf/config.yaml`. A dotted set
 (`lf config set --shared repo.tracker.linear.team T`) writes the released
 `planning: {provider, …}` shape. Quote numeric Asana team IDs (`"'1209'"`):

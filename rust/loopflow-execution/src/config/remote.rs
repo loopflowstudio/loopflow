@@ -558,11 +558,9 @@ pub(crate) fn apply_document(
     };
     if path == home.join("config.yaml") {
         replace_projection(document, &profile.global);
-    } else if path
-        .file_name()
-        .is_some_and(|name| name == super::files::PRIVATE_FILE)
-        && path
-            .parent()
+    } else if path.ends_with(super::files::PRIVATE_FILE)
+        && super::files::private_root(path)
+            .ok()
             .and_then(|repo| crate::repository::RepoId::discover(repo).ok())
             .map(|repo| repo.to_string())
             == profile.repository

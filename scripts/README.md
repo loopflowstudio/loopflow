@@ -14,7 +14,7 @@ uv run python scripts/check_architecture.py            # architecture owners and
 uv run python scripts/due_removals.py                  # leaving store members and their drop dates
 uv run python scripts/test.py --list                   # affected-suite plan
 uv run python scripts/test.py --reuse-passing          # affected suites once per exact tree
-uv run python scripts/desktop_performance.py run --cli target/debug/lf --output /tmp/desktop-check --samples 1  # needs lf-world built beside lf
+uv run python scripts/desktop_performance.py run --output /tmp/desktop-check --samples 1
 lf telemetry-daily                                     # maintainer report
 ```
 
@@ -28,11 +28,18 @@ to reproduce a matrix failure or when release guidance requires it.
 
 ## Developer build cache
 
-`scripts/dev-lf` calls `build_cache.py` before Cargo. Root inventory is derived
-from Git; other settings follow the Machine's default sccache file. The build selects it through `SCCACHE_CONF`; it takes effect after the shared
-server's normal idle exit. The script never restarts a server, shares a Cargo
-target or installs Machine configuration. An explicit cache configuration stays
-with its caller. See [build commands](testing.md#builds).
+```bash
+uv run python scripts/build_cache.py install   # share the Machine cache and install this repository's worktree hook
+uv run python scripts/build_cache.py status    # which wrapper and daemon, and whether this checkout's root is loaded
+```
+
+Plain `cargo build` in a new worktree can reuse unchanged workspace libraries.
+Focused tests keep incremental state for repeated edits.
+Git registers its root before checkout returns. If the pinned daemon lacks the
+root, registration stops it and the next compile loads the list. An in-flight
+client compile can finish across that stop and lose its cache write.
+Each worktree owns its Cargo target. For setup, recovery and the measured
+edit-to-test times, see [the shared compilation cache](testing.md#shared-compilation-cache).
 
 ## Scheduled disk cleanup
 
@@ -342,7 +349,7 @@ tree: stale inventory fails both Python tests and Desktop packaging.
 `scripts/` contains runnable validation and demo scripts. Use these for branch validation and manual UI walkthroughs.
 
 ```bash
-uv run python scripts/loopflow-dev.py run-debug     # build and launch Loopflow (macOS)
+uv run python scripts/loopflow-dev.py run-debug     # open Loopflow Dev on the live Machine with logs (macOS)
 uv run python scripts/check_swift_multiplatform_boundaries.py  # Stage 01 boundary guardrails
 ```
 

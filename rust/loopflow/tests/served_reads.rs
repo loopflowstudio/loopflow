@@ -127,11 +127,7 @@ fn configuration_edits_use_the_server_without_work_processes() {
     .unwrap_err();
     assert!(refused.message.contains("does not apply"), "{refused:?}");
     assert!(!repo.path().join(".lf/config.yaml").exists());
-    let theme = request(Operation::Write(Write::ConfigTheme {
-        path: home.path().join("config.yaml"),
-        value: None,
-    }))
-    .unwrap();
+    let theme = request(Operation::Write(Write::ConfigTheme { value: None })).unwrap();
     assert_eq!(theme["value"], "Hearth");
     assert_eq!(fs::read(&database).unwrap(), before);
 }
@@ -896,6 +892,7 @@ fn server_operations_match_their_lf_commands() {
         | Read::TaskChanges { .. }
         | Read::TaskDiff { .. }
         | Read::TaskFile { .. }
+        | Read::TaskFiles { .. }
         | Read::WaveList
         | Read::MachineSelf
         | Read::DesktopPortfolio
@@ -961,6 +958,18 @@ fn server_operations_match_their_lf_commands() {
                 Read::TaskFile {
                     issue: "INF-123".into(),
                     path: "edit.txt".into(),
+                    at: None,
+                },
+                Read::TaskFile {
+                    issue: "INF-123".into(),
+                    path: "edit.txt".into(),
+                    at: Some("parent".into()),
+                },
+                Read::TaskFiles {
+                    issue: "INF-123".into(),
+                    path: String::new(),
+                    cursor: None,
+                    show_ignored: false,
                 },
                 Read::WaveList,
                 Read::MachineSelf,
@@ -1186,6 +1195,7 @@ fn server_operations_match_their_lf_commands() {
         let file = Read::TaskFile {
             issue: "INF-123".into(),
             path: "edit.txt".into(),
+            at: None,
         }
         .read()
         .unwrap();

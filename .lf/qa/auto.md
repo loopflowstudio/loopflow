@@ -2,27 +2,15 @@ Read when the change touches `lf task auto on`, `lf task auto`, the auto setting
 
 # Auto on a private Machine
 
-`lf-world build task-review <dir>` gives five Tasks; their IDs change with each
-build (`lf task list`). `<dir>/github/pulls/<n>.json` names each PR's branch:
-one Task's PR is merged by hand, others are open, draft or unavailable
-(`<n>.unavailable`), one has none. The world's `gh` answers only reads, so a
-`land` step succeeds only on the merged one ("Pull request already merged")
-and fails elsewhere ("could not resolve GitHub owner/repo", "no active PR"); a
-failure there still shows the run got past the auto check. Start the branch's
-`lf server run` detached first.
+Set up a [private Machine and repository](served-launches.md) with the branch
+`lf`. For PR cases, use the [GitHub stand-in](stacked-tasks.md) and create
+disposable Tasks with merged, open and draft PRs and a Task with no PR. Mark
+one PR merged in the stand-in's state and check that `land` reports it already
+merged. Start the branch's `lf server run` before launching Tasks.
 
-The private home still ends up with a real launchd job: an `lf task run` or a
-read that finds no server registers `com.loopflow.server.<hash>` (the hash in
-the socket path; the label is in `$LF_HOME/server.plist`), and from then on
-launchd restarts the server and the server restarts its holder and
-conversations, so killing PIDs alone never ends. To stop a world: collect every
-PID whose environment holds its `LF_HOME` (`ps eww -o command= -p <pid>`),
-`kill -STOP` them, `launchctl bootout gui/$(id -u)/<label>`, `kill -9` them,
-then check `launchctl list | grep <hash>` is empty 15 s later. In zsh a PID
-list in a variable needs `${=P}`. Collect the PIDs in one command and kill
-them in the next: a sweep that greps every process's environment or command
-for the home path also matches its own shell, and `kill -STOP` hangs it. The
-server shows as plain `lf server run`; find it by `LF_HOME`, not by path.
+If the private Machine registers a launchd job, use the label in
+`$LF_HOME/server.plist` to boot it out at cleanup. End the holders and providers
+belonging to that private home as described in [resume](resume.md).
 
 Graph: `.lf/graphs/qaship.yaml` with `- implement`, `- interactive:
 ship-review`, `- cmd: land`, `- interactive: verify`; commit, push, then
@@ -34,13 +22,13 @@ takes no graph, so for it set `graph: qaship` in `.lf/config.yaml` (committed,
 pushed, merged into the checkouts) so a never-run Task takes it up.
 
 `auto: on` in config: `lf config set auto on` writes your own value
-(`lf.config.local.yaml`), or commit it in `.lf/config.yaml` or
+(`.lf/config.local.yaml`), or commit it in `.lf/config.yaml` or
 `.lf/wave/<wave>/config.yaml` (push, merge into the checkouts). Read it back with
 `lf config settings`, `lf --wave <wave> config settings` and the `auto` line of
 `lf wave status <wave>`. A bare `lf task run <id>` on a never-run Task then
 prints the `merges:` line and status reads `auto: on by personal config`,
-`by repository config` or `by wave config`. The world's Tasks all sit in Wave
-`desktop`; `lf task create '<words>' --json` makes one outside it. `on` is the
+`by repository config` or `by wave config`. Create a Task inside the disposable
+Wave and another outside it to check the scope of each setting. `on` is the
 only value: `off`, `true` and `null` are refused. A released config's
 `graph: auto` is checked by writing the file (`lf config settings` reads
 `graph code`, `auto on`); `lf config set graph auto` refuses it. `lf -b task run
@@ -49,11 +37,12 @@ only value: `off`, `true` and `null` are refused. A released config's
 fresh repository and `LF_HOME` with `auto: on` committed: 0.16.0 warns
 "skipping auto: unknown setting" on each read and carries on.
 
-Headless steps: a `claude` ahead of the world's on `PATH` that, for `-p`
+Headless steps: a stand-in `claude` first on the private `PATH` that, for `-p`
 with no terminal, reads one line, waits while a marker file exists, then
 prints `{"type":"result","subtype":"success","result":"done",…}`; otherwise
-it execs the world's. Touch the marker to keep `implement` running while you
-`lf task auto on`/`lf task auto off` mid-run; remove it to let the run reach the next step.
+it reads and echoes input from the PTY. Touch the marker to keep `implement`
+running while you use `lf task auto on` or `lf task auto off`. Remove the marker
+to advance the run.
 
 Read the setting with `lf task status <id> | grep -E 'auto:|Graph q'` and
 `lf task status <id> --json` (top-level `auto`; `lf task show <id> --json`
@@ -101,7 +90,7 @@ reads it back as `State: unstarted · auto: off by Demo, …` from mini's server
 Selection state `auto` is a Dashboard expression (`lf desktop dashboard query
 'Auto' 'state:auto'` prints JSON), not a `lf task list` filter. Never run
 `lf desktop view` here: it opens `loopflow://` in the installed app, which
-registers the world's repository in the real `~/.lf` and starts real
+registers the disposable repository in the real `~/.lf` and starts real
 conversations there.
 
 Recovery: an auto run's carrier is the command as typed, with parent 1:
@@ -123,10 +112,10 @@ it; `lf task run <id>` starts it again". That read is the only one: the
 
 Copy the installed binary out (`cp $(readlink -f ~/.local/bin/lf) …`), make a
 fresh repo (local Git identity, a bare origin, `graph:` naming a graph with a
-headless step) and `LF_HOME`. Keep the world's `bin` on `PATH`: its `launchctl`
-refuses, so the released lf registers no launchd job; start the released
-`lf server run` detached instead. `lf checkout <id>`, then the released `lf ship <id>`
-detached with the marker file holding its step (it blocks its
+headless step) and `LF_HOME`. Keep the provider stand-in on the private `PATH` and
+start the released `lf server run` detached before launching any Task. Run
+`lf checkout <id>`, then the released `lf ship <id>` detached with the marker
+file holding its step (it blocks its
 caller), and `lf task hold <id>` on another. Stop the released server and
 start the branch's on the same home. The branch migrates it in place on the
 first read; copy the home first to repeat the check. The released lf has no

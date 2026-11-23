@@ -199,13 +199,17 @@ fn task_files_share_exact_bases_rename_paths_and_lossless_revisions() {
         changes: loopflow_execution::ops::task::TaskChangesSnapshot,
         diff: loopflow_execution::ops::task::TaskDiffSnapshot,
         file: loopflow_execution::ops::task::TaskFileSnapshot,
+        image: loopflow_execution::ops::task::TaskFileSnapshot,
         save: loopflow_execution::ops::task::TaskFileSave,
     }
     let json = include_str!("../../../tests/fixtures/dto/task_files.json");
     let files: Files = serde_json::from_str(json).unwrap();
     assert_eq!(files.changes.base_commit, files.diff.base_commit);
+    assert_eq!(files.changes.commits[0].parent, files.changes.base_commit);
     assert_eq!(files.changes.files[0].old_path.as_deref(), Some("old.txt"));
+    assert_eq!(files.changes.files[0].changes, 1);
     assert_eq!(files.file.content.as_deref(), Some("\u{feff}notes\r\n"));
+    assert_eq!(files.image.data.as_deref(), Some("iVBORw0KGgo="));
     assert_eq!(
         serde_json::to_value(files).unwrap(),
         serde_json::from_str::<serde_json::Value>(json).unwrap()
@@ -247,6 +251,9 @@ fn task_detail_says_each_fact_once() {
         detail.task.graph.as_ref().unwrap().step.as_deref(),
         Some("demo")
     );
+    let graph = detail.graph.as_ref().unwrap();
+    assert_eq!(graph.current_step, Some(2));
+    assert_eq!(graph.sentence, "Waiting for you at demo.");
     let conversation = detail
         .sessions
         .iter()
@@ -367,7 +374,7 @@ fn graph_compositions_round_trip_distinct_compositions_and_required_children() {
     ))
     .unwrap();
     assert!(catalog[0].composition.is_some() && catalog[1].composition.is_none());
-    for field in ["included_by", "runs"] {
+    for field in ["included_by", "runs", "workflow"] {
         let mut missing = serde_json::to_value(&catalog[0]).unwrap();
         missing.as_object_mut().unwrap().remove(field);
         assert!(
@@ -430,6 +437,25 @@ fn task_work_preserves_sessions_graph_runs_and_graph() {
     );
     assert_eq!(graph.step(), "review-design");
     assert!(graph.waiting_step().is_none());
+    let line: Vec<_> = graph
+        .steps
+        .iter()
+        .map(|step| (step.name.as_str(), step.interactive))
+        .collect();
+    assert_eq!(
+        line,
+        [
+            ("plan", false),
+            ("review-design", true),
+            ("build", false),
+            ("demo", true)
+        ]
+    );
+    assert_eq!(graph.current_step, Some(2));
+    assert_eq!(
+        graph.sentence,
+        "build is running implement. You are next needed at demo."
+    );
     assert_eq!(
         serde_json::to_value(work).unwrap(),
         serde_json::from_str::<serde_json::Value>(input).unwrap()

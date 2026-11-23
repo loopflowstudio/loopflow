@@ -2,40 +2,39 @@ from playwright.sync_api import Page, expect
 
 
 def test_navbar_links_exist(homepage: Page):
-    nav = homepage.locator("nav")
+    nav = homepage.locator(".site-header nav")
     assert nav.locator("a", has_text="Docs").is_visible()
     assert nav.get_by_role("link", name="For you", exact=True).is_visible()
 
 
 def test_navbar_docs_link(homepage: Page, base_url: str):
-    homepage.locator("nav").locator("a", has_text="Docs").click()
+    homepage.locator(".site-header nav").locator("a", has_text="Docs").click()
     assert "/docs" in homepage.url
 
 
 def test_navbar_install_link(homepage: Page, base_url: str):
     homepage.goto(f"{base_url}/docs")
-    homepage.locator("nav").locator("a", has_text="Install").click()
+    homepage.locator(".site-header nav").locator("a", has_text="Install").click()
     assert homepage.url == f"{base_url}/download"
     expect(homepage.locator("h1", has_text="Install")).to_be_visible()
 
 
-def test_github_link_external(homepage: Page, base_url: str):
+def test_github_link_points_at_the_repository(homepage: Page, base_url: str):
     homepage.goto(f"{base_url}/docs")
-    github_link = homepage.locator("nav").locator("a", has_text="GitHub")
+    github_link = homepage.locator(".site-header nav").locator("a", has_text="GitHub")
     assert github_link.get_attribute("href") == "https://github.com/loopflowstudio/loopflow"
-    assert github_link.get_attribute("target") == "_blank"
 
 
 def test_brand_link_to_home(page: Page, base_url: str):
     page.goto(f"{base_url}/docs")
-    page.locator(".nav-logo").click()
+    page.locator(".site-header .brand").click()
     assert page.url == f"{base_url}/"
 
 
 def test_nav_title_no_overlap_with_links_desktop(homepage: Page):
     """Nav title should not overlap with nav links on desktop."""
-    nav_title = homepage.locator(".home-page .brand")
-    nav_links = homepage.locator(".home-page nav")
+    nav_title = homepage.locator(".site-header .brand")
+    nav_links = homepage.locator(".site-header nav")
 
     title_box = nav_title.bounding_box()
     links_box = nav_links.bounding_box()

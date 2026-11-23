@@ -9,8 +9,8 @@ struct MobileSettings: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                Text("Take your work with you").font(Typography.sectionTitle())
+            VStack(alignment: .leading, spacing: Spacing.xl) {
+                Text("Take your work with you").font(Typography.lede)
                 Text("Open Tasks and continue their Sessions from Loopflow on your iPhone. Sign in to the same Tailscale account on both devices.")
                     .foregroundStyle(palette.textSecondary)
                 if let configuration = setup.configuration, configuration.enabled {
@@ -28,9 +28,9 @@ struct MobileSettings: View {
                             .foregroundStyle(palette.textSecondary)
                         Button("Set up again") { setup.enable() }.disabled(setup.busy)
                         Text("Uses this Machine’s signed-in Tailscale account.")
-                            .font(.caption).foregroundStyle(palette.textSecondary)
+                            .font(Typography.meta).foregroundStyle(palette.textSecondary)
                     }
-                    Text(configuration.endpoint).font(.caption).textSelection(.enabled)
+                    Text(configuration.endpoint).font(Typography.mono).textSelection(.enabled)
                         .foregroundStyle(palette.textSecondary)
                     HStack {
                         Button("Copy address", systemImage: "doc.on.doc") {
@@ -42,19 +42,18 @@ struct MobileSettings: View {
                         }
                     }
                     Text("This code contains only the address. Access requires your Tailscale account.")
-                        .font(.caption).foregroundStyle(palette.textSecondary)
+                        .font(Typography.meta).foregroundStyle(palette.textSecondary)
                     Divider()
                     Button("Turn off mobile access") { setup.disable() }.disabled(setup.busy)
                     Text("Disconnects phones. Tasks and Sessions keep running. Manage individual devices in Tailscale.")
-                        .font(.caption).foregroundStyle(palette.textSecondary)
+                        .font(Typography.meta).foregroundStyle(palette.textSecondary)
                 } else {
                     Button("Enable mobile access") { setup.enable() }
-                        .buttonStyle(.borderedProminent)
-                        .tint(palette.accent).foregroundStyle(palette.accentText)
+                        .buttonStyle(LoopflowButtonStyle(.accent))
                         .disabled(setup.busy)
                         .accessibilityIdentifier("mobile-enable")
                     Text("Loopflow detects Tailscale and prepares a private connection automatically.")
-                        .font(.caption).foregroundStyle(palette.textSecondary)
+                        .font(Typography.meta).foregroundStyle(palette.textSecondary)
                 }
                 if let activity = setup.activity { ProgressView(activity).controlSize(.small) }
                 if let error = setup.error ?? setup.status?.error {
@@ -62,7 +61,8 @@ struct MobileSettings: View {
                 }
                 Button("Refresh", systemImage: "arrow.clockwise") { setup.refresh() }.disabled(setup.busy)
             }
-            .padding(24)
+            .buttonStyle(LoopflowButtonStyle())
+            .padding(Spacing.xxl)
         }
         .frame(minWidth: 560, idealWidth: 620, minHeight: 500)
         .foregroundStyle(palette.text).background(palette.background)

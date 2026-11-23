@@ -2,6 +2,13 @@ Read when QA runs a branch-built `lf`, its server or a private Machine (`LF_HOME
 
 # Private Machine
 
+In a shallow checkout the build panics ordering migrations (`CREATE INDEX
+… graph_processes …`), and `rust/loopflow-storage/migration-order.txt` lags
+main. Deepen with `git fetch --shallow-since=<months ago> origin main`, write
+`_migration_order(Path('.'))` from `scripts/test_task_installation.py` to a
+file (import with `sys.path` on `scripts/`) and build with
+`LOOPFLOW_MIGRATION_ORDER=<file>`.
+
 For live server QA, build `cargo build -p loopflow --bin lf`, then use a fresh
 Git repository with a local Git identity and a private `LF_HOME`. Put Desktop
 QA homes under a short path such as `/tmp/lf-qa-*`: macOS

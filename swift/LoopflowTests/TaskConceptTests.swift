@@ -55,20 +55,19 @@ struct TaskConceptTests {
                 let label = try header.inspect().find(viewWithAccessibilityIdentifier: "task-lifecycle-status").text().string()
                 if task.task.identifier == "FIX-2" {
                     #expect(task.lifecycle == .active)
-                    #expect(TaskHeading(task: task).state == "Active")
-                    #expect(label == "Active")
+                    // Its worktree is missing, so the page says Blocked, as its row does.
+                    #expect(label == "Blocked")
                     #expect(!task.awaitsStart)
                     #expect(!task.isCompleted)
                     #expect(TaskHistoryFilter().includes(task, now: .now))
                     #expect(task.opensConversationAutomatically)
                     #expect(task.isUnassigned == (phase.name == "unassigned_working"))
-                    #expect(throws: (any Error).self) { try header.inspect().find(button: "Reopen") }
                     #expect(throws: (any Error).self) {
-                        try TaskActionItems(model: model, task: task, wave: nil).inspect().find(button: "Reopen Task")
+                        try TaskActionItems(model: model, task: task, wave: nil, work: nil).inspect().find(button: "Reopen Task")
                     }
                 } else if task.isCompleted {
-                    #expect(label == (task.lifecycle == .done ? "Completed" : "Canceled"))
-                    _ = try header.inspect().find(button: "Reopen")
+                    #expect(label == (task.lifecycle == .done ? "Done, date unavailable" : "Abandoned"))
+                    _ = try TaskActionItems(model: model, task: task, wave: nil, work: nil).inspect().find(button: "Reopen Task")
                     #expect(!task.awaitsStart)
                     #expect(!task.opensConversationAutomatically)
                 } else if task.lifecycle == .unstarted {
@@ -112,8 +111,12 @@ struct TaskConceptTests {
             #expect(model.jumpRows(.wave(wave.wave.id), filter: "").map(\.id) == phase.tasks.map { .task($0.id) })
             let active = try #require(phase.tasks.first { $0.task.identifier == "FIX-2" })
             let picker = try #require(model.jumpRows(.wave(wave.wave.id), filter: "FIX-2").first)
-            #expect(picker.detail.contains("Active"))
-            #expect(!picker.detail.contains("Not started"))
+            // The picker says the word the Task's row says.
+            #expect(picker.detail == "FIX-2 · \(try #require(TaskRowStatus(task: active, status: model.programStatus(task: active.id)).word))")
+            for task in phase.tasks where task.awaitsStart && task.need == nil {
+                let row = model.jumpRows(.wave(wave.wave.id), filter: "").first { $0.id == .task(task.id) }
+                #expect(row?.detail == "\(task.task.identifier) · Unstarted")
+            }
             let projection = WorkProjection(roadmaps: roadmap.waves, inventory: phase.tasks, sessions: phase.sessions)
             let projected = try #require(projection.waves.first?.tasks)
             #expect(projected.map { $0.task.id } == phase.tasks.map(\.id))
@@ -146,9 +149,11 @@ struct TaskConceptTests {
         let conversation = try #require(phase.sessions.first { $0.id == "bound" })
         #expect(task.selectionStates.contains(.busy))
         let status = SessionProgramStatus(sessions: [conversation], unavailable: nil)
-        let row = TaskRowMetadata(id: task.id, task: task, status: status)
+        let row = TaskRow(id: task.id, presentation: .init(title: task.task.name, identifier: task.task.identifier, context: nil),
+                          task: task, status: status)
         #expect(try row.inspect().find(text: "Blocked").string() == "Blocked")
-        let pane = ProgramStatusLabel(status: try #require(conversation.programStatus))
+        let programStatus = try #require(conversation.programStatus)
+        let pane = try #require(StatusMark(status: programStatus))
         #expect(try pane.inspect().find(text: "Blocked").string() == "Blocked")
         #expect(task.lifecycle == .active)
     }
@@ -163,7 +168,7 @@ struct TaskConceptTests {
         let phase = try #require(self.phases().first)
         let projection = WorkProjection(roadmaps: [], inventory: [task], sessions: phase.sessions)
         #expect(Set(projection.standaloneTasks[0].sessions.map(\.id)) == ["bound", "checkout", "unknown"])
-        #expect(TaskHeading(task: task).state == "Active")
+        #expect(task.lifecycle == .active)
         #expect(!task.awaitsStart)
         #expect(!task.isCompleted)
     }

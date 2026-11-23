@@ -166,7 +166,9 @@ writing, so a recording failure cannot skip cleanup or stop a replacement.
 disclosure tree. Invalid sources remain visible with their error. `included_by`
 names the Graphs that include it with `graph:`, so a client can tell a piece
 from a Graph people start with, and `runs` says whether it runs for a Task or
-a Wave.
+a Wave. `workflow` is a `WorkflowOutline`: the top-level steps, the stops and
+the take-part sentence a `TaskGraph` carries, for a Graph no Task stands on
+yet.
 
 `lf wave graph show [WAVE | --no-wave]` reads the graph a Wave's, or the
 repository's, new Tasks take up and which setting chose it, independently of

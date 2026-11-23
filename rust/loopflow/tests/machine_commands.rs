@@ -240,6 +240,7 @@ fn remote_session_open_returns_an_owner_pinned_terminal_command() {
         "session",
         "resume",
         &id,
+        "--unfocused",
         "--prepare",
         "--json",
     ]);
@@ -303,7 +304,7 @@ fn bare_connect_in_the_repository_opens_its_session_on_your_session_machine() {
         .output()
         .unwrap();
     assert_success(&set);
-    assert!(String::from_utf8_lossy(&set.stdout).contains("lf.config.local.yaml"));
+    assert!(String::from_utf8_lossy(&set.stdout).contains(".lf/config.local.yaml"));
 
     let mut record: Value = serde_json::from_str::<Vec<Value>>(include_str!(
         "../../../tests/fixtures/dto/sessions.json"
@@ -1875,7 +1876,7 @@ fn set_machine_changes_local_preferences_without_copying_or_moving_work() {
         .0,
         laptop
     );
-    assert!(!plan.remote_path.join("lf.config.local.yaml").exists());
+    assert!(!plan.remote_path.join(".lf/config.local.yaml").exists());
     assert_eq!(
         loopflow_execution::store::ownership::task_execution_route(&plan.local, &task)
             .unwrap()

@@ -513,8 +513,17 @@ Skill export tests use isolated homes and cover builtin/global definitions,
 personal agent directories and pruning. `sync-skills --repo` exports repository
 skills and Graph recipes into the checkout; default sync exports globally.
 
+Each harness declares where it reads installed skills
+(`Capabilities::installed_skills`), and sync writes exactly those directories.
+The declaration is one directory per scope, so a harness can't be written
+without it. The conformance test syncs into a temporary home and repository and
+reads each harness's declared directories.
+It cannot catch a wrong path. Only the real binary knows where it reads:
+`lf self sync-skills --yes`, then `agy -p "/skills"`.
+
 ```bash
 cargo test -p loopflow-execution --lib skills::tests
+cargo test -p loopflow-execution --lib harness::conformance_tests::every_harness_reads_a_synced_skill
 ```
 
 Settings and recipe changes also run the provider-boundary matrix:
@@ -1013,7 +1022,7 @@ Changes to observed definition files or directory traversal also run
 must remain available when a local catalog path is not a directory.
 
 When changing Session activity or Waiting, run `session_cli_tests` and
-`world_recipes` (its `--watch` cases) together. Direct SQL fixtures must carry both the attachment
+`session_list_subscribe` together. Direct SQL fixtures must carry both the attachment
 token and the AgentProcess id, matching the production activity writer. Rebuild both SwiftPM and
 the Xcode test targets after shared model renames; Foundation types such as
 `Foundation.Process` need explicit qualification where names overlap.
@@ -1072,7 +1081,7 @@ cargo test -p loopflow --test served_reads
 cargo test -p loopflow --test transport_tests server_status_does_not_install_or_create_work
 cargo test -p loopflow --test transport_tests server_registration_migrates_old_job_and_respects_disabled_choice -- --ignored
 cargo test -p loopflow --test transport_tests held_session_survives_server_restart
-cargo test -p loopflow --test transport_tests a_held_pane_reads_reconnecting_until_the_next_server_answers
+cargo test -p loopflow --test transport_tests a_resumed_relay_keeps_focus_across_server_restarts
 cargo test -p loopflow --test transport_tests ownership_queues_behind_a_taker_and_tells_the_loser_who_took_it
 ```
 

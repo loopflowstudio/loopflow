@@ -21,7 +21,7 @@ struct RepositoryPlanView: View {
                 Text("Reading how the plan travels…")
             }
         }
-        .font(Typography.body(12))
+        .font(Typography.text)
         .foregroundStyle(palette.textSecondary)
         .textSelection(.enabled)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -36,7 +36,7 @@ struct RepositoryPlanView: View {
         if standing.unsent > standing.records.count {
             Text("and \(standing.unsent - standing.records.count) more")
         }
-        if let error = standing.error { Text(error) }
+        if let error = standing.error { FailureLine("Not sent.", machine: error) }
         if let notTaken = standing.notTaken { Text(notTaken.reason) }
     }
 }

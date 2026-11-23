@@ -641,6 +641,13 @@ pub enum Commands {
         #[arg(long)]
         json: bool,
     },
+    /// Read embedded Loopflow user documentation offline
+    Docs {
+        /// Topic slug (omit to list all topics)
+        topic: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
     /// Show Wave memory size targets, their sources, and current usage
     Context {
         #[arg(long)]
@@ -1168,7 +1175,9 @@ impl Commands {
             Self::Repo { cmd, .. } => cmd.as_ref().is_some_and(|cmd| cmd.changes_work()),
             Self::Config { cmd } => cmd.changes_work(),
             Self::Self_ { cmd } => cmd.changes_work(),
-            Self::List { .. } | Self::Help { .. } | Self::Context { .. } => false,
+            Self::List { .. } | Self::Help { .. } | Self::Docs { .. } | Self::Context { .. } => {
+                false
+            }
             Self::Open(_)
             | Self::Inline { .. }
             | Self::Scratch { .. }
@@ -1540,7 +1549,7 @@ pub enum SkillCommand {
 
 const SETTING_KEYS: &str = "`lf config catalog` lists every preference and where it applies.
 Values use YAML; false disables and [] clears an additive list.
-The default destination is root lf.config.local.yaml, shared across Task worktrees.
+The default destination is the main checkout's .lf/config.local.yaml, shared across Task worktrees.
 --global edits ~/.lf/config.yaml; --shared explicitly edits committed configuration.
 `lf --wave <name> config set` selects a Wave; unset removes only that declaration.
 `lf config settings --skill <name> --json` explains effective values and sources.";
@@ -1593,6 +1602,9 @@ pub enum GraphCommand {
 /// Shared selection, preparation and next-turn options for `resume` and `session new`.
 #[derive(Args, Debug)]
 pub struct SessionConnectionArgs {
+    /// Attach without taking the terminal size until focus or input
+    #[arg(long)]
+    pub unfocused: bool,
     #[arg(long, conflicts_with = "wave")]
     pub task: Option<String>,
     #[arg(long)]
@@ -2396,6 +2408,9 @@ using lf open's ordinary host selection. Preview and --quote open nothing."
     File {
         issue: String,
         path: String,
+        /// Read the file at this commit (parent, head or a resolved SHA) instead of the working tree
+        #[arg(long, conflicts_with = "recoveries")]
+        at: Option<String>,
         /// Inspect retained versions, including late writes; omitted for fast content reads
         #[arg(long)]
         recoveries: bool,

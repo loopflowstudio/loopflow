@@ -301,11 +301,17 @@ fn repository_errors_do_not_prevent_home_command_admission() {
         .unwrap();
     success(output);
     let preferences: loopflow_execution::config::Config = serde_yaml_ng::from_str(
-        &fs::read_to_string(cwd.path().join("lf.config.local.yaml")).unwrap(),
+        &fs::read_to_string(cwd.path().join(".lf/config.local.yaml")).unwrap(),
     )
     .unwrap();
     assert_eq!(preferences.agent().unwrap(), "claude");
-    assert!(!cwd.path().join(".lf").exists());
+    // Your settings are the only thing a bare directory gains.
+    let made: Vec<_> = fs::read_dir(cwd.path().join(".lf"))
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name())
+        .filter(|name| !name.to_string_lossy().ends_with(".lock"))
+        .collect();
+    assert_eq!(made, ["config.local.yaml"]);
 }
 
 #[test]

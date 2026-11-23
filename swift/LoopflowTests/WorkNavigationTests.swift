@@ -102,7 +102,7 @@ struct WorkNavigationTests {
         let key = try #require(registry.selectedWork)
         let root = try #require(registry.retained(key))
         let layout = root.multiplexer.layout
-        let crumbs = WorkBreadcrumbs(model: model)
+        let crumbs = TitleBar(model: model)
         model.navigation.resizeSidebar(460, availableWidth: 1200)
         model.select(.wave(id: "wave-1"))
         try crumbs.inspect().find(button: "loopflow").tap()
@@ -122,7 +122,7 @@ struct WorkNavigationTests {
         let model = try model()
         await model.refresh()
         model.select(.task(id: "issue-review"))
-        let crumbs = WorkBreadcrumbs(model: model)
+        let crumbs = TitleBar(model: model)
         for scope in ["repository", "wave-wave-1"] {
             _ = try crumbs.inspect().find(viewWithAccessibilityIdentifier: "work-jump-" + scope)
         }
@@ -141,14 +141,16 @@ struct WorkNavigationTests {
         #expect(model.navigation.palette == nil)
     }
 
-    @Test("The heading reads the Task's lifecycle, never Linear's planning state")
+    @Test("The title bar's word is the Task's condition or lifecycle, never Linear's planning state")
     func headingAgreesWithWorkingTasks() throws {
         let tasks = try roadmap().tasks.items
-        func state(_ id: String) throws -> String { TaskHeading(task: try #require(tasks.first { $0.id == id })).state }
+        func word(_ id: String) throws -> String? {
+            TaskRowStatus(task: try #require(tasks.first { $0.id == id })).word
+        }
         #expect(tasks.first { $0.id == "issue-now" }?.task.state == "unstarted")
-        #expect(try state("issue-now") == "Moving")
-        #expect(try state("issue-review") == "Unstarted")
-        #expect(try state("issue-later") == "Done")
+        #expect(try word("issue-now") == "Moving")
+        #expect(try word("issue-review") == "Waiting")
+        #expect(try word("issue-later") == "Done, date unavailable")
     }
 
     @Test("Working Tasks opens as a Dashboard; a sidebar Task keeps it in the trail, as its tile does")
@@ -334,14 +336,14 @@ struct WorkNavigationTests {
         #expect(drag.source == nil && drag.target == nil && drag.offset == 0)
     }
 
-    @Test("The sidebar header names the Dashboard under the repository, and ⌘1 marks its first member")
+    @Test("The sidebar header names the Dashboard as written under the repository, and ⌘1 marks its first member")
     func dashboardSidebarHeader() throws {
         let model = try dashboardModel()
         model.selectDashboard("review")
         let navigator = WorkNavigator(model: model, onOpenSession: { _ in })
-        _ = try navigator.inspect().find(text: "REVIEW")
+        _ = try navigator.inspect().find(text: "Review")
         _ = try navigator.inspect().find(viewWithAccessibilityIdentifier: "work-wave-repository")
-        let first = try navigator.inspect().find(TaskRowMetadata.self) { try $0.actualView().slotHint == "⌘1" }
+        let first = try navigator.inspect().find(TaskRow<TaskRowSlotHint>.self) { try $0.actualView().trailing.hint == "⌘1" }
         #expect(try first.actualView().id == "issue-now")
     }
 
@@ -376,7 +378,12 @@ struct WorkNavigationTests {
         let offer = TaskStartOffer(model: model, task: task)
         let start = try offer.inspect().find(viewWithAccessibilityIdentifier: "task-start-issue-review").button()
         #expect(!start.isDisabled())
-        #expect(throws: Never.self) { try offer.inspect().find(text: task.task.description) }
+        // The brief and a Dashboard tile's header name the Task; neither size says it again.
+        #expect(throws: Never.self) { try offer.inspect().find(text: "Not started") }
+        #expect(throws: (any Error).self) { try offer.inspect().find(text: task.task.name) }
+        let tile = try offer.environment(\.compactPanes, true).inspect()
+        #expect(throws: Never.self) { try tile.find(text: "Not started") }
+        #expect(throws: (any Error).self) { try tile.find(text: task.task.name) }
         #expect(model.navigation.notices.current == nil)
     }
 
@@ -410,7 +417,8 @@ struct WorkNavigationTests {
         #expect(action("1", .command) == "goto [\"index\": \"1\"]")
         #expect(action("9", [.command, .capsLock]) == "goto [\"index\": \"9\"]")
         #expect(action("0", .command) == nil)
-        #expect(action("1", [.command, .option]) == nil)
+        #expect(action("1", [.command, .shift]) == nil)
+        #expect(action("1", [.command, .option]) == "details [\"page\": \"brief\"]")
         #expect(action("\t", .control) == "next [:]")
         #expect(action("\u{19}", [.control, .shift]) == "previous [:]")
         #expect(action("\t", []) == nil)
@@ -952,6 +960,28 @@ struct WorkNavigationTests {
         #expect(workspace.multiplexer.focusedPaneId == pane)
     }
 
+    @Test("An unstarted Task's bar draws the workflow its first run takes up; before the catalog is read, its name alone")
+    func unstartedTaskBarDrawsItsWorkflow() async throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+        let catalog = try String(contentsOf: root.appendingPathComponent("tests/fixtures/dto/graph_catalog.json"), encoding: .utf8)
+        let model = WorkModel(query: RegistryQuery { args, _ in
+            guard args.starts(with: ["graph", "list"]) else { throw RegistryQueryError("The bar only reads the catalog") }
+            return catalog
+        }, repoPath: "/src/loopflow")
+        model.applyFixture(roadmap: .available(try roadmap()), waves: .available([]), workActivity: .loading, repos: [])
+        let task = try #require(model.task(id: "issue-review")).task
+        #expect(task.graphName == "feature")
+        let unstarted = try JSONDecoder().decode(TaskOverview.self, from: Data(#"{"sessions":[],"graph_processes":[],"graph":null}"#.utf8))
+        let bar = TaskWorkflowBar(model: model, task: task, work: .available(unstarted))
+        #expect(try bar.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-bar-name").text().string() == "feature")
+        #expect(throws: (any Error).self) { try bar.inspect().find(text: "pursue") }
+        await model.loadGraphCatalog()
+        #expect(try bar.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-bar-name").text().string() == "feature")
+        #expect(try ["design", "pursue", "xor-route", "queue"].map { try bar.inspect().find(text: $0).string() }.count == 4)
+        _ = try bar.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-start")
+    }
+
     @Test("Workflow loading, absent and failed readings: a failure shows the last good one or nothing")
     func workflowReadingStates() async throws {
         let model = try model()
@@ -960,12 +990,11 @@ struct WorkNavigationTests {
         let empty = try JSONDecoder().decode(TaskOverview.self, from: Data(#"{"sessions":[],"graph_processes":[],"graph":null}"#.utf8))
         let loading = TaskWorkflowHeader(model: model, task: found.task, work: .loading)
         #expect(try loading.inspect().find(text: "Reading workflow…").string() == "Reading workflow…")
-        #expect(throws: (any Error).self) { try loading.inspect().find(text: "No workflow selected") }
         let missing = TaskWorkflowHeader(model: model, task: found.task, work: .unavailable(lastGood: nil, reason: "Offline"))
         #expect(throws: (any Error).self) { try missing.inspect().find(text: "Reading workflow…") }
-        #expect(throws: (any Error).self) { try missing.inspect().find(text: "No workflow selected") }
         let absent = TaskWorkflowHeader(model: model, task: found.task, work: .available(empty))
-        let selection = found.task.graphName.map { "\($0) · \(found.task.graphSource ?? "")" } ?? "No workflow selected"
+        let selection = try #require(model.workflowSelection(found.task))
+        #expect(selection.hasPrefix("\(try #require(found.task.graphName)), "))
         #expect(try absent.inspect().find(text: selection).string() == selection)
         let stale = TaskWorkflowHeader(model: model, task: found.task, work: .unavailable(lastGood: empty, reason: "Offline"))
         #expect(try stale.inspect().find(text: selection).string() == selection)
@@ -1159,7 +1188,7 @@ struct WorkNavigationTests {
         let model = try model()
         await model.refresh()
         model.select(.task(id: "issue-review"))
-        _ = try WorkBreadcrumbs(model: model).inspect().find(viewWithAccessibilityIdentifier: "work-machine")
+        _ = try TitleBar(model: model).inspect().find(viewWithAccessibilityIdentifier: "work-machine")
         #expect(model.machineTarget == .task(issue: "W2-131"))
         #expect(model.machine(of: .task(issue: "W2-131")).label == "mini")
         model.select(.task(id: "issue-now"))

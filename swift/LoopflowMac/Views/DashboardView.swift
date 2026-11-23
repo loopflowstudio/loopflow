@@ -11,16 +11,19 @@ struct DashboardEditor: View {
     @State private var expression = "state:available"
     @State private var pinned = true
     @State private var revision: Int64?
+    @Environment(\.palette) private var palette
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text(plan.dashboardID == nil ? "Save Dashboard" : "Edit Dashboard").font(.headline)
+        VStack(alignment: .leading, spacing: Spacing.lg) {
+            Text(plan.dashboardID == nil ? "Save Dashboard" : "Edit Dashboard").serif(.title)
+                .foregroundStyle(palette.emphasisInk)
             TextField("Name", text: $name)
-            TextField("Query", text: $expression, axis: .vertical).font(.system(.body, design: .monospaced))
+            TextField("Query", text: $expression, axis: .vertical).font(Typography.mono)
             Text("For example: (wave:product state:open), state:available or state:auto")
-                .font(.caption).foregroundStyle(.secondary)
+                .font(Typography.meta).foregroundStyle(palette.textSecondary)
             Toggle("Pin in sidebar", isOn: $pinned)
             HStack {
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
+                    .buttonStyle(LoopflowButtonStyle())
                 Spacer()
                 Button("Save") {
                     Task {
@@ -28,8 +31,10 @@ struct DashboardEditor: View {
                                                      revision: revision) { dismiss() }
                     }
                 }.keyboardShortcut(.defaultAction).disabled(model.dashboardSaving || expression.isEmpty || name.isEmpty)
+                    .buttonStyle(LoopflowButtonStyle(.accent))
+                    .accessibilityIdentifier("dashboard-save")
             }
-        }.padding(24).frame(width: 540)
+        }.padding(Spacing.xxl).frame(width: 540)
         .onAppear {
             id = plan.dashboardID ?? id
             name = plan.name ?? id
@@ -49,7 +54,7 @@ struct DashboardQueryField: View {
 
     var body: some View {
         TextField("Query", text: $draft)
-            .textFieldStyle(.plain).font(Typography.code(11))
+            .textFieldStyle(.plain).font(Typography.mono)
             .disabled(model.dashboardSaving)
             .onSubmit(submit)
             .onChange(of: plan.selection.queryText, initial: true) { _, query in draft = query }
@@ -78,9 +83,14 @@ struct DashboardView: View {
     @State private var editingSlots = false
     @Environment(\.palette) private var palette
     var body: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: Spacing.sm) {
             if let plan = model.selectedViewPlan {
-                HStack {
+                HStack(alignment: .firstTextBaseline, spacing: Spacing.md) {
+                    // An unsaved query has no name; its query heads it.
+                    if let name = workingTasks ? "Working Tasks" : plan.name {
+                        Text(name).serif(.title).foregroundStyle(palette.emphasisInk).lineLimit(1)
+                            .layoutPriority(1).accessibilityIdentifier("dashboard-name")
+                    }
                     DashboardQueryField(model: model, plan: plan)
                     if !workingTasks {
                         if plan.dashboardID != nil {
@@ -92,13 +102,16 @@ struct DashboardView: View {
                         }
                         Button(plan.dashboardID == nil ? "Save Dashboard" : "Edit Dashboard") { editing = true }
                     }
-                }.padding(10)
+                }.buttonStyle(LoopflowButtonStyle()).padding(Spacing.sm)
                 // One line: membership may be incomplete; every reason stays in its help.
                 if let first = plan.resolution.unavailable.first {
                     let more = plan.resolution.unavailable.count - 1
-                    Text(more == 0 ? first : "\(first) (+\(more) more)").foregroundStyle(palette.warning).lineLimit(1)
+                    FailureLine("Some Work did not load.", machine: more == 0 ? first : "\(first) (+\(more) more)")
+                        .lineLimit(1)
                         .help(plan.resolution.unavailable.joined(separator: "\n"))
                         .accessibilityIdentifier("dashboard-unavailable")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, Spacing.sm)
                 }
                 // Working Tasks fill in the shared Task order; a saved Dashboard's
                 // visible occurrences fill in its arrangement order.
@@ -121,14 +134,15 @@ struct DashboardView: View {
                                     ?? plan.contents.first { $0.work == member.work }?.title ?? member.work.id)
                             }.disabled(model.dashboardSaving).help("Show this occurrence again")
                         }
-                    }.font(.caption).padding(8)
+                    }.font(Typography.meta).buttonStyle(LoopflowButtonStyle()).padding(Spacing.sm)
                 }
             } else {
-                ContentUnavailableView("Dashboard unavailable", systemImage: "exclamationmark.triangle",
-                    description: Text("This Dashboard is no longer available."))
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                EmptyState(title: "This dashboard is no longer available") {
+                    Button("Show working Tasks") { model.selectWorkingTasksDashboard() }
+                        .accessibilityIdentifier("dashboard-show-working-tasks")
+                }
             }
-        }.padding(10).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top).background(palette.surfaceMuted)
+        }.padding(Spacing.sm).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top).background(palette.surfaceMuted)
             .sheet(isPresented: $editing) {
                 if let plan = model.selectedViewPlan { DashboardEditor(model: model, plan: plan) }
             }
@@ -158,20 +172,25 @@ struct WaveTiles: View {
     let sessions: SessionsStore
     /// `.wave(id)` or `.repository`.
     let view: WorkNavigation.Board
+    @Environment(\.palette) private var palette
 
     var body: some View {
         if let plan = model.boardPlan(view) {
             let members = model.boardTiles(view)
             if members.isEmpty {
-                Text("No planned or started Tasks").font(Typography.body(15))
-                    .foregroundStyle(.secondary).frame(maxWidth: .infinity, maxHeight: .infinity)
+                HStack(spacing: Spacing.sm) {
+                    Text("No planned or started Tasks.").emptyLine()
+                    Button("New Task ⌘N") { model.navigation.palette = .newTask }
+                        .buttonStyle(LoopflowButtonStyle())
+                }.frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .accessibilityElement(children: .contain)
                     .accessibilityIdentifier("wave-tiles-empty")
             } else {
                 DashboardSlotGrid(members: members, focused: nil, layout: plan.slots,
                                   page: model.page(of: view), pagerKeys: false) { member in
                     DashboardTile(model: model, workspaces: workspaces, sessions: sessions, member: member, plan: plan,
                                   workingTasks: false, focused: false, takesFocus: false)
-                }.padding(8).accessibilityIdentifier("wave-tiles")
+                }.padding(Spacing.sm).accessibilityIdentifier("wave-tiles")
             }
         }
     }
@@ -192,31 +211,59 @@ struct DashboardTile: View {
     @Environment(\.palette) private var palette
     @State private var frame = TileFrame()
 
+    /// Where the Task's workflow stands, in its sentence. It yields only to
+    /// what a program asks, which the row above already prints; a condition's
+    /// reason on the row does not hide it.
+    static func workflow(_ graph: TaskGraph, status: SessionProgramStatus, auto: Bool, setup: String?) -> WorkflowLine? {
+        status.ask == nil ? WorkflowLine(graph: graph, auto: auto, setup: setup, sentenceOnly: true) : nil
+    }
+
     var body: some View {
         let content = plan.contents.first { $0.work == member.work }
         let entry = workspaces.retained(member.work)
         let task = model.task(id: member.work.id)
         // Only a saved Dashboard has an arrangement to write.
         let arrangeable = plan.dashboardID != nil
+        let status = task.map { model.programStatus(task: $0.task.id) } ?? .unknown
         return VStack(spacing: 0) {
-            HStack(spacing: Spacing.sm) {
-                Button { enter() } label: {
-                    if let task { TaskHeading(task: task.task) }
-                    else { Text(content?.title ?? member.work.id).lineLimit(1) }
-                }.buttonStyle(.plain)
-                Spacer(minLength: 0)
-                if let task {
-                    Menu { TaskActionItems(model: model, task: task.task, wave: task.wave?.wave) }
-                        label: { Image(systemName: "ellipsis") }
-                        .menuStyle(.button).buttonStyle(.plain).fixedSize().help("Task actions")
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(alignment: .top, spacing: Spacing.sm) {
+                    if let task {
+                        let id = task.task.id
+                        TaskRow(id: id, presentation: model.taskPresentation(id: id), task: task.task,
+                                status: status, auto: task.task.selectionStates.contains(.auto))
+                            .opening { enter() }
+                    } else {
+                        Button { enter() } label: { Text(content?.title ?? member.work.id).lineLimit(1) }
+                            .buttonStyle(.plain).padding(Spacing.sm)
+                        Spacer(minLength: 0)
+                    }
+                    HStack(spacing: Spacing.sm) {
+                        if let task {
+                            Menu { TaskActionItems(model: model, task: task.task, wave: task.wave?.wave,
+                                                             work: model.taskWork[task.task.id].value) }
+                                label: { Image(systemName: "ellipsis") }
+                                .menuStyle(.button).buttonStyle(.plain).fixedSize().help("Task actions")
+                        }
+                        Button { enter() } label: { Image(systemName: "arrow.up.left.and.arrow.down.right") }
+                            .buttonStyle(.plain).help("Open this Work in full").accessibilityLabel("Open this Work in full")
+                        if arrangeable {
+                            Button { model.setTile(plan, member, hidden: true) } label: { Image(systemName: "eye.slash") }
+                                .buttonStyle(.plain).help("Hide this occurrence").accessibilityLabel("Hide this occurrence")
+                                .disabled(model.dashboardSaving)
+                        }
+                    }
+                    // A narrow tile wraps its title; it never clips its controls.
+                    .foregroundStyle(palette.textSecondary).fixedSize().layoutPriority(1)
+                    .padding([.top, .trailing], Spacing.sm)
                 }
-                Button { enter() } label: { Image(systemName: "arrow.up.left.and.arrow.down.right") }
-                    .help("Open this Work in full")
-                if arrangeable {
-                    Button { model.setTile(plan, member, hidden: true) } label: { Image(systemName: "eye.slash") }
-                        .help("Hide this occurrence").disabled(model.dashboardSaving)
+                if let task, let workflow = model.taskWork[task.task.id].value?.graph,
+                   let line = Self.workflow(workflow, status: status, auto: model.taskExecution[task.task.id].value?.auto?.state == .on,
+                                            setup: task.task.setupPosition) {
+                    line.lineLimit(1).truncationMode(.tail).help(line.sentence ?? workflow.sentence)
+                        .padding(.horizontal, Spacing.md).padding(.bottom, Spacing.sm)
                 }
-            }.padding(8).background(palette.surface)
+            }.background(palette.surface)
                 .foregroundStyle(palette.text, palette.textSecondary)
                 .draggable(workingTasks ? TaskOrderDrag.token(member.work.id) : member.token)
                 .dropDestination(for: String.self) { values, _ in
@@ -228,8 +275,10 @@ struct DashboardTile: View {
                           let other = plan.resolution.members.first(where: { $0.token == value }), other.work != member.work else { return false }
                     Task { await model.reorderDashboard(id, member: other.work, to: member.work) }; return true
                 }
+            // A pane that cannot shrink to a narrow slot overflows here, so the header keeps the slot's width.
+            Group {
             if let entry, let content {
-                if let error = entry.persistenceError { Text(error).foregroundStyle(palette.warning).textSelection(.enabled) }
+                if let error = entry.persistenceError { FailureLine("Layout not saved.", machine: error) }
                 // The plan read in this frame decides; saved planning may still say otherwise.
                 if let task, content.states.contains(.backlog) {
                     TaskStartOffer(model: model, task: task.task)
@@ -248,7 +297,8 @@ struct DashboardTile: View {
                     // Dashboard stays. The zoom control is the way into the Work.
                     ConversationPlaceholder(workspace: entry, model: model, sessions: sessions)
                 }
-            } else { PaneEmptyState(title: "Work unavailable", systemImage: "exclamationmark.triangle") }
+            } else { EmptyState(title: "Work unavailable") }
+            }.frame(minWidth: 0, maxWidth: .infinity, alignment: .topLeading)
         }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             // The slot grid clips each tile at its frame.
             .overlay(RoundedRectangle(cornerRadius: PaneGeometry.cornerRadius)

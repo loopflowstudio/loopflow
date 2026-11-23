@@ -468,8 +468,9 @@ const UPDATE_COMMENT_MUTATION: &str = r#"mutation UpdateComment($id: String!, $b
   }
 }"#;
 
-// `attachmentLinkURL` links a URL and dedupes on it — re-linking the same PR
-// returns the existing attachment rather than duplicating. It accepts `issueId`,
+// `attachmentLinkURL` links a URL once: a URL some issue already has is refused
+// on a 200 with `This URL has already been linked with <issue>.`, not answered
+// with the existing attachment, so a PR links once and updates after. It accepts `issueId`,
 // `url`, and `title`, but not `subtitle` (that lives on `attachmentUpdate`'s
 // input). PR state is carried in the managed comment body and filled onto the
 // attachment as a subtitle by the later `attachmentUpdate`.
@@ -799,7 +800,8 @@ impl LinearClient {
         use request_log::{Exchange, RequestOutcome};
         let unanswered = |outcome, error| (Exchange::unanswered(outcome), Err(error));
         let cooldown = cooldown::Cooldown::for_endpoint(&self.base_url);
-        if let Err(error) = cooldown.check().await {
+        let (_, operation) = request_log::operation(request.query);
+        if let Err(error) = cooldown.check(&operation).await {
             return unanswered(RequestOutcome::Paused, error);
         }
         if !urgent {
@@ -835,7 +837,7 @@ impl LinearClient {
                 return (answered(RequestOutcome::Failed), Err(error));
             }
         };
-        match cooldown.observe(status, &headers, &body).await {
+        match cooldown.observe(&operation, status, &headers, &body).await {
             Ok(()) => (answered(RequestOutcome::Sent), Ok((status, body))),
             Err(error @ LinearError::RateLimited { .. }) => {
                 (answered(RequestOutcome::RateLimited), Err(error))
@@ -1626,7 +1628,11 @@ impl LinearClient {
         Ok(())
     }
 
-    pub(crate) async fn item_attachment_urls(&self, item_id: &str) -> LinearResult<Vec<String>> {
+    /// Every attachment on an issue.
+    pub(crate) async fn item_attachments(
+        &self,
+        item_id: &str,
+    ) -> LinearResult<Vec<IssueAttachment>> {
         #[derive(Deserialize)]
         struct Data {
             issue: Option<Issue>,
@@ -1637,22 +1643,18 @@ impl LinearClient {
         }
         #[derive(Deserialize)]
         struct Attachments {
-            nodes: Vec<Attachment>,
+            nodes: Vec<IssueAttachment>,
             #[serde(rename = "pageInfo")]
             page_info: PageInfo,
         }
-        #[derive(Deserialize)]
-        struct Attachment {
-            url: String,
-        }
         let mut after = None;
-        let mut urls = Vec::new();
+        let mut attachments = Vec::new();
         loop {
             let response: Data = self
                 .graphql(
                     r#"query IssueAttachments($id: String!, $after: String) {
                 issue(id: $id) { attachments(first: 100, after: $after) {
-                    nodes { url } pageInfo { hasNextPage endCursor }
+                    nodes { id url } pageInfo { hasNextPage endCursor }
                 } }
             }"#,
                     json!({ "id": item_id, "after": after }),
@@ -1664,9 +1666,9 @@ impl LinearClient {
                     LinearError::Message(format!("issue {item_id} attachments are unavailable"))
                 })?
                 .attachments;
-            urls.extend(page.nodes.into_iter().map(|node| node.url));
+            attachments.extend(page.nodes);
             if !page.page_info.has_next_page {
-                return Ok(urls);
+                return Ok(attachments);
             }
             let cursor = page.page_info.end_cursor.ok_or_else(|| {
                 LinearError::Message("attachment pagination omitted its continuation".into())
@@ -1836,6 +1838,13 @@ fn planning_response(payload: &Value, project: bool, id: &str) -> LinearResult<P
 struct GraphqlRequest<'a> {
     query: &'a str,
     variables: Value,
+}
+
+/// One attachment on an issue.
+#[derive(Debug, Deserialize)]
+pub(crate) struct IssueAttachment {
+    pub id: String,
+    pub url: String,
 }
 
 #[derive(Deserialize)]

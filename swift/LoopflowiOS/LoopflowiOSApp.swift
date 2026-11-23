@@ -54,5 +54,8 @@ final class MobileSceneDelegate: UIResponder, UIWindowSceneDelegate {
 
 private struct MobileRoot: View {
     let activity: SceneActivity
-    var body: some View { MachineConnectionView().environment(\.scenePhase, activity.phase) }
+    var body: some View {
+        MachineConnectionView()
+            .environment(\.scenePhase, activity.phase)
+    }
 }

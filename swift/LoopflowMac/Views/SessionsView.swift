@@ -54,6 +54,7 @@ struct ConsoleCommands: Commands {
 
             action("toggle-shell")
             action("toggle-browser")
+            action("details")
             action("page-back")
             action("page-forward")
             action("reload")
@@ -67,7 +68,8 @@ struct ConsoleCommands: Commands {
             let bindings: [DesktopKeyBinding?] = action.keys.isEmpty ? [nil] : action.keys
             ForEach(Array(bindings.enumerated()), id: \.offset) { _, binding in
                 let args = binding?.args ?? [:]
-                let title = args["index"].map { "Task \($0)" } ?? args["direction"]?.capitalized ?? action.title
+                let title = args["index"].map { "Task \($0)" } ?? args["direction"]?.capitalized
+                    ?? args["page"]?.capitalized ?? action.title
                 let button = Button(title) {
                     guard let actions else { return }
                     do { try action.perform(actions.context().with(args: args)) } catch { actions.failed(error) }
@@ -116,7 +118,12 @@ final class SessionsWorkspace {
     /// no Session yet. Repository and Wave primaries always do; a Task does while it works.
     var opensConversationAutomatically: Bool
     private var didPrepareTaskPanes = false
-    var lastVisit = Date.distantPast
+    private let opensUnvisitedWork: Bool
+    private(set) var lastVisit = Date.distantPast
+    var canOpenTerminals: Bool { opensUnvisitedWork || lastVisit != .distantPast }
+
+    func visit() { lastVisit = Date() }
+
     var conversationClosed = false
     var requiresLocationValidation = false
     var onConversationClosed: (() -> Void)?
@@ -181,6 +188,7 @@ final class SessionsWorkspace {
                 throw RegistryQueryError("Reopen the remote Task before adding a shell; its location is unavailable.")
             }
         }
+        visit()
         return multiplexer.newShell(command: command ?? [], location: location, execution: execution, focus: focus)
     }
 
@@ -277,7 +285,7 @@ final class SessionsWorkspace {
            case .recorded(let recorded, let checkout) = observed.location, checkout == identity.worktree {
             task = recorded
         } else { task = key.id }
-        return [try LocalWaveAgentLauncher.controlLfPath(), "--machine", identity.machineId,
+        return [try LocalWaveAgentLauncher.machineLf().path, "--machine", identity.machineId,
          "--repo-id", key.repository, "desktop", "shell", task,
          "--checkout", identity.worktree, "--id", tab.id]
     }
@@ -415,7 +423,9 @@ final class SessionsWorkspace {
         return store
     }
 
-    init(key: WorkWorkspaceKey, title: String, location: WorkspaceIdentity?, localMachineId: String?, surfaces: GhosttySurfacePool = GhosttySurfacePool()) {
+    init(key: WorkWorkspaceKey, title: String, location: WorkspaceIdentity?, localMachineId: String?,
+         surfaces: GhosttySurfacePool = GhosttySurfacePool(), opensUnvisitedWork: Bool = true) {
+        self.opensUnvisitedWork = opensUnvisitedWork
         self.key = key
         self.title = title
         self.location = location
@@ -467,6 +477,7 @@ final class SessionsWorkspaceRegistry {
     /// cross-repository bound just evicted.
     private var releasedTasks: Set<WorkWorkspaceKey> = []
     private var warmPersistenceKey: String?
+    private let opensUnvisitedWork: Bool
     private var quitting = false
     private var openings: [WorkWorkspaceKey: Task<Void, Never>] = [:]
     private var sessions: SessionsStore?
@@ -496,7 +507,9 @@ final class SessionsWorkspaceRegistry {
 
     /// `runtime` lets prepared Sessions start their terminals before a pane shows
     /// them; a registry without one retains and shows but never launches.
-    init(localMachineId: String? = nil, runtime: GhosttyManager? = nil) {
+    init(localMachineId: String? = nil, runtime: GhosttyManager? = nil,
+         opensUnvisitedWork: Bool = Bundle.main.bundleIdentifier?.hasSuffix(".dev") != true) {
+        self.opensUnvisitedWork = opensUnvisitedWork
         self.localMachineId = localMachineId
         surfaces = GhosttySurfacePool(runtime: runtime)
     }
@@ -576,7 +589,7 @@ final class SessionsWorkspaceRegistry {
                     if let id = pane.sessionId { sessions?.release(id) }
                 }
             }
-            workspace.present(retained && !workspace.conversationClosed && !workspace.requiresLocationValidation)
+            workspace.present(workspace.canOpenTerminals && retained && !workspace.conversationClosed && !workspace.requiresLocationValidation)
         }
         saveWarmIntent()
         onWarmthChanged?()
@@ -598,7 +611,7 @@ final class SessionsWorkspaceRegistry {
         for key in visibleWork.filter({ $0.kind == .task }) + warmPrimaries + recentTasks where !keys.contains(key) {
             keys.append(key)
         }
-        return keys
+        return keys.filter { workspaces[$0]?.canOpenTerminals == true }
     }
 
     func openWarmConversations(store: SessionsStore) {
@@ -630,6 +643,7 @@ final class SessionsWorkspaceRegistry {
     func openConversation(in workspace: SessionsWorkspace, store: SessionsStore) async {
         let key = workspace.key
         guard openings[key] == nil, !workspace.openingConversation else { return }
+        workspace.visit()
         sessions = store
         if workspace.conversationClosed {
             closedConversations.remove(key)
@@ -809,8 +823,8 @@ final class SessionsWorkspaceRegistry {
         presentationClosed = false
         if selectedWork != key { surfaces.clearFocus() }
         selectedWork = key
-        workspaces[key]?.lastVisit = Date()
         if let terminal = workspaces[key]?.multiplexer.sessionPane?.terminal { surfaces.scrollToBottom(terminal) }
+        if deliberate || opensUnvisitedWork { workspaces[key]?.visit() }
         if deliberate { closedConversations.remove(key) }
         if deliberate, let workspace = workspaces[key], workspace.conversationClosed {
             workspace.conversationClosed = false
@@ -912,7 +926,7 @@ final class SessionsWorkspaceRegistry {
             revealSession(record, in: target)
             target.presentation.selectedSessionId = record.id
             target.presentation.content = .terminals
-            if selectedWork == sourceKey, source.presentation.selectedSessionId == record.id {
+            if source.canOpenTerminals, selectedWork == sourceKey, source.presentation.selectedSessionId == record.id {
                 selection = destination.reference
             }
             source.presentation.selectedSessionId = nil
@@ -986,7 +1000,7 @@ final class SessionsWorkspaceRegistry {
             return existing
         }
         let workspace = SessionsWorkspace(key: key, title: title, location: location,
-            localMachineId: localMachineId, surfaces: surfaces)
+            localMachineId: localMachineId, surfaces: surfaces, opensUnvisitedWork: opensUnvisitedWork)
         workspace.conversationClosed = closedConversations.contains(key)
         workspace.onConversationClosed = { [weak self, weak workspace] in
             guard let workspace else { return }
@@ -1423,7 +1437,7 @@ struct SessionsView: View {
                         WorkNavigator(model: model, onOpenSession: { _ in })
                     }
                     if let error = workspaces.machineError ?? repositoryError {
-                        ContentUnavailableView("Workspace unavailable", systemImage: "folder", description: Text(error))
+                        RepositoryDidNotOpen(error: error) { Task { await readMachine() } }
                             .task(id: taskPage) {
                                 if let request = taskPage { model.finishTaskPage(request, error: error) }
                             }
@@ -1433,15 +1447,20 @@ struct SessionsView: View {
                 }
             }
         }
-        .task {
-            await workspaces.refreshMachine(query: query)
-            if repository == nil {
-                do { resolvedRepository = try await query.repositoryIdentity(cwd: repoPath).id }
-                catch { repositoryError = error.localizedDescription }
-            }
-            if let home = workspaces.localMachineId, workspaces.machineError == nil { model.confirmMachine(home) }
-        }
+        .task { await readMachine() }
         .answeringLostLines(model)
+    }
+
+    /// The Machine and repository this window stands on; Retry reads them again.
+    private func readMachine() async {
+        await workspaces.refreshMachine(query: query)
+        if repository == nil {
+            do {
+                resolvedRepository = try await query.repositoryIdentity(cwd: repoPath).id
+                repositoryError = nil
+            } catch { repositoryError = error.localizedDescription }
+        }
+        if let home = workspaces.localMachineId, workspaces.machineError == nil { model.confirmMachine(home) }
     }
 }
 
@@ -1563,8 +1582,7 @@ struct SessionsContentView: View {
                 .accessibilityIdentifier("work-layout")
                 .transition(.zoom(from: navigation.zoomOrigin))
             } else {
-                ContentUnavailableView("No Work open", systemImage: "rectangle.on.rectangle",
-                    description: Text("Open a repository, Wave or Task from the sidebar."))
+                ChooseWork()
             }
         }
         .coordinateSpace(.named(ZoomFromTile.space))
@@ -1585,10 +1603,9 @@ struct SessionsContentView: View {
                 VStack(spacing: 0) {
                     // The main pane alone: the sidebar stays put when a Task opens.
                     if let task = model.breadcrumb?.task?.task {
-                        TaskWorkflowBar(model: model, task: task, work: model.taskWork[task.id])
-                    }
-                    if let transition = model.visibleSessions.first(where: { $0.id == navigation.selectedSessionId })?.transition {
-                        ProviderTransitionRow(transition: transition)
+                        TaskWorkflowBar(model: model, task: task, work: model.taskWork[task.id],
+                            newConversation: { model.newTaskSession(task.id, open: newTaskSession) },
+                            openSession: openSession)
                     }
                     mainPane
                 }
@@ -1610,12 +1627,13 @@ struct SessionsContentView: View {
         }
         .popover(isPresented: Binding(get: { actionTaskID != nil }, set: { if !$0 { actionTaskID = nil } })) {
             if let id = actionTaskID, let found = model.task(id: id) {
-                VStack(alignment: .leading, spacing: 10) {
+                VStack(alignment: .leading, spacing: Spacing.sm) {
                     TaskActionItems(model: model, task: found.task, wave: found.wave?.wave,
+                        work: model.taskWork[id].value,
                         newConversation: {
                             model.newTaskSession(id, open: newTaskSession)
                         }, openSession: openSession)
-                }.padding(12).onExitCommand { actionTaskID = nil }
+                }.padding(Spacing.md).onExitCommand { actionTaskID = nil }
             }
         }
         .overlay {
@@ -1636,7 +1654,7 @@ struct SessionsContentView: View {
         )) {
             switch navigation.palette {
             case .workflow(let name):
-                WorkflowCatalogInspector(entry: model.workflowCatalog.value?.first { $0.name == name }, model: model)
+                WorkflowCatalogInspector(entry: model.graphCatalog.value?.first { $0.name == name }, model: model)
             case .graph(let name):
                 GraphCatalogInspector(entry: model.graphCatalog.value?.first { $0.name == name }, navigation: navigation, model: model)
             case .search:
@@ -1652,6 +1670,7 @@ struct SessionsContentView: View {
         .sheet(item: $model.projectsWave) { wave in
             WaveProjectsView(wave: wave.name, repo: wave.repo, sourceReference: model.projectsReference)
         }
+        .modifier(TaskAbandonConfirmation(model: model))
         .sheet(isPresented: Binding(
             get: { navigation.renaming != nil || navigation.binding != nil },
             set: { if !$0 { model.cancelSessionRename(); model.cancelSessionBinding() } }
@@ -1684,7 +1703,7 @@ struct SessionsContentView: View {
     }
 
     private func focusPane(_ pane: String, session: String?, in workspace: SessionsWorkspace) {
-        if currentKey != workspace.key { model.select(workspace.key.reference) }
+        if currentKey != workspace.key || !workspace.canOpenTerminals { model.select(workspace.key.reference) }
         workspace.multiplexer.setFocusedPane(pane)
         // Companion shells retain the current conversation context.
         guard let session, navigation.selectedSessionId != session else { return }
@@ -1702,10 +1721,9 @@ struct SessionsContentView: View {
         return VStack(spacing: 0) {
             if entry.isRestoringIntent { ProgressView("Restoring workspace") }
             if let error = entry.persistenceError {
-                HStack {
-                    Text("Layout not saved: " + error).foregroundStyle(palette.warning).textSelection(.enabled)
+                FailureLine("Layout not saved.", machine: error) {
                     Button("Reload saved intent") { Task { await entry.loadPaneIntent() } }
-                }.padding(8)
+                }.padding(Spacing.sm)
             }
             if terminals, let task, active {
                 missingCheckout
@@ -1728,6 +1746,8 @@ struct SessionsContentView: View {
                         if navigation.showsActivity { WorkActivityView(model: model).frame(minWidth: 230, maxWidth: 360) }
                     }
                 }
+            } else if active, navigation.waveView == .repository, model.repositoryIsEmpty(entry) {
+                NoPlannedWork(model: model) { Task { await model.openConversation(in: entry, store: store) } }
             } else if key.kind != .task, active, let view = navigation.waveView {
                 // A Wave view, the repository page included: the conversation and the
                 // backlog share the top band; the Tasks run along the bottom.
@@ -1747,7 +1767,7 @@ struct SessionsContentView: View {
                     if navigation.showsActivity { WorkActivityView(model: model).frame(minWidth: 230, maxWidth: 360) }
                 }
             } else {
-                Button("Open \(entry.title)") { model.select(key.reference) }
+                Button("Open \(entry.title)") { model.select(key.reference) }.buttonStyle(LoopflowButtonStyle())
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
@@ -1760,18 +1780,18 @@ struct SessionsContentView: View {
         }
     }
 
-    /// A workspace's panes, with a retry when its conversation failed to open.
+    /// A workspace's panes, with a retry above them when its conversation
+    /// failed to open and no pane says so itself.
     private func conversationPanes(_ key: WorkWorkspaceKey, _ entry: SessionsWorkspace, isFocused: Bool) -> some View {
         WorkspacePanesView(workspace: entry, isFocused: isFocused, sessions: store, model: model,
             onFocus: { pane, session in focusPane(pane, session: session, in: entry) })
             .equatable()
             .overlay(alignment: .top) {
-                if let error = entry.conversationError {
-                    HStack {
-                        Text(error).textSelection(.enabled)
+                if let error = entry.conversationError,
+                   !ConversationPlaceholder.namesFailure(in: entry, model: model, sessions: store) {
+                    FailureLine("The conversation did not open.", machine: error) {
                         Button("Retry") { Task { await model.openConversation(in: entry, store: store) } }
-                    }.foregroundStyle(theme.palette.text)
-                        .padding(8).background(theme.terminal.background.color)
+                    }.padding(Spacing.sm).background(theme.terminal.background.color)
                 }
             }
     }
@@ -1785,12 +1805,12 @@ struct SessionsContentView: View {
                     Text("Recorded checkout is missing. This Task is \(task.task.lifecycle.label); it cannot be restored.")
                 } else {
                     Text("Recorded checkout is missing")
-                    Button("Restore checkout") { prepareTaskWorkspace() }
+                    Button("Restore checkout") { prepareTaskWorkspace() }.buttonStyle(LoopflowButtonStyle())
                 }
                 Spacer()
             }
             .font(Typography.meta).foregroundStyle(palette.textSecondary)
-            .padding(.horizontal, 14).padding(.vertical, 6)
+            .padding(.horizontal, Spacing.md).padding(.vertical, Spacing.xs)
             .accessibilityIdentifier("work-missing-checkout")
         }
     }
@@ -1857,10 +1877,11 @@ struct SessionsContentView: View {
             origin.preparedTaskWorktrees[taskId] = checkout
         }
         // The captured entry receives a late preparation reply without changing selection.
-        let lf = try LocalWaveAgentLauncher.controlLfPath()
+        let lf = try LocalWaveAgentLauncher.machineLf().path
         guard checkout.machineId == machineId else { throw RegistryQueryError("Open a conversation on its owning Machine") }
         entry.presentation.content = .terminals
         entry.location = checkout
+        entry.visit()
         if let pane = entry.multiplexer.newShell(command: TaskConversationLaunch(task: issue).arguments(lf: lf), location: checkout),
            let tab = pane.content.selectedShell {
             Perf.retarget(.newConversation, from: taskId, to: tab.id, owner: origin.performanceOwner)
@@ -2088,18 +2109,5 @@ private extension WorkPaneIntent {
         case .shell: .shell
         case .browser: .browser
         }
-    }
-}
-
-struct ProviderTransitionRow: View {
-    let transition: ProviderTransition
-    var body: some View {
-        Text(transition.explanation)
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 4)
-            .help("Observed at " + Date(timeIntervalSince1970: TimeInterval(transition.observedAt)).formatted())
     }
 }

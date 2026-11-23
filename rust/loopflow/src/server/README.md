@@ -383,7 +383,7 @@ case names one operation, including distinct claim/unassign and pin/unpin writes
 | `task.detail` | `lf task detail <issue>` | read |
 | `task.list` (`closed: true`) | `lf task list --closed --wave <wave>` | read |
 | `task.changes` | `lf task changes <issue>` | read |
-| `task.diff`, `task.file` | `lf task diff`, `lf task file` | read |
+| `task.diff`, `task.file`, `task.files` | `lf task diff`, `lf task file`, `lf task files` | read |
 | `task.context` | `lf task context <issue>` | read |
 | `task.runs` | `lf task runs <issue>` | read |
 | `task.wait` | `lf task wait <issue> --until <state>` | `engine::task` |
@@ -431,7 +431,7 @@ case names one operation, including distinct claim/unassign and pin/unpin writes
 | `work.resolve` | `lf open <url> --link`; a `work` noun would shadow the builtin `work` skill | read |
 | `config.catalog`, `.settings`, `.get`, `.explain` | `lf config catalog`, `lf config settings`, `lf config get`, `lf config explain` | `engine::config` |
 | `config.set`, `.unset` | `lf config set`, `lf config unset` (`lf set`, `lf unset`) | `engine::config` |
-| `config.theme` | none; Appearance's theme file | `engine::config` |
+| `config.theme` | none; the Machine's `theme:`, read by Desktop and the phone | `engine::config` |
 | `pr.publish`, `.open`, `.submit`, `.arm`, `.abandon`, `.reconcile`, `.request_review` | `lf pr publish`, `lf pr open`, `lf pr submit`, `lf pr arm`, `lf pr abandon`, `lf pr reconcile`, `lf pr request-review` | write; `engine::pr::publish`, `open`, `submit`, `arm`, `abandon`, `reconcile`, `request_review` |
 | `pr.land` | `lf pr land` (`lf land`) | write; `engine::pr::land` (detached; the Process carrying the landing) |
 | `pr.checks`, `.reviews` | `lf pr checks`, `lf pr reviews` | read; `engine::pr::checks` (no `--subscribe`), `reviews` |
@@ -467,8 +467,8 @@ the phone's `view.select` Task list and its creation destinations all read it.
   step}` resolves them with their sources, and `config.get`, `config.set
   {value}`, `config.unset` and `config.explain` take `{destination, key}`, where
   a destination names an owner (`personal_global`, `shared_repo {repo}`,
-  …), never a file plus a scope. `config.theme {path, value}` is Appearance's
-  theme file. A failed or uncertain save is never replayed; setting values are
+  …), never a file plus a scope. `config.theme {value}` reads or sets the
+  serving Machine's `theme:`. A failed or uncertain save is never replayed; setting values are
   omitted from request telemetry.
 - A read uses the existing `Read` shape and answers with the JSON the command
   prints, serialized once. A command that prints bare text

@@ -15,18 +15,18 @@ struct WaveProjectsView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.lg) {
             HStack {
-                Text("\(wave) · Projects").font(.headline)
+                Text("\(wave) · Projects").font(Typography.textStrong)
                 Spacer()
-                Button("Done") { dismiss() }
+                Button("Done") { dismiss() }.buttonStyle(LoopflowButtonStyle())
             }
             switch projects {
             case nil:
                 ProgressView("Reading Projects…")
             case .unavailable(let reason):
-                Text(reason).foregroundStyle(palette.warning)
+                FailureLine("Projects did not load.", machine: reason)
             case .available(let entries, let truncated):
                 if entries.isEmpty && !truncated {
-                    Text("No Projects in this Wave.")
+                    Text("No Projects in this Wave.").emptyLine()
                 } else {
                     ScrollViewReader { proxy in
                         ScrollView {
@@ -47,7 +47,7 @@ struct WaveProjectsView: View {
                 }
             }
         }
-        .padding(24).frame(minWidth: 500, minHeight: 420, alignment: .topLeading)
+        .padding(Spacing.xxl).frame(minWidth: 500, minHeight: 420, alignment: .topLeading)
         .task {
             do {
                 projects = try await RegistryQueryLocal.shared.status(wave: wave, cwd: repo).projects

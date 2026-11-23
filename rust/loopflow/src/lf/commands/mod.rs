@@ -8,6 +8,7 @@ pub mod context;
 pub mod context_cost;
 pub mod desktop;
 pub mod discord;
+pub mod docs;
 pub mod doctor;
 pub mod graph;
 pub mod graph_inventory;

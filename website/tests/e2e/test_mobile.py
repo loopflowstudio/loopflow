@@ -34,8 +34,8 @@ class TestMobileNavNoOverlap:
         page.goto(base_url)
         page.wait_for_load_state("networkidle")
 
-        nav_title = page.locator(".home-page .brand")
-        nav_links = page.locator(".home-page nav")
+        nav_title = page.locator(".site-header .brand")
+        nav_links = page.locator(".site-header nav")
 
         title_box = nav_title.bounding_box()
         links_box = nav_links.bounding_box()
@@ -51,7 +51,7 @@ class TestMobileNavNoOverlap:
 
     def test_nav_fits_in_viewport(self, mobile_page: Page):
         """Nav should not cause horizontal scroll."""
-        nav = mobile_page.locator("nav")
+        nav = mobile_page.locator(".site-header nav")
         nav_box = nav.bounding_box()
         viewport = mobile_page.viewport_size
 
@@ -171,7 +171,7 @@ class TestMobileTouchTargets:
 
     def test_nav_links_touch_target_size(self, mobile_page: Page):
         """Nav links should have adequate touch targets."""
-        links = mobile_page.locator(".home-page nav a")
+        links = mobile_page.locator(".site-header nav a")
         count = links.count()
 
         for i in range(count):

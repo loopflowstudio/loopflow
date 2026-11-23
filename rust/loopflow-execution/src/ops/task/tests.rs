@@ -866,7 +866,7 @@ fn task_checkout_machine_survives_without_lifecycle_reconciliation() {
                 &fixture.task.id.as_str()[..9],
                 fixture.task.tracker_id.as_ref().unwrap().as_str(),
             ] {
-                let file = super::task_file(issue, "scratch/note.md", false).unwrap();
+                let file = super::task_file(issue, "scratch/note.md", None, false).unwrap();
                 assert_eq!(file.content.as_deref(), Some("local note\n"));
                 let changes = super::task_changes(issue, "parent", None).unwrap();
                 assert_eq!(changes.base_commit, pr.base_commit);
@@ -875,7 +875,7 @@ fn task_checkout_machine_survives_without_lifecycle_reconciliation() {
                     super::task_diff(issue, Some("scratch/note.md"), "head", None, None).unwrap();
                 assert!(diff.patch.contains("+local note"));
             }
-            let file = super::task_file("FILES-1", "scratch/note.md", false).unwrap();
+            let file = super::task_file("FILES-1", "scratch/note.md", None, false).unwrap();
             let saved = super::file_save::task_save(
                 "FILES-1",
                 "scratch/note.md",
@@ -911,7 +911,7 @@ fn task_checkout_machine_survives_without_lifecycle_reconciliation() {
             graphql_url: "http://127.0.0.1:1".into(),
         },
         || {
-            let file = super::task_file("FILES-1", "scratch/note.md", false).unwrap();
+            let file = super::task_file("FILES-1", "scratch/note.md", None, false).unwrap();
             let saved = super::task_save(
                 "FILES-1",
                 "scratch/note.md",
@@ -977,7 +977,7 @@ fn task_without_a_local_checkout_never_reads_a_local_path() {
         },
         || {
             let expected = "not checked out on this Machine";
-            assert!(super::task_file("LOCATION-1", "note.md", false)
+            assert!(super::task_file("LOCATION-1", "note.md", None, false)
                 .unwrap_err()
                 .to_string()
                 .contains(expected));
@@ -1004,6 +1004,165 @@ fn task_without_a_local_checkout_never_reads_a_local_path() {
         std::fs::read_to_string(repo.path().join("note.md")).unwrap(),
         "local file"
     );
+}
+
+#[test]
+fn task_changes_offer_first_parent_commits_without_merges() {
+    let repo = tempfile::tempdir().unwrap();
+    let git = |args: &[&str]| {
+        super::git_output(repo.path(), args)
+            .unwrap()
+            .trim()
+            .to_string()
+    };
+    let commit = |file: &str, subject: &str| {
+        std::fs::write(repo.path().join(file), subject).unwrap();
+        git(&["add", "."]);
+        git(&["commit", "-qm", subject]);
+        git(&["rev-parse", "HEAD"])
+    };
+    git(&["init", "-q", "-b", "main"]);
+    git(&["config", "user.name", "Test"]);
+    git(&["config", "user.email", "test@example.com"]);
+    let base = commit("base.txt", "base");
+    git(&["checkout", "-qb", "task"]);
+    let before = commit("task.txt", "lf implement: before");
+    git(&["checkout", "-q", "main"]);
+    commit("main.txt", "main moves on");
+    git(&["checkout", "-q", "task"]);
+    git(&["merge", "-q", "--no-edit", "main"]);
+    let merge = git(&["rev-parse", "HEAD"]);
+    let after = commit("task.txt", "lf implement: after");
+    let id = TaskId::new();
+    let changes = super::snapshot::changes_snapshot(super::TaskComparison {
+        checkout: super::TaskWorkspace {
+            issue_identifier: "TEST-1",
+            task_id: &id,
+            worktree: repo.path(),
+        },
+        base_commit: &base,
+        head_commit: None,
+    })
+    .unwrap();
+    // Neither the merge nor main's commit is offered; the commit after the
+    // merge compares against the merge, so it cannot fold into `before`.
+    assert_eq!(
+        changes.commits,
+        [
+            super::TaskCommit {
+                sha: before,
+                parent: base,
+                subject: "lf implement: before".to_string()
+            },
+            super::TaskCommit {
+                sha: after,
+                parent: merge,
+                subject: "lf implement: after".to_string()
+            },
+        ]
+    );
+}
+
+#[test]
+fn task_changes_count_each_files_stops_before_any_patch_is_read() {
+    let repo = tempfile::tempdir().unwrap();
+    let git = |args: &[&str]| {
+        super::git_output(repo.path(), args)
+            .unwrap()
+            .trim()
+            .to_string()
+    };
+    let lines = |numbers: &[&str]| numbers.join("\n") + "\n";
+    git(&["init", "-q", "-b", "main"]);
+    git(&["config", "user.name", "Test"]);
+    git(&["config", "user.email", "test@example.com"]);
+    let file = |name: &str, content: &str| std::fs::write(repo.path().join(name), content).unwrap();
+    let ten = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"];
+    file("edited.txt", &lines(&ten));
+    file("with space.txt", &lines(&ten));
+    file("old name.txt", &lines(&ten));
+    file("removed.txt", &lines(&["a", "b"]));
+    git(&["add", "."]);
+    git(&["commit", "-qm", "base"]);
+    let base = git(&["rev-parse", "HEAD"]);
+    // Two runs: the first line, and the last line replaced with one added.
+    file(
+        "edited.txt",
+        &lines(&[
+            "one", "2", "3", "4", "5", "6", "7", "8", "9", "ten", "eleven",
+        ]),
+    );
+    file(
+        "with space.txt",
+        &lines(&["1", "2", "3", "4", "five", "6", "7", "8", "9", "10"]),
+    );
+    git(&["mv", "old name.txt", "renamed.txt"]);
+    git(&["rm", "-q", "removed.txt"]);
+    file("binary.bin", "\0\u{1}\u{2}");
+    git(&["add", "binary.bin"]);
+    file("new.txt", &lines(&["a", "b", "c"]));
+    file("empty.txt", "");
+    let id = TaskId::new();
+    let changes = super::snapshot::changes_snapshot(super::TaskComparison {
+        checkout: super::TaskWorkspace {
+            issue_identifier: "TEST-1",
+            task_id: &id,
+            worktree: repo.path(),
+        },
+        base_commit: &base,
+        head_commit: None,
+    })
+    .unwrap();
+    let counts = changes
+        .files
+        .iter()
+        .map(|file| (file.path.as_str(), file.changes))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    assert_eq!(
+        counts,
+        std::collections::BTreeMap::from([
+            ("binary.bin", 0),
+            ("edited.txt", 2),
+            ("empty.txt", 0),
+            ("new.txt", 1),
+            ("removed.txt", 1),
+            ("renamed.txt", 0),
+            ("with space.txt", 1),
+        ])
+    );
+    // The Diff's patch holds the same stops; Swift parses the checked-in copy.
+    let diff = super::snapshot::diff_snapshot(
+        super::TaskComparison {
+            checkout: super::TaskWorkspace {
+                issue_identifier: "TEST-1",
+                task_id: &id,
+                worktree: repo.path(),
+            },
+            base_commit: &base,
+            head_commit: None,
+        },
+        None,
+    )
+    .unwrap();
+    let nonzero = counts
+        .iter()
+        .filter(|(_, count)| **count > 0)
+        .map(|(path, count)| (path.to_string(), *count))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    assert_eq!(
+        super::snapshot::count_changes(diff.patch.as_bytes()),
+        nonzero
+    );
+    let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/fixtures/review/change_counts.patch");
+    assert_eq!(
+        super::snapshot::count_changes(&std::fs::read(fixture).unwrap()),
+        nonzero
+    );
+    let adjacent =
+        b"diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -1,2 +1,2 @@\n+new\n-old\n+again\n-more\n";
+    // A removal right after additions starts a new stop, as the Diff reads it.
+    assert_eq!(super::snapshot::count_changes(adjacent)["x"], 3);
 }
 
 #[test]
@@ -1073,6 +1232,14 @@ fn task_files_compare_net_parent_head_and_revisioned_drafts() {
         ..workspace
     };
     let committed_files = super::snapshot::changes_snapshot(committed).unwrap();
+    assert_eq!(
+        committed_files.commits,
+        [super::TaskCommit {
+            sha: head.clone(),
+            parent: parent.clone(),
+            subject: "fixture".to_string()
+        }]
+    );
     assert!(committed_files
         .files
         .iter()
@@ -1157,6 +1324,78 @@ fn task_files_compare_net_parent_head_and_revisioned_drafts() {
         );
         assert!(super::file_snapshot(workspace.checkout, "scratch/link/private").is_err());
     }
+}
+
+#[test]
+fn task_files_read_committed_versions_and_carry_binary_bytes() {
+    use base64::Engine as _;
+    let repo = tempfile::tempdir().unwrap();
+    let git = |args: &[&str]| {
+        super::git_output(repo.path(), args)
+            .unwrap()
+            .trim()
+            .to_string()
+    };
+    git(&["init", "-q", "-b", "main"]);
+    let image = [b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".as_slice(), &[7; 1_500_000]].concat();
+    std::fs::write(repo.path().join("notes.md"), "first\n").unwrap();
+    std::fs::write(repo.path().join("image.png"), &image).unwrap();
+    git(&["add", "."]);
+    git(&[
+        "-c",
+        "user.name=Test",
+        "-c",
+        "user.email=test@example.com",
+        "commit",
+        "-qm",
+        "fixture",
+    ]);
+    let parent = git(&["rev-parse", "HEAD"]);
+    std::fs::write(repo.path().join("notes.md"), "second\n").unwrap();
+    std::fs::remove_file(repo.path().join("image.png")).unwrap();
+    let id = TaskId::new();
+    let workspace = super::TaskWorkspace {
+        issue_identifier: "TEST-1",
+        task_id: &id,
+        worktree: repo.path(),
+    };
+
+    let old = super::snapshot::committed_file_snapshot(workspace, &parent, "notes.md").unwrap();
+    assert_eq!(old.content.as_deref(), Some("first\n"));
+    assert_eq!(old.state, super::TaskFileState::Text);
+    assert_eq!(
+        old.read_only_reason.as_deref(),
+        Some("A committed version is read-only.")
+    );
+    let current = super::file_snapshot(workspace, "notes.md").unwrap();
+    assert_eq!(current.content.as_deref(), Some("second\n"));
+    assert!(current.read_only_reason.is_none());
+
+    // A binary file past the 1 MB text limit still carries its bytes, at a commit and on disk.
+    let committed =
+        super::snapshot::committed_file_snapshot(workspace, &parent, "image.png").unwrap();
+    assert_eq!(committed.state, super::TaskFileState::Binary);
+    assert_eq!(committed.size_bytes, image.len() as u64);
+    let decoded = base64::engine::general_purpose::STANDARD
+        .decode(committed.data.unwrap())
+        .unwrap();
+    assert_eq!(decoded, image);
+    assert_eq!(
+        super::file_snapshot(workspace, "image.png").unwrap().state,
+        super::TaskFileState::Missing
+    );
+    std::fs::write(repo.path().join("image.png"), &image).unwrap();
+    let on_disk = super::file_snapshot(workspace, "image.png").unwrap();
+    assert_eq!(on_disk.state, super::TaskFileState::Binary);
+    assert_eq!(
+        on_disk.data,
+        Some(base64::engine::general_purpose::STANDARD.encode(&image))
+    );
+
+    let absent = super::snapshot::committed_file_snapshot(workspace, &parent, "new.md").unwrap();
+    assert_eq!(absent.state, super::TaskFileState::Missing);
+    assert!(absent.data.is_none());
+    assert!(super::snapshot::committed_file_snapshot(workspace, &parent, "../outside").is_err());
 }
 
 #[tokio::test]

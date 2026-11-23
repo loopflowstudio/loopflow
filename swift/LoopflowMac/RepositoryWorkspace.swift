@@ -10,7 +10,7 @@ import OSLog
 struct RepositoryWorkspace: Codable, Hashable, Sendable {
     let id: String
     let path: String
-    /// The home directory of the Machine, copy or world this window was opened on.
+    /// The home directory of the Machine this window was opened on.
     /// A window saved before windows named their Machine has none.
     let machine: String?
 

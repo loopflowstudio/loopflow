@@ -10,12 +10,14 @@ import GhosttyKit
 
 extension ThemePaths {
     /// A private `~/.lf` and Ghostty theme folder for one test.
-    static func temporary() -> Self {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent("loo488-\(UUID().uuidString)", isDirectory: true)
-        return Self(config: root.appendingPathComponent("lf/config.yaml"),
-                    themes: root.appendingPathComponent("lf/themes", isDirectory: true),
-                    ghostty: root.appendingPathComponent("ghostty/themes", isDirectory: true))
+    static func temporary(root: URL = FileManager.default.temporaryDirectory
+        .appendingPathComponent("loo488-\(UUID().uuidString)", isDirectory: true)) -> Self {
+        Self(themes: root.appendingPathComponent("themes", isDirectory: true),
+             ghostty: root.appendingPathComponent("ghostty/themes", isDirectory: true))
     }
+
+    /// The test server's `config.yaml`, beside `themes` in its `LF_HOME`.
+    var config: URL { themes.deletingLastPathComponent().appendingPathComponent("config.yaml") }
 
     func write(_ text: String, theme name: String, ghostty: Bool = false) throws {
         let directory = ghostty ? self.ghostty! : themes
@@ -31,14 +33,21 @@ extension ThemePaths {
     }
 }
 
+/// The server's `theme:` text, as `config.theme` answers it.
+func savedTheme(_ location: ServerLocation) async throws -> String? {
+    let answer = try await ServerClient.configuration(.configTheme(value: nil), location: location)
+    return try JSONDecoder().decode(ConfigurationFileValue.self, from: answer).text
+}
+
+/// A server whose `LF_HOME` holds the test's theme files and `config.yaml`.
 @MainActor
-func withThemeServer(_ run: @MainActor (ServerLocation) async throws -> Void) async throws {
+func withThemeServer(_ run: @MainActor (ServerLocation, ThemePaths) async throws -> Void) async throws {
     let root = FileManager.default.temporaryDirectory.appendingPathComponent("theme-server-\(UUID().uuidString)")
     try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
     defer { try? FileManager.default.removeItem(at: root) }
     let server = LocalServerFixture(try BuiltLf(home: root))
     do {
-        try await run(server.location())
+        try await run(server.location(), ThemePaths.temporary(root: root))
         await server.stop()
     } catch {
         await server.stop()
@@ -84,32 +93,32 @@ struct ThemeTests {
         #expect(light.workSelectedText.hex == 0x2A2624)
         let dark = ThemeDefinition.dark.palette.definition
         #expect(ThemeDefinition.dark.name == "Loopflow Dark")
-        #expect(dark.background.hex == 0x2B3036)
-        #expect(dark.surface.hex == 0x343B44)
-        #expect(dark.accent.hex == 0x722F37)
-        #expect(dark.emphasisInk.hex == 0xCEBFA9)
-        #expect(dark.workSelectedFill.hex == 0x515A65)
+        #expect(dark.background.hex == 0x2B2D30)
+        #expect(dark.surface.hex == 0x323437)
+        #expect(dark.accent.hex == 0x8A3A44)
+        #expect(dark.emphasisInk.hex == 0xEBA8AC)
+        #expect(dark.workSelectedFill.hex == 0x5A5C5F)
+        // One burgundy bar tops both defaults.
+        #expect(light.titlebar.hex == 0x722F37)
+        #expect(dark.titlebar == light.titlebar)
         // Loopflow's authored design is independent of the import conversion.
         #expect(light != GhosttyThemeMapping.palette(ThemeDefinition.light.terminal))
         #expect(dark != GhosttyThemeMapping.palette(ThemeDefinition.dark.terminal))
     }
 
-    @Test func catalogueIsTwelveLightAndTwelveDarkWithQuietCompanions() throws {
+    @Test func catalogueIsTwelveFamiliesWithALightAndADarkTheme() throws {
         let light = ThemeDefinition.builtins.filter { !$0.isDark }.map(\.name)
         let dark = ThemeDefinition.builtins.filter(\.isDark).map(\.name)
-        #expect(light == ["Loopflow Light", "Linen", "Catppuccin Latte", "Celadon", "Clay", "Flexoki Light", "Frost",
-                          "Gruvbox Light", "Noctis Lilac", "Pewter", "Sea Glass", "Vellum"])
-        #expect(dark == ["Loopflow Dark", "Hearth", "Aubergine", "Catppuccin Mocha", "Flexoki Dark", "Gruvbox Dark",
-                         "Moss", "Night Owl", "Onyx", "Phosphor", "Rosewood", "Solarized Dark"])
-        for theme in ThemeDefinition.builtins where !["Loopflow Light", "Loopflow Dark"].contains(theme.name) {
+        #expect(light == ["Loopflow Light", "Arcade Day", "Contrast Light", "Fig Leaf", "Fjord Light", "Folio", "Graphite Light",
+                          "Moss Light", "Signal Light", "Sorbet Day", "Tannin Light", "Terracotta Light"])
+        #expect(dark == ["Loopflow Dark", "Arcade", "Contrast", "Fig", "Fjord", "Folio Night", "Graphite",
+                         "Moss", "Signal", "Sorbet", "Tannin", "Terracotta"])
+        for theme in ThemeDefinition.builtins {
             let palette = theme.palette.definition
-            #expect(palette.emphasisInk == palette.text)
-            #expect(palette.accentInk != palette.text)
+            // Headings are the text or the accent ink, never a third color.
+            #expect(palette.emphasisInk == palette.text || palette.emphasisInk == palette.accentInk, "\(theme.name)")
             #expect(palette.accent != palette.accentHover)
             #expect(palette.accentHover != palette.accentPressed)
-            // Terminal syntax may stay colorful; ordinary UI text should not look selected.
-            let channels = palette.text.channels
-            #expect(channels.max()! - channels.min()! < 0.09, "\(theme.name)")
             if theme.isDark { #expect(palette.surfaceElement.luminance > palette.background.luminance) }
             #expect(theme.readabilityErrors.isEmpty, "\(theme.name)")
         }
@@ -146,6 +155,24 @@ struct ThemeTests {
         #expect(second.readabilityErrors.isEmpty)
     }
 
+    @Test func titleBarFollowsTheFilesOwnAccentUntilItIsStated() throws {
+        let ground = "background=171924\nforeground=CAD2EF"
+        // Dark: the accent mixed into the ground, not the bar ANSI 4 would give.
+        let dark = try imported("\(ground)\nloopflow-accent=#224466").theme.palette.definition
+        #expect(dark.titlebar.hex == 0x1B283B)
+        #expect(dark.titlebar != (try imported(ground).theme.palette.definition.titlebar))
+        // Light: the accent itself, lightened here until black text's second level reads.
+        let light = try imported("background=ffffff\nforeground=000000\nloopflow-accent=#C06000").theme.palette.definition
+        #expect(light.titlebar.hex == 0xCB7B2B)
+        #expect(!light.readabilityErrors.contains { $0.contains("title bar") })
+        // An appearance stated against the ground's own decides the mix.
+        let asLight = try imported("\(ground)\nloopflow-accent=#224466\nloopflow-appearance=light").theme.palette.definition
+        #expect(asLight.titlebar.hex == 0x224466)
+        let stated = try imported("\(ground)\nloopflow-accent=#224466\nloopflow-titlebar=#102030").theme.palette.definition
+        #expect(stated.titlebar.hex == 0x102030)
+        #expect(try imported("\(ground)\nloopflow-titlebar=#808080").theme.readabilityErrors.contains { $0.contains("title bar") })
+    }
+
     @Test func loopflowKeysOverrideDerivedAppRoles() throws {
         let derived = try imported().theme.palette.definition
         let theme = try imported("background=171924\nforeground=CAD2EF\nloopflow-accent = #224466\nloopflow-working-ink=#99CCFF\nloopflow-selection-opacity=0.5").theme
@@ -159,141 +186,142 @@ struct ThemeTests {
     }
 
     @Test func applyChangesOnlyTheThemeAndCancelLeavesTheFileUntouched() async throws {
-        try await withThemeServer { location in
-            let paths = ThemePaths.temporary()
-            try paths.writeConfig("agent: claude\n# keep me\ntheme: Hearth\nyolo: true\n")
+        try await withThemeServer { location, paths in
+            try paths.writeConfig("agent: claude\n# keep me\ntheme: Graphite\nyolo: true\n")
             let store = await AppearanceStore.loaded(paths: paths, systemDark: false, location: location)
             #expect(store.selection.mode == .dark)
-            #expect(store.effectiveTheme.name == "Hearth")
-            store.beginPreview(); store.previewMode(.system); store.showPicker(.light); store.previewTheme("Linen")
-            #expect(paths.configText() == "agent: claude\n# keep me\ntheme: Hearth\nyolo: true\n")
+            #expect(store.effectiveTheme.name == "Graphite")
+            store.beginPreview(); store.previewMode(.system); store.previewTheme("Folio")
+            #expect(paths.configText() == "agent: claude\n# keep me\ntheme: Graphite\nyolo: true\n")
             store.cancel()
-            #expect(paths.configText() == "agent: claude\n# keep me\ntheme: Hearth\nyolo: true\n")
-            #expect(store.effectiveTheme.name == "Hearth")
-            store.beginPreview(); store.previewMode(.system); store.showPicker(.light); store.previewTheme("Linen"); await store.apply()
-            let savedTheme1 = try await ThemeConfig.read(paths.config, location: location)
-            #expect(savedTheme1 == "light:Linen,dark:Hearth")
+            #expect(paths.configText() == "agent: claude\n# keep me\ntheme: Graphite\nyolo: true\n")
+            #expect(store.effectiveTheme.name == "Graphite")
+            store.beginPreview(); store.previewMode(.system); store.previewTheme("Folio"); await store.apply()
+            let savedTheme1 = try await savedTheme(location)
+            #expect(savedTheme1 == "light:Folio,dark:Graphite")
             #expect(paths.configText()?.split(separator: "\n").filter { !$0.hasPrefix("theme:") } == ["agent: claude", "# keep me", "yolo: true"])
             store.beginPreview(); store.previewMode(.light); await store.apply()
-            let savedTheme2 = try await ThemeConfig.read(paths.config, location: location)
-            #expect(savedTheme2 == "Linen")
+            let savedTheme2 = try await savedTheme(location)
+            #expect(savedTheme2 == "Folio")
             #expect(paths.configText()?.split(separator: "\n").filter { !$0.hasPrefix("theme:") } == ["agent: claude", "# keep me", "yolo: true"])
             // Returning to System restores the dark side remembered in this session.
             await store.applyMode(.system)
-            let savedTheme3 = try await ThemeConfig.read(paths.config, location: location)
-            #expect(savedTheme3 == "light:Linen,dark:Hearth")
+            let savedTheme3 = try await savedTheme(location)
+            #expect(savedTheme3 == "light:Folio,dark:Graphite")
             await store.applyMode(.dark)
-            let savedTheme4 = try await ThemeConfig.read(paths.config, location: location)
-            #expect(savedTheme4 == "Hearth")
+            let savedTheme4 = try await savedTheme(location)
+            #expect(savedTheme4 == "Graphite")
             let relaunched = await AppearanceStore.loaded(paths: paths, systemDark: false, location: location)
             #expect(relaunched.selection.mode == .dark)
-            #expect(relaunched.effectiveTheme.name == "Hearth")
+            #expect(relaunched.effectiveTheme.name == "Graphite")
             await relaunched.applyMode(.system)
-            let savedTheme5 = try await ThemeConfig.read(paths.config, location: location)
-            #expect(savedTheme5 == "light:Loopflow Light,dark:Hearth")
+            let savedTheme5 = try await savedTheme(location)
+            #expect(savedTheme5 == "light:Loopflow Light,dark:Graphite")
         }
     }
 
     @Test func absentConfigMeansLoopflowLightAndDarkAndIsCreatedOnApply() async throws {
-        try await withThemeServer { location in
-            let paths = ThemePaths.temporary()
+        try await withThemeServer { location, paths in
             let store = await AppearanceStore.loaded(paths: paths, systemDark: true, location: location)
             #expect(store.selection == AppearanceSelection())
             #expect(store.effectiveTheme.name == "Loopflow Dark")
             #expect(paths.configText() == nil)
             await store.applyMode(.light)
-            let savedTheme6 = try await ThemeConfig.read(paths.config, location: location)
+            let savedTheme6 = try await savedTheme(location)
             #expect(savedTheme6 == "Loopflow Light")
         }
     }
 
     @Test func outsideEditsReloadAndUnknownNamesKeepTheLastGoodTheme() async throws {
-        try await withThemeServer { location in
-            let paths = ThemePaths.temporary()
-            try paths.writeConfig("theme: light:Linen,dark:Night Owl\n")
+        try await withThemeServer { location, paths in
+            try paths.writeConfig("theme: light:Folio,dark:Signal\n")
             let store = await AppearanceStore.loaded(paths: paths, systemDark: true, location: location)
-            #expect(store.effectiveTheme.name == "Night Owl")
-            try paths.writeConfig("theme: 'light:Linen,dark:Onyx' # by hand\n")
+            #expect(store.effectiveTheme.name == "Signal")
+            try paths.writeConfig("theme: 'light:Folio,dark:Contrast' # by hand\n")
             await store.reload()
-            #expect(store.effectiveTheme.name == "Onyx")
+            #expect(store.effectiveTheme.name == "Contrast")
             #expect(store.notice == nil)
             try paths.writeConfig("theme: Onxy\n")
             await store.reload()
-            #expect(store.effectiveTheme.name == "Onyx")
+            #expect(store.effectiveTheme.name == "Contrast")
             #expect(store.notice?.contains("No theme named “Onxy”") == true)
-            #expect(store.notice?.contains(paths.config.path) == true)
-            try paths.writeConfig("theme: Vellum\n")
+            #expect(store.notice?.contains(store.configPath ?? "-") == true)
+            try paths.writeConfig("theme: Sorbet Day\n")
             await store.reload()
-            #expect(store.effectiveTheme.name == "Vellum")
+            #expect(store.effectiveTheme.name == "Sorbet Day")
             #expect(store.selection.mode == .light)
             #expect(store.notice == nil)
         }
     }
 
     @Test func customizingABuiltinWritesYourCopyAndDeletingRevertsIt() async throws {
-        try await withThemeServer { location in
-            let paths = ThemePaths.temporary()
+        try await withThemeServer { location, paths in
             let store = await AppearanceStore.loaded(paths: paths, systemDark: false, location: location)
-            store.beginPreview(); store.previewTheme("Linen")
+            store.beginPreview(); store.previewTheme("Folio")
             #expect(store.selectedSource == .builtin)
             #expect(!store.canDelete)
             store.editTheme { palette, _ in palette.accent = ThemeRGB(0x224466) }
             #expect(store.selectedSource == .yours)
             #expect(store.deleteRevertsToBuiltin)
             #expect(store.effectiveTheme.palette.definition.accent.hex == 0x224466)
-            #expect(!FileManager.default.fileExists(atPath: paths.themes.appendingPathComponent("Linen").path))
+            #expect(!FileManager.default.fileExists(atPath: paths.themes.appendingPathComponent("Folio").path))
             await store.apply()
-            let saved = try ThemeFile.read(paths.themes.appendingPathComponent("Linen"), complete: true).theme
+            let saved = try ThemeFile.read(paths.themes.appendingPathComponent("Folio"), complete: true).theme
             #expect(saved.palette.definition.accent.hex == 0x224466)
             let relaunched = await AppearanceStore.loaded(paths: paths, systemDark: false, location: location)
             #expect(relaunched.effectiveTheme.palette.definition.accent.hex == 0x224466)
-            #expect(relaunched.entries(for: relaunched.picker).builtins.first { $0.name == "Linen" }?.source == .yours)
+            #expect(relaunched.entries(for: relaunched.previewSide).builtins.first { $0.name == "Folio" }?.source == .yours)
             relaunched.beginPreview(); relaunched.deleteTheme(); await relaunched.apply()
-            #expect(!FileManager.default.fileExists(atPath: paths.themes.appendingPathComponent("Linen").path))
-            #expect(relaunched.effectiveTheme.name == "Linen")
-            #expect(relaunched.effectiveTheme.palette.definition == ThemeDefinition.builtins.first { $0.name == "Linen" }?.palette.definition)
+            #expect(!FileManager.default.fileExists(atPath: paths.themes.appendingPathComponent("Folio").path))
+            #expect(relaunched.effectiveTheme.name == "Folio")
+            #expect(relaunched.effectiveTheme.palette.definition == ThemeDefinition.builtins.first { $0.name == "Folio" }?.palette.definition)
         }
     }
 
-    @Test func importAcceptsOnlyThePickersAppearance() async throws {
-        try await withThemeServer { location in
-            let paths = ThemePaths.temporary()
+    @Test func importFilesAThemeOnItsOwnSide() async throws {
+        try await withThemeServer { location, paths in
             let store = await AppearanceStore.loaded(paths: paths, systemDark: false, location: location)
-            store.beginPreview(); store.showPicker(.light)
+            store.beginPreview()
             store.importTheme(try file("background=171924\nforeground=CAD2EF"))
-            #expect(store.refusal == "“Personal” is a dark theme. Import it from the Dark picker.")
-            #expect(!store.canApply)
-            #expect(store.effectiveTheme.name == "Loopflow Light")
-            #expect(store.entries(for: store.picker).yours.isEmpty)
-            store.showPicker(.dark)
             #expect(store.canApply)
-            store.importTheme(try file("background=171924\nforeground=CAD2EF"))
-            #expect(store.refusal == nil)
-            #expect(store.entries(for: store.picker).yours.map(\.name) == ["Personal"])
+            #expect(store.current.mode == .system)
+            #expect(store.previewSide == .dark)
+            #expect(store.entries(for: .dark).yours.map(\.name) == ["Personal"])
+            #expect(store.entries(for: .light).yours.isEmpty)
             #expect(store.effectiveTheme.name == "Personal")
             await store.apply()
-            let savedTheme7 = try await ThemeConfig.read(paths.config, location: location)
+            let savedTheme7 = try await savedTheme(location)
             #expect(savedTheme7 == "light:Loopflow Light,dark:Personal")
             let saved = try ThemeFile.read(paths.themes.appendingPathComponent("Personal"), complete: true).theme
             #expect(saved.terminal.background.hex == 0x171924)
-            store.beginPreview(); store.showPicker(.dark); store.deleteTheme()
+            store.beginPreview(); store.previewTheme("Personal"); store.deleteTheme()
             #expect(store.current.dark == "Loopflow Dark")
             await store.apply()
             #expect(store.library.yours.isEmpty)
         }
     }
 
+    @Test func previewingADarkThemeFromTheLightSideLandsOnTheDarkSide() {
+        let store = AppearanceStore(paths: .temporary(), systemDark: false)
+        store.beginPreview(); store.previewMode(.system)
+        #expect(store.previewSide == .light)
+        store.previewTheme("Signal")
+        #expect(store.current.dark == "Signal")
+        #expect(store.current.light == "Loopflow Light")
+        #expect(store.previewSide == .dark)
+        #expect(store.effectiveTheme.name == "Signal")
+    }
+
     @Test func ghosttyThemesResolveAfterYoursAndBuiltinsAndStayReadOnly() async throws {
-        try await withThemeServer { location in
-            let paths = ThemePaths.temporary()
+        try await withThemeServer { location, paths in
             try paths.write("background=101010\nforeground=EEEEEE", theme: "Midnight", ghostty: true)
-            try paths.write("background=FFFFFF\nforeground=000000", theme: "Linen", ghostty: true)
+            try paths.write("background=FFFFFF\nforeground=000000", theme: "Folio", ghostty: true)
             try paths.writeConfig("theme: Midnight\n")
             let store = await AppearanceStore.loaded(paths: paths, systemDark: false, location: location)
             #expect(store.effectiveTheme.name == "Midnight")
             #expect(store.selectedSource == .ghostty)
-            #expect(store.entries(for: store.picker).yours.map(\.name) == ["Midnight"])
-            #expect(store.library.resolve("Linen")?.palette.definition == ThemeDefinition.builtins.first { $0.name == "Linen" }?.palette.definition)
+            #expect(store.entries(for: store.previewSide).yours.map(\.name) == ["Midnight"])
+            #expect(store.library.resolve("Folio")?.palette.definition == ThemeDefinition.builtins.first { $0.name == "Folio" }?.palette.definition)
             #expect(!store.canDelete)
             store.customize(); await store.apply()
             #expect(FileManager.default.fileExists(atPath: paths.themes.appendingPathComponent("Midnight").path))
@@ -322,45 +350,31 @@ struct ThemeTests {
         #expect(try ThemeFile.read(ghostty).diagnostics.contains("Line 3: loopflow-waiting-ink is now loopflow-warning-ink; not applied."))
     }
 
+    @Test func importDiagnosticsNameOnlyWhatWasDerived() throws {
+        #expect(try imported().diagnostics.contains { $0.hasPrefix("Derived: cursor-color") && $0.hasSuffix("remaining app roles.") })
+        let complete = try imported(ThemeFile.text(.dark))
+        #expect(complete.diagnostics.contains { $0.hasPrefix("Supplied: ") })
+        #expect(!complete.diagnostics.contains { $0.hasPrefix("Derived") })
+    }
+
     @Test func invalidFilesAreReportedAndDoNotHideOtherThemes() async throws {
-        try await withThemeServer { location in
-            let paths = ThemePaths.temporary()
+        try await withThemeServer { location, paths in
             try paths.write("background=red\nforeground=000000", theme: "Broken")
             try paths.write("background=FFF4DF\nforeground=34291F", theme: "Paper")
             let store = await AppearanceStore.loaded(paths: paths, systemDark: false, location: location)
             #expect(store.notice?.contains("Broken") == true)
-            #expect(store.entries(for: store.picker).yours.map(\.name) == ["Paper"])
+            #expect(store.entries(for: store.previewSide).yours.map(\.name) == ["Paper"])
         }
     }
 
     @Test func unreadableEditsKeepTheLastAppearanceAndDisableApply() throws {
         let store = AppearanceStore(paths: .temporary(), systemDark: false)
-        store.beginPreview(); store.previewTheme("Linen")
+        store.beginPreview(); store.previewTheme("Folio")
         store.editTheme { _, terminal in terminal.foreground = terminal.background }
         #expect(!store.canApply)
-        #expect(store.draftErrors.first?.hasPrefix("Linen:") == true)
+        #expect(store.draftErrors.first?.hasPrefix("Folio:") == true)
         #expect(store.effectiveTheme.terminal.foreground != store.effectiveTheme.terminal.background)
         #expect(store.notice?.contains("Default text") == true)
-    }
-
-    @Test func unchangedDiffRecolorsWithoutReplacingSelection() throws {
-        let patch = "@@ -1 +1 @@\n-old\n+new\n"
-        let lines = TaskPatchLine.changes(in: patch)
-        let text = TaskPatchTextView(usingTextLayoutManager: true)
-        text.update(patch: patch, lines: lines, palette: .dark)
-        let selection = NSRange(location: 12, length: 3)
-        text.setSelectedRange(selection)
-        text.update(patch: patch, lines: lines, palette: .light)
-        #expect(text.string == patch)
-        #expect(text.selectedRange() == selection)
-        #expect(text.backgroundColor == NSColor(LoopflowPalette.light.background))
-        #expect(text.textColor == NSColor(LoopflowPalette.light.text))
-        #expect(text.insertionPointColor == NSColor(LoopflowPalette.light.keyboardFocus))
-        #expect(text.selectedTextAttributes[.backgroundColor] as? NSColor == NSColor(LoopflowPalette.light.workSelectedFill))
-        for line in lines {
-            let color = text.textStorage?.attribute(.backgroundColor, at: line.range.location, effectiveRange: nil) as? NSColor
-            #expect(color == NSColor(line.added ? LoopflowPalette.light.successTone.fill : LoopflowPalette.light.failureTone.fill))
-        }
     }
 
     @Test func boundedImportRetainsColorsAndReportsOmissions() throws {
@@ -486,7 +500,7 @@ struct ThemeTests {
     #endif
 
     @Test func weakDimTextKeepsTheThemeAsImported() async throws {
-        try await withThemeServer { location in
+        try await withThemeServer { location, _ in
             let theme = try imported("background=FFFFFF\nforeground=000000\npalette=1=000000").theme
             #expect(theme.terminal.readabilityErrors.isEmpty)
             #expect(theme.terminal.foreground.hex == 0)

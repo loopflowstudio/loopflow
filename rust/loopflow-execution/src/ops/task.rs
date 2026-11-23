@@ -42,7 +42,9 @@ use snapshot::{
     file_snapshot, git_output, git_output_bytes, read_task_snapshot, resolve_file_base,
     validate_task_relative_path,
 };
-pub use snapshot::{task_changes, task_diff, task_file, task_snapshot, MAX_FILE_BYTES};
+pub use snapshot::{
+    task_changes, task_diff, task_file, task_snapshot, MAX_BINARY_DATA_BYTES, MAX_FILE_BYTES,
+};
 pub mod auto;
 mod file_save;
 pub mod run_recovery;
@@ -237,6 +239,21 @@ pub struct TaskChangedFile {
     pub staged: bool,
     pub unstaged: bool,
     pub untracked: bool,
+    /// Runs of changed lines in the file's patch, each the Diff's stop: a run
+    /// ends at an unchanged line, a hunk's end, or a removal after additions.
+    pub changes: u64,
+}
+
+/// One commit in a Task's comparison. A Graph step's commits share the subject
+/// prefix `lf <step>:`.
+#[derive(
+    Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
+pub struct TaskCommit {
+    pub sha: String,
+    /// The commit's first parent: a step starting here compares against it.
+    pub parent: String,
+    pub subject: String,
 }
 
 #[derive(
@@ -248,6 +265,9 @@ pub struct TaskChangesSnapshot {
     pub task_id: String,
     pub base_commit: String,
     pub head_commit: String,
+    /// The commits on head's first-parent line since base, oldest first,
+    /// without merges.
+    pub commits: Vec<TaskCommit>,
     pub files: Vec<TaskChangedFile>,
     pub scratch: Vec<String>,
     pub scratch_truncated: bool,
@@ -288,6 +308,8 @@ pub struct TaskFileSnapshot {
     pub task_id: String,
     pub path: String,
     pub content: Option<String>,
+    /// A `binary` file's bytes, base64, up to `MAX_BINARY_DATA_BYTES`.
+    pub data: Option<String>,
     pub state: TaskFileState,
     pub revision: Option<String>,
     pub read_only_reason: Option<String>,

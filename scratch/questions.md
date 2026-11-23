@@ -281,3 +281,12 @@ it. A base on origin but behind its local branch stays as it is, so the
 child's PR shows the parent's unpushed commits until the parent pushes.
 `lf sync <Task>` pushes in that case, handling the parent's merge request;
 matching it here would need the same care. Left as is.
+
+## A checkout recorded under a symlinked spelling (2026-11-23)
+
+`checkout_owner_in` matches the queried directory as spelled and as resolved,
+but compares against the stored spelling only. A row stored as `/var/...` is
+unreachable from a process whose cwd reads `/private/var/...`. lf's own writers
+store Git's resolved toplevel, so only fixtures hit it; the fixture now records
+resolved paths. Canonicalizing in `write_task_checkout_in` would close it for
+any writer, at the cost of every reader seeing the resolved spelling. Left as is.

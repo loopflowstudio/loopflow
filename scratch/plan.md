@@ -425,6 +425,18 @@ otherwise. Publication pushes an unpushed `Branch` base (`push_unpushed_base`)
 and now falls back to the repository's default branch, not a literal `main`.
 Deleted: `pr_target`, `resolve_pr_target`, `WorktreeState.base_branch`,
 `LocalBranch` (now `branch_heads` returning heads), the upstream test and asserts.
+
+Found on the way: on macOS five stacked `sync_tests::` failed before this
+slice too (since the Git-root rule, f93814c6d0). The Task fixture recorded the
+tempdir as spelled (`/var/folders/…`); `lf`'s cwd reads back as
+`/private/var/…`, and `checkout_owner_in` resolves only the queried path, so
+`lf` saw no Task. Production records Git's resolved toplevel, so the fixture now
+records `canonicalize()`d checkouts (`recorded_checkout` in
+`loopflow-execution/tests/support/mod.rs`). Passing locally: the 13 stacked or
+detach `sync_tests::`, `git::worktrees::`, `ops::pr::`, `ops::checkout::`,
+`task_handoff_tests::`, `task_initialization_tests::`, `worktree_tests::`,
+`task_pr_range_tests::`. Standalone binaries sharing the fixture
+(`task_pr_authority_tests` and others) are left to gate/CI.
 Next: gate.
 
 ## Built: one Git-root rule (human review of the ownership split, 2026-11-23)

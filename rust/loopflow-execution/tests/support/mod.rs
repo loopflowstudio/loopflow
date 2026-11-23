@@ -590,6 +590,15 @@ pub fn register_task_with_pr(
     registered
 }
 
+/// The checkout path as `lf` records it: Git resolves symlinks, so a Task
+/// checkout under macOS's `/var` temp directory is stored as `/private/var`.
+/// A path that does not exist yet stays as spelled.
+fn recorded_checkout(worktree: &Path) -> PathBuf {
+    worktree
+        .canonicalize()
+        .unwrap_or_else(|_| worktree.to_path_buf())
+}
+
 #[allow(dead_code)] // Shared helper compiled into suites with published Tasks only.
 pub fn register_task_without_pr(
     home: &Path,
@@ -606,6 +615,7 @@ fn register_task_fixture(
     branch: &str,
     base_commit: &str,
 ) -> RegisteredTask {
+    let worktree = &recorded_checkout(worktree);
     seed_store(home);
     let runtime = tokio::runtime::Runtime::new().expect("task test runtime");
     let store = runtime
@@ -746,6 +756,7 @@ pub fn register_sibling_task(
     branch: &str,
     worktree: &Path,
 ) -> Task {
+    let worktree = &recorded_checkout(worktree);
     let runtime = tokio::runtime::Runtime::new().expect("task test runtime");
     let now = OffsetDateTime::now_utc();
     let mut task = registered.task.clone();

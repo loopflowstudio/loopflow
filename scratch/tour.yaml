@@ -1,19 +1,33 @@
-at: ee696d48d79d3ec857909e5401908035ae12d2d3
+at: 6717d57ab94a3241c1c31a0d1f6e3f5637d33e6a
 first:
-  - path: scratch/plan.md
-    why: The implemented reader and remaining Files workflows
+  - path: docs/workspaces.md
+    why: Checkout search from the command line
   - path: swift/README.md
-    why: The Files walkthrough and shortcuts
-  - path: swift/LoopflowMac/TaskFileDocument.swift
-    why: Document lifetime, access, drafts and per-file modes
-  - path: swift/LoopflowMac/Grammar.swift
-    why: Source lines and colors shared by Read and Diff
+    why: Files walkthrough and keyboard controls
+  - path: tests/fixtures/dto/task_files.json
+    why: Paths, scratch pages and truncation on the wire
+  - path: rust/loopflow-execution/src/ops/task/find.rs
+    why: Git membership, scratch inventory and fuzzy ranking
+  - path: rust/loopflow-execution/src/observe.rs
+    why: Inventory lifetime and refresh on the owning Machine
+  - path: rust/loopflow/src/lf/commands/read.rs
+    why: Typed checkout read and its command line
+  - path: swift/Loopflow/Services/RegistryQuery.swift
+    why: How Desktop asks the owner for paths
+  - path: swift/LoopflowMac/Views/TaskFilePicker.swift
+    why: Search, arrow previews and accepting a file
   - path: swift/LoopflowMac/Views/TaskFilesView.swift
-    why: How the selected document opens for reading or editing
+    why: Picker and sidebar beside the selected document
+  - path: swift/LoopflowMac/TaskFileDocument.swift
+    why: Read, Edit and draft lifetime across file switches
   - path: swift/LoopflowMac/Views/TaskCodeReader.swift
-    why: Selectable numbered source lines
-  - path: swift/LoopflowMac/DesktopActions.swift
-    why: Edit shortcut routing for the addressed pane
+    why: The numbered source reader shared with previews
   - path: swift/LoopflowTests/TaskFilesTests.swift
-    why: Reading, editing, switching files and undoing a draft
-hide: []
+    why: Previewing a peer file while editing a draft
+  - path: rust/loopflow/tests/served_reads.rs
+    why: Finding paths beyond the first two thousand
+  - path: scratch/plan.md
+    why: Remaining navigation, presentation and review work
+hide:
+  - path: tests/fixtures/dto/server_schema.json
+    why: Generated from the Rust protocol types

@@ -22,3 +22,4 @@
 - Give Log Linear requests the same switch in search and General. List each contributing source when an unset list combines declarations.
 - Appearance shows its selectable configuration path directly. The project pane places its path beside **Open file…**.
 - Search and the form use the same checkout, Wave and target to determine where a preference applies. Changing only the Skill or Graph step keeps the selected file.
+- Reconnect `ScopedSettingsModel` automatically with bounded exponential backoff (1s–30s) when the server restarts or is starting up, matching `WorkModel` and `AppearanceStore`, while keeping manual **Refresh** immediate.

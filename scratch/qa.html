@@ -9,6 +9,32 @@ code{background:#f3f1ee;padding:0 .25em;border-radius:3px}
 table{border-collapse:collapse}td,th{border:1px solid #ddd;padding:.3rem .6rem;text-align:left}
 .ok{color:#256b2a}.bad{color:#9a2a2a}
 </style>
+<h1>Round 8: the bar's buttons name the theme they act on</h1>
+<p>Isolated bundle <code>com.loopflow.mac.qa50f7f9.dev</code> with <code>QAHook.swift</code>, branch at 161d82a392. Private Machine <code>/tmp/lfq8</code>: branch <code>lf</code> server, one git-planned repository with one Task, no <code>theme:</code>, and a personal theme named <code>Northern Lights Over The Harbor At Dawn</code> (a copy of Fjord Light) for the long-name case. The display was in use, so the app ran with <code>open -n -g</code> and was driven through the hook. Run 2026-11-22.</p>
+<h2>R8.1 First open, System mode</h2>
+<p class="ok">The bar reads "Customize Loopflow Light · Advanced", then Cancel · Apply. Loopflow Light and Loopflow Dark are both ringed; the button names the light one, which is the one previewing.</p>
+<img src="qa/r8-first.png">
+<h2>R8.2 Choosing a dark card</h2>
+<p class="ok">Fig: the window turns plum, "Previewing Fig", the dark heading reads "Dark themes · Fig", and the button reads "Customize Fig". The light heading still names Loopflow Light, so the two ringed cards are told apart by the bar.</p>
+<img src="qa/r8-fig.png">
+<h2>R8.3 A long personal name</h2>
+<p class="ok">At 1500 pt the bar shows "Customize Northern Lights Over The Harbor At Dawn · Delete Northern Lights Over The Harbor At Dawn · Advanced" in full. At 700 pt (the minimum) both buttons truncate in the middle of the name ("Customize Northern Light…", "Delete Northern Lights Ov…"); Advanced, Cancel and Apply stay whole and nothing wraps or overlaps.</p>
+<img src="qa/r8-long-1500.png">
+<img src="qa/r8-long-700.png">
+<h2>R8.4 Customize a built-in, Revert</h2>
+<p class="ok">On Folio, one click on "Customize Folio" opens the editor; the bar reads "Done Editing · Revert Folio to built-in · Advanced". Done Editing returns to the grid with "Customize Folio · Revert Folio to built-in". Choosing Fig then shows only "Customize Fig": the staged Folio copy's Revert waits until Folio is chosen again, as the bar acts on the card chosen last. Cancel wrote nothing (<code>themes/</code> held only the personal file, <code>config.yaml</code> had no <code>theme:</code>).</p>
+<img src="qa/r8-editing-folio.png">
+<img src="qa/r8-folio-staged.png">
+<h2>R8.5 Delete a personal theme, Apply</h2>
+<p class="ok">With Fig chosen and then the long-named theme, "Delete Northern Lights Over The Harbor At Dawn" removes its card; the light side falls back to Loopflow Light and the bar renames itself "Customize Loopflow Light". Apply wrote <code>theme: light:Loopflow Light,dark:Fig</code> and removed the file. Reopening Settings drew every card.</p>
+<img src="qa/r8-deleted.png">
+<h2>Round 8: what works</h2>
+<p>Every bar button names its theme and follows the last card chosen, across both sides in System mode, through the editor, Delete and Revert. Long names truncate at the minimum width without breaking the bar.</p>
+<h2>Round 8: not reached</h2>
+<p>A key window's title bar, the real Import panel, the editor's disclosure groups (Title bar row), and the phone and site: unchanged this round, and the hook can't make a window key or open panels.</p>
+<h2>Round 8: still wrong, worst first</h2>
+<p>1. At 700 pt a long personal name leaves both buttons truncated to the same prefix, and Customize's tooltip for your own theme says "Edit your theme" without the name, so the full name is only in the heading. 2. Round 7's notes stand: Customize and Done Editing share a spot, and Delete shifts Advanced right.</p>
+
 <h1>Round 7: Harbor gone, Arcade Day on Paper, Customize and Delete in the bottom bar</h1>
 <p>Isolated bundle <code>com.loopflow.mac.qa50f7f9.dev</code> with <code>QAHook.swift</code>, branch at fef71de686. Private Machine <code>/tmp/lfq7</code>: branch <code>lf</code> server, one git-planned repository with one Task, and a personal theme <code>My Harbor</code> (the pre-round-7 Harbor Light file), standing in for someone who had Harbor. The display was in use (idle 0 s), so the app ran with <code>open -n -g</code> behind other windows and was driven through the hook. Run 2026-11-22.</p>
 

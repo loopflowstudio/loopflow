@@ -1,0 +1,1447 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Explore · Task Top-Right Controls &amp; Pause (LOO-1078)</title>
+<style>
+  :root {
+    --bg: #faf8f5;
+    --surface: #fffdf9;
+    --surface-muted: #f3eee7;
+    --surface-el: #ece6dd;
+    --border: #e6dfd6;
+    --border-strong: #d6ccc0;
+    --border-active: #8b8277;
+    --text: #2a2624;
+    --text-2: #5f5752;
+    --text-3: #65605d;
+    --accent: #722f37;
+    --accent-hover: #5e2630;
+    --accent-text: #faf8f5;
+    --accent-ink: #722f37;
+    --titlebar: #722f37;
+    --titlebar-text: #ffffff;
+    --titlebar-text-2: rgba(255,255,255,0.72);
+    --working: #24579e;
+    --working-bg: rgba(36,87,158,0.10);
+    --warning: #79520d;
+    --warning-bg: rgba(121,82,13,0.10);
+    --success: #31633e;
+    --success-bg: rgba(49,99,62,0.11);
+    --failure: #a02e25;
+    --failure-bg: rgba(160,46,37,0.10);
+    --paused: #5f5752;
+    --paused-bg: rgba(95,87,82,0.11);
+    --shadow: 0 8px 24px rgba(0,0,0,0.10), 0 1px 3px rgba(0,0,0,0.08);
+    --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", system-ui, sans-serif;
+    --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #2b2d30;
+      --surface: #323437;
+      --surface-muted: #383a3d;
+      --surface-el: #3e4144;
+      --border: #4b4c4d;
+      --border-strong: #646464;
+      --border-active: #8c8c8b;
+      --text: #f5f1ea;
+      --text-2: #c9c6c1;
+      --text-3: #9e9b97;
+      --accent: #8a3a44;
+      --accent-hover: #722f37;
+      --accent-text: #faf8f5;
+      --accent-ink: #eba8ac;
+      --titlebar: #722f37;
+      --titlebar-text: #ffffff;
+      --titlebar-text-2: rgba(255,255,255,0.72);
+      --working: #9bafc8;
+      --working-bg: rgba(155,175,200,0.14);
+      --warning: #e8c594;
+      --warning-bg: rgba(232,197,148,0.14);
+      --success: #abb97b;
+      --success-bg: rgba(171,185,123,0.14);
+      --failure: #e89888;
+      --failure-bg: rgba(232,152,136,0.14);
+      --paused: #c9c6c1;
+      --paused-bg: rgba(201,198,193,0.12);
+      --shadow: 0 12px 32px rgba(0,0,0,0.42), 0 1px 3px rgba(0,0,0,0.35);
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --bg: #2b2d30;
+    --surface: #323437;
+    --surface-muted: #383a3d;
+    --surface-el: #3e4144;
+    --border: #4b4c4d;
+    --border-strong: #646464;
+    --border-active: #8c8c8b;
+    --text: #f5f1ea;
+    --text-2: #c9c6c1;
+    --text-3: #9e9b97;
+    --accent: #8a3a44;
+    --accent-hover: #722f37;
+    --accent-text: #faf8f5;
+    --accent-ink: #eba8ac;
+    --titlebar: #722f37;
+    --titlebar-text: #ffffff;
+    --titlebar-text-2: rgba(255,255,255,0.72);
+    --working: #9bafc8;
+    --working-bg: rgba(155,175,200,0.14);
+    --warning: #e8c594;
+    --warning-bg: rgba(232,197,148,0.14);
+    --success: #abb97b;
+    --success-bg: rgba(171,185,123,0.14);
+    --failure: #e89888;
+    --failure-bg: rgba(232,152,136,0.14);
+    --paused: #c9c6c1;
+    --paused-bg: rgba(201,198,193,0.12);
+    --shadow: 0 12px 32px rgba(0,0,0,0.42), 0 1px 3px rgba(0,0,0,0.35);
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 14px/1.55 var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  main {
+    max-width: 880px;
+    margin: 0 auto;
+    padding: 36px 20px 84px;
+  }
+
+  .top-meta {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 10px;
+    font-size: 12px;
+    color: var(--text-2);
+  }
+  .top-meta code {
+    font-family: var(--font-mono);
+    font-size: 12px;
+  }
+
+  h1 {
+    font-size: 26px;
+    line-height: 1.2;
+    letter-spacing: -0.02em;
+    margin: 0 0 10px;
+  }
+  h2 {
+    font-size: 18px;
+    line-height: 1.3;
+    letter-spacing: -0.01em;
+    margin: 34px 0 8px;
+  }
+  h3 {
+    font-size: 15px;
+    margin: 0 0 4px;
+  }
+  p { margin: 0 0 12px; color: var(--text); }
+  .muted { color: var(--text-2); }
+  .small { font-size: 12.5px; }
+
+  .lead-box {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent);
+    border-radius: 6px;
+    padding: 14px 16px;
+    margin: 16px 0 22px;
+  }
+  .lead-box p:last-child { margin-bottom: 0; }
+
+  .tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    padding: 2px 7px;
+    border-radius: 4px;
+    vertical-align: middle;
+  }
+  .tag-existing {
+    background: var(--surface-el);
+    color: var(--text-2);
+    border: 1px solid var(--border-strong);
+  }
+  .tag-proposed {
+    background: var(--working-bg);
+    color: var(--working);
+    border: 1px solid transparent;
+  }
+  .tag-radical {
+    background: rgba(114,47,55,0.12);
+    color: var(--accent-ink);
+    border: 1px solid transparent;
+  }
+
+  /* Global state controller */
+  .state-dock {
+    position: sticky;
+    top: 0;
+    z-index: 40;
+    background: var(--bg);
+    border-bottom: 1px solid var(--border);
+    padding: 10px 0;
+    margin: 0 -20px 24px;
+    padding-left: 20px;
+    padding-right: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  .state-group {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+  .state-label {
+    font-size: 11.5px;
+    font-weight: 600;
+    color: var(--text-2);
+    margin-right: 2px;
+  }
+  .seg-btn {
+    appearance: none;
+    border: 1px solid var(--border-strong);
+    background: var(--surface);
+    color: var(--text-2);
+    font: 12px/1 var(--font-sans);
+    padding: 6px 9px;
+    border-radius: 5px;
+    cursor: pointer;
+    transition: background 120ms, color 120ms, border-color 120ms;
+  }
+  .seg-btn:hover { background: var(--surface-el); color: var(--text); }
+  .seg-btn[aria-pressed="true"] {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--accent-text);
+    font-weight: 500;
+  }
+  .seg-btn.subtle[aria-pressed="true"] {
+    background: var(--surface-el);
+    border-color: var(--border-active);
+    color: var(--text);
+  }
+
+  /* Reference cards */
+  .ref-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 10px;
+    margin: 12px 0 24px;
+  }
+  .ref-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 11px 13px;
+    font-size: 12.5px;
+  }
+  .ref-card strong { display: block; margin-bottom: 3px; font-size: 13px; }
+  .ref-card p { margin: 0; color: var(--text-2); line-height: 1.45; }
+
+  /* Vision panel */
+  .vision {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 18px 18px 16px;
+    margin: 22px 0;
+  }
+  .vision-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-bottom: 6px;
+  }
+  .vision-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .vision-title h2 {
+    margin: 0;
+    font-size: 17px;
+  }
+  .one-liner {
+    color: var(--text-2);
+    margin: 0 0 14px;
+    font-size: 13.5px;
+  }
+
+  /* Simulated Loopflow Desktop Chrome */
+  .window-frame {
+    border: 1px solid var(--border-strong);
+    border-radius: 8px;
+    overflow: visible;
+    background: var(--surface-muted);
+    margin: 12px 0 14px;
+  }
+  .window-frame.narrow { max-width: 560px; }
+
+  .lf-titlebar {
+    background: var(--titlebar);
+    color: var(--titlebar-text);
+    height: 32px;
+    padding: 0 10px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    border-radius: 7px 7px 0 0;
+    font-size: 12.5px;
+    font-weight: 500;
+  }
+  .lf-titlebar-left {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+  }
+  .traffic {
+    display: inline-flex;
+    gap: 5px;
+    margin-right: 4px;
+    opacity: 0.7;
+  }
+  .traffic i {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.45);
+    display: inline-block;
+  }
+  .crumb-sep { color: var(--titlebar-text-2); font-weight: 400; }
+  .crumb-dim { color: var(--titlebar-text-2); font-weight: 400; }
+  .crumb-trigger {
+    appearance: none;
+    background: transparent;
+    border: none;
+    color: var(--titlebar-text);
+    font: inherit;
+    padding: 2px 5px;
+    margin: -2px -5px;
+    border-radius: 4px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .crumb-trigger:hover { background: rgba(255,255,255,0.14); }
+
+  .lf-wfbar {
+    background: var(--bg);
+    border-bottom: 1px solid var(--border);
+    min-height: 36px;
+    padding: 5px 12px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    font-size: 12.5px;
+    position: relative;
+  }
+  .lf-wfline {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    flex: 1 1 auto;
+  }
+  .wf-name {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--text);
+    flex-shrink: 0;
+  }
+  .wf-steps {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    flex-shrink: 0;
+  }
+  .wf-step {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    font-size: 12px;
+    color: var(--text-3);
+  }
+  .wf-step.done { color: var(--text-2); }
+  .wf-step.running { color: var(--working); font-weight: 600; }
+  .wf-step.running.auto-on { color: var(--success); }
+  .wf-step.waiting { color: var(--warning); font-weight: 600; }
+  .wf-step.paused { color: var(--paused); font-weight: 600; text-decoration: underline dotted; text-underline-offset: 3px; }
+  .wf-sentence {
+    color: var(--text-2);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
+    font-size: 12px;
+  }
+
+  .lf-controls {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+    position: relative;
+  }
+
+  /* Authentic LoopflowButtonStyle (24pt Mac control) */
+  .lf-btn {
+    appearance: none;
+    height: 24px;
+    padding: 0 8px;
+    border-radius: 5px;
+    border: 1px solid var(--border-strong);
+    background: var(--surface);
+    color: var(--text-2);
+    font: 12px/1 var(--font-sans);
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background 100ms, border-color 100ms, color 100ms;
+  }
+  .lf-btn:hover:not(:disabled) {
+    background: var(--surface-el);
+    color: var(--text);
+  }
+  .lf-btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+  .lf-btn.accent {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--accent-text);
+    font-weight: 500;
+  }
+  .lf-btn.accent:hover:not(:disabled) {
+    background: var(--accent-hover);
+    border-color: var(--accent-hover);
+    color: var(--accent-text);
+  }
+  .lf-btn.success-tint {
+    background: var(--success-bg);
+    border-color: var(--success);
+    color: var(--success);
+    font-weight: 500;
+  }
+  .lf-btn.warning-tint {
+    background: var(--warning-bg);
+    border-color: var(--warning);
+    color: var(--warning);
+    font-weight: 500;
+  }
+  .lf-btn.plain {
+    border-color: transparent;
+    background: transparent;
+    padding: 0 5px;
+  }
+  .lf-btn.plain:hover { background: var(--surface-el); }
+  .lf-btn.icon-only {
+    width: 26px;
+    padding: 0;
+    justify-content: center;
+  }
+  .lf-btn.active-toggle {
+    background: var(--success-bg);
+    border-color: var(--success);
+    color: var(--success);
+  }
+
+  /* Split button */
+  .split-btn {
+    display: inline-flex;
+    align-items: stretch;
+  }
+  .split-btn .lf-btn:first-child {
+    border-top-right-radius: 0;
+    border-bottom-right-radius: 0;
+    border-right: none;
+  }
+  .split-btn .lf-btn:last-child {
+    border-top-left-radius: 0;
+    border-bottom-left-radius: 0;
+    padding: 0 5px;
+    border-left: 1px solid rgba(128,128,128,0.28);
+  }
+
+  /* Segmented icon bar (Vision C) */
+  .icon-strip {
+    display: inline-flex;
+    align-items: center;
+    background: var(--surface);
+    border: 1px solid var(--border-strong);
+    border-radius: 5px;
+    overflow: hidden;
+    height: 24px;
+  }
+  .icon-strip button {
+    appearance: none;
+    border: none;
+    border-right: 1px solid var(--border);
+    background: transparent;
+    color: var(--text-2);
+    height: 24px;
+    padding: 0 7px;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font: 11.5px/1 var(--font-sans);
+    cursor: pointer;
+  }
+  .icon-strip button:last-child { border-right: none; }
+  .icon-strip button:hover { background: var(--surface-el); color: var(--text); }
+  .icon-strip button.is-on { background: var(--success-bg); color: var(--success); font-weight: 600; }
+  .icon-strip button.is-paused { background: var(--warning-bg); color: var(--warning); font-weight: 600; }
+  .icon-strip button.is-ready { background: var(--accent); color: var(--accent-text); font-weight: 600; }
+
+  /* State Pill (Vision B) */
+  .state-pill {
+    appearance: none;
+    height: 24px;
+    padding: 0 8px;
+    border-radius: 999px;
+    border: 1px solid var(--border-strong);
+    background: var(--surface);
+    color: var(--text);
+    font: 500 12px/1 var(--font-sans);
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    cursor: pointer;
+  }
+  .state-pill:hover { filter: brightness(0.97); }
+  .state-pill.st-moving { background: var(--working-bg); border-color: transparent; color: var(--working); }
+  .state-pill.st-waiting { background: var(--warning-bg); border-color: transparent; color: var(--warning); }
+  .state-pill.st-paused { background: var(--paused-bg); border-color: var(--border-strong); color: var(--text); }
+  .state-pill.st-merged { background: var(--success-bg); border-color: transparent; color: var(--success); }
+  .state-pill.st-unstarted { background: var(--surface); border-color: var(--border-strong); color: var(--text-2); }
+  .dot {
+    width: 7px; height: 7px; border-radius: 50%; background: currentColor; display: inline-block;
+  }
+
+  /* Inline Auto gate pill (Vision D) */
+  .gate-auto-toggle {
+    appearance: none;
+    border: 1px dashed var(--border-strong);
+    background: transparent;
+    color: var(--text-2);
+    border-radius: 4px;
+    padding: 2px 6px;
+    font: 11px/1.1 var(--font-sans);
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+  .gate-auto-toggle:hover { background: var(--surface-el); color: var(--text); }
+  .gate-auto-toggle.on {
+    border-style: solid;
+    border-color: var(--success);
+    background: var(--success-bg);
+    color: var(--success);
+    font-weight: 600;
+  }
+
+  /* Dropdown popover */
+  .menu-wrap { position: relative; display: inline-flex; }
+  .popover {
+    position: absolute;
+    top: calc(100% + 5px);
+    right: 0;
+    min-width: 230px;
+    background: var(--surface);
+    border: 1px solid var(--border-strong);
+    border-radius: 7px;
+    box-shadow: var(--shadow);
+    padding: 4px;
+    z-index: 60;
+    display: none;
+  }
+  .popover.left { right: auto; left: 0; }
+  .popover.open { display: block; }
+  .menu-item {
+    width: 100%;
+    appearance: none;
+    border: none;
+    background: transparent;
+    color: var(--text);
+    font: 12.5px/1.3 var(--font-sans);
+    padding: 6px 8px;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    text-align: left;
+    cursor: pointer;
+  }
+  .menu-item:hover { background: var(--surface-el); }
+  .menu-item .m-left { display: inline-flex; align-items: center; gap: 7px; }
+  .menu-item .m-sub { font-size: 11px; color: var(--text-3); font-family: var(--font-mono); }
+  .menu-item.danger { color: var(--failure); }
+  .menu-item.selected { font-weight: 600; color: var(--accent-ink); }
+  .menu-sep { height: 1px; background: var(--border); margin: 4px 2px; }
+  .menu-head {
+    padding: 4px 8px 2px;
+    font-size: 10.5px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-3);
+  }
+
+  /* Sub-strip (Vision D process/hold drawer) */
+  .process-strip {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 7px 12px;
+    font-size: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  .proc-pills {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+  .proc-chip {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    padding: 2px 7px;
+    border-radius: 4px;
+    background: var(--surface-muted);
+    border: 1px solid var(--border);
+    color: var(--text-2);
+  }
+  .proc-chip.hot { border-color: var(--warning); color: var(--warning); background: var(--warning-bg); }
+  .proc-chip.stopped { opacity: 0.65; text-decoration: line-through; }
+
+  /* Simulated pane body + action receipt */
+  .pane-body {
+    padding: 10px 12px;
+    font-size: 12px;
+    color: var(--text-2);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    flex-wrap: wrap;
+    border-radius: 0 0 7px 7px;
+  }
+  .cmd-log {
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    color: var(--text);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    padding: 3px 8px;
+    border-radius: 4px;
+  }
+
+  /* Details grid inside each vision */
+  .meta-cols {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+    gap: 12px;
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border);
+    font-size: 12.5px;
+  }
+  .meta-cols h4 {
+    margin: 0 0 4px;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-3);
+  }
+  .meta-cols p { margin: 0; color: var(--text-2); line-height: 1.48; }
+
+  /* Questions section */
+  .questions {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 18px 20px;
+    margin-top: 28px;
+  }
+  .questions ol {
+    margin: 10px 0 0;
+    padding-left: 18px;
+  }
+  .questions li {
+    margin-bottom: 14px;
+  }
+  .questions li:last-child { margin-bottom: 0; }
+  .opts {
+    margin-top: 5px;
+    display: grid;
+    gap: 3px;
+    font-size: 13px;
+    color: var(--text-2);
+  }
+  .opts b { color: var(--text); font-family: var(--font-mono); font-size: 12px; }
+
+  svg.ic { width: 13px; height: 13px; flex-shrink: 0; stroke: currentColor; fill: none; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
+  svg.ic-fill { width: 12px; height: 12px; flex-shrink: 0; fill: currentColor; stroke: none; }
+
+  @media (max-width: 620px) {
+    .wf-steps { display: none; }
+    main { padding: 20px 14px 64px; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <div class="top-meta">
+    <span><code>LOO-1078</code> · Explore · Task top-right controls</span>
+    <div class="state-group">
+      <button class="seg-btn subtle" id="width-toggle" aria-pressed="false" title="Simulate a narrower split pane">Narrow pane</button>
+      <button class="seg-btn subtle" id="theme-toggle" aria-pressed="false">Dark</button>
+    </div>
+  </div>
+
+  <h1>Top-right Task actions without Auto-Ship owning the bar</h1>
+
+  <div class="lead-box">
+    <p><strong>Decision needed:</strong> How should the Task bar surface <strong>Pause</strong>, <strong>Complete</strong>, <strong>Run</strong>, and <strong>Auto-Ship</strong> so lifecycle actions aren't buried inside <code>···</code> behind Auto-Ship?</p>
+    <p class="small muted">Switch the Task state below and click the actual buttons, split chevrons, pills, and menus in each panel — every control simulates its real transition and prints the <code>lf</code> command it runs.</p>
+  </div>
+
+  <!-- Reference patterns -->
+  <div class="ref-grid">
+    <div class="ref-card">
+      <strong>T3 Code (<code>pingdotgg/t3code</code>)</strong>
+      <p>Moved thread lifecycle (<em>Archive</em>, <em>Snooze</em>, <em>Settle</em>, <em>Auto-settle</em>) into a dropdown on the <strong>title breadcrumb</strong>; top-right holds quiet layout toggles, and primary Git/PR work uses a <strong>state-adaptive split button</strong> (<code>Commit ▾</code> → <code>Push ▾</code> → <code>Create PR ▾</code>).</p>
+    </div>
+    <div class="ref-card">
+      <strong>Linear</strong>
+      <p>Makes the <strong>State pill itself</strong> the primary control (<code>In Progress ▾</code> → <code>Paused</code> / <code>Done</code> / <code>Canceled</code>) with 1-key shortcuts, rather than separate labeled buttons for every transition.</p>
+    </div>
+    <div class="ref-card">
+      <strong>GitHub PR &amp; Codex / Xcode</strong>
+      <p>GitHub folds <em>Auto-merge</em> inside the merge split button rather than giving it equal chrome to <em>Close</em>. Codex &amp; Xcode use a quiet fixed-slot icon cluster so muscle memory never shifts when state changes.</p>
+    </div>
+  </div>
+
+  <!-- Sticky scenario switcher -->
+  <div class="state-dock">
+    <div class="state-group" id="state-switcher">
+      <span class="state-label">Task state:</span>
+      <button class="seg-btn" data-state="unstarted" aria-pressed="false">Unstarted</button>
+      <button class="seg-btn" data-state="moving" aria-pressed="true">Moving (compiling)</button>
+      <button class="seg-btn" data-state="waiting" aria-pressed="false">At ship-review</button>
+      <button class="seg-btn" data-state="paused" aria-pressed="false">Paused</button>
+      <button class="seg-btn" data-state="merged" aria-pressed="false">PR merged</button>
+    </div>
+    <div class="state-group">
+      <button class="seg-btn subtle" id="auto-seed" aria-pressed="false">Auto-Ship: off</button>
+    </div>
+  </div>
+
+  <!-- EXISTING -->
+  <section class="vision" data-vision="existing">
+    <div class="vision-head">
+      <div class="vision-title">
+        <h2>Current Desktop bar</h2>
+        <span class="tag tag-existing">Existing</span>
+      </div>
+    </div>
+    <p class="one-liner">Today in <code>TaskWorkflowBar</code>: <code>Run</code> vanishes while moving, <code>Auto-Ship</code> owns the only permanent button, and <code>Complete</code> (plus a future <code>Pause</code>) live inside <code>···</code>.</p>
+    <div class="window-frame" id="frame-existing"></div>
+    <p class="small muted" style="margin:0">Notice the asymmetry in <strong>Moving</strong> and <strong>PR merged</strong>: when a build is chewing CPU or a PR is already merged, the bar still promotes <em>Auto-Ship</em> while Pause and Complete take two clicks through <code>···</code>.</p>
+  </section>
+
+  <!-- VISION A -->
+  <section class="vision" data-vision="a">
+    <div class="vision-head">
+      <div class="vision-title">
+        <h2>A · Split Motion Button + First-Class Complete</h2>
+        <span class="tag tag-proposed">Proposed</span>
+      </div>
+    </div>
+    <p class="one-liner">Auto-Ship becomes a mode inside the Run split button, freeing the top-right for three equal labeled controls: <strong>Motion</strong> (<code>Start ▾</code> / <code>Pause ▾</code> / <code>Unpause ▾</code>), <strong>Pause</strong> (when idle/waiting), and <strong>Complete</strong>.</p>
+    <div class="window-frame" id="frame-a"></div>
+    <div class="meta-cols">
+      <div>
+        <h4>Demo</h4>
+        <p>While a Rust build runs, top-right reads <code>[Pause ▾]</code> <code>[Complete]</code> <code>···</code>. Click <code>Pause</code> to stop the worker &amp; builds; button flips to <code>[Unpause ▾]</code>. Click the chevron next to <code>Run</code> or <code>Unpause</code> to pick <em>Auto-Ship</em> or <em>Start from…</em>.</p>
+      </div>
+      <div>
+        <h4>Appeal</h4>
+        <p>Zero mystery icons. Every primary Task action (Run, Pause, Complete) is 1 click with an explicit label; Auto-Ship stays 1 extra click away inside the same motion family, like GitHub's merge split button.</p>
+      </div>
+      <div>
+        <h4>Cost &amp; risk</h4>
+        <p><strong>Low–medium cost:</strong> SwiftUI split button + updated <code>TaskActions</code>; mirrors cleanly to iOS menu. <strong>Risk:</strong> on narrow panes (try <em>Narrow pane</em> above), 2–3 labeled buttons squeeze the <code>WorkflowLine</code> sentence sooner.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- VISION B -->
+  <section class="vision" data-vision="b">
+    <div class="vision-head">
+      <div class="vision-title">
+        <h2>B · State Pill as the Lifecycle Control (Linear / T3 model)</h2>
+        <span class="tag tag-proposed">Proposed</span>
+      </div>
+    </div>
+    <p class="one-liner">One clickable <strong>State pill</strong> owns every lifecycle transition (<code>Paused</code>, <code>Complete</code>, <code>Unassign</code>, <code>Auto-Ship</code> switch, <code>Abandon</code>), paired with a single context-smart primary button beside it.</p>
+    <div class="window-frame" id="frame-b"></div>
+    <div class="meta-cols">
+      <div>
+        <h4>Demo</h4>
+        <p>Top-right shows <code>[● Moving ▾]</code> + <code>[Pause]</code> (while building), <code>[⏸ Paused ▾]</code> + <code>[Unpause]</code>, or <code>[✓ PR merged ▾]</code> + <code>[Complete]</code>. Clicking the pill opens a Linear-style transition sheet with keyboard hints and an inline <em>Auto-Ship</em> toggle.</p>
+      </div>
+      <div>
+        <h4>Appeal</h4>
+        <p>Cleanest visual hierarchy: never more than two controls on the right, removes the duplicate state word from the title bar, and makes <em>Paused</em>, <em>Working</em>, and <em>Done</em> feel like peers in one state model.</p>
+      </div>
+      <div>
+        <h4>Cost &amp; risk</h4>
+        <p><strong>Low–medium cost:</strong> replaces <code>TaskAutoControl</code> + <code>···</code> lifecycle items with one <code>TaskStateMenu</code>; translates 1:1 to iPhone navigation bar. <strong>Risk:</strong> <em>Complete</em> is 2 clicks (or 1 shortcut) while Moving/Waiting, until PR merges.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- VISION C -->
+  <section class="vision" data-vision="c">
+    <div class="vision-head">
+      <div class="vision-title">
+        <h2>C · Quiet Fixed-Slot Icon Strip + Title Breadcrumb Menu (T3 / Codex style)</h2>
+        <span class="tag tag-proposed">Proposed</span>
+      </div>
+    </div>
+    <p class="one-liner">Fixed muscle-memory icon strip (<code>▶/⏸</code> · <code>✈ Auto</code> · <code>✓ Complete</code>) never shifts width or steals space from <code>WorkflowLine</code>; secondary Task actions hang off the Task title in the burgundy bar (click the title above).</p>
+    <div class="window-frame" id="frame-c"></div>
+    <div class="meta-cols">
+      <div>
+        <h4>Demo</h4>
+        <p>Every open Task has the same compact 3-button segmented control at top-right: Play/Pause, Auto toggle (lights green only when armed), and Checkmark (Complete, accented when PR merged). Clicking <code>LOO-1078 lf task pause ▾</code> in the titlebar opens Move, Unassign, Start from…, Copy, Abandon.</p>
+      </div>
+      <div>
+        <h4>Appeal</h4>
+        <p>Gives <code>WorkflowLine</code> maximum room (even in narrow splits), eliminates the <code>···</code> button completely, and gives Pause, Auto, and Complete permanent 1-click spatial memory.</p>
+      </div>
+      <div>
+        <h4>Cost &amp; risk</h4>
+        <p><strong>Low cost:</strong> pure SwiftUI rework across <code>TaskWorkflowBar</code> and <code>TitleBar</code>. <strong>Risk:</strong> icon-only controls rely on tooltips until learned, and <code>⏸</code> (pause Task) vs <code>✈</code> (auto-ship) can look ambiguous without labels.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- VISION D -->
+  <section class="vision" data-vision="d">
+    <div class="vision-head">
+      <div class="vision-title">
+        <h2>D · Graph Gate Switch + Equal Pause &amp; Complete + Process Strip</h2>
+        <span class="tag tag-radical">Proposed · Radical</span>
+      </div>
+    </div>
+    <p class="one-liner">Auto-Ship isn't a Task lifecycle action — it's a Graph policy (<em>skip the 👤 stops</em>). Move that toggle onto the <code>WorkflowLine</code> itself so top-right belongs strictly to <strong>Pause/Run</strong> and <strong>Complete</strong>, with an expandable live process strip showing what Pause actually stops.</p>
+    <div class="window-frame" id="frame-d"></div>
+    <div class="meta-cols">
+      <div>
+        <h4>Demo</h4>
+        <p>On the left, clicking <code>👤 stops: on</code> on the Graph line flips it to <code>Auto: skipping 👤</code> (the <code>👤</code> icons dim/strikethrough). On the right, <code>Pause</code> (with live process count <code>2 jobs</code>) and <code>Complete</code> sit side-by-side at equal weight. Clicking <code>2 jobs</code> or pausing reveals the inline process strip (<code>codex</code>, <code>cargo test · 410% CPU</code>, <code>session</code>) and lets you pause everything (default) or keep the conversation open.</p>
+      </div>
+      <div>
+        <h4>Appeal</h4>
+        <p>Fixes the root concept mismatch: Auto-Ship explains itself visually right beside the <code>👤</code> steps it skips, Pause and Complete become true peers, and the process strip makes "stop my Rust builds" tangible and verifiable instead of blind faith.</p>
+      </div>
+      <div>
+        <h4>Cost &amp; risk</h4>
+        <p><strong>Medium–high cost:</strong> Slice 1 ships the bar split (Graph gate toggle + Pause/Complete) with zero new backend fields; Slice 2 adds owned process/job summary to <code>TaskOverview</code> so the strip shows real live builds. <strong>Risk:</strong> interactive toggle inside <code>WorkflowLine</code> needs careful truncation on narrow panes and an iPhone equivalent.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- QUESTIONS -->
+  <section class="questions">
+    <h2 style="margin-top:0">Questions to steer the next round</h2>
+    <p class="small muted">Reply with short codes like <code>1d, 2a, 3b</code> — or mix pieces across visions.</p>
+    <ol>
+      <li>
+        <strong>Which top-right mechanism feels closest?</strong>
+        <div class="opts">
+          <span><b>1a</b> Vision A — Split Motion button (Auto-Ship inside <code>Run ▾</code>) + labeled Complete</span>
+          <span><b>1b</b> Vision B — Linear-style State Pill owning lifecycle + 1 adaptive primary button</span>
+          <span><b>1c</b> Vision C — T3/Codex quiet icon strip + actions moved to the Task title breadcrumb</span>
+          <span><b>1d</b> Vision D — Auto toggle on the Graph line + equal Pause/Run &amp; Complete + live process strip</span>
+        </div>
+      </li>
+      <li>
+        <strong>Should <code>Complete</code> always be 1 click from the top-right (even while Moving or Waiting)?</strong>
+        <div class="opts">
+          <span><b>2a</b> Yes — always visible as a peer to Pause/Run (Visions A, C, D)</span>
+          <span><b>2b</b> Only 1 click once PR is merged / ready; otherwise inside the State pill (Vision B)</span>
+        </div>
+      </li>
+      <li>
+        <strong>Where should Auto-Ship live once it's no longer a permanent hero button?</strong>
+        <div class="opts">
+          <span><b>3a</b> Inside the <code>Run ▾</code> / <code>Start ▾</code> split button (Vision A)</span>
+          <span><b>3b</b> Toggle switch inside the State Pill / title menu (Vision B / T3 Code)</span>
+          <span><b>3c</b> Quiet icon toggle in a fixed strip (Vision C)</span>
+          <span><b>3d</b> Directly on the <code>WorkflowLine</code> beside the <code>👤</code> gates it skips (Vision D)</span>
+        </div>
+      </li>
+      <li>
+        <strong>Scope for <code>LOO-1078</code> vs. follow-up Task:</strong>
+        <div class="opts">
+          <span><b>4a</b> Fold the chosen top-right bar redesign directly into <code>LOO-1078</code> alongside <code>lf task pause</code></span>
+          <span><b>4b</b> Keep <code>LOO-1078</code> focused on <code>lf task pause</code> backend + minimal Pause/Unpause UI, and file the bar redesign as its own Task</span>
+        </div>
+      </li>
+    </ol>
+  </section>
+</main>
+
+<script>
+const STATES = {
+  unstarted: {
+    label: "Unstarted",
+    pillClass: "st-unstarted",
+    stepIdx: -1,
+    running: false,
+    paused: false,
+    merged: false,
+    sentence: "Ready to start code (next human stop: ship-review).",
+    paneHint: "No checkout yet · branch not created",
+    jobs: []
+  },
+  moving: {
+    label: "Moving",
+    pillClass: "st-moving",
+    stepIdx: 1,
+    running: true,
+    paused: false,
+    merged: false,
+    sentence: "build is running implement. Next stop: ship-review.",
+    paneHint: "codex running implement · cargo test active in worktree",
+    jobs: [
+      { name: "codex · implement", hot: false },
+      { name: "cargo test · 410% CPU", hot: true },
+      { name: "session · agy (open)", hot: false }
+    ]
+  },
+  waiting: {
+    label: "Ship Review",
+    pillClass: "st-waiting",
+    stepIdx: 2,
+    running: false,
+    paused: false,
+    merged: false,
+    sentence: "Waiting for you at ship-review · PR #2041 open.",
+    paneHint: "Interactive stop: ship-review · PR #2041 passing",
+    jobs: [
+      { name: "session · agy (waiting)", hot: false }
+    ]
+  },
+  paused: {
+    label: "Paused",
+    pillClass: "st-paused",
+    stepIdx: 1,
+    running: false,
+    paused: true,
+    merged: false,
+    sentence: "Paused at build · worker & builds stopped; claimed by Jack.",
+    paneHint: "Checkout, dirty files & PR #2041 kept · conversation closed (resumable)",
+    jobs: [
+      { name: "worker stopped", stopped: true },
+      { name: "cargo test killed", stopped: true },
+      { name: "session closed", stopped: true }
+    ]
+  },
+  merged: {
+    label: "PR Merged",
+    pillClass: "st-merged",
+    stepIdx: 4,
+    running: false,
+    paused: false,
+    merged: true,
+    sentence: "PR #2041 merged · verify it, then complete the Task.",
+    paneHint: "deliver landed PR #2041 · waiting at verify",
+    jobs: [
+      { name: "session · agy (open)", hot: false }
+    ]
+  }
+};
+
+const STEPS = [
+  { name: "plan", interactive: false },
+  { name: "build", interactive: false },
+  { name: "ship-review", interactive: true },
+  { name: "deliver", interactive: false },
+  { name: "verify", interactive: true }
+];
+
+const IC = {
+  play: `<svg class="ic-fill" viewBox="0 0 16 16"><path d="M4.2 2.8a.7.7 0 0 1 1.05-.6l8.2 5.2a.7.7 0 0 1 0 1.2l-8.2 5.2a.7.7 0 0 1-1.05-.6V2.8z"/></svg>`,
+  pause: `<svg class="ic-fill" viewBox="0 0 16 16"><rect x="3.5" y="2.5" width="3.3" height="11" rx="0.9"/><rect x="9.2" y="2.5" width="3.3" height="11" rx="0.9"/></svg>`,
+  check: `<svg class="ic" viewBox="0 0 16 16"><path d="M3 8.5l3.2 3.3L13 4.5"/></svg>`,
+  chev: `<svg class="ic" viewBox="0 0 16 16"><path d="M4.5 6.2L8 9.8l3.5-3.6"/></svg>`,
+  more: `<svg class="ic-fill" viewBox="0 0 16 16"><circle cx="3.2" cy="8" r="1.4"/><circle cx="8" cy="8" r="1.4"/><circle cx="12.8" cy="8" r="1.4"/></svg>`,
+  auto: `<svg class="ic" viewBox="0 0 16 16"><path d="M9.2 1.8L3.4 9h4.4l-1 5.2L12.6 7H8.2l1-5.2z"/></svg>`,
+  person: `<svg class="ic-fill" viewBox="0 0 16 16" style="width:10px;height:10px"><circle cx="8" cy="4.6" r="2.6"/><path d="M3 13.4c.5-2.6 2.5-4 5-4s4.5 1.4 5 4z"/></svg>`,
+  cpu: `<svg class="ic" viewBox="0 0 16 16"><rect x="4" y="4" width="8" height="8" rx="1.2"/><path d="M6.5 1.8V4M9.5 1.8V4M6.5 12v2.2M9.5 12v2.2M1.8 6.5H4M1.8 9.5H4M12 6.5h2.2M12 9.5h2.2"/></svg>`
+};
+
+const app = {
+  state: "moving",
+  auto: false,
+  narrow: false,
+  drawerD: true,
+  logs: {
+    existing: "Ready — click any control above",
+    a: "Ready — click Pause, Complete, or the split chevron",
+    b: "Ready — click the State pill or primary button",
+    c: "Ready — click the icon strip or the task title in the burgundy bar",
+    d: "Ready — toggle the Graph's 👤 stops, Pause, Complete, or jobs strip"
+  }
+};
+
+function renderWorkflowLine(st, opts = {}) {
+  const stepsHtml = STEPS.map((s, idx) => {
+    let cls = "wf-step";
+    if (st.stepIdx >= 0) {
+      if (idx < st.stepIdx) cls += " done";
+      else if (idx === st.stepIdx) {
+        if (st.paused) cls += " paused";
+        else if (st.running) cls += " running" + (app.auto ? " auto-on" : "");
+        else cls += " waiting";
+      }
+    }
+    const personStyle = opts.dimGates && app.auto && s.interactive ? ' style="opacity:0.35"' : '';
+    const person = s.interactive ? `<span${personStyle}>${IC.person}</span>` : "";
+    return `<span class="${cls}">${person}${s.name}</span>`;
+  }).join("");
+
+  const gateBtn = opts.gateToggle ? `
+    <button class="gate-auto-toggle ${app.auto ? "on" : ""}" data-act="toggle-auto" data-v="d" title="Auto-Ship skips interactive 👤 steps and lands the PR">
+      ${IC.auto}<span>${app.auto ? "Auto · skipping 👤" : "Stops at 👤"}</span>
+    </button>` : "";
+
+  return `
+    <div class="lf-wfline">
+      <span class="wf-name">code</span>
+      <span class="wf-steps">${stepsHtml}</span>
+      ${gateBtn}
+      <span class="wf-sentence" title="${st.sentence}">${st.sentence}</span>
+    </div>`;
+}
+
+function renderTitlebar(visionId, st, opts = {}) {
+  const titleNode = opts.titleMenu ? `
+    <span class="menu-wrap">
+      <button class="crumb-trigger" data-menu="title-${visionId}">
+        <span>LOO-1078 lf task pause</span>${IC.chev}
+      </button>
+      <div class="popover left" id="menu-title-${visionId}">
+        <div class="menu-head">Task · LOO-1078</div>
+        <button class="menu-item" data-act="cmd" data-v="${visionId}" data-cmd="lf task run LOO-1078 --from implement"><span class="m-left">Start from…</span><span class="m-sub">implement</span></button>
+        <button class="menu-item" data-act="cmd" data-v="${visionId}" data-cmd="lf session new --task LOO-1078"><span class="m-left">New conversation</span></button>
+        <button class="menu-item" data-act="cmd" data-v="${visionId}" data-cmd="lf task move LOO-1078 --wave desktop"><span class="m-left">Move to Wave…</span></button>
+        <button class="menu-item" data-act="cmd" data-v="${visionId}" data-cmd="lf task unassign LOO-1078"><span class="m-left">Unassign Task</span></button>
+        <div class="menu-sep"></div>
+        <button class="menu-item" data-act="cmd" data-v="${visionId}" data-cmd="pbcopy ← LOO-1078"><span class="m-left">Copy Task ID</span><span class="m-sub">LOO-1078</span></button>
+        <button class="menu-item" data-act="cmd" data-v="${visionId}" data-cmd="pbcopy ← jack-heart/aa0dad-lf-task-pause"><span class="m-left">Copy branch</span></button>
+        <div class="menu-sep"></div>
+        <button class="menu-item danger" data-act="cmd" data-v="${visionId}" data-cmd="lf task abandon LOO-1078"><span class="m-left">Abandon…</span></button>
+      </div>
+    </span>` : `<span>LOO-1078 lf task pause</span>`;
+
+  const stateWord = opts.hideStateWord ? "" : `<span class="crumb-dim">${st.label.toLowerCase()}</span>`;
+
+  return `
+    <div class="lf-titlebar">
+      <div class="lf-titlebar-left">
+        <span class="traffic"><i></i><i></i><i></i></span>
+        <span class="crumb-dim">loopflow</span>
+        <span class="crumb-sep">/</span>
+        ${titleNode}
+        ${stateWord}
+      </div>
+      <span class="crumb-dim" style="font-size:11px;font-family:var(--font-mono)">macOS</span>
+    </div>`;
+}
+
+function renderOverflowMenu(visionId, st, { includeComplete = false, includePause = false } = {}) {
+  return `
+    <span class="menu-wrap">
+      <button class="lf-btn plain icon-only" data-menu="more-${visionId}" title="Task actions">${IC.more}</button>
+      <div class="popover" id="menu-more-${visionId}">
+        <button class="menu-item" data-act="cmd" data-v="${visionId}" data-cmd="lf task run LOO-1078 --from implement"><span class="m-left">Start from…</span><span class="m-sub">step</span></button>
+        <button class="menu-item" data-act="cmd" data-v="${visionId}" data-cmd="lf session new --task LOO-1078"><span class="m-left">New conversation</span></button>
+        <button class="menu-item" data-act="cmd" data-v="${visionId}" data-cmd="lf task move LOO-1078 --wave …"><span class="m-left">Move to Wave</span></button>
+        ${includePause ? `<button class="menu-item" data-act="${st.paused ? "unpause" : "pause"}" data-v="${visionId}"><span class="m-left">${st.paused ? "Unpause Task" : "Pause Task"}</span><span class="m-sub">lf task ${st.paused ? "unpause" : "pause"}</span></button>` : ""}
+        ${includeComplete ? `<button class="menu-item" data-act="complete" data-v="${visionId}"><span class="m-left">Complete Task</span><span class="m-sub">lf task complete</span></button>` : ""}
+        <button class="menu-item" data-act="cmd" data-v="${visionId}" data-cmd="lf task unassign LOO-1078"><span class="m-left">Unassign Task</span></button>
+        <div class="menu-sep"></div>
+        <button class="menu-item" data-act="cmd" data-v="${visionId}" data-cmd="pbcopy ← LOO-1078"><span class="m-left">Copy Task ID</span></button>
+        <button class="menu-item danger" data-act="cmd" data-v="${visionId}" data-cmd="lf task abandon LOO-1078"><span class="m-left">Abandon…</span></button>
+      </div>
+    </span>`;
+}
+
+function renderExisting(st) {
+  const runBtn = (!st.running && !st.merged)
+    ? `<button class="lf-btn" data-act="run" data-v="existing">${st.stepIdx < 0 ? "Start" : "Run"}</button>`
+    : "";
+  const autoBtn = `<button class="lf-btn ${app.auto ? "active-toggle" : ""}" data-act="toggle-auto" data-v="existing">${app.auto ? "Stop Auto-Ship" : "Auto-Ship"}</button>`;
+  return `
+    ${renderTitlebar("existing", st)}
+    <div class="lf-wfbar">
+      ${renderWorkflowLine(st)}
+      <div class="lf-controls">
+        ${runBtn}
+        ${autoBtn}
+        ${renderOverflowMenu("existing", st, { includeComplete: true, includePause: true })}
+      </div>
+    </div>
+    <div class="pane-body">
+      <span>${st.paneHint}</span>
+      <span class="cmd-log">${app.logs.existing}</span>
+    </div>`;
+}
+
+function renderVisionA(st) {
+  let motionMain, motionAct, motionCls = "";
+  if (st.paused) {
+    motionMain = `${IC.play} Unpause`; motionAct = "unpause"; motionCls = "warning-tint";
+  } else if (st.running) {
+    motionMain = `${IC.pause} Pause`; motionAct = "pause";
+  } else if (st.stepIdx < 0) {
+    motionMain = `${IC.play} Start`; motionAct = "run";
+  } else {
+    motionMain = `${IC.play} Run`; motionAct = "run";
+  }
+
+  const autoBadge = app.auto ? ` <span style="font-size:10px;opacity:0.8">· Auto</span>` : "";
+  const extraPause = (!st.running && !st.paused && !st.merged)
+    ? `<button class="lf-btn" data-act="pause" data-v="a" title="Pause Task without unassigning">${IC.pause} Pause</button>`
+    : "";
+  const completeBtn = `<button class="lf-btn ${st.merged ? "accent" : ""}" data-act="complete" data-v="a">${IC.check} Complete</button>`;
+
+  const split = `
+    <span class="menu-wrap">
+      <span class="split-btn">
+        <button class="lf-btn ${motionCls}" data-act="${motionAct}" data-v="a">${motionMain}${autoBadge}</button>
+        <button class="lf-btn ${motionCls}" data-menu="split-a" aria-label="More run options">${IC.chev}</button>
+      </span>
+      <div class="popover" id="menu-split-a">
+        <div class="menu-head">Motion &amp; Auto</div>
+        ${st.paused ? `<button class="menu-item" data-act="unpause-run" data-v="a"><span class="m-left">${IC.play} Unpause &amp; Run</span><span class="m-sub">unpause + run</span></button>` : ""}
+        <button class="menu-item ${app.auto ? "selected" : ""}" data-act="toggle-auto" data-v="a">
+          <span class="m-left">${IC.auto} ${app.auto ? "Stop Auto-Ship" : "Auto-Ship (run & land)"}</span>
+          <span class="m-sub">${app.auto ? "on" : "off"}</span>
+        </button>
+        ${st.running ? `<button class="menu-item" data-act="cmd" data-v="a" data-cmd="lf task interrupt LOO-1078"><span class="m-left">Interrupt step only</span><span class="m-sub">stay active</span></button>` : ""}
+        <div class="menu-sep"></div>
+        <button class="menu-item" data-act="cmd" data-v="a" data-cmd="lf task run LOO-1078 --from implement"><span class="m-left">Start from implement…</span></button>
+        <button class="menu-item" data-act="cmd" data-v="a" data-cmd="lf task run LOO-1078 --from ship-review"><span class="m-left">Start from ship-review…</span></button>
+      </div>
+    </span>`;
+
+  return `
+    ${renderTitlebar("a", st)}
+    <div class="lf-wfbar">
+      ${renderWorkflowLine(st)}
+      <div class="lf-controls">
+        ${split}
+        ${extraPause}
+        ${completeBtn}
+        ${renderOverflowMenu("a", st)}
+      </div>
+    </div>
+    <div class="pane-body">
+      <span>${st.paneHint}</span>
+      <span class="cmd-log">${app.logs.a}</span>
+    </div>`;
+}
+
+function renderVisionB(st) {
+  let primaryBtn;
+  if (st.paused) {
+    primaryBtn = `<button class="lf-btn accent" data-act="unpause" data-v="b">${IC.play} Unpause</button>`;
+  } else if (st.running) {
+    primaryBtn = `<button class="lf-btn" data-act="pause" data-v="b">${IC.pause} Pause</button>`;
+  } else if (st.merged) {
+    primaryBtn = `<button class="lf-btn accent" data-act="complete" data-v="b">${IC.check} Complete</button>`;
+  } else {
+    primaryBtn = `<button class="lf-btn" data-act="run" data-v="b">${IC.play} ${st.stepIdx < 0 ? "Start" : "Run"}</button>`;
+  }
+
+  const autoTag = app.auto ? " · Auto" : "";
+  const statePill = `
+    <span class="menu-wrap">
+      <button class="state-pill ${st.pillClass}" data-menu="state-b" title="Change Task state or disposition">
+        <span class="dot"></span><span>${st.label}${autoTag}</span>${IC.chev}
+      </button>
+      <div class="popover" id="menu-state-b">
+        <div class="menu-head">Task state · LOO-1078</div>
+        <button class="menu-item ${st.running ? "selected" : ""}" data-act="run" data-v="b"><span class="m-left">${IC.play} Run next step</span><span class="m-sub">R</span></button>
+        <button class="menu-item ${st.paused ? "selected" : ""}" data-act="${st.paused ? "unpause" : "pause"}" data-v="b"><span class="m-left">${IC.pause} ${st.paused ? "Unpause" : "Pause (stop worker & builds)"}</span><span class="m-sub">P</span></button>
+        <button class="menu-item" data-act="complete" data-v="b"><span class="m-left">${IC.check} Complete Task</span><span class="m-sub">⇧C</span></button>
+        <div class="menu-sep"></div>
+        <button class="menu-item ${app.auto ? "selected" : ""}" data-act="toggle-auto" data-v="b">
+          <span class="m-left">${IC.auto} Auto-Ship</span>
+          <span class="m-sub">${app.auto ? "ON" : "off"}</span>
+        </button>
+        <div class="menu-sep"></div>
+        <button class="menu-item" data-act="cmd" data-v="b" data-cmd="lf task unassign LOO-1078"><span class="m-left">Unassign (back to Backlog)</span></button>
+        <button class="menu-item danger" data-act="cmd" data-v="b" data-cmd="lf task abandon LOO-1078"><span class="m-left">Abandon…</span></button>
+      </div>
+    </span>`;
+
+  return `
+    ${renderTitlebar("b", st, { hideStateWord: true })}
+    <div class="lf-wfbar">
+      ${renderWorkflowLine(st)}
+      <div class="lf-controls">
+        ${statePill}
+        ${primaryBtn}
+        ${renderOverflowMenu("b", st)}
+      </div>
+    </div>
+    <div class="pane-body">
+      <span>${st.paneHint}</span>
+      <span class="cmd-log">${app.logs.b}</span>
+    </div>`;
+}
+
+function renderVisionC(st) {
+  const slot1 = st.paused
+    ? `<button class="is-paused" data-act="unpause" data-v="c" title="Unpause Task (lf task unpause)">${IC.play}<span>Unpause</span></button>`
+    : st.running
+      ? `<button data-act="pause" data-v="c" title="Pause Task, stop worker & builds (lf task pause)">${IC.pause}</button>`
+      : `<button data-act="run" data-v="c" title="Run next step (lf task run)">${IC.play}</button>`;
+
+  const slotPauseWhenIdle = (!st.running && !st.paused && !st.merged)
+    ? `<button data-act="pause" data-v="c" title="Pause Task without unassigning (lf task pause)">${IC.pause}</button>`
+    : "";
+
+  const slotAuto = `<button class="${app.auto ? "is-on" : ""}" data-act="toggle-auto" data-v="c" title="${app.auto ? "Stop Auto-Ship (lf task auto off)" : "Auto-Ship (lf task auto on)"}">${IC.auto}</button>`;
+  const slotComplete = `<button class="${st.merged ? "is-ready" : ""}" data-act="complete" data-v="c" title="Complete Task (lf task complete)">${IC.check}</button>`;
+
+  return `
+    ${renderTitlebar("c", st, { titleMenu: true })}
+    <div class="lf-wfbar">
+      ${renderWorkflowLine(st)}
+      <div class="lf-controls">
+        <div class="icon-strip" role="group" aria-label="Task controls">
+          ${slot1}
+          ${slotPauseWhenIdle}
+          ${slotAuto}
+          ${slotComplete}
+        </div>
+      </div>
+    </div>
+    <div class="pane-body">
+      <span>${st.paneHint} · <em>click title in burgundy bar for secondary Task actions</em></span>
+      <span class="cmd-log">${app.logs.c}</span>
+    </div>`;
+}
+
+function renderVisionD(st) {
+  const jobCount = st.jobs.filter(j => !j.stopped).length;
+  const jobsPill = (st.jobs.length > 0)
+    ? `<button class="lf-btn plain" data-act="toggle-drawer-d" data-v="d" title="Show live worker & build processes">
+         ${IC.cpu}<span style="font-family:var(--font-mono);font-size:11px">${st.paused ? "0 live" : jobCount + " live"}</span>
+       </button>`
+    : "";
+
+  let leftPrimary;
+  if (st.paused) {
+    leftPrimary = `<button class="lf-btn warning-tint" data-act="unpause" data-v="d">${IC.play} Unpause</button>`;
+  } else if (st.running) {
+    leftPrimary = `<button class="lf-btn" data-act="pause" data-v="d">${IC.pause} Pause</button>`;
+  } else if (st.merged) {
+    leftPrimary = "";
+  } else {
+    leftPrimary = `
+      <button class="lf-btn" data-act="run" data-v="d">${IC.play} ${st.stepIdx < 0 ? "Start" : "Run"}</button>
+      <button class="lf-btn" data-act="pause" data-v="d">${IC.pause} Pause</button>`;
+  }
+
+  const completeBtn = `<button class="lf-btn ${st.merged ? "accent" : ""}" data-act="complete" data-v="d">${IC.check} Complete</button>`;
+
+  const drawerHtml = (app.drawerD && st.jobs.length > 0) ? `
+    <div class="process-strip">
+      <div class="proc-pills">
+        <span class="small muted">${st.paused ? "Stopped by pause:" : "Owned by LOO-1078:"}</span>
+        ${st.jobs.map(j => `<span class="proc-chip ${j.hot ? "hot" : ""} ${j.stopped ? "stopped" : ""}">${j.name}</span>`).join("")}
+      </div>
+      ${st.paused
+        ? `<span class="small muted">Claimed by Jack · thread resumable</span>`
+        : st.running
+          ? `<button class="lf-btn plain" data-act="cmd" data-v="d" data-cmd="lf task pause LOO-1078 --keep-session" style="font-size:11.5px">Pause worker only (keep session)</button>`
+          : ""}
+    </div>` : "";
+
+  return `
+    ${renderTitlebar("d", st)}
+    <div class="lf-wfbar">
+      ${renderWorkflowLine(st, { gateToggle: true, dimGates: true })}
+      <div class="lf-controls">
+        ${jobsPill}
+        ${leftPrimary}
+        ${completeBtn}
+        ${renderOverflowMenu("d", st)}
+      </div>
+    </div>
+    ${drawerHtml}
+    <div class="pane-body">
+      <span>${st.paneHint}</span>
+      <span class="cmd-log">${app.logs.d}</span>
+    </div>`;
+}
+
+function renderAll() {
+  const st = STATES[app.state];
+  document.getElementById("frame-existing").innerHTML = renderExisting(st);
+  document.getElementById("frame-a").innerHTML = renderVisionA(st);
+  document.getElementById("frame-b").innerHTML = renderVisionB(st);
+  document.getElementById("frame-c").innerHTML = renderVisionC(st);
+  document.getElementById("frame-d").innerHTML = renderVisionD(st);
+
+  document.querySelectorAll(".window-frame").forEach(el => {
+    el.classList.toggle("narrow", app.narrow);
+  });
+  document.querySelectorAll("#state-switcher .seg-btn").forEach(btn => {
+    btn.setAttribute("aria-pressed", String(btn.dataset.state === app.state));
+  });
+  const seedBtn = document.getElementById("auto-seed");
+  seedBtn.setAttribute("aria-pressed", String(app.auto));
+  seedBtn.textContent = app.auto ? "Auto-Ship: on" : "Auto-Ship: off";
+}
+
+function closeMenus() {
+  document.querySelectorAll(".popover.open").forEach(p => p.classList.remove("open"));
+}
+
+document.addEventListener("click", (e) => {
+  const menuTrigger = e.target.closest("[data-menu]");
+  if (menuTrigger) {
+    e.stopPropagation();
+    const id = "menu-" + menuTrigger.dataset.menu;
+    const target = document.getElementById(id);
+    const wasOpen = target && target.classList.contains("open");
+    closeMenus();
+    if (target && !wasOpen) target.classList.add("open");
+    return;
+  }
+
+  const actEl = e.target.closest("[data-act]");
+  if (actEl) {
+    e.stopPropagation();
+    const act = actEl.dataset.act;
+    const v = actEl.dataset.v;
+    closeMenus();
+    if (act === "pause") {
+      app.state = "paused";
+      app.logs[v] = "lf task pause LOO-1078  # worker, cargo test & session stopped; claim kept";
+    } else if (act === "unpause") {
+      app.state = "waiting";
+      app.logs[v] = "lf task unpause LOO-1078  # hold lifted; ready to run";
+    } else if (act === "unpause-run") {
+      app.state = "moving";
+      app.logs[v] = "lf task unpause LOO-1078 && lf task run LOO-1078";
+    } else if (act === "run") {
+      app.state = "moving";
+      app.logs[v] = "lf task run LOO-1078";
+    } else if (act === "toggle-auto") {
+      app.auto = !app.auto;
+      app.logs[v] = app.auto ? "lf task auto on LOO-1078" : "lf task auto off LOO-1078";
+    } else if (act === "complete") {
+      app.logs[v] = "lf task complete LOO-1078  # marked done";
+    } else if (act === "toggle-drawer-d") {
+      app.drawerD = !app.drawerD;
+    } else if (act === "cmd") {
+      app.logs[v] = actEl.dataset.cmd;
+    }
+    renderAll();
+    return;
+  }
+
+  const stateBtn = e.target.closest("#state-switcher .seg-btn");
+  if (stateBtn) {
+    app.state = stateBtn.dataset.state;
+    closeMenus();
+    renderAll();
+    return;
+  }
+
+  if (!e.target.closest(".popover")) closeMenus();
+});
+
+document.getElementById("auto-seed").addEventListener("click", () => {
+  app.auto = !app.auto;
+  renderAll();
+});
+
+document.getElementById("width-toggle").addEventListener("click", (e) => {
+  app.narrow = !app.narrow;
+  e.currentTarget.setAttribute("aria-pressed", String(app.narrow));
+  renderAll();
+});
+
+document.getElementById("theme-toggle").addEventListener("click", (e) => {
+  const root = document.documentElement;
+  const currentlyDark = root.dataset.theme === "dark" || (!root.dataset.theme && matchMedia("(prefers-color-scheme: dark)").matches);
+  const next = currentlyDark ? "light" : "dark";
+  root.dataset.theme = next;
+  e.currentTarget.setAttribute("aria-pressed", String(next === "dark"));
+  e.currentTarget.textContent = next === "dark" ? "Light" : "Dark";
+});
+
+// Initialize theme button label to match system appearance
+{
+  const isDark = matchMedia("(prefers-color-scheme: dark)").matches;
+  const btn = document.getElementById("theme-toggle");
+  btn.textContent = isDark ? "Light" : "Dark";
+  btn.setAttribute("aria-pressed", String(isDark));
+}
+
+renderAll();
+</script>
+</body>
+</html>

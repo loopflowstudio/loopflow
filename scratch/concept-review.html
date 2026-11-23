@@ -1,0 +1,583 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Concept Review · LOO-1078 · Pause a Task without giving it up</title>
+<style>
+  :root {
+    --bg: #fafaf8;
+    --surface: #ffffff;
+    --surface-2: #f3f2ee;
+    --border: #e2e0d8;
+    --text: #1c1b18;
+    --muted: #5c5a52;
+    --accent: #2d5be3;
+    --accent-bg: #eef2ff;
+    --yes: #166534;
+    --yes-bg: #dcfce7;
+    --no: #991b1b;
+    --no-bg: #fee2e2;
+    --warn: #92400e;
+    --warn-bg: #fef3c7;
+    --prop: #6b21a8;
+    --prop-bg: #f3e8ff;
+    --code-bg: #f0efe9;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #141413;
+      --surface: #1d1d1b;
+      --surface-2: #252522;
+      --border: #33332e;
+      --text: #ecebe4;
+      --muted: #a19f95;
+      --accent: #7aa2ff;
+      --accent-bg: #1d2744;
+      --yes: #86efac;
+      --yes-bg: #143624;
+      --no: #fca5a5;
+      --no-bg: #3e1919;
+      --warn: #fcd34d;
+      --warn-bg: #3a2b10;
+      --prop: #d8b4fe;
+      --prop-bg: #2f1b44;
+      --code-bg: #262623;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    line-height: 1.55;
+    font-size: 15px;
+  }
+  main {
+    max-width: 1080px;
+    margin: 0 auto;
+    padding: 36px 24px 80px;
+  }
+  header {
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 20px;
+    margin-bottom: 28px;
+  }
+  .eyebrow {
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--muted);
+    margin-bottom: 6px;
+  }
+  h1 {
+    margin: 0 0 10px;
+    font-size: 28px;
+    line-height: 1.2;
+    letter-spacing: -0.02em;
+  }
+  h2 {
+    margin: 38px 0 14px;
+    font-size: 20px;
+    letter-spacing: -0.01em;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 6px;
+  }
+  h3 {
+    margin: 22px 0 8px;
+    font-size: 16px;
+  }
+  p { margin: 0 0 12px; }
+  blockquote {
+    margin: 14px 0;
+    padding: 12px 16px;
+    border-left: 3px solid var(--accent);
+    background: var(--surface-2);
+    border-radius: 0 6px 6px 0;
+    color: var(--text);
+    font-style: italic;
+  }
+  code {
+    font-family: var(--mono);
+    font-size: 0.88em;
+    background: var(--code-bg);
+    padding: 1px 5px;
+    border-radius: 4px;
+  }
+  pre {
+    margin: 10px 0 14px;
+    padding: 13px 15px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow-x: auto;
+    font-family: var(--mono);
+    font-size: 12.5px;
+    line-height: 1.5;
+  }
+  .badge {
+    display: inline-block;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 2px 7px;
+    border-radius: 999px;
+    vertical-align: middle;
+    white-space: nowrap;
+  }
+  .yes { background: var(--yes-bg); color: var(--yes); }
+  .no { background: var(--no-bg); color: var(--no); }
+  .existing { background: var(--surface-2); color: var(--muted); border: 1px solid var(--border); }
+  .proposed { background: var(--prop-bg); color: var(--prop); }
+  .prior { background: var(--warn-bg); color: var(--warn); }
+  .legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: center;
+    margin-top: 12px;
+    font-size: 13px;
+    color: var(--muted);
+  }
+  .area-box {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px 18px;
+    margin: 16px 0 24px;
+  }
+  .status-banner {
+    background: var(--accent-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 16px;
+    font-size: 13.5px;
+    margin-bottom: 22px;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 14px 0 22px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+    font-size: 13.5px;
+  }
+  th, td {
+    text-align: left;
+    vertical-align: top;
+    padding: 11px 13px;
+    border-bottom: 1px solid var(--border);
+  }
+  th {
+    background: var(--surface-2);
+    font-weight: 600;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--muted);
+  }
+  tr:last-child td { border-bottom: none; }
+  .grid-2 {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: 16px;
+    margin: 14px 0 20px;
+  }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px 18px;
+  }
+  .card h3 { margin-top: 0; }
+  .callout {
+    border: 1px solid var(--no);
+    background: var(--surface);
+    border-radius: 10px;
+    padding: 18px 20px;
+    margin: 16px 0 24px;
+  }
+  .callout-title {
+    font-weight: 700;
+    color: var(--no);
+    margin-bottom: 8px;
+    font-size: 15px;
+  }
+  /* Mockup UI components */
+  .ui-bar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 9px 12px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 13px;
+    margin: 8px 0 12px;
+    flex-wrap: wrap;
+  }
+  .ui-bar .sentence { flex: 1; min-width: 180px; }
+  .ui-btn {
+    padding: 4px 10px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text);
+    font-size: 12px;
+    font-weight: 600;
+  }
+  .ui-btn.primary {
+    background: var(--accent);
+    color: #fff;
+    border-color: var(--accent);
+  }
+  .ui-btn.disabled {
+    opacity: 0.42;
+    text-decoration: line-through;
+  }
+  .sidebar-mock {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 12px;
+    font-size: 13px;
+  }
+  .sidebar-tabs {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    margin-bottom: 10px;
+  }
+  .pill {
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 11.5px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--muted);
+  }
+  .pill.active {
+    background: var(--accent-bg);
+    color: var(--accent);
+    border-color: var(--accent);
+    font-weight: 600;
+  }
+  .task-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 5px 8px;
+    border-radius: 6px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    margin-bottom: 5px;
+    font-family: var(--mono);
+    font-size: 12px;
+  }
+  .counterexample {
+    border-left: 3px solid var(--warn);
+    padding: 10px 14px;
+    background: var(--surface-2);
+    border-radius: 0 8px 8px 0;
+    margin: 10px 0 14px;
+    font-size: 13.5px;
+  }
+  .q-list {
+    list-style: none;
+    padding: 0;
+    margin: 14px 0 0;
+  }
+  .q-list > li {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 15px 18px;
+    margin-bottom: 12px;
+  }
+  .q-title { font-weight: 700; margin-bottom: 8px; }
+  .q-opts {
+    margin: 6px 0 0;
+    padding-left: 20px;
+    font-size: 14px;
+  }
+  .q-opts li { margin-bottom: 5px; }
+  .small { font-size: 12.5px; color: var(--muted); }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <div class="eyebrow">Concept Review · LOO-1078 · Pre-Implementation</div>
+    <h1>Pause a Task without giving it up</h1>
+    <blockquote>
+      “i think we need a 'paused' state / action for tasks -- stops the task worker - and ideally e.g. any rust compiling happening becasue of it - , maybe closes the tasks session for now as well, but oesnt unassign”
+    </blockquote>
+    <div class="legend">
+      <span class="badge existing">Existing</span> Committed on base <code>43e03187</code>
+      <span class="badge prior">Kickoff Plan</span> Earlier <code>scratch/plan.md</code> at <code>c0cccd63</code>
+      <span class="badge proposed">Revised Plan</span> Updated in <code>scratch/plan.md</code> by this review
+    </div>
+  </header>
+
+  <div class="status-banner">
+    <strong>Build status:</strong> Pre-implementation (no Rust or Swift code written yet). This review audited the kickoff plan against current <code>HEAD</code>, caught five conceptual mismatches, and rewrote <code>scratch/plan.md</code> around one aligned model so implementation starts clean.
+  </div>
+
+  <div class="area-box">
+    <strong>Area reviewed:</strong> <em>Task execution control &amp; lifecycle</em> — how a person starts, interrupts, pauses, unpauses, auto-runs, moves, and unassigns a Task across CLI, Machine server, Mac, and iPhone, and how that maps to <code>TaskState</code>, <code>TaskSection</code>, <code>TaskActions</code>, recovery loops, Session closure, and OS process teardown.<br>
+    <span class="small">Why this whole area: pause sits directly across five existing mechanisms (derived state, board sections, interrupt/move teardown, server recovery, and Session departure). Treating it as a standalone table creates contradictions and orphaned builds.</span>
+  </div>
+
+  <h2>1. Do the product’s concepts and the code’s concepts line up?</h2>
+  <table>
+    <thead>
+      <tr>
+        <th style="width: 22%">Product concept (what a person sees &amp; does)</th>
+        <th style="width: 26%">Code concepts (types, records, APIs)</th>
+        <th style="width: 8%">Aligns?</th>
+        <th>What is wrong where it is No (and how the revised plan fixes it)</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>Task lifecycle state</strong><br><span class="small"><code>unstarted · idle · active · moving · paused · done · abandoned</code></span></td>
+        <td><code>TaskState</code> (<code>execution.rs</code>), <code>task_state_sql</code> (<code>durable.rs</code>), <span class="badge proposed">Proposed</span> <code>task_pauses</code> table</td>
+        <td><span class="badge no">No</span></td>
+        <td><strong>One name hiding an invariant break:</strong> the kickoff plan allowed pausing an <code>unstarted</code>, unowned Backlog Task. Overriding <code>Unstarted</code> with <code>Paused</code> breaks Linear cancellation withdrawal (<code>TaskState::lifecycle</code>), flips <code>RoadmapTask.awaitsStart</code> to false, and makes <code>isUnassigned</code> misclassify an unstarted Backlog ticket as started-and-unassigned. It also never cleared <code>task_pauses</code> on <code>lf task unassign</code>.<br><strong>Fix:</strong> Pause applies only to open, <em>started</em> Tasks (checkout or Graph admitted, including <code>create --run</code> setup). <code>unassign</code>, <code>complete</code>, <code>abandon</code>, and <code>reopen</code> all clear <code>task_pauses</code>.</td>
+      </tr>
+      <tr>
+        <td><strong>Board placement &amp; finding parked work</strong><br><span class="small">Paused Tasks stay claimed, out of Working, and out of Backlog — yet one click away</span></td>
+        <td><code>TaskSection</code> (<code>execution.rs</code>), <code>SelectionState</code> (<code>selections.rs</code>), <code>TaskList</code> (<code>TaskList.swift</code>), <code>WorkNavigation.SidebarFilter</code>, <code>PendingChanges.swift</code></td>
+        <td><span class="badge no">No</span></td>
+        <td><strong>Vanishing Tasks on Mac &amp; iPhone:</strong> moving paused Tasks into <code>TaskSection::Paused</code> removes <code>SelectionState::Working</code> — but iPhone’s <code>TaskList</code> only has <code>started | available | busy | backlog | done</code> and Mac’s sidebar only filters <code>working | available | busy</code>. Under the kickoff plan, pausing a Task made it impossible to find again on Mac or iPhone!<br><strong>Fix:</strong> Wire <code>SelectionState::Paused</code> into <code>TaskList.paused</code>, Mac’s sidebar &amp; Wave board <code>PAUSED</code> section, and <code>PendingChanges</code>.</td>
+      </tr>
+      <tr>
+        <td><strong>Stopping a worker &amp; its <code>cargo</code>/<code>rustc</code> builds</strong><br><span class="small">Stop everything this Task spawned without touching neighbors</span></td>
+        <td><code>lf task interrupt</code> (<code>graph.rs:1070</code> <code>kill_process(pid)</code>), <code>moves::stop_graphs</code> (<code>SIGTERM</code> to Graph/step PIDs), <code>agent_process::close_agent_process</code> (only leader pgid), <span class="badge prior">Kickoff</span> pause-only descendant killer</td>
+        <td><span class="badge no">No</span></td>
+        <td><strong>One action with three owners (two of them leaky):</strong> <code>interrupt</code> and <code>move</code> only kill the step/provider group, leaking nested <code>cargo</code>/<code>rustc</code> job-control groups. The kickoff plan built descendant teardown only for <code>pause</code>.<br><strong>Fix:</strong> One shared descendant-aware teardown (<code>close_agent_process</code> + worker-stop helper using <code>descendant_group_leaders</code>, <code>TerminalJobs</code>, and PID+birth checks) used by <code>pause</code>, <code>interrupt</code>, and <code>move</code>. Only crash-retry PID persistence lives on <code>task_pauses.stopping_processes</code>.</td>
+      </tr>
+      <tr>
+        <td><strong>Interrupt vs. Pause</strong><br><span class="small">“Stop this wrong turn, keep talking” vs. “Park this Task and quiet it”</span></td>
+        <td><code>task_interrupt</code> (CLI/server, no UI) vs. <span class="badge proposed">Proposed</span> <code>task_pause</code> / <code>task_unpause</code></td>
+        <td><span class="badge yes">Yes</span><br><span class="small">(with shared teardown)</span></td>
+        <td>Distinct human intents once teardown is shared: <code>interrupt</code> stops a live run and keeps the Task in Working with its conversation open; <code>pause</code> parks the Task, stops builds, closes the primary conversation, and holds recovery/operators quiet.</td>
+      </tr>
+      <tr>
+        <td><strong>Closing &amp; restoring the Task conversation</strong><br><span class="small">Close provider on pause, retain thread, bring back cleanly on unpause</span></td>
+        <td><code>process::Departure</code>, <code>agent_process::stop_session_agent</code>, <code>ops/recovery.rs::server_start</code>, <code>quit_by_person</code>, <code>session_ending</code></td>
+        <td><span class="badge no">No</span></td>
+        <td><strong>Code concept leaking as a fake crash:</strong> killing a native provider with <code>SIGTERM</code> records exit <code>143</code>/<code>None</code>. Without modeling pause in <code>Departure</code> and <code>Left</code>, status reads <em>“died (exit 143)”</em>. And the kickoff plan contradicted itself on whether <code>lf resume</code> worked while paused (line 9 vs. line 17).<br><strong>Fix:</strong> Add <code>Departure::Paused { task }</code> and <code>Left::Paused</code>. Live terminals show <em>“Task INF-123 was paused: lf task unpause INF-123”</em>; status shows <em>“paused”</em>; <code>lf resume</code> respects the hold; unpausing lets server recovery restore a pause-closed conversation (while leaving an already-quit conversation quit).</td>
+      </tr>
+      <tr>
+        <td><strong>Settling a stopped Graph &amp; limit wait</strong><br><span class="small">A paused run was stopped on purpose, not crashed or rate-limited</span></td>
+        <td><code>task_graphs.run_pid</code> / <code>run_died_at</code>, <code>run_recovery::died_run</code>, <code>agent_limit_recoveries</code></td>
+        <td><span class="badge no">No</span></td>
+        <td><strong>Wrong lifecycle moment:</strong> the kickoff plan waited until <code>unpause</code> to settle the stopped carrier and retire its restart. Throughout the pause, <code>died_run</code> and <code>waiting_on_limit</code> saw stale crash/limit records.<br><strong>Fix:</strong> Settle the carrier and clear <code>agent_limit_recoveries</code> immediately when pause stops the run, so <code>unpause</code> is a clean single-row delete.</td>
+      </tr>
+      <tr>
+        <td><strong>Next action &amp; status sentence</strong><br><span class="small">One truth across CLI, Mac Workflow bar, iPhone menu, and operators</span></td>
+        <td><code>TaskGraph.sentence</code>, <code>TaskRunControl</code>, <code>TaskActionModel</code>, <code>TaskActions.swift</code></td>
+        <td><span class="badge no">No</span></td>
+        <td><strong>Stale sentences &amp; cluttered UI:</strong> without pause awareness, <code>TaskGraph.sentence</code> says <em>“Stopped at build. <code>lf task run</code> starts it again.”</em> (false while paused), <code>TaskActionModel</code> recommends <code>Run</code> (waking operators), and <code>TaskActions</code> shows disabled Run/Auto buttons beside Unpause.<br><strong>Fix:</strong> All four Rust projections read pause directly. While paused, <code>TaskActions</code> replaces <code>Run</code> with <code>Unpause</code> (disabled only while still draining), and CLI adds <code>lf task unpause --run</code>.</td>
+      </tr>
+      <tr>
+        <td><strong>Ownership, Auto, Move &amp; Steers</strong><br><span class="small">Keep my claim, keep auto setting, queue steers, carry hold on move</span></td>
+        <td><code>task_ownership</code>, <code>task_auto</code>, <code>MovedTask</code>, <code>steers</code> / child notifications</td>
+        <td><span class="badge yes">Yes</span></td>
+        <td><code>task_pauses</code> mirrors <code>task_auto</code> as a Machine-local control row carried by <code>MovedTask</code>. Incoming Linear comments and child-Task notifications queue as steers without waking a provider while paused, and stay ready once unpaused.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>2. Biggest mismatches — Before &amp; After</h2>
+
+  <div class="callout">
+    <div class="callout-title">Biggest mismatch #1 · A leaky three-way split for stopping Task workers</div>
+    <p>Loopflow had two separate paths that stopped a Task’s worker (<code>lf task interrupt</code> and <code>lf task move</code>), neither of which stopped nested <code>cargo</code>/<code>rustc</code> process groups. The kickoff plan added a third, pause-only teardown path instead of fixing the shared root.</p>
+    <div class="grid-2">
+      <div class="card">
+        <h3>Before <span class="badge existing">Existing</span> + <span class="badge prior">Kickoff</span></h3>
+        <pre>lf task interrupt  ──▶ task_events ──▶ graph.rs kill_process(step_pid)
+                                       └─ close_agent_process(pgid only)
+                                          ❌ leaks nested cargo/rustc groups
+
+lf task move       ──▶ moves::stop_graphs (SIGTERM graph+step PIDs)
+                                          ❌ leaks nested cargo/rustc groups
+
+lf task pause      ──▶ bespoke pause descendant killer + retry loop
+                                          ⚠️ 3rd stop path to maintain</pre>
+      </div>
+      <div class="card">
+        <h3>After <span class="badge proposed">Revised Plan</span></h3>
+        <pre>                    ┌─ lf task interrupt (keeps Working + Session)
+shared worker stop ─┼─ lf task move      (stops + transfers Machine)
+ (roots + nested    └─ lf task pause     (+ task_pauses hold +
+  descendant groups                         Departure::Paused +
+  + TerminalJobs +                          stopping_processes retry)
+  PID/birth check)
+                      ✓ zero leaked cargo/rustc builds on all three</pre>
+      </div>
+    </div>
+  </div>
+
+  <div class="callout">
+    <div class="callout-title">Biggest mismatch #2 · Paused Tasks broke <code>Unstarted</code>, vanished on Mac/iPhone, and left Sessions looking “crashed”</div>
+    <div class="grid-2">
+      <div class="card">
+        <h3>Before <span class="badge prior">Kickoff Plan</span></h3>
+        <div class="ui-bar">
+          <span class="sentence">Stopped at build. <code>lf task run</code> starts it again.</span>
+          <span class="ui-btn disabled">Run</span>
+          <span class="ui-btn disabled">Auto-Ship</span>
+          <span class="ui-btn primary">Unpause</span>
+        </div>
+        <div class="sidebar-mock">
+          <div class="sidebar-tabs">
+            <span class="pill active">Working</span>
+            <span class="pill">Available</span>
+            <span class="pill">Busy</span>
+            <span class="pill">Backlog</span>
+            <span class="pill">Done</span>
+          </div>
+          <div class="small">INF-123 left Working, isn’t in Backlog — <strong>nowhere to click it!</strong></div>
+        </div>
+        <pre>$ lf session list
+session_a1  INF-123  died 10:42 (exit 143) · waiting   ❌ fake crash
+$ lf task pause LOO-99   # unstarted backlog task
+LOO-99 paused            # breaks Linear withdrawal &amp; awaitsStart ❌</pre>
+      </div>
+      <div class="card">
+        <h3>After <span class="badge proposed">Revised Plan</span></h3>
+        <div class="ui-bar">
+          <span class="sentence">Paused at build. <code>lf task unpause</code> resumes it.</span>
+          <span class="ui-btn primary">Unpause</span>
+          <span class="ui-btn">Stop Auto-Ship</span>
+        </div>
+        <div class="sidebar-mock">
+          <div class="sidebar-tabs">
+            <span class="pill">Working</span>
+            <span class="pill active">Paused · 1</span>
+            <span class="pill">Available</span>
+            <span class="pill">Busy</span>
+            <span class="pill">Backlog</span>
+          </div>
+          <div class="task-row"><span>INF-123  Fix build cache</span><span>paused · build</span></div>
+        </div>
+        <pre>$ lf session list
+session_a1  INF-123  paused; `lf task unpause INF-123` resumes it ✓
+$ lf task pause LOO-99   # unstarted backlog task
+error: LOO-99 has not started; nothing to pause ✓</pre>
+      </div>
+    </div>
+  </div>
+
+  <h2>3. Concrete walkthrough: normal path, failure, and recovery</h2>
+
+  <div class="grid-2">
+    <div class="card">
+      <h3>Normal path · Pause one build, keep its neighbor compiling</h3>
+      <pre>$ lf task pause INF-123
+INF-123 paused (build · implement)
+  stopped: Graph run lf_81a, cargo (pid 41202), rustc (pid 41219)
+  session: session_a1 closed (thread retained)
+  kept:    owner Jack on macbook, worktree, PR #2041
+
+$ lf task list --state paused
+INF-123  paused  Jack  build (implement)  #2041  Fix build cache
+
+# Neighbor INF-124 is still compiling untouched.
+# Server restarts, wave-operate runs, teammate comments on Linear:
+#   → INF-123 stays quiet; Linear comment queues as steer.
+
+# Come back in one command (or two):
+$ lf task unpause INF-123 --run
+INF-123 unpaused
+INF-123 · code from implement running as Graph run lf_94c
+  follow: lf task status INF-123</pre>
+    </div>
+    <div class="card">
+      <h3>Failure &amp; recovery · Crash mid-pause, draining <code>lf land</code>, unassign</h3>
+      <div class="counterexample">
+        <strong>1. Crash between writing hold &amp; killing <code>rustc</code>:</strong><br>
+        <code>task_pauses.stopping_processes</code> already persisted <code>[(41219, birth)]</code> before the interrupt. Even after the worker exits and reparents <code>rustc</code> to PID 1, status reads <em>“Pausing at build (implement is stopping)”</em>, <code>unpause</code> refuses and names PID 41219, and repeating <code>lf task pause INF-123</code> finishes stopping it and clears <code>stopping_processes</code>.
+      </div>
+      <div class="counterexample">
+        <strong>2. Pausing during <code>lf land</code> (mutating GitHub):</strong><br>
+        Operation drains cleanly; no later step starts. Receipt reports <code>draining: pr-land</code>. Workflow bar reads <em>“Pausing at deliver (pr-land is finishing).”</em> Once it exits, Graph exits 130 and carrier settles.
+      </div>
+      <div class="counterexample">
+        <strong>3. Unassigning or moving a paused Task:</strong><br>
+        <code>lf task unassign INF-123</code> refuses if processes are still stopping, otherwise clears <code>task_pauses</code> and returns it cleanly to Backlog. <code>lf task move INF-123 --machine mini</code> carries the hold inside <code>MovedTask</code> and writes it before mini’s recovery pass runs.
+      </div>
+    </div>
+  </div>
+
+  <h2>4. What survives, what changes, and what stays outside this Task</h2>
+  <div class="grid-2">
+    <div class="card">
+      <h3>Preserved across pause</h3>
+      <ul>
+        <li>Task ownership (same person, same Machine)</li>
+        <li>Dirty worktree, branch, commits, and PR (including external GitHub merge state)</li>
+        <li>Graph name and cursor (exact interrupted step)</li>
+        <li>Primary <code>LfSessionId</code>, provider thread ID, history, and queued steers</li>
+        <li><code>task_auto</code> setting (on / off / unset)</li>
+        <li>Neighbor Tasks, shared <code>sccache</code> daemon, and user shells in the checkout</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>Stopped / cleared on pause</h3>
+      <ul>
+        <li>Running Graph, agent step, and attributable descendant build groups (<code>cargo</code>/<code>rustc</code>)</li>
+        <li>Carrier liveness (<code>run_pid</code>/<code>run_died_at</code>) and active <code>agent_limit_recoveries</code> row settled immediately</li>
+        <li>Primary Session’s live provider process (closed via <code>Departure::Paused</code>; terminals receive pause notice)</li>
+        <li>Automatic recovery, steer wakes, and operator runs held until explicit unpause</li>
+      </ul>
+      <p class="small" style="margin-top:10px"><strong>Outside this Task:</strong> Stopping live workers during <code>lf task unassign</code> on a non-paused Task (separate outcome: requires defining whether unassign interrupts in-flight runs).</p>
+    </div>
+  </div>
+
+  <h2>5. Choices made for review (open questions)</h2>
+  <p class="small">Running headless in a Graph, this review recorded the recommended choices below directly into <code>scratch/plan.md</code> so implementation can proceed. Reply with shorthand like <code>2b</code> to change any choice.</p>
+
+  <ol class="q-list">
+    <li>
+      <div class="q-title">1. Should <code>lf task pause</code> only apply to started Tasks, or also unstarted Backlog Tasks?</div>
+      <ol class="q-opts" type="a">
+        <li><strong>1a (Chosen in plan):</strong> Started Tasks only (checkout or Graph admitted, including <code>create --run</code> setup). Keeps <code>TaskState::Unstarted</code> withdrawal, <code>awaitsStart</code>, <code>isUnassigned</code>, and Backlog menus clean.</li>
+        <li><strong>1b:</strong> Allow pausing unstarted Backlog Tasks too (requires separating a stored hold axis from <code>TaskState::Unstarted</code> so Linear withdrawal and Backlog checks don’t break).</li>
+      </ol>
+    </li>
+    <li>
+      <div class="q-title">2. How should a person resume a paused Task from the CLI?</div>
+      <ol class="q-opts" type="a">
+        <li><strong>2a (Chosen in plan):</strong> Explicit <code>lf task unpause &lt;ID&gt;</code> lifts the hold without running; <code>lf task unpause &lt;ID&gt; --run</code> unpauses and runs in one command. Plain <code>lf task run</code> and <code>lf resume</code> refuse while paused so parent agents, cron operators, and steer wakes can’t accidentally undo a pause.</li>
+        <li><strong>2b:</strong> Let direct <code>lf task run &lt;ID&gt;</code> and <code>lf resume &lt;ID&gt;</code> automatically lift the pause when invoked directly, relying on operator prompts and recovery checks to respect pause.</li>
+      </ol>
+    </li>
+    <li>
+      <div class="q-title">3. What should happen to the Task’s primary Session on pause and unpause?</div>
+      <ol class="q-opts" type="a">
+        <li><strong>3a (Chosen in plan):</strong> Close the live provider on pause with <code>Departure::Paused</code> (retaining thread &amp; history); on unpause, let the Machine server bring it back automatically unless the person had already quit it beforehand.</li>
+        <li><strong>3b:</strong> Close on pause and leave it closed after unpause until the person explicitly runs <code>lf resume</code> or clicks Open.</li>
+        <li><strong>3c:</strong> Leave the primary interactive Session running during pause and stop only the headless Graph worker and its builds.</li>
+      </ol>
+    </li>
+    <li>
+      <div class="q-title">4. Where should paused Tasks live on Mac and iPhone?</div>
+      <ol class="q-opts" type="a">
+        <li><strong>4a (Chosen in plan):</strong> Separate <code>TaskSection::Paused</code> outside Working and Backlog, surfaced via <code>TaskList.paused</code> on iPhone and a discoverable Paused filter/section in Mac’s sidebar and Wave board.</li>
+        <li><strong>4b:</strong> Keep paused Tasks inside Working (dimmed / sorted to the bottom with a Paused badge) so Mac’s sidebar needs no new section.</li>
+      </ol>
+    </li>
+  </ol>
+</main>
+</body>
+</html>

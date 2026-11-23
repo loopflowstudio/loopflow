@@ -472,7 +472,9 @@ fn ask_server(
             last: span.last_miss,
         }),
         printed: Vec::new(),
-        inbox: adapter.and_then(|_| claude_inbox()),
+        inbox: adapter
+            .and_then(|_| claude_inbox())
+            .map(loopflow_execution::steer::Inbox::Claude),
     }));
     let answered = crate::server::socket_path().and_then(|socket| {
         loopflow_execution::machine::client::hook_request(

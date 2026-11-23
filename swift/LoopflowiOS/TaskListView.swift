@@ -191,6 +191,8 @@ final class TaskFeed {
 
 struct TaskListView: View {
     let client: RemoteMobileClient
+    /// Read again on connect and whenever the app returns to the foreground.
+    let machineTheme: MachineTheme
     let onForget: () -> Void
     let onChangeAddress: () -> Void
     @State private var feed: TaskFeed
@@ -204,12 +206,12 @@ struct TaskListView: View {
     @State private var notices: NoticeCenter
     /// The repository shown, by durable ID; empty shows every repository.
     @AppStorage("repository") private var repository = ""
-    @Environment(\.colorScheme) private var colorScheme
     @Environment(\.scenePhase) private var scenePhase
-    private var theme: ThemeDefinition { colorScheme == .dark ? .dark : .light }
+    @Environment(\.theme) private var theme
 
-    init(client: RemoteMobileClient, onForget: @escaping () -> Void, onChangeAddress: @escaping () -> Void) {
+    init(client: RemoteMobileClient, machineTheme: MachineTheme, onForget: @escaping () -> Void, onChangeAddress: @escaping () -> Void) {
         self.client = client
+        self.machineTheme = machineTheme
         self.onForget = onForget
         self.onChangeAddress = onChangeAddress
         let notices = NoticeCenter()
@@ -315,7 +317,7 @@ struct TaskListView: View {
                 if let created { workspace(created) }
             }
             .sheet(item: $creation, onDismiss: { showingCreated = created != nil }) { model in
-                MobileNewTaskView(model: model, theme: theme) { opening in
+                MobileNewTaskView(model: model) { opening in
                     opening.presented()
                     created = opening.task
                     creation = nil
@@ -370,6 +372,9 @@ struct TaskListView: View {
         } message: { Text(captureError ?? "") }
         .tint(theme.palette.accentInk)
         .onChange(of: repository) { feed.wave = nil }
+        .task(id: scenePhase == .active) {
+            if scenePhase == .active { await machineTheme.refresh(client) }
+        }
         .task(id: [feed.filter.rawValue, feed.wave ?? "", String(scenePhase == .active)]) {
             if scenePhase == .active { await feed.start() } else { feed.stop() }
         }
@@ -409,7 +414,7 @@ struct TaskListView: View {
     }
 
     private func workspace(_ task: MobileTask) -> some View {
-        TaskWorkspaceView(client: client, feed: feed, task: task, theme: theme, draft: Binding(
+        TaskWorkspaceView(client: client, feed: feed, task: task, draft: Binding(
             get: { drafts[task.id] ?? "" },
             set: { drafts[task.id] = $0 }))
     }

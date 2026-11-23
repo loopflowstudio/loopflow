@@ -21,7 +21,7 @@ final class MobileTaskCreationTests: XCTestCase {
         try FileManager.default.createDirectory(at: store.url, withIntermediateDirectories: true)
         XCTAssertFalse(model.saveDraft())
         let view = Color.clear.sheet(isPresented: .constant(true)) {
-            MobileNewTaskView(model: model, theme: .light, onOpen: { _ in XCTFail("No Task was requested") })
+            MobileNewTaskView(model: model, onOpen: { _ in XCTFail("No Task was requested") })
         }
         try await capture(view, name: "new-task-storage-recovery") { window in
             let clock = ContinuousClock()
@@ -179,7 +179,7 @@ final class MobileTaskCreationTests: XCTestCase {
                                PortfolioRepo(path: "/archive/first", error: nil),
                                PortfolioRepo(path: "/offline/first", error: "Repository is unavailable")]
         await model.prepare()
-        let picker = MobileRepositoryPicker(model: model, theme: .light)
+        let picker = MobileRepositoryPicker(model: model)
         let unavailable = try picker.inspect().find(text: "/offline/first").find(ViewType.Button.self, relation: .parent)
         XCTAssertTrue(unavailable.isDisabled())
         try picker.inspect().find(text: "/archive/first").find(ViewType.Button.self, relation: .parent).tap()
@@ -213,11 +213,11 @@ final class MobileTaskCreationTests: XCTestCase {
         for (name, style, size) in [("light", ColorScheme.light, DynamicTypeSize.large),
                                     ("dark", .dark, .large), ("large-text", .light, .accessibility3)] {
             let view = NavigationStack {
-                MobileRepositoryPicker(model: model, theme: style == .dark ? .dark : .light)
-            }.environment(\.colorScheme, style).environment(\.dynamicTypeSize, size)
+                MobileRepositoryPicker(model: model)
+            }.environment(\.theme, style == .dark ? .dark : .light).environment(\.colorScheme, style).environment(\.dynamicTypeSize, size)
             try await capture(view, name: "repository-picker-\(name)")
         }
-        try await capture(NavigationStack { MobileRepositoryPicker(model: model, theme: .light) },
+        try await capture(NavigationStack { MobileRepositoryPicker(model: model) },
                           name: "repository-picker-search") { window in
             let search = try XCTUnwrap(self.searchField(in: window))
             XCTAssertTrue(search.becomeFirstResponder())
@@ -226,7 +226,7 @@ final class MobileTaskCreationTests: XCTestCase {
         }
         client.repositories = []
         await model.prepare()
-        try await capture(NavigationStack { MobileRepositoryPicker(model: model, theme: .light) },
+        try await capture(NavigationStack { MobileRepositoryPicker(model: model) },
                           name: "repository-picker-empty")
     }
 
@@ -388,7 +388,7 @@ final class MobileTaskCreationTests: XCTestCase {
         client.loseReply = true
         await model.submit()
         let id = try XCTUnwrap(model.draft.submission?.id)
-        let composer = MobileNewTaskView(model: model, theme: .light, onOpen: { _ in })
+        let composer = MobileNewTaskView(model: model, onOpen: { _ in })
         try composer.inspect().find(button: "Save for later").tap()
         XCTAssertNil(model.draft.submission)
         model.editText("An unrelated draft must remain here")
@@ -396,18 +396,18 @@ final class MobileTaskCreationTests: XCTestCase {
                                     ("dark", .dark, .large), ("large-text", .light, .accessibility3)] {
             let theme = style == .dark ? ThemeDefinition.dark : .light
             let list = NavigationStack {
-                MobileSavedRequestsView(model: model, theme: theme, onOpen: { _ in })
-            }.environment(\.colorScheme, style).environment(\.dynamicTypeSize, size)
+                MobileSavedRequestsView(model: model, onOpen: { _ in })
+            }.environment(\.theme, theme).environment(\.colorScheme, style).environment(\.dynamicTypeSize, size)
             try await capture(list, name: "saved-requests-\(name)")
             let detail = NavigationStack {
-                MobileSavedTaskRequestView(id: id, model: model, theme: theme, onOpen: { _ in })
-            }.environment(\.colorScheme, style).environment(\.dynamicTypeSize, size)
+                MobileSavedTaskRequestView(id: id, model: model, onOpen: { _ in })
+            }.environment(\.theme, theme).environment(\.colorScheme, style).environment(\.dynamicTypeSize, size)
             try await capture(detail, name: "saved-request-\(name)")
         }
         XCTAssertEqual(model.draft.text, "An unrelated draft must remain here")
         XCTAssertEqual(client.requests.count, 1, "Opening saved screens must never resend a request")
         var opened: MobileTaskOpening?
-        let detail = MobileSavedTaskRequestView(id: id, model: model, theme: .light) { opened = $0 }
+        let detail = MobileSavedTaskRequestView(id: id, model: model) { opened = $0 }
         try detail.inspect().find(button: "Check status").tap()
         let deadline = Date().addingTimeInterval(2)
         while opened == nil && Date() < deadline { try await Task.sleep(for: .milliseconds(10)) }
@@ -428,8 +428,8 @@ final class MobileTaskCreationTests: XCTestCase {
         model.editText("Make the Task sidebar easier to scan.")
         for (name, style, size) in [("light", ColorScheme.light, DynamicTypeSize.large),
                                     ("dark", .dark, .large), ("large-text", .light, .accessibility3)] {
-            let view = MobileNewTaskView(model: model, theme: style == .dark ? .dark : .light, onOpen: { _ in })
-                .environment(\.colorScheme, style).environment(\.dynamicTypeSize, size)
+            let view = MobileNewTaskView(model: model, onOpen: { _ in })
+                .environment(\.theme, style == .dark ? .dark : .light).environment(\.colorScheme, style).environment(\.dynamicTypeSize, size)
             try await capture(view, name: "new-task-\(name)")
         }
     }

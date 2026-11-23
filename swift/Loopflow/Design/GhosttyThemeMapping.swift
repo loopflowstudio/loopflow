@@ -3,10 +3,24 @@ import Foundation
 /// Convert terminal colors into the complete app contract at the import boundary.
 /// State selects semantic roles; ANSI values supply seeds, never activity.
 public enum GhosttyThemeMapping {
+    /// The bar a theme gets when it states none: the accent, mixed into the ground in
+    /// dark themes, then moved away from its text until the second text level reads.
+    public static func titlebar(accent: ThemeRGB, background: ThemeRGB, dark: Bool) -> ThemeRGB {
+        let bar = dark ? accent.mixed(with: background, amount: 0.65) : accent
+        let text = bar.contrastingText, end = ThemeRGB(text.hex ^ 0xFFFFFF)
+        for step in 0...255 {
+            let value = bar.mixed(with: end, amount: Double(step) / 255)
+            let secondary = value.mixed(with: text, amount: PaletteDefinition.titlebarSecondaryOpacity)
+            // The same 0.02 margin over 4.5 that `readable(on:)` keeps.
+            if secondary.contrast(value) >= 4.52 { return value }
+        }
+        return end
+    }
+
     public static func palette(_ terminal: TerminalPalette) -> PaletteDefinition {
         let background = terminal.background
         let dark = background.prefersLightText
-        let textEnd = ThemeRGB(dark ? 0xFFFFFF : 0)
+        let textEnd = background.contrastingText
         func quiet(_ color: ThemeRGB, retaining amount: Double) -> ThemeRGB {
             let channels = color.channels
             let gray = UInt32((channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722) * 255)
@@ -52,7 +66,8 @@ public enum GhosttyThemeMapping {
             borderStrong: background.mixed(with: secondary, amount: 0.4), borderActive: accentInk,
             text: text, textSecondary: secondary, textTertiary: tertiary,
             accent: accent, accentHover: accentHover, accentPressed: accentPressed, accentInk: accentInk,
-            accentText: accentText, emphasisInk: text,
+            accentText: accentText,
+            titlebar: titlebar(accent: accent, background: background, dark: dark), emphasisInk: text,
             workSelectedFill: selectedFill, workSelectedText: selectedText,
             workSelectedSecondaryText: selectedText.mixed(with: selectedFill, amount: 0.16).readable(on: [selectedFill], dark: selectedDark),
             shadow: terminal.indexed[0], selectionFill: ThemePaint(rgb: surfaces[1], opacity: 0.72),

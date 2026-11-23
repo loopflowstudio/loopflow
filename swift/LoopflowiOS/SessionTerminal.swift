@@ -68,18 +68,17 @@ final class TerminalActions {
 struct SessionTerminal: UIViewControllerRepresentable {
     let link: SessionLink
     let actions: TerminalActions
-    let theme: ThemeDefinition
 
     func makeUIViewController(context: Context) -> SessionTerminalController {
         let controller = SessionTerminalController(link: link)
         actions.controller = controller
-        controller.apply(theme)
+        controller.apply(context.environment.theme)
         controller.loadViewIfNeeded()
         return controller
     }
 
     func updateUIViewController(_ controller: SessionTerminalController, context: Context) {
-        controller.apply(theme)
+        controller.apply(context.environment.theme)
     }
 
     static func dismantleUIViewController(_ controller: SessionTerminalController, coordinator: ()) {

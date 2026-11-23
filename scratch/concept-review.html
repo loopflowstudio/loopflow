@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8">
-<title>Concept review: themes, round 6 — the theme choice with the notice split built</title>
+<title>Concept review: themes, round 7 — the chooser bar names what it acts on</title>
 <style>
 :root { color-scheme: light dark; --bg:#faf8f5; --fg:#2a2624; --muted:#5f5752; --line:#e6dfd6; --card:#fffdf9; --yes:#31633e; --no:#a02e25; --prop:#24579e; --accent:#722f37; }
 @media (prefers-color-scheme: dark) { :root { --bg:#2b2d30; --fg:#e6e2dc; --muted:#a8a29b; --line:#45474b; --card:#323437; --yes:#8fcf9a; --no:#f0a39a; --prop:#9cc2ee; --accent:#e7a3ad; } }
@@ -19,7 +19,43 @@ pre { background:var(--bg); border:1px solid var(--line); border-radius:6px; pad
 .swatches { display:flex; gap:4px; flex-wrap:wrap; margin:.4rem 0 } .swatches span { width:28px; height:20px; border-radius:3px; border:1px solid var(--line) }
 ol.q li { margin:.6rem 0 }
 </style></head><body>
-<h1>The theme choice after round 6: do the concepts line up?</h1>
+<h1>The theme choice after round 7: do the concepts line up?</h1>
+<p class="muted">Area taken: Choose Theme as round 7 left it (demo changes: 12 families, Arcade Day on Paper, Customize and Delete/Revert in the bottom bar, <code>CardGrid</code>), inside the whole theme choice of PR #2020. Earlier rounds follow below as written.</p>
+
+<h2>Round 7: one interaction, walked</h2>
+<p><b>Normal path, System mode.</b> Both sections show. Fjord Light is ringed in the light grid, Signal in the dark grid; the headings read “Light themes · Fjord Light” and “Dark themes · Signal”. The person clicks Fjord Light, then Signal. The bar at the bottom reads <b>Customize</b> (and, for a theme of yours, <b>Delete</b>). Which one does it act on? The window's own colors and the small “Previewing Signal” line at the top say Signal; the two rings say nothing, because both are rings.</p>
+<p><b>Failure.</b> The person wanted to customize Fjord Light, last seen ringed, and presses Customize: the editor opens on a copy of Signal. With your own theme on each side, <b>Delete</b> deletes the one whose side was clicked last. Recovery is Cancel (nothing is written before Apply), but the person learns the rule by tripping on it.</p>
+<p><b>Before round 7</b> the buttons sat under the card they acted on, so place said which. Moving them to the bar (Jack's “i also dont like how the Customize button makes the rows jump”) was right; it dropped the one cue that told the two chosen themes apart.</p>
+
+<table>
+<tr><th>Product concept</th><th>Code concept</th><th>Lines up</th><th>Note</th></tr>
+<tr><td>Each side's chosen theme (what Apply saves)</td><td><code>themeName(for: side)</code>; ring, heading</td><td class="yes">yes</td><td>Two in System mode, one per side.</td></tr>
+<tr><td>The theme the bar acts on</td><td><code>selectedTheme</code> = <code>previewSide</code>'s theme; <code>customize()</code>, <code>deleteTheme()</code></td><td class="no">no</td><td>One name, “the chosen theme”, for two ideas in System mode: two ringed cards, one target. The button doesn't say which.</td></tr>
+<tr><td>12 families, a light and a dark each</td><td><code>scripts/theme_catalogue.py</code> specs; <code>ThemeDefinition.builtins</code></td><td class="yes">yes</td><td>No Harbor left outside <code>scratch/</code>.</td></tr>
+<tr><td>The card grid</td><td><code>CardGrid</code></td><td class="yes">yes</td><td>A layout, not a concept; replaces <code>LazyVGrid</code> outright.</td></tr>
+</table>
+
+<div class="big">
+<h2 style="margin-top:.4rem">Biggest mismatch: the bar's target is unnamed <span class="tag">proposed</span></h2>
+<div class="cmp">
+<div class="win"><h3>Now</h3><pre>Previewing Signal
+…grids, two rings…
+[Customize] [Delete]        [Cancel] [Apply]</pre></div>
+<div class="win prop"><h3>Proposed</h3><pre>Previewing Signal
+…grids, two rings…
+[Customize Signal] [Delete Signal]   [Cancel] [Apply]</pre></div>
+</div>
+<p>The buttons carry the name: “Customize Signal”, “Delete Signal”, “Revert Signal to built-in”. No new state, no second ring style; the target is read off the button that acts on it. In Light or Dark mode it costs a few words and is never wrong. Passed over: a second marker on the previewed card (a new visual distinction to learn), or acting on a side chosen in the bar (a second selection).</p>
+<p>The <code>customizeShown(under:)</code> check in <code>ThemeWorkflowTests</code> now can't fail (nothing is under a card); it becomes a check that the button names the clicked theme.</p>
+</div>
+
+<h2>Questions</h2>
+<ol class="q">
+<li>Name in the buttons: (a) yes, as built next; (b) only in System mode; (c) leave them bare.</li>
+<li>“Previewing X” at the top now repeats the buttons' name: (a) keep it (it names the window's colors while the editor is open); (b) drop it.</li>
+</ol>
+<hr>
+<h2>The theme choice after round 6: do the concepts line up?</h2>
 <p class="muted">Area taken: the whole theme choice as PR #2020 stands against main (<code>d820b17a6c</code>): catalogue, chooser, <code>theme:</code> as one Machine fact behind <code>config.theme {value}</code>, the phone, the site, now with round 6's notice split and QA round 6's retry (<code>scratch/qa.html</code>, R6). Round 5's review follows below as it was written.</p>
 
 <h2>Round 6: one interaction, walked again</h2>

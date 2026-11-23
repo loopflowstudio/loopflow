@@ -41,3 +41,5 @@
 - Implement round 7: Customize and Delete/Revert moved to the bottom bar as proposed at the demo, before any reply to the proposal. Delete/Revert also shows while editing (the old row was hidden then). Passed over: reserving the row's height under every card (keeps the buttons by the card, costs a blank strip per card).
 
 - QA round 7: the chooser's grids are a non-lazy `CardGrid` layout rather than `LazyVGrid`, after the lazy grid drew blank or overlapping rows on reopening Settings. Passed over: forcing a redraw on appear (treats the symptom; the lazy grid's estimated rows stay).
+
+- Concept review round 7: the bar's buttons name the theme they act on ("Customize Signal") rather than marking the previewed card a second way. Passed over: a second ring style, a side picker in the bar. "Previewing X" stays.

@@ -29,9 +29,9 @@
     --existing-bg: #f1f5f9;
     --existing-text: #475569;
     --existing-border: #cbd5e1;
-    --proposed-bg: #ecfdf5;
-    --proposed-text: #047857;
-    --proposed-border: #6ee7b7;
+    --built-bg: #ecfdf5;
+    --built-text: #047857;
+    --built-border: #6ee7b7;
     --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
     --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   }
@@ -61,9 +61,9 @@
       --existing-bg: #1e242b;
       --existing-text: #94a3b8;
       --existing-border: #334155;
-      --proposed-bg: #0d281f;
-      --proposed-text: #34d399;
-      --proposed-border: #065f46;
+      --built-bg: #0d281f;
+      --built-text: #34d399;
+      --built-border: #065f46;
     }
   }
 
@@ -111,7 +111,7 @@
     margin: 0 0 16px;
     font-size: 16px;
     color: var(--text-muted);
-    max-width: 78ch;
+    max-width: 80ch;
   }
 
   .meta-strip {
@@ -141,10 +141,10 @@
     border-color: var(--existing-border);
   }
 
-  .badge-proposed {
-    background: var(--proposed-bg);
-    color: var(--proposed-text);
-    border-color: var(--proposed-border);
+  .badge-built {
+    background: var(--built-bg);
+    color: var(--built-text);
+    border-color: var(--built-border);
   }
 
   .badge-yes {
@@ -183,7 +183,7 @@
 
   p {
     margin: 0 0 12px;
-    max-width: 78ch;
+    max-width: 80ch;
   }
 
   code {
@@ -206,11 +206,6 @@
     padding: 18px 20px;
     border: 1px solid var(--border);
     margin: 16px 0;
-  }
-
-  .callout-danger {
-    background: var(--no-bg);
-    border-color: var(--no-border);
   }
 
   .callout-accent {
@@ -257,6 +252,33 @@
     margin: 0;
   }
 
+  .metric-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 10px;
+    margin-top: 14px;
+  }
+
+  .metric {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 14px;
+  }
+
+  .metric-val {
+    font-family: var(--mono);
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--yes);
+  }
+
+  .metric-label {
+    font-size: 12.5px;
+    color: var(--text-muted);
+    margin-top: 2px;
+  }
+
   table {
     width: 100%;
     border-collapse: collapse;
@@ -294,13 +316,6 @@
     margin-top: 14px;
   }
 
-  .grid-3 {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-    gap: 14px;
-    margin-top: 14px;
-  }
-
   .flow-box {
     font-family: var(--mono);
     font-size: 12.5px;
@@ -318,53 +333,16 @@
   .flow-box .hi-yes { color: var(--yes); font-weight: 600; }
   .flow-box .hi-muted { color: var(--text-faint); }
 
-  .state-row {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    align-items: center;
-    margin: 10px 0;
-    font-family: var(--mono);
-    font-size: 12px;
-  }
-
-  .state-pill {
-    padding: 4px 10px;
-    border-radius: 6px;
-    border: 1px solid var(--border-strong);
-    background: var(--surface);
-  }
-
-  .state-arrow {
-    color: var(--text-faint);
-  }
-
-  .choice-list {
+  .outside-list {
     display: grid;
     gap: 12px;
   }
 
-  .choice {
+  .outside-item {
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: 10px;
     padding: 16px 18px;
-  }
-
-  .choice-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-    gap: 12px;
-    margin-top: 8px;
-    font-size: 13.5px;
-  }
-
-  .choice-label {
-    font-family: var(--mono);
-    font-size: 11px;
-    text-transform: uppercase;
-    color: var(--text-faint);
-    margin-bottom: 3px;
   }
 
   .questions {
@@ -399,9 +377,9 @@
     background: var(--surface-muted);
   }
 
-  .options li.recommended {
-    background: var(--proposed-bg);
-    border: 1px solid var(--proposed-border);
+  .options li.built {
+    background: var(--built-bg);
+    border: 1px solid var(--built-border);
   }
 
   .opt-key {
@@ -422,276 +400,258 @@
 <main>
 
 <header>
-  <div class="eyebrow">LOO-1080 · Concept Review · Pre-implementation</div>
+  <div class="eyebrow">LOO-1080 · Concept Review · Post-implementation (HEAD 40211c2560 vs base 2656258abf)</div>
   <h1>Do Mobile Access’s product concepts and code concepts line up?</h1>
   <p class="lede">
-    <strong>Area reviewed:</strong> Mobile remote access (<code>lf server mobile</code>, Desktop’s Mobile settings, and the server’s Tailscale boundary in <code>server/mobile.rs</code> &amp; <code>server/remote.rs</code>) — how Loopflow discovers, talks to, monitors, and recovers this Machine’s Tailscale daemon. Widened from “stop the 5-second poll” to the whole lifecycle because the previous plan still kept a macOS CLI fallback and two retry/health regimes.
+    <strong>Area reviewed:</strong> Mobile remote access across CLI, Desktop, and the resident server — <code>lf server mobile</code>, <code>swift/LoopflowMac/Views/MobileSettings.swift</code>, <code>server/mobile.rs</code>, <code>server/mobile/tailscale.rs</code>, <code>server/mobile/tailscale/macos.rs</code>, <code>server/remote.rs</code>, <code>docs/server.md</code>, and <code>server/README.md</code>. Widened beyond the 5-second poll to the whole Tailscale discovery, ownership, admission, cancellation, and recovery lifecycle.
   </p>
   <div class="meta-strip">
-    <span><span class="badge badge-existing">Existing</span> Current <code>main</code> &amp; kickoff plan</span>
-    <span><span class="badge badge-proposed">Proposed</span> Updated in <code>scratch/plan.md</code> (not yet built)</span>
-    <span>Code changed: <code>none</code></span>
+    <span><span class="badge badge-existing">Base main</span> <code>2656258abf</code> (CLI subprocess polling)</span>
+    <span><span class="badge badge-built">Built &amp; committed</span> <code>40211c2560</code> (LocalAPI client + cancellable restore + QA)</span>
+    <span><span class="badge badge-warn">Open for review</span> 4 reversible product/implementation choices below</span>
   </div>
 </header>
 
+<div class="callout callout-accent">
+  <strong>Review outcome:</strong> Nothing in the built model needs a redesign. The seven core product concepts now map 1:1 to the code on <code>HEAD</code>, zero CLI subprocesses remain, and live macOS QA observed <strong>0 <code>nehelper</code> records</strong> across 125 seconds of active mobile readiness. Two adjacent friction points (<code>TS_SOCKET</code> on launchd-managed macOS servers, and <code>lf server mobile</code> JSON/text inconsistency) sit outside LOO-1080 and are listed plainly in Section 5.
+</div>
+
 <section>
-  <h2>1. One concrete interaction: normal, failure, and recovery</h2>
-  <p>A person turns mobile access on once, opens Tasks from their iPhone, and expects Loopflow to stay silent on macOS whether Tailscale is running, signed out, or quit.</p>
+  <h2>1. One concrete interaction: built behavior observed on macOS</h2>
+  <p>A person turns mobile access on once, connects from their iPhone, and leaves it enabled while Tailscale runs, signs out, stops, or rotates its local port — expecting zero macOS GUI launches and zero <code>nehelper</code> churn.</p>
   <div class="journey">
     <div class="step">
       <div class="step-num">1 · Enable</div>
       <div class="step-title">Turn on once</div>
-      <p class="step-body">Desktop “Enable mobile access” or <code>lf server mobile</code> binds this Machine’s <code>.ts.net</code> address, saves owner + port in <code>mobile.yaml</code>, and shows the QR code.</p>
+      <p class="step-body"><code>lf server mobile</code> reads LocalAPI once (0.19s in QA), checks MagicDNS + owner, binds the tailnet address, saves <code>mobile.yaml</code>, and returns the QR endpoint.</p>
     </div>
     <div class="step">
       <div class="step-num">2 · Idle &amp; Use</div>
       <div class="step-title">Phone connects, Mac stays quiet</div>
-      <p class="step-body">Each phone socket is checked by Tailscale <code>whois</code>. While idle for days, <code>lf server</code> spawns zero Tailscale apps and triggers zero <code>nehelper</code> saves.</p>
+      <p class="step-body">Each socket checks <code>/localapi/v0/whois</code>. Every 5s <code>check_owner</code> reads <code>status?peers=false</code>. 125s live idle window logged <strong>0</strong> <code>nehelper</code> events (1 CLI control call logged 3).</p>
     </div>
     <div class="step">
       <div class="step-num">3 · Fail (Auth)</div>
-      <div class="step-title">Logout or account switch</div>
-      <p class="step-body">Already-connected phones disconnect within seconds. Local <code>lf server</code> and running Sessions stay untouched. Status says why.</p>
+      <div class="step-title">Logout, account or DNS change</div>
+      <p class="step-body"><code>HostStatus::verify</code> catches owner or DNS drift on the next 5s check, stops the listener, drops connected phones, keeps the local server untouched, and reports the exact reason.</p>
     </div>
     <div class="step">
       <div class="step-num">4 · Fail (Daemon)</div>
-      <div class="step-title">Tailscale quit or stopped</div>
-      <p class="step-body">Listener stops and reports unready. While Tailscale stays off all weekend, <code>lf server</code> must still trigger <strong>zero</strong> GUI launches and <strong>zero</strong> <code>nehelper</code> churn.</p>
+      <div class="step-title">Tailscale stopped or hung</div>
+      <p class="step-body">Listener exits and schedules restoration from completion at <code>5 → 10 → 20 → 30s</code>. Against a hung socket, <code>--status</code> answers in 0.03s and <code>--off</code> cancels the in-flight request in 0.05s.</p>
     </div>
     <div class="step">
       <div class="step-num">5 · Recover</div>
-      <div class="step-title">Tailscale returns</div>
-      <p class="step-body">Opening Tailscale with the approved account binds the <strong>same saved port</strong> automatically; phone reconnects without re-scanning QR.</p>
+      <div class="step-title">Daemon returns or rotates port</div>
+      <p class="step-body">Each retry re-discovers via <code>libproc</code> / <code>ipnport</code> / socket fresh, picks up any new <code>IPNExtension</code> port and proof token, and rebinds the <strong>same saved port</strong> so phones reconnect without re-scanning.</p>
     </div>
     <div class="step">
       <div class="step-num">6 · Disable</div>
       <div class="step-title">Turn off</div>
-      <p class="step-body">Closes the HTTPS listener immediately, cancels any in-flight retry, keeps address/owner in <code>mobile.yaml</code> with <code>enabled: false</code>.</p>
+      <p class="step-body"><code>--off</code> goes straight to the live manager without waiting behind <code>mobile-setup.lock</code>, aborts any in-flight setup or retry, releases the port before replying, and saves <code>enabled: false</code>.</p>
+    </div>
+  </div>
+
+  <div class="metric-row">
+    <div class="metric">
+      <div class="metric-val">0 / 125s</div>
+      <div class="metric-label"><code>nehelper</code> records during idle phone readiness (vs. 3 from 1 CLI call)</div>
+    </div>
+    <div class="metric">
+      <div class="metric-val">0</div>
+      <div class="metric-label">Tailscale CLI invocations recorded by trap binary in QA &amp; transport tests</div>
+    </div>
+    <div class="metric">
+      <div class="metric-val">0.03s / 0.05s</div>
+      <div class="metric-label"><code>--status</code> and <code>--off</code> latency while a daemon socket accepts and hangs</div>
+    </div>
+    <div class="metric">
+      <div class="metric-val">5 → 10 → 20 → 30s</div>
+      <div class="metric-label">Single backoff schedule verified under virtual time and live proxy outage</div>
     </div>
   </div>
 </section>
 
 <section>
-  <h2>2. Concept alignment: product vs. code</h2>
+  <h2>2. Concept alignment on HEAD: product vs. code</h2>
   <table>
     <thead>
       <tr>
         <th style="width: 21%;">Product concept</th>
-        <th style="width: 27%;">Code concept <span class="badge badge-existing">Existing</span></th>
+        <th style="width: 29%;">Code concept <span class="badge badge-built">Built on HEAD</span></th>
         <th style="width: 10%;">Aligns?</th>
-        <th>What is wrong (where No) / Proposed fix</th>
+        <th>Notes (what changed from base <code>2656258abf</code> / any remaining friction)</th>
       </tr>
     </thead>
     <tbody>
       <tr>
-        <td><strong>Saved mobile approval</strong><br><span style="color:var(--text-muted);font-size:13px;">Enabled/off, QR address, approved Tailscale owner.</span></td>
-        <td><code>Configuration</code> in <code>mobile.yaml</code> (<code>enabled</code>, <code>endpoint</code>, <code>owner</code>).</td>
+        <td><strong>Saved mobile approval</strong><br><span style="color:var(--text-muted);font-size:13px;">Enabled/off, QR address, approved owner.</span></td>
+        <td><code>Configuration</code> in <code>mobile.yaml</code> (<code>enabled</code>, <code>endpoint</code>, <code>owner</code>), owned by <code>server/mobile.rs</code>.</td>
         <td><span class="badge badge-yes">Yes</span></td>
-        <td>Clean 1:1 record. Unchanged; no wire, Swift, QR, or file migration needed.</td>
+        <td>Unchanged 1:1 record. No wire, Swift, QR, or file migration.</td>
       </tr>
       <tr>
-        <td><strong>This Machine’s Tailscale daemon</strong><br><span style="color:var(--text-muted);font-size:13px;">One local Tailscale service providing identity, WhoIs, and TLS certs.</span></td>
-        <td><code>Host { binary: PathBuf, dns }</code> shelling out to <code>TAILSCALE_BE_CLI=1 Tailscale …</code>. Kickoff plan kept <em>two</em> transports: LocalAPI + full CLI fallback.</td>
-        <td><span class="badge badge-no">No</span></td>
-        <td><strong>Biggest mismatch.</strong> Two concepts for one daemon. Spawning macOS <code>Tailscale.app</code> causes the <code>nehelper</code> meltdown — and keeping it as a fallback <em>still</em> triggers <code>nehelper</code> every 60s whenever Tailscale is quit or stopped.<br><span class="badge badge-proposed">Proposed</span> One <code>Tailscale</code> LocalAPI client for all 4 distributions; delete CLI subprocess transport.</td>
-      </tr>
-      <tr>
-        <td><strong>Live Tailscale status</strong><br><span style="color:var(--text-muted);font-size:13px;">Current owner, MagicDNS name, and tailnet IPs right now.</span></td>
-        <td>Split across <code>Host::discover()</code> (keeps <code>dns</code>, discards owner/IPs) and <code>Host::identity()</code> (re-runs <code>status</code> to get owner/IPs and re-check <code>dns</code>).</td>
-        <td><span class="badge badge-no">No</span></td>
-        <td>One observation read twice under two names (4 status calls per <code>lf server mobile</code> enable).<br><span class="badge badge-proposed">Proposed</span> Single <code>HostStatus { owner, dns, addresses }</code> parsed once from <code>GET /localapi/v0/status</code>.</td>
-      </tr>
-      <tr>
-        <td><strong>Continuous owner &amp; cert guard</strong><br><span style="color:var(--text-muted);font-size:13px;">Close connected phones on logout/switch; renew cert before expiry.</span></td>
-        <td><code>maintain()</code> spawns a blocking thread every 5s running full <code>status --json</code>; can’t cancel blocking child cleanly on <code>--off</code>. Kickoff plan split into 5s (direct) vs 60s (CLI).</td>
-        <td><span class="badge badge-no">No</span></td>
-        <td>Blocking thread pool for local HTTP, O(peers) JSON every 5s on large tailnets, and dual 5s/60s security windows.<br><span class="badge badge-proposed">Proposed</span> Async <code>GET /localapi/v0/status?peers=false</code> every 5s (full <code>status</code> at bind) + async 6h cert renewal; instantly cancellable on <code>--off</code>.</td>
-      </tr>
-      <tr>
-        <td><strong>Automatic recovery</strong><br><span style="color:var(--text-muted);font-size:13px;">Quietly restore the saved port when Tailscale returns.</span></td>
-        <td><code>manage()</code> perpetual 5s <code>tokio::time::interval</code> calling <code>bind().await</code> <em>inline</em> inside <code>select!</code>. Kickoff plan added two backoff tiers (5–60s direct vs 60s flat CLI cooldown).</td>
-        <td><span class="badge badge-no">No</span></td>
-        <td>Inline <code>bind().await</code> freezes <code>Control::Status</code> and <code>--off</code> while a slow restore or cert issuance runs. Two backoff schedules exist only to protect the CLI fallback.<br><span class="badge badge-proposed">Proposed</span> Cancellable async restore task + one backoff from completion: immediate, then <code>5 → 10 → 20 → 30s</code>.</td>
-      </tr>
-      <tr>
-        <td><strong>Readiness check</strong><br><span style="color:var(--text-muted);font-size:13px;"><code>lf server mobile --status</code> and Desktop’s Mobile settings.</span></td>
-        <td><code>Control::Status</code> in <code>manage()</code>, plus offline <code>mobile.yaml</code> read when server stopped.</td>
-        <td><span class="badge badge-no">No</span></td>
-        <td>Read stalls behind an inline <code>bind()</code> today; 60s backoff in kickoff plan made Desktop’s “Restore the connection, then refresh” feel stuck.<br><span class="badge badge-proposed">Proposed</span> Non-blocking read (never stalls behind restore) + 30s max backoff.</td>
-      </tr>
-      <tr>
-        <td><strong>Per-connection admission &amp; tickets</strong><br><span style="color:var(--text-muted);font-size:13px;">Admit only another untagged device of owner; bind terminal/bulk tickets to that device.</span></td>
-        <td><code>Host::permits</code> → <code>permits_peer</code> + <code>mobile-same-device</code> opt-in → <code>Admission::Remote { node, user }</code> in <code>Tickets</code>.</td>
+        <td><strong>This Machine’s Tailscale daemon</strong><br><span style="color:var(--text-muted);font-size:13px;">One local Tailscale service; never launches the macOS GUI app.</span></td>
+        <td>One async <code>Tailscale</code> LocalAPI client in <code>server/mobile/tailscale.rs</code> + Darwin <code>libproc</code>/<code>ipnport</code> discovery in <code>tailscale/macos.rs</code>.</td>
         <td><span class="badge badge-yes">Yes</span></td>
-        <td>Predicate and ticket binding match the product model. Moves cleanly to async <code>GET /localapi/v0/whois?addr=…&amp;proto=tcp</code>.</td>
+        <td><strong>Was No on base.</strong> Deleted <code>Host { binary, dns }</code>, <code>TAILSCALE_BE_CLI=1</code>, and all subprocess spawning. Passive path check (<code>installed_on_machine</code>) chooses “Install” vs “Open and sign in” without executing any binary.</td>
+      </tr>
+      <tr>
+        <td><strong>Live Tailscale status</strong><br><span style="color:var(--text-muted);font-size:13px;">Current owner, <code>.ts.net</code> hostname, and tailnet IPs checked against approval.</span></td>
+        <td><code>HostStatus { owner, dns, addresses }</code> with <code>parse(&amp;json, require_profile)</code> and <code>verify(&amp;config)</code>.</td>
+        <td><span class="badge badge-yes">Yes</span></td>
+        <td><strong>Was No on base</strong> (split across <code>Host::discover</code> and <code>Host::identity</code>). One observation parsed once per process; CLI setup discovers once to fail fast before <code>server::ensure()</code>, server <code>bind()</code> discovers once as the trust boundary.</td>
+      </tr>
+      <tr>
+        <td><strong>Continuous owner &amp; cert guard</strong><br><span style="color:var(--text-muted);font-size:13px;">Close phones within seconds on logout/account/DNS change; renew cert quietly.</span></td>
+        <td>Async <code>check_owner</code> every 5s via <code>status_without_peers()</code> + <code>observed.verify(&amp;config)</code>; 6h async cert renewal in <code>run()</code>.</td>
+        <td><span class="badge badge-yes">Yes</span></td>
+        <td><strong>Was No on base</strong> (blocking thread pool + full <code>status --json</code> + missed DNS drift during steady state). Now async, O(1) on large tailnets, checks both owner and DNS, and cancels immediately when <code>run()</code> drops.</td>
+      </tr>
+      <tr>
+        <td><strong>Automatic recovery &amp; cancellation</strong><br><span style="color:var(--text-muted);font-size:13px;">Restore the saved port when Tailscale returns; keep <code>--status</code> and <code>--off</code> instant.</span></td>
+        <td><code>manage()</code> in <code>server/remote.rs</code> with cancellable <code>bindings: JoinSet</code>, <code>listeners: JoinSet</code>, <code>setup</code> oneshot, and <code>5 → 10 → 20 → 30s</code> retry from completion.</td>
+        <td><span class="badge badge-yes">Yes</span></td>
+        <td><strong>Was No on base</strong> (perpetual 5s interval + inline blocking <code>bind().await</code> + <code>disable()</code> stuck behind <code>mobile-setup.lock</code>). Now <code>--status</code> never stalls, <code>--off</code> cancels live binds even while setup holds the offline lock, and an admitted setup finishes saving even if the CLI disconnects mid-cert.</td>
+      </tr>
+      <tr>
+        <td><strong>Per-connection admission &amp; tickets</strong><br><span style="color:var(--text-muted);font-size:13px;">Admit only another untagged device of owner; bind tickets to that device.</span></td>
+        <td>Async <code>Tailscale::permits</code> (<code>/localapi/v0/whois?addr=…&amp;proto=tcp</code>) → <code>permits_peer</code> → <code>Admission::Remote { node, user }</code>.</td>
+        <td><span class="badge badge-yes">Yes</span></td>
+        <td>Same admission invariant and <code>mobile-same-device</code> simulator opt-in, now async on the shared <code>reqwest::Client</code> pool.</td>
       </tr>
       <tr>
         <td><strong>HTTPS certificate</strong><br><span style="color:var(--text-muted);font-size:13px;">Valid tailnet TLS cert with private key kept only in memory.</span></td>
-        <td><code>Host::certificate</code> parsing PEM straight into <code>rustls::ServerConfig</code> / <code>TlsAcceptor</code>.</td>
+        <td>Async <code>Tailscale::certificate</code> (<code>/localapi/v0/cert/&lt;dns&gt;?type=pair&amp;min_validity=24h</code>, 50s timeout) → <code>rustls::ServerConfig</code>.</td>
         <td><span class="badge badge-yes">Yes</span></td>
-        <td>In-memory parsing lines up. Moves cleanly to async <code>GET /localapi/v0/cert/&lt;dns&gt;?type=pair&amp;min_validity=24h</code>.</td>
+        <td>PEM pair parsed straight into memory; key never touches disk or logs.</td>
+      </tr>
+      <tr>
+        <td><strong>Custom daemon socket (<code>TS_SOCKET</code>)</strong><br><span style="color:var(--text-muted);font-size:13px;">Point mobile access at a non-default <code>tailscaled</code> socket.</span></td>
+        <td><code>endpoints()</code> honors <code>TS_SOCKET</code>; <code>docs/server.md</code> says to set it in both setup and server environments.</td>
+        <td><span class="badge badge-no">No</span><br><span style="font-size:11px;color:var(--text-faint);">macOS launchd</span></td>
+        <td>Works when running <code>lf server run</code> directly (Linux systemd drop-in, containers, fixtures), but macOS servers started by <code>lf</code> run as launchd jobs carrying <code>LF_HOME</code> only — there is no supported way to pass <code>TS_SOCKET</code> into them. <em>Outside LOO-1080</em> (belongs to <code>installation/server.rs</code>; see Section 5).</td>
       </tr>
     </tbody>
   </table>
 </section>
 
 <section>
-  <h2>3. The biggest mismatch: two Tailscale transports &amp; “The Weekend Quit Bug”</h2>
-
-  <div class="callout callout-danger">
-    <h3>Counterexample that breaks the kickoff plan’s CLI fallback</h3>
-    <p style="margin-bottom:8px;">Trace what happens on an App Store Mac when mobile access is enabled and the person quits or turns off Tailscale for the weekend:</p>
-    <div class="flow-box"><span class="hi-muted">1.</span> Person quits Tailscale → <code>IPNExtension</code> exits → no live <code>sameuserproof</code> descriptor exists.
-<span class="hi-muted">2.</span> <code>lf server</code> restoration runs → LocalAPI discovery finds no running daemon.
-<span class="hi-muted">3.</span> <span class="badge badge-existing">Kickoff plan</span> treats “no LocalAPI” as “direct access unavailable” → falls back to legacy CLI.
-<span class="hi-muted">4.</span> Spawns <code>TAILSCALE_BE_CLI=1 /Applications/Tailscale.app/Contents/MacOS/Tailscale status --json</code>.
-<span class="hi-muted">5.</span> <span class="hi-no">macOS nehelper creates a temporary NETunnelProviderManager delegate, commits preferences.plist,</span>
-   <span class="hi-no">broadcasts com.apple.neconfigurationchanged, and removes it 200ms later.</span>
-<span class="hi-muted">6.</span> CLI still fails (<code>IPNExtension</code> isn’t running!). Repeats every 60s all weekend.
-<span class="hi-muted">   (Even a PATH-only fallback hits this: macOS installs symlink /usr/local/bin/tailscale → Tailscale.app.)</span></div>
-  </div>
-
-  <p>Every Tailscale distribution on macOS and Linux exposes the exact same LocalAPI — the <code>tailscale</code> CLI itself has no separate backend; it is just a Go client to these four LocalAPI endpoints. Deleting the CLI transport removes the bug in <em>both</em> steady-state and stopped-daemon states, and collapses two transports, two health intervals, and two backoff state machines into one.</p>
+  <h2>3. The resolved mismatch: CLI subprocess transport vs. LocalAPI client</h2>
+  <p>On <code>main</code>, <code>lf server</code> reached Tailscale by executing the macOS app bundle with <code>TAILSCALE_BE_CLI=1</code> every 5 seconds — which made <code>nehelper</code> create and remove a temporary <code>NETunnelProviderManager</code> configuration on every poll. Worse, any fallback to the CLI on macOS would have reproduced the exact same <code>nehelper</code> churn whenever Tailscale was quit or stopped.</p>
 
   <div class="grid-2">
     <div class="card">
-      <h3>Before <span class="badge badge-existing">Existing + Kickoff Plan</span></h3>
-      <div class="flow-box">lf server mobile / remote::manage()
- ├─ Transport A: LocalAPI (5s maintain, 5→10→20→40→60s backoff)
- │   ├─ App Store: spawn lsof → IPNExtension proof → loopback TCP
- │   ├─ Standalone: /Library/Tailscale/ipnport → loopback TCP
- │   └─ tailscaled: Unix socket
- └─ Transport B: Legacy CLI (60s maintain, 60s flat cooldown)
-     ├─ scan PATH + /Applications/Tailscale*.app + ~/Applications
-     ├─ dedupe binaries, TAILSCALE_BE_CLI=1, 15s deadline
-     ├─ "reconsider direct access" on next refresh
-     └─ <span class="hi-no">spawns Tailscale.app whenever daemon is stopped!</span>
+      <h3>Before <span class="badge badge-existing">Base main (2656258abf)</span></h3>
+      <div class="flow-box">server/mobile.rs (700+ lines)
+ └─ Host { binary, dns }
+     ├─ scans PATH, /Applications/Tailscale*.app, ~/Applications
+     ├─ <span class="hi-no">spawns TAILSCALE_BE_CLI=1 Tailscale status --json</span>
+     ├─ <span class="hi-no">every 5s: nehelper delegate save + plist commit + remove</span>
+     └─ discover() + identity() ran status twice per bind (4× on enable)
 
-manage() select! loop:
- └─ retry.tick() → <span class="hi-no">bind().await inline (blocks Status &amp; --off!)</span>
- └─ spawn_blocking(status / whois / cert) <span class="hi-no">(uncancellable)</span></div>
+server/remote.rs
+ ├─ manage(): perpetual 5s interval, <span class="hi-no">bind().await inline</span>
+ │   └─ <span class="hi-no">stalled --status and --off during slow binds/certs</span>
+ ├─ maintain(): <span class="hi-no">spawn_blocking</span> full status every 5s (uncancellable)
+ └─ disable(): <span class="hi-no">blocked behind mobile-setup.lock</span> during setup</div>
     </div>
 
     <div class="card">
-      <h3>After <span class="badge badge-proposed">Proposed</span></h3>
-      <div class="flow-box">lf server mobile / remote::manage()
- └─ One Transport: async Tailscale LocalAPI client
-     ├─ macOS App Store: <span class="hi-yes">libproc</span> IPNExtension vnode → 127.0.0.1:&lt;port&gt;
-     ├─ macOS Standalone: /Library/Tailscale/ipnport + sameuserproof
-     ├─ macOS/Linux daemon: /var/run/tailscaled.socket | tailscaled.sock
-     ├─ Custom Unix socket: TS_SOCKET (if set)
-     └─ Zero CLI execution (passive path check only for error wording)
+      <h3>After <span class="badge badge-built">Built on HEAD (40211c2560)</span></h3>
+      <div class="flow-box">server/mobile.rs (183 lines) — approval persistence, lock &amp; RPC
+server/mobile/tailscale.rs (392 lines) — one async LocalAPI client
+server/mobile/tailscale/macos.rs (233 lines) — Darwin rendezvous
+ ├─ App Store: <span class="hi-yes">in-process libproc</span> IPNExtension vnode → 127.0.0.1:&lt;port&gt;
+ ├─ Standalone: /Library/Tailscale/ipnport + sameuserproof-&lt;port&gt;
+ ├─ Daemon socket: TS_SOCKET, /var/run/tailscaled.socket | tailscaled.sock
+ ├─ <span class="hi-yes">Zero subprocesses</span>; passive existence check only for error copy
+ └─ HostStatus::parse + verify (full status at bind, ?peers=false at 5s)
 
-One observation + one async API:
- ├─ Tailscale::discover() → (Tailscale, HostStatus) <span class="hi-yes">[1 status call]</span>
- ├─ status() / status_without_peers()               <span class="hi-yes">[async, 5s]</span>
- ├─ permits(peer, &amp;owner)                           <span class="hi-yes">[async, whois]</span>
- └─ certificate(&amp;dns)                               <span class="hi-yes">[async, 6h]</span>
-
-manage() states: Off · Restoring (cancellable) · Ready · Backoff
- └─ Single schedule from completion: <span class="hi-yes">immediate → 5 → 10 → 20 → 30s</span>
- └─ Control::Status answers immediately; --off aborts in-flight bind</div>
+server/remote.rs
+ ├─ manage(): <span class="hi-yes">bindings + listeners JoinSets</span>, single 5→10→20→30s backoff
+ │   └─ <span class="hi-yes">--status always instant; --off aborts in-flight bind &amp; drops port</span>
+ └─ run(): async 5s check_owner + async 6h cert renewal + async whois</div>
     </div>
   </div>
 </section>
 
 <section>
-  <h2>4. Stress-testing the proposal against counterexamples</h2>
+  <h2>4. Counterexamples verified against HEAD</h2>
   <table>
     <thead>
       <tr>
-        <th style="width: 24%;">Scenario / Counterexample</th>
-        <th style="width: 38%;">What could break a naive design</th>
-        <th>How the proposed model handles it</th>
+        <th style="width: 24%;">Counterexample</th>
+        <th style="width: 39%;">How HEAD handles it</th>
+        <th>Where verified</th>
       </tr>
     </thead>
     <tbody>
       <tr>
         <td><strong>App Store port/token rotates on daemon restart</strong></td>
-        <td>Reusing a cached loopback port/token after <code>IPNExtension</code> restarts fails forever with connection refused or 401.</td>
-        <td><code>maintain()</code> fails → listener exits and drops remote sockets → restoration re-runs <code>Tailscale::discover()</code> fresh via <code>libproc</code>, picking up the new port and token and rebinding the same saved port.</td>
+        <td><code>check_owner</code> fails → listener drops phones → <code>manage()</code> re-runs <code>Tailscale::discover()</code> via <code>libproc</code>, picking up the new port/token and rebinding the saved port.</td>
+        <td><code>macos::tests::standalone_rediscovers_the_authenticated_port_after_rotation</code>, <code>app_store_rendezvous_follows_an_open_proof</code>, and live QA proxy restart.</td>
       </tr>
       <tr>
-        <td><strong>Stale <code>/Library/Tailscale/ipnport</code> beside live App Store</strong></td>
-        <td>Stopping on the first discovery file that fails to connect leaves a working App Store daemon unused.</td>
-        <td>Discovery tries each LocalAPI candidate in order; unreachable/stale endpoints (refused, ENOENT, EACCES, 401/403) continue to the next candidate. An authoritative HTTP 200 <code>Running</code> status with wrong owner, tags, or missing MagicDNS stops immediately and never falls through.</td>
-      </tr>
-      <tr>
-        <td><strong>Tailscale uninstalled vs. installed-but-quit</strong></td>
-        <td>Without executing the CLI, error messages might lose the distinction between “Install Tailscale” and “Open Tailscale and sign in”.</td>
-        <td>When no LocalAPI candidate responds, a passive check (does <code>/Applications/Tailscale*.app</code>, <code>~/Applications/Tailscale*.app</code>, or <code>tailscale</code> on <code>PATH</code> exist on disk?) picks the exact wording with zero process launches.</td>
+        <td><strong>Stale socket or signed-out daemon beside a live one</strong></td>
+        <td><code>discover_at</code> skips refused/stale/401/403 endpoints and remembers any responding non-Running daemon; the first <code>BackendState == "Running"</code> host is authoritative and never falls through on wrong owner or missing MagicDNS.</td>
+        <td><code>tailscale::tests::discovery_skips_a_refused_socket_and_stops_at_the_first_running_host</code> and <code>setup_distinguishes_a_missing_installation_from_a_signed_out_daemon</code>.</td>
       </tr>
       <tr>
         <td><strong><code>status?peers=false</code> omits <code>User</code> map</strong></td>
-        <td><code>owner_from_status</code> checks <code>User[user].LoginName</code>; blindly using <code>peers=false</code> at bind fails owner verification.</td>
-        <td><code>discover()</code> / <code>bind()</code> calls full <code>/localapi/v0/status</code> (verifying <code>User[user].LoginName</code>). Once bound to an approved <code>owner</code>, the 5-second <code>maintain()</code> check calls <code>/localapi/v0/status?peers=false</code> (verifying <code>BackendState</code>, untagged <code>Self</code>, <code>ID</code>, <code>UserID</code>, <code>DNSName</code>, <code>TailscaleIPs</code>) — avoiding O(peers) JSON every 5s on large tailnets.</td>
+        <td>Bind uses full <code>/localapi/v0/status</code> (<code>require_profile = true</code>); 5s maintenance uses <code>status?peers=false</code> (<code>require_profile = false</code>), still checking <code>LoginName</code> whenever <code>User</code> is present.</td>
+        <td><code>support/tailscale.rs</code> strips <code>User</code> on <code>peers=false</code>; exercised in <code>server_mobile_changes_preserve_local_connections_and_saved_disable</code> and live App Store QA.</td>
       </tr>
       <tr>
-        <td><strong>Slow Let’s Encrypt cert issuance during <code>--status</code> or <code>--off</code></strong></td>
-        <td>Inline <code>bind().await</code> in <code>manage()</code> stalls <code>lf server mobile --status</code> and <code>--off</code> for up to 60s.</td>
-        <td>Restoration runs as a separate cancellable task inside <code>manage()</code>. <code>Control::Status</code> returns immediately; <code>--off</code> aborts the in-flight bind and cancels its async HTTP request immediately.</td>
+        <td><strong>Hung Tailscale daemon during <code>--status</code> or <code>--off</code></strong></td>
+        <td><code>bind()</code> runs in <code>bindings: JoinSet</code> off the <code>select!</code> loop; <code>disable()</code> sends <code>Control::Configure { None }</code> directly without waiting on <code>mobile-setup.lock</code>, calling <code>bindings.shutdown().await</code>.</td>
+        <td><code>remote::tests::saved_restores_back_off_from_completion_and_off_cancels_a_pending_request</code>, <code>server_mobile_setup_repairs_obsolete_settings_and_occupied_ports</code>, and live QA hung-socket scenario.</td>
       </tr>
       <tr>
-        <td><strong>Custom Linux <code>tailscaled</code> socket</strong></td>
-        <td>Hardcoding only <code>/var/run/tailscale/tailscaled.sock</code> misses userspace or containerized <code>tailscaled --socket=…</code>.</td>
-        <td>Check <code>TS_SOCKET</code> when set before standard Unix socket paths. Same LocalAPI client, zero CLI code.</td>
+        <td><strong>Caller disconnects mid-certificate issuance</strong></td>
+        <td><code>setup</code> remains <code>Some(reply)</code> in <code>manage()</code> until <code>bind()</code> resolves, so an admitted setup still persists <code>mobile.yaml</code> and starts the listener unless superseded by <code>--off</code>.</td>
+        <td><code>server_mobile_changes_preserve_local_connections_and_saved_disable</code> (held cert + dropped client).</td>
+      </tr>
+      <tr>
+        <td><strong>Unverified here (gate / CI scope)</strong></td>
+        <td>Real iPhone end-to-end (QA used local WSS client with <code>mobile-same-device</code>), macOS Standalone <code>/Library/Tailscale</code> on a real install, and Linux <code>tailscaled</code> socket.</td>
+        <td>Covered by unit/transport fixtures locally and Linux CI matrix; noted in <code>scratch/qa.html</code>.</td>
       </tr>
     </tbody>
   </table>
 </section>
 
 <section>
-  <h2>5. Choices made for review (recorded in <code>scratch/plan.md</code>)</h2>
-  <p>None of these choices change the wire protocol, <code>mobile.yaml</code>, QR format, or Swift clients; all are reversible before release.</p>
-  <div class="choice-list">
-    <div class="choice">
-      <h3>1. LocalAPI only — delete the CLI subprocess fallback <span class="badge badge-proposed">Chosen</span></h3>
-      <div class="choice-grid">
-        <div><div class="choice-label">Passed over</div>Keeping a legacy CLI fallback (throttled to 60s) alongside LocalAPI.</div>
-        <div><div class="choice-label">Why</div>Every supported Tailscale distribution exposes LocalAPI; any CLI fallback on macOS still spawns <code>Tailscale.app</code> and triggers <code>nehelper</code> churn whenever Tailscale is stopped, while doubling health-check and backoff complexity.</div>
-      </div>
+  <h2>5. Outside this work</h2>
+  <p>Two pre-existing or adjacent gaps surfaced during QA and review. Neither makes LOO-1080’s model wrong, and fixing either belongs in its own Task:</p>
+  <div class="outside-list">
+    <div class="outside-item">
+      <h3>1. Forwarding <code>TS_SOCKET</code> into supervised macOS servers <span class="badge badge-existing">Separate Task</span></h3>
+      <p style="margin:0;color:var(--text-muted);"><code>installation/server.rs</code> registers macOS servers via <code>SMAppService</code> (fixed bundled plist) or a generated <code>server.plist</code> carrying <code>LF_HOME</code> only. Setting <code>TS_SOCKET</code> in a shell reaches <code>lf server mobile</code>, not the launchd-managed server — making <code>docs/server.md</code>’s custom-socket instruction unreachable on macOS unless the user runs <code>lf server run</code> manually. Fixing it requires either env-forwarding support in <code>installation/server.rs</code> (for custom homes) or storing an optional socket path in Machine config.</p>
     </div>
-    <div class="choice">
-      <h3>2. Direct <code>libproc</code> lookup on macOS (no <code>lsof</code> child) <span class="badge badge-proposed">Chosen</span></h3>
-      <div class="choice-grid">
-        <div><div class="choice-label">Passed over</div>Spawning <code>/usr/sbin/lsof -n -a -u &lt;uid&gt; -c IPNExtension -F n</code>.</div>
-        <div><div class="choice-label">Why</div><code>lsof</code> is not setuid on macOS and calls the exact same <code>libproc</code> APIs already used by <code>os_process/macos.rs</code>. Direct kernel reads spawn zero processes, take &lt;1ms, work in sandboxes, and keep proof tokens strictly in memory.</div>
-      </div>
-    </div>
-    <div class="choice">
-      <h3>3. Cancellable async restore + single <code>5 → 10 → 20 → 30s</code> backoff <span class="badge badge-proposed">Chosen</span></h3>
-      <div class="choice-grid">
-        <div><div class="choice-label">Passed over</div>Inline blocking <code>bind()</code> in <code>select!</code> and dual 60s-ceiling backoff schedules.</div>
-        <div><div class="choice-label">Why</div>Fixes stalled <code>--status</code> / <code>--off</code> during slow binds. With zero subprocesses and &lt;0.5ms idle checks, a 30s cap is negligible and halves recovery wait when reopening Tailscale.</div>
-      </div>
-    </div>
-    <div class="choice">
-      <h3>4. Full <code>/localapi/v0/status</code> at bind; <code>?peers=false</code> every 5s <span class="badge badge-proposed">Chosen</span></h3>
-      <div class="choice-grid">
-        <div><div class="choice-label">Passed over</div>Full status (all peers) every 5s, or streaming <code>/localapi/v0/watch-ipn-bus</code>.</div>
-        <div><div class="choice-label">Why</div>Keeps the full <code>User[user].LoginName</code> check at bind, avoids parsing hundreds of peers every 5s on large tailnets, and avoids version-sensitive <code>watch-ipn-bus</code> bitmasks.</div>
-      </div>
+    <div class="outside-item">
+      <h3>2. <code>lf server mobile</code> JSON vs. plain text output <span class="badge badge-existing">Separate Task</span></h3>
+      <p style="margin:0;color:var(--text-muted);"><code>lf server mobile</code> and <code>--status</code> print raw JSON without <code>--json</code>, whereas <code>--off</code> prints <code>"Mobile access is off"</code> (same on <code>main</code>). <code>swift/LoopflowMac/Views/MobileSettings.swift</code> parses stdout of <code>lf server mobile --status</code> directly without <code>--json</code>, so normalizing CLI output requires coordinating Rust and Swift together.</p>
     </div>
   </div>
 </section>
 
 <section>
-  <h2>6. Questions for review</h2>
-  <p>Reply with numbers and letters (for example, <code>1a, 3b</code>). Highlighted options are what <code>scratch/plan.md</code> builds unless changed.</p>
+  <h2>6. Open choices for review (all built &amp; reversible)</h2>
+  <p>Everything below is already built and committed on <code>HEAD</code>, internal to <code>server/{mobile,remote}.rs</code>, with no wire, Swift, schema, or <code>mobile.yaml</code> changes. Reply with numbers and letters (for example, <code>3b</code>) only if you want to change a built choice.</p>
   <div class="questions">
     <div class="question">
       <div class="question-title">1. Tailscale transport boundary</div>
       <ul class="options">
-        <li class="recommended"><span class="opt-key">1a</span> <strong>LocalAPI only (proposed):</strong> Support macOS App Store, macOS Standalone, Unix sockets, and <code>TS_SOCKET</code>; delete all CLI subprocess probing so macOS can never spawn <code>Tailscale.app</code> even when Tailscale is quit.</li>
-        <li><span class="opt-key">1b</span> <strong>LocalAPI + Linux-only CLI fallback:</strong> Never spawn CLI on macOS (<code>#[cfg(not(target_os = "macos"))]</code>), keep throttled <code>PATH</code> CLI fallback on Linux.</li>
-        <li><span class="opt-key">1c</span> <strong>LocalAPI + full CLI fallback (previous plan):</strong> Keep 60s-throttled CLI fallback including macOS <code>.app</code> bundles.</li>
+        <li class="built"><span class="opt-key">1a</span> <span class="badge badge-built">Built</span> <strong>LocalAPI only:</strong> macOS App Store (<code>libproc</code>), macOS Standalone (<code>/Library/Tailscale/ipnport</code>), Unix sockets, and <code>TS_SOCKET</code>; all CLI subprocess probing deleted so macOS can never launch <code>Tailscale.app</code> even when Tailscale is quit.</li>
+        <li><span class="opt-key">1b</span> <strong>LocalAPI + Linux-only CLI fallback:</strong> Keep macOS strictly LocalAPI-only; retain a throttled <code>PATH</code> CLI fallback only on non-macOS builds.</li>
       </ul>
     </div>
 
     <div class="question">
       <div class="question-title">2. macOS App Store <code>IPNExtension</code> discovery</div>
       <ul class="options">
-        <li class="recommended"><span class="opt-key">2a</span> <strong>Direct <code>libproc</code> (proposed):</strong> Inspect same-UID <code>IPNExtension</code> open vnodes in-process via <code>PROC_PIDLISTFDS</code> / <code>PROC_PIDFDVNODEPATHINFO</code> (zero subprocesses, proof token never touches a pipe).</li>
+        <li class="built"><span class="opt-key">2a</span> <span class="badge badge-built">Built</span> <strong>Direct <code>libproc</code>:</strong> Inspect same-UID <code>IPNExtension</code> open vnodes in-process via <code>PROC_PIDLISTFDS</code> / <code>PROC_PIDFDVNODEPATHINFO</code> (zero subprocesses; proof token never crosses a pipe).</li>
         <li><span class="opt-key">2b</span> <strong>Bounded <code>/usr/sbin/lsof</code>:</strong> Match upstream <code>safesocket_darwin.go</code> literally with a bounded child process.</li>
       </ul>
     </div>
@@ -699,23 +659,23 @@ manage() states: Off · Restoring (cancellable) · Ready · Backoff
     <div class="question">
       <div class="question-title">3. Behavior of <code>lf server mobile --status</code> (Desktop’s “Refresh”) during backoff</div>
       <ul class="options">
-        <li class="recommended"><span class="opt-key">3a</span> <strong>Strictly read-only (proposed):</strong> Always return cached manager status immediately; rely on the <code>5 → 10 → 20 → 30s</code> backoff for automatic recovery.</li>
-        <li><span class="opt-key">3b</span> <strong>Non-blocking wake on Refresh:</strong> Return cached status immediately, and if enabled &amp; sleeping in backoff (&gt;2s since last attempt), wake the retry timer so the next check runs right away.</li>
+        <li class="built"><span class="opt-key">3a</span> <span class="badge badge-built">Built</span> <strong>Strictly read-only:</strong> Return the manager’s cached <code>Status</code> immediately without waking the <code>5 → 10 → 20 → 30s</code> backoff timer (Desktop’s “Set up again” still binds immediately).</li>
+        <li><span class="opt-key">3b</span> <strong>Non-blocking wake on Refresh:</strong> Return cached status immediately, and if enabled and sleeping in backoff (&gt;2s since last attempt), wake the retry timer so the next probe runs right away.</li>
       </ul>
     </div>
 
     <div class="question">
       <div class="question-title">4. Five-second maintenance payload</div>
       <ul class="options">
-        <li class="recommended"><span class="opt-key">4a</span> <strong>Full status at bind, <code>status?peers=false</code> every 5s (proposed):</strong> Verifies <code>User.LoginName</code> at bind while keeping 5-second checks O(1) on large tailnets.</li>
-        <li><span class="opt-key">4b</span> <strong>Full <code>/localapi/v0/status</code> everywhere:</strong> One endpoint and one parser for both bind and maintenance.</li>
+        <li class="built"><span class="opt-key">4a</span> <span class="badge badge-built">Built</span> <strong>Full status at bind, <code>status?peers=false</code> every 5s:</strong> Verifies <code>User[user].LoginName</code> at bind while keeping 5-second owner and DNS checks O(1) on large tailnets.</li>
+        <li><span class="opt-key">4b</span> <strong>Full <code>/localapi/v0/status</code> everywhere:</strong> One endpoint and one parser for both bind and 5-second maintenance.</li>
       </ul>
     </div>
   </div>
 </section>
 
 <footer>
-  Generated by <code>lf concept-review</code> · Task LOO-1080 · Source plan: <code>scratch/plan.md</code>
+  Post-implementation <code>lf concept-review</code> · Task LOO-1080 · Base <code>2656258abf</code> → HEAD <code>40211c2560</code> · Source plan: <code>scratch/plan.md</code> · Live QA: <code>scratch/qa.html</code>
 </footer>
 
 </main>

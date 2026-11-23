@@ -1,11 +1,11 @@
-at: a35ca272b35347410ad9643f7622447f2546c976
+at: 041a6b6bb1493101da0b987c60a9f738e035fb36
 first:
   - path: scripts/testing.md
     why: Install seeding and inspect Cargo freshness
   - path: scripts/build_cache.py
-    why: Select and lock a built sibling before cloning
+    why: Select a built sibling and clone either Cargo layout
   - path: python/tests/test_build_cache.py
-    why: Exercise reuse, busy sources and failed clones
+    why: Exercise first-build locking, fallback and both Cargo layouts
   - path: .lf/qa/build-cache.md
     why: Replay Task checkout and cross-volume fallback
   - path: scripts/benchmarks/crate-rebuild/README.md

@@ -38,3 +38,7 @@
   real-clone seeding tests skip there and run only on a Mac. Chosen over
   copying in tests, which would hide whether the hook clones. No CI job
   exercises seeding.
+
+- Ship-review pass 2 keeps the installed default and incremental profile.
+  The planned post-verify handoff to LOO-923 is obsolete: Task status shows
+  done and PR #1978 merged. Linux and live Task startup stay with verify.

@@ -142,7 +142,7 @@ keeps every column; it belongs with LOO-939 (naming), not here. Noted in
 
 One rule in the store (`task_work::starting_task_in`), applied once when the
 row is written. The launch decides first and names the Task it found
-(`select_execution_work` → `counted_task`, by Git worktree root); the store
+(`select_execution_work` → `task_holding`); the store
 fills in only what the launch left empty. Same order, two definitions of "the
 checkout holding this directory": they differ in a worktree nested inside a
 checkout and where two Tasks hold one root. Not built here (concept review,
@@ -169,7 +169,7 @@ Processes to the calling agent's Task; 5,672 `lf session serve`, plus `commit`,
   `task_id` only. Three path matches remain, all about what occupies a
   directory now: `task_open_graph_pairs` for unended runs that recorded no
   Task, `checkout_open_work` for a checkout no Task holds, and
-  `counted_task` for a launch and for provider conversations lf has no
+  `task_holding` for a launch and for provider conversations lf has no
   Session for (`human_session/turns.rs`).
 - Backfill in `task_facts_once.sql`: the 3 primaries from
   `task_primary_sessions`, the deepest checkout for Sessions naming nothing
@@ -458,8 +458,8 @@ The `adoption.rs` special case is gone. Tests:
 bare resume there says "no associated work conversation" (execution
 `ops::task::adoption:: ops::task::tests:: ops::human_session:: ops::run::`
 107 passed); `work_route` 6 passed; clippy clean. Not run: `lf land` in a
-nested worktree end to end (gate/CI: `land_tests`). Left for compress: `counted_task` is now a
-one-line wrapper over `SqliteStore::task_holding`; callers can ask the store.
+nested worktree end to end (gate/CI: `land_tests`). Compress inlined
+`counted_task`: provider conversations ask `SqliteStore::task_holding`.
 
 ## Then: gate
 

@@ -2583,29 +2583,25 @@ pub fn task_worktree_blocker_after(
 
 /// The Task whose work `dir` is: the deepest Task checkout holding it.
 pub(crate) async fn task_holding(store: &SharedStore, dir: &Path) -> OpsResult<Option<Task>> {
-    match counted_task(&store.sqlite, dir)? {
-        Some(id) => store.get_task(&id).await.map_err(task_error),
-        None => Ok(None),
-    }
+    let id = store.sqlite.task_holding(dir).map_err(task_error)?;
+    load_task(store, id).await
 }
 
 /// The Task whose checkout is the Git worktree at `root`. A worktree nested
 /// inside another Task's checkout has no owner until a Task adopts it.
 pub(crate) async fn checkout_owner(store: &SharedStore, root: &Path) -> OpsResult<Option<Task>> {
-    match store.sqlite.task_checkout_owner(root).map_err(task_error)? {
+    let id = store.sqlite.task_checkout_owner(root).map_err(task_error)?;
+    load_task(store, id).await
+}
+
+async fn load_task(
+    store: &SharedStore,
+    id: Option<loopflow_model::durable::TaskId>,
+) -> OpsResult<Option<Task>> {
+    match id {
         Some(id) => store.get_task(&id).await.map_err(task_error),
         None => Ok(None),
     }
-}
-
-/// The Task a conversation run in `cwd` belongs to: the one holding it on
-/// this Machine. A launch counts toward it, with usage rows; a raw
-/// conversation only lists under it.
-pub(crate) fn counted_task(
-    store: &SqliteStore,
-    cwd: &Path,
-) -> OpsResult<Option<loopflow_model::durable::TaskId>> {
-    store.task_holding(cwd).map_err(task_error)
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]

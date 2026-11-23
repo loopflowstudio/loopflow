@@ -16,12 +16,7 @@ use super::SqliteStore;
 pub const START: &str = "start";
 pub const END: &str = "end";
 
-#[derive(Debug)]
-pub struct TaskOverviewRecords {
-    pub sessions: Vec<TaskSession>,
-    pub graph_processes: Vec<crate::execution::GraphProcessInventoryEntry>,
-    pub graph: Option<SavedTaskGraphRow>,
-}
+/// A Task's Sessions, Graph runs and Graph, read in one snapshot.
 #[derive(Debug)]
 pub struct TaskWorkRecords {
     pub sessions: Vec<TaskSession>,
@@ -69,7 +64,7 @@ pub(super) fn within(cwd: &str, root: &str) -> String {
 /// The Task whose checkout here is the deepest one holding `cwd`, as a scalar
 /// subquery. Probes checkout roots from the cwd outward, so each ancestor is
 /// one index seek; relative paths walk the same way as absolute ones.
-pub(super) fn deepest_checkout(cwd: &str) -> String {
+fn deepest_checkout(cwd: &str) -> String {
     format!(
         "(WITH RECURSIVE up(path) AS (
             SELECT rtrim({cwd},'/') WHERE {cwd} IS NOT NULL
@@ -680,10 +675,7 @@ impl SqliteStore {
     pub fn task_overview_records(
         &self,
         task: &TaskId,
-    ) -> StoreResult<(
-        TaskOverviewRecords,
-        Vec<crate::execution::GraphProcessDetail>,
-    )> {
+    ) -> StoreResult<(TaskWorkRecords, Vec<crate::execution::GraphProcessDetail>)> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.savepoint()?;
         let (sessions, graphs) = members(&tx, task)?;
@@ -695,7 +687,7 @@ impl SqliteStore {
             .map(|(graph, entry)| graph.detail(entry.clone()))
             .collect();
         Ok((
-            TaskOverviewRecords {
+            TaskWorkRecords {
                 sessions,
                 graph_processes: graphs.into_iter().map(|(_, entry)| entry).collect(),
                 graph,

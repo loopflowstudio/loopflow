@@ -2013,7 +2013,7 @@ pub(super) fn reserve_session_in(
 /// A Session that names no Task or Wave takes its Task by the rule a Graph run
 /// does ([`super::task_work::starting_task_in`]), recorded now so a later move
 /// or a reused path changes nothing; the Task of the Session that started it
-/// arrives named, as inherited. A primary for a repository or Wave declares
+/// arrives named, as declared. A primary for a repository or Wave declares
 /// its scope.
 fn resolve_ancestry_in(conn: &Connection, session: &mut LfSession) -> StoreResult<()> {
     if session.task_id.is_none()

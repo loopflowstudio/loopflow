@@ -1,11 +1,11 @@
-at: 6bd79b8989dbe757c2f9fc486284628ff256c61d
+at: cd87c36057f953d062ebeadf36f092f2cacd652c
 first:
   - path: rust/loopflow/src/server/README.md
     why: the Antigravity reach beside main's Claude, Codex and socket reaches
   - path: rust/loopflow-storage/src/steer.rs
     why: IdleReach gains Antigravity
   - path: rust/loopflow-storage/src/sqlite/steers.rs
-    why: an agy row without endpoint or socket reaches its wake file
+    why: an agy row's agent_inbox is its wake file, selected beside Codex's endpoint
   - path: rust/loopflow-storage/src/sqlite/processes.rs
     why: record_launch_inbox, the launch-side write
   - path: rust/loopflow-execution/src/harness/antigravity.rs

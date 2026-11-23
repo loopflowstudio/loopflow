@@ -276,7 +276,8 @@ impl SqliteStore {
         let mut statement = conn.prepare(
             "SELECT s.id,s.agent_process_id,a.capability,s.provider_thread,s.cwd,
                 CASE WHEN s.provider='codex' THEN s.agent_endpoint END,s.agent_inbox,
-                s.agent_pid,s.agent_os_started_at,s.agent_socket,s.provider IS 'agy'
+                s.agent_pid,s.agent_os_started_at,s.agent_socket,
+                CASE WHEN s.provider='agy' THEN s.agent_inbox END
              FROM agent_sessions s INDEXED BY agent_sessions_unended_agent
              JOIN steer_adapters a ON a.agent_process_id=s.agent_process_id
              JOIN session_activity act ON act.session_id=s.id AND act.agent_process_id=s.agent_process_id
@@ -288,16 +289,14 @@ impl SqliteStore {
         )?;
         let rows = statement.query_map([session], |row| {
             let path = |column| row.get::<_, Option<String>>(column);
-            let reach = match (path(5)?, path(9)?) {
-                (Some(endpoint), _) => IdleReach::Codex(endpoint.into()),
-                (None, Some(socket)) => IdleReach::Inbox(Inbox::Socket(socket.into())),
-                (None, None) => {
-                    let inbox = row.get::<_, String>(6)?.into();
-                    if row.get::<_, bool>(10)? {
-                        IdleReach::Antigravity(inbox)
-                    } else {
-                        IdleReach::Inbox(Inbox::Claude(inbox))
-                    }
+            // The query keeps only reachable conversations: with no endpoint,
+            // wake file or socket, the Claude key is there.
+            let reach = match (path(5)?, path(10)?, path(9)?) {
+                (Some(endpoint), _, _) => IdleReach::Codex(endpoint.into()),
+                (None, Some(wake), _) => IdleReach::Antigravity(wake.into()),
+                (None, None, Some(socket)) => IdleReach::Inbox(Inbox::Socket(socket.into())),
+                (None, None, None) => {
+                    IdleReach::Inbox(Inbox::Claude(row.get::<_, String>(6)?.into()))
                 }
             };
             let identity = row

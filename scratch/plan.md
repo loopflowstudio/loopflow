@@ -57,9 +57,9 @@ Checks: `cargo test -p loopflow --lib server::wake::tests::` 9 passed;
 1. **Live wake** (demo/qa, needs the branch installed and an `agy` login): the demo above. Risk
    still open: a wake racing a typed prompt on `agy` is untested; the server sends only when the
    store says yielded.
-2. **Shape, for review:** the candidate query distinguishes Claude's key from Antigravity's wake
-   file by `provider IS 'agy'` inside the `(None, None)` arm. Main's `Inbox` enum already names
-   what provider code listens on; `Inbox::Antigravity` (or a column-free check on the file) could
-   replace the extra `IdleReach` variant. Small; decide at gate.
+2. **Shape, settled:** the candidate query selects the wake file as its own column
+   (`CASE WHEN provider='agy' THEN agent_inbox END`), beside Codex's endpoint. Not `Inbox`: that is
+   the wire type hooks report, and `agy`'s file comes from the launch. Not `agent_endpoint`:
+   `session_connection` reads it as a Codex app-server on resume.
 3. Main's `tests/e2e/idle_wake.py` drives OpenCode and Pi live against a stand-in model; `agy` has
    no stand-in model route, so Antigravity is not added there.

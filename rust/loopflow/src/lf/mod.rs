@@ -2295,7 +2295,10 @@ using lf open's ordinary host selection. Preview and --quote open nothing."
         #[arg(long)]
         json: bool,
     },
-    /// Complete a Task without moving its Graph
+    /// Complete a Task without moving its Graph; settles open children (merged → done, others → abandoned)
+    #[command(
+        after_help = "Completing a parent Task settles every open descendant: children whose PR merged are marked done, and all other open children are abandoned (closing their PRs and deleting their branches). Abandoned Tasks cannot be reopened."
+    )]
     Complete {
         issue: String,
         /// Why, kept in the Task's completion request

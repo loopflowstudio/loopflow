@@ -49,10 +49,8 @@ use super::{SqliteStore, TaskCheckout};
 pub enum ChildOutcome {
     /// Its PR had merged.
     Done,
-    /// It was never started.
+    /// It was not merged and was canceled with its parent.
     Abandoned,
-    /// It holds something unmerged and keeps its link.
-    Open,
 }
 
 #[derive(Debug)]
@@ -61,8 +59,7 @@ pub struct ChildCompletion {
     pub outcome: ChildOutcome,
     pub pr: Option<TaskPr>,
     pub step: Option<String>,
-    /// What completing this child did with its own children; empty when it
-    /// stays open.
+    /// What settling this child did with its own children.
     pub children: Vec<ChildCompletion>,
 }
 
@@ -618,7 +615,12 @@ impl SqliteStore {
                 "UPDATE tasks SET completion_request=NULL,completion_error=NULL WHERE id=?1",
                 [id.as_str()],
             )?;
-            super::task_state::decide_in(&tx, id, "unstarted")?;
+            let target = if has_prior_work(&tx, id)? {
+                "started"
+            } else {
+                "unstarted"
+            };
+            super::task_state::decide_in(&tx, id, target)?;
             // Reopening clears auto: it ended with the Task.
             tx.execute("DELETE FROM task_auto WHERE task_id=?1", [id.as_str()])?;
             insert_task_event_in(
@@ -2702,16 +2704,11 @@ fn complete_children(conn: &Connection, parent: &TaskId) -> StoreResult<Vec<Chil
         let outcome = if pr.as_ref().is_some_and(|pr| pr.phase() == PrPhase::Merged) {
             record_task_completion(conn, &task.id)?;
             ChildOutcome::Done
-        } else if pr.is_none() && never_started(conn, &task.id)? {
+        } else {
             super::durable::abandon_task_in(conn, &task.id, "parent Task completed", now_unix())?;
             ChildOutcome::Abandoned
-        } else {
-            ChildOutcome::Open
         };
-        let children = match outcome {
-            ChildOutcome::Done | ChildOutcome::Abandoned => complete_children(conn, &task.id)?,
-            ChildOutcome::Open => Vec::new(),
-        };
+        let children = complete_children(conn, &task.id)?;
         let step = conn
             .query_row(
                 "SELECT step FROM task_graphs WHERE task_id=?1 AND run_start IS NULL",
@@ -2731,20 +2728,15 @@ fn complete_children(conn: &Connection, parent: &TaskId) -> StoreResult<Vec<Chil
     Ok(completions)
 }
 
-fn never_started(conn: &Connection, task: &TaskId) -> StoreResult<bool> {
-    if super::durable::task_state_in(conn, task)? != TaskState::Unstarted
-        || super::task_started::task_begun_in(conn, task)?
-    {
-        return Ok(false);
+fn has_prior_work(conn: &Connection, task: &TaskId) -> StoreResult<bool> {
+    if super::task_started::task_begun_in(conn, task)? {
+        return Ok(true);
     }
     Ok(conn.query_row(
-        "SELECT NOT (
-            EXISTS(SELECT 1 FROM task_prs WHERE task_id=?1)
+        "SELECT EXISTS(SELECT 1 FROM task_prs WHERE task_id=?1)
             OR EXISTS(SELECT 1 FROM graph_processes WHERE task_id=?1)
-            OR EXISTS(SELECT 1 FROM task_events WHERE task_id=?1
-               AND json_extract(kind_json,'$.kind') IN
-                   ('checkout_initializing','checkout_ready','worktree_initializing'))
-        )",
+            OR EXISTS(SELECT 1 FROM task_checkouts WHERE task_id=?1)
+            OR EXISTS(SELECT 1 FROM agent_sessions WHERE task_id=?1)",
         [task.as_str()],
         |row| row.get(0),
     )?)

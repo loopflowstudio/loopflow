@@ -254,8 +254,15 @@ struct TaskActionItems: View {
             Button("Reopen Task") { model.reopenTask(task) }.disabled(unavailable)
                 .accessibilityIdentifier("task-reopen")
         } else {
-            Button("Complete Task") { model.completeTaskFromInput(task) }.disabled(unavailable)
-                .accessibilityIdentifier("task-complete")
+            let hasOpenChildren = !model.openDescendants(of: task).isEmpty
+            Button(hasOpenChildren ? "Complete Task & Settle Children…" : "Complete Task") {
+                model.beginComplete(task)
+            }
+            .disabled(unavailable)
+            .help(hasOpenChildren
+                ? "Completing this Task marks merged children done and abandons all other open children"
+                : "Mark this Task done")
+            .accessibilityIdentifier("task-complete")
             Button(task.runtime?.owner == nil ? "Claim Task" : "Unassign Task") {
                 model.assignTask(task, claimed: task.runtime?.owner == nil)
             }
@@ -316,6 +323,62 @@ struct TaskAbandonConfirmation: ViewModifier {
             Button("Abandon Task", role: .destructive) { model.abandonTask(task) }
         } message: { _ in
             Text("Cancels the Task, closes its PRs and deletes its branches. Unassign it instead to keep its work for later.")
+        }
+    }
+}
+
+/// The window's one Complete… confirmation when completing a parent will settle open children.
+struct TaskCompleteConfirmation: ViewModifier {
+    let model: WorkModel
+
+    private var completing: RoadmapTask? {
+        model.navigation.completing.flatMap { model.task(id: $0)?.task }
+    }
+
+    private func summary(for descendants: [RoadmapTask]) -> (done: [RoadmapTask], abandoned: [RoadmapTask]) {
+        let done = descendants.filter { $0.pr?.phase == .merged }
+        let abandoned = descendants.filter { $0.pr?.phase != .merged }
+        return (done, abandoned)
+    }
+
+    private func message(for descendants: [RoadmapTask]) -> String {
+        let (done, abandoned) = summary(for: descendants)
+        var lines: [String] = []
+        if !done.isEmpty {
+            let names = done.map(\.task.identifier).joined(separator: ", ")
+            lines.append("Marked done (PR merged): \(names).")
+        }
+        if !abandoned.isEmpty {
+            let names = abandoned.map(\.task.identifier).joined(separator: ", ")
+            lines.append("Abandoned (PRs closed, branches deleted, cannot be reopened): \(names).")
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    func body(content: Content) -> some View {
+        let descendants = completing.map { model.openDescendants(of: $0) } ?? []
+        let (_, abandoned) = summary(for: descendants)
+        let title: String = if let task = completing {
+            descendants.count == 1
+                ? "Complete \(task.task.identifier) and settle 1 open child?"
+                : "Complete \(task.task.identifier) and settle \(descendants.count) open children?"
+        } else {
+            "Complete Task?"
+        }
+        content.confirmationDialog(
+            title,
+            isPresented: Binding(get: { completing != nil }, set: { if !$0 { model.navigation.completing = nil } }),
+            presenting: completing
+        ) { task in
+            Button(
+                abandoned.isEmpty ? "Complete & Finish Children" : "Complete & Settle Children",
+                role: abandoned.isEmpty ? nil : .destructive
+            ) {
+                model.navigation.completing = nil
+                model.completeTaskFromInput(task)
+            }
+        } message: { _ in
+            Text(message(for: descendants))
         }
     }
 }

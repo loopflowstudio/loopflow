@@ -2314,7 +2314,7 @@ async fn snapshot_task_detail(
         at_end,
     );
     let conducting = finished
-        .filter(|_| open_children > 0)
+        .filter(|_| open_children > 0 && execution.state != TaskExecutionState::Running)
         .map(|finished| finished.reason(open_children));
     let next_move = if let Some(reason) = conducting.clone() {
         NextMove {

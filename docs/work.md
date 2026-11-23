@@ -231,8 +231,13 @@ LOO-12 done
   LOO-14 done: #1980 merged
     LOO-17 abandoned: never started
   LOO-16 abandoned: never started
-  LOO-15 stays open: #1981 open, at ship-review
+  LOO-15 abandoned: #1981 open, at ship-review
 ```
+
+Completing a parent Task settles every open descendant: children whose PR
+merged are marked `done`, and all other open children (unstarted or unmerged)
+are `abandoned` (closing their PRs and deleting their branches). Abandoned
+Tasks cannot be reopened.
 
 Completing a parent finishes each child whose PR merged and abandons each
 child that never started. A child with anything unmerged (an open PR, a
@@ -602,12 +607,19 @@ there. See [Orchestration](orchestration.md#where-a-person-takes-part).
 **Membership and lifecycle.** A [follow-up](#file-follow-ups-from-a-task) is
 filed in its parent's Wave and Project, and stays there if the parent later
 moves. `lf task move LOO-12 --wave billing` (or `--no-wave`) moves a Task while
-keeping its Session, checkout, PR, and Graph. `lf task complete` updates status
-only; on a parent it also finishes merged children and abandons never-started
-ones, and does the same under each child it closes. `lf task complete --json`
-carries `children`: each child's row, its `outcome` (`done`, `abandoned` or
-`open`) and its own `children`, `[]` when there were none. `lf task reopen`
-keeps the same PR;
+keeping its Session, checkout, PR, and Graph. A Task keeps one worktree and one current PR at a time, with PRs over time:
+once a PR merges on a Task that stays open (conducting children, or after
+`lf task reopen`), `lf task run <ID> --from <step>` (or `lf pr submit`) starts
+the next pass and opens the next PR linked to the same issue.
+
+`lf task complete` updates status only on a leaf Task; on a parent it also
+finishes children with merged PRs and abandons all other open children
+(closing their PRs and deleting their branches), recursing through open
+descendants. `lf task complete --json` carries `children`: each child's row,
+its `outcome` (`done` or `abandoned`) and its own `children`, `[]` when there
+were none. `lf task reopen` keeps the same PR and restores started Tasks to
+`started` (or `unstarted` if never started); abandoned Tasks cannot be
+reopened.
 `lf task abandon` cancels the Task, closes its PRs, and deletes its branches.
 
 **Idempotent creation (`--request-id`).** Scripts and Desktop can pass

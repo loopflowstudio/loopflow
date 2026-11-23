@@ -63,8 +63,9 @@ BEGIN
     UPDATE store_revisions SET revision=revision+1 WHERE domain='task_updates';
 END;
 
--- Nothing writes or reads what a merge should do next: one Task has one PR,
--- and work after a merge is a child Task.
+-- Nothing writes or reads what a merge should do next: a merged PR settles
+-- itself, and later work on the Task opens the next PR (1 Task = 1 worktree
+-- = 1 current PR).
 -- leaving: task_prs.after_merge LOO-996
 -- leaving: task_prs.next_slug LOO-996
 -- leaving: pr_landings.after_merge LOO-996

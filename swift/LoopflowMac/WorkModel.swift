@@ -2809,6 +2809,31 @@ final class WorkModel {
         }
     }
 
+    /// Open descendants of `task` in the loaded roadmap, breadth-first and cycle-safe.
+    func openDescendants(of task: RoadmapTask) -> [RoadmapTask] {
+        var queue = [task.task.id]
+        var seen: Set<String> = [task.task.id]
+        var descendants: [RoadmapTask] = []
+        let open = taskIndex.tasks.filter { !$0.isCompleted }
+        while !queue.isEmpty {
+            let parentId = queue.removeFirst()
+            for child in open where child.task.parentId == parentId && seen.insert(child.task.id).inserted {
+                descendants.append(child)
+                queue.append(child.task.id)
+            }
+        }
+        return descendants
+    }
+
+    /// Complete immediately when no open children exist; confirm first when children will settle.
+    func beginComplete(_ task: RoadmapTask) {
+        if openDescendants(of: task).isEmpty {
+            completeTaskFromInput(task)
+        } else {
+            navigation.completing = task.id
+        }
+    }
+
     /// Put the Task at `rank` in its Project, from 0; Rust renumbers the rest and moves it in Linear.
     func rankTask(_ task: RoadmapTask, rank: Int) async throws {
         let home = workDataDirectory

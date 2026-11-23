@@ -3082,10 +3082,16 @@ async fn settle_completion(
             let result = match child.outcome {
                 ChildOutcome::Done => finish_completion(store, &child.task).await,
                 ChildOutcome::Abandoned => {
-                    let result = retirement::close_conversations(&store.sqlite, &child.task.id);
-                    sync_completion(store, &child.task).await.and(result)
+                    let close = retirement::close_conversations(&store.sqlite, &child.task.id);
+                    let sync = sync_completion(store, &child.task).await;
+                    let cleanup = match repository_for_task(store, &child.task) {
+                        Ok(repo) => lifecycle::cleanup_abandoned(&repo, store, &child.task, false)
+                            .await
+                            .map(drop),
+                        Err(error) => Err(error),
+                    };
+                    sync.and(close).and(cleanup)
                 }
-                ChildOutcome::Open => continue,
             };
             if let Err(error) = result {
                 crate::journal::request::diagnostic(format_args!(

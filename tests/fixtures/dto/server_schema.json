@@ -584,12 +584,7 @@
         },
         {
           "const": "abandoned",
-          "description": "It was never started.",
-          "type": "string"
-        },
-        {
-          "const": "open",
-          "description": "It holds something unmerged and keeps its link.",
+          "description": "It was not merged and was canceled with its parent.",
           "type": "string"
         }
       ]

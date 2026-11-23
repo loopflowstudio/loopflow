@@ -859,29 +859,37 @@ fn a_merged_parent_stays_open_until_it_is_completed_with_its_children() {
             .collect::<Vec<_>>()
     };
     let children = outcomes(&completed["children"]);
-    assert_eq!(
-        children[..2],
-        [
-            (landed.clone(), "done".into(), "done".into()),
-            (unstarted.clone(), "abandoned".into(), "abandoned".into()),
-        ]
-    );
-    assert_eq!(
-        (&children[2].0, children[2].1.as_str()),
-        (&reviewing, "open")
-    );
+    assert_eq!(children[0], (landed.clone(), "done".into(), "done".into()));
+    let abandoned: Vec<_> = children[1..]
+        .iter()
+        .map(|(id, outcome, state)| {
+            assert_eq!(outcome, "abandoned");
+            assert_eq!(state, "abandoned");
+            id.as_str()
+        })
+        .collect();
+    assert!(abandoned.contains(&unstarted.as_str()), "{children:?}");
+    assert!(abandoned.contains(&reviewing.as_str()), "{children:?}");
+
     let grandchildren = outcomes(&completed["children"][0]["children"]);
+    assert_eq!(grandchildren.len(), 2, "{grandchildren:?}");
+    for (_, outcome, state) in &grandchildren {
+        assert_eq!(outcome, "abandoned");
+        assert_eq!(state, "abandoned");
+    }
+    let grandchild_ids: Vec<_> = grandchildren.iter().map(|(id, _, _)| id.as_str()).collect();
+    assert!(grandchild_ids.contains(&grandchild.as_str()));
+    assert!(grandchild_ids.contains(&kept.as_str()));
+
+    // An abandoned child also settles its own open descendants.
+    let unstarted_row = completed["children"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|child| child["task"]["identifier"] == unstarted)
+        .unwrap();
     assert_eq!(
-        grandchildren[0],
-        (grandchild.clone(), "abandoned".into(), "abandoned".into())
-    );
-    assert_eq!(
-        (&grandchildren[1].0, grandchildren[1].1.as_str()),
-        (&kept, "open")
-    );
-    // So does a child that is abandoned.
-    assert_eq!(
-        outcomes(&completed["children"][1]["children"]),
+        outcomes(&unstarted_row["children"]),
         [(
             unstarted_child.clone(),
             "abandoned".into(),
@@ -892,19 +900,20 @@ fn a_merged_parent_stays_open_until_it_is_completed_with_its_children() {
     assert_eq!(state(&parent), "done");
     assert_eq!(state(&landed), "done");
     assert_eq!(state(&unstarted), "abandoned");
+    assert_eq!(state(&reviewing), "abandoned");
     assert_eq!(state(&grandchild), "abandoned");
+    assert_eq!(state(&kept), "abandoned");
     assert_eq!(state(&unstarted_child), "abandoned");
 
-    // The child left open keeps its link and is listed on its own.
-    let left = json(lf(&["task", "status", &reviewing, "--json"]));
-    assert_eq!(left["parent"]["identifier"], parent);
-    assert!(
-        !matches!(left["task"]["state"].as_str(), Some("done" | "abandoned")),
-        "{}",
-        left["task"]
-    );
-    let listed = lf(&["task", "list"]);
-    assert!(line(&listed, format!("{reviewing} ·")), "{listed}");
+    // Reopening a done parent with prior work restores `started` planning state;
+    // abandoned children cannot be reopened.
+    let reopened = json(lf(&["task", "reopen", &parent, "--json"]));
+    assert_eq!(reopened["state"], "started");
+    let mut reopen_abandoned = command(home.path(), &["task", "reopen", &reviewing]);
+    reopen_abandoned
+        .current_dir(repo.path())
+        .env("HOME", home.path());
+    assert!(!reopen_abandoned.output().unwrap().status.success());
 
     // A Task with no PR whose Graph reached `end` stands the same way.
     let (planned_id, planned) = file("Plan the cache", None);

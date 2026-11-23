@@ -52,6 +52,12 @@ pub fn derive_task_actions(evidence: &TaskActionEvidence) -> TaskActionModel {
     if matches!(evidence.status, WorkStatus::Done | WorkStatus::Abandoned) {
         return action(TaskAction::NoAction, "Task is terminal");
     }
+    if let Some(execution) = evidence
+        .execution
+        .filter(|execution| execution.state == TaskExecutionState::Running)
+    {
+        return action(TaskAction::NoAction, &execution.reason);
+    }
     let finished = Finished::of(&evidence.status, evidence.latest_pr_phase, evidence.at_end);
     if finished.is_none() {
         if let Some(execution) = evidence
@@ -336,6 +342,17 @@ mod tests {
             derive_task_actions(&evidence).reason,
             "Merged · 1 child open"
         );
+        // A new Graph pass running on a merged Task reports the live run, not the earlier merge.
+        let running = TaskExecutionSnapshot {
+            state: TaskExecutionState::Running,
+            reason: "code at implement".into(),
+            step: Some("implement".into()),
+            captured: None,
+            died: None,
+            outlook: None,
+        };
+        evidence.execution = Some(&running);
+        assert_eq!(derive_task_actions(&evidence).reason, "code at implement");
     }
 
     #[test]

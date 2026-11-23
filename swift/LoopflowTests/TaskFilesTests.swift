@@ -250,7 +250,7 @@ struct TaskFilesTests {
         }
     }
 
-    @Test func readChordsUseTheUnderlinedOccurrenceBesideSelectableText() async throws {
+    private func readerShortcuts() throws -> (TaskFilesStore, DesktopActionMonitor.Coordinator) {
         let registry = SessionsWorkspaceRegistry(localMachineId: fixtureMachineId)
         let location = fixtureWorkspace("/fixture")
         let workspace = fixtureWork(registry, location)
@@ -259,6 +259,49 @@ struct TaskFilesTests {
         let store = try workspace.files(for: pane.content, task: nil, query: query)
         let context = DesktopActionContext(model: WorkModel(query: query), workspaces: registry, workspace: workspace, pane: pane)
         let monitor = DesktopActionMonitor(context: { context }, failed: { Issue.record($0) }).makeCoordinator()
+        return (store, monitor)
+    }
+
+    @Test(.requiresDisplay) func selectableFirstResponderReceivesReadChordsThroughTheWindowMonitor() throws {
+        _ = NSApplication.shared
+        let (store, monitor) = try readerShortcuts()
+        store.selectFile("Call.swift")
+        _ = store.document("Call.swift")
+        store.jumps.target = .init(path: "Call.swift", line: 1, word: "read", range: NSRange(location: 0, length: 4))
+        // Supply the key-window condition without activating over another application.
+        final class KeyWindow: NSWindow { override var isKeyWindow: Bool { true } }
+        let window = KeyWindow(contentRect: CGRect(x: 0, y: 0, width: 300, height: 100),
+                               styleMask: [.titled], backing: .buffered, defer: false)
+        let text = NSTextView(frame: window.contentLayoutRect)
+        text.string = "read()"
+        text.isEditable = false
+        text.isSelectable = true
+        window.contentView = text
+        monitor.install(for: text)
+        defer { monitor.uninstall() }
+        try #require(window.makeFirstResponder(text) && window.firstResponder === text)
+        func press(_ key: String, code: UInt16) throws {
+            let event = try #require(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [],
+                timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil,
+                characters: key, charactersIgnoringModifiers: key, isARepeat: false, keyCode: code))
+            NSApp.sendEvent(event)
+        }
+        try press("g", code: 5)
+        try press("d", code: 2)
+        #expect(store.jumps.peek?.lookup == .definition("read"))
+        try press("g", code: 5)
+        try press("r", code: 15)
+        #expect(store.jumps.peek?.lookup == .references("read"))
+        store.jumps.dismiss()
+        text.isEditable = true
+        try #require(window.makeFirstResponder(text) && window.firstResponder === text)
+        for key in ["g", "d", "g", "r"] {
+            #expect(!monitor.handleReadKey(key, modifiers: [], firstResponder: window.firstResponder))
+        }
+    }
+
+    @Test func readChordsUseTheUnderlinedOccurrenceBesideSelectableText() async throws {
+        let (store, monitor) = try readerShortcuts()
         let path = "Call.swift"
         let text = "😀 read() + read()"
         store.selectFile(path)

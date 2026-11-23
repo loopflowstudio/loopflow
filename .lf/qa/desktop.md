@@ -310,7 +310,15 @@ desktop focus -p session`; `desktop capture -p session` reads the provider.
   on the view and offers ⌘ chords straight to the main menu; Desktop's key
   monitor (which checks `isKeyWindow`) does not act either. `claims` asks the
   window first, as AppKit does for a key window, then names the menu that
-  takes ⌘↩. `equivalents` lists every menu key equivalent with its mask.
+  takes ⌘↩. `equivalents` lists every menu key equivalent with its mask
+  and its `isEnabled`/`isHidden` as read before AppKit validates. SwiftUI
+  command items read disabled there yet still fire, and a disabled or hidden
+  item still consumes its chord, so neither state says who owns a key.
+- A locked relaunch can leave both windows on "Updating…" and drop every
+  `key post` while `key send` still reaches the pane. This happened while other agents
+  kept the Machine busy and the main thread stalled every second (`main
+  thread stalled` in the private `lf.log`). Run key scenarios on the first
+  launch, before any relaunch, and use `key send` to confirm the responder.
 - A Settings window opened under lock stalls the main thread for several
   seconds in AppKit's window snapshotter; hook answers then arrive late and
   out of order. Close it and send the next command once the last answer is in.

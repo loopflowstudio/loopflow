@@ -101,28 +101,21 @@ struct GhosttyModifierInputTests {
         func shadowed(_ key: String, _ flags: NSEvent.ModifierFlags) -> Bool {
             GhosttyTerminalShortcut.shadowedByShiftedMenuItem(characters: key, modifiers: flags, in: menu)
         }
-        add("\r", [.command, .shift])
+        // AppKit validates an item only when it dispatches, and a disabled or
+        // hidden item still consumes its chord, so neither state frees one.
+        let zoom = add("\r", [.command, .shift])
+        zoom.isEnabled = false
+        zoom.isHidden = true
         add("e", [.command, .shift])
         add("O", .command)
-        let exact = add("k", .command)
-        let shifted = add("k", [.command, .shift])
+        add("k", .command)
+        add("k", [.command, .shift])
         #expect(shadowed("\r", .command))
         #expect(shadowed("e", .command))
         #expect(shadowed("o", .command))
         #expect(!shadowed("\r", [.command, .shift]))
         #expect(!shadowed("k", .command))
         #expect(!shadowed("d", .command))
-
-        exact.isHidden = true
-        #expect(shadowed("k", .command))
-        shifted.isEnabled = false
-        #expect(!shadowed("k", .command))
-        exact.isHidden = false
-        exact.isEnabled = false
-        shifted.isEnabled = true
-        #expect(shadowed("k", .command))
-        shifted.isHidden = true
-        #expect(!shadowed("k", .command))
     }
 
     @Test("Committing marked text writes it once and canceling writes nothing")

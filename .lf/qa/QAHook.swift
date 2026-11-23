@@ -130,10 +130,10 @@ enum QAHook {
             }
             return "typed"
         case "equivalents":
-            // Lists main-menu items with a key equivalent: title, characters (hex), modifier mask.
+            // Lists main-menu items with a key equivalent: title, characters (hex), modifier mask, enabled, hidden.
             func list(_ menu: NSMenu) -> [String] {
                 menu.items.flatMap { item -> [String] in
-                    let own = item.keyEquivalent.isEmpty ? [] : ["\(item.title) \(item.keyEquivalent.unicodeScalars.map { String($0.value, radix: 16) }) \(item.keyEquivalentModifierMask.rawValue)"]
+                    let own = item.keyEquivalent.isEmpty ? [] : ["\(item.title) \(item.keyEquivalent.unicodeScalars.map { String($0.value, radix: 16) }) \(item.keyEquivalentModifierMask.rawValue) enabled=\(item.isEnabled) hidden=\(item.isHidden)"]
                     return own + (item.submenu.map(list) ?? [])
                 }
             }

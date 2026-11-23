@@ -72,6 +72,26 @@ also checked Shift-/ and Shift-A with only modifyOtherKeys enabled
 (<code>?</code>, <code>CSI 27;2;65~</code>) and with both modes active
 (<code>?A</code>).</p>
 
+<h2>Round 2: after compression</h2>
+<p>The compressed responder (<code>2e34762281</code>) ran in a rebuilt isolated Dev bundle on the same private Machine and held key probe. The screen was locked.</p>
+<table>
+<tr><th>#</th><th>What I did</th><th>What the provider received</th><th></th></tr>
+<tr><td>R1</td><td>Legacy: Return, Shift-Return, Control-Return</td><td><code>0d</code> · CSI 27;2;13~ · CSI 27;5;13~</td><td class="ok">ok</td></tr>
+<tr><td>R2</td><td>Left and right Option-B</td><td><code>1b62</code> <code>1b62</code></td><td class="ok">ok</td></tr>
+<tr><td>R3</td><td>b, Shift-B, Shift-Tab, Shift-/, Shift-A</td><td><code>62</code> <code>42</code> <code>1b5b5a</code> <code>3f</code> <code>41</code></td><td class="ok">ok</td></tr>
+<tr><td>R4</td><td>Kitty on; Return, Shift/Control/Option-Return, Shift-Tab, Option-B, Shift-/, Shift-A</td><td><code>0d</code> · CSI 13;2u · CSI 13;5u · CSI 13;3u · CSI 9;2u · CSI 98;3u · <code>3f</code> · <code>41</code></td><td class="ok">ok</td></tr>
+<tr><td>R5</td><td>⌘D, ⌘T</td><td>CSI 100;9u · CSI 116;9u</td><td class="ok">ok</td></tr>
+<tr><td>R6</td><td><code>claims</code> (⌘↩, window asked first)</td><td><code>menus ["View"]</code>: Zoom Pane took it again. <code>equivalents</code> showed Zoom Pane and Toggle Browser reading <code>enabled=false</code></td><td class="bad">bug → fixed</td></tr>
+<tr><td>R7</td><td>After the fix: <code>claims</code></td><td><code>window</code>; the provider got CSI 13;9u (<code>b24=1b5b31333b3975</code>)</td><td class="ok">ok</td></tr>
+<tr><td>R8</td><td>⌘, over the pane</td><td>Settings (Appearance) opened; nothing reached the provider</td><td class="ok">ok</td></tr>
+</table>
+<p><b>What I fixed.</b> After the first QA round, <code>shadowedByShiftedMenuItem</code> had started skipping disabled and hidden menu items. A standalone <code>NSMenu</code> probe showed why that was wrong. An auto-enabled ⇧⌘↩ item that reads <code>isEnabled=false</code> fires on ⌘↩ once the menu validates it. A disabled item returns <code>true</code> without firing, and a hidden item fires. In every case the chord never reached the program. The filter is gone. The headless test now uses a disabled, hidden ⇧⌘↩ item and fails against the old filter.</p>
+<pre>auto=false enabled(before)=false -> returned true fired 0
+auto=false enabled(before)=true  -> returned true fired 1
+auto=true  enabled(before)=false -> returned true fired 1 enabled(after)=true
+hidden                          -> returned true fired 1</pre>
+<p>Not reached this round: posted events after a relaunch. Under load from other agents, the relaunched windows stayed on “Updating…” and every <code>key post</code> was dropped, while <code>key send</code> still reached the pane. I checked R7 with <code>key send</code>.</p>
+<pre>scripts/test_desktop.sh --filter 'GhosttyModifierInputTests|SessionModifierInputTests|shortcutOwnership|windowCycleBelongsToAppKit|embeddedConfigBindsPromptJumps'   # 19 passed; CI repeats</pre>
 <h2>Where it stands</h2>
 <p><b>Works now:</b> modified Return, Tab and Option keys reach a held Session with modifiers intact in legacy and
 Kitty modes, once each, through the app's real event dispatch, and again after the app quits and reopens.

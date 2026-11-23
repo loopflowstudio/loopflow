@@ -28,13 +28,15 @@ enum GhosttyTerminalShortcut {
 
     /// AppKit fires a menu item that requires Shift for the same chord without it:
     /// ⇧⌘↩ Zoom Pane answers ⌘↩ and ⇧⌘E Toggle Browser answers ⌘E. A chord that
-    /// no menu item names exactly belongs to the terminal.
+    /// no menu item names exactly belongs to the terminal. Enabled and hidden
+    /// states don't matter: AppKit validates at dispatch, and a disabled or
+    /// hidden item still consumes its chord.
     static func shadowedByShiftedMenuItem(characters: String?, modifiers: NSEvent.ModifierFlags, in menu: NSMenu?) -> Bool {
         let held = modifiers.intersection(shortcutModifiers)
         guard !held.contains(.shift), let key = characters?.lowercased(), !key.isEmpty, let menu else { return false }
         var shifted = false
         func visit(_ menu: NSMenu) -> Bool {
-            for item in menu.items where item.isEnabled && !item.isHidden {
+            for item in menu.items {
                 var required = item.keyEquivalentModifierMask.intersection(shortcutModifiers)
                 // An uppercase equivalent implies Shift.
                 if item.keyEquivalent != item.keyEquivalent.lowercased() { required.insert(.shift) }

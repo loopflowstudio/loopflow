@@ -355,6 +355,9 @@ pub struct InstalledSkills {
     pub global: &'static str,
     /// Relative to the repository root.
     pub repository: &'static str,
+    /// A `skills.json` under the home directory that must list `global`
+    /// (as an absolute path) before the harness reads it.
+    pub global_registry: Option<&'static str>,
 }
 
 #[derive(Debug, Clone, Copy)]

@@ -38,15 +38,14 @@ Both probe files were removed; `~/.gemini/config` is back to `config.json`,
 
 ## Decisions
 
-**Antigravity gets a generated tree at `~/.gemini/config/skills/`** — made for
-review. It is the same kind of thing as the two trees Loopflow writes today:
-marked files (`loopflow: true`) that the existing write, collision and prune
-code already owns, and it ranks above agy's builtins. Passed over: a
-`skills.json` entry. It means merging into a provider-owned config file, it only
-works with an absolute home path baked in (the `~/` form fails on 1.5.14), it
-ranks below agy's builtins, and it is the kind of write into global provider
-settings Loopflow doesn't make. What the tree gives up: skills other tools put
-in `~/.agents/skills` (`find-skills`) stay invisible to agy.
+**Antigravity reads `~/.agents/skills` through one `skills.json` entry.**
+Jack, 2026-11-22: "Add one ~/.gemini/config/skills.json entry pointing at
+~/.agents/skills". Antigravity's `global` is `.agents/skills`, and
+`global_registry: Some(".gemini/config/skills.json")` makes sync merge
+`{"path": "<absolute home>/.agents/skills"}` into that file's `entries`,
+keeping everything else and refusing to touch a file that isn't JSON. agy also
+lists third-party skills there (`find-skills`). Entries in the global file rank
+below agy's builtins.
 
 **The declaration lives on `Capabilities`** (`rust/loopflow-execution/src/harness/mod.rs`),
 beside `native_skills`. It is one path per scope and nothing else:
@@ -55,6 +54,7 @@ beside `native_skills`. It is one path per scope and nothing else:
 pub struct InstalledSkills {
     pub global: &'static str,      // relative to the home directory
     pub repository: &'static str,  // relative to the repository root
+    pub global_registry: Option<&'static str>, // skills.json that must list `global`
 }
 ```
 
@@ -62,7 +62,7 @@ pub struct InstalledSkills {
 |---|---|---|
 | claude | `.claude/skills` | `.claude/skills` |
 | codex | `.agents/skills` | `.agents/skills` |
-| antigravity | `.gemini/config/skills` | `.agents/skills` |
+| antigravity | `.agents/skills` (+ `.gemini/config/skills.json` entry) | `.agents/skills` |
 | opencode | `.agents/skills` | `.agents/skills` |
 | pi | `.agents/skills` | `.agents/skills` |
 
@@ -130,11 +130,10 @@ from it.
 
 ## Absent and error states
 
-- No `~/.gemini`: sync creates `~/.gemini/config/skills/`.
-- A hand-written skill at `~/.gemini/config/skills/<name>`: kept and reported as
-  skipped, by `writable_target`, as in the other trees.
-- `~/.gemini/config/skills` is a symlink: nothing is written or pruned through
-  it (existing rule in `writable_target` and `prune_targets`).
+- No `~/.gemini`: sync creates `~/.gemini/config/skills.json` with the one entry.
+- The entry is already there: the file is left untouched.
+- `skills.json` isn't a JSON object, or its `entries` isn't a list: sync fails
+  naming the file and leaves it as it was.
 - A harness moves its directory in a later version (agy 1.5.14's docs and
   behavior already disagree about `skills.json`): the declaration changes, the
   new tree is written, and the old tree stays where it was. Nothing records

@@ -524,6 +524,21 @@ fn every_harness_reads_a_synced_skill() {
 
     for harness in HarnessKind::ALL {
         let installed = super::launcher(harness).capabilities().installed_skills;
+        if let Some(registry) = installed.global_registry {
+            let config: serde_json::Value =
+                serde_json::from_str(&fs::read_to_string(home.path().join(registry)).unwrap())
+                    .unwrap();
+            let global = std::path::absolute(home.path().join(installed.global)).unwrap();
+            assert!(
+                config["entries"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|entry| entry["path"].as_str() == global.to_str()),
+                "{harness:?}: {registry} doesn't list {}",
+                global.display()
+            );
+        }
         for (base, directory, skill, graph) in [
             (home.path(), installed.global, "implement", "code"),
             (repo.path(), installed.repository, "audit", "proof"),

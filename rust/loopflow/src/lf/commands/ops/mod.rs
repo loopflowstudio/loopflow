@@ -18,7 +18,9 @@ use loopflow_execution::ops::{
 use loopflow_execution::output::{column_width, Colors};
 use loopflow_execution::repo::find_repo_root;
 use loopflow_execution::skills::SkillSyncOptions;
-use loopflow_execution::skills::{installed_skill_directories, sync_skills};
+use loopflow_execution::skills::{
+    installed_skill_directories, installed_skill_registries, sync_skills,
+};
 use loopflow_execution::work::wave::context::planning_wave;
 use std::io::{self, IsTerminal, Write};
 use std::path::{Path, PathBuf};
@@ -333,7 +335,8 @@ fn pr_status(repo_root: &Path) -> Result<()> {
 pub fn run_sync_skills(yes: bool, no_prune: bool, repo: bool) -> Result<()> {
     if !yes && !repo {
         let directories = installed_skill_directories(false)
-            .iter()
+            .into_iter()
+            .chain(installed_skill_registries())
             .map(|directory| format!("~/{directory}"))
             .collect::<Vec<_>>()
             .join(", ");

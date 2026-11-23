@@ -648,6 +648,7 @@ impl super::Launcher for loopflow_harness::Pi {
             installed_skills: super::InstalledSkills {
                 global: ".agents/skills",
                 repository: ".agents/skills",
+                global_registry: None,
             },
             turn_limit: false,
             output_schema: false,

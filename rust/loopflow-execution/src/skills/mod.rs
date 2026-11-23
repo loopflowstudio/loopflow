@@ -88,6 +88,19 @@ pub fn installed_skill_directories(repository: bool) -> Vec<&'static str> {
     directories
 }
 
+/// Config files global sync adds its directory to, relative to the home directory.
+pub fn installed_skill_registries() -> Vec<&'static str> {
+    HarnessKind::ALL
+        .into_iter()
+        .filter_map(|kind| {
+            launcher(kind)
+                .capabilities()
+                .installed_skills
+                .global_registry
+        })
+        .collect()
+}
+
 /// Export global or repository definitions without replacing third-party bundles.
 pub fn sync_skills(options: &SkillSyncOptions) -> Result<SkillSyncReport, LoadError> {
     let home = options.global_home.clone().or_else(dirs::home_dir);
@@ -199,10 +212,56 @@ pub fn sync_skills(options: &SkillSyncOptions) -> Result<SkillSyncReport, LoadEr
                 .map_err(|error| in_directory(root, error))?;
         }
     }
+    if options.repo.is_none() {
+        for kind in HarnessKind::ALL {
+            let installed = launcher(kind).capabilities().installed_skills;
+            if let Some(registry) = installed.global_registry {
+                let registry = base.join(registry);
+                if register_directory(
+                    &registry,
+                    &std::path::absolute(base.join(installed.global))?,
+                )
+                .map_err(|error| in_directory(&registry, error))?
+                {
+                    report.written.push(registry);
+                }
+            }
+        }
+    }
     report.written.sort();
     report.pruned.sort();
     report.skipped.sort();
     Ok(report)
+}
+
+/// Add `directory` to a `skills.json`'s `entries`, keeping everything else in
+/// it; true when the file changed.
+fn register_directory(registry: &Path, directory: &Path) -> Result<bool, LoadError> {
+    let directory = directory.to_string_lossy();
+    let mut config = match fs::read_to_string(registry) {
+        Ok(text) => serde_json::from_str::<serde_json::Value>(&text)
+            .map_err(|error| LoadError::Io(format!("not JSON, left as is: {error}")))?,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => serde_json::json!({}),
+        Err(error) => return Err(error.into()),
+    };
+    let entries = config
+        .as_object_mut()
+        .ok_or_else(|| LoadError::Io("not a JSON object, left as is".into()))?
+        .entry("entries")
+        .or_insert_with(|| serde_json::json!([]))
+        .as_array_mut()
+        .ok_or_else(|| LoadError::Io("`entries` is not a list, left as is".into()))?;
+    if entries
+        .iter()
+        .any(|entry| entry["path"].as_str() == Some(directory.as_ref()))
+    {
+        return Ok(false);
+    }
+    entries.push(serde_json::json!({ "path": directory }));
+    fs::create_dir_all(registry.parent().expect("registry has a parent"))?;
+    let text = serde_json::to_string_pretty(&config).expect("JSON value serializes");
+    fs::write(registry, format!("{text}\n"))?;
+    Ok(true)
 }
 
 /// Sync writes several tools' directories; a failure says which one.
@@ -586,6 +645,45 @@ mod tests {
             global_home: Some(home.path().to_path_buf()),
             repo: None,
         }
+    }
+
+    #[test]
+    fn global_sync_registers_agents_skills_in_antigravity_config_once() {
+        let home = TempDir::new().unwrap();
+        let registry = home.path().join(".gemini/config/skills.json");
+        fs::create_dir_all(registry.parent().unwrap()).unwrap();
+        fs::write(
+            &registry,
+            r#"{"inherits":[{"path":"/team/skills.json"}],"entries":[{"path":"/mine"}]}"#,
+        )
+        .unwrap();
+
+        sync_skills(&options_for(&home)).unwrap();
+        let second = sync_skills(&options_for(&home)).unwrap();
+
+        let config: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&registry).unwrap()).unwrap();
+        let agents = std::path::absolute(home.path().join(".agents/skills")).unwrap();
+        assert_eq!(config["inherits"][0]["path"], "/team/skills.json");
+        assert_eq!(
+            config["entries"],
+            serde_json::json!([{"path": "/mine"}, {"path": agents.to_string_lossy()}])
+        );
+        assert!(!second.written.contains(&registry));
+        assert!(!home.path().join(".gemini/config/skills").exists());
+    }
+
+    #[test]
+    fn global_sync_leaves_an_unreadable_antigravity_config_alone() {
+        let home = TempDir::new().unwrap();
+        let registry = home.path().join(".gemini/config/skills.json");
+        fs::create_dir_all(registry.parent().unwrap()).unwrap();
+        fs::write(&registry, "{ not json").unwrap();
+
+        let error = sync_skills(&options_for(&home)).unwrap_err().to_string();
+
+        assert!(error.contains("skills.json"), "{error}");
+        assert_eq!(fs::read_to_string(&registry).unwrap(), "{ not json");
     }
 
     #[test]

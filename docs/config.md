@@ -383,10 +383,12 @@ agy -p "/skills" | cut -f1    # implement, kickoff, code, … beside Antigravity
 | Harness | Personal skills and builtins | `--repo`: this repository's skills and Graphs |
 |---|---|---|
 | Claude Code | `~/.claude/skills` | `.claude/skills` |
-| Codex, OpenCode, Pi | `~/.agents/skills` | `.agents/skills` |
-| Antigravity | `~/.gemini/config/skills` | `.agents/skills` |
+| Codex, OpenCode, Pi, Antigravity | `~/.agents/skills` | `.agents/skills` |
 
-All three home directories are written whichever harnesses are installed. A
+Antigravity doesn't scan `~/.agents/skills` on its own, so sync adds that
+directory to `~/.gemini/config/skills.json`, keeping the file's other entries;
+it then also lists skills other tools installed there. Both home directories
+are written whichever harnesses are installed. A
 session that was already open picks up the change with `/skills reload` in
 Antigravity or `/reload` in Pi. Pi loads a repository's `.agents/skills` only
 in a project you trust: answer its prompt or run `/trust`; `pi -p` needs

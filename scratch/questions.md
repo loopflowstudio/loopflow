@@ -1,11 +1,10 @@
 # Open choices (made headless, for review)
 
-- Antigravity global skills: generated tree at `~/.gemini/config/skills/`, not a
-  `skills.json` entry. Cost: third-party bundles in `~/.agents/skills`
-  (`find-skills`) don't show in agy. Reasons and probe results in `plan.md`.
-- The tree is written even when Antigravity isn't installed, matching
-  `~/.claude/skills` and `~/.agents/skills`. Alternative: write a harness's
-  global directory only when its home (`~/.gemini`) exists.
+- Antigravity global skills: Jack chose (2026-11-22) "Add one ~/.gemini/config/skills.json
+  entry pointing at ~/.agents/skills". Sync merges an absolute-path entry
+  (`~/` is ignored by agy 1.5.14) into that file and writes no
+  `~/.gemini/config/skills/` tree; the tree an earlier run of this branch wrote
+  on this Machine was removed by hand. agy listed 117 skills afterwards.
 - One rendering for every directory: Graph exports carry
   `disable-model-invocation: true` in `.agents/skills` too, so pi stops picking
   Graph recipes on its own. Passed over: a dialect per directory. Codex 0.170.0

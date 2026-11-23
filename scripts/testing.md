@@ -324,7 +324,7 @@ not point sibling worktrees at a shared mutable target directory.
 ### Shared compilation cache
 
 ```bash
-uv run python scripts/build_cache.py install   # once per Machine
+uv run python scripts/build_cache.py install   # run in each repository that shares the cache
 uv run python scripts/build_cache.py status    # in any worktree
 ```
 
@@ -343,7 +343,8 @@ test executables, binaries, proc-macros and build scripts. The application's
 `test-support` libraries embed checkout paths and also compile in each root.
 
 The installer builds and checks the pin, then writes `build.rustc-wrapper` and
-`SCCACHE_*` entries in `~/.cargo/config.toml`. It keeps other settings,
+`SCCACHE_*` entries in the personal Cargo configuration (`~/.cargo/config.toml`,
+or `~/.cargo/config` when it exists). It keeps other settings,
 the existing cache directory and the size cap. Reinstall to update the hook or
 pass `--revision <sha>` to move the pin. The verified binary and stock 0.19.0
 print the same version. The revision in the installation path and socket name
@@ -355,6 +356,9 @@ Git's `post-checkout` hook registers the worktree in
 `~/.cache/loopflow/sccache.json` (under `XDG_CACHE_HOME` when set). The hook
 carries a copy of the script so older revisions can register. It retains other
 repositories' roots and lets Git finish checkout if registration fails.
+Installation keeps an existing shell hook in place when it can insert the
+registration command. Other hooks move beside it to `post-checkout.before-loopflow`.
+Git runs the saved hook with its original arguments if it is executable.
 
 The daemon reads that list at startup. If the pinned client-side daemon lacks
 this root, registration asks it to stop. The next compile starts its replacement.

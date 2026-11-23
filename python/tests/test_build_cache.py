@@ -94,6 +94,7 @@ def test_worktree_hook_keeps_existing_content_and_runs_fail_soft(tmp_path):
     hook = hooks / "post-checkout"
     original = '#!/bin/sh\nprintf "%s\\n" "$@" > hook-args\nexit 23\n'
     hook.write_text(original)
+    hook.chmod(0o755)
     install_hook(repo)
     installed = hook.read_text()
     install_hook(repo)
@@ -104,6 +105,47 @@ def test_worktree_hook_keeps_existing_content_and_runs_fail_soft(tmp_path):
     (hooks / "loopflow-build-cache.py").unlink()
     assert subprocess.run([str(hook), "old", "new", "1"], cwd=repo).returncode == 23
     assert (repo / "hook-args").read_text().splitlines() == ["old", "new", "1"]
+
+
+@pytest.mark.parametrize("symlink,executable", [(False, True), (True, True), (True, False)])
+def test_git_checkout_chains_an_existing_python_hook(repo, pinned_cache, symlink, executable):
+    hooks = repo / ".git/hooks"
+    hook = hooks / "post-checkout"
+    program = hooks / "original.py" if symlink else hook
+    original = (
+        b"#!/usr/bin/env python3\nimport sys\nfrom pathlib import Path\n"
+        b'Path("hook-args").write_text(" ".join(sys.argv[1:]))\n'
+    )
+    program.write_bytes(original)
+    program.chmod(0o755 if executable else 0o644)
+    if symlink:
+        hook.symlink_to(program.name)
+    install_hook(repo)
+    install_hook(repo)
+
+    tree = repo.parent / "new tree"
+    _git(repo, "worktree", "add", "--detach", str(tree))
+    assert (hooks / "post-checkout.before-loopflow").read_bytes() == original
+    assert str(tree.resolve()) in json.loads(build_cache.inventory_path().read_text())["basedirs"]
+    if executable:
+        revision = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], cwd=repo, text=True
+        ).strip()
+        assert (tree / "hook-args").read_text().split() == ["0" * len(revision), revision, "1"]
+    else:
+        assert not (tree / "hook-args").exists()
+
+
+def test_installer_uses_the_same_personal_configuration_as_cargo(tmp_path, monkeypatch):
+    monkeypatch.setenv("CARGO_HOME", str(tmp_path))
+    legacy = tmp_path / "config"
+    modern = tmp_path / "config.toml"
+    modern.write_text("[build]\njobs = 3\n")
+    legacy.write_text("[build]\njobs = 2\n")
+    configure_cargo(build_cache.cargo_configuration(), Path("/pinned/sccache"), {})
+    assert 'rustc-wrapper = "/pinned/sccache"' in legacy.read_text()
+    assert modern.read_text() == "[build]\njobs = 3\n"
+    assert build_cache.configured_cache()[0] == Path("/pinned/sccache")
 
 
 @pytest.fixture

@@ -51,12 +51,14 @@ def _configured_roots(settings: dict) -> list[str]:
     return roots
 
 
-def _replace_file(path: Path, content: str) -> None:
-    with tempfile.NamedTemporaryFile(mode="w", dir=path.parent, delete=False) as output:
+def _replace_file(path: Path, content: str, mode: int | None = None) -> None:
+    with tempfile.NamedTemporaryFile(dir=path.parent, delete=False) as output:
         temporary = Path(output.name)
         try:
-            output.write(content)
+            output.write(os.fsencode(content))
             output.flush()
+            if mode is not None:
+                temporary.chmod(mode)
             temporary.replace(path)
         finally:
             temporary.unlink(missing_ok=True)
@@ -133,7 +135,10 @@ def cache_environment(revision: str = REVISION) -> dict[str, str]:
 
 
 def cargo_configuration() -> Path:
-    return Path(os.environ.get("CARGO_HOME", str(Path.home() / ".cargo"))) / "config.toml"
+    directory = Path(os.environ.get("CARGO_HOME", str(Path.home() / ".cargo")))
+    # Cargo gives the extensionless configuration precedence when both exist.
+    legacy = directory / "config"
+    return legacy if legacy.is_file() else directory / "config.toml"
 
 
 def configure_cargo(path: Path, wrapper: Path, env: dict[str, str]) -> None:
@@ -162,7 +167,6 @@ def install_hook(repo: Path) -> None:
     )
     if not hook.is_absolute():
         hook = repo / hook
-    original = hook.read_text() if hook.exists() else "#!/bin/sh\n"
     begin, end = "# loopflow build cache begin", "# loopflow build cache end"
     # Worktrees can check out revisions that predate this installer.
     program = hook.parent / "loopflow-build-cache.py"
@@ -175,19 +179,27 @@ def install_hook(repo: Path) -> None:
         f'{begin}\nif [ "${{3:-}}" = 1 ]; then\n'
         f"    {command} </dev/null >/dev/null 2>&1 || :\nfi\n{end}\n"
     )
-    body = original
-    if begin in original:
-        start = original.index(begin)
-        finish = original.index(end, start) + len(end)
-        body = original[:start] + original[finish:].removeprefix("\n")
-    if body.startswith("#!"):
-        shebang, _, rest = body.partition("\n")
-        updated = shebang + "\n" + block + rest
-    else:
-        updated = block + body
-    if updated != original or not hook.exists():
-        hook.write_text(updated)
-    hook.chmod(hook.stat().st_mode | 0o111)
+    saved = hook.with_name("post-checkout.before-loopflow")
+    original = os.fsdecode(hook.read_bytes()) if hook.is_file() else ""
+    # Shell hooks can keep their original $0 and location. Other interpreters,
+    # binaries and symlink targets must not receive shell source.
+    shell_hook = original.startswith(("#!/bin/sh\n", "#!/bin/bash\n", "#!/usr/bin/env bash\n"))
+    if hook.is_symlink() or (hook.exists() and not (shell_hook and os.access(hook, os.X_OK))):
+        if os.path.lexists(saved):
+            raise ValueError(f"cannot keep the existing hook: {saved} already exists")
+        hook.rename(saved)
+        original = ""
+    body = original or "#!/bin/sh\n"
+    if not original and os.path.lexists(saved):
+        body += 'if [ -x "$0.before-loopflow" ]; then exec "$0.before-loopflow" "$@"; fi\n'
+    if begin in body:
+        start = body.index(begin)
+        finish = body.index(end, start) + len(end)
+        body = body[:start] + body[finish:].removeprefix("\n")
+    shebang, _, rest = body.partition("\n")
+    updated = shebang + "\n" + block + rest
+    if updated != original:
+        _replace_file(hook, updated, hook.stat().st_mode if hook.exists() else 0o755)
 
 
 def _is_revision(value: str) -> bool:

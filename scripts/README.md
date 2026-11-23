@@ -29,7 +29,7 @@ to reproduce a matrix failure or when release guidance requires it.
 ## Developer build cache
 
 ```bash
-uv run python scripts/build_cache.py install   # once per Machine: pinned sccache, personal Cargo config, worktree hook
+uv run python scripts/build_cache.py install   # share the Machine cache and install this repository's worktree hook
 uv run python scripts/build_cache.py status    # which wrapper and daemon, and whether this checkout's root is loaded
 ```
 

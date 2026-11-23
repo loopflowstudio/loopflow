@@ -182,7 +182,6 @@ pub(super) async fn run() -> Result<()> {
     let tickets = Arc::new(Tickets::default());
     let subscriptions = Arc::new(Subscriptions::default());
     let (remote_control, remote_requests) = mpsc::channel(8);
-    super::wake::start();
     super::maintenance::start();
     super::maintenance::start_plan_exchange();
     // Held terminals keep running in their holders whether or not this server
@@ -197,6 +196,7 @@ pub(super) async fn run() -> Result<()> {
             None
         }
     };
+    super::wake::start(terminals.clone());
     let remote = super::remote::manage(
         super::mobile::configured(),
         remote_requests,

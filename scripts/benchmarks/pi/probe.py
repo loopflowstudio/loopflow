@@ -240,7 +240,7 @@ def _scenario(fixture: Fixture, mode: str) -> dict:
     first = (
         ["-i", ":", "FIRST_INPUT 雪"]
         if native
-        else ["-b", "resume", "--message", "FIRST_INPUT 雪"]
+        else ["-b", ":", "FIRST_INPUT 雪"]
     )
     if mode in ("overflow", "threshold"):
         first[-1] += " prior context 雪" * 2000
@@ -265,7 +265,7 @@ def _scenario(fixture: Fixture, mode: str) -> dict:
     second = (
         ["-i", "resume", session]
         if native
-        else ["-b", "resume", session, "--message", "EXPLICIT_SECOND_INPUT 雪"]
+        else ["-b", "steer", session, "EXPLICIT_SECOND_INPUT 雪"]
     )
     fixture.run(
         second,
@@ -279,7 +279,7 @@ def _scenario(fixture: Fixture, mode: str) -> dict:
             f"{mode} must compact real Pi history"
         )
         if mode == "threshold":
-            fixture.run(["-b", "resume", session, "--message", "AFTER_THRESHOLD"])
+            fixture.run(["-b", "steer", session, "AFTER_THRESHOLD"])
             assert fixture.identity() == (session, token)
         assert "AFTER_COMPACT" in json.dumps(model.requests[-1]), (
             "first post-compaction request must refresh context"
@@ -306,7 +306,7 @@ def _steer_scenario(fixture: Fixture) -> dict:
     binary = fixture.binary
     model.hold = True
     process = subprocess.Popen(
-        [str(binary), "-b", "resume", "--message", "FIRST_INPUT"],
+        [str(binary), "-b", ":", "FIRST_INPUT"],
         cwd=fixture.repo,
         env=fixture.env,
         stdin=subprocess.DEVNULL,
@@ -372,9 +372,9 @@ def _tools_scenario(fixture: Fixture) -> dict:
         fixture.model.tool_command = command
         fixture.model.tool_timeout = timeout
         args = (
-            ["-b", "resume", session, "--message", "RUN_TOOL"]
+            ["-b", "steer", session, "RUN_TOOL"]
             if session
-            else ["-b", "resume", "--message", "RUN_TOOL"]
+            else ["-b", ":", "RUN_TOOL"]
         )
         fixture.run(args)
         session, _ = fixture.identity()
@@ -477,7 +477,7 @@ def _crash_scenario(fixture: Fixture, *, native: bool = False) -> dict:
         f"mv {shlex.quote(str(ready))}.tmp {shlex.quote(str(ready))}; wait"
     )
     args = (
-        ["-i", ":", "RUN_TOOL"] if native else ["-b", "resume", "--message", "RUN_TOOL"]
+        ["-i", ":", "RUN_TOOL"] if native else ["-b", ":", "RUN_TOOL"]
     )
     process = subprocess.Popen(
         [str(fixture.binary), *args],
@@ -532,7 +532,7 @@ def _crash_scenario(fixture: Fixture, *, native: bool = False) -> dict:
             if native:
                 fixture.run(["-i", "resume", session], input_text="EXPLICIT_RECOVERY\n")
             else:
-                fixture.run(["-b", "resume", session, "--message", "EXPLICIT_RECOVERY"])
+                fixture.run(["-b", "steer", session, "EXPLICIT_RECOVERY"])
             assert fixture.identity() == (session, token)
             later = json.loads(fixture.run(["session", "history", session, "--json"]).stdout)
             assert all(event in later for event in usage), "recovery rewrote prior paid usage"

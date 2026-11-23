@@ -83,6 +83,26 @@ Wait for an answer by a line of its own (`(?m)^\s+back`), not a word: the
 spinner line prints the model's thinking, which repeats the words of a steer
 before the answer exists.
 
+# Steering a quit conversation
+
+A quit chat (`lf default '…' -a agy` in `lf wt create`'s worktree, ctrl+c
+twice) or a Task's quit primary is started by the server when `lf steer`
+names it: a child of the private `lf holder run` running
+`agy --conversation <id> … -i <lf:steers>…`, so `ps -o command= -p <pid>`
+shows which steers it took. The steer is the next `USER_INPUT` row in that
+conversation's `transcript_full.jsonl`. To save steers while nothing starts
+them, stop the server by PID first; the start comes on `lf server run`.
+
+- Started from an agent's tool shell, `lf server run &` keeps running, but
+  `ps` shows it as plain `lf server run`; find it with
+  `lsof -t <socket from lf server status>` and check `LF_HOME` with
+  `ps eww -p <pid>`.
+- A PTY viewer of a held terminal (`lf resume S`, which execs
+  `lf session attach --terminal …`) ignores SIGHUP; stop it with SIGTERM.
+  Quitting agy in it (Esc, ctrl+c twice) ends only agy; the holder stays.
+- A quit chat outside any Task is missing from `lf session list --all`; take
+  its ID from agy's quit line ("Continue with: lf resume <id>").
+
 # Failures on demand
 
 - Unserved model: `lf set --global agents 'agy:no-such-model-xyz,agy'`,

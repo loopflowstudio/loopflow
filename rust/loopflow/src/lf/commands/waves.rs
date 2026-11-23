@@ -22,7 +22,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::lf::commands::session::SessionFacts;
 use crate::lf::commands::session_history::format_tokens;
-use crate::lf::commands::task_row::{TaskDetail, TaskGraphRow, TaskNames, TaskThread};
+use crate::lf::commands::task_row::{TaskDetail, TaskGraphRow, TaskNames, TaskRow, TaskThread};
 use loopflow_execution::durable::{TaskSection, TaskState};
 use loopflow_execution::ops::task_execution::{TaskExecutionSnapshot, TaskExecutionState};
 use loopflow_execution::output::Colors;
@@ -117,6 +117,9 @@ pub struct TaskSummary {
     pub id: String,
     #[serde(deserialize_with = "Option::deserialize")]
     pub tracker_id: Option<String>,
+    /// The stable ID of the Task this one was filed from.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub parent_id: Option<String>,
     pub identifier: String,
     pub name: String,
     pub description: String,
@@ -444,6 +447,13 @@ pub struct RoadmapTask {
     /// Carried to `lf task status`'s `TaskRow`, not on the wire.
     #[serde(skip)]
     pub(crate) step: Option<String>,
+    /// How the Task's own work ended, while it is open. Not on the wire.
+    #[serde(skip)]
+    pub(crate) finished: Option<loopflow_execution::ops::task_actions::Finished>,
+    /// Why a finished Task stays open: it has open children to conduct.
+    /// Stands for the reason in `TaskRow` and the lists, not on the wire.
+    #[serde(skip)]
+    pub(crate) conducting: Option<String>,
 }
 
 /// `lf wave list` — every durable Wave identity the registry knows.
@@ -833,7 +843,7 @@ pub fn list_tasks(repo: &Path, query: &TaskListArgs, json: bool) -> Result<()> {
         } else if let Some(store) = &store {
             // Without a store there are no Tasks to print.
             let local = loopflow_execution::store::machines::local_machine(&store.sqlite)?.id;
-            for task in tasks {
+            for (task, depth, _) in task_hierarchy(&tasks) {
                 let id = loopflow_model::durable::TaskId::from_raw(task.task.id.clone());
                 let ownership =
                     loopflow_execution::store::ownership::task_ownership(&store.sqlite, &id)?;
@@ -846,7 +856,11 @@ pub fn list_tasks(repo: &Path, query: &TaskListArgs, json: bool) -> Result<()> {
                 if let Some(place) = place {
                     owner = format!("{owner} · {place}");
                 }
-                println!("{} · {owner} · {}", task.task.identifier, task.task.name);
+                let indent = "  ".repeat(depth);
+                println!(
+                    "{indent}{} · {owner} · {}",
+                    task.task.identifier, task.task.name
+                );
             }
         }
         Ok(())
@@ -1104,25 +1118,191 @@ pub struct DesktopTaskPane {
     #[serde(flatten)]
     pub status: loopflow_execution::ops::task::TaskStatus,
     pub row: Option<RoadmapTask>,
+    /// The Task this one was filed from; `null` for top-level work.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub parent: Option<TaskRow>,
+    /// The Tasks filed from this one, in filing order.
+    pub children: Vec<TaskRow>,
 }
 
 pub(crate) async fn task_pane(
     store: &SharedStore,
     status: loopflow_execution::ops::task::TaskStatus,
 ) -> Result<DesktopTaskPane> {
-    let row = match &status.task {
-        Some(task) => Some(task_row(store, task).await?),
-        None => None,
+    let (row, parent, children) = match &status.task {
+        Some(task) => {
+            let (row, parent, children) = task_with_family(store, task).await?;
+            (Some(row), parent, children)
+        }
+        None => (None, None, Vec::new()),
     };
-    Ok(DesktopTaskPane { status, row })
+    Ok(DesktopTaskPane {
+        status,
+        row,
+        parent,
+        children,
+    })
 }
 
-/// One Task's row in the Work projection's shape, as the plan reads it.
-pub(crate) async fn task_row(store: &SharedStore, task: &Task) -> Result<RoadmapTask> {
+/// The rows of `tasks` in the Work projection's shape, as the plan reads
+/// them, in one reading.
+async fn roadmap_rows(store: &SharedStore, tasks: Vec<&Task>) -> Result<Vec<RoadmapTask>> {
+    if tasks.is_empty() {
+        return Ok(Vec::new());
+    }
     let shared = SharedTaskReads::read(store).await?;
-    Ok(snapshot_task_details(store, vec![task], false, &shared)?
-        .pop()
-        .expect("one Task reads one row"))
+    snapshot_task_details(store, tasks, false, &shared)
+}
+
+/// The rows of `tasks`, as `lf task list --json` prints them.
+async fn task_rows(store: &SharedStore, tasks: Vec<&Task>) -> Result<Vec<TaskRow>> {
+    let rows = roadmap_rows(store, tasks).await?;
+    if rows.is_empty() {
+        return Ok(Vec::new());
+    }
+    let names = TaskNames::read(Some(store)).await?;
+    Ok(rows.into_iter().map(|row| names.row(row)).collect())
+}
+
+/// `task`'s own row, the row of the Task it was filed from and the rows of
+/// the Tasks filed from it, in one reading. The parent is `None` for
+/// top-level work and for a parent this Machine does not hold.
+pub(crate) async fn task_with_family(
+    store: &SharedStore,
+    task: &Task,
+) -> Result<(RoadmapTask, Option<TaskRow>, Vec<TaskRow>)> {
+    let parent = match &task.parent_task_id {
+        Some(parent) => store.get_task(parent).await?,
+        None => None,
+    };
+    let children = store.sqlite.task_children(&task.id)?;
+    let tasks = std::iter::once(task).chain(&parent).chain(&children);
+    let mut rows = roadmap_rows(store, tasks.collect()).await?.into_iter();
+    let row = rows.next().expect("one Task reads one row");
+    let names = TaskNames::read(Some(store)).await?;
+    let mut family = rows.map(|row| names.row(row));
+    let parent = parent.and_then(|_| family.next());
+    Ok((row, parent, family.collect()))
+}
+
+/// The identifier of the Task `task` was filed from, when this Machine holds it.
+pub(crate) fn parent_identifier(
+    store: &loopflow_storage::sqlite::SqliteStore,
+    task: &Task,
+) -> Result<Option<String>> {
+    Ok(match &task.parent_task_id {
+        Some(parent) => store.task(parent)?.map(|parent| parent.identifier),
+        None => None,
+    })
+}
+
+/// `lf task complete --json`: the completed Task and what its completion did
+/// with each child. Wire type; no defaults.
+#[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct TaskCompleted {
+    #[serde(flatten)]
+    pub task: Task,
+    /// One entry per Task filed from it that was open, in the order the
+    /// command prints them.
+    pub children: Vec<CompletedChild>,
+}
+
+/// One child of a completed Task. Wire type; no defaults.
+#[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct CompletedChild {
+    /// The child as it stands now.
+    pub task: TaskRow,
+    pub outcome: loopflow_storage::sqlite::children::ChildOutcome,
+    /// What becoming done did with its own children.
+    pub children: Vec<CompletedChild>,
+}
+
+/// Join a completion to the rows its children have now.
+pub(crate) fn task_completed(
+    completion: loopflow_execution::ops::task::TaskCompletion,
+) -> Result<TaskCompleted> {
+    use loopflow_storage::sqlite::children::ChildCompletion;
+
+    fn ids<'a>(
+        children: &'a [ChildCompletion],
+        into: &mut Vec<&'a loopflow_storage::work::task::TaskId>,
+    ) {
+        for child in children {
+            into.push(&child.task.id);
+            ids(&child.children, into);
+        }
+    }
+    fn join(
+        children: &[ChildCompletion],
+        rows: &mut HashMap<String, TaskRow>,
+    ) -> Result<Vec<CompletedChild>> {
+        children
+            .iter()
+            .map(|child| {
+                Ok(CompletedChild {
+                    task: rows
+                        .remove(child.task.id.as_str())
+                        .ok_or_else(|| anyhow!("{} has no row", child.task.identifier))?,
+                    outcome: child.outcome,
+                    children: join(&child.children, rows)?,
+                })
+            })
+            .collect()
+    }
+    let mut settled = Vec::new();
+    ids(&completion.children, &mut settled);
+    let mut rows = HashMap::new();
+    if !settled.is_empty() {
+        tokio::runtime::Runtime::new()?.block_on(async {
+            let store = loopflow_execution::store::read_existing_registry()?
+                .map(std::sync::Arc::new)
+                .ok_or_else(|| anyhow!("no Loopflow store exists on this Machine"))?;
+            // Read after the settlement, so each row shows where its Task stands now.
+            let mut tasks = Vec::with_capacity(settled.len());
+            for id in settled {
+                tasks.extend(store.get_task(id).await?);
+            }
+            for row in task_rows(&store, tasks.iter().collect()).await? {
+                rows.insert(row.id.clone(), row);
+            }
+            anyhow::Ok(())
+        })?;
+    }
+    Ok(TaskCompleted {
+        children: join(&completion.children, &mut rows)?,
+        task: completion.task,
+    })
+}
+
+/// `lf task status`: the Task it was filed from and one line per child.
+pub fn print_task_family(task: &Task) -> Result<()> {
+    tokio::runtime::Runtime::new()?.block_on(async {
+        let store = loopflow_execution::store::read_existing_registry()?
+            .map(std::sync::Arc::new)
+            .ok_or_else(|| anyhow!("no Loopflow store exists on this Machine"))?;
+        if let Some(parent) = parent_identifier(&store.sqlite, task)? {
+            println!("  parent: {parent}");
+        }
+        let children = store.sqlite.task_children(&task.id)?;
+        let children = task_rows(&store, children.iter().collect()).await?;
+        let width = |text: fn(&TaskRow) -> &str| {
+            children
+                .iter()
+                .map(|row| text(row).chars().count())
+                .max()
+                .unwrap_or(0)
+        };
+        let (identifier, title) = (width(|row| &row.identifier), width(|row| &row.title));
+        for child in &children {
+            println!(
+                "  child: {:identifier$}  {:title$}  {}",
+                child.identifier,
+                child.title,
+                child.standing()
+            );
+        }
+        Ok(())
+    })
 }
 
 /// `lf task status --json`.
@@ -1163,7 +1343,7 @@ pub(crate) async fn task_detail(
     let task = status
         .task
         .ok_or_else(|| anyhow!("this Task is not registered in Loopflow"))?;
-    let row = task_row(store, &task).await?;
+    let (row, parent, children) = task_with_family(store, &task).await?;
     let (overview_sessions, graph) = status
         .overview
         .map(|overview| (overview.sessions, overview.graph))
@@ -1186,6 +1366,8 @@ pub(crate) async fn task_detail(
     let summary = store.sqlite.task_summary(&task.id)?;
     Ok(TaskDetail {
         summary,
+        parent,
+        children,
         conversation: conversation_id,
         auto: status
             .execution
@@ -1966,7 +2148,25 @@ async fn snapshot_task_detail(
     } else {
         None
     };
-    let next_move = if unassigned(&runtime) {
+    let open_children = facts.open_children.get(&task.id).copied().unwrap_or(0);
+    let at_end = facts
+        .steps
+        .get(&task.id)
+        .is_some_and(|step| step == loopflow_execution::task_graph::END);
+    let finished = loopflow_execution::ops::task_actions::Finished::of(
+        &status.work_status(),
+        pr.as_ref().map(TaskPr::phase),
+        at_end,
+    );
+    let conducting = finished
+        .filter(|_| open_children > 0 && execution.state != TaskExecutionState::Running)
+        .map(|finished| finished.reason(open_children));
+    let next_move = if let Some(reason) = conducting.clone() {
+        NextMove {
+            owner: NextMoveOwner::Task,
+            reason,
+        }
+    } else if unassigned(&runtime) {
         NextMove {
             owner: NextMoveOwner::User,
             reason: "Unassigned; nothing moves it until `lf task claim` or `lf task run`".into(),
@@ -1979,12 +2179,10 @@ async fn snapshot_task_detail(
             },
             reason: execution.reason.clone(),
         }
-    } else if pr.as_ref().is_some_and(|pr| pr.phase() == PrPhase::Merged)
-        && !runtime.status.is_terminal()
-    {
+    } else if let Some(finished) = finished {
         NextMove {
             owner: NextMoveOwner::Wave,
-            reason: "Merged; complete the Task".into(),
+            reason: finished.reason(open_children),
         }
     } else {
         next_move_for_task(
@@ -2026,6 +2224,8 @@ async fn snapshot_task_detail(
             .as_ref()
             .filter(|pr| pr.phase() == PrPhase::Open)
             .map(|pr| pr.presentation().is_some()),
+        at_end,
+        open_children,
         completion_refusal: completion_refusal.as_deref(),
         run_refusal: run_refusal.as_deref(),
         ci: active.and_then(|pr| pr.fresh_ci()),
@@ -2117,6 +2317,8 @@ async fn snapshot_task_detail(
         section,
         owned_by_you,
         step: facts.steps.get(&task.id).cloned(),
+        finished,
+        conducting,
     })
 }
 
@@ -2404,6 +2606,7 @@ fn task_summary(
         id: task.id.to_string(),
         tracker_id: task.tracker_id.as_ref().map(|id| id.as_str().to_string()),
         identifier: task.identifier.clone(),
+        parent_id: task.parent_task_id.as_ref().map(ToString::to_string),
         name: task.title.clone(),
         description: task.description.clone(),
         rank: task.rank,
@@ -2701,10 +2904,14 @@ fn task_roadmap_row(task: &RoadmapTask, now: time::OffsetDateTime) -> RoadmapRow
             .as_ref()
             .map(|workspace| workspace.slug.clone()),
         condition: Some(task.condition.state),
-        reason: std::iter::once(task.condition.reason.clone())
-            .chain(task.task.sync.lines())
-            .collect::<Vec<_>>()
-            .join(" · "),
+        reason: std::iter::once(
+            task.conducting
+                .clone()
+                .unwrap_or_else(|| task.condition.reason.clone()),
+        )
+        .chain(task.task.sync.lines())
+        .collect::<Vec<_>>()
+        .join(" · "),
     }
 }
 
@@ -2749,6 +2956,45 @@ fn section_label(section: TaskSection) -> &'static str {
     }
 }
 
+fn task_hierarchy<'a>(
+    tasks: impl IntoIterator<Item = &'a RoadmapTask>,
+) -> Vec<(&'a RoadmapTask, usize, TaskSection)> {
+    let tasks: Vec<_> = tasks.into_iter().collect();
+    let open: HashSet<_> = tasks
+        .iter()
+        .filter(|task| !task.lifecycle.is_terminal())
+        .map(|task| task.task.id.as_str())
+        .collect();
+    let mut children = HashMap::<_, Vec<_>>::new();
+    let mut roots = Vec::new();
+    for task in tasks {
+        if let Some(parent) = task
+            .task
+            .parent_id
+            .as_deref()
+            .filter(|id| open.contains(id))
+        {
+            children.entry(parent).or_default().push(task);
+        } else {
+            roots.push((task, 0, task.section));
+        }
+    }
+    let mut ordered = Vec::new();
+    let mut stack: Vec<_> = roots.into_iter().rev().collect();
+    while let Some((task, depth, section)) = stack.pop() {
+        ordered.push((task, depth, section));
+        if let Some(children) = children.remove(task.task.id.as_str()) {
+            stack.extend(
+                children
+                    .into_iter()
+                    .rev()
+                    .map(|child| (child, depth + 1, section)),
+            );
+        }
+    }
+    ordered
+}
+
 fn print_roadmap(roadmap: &RoadmapSnapshot) {
     if roadmap.waves.is_empty() {
         println!("No waves in the registry.");
@@ -2765,9 +3011,9 @@ fn print_roadmap(roadmap: &RoadmapSnapshot) {
             }
             Evidence::Ok { items, .. } => items,
         };
-        let rows: Vec<RoadmapRow> = tasks
+        let rows: Vec<_> = task_hierarchy(tasks)
             .into_iter()
-            .map(|task| task_roadmap_row(task, now))
+            .map(|(task, depth, section)| (task_roadmap_row(task, now), depth, section))
             .collect();
         if rows.is_empty() {
             println!("  (no plan rows)");
@@ -2776,7 +3022,7 @@ fn print_roadmap(roadmap: &RoadmapSnapshot) {
         // Wide enough for an unnamed owner's email key.
         let owner_width = rows
             .iter()
-            .map(|row| row.owner.chars().count())
+            .map(|(row, _, _)| row.owner.chars().count())
             .max()
             .unwrap_or(0)
             .clamp(12, 32);
@@ -2786,15 +3032,23 @@ fn print_roadmap(roadmap: &RoadmapSnapshot) {
             TaskSection::Done,
             TaskSection::Abandoned,
         ] {
-            let in_section: Vec<&RoadmapRow> =
-                rows.iter().filter(|row| row.section == section).collect();
+            let in_section: Vec<_> = rows
+                .iter()
+                .filter(|(_, _, root)| *root == section)
+                .collect();
             if in_section.is_empty() {
                 continue;
             }
             println!("  {}", section_label(section));
-            for row in in_section {
+            for (row, depth, _) in in_section {
+                let indent = "  ".repeat(*depth);
+                let nested_section = if row.section == section {
+                    String::new()
+                } else {
+                    format!(" · {}", section_label(row.section))
+                };
                 println!(
-                    "    {id}  {rank:>4}  {owner:<owner_width$}  next:{next:<8}  {age:>5}  {condition:<7}  {workspace:<20}  {pr:<24}  {title}",
+                    "    {indent}{id}  {rank:>4}  {owner:<owner_width$}  next:{next:<8}  {age:>5}  {condition:<7}  {workspace:<20}  {pr:<24}  {title}{nested_section}",
                     id = task_identifier_label(
                         &row.id,
                         row.issue_url.as_deref(),
@@ -2819,7 +3073,7 @@ fn print_roadmap(roadmap: &RoadmapSnapshot) {
                     pr = truncate(row.pr.as_deref().unwrap_or("-"), 24),
                     title = truncate(&row.title, 36),
                 );
-                println!("      {}", row.reason);
+                println!("      {indent}{}", row.reason);
             }
         }
     }
@@ -3460,6 +3714,8 @@ mod tests {
             project_id: Some("current".into()),
             team_id: Some("team".into()),
             assignee: None,
+            parent_id: None,
+            parent_observed: true,
         };
         let mut items = vec![item.clone()];
         item.id = "started".into();
@@ -3788,6 +4044,8 @@ mod tests {
                 latest_pr_phase: None,
                 latest_pr_merge_request: None,
                 latest_pr_presentation_current: None,
+                at_end: false,
+                open_children: 0,
                 completion_refusal: None,
                 run_refusal: None,
                 ci: None,
@@ -3910,6 +4168,8 @@ mod tests {
                     latest_pr_phase: None,
                     latest_pr_merge_request: None,
                     latest_pr_presentation_current: None,
+                    at_end: false,
+                    open_children: 0,
                     completion_refusal: None,
                     run_refusal: None,
                     ci: None,
@@ -3940,6 +4200,8 @@ mod tests {
             latest_pr_phase: Some(PrPhase::Open),
             latest_pr_merge_request: None,
             latest_pr_presentation_current: Some(true),
+            at_end: false,
+            open_children: 0,
             completion_refusal: None,
             run_refusal: None,
             ci: None,

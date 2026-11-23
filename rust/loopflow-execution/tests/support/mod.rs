@@ -645,6 +645,7 @@ fn register_task_fixture(
         updated_at: now,
     };
     let task = Task {
+        parent_task_id: None,
         repository_id: loopflow::repository::location::ensure_repository(
             &loopflow::store::open_sqlite(&home.join("loopflow.db")).unwrap(),
             wave.repo(),
@@ -984,6 +985,7 @@ pub fn prepare_native_conversation(
         .unwrap_or_else(|| {
             store
                 .create_task(&loopflow_storage::work::task::NewTask {
+                    parent_task_id: None,
                     id: loopflow_model::durable::TaskId::new(),
                     repository_id: crate::repository::location::ensure_repository(
                         &store,

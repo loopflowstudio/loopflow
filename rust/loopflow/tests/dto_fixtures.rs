@@ -78,6 +78,8 @@ fn wave_detail_preserves_graph_and_machine() {
     assert_eq!(tasks[0].task.id, tasks[0].runtime.as_ref().unwrap().work_id);
     assert!(tasks[0].runtime.as_ref().unwrap().provider.is_none());
     assert_eq!(tasks[0].task.tracker_id.as_deref(), Some("issue-1"));
+    assert_eq!(tasks[0].task.parent_id, None);
+    assert_eq!(tasks[1].task.parent_id.as_ref(), Some(&tasks[0].task.id));
     let Evidence::Ok { items: runs, .. } = &snapshot.history else {
         panic!("fixture contains recorded Runs");
     };
@@ -277,7 +279,7 @@ fn task_detail_says_each_fact_once() {
 
 #[test]
 fn task_status_preserves_canonical_work_and_tracker_state() {
-    use loopflow_execution::ops::task::TaskStatus;
+    use loopflow::lf::commands::waves::DesktopTaskPane;
     let json = include_str!("../../../tests/fixtures/dto/task_status.json");
     let wire: serde_json::Value = serde_json::from_str(json).unwrap();
     for (record, field) in [
@@ -288,11 +290,19 @@ fn task_status_preserves_canonical_work_and_tracker_state() {
         let mut missing = wire.clone();
         missing[record].as_object_mut().unwrap().remove(field);
         assert!(
-            serde_json::from_value::<TaskStatus>(missing).is_err(),
+            serde_json::from_value::<DesktopTaskPane>(missing).is_err(),
             "{record}.{field}"
         );
     }
-    let status: TaskStatus = serde_json::from_value(wire).unwrap();
+    let pane: DesktopTaskPane = serde_json::from_value(wire).unwrap();
+    // A follow-up names the Task it was filed from and lists its own.
+    assert_eq!(pane.parent.as_ref().unwrap().identifier, "LOO-1");
+    assert_eq!(
+        pane.children[0].parent_id.as_deref(),
+        Some("task_11111111111111111111111111111111")
+    );
+    assert_eq!(pane.children[0].identifier, "LOO-3");
+    let status = &pane.status;
     let task = status.task.as_ref().unwrap();
     let project = status.project.as_ref().unwrap();
     assert_eq!(task.title, "Route incoming mail");
@@ -326,12 +336,12 @@ fn task_status_preserves_canonical_work_and_tracker_state() {
         ]
     );
     let value: serde_json::Value = serde_json::from_str(json).unwrap();
-    assert_eq!(serde_json::to_value(status).unwrap(), value);
-    for field in ["plan_stale", "graph_processes"] {
+    assert_eq!(serde_json::to_value(&pane).unwrap(), value);
+    for field in ["plan_stale", "graph_processes", "parent", "children"] {
         let mut missing = value.clone();
         missing.as_object_mut().unwrap().remove(field);
         assert!(
-            serde_json::from_value::<TaskStatus>(missing).is_err(),
+            serde_json::from_value::<DesktopTaskPane>(missing).is_err(),
             "{field}"
         );
     }
@@ -1269,7 +1279,7 @@ fn task_create_answers_with_the_conversation_record_and_row() {
     // A headless `-b` run has no conversation.
     assert_eq!(answers[1].receipt.session_id, None);
     assert!(answers[1].session.is_none());
-    for key in ["session", "row"] {
+    for key in ["session", "row", "parent"] {
         let mut absent: serde_json::Value = serde_json::from_str(json).unwrap();
         absent[1].as_object_mut().unwrap().remove(key);
         assert!(serde_json::from_value::<Vec<TaskCreated>>(absent).is_err());

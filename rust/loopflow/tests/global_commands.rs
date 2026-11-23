@@ -659,6 +659,7 @@ fn repo_selection_carries_scoped_task_prefix_through_reads_and_writes() {
         let project = store.seed_project(&wave).unwrap().id;
         store
             .create_task(&loopflow_execution::work::task::NewTask {
+                parent_task_id: None,
                 repository_id: loopflow_execution::repository::location::ensure_repository(
                     &store,
                     repo.canonicalize().unwrap().to_str().unwrap(),
@@ -2335,6 +2336,7 @@ fn task_planning_explain_move_resolves_destination_and_retains_recorded_work() {
     let destination = project("destination");
     let task = store
         .create_task(&loopflow_execution::work::task::NewTask {
+            parent_task_id: None,
             repository_id: loopflow_execution::repository::location::ensure_repository(
                 &store,
                 repo.path().canonicalize().unwrap().to_str().unwrap(),
@@ -2409,6 +2411,7 @@ fn task_planning_explain_move_resolves_destination_and_retains_recorded_work() {
     // Execution addresses the same durable destination, not a new Wave named after its ID.
     let second = store
         .create_task(&loopflow_execution::work::task::NewTask {
+            parent_task_id: None,
             repository_id: loopflow_execution::repository::location::ensure_repository(
                 &store,
                 repo.path().canonicalize().unwrap().to_str().unwrap(),

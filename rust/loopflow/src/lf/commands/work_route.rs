@@ -693,6 +693,7 @@ mod tests {
                 loopflow_execution::test_support::seed_wave_project(&store, repo, "inbox").unwrap();
             store
                 .create_task(&NewTask {
+                    parent_task_id: None,
                     repository_id: loopflow_execution::repository::location::ensure_repository(
                         &store, repo,
                     )

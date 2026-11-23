@@ -19,7 +19,7 @@ struct RegistryQueryTests {
         }
         let adoption = Adoption()
         let query = RegistryQuery(write: { change in
-            guard case .taskCreate(_, _, let title?, _, _, _, _, _) = change else {
+            guard case .taskCreate(_, _, let title?, _, _, _, _, _, _) = change else {
                 throw RegistryQueryError("Unexpected write")
             }
             return try await adoption.submit(title: title)
@@ -365,7 +365,7 @@ struct RegistryQueryTests {
           "name": "Wire it",
           "description": "",
           "rank": 1,
-          "state": "unstarted", "completed_at": null, "due_date": null, "tracker_state": {"state": "available", "synced_at": null}, "tracker_id": null, "sync": {"actions": []},
+          "state": "unstarted", "completed_at": null, "due_date": null, "tracker_state": {"state": "available", "synced_at": null}, "tracker_id": null, "parent_id": null, "sync": {"actions": []},
           "assignee": null
         },
         "reference": {

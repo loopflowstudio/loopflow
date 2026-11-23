@@ -12,7 +12,8 @@ use super::{
 };
 use crate::ops::tracker::{
     creation_id, ingest_task, message, now, observed_project, observed_task, opening_state,
-    remote_project, remote_task, repository_scope, target_state, value, values, Sent,
+    remote_parent, remote_project, remote_task, repository_scope, target_state, value, values,
+    Sent,
 };
 use crate::ops::OpsResult;
 use crate::store::Store;
@@ -114,6 +115,11 @@ impl LinearClient {
                 WorkValue::TaskProject(project) => {
                     input["projectId"] = json!(project_id(store, project.as_deref()).await?)
                 }
+                WorkValue::TaskParent(parent) => {
+                    if let Some(parent) = remote_parent(store, parent.as_deref()).await? {
+                        input["parentId"] = json!(parent);
+                    }
+                }
                 _ => {}
             }
         }
@@ -183,6 +189,9 @@ impl LinearClient {
             WorkValue::TaskAssignee(assignee) => json!({"assigneeId": assignee}),
             WorkValue::TaskProject(project) => {
                 json!({"projectId": project_id(store, project.as_deref()).await?})
+            }
+            WorkValue::TaskParent(parent) => {
+                json!({"parentId": remote_parent(store, parent.as_deref()).await?})
             }
             other => {
                 return Err(message(format!(
@@ -870,6 +879,7 @@ mod tests {
         store
             .sqlite
             .create_task(&loopflow_storage::work::task::NewTask {
+                parent_task_id: None,
                 repository_id: loopflow_storage::test_fixture::repository(&store.sqlite, "/repo"),
                 id: task.clone(),
                 project_id: None,

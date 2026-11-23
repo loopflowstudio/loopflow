@@ -9,6 +9,7 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::Json;
+use loopflow_storage::work::task::Task;
 use serde_json::{json, Value};
 use tokio::sync::Mutex;
 
@@ -87,7 +88,7 @@ async fn create(State(state): State<Shared>, Json(body): Json<Value>) -> Respons
         "name": input["name"], "html_notes": input["html_notes"],
         "completed": input["completed"].as_bool().unwrap_or(false), "completed_at": null,
         "modified_at": modified, "permalink_url": format!("https://app.asana.com/0/{PROJECT}/{id}"),
-        "due_on": input["due_on"], "assignee": null,
+        "due_on": input["due_on"], "assignee": null, "parent": input["parent"],
         "memberships": input["projects"].as_array().unwrap().iter()
             .map(|project| json!({"project": {"gid": project}})).collect::<Vec<_>>(),
     });
@@ -289,6 +290,7 @@ fn asana_task_create_mirrors_task_under_its_loopflow_identity() {
             Some("Ship the Asana provider".into()),
             Some("Mirror **Tasks** into Asana".into()),
             crate::ops::task::TaskAdoptionOptions::default(),
+            Default::default(),
             None,
         )
         .unwrap();
@@ -320,6 +322,31 @@ fn asana_task_create_mirrors_task_under_its_loopflow_identity() {
 }
 
 #[test]
+fn asana_follow_up_is_created_as_a_subtask_of_its_parent() {
+    with_asana(|runtime, _fixture, repo, state| {
+        let file = |title: &str, parent: Option<&Task>| {
+            crate::ops::task::task_create(
+                repo,
+                None,
+                Some(title.into()),
+                Some("Brief".into()),
+                crate::ops::task::TaskAdoptionOptions::default(),
+                parent.map(|parent| parent.identifier.clone()),
+                None,
+            )
+            .unwrap()
+        };
+        let parent = file("Parent", None);
+        let child = file("Follow-up", Some(&parent));
+        let asana =
+            |task: &Task| mirrored(runtime, &state, task.tracker_id.as_ref().unwrap().as_str());
+        assert_eq!(asana(&child)["parent"], asana(&parent)["gid"]);
+        // Asana's answer does not say what the parent is; the link stands.
+        assert_eq!(child.parent_task_id, Some(parent.id));
+    });
+}
+
+#[test]
 fn asana_status_title_and_comments_write_back_to_the_mirrored_task() {
     with_asana(|runtime, fixture, repo, state| {
         let saved = crate::ops::task::task_create(
@@ -328,6 +355,7 @@ fn asana_status_title_and_comments_write_back_to_the_mirrored_task() {
             Some("Write back".into()),
             None,
             crate::ops::task::TaskAdoptionOptions::default(),
+            Default::default(),
             None,
         )
         .unwrap();
@@ -348,6 +376,7 @@ fn asana_status_title_and_comments_write_back_to_the_mirrored_task() {
                 title: Some("Write back, renamed".into()),
                 ..Default::default()
             },
+            None,
         )
         .unwrap();
         assert_eq!(mirrored(runtime, &state, id)["name"], "Write back, renamed");
@@ -397,6 +426,7 @@ fn asana_outage_keeps_the_local_save_and_publishes_once_on_retry() {
             Some("Saved offline".into()),
             None,
             crate::ops::task::TaskAdoptionOptions::default(),
+            Default::default(),
             None,
         )
         .unwrap();
@@ -425,6 +455,7 @@ fn asana_comments_and_edits_by_people_become_task_direction() {
             Some("Take direction".into()),
             None,
             crate::ops::task::TaskAdoptionOptions::default(),
+            Default::default(),
             None,
         )
         .unwrap();
@@ -533,6 +564,7 @@ fn asana_tasks_coworkers_delete_leave_the_plan() {
             Some("Deleted in Asana".into()),
             None,
             crate::ops::task::TaskAdoptionOptions::default(),
+            Default::default(),
             None,
         )
         .unwrap();
@@ -565,6 +597,7 @@ fn asana_wave_projects_become_team_projects_holding_their_tasks() {
             Some("Planned work".into()),
             None,
             crate::ops::task::TaskAdoptionOptions::default(),
+            Default::default(),
             None,
         )
         .unwrap();

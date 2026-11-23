@@ -332,10 +332,13 @@ pub async fn planning_response(
         } else {
             let mut issue = json!({"id":input["id"],"identifier":format!("FIX-{}",state.issues.len()+1),
                 "title":input["title"],"description":input["description"],"url":"https://fixture.invalid/task",
-                "branchName":null,"completedAt":null,"dueDate":input["dueDate"],"trashed":null,"prioritySortOrder":0.0,"sortOrder":0.0,"state":{"type":input["stateId"]},
+                "branchName":null,"completedAt":null,"dueDate":input["dueDate"],"trashed":null,"parent":null,"prioritySortOrder":0.0,"sortOrder":0.0,"state":{"type":input["stateId"]},
                 "assignee":null,"team":{"id":input["teamId"]},"project":{"id":input["projectId"],"name":"Local project"}});
             if input["projectId"].is_null() {
                 issue["project"] = json!(null);
+            }
+            if !input["parentId"].is_null() {
+                issue["parent"] = json!({"id": input["parentId"]});
             }
             mark_issue_updated(&mut issue);
             state.issues.push(issue);
@@ -404,6 +407,13 @@ pub async fn planning_response(
                         json!(null)
                     } else {
                         json!({"id":value,"name":"Project"})
+                    }
+                }
+                "parentId" => {
+                    target["parent"] = if value.is_null() {
+                        json!(null)
+                    } else {
+                        json!({"id":value})
                     }
                 }
                 _ => target[field] = value.clone(),
@@ -630,7 +640,7 @@ pub fn seed_provider_task(
         state.issues.push(json!({
             "id":id,"identifier":format!("FIX-{index}"),"url":null,
             "title":title,"description":description,"completedAt":null,"dueDate":null,
-            "prioritySortOrder":0.0,"sortOrder":index as f64,"assignee":null,"trashed":null,
+            "parent":null,"prioritySortOrder":0.0,"sortOrder":index as f64,"assignee":null,"trashed":null,
             "updatedAt":"2026-09-29T12:00:00.123Z","state":{"type":"unstarted"},
             "team":{"id":"team-1"},"project":{"id":"project-1","name":"Project"}
         }));

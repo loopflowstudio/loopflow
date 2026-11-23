@@ -90,6 +90,7 @@ fn task(
     let now = OffsetDateTime::now_utc();
     let id = TaskId::new();
     let task = Task {
+        parent_task_id: None,
         repository_id: loopflow_execution::repository::location::ensure_repository(
             &store.sqlite,
             wave.repo(),

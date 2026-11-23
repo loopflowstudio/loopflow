@@ -1199,6 +1199,9 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
                     },
                     None => {}
                 }
+                if let Some(task) = &status.task {
+                    loopflow::lf::commands::waves::print_task_family(task)?;
+                }
             }
             Ok(())
         }
@@ -2223,14 +2226,16 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
                     notes,
                     rank,
                     assignee,
+                    parent,
                     wave,
                     ..
                 },
         }) => Some((
             wave.as_deref().or(cli.wave.as_deref()),
-            loopflow_execution::ops::task::TaskPlanningRequest::Edit(task_edit_update(
-                title, notes, *rank, assignee,
-            )),
+            loopflow_execution::ops::task::TaskPlanningRequest::Edit {
+                update: task_edit_update(title, notes, *rank, assignee),
+                parent: parent.as_deref(),
+            },
         )),
         Some(Commands::Task {
             cmd: TaskCommand::Report { message, wave, .. },

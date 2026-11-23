@@ -95,7 +95,11 @@ impl Store {
         .await
     }
 
-    pub(crate) async fn complete_task(&self, task: &Task, request: i64) -> StoreResult<bool> {
+    pub(crate) async fn complete_task(
+        &self,
+        task: &Task,
+        request: i64,
+    ) -> StoreResult<loopflow_storage::sqlite::children::CompletionSettlement> {
         let task = task.clone();
         run_sqlite(&self.sqlite, move |store| {
             store.complete_task(&task, request)
@@ -429,6 +433,7 @@ mod identity_tests {
                 .unwrap();
             store
                 .create_task(&loopflow_storage::work::task::NewTask {
+                    parent_task_id: None,
                     id: loopflow_model::durable::TaskId::parse(task).unwrap(),
                     repository_id: loopflow_model::durable::RepositoryId::parse(repo_id).unwrap(),
                     project_id: None,

@@ -784,6 +784,7 @@ mod tests {
             .expect("current unix time");
         let id = TaskId::new();
         Task {
+            parent_task_id: None,
             repository_id: crate::repository::location::ensure_repository(
                 &store.sqlite,
                 wave.repo(),
@@ -1087,7 +1088,7 @@ mod tests {
                     .unwrap();
             }
             let record = store.sqlite.task(&task.id).unwrap().unwrap();
-            assert_eq!(record.state.as_deref(), Some("unstarted"));
+            assert_eq!(record.state.as_deref(), Some("started"));
             assert_eq!(record.completed_at, None);
             assert_eq!(record.assignee, None);
             assert_eq!(record.rank, 0);
@@ -1266,6 +1267,7 @@ mod tests {
                 store
                     .sqlite
                     .create_task(&loopflow_storage::work::task::NewTask {
+                        parent_task_id: None,
                         repository_id: crate::repository::location::ensure_repository(
                             &store.sqlite,
                             directory.path().canonicalize().unwrap().to_str().unwrap(),

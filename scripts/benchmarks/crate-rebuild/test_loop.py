@@ -13,6 +13,7 @@ import sys
 import tempfile
 import time
 from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
 from pathlib import Path
 
 import tomllib
@@ -69,6 +70,23 @@ def _run(argv: list[str], cwd: Path, env: dict) -> str:
     if result.returncode:
         raise RuntimeError(f"{argv}: {result.stdout}\n{result.stderr}")
     return result.stdout.strip()
+
+
+def _clear_target(tree: Path) -> None:
+    target = tree / "target"
+    if os.path.lexists(target):
+        shutil.rmtree(target)
+
+
+def remove_worktree(tree: Path, env: dict) -> None:
+    if tree.exists():
+        _run(["git", "worktree", "remove", "--force", str(tree)], ROOT, env)
+
+
+def add_worktree(tree: Path, revision: str, env: dict, *, cold: bool) -> None:
+    _run(["git", "worktree", "add", "--detach", str(tree), revision], ROOT, env)
+    if cold:
+        _clear_target(tree)
 
 
 def _private_cache_env(settings: dict, root: Path, socket: Path) -> dict:
@@ -220,8 +238,9 @@ def _time_command(
     return child.returncode, memory
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__)
+@contextmanager
+def measurement_run(description: str) -> Iterator[tuple[Path, int, bool]]:
+    parser = argparse.ArgumentParser(description=description)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--cohorts", type=int, default=3)
     parser.add_argument("--resume", action="store_true")
@@ -236,20 +255,23 @@ def main() -> None:
             fcntl.flock(directory, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             parser.error(f"measurement already running in {output}")
-        # Only the Unix socket needs a short, temporary pathname.
-        with tempfile.TemporaryDirectory(prefix="lf921-", dir="/tmp") as short:
-            _measure(output, args.cohorts, args.resume, Path(short) / "cache.sock")
+        if (output / "configuration.json").exists() != args.resume:
+            parser.error("use --resume with an existing measurement, and only then")
+        yield output, args.cohorts, args.resume
     finally:
         os.close(directory)
+
+
+def main() -> None:
+    with measurement_run(__doc__) as (output, cohorts, resume):
+        # Only the Unix socket needs a short, temporary pathname.
+        with tempfile.TemporaryDirectory(prefix="lf921-", dir="/tmp") as short:
+            _measure(output, cohorts, resume, Path(short) / "cache.sock")
 
 
 def _measure(output: Path, cohorts: int, resume: bool, socket: Path) -> None:
     state = output / "configuration.json"
     receipts_path = output / "receipts.json"
-    if state.exists() and not resume:
-        raise SystemExit("output already exists; use --resume")
-    if resume and not state.exists():
-        raise SystemExit(f"no measurement configuration to resume in {output}")
     if resume:
         config = json.loads(state.read_text())
         passed = output / "passed.json"
@@ -320,7 +342,7 @@ def _measure(output: Path, cohorts: int, resume: bool, socket: Path) -> None:
             if item is None:
                 continue
             if cohort in config.get("calibration_cohorts", []):
-                shutil.rmtree(Path(item["path"]) / "target", ignore_errors=True)
+                _clear_target(Path(item["path"]))
                 continue
             cases = GROUP_CASES[group]
             rows = [
@@ -333,11 +355,12 @@ def _measure(output: Path, cohorts: int, resume: bool, socket: Path) -> None:
             ):
                 continue
             tree = Path(item["path"])
-            if not (tree / "target").exists() and not rows:
+            if not os.path.lexists(tree / "target") and not rows:
                 continue
             # A partial compilation can populate both caches and incremental state.
             # Restart that group with distinct edits; keep its earlier raw attempts.
             attempt = item.get("attempt", 0)
+            _clear_target(tree)
             archive = output / "abandoned-attempts" / f"{key}_{attempt}"
             archive.mkdir(parents=True, exist_ok=True)
             _write(archive / "receipts.json", rows)
@@ -348,7 +371,6 @@ def _measure(output: Path, cohorts: int, resume: bool, socket: Path) -> None:
                     path.rename(archive / path.name)
             receipts = [r for r in receipts if r not in rows]
             _write(receipts_path, receipts)
-            shutil.rmtree(tree / "target", ignore_errors=True)
             _run(["git", "restore", "--source=HEAD", "--worktree", "rust"], tree, env)
             item["attempt"] = attempt + 1
             _write(state, config)
@@ -357,12 +379,11 @@ def _measure(output: Path, cohorts: int, resume: bool, socket: Path) -> None:
         if key in config["trees"]:
             continue
         tree = root / key
+        if resume:
+            # Setup may have stopped before the checkout was recorded.
+            remove_worktree(tree, env)
         start = time.monotonic()
-        _run(
-            ["git", "worktree", "add", "--detach", str(tree), revision],
-            ROOT,
-            {**env, "XDG_CACHE_HOME": str(root)},
-        )
+        add_worktree(tree, revision, {**env, "XDG_CACHE_HOME": str(root)}, cold=True)
         config["trees"][key] = {"path": str(tree), "setup_seconds": time.monotonic() - start}
         _write(state, config)
     write_inventory(ROOT, Path(env["SCCACHE_CONF"]))
@@ -511,12 +532,10 @@ def _measure(output: Path, cohorts: int, resume: bool, socket: Path) -> None:
                 owner = "app" if case.removeprefix("seed_").startswith("app") else "execution"
                 sample(cohort, mode, group, case, owner, index == 0)
             tree = Path(config["trees"][f"{cohort}_{mode}_{group}"]["path"])
-            shutil.rmtree(tree / "target", ignore_errors=True)
+            _clear_target(tree)
         validate(receipts, cohorts, config.get("calibration_cohorts", []))
         for item in config["trees"].values():
-            tree = Path(item["path"])
-            if tree.exists():
-                _run(["git", "worktree", "remove", "--force", str(tree)], ROOT, env)
+            remove_worktree(Path(item["path"]), env)
     finally:
         _run([str(cache), "--stop-server"], ROOT, env)
         print(f"Receipts: {output}; experiment state: {root}", flush=True)

@@ -589,6 +589,7 @@ mod tests {
                 crate::test_support::seed_wave_project(&self.store, &self.repo, "plan").unwrap();
             self.store
                 .create_task(&NewTask {
+                    parent_task_id: None,
                     repository_id: crate::repository::location::ensure_repository(
                         &self.store,
                         &self.repo,

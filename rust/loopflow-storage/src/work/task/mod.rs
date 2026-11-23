@@ -25,6 +25,8 @@ pub struct TaskUpdate {
     pub assignee: Option<Option<String>>,
     pub title: Option<String>,
     pub description: Option<String>,
+    /// Omitted preserves parent; explicit None clears it.
+    pub parent: Option<Option<TaskId>>,
 }
 
 /// The caller retains this identity across a retry; a separate create mints another.
@@ -34,6 +36,8 @@ pub struct NewTask {
     pub id: loopflow_model::durable::TaskId,
     pub repository_id: loopflow_model::durable::RepositoryId,
     pub project_id: Option<loopflow_model::durable::ProjectId>,
+    /// The Task this one is filed from.
+    pub parent_task_id: Option<loopflow_model::durable::TaskId>,
     pub title: String,
     pub description: String,
 }
@@ -511,6 +515,9 @@ pub struct Task {
     #[serde(rename = "repo_id")]
     pub repository_id: loopflow_model::durable::RepositoryId,
     pub project_id: Option<ProjectId>,
+    /// The Task this one was filed from; its children are the Tasks naming it.
+    /// Not the stack: `parent_pr_id` says which branch it starts from.
+    pub parent_task_id: Option<TaskId>,
     pub worktree: Option<PathBuf>,
     pub workspace_slug: String,
     pub branch: String,
@@ -659,6 +666,14 @@ pub enum TaskEventKind {
     CompletionRequested {
         reason: Option<String>,
     },
+    /// A person asked to complete the Task, so settling it settles its
+    /// children too. A Graph reaching `end` writes `CompletionRequested`,
+    /// which waits while a child is open. The request can pend until the
+    /// Task's PR merges, and a child can be filed, reopened or moved under
+    /// the Task meanwhile, so who asked is kept with the request.
+    FamilyCompletionRequested {
+        reason: Option<String>,
+    },
     Completed {
         summary: String,
     },
@@ -745,6 +760,7 @@ mod tests {
     fn task() -> Task {
         let now = time::OffsetDateTime::now_utc();
         Task {
+            parent_task_id: None,
             repository_id: loopflow_model::durable::RepositoryId::new(),
             id: TaskId::new(),
 

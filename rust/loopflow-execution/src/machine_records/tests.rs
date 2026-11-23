@@ -18,6 +18,7 @@ fn with_task(home: &Path) -> SqliteStore {
     let project = crate::test_support::seed_wave_project(&store, repo, "inbox").unwrap();
     store
         .create_task(&NewTask {
+            parent_task_id: None,
             repository_id: crate::repository::location::ensure_repository(&store, repo).unwrap(),
             due_date: None,
             id: TaskId::parse(TASK).unwrap(),

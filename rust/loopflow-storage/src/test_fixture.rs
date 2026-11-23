@@ -323,6 +323,7 @@ pub fn task() -> (tempfile::TempDir, SqliteStore, Task, TaskPr) {
     };
     store.insert_project(&project).unwrap();
     let task = Task {
+        parent_task_id: None,
         repository_id: crate::test_fixture::repository(&store, "/repo"),
         id: task_id.clone(),
 
@@ -442,6 +443,7 @@ pub fn unowned_task() -> (tempfile::TempDir, SqliteStore, TaskId) {
     let repo = dir.path().canonicalize().unwrap();
     let task = store
         .create_task(&crate::work::task::NewTask {
+            parent_task_id: None,
             id: TaskId::new(),
             repository_id: crate::test_fixture::repository(&store, repo.to_str().unwrap()),
             project_id: None,
@@ -522,9 +524,9 @@ pub fn retirement() -> (
     {
         let conn = store.conn.lock().unwrap();
         conn.execute(
-            "INSERT INTO tasks(id,repository_id,issue_identifier,created_at,
-                 planning_completed,planning_completed_at)
-             VALUES(?1,?2,'PLAN-1',1,1,'done')",
+            "INSERT INTO tasks(id,repository_id,issue_identifier,issue_title,issue_description,
+                 workspace_slug,created_at,updated_at,planning_completed,planning_completed_at)
+             VALUES(?1,?2,'PLAN-1','Plan','','plan',1,1,1,'done')",
             rusqlite::params![task.as_str(), repo.as_str()],
         )
         .unwrap();

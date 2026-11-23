@@ -142,6 +142,8 @@ work_values! {
     (ProjectInitiatives, "project_initiatives", Vec<String>),
     (ProjectTeams, "project_teams", Vec<String>),
     (TaskProject, "task_project", Option<String>),
+    // The Task this one was filed from.
+    (TaskParent, "task_parent", Option<String>),
     (TaskLinearId, "task_linear_id", Option<String>),
     (TaskIdentifier, "task_identifier", String),
     (TaskTitle, "task_title", Option<String>),
@@ -173,7 +175,7 @@ impl WorkValue {
             }
             Self::TaskProject(Some(v)) => *v = canonical_prefixed(v, "proj_"),
             Self::ProjectWave(v) => *v = canonical_uuid(v),
-            Self::CommentTask(v) => *v = canonical_prefixed(v, "task_"),
+            Self::CommentTask(v) | Self::TaskParent(Some(v)) => *v = canonical_prefixed(v, "task_"),
             Self::TaskIdentifier(v) => *v = canonical_task_identifier(v),
             Self::ProjectInitiatives(values) | Self::ProjectTeams(values) => {
                 let mut seen = std::collections::BTreeMap::new();

@@ -1676,6 +1676,7 @@ struct SessionsContentView: View {
             WaveProjectsView(wave: wave.name, repo: wave.repo, sourceReference: model.projectsReference)
         }
         .modifier(TaskAbandonConfirmation(model: model))
+        .modifier(TaskCompleteConfirmation(model: model))
         .sheet(isPresented: Binding(
             get: { navigation.renaming != nil || navigation.binding != nil },
             set: { if !$0 { model.cancelSessionRename(); model.cancelSessionBinding() } }

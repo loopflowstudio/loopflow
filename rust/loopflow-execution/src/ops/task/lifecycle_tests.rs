@@ -199,7 +199,7 @@ fi
         // Exercise buffered filing while the selected planning transport is offline.
         provider.lock().unwrap().unavailable = true;
         let child = crate::ops::task::task_create(repo.path(), Some(wave.slug()),
-            Some("Verify installed release".into()), Some("Run the released command; retain failures.".into()), crate::ops::task::TaskAdoptionOptions::default(), None).unwrap();
+            Some("Verify installed release".into()), Some("Run the released command; retain failures.".into()), crate::ops::task::TaskAdoptionOptions::default(), Default::default(), None).unwrap();
         let thread = crate::ops::task::task_comment(repo.path(), "FIX-1", None,
             Some(&format!("Installed verification continues in {}.", child.identifier)), false).unwrap();
         assert!(thread.comments.iter().any(|comment| comment.body.contains(&child.identifier)));
@@ -257,7 +257,7 @@ async fn respond(
         json!({"issue": {"id":"source-issue", "identifier":"FIX-1", "url":"https://linear.app/fixture/issue/FIX-1",
             "title":"Deliver the command", "description":"", "dueDate":null,
             "updatedAt":"2026-10-07T00:00:00Z", "completedAt":null, "branchName":null,
-            "prioritySortOrder":1.0, "sortOrder":1.0, "assignee":null, "state":{"type":"unstarted"},
+            "parent":null,"prioritySortOrder":1.0, "sortOrder":1.0, "assignee":null, "state":{"type":"unstarted"},
             "team":{"id":"team-1"}, "project":{"id":"project-1", "name":"Provider destination",
                 "description":"", "content":"workflow: feature", "status":{"type":"started"},
                 "updatedAt":"2026-10-07T00:00:00Z", "archivedAt":null,
@@ -333,6 +333,7 @@ fn fixture(
         updated_at: now,
     };
     let task = Task {
+        parent_task_id: None,
         repository_id: crate::repository::location::ensure_repository(&store.sqlite, wave.repo())
             .unwrap(),
         id: TaskId::new(),

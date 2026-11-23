@@ -281,7 +281,7 @@ public enum ServedRead: Equatable, Sendable, Encodable {
 /// `argv` does in `cwd`, given `input` on stdin. Served requests retain their
 /// own trace without recording an OS Process.
 public enum ServedWrite: Equatable, Sendable, Encodable {
-    case taskCreate(directory: String, requestID: String, title: String?, request: String?, wave: String?, graph: String?, session: String?, run: Bool)
+    case taskCreate(directory: String, requestID: String, title: String?, request: String?, wave: String?, parent: String?, graph: String?, session: String?, run: Bool)
     case taskComplete(directory: String, issue: String)
     case taskReopen(directory: String, issue: String)
     case taskAbandon(directory: String, issue: String)
@@ -376,10 +376,11 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
             return ["--batch"] + argument("--agent", agent) + ["graph", name] + argument(nil, message)
         case .skillRun(_, let name, let message, let agent):
             return ["--batch"] + argument("--agent", agent) + ["skill", name] + argument(nil, message)
-        case .taskCreate(_, let requestID, let title, let request, let wave, let graph, let session, let run):
+        case .taskCreate(_, let requestID, let title, let request, let wave, let parent, let graph, let session, let run):
             var argv = ["task", "create", "--request-id", requestID]
             argv += argument("--title", title)
             argv += argument("--wave", wave)
+            argv += argument("--parent", parent)
             argv += argument("--graph", graph)
             argv += argument("--session", session)
             if run { argv.append("--run") }
@@ -560,9 +561,9 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
 
     private var tagged: TaggedFields {
         switch self {
-        case .taskCreate(let directory, let requestID, let title, let request, let wave, let graph, let session, let run):
+        case .taskCreate(let directory, let requestID, let title, let request, let wave, let parent, let graph, let session, let run):
             TaggedFields("task.create", ["directory": directory, "request_id": requestID, "title": title,
-                "request": request, "wave": wave, "graph": graph, "session": session, "run": run])
+                "request": request, "wave": wave, "parent": parent, "graph": graph, "session": session, "run": run])
         case .taskComplete(let directory, let issue):
             TaggedFields("task.complete", ["directory": directory, "issue": issue])
         case .taskReopen(let directory, let issue):
@@ -1152,7 +1153,7 @@ public struct RegistryQuery: Sendable {
     /// unstarted and nothing runs.
     public func createTask(request: String, wave: String?, graph: String?, run: Bool, cwd: String?, requestID: String = UUID().uuidString) async throws -> TaskCreated {
         try Self.decode(TaskCreated.self, from: await write(.taskCreate(directory: cwd ?? "/", requestID: requestID,
-            title: nil, request: request, wave: wave, graph: graph, session: nil, run: run)))
+            title: nil, request: request, wave: wave, parent: nil, graph: graph, session: nil, run: run)))
     }
 
     /// The graph a new Task in `wave`, or the repository when nil, would take up.
@@ -1296,7 +1297,7 @@ public struct RegistryQuery: Sendable {
     /// Create a Task around the selected conversation without launching work.
     public func createTaskFromSession(id: String, title: String, cwd: String?, requestID: String = UUID().uuidString) async throws -> TaskCreateReceipt.CreatedTask {
         try Self.decode(TaskCreateReceipt.self, from: await write(
-            .taskCreate(directory: cwd ?? "/", requestID: requestID, title: title, request: nil, wave: nil, graph: nil, session: id, run: false))).task
+            .taskCreate(directory: cwd ?? "/", requestID: requestID, title: title, request: nil, wave: nil, parent: nil, graph: nil, session: id, run: false))).task
     }
 
     public func previewSessionBinding(id: String, task: String) async throws -> SessionBindingPreview {

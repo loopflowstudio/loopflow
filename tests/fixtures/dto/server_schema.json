@@ -574,6 +574,21 @@
       ],
       "type": "object"
     },
+    "ChildOutcome": {
+      "description": "What completing a parent did with one child, in the order they are reported.",
+      "oneOf": [
+        {
+          "const": "done",
+          "description": "Its PR had merged.",
+          "type": "string"
+        },
+        {
+          "const": "abandoned",
+          "description": "It was not merged and was canceled with its parent.",
+          "type": "string"
+        }
+      ]
+    },
     "CiCheck": {
       "description": "One required check that is not passing, named so the `ci-fix` skill can\nresolve the exact failure from its logs.",
       "properties": {
@@ -1477,6 +1492,31 @@
       ],
       "type": "object"
     },
+    "CompletedChild": {
+      "description": "One child of a completed Task. Wire type; no defaults.",
+      "properties": {
+        "children": {
+          "description": "What becoming done did with its own children.",
+          "items": {
+            "$ref": "#/$defs/CompletedChild"
+          },
+          "type": "array"
+        },
+        "outcome": {
+          "$ref": "#/$defs/ChildOutcome"
+        },
+        "task": {
+          "$ref": "#/$defs/TaskRow",
+          "description": "The child as it stands now."
+        }
+      },
+      "required": [
+        "task",
+        "outcome",
+        "children"
+      ],
+      "type": "object"
+    },
     "ConfigLayer": {
       "description": "The configuration a default came from, as `lf task status` names it.",
       "oneOf": [
@@ -1904,6 +1944,13 @@
     "DesktopTaskPane": {
       "description": "The full Task reading used by Desktop and terminal Task views, plus the\nDesktop row that keeps the pane current after the Task leaves the plan.",
       "properties": {
+        "children": {
+          "description": "The Tasks filed from this one, in filing order.",
+          "items": {
+            "$ref": "#/$defs/TaskRow"
+          },
+          "type": "array"
+        },
         "comments": {
           "anyOf": [
             {
@@ -1951,6 +1998,17 @@
               "type": "null"
             }
           ]
+        },
+        "parent": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TaskRow"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The Task this one was filed from; `null` for top-level work."
         },
         "plan_error": {
           "type": [
@@ -2017,7 +2075,9 @@
         "overview",
         "graph_processes",
         "comments",
-        "row"
+        "row",
+        "parent",
+        "children"
       ],
       "type": "object"
     },
@@ -11146,6 +11206,13 @@
             "null"
           ]
         },
+        "parent_task_id": {
+          "description": "The Task this one was filed from; its children are the Tasks naming it.\nNot the stack: `parent_pr_id` says which branch it starts from.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "project_id": {
           "type": [
             "string",
@@ -11237,6 +11304,7 @@
         "wave_id",
         "repo_id",
         "project_id",
+        "parent_task_id",
         "worktree",
         "workspace_slug",
         "branch",
@@ -11548,6 +11616,168 @@
       ],
       "type": "object"
     },
+    "TaskCompleted": {
+      "description": "`lf task complete --json`: the completed Task and what its completion did\nwith each child. Wire type; no defaults.",
+      "properties": {
+        "assignee": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "base_commit": {
+          "type": "string"
+        },
+        "branch": {
+          "type": "string"
+        },
+        "children": {
+          "description": "One entry per Task filed from it that was open, in the order the\ncommand prints them.",
+          "items": {
+            "$ref": "#/$defs/CompletedChild"
+          },
+          "type": "array"
+        },
+        "completed_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "created_at": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "due_date": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "identifier": {
+          "type": "string"
+        },
+        "parent_pr_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "parent_task_id": {
+          "description": "The Task this one was filed from; its children are the Tasks naming it.\nNot the stack: `parent_pr_id` says which branch it starts from.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "project_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "rank": {
+          "description": "Shared planning fields; independent of local execution and Workflow position.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "repo_id": {
+          "description": "Stable repository identity, independent of planning membership.",
+          "type": "string"
+        },
+        "revision": {
+          "description": "Local optimistic-write revision; independent of Linear observation age.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "state": {
+          "description": "Linear's state type, `completed` once done; the lifecycle is `TaskState`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "title": {
+          "type": "string"
+        },
+        "tracker_id": {
+          "description": "The record’s ID in the repository's tracker.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tracker_synced_at": {
+          "description": "Time of the last successful tracker refresh.",
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "tracker_writeback": {
+          "$ref": "#/$defs/LinearWritebackState"
+        },
+        "updated_at": {
+          "type": "string"
+        },
+        "wave_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/WaveId"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Read projection from the Project join, validated against the Project on save."
+        },
+        "workspace_slug": {
+          "type": "string"
+        },
+        "worktree": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "revision",
+        "identifier",
+        "title",
+        "description",
+        "rank",
+        "assignee",
+        "due_date",
+        "state",
+        "completed_at",
+        "tracker_id",
+        "tracker_synced_at",
+        "tracker_writeback",
+        "wave_id",
+        "repo_id",
+        "project_id",
+        "parent_task_id",
+        "worktree",
+        "workspace_slug",
+        "branch",
+        "base_commit",
+        "parent_pr_id",
+        "created_at",
+        "updated_at",
+        "children"
+      ],
+      "type": "object"
+    },
     "TaskConditionSnapshot": {
       "description": "A Task's shared condition and the evidence that proves it.",
       "properties": {
@@ -11621,7 +11851,7 @@
       "type": "object"
     },
     "TaskCreated": {
-      "description": "`task.create`'s answer: its receipt, the primary conversation's record and\nthe Task's row in the Work projection's shape, read when answering, so a\nclient selects the Task and opens the conversation before its planning\nsubscription lists it. The stored receipt holds neither.",
+      "description": "`task.create`'s answer: its receipt, the primary conversation's record, the\nTask's parent and its row in the Work projection's shape, read when answering, so a\nclient selects the Task and opens the conversation before its planning\nsubscription lists it. The stored receipt holds neither.",
       "properties": {
         "graph": {
           "type": [
@@ -11631,6 +11861,17 @@
         },
         "milestone": {
           "type": "string"
+        },
+        "parent": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TaskRow"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The Task this one was filed from; `null` for top-level work."
         },
         "row": {
           "$ref": "#/$defs/RoadmapTask"
@@ -11665,7 +11906,8 @@
         "session_id",
         "milestone",
         "session",
-        "row"
+        "row",
+        "parent"
       ],
       "type": "object"
     },
@@ -12317,6 +12559,26 @@
           "properties": {
             "kind": {
               "const": "completion_requested",
+              "type": "string"
+            },
+            "reason": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "reason"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "A person asked to complete the Task, so settling it settles its\nchildren too. A Graph reaching `end` writes `CompletionRequested`,\nwhich waits while a child is open. The request can pend until the\nTask's PR merges, and a child can be filed, reopened or moved under\nthe Task meanwhile, so who asked is kept with the request.",
+          "properties": {
+            "kind": {
+              "const": "family_completion_requested",
               "type": "string"
             },
             "reason": {
@@ -13203,6 +13465,130 @@
       ],
       "type": "object"
     },
+    "TaskRow": {
+      "description": "One Task. Wire type; no defaults.",
+      "properties": {
+        "graph": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TaskRowGraph"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "identifier": {
+          "type": "string"
+        },
+        "next": {
+          "description": "The command that moves it on; `null` while it moves by itself or is closed.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "parent_id": {
+          "description": "The `id` of the Task this one was filed from; `null` for top-level work.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "pr": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TaskRowPr"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Its published pull request."
+        },
+        "project": {
+          "description": "Its Project's name; `null` outside any Project.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reason": {
+          "description": "Why it is in that state, or what it waits on.",
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/$defs/TaskState"
+        },
+        "title": {
+          "type": "string"
+        },
+        "wave": {
+          "description": "Its Wave's name; `null` outside any Wave.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "identifier",
+        "title",
+        "wave",
+        "project",
+        "parent_id",
+        "state",
+        "reason",
+        "graph",
+        "pr",
+        "next"
+      ],
+      "type": "object"
+    },
+    "TaskRowGraph": {
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "step": {
+          "description": "The step it stands at (`start`, `end` or an interactive step); `null` while a run carries it.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "name",
+        "step"
+      ],
+      "type": "object"
+    },
+    "TaskRowPr": {
+      "properties": {
+        "number": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "phase": {
+          "$ref": "#/$defs/PrPhase"
+        },
+        "url": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "number",
+        "url",
+        "phase"
+      ],
+      "type": "object"
+    },
     "TaskRun": {
       "description": "What `task.run` started.",
       "oneOf": [
@@ -13706,6 +14092,13 @@
         "name": {
           "type": "string"
         },
+        "parent_id": {
+          "description": "The stable ID of the Task this one was filed from.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "project_id": {
           "type": [
             "string",
@@ -13757,6 +14150,7 @@
         "sync",
         "id",
         "tracker_id",
+        "parent_id",
         "identifier",
         "name",
         "description",
@@ -15148,6 +15542,7 @@
               "directory": "/repo",
               "graph": null,
               "kind": "task.create",
+              "parent": null,
               "request": null,
               "request_id": "fixture-creation",
               "run": false,
@@ -15159,6 +15554,7 @@
               "directory": "/repo",
               "graph": null,
               "kind": "task.create",
+              "parent": null,
               "request": "Fix the retry test",
               "request_id": "00000000-0000-4000-8000-000000000001",
               "run": true,
@@ -15180,6 +15576,13 @@
             "kind": {
               "const": "task.create",
               "type": "string"
+            },
+            "parent": {
+              "description": "The Task this one is filed from, by ID or identifier; `null` files top-level.",
+              "type": [
+                "string",
+                "null"
+              ]
             },
             "request": {
               "type": [
@@ -15219,6 +15622,7 @@
             "title",
             "request",
             "wave",
+            "parent",
             "graph",
             "session",
             "run"
@@ -15250,7 +15654,7 @@
           ],
           "type": "object",
           "x-result": {
-            "$ref": "#/$defs/Task"
+            "$ref": "#/$defs/TaskCompleted"
           }
         },
         {

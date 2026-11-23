@@ -350,6 +350,25 @@ pub(crate) async fn remote_task(
     Ok(task.tracker_id()?.as_str().to_owned())
 }
 
+/// The tracker id of the Task a creation or a parent edit names as parent.
+/// `None` when it names none, or one the tracker does not hold: another
+/// repository's, or one no tracker was ever sent.
+pub(crate) async fn remote_parent(
+    store: &Store,
+    parent: Option<&str>,
+) -> OpsResult<Option<String>> {
+    let Some(parent) = parent else {
+        return Ok(None);
+    };
+    let parent = loopflow_model::durable::TaskId::from_raw(parent);
+    Ok(store
+        .get_task(&parent)
+        .await
+        .map_err(message)?
+        .and_then(|task| task.tracker_id)
+        .map(|id| id.as_str().to_owned()))
+}
+
 /// The tracker id of a bound Project.
 pub(crate) async fn remote_project(
     store: &Store,
@@ -374,20 +393,33 @@ pub(crate) async fn observed_task(store: &Store, item: &TrackerItem) -> Observed
             .map(|project| project.id.to_string()),
         None => None,
     };
+    let parent = match &item.parent_id {
+        Some(external) => store
+            .get_task_by_issue(external)
+            .await
+            .ok()
+            .flatten()
+            .map(|task| task.id.to_string()),
+        None => None,
+    };
+    let mut values = vec![
+        WorkValue::TaskTitle(Some(item.name.clone())),
+        WorkValue::TaskDescription(Some(item.description.clone())),
+        WorkValue::TaskAssignee(item.assignee.clone()),
+        WorkValue::TaskProject(project),
+        WorkValue::Disposition(Disposition {
+            planning_state: item.state.clone(),
+            planning_completed: i64::from(item.completed),
+            planning_completed_at: item.completed_at.clone(),
+        }),
+    ];
+    if item.parent_observed {
+        values.push(WorkValue::TaskParent(parent));
+    }
     Observed {
         remote_id: Some(item.id.clone()),
         revision: item.revision.clone(),
-        values: vec![
-            WorkValue::TaskTitle(Some(item.name.clone())),
-            WorkValue::TaskDescription(Some(item.description.clone())),
-            WorkValue::TaskAssignee(item.assignee.clone()),
-            WorkValue::TaskProject(project),
-            WorkValue::Disposition(Disposition {
-                planning_state: item.state.clone(),
-                planning_completed: i64::from(item.completed),
-                planning_completed_at: item.completed_at.clone(),
-            }),
-        ],
+        values,
         ..Observed::default()
     }
 }

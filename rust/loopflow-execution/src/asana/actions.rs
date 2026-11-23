@@ -10,8 +10,9 @@ use serde_json::{json, Value};
 
 use super::{completed, rich_text, AsanaClient, Task, IDENTITY_LABEL};
 use crate::ops::tracker::{
-    creation_id, ingest_task, message, now, observed_task, opening_state, remote_project,
-    remote_task, repository_scope, target_state, value, values, visible_text, Sent, TrackerError,
+    creation_id, ingest_task, message, now, observed_task, opening_state, remote_parent,
+    remote_project, remote_task, repository_scope, target_state, value, values, visible_text, Sent,
+    TrackerError,
 };
 use crate::ops::OpsResult;
 use crate::store::Store;
@@ -109,6 +110,19 @@ impl AsanaClient {
                 WorkValue::TaskProject(Some(project)) => {
                     projects.push(self.mirrored(store, &project).await?)
                 }
+                WorkValue::TaskParent(parent) => {
+                    if let Some(parent) = remote_parent(store, parent.as_deref()).await? {
+                        // Asana takes a parent by its own id, not Loopflow's.
+                        let held: Task = match self
+                            .send(Method::GET, &format!("/tasks/external:{parent}"), None)
+                            .await
+                        {
+                            Ok(held) => held,
+                            Err(error) => return Ok(Sent::failed(TrackerError::from(error))),
+                        };
+                        data["parent"] = json!(held.gid);
+                    }
+                }
                 value => fields(&mut data, &value),
             }
         }
@@ -170,6 +184,11 @@ impl AsanaClient {
         let external = remote_task(store, task).await?;
         let path = format!("/tasks/external:{external}");
         let updated: Result<Task, super::AsanaFailure> = match value(action)? {
+            WorkValue::TaskParent(_) => {
+                return Ok(Sent::Unsupported(
+                    "Asana keeps the parent a task was created under".into(),
+                ))
+            }
             WorkValue::TaskProject(project) => {
                 let target = match project {
                     Some(project) => Some(self.mirrored(store, &project).await?),

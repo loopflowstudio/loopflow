@@ -291,6 +291,7 @@ const LIST_ITEMS_QUERY: &str = r#"query ListProjectIssues($projectId: String!, $
           type
         }
         project { id }
+        parent { id }
         team {
           id
         }
@@ -320,6 +321,7 @@ macro_rules! issue_fields {
     assignee { id }
     state { type }
     team { id }
+    parent { id }
 "#
     };
 }
@@ -1880,6 +1882,8 @@ struct IssueFields {
     state: Option<WorkflowStateRef>,
     #[serde(deserialize_with = "Option::deserialize")]
     team: Option<IdNode>,
+    #[serde(deserialize_with = "Option::deserialize")]
+    parent: Option<IdNode>,
 }
 
 impl IssueNode {
@@ -1939,6 +1943,8 @@ impl IssueFields {
             project_id,
             team_id: Some(team.id),
             assignee: self.assignee.map(|assignee| assignee.id),
+            parent_id: self.parent.map(|parent| parent.id),
+            parent_observed: true,
         })
     }
 }
@@ -2274,7 +2280,7 @@ mod tests {
             let mut wire = json!({
                 "id":item.id, "identifier":item.identifier, "updatedAt":item.revision,
                 "branchName":null,"url":null,"title":item.name,"description":item.description,
-                "prioritySortOrder":0.0,"sortOrder":0.0,"assignee":null,
+                "parent":null,"prioritySortOrder":0.0,"sortOrder":0.0,"assignee":null,
                 "state":{"type":item.state},"team":{"id":"team"},
                 "completedAt":item.completed_at, "dueDate":item.due_date
             });
@@ -2303,7 +2309,7 @@ mod tests {
         let mut wire = json!({
             "id":"issue", "identifier":"LOO-1", "updatedAt":"2026-10-07T00:00:00Z",
             "branchName":null, "url":null, "title":"Check installation", "description":null,
-            "prioritySortOrder":0.0, "sortOrder":0.0, "assignee":null,
+            "parent":null,"prioritySortOrder":0.0, "sortOrder":0.0, "assignee":null,
             "state":{"type":"unstarted"}, "team":{"id":"team"},
             "completedAt":null, "dueDate":"2026-10-08"
         });
@@ -2503,7 +2509,7 @@ mod tests {
                                     "url": "https://linear.app/loopflow/issue/INF-1/first",
                                     "title": "First",
                                     "description": "one",
-                                    "completedAt": null, "dueDate": null, "prioritySortOrder": 10.0,
+                                    "completedAt": null, "dueDate": null, "parent":null,"prioritySortOrder": 10.0,
                                     "sortOrder": 10.0, "updatedAt":"2026-09-29T12:00:00.123Z",
                                     "assignee": { "id": "user-1" },
                                     "state": { "type": "unstarted" },
@@ -2517,7 +2523,7 @@ mod tests {
                                     "assignee": null,
                                     "title": "Second",
                                     "description": "two",
-                                    "completedAt": null, "dueDate": null, "prioritySortOrder": 0.0,
+                                    "completedAt": null, "dueDate": null, "parent":null,"prioritySortOrder": 0.0,
                                     "sortOrder": 0.0, "updatedAt":"2026-09-29T12:00:00.123Z",
                                     "state": { "type": "completed" },
                                     "project": { "id": "project-123" },
@@ -2978,7 +2984,7 @@ mod tests {
             json!({ "data": { "issue": {
                 "id": "issue-uuid", "identifier": "LOO-42", "url": null,
                 "title": "Resolve ownership", "description": "",
-                "completedAt": null, "dueDate": null, "prioritySortOrder": 0.0, "sortOrder": 0.0, "updatedAt":"2026-09-29T12:00:00.123Z",
+                "completedAt": null, "dueDate": null, "parent":null,"prioritySortOrder": 0.0, "sortOrder": 0.0, "updatedAt":"2026-09-29T12:00:00.123Z",
                 "assignee": null, "state": { "type": "unstarted" },
                 "team": { "id": "team-loo" },
                 "project": {
@@ -3023,7 +3029,7 @@ mod tests {
                     json!({ "data": { "issueUpdate": { "success":true,"issue": {
                         "id":"ENG-7","identifier":"ENG-7","title":"Fixture","description":null,
                         "branchName":null,"completedAt":null,"dueDate":null,"url":null,
-                        "updatedAt":"2026-10-11T12:00:00Z","prioritySortOrder":0.0,"sortOrder":0.0,
+                        "updatedAt":"2026-10-11T12:00:00Z","parent":null,"prioritySortOrder":0.0,"sortOrder":0.0,
                         "state":{"type":target},"assignee":null,"team":{"id":"team-eng"},"project":null
                     } } } }),
                 ),

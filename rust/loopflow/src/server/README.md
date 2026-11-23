@@ -533,7 +533,7 @@ the phone's `view.select` Task list and its creation destinations all read it.
 - A write uses the shared `Write` shape. `Write::run` calls the shared Rust
   function its CLI handler calls and returns the typed value; the CLI prints
   that value with `--json` and renders it as text otherwise. Nothing parses
-  standard output. `task.create {directory,request_id,title,request,wave,graph,session,run}`
+  standard output. `task.create {directory,request_id,title,request,wave,parent,graph,session,run}`
   files a Task or adopts the named Session; `run` admits its conversation,
   which makes the checkout and starts the Graph after the answer.
   A null `wave` selects the repository. Both paths return the same creation

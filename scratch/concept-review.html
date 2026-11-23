@@ -1,8 +1,5 @@
 <!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<title>LOO-1002 concept review: waking an idle work session</title>
+<html lang="en"><head><meta charset="utf-8"><title>LOO-1002 concept review: waking an idle work session</title>
 <style>
   :root { color-scheme: light dark; --fg:#1d1f23; --bg:#fbfaf7; --muted:#6a6f78; --line:#dcd8cf;
     --yes:#2f7d4f; --no:#b2452f; --prop:#2f5fb2; --card:#f2efe8; }
@@ -27,95 +24,57 @@
   ol li { margin-bottom: .55rem; }
   @media (max-width: 720px) { .cols { grid-template-columns: 1fr; } }
 </style>
-</head>
-<body>
+</head><body>
 <h1>Waking an idle work session: do the concepts line up?</h1>
-<p class="lede">LOO-1002, reviewed before anything is built, against <code>scratch/plan.md</code> at 8fc8bdf64c.
-Area taken: how a steer or Task update reaches a work session that has finished its turn, for all five harnesses:
-the idle recording, the store's wake address, the server's watcher and each provider's reach. That is the whole
-"hears a steer while idle" row, not only the three new harnesses, because the new reaches reuse the Claude/Codex
-model and should fit it rather than extend it.</p>
+<p class="lede">LOO-1002, reviewed after the build, against <code>origin/main</code> with the whole branch in it (HEAD <code>b497be0e89</code>). Replaces the pre-build review of <code>8fc8bdf64c</code>.</p>
+
+<p><b>Area taken:</b> how a steer or Task update reaches a work session that finished its turn, for all five harnesses: the idle reading, the store's wake address, the server's watcher and each provider's reach. OpenCode and Pi came from main (#1988); this branch adds Antigravity and the minute sweep. Reviewed as one area because the Antigravity reach should fit the model the other four share, not extend it.</p>
 
 <h2>The interaction</h2>
-<p>You run <code>lf steer LOO-12 'use the new API'</code>. The work session for LOO-12 sits idle in an OpenCode TUI.
-Within a second a turn starts there showing lf's message, and <code>lf session steers</code> says delivered.
-If the wake fails (provider refused, socket gone, <code>agy</code> changed its RPC), nothing breaks: the steer waits and
-the session hears it at its next boundary, as it does today. A person learns one thing — <em>an idle session hears
-lf</em> — and nothing about sockets, tokens or providers.</p>
+<p><code>lf steer LOO-x 'reply with exactly WOKEN'</code>. The <code>agy</code> TUI for LOO-x sits idle. Within a second it shows lf's message as a prompt and answers. If <code>agy</code> was quit and reopened, nothing reports it, so the launch records it idle and the next sweep (at most a minute) sends what waited. If the RPC fails, the steer's claim lapses in 15 s and it arrives at the next boundary; <code>logs/lf.log</code> says why. A person learns one thing: an idle work session hears lf.</p>
 
 <h2>Product concepts and code concepts</h2>
 <table>
 <tr><th>What a person knows</th><th>Behind it in code</th><th>Lines up?</th><th>Where it doesn't</th></tr>
-<tr><td>A steer / Task update</td><td><code>steers</code>, <code>steer::claim</code>, <code>steer_delivered</code></td><td class="yes">yes</td><td></td></tr>
-<tr><td>The work session is idle</td><td><code>session_activity.yielded</code>, written by the Stop boundary (<code>record_native_turn</code>) or by Pi's event facts</td>
-  <td class="no">no, for OpenCode</td><td>OpenCode's turn end sends <code>stop {}</code>, so <code>boundary.rs</code> records no turn: an idle OpenCode session never reads as idle. The plan fixes it. Pi records idle from <code>agent_settled</code> through <code>AvailabilityReading</code>; its <code>stop {}</code> is harmless and stays.</td></tr>
-<tr><td>"lf can reach it" (implicit)</td><td><code>agent_sessions.agent_inbox</code> + <code>agent_endpoint</code> → <code>IdleReach</code></td>
-  <td class="no">no</td><td>One idea, "where this idle conversation takes a message", is documented as Claude-only (<code>record_agent_inbox</code>: "an idle Claude conversation… the inbox key file its hook found") and decoded as "endpoint means Codex, else Claude". The plan widens it per provider — right — but leaves the docs saying Claude.</td></tr>
-<tr><td>A wake</td><td><code>server::wake::wake</code>: connect, claim, send, <code>record_woken</code>, <code>delivered</code></td><td class="yes">yes</td><td>One owner. New reaches add a send arm, not a second watcher.</td></tr>
-<tr><td>Delivered vs waiting</td><td><code>steer_delivered.delivered_at</code></td><td class="yes">yes</td><td>Plugin reach is better than Claude's: it answers <code>accepted</code>/<code>error</code>, so a refusal leaves the claim to lapse.</td></tr>
-<tr><td>lf's message, not mine</td><td>Pi <code>customType: loopflow-steer</code>; OpenCode <code>session.synthetic</code>; Antigravity <code>SendUserCascadeMessage</code></td>
-  <td class="no">partly</td><td>Antigravity renders it as a typed prompt. Accepted cost: <code>agy</code> offers no other idle entry (questions.md).</td></tr>
-<tr><td>(nothing)</td><td>Antigravity wake file <code>{log, token}</code> + an env var + a hook change</td>
-  <td class="no">no</td><td>The biggest mismatch, below.</td></tr>
+<tr><td>A steer / Task update</td><td><code>steers</code>, <code>steer::claim</code>, <code>steer::delivered</code></td><td class="yes">yes</td><td></td></tr>
+<tr><td>The work session is idle</td><td><code>session_activity.yielded</code>: turn boundaries, plus <code>record_opened_idle</code> for a provider that has run no turn</td><td class="yes">yes</td><td>One writer for "opened idle", shared by a hook naming its inbox and a launch recording one. Before this branch it was inline SQL in one caller.</td></tr>
+<tr><td>A wake</td><td><code>server::wake::wake</code>: find reach, claim, send, <code>record_woken</code>, delivered</td><td class="yes">yes</td><td>Antigravity is one more <code>Reach</code> arm, no second watcher.</td></tr>
+<tr><td>"lf comes back to it" (sweep)</td><td><code>Watcher::swept</code>, 60 s <code>UNSIGNALLED</code></td><td class="yes">yes</td><td>The old 60 s fallback only re-read revisions; now it also wakes. One clock covers a missed checkpoint, sleep, a reopened <code>agy</code> and a failed wake. No per-Session clock.</td></tr>
+<tr><td>(implicit) where lf reaches it</td><td><code>agent_endpoint</code> (Codex), <code>agent_inbox</code> (Claude key <i>or</i> <code>agy</code> wake file), <code>agent_socket</code> (OpenCode, Pi) → <code>IdleReach</code></td><td class="no">partly</td><td>One idea in three columns, and <code>agent_inbox</code> means two things decoded by <code>provider='agy'</code>. <code>IdleReach</code> names the four cases in one place, so the code reads right; the schema doesn't. Below.</td></tr>
+<tr><td>Who records the address</td><td>lf-made: launch (<code>record_agent_endpoint</code>, <code>record_launch_inbox</code>). Provider-made: boundary (<code>record_agent_inbox</code>, socket)</td><td class="yes">yes</td><td>The pre-build mismatch is fixed: <code>agy</code>'s hook no longer carries an address the launch made.</td></tr>
+<tr><td>lf's message, not mine</td><td><code>SendUserCascadeMessage</code></td><td class="no">accepted</td><td>Renders as a typed prompt; <code>agy</code> offers no other idle entry (questions.md).</td></tr>
 </table>
 
-<h2>Biggest mismatch: who reports the address</h2>
-<p>The store's wake address has two sources today, and they are honest about it:</p>
+<h2>Biggest mismatch: the wake address has three homes</h2>
 <div class="cols">
-  <div class="card"><h3>The provider makes it → a boundary reports it</h3>
-  Claude creates its inbox key; lf only finds it from a hook (<code>claude_inbox()</code>). The OpenCode/Pi plugin binds its
-  socket inside the provider process and reports it on each boundary. Reporting from inside is the only way lf learns these.</div>
-  <div class="card"><h3>lf makes it → the launch records it</h3>
-  Codex's app-server is spawned by lf; <code>codex.rs</code> calls <code>record_agent_endpoint</code> during <code>open()</code>.
-  No hook involved.</div>
+<div class="card"><h3>Existing</h3><pre>agent_endpoint  Codex app-server   (also read by
+                                    saved_session_connection)
+agent_inbox     Claude inbox key   | agy wake file
+                (by hook)          | (by launch, provider='agy')
+agent_socket    OpenCode / Pi socket (by boundary)</pre></div>
+<div class="card prop"><h3>Possible, <span class="tag">not this Task</span></h3><pre>agent_wake      one address
+agent_wake_kind codex | claude | agy | socket
+                written by whoever makes it</pre></div>
 </div>
-<p>The plan's Antigravity reach is the second kind wearing the first kind's route. lf creates the token, picks the log file and
-writes the wake file in <code>antigravity.rs open()</code> — then puts the file's path in an env var so <code>agy</code>'s hook
-can read it back and send it to the server as <code>inbox</code>, which the server stores. That's a round trip through the
-agent's environment to tell the store something the launch already knew.</p>
+<p>Why it stays: <code>agent_endpoint</code> is also Codex's resume connection, so it can't fold in without splitting that reader; <code>agent_socket</code> came from main a day ago; and a merged column is a staged migration (expand, 30 days, contract). The decode lives in one query and one enum, which is where a reader looks. The Antigravity arm sits between Codex and socket in the <code>match</code>; the <code>provider='agy'</code> CASE makes its column distinct, so no row can be misread as a Claude key. Recommendation: leave it; it is a separate outcome if a sixth harness arrives.</p>
 
-<div class="cols">
-<div><strong>Before (plan as written)</strong>
-<pre>antigravity open():  token, --log-file, write wake file
-                     <del>set LF_AGY_WAKE=&lt;file&gt; in child env</del>
-agy hook (every boundary):
-  <del>context.rs: inbox = env(LF_AGY_WAKE)</del>
-server boundary.rs:  record_agent_inbox(adapter, inbox)</pre></div>
-<div class="prop"><strong>After <span class="tag">proposed</span></strong>
-<pre>antigravity open():  token, --log-file, write wake file
-                     <ins>store.record_agent_inbox(attachment, file)</ins>
-                     (as codex.rs records agent_endpoint)
-agy hook:            unchanged
-server boundary.rs:  unchanged for agy</pre></div>
-</div>
-<p>Deletes the env var and the <code>context.rs</code> hook change; the address lives exactly as long as the AgentProcess that
-owns it (the bind already nulls <code>agent_inbox</code>, <code>processes.rs:579</code>). Counterexamples tried:
-<code>/resume</code> inside <code>agy</code> — same process, same server, thread follows via <code>hook_callback</code>, address unchanged ✓;
-<code>lf resume</code> — new AgentProcess, new launch, new file ✓; a released <code>lf</code> launch — no file, no row, next-turn only ✓;
-a hook that never fires (store down) — the hook route would leave no address, the launch route still has one ✓.</p>
-
-<h2>Smaller findings, written into the plan</h2>
+<h2>Smaller findings</h2>
 <ol>
-<li><strong>One concept, one description.</strong> <code>agent_inbox</code> is "where the conversation's own process takes a wake";
-<code>IdleReach</code>'s doc lists the four formats in one place and <code>record_agent_inbox</code>'s doc stops saying Claude.
-<code>agent_endpoint</code> stays Codex's app-server: <code>saved_session_connection</code> and <code>AfterStop</code> read it as one, so
-Antigravity must not go there.</li>
-<li><strong>Pi idle is already recorded</strong> through <code>agent_settled</code> → <code>AvailabilityReading</code>. The plan should say so, so the
-build fixes OpenCode's Stop only and doesn't add a second Pi idle writer.</li>
-<li><strong>OpenCode's typed prompt</strong> reports moment <code>tool</code> with <code>hook_event_name: "UserPromptSubmit"</code>: that pair is what
-<code>boundary.rs</code> maps to <code>yielded=false</code>.</li>
+<li><b>Antigravity claims before it connects.</b> <code>LanguageServer::find</code> reads files only; the network is first touched in <code>send</code>, after <code>claim</code>. The other reaches connect first so an unreachable conversation keeps its news. Cost here: a dead language server holds a 15 s claim, then the steer arrives at the next boundary. A typed prompt in that window gets it at the next tool. Nothing lost; not worth splitting a one-shot POST.</li>
+<li><b>A broken RPC logs once a minute</b> per idle <code>agy</code> conversation with news, now that the sweep retries. Bounded by news (none, no connect) and by the conversation going non-idle. Acceptable noise for an undocumented RPC that would otherwise fail silently.</li>
+<li><b>Launch fails if the wake can't be recorded.</b> <code>prepare_wake</code>'s <code>?</code> matches Codex's <code>record_agent_endpoint</code>, and a managed launch already requires the server. Consistent, so left.</li>
 </ol>
 
-<h2>What stays as planned</h2>
-<p>The watcher, claim/send/delivered order, one store column read by provider, the plugin wake socket with a real answer,
-Pi <code>followUp + triggerTurn</code>, OpenCode <code>synthetic/queue</code>, Antigravity over its loopback language server, the slice order
-(OpenCode end to end first, because the TUI rendering is the risk that could sink the approach).</p>
+<h2>What stays</h2>
+<p>Launch-recorded wake file (0600, beside the delivery), port read from <code>--log-file</code> at each wake, token only in the environment, the shared opened-idle writer, the sweep as the single clock, chats and batches never woken. Untested: a wake racing a typed prompt on <code>agy</code> (plan, Remaining 1).</p>
+
+<h2>Outcome</h2>
+<p>Nothing to change in this Task. The plan stands.</p>
 
 <h2>Questions</h2>
 <ol>
-<li>Antigravity's wake address: (a) recorded by the launch, as Codex's endpoint is <span class="tag">chosen</span>; (b) reported by its hook from an env var, as the kickoff planned.</li>
-<li>Antigravity shows lf's message as a typed prompt: (a) accept, the only idle entry <code>agy</code> has <span class="tag">chosen</span>; (b) leave Antigravity next-turn-only until it offers a non-user message.</li>
-<li>Pi's turn end <code>stop {}</code>: (a) leave it, idle comes from <code>agent_settled</code> <span class="tag">chosen</span>; (b) send a named Stop like every other harness and drop Pi's activity reading for yielded.</li>
+<li>The three-column wake address: (a) leave it, (b) file a Task for one <code>agent_wake</code> column with a kind.</li>
+<li>A failed <code>agy</code> wake retried every minute: (a) keep the warn each time, (b) note it once per changed failure, as recording gaps do.</li>
+<li>Antigravity's claim-before-connect: (a) accept the 15 s claim, (b) probe the port before claiming.</li>
 </ol>
-</body>
-</html>
+</body></html>

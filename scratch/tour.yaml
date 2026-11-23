@@ -1,21 +1,35 @@
-at: a6d432cc3452ff88699c7950bc4cacbedfcab223
+at: 53b444c70a06ab145c5a343fe6ab670a15b70f7d
 first:
   - path: docs/surfaces.md
     why: Where File and Start take the draft
+  - path: rust/loopflow/src/server/README.md
+    why: Creation selectors, refusals and receipt replay
+  - path: rust/loopflow/src/lf/commands/write.rs
+    why: Existing Wave IDs and legacy names on the wire
+  - path: rust/loopflow-execution/src/engine/creation.rs
+    why: Receipts take precedence over changed selections
+  - path: rust/loopflow-execution/src/ops/task.rs
+    why: Resolve the destination and capture the workflow
+  - path: rust/loopflow-storage/src/sqlite/children.rs
+    why: Recheck membership before committing admission
   - path: swift/LoopflowMac/Views/NewTaskSheet.swift
-    why: Editing, sending and correcting a refused draft
+    why: Edit the draft after a refusal
+  - path: swift/LoopflowMac/WorkModel.swift
+    why: Submit the selection and open the returned destination
   - path: swift/Loopflow/Services/CreationJournal.swift
     why: Which failures allow a fresh request
-  - path: swift/LoopflowMac/WorkModel.swift
-    why: Which reply can open which destination
   - path: swift/LoopflowMac/WorkProjection.swift
     why: Leaving the backlog releases its borrowed row
   - path: swift/LoopflowMac/Views/BacklogView.swift
     why: Selected rows supply the brief and its actions
+  - path: rust/loopflow/tests/task_create_tests.rs
+    why: Removal, replacement, rename and replay on one Machine
   - path: swift/LoopflowTests/NewTaskTests.swift
     why: File and Start through refusal and reconnect
   - path: swift/LoopflowTests/CreationSubmissionTests.swift
     why: Retirement and recovery on the original Machine
   - path: swift/LoopflowTests/WorkDestinationTests.swift
     why: Session installation and replies after navigation
-hide: []
+hide:
+  - path: tests/fixtures/dto/server_schema.json
+    why: Generated from the protocol and its fixtures

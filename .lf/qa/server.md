@@ -199,7 +199,7 @@ Session's Task is `agent_sessions.task_id`, a run's `graph_processes.task_id`
 (keyed by `lf_process_id`), a primary a `task_primary_sessions` row, and
 `tasks.issue_identifier` holds `lf-<uuid>` for a Task with no tracker. `lf
 session resume --prepare --json` prints more than one JSON document; read the
-first. A Working-board drag is `lf desktop dashboard move
+first. `lf session list` shows unfinished Sessions only: a prepared primary lists, a finished `lf -b default` row does not, even with `--headless`; read those in SQL. Its `--task` and `--wave` read `agent_sessions.task_id` (a Session under a Wave names the Wave or one of its Tasks), so they match `lf task show` after a move. `lf task show <id>` answers only from the Task's repository (elsewhere "is not registered", on the installed lf too). A Working-board drag is `lf desktop dashboard move
 working-tasks/task:<id> --destination task:<id>`, run from the repository; it
 is the only CLI that changes a Task's rank (`lf task move` changes membership
 or Machine), and `lf task list` and `lf task show` show the result, `lf task

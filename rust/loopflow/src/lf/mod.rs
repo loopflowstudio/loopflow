@@ -1702,7 +1702,7 @@ pub struct SessionListArgs {
     pub after: Option<String>,
     #[arg(long)]
     pub task: Option<String>,
-    /// Conversations attributed to this Wave or inside one of its Tasks' checkouts
+    /// Conversations attributed to this Wave or to one of its Tasks
     #[arg(long, id = "session_wave", value_name = "W")]
     pub wave: Option<String>,
     /// Current primary conversations; omit the value to include all three scopes

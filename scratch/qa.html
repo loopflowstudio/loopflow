@@ -1,61 +1,55 @@
 <!doctype html>
-<meta charset="utf-8">
-<title>LOO-937 QA</title>
+<html><head><meta charset="utf-8"><title>LOO-937 QA: the Session list reads the stored Task</title>
 <style>
-body{font:15px/1.5 -apple-system,system-ui,sans-serif;max-width:60rem;margin:2rem auto;padding:0 1rem;color:#1d1d1f}
-h1{font-size:1.6rem}h2{font-size:1.15rem;margin-top:2rem;border-top:1px solid #ddd;padding-top:1rem}
-table{border-collapse:collapse;margin:.6rem 0;font-size:13.5px}td,th{border:1px solid #ddd;padding:.25rem .55rem;text-align:left;vertical-align:top}
-th{background:#f5f5f7}code,pre{font:12.5px ui-monospace,Menlo,monospace}pre{background:#f5f5f7;padding:.6rem .8rem;overflow-x:auto}
-.bad{color:#b00020;font-weight:600}.ok{color:#1b7f3b;font-weight:600}
-</style>
-<h1>LOO-937 QA: one Git-root rule, on <code>be5169a4f</code></h1>
-<p>Branch <code>lf 0.16.0+be5169a4f</code> (debug) beside the installed <code>lf 0.16.0+5d5bf92c7</code> (this branch's base). Private homes under <code>/tmp/lf937g/{fr,base,mv}</code>, stand-in <code>claude</code>/<code>codex</code> that exit 1 (the Session row stays). This pass covers the Git-root rule (<code>f93814c6d0</code>) and the compress after it. The migration's SQL changed only in comments since the last pass (<code>a49184a28b</code>), so its numbers on a copy of the live store stand: 0.49 s, checks clean, 24,194 of 25,259 Sessions and 2,923 of 3,124 runs naming a Task after.</p>
+body{font:15px/1.5 -apple-system,system-ui,sans-serif;max-width:920px;margin:2em auto;padding:0 1em;color:#222}
+table{border-collapse:collapse;margin:.6em 0}td,th{border:1px solid #ccc;padding:.25em .6em;text-align:left;vertical-align:top}
+th{background:#f4f4f4}code,pre{font:13px ui-monospace,Menlo,monospace}pre{background:#f7f7f7;padding:.6em;overflow:auto}
+.ok{color:#176a2a}.bad{color:#a12}
+</style></head><body>
+<h1>LOO-937 QA: the Session list reads the stored Task, on ee3153cb1</h1>
+<p>Branch <code>lf 0.16.0+ee3153cb1</code> (debug) beside the installed <code>lf 0.16.0+5d5bf92c7</code> (base). Private homes under
+<code>/tmp/lf937s/{fr,up}</code>, stand-in <code>claude</code>/<code>codex</code> that exit 1. This pass covers what changed since the last one
+(<code>8e62c4f468</code>): <code>d19440e2b6</code> (a listed Session's Tasks are its <code>agent_sessions.task_id</code>; the <code>--wave</code> path clause gone) and the compress
+<code>ee3153cb1c</code> (a Task's Graphs and open Sessions read <code>task_id</code>). The Git-root rule, delivery and the migration were covered last pass and did not change.</p>
 
-<h2>1. Who a directory belongs to</h2>
-<pre>Tasks a (wt-a), b (wt-b), n (wt-a/nested, adopted with --worktree)
-wt-b/inner: a plain Git worktree inside b's checkout, no Task of its own</pre>
-<table><tr><th>where</th><th><code>-b graph qa</code> / <code>-b default hello</code></th><th>bare <code>lf resume --prepare</code></th><th><code>lf task status</code></th></tr>
-<tr><td>wt-a, wt-a/src/lib</td><td>a / a</td><td>a's primary</td><td>Task a</td></tr>
-<tr><td>wt-a/nested/x</td><td>n / n</td><td>n's primary</td><td>Task n</td></tr>
-<tr><td>wt-b/sub</td><td>b / b</td><td>b's primary</td><td>Task b</td></tr>
-<tr><td>wt-b/inner/y</td><td class="ok">none / none</td><td>"This worktree has no associated work conversation."</td><td class="ok">"Error: this checkout has no Task"</td></tr>
-<tr><td>repository root</td><td>none / none</td><td>the repository's conversation</td><td>"this checkout has no Task"</td></tr>
-</table>
-<p>The last pass's open item 2 is gone: in <code>wt-b/inner</code> every command gives the same answer. Read from <code>agent_sessions.task_id</code> and <code>graph_processes.task_id</code>, not from output.</p>
+<h2>1. Fresh home: one answer per Session</h2>
+<p>Repository with Wave <code>w</code>; Task a (Wave w) adopted at <code>repo/wt/a</code>, Task b (no Wave) at <code>repo/wt/b</code>. In each: <code>lf -b default hello</code>, <code>lf -b graph qa</code>,
+<code>lf session resume --prepare</code>; a repository primary at the root.</p>
+<table><tr><th>lf session list --all --headless --no-raw …</th><th>listed</th></tr>
+<tr><td><code>--task a</code></td><td>wt/a primary, tasks=[a], primary_scope=task</td></tr>
+<tr><td><code>--task b</code></td><td>wt/b primary, tasks=[b]</td></tr>
+<tr><td><code>--wave w</code></td><td>wt/a only</td></tr>
+<tr><td><code>--orphan</code></td><td>the repository primary only</td></tr>
+<tr><td><code>--primary</code></td><td>all three, scopes task, task, repository</td></tr></table>
+<p class="ok">Matches <code>agent_sessions.task_id</code> in SQL row for row.</p>
 
-<h2>2. Acting as another Task (<code>LF_AS</code>)</h2>
-<table><tr><th>where, with <code>LF_AS=task:&lt;a&gt;</code></th><th>run</th><th>Session</th></tr>
-<tr><td>wt-b/sub (b's checkout)</td><td>b</td><td>b (<code>checkout</code>)</td></tr>
-<tr><td>wt-b/inner/y</td><td>a</td><td>a (<code>declared</code>), with <code>-a claude</code>; see open item 1</td></tr>
-<tr><td>repository root</td><td>a</td><td>a (<code>declared</code>)</td></tr>
-</table>
-<p>The owner wins over the declaration, as the plan says. A bare id (<code>LF_AS=task_…</code>) is "invalid Work selector" outside a checkout and ignored inside one, because the checkout is read first.</p>
+<h2>2. Repository moved, its old path reused</h2>
+<p><code>mv repo moved</code>, <code>git worktree repair</code>, <code>lf task list</code> from the new path; <code>git clone moved repo</code>, <code>git worktree add repo/wt/a</code>, adopted as Task c, its own hello and primary.</p>
+<table><tr><th>read</th><th>answer</th></tr>
+<tr><td><code>session list --task a</code></td><td>moved/wt/a only</td></tr>
+<tr><td><code>session list --task c</code></td><td>repo/wt/a (the reused path) only, <code>workspace.task_id</code> = c</td></tr>
+<tr><td><code>session list --wave w</code></td><td>moved/wt/a only; Task c (no Wave) at a's old path does not join</td></tr>
+<tr><td><code>task show a</code> / <code>b</code> / <code>c</code></td><td>2 Sessions, 1 run / 2, 1 / 2, 0</td></tr>
+<tr><td>a taskless <code>-b default</code> Session left at <code>repo/wt/a</code> before c was adopted</td><td>stays taskless (no adoption)</td></tr></table>
+<p>Served <code>session.list</code> with <code>task</code> set, over a private <code>lf server run</code> socket as Desktop sends it: same rows as the CLI for a, b and c.</p>
 
-<h2>3. Delivering from the nested worktree</h2>
-<p><code>lf commit -m … --json</code> in wt-b/inner/y: <code>{"branch":"ti","committed":true}</code>. In wt-b/sub: <code>{"branch":"tb","committed":true}</code>; wt-b's status stays clean, the nested worktree not staged. Last pass's regression (outer Task's branch check refusing) stays fixed.</p>
+<h2>3. Returning user: a home the installed lf built</h2>
+<p>Same setup run by base, plus a headless Session in <code>wt/a/sub</code>; then each binary reads it, base first.</p>
+<table><tr><th>read</th><th>base</th><th>branch (after its migration)</th></tr>
+<tr><td><code>--task a</code>, <code>--task b</code>, <code>--wave w</code>, <code>--orphan</code></td><td colspan="2">identical rows</td></tr>
+<tr><td><code>primary_scope</code> of the Task primaries</td><td>null</td><td><code>task</code> (derived from <code>task_primary_sessions</code>)</td></tr>
+<tr><td><code>task show a</code> / <code>b</code></td><td colspan="2">3 Sessions, 1 run / 2, 1</td></tr></table>
 
-<h2>4. Repository move and path reuse</h2>
-<pre>repo/wt/m adopted as Task m (a worktree inside the repository's own worktree)
-run in wt/m · mv repo moved · git worktree repair · run in moved/wt/m/deep
-git clone moved repo · mkdir repo/wt/m · run there</pre>
-<table><tr><th>run</th><th>Task</th></tr>
-<tr><td>repo/wt/m, before the move</td><td>m</td></tr>
-<tr><td>moved/wt/m/deep</td><td>m (<code>lf task status</code> there: Task m)</td></tr>
-<tr><td>the clone's repo/wt/m (Git root <code>repo</code>)</td><td>none</td></tr>
-</table>
-<p><code>task_checkouts</code> holds only <code>moved/wt/m</code>; <code>lf task list</code> from the new path lists m.</p>
-
-<h2>5. What agents are told</h2>
-<p>LOOPFLOW.md's child-agent paragraph now sends a separate checkout to <code>lf wt create &lt;name&gt;</code>. From wt-a/src it made <code>repo.side</code> on <code>qa/side</code>, beside the repository, branched from <code>main</code>, not from the Task's branch.</p>
+<h2>Fixed here</h2>
+<ul><li><code>lf session list --help</code> said <code>--wave</code> lists conversations "inside one of its Tasks' checkouts"; <code>d19440e2b6</code> removed that path clause. It now says "attributed to this Wave or to one of its Tasks".</li>
+<li><code>.lf/qa/server.md</code>: what <code>lf session list</code> lists (unfinished only) and that <code>lf task show</code> answers only from the Task's repository.</li></ul>
 
 <h2>Where it stands</h2>
-<p><b>Works:</b> one answer per directory for launches, resume, status and commit; adopted nested checkouts own themselves; subdirectories belong to their checkout; declared Tasks apply only where no checkout owns the directory; a moved repository keeps its Task's runs and a reused path takes none.</p>
-<p><b>Fixed here:</b> nothing; the QA note in <code>.lf/qa/server.md</code> described the old split and now describes this rule and the <code>LF_AS=task:&lt;id&gt;</code> spelling.</p>
-<p><b>Not reached:</b> <code>lf land</code> in a nested worktree end to end (the fake <code>gh</code> has no <code>pr merge</code>; CI's <code>land_tests</code>); Desktop UI (no display); Linear-backed rank.</p>
-<p><b>Still open, worst first:</b></p>
+<p class="ok">Works: <code>lf session list</code> <code>--task</code>/<code>--wave</code>/<code>--orphan</code>/<code>--primary</code>, its served read and <code>lf task show</code> give one answer per Session, through a move and a reused path, on fresh and upgraded homes.</p>
+<p>Not reached: Desktop's <code>names(task:)</code> UI (no display; the served read it decodes was checked); finished headless Sessions, which <code>session list</code> never shows (checked in SQL).</p>
+<p>Still open, worst first:</p>
 <ol>
-<li><code>LF_AS=task:&lt;id&gt; lf -b default …</code> in a plain worktree nested in another Task's checkout fails "No agent selected" though the worktree's <code>.lf/config.yaml</code> sets <code>default_agent</code>. The installed lf (base) fails the same way; not this change.</li>
-<li>A drag made by the installed lf is invisible to the branch (and the reverse) until every lf on the Machine is this build. Known, questions.md.</li>
-<li><code>lf wt create</code> branches from <code>main</code>, so a child agent sent there by LOOPFLOW.md does not start from the Task's work. The text says "a separate checkout", which is accurate; whether it should start from the Task's branch is a product call.</li>
-<li>Plan slice 5 still says the primary is <code>agent_sessions.primary_scope='task'</code>; <code>8cc3ba3f9c</code> dropped that and the store keeps <code>task_primary_sessions</code> (schema CHECK allows only <code>repository</code>, <code>wave</code>). Plan drift for realign.</li>
+<li><code>lf task show &lt;id&gt;</code> from another repository's checkout: "Task … is not registered". Base does the same; not this change.</li>
+<li>From last pass, unchanged: <code>LF_AS=task:&lt;id&gt; lf -b default</code> in a plain worktree nested in another Task's checkout fails "No agent selected" (base too); a drag by the installed lf is invisible to the branch until every lf is this build (questions.md); <code>lf wt create</code> branches from <code>main</code>.</li>
 </ol>
+</body></html>

@@ -1,4 +1,4 @@
-at: 853cbcc521eebdb2f59c10c7ced33b7c4b154597
+at: 236f78982201f5190f3fafdfeed092db072e829e
 first:
   - path: docs/surfaces.md
     why: Follow a setting from search through Undo
@@ -6,6 +6,12 @@ first:
     why: Theme selection and staged color edits
   - path: scratch/plan.md
     why: Design choices, measurements and remaining visual checks
+  - path: swift/LoopflowMac/Views/SettingsWindow.swift
+    why: See the sidebar and its two independent destinations
+  - path: swift/LoopflowMac/Views/ScopedSettings.swift
+    why: Find each preference and its configuration file
+  - path: swift/LoopflowMac/Views/SettingsSearch.swift
+    why: Follow personal and project results to their controls
   - path: rust/loopflow-execution/src/engine/config/scope.rs
     why: Effective values beside each editable declaration
   - path: swift/Loopflow/Models/ConfigurationEdit.swift
@@ -20,16 +26,10 @@ first:
     why: Review, install and recover a declaration move
   - path: rust/loopflow-execution/src/observe.rs
     why: Publish writes to live settings readers
-  - path: swift/LoopflowMac/Views/SettingsWindow.swift
-    why: Open panes and reveal search results
   - path: swift/LoopflowMac/Services/ScopedSettingsModel.swift
     why: Observe the selected work and find editable files
-  - path: swift/LoopflowMac/Views/ScopedSettings.swift
-    why: Group controls and identify each declaration’s editor
   - path: swift/LoopflowMac/Views/ScopedSettingRow.swift
     why: Preview a draft against its original declaration
-  - path: swift/LoopflowMac/Views/SettingsSearch.swift
-    why: Edit the same declaration from search
   - path: swift/LoopflowMac/Design/AppearanceStore.swift
     why: Apply themes and stage color edits
   - path: swift/LoopflowMac/Services/SettingsUndo.swift

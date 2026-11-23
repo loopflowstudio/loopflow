@@ -1,5 +1,6 @@
-import { statSync as markerStamp } from "node:fs";
-import { createConnection as connectMachineServer } from "node:net";
+import { randomBytes as wakeName } from "node:crypto";
+import { statSync as markerStamp, mkdirSync as makeWakeDirectory, unlinkSync as removeWakeSocket } from "node:fs";
+import { createConnection as connectMachineServer, createServer as listenForWakes } from "node:net";
 
 // Every launch reads its own news: its unread steers and what changed on its
 // Tasks. It compares the markers a steer for it touches against its last
@@ -28,14 +29,60 @@ function ownNews(callback, log, args = [], options = {}) {
   }
 }
 
+// Where the Machine server wakes this conversation once it is idle: a socket
+// in the provider's own process, under the Machine's wake directory, reported
+// as `inbox` on every boundary once it listens. The server writes one line,
+// {"type":"steers","text":…}; `take(text)` hands it to the provider, and the
+// answer, {"type":"accepted"} or {"type":"error","message":…}, says whether
+// the provider took it. Nothing here throws: a socket that cannot listen is a
+// log line, and steers wait for the conversation's next boundary.
+function wakeSocket(take, log) {
+  const wake = { inbox: null };
+  const path = `${spec.wake}/${wakeName(8).toString("hex")}.sock`;
+  const unavailable = (error) => log(`wake socket unavailable: ${error.message.split("\n")[0]}; steers wait for the next boundary`);
+  try { makeWakeDirectory(spec.wake, { recursive: true, mode: 0o700 }); } catch (error) {
+    unavailable(error);
+    return wake;
+  }
+  const listener = listenForWakes((socket) => {
+    socket.setEncoding("utf8");
+    socket.on("error", () => {});
+    let buffer = "";
+    const read = async (chunk) => {
+      buffer += chunk;
+      const end = buffer.indexOf("\n");
+      if (end < 0) return;
+      socket.off("data", read);
+      try {
+        const message = JSON.parse(buffer.slice(0, end));
+        if (message.type !== "steers") throw new Error(`unknown wake ${message.type}`);
+        await take(message.text);
+        socket.end(`${JSON.stringify({ type: "accepted" })}\n`);
+      } catch (error) {
+        log(`wake refused: ${error.message.split("\n")[0]}; steers wait for the next boundary`);
+        socket.end(`${JSON.stringify({ type: "error", message: error.message })}\n`);
+      }
+    };
+    socket.on("data", read);
+  });
+  listener.on("error", unavailable);
+  listener.listen(path, () => { wake.inbox = path; });
+  // The provider's exit never waits on this socket, and leaves no file behind.
+  listener.unref();
+  process.once("exit", () => { try { removeWakeSocket(path); } catch { /* already gone */ } });
+  return wake;
+}
+
 // A managed launch reports each boundary for the server to record: one
 // machine.sock connection, as a hook makes one request: connect, the hello a
 // hook sends, one session.boundary, close. The server's connection slot is
 // back as soon as the answer arrives. Nothing here throws: an unanswered
 // boundary is a recording gap, one `recording gap` line per changed failure
-// through `log`, and the next boundary sends the open gap.
-function machineServer(delivery, log) {
+// through `log`, and the next boundary sends the open gap. `take` starts a
+// turn with lf's message when the server wakes the idle conversation.
+function machineServer(delivery, log, take) {
   const adapter = process.env.LF_PROVIDER_CONTEXT ? JSON.parse(process.env.LF_PROVIDER_CONTEXT) : null;
+  const wake = adapter ? wakeSocket(take, log) : { inbox: null };
   let queue = Promise.resolve();
   let gap;
 
@@ -84,7 +131,7 @@ function machineServer(delivery, log) {
     if (skippable && gap) return undefined;
     try {
       const answer = await ask({ kind: "session.boundary", moment, delivery, adapter, callback,
-        gap: gap ? { first: gap.first, last: gap.last } : null, printed: [], inbox: null });
+        gap: gap ? { first: gap.first, last: gap.last } : null, printed: [], inbox: wake.inbox });
       if (gap) log(`recording gap closed (${gap.message}); lf records from here`);
       gap = undefined;
       return answer;

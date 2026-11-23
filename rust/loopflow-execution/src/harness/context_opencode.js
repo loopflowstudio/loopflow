@@ -30,8 +30,13 @@ export default {
       console.error(`recording gap closed (context ${gap}); lf serves context from here`);
       gap = undefined;
     };
-    // A launch that reports no turns opens no connection and reports no turn end.
-    const server = spec.turns ? machineServer(delivery, (line) => console.error(line)) : undefined;
+    // A launch that reports no turns opens no connection, reports no turn end
+    // and is never woken. A wake is lf's message, queued behind a running turn.
+    const wake = async (text) => {
+      if (!owner) throw new Error("OpenCode has no conversation yet");
+      await session.synthetic({ sessionID: owner, text, description: "Loopflow", delivery: "queue" });
+    };
+    const server = spec.turns ? machineServer(delivery, (line) => console.error(line), wake) : undefined;
     const lf = { env: { ...process.env, LF_HOME: spec.delivery.home }, cwd: spec.delivery.repo };
     // The block comes from checkout files, rendered without the launch's
     // capability; the Session's news is read apart from it.
@@ -40,7 +45,14 @@ export default {
       ["__context-block", "--delivery", delivery, "--moment", moment], {
         env: renderEnv, cwd: lf.cwd, input: JSON.stringify(callback), encoding: "utf8", timeout: 30000,
       })).hookSpecificOutput.additionalContext;
-    await session.hook("prompt", (input) => { owner ??= input.sessionID; });
+    // A typed prompt in the selected conversation runs a turn. The first one
+    // selects it at its first request, so only later ones report.
+    await session.hook("prompt", (input) => {
+      const selected = owner !== undefined;
+      owner ??= input.sessionID;
+      if (!selected || input.sessionID !== owner) return;
+      server?.boundary("tool", { session_id: owner, hook_event_name: "UserPromptSubmit" });
+    });
     await session.hook("compaction", (input) => { if (input.sessionID === owner) refresh = "compact"; });
     await session.hook("context", async (input) => {
       owner ??= input.sessionID;
@@ -68,7 +80,7 @@ export default {
       for await (const item of event.subscribe({ signal: controller.signal })) {
         if (item.type !== "session.execution.succeeded" || item.data.sessionID !== owner) continue;
         // An unanswered turn end leaves planning pending until a later boundary.
-        await server.boundary("stop", {});
+        await server.boundary("stop", { session_id: owner, hook_event_name: "Stop" });
       }
     })().catch((error) => { if (!controller.signal.aborted) throw error; });
     return async () => { controller.abort(); await watching; };

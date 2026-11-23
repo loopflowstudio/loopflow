@@ -38,12 +38,17 @@ pub struct IdleConversation {
     pub reach: IdleReach,
 }
 
+/// How the Machine server starts a turn in an idle conversation, chosen by
+/// its provider from `agent_inbox` (Codex: `agent_endpoint`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum IdleReach {
     /// The inbox key file Claude publishes beside its session record.
     Claude(std::path::PathBuf),
     /// The Session's private app-server.
     Codex(std::path::PathBuf),
+    /// The wake socket an OpenCode plugin or Pi extension listens on inside
+    /// the provider's process.
+    Plugin(std::path::PathBuf),
 }
 
 impl std::fmt::Debug for SteerAdapter {

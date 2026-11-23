@@ -99,7 +99,8 @@ pub(crate) fn add_opencode_context(
     kind: LaunchKind,
 ) -> Result<()> {
     let spec = json!({"executable":crate::os_process::resolve_lf_binary()?, "delivery":context, "instructions":instructions, "turns":kind.is_managed(),
-        "steers":loopflow_storage::steer_markers::latest_marker(&context.home), "server":server_spec("lf opencode plugin")});
+        "steers":loopflow_storage::steer_markers::latest_marker(&context.home), "server":server_spec("lf opencode plugin"),
+        "wake":context.home.join("wake")});
     let delivery = write_prompt_log(
         &context.repo,
         &serde_json::to_string(context)?,
@@ -145,7 +146,7 @@ pub(crate) fn pi_args(
         json!({"native":native, "turns":kind.is_managed(), "executable":crate::os_process::resolve_lf_binary()?,
             "log":home.join("logs").join("pi-extension.log"), "server":server_spec("lf pi extension"),
             "steers":loopflow_storage::steer_markers::latest_marker(&home),
-            "bashGuard":pi_bash_guard()}),
+            "wake":home.join("wake"), "bashGuard":pi_bash_guard()}),
         include_str!("context_pi.mjs"),
         include_str!("server_connection.js")
     );
@@ -394,8 +395,9 @@ mod tests {
 
     /// A stand-in Machine server on the plugin's socket: it welcomes every
     /// `hello` (a frozen one never does), answers each boundary, and keeps
-    /// each hello and request in `server.json`.
-    const STAND_IN_SERVER: &str = r#"import { createServer } from 'node:net';
+    /// each hello and request in `server.json`. `wakeOnce` wakes the plugin
+    /// as the server does: one line to its socket, one answer back.
+    const STAND_IN_SERVER: &str = r#"import { connect, createServer } from 'node:net';
 import { writeFileSync } from 'node:fs';
 const seen = { hellos: [], requests: [] };
 const keep = () => writeFileSync(SEEN, JSON.stringify(seen));
@@ -423,6 +425,15 @@ const server = createServer((socket) => {
   });
 });
 await new Promise((resolve) => server.listen(SOCKET, resolve));
+const wakeOnce = (inbox, text) => new Promise((resolve, reject) => {
+  const socket = connect(inbox);
+  let answer = '';
+  socket.setEncoding('utf8');
+  socket.on('error', reject);
+  socket.on('data', (chunk) => { answer += chunk; });
+  socket.on('end', () => resolve(JSON.parse(answer)));
+  socket.write(JSON.stringify({ type: 'steers', text }) + '\n');
+});
 "#;
 
     struct Probe {
@@ -482,7 +493,9 @@ await new Promise((resolve) => server.listen(SOCKET, resolve));
     }
 
     /// One conversation through the OpenCode plugin: a prompt, three model
-    /// requests with a compaction before the third, then the turn's end.
+    /// requests with a compaction before the third, then the turn's end. A
+    /// managed one is then woken twice, once refused, and a typed prompt
+    /// follows.
     fn opencode_turn(kind: LaunchKind) -> Probe {
         let turns = kind.is_managed();
         let _lock = loopflow_test_support::env_lock().lock().unwrap();
@@ -512,10 +525,17 @@ await new Promise((resolve) => server.listen(SOCKET, resolve));
                 r#"import assert from 'node:assert/strict';
 import plugin from {plugin};
 const hooks = {{}};
+const synthetic = [];
 let end;
 const ended = new Promise((resolve) => {{ end = resolve; }});
 const close = await plugin.setup({{
-  session: {{ hook: async (name, callback) => {{ hooks[name] = callback; }} }},
+  session: {{
+    hook: async (name, callback) => {{ hooks[name] = callback; }},
+    synthetic: async (input) => {{
+      if (input.text === 'refused') throw new Error('Session.NotFoundError');
+      synthetic.push(input);
+    }},
+  }},
   event: {{ subscribe: async function* () {{
     await ended;
     yield {{ type: 'session.execution.succeeded', data: {{ sessionID: 'native' }} }};
@@ -534,6 +554,16 @@ for (const compact of [false, false, true]) {{
 assert.deepEqual(texts.map((text) => text[1]), ['STEER BLOCK', 'STEER BLOCK', 'STEER BLOCK']);
 end();
 await new Promise((resolve) => setTimeout(resolve, 200));
+if ({turns}) {{
+  const inbox = seen.requests.at(-1).inbox;
+  assert.deepEqual(await wakeOnce(inbox, 'use the new API'), {{ type: 'accepted' }});
+  assert.deepEqual(synthetic, [{{ sessionID: 'native', text: 'use the new API',
+    description: 'Loopflow', delivery: 'queue' }}]);
+  assert.equal((await wakeOnce(inbox, 'refused')).type, 'error');
+  // The typed prompt's report goes out before the next request's.
+  await hooks.prompt({{ sessionID: 'native' }});
+  await hooks.context({{ sessionID: 'native', system: [] }});
+}}
 await close();
 "#,
                 plugin = serde_json::to_string(&format!("{plugin}/index.js")).unwrap(),
@@ -550,10 +580,26 @@ await close();
             .map(|call| call.rsplit(' ').next().unwrap())
             .collect();
         assert_eq!(calls, ["start", "steer", "compact"], "{}", managed.calls);
-        assert_eq!(moments(&managed), ["start", "tool", "compact", "stop"]);
+        assert_eq!(
+            moments(&managed),
+            ["start", "tool", "compact", "stop", "tool", "tool"]
+        );
+        let requests = managed.server["requests"].as_array().unwrap();
+        // The turn end and the typed prompt name the conversation, and each
+        // boundary says where the plugin takes a wake.
+        assert_eq!(
+            requests[3]["callback"],
+            serde_json::json!({"session_id":"native","hook_event_name":"Stop"})
+        );
+        assert_eq!(
+            requests[4]["callback"],
+            serde_json::json!({"session_id":"native","hook_event_name":"UserPromptSubmit"})
+        );
+        let inbox = requests[3]["inbox"].as_str().unwrap();
+        assert!(inbox.ends_with(".sock"), "{inbox}");
         // One connection per boundary, each opened with a hook's hello.
         let hellos = managed.server["hellos"].as_array().unwrap();
-        assert_eq!(hellos.len(), 4, "{}", managed.server);
+        assert_eq!(hellos.len(), 6, "{}", managed.server);
         assert!(hellos
             .iter()
             .all(|hello| hello["client"]["kind"] == "plugin"));
@@ -627,7 +673,10 @@ const fire = async (name, event) => {{
 const pi = {{
   on: (name, handler) => {{ (handlers[name] ??= []).push(handler); }},
   getSettings: () => ({{}}), getAllTools: () => [], getActiveTools: () => [],
-  sendMessage: (message, options) => {{ steers.push([message.content, options.deliverAs]); }},
+  sendMessage: (message, options) => {{
+    assert.equal(message.customType, 'loopflow-steer');
+    steers.push([message.content, options.deliverAs, options.triggerTurn ?? false]);
+  }},
 }};
 const ctx = {{ cwd: '/', sessionManager: {{ getSessionFile: () => '/pi/session.jsonl' }},
   abort() {{}}, shutdown() {{}} }};
@@ -645,9 +694,15 @@ for (const tool of ['one', 'two']) {{
   await fire('tool_execution_end', {{ type: 'tool_execution_end', toolCallId: tool }});
 }}
 await fire('agent_settled', {{ type: 'agent_settled' }});
-await fire('session_shutdown', {{}});
 // One steer check finds the launch has never checked; later ones find nothing newer.
-assert.deepEqual(steers, [["STEER ", "steer"]]);
+assert.deepEqual(steers, [["STEER ", "steer", false]]);
+// Idle, a wake starts a turn with lf's message.
+const inbox = seen.requests.at(-1)?.inbox;
+if (inbox) {{
+  assert.deepEqual(await wakeOnce(inbox, 'use the new API'), {{ type: 'accepted' }});
+  assert.deepEqual(steers.at(-1), ['use the new API', 'followUp', true]);
+}}
+await fire('session_shutdown', {{}});
 "#,
                 extension = serde_json::to_string(&args[1]).unwrap(),
                 ran =
@@ -688,6 +743,12 @@ assert.deepEqual(steers, [["STEER ", "steer"]]);
             ]
         );
         assert_eq!(requests[2]["callback"]["sessionFile"], "/pi/session.jsonl");
+        assert!(
+            requests.last().unwrap()["inbox"]
+                .as_str()
+                .is_some_and(|inbox| inbox.ends_with(".sock")),
+            "the extension reports where it takes a wake"
+        );
     }
 
     #[test]

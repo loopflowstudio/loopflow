@@ -1,5 +1,5 @@
 //! Context callbacks carry provider authority, independently of the attached client.
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 
@@ -226,8 +226,10 @@ impl SqliteStore {
         })
     }
 
-    /// Save where an idle Claude conversation takes messages: the inbox key
-    /// file its hook found. Written only when it changes.
+    /// Save where the conversation's own process takes a wake once it is
+    /// idle, as its hook or plugin reports it: Claude's inbox key file, or an
+    /// OpenCode plugin's or Pi extension's wake socket. Written only when it
+    /// changes.
     pub fn record_agent_inbox(&self, adapter: &SteerAdapter, key: &Path) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
@@ -254,8 +256,7 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut statement = conn.prepare(
             "SELECT s.id,s.agent_process_id,a.capability,s.provider_thread,s.cwd,
-                CASE WHEN s.provider='codex' THEN s.agent_endpoint END,s.agent_inbox,
-                s.agent_pid,s.agent_os_started_at
+                s.provider,s.agent_endpoint,s.agent_inbox,s.agent_pid,s.agent_os_started_at
              FROM agent_sessions s INDEXED BY agent_sessions_unended_agent
              JOIN steer_adapters a ON a.agent_process_id=s.agent_process_id
              JOIN session_activity act ON act.session_id=s.id AND act.agent_process_id=s.agent_process_id
@@ -265,13 +266,21 @@ impl SqliteStore {
                AND (?1 IS NULL OR s.id=?1)",
         )?;
         let rows = statement.query_map([session], |row| {
-            let reach = match row.get::<_, Option<String>>(5)? {
-                Some(endpoint) => IdleReach::Codex(endpoint.into()),
-                None => IdleReach::Claude(row.get::<_, String>(6)?.into()),
+            let path = |column: usize| -> rusqlite::Result<Option<PathBuf>> {
+                Ok(row.get::<_, Option<String>>(column)?.map(PathBuf::from))
+            };
+            let reach = match row.get::<_, Option<String>>(5)?.as_deref() {
+                Some("codex") => path(6)?.map(IdleReach::Codex),
+                Some("claude") => path(7)?.map(IdleReach::Claude),
+                Some("opencode" | "pi") => path(7)?.map(IdleReach::Plugin),
+                _ => None,
+            };
+            let Some(reach) = reach else {
+                return Ok(None);
             };
             let identity = row
-                .get::<_, Option<u32>>(7)?
-                .zip(row.get::<_, Option<i64>>(8)?);
+                .get::<_, Option<u32>>(8)?
+                .zip(row.get::<_, Option<i64>>(9)?);
             let conversation = IdleConversation {
                 adapter: SteerAdapter {
                     session: row.get(0)?,
@@ -282,12 +291,14 @@ impl SqliteStore {
                 cwd: row.get::<_, String>(4)?.into(),
                 reach,
             };
-            Ok(IdleCandidate {
+            Ok(Some(IdleCandidate {
                 conversation,
                 identity,
-            })
+            }))
         })?;
-        Ok(rows.collect::<Result<_, _>>()?)
+        Ok(rows
+            .filter_map(Result::transpose)
+            .collect::<Result<_, _>>()?)
     }
 
     /// A woken conversation is in a turn until its next Stop says otherwise.

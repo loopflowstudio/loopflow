@@ -76,9 +76,8 @@ pub(super) fn answer(
         };
         return Ok((nothing, Some(after)));
     };
-    // OpenCode's turn end names no conversation: it records no turn, and
-    // still confirms, refreshes planning and applies a pending move. A Pi
-    // event names its conversation by its session file.
+    // A Pi event names its conversation by its session file; Pi's turn end
+    // names none, since its settled event already recorded the turn.
     let thread = match moment {
         BoundaryMoment::Event => callback["sessionFile"].as_str(),
         _ => callback["session_id"].as_str(),
@@ -116,7 +115,7 @@ pub(super) fn answer(
     }
     if *moment == BoundaryMoment::Stop {
         // The transcript is the only writer of usage rows; the exit read
-        // catches turns it does not show yet. Pi and OpenCode have no hook name.
+        // catches turns it does not show yet.
         loopflow_execution::transcript::facts::record_session(
             store,
             &adapter.session,

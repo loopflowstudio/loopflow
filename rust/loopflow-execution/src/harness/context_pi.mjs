@@ -78,8 +78,12 @@ export default function (pi) {
     log(`recording gap closed (${gap}); lf records from here`);
     gap = undefined;
   };
+  // A wake is lf's message. Idle, it starts a turn; racing one, it waits for
+  // that turn to finish rather than interrupting it.
+  const wake = (content) => pi.sendMessage({ customType: "loopflow-steer", content, display: true },
+    { deliverAs: "followUp", triggerTurn: true });
   const server = spec.turns && process.env.LF_CONTEXT_DELIVERY
-    ? machineServer(process.env.LF_CONTEXT_DELIVERY, log) : undefined;
+    ? machineServer(process.env.LF_CONTEXT_DELIVERY, log, wake) : undefined;
   // The block comes from checkout files, rendered without the launch's
   // capability; the Session's news is read apart from it.
   const { LF_PROVIDER_CONTEXT: _, LF_BARE_STEER: __, ...renderEnv } = process.env;

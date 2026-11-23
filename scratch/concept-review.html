@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>LOO-937 Concept Review (a49184a2)</title>
+<title>LOO-937 Concept Review (a8627a30)</title>
 <style>
 :root{--bg:#fbfaf7;--fg:#1d1c1a;--mute:#6b675f;--line:#e2ded5;--card:#fff;--yes:#2f7d4f;--no:#b3412e;--new:#7a5bc4;--code:#f1eee7}
 @media (prefers-color-scheme:dark){:root{--bg:#171614;--fg:#ece9e2;--mute:#a19c92;--line:#34312c;--card:#1f1e1b;--yes:#6cc28f;--no:#ec8a76;--new:#b9a2f0;--code:#2a2824}}
@@ -27,70 +27,59 @@ ol li{margin:.5rem 0}
 </style>
 </head>
 <body><main>
-<h1>LOO-937 as built, at <code>a49184a2</code></h1>
-<p class="mute">The area: which record holds each Task fact, and how a directory, a Session, a Graph run or a landing finds its Task. I read the whole branch against origin/main, not just the QA fix. The QA fix is where the problem shows up.</p>
+<h1>LOO-937 as built, at <code>a8627a30</code></h1>
+<p class="mute">The area: which record holds each Task fact, and how a directory, a Session, a Graph run, a landing or a commit finds its Task. Read against the branch base <code>7487986a</code>, with the ownership split, the compress and the delivery fix in. The earlier review at <code>a49184a2</code> proposed the split. This page checks the split as built, across every caller.</p>
 
 <h2>Product concepts and code concepts</h2>
 <div class="wrap"><table>
 <tr><th>What a person knows</th><th>What the code has</th><th></th><th>Note</th></tr>
 <tr><td>A Task's title, state, rank, URL, branch</td><td><code>tasks</code> (desired), <code>tracker_items</code>/<code>pm_items</code> (observed)</td><td class="yes">yes</td><td>Two records on purpose: they're the merge base for conflicts.</td></tr>
-<tr><td>Is it done?</td><td><code>planning_state</code>; the boolean is leaving</td><td class="yes">yes</td><td>One fact now.</td></tr>
-<tr><td>Task order, the drag on the Working board</td><td><code>tasks.planning_rank</code>, <code>reorder_task</code></td><td class="yes">yes</td><td><code>task_orders</code> is leaving. One order.</td></tr>
+<tr><td>Is it done?</td><td><code>planning_state</code>; the boolean is leaving</td><td class="yes">yes</td><td>One fact.</td></tr>
+<tr><td>Task order, the drag on the Working board</td><td><code>tasks.planning_rank</code>, <code>reorder_task</code></td><td class="yes">yes</td><td><code>task_orders</code> is leaving.</td></tr>
 <tr><td>A Task's conversation</td><td><code>task_primary_sessions</code>, read through <code>primary_scope_sql</code></td><td class="yes">yes</td><td>Kept until LOO-877 so released lf agrees with it.</td></tr>
 <tr><td>A Session's or a run's Task (its history)</td><td><code>agent_sessions.task_id</code>, <code>graph_processes.task_id</code>, written once by <code>starting_task_in</code></td><td class="yes">yes</td><td>The work stays with its Task after a move or path reuse.</td></tr>
-<tr><td><b>"I'm working in this Task's directory"</b> (membership)</td><td rowspan="2"><code>SqliteStore::task_holding(dir)</code>, which picks the deepest checkout that contains <code>dir</code></td><td class="yes">yes</td><td>Containment is right here: a command started inside a checkout is that Task's work.</td></tr>
-<tr><td><b>"This checkout is this Task's"</b> (ownership: whose PR lands from it, which conversation <code>lf resume</code> opens, whether <code>lf task create --worktree</code> may take it)</td><td class="no">no</td><td><b>One name for two ideas.</b> A checkout is one Git worktree. A second Git worktree nested inside it is a separate checkout, but containment gives it to the outer Task.</td></tr>
-<tr><td>Edit revision (stale edit refused)</td><td><code>tasks.planning_revision</code></td><td class="yes">yes</td><td>Kept: it's the compare-and-set every edit checks.</td></tr>
-<tr><td>Is a run alive?</td><td><code>task_graphs.run_pid</code> (carrier) and <code>graph_processes.pid</code> (child)</td><td class="no">no</td><td>Two OS processes behind one concept. Too big for this Task (launch work). It's in questions.md.</td></tr>
+<tr><td><b>"I'm working in this Task's directory"</b> (membership)</td><td><code>SqliteStore::task_holding(dir)</code>: the deepest checkout containing <code>dir</code></td><td class="yes">yes</td><td>Launch selection, context, <code>lf task status</code>, <code>--design</code>, provider conversations.</td></tr>
+<tr><td><b>"This checkout is this Task's"</b> (ownership: whose PR lands or commits from it, which conversation <code>lf resume</code> opens, whether <code>lf task create --worktree</code> may take it)</td><td><code>SqliteStore::task_checkout_owner(root)</code>: exact Git root</td><td class="yes">yes</td><td>Now its own answer. Was <span class="no">no</span> at <code>a49184a2</code>.</td></tr>
+<tr><td>Edit revision (stale edit refused)</td><td><code>tasks.planning_revision</code></td><td class="yes">yes</td><td>The compare-and-set every edit checks.</td></tr>
+<tr><td>Is a run alive?</td><td><code>task_graphs.run_pid</code> (carrier) and <code>graph_processes.pid</code> (child)</td><td class="no">no</td><td>Two OS processes behind one concept. Launch work, larger than this Task (questions.md).</td></tr>
 <tr><td>The Session list's Task column</td><td><code>WorkspaceResolver</code> working from Git roots</td><td class="no">no</td><td>A third lookup. Fits LOO-934.</td></tr>
 </table></div>
 
-<h2>The biggest mismatch: ownership is answered by containment</h2>
-<p>On main, <code>counted_task</code> compared Git worktree roots: a nested worktree was its own checkout, owned by nobody. Change 4 routed every caller through <code>task_holding</code>, which matches by containment. QA hit one caller (<code>lf task create --worktree</code> refused a nested worktree), and <code>8896fa90</code> patched only that caller, by comparing the root inline.</p>
-<p>The case is common. Claude Code's isolated subagents and <code>EnterWorktree</code> create <code>.claude/worktrees/&lt;name&gt;</code> <i>inside</i> the current checkout. Three of them sit inside <code>~/src/loopflow</code> right now. Here is one interaction:</p>
-<div class="card">
-<p>1. A Task agent in <code>loopflow.loo-X/</code> starts an isolated subagent. Its worktree is <code>loopflow.loo-X/.claude/worktrees/agent-1</code>, on its own branch.</p>
-<p>2. The subagent's commands record <code>task_id = LOO-X</code>. <span class="yes">Right</span>: it's that Task's work.</p>
-<p>3. Someone runs <code>lf land</code> in <code>agent-1</code>. <code>pr_landing.rs:1200</code> calls <code>task_for_checkout</code> → LOO-X. The landing then checks LOO-X's active PR against the armed PR from <code>agent-1</code>'s branch and fails ("Task merge request does not match…"). <span class="no">Wrong</span>. On main this landing had no Task and went through.</p>
-<p>4. Bare <code>lf resume</code> in <code>agent-1</code> opens LOO-X's conversation (seen in QA). Released lf says "This worktree has no associated work conversation". <span class="no">Wrong</span>: the conversation's checkout isn't this one.</p>
-<p>5. <code>lf task create --worktree agent-1</code> works only because of the special case. The same Session without <code>--worktree</code> still sees LOO-X as the checkout's owner.</p>
-</div>
-
+<h2>The split, caller by caller</h2>
+<p>The earlier proposal named three ownership callers. QA on <code>71feca7d</code> found a fourth: delivery (<code>lf commit</code>, <code>lf pr open</code>) still went through the launch selection, so in a nested worktree it acted for the outer Task and refused on its branch. <code>a8627a30</code> moved it to the owner. A grep of every caller of both answers and of <code>select_work</code>/<code>select_execution_work</code> finds no fifth.</p>
 <div class="cols">
-<div class="card"><b>Before (as built)</b>
-<pre>task_holding(dir)        // containment
- ├ starting_task_in      membership ✓
- ├ counted_task / launch membership ✓
- ├ checkout_scope        ownership ✗
- │   └ adoption + inline root compare (patch)
- ├ pr_landing            ownership ✗
- ├ handoff --design      membership ✓
- └ worktree_task (resume) ownership ✗</pre></div>
-<div class="card prop"><b>After</b> <span class="tag">proposed</span>
-<pre>task_holding(dir)        // membership: deepest containing
- ├ starting_task_in, counted_task, run select,
- └ handoff --design
-task_checkout_owner(root) // ownership: exact Git root
- ├ checkout_scope (resume, adoption, bind)
- ├ pr_landing
- └ worktree_task (bare lf resume routing)
-adoption special case: deleted</pre></div>
+<div class="card"><b>Membership</b>: <code>task_holding(dir)</code>
+<pre>starting_task_in       Session / run history
+run::select_work       launch, lf context, implicit_binding
+task_status            bare lf task status
+handoff --design       source Task of a design
+turns.rs               provider conversations</pre></div>
+<div class="card"><b>Ownership</b>: <code>task_checkout_owner(root)</code>
+<pre>checkout_scope         resume, adoption, bind
+pr_landing             lf land
+delivery               lf commit, lf pr open   <i>(a8627a30)</i>
+work_route             bare lf resume routing</pre></div>
 </div>
-<p>The ownership answer is one index seek on <code>task_checkouts_root</code>: the Task whose checkout <i>is</i> the Git root, matched as named and as it resolves. This brings back main's behavior for ownership without its O(checkouts) Git subprocess scan, and drops the inline patch. Two Tasks on one root resolve to the lower id, the same as <code>task_holding</code>.</p>
-<p class="mute">Decided for review: ownership callers are <code>checkout_scope</code>, <code>pr_landing</code> and <code>worktree_task</code>. Rejected: making containment the single rule and deciding a nested worktree belongs to the outer Task everywhere. That would mean <code>lf land</code> in a subagent worktree can't work, and the outer Task's conversation hijacks <code>lf resume</code>.</p>
+<p>Delivery's fallback is still a <code>Declared</code> selection (<code>LF_AS</code> or <code>--task</code>), as on main: a Session that names a Task can commit for it from a directory no Task owns.</p>
+
+<h2>What's left that's small</h2>
+<p>One word. <code>rust/loopflow/src/lf/commands/run.rs:285</code>, the comment on <code>implicit_binding</code>, says "checkout ownership wins over an ancestor's explicit declaration". The code asks <code>task_holding</code>, which is membership. "Ownership" now names the other answer, so the comment should say "the checkout holding the directory". That's a gate fix, not a design change.</p>
 
 <h2>What else holds</h2>
-<p>The slices line up with the product: one completion fact, one order, primary in its released home, work recorded once at start, and the leaving guard. Nothing left over from replaced designs: adoption is gone, the primary mark nothing writes is gone, and <code>'inherited'</code> is gone.</p>
+<p>The slices match the product: one completion fact, one order, the primary in its released home, work recorded once at start, the leaving guard. Nothing is left over from replaced designs. The adoption special case is gone, so are the primary mark nothing wrote and <code>'inherited'</code>, and compress merged <code>TaskOverviewRecords</code>/<code>TaskWorkRecords</code>.</p>
 
 <h2>Questions</h2>
 <ol>
 <li>Ownership vs membership:
- <br>a) two store answers, as above <span class="tag">chosen</span>
- <br>b) containment everywhere; a nested worktree is the outer Task's checkout too
- <br>c) Git-root equality everywhere, including membership (a subagent worktree's work leaves the Task's history)</li>
+ <br>a) two store answers, as built <span class="tag">built</span>
+ <br>b) containment everywhere
+ <br>c) Git-root equality everywhere</li>
 <li>Bare <code>lf resume</code> in a nested non-Task worktree:
- <br>a) "no associated work conversation", as released lf says <span class="tag">chosen, follows 1a</span>
+ <br>a) "no associated work conversation", as released lf says <span class="tag">built</span>
  <br>b) open the outer Task's conversation</li>
+<li>Bare <code>lf task status</code> in a plain nested worktree:
+ <br>a) show the outer Task (membership) <span class="tag">current</span>
+ <br>b) "this checkout has no Task" (ownership)</li>
 <li>Run liveness has two process records (carrier vs child):
  <br>a) leave it for a launch Task <span class="tag">current</span>
  <br>b) the carrier records itself as the run in <code>graph_processes</code></li>

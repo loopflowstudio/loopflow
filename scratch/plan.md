@@ -461,6 +461,15 @@ bare resume there says "no associated work conversation" (execution
 nested worktree end to end (gate/CI: `land_tests`). Compress inlined
 `counted_task`: provider conversations ask `SqliteStore::task_holding`.
 
+## Concept review on `a8627a309e` (2026-11-23)
+
+Nothing to change in the design. Every caller of `task_holding`,
+`task_checkout_owner`, `select_work` and `select_execution_work` is on the
+right side of the split; delivery was the last one and is fixed
+(`scratch/concept-review.html`). One gate fix: the `implicit_binding`
+comment (`rust/loopflow/src/lf/commands/run.rs:285`) says "checkout
+ownership" for what is membership (`task_holding`).
+
 ## Then: gate
 
 QA on `71feca7db5` (2026-11-23, `scratch/qa.html`) found one more regression

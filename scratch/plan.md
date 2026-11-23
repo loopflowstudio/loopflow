@@ -60,6 +60,7 @@ The CLI now records the hold and the worker-session members in the interrupt tra
 - On the private macOS Machine, the target build observed its own PID in the committed pause record when TERM arrived. Its Graph exited 130. The neighbor remained alive and finished with exit 0. Restart and `unpause --run` reached the review step.
 - A private CLI checkout refused pause on an unstarted Task. After placement, two pauses left one hold, `task list --state paused` found it, `task run` named the unpause command, and plain unpause lifted the hold.
 - At 10,000 Tasks the admission and cleanup queries looked up the hold by its primary key. The worker query walked the partial live-agent index, with indexed Graph, capture and step lookups. Limit settlement used the Task's Graph and step indexes.
+- `cargo test -p loopflow --lib task_graph_launch_tests::pause_stops_owned_build_and_keeps_claim -- --exact` passed on macOS (143 s). It covers two Tasks building side by side, plain `unpause` followed by `run`, `unpause --run`, and the primary conversation keeping its provider thread.
 - `uv run python scripts/check_migrations.py` and `uv run python scripts/check_architecture.py` passed. Gate and CI cover the other worker harnesses and Linux session enumeration.
 
 ## Checks for the worker-stop increment

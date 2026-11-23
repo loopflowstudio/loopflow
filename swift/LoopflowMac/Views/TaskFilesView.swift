@@ -9,6 +9,14 @@ enum TaskFileChrome {
     static let dockedWidth: CGFloat = 620
 }
 
+private extension String {
+    var openRowID: String { "open:" + self }
+}
+
+private extension TaskChangedFile {
+    var changedRowID: String { "changed:" + path }
+}
+
 struct TaskFilesView: View {
     @Bindable var store: TaskFilesStore
     /// The recorded base moves with a store commit, not a file.
@@ -216,7 +224,7 @@ struct TaskFilesView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: Spacing.xxs) {
                     Text("Open & Scratch").font(Typography.textStrong)
-                    ForEach(store.openAndScratch, id: \.self) { path in fileRow(path) }
+                    ForEach(store.openAndScratch, id: \.openRowID) { path in fileRow(path) }
                     if let error = store.scratchError {
                         FailureLine("Scratch unavailable.", machine: error) {
                             Button("Retry") { Task { await store.refreshScratch() } }
@@ -224,7 +232,7 @@ struct TaskFilesView: View {
                     }
                     Text("Changed in Task").font(Typography.textStrong).padding(.top, Spacing.sm)
                     if let changes = store.workingChanges {
-                        ForEach(changes.files) { file in
+                        ForEach(changes.files, id: \.changedRowID) { file in
                             fileRow(file.path, count: file.lines.map { "+\($0.added) −\($0.removed)" })
                         }
                     } else if let error = store.workingTree.error {

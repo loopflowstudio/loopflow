@@ -14,6 +14,7 @@
         "start": 3,
         "end": 9,
         "revision": "d49b198fdd7a62d73eca883aa2fb88b47c02de0dd141509e8741bf43e271d1aa",
+        "excerpt_start": 0,
         "excerpt": "// Reader"
       },
       {
@@ -22,6 +23,7 @@
         "start": 5,
         "end": 11,
         "revision": "d49b198fdd7a62d73eca883aa2fb88b47c02de0dd141509e8741bf43e271d1aa",
+        "excerpt_start": 0,
         "excerpt": "😀 Reader Reader"
       },
       {
@@ -30,6 +32,7 @@
         "start": 12,
         "end": 18,
         "revision": "d49b198fdd7a62d73eca883aa2fb88b47c02de0dd141509e8741bf43e271d1aa",
+        "excerpt_start": 0,
         "excerpt": "😀 Reader Reader"
       }
     ],

@@ -171,6 +171,19 @@ final class TaskFilePicker {
     }
 }
 
+extension TaskGrepHit {
+    func highlightedExcerpt(color: Color, omitPrefix: Bool = false) -> AttributedString {
+        var value = AttributedString(excerpt)
+        guard let range = range(in: excerpt, excerptOffset: excerptStart),
+              let span = Range(range, in: value) else { return value }
+        value[span].backgroundColor = color
+        if omitPrefix, span.lowerBound > value.startIndex {
+            value.replaceSubrange(value.startIndex..<span.lowerBound, with: AttributedString("…"))
+        }
+        return value
+    }
+}
+
 struct TaskFilePickerView: View {
     let store: TaskFilesStore
     @Bindable var picker: TaskFilePicker
@@ -227,7 +240,11 @@ struct TaskFilePickerView: View {
                                     Text(verbatim: result.hit.map { "\($0.path):\($0.line)" } ?? result.path)
                                         .font(Typography.mono).lineLimit(1).truncationMode(.middle)
                                     if let hit = result.hit {
-                                        Text(verbatim: hit.excerpt).font(Typography.meta).lineLimit(1)
+                                        let color = palette.keyboardFocus.opacity(0.45)
+                                        ViewThatFits(in: .horizontal) {
+                                            Text(hit.highlightedExcerpt(color: color)).fixedSize()
+                                            Text(hit.highlightedExcerpt(color: color, omitPrefix: true))
+                                        }.font(Typography.meta).lineLimit(1)
                                     }
                                 }
                                 .padding(Spacing.xs).frame(maxWidth: .infinity, alignment: .leading)

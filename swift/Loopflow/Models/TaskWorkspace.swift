@@ -53,7 +53,13 @@ public struct TaskGrepHit: Decodable, Hashable, Sendable {
     public let start: Int
     public let end: Int
     public let revision: String
+    public let excerptStart: Int
     public let excerpt: String
+
+    private enum CodingKeys: String, CodingKey {
+        case path, line, start, end, revision, excerpt
+        case excerptStart = "excerpt_start"
+    }
 }
 
 public struct TaskGrepResults: Decodable, Sendable {

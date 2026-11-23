@@ -87,7 +87,8 @@ swift/LoopflowMac/TaskFileDocument.swift:318:func reconcile (TaskFileDocument)
   skipping files over 1 MB. `--json` includes 1-based line numbers, UTF-8 byte
   spans, excerpts, and `truncated`. Each occurrence has its own hit.
   `start` is inclusive and `end` is exclusive, measured from the start of the
-  line in the file’s reported `revision`.
+  line in the file’s reported `revision`. `excerpt_start` gives the byte offset
+  of the excerpt’s first character on that line.
 - `lf task symbols <ID> <name> [--path <path>]` finds declarations (functions,
   types, methods, and Markdown headings) with their enclosing container, path,
   and 1-based line number. JSON returns up to 100 exact-name matches in `hits`.

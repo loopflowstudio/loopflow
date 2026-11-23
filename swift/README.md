@@ -607,8 +607,9 @@ files first. Matching paths favor scratch, changed and open files. Choose
 
 In Read, click an identifier to underline the occurrence that `gd` or `gr` will use.
 
-Grep opens the numbered source, including for Markdown and HTML. It highlights
-the occurrence when the displayed revision matches. Escape from Grep returns
+Each Grep result highlights its occurrence. Previewing or opening a hit on a
+long line scrolls it into view when the displayed revision matches. Grep opens
+numbered source for Markdown and HTML too. Escape from Grep returns
 to the current Find match. Definitions resolve in the live document first,
 then on the Machine that owns the checkout.
 

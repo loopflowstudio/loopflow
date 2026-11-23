@@ -742,25 +742,33 @@ struct SessionPaneView: View {
         if case .browser(let taskId, let tabs, let selected, _, _) = pane.content {
             let task = model.task(id: taskId)?.task
             let files = try? workspace.files(for: pane.content, task: task, query: sessions.query)
-            ScrollView(.horizontal) {
-                HStack(spacing: Spacing.xs) {
-                    if let files {
-                        ForEach(task == nil ? [.changes, .files] : TaskFilesStore.Page.allCases, id: \.self) { page in
-                            browserTab(page.rawValue,
-                                       selected: selected == BrowserTab.files.id && files.shownPage(hasTask: task != nil) == page,
-                                       id: "page-\(page.rawValue.lowercased())") {
-                                workspace.showBrowser(.files, from: pane)
-                                files.page = page
+            let shownPage = files?.shownPage(hasTask: task != nil)
+            let selectedID = selected == BrowserTab.files.id ? shownPage?.rawValue ?? selected : selected
+            ScrollViewReader { proxy in
+                ScrollView(.horizontal) {
+                    HStack(spacing: Spacing.xs) {
+                        if let files {
+                            ForEach(task == nil ? [.changes, .files] : TaskFilesStore.Page.allCases, id: \.self) { page in
+                                browserTab(page.rawValue,
+                                           selected: selectedID == page.rawValue,
+                                           id: "page-\(page.rawValue.lowercased())") {
+                                    workspace.showBrowser(.files, from: pane)
+                                    files.page = page
+                                }.id(page.rawValue)
                             }
                         }
-                    }
-                    ForEach(tabs.filter { $0 != .files || files == nil }) { tab in
-                        browserTab(tab.title, selected: tab.id == selected, id: tab.id) {
-                            workspace.showBrowser(tab, from: pane)
+                        ForEach(tabs.filter { $0 != .files || files == nil }) { tab in
+                            browserTab(tab.title, selected: tab.id == selected, id: tab.id) {
+                                workspace.showBrowser(tab, from: pane)
+                            }.id(tab.id)
                         }
-                    }
-                }.buttonStyle(.plain).font(Typography.meta)
-            }.fixedSize(horizontal: false, vertical: true)
+                    }.buttonStyle(.plain).font(Typography.meta)
+                }.fixedSize(horizontal: false, vertical: true)
+                .onChange(of: selectedID, initial: true) { if let selectedID { proxy.scrollTo(selectedID) } }
+                .onGeometryChange(for: CGFloat.self, of: \.size.width) { _ in
+                    if let selectedID { proxy.scrollTo(selectedID) }
+                }
+            }
             .help("Brief ⌥⌘1 · Diff ⌥⌘2 · Files ⌥⌘3")
         }
     }

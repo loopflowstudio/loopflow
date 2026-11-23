@@ -21,43 +21,8 @@ struct TaskCodeReader: View {
     var body: some View {
         Group {
             if let lines {
-                ScrollViewReader { proxy in
-                    ScrollView([.horizontal, .vertical]) {
-                        LazyVStack(alignment: .leading, spacing: 0) {
-                            if let store {
-                                ForEach(store.comments.items.filter { $0.original.path == path && $0.original.source.isFile && $0.detached }) {
-                                    ReviewCommentRow(store: store, comment: $0)
-                                }
-                            }
-                            ForEach(lines.indices, id: \.self) { index in
-                                row(index, in: lines)
-                            }
-                        }
-                        .scrollTargetLayout()
-                        .font(Typography.mono)
-                        .padding(Spacing.sm)
-                    }
-                    .defaultScrollAnchor(.topLeading, for: .alignment)
-                    .onScrollPhaseChange { _, phase in
-                        scrolling = phase == .tracking || phase == .interacting || phase == .decelerating
-                    }
-                    .onScrollTargetVisibilityChange(idType: Int.self, threshold: 0.1) { visible in
-                        if scrolling, let store, let first = visible.min() { store.jumps.readingLine = first + 1 }
-                    }
-                    .task(id: FileFind.Scan(query: store?.find?.query, revision: parsedVersion)) {
-                        if let find = store?.find, !find.query.isEmpty {
-                            await find.search(lines: lines)
-                        }
-                    }
-                    .onChange(of: store?.find?.current) {
-                        if case .line(let line) = store?.find?.current?.cell {
-                            proxy.scrollTo(line - 1, anchor: .center)
-                            store?.jumps.readingLine = line
-                        }
-                    }
-                    .task(id: location) {
-                        if let location { proxy.scrollTo(location.line - 1, anchor: UnitPoint(x: 0, y: 0.5)) }
-                    }
+                GeometryReader { viewport in
+                    reader(lines, width: viewport.size.width)
                 }
                 .onAppear(perform: ready)
                 .accessibilityIdentifier("files-code-reader")
@@ -81,6 +46,49 @@ struct TaskCodeReader: View {
             if let outline = result.1, let version { document?.receive(outline, version: version) }
             lines = result.0
             parsedVersion += 1
+        }
+    }
+
+    private func reader(_ lines: [CodeLine], width: CGFloat) -> some View {
+        ScrollViewReader { proxy in
+            ScrollView([.horizontal, .vertical]) {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    if let store {
+                        ForEach(store.comments.items.filter { $0.original.path == path && $0.original.source.isFile && $0.detached }) {
+                            ReviewCommentRow(store: store, comment: $0)
+                        }
+                    }
+                    ForEach(lines.indices, id: \.self) { index in
+                        row(index, in: lines)
+                    }
+                }
+                .scrollTargetLayout()
+                .font(Typography.mono)
+                .padding(Spacing.sm)
+            }
+            .defaultScrollAnchor(.topLeading, for: .alignment)
+            .onScrollPhaseChange { _, phase in
+                scrolling = phase == .tracking || phase == .interacting || phase == .decelerating
+            }
+            .onScrollTargetVisibilityChange(idType: Int.self, threshold: 0.1) { visible in
+                if scrolling, let store, let first = visible.min() { store.jumps.readingLine = first + 1 }
+            }
+            .task(id: FileFind.Scan(query: store?.find?.query, revision: parsedVersion)) {
+                if let find = store?.find, !find.query.isEmpty {
+                    await find.search(lines: lines)
+                }
+            }
+            .onChange(of: store?.find?.current) {
+                if case .line(let line) = store?.find?.current?.cell {
+                    proxy.scrollTo(line - 1, anchor: .center)
+                    store?.jumps.readingLine = line
+                }
+            }
+            .task(id: location) {
+                guard let location, lines.indices.contains(location.line - 1) else { return }
+                let anchor = scrollAnchor(for: location, text: lines[location.line - 1].text, width: width)
+                proxy.scrollTo(location.line - 1, anchor: anchor)
+            }
         }
     }
 
@@ -146,10 +154,30 @@ struct TaskCodeReader: View {
         } else { label }
     }
 
-    func target(in text: String, number: Int, at point: CGPoint) -> FileJumps.Target? {
+    private func typeset(_ text: String) -> CTLine {
         let font = NSFont(name: Typography.monoFace, size: Typography.monoSize)
             ?? .monospacedSystemFont(ofSize: Typography.monoSize, weight: .regular)
-        let line = CTLineCreateWithAttributedString(NSAttributedString(string: text, attributes: [.font: font]))
+        return CTLineCreateWithAttributedString(NSAttributedString(string: text, attributes: [.font: font]))
+    }
+
+    func scrollAnchor(for visit: FileVisit, text: String, width: CGFloat) -> UnitPoint {
+        let leading = UnitPoint(x: 0, y: 0.5)
+        guard let hit = visit.hit, hit.revision == revision, let range = hit.range(in: text) else { return leading }
+        let line = typeset(text)
+        let gutter = store == nil ? CTLineGetTypographicBounds(typeset(String(visit.line)), nil, nil, nil)
+            : ReviewStream.gutterWidth + Spacing.xs
+        let inset = gutter + Spacing.md
+        let overflow = inset + CTLineGetTypographicBounds(line, nil, nil, nil) - width
+        guard overflow > 0 else { return leading }
+        let start = CTLineGetOffsetForStringIndex(line, range.location, nil)
+        let end = CTLineGetOffsetForStringIndex(line, NSMaxRange(range), nil)
+        // scrollTo aligns the same fractional point in the row and the viewport.
+        let offset = inset + start + min(end - start, width) / 2 - width / 2
+        return UnitPoint(x: max(0, min(1, offset / overflow)), y: 0.5)
+    }
+
+    func target(in text: String, number: Int, at point: CGPoint) -> FileJumps.Target? {
+        let line = typeset(text)
         var index = CTLineGetStringIndexForPosition(line, point)
         guard index != kCFNotFound, point.x >= 0,
               point.x < CTLineGetTypographicBounds(line, nil, nil, nil) else { return nil }
@@ -185,11 +213,13 @@ struct TaskCodeReader: View {
 }
 
 extension TaskGrepHit {
-    func range(in text: String) -> NSRange? {
+    func range(in text: String, excerptOffset: Int? = nil) -> NSRange? {
+        let offset = excerptOffset ?? 0
+        guard offset >= 0, start >= offset, end > start else { return nil }
         let bytes = text.utf8
-        guard start >= 0, end >= start,
-              let from = bytes.index(bytes.startIndex, offsetBy: start, limitedBy: bytes.endIndex),
-              let to = bytes.index(from, offsetBy: end - start, limitedBy: bytes.endIndex),
+        let upperOffset = excerptOffset == nil ? end : min(end - offset, bytes.count)
+        guard let from = bytes.index(bytes.startIndex, offsetBy: start - offset, limitedBy: bytes.endIndex),
+              let to = bytes.index(bytes.startIndex, offsetBy: upperOffset, limitedBy: bytes.endIndex),
               let lower = from.samePosition(in: text.unicodeScalars),
               let upper = to.samePosition(in: text.unicodeScalars) else { return nil }
         return NSRange(lower..<upper, in: text)

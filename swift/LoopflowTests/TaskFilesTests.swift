@@ -214,7 +214,7 @@ struct TaskFilesTests {
                                       "--json", "--whole-word", "--", "read"] else {
                 throw RegistryQueryError("Expected whole-word grep on the peer")
             }
-            return #"{"hits":[{"path":"Call.swift","line":2,"start":5,"end":9,"revision":"base","excerpt":"😀 read()"}],"truncated":false}"#
+            return #"{"hits":[{"path":"Call.swift","line":2,"start":5,"end":9,"revision":"base","excerpt_start":0,"excerpt":"😀 read()"}],"truncated":false}"#
         }.onMachine("peer", repository: "plan"))
         store.selectFile("Call.swift")
         let doc = store.document("Call.swift")
@@ -451,6 +451,27 @@ struct TaskFilesTests {
         #expect(store.selection == nested && store.mode == .read)
     }
 
+    @Test func grepRevealsTheSecondOccurrenceInACroppedLongLine() throws {
+        let prefix = String(repeating: "x", count: 500)
+        let excerpt = "😀 earlier hit, later hit"
+        let line = prefix + excerpt
+        let start = line.utf8.count - 3
+        let hit = TaskGrepHit(path: "source", line: 1, start: start, end: start + 3,
+                              revision: "disk", excerptStart: prefix.utf8.count, excerpt: excerpt)
+        let painted = hit.highlightedExcerpt(color: .yellow)
+        let marked = try #require(painted.runs.first { $0.backgroundColor == .yellow })
+        #expect(String(painted[..<marked.range.lowerBound].characters) == "😀 earlier hit, later ")
+        #expect(String(painted[marked.range].characters) == "hit")
+        #expect(String(hit.highlightedExcerpt(color: .yellow, omitPrefix: true).characters) == "…hit")
+
+        let visit = FileVisit(line: 1, hit: hit, visitID: nil)
+        let reader = TaskCodeReader(path: hit.path, text: line, location: visit, revision: "disk", ready: {})
+        #expect(reader.scrollAnchor(for: visit, text: line, width: 240).x == 1)
+        var draft = reader
+        draft.revision = nil
+        #expect(draft.scrollAnchor(for: visit, text: line, width: 240).x == 0)
+    }
+
     @Test func recordedLocalCheckoutUsesTheResidentServerForFileSearch() async throws {
         let place = TaskLocation.recorded(taskID: "owner-task", checkout: "/checkout")
         let owner = TaskLocationObservation(request: "opened", repositoryID: "plan", taskID: "portable",
@@ -622,7 +643,7 @@ struct TaskFilesTests {
         #expect(try note.inspect().find(MarkdownBlocks.self).actualView().source == "# Plan")
 
         let path = "scratch/plan.md"
-        let hit = TaskGrepHit(path: path, line: 1, start: 2, end: 6, revision: "# Plan", excerpt: "# Plan")
+        let hit = TaskGrepHit(path: path, line: 1, start: 2, end: 6, revision: "# Plan", excerptStart: 0, excerpt: "# Plan")
         store.openMatch(hit)
         let files = TaskFilesView(store: store, checkoutBase: nil)
         #expect(try files.inspect().find(TaskCodeReader.self).actualView().location?.hit == hit)

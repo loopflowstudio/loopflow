@@ -61,13 +61,20 @@ Keep `Brief`, `Diff` and `Files` in the pane strip. Cleanly separate **working-t
 
 **Desktop presentation.** `lf desktop files` reveals Files beside a zoomed terminal and keeps terminal focus. Pending presentations and unread scratch paths stay in the rail after dismissing the banner. Rewriting the mounted Read page reconciles it in place. Removed `lf open --file` and its separate Desktop dispatch.
 
-**Remaining from [concept review](concept-review.html)**
-
-1. **Rail section IDs, narrow pane-strip scroll, and Grep hit visibility** ([TaskFilesView.swift](../swift/LoopflowMac/Views/TaskFilesView.swift), [WorkspacePanesView.swift](../swift/LoopflowMac/Views/WorkspacePanesView.swift), [TaskFilePicker.swift](../swift/LoopflowMac/Views/TaskFilePicker.swift), [TaskCodeReader.swift](../swift/LoopflowMac/Views/TaskCodeReader.swift), [ReviewStreamView.swift](../swift/LoopflowMac/Views/ReviewStreamView.swift)): prefix `Open & Scratch` and `Changed in Task` `ForEach` IDs by section so opening a changed file never drops it from `Changed in Task`; wrap `browserTabs` in `ScrollViewReader` scrolling to the selected tab so narrow panes never clip `Files`; highlight the matched substring inside Grep row excerpts and reveal long-line hits horizontally in preview/reader; update `ReviewStepper`'s stale doc comment (`ReviewStreamView.swift:809`).
+**Rail, pane strip and Grep.** Each rail section identifies its rows independently. Selecting a pane tab or narrowing the pane scrolls the selected tab into view. Grep carries the excerpt’s first byte offset from the owning Machine. The picker marks the returned occurrence even when its context is cropped. The numbered reader uses that occurrence’s typeset position for horizontal scrolling at the matching revision.
 
 Mounted focus, scroll and the 360/620-point layouts continue to gate and display QA after this pass.
 
 ## Gate and demo
+
+November 23 presentation and navigation checks:
+
+- `cargo test -p loopflow --lib lf::tests::` passed 38 parser tests. The rebuilt CLI exposes the checkout-relative address in `desktop files --help` and omits `--file` from `open --help`.
+- Three headless Desktop tests passed for zoomed presentation, dismissing and replacing offers, and rewriting visible HTML in place.
+- The focused Rust Grep test, two Task file fixture tests, eight schema tests, four documented-command tests and `cargo clippy --all-targets -- -D warnings` passed.
+- The cropped Unicode hit test and both picker cases passed. The local and peer browser journeys passed in 14.4 seconds with the source-built CLI.
+- Display QA checks mounted focus, horizontal scrolling in the reader and pane strip, distinct rail rows for an open changed file, and the 360/620-point layouts.
+
 
 **Read navigation checks on November 23**
 
@@ -149,5 +156,3 @@ Updated in place for implementation to match:
 - [swift/README.md](../swift/README.md) — Desktop **Files** walkthrough, shortcuts (`⌘P`, `⇧⌘F`, `⌘F`, `⇧⌘O`, `⌘-click`/`gd`, `gr`, `⌘[`/`⌘]`, `⌃⌘E`, `⌘↩`), 32 pt breadcrumb header, responsive 236 pt rail, per-file Read/Edit/Diff, one-time initial pick, calm `scratch/` updates, deliberate presentation, and `lf task find|grep|symbols` reads.
 - [docs/surfaces.md](../docs/surfaces.md) — `lf desktop files` presentation behavior (including quiet bar during active Edit) and Desktop **Files** overview.
 - [docs/workspaces.md](../docs/workspaces.md) — CLI checkout reads (`lf task find`, `lf task grep`, `lf task symbols`, `lf task file`) with examples and `--json` contract notes.
-
-November 23 presentation checks: 38 CLI parser tests and Clippy passed. Three headless Desktop tests passed for zoomed presentation, banner dismissal and replacement, and a visible HTML rewrite. Mounted keyboard focus goes to display QA.

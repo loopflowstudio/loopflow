@@ -806,8 +806,7 @@ struct ReviewFileNote: View {
 }
 
 /// Previous/next change around the position, with `[`/`]` while the pane has
-/// focus. Changes crosses files in its stream; Files' Diff opens the
-/// neighbouring changed file past either end.
+/// focus. Diff steps across the review stream. Files steps within the open file.
 struct ReviewStepper: View {
     @Bindable var store: TaskFilesStore
     let reader: DiffReviewState.ReviewReader

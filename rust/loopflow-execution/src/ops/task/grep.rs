@@ -23,6 +23,8 @@ pub struct TaskGrepHit {
     pub start: usize,
     pub end: usize,
     pub revision: String,
+    /// Byte offset of the excerpt in the same source line.
+    pub excerpt_start: usize,
     pub excerpt: String,
 }
 
@@ -102,6 +104,7 @@ fn search(
                                 start,
                                 end: span.end(),
                                 revision: revision.clone(),
+                                excerpt_start,
                                 excerpt: text[excerpt_start..excerpt_end].into(),
                             });
                             true
@@ -175,7 +178,7 @@ fn read_search_file<'a>(
 
 #[cfg(test)]
 mod tests {
-    use super::{search, TaskFileInventory, MAX_FILE_BYTES};
+    use super::{search, TaskFileInventory, EXCERPT_BYTES, MAX_FILE_BYTES};
     use std::{fs, os::unix::fs::symlink};
 
     #[test]
@@ -213,7 +216,12 @@ mod tests {
             (first.path.as_str(), first.line, first.start, first.end),
             ("text", 2, 5, 8)
         );
-        assert!(exact.hits.last().unwrap().excerpt.len() <= 240);
+        let last = exact.hits.last().unwrap();
+        assert!(last.excerpt_start > 0 && last.excerpt.len() <= EXCERPT_BYTES);
+        for hit in &exact.hits {
+            let local = hit.start - hit.excerpt_start..hit.end - hit.excerpt_start;
+            assert_eq!(&hit.excerpt[local], "a.b");
+        }
         fs::write(file, "a.b ".repeat(101)).unwrap();
         let overflow = search(root.path(), &inventory, "a.b", true, &|| false).unwrap();
         assert_eq!(overflow.hits.len(), 100);

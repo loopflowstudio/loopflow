@@ -13879,6 +13879,12 @@
         "excerpt": {
           "type": "string"
         },
+        "excerpt_start": {
+          "description": "Byte offset of the excerpt in the same source line.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
         "line": {
           "format": "uint64",
           "minimum": 0,
@@ -13903,6 +13909,7 @@
         "start",
         "end",
         "revision",
+        "excerpt_start",
         "excerpt"
       ],
       "type": "object"

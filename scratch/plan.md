@@ -263,8 +263,42 @@ Compress after slice 4: the Backlog Wave menu's Project sheet shows the Wave's
 one Project; its scroll-to-reference (`sourceReference`, `projectsReference`)
 and truncation line went.
 
+## Slice 5: the wire carries one Project (concept review after slice 4)
+
+Chosen for review (`scratch/concept-review.html`, questions 1 and 2): the
+last place the code says a Wave has several Projects is the wire.
+`WaveDetailSnapshot.projects` and `WaveRoadmap.projects`
+(`rust/loopflow/src/lf/commands/waves.rs`) are `Evidence<ProjectSummary>`
+with `items` and `truncated`; every reader takes the first or loops over one.
+Passed over: keeping the list; a bare `Option` (loses "could not read").
+
+Build:
+
+- `waves.rs`: a generic `Reading<T>` beside `Evidence<T>`
+  (`Ok { value: T }` / `Unavailable { reason }`, same `state` tag, no
+  defaults). Both structs carry `project: Reading<Option<ProjectSummary>>`.
+  `project_planning` reads the Wave's one Project (no list);
+  `print_projects` becomes `print_project` (`Project   none` when absent).
+- Swift: `WorkReading<Value>` mirroring it; `WaveWorkMap.project`,
+  `WavePlan.project`, `RegistryQuery` decoder. Readers in `WorkModel.swift`
+  (queued-sync check, reference lookup, the "Project reading is incomplete"
+  line goes), `RoadmapView`, `WavesView`, `WaveDetailPane`,
+  `WaveProjectsView` read the one value.
+- Fixtures: `wave_detail.json`, `roadmap_snapshot.json`,
+  `work_first_entry.json`, `server_schema.json` (regenerate), each
+  language's fixture test. `task_history_planning.json`'s `projects` is the
+  Task history's own field; leave it unless it is this shape.
+- The test in `waves.rs` that seeds a completed "Current project" and a
+  "Next project" successor (around the `for project_id in ["current",
+  "next"]` loop) loses the successor case: it is rollover.
+
+Checks: CLI `dto_fixtures::`, `server::schema::tests::`, `status_tests::`,
+`wave_lifecycle::`, `lf::commands::waves::tests::`; Swift
+`DTOFixtureTests|WaveDetailReadingTests|WorkModelTests|RegistryQueryTests`
+(`scripts/test_desktop.sh`); clippy.
+
 ## Remains
 
-Nothing to implement. Gate: Swift DTO suites (`scripts/test_desktop.sh`),
-the full matrix in CI, the `oauth_tests` contention failure checked on the
-base. Open, not this Task: question 5 (a queued create's field snapshot).
+After slice 5, gate: Swift DTO suites (`scripts/test_desktop.sh`), the full
+matrix in CI, the `oauth_tests` contention failure checked on the base. Open,
+not this Task: a queued create's field snapshot (page question 3).

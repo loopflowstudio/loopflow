@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>A Wave is one Project — as built</title>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>A Wave is one Project — as built, slices 1–4</title>
 <style>
 :root {
   --bg: #fbfaf7; --fg: #1d1c1a; --muted: #6b675f; --line: #e2ded5; --card: #ffffff;
@@ -70,62 +70,68 @@ svg .sub { fill: var(--muted); font-size: 11.5px; }
 
 </head><body>
 <main>
-<h1>A Wave is one Project — as built, slices 1–3</h1>
-<p class="lede">LOO-995 concept review, pass after slice 3, 2026-11-23. Branch at 855ed4dd5e, read against its base 494eae3d55. Replaces the page written after slices 1 and 2, whose two "no" rows slice 3 built.</p>
-<p><b>Area taken:</b> a Wave and its one Project across a Wave's whole life — create, rename, connect, a Task joining and moving, removal — locally and in a Linear repository, with every slice in it.</p>
+<h1>A Wave is one Project — as built, slices 1–4</h1>
+<p class="lede">LOO-995 concept review after slice 4, 2026-11-23. Branch at 4fad52b15c, read against its base 43e031870e. Replaces the page written after slice 3; slice 4 built its answers 1b, 2b and 3b.</p>
+<p><strong>Area taken:</strong> a Wave and its one Project across a Wave's whole life (create, rename, connect, a Task joining and moving, removal) and every surface that shows it: <code>lf wave status</code>, the roadmap, the wire, Desktop.</p>
 
 <h2>One interaction, as built</h2>
 <pre><code>$ lf wave create ledger ; lf task create --wave ledger 'x'
-$ lf wave rename ledger books
-$ lf wave status books             # Project   books (local) · started      (QA second run)
-$ lf repo tracker                  # books create · queued, books name · queued
-$ lf wave create pay/refunds ; lf task create --wave pay/refunds 'Partial refund'
-$ lf wave remove pay/refunds       # 1 open Task moved to pay.
-                                   # refunds' create retired "its Wave was removed";
-                                   # the Task's queued create now names pay's Project</code></pre>
-<p>Failure and recovery: renaming a linked Wave leaves the Project on Linear's name and sends nothing; the next import still mirrors Linear. Removing a Wave before its Project's <code>create</code> was sent retires it in the same write; a <code>sent</code> one is left to resolve.</p>
+$ lf wave plan connect ledger 'Ledger'     # links the Wave's Project
+$ lf wave rename ledger books              # Project name follows; Linear gets a project_name action
+$ lf wave status books
+  Project   books (linked) · started
+            https://linear.app/…/project/books-…
+$ lf wave status books --json | jq .projects
+  {"state":"ok","items":[{ … one Project … }],"truncated":false}   ← a list, on the wire
+</code></pre>
+<p>Failure and recovery: a Project linked before this branch shows no URL until the next tracker read; a store that cannot be read prints <code>projects unavailable: …</code>, and Desktop says “Project reading is incomplete” when <code>truncated</code> is true, which nothing can make true for one Project.</p>
 
 <h2>Do the product's concepts and the code's line up?</h2>
 <div class="table-wrap"><table>
 <tr><th></th><th>What a person knows or does</th><th>What the code has</th><th>What is wrong</th></tr>
 <tr><td><span class="mark yes">yes</span></td><td>A Wave</td><td><code>waves</code>, <code>parent_wave_id</code></td><td></td></tr>
 <tr><td><span class="mark yes">yes</span></td><td>A Wave's Project</td><td><code>projects.wave_id</code> unique not null; id <code>ProjectId::for_wave</code></td><td>One record, one key.</td></tr>
-<tr><td><span class="mark yes">yes</span></td><td>A Task is in a Wave</td><td>read through its Project; no <code>tasks.wave_id</code></td><td></td></tr>
+<tr><td><span class="mark yes">yes</span></td><td>A Task is in a Wave</td><td>read through its Project</td><td></td></tr>
 <tr><td><span class="mark yes">yes</span></td><td>Move a Task</td><td>one rule: the new Wave's Project</td><td></td></tr>
-<tr><td><span class="mark yes">yes</span></td><td>Connect a Wave to Linear</td><td><code>lf wave plan connect &lt;wave&gt; [&lt;project&gt;]</code> sets <code>external_project_id</code></td><td>The link is the only thing that says which Wave a tracker Project is.</td></tr>
-<tr><td><span class="mark yes">yes</span></td><td>A Wave's name</td><td><code>relocate_waves</code> writes the unlinked Project's <code>ProjectSlug</code>/<code>ProjectName</code> as plan edits in the rename's transaction</td><td>Was "no". Still two columns, but one writer keeps them equal while unlinked; linked, Linear owns the name.</td></tr>
-<tr><td><span class="mark yes">yes</span></td><td>Remove a Wave</td><td><code>retire_wave_in</code> retires the Project's queued actions in the removal's write</td><td>Was "no".</td></tr>
-<tr><td><span class="mark part">partly</span></td><td>A Task's queued <code>create</code> in Linear</td><td><code>tracker_actions.value_json</code> snapshots <code>task_project</code> at queue time; a move queues a field action behind it; removal rewrites the snapshot</td><td>The snapshot is a copy of where the Task is. Removal has to patch it because the create would name a Project Linear never gets. Larger than this work, below.</td></tr>
-<tr><td><span class="mark part">partly</span></td><td>"No history"</td><td>removal summary "N Project(s) stay readable in history"; <code>WaveRemoval.projects</code></td><td>Always equals the Waves removed. Wire field; noted, not changed.</td></tr>
-<tr><td><span class="mark part">partly</span></td><td>Desktop Wave pane</td><td>a <b>Projects</b> button listing one</td><td>A list for a one-to-one thing. Noted, not changed.</td></tr>
+<tr><td><span class="mark yes">yes</span></td><td>Connect a Wave to Linear</td><td><code>lf wave plan connect</code> sets <code>external_project_id</code></td><td></td></tr>
+<tr><td><span class="mark yes">yes</span></td><td>Rename a Wave</td><td><code>relocate_waves</code> renames its Project, linked or not; linked queues <code>project_name</code></td><td>Was “partly” (1b built).</td></tr>
+<tr><td><span class="mark yes">yes</span></td><td>Remove a Wave</td><td>retires the Project's queued actions; no Project line, no <code>WaveRemoval.projects</code></td><td>Was “partly” (2b built).</td></tr>
+<tr><td><span class="mark yes">yes</span></td><td>See where the Wave lives in Linear</td><td>Wave header: Project name, linked by <code>ProjectSummary.url</code></td><td>Was “partly” (3b built).</td></tr>
+<tr><td><span class="mark no">no</span></td><td>A Wave's Project, as the surfaces read it</td><td><code>WaveDetailSnapshot.projects</code>, <code>WaveRoadmap.projects</code>: <code>Evidence&lt;ProjectSummary&gt;</code> (<code>items</code>, <code>truncated</code>); Swift <code>WorkEvidence&lt;ProjectPlanningSnapshot&gt;</code>, <code>ForEach(projects.items)</code>, <code>.items.first</code>, “Project reading is incomplete”; <code>print_projects</code> loops</td><td>One thing under a list's shape. Every reader takes the first item or loops over one. It is the multi-Project model's last shape, and the next reader has to guess whether a second item can appear.</td></tr>
+<tr><td><span class="mark part">partly</span></td><td>A Task's queued create in Linear</td><td><code>tracker_actions.value_json</code> snapshots <code>task_project</code>; removal rewrites it</td><td>Unchanged; question 5 of the last page, its own Task.</td></tr>
 </table></div>
 
 <div class="callout">
-<p><b>Biggest remaining mismatch: a queued tracker <code>create</code> carries a snapshot of the Task's fields.</b></p>
-<p>The Wave-name copy is closed. What is left has the same shape one layer down: a queued <code>create</code> holds the Task's Project as it was when queued, and a later move adds a field action that sends the same value again. Removal now patches the snapshot (<code>retire_wave_in</code>), which works but is the second place that knows a queued payload's layout.</p>
+<p><strong>Biggest mismatch: the wire says a Wave has a list of Projects.</strong></p>
+<p>Storage, commands and Desktop's header all hold one Project. <code>lf wave status --json</code>, the roadmap stream and every Swift reader still carry <code>projects: {state, items, truncated}</code>, and a test in <code>waves.rs</code> still seeds a completed “Current project” and a “Next project” successor, the rollover this Task removed.</p>
 </div>
 
-<h2>Larger than this work <span class="tag prop">not proposed here</span></h2>
+<h2>Recommendation <span class="tag prop">proposed, chosen for review</span></h2>
 <div class="cols">
 <div class="panel"><h3>Now</h3>
-<p>A <code>create</code> stores its field values at queue time. Each later edit queues a field action. Anything that invalidates a stored value must find and rewrite it.</p></div>
-<div class="panel proposed"><h3>What it would take</h3>
-<p>A queued <code>create</code> stores only its owner; the drain reads the Task's current fields when it sends, and edits made before the send queue nothing. That changes the tracker drain and every action kind, and touches retry and conflict handling on <code>sent</code> actions, so it is its own Task, not a fix to this one. The branch is right as it stands: QA's second run showed the patched create reaching pay's Project.</p></div>
+<pre><code>pub projects: Evidence&lt;ProjectSummary&gt;
+// {"state":"ok","items":[{…}],"truncated":false}
+
+ForEach(plan.projects.items) { WaveProjectView(…) }
+plan.projects.items.first
+"Project reading is incomplete"</code></pre></div>
+<div class="panel proposed"><h3>After</h3>
+<pre><code>pub project: Reading&lt;Option&lt;ProjectSummary&gt;&gt;
+// {"state":"ok","value":{…}}  or  {"state":"ok","value":null}
+// {"state":"unavailable","reason":"…"}
+
+if let project = plan.project.value { WaveProjectView(…) }
+// no truncation line</code></pre></div>
 </div>
-<p class="small">Nothing in this pass changes the plan: slice 3 built the previous page's recommendation, QA ran both paths through the CLI, and the remaining rows are wire or Desktop changes already listed for another pass.</p>
+<p><code>Option</code> because a Wave that arrived from a released build has no Project until its first Task, and because 0–1 Projects per Wave is the stated next model. Passed over: leaving the list (cheap now, but it is the one place the code still says “several”), and a bare <code>Option&lt;ProjectSummary&gt;</code> (loses “could not read” versus “none”, which <code>Evidence</code> exists to keep apart).</p>
 
 <h2>Questions</h2>
 <ol class="q">
-<li>When a linked Wave is renamed in Loopflow:
- <ol><li>keep Linear's name (built)</li><li>also rename the Linear Project (new tracker action)</li></ol></li>
-<li>The removal line "N Projects stay readable in history":
- <ol><li>keep</li><li>drop the line and <code>WaveRemoval.projects</code> (wire change)</li></ol></li>
-<li>Desktop's <b>Projects</b> button:
- <ol><li>leave</li><li>replace with the Project's name and link in the Wave header</li></ol></li>
-<li>A child Wave's Project is named <code>refunds</code> on the branch, <code>billing/refunds</code> by installed lf; upgraded homes keep the old name:
- <ol><li>leave</li><li>rename-follows fixes it on the next rename only — fine</li><li>migrate unlinked Projects' names to their Wave's</li></ol></li>
-<li>A queued tracker <code>create</code>'s field snapshot:
- <ol><li>leave; removal patches it (built)</li><li>file a Task: creates read the Task's fields at send time, edits before the send queue nothing</li></ol></li>
+<li>A Wave's Project on the wire:
+  <ol><li>keep <code>projects</code> as a list</li><li><span class="rec">one <code>project</code> reading, <code>Option</code> inside (chosen, slice 5)</span></li><li>bare <code>project: Option&lt;ProjectSummary&gt;</code>, read failures fail the whole snapshot</li></ol></li>
+<li>The single-value reading type:
+  <ol><li><span class="rec">a generic <code>Reading&lt;T&gt;</code> beside <code>Evidence&lt;T&gt;</code>, mirrored in Swift (chosen)</span></li><li>a Project-only enum</li></ol></li>
+<li>A queued tracker create's field snapshot (unchanged from the last page):
+  <ol><li>leave; removal patches it (built)</li><li>file a Task: creates read the Task's fields at send time</li></ol></li>
 </ol>
-</main>
-</body></html>
+</main></body></html>

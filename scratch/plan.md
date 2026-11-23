@@ -15,3 +15,7 @@ The current sheet submits the selected graph even for File. Rust's creation engi
 - Extend the headless New Task view and request checks. An explicit choice is visible next to Start, survives a scope change, and returns to inheritance through **Use default** even if the names match. Picking a workflow that disappears before submission still lets File save the brief and select its unstarted row. Assert that File sends no graph override and that Start sends the named choice.
 - Cover a refused File and subsequent success. Keep the request, scope, and Start choice in the sheet on refusal. On a lost answer, recover against the original request ID, payload, and Machine through `CreationSubmissions`. Existing tests cover the receipt contract. A setup failure after admission belongs to the existing Task's workspace and recovery.
 - Update the New Task usage text in `docs/surfaces.md`. Run `scripts/test_desktop.sh --filter 'NewTaskTests|CreationSubmissionTests|TaskGraphProofTests'` after implementation and record the result.
+
+## Docs
+
+- `docs/surfaces.md` (New Task and Start picks a workflow sections updated ahead of implementation)

@@ -27,3 +27,7 @@
 - Smart “heading to the end” sink for `Auto` / `deliver` / settling PRs (`B3` in `explore.html`) — Jack Heart: “i think we need something like moving auto to the bottom, or being able to 'close' certain tasks, but auto has to be smart enough to know like if its moving towards the end, that coutn even if its not explicitly auto”.
 - Manual “Close / Park” for individual Working Tasks (`B4` in `explore.html`).
 - LOO-937's Project-rank redesign remains separate from Working sidebar order.
+
+## From QA round 4 (2026-11-23)
+
+- A returning Desktop launch opened by link stays on saved planning (“Updating…”), highlights the saved selection and ignores sidebar clicks; moving `desktop-cache/workspace.json` aside clears it. Left unfixed here: the stuck read is in workspace restore, not Working order. Worth its own Task if it reproduces unlocked.

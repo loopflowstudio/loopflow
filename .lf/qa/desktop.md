@@ -219,12 +219,21 @@ them. Nothing here needs WindowServer focus.
   before sending the mouse-down; sent the other way a segmented control spins
   in `trackMouse` and the app hangs. Don't `activate` or `makeKey` in the
   hook: every later click goes dead. The first click after a launch is often
-  swallowed; send it twice and look. Test that clicks land with a row click
-  and `lf desktop state --json` (its `destination` changes) before relying
-  on one; in some runs no hook click lands even after a relaunch. Then drive
+  swallowed; send it twice and look. Row clicks never select (use a link);
+  test a button against what it writes (`grep desktop.sort lf.log`).
+- Clicks land only in a window whose `lf desktop state` reading is
+  `current`. Locked, a launch may mount no window until a
+  `loopflow://<repo>/task/<id>` link arrives, and with a saved
+  `$LF_HOME/desktop-cache/workspace.json` that window stays `updating`
+  (saved planning, highlight on the saved selection) and answers no click.
+  Quit the app, move `workspace.json` aside, relaunch and open the link: the
+  window reaches `current` and the sidebar buttons answer. Otherwise drive
   through `lf desktop do <action>` (`new-task` opens the New Task sheet) and
   the CLI command behind the button (`lf desktop sort`, `lf desktop dashboard
   move`), and report the click itself as not reached.
+- Stand-in `claude` markers `error` and `blocked` that print
+  `\x1b]7501;id=turn:state=error\x1b\\` (or `blocked`) give rows Error and
+  Blocked beside the Busy and Available described below.
 - `snap` with two windows can block the main thread for minutes while
   `cacheDisplay` renders; wait for the `.out` rather than timing out. Quit
   a restored second window first: one left on “Updating…” after killed

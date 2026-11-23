@@ -203,13 +203,13 @@ first. A Working-board drag is `lf desktop dashboard move
 working-tasks/task:<id> --destination task:<id>`, run from the repository; it
 is the only CLI that changes a Task's rank (`lf task move` changes membership
 or Machine), and `lf task list` and `lf task show` show the result, `lf task
-status --json` carries no rank. A worktree nested inside another Task's
-checkout (`git worktree add <checkout>/nested`) is the case where "the Task
-holding a directory" and "the Task whose checkout this is" differ: adopt it
-with `lf task create --worktree`, then launch in a subdirectory of each.
-Before adopting, check both questions there: launches count toward the outer
-Task, while bare `lf resume`, `lf commit` and `lf pr open` (fake GitHub in
-`stacked-tasks.md`) treat it as nobody's checkout, as the installed lf does. To move a repository with its checkouts,
+status --json` carries no rank. A worktree nested inside another Task's checkout (`git worktree add <checkout>/nested`)
+is its own Git root, so it belongs to no Task until adopted with `lf task
+create --worktree`: launches, bare `lf resume`, `lf task status` ("this checkout
+has no Task") and `lf commit` there all answer none, while a plain
+subdirectory of the checkout is the Task's. To act as another Task, set
+`LF_AS=task:<id>` (a bare id is "invalid Work selector"); a checkout's owner
+still wins over it. To move a repository with its checkouts,
 keep the worktrees inside it, `mv` it, `git worktree repair`, then run
 `lf task list` from the new path. Once every writer has exited, `sqlite3
 ?mode=ro` cannot open a home's store (no `-shm`); open it read-write.

@@ -246,3 +246,12 @@ ancestor as its own root (exact match), instead of answering nothing or
 falling back to the deepest checkout. Live starts always have a real
 directory; this only decides fixtures with missing paths and a checkout whose
 worktree is gone. Reversible in `checkout_owner_in` (`sqlite/task_work.rs`).
+
+## QA on be5169a4f (2026-11-23)
+
+- Plan slice 5 and the inventory still name `agent_sessions.primary_scope='task'`
+  as a Task's primary; `8cc3ba3f9c` dropped it and `task_primary_sessions` is
+  the home (CHECK allows `repository`, `wave`). Realign should fix the plan.
+- `lf wt create` from a Task checkout branches from `main`. LOOPFLOW.md now
+  sends child agents there for a separate checkout; open whether it should
+  start from the Task's branch.

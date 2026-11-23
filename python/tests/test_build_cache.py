@@ -489,3 +489,18 @@ def test_an_existing_target_is_never_replaced(cargo_repo, tmp_path):
     (tree / "target").mkdir()
     assert build_cache.seed_target(tree) is None
     assert list((tree / "target").iterdir()) == []
+
+
+def test_an_unbuilt_seed_ranks_as_old_as_its_source(cargo_repo, tmp_path):
+    # Directory clones get fresh mtimes; a seed that never built must not
+    # outrank the sibling that last did.
+    built = tmp_path / "built"
+    _git(cargo_repo, "-c", "core.hooksPath=/dev/null", "worktree", "add", "--detach", str(built))
+    _cargo_build(built)
+    install_hook(cargo_repo)
+    _git(cargo_repo, "worktree", "add", "--detach", str(tmp_path / "seeded"))
+    later = tmp_path / "later"
+    _git(cargo_repo, "worktree", "add", "--detach", str(later))
+    assert json.loads(_cache_command(later, "status", "--json").stdout)["seed"]["source"] == str(
+        built.resolve()
+    )

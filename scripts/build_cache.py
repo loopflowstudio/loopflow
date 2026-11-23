@@ -195,6 +195,10 @@ def seed_target(repo: Path) -> Path | None:
                 staging.mkdir()
                 for entry in SEED_ENTRIES:
                     _clone(debug / entry, staging / entry)
+                # A cloned directory gets a fresh mtime; keep the source's so an
+                # unbuilt seed never outranks the sibling that last built.
+                built = (debug / ".fingerprint").stat()
+                os.utime(staging / ".fingerprint", ns=(built.st_atime_ns, built.st_mtime_ns))
                 # Atomic: a Cargo started meanwhile sees no target or a whole one.
                 staging.rename(target / "debug")
             except (OSError, subprocess.CalledProcessError):

@@ -54,10 +54,8 @@ final class MobileSceneDelegate: UIResponder, UIWindowSceneDelegate {
 
 private struct MobileRoot: View {
     let activity: SceneActivity
-    @Environment(\.colorScheme) private var colorScheme
     var body: some View {
         MachineConnectionView()
             .environment(\.scenePhase, activity.phase)
-            .environment(\.palette, (colorScheme == .dark ? ThemeDefinition.dark : .light).palette)
     }
 }

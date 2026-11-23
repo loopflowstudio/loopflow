@@ -3,7 +3,7 @@ import SwiftUI
 
 /// One Task's Session: the live terminal, and a reply field under your thumb.
 struct SessionView: View {
-    let theme: ThemeDefinition
+    @Environment(\.theme) private var theme
     let showChanges: () -> Void
     @Binding var draft: String
     @State private var link: SessionLink
@@ -12,9 +12,8 @@ struct SessionView: View {
     @FocusState private var replying: Bool
     @Environment(\.scenePhase) private var scenePhase
 
-    init(client: RemoteMobileClient, task: MobileTask, session: String, theme: ThemeDefinition, draft: Binding<String>,
+    init(client: RemoteMobileClient, task: MobileTask, session: String, draft: Binding<String>,
          showChanges: @escaping () -> Void) {
-        self.theme = theme
         self.showChanges = showChanges
         _draft = draft
         _link = State(initialValue: SessionLink(client: client, task: task, session: session))
@@ -27,7 +26,7 @@ struct SessionView: View {
                     Button("Changes", action: showChanges).buttonStyle(LoopflowButtonStyle(.accent))
                 }
             } else {
-                SessionTerminal(link: link, actions: actions, theme: theme)
+                SessionTerminal(link: link, actions: actions)
                     .overlay { notice }
                 if link.state == .live {
                     if showingKeys { keys }

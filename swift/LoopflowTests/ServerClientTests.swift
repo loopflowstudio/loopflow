@@ -85,6 +85,28 @@ struct ServerClientTests {
         #expect(effects.get() == 1)
     }
 
+    @Test(arguments: [true, false])
+    func aRequestTheServerCannotParseNamesBothBuilds(parse: Bool) async throws {
+        let peer = try ServerPeer()
+        // What a 0.16.0 server answers for `config.theme` without `path`, or for an operation it lacks.
+        let refusal = parse ? "config.theme: missing field `path`" : "this server has no operation `config.theme`; update the selected installation"
+        peer.serve { message, respond in
+            guard message["type"] as? String == "request" else { return true }
+            respond(["type": "error", "revisions": NSNull(), "id": message["id"]!, "code": "invalid",
+                     "message": refusal, "data": ["kind": "config.theme"]])
+            return true
+        }
+        do {
+            _ = try await ServerClient.configuration(.configTheme(value: nil), location: peer.location)
+            Issue.record("A refused request succeeded")
+        } catch {
+            let client = "\(LaunchJournal.appVersion)+\(DesktopLog.sourceRevision)"
+            #expect(error.localizedDescription == (parse
+                ? "The server (test) can't read what this Loopflow (\(client)) asked. Update the older one."
+                : refusal))
+        }
+    }
+
     @Test func cancelledReadSendsCancelDropsLateAnswerAndKeepsTheConnection() async throws {
         let peer = try ServerPeer()
         let firstId = Mutex<String?>(nil)
@@ -371,7 +393,7 @@ struct ServerClientTests {
             return true
         }
         #expect(try await ServerClient.read(.repoPath(id: "repo_1"), location: peer.location).decode(String.self) == big)
-        let output = try await ServerClient.configuration(.configTheme(path: "/unused", value: big), location: peer.location)
+        let output = try await ServerClient.configuration(.configTheme(value: big), location: peer.location)
         #expect(String(decoding: output, as: UTF8.self) == "\(big.utf8.count)")
     }
 

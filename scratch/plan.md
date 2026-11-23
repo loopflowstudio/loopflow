@@ -403,27 +403,29 @@ Main through #2026 is merged (`def5dfdded`). The review is
    `task_ids` for the Session list from Git roots (questions.md).
    Tests: `the_task_holding_a_directory_is_its_deepest_checkout`,
    `ops::task::tests::` 35, `ops::human_session::` 51, `work_route` 6.
-5. **Not built: the primary mark's upgrade day** (5.3b). Writers go back to
-   `task_primary_sessions` and no writer sets `primary_scope='task'`. What it
-   reaches, found this pass: `counts_for_task` already counts NULL and
-   `'task'` alike, so membership tolerates the mark. But "which Session is the
-   primary" is read from `primary_scope` in ~25 places: `sessions.rs`
-   (filter `SessionPrimary::Task`, `primary_scope()`, the cwd update's
-   `primary_scope IS NOT NULL`, `SESSION_SELECT` column 25 that Swift's
-   `taskPrimary` derives from), `session_recovery.rs:43`, `task_retirement`,
-   `processes`, `children`, `open.rs`, `waves.rs`, `server/recovery.rs:328`
-   and `server/service.rs:3840` (both write the mark directly), plus seven
-   `human_session` readers. Shape: one SQL expression for "the Session's
-   scope", `CASE WHEN EXISTS(task_primary_sessions …) THEN 'task' ELSE
-   s.primary_scope END`, used wherever `primary_scope` is read; writers
-   (`mark_task_primary_in`, the two server writes) upsert
-   `task_primary_sessions`; drop the mirror triggers
-   (`task_primary_sessions_mark_*`, `agent_sessions_task_primary_row`) and the
-   rebuild's `THEN 'task'` backfill; remove
-   `-- leaving: task_primary_sessions`, so the guard stops refusing it.
-   Keep the CHECK accepting `'task'` and the plain index: LOO-877 flips
-   writers to the mark. Rewrite the trigger tests at `sessions.rs:2438-2520`
-   as "released lf sees the primary this build chose".
+5. **Built** (`06c6145399`, 5.3b). `task_primary_sessions` is the Task
+   primary's home again, read and written by this build and released lf
+   alike; nothing writes `primary_scope='task'`. One expression,
+   `primary_scope_sql(s)` (`coalesce(s.primary_scope, 'task' if a row names
+   s)`), gives the scope wherever it is read: the session filter, the
+   summary's wire `primary_scope` (Swift's `taskPrimary`), and the bound
+   cwd update. "Which Session is the Task's primary" joins the table
+   (`primary_session_in`, `task_conversation_here_sql`, `primary_scope()`).
+   `mark_task_primary_in` is `INSERT OR REPLACE` of the row. Gone: the
+   mirror triggers, the rebuild's `'task'` backfill, the leaving mark. Kept:
+   the CHECK accepting `'task'` and the plain index, for LOO-877. Found on
+   the way: the `agent_sessions` rebuild dropped main's `agent_socket`
+   (`loo974_agent_socket`); it carries it now (SCHEMA.md regenerated).
+   Fixed a fixture that still relied on path membership
+   (`input_replacement_retains_workspace_and_task_membership`). Tests:
+   storage `task_work:: leaving_members_are_unreadable sessions::
+   session_recovery:: query_plans` 29 passed; execution `ops::human_session::
+   store::session_metadata_tests:: store::sessions:: ops::task::tests::` 105
+   passed; application served watch, `server::recovery::` and the three
+   `context_launch_tests::` recovery fixtures 13 passed. Not run here: the
+   standalone fixture binaries whose SQL moved to the table
+   (`session_lifecycle_tests`, `work_open_tests`, `served_reads`,
+   `machine_commands`, `task_graph_launch_tests`).
 6. **Built** (`c957535ac8`). `'inherited'` leaves the CHECK; the rebuild
    maps the 750 live rows to `'declared'`; `WorkSource::Declared` reads the
    771 history events that say `inherited` (serde alias). Swift reads the
@@ -433,9 +435,9 @@ Demo at gate (4b): `lf task move` then `lf task status` show the new rank;
 Desktop's Working board after merge and install. Auto stays a Machine fact
 (2a), unchanged.
 
-## Then: gate
+## Next: gate
 
-After item 5 above. PR #1973; branch merges main through #1988
+Items 1-6 are settled. PR #1973; branch merges main through #1988
 (`8892ba5671`). The acceptance check last passed at `2448546730` (10 tests).
 
 Run on that head (2026-11-18, clean `LF_*`):

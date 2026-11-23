@@ -1,17 +1,19 @@
-at: 739284af74898ff91e138a68fcc8ce085fea7543
+at: 17584322f0de6970290a7e0644538f700dc2b109
 first:
   - path: docs/surfaces.md
-    why: File and Start from the sheet
+    why: Where File and Start take you
   - path: swift/LoopflowMac/Views/NewTaskSheet.swift
     why: The draft and its workflow choice
   - path: swift/Loopflow/Services/CreationJournal.swift
-    why: Which submissions can return to the draft
-  - path: swift/LoopflowMac/WorkModel.swift
-    why: Dismiss the submitting sheet and reveal the destination
+    why: Which refusals can return to the draft
   - path: swift/LoopflowMac/Views/BacklogView.swift
-    why: Select and present the filed brief
+    why: The selected brief can use the File reply
+  - path: swift/LoopflowMac/WorkModel.swift
+    why: Route the reply and reconcile it with planning
+  - path: swift/LoopflowMac/WorkProjection.swift
+    why: Leaving the board releases its temporary row
   - path: swift/LoopflowTests/NewTaskTests.swift
-    why: Follow File and Start through to their workspaces
+    why: Watch the brief open before planning catches up
   - path: swift/LoopflowTests/CreationSubmissionTests.swift
     why: Recover interrupted submissions across windows and restarts
 hide: []

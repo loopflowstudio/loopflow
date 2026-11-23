@@ -250,7 +250,6 @@ pub struct WaveRemoval {
     pub moved: Vec<RemovalTask>,
     pub deleted: Vec<RemovalTask>,
     pub completed_tasks: usize,
-    pub projects: usize,
     pub sessions: usize,
     pub has_files: bool,
     /// Files under `.lf/wave/<name>` with edits nobody committed on the main
@@ -345,13 +344,7 @@ pub fn remove(
     let mut moved = Vec::new();
     let mut deleted = Vec::new();
     let mut completed_tasks = 0;
-    let mut projects = 0;
     for id in &ids {
-        projects += store
-            .sqlite
-            .list_projects(Some(id))
-            .map_err(lifecycle_error)?
-            .len();
         for task in store.sqlite.list_tasks(Some(id)).map_err(lifecycle_error)? {
             let state = store.sqlite.task_state(&task.id).map_err(lifecycle_error)?;
             if state.is_terminal() {
@@ -401,7 +394,6 @@ pub fn remove(
         moved,
         deleted,
         completed_tasks,
-        projects,
         sessions,
         has_files,
         uncommitted: if has_files {
@@ -722,26 +714,19 @@ fn removal_summary(removal: &WaveRemoval) -> Vec<String> {
                 .join(", ")
         ));
     }
-    let mut kept = Vec::new();
     if removal.completed_tasks > 0 {
-        kept.push(count(
-            removal.completed_tasks,
-            "completed Task",
-            "completed Tasks",
-        ));
-    }
-    if removal.projects > 0 {
-        kept.push(count(removal.projects, "Project", "Projects"));
-    }
-    if !kept.is_empty() {
-        let verb = if removal.completed_tasks + removal.projects == 1 {
+        let verb = if removal.completed_tasks == 1 {
             "stays"
         } else {
             "stay"
         };
         lines.push(format!(
             "{} {verb} readable in history.",
-            kept.join(" and ")
+            count(
+                removal.completed_tasks,
+                "completed Task",
+                "completed Tasks"
+            )
         ));
     }
     if removal.sessions > 0 {

@@ -14798,11 +14798,6 @@
         "preview": {
           "type": "boolean"
         },
-        "projects": {
-          "format": "uint",
-          "minimum": 0,
-          "type": "integer"
-        },
         "sessions": {
           "format": "uint",
           "minimum": 0,
@@ -14839,7 +14834,6 @@
         "moved",
         "deleted",
         "completed_tasks",
-        "projects",
         "sessions",
         "has_files",
         "uncommitted",

@@ -11,14 +11,13 @@
   ],
   "deleted": [],
   "completed_tasks": 1,
-  "projects": 1,
   "sessions": 1,
   "has_files": true,
   "uncommitted": [],
   "files": null,
   "summary": [
     "2 open Tasks move to the repository (1 started keeps its worktree, PR and running Graph).",
-    "1 completed Task and 1 Project stay readable in history.",
+    "1 completed Task stays readable in history.",
     "The Wave conversation stays in history.",
     ".lf/wave/desktop is deleted on the main checkout; Git history keeps it."
   ]

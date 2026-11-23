@@ -1933,7 +1933,7 @@ pub enum WaveCommand {
         json: bool,
     },
     /// Remove a Wave and its child Waves. Open Tasks move to the parent Wave, or the
-    /// repository; Projects, completed Tasks and Sessions stay readable in history.
+    /// repository; completed Tasks and Sessions stay readable in history.
     #[command(after_help = "Run again to finish an interrupted removal.")]
     Remove {
         wave: String,

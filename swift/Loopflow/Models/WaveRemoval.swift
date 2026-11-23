@@ -13,7 +13,6 @@ public struct WaveRemoval: Decodable, Sendable, Hashable {
     public let moved: [Task]
     public let deleted: [Task]
     public let completedTasks: Int
-    public let projects: Int
     public let sessions: Int
     public let hasFiles: Bool
     /// Edits under `.lf/wave/<name>` nobody committed; removal deletes them.
@@ -57,7 +56,7 @@ public struct WaveRemoval: Decodable, Sendable, Hashable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, name, preview, destination, waves, moved, deleted, projects, sessions
+        case id, name, preview, destination, waves, moved, deleted, sessions
         case uncommitted, files, summary
         case alreadyRemoved = "already_removed"
         case completedTasks = "completed_tasks"
@@ -75,7 +74,6 @@ public struct WaveRemoval: Decodable, Sendable, Hashable {
         moved = try container.decode([Task].self, forKey: .moved)
         deleted = try container.decode([Task].self, forKey: .deleted)
         completedTasks = try container.decode(Int.self, forKey: .completedTasks)
-        projects = try container.decode(Int.self, forKey: .projects)
         sessions = try container.decode(Int.self, forKey: .sessions)
         hasFiles = try container.decode(Bool.self, forKey: .hasFiles)
         uncommitted = try container.decode([String].self, forKey: .uncommitted)

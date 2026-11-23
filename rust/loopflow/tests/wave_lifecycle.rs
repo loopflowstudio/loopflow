@@ -119,17 +119,12 @@ fn removing_an_empty_wave_retires_it_and_removes_its_files_on_main() {
     let preview = lab.lf(&["wave", "remove", "research", "--preview", "--json"]);
     assert_eq!(preview["summary"][0], "research has no Tasks or Sessions.");
     assert_eq!(preview["uncommitted"][0], ".lf/wave/research/GOAL.md");
-    // The Wave's own Project stays in history with it.
     assert_eq!(
         preview["summary"][1],
-        "1 Project stays readable in history."
-    );
-    assert_eq!(
-        preview["summary"][2],
         ".lf/wave/research is deleted on the main checkout; Git history keeps its committed files."
     );
     assert_eq!(
-        preview["summary"][3],
+        preview["summary"][2],
         "Uncommitted edits in .lf/wave/research are deleted with it: .lf/wave/research/GOAL.md."
     );
     assert!(
@@ -145,7 +140,7 @@ fn removing_an_empty_wave_retires_it_and_removes_its_files_on_main() {
     assert!(git(&lab, &["diff", "--cached", "--name-only"]).is_empty());
     assert!(lab.live_waves().is_empty());
     assert_eq!(
-        removed["summary"][2],
+        removed["summary"][1],
         ".lf/wave/research removed on the main checkout."
     );
     let history = lab.lf(&["wave", "show", "research", "--json"]);
@@ -186,14 +181,13 @@ fn removing_a_wave_with_work_moves_open_tasks_and_keeps_history() {
     let preview = lab.lf(&["wave", "remove", "desktop", "--preview", "--json"]);
     assert_eq!(preview["moved"].as_array().unwrap().len(), 2);
     assert_eq!(preview["completed_tasks"], 1);
-    assert_eq!(preview["projects"], 1);
     let summary = preview["summary"].to_string();
     assert!(
         summary.contains("2 open Tasks move to the repository (1 started keeps its worktree"),
         "{summary}"
     );
     assert!(
-        summary.contains("1 completed Task and 1 Project stay readable"),
+        summary.contains("1 completed Task stays readable"),
         "{summary}"
     );
 

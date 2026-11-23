@@ -96,7 +96,7 @@ struct DTOFixtureTests {
             WaveRemoval.self, from: String(decoding: loadFixtureData("wave_removal.json"), as: UTF8.self))
         #expect(removal.name == "desktop")
         #expect(removal.destination == nil)
-        #expect(removal.projects == 1)
+        #expect(removal.completedTasks == 1)
         #expect(removal.moved.filter(\.started).count == 1)
         #expect(removal.files == nil)
         #expect(removal.summary.first?.hasPrefix("2 open Tasks move to the repository") == true)

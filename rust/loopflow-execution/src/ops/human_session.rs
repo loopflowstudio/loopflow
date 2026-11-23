@@ -851,8 +851,8 @@ pub async fn list(
     store: &SharedStore,
     filter: &crate::session::SessionFilter,
 ) -> Result<Vec<SessionRecord>> {
-    // Checkout resolution must precede Task filtering and pagination: SQL path
-    // prefixes cannot recognize symlink aliases or nested repositories.
+    // Association filters apply after the summaries and before pagination,
+    // so raw conversations no Session records are filtered the same way.
     let association_filter =
         filter.orphan || filter.task.is_some() || filter.wave.is_some() || filter.on.is_some();
     let mut selection = filter.clone();
@@ -878,7 +878,7 @@ pub async fn list(
             ending_here(&store.sqlite, &session, now),
         ));
     }
-    let mut workspaces = workspace::associate(store, &mut sessions).await?;
+    workspace::associate(store, &mut sessions).await?;
     turns::read(&store.sqlite, &mut sessions)?;
     let task = match &filter.task {
         Some(selector) => crate::store::children::resolve_task_id(&store.sqlite, selector, None)?,
@@ -894,7 +894,7 @@ pub async fn list(
         Some(wave) => store.sqlite.task_ids_in_wave(wave)?,
         None => Default::default(),
     };
-    let mut in_work = |session: &SessionRecord| {
+    let in_work = |session: &SessionRecord| {
         (!filter.orphan || (session.task_ids.is_empty() && session.wave_id.is_none()))
             && in_task(session)
             && (filter.wave.is_none()
@@ -902,8 +902,7 @@ pub async fn list(
                 || session
                     .task_ids
                     .iter()
-                    .any(|task| wave_tasks.contains(task))
-                || workspaces.in_task_checkout(Path::new(&session.cwd), &wave_tasks))
+                    .any(|task| wave_tasks.contains(task)))
     };
     if association_filter {
         sessions.retain(|session| {

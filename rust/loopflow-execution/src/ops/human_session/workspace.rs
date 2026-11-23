@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
@@ -19,43 +19,33 @@ pub struct SessionWorkspace {
     pub unavailable: Option<String>,
 }
 
+/// Where each listed Session's directory sits: the Git worktree holding it and
+/// the Task whose checkout that worktree is, by `task_checkout_owner`'s rule
+/// (root equality, lower id on a shared root). Presentation only: a Session's
+/// Tasks are the one it recorded as it started.
 #[derive(Debug)]
-pub(super) struct WorkspaceResolver {
+struct WorkspaceResolver {
     home: MachineId,
     checkouts: Vec<TaskCheckout>,
     roots: HashMap<PathBuf, Option<PathBuf>>,
-    tasks_by_root: HashMap<PathBuf, Vec<TaskId>>,
+    owners: HashMap<PathBuf, TaskId>,
 }
 
 impl WorkspaceResolver {
-    fn new(home: MachineId, checkouts: Vec<TaskCheckout>) -> Self {
+    fn new(home: MachineId, mut checkouts: Vec<TaskCheckout>) -> Self {
+        checkouts.sort_by(|a, b| a.task_id.as_str().cmp(b.task_id.as_str()));
         let mut resolver = Self {
             home,
             checkouts,
             roots: HashMap::new(),
-            tasks_by_root: HashMap::new(),
+            owners: HashMap::new(),
         };
         for checkout in resolver.checkouts.clone() {
             if let Some(root) = resolver.root(&checkout.worktree) {
-                resolver
-                    .tasks_by_root
-                    .entry(root)
-                    .or_default()
-                    .push(checkout.task_id);
+                resolver.owners.entry(root).or_insert(checkout.task_id);
             }
         }
         resolver
-    }
-
-    pub(super) fn in_task_checkout(&mut self, cwd: &Path, tasks: &HashSet<TaskId>) -> bool {
-        let root = self.root(cwd).unwrap_or_else(|| cwd.to_path_buf());
-        self.tasks_by_root
-            .get(&root)
-            .is_some_and(|ids| ids.iter().any(|id| tasks.contains(id)))
-            || self
-                .checkouts
-                .iter()
-                .any(|checkout| checkout.worktree == root && tasks.contains(&checkout.task_id))
     }
 
     fn root(&mut self, path: &Path) -> Option<PathBuf> {
@@ -69,79 +59,52 @@ impl WorkspaceResolver {
 
     fn resolve(&mut self, cwd: &Path, work: Option<&WorkRef>) -> Option<SessionWorkspace> {
         if let Some(root) = self.root(cwd) {
-            let tasks = self
-                .tasks_by_root
-                .get(&root)
-                .map(Vec::as_slice)
-                .unwrap_or_default();
             return Some(SessionWorkspace {
                 machine_id: self.home.clone(),
+                task_id: self.owners.get(&root).cloned(),
                 worktree: root,
-                task_id: (tasks.len() == 1).then(|| tasks[0].clone()),
-                unavailable: (tasks.len() > 1).then(|| "Multiple Tasks claim this checkout".into()),
+                unavailable: None,
             });
         }
-        // An unavailable cwd is not an ancestor match. Only exact recorded
-        // checkout evidence or explicit Task attribution can retain association.
-        let mut candidates = self.checkouts.iter().filter(|checkout| {
+        // An unavailable cwd is not an ancestor match: only a checkout recorded
+        // at it, or the Session's own Task's checkout, places it.
+        let checkout = self.checkouts.iter().find(|checkout| {
             checkout.worktree == cwd
                 || matches!(work, Some(WorkRef::Task(id)) if id == &checkout.task_id)
-        });
-        let checkout = candidates.next()?;
-        let ambiguous = candidates.next().is_some();
+        })?;
         Some(SessionWorkspace {
             machine_id: self.home.clone(),
             worktree: checkout.worktree.clone(),
-            task_id: (!ambiguous).then(|| checkout.task_id.clone()),
-            unavailable: Some(
-                if ambiguous {
-                    "Multiple Tasks claim this unavailable checkout"
-                } else {
-                    "Task checkout is unavailable"
-                }
-                .into(),
-            ),
+            task_id: Some(checkout.task_id.clone()),
+            unavailable: Some("Task checkout is unavailable".into()),
         })
     }
 }
 
-pub async fn associate(
-    store: &SharedStore,
-    sessions: &mut [SessionRecord],
-) -> Result<WorkspaceResolver> {
-    // Both callers supply local registry Sessions without workspace projections.
-    // A failed snapshot propagates: callers must retain their last good inventory.
+/// Places each local registry Session in its workspace. A failed snapshot
+/// propagates: callers must retain their last good inventory.
+pub async fn associate(store: &SharedStore, sessions: &mut [SessionRecord]) -> Result<()> {
     let checkouts = store.task_checkouts().await?;
     let home = store.local_machine().await?.id;
     let mut resolver = WorkspaceResolver::new(home.clone(), checkouts);
     for session in sessions {
-        if matches!(
+        let cwd = Path::new(&session.cwd);
+        session.workspace = if matches!(
             session.primary_scope.as_deref(),
             Some("repository" | "wave")
         ) {
-            let cwd = Path::new(&session.cwd);
-            session.workspace = Some(SessionWorkspace {
+            Some(SessionWorkspace {
                 machine_id: home.clone(),
                 worktree: resolver.root(cwd).unwrap_or_else(|| cwd.to_path_buf()),
                 task_id: None,
                 unavailable: (!crate::observe::exists(cwd))
                     .then(|| "Persistent checkout is unavailable".into()),
-            });
-            session.task_ids.clear();
-            continue;
-        }
-        session.workspace = resolver.resolve(Path::new(&session.cwd), session.work.as_ref());
-        if let Some(workspace) = &session.workspace {
-            session.task_ids = workspace.task_id.iter().cloned().collect();
-        }
-        // Recorded checkout location and explicit binding both grant membership.
-        if let Some(WorkRef::Task(task)) = &session.work {
-            if !session.task_ids.contains(task) {
-                session.task_ids.push(task.clone());
-            }
-        }
+            })
+        } else {
+            resolver.resolve(cwd, session.work.as_ref())
+        };
     }
-    Ok(resolver)
+    Ok(())
 }
 
 #[cfg(test)]
@@ -231,9 +194,10 @@ mod tests {
         );
         let mut duplicate = checkout.clone();
         duplicate.task_id = TaskId::new();
+        let lower = id.as_str().min(duplicate.task_id.as_str()).to_owned();
         let mut resolver = WorkspaceResolver::new(home, vec![checkout, duplicate]);
-        let ambiguous = resolver.resolve(repo.path(), None).unwrap();
-        assert!(ambiguous.task_id.is_none());
-        assert!(ambiguous.unavailable.is_some());
+        let shared = resolver.resolve(repo.path(), None).unwrap();
+        assert_eq!(shared.task_id.unwrap().as_str(), lower);
+        assert!(shared.unavailable.is_none());
     }
 }

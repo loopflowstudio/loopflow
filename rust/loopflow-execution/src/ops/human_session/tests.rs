@@ -2099,7 +2099,6 @@ fn list_wave_includes_attribution_and_raw_checkout_conversations_before_paging()
                     "bare",
                     "former",
                     "raw-in-task",
-                    "repository-in-task",
                     "task-primary",
                     "wave-primary"
                 ]
@@ -2109,8 +2108,67 @@ fn list_wave_includes_attribution_and_raw_checkout_conversations_before_paging()
                 limit: 1,
                 ..filter
             };
-            assert_eq!(fixture.ids(filter).await, ["repository-in-task"]);
+            assert_eq!(fixture.ids(filter).await, ["task-primary"]);
         })
+    });
+}
+
+#[test]
+fn list_task_keeps_each_session_with_its_task_after_a_move_and_path_reuse() {
+    let _lock = crate::journal::test_env_lock();
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    runtime.block_on(async {
+        let home = SessionHome::new();
+        let store = home.store().await;
+        let reused = loopflow_test_support::TestRepo::new();
+        let path = reused.path().to_str().unwrap();
+        let db = rusqlite::Connection::open(home.home.path().join("loopflow.db")).unwrap();
+        db.execute(
+            "INSERT INTO repository_plans(id,repo,selected) VALUES('repo_00000000000000000000000000000001','/moved',1)",
+            [],
+        )
+        .unwrap();
+        // Task A's checkout moved with its repository; Task C's clone took the
+        // old path, where A's Session still says it ran.
+        let (a, c) = (
+            loopflow_model::durable::TaskId::new(),
+            loopflow_model::durable::TaskId::new(),
+        );
+        for (task, identifier, worktree) in [(&a, "TEST-1", "/moved/task"), (&c, "TEST-2", path)] {
+            db.execute("INSERT INTO tasks(id,repository_id,issue_identifier,created_at) VALUES(?1,'repo_00000000000000000000000000000001',?2,1)", [task.as_str(), identifier]).unwrap();
+            db.execute(
+                "INSERT INTO task_checkouts(task_id,worktree) VALUES(?1,?2)",
+                [task.as_str(), worktree],
+            )
+            .unwrap();
+        }
+        for (id, task) in [("first", &a), ("second", &c)] {
+            store
+                .sqlite
+                .test_session(id, &crate::session_record::new_artifact_key());
+            db.execute(
+                "UPDATE agent_sessions SET task_id=?1,cwd=?2 WHERE id=?3",
+                [task.as_str(), path, id],
+            )
+            .unwrap();
+        }
+        let listed = |task: &loopflow_model::durable::TaskId| {
+            let filter = crate::session::SessionFilter {
+                task: Some(task.to_string()),
+                ..Default::default()
+            };
+            let store = store.clone();
+            async move {
+                super::list(&store, &filter)
+                    .await
+                    .unwrap()
+                    .into_iter()
+                    .map(|row| (row.id.to_string(), row.task_ids))
+                    .collect::<Vec<_>>()
+            }
+        };
+        assert_eq!(listed(&a).await, [("first".to_owned(), vec![a.clone()])]);
+        assert_eq!(listed(&c).await, [("second".to_owned(), vec![c.clone()])]);
     });
 }
 

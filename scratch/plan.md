@@ -403,25 +403,23 @@ Task's), `ops::task::tests:: ops::run:: ops::human_session:: git::` passed;
 `lf land` in a nested worktree end to end (`land_tests`, CI);
 `pr_landing` already asked the owner by Git root.
 
-## Next: the Session list reads the stored Task (concept review on 8e62c4f468)
+## Built: the Session list reads the stored Task (concept review on 8e62c4f468)
 
-One reader still computes membership from paths at read time:
-`human_session/workspace.rs` `associate` sets each listed Session's
-`task_ids` from the Task whose checkout is its cwd's Git root *now*, then
-adds the stored Task. `lf session list --task`, its JSON `task_ids` and
-Desktop's `SessionRecord.names(task:)` read that. It breaks the outcome:
-reuse a path with a clone that becomes Task C's checkout, and an old
-Session of Task A lists under A and C; an untasked Session in a nested
-directory that later becomes a checkout joins it. It also says "Multiple
-Tasks claim this checkout" where the store answers the lower id.
+`human_session/workspace.rs` `associate` no longer touches `task_ids`: a
+listed Session's Tasks are the store's `session_tasks` (its
+`agent_sessions.task_id`, Repository and Wave primaries excluded), so
+`lf session list --task`, its JSON and Desktop's `names(task:)` read one
+answer. `WorkspaceResolver` only places the Session (worktree root,
+unavailable reason); `workspace.task_id` is the root's owner by
+`task_checkout_owner`'s rule (lower id on a shared root), and the
+"Multiple Tasks claim this checkout" message is gone. The `--wave` filter's
+path clause (`in_task_checkout`) went with it: a Repository primary sitting
+in a Wave Task's checkout no longer lists under that Wave. Raw conversations
+keep their checkout-owner Task (`turns.rs`), since no Session records them.
 
-Build: `associate` sets `task_ids` from the stored Task only
-(`session.work`'s Task, i.e. `agent_sessions.task_id`); `WorkspaceResolver`
-keeps the workspace presentation (worktree root, unavailable reasons) and
-its `workspace.task_id` comes from `task_checkout_owner`'s rule (lower id on
-a shared root) or goes if nothing reads it. Test: the move-and-reuse demo
-extended through `lf session list --task <C>` listing none of A's Sessions.
-Then gate.
+Test: `human_session::tests::list_task_keeps_each_session_with_its_task_after_a_move_and_path_reuse`
+(execution, since the storage demo can't call `list`): A's Session at the
+reused path lists under A only, C's under C. Next: gate.
 
 ## Earlier: implement (concept review after the plan hub, 2026-11-22)
 

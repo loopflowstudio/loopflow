@@ -205,6 +205,8 @@ def _probe(lf: Path, harness: str, native: Path, output: Path) -> None:
         start_new_session=True,
     )
     tui = None
+    # Where the open terminal's bytes land if the run stops while it is open.
+    raw = output / "terminal.raw"
     try:
         created = run("task", "create", "Idle wake fixture", "--json")
         (output / "task.json").write_text(created)
@@ -227,9 +229,10 @@ def _probe(lf: Path, harness: str, native: Path, output: Path) -> None:
 
         # Quit, steer while nothing runs, reopen and type nothing.
         _quit(tui)
-        (output / "terminal.raw").write_bytes(tui.raw)
+        raw.write_bytes(tui.raw)
         tui.close()
         tui = None
+        raw = output / "reopen-terminal.raw"
         run("steer", task, REOPEN_STEER)
         reopened = len(_Model.requests)
         tui = _Tui([str(lf), "resume", "--task", task], work, env)
@@ -253,7 +256,7 @@ def _probe(lf: Path, harness: str, native: Path, output: Path) -> None:
     finally:
         (output / "requests.json").write_text(json.dumps(_Model.requests, indent=2))
         if tui is not None:
-            (output / "reopen-terminal.raw").write_bytes(tui.raw)
+            raw.write_bytes(tui.raw)
             tui.close()
         if server.poll() is None:
             os.killpg(server.pid, signal.SIGTERM)

@@ -1252,6 +1252,7 @@ fn report_first_boundary(
     thread: &AgentSessionId,
     opening: bool,
 ) {
+    use crate::machine::client::{hook_request, HOOK_DEADLINE};
     use crate::machine::wire::{BoundaryMoment, ServerOperation, SessionBoundary};
     let (moment, callback) = if opening {
         (
@@ -1273,13 +1274,8 @@ fn report_first_boundary(
         printed: Vec::new(),
         inbox: None,
     });
-    let answered = crate::machine::socket_path().and_then(|socket| {
-        crate::machine::client::hook_request(
-            &socket,
-            operation,
-            crate::machine::client::HOOK_DEADLINE,
-        )
-    });
+    let answered = crate::machine::socket_path()
+        .and_then(|socket| hook_request(&socket, operation, HOOK_DEADLINE));
     if let Err(error) = answered {
         tracing::warn!(error = %format!("{error:#}"), "Codex's first boundary unrecorded; waiting steers wait for its first turn");
     }

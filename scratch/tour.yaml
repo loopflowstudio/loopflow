@@ -1,9 +1,9 @@
-at: ceec08df10cdb38a520ea7a9ad0d73f6b9e8de72
+at: 60058d46a53199ea0e601a4affdf03b799def8f6
 first:
   - path: docs/work.md
     why: What pausing and unpausing do
   - path: scratch/plan.md
-    why: Scope, macOS checks, and remaining work
+    why: Codex probe, worker ownership, and remaining work
   - path: rust/loopflow-storage/src/sqlite/task_pause.rs
     why: The hold and the worker identities it protects
   - path: rust/loopflow/src/lf/commands/write.rs
@@ -37,7 +37,7 @@ first:
   - path: rust/loopflow/tests/machine_commands.rs
     why: Pause remotely and read the owner's answer
   - path: rust/loopflow/tests/work/task_graph_launch_tests.rs
-    why: Exercise teardown, quiet wakes, Backlog, and unpause
+    why: Pause at admission, during land, and during builds
 hide:
   - path: tests/fixtures/dto/server_schema.json
     why: Generated from the Rust protocol and request fixtures

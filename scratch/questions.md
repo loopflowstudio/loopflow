@@ -7,3 +7,4 @@
 - Fix both `DesktopActionMonitor` and `WorkPaletteShortcut` to check `NSTextInputClient.hasMarkedText()` instead of `NSTextView`, leaving monitor consolidation as separate cleanup.
 - For the Option-B fixture, enable bracketed paste and follow both keypresses with a terminal status query. Its reply marks the end of the byte stream for that pair.
 - Match the pinned Ghostty defaults for Settings and numbered tabs. Settings uses the comma character, while `comma` names a physical key. Tabs 1–8 bind both characters and physical digits.
+- The held-Session fixture types an ordinary `x` after the three chords to delimit each batch, so a duplicated final Control-Return is visible in the byte comparison.

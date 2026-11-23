@@ -44,7 +44,7 @@ Clipboard paste, `lf desktop send`/`send-key`, selection, focus, connection reco
 
 1. **Built the Option-B slice.** Desktop key equivalents now probe for a binding before sending a key. The shared Session and Shell responder lets AppKit interpret Option on the side Ghostty selected, then encodes committed text with the original key. Clipboard paste still uses the paste API.
 2. **Built modifier, composition and shortcut ownership.** Each modifier release follows its physical key. Both Desktop shortcut monitors and the terminal's modifier handler defer during marked text. Input-source changes refresh Ghostty's keymap, and Edit → Select All selects terminal output. Ghostty's standalone shortcuts are removed before loading personal bindings. The Desktop menu keys for Quit, Settings and Close Window are unbound after loading them.
-3. **Exercise the held Session.** Reuse the isolated provider and private Machine setup from `SessionConnectionProofTests.swift`. An input fixture switches its PTY to raw mode, requests Kitty keyboard mode, signals readiness, and reports the bytes it reads. Run the sequence through the Desktop Session surface, then reattach to that PTY and repeat after mode restore. Verify provider bytes, not handler return values, using a readiness signal and bounded reads. Gate target: `scripts/test_desktop.sh --filter 'GhosttyModifierInputTests|SessionModifierInputTests'`, with renderer and PTY checks off-window and mounted/physical-keyboard checks in the optional mounted lane.
+3. **Verified held Session reattachment.** `SessionModifierInputTests` opens a prepared Session on a private Machine. Its provider sets the PTY to raw mode and requests Kitty disambiguation once. After reading the first batch it prints the second readiness marker. Desktop releases the first surface, prepares the same Session and waits for that marker on the new surface. The provider records both batches. A replacement process would still be waiting for its first batch.
 
 **Slice 1 checks**
 - `scripts/test_desktop.sh --skip-build --filter GhosttyModifierInputTests` after `swift build --build-tests --package-path swift` passed all four settings headless. With bracketed paste enabled, each side wrote exactly `1b 62` or `e2 88 ab`. CI repeats this check.
@@ -54,7 +54,12 @@ Clipboard paste, `lf desktop send`/`send-key`, selection, focus, connection reco
 
 - `scripts/test_desktop.sh --filter GhosttyModifierInputTests` passed all seven headless tests. In Kitty disambiguation mode the surface wrote exactly CR, CSI 13;2u and CSI 13;5u for Return, Shift-Return and Control-Return. CI repeats the byte checks.
 - With `LOOPFLOW_NATIVE_TESTS=1`, `swift test --package-path swift --no-parallel --filter focusedKeyEquivalents` verified menu fallthrough, Control-Return dispatch, selection and a personal unconsumed binding. The mounted checks `composingInFocusedTerminal` and `pasteShortcutFollowsFirstResponder` passed after fixing their fixtures. The first dispatches through both local monitors in a test key window. The second waits for the Session relay's ready message before pasting.
-- Switching physical input sources and typing with a real IME remain manual checks. Slice 3 still needs the same byte comparison across held-Session reattachment.
+
+**Slice 3 checks**
+
+- `scripts/test_desktop.sh --filter SessionModifierInputTests` passed without WindowServer. The provider recorded exactly `0d 1b 5b 31 33 3b 32 75 1b 5b 31 33 3b 35 75` on each surface. The existing held-terminal replay restored Kitty mode.
+- `LOOPFLOW_NATIVE_TESTS=1 swift test --package-path swift --no-parallel --filter nativeOpeningAndRecovery` passed. The former bare chat showed the prompt while the connection remained at generation zero. Opening the prepared Session exercised server loss, recovery and provider exit.
+- `scripts/test_desktop.sh --skip-build --filter 'GhosttyModifierInputTests|SessionModifierInputTests'` passed all eight headless tests. The two mounted diagnostics run in the display lane. Physical keyboard layout switching and IME typing remain manual.
 
 **Demo.** Open the isolated Session in Loopflow Desktop. Press Return, Shift-Return, and Control-Return; the fixture shows `0d`, `1b 5b 31 33 3b 32 75`, and `1b 5b 31 33 3b 35 75` once each. Close and reopen the pane and repeat. In legacy mode, Option-B shows `1b 62` with Option-as-Alt enabled and `∫` with it disabled on a US layout. Confirm `⌘Q`, `⌘,`, and `⌘⇧W` still reach Loopflow Desktop menus while the Kitty-mode Session is focused.
 

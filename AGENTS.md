@@ -451,6 +451,10 @@ stay in `.requiresDisplay` suites. Ghostty calls `io_write_cb` on its IO thread.
 Mark the callback `@Sendable` when installing it from a main-actor fixture and
 synchronize access to the bytes it collects.
 
+Swift fixtures that exercise the Desktop Session relay open the prepared Session's
+`open_argv`. A bare interactive chat can print the provider's prompt without
+ever reporting relay readiness to the pane.
+
 # Review Ritual
 
 Before calling a unit of work done, review it the way Mitchell Hashimoto would:

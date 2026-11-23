@@ -341,94 +341,40 @@ own Project's `create` would go out on the next send. Connect now finds the
 Linear Project before adding the Wave
 (`task_planning_tests::connect_naming_a_missing_project_adds_no_wave`).
 
-## Slice 7 — live-only tracker links and clean adopt on connect (concept review pass 2)
+## Slice 7 — remove and reconnect a Wave's tracker Project
 
-Full-area review after slice 6 (`scratch/concept-review.html`, at `43d899d4ee`)
-found two mismatches between the one-Project-per-Wave model and how
-`projects.external_project_id` and queued Project actions behave across removal
-and `lf wave plan connect`:
+Only live Waves admit issues and order changes from a tracker Project.
+Removing a Wave leaves its completed Tasks readable. Lost-reply checks use
+the observed local Project ID, including a retired Wave's, or the external
+ID for a Project without a local record.
 
-1. **Retired Waves still hold active tracker links.**
-   - `project_by_tracker_id` (`rust/loopflow-storage/src/sqlite/children.rs:1326`)
-     and `ACCEPTED_WAVE_PROJECTS` (`rust/loopflow-storage/src/sqlite/linear_events.rs:425`)
-     do not filter `w.retired_at IS NULL`. After `lf wave remove billing`, the
-     Team delta skips new Linear issues in `billing`'s Linear Project (because
-     `waves_in` excludes retired Waves), while `lf task sync <issue>` imports
-     them into the removed Wave.
-   - Reconnecting that Linear Project to a new Wave (`lf wave plan connect
-     payments 'Billing'`) fails on the retired Wave's `projects.external_project_id`
-     (`Project … changed Wave ownership`), AFTER `connect_async` already called
-     `add_local` and committed `.lf/wave/payments`.
-   - The same orphan-Wave bug hits when connecting a new Wave to a Linear
-     Project already linked by another *live* Wave.
-2. **Pre-link queued Project edits overwrite an existing Linear Project.**
-   - `link_wave_project_in` (`rust/loopflow-storage/src/sqlite/linear_events.rs:77`)
-     retires only `kind='create'`. A queued `field(project_name)` from an
-     offline `lf wave rename` (either before initial connect or before relinking
-     an empty Wave from Project A to Project B) survives, overlays Linear's name
-     in `reconcile_in`, and renames the existing Linear Project on the next drain.
+Connect checks for a live owner before adding files or registering a Wave.
+The link transaction repeats that check, releases a retired owner's external
+ID, and retires queued and conflicted Project edits when the link changes.
+A sent action or a conflicted create needs resolution first. A retry with
+the same link keeps its queued work.
 
-### What to build (chosen for review; no irreversible product choice)
+The repository's lifecycle lock covers the ownership check, Wave registration
+and local binding. This closes the gap in the original preflight where two
+connects could both register Waves before either claimed the Project.
 
-1. **Live-only active links (`rust/loopflow-storage/src/sqlite/children.rs`, `linear_events.rs`, `rust/loopflow-execution/src/ops/tracker.rs`):**
-   - `project_by_tracker_id` joins `waves w ON w.id = p.wave_id` with
-     `w.retired_at IS NULL`, so Team delta, `inspect_task_planning_async`,
-     `fetch_task`, and `connect_async` all agree that a removed Wave owns no
-     tracker Project.
-   - `ACCEPTED_WAVE_PROJECTS`, `observe_order`, and the item observation join
-     in `project_accepted_planning` (`sqlite/linear_events.rs`) filter
-     `w.retired_at IS NULL`, so removed Waves never accept new tracker issues
-     or order updates.
-   - **Counterexample guard in `observed_task` (`ops/tracker.rs:386`):** when
-     verifying a lost `task_project = None` reply after Wave removal, a
-     tracker item still in the retired Wave's Linear Project must not map to
-     `TaskProject(None)` (which would falsely confirm the lost move). Look up
-     any Project row (including retired) by `external_project_id`, falling back
-     to `Some(external.clone())` when unlinked.
-   - **Counterexample guard in `tracker_states_in` (`sqlite/children.rs:1485`):**
-     left-join `waves pw ON pw.id = p.wave_id` and skip the
-     `i.project_id IS NOT p.external_project_id` mismatch when
-     `pw.retired_at IS NOT NULL`, so historical completed Tasks in a retired
-     Wave stay `Available` even if its Linear Project is later reclaimed by a
-     new Wave.
-2. **Clean adopt and reclaim in `link_wave_project_in` (`rust/loopflow-storage/src/sqlite/linear_events.rs`):**
-   - When linking `own` to a different tracker Project (`linked.as_deref() != Some(project.id.as_str())`):
-     - Refuse if another *live* Wave already links `project.id`, naming that
-       Wave's slug.
-     - Refuse if any action on `own` is `phase='sent'` (or `kind='create'` and
-       `phase='conflicted'`).
-     - Release `external_project_id = NULL` on any *retired* Wave's Project
-       holding `project.id` so the unique column lets the live Wave claim it.
-     - Retire **all** `phase IN ('queued','conflicted')` actions on `own`
-       (`WHERE project_id=?1 AND phase IN ('queued','conflicted')`), not just
-       `kind='create'`, so pre-link renames/edits for the uncreated or old
-       Project never overwrite the existing Linear Project.
-3. **Preflight live-Wave collision before `add_local` (`rust/loopflow-execution/src/ops/linear.rs`):**
-   - In `connect_async`, right after `validate_project_ownership` and before
-     `add_local`, check whether `project.id` is already linked by another live
-     Wave (`store.project_by_tracker_id(&project.id)`). If so, return an error
-     naming that live Wave without registering or committing the new Wave.
-4. **Two plural leftovers:**
-   - `rust/loopflow/src/lf/mod.rs:1991`: `Projects` → `Project` in `lf wave rename` help.
-   - `docs/dev/planning.md:416`: `# projects: one, status started` → `# project: status started`.
+On an in-memory SQLite fixture with 10,000 Tasks, 10,000 action rows and
+1,000 linked Projects, looking up a collision through `wave_addresses`
+walked unrelated Waves. The check now follows just the holder's ancestors.
+Joining accepted Projects materialized the repository's tracker inventory
+for one issue. The correlated existence check uses its Project ID. Medians
+over 31 warm runs were 3 µs for a collision and 7 µs for issue admission.
 
-### Tests to add
-
-- Storage/execution: removing a linked Wave lets a new Wave connect to that
-  Linear Project (and completed Tasks in the removed Wave stay `Available`),
-  while exact issue sync does not import new issues into the removed Wave.
-- Execution: `connect` naming a Linear Project already linked to another live
-  Wave returns an error naming that Wave and adds/commits no new Wave.
-- Storage/execution: creating a Wave offline, renaming it, then linking it to
-  an existing Linear Project retires the queued `project_name` action and keeps
-  the existing Linear Project's name untouched on drain.
-- Storage/execution: `observed_task` does not map an unlinked/retired tracker
-  Project ID to `TaskProject(None)`.
+Checks on 2026-11-23: three focused storage tests, five execution tests
+against simulated Linear, and four `documented_commands` tests passed.
+Two concurrent connects after removal produced one Wave and one imported
+issue under it. An offline rename followed by connect and drain issued
+zero Project creates or field updates. Private CLI rename help shows one
+Project. `cargo fmt` and `cargo clippy --all-targets -- -D warnings` passed.
 
 ## Remains
 
-1. Implement Slice 7 above, run focused storage/execution/CLI tests and clippy.
-2. Gate: Swift DTO and desktop suites (`scripts/test_desktop.sh`), full matrix
+1. Gate: Swift DTO and desktop suites (`scripts/test_desktop.sh`), full matrix
    in CI, and check the `oauth_tests` contention failure on the base.
-3. Open, not this Task: a queued create's field snapshot (`scratch/concept-review.html`
+2. Open, not this Task: a queued create's field snapshot (`scratch/concept-review.html`
    question 4).

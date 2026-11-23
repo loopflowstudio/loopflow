@@ -648,11 +648,27 @@ async fn connect_async(
         }
         None => None,
     };
-    let wave_id = match store
+    // Hold the same lifecycle lock through the check, registration and link so
+    // competing connects cannot both register a Wave for the same Project.
+    let lifecycle = super::wave_lifecycle::recovery::lock_async(repo).await?;
+    let registered = store
         .get_wave_at(&locator)
         .await
-        .map_err(super::tracker::message)?
-    {
+        .map_err(super::tracker::message)?;
+    if let Some(project) = &named {
+        let id = project.id.clone();
+        let wave_id = registered.as_ref().map(|wave| wave.id().clone());
+        crate::store::run_sqlite(&store.sqlite, move |sqlite| {
+            loopflow_storage::sqlite::linear_events::check_project_link(
+                &sqlite,
+                &id,
+                wave_id.as_ref(),
+            )
+        })
+        .await
+        .map_err(super::tracker::message)?;
+    }
+    let wave_id = match registered {
         Some(registered) => registered.id().clone(),
         None => {
             progress.status(&format!("adding Wave {wave}"));
@@ -666,41 +682,37 @@ async fn connect_async(
         .wave_project(&wave_id)
         .map_err(|error| OpsError::Message(error.to_string()))?;
     let linked = linked_project(&store, &wave_id).await?;
-    match named {
-        Some(project) => {
-            if linked.as_deref() != Some(project.id.as_str()) {
-                progress.status(&format!(
-                    "linking wave/{wave} to Linear Project `{}`",
-                    project.name
-                ));
-                let locks = lock_wave_planning(&wave_id).await?;
-                let observed_at = time::OffsetDateTime::now_utc().unix_timestamp();
-                crate::store::run_planning_write(&store.sqlite, Some(locks), move |sqlite| {
-                    loopflow_storage::sqlite::linear_events::link_wave_project_in(
-                        &sqlite,
-                        &wave_id,
-                        &project,
-                        observed_at,
-                        loopflow_storage::planning_sync::TrackerKind::Linear,
-                    )
-                })
-                .await
-                .map_err(|error| OpsError::Message(error.to_string()))?;
-            }
-        }
-        None => {
-            if linked.is_none() {
-                // The Project's `create` goes out with the repository's other
-                // saved changes; a failed send waits for the next exchange.
-                progress.status(&format!("making wave/{wave}'s Project in Linear"));
-                super::planning_sync::sync_after_save(
-                    &store,
-                    &repo.to_string_lossy(),
-                    Some(&ActionOwner::Project(own.clone())),
-                )
-                .await;
-            }
-        }
+    let create = named.is_none() && linked.is_none();
+    if let Some(project) = named.filter(|project| linked.as_deref() != Some(project.id.as_str())) {
+        progress.status(&format!(
+            "linking wave/{wave} to Linear Project `{}`",
+            project.name
+        ));
+        let locks = lock_wave_planning(&wave_id).await?;
+        let observed_at = time::OffsetDateTime::now_utc().unix_timestamp();
+        crate::store::run_planning_write(&store.sqlite, Some(locks), move |sqlite| {
+            loopflow_storage::sqlite::linear_events::link_wave_project_in(
+                &sqlite,
+                &wave_id,
+                &project,
+                observed_at,
+                loopflow_storage::planning_sync::TrackerKind::Linear,
+            )
+        })
+        .await
+        .map_err(|error| OpsError::Message(error.to_string()))?;
+    }
+    drop(lifecycle);
+    if create {
+        // The Project's `create` goes out with the repository's other
+        // saved changes; a failed send waits for the next exchange.
+        progress.status(&format!("making wave/{wave}'s Project in Linear"));
+        super::planning_sync::sync_after_save(
+            &store,
+            &repo.to_string_lossy(),
+            Some(&ActionOwner::Project(own.clone())),
+        )
+        .await;
     }
     refresh_inventory(repo, &wave, &ctx).await?;
     let project = store

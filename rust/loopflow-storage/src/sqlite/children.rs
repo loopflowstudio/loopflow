@@ -1326,13 +1326,27 @@ impl SqliteStore {
     pub fn project_by_tracker_id(&self, external: &str) -> StoreResult<Option<Project>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let project = conn
-            .prepare_cached(&format!("{PROJECT_COLUMNS} WHERE external_project_id=?1"))?
+            .prepare_cached(&format!(
+                "{PROJECT_COLUMNS} JOIN waves w ON w.id=p.wave_id
+                 WHERE p.external_project_id=?1 AND w.retired_at IS NULL"
+            ))?
             .query_row(
                 [loopflow_model::id::canonical_uuid(external)],
                 map_project_row,
             )
             .optional()?;
         Ok(project)
+    }
+
+    /// Tracker actions compare membership by local Project ID (even after retirement)
+    /// or, for a Project never linked here, by the observed ID.
+    pub fn observed_project_id(&self, external: &str) -> StoreResult<String> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn.query_row(
+            "SELECT COALESCE((SELECT id FROM projects WHERE external_project_id=?1), ?2)",
+            params![loopflow_model::id::canonical_uuid(external), external],
+            |row| row.get(0),
+        )?)
     }
 
     /// The Wave's Project, which its Tasks are in; for a Wave that has none
@@ -1482,7 +1496,7 @@ pub(super) fn tracker_states_in(
              (NOT (?2 AND EXISTS(
                  SELECT 1 FROM tracker_actions e WHERE e.task_id=t.id AND e.subject='task_project'
                  AND e.kind='field' AND e.phase IN ('queued','sent')))
-              AND (i.project_id IS NOT p.external_project_id
+              AND ((pw.retired_at IS NULL AND i.project_id IS NOT p.external_project_id)
                    OR CASE WHEN p.id IS NOT NULL AND i.team_id IS NOT NULL THEN
                           NOT EXISTS(SELECT 1 FROM json_each(p.planning_teams) WHERE value=i.team_id)
                       ELSE 0 END))
@@ -1496,6 +1510,7 @@ pub(super) fn tracker_states_in(
          t.planning_deleted_at IS NOT NULL OR COALESCE(changes.removed,0),
          changes.issue_id IS NOT NULL
          FROM tasks t JOIN repository_plans w ON w.id=t.repository_id LEFT JOIN projects p ON p.id=t.project_id
+         LEFT JOIN waves pw ON pw.id=p.wave_id
          LEFT JOIN tracker_items i ON i.repo=w.repo AND i.tracker IN ('linear','asana') AND i.id=t.external_issue_id
          LEFT JOIN tracker_projects parent ON parent.repo=w.repo AND parent.tracker IN ('linear','asana')
                                      AND parent.id=p.external_project_id
@@ -2436,10 +2451,10 @@ pub(crate) fn held_wave_project_in(
 }
 
 const PROJECT_COLUMNS: &str = "SELECT
-    id, external_project_id, project_slug, project_name, description,
-    wave_id, pm_snapshot_synced_at,
-    created_at, updated_at, status, project_summary
-    FROM projects";
+    p.id, p.external_project_id, p.project_slug, p.project_name, p.description,
+    p.wave_id, p.pm_snapshot_synced_at,
+    p.created_at, p.updated_at, p.status, p.project_summary
+    FROM projects p";
 pub(crate) fn project_in(conn: &Connection, id: &ProjectId) -> rusqlite::Result<Project> {
     conn.prepare_cached(&format!("{PROJECT_COLUMNS} WHERE id=?1"))?
         .query_row([id.as_str()], map_project_row)

@@ -48,23 +48,23 @@ pub struct WaveAdded {
 /// them. Re-adding a live Wave changes nothing.
 pub async fn add(repo: &Path, name: &str, objective: Option<&str>) -> OpsResult<WaveAdded> {
     let store = super::planning_sync::planning_store().await?;
-    let added = add_local(&store, repo, name, objective).await?;
+    let main = crate::repository::discover(repo).map_err(lifecycle_error)?;
+    let added = {
+        let _lifecycle = recovery::lock_async(main.as_path()).await?;
+        add_local(&store, main.as_path(), name, objective).await?
+    };
     sync_wave_project(&store, &added.main_checkout.to_string_lossy(), &added.id).await?;
     Ok(added)
 }
 
+/// Register and commit under the caller's main-checkout lifecycle lock.
 pub(crate) async fn add_local(
     store: &Store,
-    repo: &Path,
+    main: &Path,
     name: &str,
     objective: Option<&str>,
 ) -> OpsResult<WaveAdded> {
-    let main = crate::repository::discover(repo)
-        .map_err(lifecycle_error)?
-        .as_path()
-        .to_path_buf();
-    let _lifecycle = recovery::lock(&main)?;
-    let locator = crate::work::wave::discover(&main, name).map_err(lifecycle_error)?;
+    let locator = crate::work::wave::discover(main, name).map_err(lifecycle_error)?;
     // A clone's authored Waves join the store with the first explicit write here.
     crate::work::wave::bootstrap::register_authored_waves(&store.sqlite, &main.to_string_lossy())
         .map_err(lifecycle_error)?;
@@ -78,19 +78,19 @@ pub(crate) async fn add_local(
     // Another Machine may have made a Wave of this name: read the plan first,
     // so this command joins that Wave and does not make a second.
     let created = !held().await? && {
-        super::plan_carriers::look_first(store, &main).await;
+        super::plan_carriers::look_first(store, main).await;
         !held().await?
     };
-    let wave = crate::work::wave::ensure_wave_row(store, &main, locator.slug())
+    let wave = crate::work::wave::ensure_wave_row(store, main, locator.slug())
         .await
         .map_err(lifecycle_error)?;
     if created {
         if let Some(objective) = objective.map(str::trim).filter(|text| !text.is_empty()) {
-            write_objective(&main, wave.slug(), objective)?;
+            write_objective(main, wave.slug(), objective)?;
         }
     }
     let files = commit_authored(
-        &main,
+        main,
         &[authored_path(wave.slug())],
         &format!("lf wave add: {}", wave.slug()),
     );
@@ -98,7 +98,7 @@ pub(crate) async fn add_local(
         id: wave.id().clone(),
         name: wave.slug().to_string(),
         created,
-        main_checkout: main,
+        main_checkout: main.to_path_buf(),
         summary: uncommitted_summary(wave.slug(), &files),
         files,
     })
@@ -812,7 +812,7 @@ pub async fn rename(
                 .ok_or_else(|| lifecycle_error(format!("invalid Wave name {name:?}")))
         })
         .transpose()?;
-    let _lifecycle = recovery::lock(&main)?;
+    let _lifecycle = recovery::lock_async(&main).await?;
     let repo_key = main.to_string_lossy().to_string();
     let target_checkout = crate::repository::discover(target_repo.unwrap_or(&main))
         .map_err(lifecycle_error)?

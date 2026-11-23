@@ -413,7 +413,7 @@ The documented unconditional-update race remains a protocol limit.
 ```text
 $ lf wave create product --json          # its Project: product, started
 $ lf task create --wave product --title "Fix the parser"
-$ lf wave plan product --json            # projects: one, status started
+$ lf wave plan product --json            # project: status started
 ```
 
 A Wave is exactly one Project: the `projects` row with its `wave_id`, which a
@@ -429,13 +429,15 @@ moving one out of every Wave clears it. A Task's Wave is its Project's.
 
 A Project made here has no tracker binding until the drain gives it a
 `create`, including one made before a tracker was connected. A Task's
-`issueCreate` waits for its Project's tracker ID. The binding,
-`projects.external_project_id`, is the Wave's link: an issue belongs to the
-Wave whose Project links its tracker Project, and a tracker Project no Wave
-links is not imported. Only three writes bind: the Project's own `create`
-landing, `lf wave plan connect <wave> <project>` (which retires an unsent
-`create`, and moves a link while none of the Wave's Tasks is in the tracker),
-and a Wave's inventory refresh, which reads the Project it links.
+`issueCreate` waits for its Project's tracker ID. A live Wave links the tracker Project
+through `projects.external_project_id`. Issues in that tracker Project belong to the Wave.
+Removing the Wave ends the link and another Wave can claim the tracker Project.
+
+The Project's create receipt, a Wave inventory refresh, and
+`lf wave plan connect <wave> <project>` can record the binding. Connect can
+replace a link while none of the Wave's Tasks is in the tracker. Sent
+actions and conflicted creates must resolve first. Connect retires the other
+queued and conflicted edits to the previous Project.
 
 A Project's status changes in the tracker, mirrored both ways, or through
 abandonment, which writes `work_state` and `work_terminal_at`. A Task changes

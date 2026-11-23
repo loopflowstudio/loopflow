@@ -383,14 +383,17 @@ pub(crate) async fn remote_project(
 }
 
 /// What the tracker holds for a Task, as the values a Task action compares.
-pub(crate) async fn observed_task(store: &Store, item: &TrackerItem) -> Observed {
+pub(crate) async fn observed_task(store: &Store, item: &TrackerItem) -> OpsResult<Observed> {
     let project = match &item.project_id {
-        Some(external) => store
-            .project_by_tracker_id(external)
+        Some(external) => {
+            let external = external.clone();
+            let id = crate::store::run_sqlite(&store.sqlite, move |sqlite| {
+                sqlite.observed_project_id(&external)
+            })
             .await
-            .ok()
-            .flatten()
-            .map(|project| project.id.to_string()),
+            .map_err(message)?;
+            Some(id)
+        }
         None => None,
     };
     let parent = match &item.parent_id {
@@ -416,12 +419,12 @@ pub(crate) async fn observed_task(store: &Store, item: &TrackerItem) -> Observed
     if item.parent_observed {
         values.push(WorkValue::TaskParent(parent));
     }
-    Observed {
+    Ok(Observed {
         remote_id: Some(item.id.clone()),
         revision: item.revision.clone(),
         values,
         ..Observed::default()
-    }
+    })
 }
 
 /// What the tracker holds for a Project.

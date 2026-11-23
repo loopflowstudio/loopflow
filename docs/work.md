@@ -578,6 +578,7 @@ lf wave remove payments --delete-backlog # delete unstarted Tasks instead; start
 
 Removal retires the Wave and its children, folds a child's `MEMORY.md` into its
 parent, and keeps completed history readable via `lf wave show payments`.
+You can then connect another Wave to the same Linear Project.
 
 ### Talk to it from Discord
 

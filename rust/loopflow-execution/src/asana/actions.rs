@@ -324,7 +324,7 @@ impl AsanaClient {
             return Ok(None);
         };
         ingest_task(store, repo, &item, None, now()).await?;
-        Ok(Some(observed_task(store, &item).await))
+        Ok(Some(observed_task(store, &item).await?))
     }
 
     async fn look_comments(

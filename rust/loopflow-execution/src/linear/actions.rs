@@ -545,7 +545,7 @@ impl LinearClient {
             return Ok(None);
         };
         ingest_task(store, repo, &item, project.as_ref(), now()).await?;
-        Ok(Some(observed_task(store, &item).await))
+        Ok(Some(observed_task(store, &item).await?))
     }
 
     async fn look_created_project(
@@ -576,7 +576,7 @@ impl LinearClient {
             return Ok(None);
         };
         ingest_task(store, repo, &item, project.as_ref(), now()).await?;
-        let mut observed = observed_task(store, &item).await;
+        let mut observed = observed_task(store, &item).await?;
         if action.kind == ActionKind::State {
             observed.state_history = Some(self.state_history(&external, action, &item).await);
         }

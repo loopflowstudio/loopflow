@@ -1988,7 +1988,7 @@ pub enum WaveCommand {
         selection: crate::lf::Selection,
     },
     /// Rename a Wave, moving .lf/wave/<name>/ on the main checkout; its Tasks,
-    /// Projects and Sessions keep their identity
+    /// Project and Sessions keep their identity
     Rename {
         wave: String,
         /// The new name; omit to keep it while changing --repo

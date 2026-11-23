@@ -46,3 +46,6 @@
   Projects are named "… — Chapter …" in Linear.
 - Tracker issue observations identify their Project by its external ID. Local
   Project slugs and local IDs remain selectors for commands that accept them.
+- Slice 7 treats simultaneous named connects in one checkout as competing
+  for the same link. They share the existing repository lifecycle lock through
+  local registration and binding, then release it before inventory refresh.

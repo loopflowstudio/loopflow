@@ -30,10 +30,44 @@ pub fn accept_linear_project_in(
     Ok(())
 }
 
-/// Link `wave`'s Project to a tracker Project that already exists. The
-/// Project's own unsent `create` is retired: the existing one stands in for
-/// it. A Project linked elsewhere moves its link while none of its Tasks is in
-/// the tracker yet; the tracker Project it leaves stays in the tracker.
+/// Check the named Project before registering a Wave. Linking repeats this check
+/// inside the transaction that claims the Project.
+pub fn check_project_link(
+    store: &SqliteStore,
+    project: &str,
+    wave: Option<&WaveId>,
+) -> StoreResult<()> {
+    let conn = store.conn.lock().expect("store mutex poisoned");
+    check_project_link_in(&conn, project, wave)
+}
+
+fn check_project_link_in(
+    conn: &Connection,
+    project: &str,
+    wave: Option<&WaveId>,
+) -> StoreResult<()> {
+    let owner: Option<String> = conn
+        .query_row(
+            "WITH RECURSIVE owner(slug,parent) AS (
+                 SELECT w.name,w.parent_wave_id FROM projects p JOIN waves w ON w.id=p.wave_id
+                 WHERE p.external_project_id=?1 AND w.id IS NOT ?2 AND w.retired_at IS NULL
+                 UNION ALL
+                 SELECT w.name || '/' || owner.slug,w.parent_wave_id
+                 FROM owner JOIN waves w ON w.id=owner.parent
+             ) SELECT slug FROM owner WHERE parent IS NULL",
+            params![project, wave],
+            |row| row.get(0),
+        )
+        .optional()?;
+    if let Some(owner) = owner {
+        return Err(StoreError::InvalidData(format!(
+            "Tracker Project {project} is already linked to wave/{owner}"
+        )));
+    }
+    Ok(())
+}
+
+/// Adopt an existing tracker Project and retire edits intended for the old link.
 pub fn link_wave_project_in(
     store: &SqliteStore,
     wave: &WaveId,
@@ -44,25 +78,36 @@ pub fn link_wave_project_in(
     let tracker = tracker.as_str();
     let mut conn = store.conn.lock().expect("store mutex poisoned");
     let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-    let repo: String = tx.query_row("SELECT repo FROM waves WHERE id=?1", [wave], |row| {
-        row.get(0)
-    })?;
-    if let Some(own) = sqlite::children::held_wave_project_in(&tx, wave)? {
-        let (linked, creating, tracked): (Option<String>, bool, i64) = tx.query_row(
-            "SELECT external_project_id,
-                EXISTS(SELECT 1 FROM tracker_actions WHERE project_id=?1 AND kind='create'
-                    AND phase IN ('sent','conflicted')),
-                (SELECT count(*) FROM tasks WHERE project_id=?1 AND external_issue_id IS NOT NULL)
-             FROM projects WHERE id=?1",
+    let repo: String = tx.query_row(
+        "SELECT repo FROM waves WHERE id=?1 AND retired_at IS NULL",
+        [wave],
+        |row| row.get(0),
+    )?;
+    let own = sqlite::children::wave_project_in(&tx, wave)?;
+    let linked: Option<String> = tx.query_row(
+        "SELECT external_project_id FROM projects WHERE id=?1",
+        [own.as_str()],
+        |row| row.get(0),
+    )?;
+    if linked.as_deref() != Some(project.id.as_str()) {
+        check_project_link_in(&tx, &project.id, Some(wave))?;
+        let unresolved: bool = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM tracker_actions WHERE project_id=?1
+             AND (phase='sent' OR (kind='create' AND phase='conflicted')))",
             [own.as_str()],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            |row| row.get(0),
         )?;
-        if creating {
+        if unresolved {
             return Err(StoreError::InvalidData(format!(
-                "Wave {wave}'s Project is being created in the tracker; link it once that lands"
+                "Wave {wave}'s Project has an unresolved tracker action; resolve it before linking"
             )));
         }
-        if let Some(linked) = linked.filter(|linked| *linked != project.id) {
+        if let Some(linked) = linked {
+            let tracked: i64 = tx.query_row(
+                "SELECT count(*) FROM tasks WHERE project_id=?1 AND external_issue_id IS NOT NULL",
+                [own.as_str()],
+                |row| row.get(0),
+            )?;
             if tracked > 0 {
                 return Err(StoreError::InvalidData(format!(
                     "Wave {wave}'s Project links tracker Project {linked}, which holds {tracked} of its Tasks; move them to {} in the tracker first",
@@ -74,9 +119,14 @@ pub fn link_wave_project_in(
                 [own.as_str()],
             )?;
         }
+        // The live-owner check above leaves only a retired owner to release.
+        tx.execute(
+            "UPDATE projects SET external_project_id=NULL WHERE external_project_id=?1",
+            [&project.id],
+        )?;
         tx.execute(
             "UPDATE tracker_actions SET phase='retired',error='linked to an existing tracker Project'
-             WHERE project_id=?1 AND kind='create' AND phase='queued'",
+             WHERE project_id=?1 AND phase IN ('queued','conflicted')",
             [own.as_str()],
         )?;
     }
@@ -392,7 +442,14 @@ fn observe_order(
     items: &[TrackerItem],
     tracker: &str,
 ) -> StoreResult<bool> {
-    let project: Option<String> = conn.query_row("SELECT p.id FROM projects p JOIN waves w ON w.id=p.wave_id WHERE p.external_project_id=?1 AND w.repo=?2", params![external,repo], |row| row.get(0)).optional()?;
+    let project: Option<String> = conn
+        .query_row(
+            "SELECT p.id FROM projects p JOIN waves w ON w.id=p.wave_id
+             WHERE p.external_project_id=?1 AND w.repo=?2 AND w.retired_at IS NULL",
+            params![external, repo],
+            |row| row.get(0),
+        )
+        .optional()?;
     let Some(project) = project.map(ProjectId::from_raw) else {
         return Ok(false);
     };
@@ -425,7 +482,7 @@ fn observe_order(
 const ACCEPTED_WAVE_PROJECTS: &str = "
     SELECT p.*, w.id AS wave_id FROM tracker_projects p
     LEFT JOIN projects l ON l.external_project_id=p.id
-    JOIN waves w ON w.id=COALESCE(?4,l.wave_id) AND w.repo=p.repo
+    JOIN waves w ON w.id=COALESCE(?4,l.wave_id) AND w.repo=p.repo AND w.retired_at IS NULL
     WHERE p.repo=?1 AND p.tracker=?2 AND p.archived=0";
 
 /// Inputs select IDs only; project their accepted rows inside the ingestion transaction.
@@ -531,6 +588,7 @@ fn project_accepted_planning(
     let mut query = tx.prepare(
         "SELECT i.id,i.revision,i.name,i.description,i.assignee,p.id,i.assignee_observed,i.project_id_observed,i.claimed_project_id
          FROM tracker_items i LEFT JOIN projects p ON p.external_project_id=i.project_id
+             AND EXISTS(SELECT 1 FROM waves WHERE id=p.wave_id AND retired_at IS NULL)
          WHERE i.repo=?1 AND i.tracker=?3 AND i.needs_refresh=0
          AND i.id IN (SELECT value FROM json_each(?2))",
     )?;
@@ -572,11 +630,10 @@ fn project_accepted_planning(
              i.state,i.completed,
              i.completed_at FROM tracker_items i
          LEFT JOIN projects p ON p.external_project_id=i.project_id
-         LEFT JOIN accepted observed ON observed.id=i.project_id AND observed.wave_id=p.wave_id
          LEFT JOIN tasks target ON target.external_issue_id=i.id
          WHERE i.repo=?1 AND i.tracker=?2 AND i.needs_refresh=0
          AND i.id IN (SELECT value FROM json_each(?3))
-         AND (observed.id IS NOT NULL
+         AND (EXISTS(SELECT 1 FROM accepted a WHERE a.id=i.project_id AND a.wave_id=p.wave_id)
               OR (i.project_id_observed=1 AND i.claimed_project_id IS NULL))
          AND (target.id IS NULL OR target.repository_id=(SELECT id FROM repository_plans WHERE repo=?1 AND selected=1))
          AND NOT EXISTS(SELECT 1 FROM tracker_events c WHERE c.issue_id=i.id
@@ -748,6 +805,117 @@ mod tests {
         items: Vec<TrackerItem>,
     }
 
+    fn inventory() -> Inventory {
+        serde_json::from_str(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../tests/fixtures/dto/task_history_planning.json"
+        )))
+        .unwrap()
+    }
+
+    #[test]
+    fn reclaiming_a_removed_waves_project_keeps_completed_history_available() {
+        use crate::planning_sync::TrackerKind::Linear;
+
+        let dir = tempfile::tempdir().unwrap();
+        let store = crate::test_fixture::open(&dir.path().join("db")).unwrap();
+        let old = crate::test_fixture::project(&store, "/repo", "billing");
+        let next = crate::test_fixture::project(&store, "/repo", "payments");
+        let snapshot = inventory();
+        let project = &snapshot.projects[0];
+        let mut done = snapshot.items[0].clone();
+        done.completed = true;
+        done.state = Some("completed".into());
+        let arriving = &snapshot.items[1];
+        let link = |wave| super::link_wave_project_in(&store, wave, project, 1, Linear);
+        let observe = |issue| {
+            super::accept_linear_issue_in(&store, "/repo", issue, Some(project), 2, Linear).unwrap()
+        };
+
+        link(&old.wave_id).unwrap();
+        let error = link(&next.wave_id).unwrap_err();
+        assert!(error.to_string().contains("wave/billing"));
+        observe(&done);
+        let task = store.task_by_issue(&done.id).unwrap().unwrap().id;
+
+        store
+            .retire_waves(std::slice::from_ref(&old.wave_id), "removed")
+            .unwrap();
+        assert!(store.project_by_tracker_id(&project.id).unwrap().is_none());
+        observe(arriving);
+        assert!(store.task_by_issue(&arriving.id).unwrap().is_none());
+        assert!(!super::accept_linear_project_order_in(&store, "/repo", &project.id, &[]).unwrap());
+
+        link(&next.wave_id).unwrap();
+        assert!(store
+            .project(&old.id)
+            .unwrap()
+            .unwrap()
+            .tracker_id
+            .is_none());
+        assert_eq!(store.task(&task).unwrap().unwrap().project_id, Some(old.id));
+        assert_eq!(
+            store.task_tracker_state(&task).unwrap().state,
+            crate::PlanningState::Available
+        );
+        observe(arriving);
+        assert_eq!(
+            store.task_by_issue(&arriving.id).unwrap().unwrap().wave_id,
+            Some(next.wave_id)
+        );
+    }
+
+    #[test]
+    fn relinking_waits_for_a_sent_edit_then_retires_its_conflict() {
+        use super::tracker_actions::{ActionOwner, ActionPhase, Resolution};
+        use crate::planning_sync::TrackerKind::Linear;
+        use crate::work::edit::WorkValue;
+
+        let dir = tempfile::tempdir().unwrap();
+        let store = crate::test_fixture::open(&dir.path().join("db")).unwrap();
+        let local = crate::test_fixture::project(&store, "/repo", "billing");
+        let first = inventory().projects.remove(0);
+        let second = TrackerProject {
+            id: "second".into(),
+            name: "Second".into(),
+            ..first.clone()
+        };
+        let link = |project: &TrackerProject| {
+            super::link_wave_project_in(&store, &local.wave_id, project, 1, Linear)
+        };
+        link(&first).unwrap();
+        store
+            .edit_project_fields(&local.id, &[WorkValue::ProjectName(Some("Renamed".into()))])
+            .unwrap();
+        let edit = store
+            .tracker_actions_for(&ActionOwner::Project(local.id.clone()))
+            .unwrap()
+            .into_iter()
+            .find(|a| a.subject.as_deref() == Some("project_name"))
+            .unwrap();
+        link(&first).unwrap();
+        assert!(store.attempt_tracker_action(&edit.id).unwrap());
+        assert!(link(&second).is_err());
+        assert_eq!(
+            store.project_by_tracker_id(&first.id).unwrap().unwrap().id,
+            local.id
+        );
+        store
+            .resolve_tracker_action(
+                &edit.id,
+                &Resolution::Conflicted {
+                    remote: serde_json::json!(first.name),
+                },
+            )
+            .unwrap();
+        link(&second).unwrap();
+        assert_eq!(
+            store.tracker_action(&edit.id).unwrap().unwrap().phase,
+            ActionPhase::Retired
+        );
+        assert_eq!(store.project(&local.id).unwrap().unwrap().name, second.name);
+    }
+
     #[test]
     fn project_reads_at_one_revision_keep_the_later_one() {
         // "Customer requests" stands for both a projected prefixed name and a
@@ -761,11 +929,7 @@ mod tests {
                 &conn,
                 "planning_peers",
             );
-            let snapshot: Inventory = serde_json::from_str(include_str!(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/../../tests/fixtures/dto/task_history_planning.json"
-            )))
-            .unwrap();
+            let snapshot = inventory();
             let mut project = snapshot.projects[0].clone();
             project.revision = Some("2026-10-05T12:00:00Z".into());
             project.name = historical_name.into();

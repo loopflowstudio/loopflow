@@ -53,13 +53,17 @@ Keep `Brief`, `Diff` and `Files` in the pane strip. Cleanly separate **working-t
 
 **Unified Find and line review increment.** The Files pane owns ⌘F across source, Edit, rendered Markdown and HTML, and visible per-file Diff rows or sides. ⇧⌘F carries the query to checkout Grep. Read and Diff share one comment editor and batch. Each reference keeps its original working-file, draft or comparison source. Read gutter marks follow the working patch, including deletions.
 
-**Remaining.**
+**Reference lookup and browser journey.** The focused reader accepts `gr` on the clicked identifier. The owning Machine returns whole-word occurrences with their byte ranges. Each stays in the inline list until picked, even a single hit on the current line. Picking a result records the source line and closes the list.
 
-1. **`gr` references.** Not built: `RegistryQuery.taskGrep(wholeWord:)` exists, but no Desktop caller passes `true` and the code reader has no `gr` chord (only `gd`, in [FileJumps.swift](../swift/LoopflowMac/FileJumps.swift)). Add `gr` beside `gd` in the focused reader: call `task.files.grep` with `whole_word: true` and list candidates in the same inline peek as multiple definitions, with an accepted pick pushing jump history. Drop the `wholeWord = false` default so every caller states it. Headless test: `gr` on an identifier in a peer checkout lists whole-word hits only and a pick returns with `⌘[`.
-2. **Journey test.** `TaskFileBrowserJourneyTests` (Gate section) does not exist yet. Build it from the existing focused fixtures; it is the one test that crosses CLI, served reads and Desktop state end to end.
-3. **Coverage sweep.** Declaration scanner and outline across the listed languages plus fallback, dirty-buffer overlays, truncated states, CLI/server reference docs. No change to iOS navigation or existing Diff comparison controls. Mounted focus, scroll and 360/620-point layouts go to gate and display QA.
+**Remaining.** Check the declaration scanner and outline across the planned languages and fallback, dirty-buffer overlays, truncated states and CLI/server reference docs. Mounted focus, scroll and the 360/620-point layouts go to gate and display QA.
 
 ## Gate and demo
+
+**Reference lookup and journey checks on November 23**
+
+- `scripts/test_desktop.sh --skip-build --filter TaskFileBrowserJourneyTests` passed both cases in 56.1 s. The source-built CLI and Desktop found three whole-word occurrences and two declarations. Picking a reference returned to the call at line 3 with ⌘[. Read and Diff supplied one unsent comment batch.
+- Two scratch writes in each of Read, Edit, Brief and Diff left the selection, draft caret and terminal pane focus in place. `lf desktop files scratch/report.html -p session` reached a private Desktop socket, offered the page during Edit and opened it during Read. Undo restored the original source.
+- Four focused headless peek tests and four Rust documented-command checks passed. The Swift journey uses local served reads and a peer transport stand-in running the owner’s real CLI. Display QA covers physical keyboard focus, scrolling and layout.
 
 **Find and line review checks on November 23**
 
@@ -100,7 +104,7 @@ Reader checks on November 22:
 - `scripts/test_desktop.sh --skip-build --filter 'codeOpensInReadAndKeepsItsDraftAndEditorAcrossFiles|readModeRendersHTMLAsAPageAndMarkdownAsBlocks|twoShellsAndFilesRestoreIdentitiesSelectionAndDrafts|diskWinsOverlapKeepsOtherLocalEditsAndUndoNeverRevertsDisk|sameRevisionAccessChangePreservesDraftSelectionAndUndo|compositionDefersIncomingChangesAndSave|plainTextAtTheFileSizeLimitKeepsEveryLine|aDocstringRowColorsFromTheWholeFile'` passed all eight. The 1,000,000-byte plain-text fixture produced 10,001 lines in a 0.089 s headless test. This measures line preparation and assertions.
 - `scripts/test_desktop.sh --skip-build --filter 'codeOpensInReadAndKeepsItsDraftAndEditorAcrossFiles|aRecoveredDraftStaysReadOnlyWhenTheFileHasDisappeared|twoShellsAndFilesRestoreIdentitiesSelectionAndDrafts|sameRevisionAccessChangePreservesDraftSelectionAndUndo|compositionDefersIncomingChangesAndSave'` passed all five after the access-state change. Display-capable QA still owns mounted keyboard focus and visual layout.
 
-Planned headless gate from the repository root, with the source-built CLI and the new Swift integration scenario:
+Run the file-browser journey from the repository root with the source-built CLI.
 
 ```sh
 cargo build -p loopflow --bin lf

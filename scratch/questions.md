@@ -20,3 +20,5 @@
 - Line totals for untracked text use the reader’s 1,000,000-byte ceiling. Larger untracked files retain their change stop and omit the line total.
 
 - In-file Find uses case-insensitive literal text. Promoting the query to Grep keeps Find open underneath so Escape returns to the same match. A pure deletion marks the surviving line above it, or line one at the start of the file.
+
+- The Swift journey simulates SSH by forwarding addressed commands to a private Machine. Its checkout path on the Desktop side is absent. The Rust Machine fixture covers SSH dispatch.

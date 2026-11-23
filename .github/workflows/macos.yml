@@ -27,7 +27,7 @@ jobs:
       CARGO_PROFILE_DEV_DEBUG: "0"
       CARGO_PROFILE_TEST_DEBUG: "0"
       # --filter and --skip use this same expression, so every test runs once.
-      SWIFT_TRANSPORT_TESTS: 'AppAppearanceTests|ThemeTests|ThemeWorkflowTests|LocalWaveAgentLauncherTests|ServerClientTests|WorkCLISubscriptionTests|WorkOpeningCLITests|PortfolioServiceTests|WorkObservationTransportTests'
+      SWIFT_TRANSPORT_TESTS: 'AppAppearanceTests|ThemeTests|ThemeWorkflowTests|LocalWaveAgentLauncherTests|ServerClientTests|TaskFileBrowserJourneyTests|WorkCLISubscriptionTests|WorkOpeningCLITests|PortfolioServiceTests|WorkObservationTransportTests'
     steps:
       - uses: actions/checkout@v7
         with:

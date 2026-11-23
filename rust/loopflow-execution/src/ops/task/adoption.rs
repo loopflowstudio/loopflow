@@ -225,7 +225,15 @@ pub async fn save(
             receipt,
         )
         .await
-        .map_err(task_error)?;
+        .map_err(|error| match error {
+            crate::store::StoreError::WaveUnavailable(id) => {
+                crate::engine::creation::wave_unavailable(&id).into()
+            }
+            crate::store::StoreError::Stale(message) => {
+                crate::engine::Error::new(crate::engine::ErrorCode::Conflict, message).into()
+            }
+            other => task_error(other),
+        })?;
     if let Some(cwd) = destination {
         crate::journal::request::diagnostic(format_args!("Conversation directory set to {}. Already-running clients may keep their original directory. Files stay in their original checkout.", cwd.display()));
     }

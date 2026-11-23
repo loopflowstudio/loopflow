@@ -28,7 +28,7 @@ struct NewTaskTests {
             calls.withLock { $0.append(args) }
             return args.starts(with: ["task"]) ? receipt : repository
         }
-        let created = try await query.createTask(request: "-v is ignored", wave: "product", graph: "auto", run: true, cwd: "/repo")
+        let created = try await query.createTask(request: "-v is ignored", wave: .name("product"), graph: "auto", run: true, cwd: "/repo")
         #expect(created.receipt.task.identifier == "LOO-1")
         #expect(created.receipt.graph == "code")
         #expect(created.session?.id == created.receipt.sessionId)
@@ -73,9 +73,11 @@ struct NewTaskTests {
             if args.starts(with: ["plan", "list"]), !args.contains("--task") { return planning ?? initial }
             if args.starts(with: ["graph", "list"]) { return catalog.withLock { $0 } }
             if args.starts(with: ["wave", "graph", "show"]) {
-                return args.contains("--no-wave")
-                    ? #"{"wave_id":null,"wave":null,"default":{"name":"code","source":"repository"}}"#
-                    : #"{"wave_id":"wave-1","wave":"product","default":{"name":"feature","source":"repository"}}"#
+                if args.contains("--no-wave") {
+                    return #"{"wave_id":null,"wave":null,"default":{"name":"code","source":"repository"}}"#
+                }
+                guard args.contains("wave-1") else { throw RegistryQueryError("Unknown Wave") }
+                return #"{"wave_id":"wave-1","wave":"product","default":{"name":"feature","source":"repository"}}"#
             }
             throw RegistryQueryError("No fixture for \(args)")
         }, repoPath: "/src/loopflow")
@@ -94,7 +96,7 @@ struct NewTaskTests {
         let admitted = try json(fixtureArray("task_create_receipt.json")[0])
         let model = try await model(catalog: .init(initialState: catalogWithCode())) { change in
             if case .taskCreate(_, _, _, let request, let wave, let graph, nil, true) = change {
-                #expect(request == "a brief" && wave == (explicit ? "product" : nil))
+                #expect(request == "a brief" && wave == (explicit ? .existing(id: "wave-1") : nil))
                 #expect(graph == (explicit ? "code" : nil))
             } else { Issue.record("Start sent \(change)") }
             return admitted
@@ -134,10 +136,14 @@ struct NewTaskTests {
         _ = try bar.inspect().find(text: "Starting code")
     }
 
-    @Test("A removed Wave needs an explicit destination before File or Start")
-    func removedWave() async throws {
+    @Test("A removed Wave needs an explicit destination before File or Start", arguments: [true, false])
+    func removedWave(planningCaughtUp: Bool) async throws {
         let (row, filed, planning, _) = try filing()
         let model = try await model(catalog: .init(initialState: catalogWithCode())) { change in
+            if case .taskCreate(_, _, _, _, .existing(let id), _, _, _) = change {
+                throw ServerError(code: "not_found", message: "The selected Wave is no longer available in this repository.",
+                                  data: .object(["wave_id": .string(id)]))
+            }
             guard case .taskCreate(_, _, _, "keep my words", nil, nil, nil, false) = change else {
                 throw RegistryQueryError("Unexpected File: \(change)")
             }
@@ -151,7 +157,12 @@ struct NewTaskTests {
         var snapshot = try #require(JSONSerialization.jsonObject(with: Data(planning.utf8)) as? [String: Any])
         snapshot["waves"] = []
         let removed = try RegistryQuery.decode(RoadmapSnapshot.self, from: json(snapshot))
-        model.applyFixture(roadmap: .available(removed), waves: .available([]), workActivity: .loading, repos: [])
+        if planningCaughtUp {
+            model.applyFixture(roadmap: .available(removed), waves: .available([]), workActivity: .loading, repos: [])
+        } else {
+            try sheet.inspect().find(button: "File to backlog").tap()
+            try await eventually { (try? sheet.inspect().find(text: "Not filed.")) != nil }
+        }
         let view = try sheet.inspect()
         _ = try view.find(text: "Wave unavailable")
         #expect(try view.find(button: "File to backlog").isDisabled())
@@ -176,7 +187,7 @@ struct NewTaskTests {
             send: { data in
                 let payload = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
                 if payload["graph"] as? String == "code" {
-                    throw ServerError(code: "invalid", message: "Workflow unavailable", data: .null)
+                    throw ServerError(code: "invalid", message: "Workflow unavailable", data: .object(["graph": .string("code")]))
                 }
                 return admitted
             })
@@ -211,7 +222,7 @@ struct NewTaskTests {
             Issue.record("Unexpected Start submissions: \(writes)")
             return
         }
-        #expect(originalWave == wave.name && finalWave == wave.name)
+        #expect(originalWave == .existing(id: wave.id) && finalWave == originalWave)
         #expect(first != second)
         #expect(try await journal.pending().map(\.id) == [second])
         await CreationRecovery.shared.presented([second])
@@ -332,7 +343,7 @@ struct NewTaskTests {
                 Issue.record("File sent \(change)")
                 return
             }
-            #expect(wave == product.name && request == row.task.name)
+            #expect(wave == .existing(id: product.id) && request == row.task.name)
         }
         let state = try #require(model.navigation.backlogs[destination])
         #expect(state.selection == [row.id] && state.filter == .all && state.query.isEmpty)

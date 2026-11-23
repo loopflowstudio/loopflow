@@ -173,7 +173,8 @@ File to backlog   Choose a workflow when you start.
 ```
 
 **In** starts on the Wave you were looking at. Choose another Wave or the
-repository to change where the Task lands. If the selected Wave disappears,
+repository to change where the Task lands. A rename keeps the selection. If the
+selected Wave disappears, even if another takes its name before the Machine answers,
 **In** shows **Wave unavailable**. Choose a destination to enable File and Start.
 
 **Workflow for Start** follows that scope's default. Pick a named workflow

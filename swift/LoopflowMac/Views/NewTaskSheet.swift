@@ -6,6 +6,7 @@ import SwiftUI
 private final class NewTaskDraft {
     var request = ""
     var waveID: String?
+    var unavailableWaves: Set<String> = []
     var graph: String?
     enum Submission: Equatable {
         case editing
@@ -36,7 +37,8 @@ struct NewTaskSheet: View {
 
     private var wave: WaveSnapshot? { draft.waveID.flatMap { model.wave(id: $0)?.wave } }
     private var destination: WorkNavigation.Board? {
-        guard draft.waveID != nil else { return .repository }
+        guard let id = draft.waveID else { return .repository }
+        guard !draft.unavailableWaves.contains(id) else { return nil }
         return wave.map { .wave($0.id) }
     }
     private var canSubmit: Bool { !trimmed.isEmpty && destination != nil && !draft.isSending }
@@ -123,6 +125,7 @@ struct NewTaskSheet: View {
                 Button(model.repositoryName) { draft.waveID = nil }
                 ForEach(model.visibleRoadmaps, id: \.wave.id) { roadmap in
                     Button(roadmap.wave.displayName) { draft.waveID = roadmap.wave.id }
+                        .disabled(draft.unavailableWaves.contains(roadmap.wave.id))
                 }
             }
             .menuStyle(.borderlessButton).font(Typography.textStrong).fixedSize()
@@ -176,6 +179,10 @@ struct NewTaskSheet: View {
             do {
                 try await model.submitTask(action, request: trimmed, wave: wave, requestID: requestID)
             } catch {
+                if let refusal = error as? ServerError, refusal.code == .notFound,
+                   case .object(let detail) = refusal.data, case .string(let id) = detail["wave_id"] {
+                    draft.unavailableWaves.insert(id)
+                }
                 draft.submission = .refused(action, error.localizedDescription)
             }
         }

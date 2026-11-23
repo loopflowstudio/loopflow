@@ -6,21 +6,26 @@ The workflow choice belongs to Start. **Use default** follows the selected scope
 
 **In** chooses an existing Wave or the repository. A renamed Wave remains the same choice. If it is removed, even between the click and the Machine receiving the request, keep the draft and ask for another destination. A replacement Wave using the same name is a new choice.
 
-## First slice · Make the Machine honor the draft
+## Machine admission
 
-Use the actual served write in `rust/loopflow/tests/task_create_tests.rs`. Select a Wave ID, keep the Desktop reading stale, then retire the Wave and send File. The Machine must refuse, with no Task, receipt or new Wave. Repeat with the same name reused by another Wave. A rename must still allow File into the original Wave. Send Start with a removed named Graph and require a typed refusal, no receipt and no Task, claim or primary Session. Both current failures were reproduced with Desktop-shaped requests on isolated Machines. The retired Wave's name successfully filed into a newly provisioned Wave. The missing Graph returned `outcome_unknown` even though `creation.get` returned null.
+Before this pass, File recreated a retired Wave by name and Start with a missing named Graph returned `outcome_unknown` with an empty receipt lookup. Desktop now sends the selected Wave ID for the workflow preview and in the saved creation request. The nullable `wave` field accepts an existing ID object, a legacy name string or the repository selection. Existing receipts take precedence over changes to Waves and Graphs.
 
-- Carry the chosen Wave's ID from `NewTaskSheet` through `WorkModel.submitTask` and `RegistryQuery.createTask` into the saved request and Rust creation. Use the existing nullable `wave` field as a selector. `null` selects the repository, `{"id":"…"}` selects an existing Wave, and a string keeps the legacy name behavior for `lf task create --wave` and earlier payloads. The object lets an older server refuse the request shape safely. Keep legacy serialization and fingerprints stable and cover both wire shapes in the Rust and Swift fixtures. Read the inherited workflow preview for the same Wave ID.
-- Resolve the ID in the requested repository and use the Wave's current address and selected Project at admission. The ID path goes straight to existing-wave resolution. Slug provisioning stays in the name path. Coordinate the live selection and creation write with Wave removal and recheck live Wave and Project membership at commit, using the existing creation transaction. A renamed Wave uses its new address. A removed Wave or a different Wave at that address cannot receive the request. Admission still commits Task, Graph, claim and primary Session together and answers before checkout.
-- Return a typed, pre-commit refusal for a missing selected Wave or unavailable Graph definition. Classify known input failures where the Machine can establish they preceded any creation effect. A write or answer whose effect is uncertain stays in receipt recovery. Desktop keeps the existing same-sheet correction, and a typed Wave refusal makes **Wave unavailable** actionable even while planning still shows the old Wave. The text and Start choice stay editable. Test the sheet against the served error contract, including choosing the repository after the Wave refusal and **Use default** after the Graph refusal.
+A disposable Machine refused File after removal and after same-name replacement, filed into the renamed Wave, and replayed the original receipt after removal. Missing Graph and Wave refusals left no Task, Graph, claim, primary Session or receipt. The transaction test also retired a Wave after preparation and verified rollback. The commit-time lookup used the Wave primary-key index and took 6.7 ms for 10,000 in-memory reads with 500 Waves and 10,000 Tasks.
 
-## Finish recovery for a refused submission
+Checks on this slice:
+
+- `task_create_honors_the_selected_wave_and_graph_before_admission` passed against the served write, including the workflow preview after replacement and rename and replay by CLI UUID after removal.
+- `an_admitted_creation_commits_task_graph_claim_and_conversation_together`, the Rust wire fixture round-trip and the checked-in schema comparison passed.
+- `scripts/test_desktop.sh --filter 'NewTaskTests/(removedWave|correctRefusedStart|startChoice|fileRefusalAndRetry)|ServerProtocolTests/taskCreationSelects'` passed all five tests, including stale planning and same-sheet correction.
+- `documented_commands::` passed all four checks. `cargo clippy --all-targets -- -D warnings` passed.
+
+## Next slice · Edit a refusal found during recovery
 
 Keep the exact command, request ID and original Machine for in-flight and admitted requests. `creation.get` decides whether to recover an existing Task, continue the original command or inspect an uncertain launch. A completed receipt wins over any later Wave or workflow change. If the receipt's Task has since been deleted, recovery reports that outcome with its original identity. A saved Wave name from an earlier build cannot supply an ID retroactively. Keep its existing receipt and protocol-version rules and leave the saved payload intact.
 
 If an ambiguous send hands off to recovery and the exact replay is definitively refused before commit, confirm receipt absence on the original Machine. Retain the saved words, destination and Start choice as a draft awaiting correction, with the Machine's reason. Park that record from automatic sends so a later workflow edit or restart cannot submit it while someone is correcting it. Offer **Edit draft** in the recovery notice for this case. Reopen the same New Task form, require a destination choice for a removed Wave, and use a fresh request ID on deliberate resubmission. Retain the saved draft until its replacement is saved or it is discarded. Test the lost-then-refused path, including a Desktop restart, alongside the existing lost-after-commit test. A missing or unavailable lookup alone still leaves the original submission in recovery.
 
-Update `docs/surfaces.md` with the destination and recovered-draft behavior. Run the focused served creation tests and the New Task and creation journal suites. The [concept review](concept-review.html) records the reason for this pass.
+Update `docs/surfaces.md` with the recovered-draft behavior. Run the focused served creation tests and the New Task and creation journal suites. The [concept review](concept-review.html) records the reason for this pass.
 
 ## Backlog handoff
 

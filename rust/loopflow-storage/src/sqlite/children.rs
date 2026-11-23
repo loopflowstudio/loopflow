@@ -396,6 +396,21 @@ impl SqliteStore {
             .transpose()?;
         let task = task_on(&tx, task_id)?.ok_or(StoreError::NotFound)?;
         if let Some(receipt) = receipt {
+            if let Some(expected) = &receipt.wave {
+                let live: bool = tx.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM waves WHERE id=?1 AND repo=?2 AND retired_at IS NULL)",
+                    params![expected.id(), expected.repo()],
+                    |row| row.get(0),
+                )?;
+                if !live {
+                    return Err(StoreError::WaveUnavailable(expected.id().clone()));
+                }
+                if task.wave_id.as_ref() != Some(expected.id()) {
+                    return Err(StoreError::Stale(
+                        "Task membership changed during creation".into(),
+                    ));
+                }
+            }
             let (graph, session_id, milestone) = match admitted {
                 Some((graph, conversation)) => (Some(graph), Some(conversation.id), "admitted"),
                 None => (None, session.map(|s| s.id.clone()), "filed"),

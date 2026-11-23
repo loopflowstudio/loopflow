@@ -29,6 +29,14 @@ pub struct TaskCreation {
     pub approve: bool,
 }
 
+pub(crate) fn wave_unavailable(id: &loopflow_model::id::WaveId) -> Error {
+    Error::new(
+        ErrorCode::NotFound,
+        "The selected Wave is no longer available in this repository.",
+    )
+    .with(serde_json::json!({"wave_id": id}))
+}
+
 pub fn identity(
     kind: &'static str,
     id: &str,
@@ -169,9 +177,11 @@ pub fn create(id: &str, mut input: TaskCreation) -> Result<Created> {
     let (recorded, filed) = match store.sqlite.creation_receipt(id)? {
         Some(receipt) => (receipt, false),
         None => {
-            if let Some(graph) = input.graph.as_deref() {
-                crate::ops::task::load_graph(graph, "", &input.directory)?;
-            }
+            let graph = input
+                .graph
+                .as_deref()
+                .map(|name| crate::ops::task::creation_graph(name, "", &input.directory))
+                .transpose()?;
             let adoption = crate::ops::task::TaskAdoptionOptions {
                 session: input.session.clone(),
                 worktree: input.worktree.clone(),
@@ -184,7 +194,7 @@ pub fn create(id: &str, mut input: TaskCreation) -> Result<Created> {
                         input.title.clone(),
                         input.request.clone(),
                         adoption,
-                        input.graph.as_deref(),
+                        graph,
                         identity,
                     )
                 } else {

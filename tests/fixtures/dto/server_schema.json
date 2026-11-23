@@ -1703,6 +1703,26 @@
       ],
       "type": "object"
     },
+    "CreationWave": {
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/WaveId"
+            }
+          },
+          "required": [
+            "id"
+          ],
+          "type": "object"
+        },
+        {
+          "type": "string"
+        }
+      ],
+      "description": "A saved name may provision a Wave. An ID selects only the existing Wave."
+    },
     "Customized": {
       "description": "What `lf graph customize` wrote.",
       "properties": {
@@ -16004,6 +16024,30 @@
               "session": null,
               "title": null,
               "wave": null
+            },
+            {
+              "directory": "/repo",
+              "graph": null,
+              "kind": "task.create",
+              "request": "Fix the retry test",
+              "request_id": "00000000-0000-4000-8000-000000000001",
+              "run": true,
+              "session": null,
+              "title": null,
+              "wave": {
+                "id": "761bba76-e3e4-410b-9306-13bb61f64012"
+              }
+            },
+            {
+              "directory": "/repo",
+              "graph": null,
+              "kind": "task.create",
+              "request": "Fix the retry test",
+              "request_id": "00000000-0000-4000-8000-000000000001",
+              "run": true,
+              "session": null,
+              "title": null,
+              "wave": "product"
             }
           ],
           "properties": {
@@ -16045,9 +16089,13 @@
               ]
             },
             "wave": {
-              "type": [
-                "string",
-                "null"
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/CreationWave"
+                },
+                {
+                  "type": "null"
+                }
               ]
             }
           },

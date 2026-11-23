@@ -2619,7 +2619,7 @@ final class WorkModel {
         let key = graphDefaultKey(wave: wave)
         let previous = graphDefaults[key]?.value
         let result: Result<WaveGraph, Error>
-        do { result = .success(try await query.waveGraph(wave: wave?.name, cwd: repoPath)) }
+        do { result = .success(try await query.waveGraph(wave: wave?.id, cwd: repoPath)) }
         catch { result = .failure(error) }
         graphDefaults[key] = reading(from: result, lastGood: previous)
     }
@@ -2634,7 +2634,7 @@ final class WorkModel {
         let machine = observingMachineId
         let created: TaskCreated?
         do {
-            let answer = try await query.createTask(request: request, wave: wave?.name, graph: action.graph,
+            let answer = try await query.createTask(request: request, wave: wave.map { .existing(id: $0.id) }, graph: action.graph,
                                                     run: action != .file, cwd: repoPath, requestID: requestID)
             created = answer
             if case .start = action {

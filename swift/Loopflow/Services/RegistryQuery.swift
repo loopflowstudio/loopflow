@@ -277,11 +277,32 @@ public enum ServedRead: Equatable, Sendable, Encodable {
     }
 }
 
+/// The Wave selected for Task creation. Saved name-based requests can provision a Wave.
+public enum CreationWave: Equatable, Sendable, Encodable {
+    case existing(id: String)
+    case name(String)
+
+    var argument: String {
+        switch self {
+        case .existing(let id): id
+        case .name(let name): name
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        switch self {
+        case .existing(let id): try container.encode(["id": id])
+        case .name(let name): try container.encode(name)
+        }
+    }
+}
+
 /// A write Loopflow makes inside the app, encoded as its Rust `Write`: what
 /// `argv` does in `cwd`, given `input` on stdin. Served requests retain their
 /// own trace without recording an OS Process.
 public enum ServedWrite: Equatable, Sendable, Encodable {
-    case taskCreate(directory: String, requestID: String, title: String?, request: String?, wave: String?, graph: String?, session: String?, run: Bool)
+    case taskCreate(directory: String, requestID: String, title: String?, request: String?, wave: CreationWave?, graph: String?, session: String?, run: Bool)
     case taskComplete(directory: String, issue: String)
     case taskReopen(directory: String, issue: String)
     case taskAbandon(directory: String, issue: String)
@@ -380,7 +401,7 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
         case .taskCreate(_, let requestID, let title, let request, let wave, let graph, let session, let run):
             var argv = ["task", "create", "--request-id", requestID]
             argv += argument("--title", title)
-            argv += argument("--wave", wave)
+            argv += argument("--wave", wave?.argument)
             argv += argument("--graph", graph)
             argv += argument("--session", session)
             if run { argv.append("--run") }
@@ -1154,7 +1175,7 @@ public struct RegistryQuery: Sendable {
     /// as the first turn and returns once both are recorded; the conversation
     /// makes the checkout and starts the Graph. Without, the Task is filed
     /// unstarted and nothing runs.
-    public func createTask(request: String, wave: String?, graph: String?, run: Bool, cwd: String?, requestID: String = UUID().uuidString) async throws -> TaskCreated {
+    public func createTask(request: String, wave: CreationWave?, graph: String?, run: Bool, cwd: String?, requestID: String = UUID().uuidString) async throws -> TaskCreated {
         try Self.decode(TaskCreated.self, from: await write(.taskCreate(directory: cwd ?? "/", requestID: requestID,
             title: nil, request: request, wave: wave, graph: graph, session: nil, run: run)))
     }

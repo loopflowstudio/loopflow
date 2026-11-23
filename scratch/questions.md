@@ -19,3 +19,5 @@ A filter can hide a row during a drag. I kept the existing drop behavior for tha
 Pass 2 choice. **In** selects the existing Wave ID. A rename keeps that choice and removal requires a new choice, even if a replacement has the same name. Use an object in the existing `wave` field for the ID and keep the legacy string for CLI name provisioning. A server that only understands strings can refuse the new shape safely.
 
 When recovery confirms a refusal, **Edit draft** brings back the saved request on demand. An automatic reopening could interrupt work in another window.
+
+I used the Wave resolver’s UUID convention for `lf task create --wave`. A UUID selects the existing Wave. The saved string keeps its original fingerprint. Desktop records the ID object so an older Machine cannot treat it as a name to provision.

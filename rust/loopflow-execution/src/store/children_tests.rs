@@ -884,12 +884,17 @@ fn an_admitted_creation_commits_task_graph_claim_and_conversation_together() {
     let store =
         crate::store::opening::open_ephemeral(&directory.path().join("loopflow.db")).unwrap();
     let repository_id = local_repository(&store);
+    let project = local_project(&store);
+    let wave = store
+        .get_wave(&store.project(&project).unwrap().unwrap().wave_id)
+        .unwrap()
+        .unwrap();
     let admit = |request: &str, graph: &str| {
         let creation = NewTask {
             repository_id: repository_id.clone(),
             due_date: None,
             id: TaskId::new(),
-            project_id: None,
+            project_id: Some(project.clone()),
             title: "Start in the conversation".into(),
             description: "Start in the conversation".into(),
         };
@@ -900,6 +905,7 @@ fn an_admitted_creation_commits_task_graph_claim_and_conversation_together() {
         );
         session.interactive = true;
         let record = TaskCreationRecord {
+            wave: Some(wave.clone()),
             identity: CreationIdentity {
                 request_id: request.into(),
                 kind: "task.create",
@@ -947,4 +953,16 @@ fn an_admitted_creation_commits_task_graph_claim_and_conversation_together() {
     assert_eq!(result["milestone"], "admitted");
     assert_eq!(result["graph"], "code");
     assert_eq!(result["session_id"], session.id.as_str());
+
+    // Planning can retire the selected Wave after the draft was prepared.
+    store
+        .retire_waves(std::slice::from_ref(wave.id()), "removed")
+        .unwrap();
+    let (id, conversation, result) = admit("stale", r#"{"name":"code","steps":[]}"#);
+    assert!(
+        matches!(result, Err(crate::store::StoreError::WaveUnavailable(id)) if &id == wave.id())
+    );
+    assert!(store.task(&id).unwrap().is_none());
+    assert!(store.session(conversation.id.as_str()).unwrap().is_none());
+    assert!(store.creation_receipt("stale").unwrap().is_none());
 }

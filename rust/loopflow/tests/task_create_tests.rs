@@ -88,6 +88,110 @@ impl Drop for Service {
 }
 
 #[test]
+fn task_create_honors_the_selected_wave_and_graph_before_admission() {
+    use loopflow_execution::engine::{Error, ErrorCode};
+    use serde_json::json;
+
+    let fixture = CreationFixture::new();
+    fixture.repo.push();
+    let service = Service::start(&fixture);
+    let wave = |args: &[&str]| {
+        let output = fixture.run(args);
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        serde_json::from_slice::<serde_json::Value>(&output.stdout).unwrap()
+    };
+    let create = |request: &str, id: &serde_json::Value, graph: Option<&str>| {
+        service.connect().request(json!({
+            "kind": "task.create", "directory": fixture.repo.path(), "request_id": request,
+            "wave": {"id": id}, "title": null, "request": "Keep this brief", "session": null,
+            "graph": graph, "run": graph.is_some()
+        }))
+    };
+    let preview = |id: &serde_json::Value| {
+        service
+            .connect()
+            .request(json!({"kind":"wave.graph", "directory": fixture.repo.path(), "wave": id}))
+    };
+    let removed = wave(&["wave", "add", "product", "--json"])["id"].clone();
+    wave(&["wave", "remove", "product", "--json"]);
+    let db = rusqlite::Connection::open(fixture.home.path().join("loopflow.db")).unwrap();
+    let assert_empty = || {
+        for table in [
+            "tasks",
+            "creation_receipts",
+            "task_graphs",
+            "agent_sessions",
+            "task_ownership",
+        ] {
+            let count: i64 = db
+                .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r.get(0))
+                .unwrap();
+            assert_eq!(count, 0, "{table}");
+        }
+    };
+    let refuse_removed = || {
+        let error = create("removed-wave", &removed, None)
+            .unwrap_err()
+            .downcast::<Error>()
+            .unwrap();
+        assert_eq!(error.code, ErrorCode::NotFound);
+        assert_eq!(error.data, Some(json!({"wave_id": removed})));
+        assert_empty();
+    };
+    refuse_removed();
+    let live: i64 = db
+        .query_row(
+            "SELECT COUNT(*) FROM waves WHERE retired_at IS NULL",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(live, 0);
+    let replacement = wave(&["wave", "add", "product", "--json"])["id"].clone();
+    assert_ne!(removed, replacement);
+    refuse_removed();
+    assert!(preview(&removed).is_err());
+    let error = create("missing-graph", &replacement, Some("removed-workflow"))
+        .unwrap_err()
+        .downcast::<Error>()
+        .unwrap();
+    assert_eq!(error.code, ErrorCode::Invalid);
+    assert_eq!(error.data, Some(json!({"graph":"removed-workflow"})));
+    assert_empty();
+
+    wave(&["wave", "rename", "product", "renamed", "--json"]);
+    let current = preview(&replacement).unwrap().result;
+    assert_eq!(current["wave_id"], replacement);
+    assert_eq!(current["wave"], "renamed");
+    let filed = create("after-rename", &replacement, None).unwrap().result;
+    assert_eq!(filed["row"]["task"]["wave_id"], replacement);
+    wave(&["wave", "remove", "renamed", "--json"]);
+    let replay = create("after-rename", &replacement, None).unwrap().result;
+    assert_eq!(replay["task"]["id"], filed["task"]["id"]);
+    let cli = fixture.run(&[
+        "task",
+        "create",
+        "Keep this brief",
+        "--wave",
+        replacement.as_str().unwrap(),
+        "--request-id",
+        "after-rename",
+        "--json",
+    ]);
+    assert!(
+        cli.status.success(),
+        "{}",
+        String::from_utf8_lossy(&cli.stderr)
+    );
+    let cli: serde_json::Value = serde_json::from_slice(&cli.stdout).unwrap();
+    assert_eq!(cli["task"]["id"], filed["task"]["id"]);
+}
+
+#[test]
 fn task_create_answers_and_its_conversation_starts_the_graph_across_a_server_restart() {
     use loopflow::lf::commands::write::Write as Change;
     use loopflow::server::wire::Operation;

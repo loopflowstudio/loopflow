@@ -2023,14 +2023,14 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
         } => {
             let mut args = words(&["task", "create", "--request-id", request_id, "--json"]);
             for (flag, value) in [
-                ("--title", title),
-                ("--notes", request),
-                ("--wave", wave),
-                ("--graph", graph),
-                ("--session", session),
+                ("--title", title.as_deref()),
+                ("--notes", request.as_deref()),
+                ("--wave", wave.as_ref().map(|wave| wave.argument())),
+                ("--graph", graph.as_deref()),
+                ("--session", session.as_deref()),
             ] {
                 if let Some(value) = value {
-                    args.extend([flag.into(), value.clone()]);
+                    args.extend([flag.into(), value.into()]);
                 }
             }
             if *run {

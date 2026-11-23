@@ -179,6 +179,9 @@ fn read_store() -> OpsResult<Store> {
 }
 
 async fn graph_wave(store: &Store, repo: &Path, wave: Option<&str>) -> OpsResult<Wave> {
+    if let Some(id) = wave.and_then(|value| value.parse().ok()) {
+        return super::task::existing_creation_wave(store, repo, &id).await;
+    }
     crate::work::wave::context::resolve_managed_wave(
         Some(store),
         Some(repo),

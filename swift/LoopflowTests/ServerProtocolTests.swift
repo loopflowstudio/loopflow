@@ -177,6 +177,16 @@ struct ServerProtocolTests {
         guard case .admitted = try message("admitted") else { Issue.record("Missing admitted"); return }
     }
 
+    @Test func taskCreationSelectsAnExistingWaveOrProvisionsAName() throws {
+        let waves: [(CreationWave, String)] = [(.existing(id: "761bba76-e3e4-410b-9306-13bb61f64012"), "task_create_wave_id"),
+                                               (.name("product"), "task_create_wave_name")]
+        for (wave, fixture) in waves {
+            let task = ServedWrite.taskCreate(directory: "/repo", requestID: "00000000-0000-4000-8000-000000000001",
+                title: nil, request: "Fix the retry test", wave: wave, graph: nil, session: nil, run: true)
+            #expect(try encoded(.request(id: "create-1", operation: .command(task), select: nil, requestID: nil)) == value(fixture))
+        }
+    }
+
     @Test func mobileOperationsUseTheSharedFixtures() throws {
         let task = ServedWrite.taskCreate(directory: "/repo", requestID: "00000000-0000-4000-8000-000000000001", title: nil, request: "Fix the retry test", wave: nil, graph: nil, session: nil, run: true)
         #expect(try encoded(.request(id: "create-1", operation: .command(task), select: nil, requestID: nil)) == value("task_create"))

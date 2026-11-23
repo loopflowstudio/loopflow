@@ -801,6 +801,18 @@ impl TaskRunSelection {
     }
 }
 
+pub(crate) fn creation_graph(
+    name: &str,
+    source: &str,
+    repo: &Path,
+) -> OpsResult<crate::task_graph::CapturedGraph> {
+    load_graph(name, source, repo).map_err(|error| {
+        crate::engine::Error::new(crate::engine::ErrorCode::Invalid, error.to_string())
+            .with(serde_json::json!({"graph": name}))
+            .into()
+    })
+}
+
 /// The graph a Task takes up when it names none: your `lf set wave.graph`, then its
 /// Wave's and the repository's `graph:`, then the builtin `code`.
 pub fn task_graph_default(store: &Store, task: &Task) -> OpsResult<(String, ConfigSource)> {
@@ -2126,6 +2138,23 @@ pub(crate) async fn select_task_creation_wave(
         .map_err(task_error)
 }
 
+/// The existing Wave a New Task draft selected, in this repository.
+pub(super) async fn existing_creation_wave(
+    store: &Store,
+    repo: &Path,
+    id: &loopflow_model::id::WaveId,
+) -> OpsResult<Wave> {
+    use crate::work::wave::context::{resolve_managed_wave, WaveResolveError};
+    match resolve_managed_wave(Some(store), Some(repo), Some(id.as_str()), None).await {
+        Ok(wave) if !wave.is_retired() => Ok(wave),
+        Ok(_)
+        | Err(WaveResolveError::UnknownExplicit(_) | WaveResolveError::RepositoryMismatch { .. }) => {
+            Err(crate::engine::creation::wave_unavailable(id).into())
+        }
+        Err(error) => Err(task_error(error)),
+    }
+}
+
 pub fn task_create(
     repo: &Path,
     wave: Option<&str>,
@@ -2166,7 +2195,7 @@ pub fn admit_task(
     title: Option<String>,
     request: Option<String>,
     adoption: TaskAdoptionOptions,
-    graph: Option<&str>,
+    graph: Option<crate::task_graph::CapturedGraph>,
     receipt: loopflow_storage::sqlite::creation::CreationIdentity,
 ) -> OpsResult<Task> {
     let main = crate::git::worktrees::main_repo_root(repo).map_err(task_error)?;
@@ -2221,13 +2250,13 @@ pub(crate) fn sync_admitted(main: &Path, task: &loopflow_model::durable::TaskId)
 }
 
 /// A creation's receipt, and for a started one what its admission commits.
-struct Receipt<'a> {
+struct Receipt {
     identity: loopflow_storage::sqlite::creation::CreationIdentity,
-    admit: Option<Admit<'a>>,
+    admit: Option<Admit>,
 }
 
-struct Admit<'a> {
-    graph: Option<&'a str>,
+struct Admit {
+    graph: Option<crate::task_graph::CapturedGraph>,
     request: Option<String>,
 }
 
@@ -2237,14 +2266,13 @@ struct Admit<'a> {
 #[allow(clippy::too_many_arguments)]
 async fn creation_record(
     store: &SharedStore,
-    repo: &Path,
     main: &Path,
     existing: Option<&Task>,
     id: &loopflow_model::durable::TaskId,
     title: &str,
-    wave: Option<&str>,
+    wave: Option<&Wave>,
     selected: Option<&crate::session::LfSession>,
-    receipt: Option<Receipt<'_>>,
+    receipt: Option<Receipt>,
 ) -> OpsResult<Option<loopflow_storage::sqlite::creation::TaskCreationRecord>> {
     let Some(Receipt { identity, admit }) = receipt else {
         return Ok(None);
@@ -2253,6 +2281,7 @@ async fn creation_record(
         return Ok(Some(
             loopflow_storage::sqlite::creation::TaskCreationRecord {
                 identity,
+                wave: wave.cloned(),
                 admission: None,
             },
         ));
@@ -2265,13 +2294,13 @@ async fn creation_record(
     };
     let graph = match (taken, admit.graph) {
         (true, _) => None,
-        (false, Some(name)) => Some(load_graph(name, "", repo)?),
+        (false, Some(graph)) => Some(graph),
         (false, None) => {
             let (name, source) = match existing {
                 Some(task) => task_graph_default(store, task)?,
-                None => scope_graph_default(main, wave)?,
+                None => scope_graph_default(main, wave.map(Wave::slug))?,
             };
-            Some(load_graph(
+            Some(creation_graph(
                 &name,
                 &format!("{} default ", source.as_str()),
                 main,
@@ -2312,6 +2341,7 @@ async fn creation_record(
     Ok(Some(
         loopflow_storage::sqlite::creation::TaskCreationRecord {
             identity,
+            wave: wave.cloned(),
             admission: Some(admission),
         },
     ))
@@ -2326,12 +2356,39 @@ async fn file_task_in(
     title: Option<String>,
     report: Option<String>,
     adoption: TaskAdoptionOptions,
-    receipt: Option<Receipt<'_>>,
+    receipt: Option<Receipt>,
 ) -> OpsResult<Task> {
     let input = resolve_task_create_input(title.as_deref(), report.as_deref())?;
     let source = adoption::resolve_source(store, repo, &adoption).await?;
+    // Removal inventories Tasks before retiring the Wave. Keep that inventory
+    // and this admission in order, including when the Wave is renamed.
+    let existing_id = wave.and_then(|value| value.parse().ok());
+    let _lifecycle = existing_id
+        .as_ref()
+        .map(|_| super::wave_lifecycle::recovery::read_lock(main))
+        .transpose()?;
+    let mut provisioned = false;
+    let selected = if let Some(id) = existing_id {
+        Some(existing_creation_wave(store, main, &id).await?)
+    } else if let Some(name) = wave {
+        if source.task.is_none() {
+            let locator = crate::work::wave::discover(main, name).map_err(task_error)?;
+            if store
+                .get_wave_at(&locator)
+                .await
+                .map_err(task_error)?
+                .is_none()
+            {
+                super::wave_lifecycle::add(repo, name, None).await?;
+                provisioned = true;
+            }
+        }
+        select_task_creation_wave(store, main, Some(name)).await?
+    } else {
+        None
+    };
     if let Some(task) = source.task.as_ref() {
-        if let Some(selected) = select_task_creation_wave(store, main, wave).await? {
+        if let Some(selected) = &selected {
             if task.wave_id.as_ref() != Some(selected.id()) {
                 return Err(task_error(format!(
                     "{} already belongs to different planning; use `lf task move` or file separate work without --session or --worktree",
@@ -2341,12 +2398,11 @@ async fn file_task_in(
         }
         let receipt = creation_record(
             store,
-            repo,
             main,
             Some(task),
             &task.id,
             &task.title,
-            None,
+            selected.as_ref(),
             source.conversation(store)?.as_ref(),
             receipt,
         )
@@ -2359,23 +2415,10 @@ async fn file_task_in(
             .map_err(task_error)?
             .ok_or_else(|| task_error("Promoted Task is missing"));
     }
-    if let Some(name) = wave {
-        let locator = crate::work::wave::discover(main, name).map_err(task_error)?;
-        if store
-            .get_wave_at(&locator)
-            .await
-            .map_err(task_error)?
-            .is_none()
-        {
-            super::wave_lifecycle::add(repo, name, None).await?;
-        }
-    }
-    let selected = select_task_creation_wave(store, main, wave).await?;
-    let wave_slug = selected.as_ref().map(|wave| wave.slug().to_string());
-    let (creation_project, acquisition) = match selected {
+    let (creation_project, acquisition) = match &selected {
         Some(wave) => {
-            let acquisition = super::planning_sync::lock_wave_planning(&wave).await?;
-            let project = super::project::current_project(store, &wave)?.id;
+            let acquisition = super::planning_sync::lock_wave_planning(wave).await?;
+            let project = super::project::current_project(store, wave)?.id;
             (Some(project), Some(acquisition))
         }
         None => (None, None),
@@ -2391,18 +2434,26 @@ async fn file_task_in(
         title: input.title,
         description: input.report,
     };
+    // Once a name-based request adds its Wave the request has had an effect.
+    let filing_error = |error| {
+        if provisioned {
+            task_error(error)
+        } else {
+            error
+        }
+    };
     let receipt = creation_record(
         store,
-        repo,
         main,
         None,
         &creation.id,
         &creation.title,
-        wave_slug.as_deref(),
+        selected.as_ref(),
         source.conversation(store)?.as_ref(),
         receipt,
     )
-    .await?;
+    .await
+    .map_err(filing_error)?;
     let task = adoption::save(
         store,
         main,
@@ -2413,7 +2464,8 @@ async fn file_task_in(
         false,
         receipt,
     )
-    .await?;
+    .await
+    .map_err(filing_error)?;
     store
         .get_task(&task.id)
         .await

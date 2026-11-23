@@ -113,7 +113,7 @@ struct CreationSubmissionTests {
         let client = CreationSubmissions(directory: root, machine: { "original-machine" },
             lookup: { await server.lookup($0) }, send: { _ in throw refusal })
         let change = ServedWrite.taskCreate(directory: "/repo", requestID: "file", title: nil,
-            request: "an idea", wave: "product", graph: nil, session: nil, run: false)
+            request: "an idea", wave: .name("product"), graph: nil, session: nil, run: false)
         await #expect(throws: refusal) { try await client.submit(change, requestID: "file") }
         #expect(try await client.pending().isEmpty)
         let stale = SubmittedCreation(requestID: "file", destination: "original-machine",

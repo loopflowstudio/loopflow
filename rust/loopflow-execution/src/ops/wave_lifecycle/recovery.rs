@@ -125,7 +125,7 @@ fn apply_and_commit(
     Ok(files)
 }
 
-pub fn lock(main: &Path) -> OpsResult<File> {
+fn lock_file(main: &Path) -> OpsResult<File> {
     let git = crate::git::git_stdout(main, &["rev-parse", "--absolute-git-dir"])
         .map_err(lifecycle_error)?;
     let file = OpenOptions::new()
@@ -134,7 +134,19 @@ pub fn lock(main: &Path) -> OpsResult<File> {
         .read(true)
         .write(true)
         .open(Path::new(git.trim()).join("lf-wave-lifecycle.lock"))?;
+    Ok(file)
+}
+
+pub fn lock(main: &Path) -> OpsResult<File> {
+    let file = lock_file(main)?;
     fs2::FileExt::lock_exclusive(&file)?;
+    Ok(file)
+}
+
+/// Keep an existing Wave's address live through Task admission.
+pub(crate) fn read_lock(main: &Path) -> OpsResult<File> {
+    let file = lock_file(main)?;
+    fs2::FileExt::lock_shared(&file)?;
     Ok(file)
 }
 

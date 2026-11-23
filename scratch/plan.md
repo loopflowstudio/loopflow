@@ -201,12 +201,13 @@ and build scripts" becomes the seeded behaviour plus what still compiles.
      cold was 2.05 GB in two of three. Unexplained; see questions.md.
    - The seeded focused test cost 185 CPU-s, close to the "about 200" in
      testing.md; that sentence holds.
-3. **Docs (next).** Written ahead of the code: `scripts/testing.md` (Shared
-   compilation cache: `seed` status line, "New worktrees start warm", hook
-   paragraph, `lf wt prune --builds` overcount) and
-   `scripts/benchmarks/crate-rebuild/README.md` (`seed_probe.py` commands,
-   LOO-922 results link, "Seeded worktrees"). Make the code match them, or fix
-   them where the code shows they're wrong.
+3. **Docs: done.** `scripts/testing.md` and the crate-rebuild README match the
+   code (status line format, hook paragraph, `seed_probe.py` commands,
+   results link). Realign replaced the earlier probe's "about 40% diverged"
+   with slice 2's bytes, noted Cargo.lock drift (31 units at 140 commits) and
+   linked loo-922.html from testing.md.
+
+Remaining: gate. Open: the seeded build's 3.1 GB peak RSS (questions.md).
 
 After verify: check LOO-923 status/liveness, `lf task checkout LOO-923` if
 absent, then `lf ship LOO-923` with these measurements in its context.

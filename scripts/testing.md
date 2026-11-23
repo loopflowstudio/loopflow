@@ -351,13 +351,17 @@ git worktree add ../loopflow.my-change main && cd ../loopflow.my-change
 cargo build -p loopflow --bin lf     # 7 Compiling lines (workspace crates), not 256
 ```
 
+A seed from a sibling whose `Cargo.lock` has drifted recompiles the units that
+changed: one 140 commits away compiled 31.
+
 Cargo still decides what is fresh; the seed only gives it a target to look at.
 Every workspace crate rebuilds, because checkout gives its sources new mtimes,
 and the shared cache serves the eligible ones. The seed is a copy-on-write clone
 (APFS on macOS, reflink on Linux) of `.fingerprint`, `build` and `deps`; it never
 copies `incremental/`, lock files or a built `lf`. Clone blocks are shared until
-a build rewrites them: after the first `lf` build about 40% of the target had
-diverged. Where the filesystem can't clone, or every sibling is building, the
+a build rewrites them: the first `lf` build wrote 1.7 GiB into a seeded target
+(2.0 cold), and after a focused test about half of the target's allocated bytes
+were still cloned. Where the filesystem can't clone, or every sibling is building, the
 worktree starts with no target and builds cold. A focused `cargo test` still
 compiles the workspace libraries in the incremental test profile, about 200
 CPU-seconds that neither the seed nor the cache serves.

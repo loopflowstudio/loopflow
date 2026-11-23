@@ -11,7 +11,7 @@ import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from build_cache import refresh  # noqa: E402
+from build_cache import CACHE_ENV, write_inventory  # noqa: E402
 
 
 def main() -> None:
@@ -72,7 +72,8 @@ def main() -> None:
             ]
         )
         config = root / "sccache.json"
-        env.update(refresh(a, config))
+        write_inventory(a, config)
+        env.update(CACHE_ENV, SCCACHE_CONF=str(config))
         process = None
 
         def start() -> subprocess.Popen:
@@ -132,10 +133,9 @@ def main() -> None:
             process = start()
             build("first", a, a / "target", (0, 1))
             run(["git", "worktree", "add", "--detach", str(b)])
-            env.update(refresh(b, config))
+            write_inventory(b, config)
             build("before_idle", b, b / "target", (0, 1))
-            # The production entry point never sends a stop/restart. Let this
-            # fixture's daemon expire in exactly the same way.
+            # Observe natural expiry independently of the registration hook.
             if process.wait(timeout=60) != 0:
                 raise RuntimeError("cache server failed instead of expiring idle")
             (b / "target").rename(root / "retained-before-idle-target")

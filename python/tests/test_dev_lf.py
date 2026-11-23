@@ -14,8 +14,6 @@ ROOT = Path(__file__).resolve().parents[2]
 def test_build_target_and_cache_bypass(tmp_path, isolated):
     repo = tmp_path / "source with spaces"
     repo.mkdir()
-    (repo / "scripts").mkdir()
-    (repo / "scripts/build_cache.py").write_text((ROOT / "scripts/build_cache.py").read_text())
     subprocess.run(["git", "init", "-q", str(repo)], check=True)
     commands = tmp_path / "bin"
     commands.mkdir()
@@ -65,8 +63,8 @@ def test_build_target_and_cache_bypass(tmp_path, isolated):
         "SCCACHE_DISABLE": "1" if isolated else "0",
     }
 
-    config = tmp_path / "cache/loopflow/sccache.json"
-    if isolated:
-        assert not config.exists()
-    else:
-        assert json.loads(config.read_text())["basedirs"] == [str(repo.resolve())]
+    assert result.stderr.splitlines() == [
+        "    Finished test build",
+        f"running: {target}/debug/lf session show name with spaces",
+    ]
+    assert not (tmp_path / "cache/loopflow").exists()

@@ -24,7 +24,9 @@ that split with `loopflow-harness` beside storage.
 then a focused `cargo test` that passes. It uses the Machine's own Cargo
 configuration from [`build_cache.py install`](../../testing.md#shared-compilation-cache)
 (the pinned wrapper and the Machine's `jobs`), with a private cache directory
-and socket plus a private root inventory so every counter belongs to the run. Both incremental settings get
+and socket plus a private root inventory so every counter belongs to the run.
+The driver removes any target supplied by the checkout hook before the first build.
+Both incremental settings get
 a seed application test and execution test.
 Switching `CARGO_INCREMENTAL` changes third-party artifact keys too; a seed in
 only one mode leaves the other cold. Seeds are excluded from the samples.

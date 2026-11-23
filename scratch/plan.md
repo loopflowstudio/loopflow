@@ -226,33 +226,15 @@ and build scripts" becomes the seeded behaviour plus what still compiles.
    code and link `loo-922.html`.
 4. **Done: lock contention check.** Verified Cargo 1.98.1 waits with
    `Blocking waiting for file lock` when `_quiescent` holds `CARGO_LOCKS`.
-5. **Next (from post-build concept review): only built targets are seed
-   sources, and keep `test_loop.py` cold.**
-   - In `scripts/build_cache.py` (`_seed_sources`): require a built target —
-     all `SEED_ENTRIES` exist **and** `any((tree / "target/debug" / lock).exists() for lock in CARGO_LOCKS)`.
-     Drop the `not (tree / "target" / SEED_RECORD).exists()` tie-breaker; sort
-     by `.fingerprint` mtime alone. Keep `shutil.copystat` on `.fingerprint` and
-     keep `CARGO_LOCKS` locking inside `_quiescent` for built candidates.
-   - In `scripts/benchmarks/crate-rebuild/test_loop.py`: right after
-     `git worktree add` creates a measurement worktree, remove `tree / "target"`
-     if present (`shutil.rmtree(tree / "target", ignore_errors=True)`) so
-     LOO-921's cold-target private-cache benchmark is unaffected by the
-     installed seeding hook.
-   - In `python/tests/test_build_cache.py`:
-     - Replace the unbuilt-seed lock test and cold-only tie test with explicit
-       steady-state coverage: (a) a seeded-then-built sibling (`SEED_RECORD`
-       present, built) beats an unbuilt seed cloned from it (no lock files
-       created in the unbuilt seed); (b) an unbuilt seed is skipped even when
-       it is the only idle sibling (built source locked or removed), leaving no
-       `target/` and no lock files in the unbuilt seed; (c) once Cargo builds
-       in that seeded worktree, it seeds later worktrees; (d) holding
-       `_quiescent` on a built sibling blocks Cargo with
-       `Blocking waiting for file lock`.
-   - In `scripts/testing.md` and `.lf/qa/build-cache.md`: state plainly that
-     only built siblings (targets Cargo has built) seed new worktrees, and
-     update the QA lock-race note to reflect that unbuilt seeds are skipped.
-   - Reinstall the hook on this Machine (`uv run python scripts/build_cache.py install`)
-     and run `uv run pytest -q python/tests/test_build_cache.py python/tests/test_crate_test_loop.py`.
+5. **Done: only built targets seed worktrees.** The installer refreshed the
+   shared Git hook. Its candidate list contained 16 built siblings and excluded
+   the seeded `loopflow.ready`. The edit-to-test driver removes each new
+   worktree's target before measuring any Cargo command.
+
+   `uv run pytest -q python/tests/test_build_cache.py python/tests/test_crate_test_loop.py`
+   passed all 41 tests, including Cargo's lock wait and the cold benchmark checkout.
+
+Next: gate and CI.
 
 The delivery instruction is “ok lg2m ship it when it works”.
 

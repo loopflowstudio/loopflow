@@ -72,6 +72,17 @@ def _run(argv: list[str], cwd: Path, env: dict) -> str:
     return result.stdout.strip()
 
 
+def _add_cold_worktree(tree: Path, revision: str, env: dict) -> None:
+    _run(
+        ["git", "worktree", "add", "--detach", str(tree), revision],
+        ROOT,
+        {**env, "XDG_CACHE_HOME": str(tree.parent)},
+    )
+    target = tree / "target"
+    if target.exists():
+        shutil.rmtree(target)
+
+
 def _private_cache_env(settings: dict, root: Path, socket: Path) -> dict:
     env = {
         k: v
@@ -363,11 +374,7 @@ def _measure(output: Path, cohorts: int, resume: bool, socket: Path) -> None:
             continue
         tree = root / key
         start = time.monotonic()
-        _run(
-            ["git", "worktree", "add", "--detach", str(tree), revision],
-            ROOT,
-            {**env, "XDG_CACHE_HOME": str(root)},
-        )
+        _add_cold_worktree(tree, revision, env)
         config["trees"][key] = {"path": str(tree), "setup_seconds": time.monotonic() - start}
         _write(state, config)
     write_inventory(ROOT, Path(env["SCCACHE_CONF"]))

@@ -25,3 +25,7 @@
 
 - Compress reused the six recorded samples to check report equivalence. A
   disposable Cargo repository exercised both probe arms and hard-link accounting.
+
+- The edit-to-test driver follows the cold arm of `seed_probe.py`: a missing
+  target is already cold. If removing a target fails, the benchmark stops
+  before recording a sample.

@@ -3,6 +3,7 @@
 import gzip
 import importlib
 import json
+import os
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
@@ -17,6 +18,34 @@ def probe(monkeypatch):
     directory = ROOT / "scripts/benchmarks/crate-rebuild"
     monkeypatch.syspath_prepend(str(directory))
     return importlib.import_module("test_loop")
+
+
+def test_measurement_worktree_starts_cold_after_the_checkout_hook(probe, tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    subprocess.run(["git", "init", "--quiet", repo], check=True)
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=f@example.com",
+            "commit",
+            "--allow-empty",
+            "-qm",
+            "init",
+        ],
+        cwd=repo,
+        check=True,
+    )
+    hook = repo / ".git/hooks/post-checkout"
+    hook.write_text("#!/bin/sh\nmkdir -p target/debug/deps && touch hook-ran\n")
+    hook.chmod(0o755)
+    monkeypatch.setattr(probe, "ROOT", repo)
+    tree = tmp_path / "measurement"
+    probe._add_cold_worktree(tree, "HEAD", os.environ.copy())
+    assert (tree / "hook-ran").exists()
+    assert not (tree / "target").exists()
 
 
 def test_consecutive_edits_replace_the_committed_message_in_each_crate(probe, tmp_path):

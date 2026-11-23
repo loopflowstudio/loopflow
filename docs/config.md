@@ -153,12 +153,14 @@ lf context --json                              # context budgets and current usa
 `lf set` validates keys and types strictly and preserves comments in YAML
 files. Desktop's [Settings](surfaces.md#settings) window (`⌘,`) reads and
 writes the same files. **Project & Wave Config** has the **Applies to** and
-**Save in** selectors, a precedence ladder, YAML previews for Reset and Move,
-and Undo. An unset control shows the value in effect and its source, such
-as **On (Default)**. Lists can name several contributing files. Choosing
-the source-labeled option in a picker removes the declaration. **Explicit
-null** keeps a nullable key such as `chrome` in YAML and lets lower
-declarations supply its value.
+**Save in** selectors, a precedence ladder, and Undo. Simple controls reset
+immediately. YAML resets and moves show a preview.
+
+An unset control shows the value in effect and its source, such as
+**On (Default)**. Lists can name several contributing files. Choosing the
+source-labeled option in a picker removes the declaration. A picker shows
+**Explicit null** when its file declares a nullable key such as `chrome` as
+`null`. Lower declarations supply its value. **Reset** removes the key.
 
 ## Where settings live
 

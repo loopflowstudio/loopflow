@@ -418,13 +418,14 @@ mod tests {
     }
 
     #[test]
-    fn catalogue_wire_shape_includes_feature_category() {
+    fn catalogue_wire_shape_includes_category_and_unset_meaning() {
         let fixture: serde_json::Value = serde_json::from_str(include_str!(
             "../../../../tests/fixtures/dto/configuration_catalog.json"
         ))
         .unwrap();
-        let theme = crate::config::catalog::definition("theme").unwrap();
-        assert_eq!(serde_json::to_value([theme]).unwrap(), fixture);
+        let definitions = ["theme", "agent", "default_agent"]
+            .map(|key| crate::config::catalog::definition(key).unwrap());
+        assert_eq!(serde_json::to_value(definitions).unwrap(), fixture);
     }
 
     #[test]

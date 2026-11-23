@@ -37,28 +37,30 @@ struct ScopedSettings: View {
                 if case .step = model.target, scope.files.allSatisfy({ $0.slots["agent"] == nil }) {
                     Section { Text("This Graph step is read-only. Give it an id: in its Graph YAML to edit step preferences.") }
                 }
-                ForEach(SettingsSection.allCases.filter { $0.appears(in: pane, wave: model.wave) }) { group in
-                    Section(group.rawValue) {
-                        ForEach(group.keys, id: \.self) { key in
-                            if let definition = model.catalogue.first(where: { $0.key == key }) {
-                                row(definition, in: scope)
+                let definitions = model.catalogue.filter { definition in
+                    if pane != .project { return definition.pane == pane }
+                    return (definition.pane == .project || definition.pane == .agents)
+                        && (model.wave == nil || definition.applicability != "repository")
+                        && (model.target == .general || definition.applicability == "launch")
+                }
+                ForEach(SettingsSection.allCases) { group in
+                    let rows = group.keys.compactMap { key in definitions.first { $0.key == key } }
+                    if !rows.isEmpty {
+                        Section(group.rawValue) {
+                            ForEach(rows, id: \.key) { row($0, in: scope) }
+                            if group == .policy, pane == .project, let order = scope.settings["agents"] {
+                                SettingProvenance(title: "Effective agent order", value: order.value.settingsText, effective: order)
                             }
-                        }
-                        if group == .policy, pane == .project, let order = scope.settings["agents"] {
-                            SettingProvenance(title: "Effective agent order", value: order.value.settingsText, effective: order)
                         }
                     }
                 }
                 if pane == .project {
-                    if model.wave != nil {
+                    if model.wave != nil && model.target == .general {
                         Section("Git & Release") {
                             Button("Inspect repository settings") { model.select(checkout: model.checkout) }
                         }
                     }
-                    let other = model.catalogue.filter {
-                        $0.pane == .project && $0.section == nil && !$0.isContainer &&
-                            (model.wave == nil || $0.applicability != "repository")
-                    }
+                    let other = definitions.filter { $0.section == nil && !$0.isContainer }
                     if !other.isEmpty {
                         Section {
                             DisclosureGroup("Advanced settings", isExpanded: $advanced) {
@@ -72,6 +74,9 @@ struct ScopedSettings: View {
                 }
                 if let file = model.file {
                     Section {
+                        if pane == .project {
+                            Text(file.path).font(Typography.mono).foregroundStyle(.secondary).textSelection(.enabled)
+                        }
                         Button(pane == .project ? "Open file…" : "Open ~/.lf/config.yaml") {
                             openFile(file)
                         }
@@ -112,7 +117,7 @@ struct ScopedSettings: View {
                 }
                 .settingsRow(key, highlighted: highlightedKey)
             } else {
-                SettingProvenance(title: definition.title, value: effective.value.settingsText, effective: effective)
+                SettingProvenance(title: definition.title, value: definition.displayText(for: effective.value), effective: effective, definition: definition)
                     .settingsRow(key, highlighted: highlightedKey)
                 if key == "machine", model.target == .general {
                     Text("Machine placement is a personal preference.").foregroundStyle(.secondary)
@@ -153,6 +158,8 @@ struct ScopedSettings: View {
                 .fixedSize()
             }
             if model.target != .general {
+                Text("Showing launch settings for this target. Repository and general settings apply to all work.")
+                    .foregroundStyle(.secondary)
                 Button("Inspect general work") { model.target = .general }
             }
             if let checkout = model.checkout {
@@ -195,14 +202,6 @@ enum SettingsSection: String, CaseIterable, Identifiable {
         case .policy, .execution, .harnesses: .agents
         case .diff, .files, .pullRequests, .diffView, .release, .placement: .project
         case .machine: .machines
-        }
-    }
-
-    func appears(in selected: SettingsPane, wave: String?) -> Bool {
-        guard selected == .project else { return selected == pane }
-        switch self {
-        case .pullRequests, .diffView, .release: return wave == nil
-        default: return pane == .project || pane == .agents
         }
     }
 

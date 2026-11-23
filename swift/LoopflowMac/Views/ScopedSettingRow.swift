@@ -47,10 +47,11 @@ struct ScopedSettingRow: View {
                 Text(editError.message).foregroundStyle(.secondary).textSelection(.enabled)
                 if editError.recovery == .refresh { Button("Refresh") { refreshRow() } }
             }
-            if file.owner != .personalGlobal && definition.section != .policy {
+            if file.owner != .personalGlobal, definition.section != .policy,
+               declared != .absent || effective.candidates.contains(where: { $0.source != "builtin" }) {
                 SettingProvenance(title: "In effect",
                     value: [effectiveText, source ?? "Default"].joined(separator: " · "),
-                    effective: effective, files: model.reading.value?.files ?? [], key: key, path: file.path)
+                    effective: effective, definition: definition, files: model.reading.value?.files ?? [])
             }
             if let draft, draft.text == nil {
                 Text(preview.current ?? preview.failure ?? "Preparing preview…").font(Typography.mono).textSelection(.enabled)
@@ -60,10 +61,14 @@ struct ScopedSettingRow: View {
                     if preview.failure != nil { Button("Refresh") { refreshRow() } }
                 }
             } else if declared != .absent {
-                Button("Reset…") {
-                    preview = .loading
-                    draft = Draft(text: nil, file: file)
-                }.controlSize(.small)
+                if case .yaml = definition.control {
+                    Button("Reset…") {
+                        preview = .loading
+                        draft = Draft(text: nil, file: file)
+                    }.controlSize(.small)
+                } else {
+                    Button("Reset") { save(.reset, to: file) }.controlSize(.small)
+                }
             }
             moveControls
         }
@@ -100,7 +105,7 @@ struct ScopedSettingRow: View {
                 Text(change.path).textSelection(.enabled)
                 Text(change.patch).font(Typography.mono).textSelection(.enabled)
             }
-            LabeledContent("In effect after move", value: moveReview.effective.value.settingsText)
+            LabeledContent("In effect after move", value: definition.displayText(for: moveReview.effective.value))
             HStack {
                 Button("Cancel") { self.moveReview = nil }
                 Button("Confirm move") { promote(.confirm(moveReview)) }
@@ -124,14 +129,14 @@ struct ScopedSettingRow: View {
     /// What applies while this file declares nothing, and where it comes from.
     /// The agent keys read their own declarations: their effective value is the combined agent order.
     var unsetText: String {
-        if key == "agents" || key == "default_agent" {
+        if definition.section == .policy {
             guard let candidate = effective.candidates.last(where: { $0.key == key }) else {
-                // The catalog's defaults for these keys are the JSON literals `null` and `[]`.
+                if let unset = definition.unset { return labeled(unset, origin: "Default") }
                 let builtin = try? JSONDecoder().decode(JSONValue.self, from: Data(definition.default.utf8))
-                return labeled((builtin ?? .null).settingsText, origin: "Default")
+                return labeled(definition.displayText(for: builtin ?? .null), origin: "Default")
             }
             let origin = model.reading.value?.title(locator: candidate.locator) ?? candidate.locator
-            return labeled(candidate.value.settingsText, origin: origin)
+            return labeled(definition.displayText(for: candidate.value), origin: origin)
         }
         return labeled(effectiveText, origin: source ?? "Default")
     }
@@ -140,7 +145,7 @@ struct ScopedSettingRow: View {
     private var effectiveText: String {
         let value = definition.fieldValue(in: effective.value) ?? .null
         if value == .null, (source ?? "Default") == "Default", let unset = definition.unset { return unset }
-        return value.settingsText
+        return definition.displayText(for: value)
     }
 
     private func labeled(_ text: String, origin: String) -> String {
@@ -152,7 +157,7 @@ struct ScopedSettingRow: View {
         case .toggle:
             ScopedBooleanToggle(model: model, definition: definition, effective: effective,
                                 file: file, notices: notices, manager: manager)
-        case .choices(let choices, let nullable):
+        case .choices(let choices):
             Picker(definition.title, selection: Binding(get: { declared }, set: { selection in
                 switch selection {
                 case .absent: save(.reset, to: file)
@@ -160,10 +165,10 @@ struct ScopedSettingRow: View {
                 }
             })) {
                 Text(unsetText).tag(ConfigurationScope.Authored.absent)
-                if nullable {
+                if declared == .present(.null) {
                     Text("Explicit null").tag(ConfigurationScope.Authored.present(.null))
                 }
-                ForEach(choices, id: \.self) { Text($0.settingsText).tag(ConfigurationScope.Authored.present($0)) }
+                ForEach(choices, id: \.self) { Text(definition.displayText(for: $0)).tag(ConfigurationScope.Authored.present($0)) }
             }
         case .stringList:
             OrderedSetting(title: definition.title, value: authored, unsetText: unsetText,
@@ -212,8 +217,8 @@ struct ScopedSettingRow: View {
         switch definition.control {
         case .text:
             change = definition.change(to: text.isEmpty ? nil : .string(text), in: draft.file)
-        case .integer where definition.editedField != nil:
-            change = definition.change(to: Int64(text).map(JSONValue.integer) ?? .string(text), in: draft.file)
+        case .integer:
+            change = definition.integerChange(text, in: draft.file)
         default:
             change = .set(text)
         }
@@ -308,22 +313,21 @@ struct SettingProvenance: View {
     let title: String
     let value: String
     let effective: ConfigurationValue
+    var definition: ConfigurationDefinition?
     var files: [ConfigurationScope.File] = []
-    var key: String?
-    var path: String?
 
     var body: some View {
         DisclosureGroup {
             ForEach(Array(effective.candidates.enumerated()), id: \.offset) { _, candidate in
-                LabeledContent(candidate.locator, value: "\(candidate.key) · \(candidate.value.settingsText) · \(candidate.reason)")
+                let text = definition?.displayText(for: candidate.value) ?? candidate.value.settingsText
+                LabeledContent(candidate.locator, value: "\(candidate.key) · \(text) · \(candidate.reason)")
                     .textSelection(.enabled)
             }
-            if let key {
+            if let key = definition?.key {
                 ForEach(files.filter { $0.slots[key]?.declared == .absent }) { file in
                     LabeledContent(file.owner?.title ?? file.path, value: "No declaration")
                 }
             }
-            if let path { Text(path).font(Typography.mono).textSelection(.enabled) }
         } label: {
             LabeledContent(title, value: value).lineLimit(2)
         }

@@ -145,7 +145,8 @@ final class ScopedSettingsModel {
                shown.key == address, shown.entries != receipt.after {
                 await confirmReading()
             }
-            let name = "\(key) in \(file.owner?.title ?? file.path)"
+            let title = title(for: key)
+            let name = file.owner == .personalGlobal ? title : "\(title) in \(file.owner?.title ?? file.path)"
             let undo = Notice.Action.undo(name, manager: manager, target: self) { [weak notices] model in
                 Task {
                     do {
@@ -157,7 +158,8 @@ final class ScopedSettingsModel {
                     }
                 }
             }
-            notices.post(Notice("Saved \(name)", key: key, action: undo))
+            let verb = receipt.after.isEmpty ? "Reset" : "Saved"
+            notices.post(Notice("\(verb) \(name)", key: key, action: undo))
             return true
         } catch {
             report(error, id: id, key: key, file: file, notices: nil)
@@ -180,13 +182,14 @@ final class ScopedSettingsModel {
         do {
             let result = try await move(address, destination: destination, wave: wave, action: action)
             errors[RowAddress(file, key)] = nil
+            let title = title(for: key)
             switch result {
             case .preview(let review): return review
             case .pending: refresh()
-            case .dismissed: notices.post(Notice("Dismissed pending move for \(key)", key: key))
-            case .recovered: notices.post(Notice("Finished moving \(key)", key: key))
+            case .dismissed: notices.post(Notice("Dismissed pending move for \(title)", key: key))
+            case .recovered: notices.post(Notice("Finished moving \(title)", key: key))
             case .applied(let receipt):
-                let name = "Move \(key)"
+                let name = "Move \(title)"
                 let undo = Notice.Action.undo(name, manager: manager, target: self) { [weak notices] model in
                     Task {
                         do {
@@ -197,10 +200,14 @@ final class ScopedSettingsModel {
                         } catch { model.report(error, id: id, key: key, file: file, notices: notices) }
                     }
                 }
-                notices.post(Notice("Moved \(key)", key: key, action: undo))
+                notices.post(Notice("Moved \(title)", key: key, action: undo))
             }
         } catch { report(error, id: id, key: key, file: file, notices: nil, move: action) }
         return nil
+    }
+
+    private func title(for key: String) -> String {
+        catalogue.first { $0.key == key }?.title ?? key
     }
 
     private func move(_ key: String, destination: JSONValue, wave: String?, action: MoveAction) async throws -> MoveResult {

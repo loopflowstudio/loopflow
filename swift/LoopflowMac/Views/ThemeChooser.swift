@@ -49,9 +49,9 @@ struct ThemeChooser: View {
                             .accessibilityIdentifier("appearance-heading-\(side.rawValue)")
                     }
                 }
-                Section {
-                    if let config = appearance.configPath {
-                        DisclosureGroup("Advanced") {
+                if let config = appearance.configPath {
+                    Section {
+                        LabeledContent("Configuration file") {
                             Text(config).font(Typography.mono).textSelection(.enabled)
                         }
                     }

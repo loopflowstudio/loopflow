@@ -20,3 +20,4 @@
 - Search for a file-only global preference to highlight Open ~/.lf/config.yaml. Opening a missing global file creates an empty YAML mapping. The first scoped edit creates its file through the config writer, which also installs the Git exclusion for private preferences.
 - Keep search anchored to the catalog key across destinations. A draft, its Reset preview and its move confirmation belong to the declaration address until the editor closes.
 - Give Log Linear requests the same switch in search and General. List each contributing source when an unset list combines declarations.
+- Appearance shows its selectable configuration path directly. The project pane places its path beside **Open file…**.

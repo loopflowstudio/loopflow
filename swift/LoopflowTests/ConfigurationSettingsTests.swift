@@ -63,8 +63,8 @@ struct ConfigurationSettingsTests {
     @Test func catalogueIncludesFeatureCategory() throws {
         let fixture = try loadFixtureData("configuration_catalog.json")
         let catalogue = try JSONDecoder().decode([ConfigurationDefinition].self, from: fixture)
-        #expect(catalogue.count == 1)
-        #expect(catalogue[0].key == "theme")
+        #expect(catalogue.map(\.key) == ["theme", "agent", "default_agent"])
+        #expect(catalogue.map(\.unset) == [nil, "Use starting preference", "First in fallback order"])
         #expect(catalogue[0].category == "Desktop")
     }
 

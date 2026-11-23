@@ -122,6 +122,12 @@ struct SettingsWorkflowTests {
             let agents = try pane(.project).inspect()
             _ = try agents.find(text: "Effective agent order")
             let chrome = try agents.find(viewWithId: "chrome").find(ViewType.Picker.self)
+            _ = try chrome.find(text: "Explicit null")
+            for (key, label) in [("land", "GitHub PR"), ("auto", "On"), ("merge_method", "Squash"), ("codex.service_tier", "Standard")] {
+                let picker = try agents.find(viewWithId: key).find(ViewType.Picker.self)
+                _ = try picker.find(text: label)
+                #expect(throws: (any Error).self) { try picker.find(text: "Explicit null") }
+            }
             #expect(try chrome.selectedValue(ConfigurationScope.Authored.self) == .present(.null))
 
             #expect(await !model.apply(.set("no-such-graph"), key: "wave.graph", to: shared, notices: notices, manager: nil))
@@ -144,7 +150,7 @@ struct SettingsWorkflowTests {
             #expect(try !logResult.isOn())
             try logResult.tap()
             let logDeadline = ContinuousClock.now + .seconds(10)
-            while personal.file?.slots["logs"]?.declared.value?["linear_requests"] != .bool(true) {
+            while personal.saving || personal.file?.slots["logs"]?.declared.value?["linear_requests"] != .bool(true) {
                 try #require(ContinuousClock.now < logDeadline)
                 try await Task.sleep(for: .milliseconds(20))
             }
@@ -166,7 +172,9 @@ struct SettingsWorkflowTests {
             let hub = try machines.find(viewWithId: "hub").find(ScopedSettingRow.self).actualView()
             #expect(hub.file.owner == .personalGlobal)
             let machineID = "home_11111111111111111111111111111111"
-            #expect(await personal.apply(.set(machineID), key: "hub", to: hub.file, notices: notices, manager: nil))
+            let saved = await personal.apply(.set(machineID), key: "hub", to: hub.file, notices: notices, manager: nil)
+            try #require(saved, "\(personal.errors[.init(hub.file, "hub")]?.message ?? personal.reading.failure ?? "Plan hub unavailable")")
+            #expect(notices.current?.text == "Saved Plan hub")
             #expect(model.destination == .sharedRepository)
             #expect(model.file?.hasOverrides == true)
             #expect(try String(contentsOf: home.appending(path: "config.yaml"), encoding: .utf8).contains(machineID))
@@ -192,8 +200,19 @@ struct SettingsWorkflowTests {
             _ = try pane(.project).inspect().find(viewWithId: "chrome").find(text: "Claude's own setting (Default)")
             #expect(try pane(.general).inspect().find(viewWithId: "repo_root").find(ScopedSettingRow.self).actualView().unsetText == "~/src (Default)")
             let agentsPane = try pane(.agents)
-            #expect(try agentsPane.inspect().find(viewWithId: "default_agent").find(ScopedSettingRow.self).actualView().unsetText == "None (Default)")
+            #expect(try agentsPane.inspect().find(viewWithId: "default_agent").find(ScopedSettingRow.self).actualView().unsetText == "First in fallback order (Default)")
+            #expect(await personal.apply(.set("claude"), key: "default_agent", to: try #require(personal.file), notices: notices, manager: nil))
+            #expect(personal.reading.value?.settings["agent"]?.value == .string("claude"))
+            #expect(try agentsPane.inspect().find(viewWithId: "agent").find(ScopedSettingRow.self).actualView().unsetText == "Use starting preference (Default)")
             #expect(try agentsPane.inspect().find(viewWithId: "yolo").find(ScopedSettingRow.self).actualView().unsetText == "On (Default)")
+            let retries = try #require(personal.catalogue.first { $0.key == "automation" })
+            let before = try #require(personal.file)
+            #expect(await personal.apply(retries.integerChange("3", in: before), key: retries.key, to: before, notices: notices, manager: nil))
+            let edited = try #require(personal.file)
+            #expect(edited.slots[retries.key]?.declared.value?["retries"] == .integer(3))
+            #expect(await personal.apply(retries.integerChange("  ", in: edited), key: retries.key, to: edited, notices: notices, manager: nil))
+            #expect(personal.file?.slots[retries.key]?.declared == .absent)
+            #expect(notices.current?.text == "Reset Automatic retries")
             for settings in [SettingsPane.general, .agents, .machines, .project] {
                 let rows = try pane(settings).inspect().findAll(ScopedSettingRow.self).map { try $0.actualView() }
                 #expect(!rows.isEmpty)

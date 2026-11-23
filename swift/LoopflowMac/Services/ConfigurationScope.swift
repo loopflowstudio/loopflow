@@ -65,7 +65,7 @@ struct ConfigurationDefinition: Decodable {
 
     enum Control {
         case toggle, text, integer, stringList, yaml
-        case choices([JSONValue], nullable: Bool)
+        case choices([JSONValue])
     }
 
     // These controls edit one field of a mapping. Checked writes still cover
@@ -92,6 +92,26 @@ struct ConfigurationDefinition: Decodable {
         return fields.isEmpty ? .reset : .set(JSONValue.object(fields).settingsYAML)
     }
 
+    func integerChange(_ text: String, in file: ConfigurationScope.File) -> ConfigurationChange {
+        let input = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if input.isEmpty { return change(to: nil, in: file) }
+        guard editedField != nil else { return .set(input) }
+        return change(to: Int64(input).map(JSONValue.integer) ?? .string(input), in: file)
+    }
+
+    func displayText(for value: JSONValue) -> String {
+        switch (key, value) {
+        case ("land", .string("gh")): "GitHub PR"
+        case ("land", .string("local")): "Local merge"
+        case ("codex.service_tier", .string("default")): "Standard"
+        case ("codex.service_tier", .string("priority")): "Fast"
+        case ("auto", .string("on")): "On"
+        case ("auto", .string("off")): "Off"
+        case ("merge_method", .string(let method)): method.capitalized
+        default: value.settingsText
+        }
+    }
+
     var control: Control {
         var field = editedField.map { schema["properties"][$0] } ?? schema
         var nullable = false
@@ -106,9 +126,9 @@ struct ConfigurationDefinition: Decodable {
             nullable = types.contains(.string("null"))
             type = types.first { $0 != .string("null") } ?? .null
         }
-        if case .array(let values) = field["enum"] { return .choices(values, nullable: nullable) }
+        if case .array(let values) = field["enum"] { return .choices(values) }
         switch type {
-        case .string("boolean"): return nullable ? .choices([.bool(true), .bool(false)], nullable: true) : .toggle
+        case .string("boolean"): return nullable ? .choices([.bool(true), .bool(false)]) : .toggle
         case .string("string"): return .text
         case .string("integer"): return .integer
         case .string("array") where field["items"]["type"] == .string("string"): return .stringList

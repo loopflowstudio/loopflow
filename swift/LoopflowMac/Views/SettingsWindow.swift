@@ -110,6 +110,7 @@ struct SettingsWindow: View {
                 }
             }
             .frame(minWidth: 210)
+            .toolbar(removing: .sidebarToggle)
             .navigationSplitViewColumnWidth(min: 210, ideal: 220, max: 280)
         } detail: {
             Group {
@@ -161,8 +162,12 @@ struct SettingsWindow: View {
     }
 
     private func open(_ match: SettingsMatch) {
-        if case .setting(let definition, .project) = match, definition.applicability == "repository", project.wave != nil {
-            project.select(checkout: project.checkout)
+        if case .setting(let definition, .project) = match {
+            if definition.applicability == "repository", project.wave != nil {
+                project.select(checkout: project.checkout)
+            } else if definition.applicability != "launch" {
+                project.target = .general
+            }
         }
         navigation.open(match.pane, row: match.key)
     }
@@ -177,10 +182,11 @@ struct SettingsWindow: View {
         let selection = navigation.selection(in: matches)?.id
         return ScrollViewReader { proxy in
             List {
-                ForEach([personal, project], id: \.observation) { scope in
-                    if let error = scope.reading.failure {
-                        Text(error).foregroundStyle(.secondary)
-                        Button("Refresh settings") { scope.refresh() }
+                let failures = [personal, project].compactMap { $0.reading.failure }
+                ForEach(Array(Set(failures)).sorted(), id: \.self) { error in
+                    Text(error).foregroundStyle(.secondary)
+                    Button("Refresh settings") {
+                        for scope in [personal, project] where scope.reading.failure == error { scope.refresh() }
                     }
                 }
                 ForEach(matches) { result in

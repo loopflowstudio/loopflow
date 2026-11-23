@@ -310,8 +310,8 @@ definitions! {
         #[serde(skip)] setting_layers: Option<Vec<ConfigDeclarations>> = None;
         #[serde(skip)] context_budget_sources: BTreeMap<BudgetKey, String> = BTreeMap::new();
     };
-    agent: Option<String> = "null", Launch, Replace, Portable, NextLaunch, Agents, "Harness[:model] choice; every choice precedes every fallback";
-    default_agent: Option<String> = "null", Launch, Replace, Portable, NextLaunch, Agents, "Harness[:model] tried first when no applicable agent choice exists; the rest of agents stays behind it";
+    agent: Option<String> = "null", Launch, Replace, Portable, NextLaunch, Agents, "Harness[:model] choice; every choice precedes every fallback", unset "Use starting preference";
+    default_agent: Option<String> = "null", Launch, Replace, Portable, NextLaunch, Agents, "Harness[:model] tried first when no applicable agent choice exists; the rest of agents stays behind it", unset "First in fallback order";
     agents: Vec<String> = "[]", Launch, Replace, Portable, NextLaunch, Agents, "Ordered harness[:model] entries Loopflow may pick; headless work refused by a usage limit moves to the next";
     context: ContextConfig = "{}", Launch, Merge, Portable, NextLaunch, Agents, "Files and other inputs supplied to the agent";
     yolo: bool = "true", Launch, Replace, Portable, NextLaunch, Agents, "Agents act without asking permission; false keeps the vendor's own prompts in conversations you attend. Unattended runs never ask. Pi keeps its own tool policy";

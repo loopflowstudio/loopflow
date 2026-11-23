@@ -320,18 +320,22 @@ opens it in its associated app.
 A dot beside the pane means the selected file declares a setting. Switching to
 a personal pane keeps the checkout and destination ready for your return.
 
-Expand **Advanced** to inspect a Skill or Graph step. Use **Inspect general
-work** to clear that target. A step needs an `id:` before you can save its
+Expand **Skill or Graph step** to see launch settings for that target.
+**Inspect general work** returns to all settings. A step needs an `id:` before you can save its
 preferences. Git & Release applies to the repository. While viewing a Wave,
-**Inspect repository settings** returns to its checkout.
+**Inspect repository settings** returns to its checkout. Opening a search result
+selects general work or the checkout when the setting requires it.
 
-For example, open **Project & Wave Config** on a checkout where the shared file sets
+**In effect** appears when the selected file declares a setting or another
+source supplies a value beyond the built-in default. For example, open
+**Project & Wave Config** on a checkout where the shared file sets
 `context.diff: true` and your file sets it to `false`. Choose **Shared
 repository settings**. The switch shows **On**. **In effect** still shows
 **Off · My repository settings**. Expand it to see the candidates and paths.
 
-- **Reset…** previews removal of the selected declaration. For additional
-  documents, **Save empty list** clears inherited entries. Reset lets them
+- **Reset** removes a simple control’s declaration immediately. Clearing a text
+  or number field also resets it. YAML editors preview removal with **Reset…**.
+  For additional documents, **Save empty list** clears inherited entries. Reset lets them
   apply again.
 - **Move to Shared Repository…** appears when the shared slot is empty. From
   a private Wave you can move to your repository settings. Review the YAML

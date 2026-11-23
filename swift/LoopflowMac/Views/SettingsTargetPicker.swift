@@ -12,7 +12,7 @@ struct SettingsTargetPicker: View {
     @State private var error: String?
 
     var body: some View {
-        DisclosureGroup("Advanced", isExpanded: $expanded) {
+        DisclosureGroup("Skill or Graph step", isExpanded: $expanded) {
             Menu("Inspect Skill") {
                 ForEach(skills, id: \.self) { name in Button(name) { model.target = .skill(name) } }
             }

@@ -94,7 +94,11 @@ struct ContextSettingsWorkflowTests {
             #expect(!fm.fileExists(atPath: privateFile.path))
             let view = ScopedSettings(model: model, pane: .project, checkouts: [repo.path], waves: [], notices: notices)
             _ = try view.inspect().find(viewWithId: "context.docs").find(text: "README.md (from Shared repository settings)")
-            let toggle = try view.inspect().find(viewWithId: "context.diff").find(ViewType.Toggle.self)
+            let inherited = try view.inspect().find(viewWithId: "context.diff")
+            _ = try inherited.find(text: "In effect")
+            #expect(try view.inspect().find(viewWithId: "context.paste").findAll(SettingProvenance.self).isEmpty)
+            _ = try view.inspect().find(text: privateFile.path)
+            let toggle = try inherited.find(ViewType.Toggle.self)
             #expect(try toggle.isOn())
             #expect(try await launchHasDiff(in: repo))
             try toggle.tap()
@@ -104,7 +108,9 @@ struct ContextSettingsWorkflowTests {
 
             let picker = try view.inspect().find(ViewType.Picker.self)
             try picker.select(value: ConfigurationDestination.sharedRepository)
-            #expect(try view.inspect().find(viewWithId: "context.diff").find(ViewType.Toggle.self).isOn())
+            let losing = try view.inspect().find(viewWithId: "context.diff")
+            #expect(try losing.find(ViewType.Toggle.self).isOn())
+            _ = try losing.find(text: "Off · My repository settings")
             var navigation = SettingsNavigation(search: " Diff ")
             let window = SettingsWindow(navigation: Binding(get: { navigation }, set: { navigation = $0 }),
                                         appearance: AppearanceStore(paths: .temporary(), systemDark: false),
@@ -148,8 +154,9 @@ struct ContextSettingsWorkflowTests {
             _ = try empty.find(text: "No matching settings")
             #expect(empty.findAll(SettingsSearchRow.self).isEmpty)
             let privateOff = try #require(model.file)
-            await model.apply(.reset, key: "context.diff", to: privateOff, notices: notices, manager: nil)
+            try view.inspect().find(viewWithId: "context.diff").find(button: "Reset").tap()
             try await awaitReading { model.file?.slots["context.diff"]?.entries.isEmpty == true }
+            #expect(notices.current?.text == "Reset Include diff in agent context in My repository settings")
             #expect(try await launchHasDiff(in: repo))
             let undo = try #require(notices.current?.action)
             try picker.select(value: ConfigurationDestination.sharedRepository)
@@ -157,7 +164,7 @@ struct ContextSettingsWorkflowTests {
             try await awaitReading { model.reading.value?.settings["context.diff"]?.value == .bool(false) }
             #expect(try await !launchHasDiff(in: repo))
 
-            // The reset preview was opened on private Off. A later hand edit wins.
+            // The old private Off reading cannot reset a later hand edit.
             let external = "# hand edit\ncontext: {diff: true}\n"
             try external.write(to: mine, atomically: true, encoding: .utf8)
             await model.apply(.reset, key: "context.diff", to: privateOff, notices: notices, manager: nil)
@@ -206,6 +213,22 @@ struct ContextSettingsWorkflowTests {
             #expect(try JSONDecoder().decode(ConfigurationFileValue.self, from: Data(get.utf8)).value == .bool(false))
             _ = try await lf.run(["config", "unset", "context.diff", "--shared"], cwd: linked)
             #expect(try String(contentsOf: linked.appending(path: ".lf/config.yaml"), encoding: .utf8) == "context: [README.md] # included at launch\n")
+            watch.cancel()
+            await watch.value
+            model.target = .skill("probe")
+            watch = Task { await model.observe() }
+            try await awaitReading { model.file != nil }
+            let targeted = try view.inspect()
+            _ = try targeted.find(viewWithId: "context.diff")
+            _ = try targeted.find(button: "Inspect general work")
+            for key in ["land", "machine", "wave.graph", "auto", "automation"] {
+                #expect(throws: (any Error).self) { try targeted.find(viewWithId: key) }
+            }
+            navigation.search = "Landing method"
+            try window.inspect().find(ViewType.NavigationSplitView.self).sidebarView().find(ViewType.TextField.self).callOnSubmit()
+            #expect(model.target == .general)
+            #expect(navigation.pane == .project && navigation.highlightedKey == "land")
+
         } catch {
             watch.cancel()
             await watch.value

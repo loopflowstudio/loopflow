@@ -406,13 +406,17 @@ as text instead.
   performs that Undo.
 - `field <placeholder>|` with nothing after the bar empties a field; Return
   then resets that declaration (a number row included).
-- After the private server restarts, an open Settings window shows "Loopflow
-  server unavailable or owned by another account" and its edits fail.
-  `close 1` then `menu Settings…` reconnects and keeps the scroll position.
+- Killing the private server (by PID) shows "Loopflow server unavailable or
+  owned by another account" at the top of an open Settings pane; the last
+  reading stays and a typed edit is dropped. Start it again and the pane
+  reconnects by itself within about 20 s; poll `tree 1` for that line.
+  The server's PID: `ps -E -p <pid>` shows its `LF_HOME`.
 - Personal config edits are in `$LF_HOME/config.yaml`. Project & Wave Config
   writes to the selected destination. Hand edits and a broken
-  file reach the open pane within a few seconds. Kill the private server to
-  see the stale reading; restarting it needs Refresh.
+  file reach the open pane within a few seconds.
+- `size 1 700 480` clamps to 760x592. `views 1` then gives the sidebar
+  wrapper (0–228) and each form section's frame (`_NSGraphicsView`), which
+  shows overlap without a display; how it looks still needs one.
 - Project & Wave Config opens on the active checkout. Menus (Applies to,
   Save in) don't open through the hook. `ContextSettingsWorkflowTests`
   drives destination changes.

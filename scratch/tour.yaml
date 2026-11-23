@@ -1,4 +1,4 @@
-at: 2bb4d1998df746612e0e4bb29b2dd82533c5a87b
+at: 3f35147ebd9cb4b58a4f1712685385ce0efc2e4d
 first:
   - path: docs/surfaces.md
     why: What the Settings window offers
@@ -17,7 +17,9 @@ first:
   - path: rust/loopflow/src/lf/commands/machine.rs
     why: Machine identity and rental status behind both surfaces
   - path: swift/LoopflowMac/Views/SettingsWindow.swift
-    why: Settings navigation and the shared observation
+    why: Navigate by keyboard and reveal the matching control
+  - path: swift/LoopflowMac/Views/SettingsSearch.swift
+    why: Match catalog and App rows with their switches
   - path: swift/LoopflowMac/Design/AppearanceStore.swift
     why: Immediate theme selection, exact Undo and editor drafts
   - path: swift/LoopflowMac/Views/MobileSettings.swift
@@ -31,7 +33,7 @@ first:
   - path: swift/LoopflowMac/Views/ScopedSettingRow.swift
     why: Edit, inspect and move a declaration
   - path: swift/LoopflowTests/ContextSettingsWorkflowTests.swift
-    why: Trace settings through the CLI and provider launch
+    why: Trace a search edit through Undo and launch
   - path: swift/LoopflowTests/ThemeWorkflowTests.swift
     why: Follow theme picks and Undo through the branch server
 hide:

@@ -151,7 +151,8 @@ fn launch_task(cli: &Cli) -> Option<&str> {
 }
 
 /// Bare `lf resume` in a Task's worktree acts on that Task, so it routes to
-/// its Machine exactly as `--task` does.
+/// its Machine exactly as `--task` does. A worktree nested inside the Task's
+/// checkout is not the Task's.
 fn worktree_task(cli: &Cli, directory: &Path) -> Result<Option<String>> {
     let bare = match &cli.command {
         Some(Commands::Session {
@@ -165,7 +166,12 @@ fn worktree_task(cli: &Cli, directory: &Path) -> Result<Option<String>> {
     let Some(store) = read_registry()? else {
         return Ok(None);
     };
-    Ok(store.task_holding(directory)?.map(|task| task.to_string()))
+    let Ok(root) = loopflow_execution::git::worktree_root(directory) else {
+        return Ok(None);
+    };
+    Ok(store
+        .task_checkout_owner(&root)?
+        .map(|task| task.to_string()))
 }
 
 /// A command `lf` sends to another Machine instead of running here.

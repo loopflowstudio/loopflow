@@ -82,6 +82,14 @@ pub(super) fn deepest_checkout(cwd: &str) -> String {
     )
 }
 
+/// SQL for the Task whose checkout is exactly `root`, lower id on a shared root.
+fn checkout_at(root: &str) -> String {
+    format!(
+        "(SELECT c.task_id FROM task_checkouts c INDEXED BY task_checkouts_root
+          WHERE rtrim(c.worktree,'/')=rtrim({root},'/') ORDER BY c.task_id LIMIT 1)"
+    )
+}
+
 /// The Task a Session or a Graph run belongs to, read once as it starts: the
 /// Task it names, else the deepest checkout holding its directory on this
 /// Machine, else the Task of the Session that started it. A command run inside
@@ -584,23 +592,35 @@ fn member_graphs(tx: &rusqlite::Connection, task: &TaskId) -> StoreResult<Vec<Me
 }
 
 impl SqliteStore {
-    /// The Task holding `dir` on this Machine: the one whose checkout is the
-    /// deepest holding it, so a checkout nested inside another is its own
+    /// The Task whose work `dir` is on this Machine: the one whose checkout is
+    /// the deepest holding it, so a checkout nested inside another is its own
     /// Task's; two Tasks recorded on one root resolve to the lower id. `dir`
-    /// matches as named and as it resolves through symlinks. Every "which Task
-    /// is this directory" question asks here.
+    /// matches as named and as it resolves through symlinks. A worktree nested
+    /// in a checkout that no Task owns is still the outer Task's work.
     pub fn task_holding(&self, dir: &std::path::Path) -> StoreResult<Option<TaskId>> {
-        let resolved = dir.canonicalize().ok().filter(|resolved| resolved != dir);
+        self.task_at(dir, deepest_checkout)
+    }
+
+    /// The Task whose checkout is the worktree at `root` on this Machine: an
+    /// exact match, so a worktree nested inside another Task's checkout is
+    /// owned by nobody until a Task adopts it. Matching and ties follow
+    /// [`Self::task_holding`].
+    pub fn task_checkout_owner(&self, root: &std::path::Path) -> StoreResult<Option<TaskId>> {
+        self.task_at(root, checkout_at)
+    }
+
+    fn task_at(
+        &self,
+        path: &std::path::Path,
+        lookup: fn(&str) -> String,
+    ) -> StoreResult<Option<TaskId>> {
+        let resolved = path.canonicalize().ok().filter(|resolved| resolved != path);
         let conn = self.conn.lock().expect("store mutex poisoned");
         Ok(conn
             .query_row(
-                &format!(
-                    "SELECT coalesce({},{})",
-                    deepest_checkout("?1"),
-                    deepest_checkout("?2")
-                ),
+                &format!("SELECT coalesce({},{})", lookup("?1"), lookup("?2")),
                 rusqlite::params![
-                    dir.to_string_lossy(),
+                    path.to_string_lossy(),
                     resolved.as_deref().map(std::path::Path::to_string_lossy)
                 ],
                 |row| row.get::<_, Option<String>>(0),
@@ -1143,7 +1163,7 @@ mod tests {
     }
 
     #[test]
-    fn the_task_holding_a_directory_is_its_deepest_checkout() {
+    fn a_directory_is_held_by_its_deepest_checkout_and_owned_by_its_exact_one() {
         let dir = tempfile::tempdir().unwrap();
         let store = crate::test_fixture::open(&dir.path().join("db")).unwrap();
         let repository = crate::test_fixture::repository(&store, "/repo");
@@ -1174,15 +1194,15 @@ mod tests {
         let (one, two) = (task("/repo/shared"), task("/repo/shared/"));
         let holding = |path: &str| store.task_holding(std::path::Path::new(path)).unwrap();
         assert_eq!(holding("/repo/outer/src"), Some(outer.clone()));
-        assert_eq!(holding("/repo/outer/nested/src"), Some(nested));
+        assert_eq!(holding("/repo/outer/nested/src"), Some(nested.clone()));
         // A sibling sharing a name prefix is not inside the checkout.
-        assert_eq!(holding("/repo/outer/nestedness"), Some(outer));
+        assert_eq!(holding("/repo/outer/nestedness"), Some(outer.clone()));
         let lower = if one.as_str() < two.as_str() {
             one
         } else {
             two
         };
-        assert_eq!(holding("/repo/shared"), Some(lower));
+        assert_eq!(holding("/repo/shared"), Some(lower.clone()));
         assert_eq!(holding("/repo"), None);
         assert_eq!(holding("/elsewhere"), None);
         // A directory named through a symlink is in the checkout it resolves to.
@@ -1191,7 +1211,26 @@ mod tests {
         let link = dir.path().join("link");
         std::os::unix::fs::symlink(&real, &link).unwrap();
         let resolved = task(real.to_str().unwrap());
-        assert_eq!(holding(link.join("src").to_str().unwrap()), Some(resolved));
+        assert_eq!(
+            holding(link.join("src").to_str().unwrap()),
+            Some(resolved.clone())
+        );
+
+        // Owning a checkout is root equality: a worktree nested in another
+        // Task's checkout is that Task's work, but no Task's checkout.
+        let owner = |path: &str| {
+            store
+                .task_checkout_owner(std::path::Path::new(path))
+                .unwrap()
+        };
+        let claude = "/repo/outer/.claude/worktrees/agent";
+        assert_eq!(holding(claude), Some(outer.clone()));
+        assert_eq!(owner(claude), None);
+        assert_eq!(owner("/repo/outer"), Some(outer.clone()));
+        assert_eq!(owner("/repo/outer/"), Some(outer));
+        assert_eq!(owner("/repo/outer/nested"), Some(nested));
+        assert_eq!(owner("/repo/shared"), Some(lower));
+        assert_eq!(owner(link.to_str().unwrap()), Some(resolved));
     }
 
     #[test]

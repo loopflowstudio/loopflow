@@ -111,13 +111,6 @@ async fn resolve_checkout(
         .await
         .map_err(task_error)?;
     let (checkout, checkout_task) = match scope {
-        // A worktree nested inside another Task's checkout holds that Task's
-        // work, but as a checkout it is its own until a Task adopts it.
-        Some(PrimaryScope::Task(id)) if worktree.is_some() => {
-            let holder = store.get_task(&id).await.map_err(task_error)?;
-            let exact = holder.and_then(|task| task.worktree).as_ref() == Some(&root);
-            (Some(root), exact.then_some(id))
-        }
         Some(PrimaryScope::Task(id)) => (Some(root), Some(id)),
         None => (Some(root), None),
         Some(PrimaryScope::Repository(_) | PrimaryScope::Wave(_)) => {

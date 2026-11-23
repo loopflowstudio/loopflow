@@ -1547,7 +1547,7 @@ async fn parent_run_cannot_override_task_worktree_resolution() {
     );
     std::env::remove_var("LF_RUN_DIR");
 
-    let resolved = super::task_for_checkout(&store, task.worktree.as_ref().unwrap())
+    let resolved = super::task_holding(&store, task.worktree.as_ref().unwrap())
         .await
         .unwrap()
         .unwrap();
@@ -1559,7 +1559,7 @@ async fn parent_run_cannot_override_task_worktree_resolution() {
 async fn checkout_resolution_reads_only_this_machines_checkouts() {
     let repo = loopflow_test_support::TestRepo::new();
     let fixture = task_fixture_at("LOCATION-1", repo.path().canonicalize().unwrap()).await;
-    let resolved = super::task_for_checkout(&fixture.store, repo.path())
+    let resolved = super::task_holding(&fixture.store, repo.path())
         .await
         .unwrap()
         .unwrap();
@@ -1570,7 +1570,7 @@ async fn checkout_resolution_reads_only_this_machines_checkouts() {
         [fixture.task.id.as_str()],
     )
     .unwrap();
-    assert!(super::task_for_checkout(&fixture.store, repo.path())
+    assert!(super::task_holding(&fixture.store, repo.path())
         .await
         .unwrap()
         .is_none());

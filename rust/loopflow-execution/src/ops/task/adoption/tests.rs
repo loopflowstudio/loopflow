@@ -233,6 +233,23 @@ fn a_worktree_inside_a_tasks_checkout_becomes_its_own_tasks_checkout() {
         ],
     );
     let nested_root = nested_path.canonicalize().unwrap();
+    // Until a Task adopts it, the nested worktree is nobody's checkout: bare
+    // `lf resume` there does not open the outer Task's conversation.
+    let resume = |cwd: &Path| {
+        table
+            .runtime
+            .block_on(crate::ops::human_session::existing_connection(
+                &table.store,
+                cwd,
+                crate::ops::human_session::SessionTarget::Context,
+            ))
+    };
+    let error = resume(&nested_root).unwrap_err().to_string();
+    assert!(error.contains("no associated work conversation"), "{error}");
+    assert_eq!(
+        resume(&outer_root).unwrap().0,
+        Some(crate::session::PrimaryScope::Task(outer.id.clone()))
+    );
 
     let nested = table.create("Nested", None, Some(&nested_root)).unwrap();
     assert_ne!(nested.id, outer.id);

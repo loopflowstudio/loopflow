@@ -2581,8 +2581,18 @@ pub fn task_worktree_blocker_after(
     }))
 }
 
-pub(crate) async fn task_for_checkout(store: &SharedStore, repo: &Path) -> OpsResult<Option<Task>> {
-    match counted_task(&store.sqlite, repo)? {
+/// The Task whose work `dir` is: the deepest Task checkout holding it.
+pub(crate) async fn task_holding(store: &SharedStore, dir: &Path) -> OpsResult<Option<Task>> {
+    match counted_task(&store.sqlite, dir)? {
+        Some(id) => store.get_task(&id).await.map_err(task_error),
+        None => Ok(None),
+    }
+}
+
+/// The Task whose checkout is the Git worktree at `root`. A worktree nested
+/// inside another Task's checkout has no owner until a Task adopts it.
+pub(crate) async fn checkout_owner(store: &SharedStore, root: &Path) -> OpsResult<Option<Task>> {
+    match store.sqlite.task_checkout_owner(root).map_err(task_error)? {
         Some(id) => store.get_task(&id).await.map_err(task_error),
         None => Ok(None),
     }
@@ -2626,7 +2636,7 @@ pub fn task_status(repo: &Path, issue: Option<&str>) -> OpsResult<TaskStatus> {
                 super::planning_sync::find_task(&store, &repo.to_string_lossy(), issue).await?
             }
             None => Some(
-                task_for_checkout(&store, repo)
+                task_holding(&store, repo)
                     .await?
                     .ok_or_else(|| task_error("this checkout has no Task"))?,
             ),

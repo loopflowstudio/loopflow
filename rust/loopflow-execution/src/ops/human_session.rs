@@ -214,7 +214,7 @@ pub(crate) async fn checkout_scope(
         return Ok(Some(PrimaryScope::Repository(repo)));
     }
     let root = crate::git::worktree_root(cwd)?;
-    if let Some(task) = crate::ops::task::task_for_checkout(store, &root).await? {
+    if let Some(task) = crate::ops::task::checkout_owner(store, &root).await? {
         return Ok(Some(PrimaryScope::Task(task.id)));
     }
     if root == repo.as_path() {

@@ -35,3 +35,7 @@ November 22 concept review: use the existing Git hook and manual `register`
 for recovery. Drop `dev-lf`'s passive inventory write so ordinary builds can
 use either the Machine cache or a caller's configuration without editing the
 inventory. Leave `status` as a diagnostic. See `scratch/concept-review.html`.
+
+November 22 implementation choice: when the daemon still has a root that
+is missing on disk, status returns 3. Registration restores the inventory
+and keeps that daemon running. Both the current and next start are then ready.

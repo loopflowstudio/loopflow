@@ -99,67 +99,69 @@ def test_worktree_hook_keeps_existing_content_and_runs_fail_soft(tmp_path):
     assert subprocess.run([str(hook)], cwd=repo).returncode == 0
 
 
-@pytest.mark.parametrize(
-    "running,loaded,expected", [(False, False, 0), (True, False, 3), (True, True, 0)]
-)
-def test_status_classifies_loaded_roots(tmp_path, monkeypatch, running, loaded, expected):
+@pytest.fixture
+def pinned_cache(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("CARGO_HOME", str(tmp_path / "cargo"))
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+    for key in os.environ.copy():
+        if key.startswith("SCCACHE_"):
+            monkeypatch.delenv(key)
+
     wrapper = tmp_path / ".local/share/loopflow/sccache" / build_cache.REVISION / "bin/sccache"
     wrapper.parent.mkdir(parents=True)
-    wrapper.touch()
-    wrapper.chmod(0o755)
-    socket = tmp_path / "cache.sock"
-    monkeypatch.setattr(build_cache, "daemon_pid", lambda address: 123 if running else None)
-    monkeypatch.setattr(build_cache.sys, "platform", "darwin")
-    config = tmp_path / "cache.json"
-    monkeypatch.setattr(build_cache, "inventory_path", lambda: config)
-    config.write_text(json.dumps({"basedirs": [], "cache": {"disk": {"size": 123}}}))
-    monkeypatch.setattr(build_cache, "worktree_roots", lambda repo: {str(tmp_path)})
-    monkeypatch.setattr(
-        build_cache,
-        "configured_cache",
-        lambda: (
-            wrapper,
-            {
-                "SCCACHE_CONF": str(config),
-                "SCCACHE_SERVER_UDS": str(socket),
-                "SCCACHE_IDLE_TIMEOUT": "120",
-            },
-        ),
+    wrapper.touch(mode=0o755)
+    env = build_cache.cache_environment()
+    with tempfile.TemporaryDirectory(dir="/tmp") as short:
+        env["SCCACHE_SERVER_UDS"] = str(Path(short) / "cache.sock")
+        configure_cargo(build_cache.cargo_configuration(), wrapper, env)
+        yield wrapper
+
+
+def _cache_command(repo, *args):
+    return subprocess.run(
+        [sys.executable, build_cache.__file__, *args], cwd=repo, text=True, capture_output=True
     )
-    stats = {
-        "basedirs": [str(tmp_path) + "/"] if loaded else [],
-        "stats": {},
-        "cache_size": 10,
-        "max_cache_size": 100,
-    }
 
-    def check_output(argv, **kwargs):
-        return str(tmp_path) if argv[0] == "git" else json.dumps(stats)
 
-    def run(argv, **kwargs):
-        return subprocess.CompletedProcess(
-            argv,
-            0,
-            "03:10\n" if argv[-1] == "etime=" else f"{wrapper}\n",
-            "",
-        )
+def test_register_recovers_a_worktree_after_a_skipped_hook(tmp_path, pinned_cache):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q")
+    _git(
+        repo,
+        "-c",
+        "user.name=Fixture",
+        "-c",
+        "user.email=fixture@example.com",
+        "commit",
+        "--allow-empty",
+        "-qm",
+        "initial",
+    )
+    install_hook(repo)
+    tree = tmp_path / "skipped hook"
+    _git(repo, "-c", "core.hooksPath=/dev/null", "worktree", "add", "--detach", str(tree))
 
-    monkeypatch.setattr(subprocess, "check_output", check_output)
-    monkeypatch.setattr(subprocess, "run", run)
-    result = build_cache.cache_status(tmp_path, *build_cache.configured_cache())
-    assert result["exit_code"] == expected
-    assert result["loaded_roots"] == ([str(tmp_path)] if running and loaded else [])
-    assert (result["daemon"] is not None) == running
-    assert result["configured_idle_timeout_seconds"] == 120
-    assert result["listed_roots"] == [str(tmp_path)]
-    assert json.loads(config.read_text())["cache"]["disk"]["size"] == 123
+    config = build_cache.inventory_path()
+    status = _cache_command(tree, "status")
+    assert status.returncode == 3, status.stderr
+    assert "missing from the root list; run register" in status.stdout
+    assert not config.parent.exists()
+
+    _cache_command(tree, "register").check_returncode()
+    status = _cache_command(tree, "status", "--json")
+    status.check_returncode()
+    state = json.loads(status.stdout)
+    assert set(state["listed_roots"]) == {str(repo.resolve()), str(tree.resolve())}
+    assert state["loaded_roots"] == []
+    assert state["daemon"] is None
+    assert state["diagnostic"] == "this checkout is listed for the next daemon start"
 
 
 def test_missing_wrapper_is_actionable(tmp_path, monkeypatch):
     monkeypatch.setattr(build_cache, "configured_cache", lambda: (tmp_path / "missing", {}))
     monkeypatch.setattr(build_cache, "inventory_path", lambda: tmp_path / "inventory")
-    monkeypatch.setattr(build_cache, "worktree_roots", lambda repo: {str(tmp_path)})
     monkeypatch.setattr(subprocess, "check_output", lambda *args, **kwargs: str(tmp_path))
     assert build_cache.cache_status(tmp_path, *build_cache.configured_cache())["exit_code"] == 1
 
@@ -190,35 +192,85 @@ def test_git_worktree_add_registers_even_an_older_revision_before_return(tmp_pat
     assert set(config["basedirs"]) == {str(repo.resolve()), str(tree.resolve())}
 
 
-@pytest.mark.parametrize(
-    "loaded,client_side,stopped", [(False, "1", True), (True, "1", False), (False, "0", False)]
-)
-def test_registration_only_stops_an_unloaded_client_side_daemon(
-    tmp_path, monkeypatch, loaded, client_side, stopped
-):
+@pytest.fixture
+def serving_cache(tmp_path, monkeypatch, pinned_cache):
+    _git(tmp_path, "init", "-q")
     marker = tmp_path / "running"
     marker.touch()
-    wrapper = tmp_path / "sccache"
-    wrapper.write_text('#!/bin/sh\n[ "$1" = --stop-server ] && rm "$SCCACHE_TEST_MARKER"\n')
-    wrapper.chmod(0o755)
-    env = {
-        "SCCACHE_CONF": str(tmp_path / "cache.json"),
-        "SCCACHE_CLIENT_SIDE": client_side,
-        "SCCACHE_TEST_MARKER": str(marker),
-    }
-    monkeypatch.setattr(build_cache, "configured_cache", lambda: (wrapper, env))
-    monkeypatch.setattr(build_cache, "inventory_path", lambda: tmp_path / "cache.json")
-    monkeypatch.setattr(
-        build_cache,
-        "cache_status",
-        lambda *args: {"exit_code": 0 if loaded else 3, "daemon": {"pid": 1}},
+    monkeypatch.setenv("SCCACHE_TEST_MARKER", str(marker))
+    monkeypatch.setenv("SCCACHE_TEST_STATS", '{"basedirs":[]}')
+    monkeypatch.setenv("SCCACHE_IDLE_TIMEOUT", "120")
+    pinned_cache.write_text(
+        "#!/bin/sh\n"
+        'case "$1" in\n'
+        '--show-stats) printf "%s\\n" "$SCCACHE_TEST_STATS";;\n'
+        '--stop-server) rm "$SCCACHE_TEST_MARKER";;\n'
+        "*) exit 1;;\nesac\n"
     )
-    if not loaded and client_side != "1":
-        with pytest.raises(ValueError, match="client-side"):
-            build_cache.register(tmp_path)
-    else:
+    monkeypatch.setattr(build_cache, "daemon_pid", lambda _: 123 if marker.exists() else None)
+    monkeypatch.setattr(build_cache.sys, "platform", "darwin")
+    # Report the stand-in executable as the socket owner.
+    original_run = subprocess.run
+
+    def run(argv, **kwargs):
+        if argv[0] == "ps":
+            value = "03:10" if argv[-1] == "etime=" else str(pinned_cache)
+            return subprocess.CompletedProcess(argv, 0, value, "")
+        return original_run(argv, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", run)
+    return marker
+
+
+def test_register_stops_the_stale_daemon(tmp_path, serving_cache):
+    refresh(tmp_path, build_cache.inventory_path())
+    state = build_cache.cache_status(tmp_path, *build_cache.configured_cache())
+    assert state["exit_code"] == 3
+    assert state["listed_roots"] == [str(tmp_path.resolve())]
+    assert state["loaded_roots"] == []
+    assert "daemon lacks this checkout; run register" in state["diagnostic"]
+    assert state["configured_idle_timeout_seconds"] == 120
+    assert serving_cache.exists()
+
+    build_cache.register(tmp_path)
+    assert not serving_cache.exists()
+    assert build_cache.cache_status(tmp_path, *build_cache.configured_cache())["exit_code"] == 0
+
+
+def test_register_restores_missing_inventory_while_the_root_is_loaded(
+    tmp_path, serving_cache, monkeypatch
+):
+    root = str(tmp_path.resolve())
+    monkeypatch.setenv("SCCACHE_TEST_STATS", json.dumps({"basedirs": [root + "/"]}))
+    state = build_cache.cache_status(tmp_path, *build_cache.configured_cache())
+    assert state["exit_code"] == 3
+    assert state["listed_roots"] == []
+    assert state["loaded_roots"] == [root]
+
+    build_cache.register(tmp_path)
+    assert serving_cache.exists()
+    assert build_cache.cache_status(tmp_path, *build_cache.configured_cache())["exit_code"] == 0
+
+
+def test_register_lists_the_root_for_a_server_side_daemon(tmp_path, serving_cache, monkeypatch):
+    monkeypatch.setenv("SCCACHE_CLIENT_SIDE", "0")
+    with pytest.raises(ValueError, match="client-side"):
         build_cache.register(tmp_path)
-    assert marker.exists() == (not stopped)
+    state = build_cache.cache_status(tmp_path, *build_cache.configured_cache())
+    assert state["exit_code"] == 3
+    assert state["listed_roots"] == [str(tmp_path.resolve())]
+    assert "restart your daemon" in state["diagnostic"]
+    assert serving_cache.exists()
+
+
+def test_register_leaves_a_stale_caller_owned_daemon_running(tmp_path, serving_cache, monkeypatch):
+    monkeypatch.setenv("SCCACHE_BASEDIRS", str(tmp_path.resolve()))
+    build_cache.register(tmp_path)
+    state = build_cache.cache_status(tmp_path, *build_cache.configured_cache())
+    assert state["exit_code"] == 3
+    assert "restart your daemon" in state["diagnostic"]
+    assert not build_cache.inventory_path().exists()
+    assert serving_cache.exists()
 
 
 def test_socket_reports_the_replacement_after_the_listener_is_unlinked():
@@ -264,17 +316,28 @@ def test_registration_observes_the_same_private_socket_and_inventory_as_cargo(
     assert env["SCCACHE_CONF"] == "/private/inventory"
 
 
-@pytest.mark.parametrize("extension", ["json", "toml"])
-def test_caller_supplied_root_configuration_is_read_only(tmp_path, monkeypatch, extension):
+@pytest.mark.parametrize("source", ["json", "toml", "SCCACHE_BASEDIRS"])
+def test_caller_supplied_root_configuration_is_read_only(
+    tmp_path, monkeypatch, pinned_cache, source
+):
     _git(tmp_path, "init", "-q")
-    config = tmp_path / f"custom.{extension}"
-    original = '{"basedirs":["/other"]}' if extension == "json" else 'basedirs = ["/other"]\n'
-    config.write_text(original)
-    env = {"SCCACHE_CONF": str(config)}
-    monkeypatch.setattr(build_cache, "configured_cache", lambda: (None, env))
-    build_cache.register(tmp_path)
-    state = build_cache.cache_status(tmp_path, None, env)
+    config = tmp_path / f"custom.{source}"
+    if source == "SCCACHE_BASEDIRS":
+        monkeypatch.setenv(source, "/other")
+    else:
+        original = '{"basedirs":["/other"]}' if source == "json" else 'basedirs = ["/other"]\n'
+        config.write_text(original)
+        monkeypatch.setenv("SCCACHE_CONF", str(config))
+
+    _cache_command(tmp_path, "register").check_returncode()
+    status = _cache_command(tmp_path, "status", "--json")
+    assert status.returncode == 3, status.stderr
+    state = json.loads(status.stdout)
     assert state["listed_roots"] == ["/other"]
     assert not state["managed_roots"]
-    assert config.read_text() == original
-    assert not list(tmp_path.glob("*.lock"))
+    assert state["diagnostic"].endswith(
+        f"add it to {source if source == 'SCCACHE_BASEDIRS' else config}"
+    )
+    if source != "SCCACHE_BASEDIRS":
+        assert config.read_text() == original
+    assert not build_cache.inventory_path().parent.exists()

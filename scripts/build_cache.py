@@ -41,6 +41,13 @@ def worktree_roots(repo: Path, *, env: dict[str, str] | None = None) -> set[str]
     return roots
 
 
+def _configured_roots(settings: dict) -> list[str]:
+    roots = settings.get("basedirs", []) if isinstance(settings, dict) else None
+    if not isinstance(roots, list) or not all(isinstance(path, str) for path in roots):
+        raise ValueError("cache configuration must be an object with a basedirs list of paths")
+    return roots
+
+
 def refresh(repo: Path, config: Path, settings: dict | None = None) -> None:
     """Write the next daemon's configuration, leaving the running daemon alone."""
     config.parent.mkdir(parents=True, exist_ok=True)
@@ -48,8 +55,6 @@ def refresh(repo: Path, config: Path, settings: dict | None = None) -> None:
         fcntl.flock(lock, fcntl.LOCK_EX)
         roots = worktree_roots(repo)
         saved = json.loads(config.read_text()) if config.exists() else {}
-        if not isinstance(saved, dict) or not isinstance(saved.get("basedirs", []), list):
-            raise ValueError("cache configuration must be an object with a basedirs list")
         # Keep other repositories using the same Machine cache. Refresh each
         # repository's complete inventory so removed worktrees do not accumulate.
         # Git hooks can export the current repository even when cwd points elsewhere.
@@ -58,7 +63,7 @@ def refresh(repo: Path, config: Path, settings: dict | None = None) -> None:
             for k, v in os.environ.items()
             if k not in ("GIT_DIR", "GIT_COMMON_DIR", "GIT_WORK_TREE")
         }
-        for old in saved.get("basedirs", []):
+        for old in _configured_roots(saved):
             path = Path(old)
             if path.exists() and old not in roots:
                 try:
@@ -250,8 +255,7 @@ def daemon_pid(address: str) -> int | None:
 def _manages_roots(env: dict[str, str]) -> bool:
     inventory = inventory_path()
     return (
-        Path(env.get("SCCACHE_CONF", str(inventory))) == inventory
-        and "SCCACHE_BASEDIRS" not in env
+        Path(env.get("SCCACHE_CONF", str(inventory))) == inventory and "SCCACHE_BASEDIRS" not in env
     )
 
 
@@ -270,15 +274,14 @@ def cache_status(repo: Path, wrapper: Path | None, env: dict[str, str]) -> dict:
     )
     config = Path(env.get("SCCACHE_CONF", str(inventory_path())))
     managed = _manages_roots(env)
-    if managed:
-        refresh(repo, config)
     if "SCCACHE_BASEDIRS" in env:
         listed = [root for root in env["SCCACHE_BASEDIRS"].split(os.pathsep) if root]
     elif config.exists():
         parse = json.loads if managed or config.suffix == ".json" else tomllib.loads
-        listed = parse(config.read_text()).get("basedirs", [])
+        listed = _configured_roots(parse(config.read_text()))
     else:
         listed = []
+    listed = [str(Path(path)) for path in listed]
     root = subprocess.check_output(
         ["git", "rev-parse", "--show-toplevel"], cwd=repo, text=True
     ).removesuffix("\n")
@@ -297,7 +300,7 @@ def cache_status(repo: Path, wrapper: Path | None, env: dict[str, str]) -> dict:
         else None,
     }
     if not pinned:
-        return {**result, "exit_code": 1}
+        return {**result, "exit_code": 1, "diagnostic": "pinned wrapper unavailable; run install"}
     address = env.get("SCCACHE_SERVER_UDS")
     if address and (pid := daemon_pid(address)):
         executable = (
@@ -312,7 +315,11 @@ def cache_status(repo: Path, wrapper: Path | None, env: dict[str, str]) -> dict:
         ).stdout.strip()
         result["daemon"] = {"pid": pid, "executable": executable, "uptime": uptime}
         if executable != str(wrapper):
-            return {**result, "exit_code": 1}
+            return {
+                **result,
+                "exit_code": 1,
+                "diagnostic": "check SCCACHE_SERVER_UDS; socket served by another executable",
+            }
         # --show-stats answers empty statistics if no server exists; never starts one.
         raw = subprocess.check_output(
             [str(wrapper), "--show-stats", "--stats-format", "json"],
@@ -323,8 +330,22 @@ def cache_status(repo: Path, wrapper: Path | None, env: dict[str, str]) -> dict:
         stats = json.loads(raw)
         result["loaded_roots"] = [str(Path(root)) for root in stats["basedirs"]]
         result["stats"] = stats
-    loaded = result["loaded_roots"] if result["daemon"] else listed
-    return {**result, "exit_code": 0 if root in loaded else 3}
+    if root not in listed:
+        source = "SCCACHE_BASEDIRS" if "SCCACHE_BASEDIRS" in env else str(config)
+        action = "run register" if managed else f"add it to {source}"
+        note = f"this checkout is missing from the root list; {action}"
+    elif result["daemon"] and root not in result["loaded_roots"]:
+        can_register = managed and env.get("SCCACHE_CLIENT_SIDE") == "1"
+        action = "run register" if can_register else "restart your daemon with the configured roots"
+        note = f"the serving daemon lacks this checkout; {action}"
+    else:
+        note = (
+            "this checkout loaded"
+            if result["daemon"]
+            else "this checkout is listed for the next daemon start"
+        )
+        return {**result, "exit_code": 0, "diagnostic": note}
+    return {**result, "exit_code": 3, "diagnostic": note}
 
 
 def register(repo: Path) -> None:
@@ -336,26 +357,24 @@ def register(repo: Path) -> None:
     # Concurrent checkouts must observe the daemon after the preceding registration.
     with config.with_suffix(".register.lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
+        refresh(repo, config)
         state = cache_status(repo, wrapper, env)
         if not state["exit_code"]:
             return
-        if state["exit_code"] == 1:
-            raise ValueError(
-                "registration needs the installed wrapper and its pinned daemon socket"
-            )
+        if state["exit_code"] == 1 or state["root"] not in state["listed_roots"]:
+            raise ValueError(state["diagnostic"])
         if env.get("SCCACHE_CLIENT_SIDE") != "1":
             raise ValueError(
                 "root listed for the next start; only client-side registration can stop the daemon"
             )
-        if state["daemon"]:
-            subprocess.run(
-                [str(wrapper), "--stop-server"],
-                env={**os.environ, **env},
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.DEVNULL,
-                check=True,
-                timeout=15,
-            )
+        subprocess.run(
+            [str(wrapper), "--stop-server"],
+            env={**os.environ, **env},
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            check=True,
+            timeout=15,
+        )
 
 
 def main() -> None:
@@ -363,7 +382,6 @@ def main() -> None:
     commands = parser.add_subparsers(dest="command", required=True)
     installer = commands.add_parser("install")
     installer.add_argument("--revision", default=REVISION)
-    commands.add_parser("refresh")
     commands.add_parser("register")
     status = commands.add_parser("status")
     status.add_argument("--json", action="store_true")
@@ -371,8 +389,6 @@ def main() -> None:
     try:
         if args.command == "install":
             install(Path.cwd(), args.revision)
-        elif args.command == "refresh":
-            refresh(Path.cwd(), inventory_path(), _default_configuration())
         elif args.command == "register":
             register(Path.cwd())
         else:
@@ -395,21 +411,7 @@ def main() -> None:
                 )
                 listed = set(result["listed_roots"])
                 loaded = listed.intersection(result["loaded_roots"])
-                if not daemon:
-                    note = (
-                        "this checkout listed"
-                        if result["root"] in listed
-                        else "checkout not listed"
-                    )
-                elif stats is None:
-                    note = "socket served by another executable"
-                elif result["root"] in loaded:
-                    note = "this checkout loaded"
-                elif not result["managed_roots"]:
-                    note = "this checkout is unloaded; roots come from your sccache configuration"
-                else:
-                    note = "this checkout is unloaded; run register"
-                print(f"roots    {len(loaded)} of {len(listed)} loaded; {note}")
+                print(f"roots    {len(loaded)} of {len(listed)} loaded; {result['diagnostic']}")
                 if stats:
                     counts = stats["stats"]
                     hits = counts.get("cache_hits", {}).get("counts", {}).get("Rust", 0)

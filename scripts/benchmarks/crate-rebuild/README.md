@@ -145,11 +145,12 @@ time include compiler and linker CPU in the client process tree; storage-daemon
 overhead is excluded. These receipts do not establish total Machine CPU savings
 or a safe concurrent build budget. The comparison and owner probe do not configure Machine admission budgets.
 
-The root upkeep probe uses the same root list as `build_cache.py refresh`. It creates a linked worktree after starting its private server,
+The root upkeep probe writes its private inventory with the same function as
+worktree registration. It creates a linked worktree after starting its private server,
 checks the expected miss while the old configuration remains active, waits for
 that exact server's natural idle exit, then checks a hit in a fresh independent
-target. It never sends a restart RPC or edits a root list. The tiny library checks
-root reload; the owner probe separately checks the actual extracted crates.
+target. The tiny library checks root reload. The owner probe checks the actual
+extracted crates.
 
 The private daemon accepts frames up to 1 GiB: client-side cache uploads of
 storage/application libraries exceed sccache's default 8 MiB IPC frame limit.

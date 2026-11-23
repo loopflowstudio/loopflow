@@ -374,17 +374,20 @@ was lost, so another worktree would have to compile that library again.
 The replacement daemon loaded the new root.
 [Run the probe](benchmarks/crate-rebuild/README.md#registration-during-a-build).
 
-`scripts/dev-lf` and `status` refresh the inventory. Only `register` asks a
-daemon to stop. `status` reads the executable of the process accepting
-connections on the socket, the loaded roots and cache counters.
-`status --json` returns the same observations. Reading stats resets the idle timer.
-When you select your own `SCCACHE_CONF` or `SCCACHE_BASEDIRS`, that configuration
-owns the root list. Registration leaves its contents and daemon alone.
+If the checkout hook was skipped or failed, run `status` in that worktree.
+It reads the root inventory, the executable serving the socket, the daemon's
+loaded roots and its cache counters. Reading stats resets the idle timer.
+`status --json` includes both root lists and the same diagnostic.
+`register` performs the same recovery as the hook. Ordinary `scripts/dev-lf`
+builds use Cargo's configured cache directly. When you supply the roots through
+`SCCACHE_CONF` or `SCCACHE_BASEDIRS`, you manage their inventory and daemon.
 
 | `status` exit | Meaning | Next command |
 |---|---|---|
-| 0 | The root is loaded, or listed for the next daemon start | Run the focused Cargo command |
-| 3 | The serving daemon lacks this root | `uv run python scripts/build_cache.py register` |
+| 0 | The root is listed and any serving daemon has loaded it | Run the focused Cargo command |
+| 3 | The Machine inventory or its pinned client-side daemon lacks this root | `uv run python scripts/build_cache.py register` |
+| 3 | Your own `SCCACHE_CONF` or `SCCACHE_BASEDIRS` is missing the checkout | Add it to that configuration and reload your daemon if running |
+| 3 | The root is listed but missing from your caller-owned or server-side daemon | Restart your daemon with the updated list |
 | 1 | Check the wrapper, socket owner or reported configuration error | `uv run python scripts/build_cache.py install` |
 
 A wrapper path that no longer exists fails every Rust build on the Machine, in

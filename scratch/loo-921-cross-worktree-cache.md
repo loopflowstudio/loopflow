@@ -29,12 +29,6 @@ capacity as unmeasured unless a separate permitted experiment exists".
 
 ## Checks and remaining work
 
-- Concept review returns to implementation. The inventory write still runs
-  through `status`, and `dev-lf` still invokes the passive `refresh` command
-  from the idle-based design. In a private fixture with no daemon and no
-  inventory, `status` created the inventory and returned 0. With a caller-owned
-  config missing the checkout, `status` returned 3 and `register` returned 0
-  without changing it.
 - November 16: private root and real-crate probes passed, including post-idle
   reuse, semantic edits, checkout identity and source-path observations. Four
   corrected seed commands passed. The original cohort exposed a cold
@@ -60,37 +54,21 @@ capacity as unmeasured unless a separate permitted experiment exists".
   rlib. Checking for an absolute path in `strings` did not identify the producer.
   The report retains the per-invocation counters and hashes. The opening
   Machine status was 100/100 loaded, 10 GiB/10 GiB occupied.
-- `uv run pytest -q python/tests/{test_build_cache,test_dev_lf,test_crate_test_loop}.py`:
-  30 passed. Two linked fixture worktrees sharing a private XDG cache confirmed
-  the installed registration behavior after adding read-only custom inventories.
-- Gate owns documented_commands:: and the broader suites.
+- `uv run pytest -q python/tests/{test_build_cache,test_dev_lf}.py` passed all
+  17 cases. A linked checkout with its hook skipped returned 3 without creating
+  the inventory. Manual registration listed both roots and status returned 0.
+- With the installed pin on a private socket, a stale daemon survived both
+  status and caller-owned registration. Machine registration stopped it. The
+  next plain Cargo build passed with the second root loaded by a different PID.
+- Gate owns `documented_commands::` and the broader suites.
 
-## Next implementation — worktree registration owns recovery
+## Registration and recovery
 
-`install` seeds the Machine inventory and installs the Git hook. The hook and
-manual `register` use the same operation: list the root, then request the
-approved stop if the serving pinned client-side daemon lacks it. Today
-`register` lists the root only through `cache_status` → `refresh`
-(`scripts/build_cache.py`), so it must call the writer itself. Keep the
-serialized registration and atomic inventory write. The next Cargo command
-starts a daemon when needed. Checkout remains fail-soft. Caller-owned root
-settings stay read-only, and an isolated build bypasses the cache.
-
-`status` observes the configured inventory and the serving daemon. Report a
-missing Machine root or a stale daemon as repairable with `register`; direct
-caller-owned roots to their own configuration. Keep the on-disk and loaded
-roots available for diagnostics. Reading stats still resets the idle timer.
-Remove the `refresh` command and its `dev-lf` call. Keep the inventory writer
-for registration, installation and the private probes. Update `scripts/testing.md`
-and the launcher fixture so ordinary `dev-lf` exercises plain Cargo and the
-isolated path still bypasses the cache.
-
-Start with a linked-worktree fixture where the hook was skipped. `status`
-should report a missing root without creating an inventory, `register` should
-list it, and the next `status` should confirm the root is ready for daemon
-startup. Cover the stale serving-daemon and caller-owned configuration paths
-with the existing registration fixtures. The stop policy and measured test
-profile carry forward from the completed probes.
+Installation seeds the inventory. Git's fail-soft hook and manual `register`
+share the serialized inventory update and conditional stop. Status reports
+the configured and loaded roots. A missing Machine root points to registration.
+A caller-owned list points to its configuration. Ordinary builds use Cargo
+directly, and isolated builds bypass the cache.
 
 ## Delete — do not maintain
 
@@ -98,3 +76,5 @@ Removed the old dev-lf cache environment injection, build_cache.py exec-wrapper
 and duplicate environment constants. Status reports only the configured
 next-start timeout. Registration-triggered stop replaces idle-wait registration and its
 checkout instructions. Keep the isolated natural-idle probe and fail-soft checkout.
+The passive `refresh` command and launcher call are gone. Installation,
+registration and the private probes still share the atomic inventory writer.

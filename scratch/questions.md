@@ -12,3 +12,6 @@
 - Refresh Mobile while Settings is open and remote connections while Machines is visible, 30 seconds after the last check finishes. Each SSH probe keeps its existing 20-second deadline.
 - Return opens the first search result until ↑/↓ selects another. A switch keeps the results open so Undo or a second edit stays within reach.
 - Keep older servers’ theme declarations readable. Desktop uses the checked entries supplied by newer servers for edits and Undo.
+- Edit Global-only Machine settings (`hub`, `machines`, `connections`, `pools`, `ondemands`, `forward.*`) directly in a clearly labeled **This Machine (Global)** section instead of switching `Save in` to a ghost global destination.
+- Hide `Lifecycle::Inactive` keys (`isolate`, `summaries`, `summary_tokens`) and internal Desktop state (`portfolio`) from primary Settings forms; keep authored or advanced catalog entries reachable through a collapsed Advanced section and search.
+- Require an explicit **Dismiss pending move** action (`Action::Dismiss`) to clear an interrupted 2-file move journal whose files diverged, keeping both config files intact.

@@ -2,152 +2,93 @@
 
 > Visual redesign of the settings pane. make it more like a standard Apple Settings pane, sort of like Rex
 
-Jack Heart chose “vision c” at explore. [Vision C](design.md) and its [prototype](explore.html#vision-c) record the direction. The [concept review](concept-review.html) shows the interaction to build. [Choices for review](questions.md) records its defaults. User docs: [Surfaces](../docs/surfaces.md#settings), [Configuration](../docs/config.md#inspect-effective-settings), [Connect clients](../docs/server.md#phone-access), and [Loopflow for macOS](../swift/README.md).
+Jack Heart chose “vision c” at explore. [Vision C](design.md) and its [prototype](explore.html#vision-c) record the direction. The [concept review](concept-review.html) audits the built branch against its base and specifies the fixes below. [Choices for review](questions.md) records the defaults. User docs: [Surfaces](../docs/surfaces.md#settings), [Configuration](../docs/config.md#inspect-effective-settings), [Connect clients](../docs/server.md#phone-access), and [Loopflow for macOS](../swift/README.md).
 
 ## Done when
 
-⌘, opens a native macOS Settings window with a searchable sidebar and grouped forms. App contains General, Appearance, Shortcuts and Mobile. Workflow contains Agents, Context and Git & Release. Infrastructure contains Machines. Use system chrome and accent with colored symbols. Theme cards show their own colors, and the chosen theme reaches Desktop, Ghostty and iPhone through the existing appearance path.
+⌘, opens a native macOS Settings window with a searchable sidebar and grouped Apple Settings forms. App contains General, Appearance, Shortcuts and Mobile. Workflow contains Agents, Context and Git & Release. Infrastructure contains Machines. Use system chrome and accent with colored symbols. Theme cards show their own colors, and the chosen theme reaches Desktop, Ghostty and iPhone through the existing appearance path.
 
-In the Workflow and Machines panes, **Applies to** selects the work being inspected. **Save in** selects the declaration being edited. Choose a checkout or Wave, then switch between My and Shared settings while the value for that work stays in view. A saved Shared value can coexist with a winning private override. The row shows both and names the source that applies. Open the provenance badge for the ordered candidates, locators, any available empty slots, and a YAML preview for Reset or Promote. A preview for a move also shows the projected effective result for the selected work.
+In the Workflow and Machines panes, **Applies to** names the exact work being inspected — Global, a checkout, a Wave, and any active Skill or Graph step — and **Save in** chooses the declaration audience (`My` vs `Shared`) at that scope. A setting’s own applicability never hijacks `Save in` into a ghost destination. Global-only Machine settings edit `~/.lf/config.yaml` directly in a clearly labeled **This Machine (Global)** section, and Git & Release explains clearly when a Wave is selected.
 
-Search matches pane names, labels, catalog keys, aliases and descriptions. Select a result to open its pane, scroll to the row and highlight it briefly. In-place boolean edits use the same destination, row state and Undo. Mobile’s sidebar and QR panel agree on readiness. Override dots count declarations in the selected non-global save destination, including declarations that lose.
+Each row edits the declaration in its file, preserving the three-way distinction between absent, explicit `null`, and an authored value. Coupled agent policy (`agent`, `default_agent`, `agents`) is grouped in one section with one shared effective result. Inactive compatibility keys and internal Desktop state stay out of the main forms (reachable through Advanced/search). Server writes invalidate the file observation cache synchronously so rapid edits never hit stale slots. A single-row validation or conflict error stays on that row without locking the rest of Settings; only a read failure marks the scope stale. Interrupted 2-file moves surface on the row and can be either resumed or explicitly dismissed if a file diverged. Search opens its pane, scrolls the form to the row and highlights it briefly.
 
-## Work, declarations and controls
+## Experience and model
 
-- **Applies to** starts at Global. Repository choices identify actual checkouts from `PortfolioService` and include Choose Checkout. Wave choices come from that repository’s entries in `RegistryQuery.allWaves()`; use the authored UUID when available so rename and name reuse keep the right identity. The standard reading describes general work with saved settings. An Advanced target selects a Skill or authored Graph step, with stable identity from its defining Graph, and uses that target’s resolver inspection and existing config address. An unnamed occurrence can be inspected when present. File writes use addresses that the existing writer accepts. A one-off launch can supply flags or environment of its own.
-- **Save in** defaults to My settings at the selected scope. At Global the only file destination is the personal global file, so hide the extra chooser. For a checkout or Wave offer My and Shared declarations for that scope. The ladder also exposes valid broader destinations via named edit actions; changing the write destination keeps the inspected checkout, Wave and target. Keep General global. When a setting only accepts a different destination, such as Hub in a repository view, show its effective value with an explicit edit action for its valid destination. The search toggle is available when the current destination is clearly named and applicable; otherwise selection opens the row.
-- **The row edits the declaration in Save in.** A replace toggle can start from the value in effect when its slot is absent. Mark it as inherited and name where a click will create an override. When the slot exists, bind the control to the authored value and show the effective value beside it whenever they differ. Keep absence, explicit null, false and empty lists distinct. For append/reset and keyed merge, edit only that destination’s entries and show the combined result separately. Reset Layer removes a declaration. An explicit empty list can clear contributions while keeping a declaration. For agent policy, label the three authored controls as pin, starting preference and fallback order and show their shared resolver result together. A pin can win over a more specific fallback. Explain an inapplicable, inactive or losing value with the resolver or catalog reason.
-- **One catalog, one reading.** Swift chooses pane grouping and labels. The catalog’s schema, applicability and combination policy drive the controls. Use built-in SwiftUI controls for booleans, optional choices, enums, numbers, text and ordered tokens. Use inline YAML with Apply and Cancel for complex shapes. Include the keys in the design and retain access to the active catalog, legacy spellings, dynamic keys and existing targeted overrides through Advanced. Collapse duplicate parent and leaf rows around the appropriate editor. Keep the tracker a single tagged editor through its Rust codec. Appearance owns `theme` and its asset actions, and search routes that catalog entry to Appearance. Do the same for any domain-owned App control represented in the catalog.
-- **Project the same inputs used for execution.** Add an observed, context-keyed `config.scope` read/subscription alongside `config.settings`, using the existing repository/Wave and Skill/Graph selectors and existing `Destination` for editable slots. Global resolution passes no checkout. Rust returns a row’s known editable slots (destination, authored presence/value and locator), effective value or group result, and existing ordered candidates with their dispositions. Authored slots come from the files before any filtering or normalization that discards presence; use canonical key codecs for aliases and preserve typed paths for literal nested map keys. Represent a slot as absent or present with a typed value. Rust reads each physical document once per observation, even when two slots share a file, and derives the projection through the existing resolver, applicability and file owner. The selected checkout supplies shared files; Git metadata locates the private file for the clone and its linked worktrees. Keep the existing `config.settings/get/explain` contracts. [Scope reading](../rust/loopflow-execution/src/engine/config/scope.rs), [destination and file owner](../rust/loopflow-execution/src/config/files.rs), [served reads](../rust/loopflow/src/lf/commands/read.rs).
-- **Keep selection and loading independent.** Cache the catalog and current context reading while Settings is open. File observations refresh after CLI and hand edits, including absent files. Pane switches, Save in and search reuse the cached reading. Discard responses for an earlier context or target. A disappearing checkout or Wave leaves the picker usable. A read failure keeps the last confirmed reading marked stale and offers Refresh before editing it again. File settings remain reachable when portfolio, Wave discovery, Mobile status or Machine reachability fails independently. Budget one bulk request per context change. Measure warm local scope p95 against 150 ms on the gate fixture and record the result.
+### 1. Live file cache and error boundaries (Rust + Swift)
 
-## One edit from preview to write to Undo
+- **Invalidate `observe::Cache` on config writes.** Add `observe::invalidate_path(path: &Path)` on `Cache::shared()` to immediately re-observe matching `Fact::File`, `Fact::Metadata`, and parent `Fact::Directory` entries (advancing their revisions so active `read_stream` subscriptions push immediately without waiting for the 1-second poll). Call it from `config::files::atomic_write` and when creating or removing pending move journals in `engine::config::promotion`.
+- **Keep read failures and row edit errors separate.** `ScopedSettingsModel.editsDisabled` disables writes only during an active save (`saving`) or a scope read failure (`reading.failure`, e.g., malformed YAML or unreachable server, where the last confirmed reading stays visible with a leading Refresh button). Validation errors and stale-slot conflicts belong to the row that triggered them:
+  - A validation error (invalid graph name, bad YAML, invalid integer) renders inline on that row while keeping its draft editable and every other row across Settings interactive.
+  - A stale-slot conflict renders inline on that row with a **Refresh** action, keeping the draft attached to its original slot until refreshed.
 
-A file edit identifies the typed setting path, target and destination, and carries the expected authored state. Set stores a value, Reset removes the declaration, and Promote moves the declaration. Rust prepares and applies each action through the canonical file writer and validators. Cover the whole affected footprint including key normalization, tagged values and coupled keys such as `machine.tasks` / `machine.capacity`. Preview affected YAML hunks from that same edit in memory. Recompute against the latest documents under the file locks, check the affected authored state and retain unrelated changes and comments. When an inspected result changed materially after a reviewed preview, return a refreshed preview before applying the move. Debounce live YAML previews by 150 ms and discard responses for old drafts.
+### 2. Honest `Applies to`, `Save in`, and pane applicability
 
-A toggle or picker commits immediately. Text commits on Return or focus loss and Escape restores the confirmed reading. A successful commit returns the applied edit’s before and after states and registers the inverse with the Settings Undo manager and toast. Undo addresses the original declarations even after navigation and checks the expected after states before restoring the exact presence and values. A rejected edit keeps the draft attached to its original address and the last confirmed value visible. Refresh shows the newer file state; retry uses a newly reviewed expectation. If a response drops, reconcile against the files before reissuing any edit. Offer Undo for a confirmed commit from this window. When the read confirms the current value but cannot attribute the write, show the current value without an Undo that could erase someone else’s edit.
+- **`Applies to` shows the full inspected context.** Display repository display names (not raw full paths) in the picker and label, and include any active Skill or Graph step target (`<repo> · Skill <name>` or `<repo> · <graph> / <step>`) directly in the visible `Applies to` header alongside a one-click reset to general work so a collapsed `Advanced` disclosure never hides an active target.
+- **`Save in` never holds ghost destinations.** At Global, hide `Save in`. For a checkout, offer only `My repository settings` and `Shared repository settings`. For a Wave, offer only `My Wave preferences` and `Shared Wave preferences` (falling back to Shared if the Wave has no authored ID). Remove the `owner == model.destination` escape hatch.
+- **Pane applicability matches each setting’s owner:**
+  - **General** is always Global (`PersonalGlobal`) with no `Applies to` / `Save in` picker and no multi-layer provenance disclosure on every row.
+  - **Machines** separates three clean sections:
+    1. **Connection health** — reads the `machines` list from `config.scope`’s `PersonalGlobal` slot (deleting the redundant `config.get` poll), preserves last-known per-Machine health across 30-second background refreshes instead of wiping `health = [:]` back to “Checking…”, and includes an explicit Refresh button.
+    2. **Placement** (`machine`) — the one scoped Machine preference (`PersonalScoped`: Global, My repo, or My Wave). When `Save in` is Shared, state plainly that Machine placement is personal-only and offer `Switch Save in to My …` (switching between valid options of the current scope).
+    3. **This Machine (Global)** (`hub`, `machines`, `connections`, `pools`, `ondemands`, `forward.env`, `forward.files`) — edits `PersonalGlobal` (`~/.lf/config.yaml`) directly without mutating `model.destination`, clearly labeled so `Save in` and sidebar override dots stay intact across panes.
+  - **Git & Release** at Wave scope: because all seven keys have `Applicability::Repository` (`scope != Wave`), show one clear section banner (*“Git & Release settings apply to the repository, not individual Waves.”*) with a single action to switch `Applies to` to the checkout, instead of 21 per-row `Edit in …` buttons.
+  - **Unnamed Graph steps:** when inspecting a step with no `id:`, show one banner explaining that unnamed steps are read-only until given an `id:` in their Graph YAML, and keep each row’s provenance `DisclosureGroup` accessible so candidates remain inspectable.
 
-**Promote moves one declaration.** Offer the immediate destination explicitly as `Move to Shared Repository…`, `Move to My Repository Settings…` or `Move to Shared Repository…` from My repository, My Wave and Shared Wave respectively. The ladder can use Promote as the group label. The Rust writer offers the action only if the destination accepts the declaration and its slot is empty. Preview the source removal, destination addition and effect for the selected work. Name the scope or audience that gains the declaration. On confirmation, a same-file move is one atomic replacement. For two files, lock in path order, validate both patches, record the intended before/after slots locally, install the receiving patch first and then remove the source. Keep the operation record through completion. Recover or recognize completion only from matching states. If a changed slot makes completion ambiguous, keep the surviving declarations and show which file still needs attention. Undo uses the inverse move and checks both slots. This path operates on local files even if Work discovery is unavailable. [Locked file writes](../rust/loopflow-execution/src/config/files.rs), [resumable config writes](../rust/loopflow-execution/src/config/migrate.rs).
+### 3. Grouped Apple Settings forms and faithful `Authored` controls
 
-## App behavior and replacements
+- **Curated sections backed by `config.catalog`.** Replace the flat one-`Section`-per-key loop with semantic grouped `Section`s per pane (matching Apple System Settings):
+  - **General:** *Task Files* (Autosave), *Profile & Workspace* (`user.name` as a native TextField, `repo_root`), *Updates & Diagnostics* (`stream`, `logs.linear_requests` as a native Toggle, `session`).
+  - **Agents:** *Agent Policy* (`agent`, `default_agent`, `agents` together in one section with one shared **Effective agent order** result and provenance ladder that explains when a Pin overrides Starting preference / Fallback order), *Execution* (`yolo`, `wave.graph`, `auto`, `automation`, `supported_harnesses`), *Harnesses* (`claude.model`, `codex.service_tier`, `chrome`).
+  - **Context:** *Diff & Clipboard* (`context.diff`, `context.diff_files`, `context.paste`), *Files & Budgets* (`context.docs`, `context.exclude`, `context.budgets`).
+  - **Git & Release:** *Git & Pull Requests* (`land`, `merge_method`, `pr`), *Diff View* (`diff_hidden`, `diff_groups`), *Planning & Release* (`repo.tracker`, `release`).
+  - **Machines:** *Connection health*, *Placement*, *This Machine (Global)*.
+  - **Hide inactive and internal keys from primary forms.** Keep `Lifecycle::Inactive` keys (`isolate`, `summaries`, `summary_tokens`), internal Desktop state (`portfolio`), and `Category::Accounts` (`auth_browsers`, no longer falling into `Agents`) out of the primary forms. Expose any authored inactive/other catalog keys in a collapsed **Advanced** section (and keep them searchable with an `Inactive` tag for inactive entries).
+  - **Compact rows when clean.** On **General** (single file), omit provenance disclosures entirely and show a quiet Reset button only when declared. On **Global** in scoped panes, keep rows compact without duplicating every value in a second line; show provenance on demand or when inspecting a checkout/Wave where layers interact.
+- **Preserve `Authored::{Absent, Present(Value)}` end-to-end in Swift.** Decode `ConfigurationScope.Slot.declared` into a typed `enum Authored { case absent; case present(JSONValue) }` instead of collapsing into `JSONValue?`:
+  - **`Option<bool>` (`chrome`):** render a 3-way `Picker` (`Inherited`, `Claude default (null)`, `On`, `Off`) rather than a 2-state `Toggle` that conflates `null` with `false`.
+  - **`Option<Enum>` (`codex.service_tier`, `auto`, `merge_method`):** use a 3-case selection tag (`inherited`, `clear` for explicit `null`, `value(JSONValue)`) so explicit `null` is never mislabeled `"Inherited"`.
+  - **`land`:** type `land` as a 2-variant enum (`gh` | `local`) in `catalog.rs` (or map its two choices to a `Picker` in Swift; typing it in Rust keeps CLI and catalog validation aligned).
+  - **`Option<String>` (`agent`, `default_agent`, `claude.model`, `wave.graph`, `repo_root`, `stream`):** never convert `.present(.null)` to literal `"None"` in a `TextField`; show an explicit cleared state, and treat clearing a text field to empty as `.reset` (removing the declaration) rather than writing `""`.
+  - **Ordered lists (`OrderedSetting`):** show a concise summary on the collapsed header, and show `"Save empty list"` only when `definition.combination == "append_reset"` and the destination can inherit from a broader layer.
+  - **Simple General maps (`user`, `logs`):** expose `user.name` and `logs.linear_requests` as native controls (preserving any sibling fields on edit) instead of raw YAML disclosures.
 
-- Keep the `Settings` scene in `LoopflowApp.swift` and use a SwiftUI `NavigationSplitView`, sidebar search and grouped `Form`. The workspace’s **Choose Theme…** recovery action routes to Appearance. Explicit view measures and typography use the tokens required by `DesignDisciplineTests`.
-- In Appearance, retain both System theme sides, the built-in and personal grids, import, delete/revert and diagnostics. Cards and System/Light/Dark selections commit through `AppearanceStore` and offer Undo to the exact previous `theme:` declaration, including absence. Mode changes from the app menu use that same owner. Keep a draft only inside `ThemeEditor` for custom colors, import and asset edits. Apply/Cancel belongs to that editor and closing it cancels its draft. A failed file or selection save keeps the edit available for correction and reloads any files already committed. Continue honoring hand edits, theme-file recovery, palette read/publish and Ghostty/iPhone propagation. Delete chooser-wide preview and its footer.
-- Move the existing `taskFilesAutosave` binding to General. Use one grouped read-only reference with the `DesktopAction` bindings for both Shortcuts surfaces. Keep the standalone Keyboard Shortcuts window.
-- Lift `MobileSetup` to the Settings scene so sidebar, switch, status and QR share the existing status and recovery path. Keep enable, disable, retry, refresh, copy and share. Show the in-progress/error state during setup and derive ready from the latest fresh status. Refresh while Settings is visible.
-- Machines separates connection health from placement and other preferences. Reuse the identity-checked status probe and ended-rental handling from `lf machine status` in the served path. Use up to four in flight, the existing 20-second probe deadline, and refresh while the pane is visible. Distinguish checking, reachable, error and ended rental. [CLI status](../rust/loopflow/src/lf/commands/machine.rs), [connection probe](../rust/loopflow-execution/src/machine/connection.rs).
-- Delete the five-tab shell and `ConfigurationSettingsView` with its path text fields, raw explanation formatter and key-by-key loading. Move DTOs still used by `TaskChangesView` to their shared owner. Retain CLI, launch and iPhone behavior through their current owners. New wire request/results use required fields and Rust/Swift fixtures. Update the Desktop and server operation docs as the interfaces change.
+### 4. Recoverable 2-file moves (`promotion.rs` + `ScopedSettingRow.swift`)
 
-## Built
+- **Add `Action::Dismiss` to `engine::config::promotion`.** When an interrupted 2-file move’s journal exists (`~/.lf/settings-moves/<hash>.json`), `Action::Resume` continues to require matching states before installing. If a file was hand-edited and `Resume` refuses, `Action::Dismiss` acquires the ordered file locks, deletes the journal without modifying either config file, invalidates the journal directory in `observe::Cache`, and returns `Outcome::Dismissed`. Update the wire schema and DTO fixtures (`tests/fixtures/dto/server_schema.json`, `configuration_scope.json` if touched) in the same change.
+- **Surface pending moves and preview changes clearly in Swift.** Show a pending move banner/actions directly on the row (not buried inside a collapsed disclosure) with **Finish interrupted move…** and, on divergence, **Dismiss pending move**. In a move preview, name the audience that gains the declaration (*“Everyone using this repository”* for Shared repo, *“All work in this checkout”* for My repo). When `Confirm move` returns a refreshed `Outcome::Preview` because the effective value changed materially, show an explicit inline notice asking the person to review the updated preview before confirming again.
 
-The split window opens on General, with pane-name search, the autosave switch and
-Undo, a grouped Shortcuts reference shared with the separate window, and a direct
-route from Choose Theme to Appearance.
+### 5. Search scroll and Appearance form polish
 
-Context follows one checkout. My and Shared show their own Diff declarations,
-the scope reading names the effective source, and the disclosure shows the
-ordered candidates. Reset previews the selected file patch. Set, Reset and Undo
-check both spellings under the file lock. The writer edits a released flat
-`diff` beside `context: [README.md]` in place, so the list and its comment
-survive. A linked checkout reads its own Shared file and the clone’s My file.
+- **Fix Search → Scroll to Row.** Place `ScrollViewReader` *inside* `ScopedSettings`, `ThemeChooser`, and `MobileSettings` around their `Form` (not outside the pane switch in `SettingsWindow`). Remove the conflicting `.id(RowAddress(...))` wrapper around `ScopedSettingRow`’s `Section` (bind per-row draft state to destination/key changes via `.onChange` so `.id(definition.key)` stays the sole scroll identity inside `Form`). When switching panes from search, yield one layout turn (`await Task.yield()`) before calling `proxy.scrollTo(key, anchor: .center)`.
+- **Group `ThemeChooser` controls in `Section`s.** Wrap the Appearance mode picker and Customize button in a `Section`, and move `appearance.readFailure` / `appearance.notice` into a leading error `Section` at the top of the `Form` (matching `ScopedSettings`) so errors never scroll off-screen.
 
-The launch fixture found that the provider receives a `-changes.md` reference
-in its start-context manifest when Diff is On. With My Off the reference
-disappeared and the same explicit README still reached the provider. The
-fixture checks this delivery during an ordinary batch skill run.
+## Build order
 
-Agents, Context, Git & Release and Machines now share one observation of the
-selected Global, checkout or Wave settings. Advanced selects a Skill or Graph
-occurrence. The bulk reading includes 47 catalog entries. An empty list, a
-missing declaration and a value contributed by another file have separate
-representations. General reads the personal global slots.
+Start with the slice that proves the core model fixes fastest, then layer the UI structure and recovery:
 
-The checked writer captures component paths before normalization. Reset and
-Undo cover every spelling the edit touches. Promote previews the receiving
-and source declarations and resolves the proposed files together. Private Wave
-and repository settings can share a single file. Across two files, an
-interrupted move leaves the receiving declaration in place until recovery
-checks both slots. The old Configuration pane and Diff-only writer are gone.
+1. **Slice 1 — Rust cache invalidation, `Action::Dismiss`, and `land` enum:**
+   - `observe::invalidate_path` called from `config::files::atomic_write` and `promotion.rs`.
+   - `promotion::Action::Dismiss` + `Outcome::Dismissed` + Rust unit test covering diverged interrupted move → `Resume` fails → `Dismiss` clears journal while keeping both files.
+   - Type `land` as an enum (`gh` | `local`) in `catalog.rs` (keeping `serde` string compatibility) and update DTO/server schema fixtures (`tests/fixtures/dto/server_schema.json`).
+   - Verify with focused Rust tests (`promotion::tests`, `config::files::edit::tests`, `served_reads`, `the_checked_in_schema_is_what_describe_prints`) and confirm rapid back-to-back writes reflect immediately in `config.scope`.
+2. **Slice 2 — Swift `Authored` model, row-scoped errors, honest `Save in` / `Applies to`, and `MachineConnections`:**
+   - Replace `Slot.value: JSONValue?` with `enum Authored { case absent; case present(JSONValue) }`.
+   - Remove `editError` from `ScopedSettingsModel.editsDisabled`; move validation/conflict errors to per-row state.
+   - Show active `model.target` and repository display names in `Applies to`; remove the ghost `Save in` fallback; give `Machines` its **This Machine (Global)** section and `Git & Release` its Wave-scope banner; add provenance + read-only explanation for unnamed Graph steps.
+   - Drive `MachineConnections` from `config.scope`’s `PersonalGlobal` `machines` slot and preserve previous health states across 30s refreshes.
+3. **Slice 3 — Grouped Apple Settings forms, faithful nullable controls, Agent Policy section, Search scroll, and `ThemeChooser` sections:**
+   - Group rows into semantic `Section`s per pane; hide `Lifecycle::Inactive` (`isolate`, `summaries`, `summary_tokens`), `portfolio`, and move `auth_browsers` out of `Agents` into Advanced/collapsed catalog access.
+   - Implement 3-state `chrome` picker, 3-state nullable enum pickers, clean nullable string TextFields, native `user.name` / `logs.linear_requests` controls, contextual `Save empty list`, and the grouped **Agent Policy** section.
+   - Surface pending moves + **Dismiss pending move**, audience text, and refreshed-preview notice in `ScopedSettingRow`.
+   - Fix `ScrollViewReader` inside `Form` and group `ThemeChooser` sections with leading errors.
+   - Update tests (`SettingsWorkflowTests`, `ContextSettingsWorkflowTests`, `ConfigurationSettingsTests`, `ThemeWorkflowTests`, `DesignDisciplineTests`) to exercise every fixed interaction, including rapid toggles, row-scoped typo recovery, Machines Global edit without hijacking `Save in`, diverged move dismiss, nullable controls, and Search scroll.
 
-Appearance now writes each card or mode selection through the checked writer.
-The direct `config.theme` reply supplies the authored entries. A private server
-probe saw `theme: Loopflow Dark` immediately after a write while `config.scope`
-still reported an absent slot. The chooser uses the direct read for edits and
-the receipt for Undo. Only the single theme file open in the editor has a draft.
+## Built (from earlier passes)
 
-Mobile shares one readiness reading and QR code across Settings. Machines reads
-registered names from global configuration and checks the corresponding identities
-with the CLI probe, four at a time, independently of the editable settings.
-
-Sidebar search uses the open window’s catalog. Return opens the selected result,
-scrolls the detail form and briefly highlights the control. Search switches share
-the pane’s edit destination, saved value and Undo. When a settings read fails,
-the sidebar keeps the last reading visible and offers Refresh.
-
-## Remaining work
-
-Gate and demo cover the rendered scroll position, resizing, keyboard focus, and
-light and dark appearance on the Mac.
-
-The locked-screen QA run never saw search scroll the form. Opening
-`context.paste`, `context.diff_files` or `context.budgets` from search left the
-Context form's clip origin at −88 (document 899 pt, window 648 pt), on the
-same pane and from General. The scroll task fired with the key each time.
-A standalone grouped `Form` in a `NavigationSplitView` with the same row
-shape scrolled to its target in the same conditions. The demo checks this
-on an unlocked display before anything changes.
-
-## Sidebar checks
-
-- `swift build --package-path swift --build-tests` and `scripts/test_desktop.sh --skip-build --filter 'SettingsWorkflowTests|DesignDisciplineTests'` passed locally. Seven tests covered both suites. Gate runs the Desktop checks again.
-- Native window renders at 960 × 620 showed the full Configuration label and search field in General (light) and Shortcuts (dark) after widening the sidebar. The final demo covers the remaining panes and window sizes.
-
-## Context checks
-
-- A private Machine served 31 warm `config.scope` requests over one Unix socket with Shared On, My Off and a legacy document list. Median 23.7 ms, p95 131.7 ms against the 150 ms target. Gate repeats the measurement when the rest of the catalog is present.
-- `cargo nextest run -p loopflow -p loopflow-execution --lib -E 'test(config::files::context_diff::tests::) | test(checkout_scope_and_checked_edit_share_the_desktop_wire_shape) | test(the_checked_in_schema_is_what_describe_prints)'` passed four tests. Gate includes the server and DTO checks.
-- `cargo test -p loopflow --test served_reads configuration_edits_use_the_server_without_work_processes` passed. The checkout reading arrived with an unreadable Work registry.
-- `scripts/test_desktop.sh --skip-build --filter ContextSettingsWorkflowTests` passed in 37.6 seconds with the built CLI, a private server and the Pi fixture. The toggle, Save in, Reset, Undo, stale preview and linked checkout all reached the expected CLI or launch result. The configuration DTO, sidebar and design suites also passed.
-- `cargo clippy --all-targets -- -D warnings` passed. Gate runs the documented command checks and the shared Swift protocol checks.
-
-## Scoped settings checks
-
-- Six focused nextest cases passed for authored presence, legacy spellings, stale and interrupted moves, the Desktop wire fixture and the checked-in server schema. `cargo clippy --all-targets -- -D warnings` passed.
-- `scripts/test_desktop.sh --filter 'ContextSettingsWorkflowTests|ConfigurationSettingsTests|SettingsWorkflowTests|DesignDisciplineTests'` passed 12 tests in 40.1 seconds against the branch CLI. The fixture observed the provider launch, absent and empty docs, a pin and fallback, Task Diff exclusions, tracker and placement changes, Skill and Graph-step addresses, Promote and Undo, and the same Wave file after renaming it and reusing the old name.
-- A private server returned all 47 settings in 31 warm checkout readings over one Unix socket. Median 16.4 ms, p95 125.6 ms against the 150 ms target. Gate retains the documented-command and served-read checks.
-
-## App panes and health checks
-
-- `scripts/test_desktop.sh --filter 'ThemeWorkflowTests|MobilePairingTests|SettingsWorkflowTests|DesignDisciplineTests|ThemeTests|AppAppearanceTests|WorkPaletteTests'` passed 48 headless tests across nine suites. A failed Mobile status read removed the QR code and sidebar dot together. A private Machine with a stand-in SSH host showed a changed identity and an ended rental.
-- Two consecutive selections and two checked Undos over one private server connection restored the absent `theme:` key. The editor test changed the declaration by hand after import, saw the committed theme file on the failed Apply, then saved the retained draft.
-- The focused Rust nextest run passed all eight tests covering Machine status at the CLI, the Desktop and theme wire fixtures, the server schema and documented commands.
-- `cargo clippy --all-targets -- -D warnings` passed.
-- Gate covers the shared iOS protocol and the visual demo.
-
-## Search checks
-
-- `scripts/test_desktop.sh --filter 'SettingsWorkflowTests|ContextSettingsWorkflowTests|DesignDisciplineTests'` passed 11 tests in 55.2 seconds. Searching Diff showed Shared On while My Off applied. Toggling the result edited the Shared file, selecting it highlighted the Context switch, and Undo restored Shared On.
-- A malformed checkout file left the last value visible with editing disabled. Refresh restored the search switch after the file was repaired. The same run checked keyboard submission, alias and description matches, App rows before catalog loading, and an empty result list.
+The split window, sidebar groups, `AutosaveToggle`, shared `KeyboardShortcutsView`, lifted `MobileSetup`, `AppearanceStore` instant-apply + Undo + `ThemeEditor` drafts, `config.scope` subscription (median 16.4 ms, p95 125.6 ms across 47 entries), `config::files::edit` checked YAML patching, `promotion` locked 2-file move, `machine.status` served identity/rental probe, legacy Wave `GOAL.md` adoption, and sidebar search matching are built and passing their existing tests.
 
 ## Gate and demo
 
-Run `scripts/test_desktop.sh --filter 'SettingsWorkflowTests|ContextSettingsWorkflowTests|ConfigurationSettingsTests|ThemeWorkflowTests|MobilePairingTests|DesignDisciplineTests'`. Build `SettingsWorkflowTests` around the branch’s `lf`, a local server and temporary checkouts using the ThemeWorkflow fixture pattern. The focused Rust checks cover preview/write parity, interrupted promotion and DTOs. Swift coverage checks the real controls, selected destination versus effective value, context changes during reads, Undo across navigation, theme selection and a staged editor, and shared Mobile detail/sidebar status. Run the iOS protocol and pairing gate when shared wire code changes.
+Run `scripts/test_desktop.sh --filter 'SettingsWorkflowTests|ContextSettingsWorkflowTests|ConfigurationSettingsTests|ThemeWorkflowTests|MobilePairingTests|DesignDisciplineTests'` and focused Rust checks (`promotion`, `edit`, `served_reads`, `server_schema`, `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`). Run the iOS protocol check if `ServerProtocol.swift` changes.
 
-For the visual demo, `uv run python scripts/loopflow-dev.py run` against the branch server on a private Machine. Open Settings with ⌘,, search Diff, and switch Save in between My and Shared while Applies to stays on the demo checkout. Change, inspect, Reset and Undo. Preview a Promote to an empty slot and apply it. Pick and undo a theme, then compare the Mobile panel with its sidebar dot. Check Light and Dark with the window resized. The required gate uses headless fixtures and view inspection.
-
-Kickoff probes on November 22 showed Builtin → Shared repository → Shared Wave → Personal global → Personal repository for the test Wave. A personal empty `context.docs` cleared earlier contributions. Tracker read as `{git: {}}` in `config get` and `{provider: git}` in `config explain`. The native Settings shell passed the headless SDK typecheck.
-
-### Legacy Wave files
-
-A private CLI fixture with an ID and `agent: codex` in GOAL.md returned
-`"codex"` before `config set chrome true --shared` and `null` afterwards.
-The next private edit reported “Wave legacy needs its authored id before
-private settings can follow it through renames”. The shared writer now seeds the file from the
-same frontmatter as the Wave reader under the file lock. The ID and pin
-survived the first shared edit and the private edit addressed the original ID.
-
-### Compression checks
-
-- `scripts/test_desktop.sh --skip-build --filter 'ThemeWorkflowTests|SettingsWorkflowTests|ConfigurationSettingsTests|DesignDisciplineTests'` passed 20 tests in 232 seconds. A theme pick rejected an intervening `theme: null`; a fresh pick and Undo restored the explicit null.
-- Seven focused Rust tests passed for checked edits, move recovery, Wave renames, the Desktop wire fixture and the server schema. Gate runs the suites.
-- On the final CLI build, both Rust promotion tests and the Desktop Promote/Undo round trip passed. `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings` passed.
+For the visual demo, run `uv run python scripts/loopflow-dev.py run` against the branch server on a private Machine. Verify Search actually scrolls to bottom rows (`context.budgets`, `context.paste`), verify `Machines` edits Global settings without mutating `Save in`, verify a typo error keeps the field editable and other panes unlocked, verify Agent Policy grouping and 3-state `chrome`, and check Light and Dark appearance with resizing.

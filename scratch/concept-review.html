@@ -1,0 +1,723 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LOO-1080 · Concept Review — Mobile Tailscale Access</title>
+<style>
+  :root {
+    --bg: #fafaf9;
+    --surface: #ffffff;
+    --surface-muted: #f4f3f0;
+    --border: #e5e2dc;
+    --border-strong: #cfc9be;
+    --text: #1c1917;
+    --text-muted: #57534e;
+    --text-faint: #78716c;
+    --accent: #0f766e;
+    --accent-bg: #f0fdfa;
+    --accent-border: #99f6e4;
+    --yes: #15803d;
+    --yes-bg: #f0fdf4;
+    --yes-border: #bbf7d0;
+    --no: #b91c1c;
+    --no-bg: #fef2f2;
+    --no-border: #fecaca;
+    --warn: #b45309;
+    --warn-bg: #fffbeb;
+    --warn-border: #fde68a;
+    --existing-bg: #f1f5f9;
+    --existing-text: #475569;
+    --existing-border: #cbd5e1;
+    --proposed-bg: #ecfdf5;
+    --proposed-text: #047857;
+    --proposed-border: #6ee7b7;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #121210;
+      --surface: #1b1a17;
+      --surface-muted: #24221e;
+      --border: #302d27;
+      --border-strong: #46423a;
+      --text: #f5f5f4;
+      --text-muted: #a8a29e;
+      --text-faint: #78716c;
+      --accent: #2dd4bf;
+      --accent-bg: #0f2926;
+      --accent-border: #115e59;
+      --yes: #4ade80;
+      --yes-bg: #0c2617;
+      --yes-border: #166534;
+      --no: #f87171;
+      --no-bg: #2a1215;
+      --no-border: #7f1d1d;
+      --warn: #fbbf24;
+      --warn-bg: #291e0c;
+      --warn-border: #78350f;
+      --existing-bg: #1e242b;
+      --existing-text: #94a3b8;
+      --existing-border: #334155;
+      --proposed-bg: #0d281f;
+      --proposed-text: #34d399;
+      --proposed-border: #065f46;
+    }
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 15px;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  main {
+    max-width: 1080px;
+    margin: 0 auto;
+    padding: 40px 24px 72px;
+  }
+
+  header {
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 24px;
+    margin-bottom: 36px;
+  }
+
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin-bottom: 8px;
+  }
+
+  h1 {
+    margin: 0 0 10px;
+    font-size: 28px;
+    line-height: 1.2;
+    letter-spacing: -0.02em;
+  }
+
+  .lede {
+    margin: 0 0 16px;
+    font-size: 16px;
+    color: var(--text-muted);
+    max-width: 78ch;
+  }
+
+  .meta-strip {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 14px;
+    font-size: 13px;
+    color: var(--text-muted);
+    align-items: center;
+  }
+
+  .badge {
+    display: inline-block;
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 999px;
+    border: 1px solid transparent;
+    vertical-align: middle;
+    letter-spacing: 0.02em;
+  }
+
+  .badge-existing {
+    background: var(--existing-bg);
+    color: var(--existing-text);
+    border-color: var(--existing-border);
+  }
+
+  .badge-proposed {
+    background: var(--proposed-bg);
+    color: var(--proposed-text);
+    border-color: var(--proposed-border);
+  }
+
+  .badge-yes {
+    background: var(--yes-bg);
+    color: var(--yes);
+    border-color: var(--yes-border);
+  }
+
+  .badge-no {
+    background: var(--no-bg);
+    color: var(--no);
+    border-color: var(--no-border);
+  }
+
+  .badge-warn {
+    background: var(--warn-bg);
+    color: var(--warn);
+    border-color: var(--warn-border);
+  }
+
+  section {
+    margin-bottom: 44px;
+  }
+
+  h2 {
+    font-size: 20px;
+    line-height: 1.3;
+    margin: 0 0 12px;
+    letter-spacing: -0.01em;
+  }
+
+  h3 {
+    font-size: 15px;
+    margin: 0 0 8px;
+  }
+
+  p {
+    margin: 0 0 12px;
+    max-width: 78ch;
+  }
+
+  code {
+    font-family: var(--mono);
+    font-size: 0.88em;
+    background: var(--surface-muted);
+    padding: 1px 5px;
+    border-radius: 4px;
+  }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 18px 20px;
+  }
+
+  .callout {
+    border-radius: 10px;
+    padding: 18px 20px;
+    border: 1px solid var(--border);
+    margin: 16px 0;
+  }
+
+  .callout-danger {
+    background: var(--no-bg);
+    border-color: var(--no-border);
+  }
+
+  .callout-accent {
+    background: var(--accent-bg);
+    border-color: var(--accent-border);
+  }
+
+  .callout-warn {
+    background: var(--warn-bg);
+    border-color: var(--warn-border);
+  }
+
+  .journey {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(175px, 1fr));
+    gap: 10px;
+    margin-top: 14px;
+  }
+
+  .step {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 14px;
+  }
+
+  .step-num {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--text-faint);
+    text-transform: uppercase;
+    margin-bottom: 4px;
+  }
+
+  .step-title {
+    font-weight: 600;
+    font-size: 14px;
+    margin-bottom: 4px;
+  }
+
+  .step-body {
+    font-size: 13px;
+    color: var(--text-muted);
+    margin: 0;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+    font-size: 14px;
+  }
+
+  th, td {
+    text-align: left;
+    vertical-align: top;
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  th {
+    background: var(--surface-muted);
+    font-size: 12px;
+    font-family: var(--mono);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: var(--text-muted);
+  }
+
+  tr:last-child td {
+    border-bottom: none;
+  }
+
+  .grid-2 {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: 16px;
+    margin-top: 14px;
+  }
+
+  .grid-3 {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 14px;
+    margin-top: 14px;
+  }
+
+  .flow-box {
+    font-family: var(--mono);
+    font-size: 12.5px;
+    line-height: 1.5;
+    background: var(--surface-muted);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px;
+    white-space: pre-wrap;
+    overflow-x: auto;
+    margin: 10px 0 0;
+  }
+
+  .flow-box .hi-no { color: var(--no); font-weight: 600; }
+  .flow-box .hi-yes { color: var(--yes); font-weight: 600; }
+  .flow-box .hi-muted { color: var(--text-faint); }
+
+  .state-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+    margin: 10px 0;
+    font-family: var(--mono);
+    font-size: 12px;
+  }
+
+  .state-pill {
+    padding: 4px 10px;
+    border-radius: 6px;
+    border: 1px solid var(--border-strong);
+    background: var(--surface);
+  }
+
+  .state-arrow {
+    color: var(--text-faint);
+  }
+
+  .choice-list {
+    display: grid;
+    gap: 12px;
+  }
+
+  .choice {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px 18px;
+  }
+
+  .choice-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 12px;
+    margin-top: 8px;
+    font-size: 13.5px;
+  }
+
+  .choice-label {
+    font-family: var(--mono);
+    font-size: 11px;
+    text-transform: uppercase;
+    color: var(--text-faint);
+    margin-bottom: 3px;
+  }
+
+  .questions {
+    display: grid;
+    gap: 14px;
+  }
+
+  .question {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px 18px;
+  }
+
+  .question-title {
+    font-weight: 600;
+    margin-bottom: 8px;
+  }
+
+  .options {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: 6px;
+    font-size: 14px;
+  }
+
+  .options li {
+    padding: 6px 10px;
+    border-radius: 6px;
+    background: var(--surface-muted);
+  }
+
+  .options li.recommended {
+    background: var(--proposed-bg);
+    border: 1px solid var(--proposed-border);
+  }
+
+  .opt-key {
+    font-family: var(--mono);
+    font-weight: 700;
+    margin-right: 6px;
+  }
+
+  footer {
+    border-top: 1px solid var(--border);
+    padding-top: 16px;
+    font-size: 13px;
+    color: var(--text-faint);
+  }
+</style>
+</head>
+<body>
+<main>
+
+<header>
+  <div class="eyebrow">LOO-1080 · Concept Review · Pre-implementation</div>
+  <h1>Do Mobile Access’s product concepts and code concepts line up?</h1>
+  <p class="lede">
+    <strong>Area reviewed:</strong> Mobile remote access (<code>lf server mobile</code>, Desktop’s Mobile settings, and the server’s Tailscale boundary in <code>server/mobile.rs</code> &amp; <code>server/remote.rs</code>) — how Loopflow discovers, talks to, monitors, and recovers this Machine’s Tailscale daemon. Widened from “stop the 5-second poll” to the whole lifecycle because the previous plan still kept a macOS CLI fallback and two retry/health regimes.
+  </p>
+  <div class="meta-strip">
+    <span><span class="badge badge-existing">Existing</span> Current <code>main</code> &amp; kickoff plan</span>
+    <span><span class="badge badge-proposed">Proposed</span> Updated in <code>scratch/plan.md</code> (not yet built)</span>
+    <span>Code changed: <code>none</code></span>
+  </div>
+</header>
+
+<section>
+  <h2>1. One concrete interaction: normal, failure, and recovery</h2>
+  <p>A person turns mobile access on once, opens Tasks from their iPhone, and expects Loopflow to stay silent on macOS whether Tailscale is running, signed out, or quit.</p>
+  <div class="journey">
+    <div class="step">
+      <div class="step-num">1 · Enable</div>
+      <div class="step-title">Turn on once</div>
+      <p class="step-body">Desktop “Enable mobile access” or <code>lf server mobile</code> binds this Machine’s <code>.ts.net</code> address, saves owner + port in <code>mobile.yaml</code>, and shows the QR code.</p>
+    </div>
+    <div class="step">
+      <div class="step-num">2 · Idle &amp; Use</div>
+      <div class="step-title">Phone connects, Mac stays quiet</div>
+      <p class="step-body">Each phone socket is checked by Tailscale <code>whois</code>. While idle for days, <code>lf server</code> spawns zero Tailscale apps and triggers zero <code>nehelper</code> saves.</p>
+    </div>
+    <div class="step">
+      <div class="step-num">3 · Fail (Auth)</div>
+      <div class="step-title">Logout or account switch</div>
+      <p class="step-body">Already-connected phones disconnect within seconds. Local <code>lf server</code> and running Sessions stay untouched. Status says why.</p>
+    </div>
+    <div class="step">
+      <div class="step-num">4 · Fail (Daemon)</div>
+      <div class="step-title">Tailscale quit or stopped</div>
+      <p class="step-body">Listener stops and reports unready. While Tailscale stays off all weekend, <code>lf server</code> must still trigger <strong>zero</strong> GUI launches and <strong>zero</strong> <code>nehelper</code> churn.</p>
+    </div>
+    <div class="step">
+      <div class="step-num">5 · Recover</div>
+      <div class="step-title">Tailscale returns</div>
+      <p class="step-body">Opening Tailscale with the approved account binds the <strong>same saved port</strong> automatically; phone reconnects without re-scanning QR.</p>
+    </div>
+    <div class="step">
+      <div class="step-num">6 · Disable</div>
+      <div class="step-title">Turn off</div>
+      <p class="step-body">Closes the HTTPS listener immediately, cancels any in-flight retry, keeps address/owner in <code>mobile.yaml</code> with <code>enabled: false</code>.</p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2>2. Concept alignment: product vs. code</h2>
+  <table>
+    <thead>
+      <tr>
+        <th style="width: 21%;">Product concept</th>
+        <th style="width: 27%;">Code concept <span class="badge badge-existing">Existing</span></th>
+        <th style="width: 10%;">Aligns?</th>
+        <th>What is wrong (where No) / Proposed fix</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>Saved mobile approval</strong><br><span style="color:var(--text-muted);font-size:13px;">Enabled/off, QR address, approved Tailscale owner.</span></td>
+        <td><code>Configuration</code> in <code>mobile.yaml</code> (<code>enabled</code>, <code>endpoint</code>, <code>owner</code>).</td>
+        <td><span class="badge badge-yes">Yes</span></td>
+        <td>Clean 1:1 record. Unchanged; no wire, Swift, QR, or file migration needed.</td>
+      </tr>
+      <tr>
+        <td><strong>This Machine’s Tailscale daemon</strong><br><span style="color:var(--text-muted);font-size:13px;">One local Tailscale service providing identity, WhoIs, and TLS certs.</span></td>
+        <td><code>Host { binary: PathBuf, dns }</code> shelling out to <code>TAILSCALE_BE_CLI=1 Tailscale …</code>. Kickoff plan kept <em>two</em> transports: LocalAPI + full CLI fallback.</td>
+        <td><span class="badge badge-no">No</span></td>
+        <td><strong>Biggest mismatch.</strong> Two concepts for one daemon. Spawning macOS <code>Tailscale.app</code> causes the <code>nehelper</code> meltdown — and keeping it as a fallback <em>still</em> triggers <code>nehelper</code> every 60s whenever Tailscale is quit or stopped.<br><span class="badge badge-proposed">Proposed</span> One <code>Tailscale</code> LocalAPI client for all 4 distributions; delete CLI subprocess transport.</td>
+      </tr>
+      <tr>
+        <td><strong>Live Tailscale status</strong><br><span style="color:var(--text-muted);font-size:13px;">Current owner, MagicDNS name, and tailnet IPs right now.</span></td>
+        <td>Split across <code>Host::discover()</code> (keeps <code>dns</code>, discards owner/IPs) and <code>Host::identity()</code> (re-runs <code>status</code> to get owner/IPs and re-check <code>dns</code>).</td>
+        <td><span class="badge badge-no">No</span></td>
+        <td>One observation read twice under two names (4 status calls per <code>lf server mobile</code> enable).<br><span class="badge badge-proposed">Proposed</span> Single <code>HostStatus { owner, dns, addresses }</code> parsed once from <code>GET /localapi/v0/status</code>.</td>
+      </tr>
+      <tr>
+        <td><strong>Continuous owner &amp; cert guard</strong><br><span style="color:var(--text-muted);font-size:13px;">Close connected phones on logout/switch; renew cert before expiry.</span></td>
+        <td><code>maintain()</code> spawns a blocking thread every 5s running full <code>status --json</code>; can’t cancel blocking child cleanly on <code>--off</code>. Kickoff plan split into 5s (direct) vs 60s (CLI).</td>
+        <td><span class="badge badge-no">No</span></td>
+        <td>Blocking thread pool for local HTTP, O(peers) JSON every 5s on large tailnets, and dual 5s/60s security windows.<br><span class="badge badge-proposed">Proposed</span> Async <code>GET /localapi/v0/status?peers=false</code> every 5s (full <code>status</code> at bind) + async 6h cert renewal; instantly cancellable on <code>--off</code>.</td>
+      </tr>
+      <tr>
+        <td><strong>Automatic recovery</strong><br><span style="color:var(--text-muted);font-size:13px;">Quietly restore the saved port when Tailscale returns.</span></td>
+        <td><code>manage()</code> perpetual 5s <code>tokio::time::interval</code> calling <code>bind().await</code> <em>inline</em> inside <code>select!</code>. Kickoff plan added two backoff tiers (5–60s direct vs 60s flat CLI cooldown).</td>
+        <td><span class="badge badge-no">No</span></td>
+        <td>Inline <code>bind().await</code> freezes <code>Control::Status</code> and <code>--off</code> while a slow restore or cert issuance runs. Two backoff schedules exist only to protect the CLI fallback.<br><span class="badge badge-proposed">Proposed</span> Cancellable async restore task + one backoff from completion: immediate, then <code>5 → 10 → 20 → 30s</code>.</td>
+      </tr>
+      <tr>
+        <td><strong>Readiness check</strong><br><span style="color:var(--text-muted);font-size:13px;"><code>lf server mobile --status</code> and Desktop’s Mobile settings.</span></td>
+        <td><code>Control::Status</code> in <code>manage()</code>, plus offline <code>mobile.yaml</code> read when server stopped.</td>
+        <td><span class="badge badge-no">No</span></td>
+        <td>Read stalls behind an inline <code>bind()</code> today; 60s backoff in kickoff plan made Desktop’s “Restore the connection, then refresh” feel stuck.<br><span class="badge badge-proposed">Proposed</span> Non-blocking read (never stalls behind restore) + 30s max backoff.</td>
+      </tr>
+      <tr>
+        <td><strong>Per-connection admission &amp; tickets</strong><br><span style="color:var(--text-muted);font-size:13px;">Admit only another untagged device of owner; bind terminal/bulk tickets to that device.</span></td>
+        <td><code>Host::permits</code> → <code>permits_peer</code> + <code>mobile-same-device</code> opt-in → <code>Admission::Remote { node, user }</code> in <code>Tickets</code>.</td>
+        <td><span class="badge badge-yes">Yes</span></td>
+        <td>Predicate and ticket binding match the product model. Moves cleanly to async <code>GET /localapi/v0/whois?addr=…&amp;proto=tcp</code>.</td>
+      </tr>
+      <tr>
+        <td><strong>HTTPS certificate</strong><br><span style="color:var(--text-muted);font-size:13px;">Valid tailnet TLS cert with private key kept only in memory.</span></td>
+        <td><code>Host::certificate</code> parsing PEM straight into <code>rustls::ServerConfig</code> / <code>TlsAcceptor</code>.</td>
+        <td><span class="badge badge-yes">Yes</span></td>
+        <td>In-memory parsing lines up. Moves cleanly to async <code>GET /localapi/v0/cert/&lt;dns&gt;?type=pair&amp;min_validity=24h</code>.</td>
+      </tr>
+    </tbody>
+  </table>
+</section>
+
+<section>
+  <h2>3. The biggest mismatch: two Tailscale transports &amp; “The Weekend Quit Bug”</h2>
+
+  <div class="callout callout-danger">
+    <h3>Counterexample that breaks the kickoff plan’s CLI fallback</h3>
+    <p style="margin-bottom:8px;">Trace what happens on an App Store Mac when mobile access is enabled and the person quits or turns off Tailscale for the weekend:</p>
+    <div class="flow-box"><span class="hi-muted">1.</span> Person quits Tailscale → <code>IPNExtension</code> exits → no live <code>sameuserproof</code> descriptor exists.
+<span class="hi-muted">2.</span> <code>lf server</code> restoration runs → LocalAPI discovery finds no running daemon.
+<span class="hi-muted">3.</span> <span class="badge badge-existing">Kickoff plan</span> treats “no LocalAPI” as “direct access unavailable” → falls back to legacy CLI.
+<span class="hi-muted">4.</span> Spawns <code>TAILSCALE_BE_CLI=1 /Applications/Tailscale.app/Contents/MacOS/Tailscale status --json</code>.
+<span class="hi-muted">5.</span> <span class="hi-no">macOS nehelper creates a temporary NETunnelProviderManager delegate, commits preferences.plist,</span>
+   <span class="hi-no">broadcasts com.apple.neconfigurationchanged, and removes it 200ms later.</span>
+<span class="hi-muted">6.</span> CLI still fails (<code>IPNExtension</code> isn’t running!). Repeats every 60s all weekend.
+<span class="hi-muted">   (Even a PATH-only fallback hits this: macOS installs symlink /usr/local/bin/tailscale → Tailscale.app.)</span></div>
+  </div>
+
+  <p>Every Tailscale distribution on macOS and Linux exposes the exact same LocalAPI — the <code>tailscale</code> CLI itself has no separate backend; it is just a Go client to these four LocalAPI endpoints. Deleting the CLI transport removes the bug in <em>both</em> steady-state and stopped-daemon states, and collapses two transports, two health intervals, and two backoff state machines into one.</p>
+
+  <div class="grid-2">
+    <div class="card">
+      <h3>Before <span class="badge badge-existing">Existing + Kickoff Plan</span></h3>
+      <div class="flow-box">lf server mobile / remote::manage()
+ ├─ Transport A: LocalAPI (5s maintain, 5→10→20→40→60s backoff)
+ │   ├─ App Store: spawn lsof → IPNExtension proof → loopback TCP
+ │   ├─ Standalone: /Library/Tailscale/ipnport → loopback TCP
+ │   └─ tailscaled: Unix socket
+ └─ Transport B: Legacy CLI (60s maintain, 60s flat cooldown)
+     ├─ scan PATH + /Applications/Tailscale*.app + ~/Applications
+     ├─ dedupe binaries, TAILSCALE_BE_CLI=1, 15s deadline
+     ├─ "reconsider direct access" on next refresh
+     └─ <span class="hi-no">spawns Tailscale.app whenever daemon is stopped!</span>
+
+manage() select! loop:
+ └─ retry.tick() → <span class="hi-no">bind().await inline (blocks Status &amp; --off!)</span>
+ └─ spawn_blocking(status / whois / cert) <span class="hi-no">(uncancellable)</span></div>
+    </div>
+
+    <div class="card">
+      <h3>After <span class="badge badge-proposed">Proposed</span></h3>
+      <div class="flow-box">lf server mobile / remote::manage()
+ └─ One Transport: async Tailscale LocalAPI client
+     ├─ macOS App Store: <span class="hi-yes">libproc</span> IPNExtension vnode → 127.0.0.1:&lt;port&gt;
+     ├─ macOS Standalone: /Library/Tailscale/ipnport + sameuserproof
+     ├─ macOS/Linux daemon: /var/run/tailscaled.socket | tailscaled.sock
+     ├─ Custom Unix socket: TS_SOCKET (if set)
+     └─ Zero CLI execution (passive path check only for error wording)
+
+One observation + one async API:
+ ├─ Tailscale::discover() → (Tailscale, HostStatus) <span class="hi-yes">[1 status call]</span>
+ ├─ status() / status_without_peers()               <span class="hi-yes">[async, 5s]</span>
+ ├─ permits(peer, &amp;owner)                           <span class="hi-yes">[async, whois]</span>
+ └─ certificate(&amp;dns)                               <span class="hi-yes">[async, 6h]</span>
+
+manage() states: Off · Restoring (cancellable) · Ready · Backoff
+ └─ Single schedule from completion: <span class="hi-yes">immediate → 5 → 10 → 20 → 30s</span>
+ └─ Control::Status answers immediately; --off aborts in-flight bind</div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2>4. Stress-testing the proposal against counterexamples</h2>
+  <table>
+    <thead>
+      <tr>
+        <th style="width: 24%;">Scenario / Counterexample</th>
+        <th style="width: 38%;">What could break a naive design</th>
+        <th>How the proposed model handles it</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>App Store port/token rotates on daemon restart</strong></td>
+        <td>Reusing a cached loopback port/token after <code>IPNExtension</code> restarts fails forever with connection refused or 401.</td>
+        <td><code>maintain()</code> fails → listener exits and drops remote sockets → restoration re-runs <code>Tailscale::discover()</code> fresh via <code>libproc</code>, picking up the new port and token and rebinding the same saved port.</td>
+      </tr>
+      <tr>
+        <td><strong>Stale <code>/Library/Tailscale/ipnport</code> beside live App Store</strong></td>
+        <td>Stopping on the first discovery file that fails to connect leaves a working App Store daemon unused.</td>
+        <td>Discovery tries each LocalAPI candidate in order; unreachable/stale endpoints (refused, ENOENT, EACCES, 401/403) continue to the next candidate. An authoritative HTTP 200 <code>Running</code> status with wrong owner, tags, or missing MagicDNS stops immediately and never falls through.</td>
+      </tr>
+      <tr>
+        <td><strong>Tailscale uninstalled vs. installed-but-quit</strong></td>
+        <td>Without executing the CLI, error messages might lose the distinction between “Install Tailscale” and “Open Tailscale and sign in”.</td>
+        <td>When no LocalAPI candidate responds, a passive check (does <code>/Applications/Tailscale*.app</code>, <code>~/Applications/Tailscale*.app</code>, or <code>tailscale</code> on <code>PATH</code> exist on disk?) picks the exact wording with zero process launches.</td>
+      </tr>
+      <tr>
+        <td><strong><code>status?peers=false</code> omits <code>User</code> map</strong></td>
+        <td><code>owner_from_status</code> checks <code>User[user].LoginName</code>; blindly using <code>peers=false</code> at bind fails owner verification.</td>
+        <td><code>discover()</code> / <code>bind()</code> calls full <code>/localapi/v0/status</code> (verifying <code>User[user].LoginName</code>). Once bound to an approved <code>owner</code>, the 5-second <code>maintain()</code> check calls <code>/localapi/v0/status?peers=false</code> (verifying <code>BackendState</code>, untagged <code>Self</code>, <code>ID</code>, <code>UserID</code>, <code>DNSName</code>, <code>TailscaleIPs</code>) — avoiding O(peers) JSON every 5s on large tailnets.</td>
+      </tr>
+      <tr>
+        <td><strong>Slow Let’s Encrypt cert issuance during <code>--status</code> or <code>--off</code></strong></td>
+        <td>Inline <code>bind().await</code> in <code>manage()</code> stalls <code>lf server mobile --status</code> and <code>--off</code> for up to 60s.</td>
+        <td>Restoration runs as a separate cancellable task inside <code>manage()</code>. <code>Control::Status</code> returns immediately; <code>--off</code> aborts the in-flight bind and cancels its async HTTP request immediately.</td>
+      </tr>
+      <tr>
+        <td><strong>Custom Linux <code>tailscaled</code> socket</strong></td>
+        <td>Hardcoding only <code>/var/run/tailscale/tailscaled.sock</code> misses userspace or containerized <code>tailscaled --socket=…</code>.</td>
+        <td>Check <code>TS_SOCKET</code> when set before standard Unix socket paths. Same LocalAPI client, zero CLI code.</td>
+      </tr>
+    </tbody>
+  </table>
+</section>
+
+<section>
+  <h2>5. Choices made for review (recorded in <code>scratch/plan.md</code>)</h2>
+  <p>None of these choices change the wire protocol, <code>mobile.yaml</code>, QR format, or Swift clients; all are reversible before release.</p>
+  <div class="choice-list">
+    <div class="choice">
+      <h3>1. LocalAPI only — delete the CLI subprocess fallback <span class="badge badge-proposed">Chosen</span></h3>
+      <div class="choice-grid">
+        <div><div class="choice-label">Passed over</div>Keeping a legacy CLI fallback (throttled to 60s) alongside LocalAPI.</div>
+        <div><div class="choice-label">Why</div>Every supported Tailscale distribution exposes LocalAPI; any CLI fallback on macOS still spawns <code>Tailscale.app</code> and triggers <code>nehelper</code> churn whenever Tailscale is stopped, while doubling health-check and backoff complexity.</div>
+      </div>
+    </div>
+    <div class="choice">
+      <h3>2. Direct <code>libproc</code> lookup on macOS (no <code>lsof</code> child) <span class="badge badge-proposed">Chosen</span></h3>
+      <div class="choice-grid">
+        <div><div class="choice-label">Passed over</div>Spawning <code>/usr/sbin/lsof -n -a -u &lt;uid&gt; -c IPNExtension -F n</code>.</div>
+        <div><div class="choice-label">Why</div><code>lsof</code> is not setuid on macOS and calls the exact same <code>libproc</code> APIs already used by <code>os_process/macos.rs</code>. Direct kernel reads spawn zero processes, take &lt;1ms, work in sandboxes, and keep proof tokens strictly in memory.</div>
+      </div>
+    </div>
+    <div class="choice">
+      <h3>3. Cancellable async restore + single <code>5 → 10 → 20 → 30s</code> backoff <span class="badge badge-proposed">Chosen</span></h3>
+      <div class="choice-grid">
+        <div><div class="choice-label">Passed over</div>Inline blocking <code>bind()</code> in <code>select!</code> and dual 60s-ceiling backoff schedules.</div>
+        <div><div class="choice-label">Why</div>Fixes stalled <code>--status</code> / <code>--off</code> during slow binds. With zero subprocesses and &lt;0.5ms idle checks, a 30s cap is negligible and halves recovery wait when reopening Tailscale.</div>
+      </div>
+    </div>
+    <div class="choice">
+      <h3>4. Full <code>/localapi/v0/status</code> at bind; <code>?peers=false</code> every 5s <span class="badge badge-proposed">Chosen</span></h3>
+      <div class="choice-grid">
+        <div><div class="choice-label">Passed over</div>Full status (all peers) every 5s, or streaming <code>/localapi/v0/watch-ipn-bus</code>.</div>
+        <div><div class="choice-label">Why</div>Keeps the full <code>User[user].LoginName</code> check at bind, avoids parsing hundreds of peers every 5s on large tailnets, and avoids version-sensitive <code>watch-ipn-bus</code> bitmasks.</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2>6. Questions for review</h2>
+  <p>Reply with numbers and letters (for example, <code>1a, 3b</code>). Highlighted options are what <code>scratch/plan.md</code> builds unless changed.</p>
+  <div class="questions">
+    <div class="question">
+      <div class="question-title">1. Tailscale transport boundary</div>
+      <ul class="options">
+        <li class="recommended"><span class="opt-key">1a</span> <strong>LocalAPI only (proposed):</strong> Support macOS App Store, macOS Standalone, Unix sockets, and <code>TS_SOCKET</code>; delete all CLI subprocess probing so macOS can never spawn <code>Tailscale.app</code> even when Tailscale is quit.</li>
+        <li><span class="opt-key">1b</span> <strong>LocalAPI + Linux-only CLI fallback:</strong> Never spawn CLI on macOS (<code>#[cfg(not(target_os = "macos"))]</code>), keep throttled <code>PATH</code> CLI fallback on Linux.</li>
+        <li><span class="opt-key">1c</span> <strong>LocalAPI + full CLI fallback (previous plan):</strong> Keep 60s-throttled CLI fallback including macOS <code>.app</code> bundles.</li>
+      </ul>
+    </div>
+
+    <div class="question">
+      <div class="question-title">2. macOS App Store <code>IPNExtension</code> discovery</div>
+      <ul class="options">
+        <li class="recommended"><span class="opt-key">2a</span> <strong>Direct <code>libproc</code> (proposed):</strong> Inspect same-UID <code>IPNExtension</code> open vnodes in-process via <code>PROC_PIDLISTFDS</code> / <code>PROC_PIDFDVNODEPATHINFO</code> (zero subprocesses, proof token never touches a pipe).</li>
+        <li><span class="opt-key">2b</span> <strong>Bounded <code>/usr/sbin/lsof</code>:</strong> Match upstream <code>safesocket_darwin.go</code> literally with a bounded child process.</li>
+      </ul>
+    </div>
+
+    <div class="question">
+      <div class="question-title">3. Behavior of <code>lf server mobile --status</code> (Desktop’s “Refresh”) during backoff</div>
+      <ul class="options">
+        <li class="recommended"><span class="opt-key">3a</span> <strong>Strictly read-only (proposed):</strong> Always return cached manager status immediately; rely on the <code>5 → 10 → 20 → 30s</code> backoff for automatic recovery.</li>
+        <li><span class="opt-key">3b</span> <strong>Non-blocking wake on Refresh:</strong> Return cached status immediately, and if enabled &amp; sleeping in backoff (&gt;2s since last attempt), wake the retry timer so the next check runs right away.</li>
+      </ul>
+    </div>
+
+    <div class="question">
+      <div class="question-title">4. Five-second maintenance payload</div>
+      <ul class="options">
+        <li class="recommended"><span class="opt-key">4a</span> <strong>Full status at bind, <code>status?peers=false</code> every 5s (proposed):</strong> Verifies <code>User.LoginName</code> at bind while keeping 5-second checks O(1) on large tailnets.</li>
+        <li><span class="opt-key">4b</span> <strong>Full <code>/localapi/v0/status</code> everywhere:</strong> One endpoint and one parser for both bind and maintenance.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<footer>
+  Generated by <code>lf concept-review</code> · Task LOO-1080 · Source plan: <code>scratch/plan.md</code>
+</footer>
+
+</main>
+</body>
+</html>

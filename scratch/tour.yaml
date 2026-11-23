@@ -1,0 +1,13 @@
+at: 863313446476e3f365687a76dc239b2a8bfbcee8
+first:
+  - path: docs/sessions.md
+    why: What appears during opening and recovery
+  - path: swift/LoopflowMac/Services/ServerConnection.swift
+    why: Readiness controls input independently of banner visibility
+  - path: swift/LoopflowMac/Views/WorkspacePanesView.swift
+    why: Provider strip, opening spinner and retained terminal output
+  - path: swift/LoopflowTests/WorkspacePanesTests.swift
+    why: Fresh and resumed panes show the provider strip
+  - path: swift/LoopflowTests/ServerConnectionTests.swift
+    why: Readiness and recovery over the relay socket
+hide: []

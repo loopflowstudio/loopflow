@@ -19,13 +19,15 @@ Checks on this slice:
 - `scripts/test_desktop.sh --filter 'NewTaskTests/(removedWave|correctRefusedStart|startChoice|fileRefusalAndRetry)|ServerProtocolTests/taskCreationSelects'` passed all five tests, including stale planning and same-sheet correction.
 - `documented_commands::` passed all four checks. `cargo clippy --all-targets -- -D warnings` passed.
 
-## Next slice · Edit a refusal found during recovery
+## Edit a refusal found during recovery
 
-Keep the exact command, request ID and original Machine for in-flight and admitted requests. `creation.get` decides whether to recover an existing Task, continue the original command or inspect an uncertain launch. A completed receipt wins over any later Wave or workflow change. If the receipt's Task has since been deleted, recovery reports that outcome with its original identity. A saved Wave name from an earlier build cannot supply an ID retroactively. Keep its existing receipt and protocol-version rules and leave the saved payload intact.
+A refused replay checks the receipt again on the original Machine. A receipt found at that point goes to the existing result or inspector. An unavailable lookup keeps the submission in recovery. Confirmed absence parks the words, destination, workflow choice and refusal in the journal. A name-only Wave from an older build requires a new destination when editing.
 
-If an ambiguous send hands off to recovery and the exact replay is definitively refused before commit, confirm receipt absence on the original Machine. Retain the saved words, destination and Start choice as a draft awaiting correction, with the Machine's reason. Park that record from automatic sends so a later workflow edit or restart cannot submit it while someone is correcting it. Offer **Edit draft** in the recovery notice for this case. Reopen the same New Task form, require a destination choice for a removed Wave, and use a fresh request ID on deliberate resubmission. Retain the saved draft until its replacement is saved or it is discarded. Test the lost-then-refused path, including a Desktop restart, alongside the existing lost-after-commit test. A missing or unavailable lookup alone still leaves the original submission in recovery.
+**Edit draft** opens the original repository’s New Task sheet. Cancel leaves the saved draft available. Discard removes it. File or Start replaces the same journal file atomically under a fresh request ID. The [concept review](concept-review.html) records the reason for this pass. The unlocked-display walkthrough below remains for QA.
 
-Update `docs/surfaces.md` with the recovered-draft behavior. Run the focused served creation tests and the New Task and creation journal suites. The [concept review](concept-review.html) records the reason for this pass.
+- `cargo test -p loopflow --test integration task_create_tests::` passed all 11 Machine tests.
+- `scripts/test_desktop.sh --filter 'NewTaskTests|CreationSubmissionTests'` passed 26 tests. Across a restart, the removed Wave blocked both actions despite stale planning, File kept its unsent workflow choice through discard, and a corrected Start opened the Task under a fresh request ID. A failed replacement save left the parked draft intact.
+- `cargo test -p loopflow --test integration documented_commands::` passed all four documentation checks.
 
 ## Backlog handoff
 

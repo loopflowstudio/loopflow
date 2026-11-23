@@ -196,7 +196,15 @@ A confirmed refusal shows “Not filed.” or “Not started.” and the reason 
 the sheet. Your words, destination and workflow choice stay editable.
 After admission, setup errors appear in the Task's workspace. If the reply
 is lost or unreadable, the sheet closes and Desktop checks the saved
-submission on its original Machine.
+submission on its original Machine. If a receipt exists, it leads back to
+the original work. If the Machine refuses the replay and confirms it has
+no receipt, the notice offers **Edit draft** with the Machine’s reason.
+
+**Edit draft** reopens New Task in the original repository with your words,
+destination and workflow choice. Choose another destination if the Wave is
+unavailable. The draft stays saved across restarts. **Cancel** leaves it in
+the notice, **Discard draft** removes it, and File or Start saves your
+correction as a new submission before sending it.
 
 #### A Task that has not started
 

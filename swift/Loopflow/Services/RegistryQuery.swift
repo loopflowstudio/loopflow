@@ -278,7 +278,7 @@ public enum ServedRead: Equatable, Sendable, Encodable {
 }
 
 /// The Wave selected for Task creation. Saved name-based requests can provision a Wave.
-public enum CreationWave: Equatable, Sendable, Encodable {
+public enum CreationWave: Equatable, Sendable, Codable {
     case existing(id: String)
     case name(String)
 
@@ -286,6 +286,16 @@ public enum CreationWave: Equatable, Sendable, Encodable {
         switch self {
         case .existing(let id): id
         case .name(let name): name
+        }
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if let name = try? container.decode(String.self) {
+            self = .name(name)
+        } else {
+            struct Existing: Decodable { let id: String }
+            self = .existing(id: try container.decode(Existing.self).id)
         }
     }
 
@@ -789,7 +799,12 @@ public struct RegistryQuery: Sendable {
     private var serve: @Sendable (ServedRead) async throws -> ReadOutput
     /// What a `ServedWrite`'s `argv` prints: made in the app when the
     /// transport can, else run.
-    private var write: @Sendable (ServedWrite) async throws -> String
+    private var performWrite: @Sendable (ServedWrite, String?, String?) async throws -> String
+
+    private func write(_ change: ServedWrite, fileWorkflow: String? = nil, replacing: String? = nil) async throws -> String {
+        try await performWrite(change, fileWorkflow, replacing)
+    }
+
     /// A change under its request ID, answered with the revisions it advanced;
     /// nil where the transport cannot say (the CLI).
     private var change: @Sendable (ServedWrite, String) async throws -> Revisions?
@@ -803,6 +818,7 @@ public struct RegistryQuery: Sendable {
         },
         serve: (@Sendable (ServedRead) async throws -> ReadOutput)? = nil,
         write: (@Sendable (ServedWrite) async throws -> String)? = nil,
+        submissions: CreationSubmissions? = nil,
         change: (@Sendable (ServedWrite, String) async throws -> Revisions?)? = nil,
         watchFiles: (@Sendable ([String], String?) async throws -> TaskFilesObservation)? = nil,
         subscribeRead: (@Sendable ([String], String?) async throws -> LineSubscription)? = nil,
@@ -825,7 +841,26 @@ public struct RegistryQuery: Sendable {
             if let input = change.input { return try await runWithInput(change.argv, change.cwd, input) }
             return try await run(change.argv, change.cwd)
         }
-        self.write = write
+        self.performWrite = { change, fileWorkflow, replacing in
+            guard let submissions else {
+                guard replacing == nil else { throw RegistryQueryError("The saved draft is unavailable on this connection.") }
+                return try await write(change)
+            }
+            let requestID: String
+            switch change {
+            case .taskCreate(_, let id, _, _, _, _, _, _), .sessionNew(_, let id, _, _): requestID = id
+            default: return try await write(change)
+            }
+            let answer = try await submissions.submit(change, requestID: requestID, fileWorkflow: fileWorkflow, replacing: replacing)
+            do {
+                switch change {
+                case .taskCreate: _ = try RegistryQuery.decode(TaskCreated.self, from: answer)
+                case .sessionNew: _ = try RegistryQuery.decode(SessionRecord.self, from: answer)
+                default: break
+                }
+                return answer
+            } catch { throw SubmittedCreationError(requestID: requestID, cause: error) }
+        }
         self.change = change ?? { change, _ in
             _ = try await write(change)
             return nil
@@ -942,9 +977,9 @@ public struct RegistryQuery: Sendable {
             try await validate()
             return output
         }
-        query.write = { [write] change in
+        query.performWrite = { [performWrite] change, fileWorkflow, replacing in
             try await validate()
-            let output = try await write(change)
+            let output = try await performWrite(change, fileWorkflow, replacing)
             try await validate()
             return output
         }
@@ -1004,8 +1039,8 @@ public struct RegistryQuery: Sendable {
             record(stdout.text)
             return stdout
         }
-        query.write = { [write] change in
-            let stdout = try await write(change)
+        query.performWrite = { [performWrite] change, fileWorkflow, replacing in
+            let stdout = try await performWrite(change, fileWorkflow, replacing)
             record(stdout)
             return stdout
         }
@@ -1175,9 +1210,11 @@ public struct RegistryQuery: Sendable {
     /// as the first turn and returns once both are recorded; the conversation
     /// makes the checkout and starts the Graph. Without, the Task is filed
     /// unstarted and nothing runs.
-    public func createTask(request: String, wave: CreationWave?, graph: String?, run: Bool, cwd: String?, requestID: String = UUID().uuidString) async throws -> TaskCreated {
+    public func createTask(request: String, wave: CreationWave?, graph: String?, run: Bool, cwd: String?, requestID: String = UUID().uuidString,
+                           replacing: String? = nil) async throws -> TaskCreated {
         try Self.decode(TaskCreated.self, from: await write(.taskCreate(directory: cwd ?? "/", requestID: requestID,
-            title: nil, request: request, wave: wave, graph: graph, session: nil, run: run)))
+            title: nil, request: request, wave: wave, graph: run ? graph : nil, session: nil, run: run),
+            fileWorkflow: run ? nil : graph, replacing: replacing))
     }
 
     /// The graph a new Task in `wave`, or the repository when nil, would take up.

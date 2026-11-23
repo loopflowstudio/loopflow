@@ -250,6 +250,7 @@ final class WorkNavigation {
         case graph(String)
         case workflow(String)
         case newTask
+        case editDraft(RefusedTaskDraft)
     }
     @MainActor @Observable
     final class WorkspacePresentation {

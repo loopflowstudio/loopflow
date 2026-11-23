@@ -1195,7 +1195,10 @@ Task creation (including Session adoption) and new Session threads additionally
 have creation receipts. `CreationSubmissions` saves the exact submitted payload,
 request ID, original Machine and protocol version before sending; the payload
 contains the original repository directory. A single app recovery owner looks up
-receipts after restart and continues only absent or safely resumable submissions.
+receipts after restart and continues absent or safely resumable submissions.
+If an exact New Task replay is refused and the Machine confirms receipt absence,
+Desktop parks the submission. **Edit draft** opens it in the saved repository.
+Resubmission atomically replaces that journal entry under a fresh request ID.
 The server derives `complete`, `continue` or `inspect`; Desktop does not infer
 continuation from milestones. `CreationPresentation` retires a submission when
 its Task or Session view mounts, including promotion. Cold recovery's Show result

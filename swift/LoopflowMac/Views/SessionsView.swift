@@ -1661,6 +1661,8 @@ struct SessionsContentView: View {
                 WorkPalette(model: model, sidebarOnly: true, activate: navigate)
             case .newTask:
                 NewTaskSheet(model: model)
+            case .editDraft(let draft):
+                NewTaskSheet(model: model, recovered: draft).id(draft.id)
             case nil:
                 EmptyView()
             }

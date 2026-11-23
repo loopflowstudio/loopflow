@@ -65,11 +65,11 @@ struct NewTaskTests {
     }
 
     private func model(catalog: OSAllocatedUnfairLock<String> = .init(initialState: "[]"),
-                       planning: String? = nil,
+                       planning: String? = nil, submissions: CreationSubmissions? = nil,
                        subscribe: (@Sendable () async throws -> WorkObservation)? = nil,
                        write: @escaping @Sendable (ServedWrite) async throws -> String) async throws -> WorkModel {
         let initial = String(decoding: try loadFixtureData("roadmap_snapshot.json"), as: UTF8.self)
-        let model = WorkModel(query: RegistryQuery(write: write, subscribeWork: subscribe) { args, _ in
+        let model = WorkModel(query: RegistryQuery(write: write, submissions: submissions, subscribeWork: subscribe) { args, _ in
             if args.starts(with: ["plan", "list"]), !args.contains("--task") { return planning ?? initial }
             if args.starts(with: ["graph", "list"]) { return catalog.withLock { $0 } }
             if args.starts(with: ["wave", "graph", "show"]) {
@@ -255,6 +255,108 @@ struct NewTaskTests {
         let payload = try #require(JSONSerialization.jsonObject(with: record.payload) as? [String: Any])
         #expect(payload["request_id"] as? String == record.id)
         #expect(payload["request"] as? String == "start once")
+    }
+
+    @Test("A lost creation refused on replay reopens as an editable draft across restart",
+          arguments: [NewTaskAction.start(graph: "code"), .file])
+    func editDraftAfterLostReply(action: NewTaskAction) async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let sends = OSAllocatedUnfairLock<[Data]>(initialState: [])
+        let refusal = ServerError(code: "not_found", message: "The selected Wave disappeared.",
+                                  data: .object(["wave_id": .string("wave-1")]))
+        let admitted = try json(fixtureArray("task_create_receipt.json")[0])
+        func journal() -> CreationSubmissions {
+            CreationSubmissions(directory: directory, machine: { "original" }, lookup: { _ in ReadOutput("null") },
+                send: { payload in
+                    let attempt = sends.withLock { $0.append(payload); return $0.count }
+                    switch attempt {
+                    case 1: throw RegistryQueryError("Connection lost before admission")
+                    case 2: throw refusal
+                    default: return admitted
+                    }
+                })
+        }
+        let first = journal()
+        let catalog = OSAllocatedUnfairLock(initialState: try catalogWithCode())
+        func window(_ submissions: CreationSubmissions) async throws -> WorkModel {
+            try await self.model(catalog: catalog, submissions: submissions) { _ in
+                throw RegistryQueryError("Unexpected write")
+            }
+        }
+        let initial = try await window(first)
+        let sheet = NewTaskSheet(model: initial)
+        try sheet.inspect().find(button: #require(initial.visibleRoadmaps.first?.wave.displayName)).tap()
+        try sheet.inspect().find(ViewType.TextField.self).setInput("keep these words")
+        try toggle("code", in: sheet).tap()
+        try sheet.inspect().find(button: action == .file ? "File to backlog" : "Start with code ⌘↩").tap()
+        try await eventually { initial.navigation.palette == nil }
+        let original = try #require(await first.pending().first)
+        let recovery = CreationRecovery(submissions: first)
+        await recovery.refresh()
+        #expect(recovery.items.first?.draft?.id == original.id)
+        #expect(sends.withLock { $0 } == [original.payload, original.payload])
+        if action == .file {
+            let command = try #require(JSONSerialization.jsonObject(with: original.payload) as? [String: Any])
+            #expect(command["graph"] is NSNull)
+            #expect(command["run"] as? Bool == false)
+        }
+
+        let cold = journal()
+        let restarted = CreationRecovery(submissions: cold)
+        let model = try await window(cold)
+        model.navigation.palette = nil
+        let notices = model.navigation.notices
+        if notices.event != nil { notices.dismiss() }
+        restarted.report(to: notices, editDraft: model.editDraft)
+        await restarted.refresh()
+        #expect(model.navigation.palette == nil)
+        #expect(notices.current?.action?.title == "Edit draft")
+        #expect(notices.current?.text.contains(refusal.message) == true)
+        #expect(try await cold.reconcile(original) == nil)
+        notices.current?.action?.perform()
+        guard case .editDraft(let draft) = model.navigation.palette else {
+            Issue.record("Edit draft did not open the refused creation")
+            return
+        }
+        let editing = NewTaskSheet(model: model, recovered: draft, recovery: restarted)
+        let view = try editing.inspect()
+        #expect(try view.find(ViewType.TextField.self).input() == "keep these words")
+        #expect(try toggle("code", in: editing).isOn())
+        _ = try view.find(text: "Wave unavailable")
+        _ = try view.find(text: refusal.message)
+        #expect(try view.find(button: "File to backlog").isDisabled())
+        #expect(try view.find(button: "Start with code ⌘↩").isDisabled())
+        try view.find(button: model.repositoryName).tap()
+        try toggle("Use default", in: editing).tap()
+        try view.find(ViewType.TextField.self).setInput("corrected words")
+        await restarted.refresh()
+        #expect(sends.withLock { $0.count } == 2)
+        #expect(try await cold.pending().first?.refusedDraft == draft)
+        if action == .file {
+            try editing.inspect().find(button: "Discard draft").tap()
+            try await eventually { restarted.items.isEmpty }
+            #expect(try await cold.pending().isEmpty)
+            #expect(sends.withLock { $0.count } == 2)
+            return
+        }
+        try editing.inspect().find(button: "Start with code ⌘↩").tap()
+        try await eventually { model.selection?.kind == .task }
+        #expect(model.navigation.palette == nil)
+        let records = try await cold.pending()
+        let replacement = try #require(records.first)
+        #expect(records.count == 1 && replacement.id != original.id && replacement.refusedDraft == nil)
+        let sent = sends.withLock { $0 }
+        #expect(sent == [original.payload, original.payload, replacement.payload])
+        let command = try #require(JSONSerialization.jsonObject(with: replacement.payload) as? [String: Any])
+        #expect(command["request"] as? String == "corrected words")
+        #expect(command["run"] as? Bool == true && command["wave"] is NSNull && command["graph"] is NSNull)
+        #expect(command["request_id"] as? String == replacement.id)
+        try await cold.discardDraft(original.id)
+        #expect(try await cold.pending().map(\.id) == [replacement.id])
+        try await cold.presented(replacement.id)
+        #expect(try await cold.pending().isEmpty)
+        await CreationRecovery.shared.presented([replacement.id])
     }
 
     enum TaskChange: CaseIterable { case moved, started }

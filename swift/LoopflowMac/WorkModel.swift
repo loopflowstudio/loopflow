@@ -861,8 +861,14 @@ final class WorkModel {
         } else { select(.wave(id: id)) }
     }
 
+    func editDraft(_ draft: RefusedTaskDraft) {
+        if draft.directory == repoPath { navigation.palette = .editDraft(draft) }
+        else { openRepository?(draft.directory, .editDraft(draft)) }
+    }
+
     func receiveWorkLink(_ link: LinkedWork) async {
         switch link {
+        case .editDraft(let draft): navigation.palette = .editDraft(draft)
         case .task(let link): await openTaskLink(link)
         case .session(let id, let address): await openSessionLink(id, address: address)
         case .wave(let name, _):
@@ -2627,15 +2633,15 @@ final class WorkModel {
     /// Only a confirmed refusal returns to the draft. A saved submission whose
     /// answer is unknown stays with recovery on its original Machine.
     func submitTask(_ action: NewTaskAction, request: String, wave: WaveSnapshot?,
-                    requestID: String = UUID().uuidString) async throws {
+                    requestID: String = UUID().uuidString, fileWorkflow: String? = nil, replacing: String? = nil) async throws {
         let owner = navigation
         let presentation = owner.paletteGeneration
         let destination = destinationGeneration
         let machine = observingMachineId
         let created: TaskCreated?
         do {
-            let answer = try await query.createTask(request: request, wave: wave.map { .existing(id: $0.id) }, graph: action.graph,
-                                                    run: action != .file, cwd: repoPath, requestID: requestID)
+            let answer = try await query.createTask(request: request, wave: wave.map { .existing(id: $0.id) }, graph: action.graph ?? fileWorkflow,
+                                                    run: action != .file, cwd: repoPath, requestID: requestID, replacing: replacing)
             created = answer
             if case .start = action {
                 let receipt = answer.receipt
@@ -2651,7 +2657,10 @@ final class WorkModel {
             created = nil
         }
         guard owner.paletteGeneration == presentation else { return }
-        if owner.palette == .newTask { owner.palette = nil }
+        switch owner.palette {
+        case .newTask, .editDraft: owner.palette = nil
+        default: break
+        }
         guard let created, navigation === owner, destinationGeneration == destination,
               observingMachineId == machine else { return }
         switch action {

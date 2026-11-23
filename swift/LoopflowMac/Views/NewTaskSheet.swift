@@ -5,7 +5,8 @@ import SwiftUI
 @MainActor @Observable
 private final class NewTaskDraft {
     var request = ""
-    var waveID: String?
+    var scope: CreationWave?
+    var replacing: String?
     var unavailableWaves: Set<String> = []
     var graph: String?
     enum Submission: Equatable {
@@ -20,25 +21,50 @@ private final class NewTaskDraft {
         return false
     }
 
-    init(waveID: String?) { self.waveID = waveID }
+    init(waveID: String?, recovered: RefusedTaskDraft?) {
+        if let recovered {
+            request = recovered.request
+            scope = recovered.wave
+            graph = recovered.graph
+            replacing = recovered.id
+            refuse(recovered.run ? .start(graph: graph) : .file, error: recovered.refusal)
+        } else {
+            scope = waveID.map { .existing(id: $0) }
+        }
+    }
+
+    func refuse(_ action: NewTaskAction, error: Error) {
+        let parked = error as? RefusedTaskDraft
+        if let parked { replacing = parked.id }
+        if let refusal = parked?.refusal ?? (error as? ServerError), refusal.code == .notFound,
+           case .object(let detail) = refusal.data, case .string(let id) = detail["wave_id"] {
+            unavailableWaves.insert(id)
+        }
+        submission = .refused(action, error.localizedDescription)
+    }
 }
 
 struct NewTaskSheet: View {
     let model: WorkModel
+    let recovery: CreationRecovery
     @Environment(\.palette) private var palette
     @Environment(\.dismiss) private var dismiss
     @State private var draft: NewTaskDraft
     @FocusState private var focused: Bool
 
-    init(model: WorkModel) {
+    init(model: WorkModel, recovered: RefusedTaskDraft? = nil, recovery: CreationRecovery = .shared) {
+        self.recovery = recovery
         self.model = model
-        _draft = State(initialValue: NewTaskDraft(waveID: model.navigation.sidebarWaveID))
+        _draft = State(initialValue: NewTaskDraft(waveID: model.navigation.sidebarWaveID, recovered: recovered))
     }
 
-    private var wave: WaveSnapshot? { draft.waveID.flatMap { model.wave(id: $0)?.wave } }
+    private var wave: WaveSnapshot? {
+        guard case .existing(let id) = draft.scope else { return nil }
+        return model.wave(id: id)?.wave
+    }
     private var destination: WorkNavigation.Board? {
-        guard let id = draft.waveID else { return .repository }
-        guard !draft.unavailableWaves.contains(id) else { return nil }
+        guard let scope = draft.scope else { return .repository }
+        guard case .existing(let id) = scope, !draft.unavailableWaves.contains(id) else { return nil }
         return wave.map { .wave($0.id) }
     }
     private var canSubmit: Bool { !trimmed.isEmpty && destination != nil && !draft.isSending }
@@ -91,6 +117,19 @@ struct NewTaskSheet: View {
                     .foregroundStyle(palette.textSecondary)
             }
             HStack(spacing: Spacing.sm) {
+                if let id = draft.replacing {
+                    Button("Discard draft", role: .destructive) {
+                        Task {
+                            do {
+                                try await recovery.discardDraft(id)
+                                dismiss()
+                            } catch {
+                                model.navigation.notices.post(Notice("Couldn’t discard draft. \(error.localizedDescription)"))
+                            }
+                        }
+                    }
+                    .buttonStyle(LoopflowButtonStyle())
+                }
                 Spacer()
                 Button("Cancel") { dismiss() }
                     .buttonStyle(LoopflowButtonStyle())
@@ -122,9 +161,9 @@ struct NewTaskSheet: View {
         HStack(spacing: Spacing.xs) {
             Text("In")
             Menu(destination == nil ? "Wave unavailable" : model.scopeName(wave)) {
-                Button(model.repositoryName) { draft.waveID = nil }
+                Button(model.repositoryName) { draft.scope = nil }
                 ForEach(model.visibleRoadmaps, id: \.wave.id) { roadmap in
-                    Button(roadmap.wave.displayName) { draft.waveID = roadmap.wave.id }
+                    Button(roadmap.wave.displayName) { draft.scope = .existing(id: roadmap.wave.id) }
                         .disabled(draft.unavailableWaves.contains(roadmap.wave.id))
                 }
             }
@@ -177,13 +216,10 @@ struct NewTaskSheet: View {
         // Begin in this sheet's repository before navigation can change.
         Task.immediate {
             do {
-                try await model.submitTask(action, request: trimmed, wave: wave, requestID: requestID)
+                try await model.submitTask(action, request: trimmed, wave: wave, requestID: requestID,
+                                           fileWorkflow: action == .file ? draft.graph : nil, replacing: draft.replacing)
             } catch {
-                if let refusal = error as? ServerError, refusal.code == .notFound,
-                   case .object(let detail) = refusal.data, case .string(let id) = detail["wave_id"] {
-                    draft.unavailableWaves.insert(id)
-                }
-                draft.submission = .refused(action, error.localizedDescription)
+                draft.refuse(action, error: error)
             }
         }
     }

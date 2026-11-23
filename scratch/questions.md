@@ -21,3 +21,5 @@ Pass 2 choice. **In** selects the existing Wave ID. A rename keeps that choice a
 When recovery confirms a refusal, **Edit draft** brings back the saved request on demand. An automatic reopening could interrupt work in another window.
 
 I used the Wave resolver’s UUID convention for `lf task create --wave`. A UUID selects the existing Wave. The saved string keeps its original fingerprint. Desktop records the ID object so an older Machine cannot treat it as a name to provision.
+
+In a recovered sheet, Cancel keeps the last saved draft and Discard draft removes it. File keeps the menu’s named workflow in the Desktop journal so Edit draft can restore the selection. Only Start includes it in the Machine command.

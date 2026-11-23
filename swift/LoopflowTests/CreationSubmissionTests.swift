@@ -105,6 +105,20 @@ struct CreationSubmissionTests {
         #expect(Set(fields.keys) == Set(["requestID", "destination", "payload", "version", "submittedAt"]))
     }
 
+    @Test func anUnreadableUnrelatedDraftStillAllowsANewSubmission() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try Data().write(to: root.appendingPathComponent("damaged.json"))
+        let machine = CreationTestMachine()
+        let client = CreationSubmissions(directory: root, machine: { "original" },
+            lookup: { await machine.lookup($0) }, send: { try await machine.send($0) })
+        _ = try await client.submit(.taskCreate(directory: "/repo", requestID: "fresh", title: nil,
+            request: "new words", wave: nil, graph: nil, session: nil, run: false), requestID: "fresh")
+        #expect(await machine.creations == 1)
+        await #expect(throws: DecodingError.self) { try await client.pending() }
+    }
+
     @Test func aRefusedCreationReturnsToTheDraftOnlyAfterConfirmedAbsence() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
@@ -123,6 +137,79 @@ struct CreationSubmissionTests {
         await server.unknown("file")
         await #expect(throws: SubmittedCreationError.self) { try await client.submit(change, requestID: "file") }
         #expect(try await client.pending().first?.id == "file")
+    }
+
+    @Test("Only a confirmed absent receipt after replay returns a draft", arguments: [true, false])
+    func refusalRequiresAnotherReceiptLookup(receiptAvailable: Bool) async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let machine = CreationTestMachine()
+        let client = CreationSubmissions(directory: root, machine: { "original" }, lookup: { id in
+            if !receiptAvailable, await machine.creations > 0 { throw RegistryQueryError("Machine disconnected") }
+            return await machine.lookup(id)
+        }, send: { payload in
+            _ = try await machine.send(payload)
+            throw ServerError(code: "invalid", message: "Start refused", data: .null)
+        })
+        let record = try await client.record(.taskCreate(directory: "/repo", requestID: "original", title: nil,
+            request: "my words", wave: nil, graph: nil, session: nil, run: true), requestID: "original")
+        if receiptAvailable {
+            #expect(try await client.reconcile(record, keepingRefusedDraft: true)?.taskId == "original")
+        } else {
+            await #expect(throws: RegistryQueryError.self) { try await client.reconcile(record, keepingRefusedDraft: true) }
+        }
+        let pending = try #require(await client.pending().first)
+        #expect(pending.id == record.id && pending.refusedDraft == nil)
+        #expect(await machine.submissions == [record.payload])
+    }
+
+    @MainActor @Test func unsuccessfulReplacementKeepsTheParkedDraftUntilDiscard() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let server = CreationTestMachine()
+        func client(on machine: String) -> CreationSubmissions {
+            CreationSubmissions(directory: root, machine: { machine }, lookup: { await server.lookup($0) },
+                send: { _ in throw ServerError(code: "invalid", message: "Workflow removed", data: .null) })
+        }
+        func start(_ id: String, graph: String?) -> ServedWrite {
+            .taskCreate(directory: "/repo", requestID: id, title: nil, request: "original words",
+                        wave: .name("product"), graph: graph, session: nil, run: true)
+        }
+        let original = client(on: "original")
+        let record = try await original.record(start("one", graph: "removed"), requestID: "one")
+        let recovery = CreationRecovery(submissions: original)
+        await recovery.refresh()
+        let draft = try #require(recovery.items.first?.draft)
+        #expect(draft.wave == .name("product") && draft.graph == "removed")
+
+        let correction = start("two", graph: nil)
+        await #expect(throws: RegistryQueryError.self) {
+            try await client(on: "another").submit(correction, requestID: "two", replacing: draft.id)
+        }
+        let file = try #require(FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil).first)
+        try FileManager.default.setAttributes([.immutable: true], ofItemAtPath: file.path)
+        defer { try? FileManager.default.setAttributes([.immutable: false], ofItemAtPath: file.path) }
+        await #expect(throws: (any Error).self) {
+            try await original.submit(correction, requestID: "two", replacing: draft.id)
+        }
+        try FileManager.default.setAttributes([.immutable: false], ofItemAtPath: file.path)
+        let saved = try #require(await original.pending().first)
+        #expect(saved.refusedDraft == draft && saved.payload == record.payload)
+
+        // The next refusal belongs to the saved correction. A stale window
+        // can neither discard nor replace it by acting on the first ID.
+        await #expect(throws: RefusedTaskDraft.self) {
+            try await original.submit(correction, requestID: "two", replacing: draft.id)
+        }
+        try await recovery.discardDraft(draft.id)
+        await #expect(throws: RegistryQueryError.self) {
+            try await original.submit(start("three", graph: nil), requestID: "three", replacing: draft.id)
+        }
+        await recovery.refresh()
+        let corrected = try #require(recovery.items.first?.draft)
+        #expect(corrected.id == "two" && corrected.graph == nil)
+        try await recovery.discardDraft(corrected.id)
+        #expect(try await original.pending().isEmpty && recovery.items.isEmpty)
     }
 
     @Test func simultaneousWindowsShareOneRecoveryAndUnavailableLookupNeverSends() async throws {
@@ -234,7 +321,7 @@ struct CreationSubmissionTests {
             request: nil, wave: nil, graph: nil, session: nil, run: false), requestID: "same")
         let recovery = CreationRecovery(submissions: client)
         let notices = NoticeCenter()
-        recovery.report(to: notices)
+        recovery.report(to: notices) { _ in Issue.record("Expected a receipt") }
         await recovery.refresh()
         let item = try #require(recovery.items.first)
         #expect(item.complete)

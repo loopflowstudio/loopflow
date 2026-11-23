@@ -82,7 +82,7 @@ public struct ServerAnswer: Sendable {
 }
 
 /// What a client branches on: the Rust `ErrorCode`'s wire names.
-public enum ServerErrorCode: String, Sendable, Equatable {
+public enum ServerErrorCode: String, Codable, Sendable, Equatable {
     case incompatible, invalid, conflict, unavailable, busy
     case notFound = "not_found"
     case outcomeUnknown = "outcome_unknown"
@@ -90,7 +90,7 @@ public enum ServerErrorCode: String, Sendable, Equatable {
 
 /// A server `error`, typed so callers branch on `code` rather than its text.
 /// `code` is nil for a code this client does not know yet.
-public struct ServerError: LocalizedError, Sendable, Equatable {
+public struct ServerError: LocalizedError, Codable, Sendable, Equatable {
     public let code: ServerErrorCode?
     public let message: String
     public let data: JSONValue

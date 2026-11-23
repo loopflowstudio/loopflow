@@ -10,21 +10,24 @@ import struct
 import subprocess
 import sys
 import tempfile
+from contextlib import contextmanager
 from pathlib import Path
 
 import tomllib
 
 REVISION = "ca81ec2a2566efc623692741440d99c710268841"
 CACHE_ENV = {
+    "SCCACHE_BASEDIRS_VERBATIM_ENV_DEPS": (
+        "CARGO_MANIFEST_DIR,CARGO_MANIFEST_PATH,LOOPFLOW_BUILD_SOURCE_ROOT"
+    ),
     "SCCACHE_CLIENT_SIDE": "1",
     "SCCACHE_ALLOW_INCREMENTAL": "1",
     "SCCACHE_MAX_FRAME_LENGTH": str(1024 * 1024 * 1024),
     "SCCACHE_IGNORE_SERVER_IO_ERROR": "1",
 }
-VERBATIM_ENV_DEPS = "CARGO_MANIFEST_DIR,CARGO_MANIFEST_PATH,LOOPFLOW_BUILD_SOURCE_ROOT"
 
 
-def worktree_roots(repo: Path, *, env: dict[str, str] | None = None) -> set[str]:
+def _worktree_roots(repo: Path, *, env: dict[str, str] | None = None) -> set[str]:
     result = subprocess.run(
         ["git", "worktree", "list", "--porcelain", "-z"],
         cwd=repo,
@@ -48,40 +51,54 @@ def _configured_roots(settings: dict) -> list[str]:
     return roots
 
 
-def write_inventory(repo: Path, config: Path, settings: dict | None = None) -> None:
-    """Write the next daemon's configuration, leaving the running daemon alone."""
+def _replace_file(path: Path, content: str) -> None:
+    with tempfile.NamedTemporaryFile(mode="w", dir=path.parent, delete=False) as output:
+        temporary = Path(output.name)
+        try:
+            output.write(content)
+            output.flush()
+            temporary.replace(path)
+        finally:
+            temporary.unlink(missing_ok=True)
+
+
+@contextmanager
+def _inventory_lock(config: Path):
     config.parent.mkdir(parents=True, exist_ok=True)
     with config.with_suffix(".lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
-        roots = worktree_roots(repo)
-        saved = json.loads(config.read_text()) if config.exists() else {}
-        # Keep other repositories using the same Machine cache. Rewrite each
-        # repository's complete inventory so removed worktrees do not accumulate.
-        # Git hooks can export the current repository even when cwd points elsewhere.
-        other_env = {
-            k: v
-            for k, v in os.environ.items()
-            if k not in ("GIT_DIR", "GIT_COMMON_DIR", "GIT_WORK_TREE")
-        }
-        for old in _configured_roots(saved):
-            path = Path(old)
-            if path.exists() and old not in roots:
-                try:
-                    roots.update(worktree_roots(path, env=other_env))
-                except subprocess.CalledProcessError:
-                    continue
-        selected = dict(saved if settings is None else settings)
-        selected["basedirs"] = sorted(roots)
-        encoded = json.dumps(selected, indent=2) + "\n"
-        if not config.exists() or config.read_text() != encoded:
-            with tempfile.NamedTemporaryFile(mode="w", dir=config.parent, delete=False) as output:
-                temporary = Path(output.name)
-                try:
-                    output.write(encoded)
-                    output.close()
-                    temporary.replace(config)
-                finally:
-                    temporary.unlink(missing_ok=True)
+        yield
+
+
+def write_inventory(repo: Path, config: Path, settings: dict | None = None) -> None:
+    with _inventory_lock(config):
+        _write_inventory(repo, config, settings)
+
+
+def _write_inventory(repo: Path, config: Path, settings: dict | None = None) -> None:
+    roots = _worktree_roots(repo)
+    original = config.read_text() if config.exists() else None
+    saved = json.loads(original) if original is not None else {}
+    # Keep other repositories using the same Machine cache. Rewrite each
+    # repository's complete inventory so removed worktrees do not accumulate.
+    # Git hooks can export the current repository even when cwd points elsewhere.
+    other_env = {
+        k: v
+        for k, v in os.environ.items()
+        if k not in ("GIT_DIR", "GIT_COMMON_DIR", "GIT_WORK_TREE")
+    }
+    for old in _configured_roots(saved):
+        path = Path(old)
+        if path.exists() and old not in roots:
+            try:
+                roots.update(_worktree_roots(path, env=other_env))
+            except subprocess.CalledProcessError:
+                continue
+    selected = dict(saved if settings is None else settings)
+    selected["basedirs"] = sorted(roots)
+    encoded = json.dumps(selected, indent=2) + "\n"
+    if original != encoded:
+        _replace_file(config, encoded)
 
 
 def _default_configuration() -> dict:
@@ -112,7 +129,6 @@ def cache_environment(revision: str = REVISION) -> dict[str, str]:
         **CACHE_ENV,
         "SCCACHE_CONF": str(config),
         "SCCACHE_SERVER_UDS": str(config.parent / f"sccache-{revision[:8]}.sock"),
-        "SCCACHE_BASEDIRS_VERBATIM_ENV_DEPS": VERBATIM_ENV_DEPS,
     }
 
 
@@ -135,14 +151,7 @@ def configure_cargo(path: Path, wrapper: Path, env: dict[str, str]) -> None:
     encoded = tomlkit.dumps(config)
     if encoded != original:
         path.parent.mkdir(parents=True, exist_ok=True)
-        with tempfile.NamedTemporaryFile(mode="w", dir=path.parent, delete=False) as output:
-            temporary = Path(output.name)
-            try:
-                output.write(encoded)
-                output.close()
-                temporary.replace(path)
-            finally:
-                temporary.unlink(missing_ok=True)
+        _replace_file(path, encoded)
 
 
 def install_hook(repo: Path) -> None:
@@ -158,11 +167,9 @@ def install_hook(repo: Path) -> None:
     # Worktrees can check out revisions that predate this installer.
     program = hook.parent / "loopflow-build-cache.py"
     hook.parent.mkdir(parents=True, exist_ok=True)
-    source = Path(__file__).read_bytes()
-    if not program.exists() or source != program.read_bytes():
-        with tempfile.NamedTemporaryFile(dir=hook.parent, delete=False) as output:
-            output.write(source)
-        Path(output.name).replace(program)
+    source = Path(__file__).read_text()
+    if not program.exists() or source != program.read_text():
+        _replace_file(program, source)
     command = shlex.join([str(Path(sys.executable).resolve()), str(program.resolve()), "register"])
     block = (
         f'{begin}\nif [ "${{3:-}}" = 1 ]; then\n'
@@ -183,10 +190,18 @@ def install_hook(repo: Path) -> None:
     hook.chmod(hook.stat().st_mode | 0o111)
 
 
+def _is_revision(value: str) -> bool:
+    return len(value) == 40 and all(c in "0123456789abcdef" for c in value)
+
+
+def _pin_directory(revision: str) -> Path:
+    return Path.home() / ".local/share/loopflow/sccache" / revision
+
+
 def install(repo: Path, revision: str) -> None:
-    if len(revision) != 40 or any(c not in "0123456789abcdef" for c in revision):
+    if not _is_revision(revision):
         raise ValueError("revision must be a full lowercase Git SHA")
-    prefix = Path.home() / ".local/share/loopflow/sccache" / revision
+    prefix = _pin_directory(revision)
     wrapper = prefix / "bin/sccache"
     if not wrapper.exists():
         env = {
@@ -260,17 +275,13 @@ def _manages_roots(env: dict[str, str]) -> bool:
 
 
 def cache_status(repo: Path, wrapper: Path | None, env: dict[str, str]) -> dict:
-    expected = Path.home() / ".local/share/loopflow/sccache" / REVISION / "bin/sccache"
     # A revision override is still a pin when its full SHA is carried in the stable path.
     pinned = bool(
         wrapper
         and wrapper.is_file()
         and os.access(wrapper, os.X_OK)
-        and wrapper.name == "sccache"
-        and wrapper.parent.name == "bin"
-        and wrapper.parent.parent.parent == expected.parent.parent.parent
-        and len(wrapper.parent.parent.name) == 40
-        and all(c in "0123456789abcdef" for c in wrapper.parent.parent.name)
+        and _is_revision(revision := wrapper.parent.parent.name)
+        and wrapper == _pin_directory(revision) / "bin/sccache"
     )
     config = Path(env.get("SCCACHE_CONF", str(inventory_path())))
     managed = _manages_roots(env)
@@ -353,11 +364,9 @@ def register(repo: Path) -> None:
     if not _manages_roots(env):
         return
     config = inventory_path()
-    config.parent.mkdir(parents=True, exist_ok=True)
     # Concurrent checkouts must observe the daemon after the preceding registration.
-    with config.with_suffix(".register.lock").open("a") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
-        write_inventory(repo, config)
+    with _inventory_lock(config):
+        _write_inventory(repo, config)
         state = cache_status(repo, wrapper, env)
         if not state["exit_code"]:
             return

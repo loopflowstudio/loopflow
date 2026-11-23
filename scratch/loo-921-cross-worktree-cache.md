@@ -54,11 +54,9 @@ capacity as unmeasured unless a separate permitted experiment exists".
   rlib. Checking for an absolute path in `strings` did not identify the producer.
   The report retains the per-invocation counters and hashes. The opening
   Machine status was 100/100 loaded, 10 GiB/10 GiB occupied.
-- `uv run pytest -q python/tests/{test_build_cache,test_dev_lf}.py` passed all
-  17 cases (rerun November 22 after renaming the writer). They cover skipped-hook
-  recovery, the stale daemon, missing inventory with a loaded root, caller-owned
-  configuration and the isolated build. A linked checkout with its hook skipped returned 3 without creating
-  the inventory. Manual registration listed both roots and status returned 0.
+- `uv run pytest -q python/tests/{test_build_cache,test_crate_test_loop,test_dev_lf}.py` passed 31 cases, including consecutive edits in the current Rust sources.
+- `root_probe.py` with the installed pin recorded 0 hits / 1 miss in each root before idle exit and 1 hit / 0 misses in the second root afterward. Both executables reported their own checkout.
+- The edit-to-test driver on a two-crate fixture linked and passed four seeds and 39 samples. Alternating mode order, worktree cleanup and resuming the completed run passed. Replaying the archived LOO-921 receipts reproduced the published HTML byte for byte.
 - With the installed pin on a private socket, a stale daemon survived both
   status and caller-owned registration. Machine registration stopped it. The
   next plain Cargo build passed with the second root loaded by a different PID.
@@ -67,19 +65,12 @@ capacity as unmeasured unless a separate permitted experiment exists".
   November 22. Reinstall from the merged checkout during verification to update
   the copy and check the live checkout path.
 
-## Registration and recovery
-
-Installation seeds the inventory. Git's fail-soft hook and manual `register`
-share the serialized inventory update and conditional stop. Status reports
-the configured and loaded roots. A missing Machine root points to registration.
-A caller-owned list points to its configuration. Ordinary builds use Cargo
-directly, and isolated builds bypass the cache.
-
 ## Delete — do not maintain
 
-Removed the old dev-lf cache environment injection, build_cache.py exec-wrapper
-and duplicate environment constants. Status reports only the configured
-next-start timeout. Registration-triggered stop replaces idle-wait registration and its
-checkout instructions. Keep the isolated natural-idle probe and fail-soft checkout.
-The passive `refresh` command and launcher call are gone. Installation,
-registration and the private probes share `write_inventory`.
+The build launcher, hook and probes no longer need a passive `refresh` command.
+Keep Git and manual registration on the same path. One inventory lock covers
+the write and any daemon stop. Keep the natural-idle probe for cache reuse.
+
+The edit-to-test driver uses one group schedule for setup, recovery, execution
+and validation. Historical receipts keep the driver hash and edit paths from
+their run.

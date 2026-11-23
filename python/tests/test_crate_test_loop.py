@@ -1,8 +1,9 @@
 """Benchmark reports require complete passing cohorts and exclude seed costs."""
 
 import gzip
-import importlib.util
+import importlib
 import json
+import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -15,10 +16,30 @@ ROOT = Path(__file__).resolve().parents[2]
 def probe(monkeypatch):
     directory = ROOT / "scripts/benchmarks/crate-rebuild"
     monkeypatch.syspath_prepend(str(directory))
-    spec = importlib.util.spec_from_file_location("crate_test_loop", directory / "test_loop.py")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    return importlib.import_module("test_loop")
+
+
+def test_consecutive_edits_replace_the_committed_message_in_each_crate(probe, tmp_path):
+    tree = tmp_path / "source"
+    subprocess.run(["git", "clone", "--quiet", "--shared", "--no-checkout", ROOT, tree], check=True)
+    subprocess.run(
+        [
+            "git",
+            "restore",
+            "--source=HEAD",
+            "--worktree",
+            "rust/loopflow/src",
+            "rust/loopflow-execution/src",
+        ],
+        cwd=tree,
+        check=True,
+    )
+    for owner in ("app", "execution"):
+        path = tree / probe._edit(tree, owner, "first measurement")
+        first = path.read_text()
+        probe._edit(tree, owner, "second measurement")
+        assert "first measurement" in first
+        assert path.read_text() == first.replace("first measurement", "second measurement")
 
 
 def _receipts(probe):
@@ -81,10 +102,7 @@ def test_incomplete_or_nonpassing_samples_cannot_publish(probe, change):
 def test_report_selects_incremental_only_when_both_edit_totals_win(
     probe, tmp_path, winners, default
 ):
-    directory = ROOT / "scripts/benchmarks/crate-rebuild"
-    spec = importlib.util.spec_from_file_location("crate_report", directory / "report.py")
-    report = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(report)
+    report = importlib.import_module("report")
     rows = _receipts(probe)
     for row in rows:
         owner = "app" if row["case"] in probe.CASES[:3] else "execution"

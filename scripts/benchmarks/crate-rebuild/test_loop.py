@@ -12,14 +12,15 @@ import subprocess
 import sys
 import tempfile
 import time
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from pathlib import Path
 
-import tomlkit
+import tomllib
+from compiler_receipt import install_wrapper
 from run import _timing
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from build_cache import cargo_configuration, configured_cache, daemon_pid, refresh  # noqa: E402
+from build_cache import cargo_configuration, configured_cache, daemon_pid, write_inventory  # noqa: E402
 from resource_envelope import load_policy  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -38,6 +39,21 @@ CASES = [
     "execution_edit_2",
     "execution_edit_3",
 ]
+MODES = ("cache", "incremental")
+GROUP_CASES = {
+    "seed": ["seed_app", "seed_execution"],
+    "mixed": CASES,
+    "execution": ["execution_new"],
+}
+
+
+def _groups(cohorts: int) -> Iterator[tuple[int, str, str]]:
+    for mode in MODES:
+        yield 0, mode, "seed"
+    for cohort in range(1, cohorts + 1):
+        for mode in MODES if cohort % 2 else reversed(MODES):
+            yield cohort, mode, "mixed"
+        yield cohort, "cache", "execution"
 
 
 def _write(path: Path, value: object) -> None:
@@ -55,27 +71,39 @@ def _run(argv: list[str], cwd: Path, env: dict) -> str:
     return result.stdout.strip()
 
 
+def _private_cache_env(settings: dict, root: Path, socket: Path) -> dict:
+    env = {
+        k: v
+        for k, v in os.environ.items()
+        if (k == "CARGO_HOME" or not k.startswith(("LF_", "SCCACHE_", "CARGO_")))
+        and k not in ("RUSTC_WRAPPER", "RUSTC_WORKSPACE_WRAPPER", "RUSTFLAGS")
+    }
+    env.update(settings)
+    env.update(
+        SCCACHE_DIR=str(root / "cache"),
+        SCCACHE_SERVER_UDS=str(socket),
+        SCCACHE_IDLE_TIMEOUT="0",
+        SCCACHE_CONF=str(root / "loopflow/sccache.json"),
+    )
+    return env
+
+
 def _edit(tree: Path, owner: str, suffix: str) -> str:
     if owner == "app":
         path = tree / "rust/loopflow/src/lf/mod.rs"
         old = 'about = "Open Loopflow or run its CLI"'
     else:
-        paths = [
-            p
-            for p in (tree / "rust").glob("*/src/ops/task/**/*.rs")
-            if "pub enum ShipStart" in p.read_text()
-        ]
-        if len(paths) != 1:
-            raise RuntimeError("cannot locate execution edit")
-        path = paths[0]
+        # A resumed cohort on the measured revision keeps its original edit.
+        path = tree / "rust/loopflow-execution/src/ops/task/ship.rs"
+        if not path.exists():
+            path = tree / "rust/loopflow-execution/src/engine/task.rs"
         old = '"no Task exists for {issue:?}"'
     # Always start from the committed source: repeated edits replace the previous edit.
     relative = str(path.relative_to(tree))
     original = subprocess.check_output(["git", "show", f"HEAD:{relative}"], cwd=tree, text=True)
     if original.count(old) != 1:
         raise RuntimeError(f"cannot locate semantic edit in {path}")
-    position = old.rfind('"')
-    path.write_text(original.replace(old, old[:position] + f" ({suffix})" + old[position:]))
+    path.write_text(original.replace(old, old[:-1] + f' ({suffix})"'))
     return relative
 
 
@@ -105,7 +133,7 @@ def _tree_rss(rows: dict, pid: int) -> int:
 
 def summarize(receipts: list[dict]) -> list[dict]:
     result = []
-    for mode in ("cache", "incremental"):
+    for mode in MODES:
         for case in CASES + ["execution_new"]:
             samples = [r for r in receipts if r["mode"] == mode and r["case"] == case]
             if not samples:
@@ -130,8 +158,12 @@ def summarize(receipts: list[dict]) -> list[dict]:
 
 def validate(receipts: list[dict], cohorts: int, calibration_cohorts: Sequence[int] = ()) -> None:
     warm = set(range(1, cohorts + 1)) - set(calibration_cohorts)
-    expected = {(c, m, case) for c in warm for m in ("cache", "incremental") for case in CASES}
-    expected |= {(c, "cache", "execution_new") for c in warm}
+    expected = {
+        (cohort, mode, case)
+        for cohort, mode, group in _groups(cohorts)
+        if cohort in warm
+        for case in GROUP_CASES[group]
+    }
     samples = [r for r in receipts if r["cohort"] in warm]
     actual = {(r["cohort"], r["mode"], r["case"]) for r in samples}
     if len(warm) < 3 or actual != expected or len(samples) != len(expected):
@@ -153,6 +185,39 @@ def _require_disk(directory: Path, minimum: int) -> None:
             f"the repository reserve is {minimum / 1024**3:.0f} GiB. "
             "Experiment receipts and state are retained; resume after space is available."
         )
+
+
+def _time_command(
+    command: list[str], tree: Path, env: dict, output: Path, stem: str, start: float, reserve: int
+) -> tuple[int, list]:
+    memory = []
+    with (
+        (output / f"{stem}.jsonl").open("w") as stdout,
+        (output / f"{stem}.log").open("w") as stderr,
+    ):
+        child = subprocess.Popen(
+            ["/usr/bin/time", "-l" if sys.platform == "darwin" else "-v", *command],
+            cwd=tree,
+            env=env,
+            stdout=stdout,
+            stderr=stderr,
+            stdin=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+        try:
+            while child.poll() is None:
+                _require_disk(tree, reserve)
+                rss = _tree_rss(_processes(), child.pid)
+                memory.append([round(time.monotonic() - start, 3), rss])
+                try:
+                    child.wait(timeout=1)
+                except subprocess.TimeoutExpired:
+                    pass
+        finally:
+            if child.poll() is None:
+                os.killpg(child.pid, 15)
+                child.wait()
+    return child.returncode, memory
 
 
 def main() -> None:
@@ -210,63 +275,46 @@ def _measure(output: Path, cohorts: int, resume: bool, socket: Path) -> None:
     cache, cargo_env = configured_cache()
     if not cache or not cache.exists():
         raise SystemExit("run scripts/build_cache.py install first")
-    env = {
-        k: v
-        for k, v in os.environ.items()
-        if not k.startswith(("LF_", "SCCACHE_", "CARGO_"))
-        and k not in ("RUSTC_WRAPPER", "RUSTC_WORKSPACE_WRAPPER", "RUSTFLAGS")
-    }
-    env.update(cargo_env)
-    revision = _run(["git", "rev-parse", "HEAD"], ROOT, env)
+    root = (
+        Path(config["temporary"])
+        if resume
+        else Path(tempfile.mkdtemp(prefix="worktrees-", dir=output))
+    )
+    env = _private_cache_env(cargo_env, root, socket)
+    driver_sha = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
+    cache_sha = hashlib.sha256(cache.read_bytes()).hexdigest()
     if resume:
         cohorts = max(config["cohorts"], cohorts)
         config["cohorts"] = cohorts
         revision = config["revision"]
-        config.setdefault("drivers", []).append(
-            hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
-        )
-        root = Path(config["temporary"])
-        if config["cache_sha256"] != hashlib.sha256(cache.read_bytes()).hexdigest():
+        config.setdefault("drivers", []).append(driver_sha)
+        if config["cache_sha256"] != cache_sha:
             raise ValueError("resume cache binary differs")
-        _write(state, config)
     else:
-        root = Path(tempfile.mkdtemp(prefix="worktrees-", dir=output))
+        revision = _run(["git", "rev-parse", "HEAD"], ROOT, env)
         config = {
             "revision": revision,
-            "drivers": [hashlib.sha256(Path(__file__).read_bytes()).hexdigest()],
+            "drivers": [driver_sha],
             "cohorts": cohorts,
             "temporary": str(root),
             "cache": str(cache),
-            "cache_sha256": hashlib.sha256(cache.read_bytes()).hexdigest(),
+            "cache_sha256": cache_sha,
             "rustc": _run(["rustc", "-Vv"], ROOT, env),
             "cpus": os.cpu_count(),
             "machine": list(os.uname()),
-            "jobs": tomlkit.loads(cargo_configuration().read_text()).get("build", {}).get("jobs"),
-            "profiles": tomlkit.loads((ROOT / "Cargo.toml").read_text())
-            .unwrap()
-            .get("profile", {}),
+            "jobs": tomllib.loads(cargo_configuration().read_text()).get("build", {}).get("jobs"),
+            "profiles": tomllib.loads((ROOT / "Cargo.toml").read_text()).get("profile", {}),
             "filters": FILTERS,
             "created": time.time(),
             "trees": {},
         }
-        _write(state, config)
-    # Git invokes the registration hook while adding the measured worktrees.
-    # Give the hook the same private inventory and socket as the compilers.
-    env.update(
-        SCCACHE_DIR=str(root / "cache"),
-        SCCACHE_SERVER_UDS=str(socket),
-        SCCACHE_IDLE_TIMEOUT="0",
-        SCCACHE_CONF=str(root / "loopflow/sccache.json"),
-    )
+    _write(state, config)
     receipts = json.loads(receipts_path.read_text()) if receipts_path.exists() else []
     # Register every measured root before starting the private daemon. Creating a
     # worktree is timed separately and included in its first sample's wall time.
-    specs = [(0, mode, "seed") for mode in ("cache", "incremental")] + [
-        (c, m, "mixed") for c in range(1, cohorts + 1) for m in ("cache", "incremental")
-    ]
-    specs += [(c, "cache", "execution") for c in range(1, cohorts + 1)]
+    groups = list(_groups(cohorts))
     if resume:
-        for cohort, mode, group in specs:
+        for cohort, mode, group in groups:
             key = f"{cohort}_{mode}_{group}"
             item = config["trees"].get(key)
             if item is None:
@@ -274,13 +322,7 @@ def _measure(output: Path, cohorts: int, resume: bool, socket: Path) -> None:
             if cohort in config.get("calibration_cohorts", []):
                 shutil.rmtree(Path(item["path"]) / "target", ignore_errors=True)
                 continue
-            cases = (
-                ["seed_app", "seed_execution"]
-                if group == "seed"
-                else ["execution_new"]
-                if group == "execution"
-                else CASES
-            )
+            cases = GROUP_CASES[group]
             rows = [
                 r
                 for r in receipts
@@ -310,7 +352,7 @@ def _measure(output: Path, cohorts: int, resume: bool, socket: Path) -> None:
             _run(["git", "restore", "--source=HEAD", "--worktree", "rust"], tree, env)
             item["attempt"] = attempt + 1
             _write(state, config)
-    for cohort, mode, group in specs:
+    for cohort, mode, group in groups:
         key = f"{cohort}_{mode}_{group}"
         if key in config["trees"]:
             continue
@@ -323,15 +365,9 @@ def _measure(output: Path, cohorts: int, resume: bool, socket: Path) -> None:
         )
         config["trees"][key] = {"path": str(tree), "setup_seconds": time.monotonic() - start}
         _write(state, config)
-    refresh(ROOT, Path(env["SCCACHE_CONF"]))
-    # cc-rs recognizes this basename and also routes native compiles through it.
-    wrapper = root / "sccache"
-    wrapper.write_text(
-        f"#!{sys.executable}\n" + Path(__file__).with_name("compiler_receipt.py").read_text()
-    )
-    wrapper.chmod(0o755)
+    write_inventory(ROOT, Path(env["SCCACHE_CONF"]))
     env.update(
-        RUSTC_WRAPPER=str(wrapper),
+        RUSTC_WRAPPER=str(install_wrapper(root)),
         LOOPFLOW_REBUILD_CACHE=str(cache),
         LOOPFLOW_REBUILD_ALL="1",
     )
@@ -382,42 +418,19 @@ def _measure(output: Path, cohorts: int, resume: bool, socket: Path) -> None:
                 "--",
                 "--exact",
             ]
-            peak = 0
-            memory = []
-            with (
-                (output / f"{stem}.jsonl").open("w") as stdout,
-                (output / f"{stem}.log").open("w") as stderr,
-            ):
-                child = subprocess.Popen(
-                    ["/usr/bin/time", "-l" if sys.platform == "darwin" else "-v", *command],
-                    cwd=tree,
-                    env=selected_env,
-                    stdout=stdout,
-                    stderr=stderr,
-                    stdin=subprocess.DEVNULL,
-                    start_new_session=True,
-                )
-                try:
-                    while child.poll() is None:
-                        _require_disk(root, reserve)
-                        rss = _tree_rss(_processes(), child.pid)
-                        peak = max(peak, rss)
-                        memory.append([round(time.monotonic() - start, 3), rss])
-                        try:
-                            child.wait(timeout=1)
-                        except subprocess.TimeoutExpired:
-                            pass
-                finally:
-                    if child.poll() is None:
-                        os.killpg(child.pid, 15)
-                        child.wait()
+            exit_code, memory = _time_command(
+                command, tree, selected_env, output, stem, start, reserve
+            )
             elapsed = time.monotonic() - start
             after, load_after = stats(), os.getloadavg()
             daemon_after = _processes().get(server_pid)
             log = (output / f"{stem}.log").read_text()
             raw = (output / f"{stem}.jsonl").read_text()
             compilers = [json.loads(line) for line in compiler_log.read_text().splitlines()]
-            for compiler in compilers:
+            workspace = [
+                c for c in compilers if c["crate"].startswith("loopflow") or c["crate"] == "lf"
+            ]
+            for compiler in workspace:
                 overlapping = any(
                     other["pid"] != compiler["pid"]
                     and other["started"] < compiler["finished"]
@@ -444,14 +457,14 @@ def _measure(output: Path, cohorts: int, resume: bool, socket: Path) -> None:
                 "edit": edit,
                 "edit_suffix": edit_suffix,
                 "command": command,
-                "exit_code": child.returncode,
+                "exit_code": exit_code,
                 "tests_passed": sum(
                     int(n) for n in re.findall(r"test result: ok\. (\d+) passed", raw)
                 ),
                 "wall_seconds": elapsed + (item["setup_seconds"] if first else 0),
                 "setup_seconds": item["setup_seconds"] if first else 0,
                 **_timing(log),
-                "tree_rss_bytes": peak,
+                "tree_rss_bytes": max((rss for _, rss in memory), default=0),
                 "memory_samples": memory,
                 "daemon_cpu_seconds": _cpu(daemon_after[2]) - _cpu(daemon_before[2])
                 if daemon_before and daemon_after
@@ -469,7 +482,7 @@ def _measure(output: Path, cohorts: int, resume: bool, socket: Path) -> None:
                     for key, value in after["stats"]["not_cached"].items()
                     if value != before["stats"]["not_cached"].get(key, 0)
                 },
-                "workspace_compilers": [c for c in compilers if c["crate"].startswith("loopflow")],
+                "workspace_compilers": workspace,
                 "cargo_units": units,
                 "cargo_units_note": None if units is not None else "Cargo HTML unit data not found",
                 "linked_tests": [
@@ -485,35 +498,20 @@ def _measure(output: Path, cohorts: int, resume: bool, socket: Path) -> None:
             _write(receipts_path, receipts)
             _write(output / "summary.json", summarize(receipts))
             print(
-                f"{stem}: exit {child.returncode}, "
-                f"{receipt['tests_passed']} tests passed, {elapsed:.1f}s",
+                f"{stem}: exit {exit_code}, {receipt['tests_passed']} tests passed, {elapsed:.1f}s",
                 flush=True,
             )
-            if child.returncode or receipt["tests_passed"] != 1:
+            if exit_code or receipt["tests_passed"] != 1:
                 raise RuntimeError(f"focused test failed: {output / (stem + '.log')}")
 
-        for cohort in range(cohorts + 1):
+        for cohort, mode, group in groups:
             if cohort in config.get("calibration_cohorts", []):
                 continue
-            modes = (
-                ("cache", "incremental")
-                if cohort == 0
-                else (("cache", "incremental") if cohort % 2 else ("incremental", "cache"))
-            )
-            for mode in modes:
-                group = "seed" if cohort == 0 else "mixed"
-                cases = ["seed_app", "seed_execution"] if cohort == 0 else CASES
-                for index, case in enumerate(cases):
-                    owner = (
-                        "app" if "app" in case and case != "execution_after_app" else "execution"
-                    )
-                    sample(cohort, mode, group, case, owner, index == 0)
-                tree = Path(config["trees"][f"{cohort}_{mode}_{group}"]["path"])
-                shutil.rmtree(tree / "target", ignore_errors=True)
-            if cohort:
-                sample(cohort, "cache", "execution", "execution_new", "execution", True)
-                tree = Path(config["trees"][f"{cohort}_cache_execution"]["path"])
-                shutil.rmtree(tree / "target", ignore_errors=True)
+            for index, case in enumerate(GROUP_CASES[group]):
+                owner = "app" if case.removeprefix("seed_").startswith("app") else "execution"
+                sample(cohort, mode, group, case, owner, index == 0)
+            tree = Path(config["trees"][f"{cohort}_{mode}_{group}"]["path"])
+            shutil.rmtree(tree / "target", ignore_errors=True)
         validate(receipts, cohorts, config.get("calibration_cohorts", []))
         for item in config["trees"].values():
             tree = Path(item["path"])

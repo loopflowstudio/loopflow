@@ -11,7 +11,7 @@ import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from build_cache import CACHE_ENV, VERBATIM_ENV_DEPS, refresh  # noqa: E402
+from build_cache import CACHE_ENV, write_inventory  # noqa: E402
 
 
 def main() -> None:
@@ -72,12 +72,8 @@ def main() -> None:
             ]
         )
         config = root / "sccache.json"
-        refresh(a, config)
-        env.update(
-            CACHE_ENV,
-            SCCACHE_CONF=str(config),
-            SCCACHE_BASEDIRS_VERBATIM_ENV_DEPS=VERBATIM_ENV_DEPS,
-        )
+        write_inventory(a, config)
+        env.update(CACHE_ENV, SCCACHE_CONF=str(config))
         process = None
 
         def start() -> subprocess.Popen:
@@ -137,7 +133,7 @@ def main() -> None:
             process = start()
             build("first", a, a / "target", (0, 1))
             run(["git", "worktree", "add", "--detach", str(b)])
-            refresh(b, config)
+            write_inventory(b, config)
             build("before_idle", b, b / "target", (0, 1))
             # Observe natural expiry independently of the registration hook.
             if process.wait(timeout=60) != 0:

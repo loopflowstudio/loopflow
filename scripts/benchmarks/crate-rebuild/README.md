@@ -36,8 +36,8 @@ only one mode leaves the other cold. Seeds are excluded from the samples.
 
 Each cohort runs every row once, alternating which mode goes first; three
 cohorts is the minimum. Edits are unique to their cohort, so none can retrieve
-an earlier edited artifact. Worktrees and targets are removed after their
-samples. Cargo commands run one at a time. The driver checks the repository
+an earlier edited artifact. Each group releases its target after its final test.
+The driver removes the worktrees after validating all cohorts. Cargo commands run one at a time. The driver checks the repository
 disk reserve before and during each build. Crossing it stops the experiment's
 process group. The private cache and worktrees stay beside the receipts until
 the run passes. Only the Unix socket needs a short path under `/tmp`.

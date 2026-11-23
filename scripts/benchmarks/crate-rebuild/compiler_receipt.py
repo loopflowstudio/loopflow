@@ -8,6 +8,14 @@ import time
 from pathlib import Path
 
 
+def install_wrapper(directory: Path) -> Path:
+    # cc-rs routes native builds through wrappers named sccache.
+    wrapper = directory / "sccache"
+    wrapper.write_text(f"#!{sys.executable}\n" + Path(__file__).read_text())
+    wrapper.chmod(0o755)
+    return wrapper
+
+
 def main() -> None:
     cache = os.environ["LOOPFLOW_REBUILD_CACHE"]
     arguments = sys.argv[1:]
@@ -15,11 +23,8 @@ def main() -> None:
     if "--crate-name" in arguments:
         name = arguments[arguments.index("--crate-name") + 1]
     receipt = os.environ.get("LOOPFLOW_REBUILD_RECEIPTS")
-    if not receipt or not (
-        os.environ.get("LOOPFLOW_REBUILD_ALL") == "1"
-        or name == "lf"
-        or (name or "").startswith("loopflow")
-    ):
+    workspace = name == "lf" or (name or "").startswith("loopflow")
+    if not receipt or (not workspace and os.environ.get("LOOPFLOW_REBUILD_ALL") != "1"):
         os.execv(cache, [cache, *arguments])
 
     def stats() -> dict:
@@ -32,7 +37,6 @@ def main() -> None:
         return json.loads(result.stdout)["stats"]
 
     started = time.time()
-    workspace = name == "lf" or (name or "").startswith("loopflow")
     before = stats() if workspace else None
     start = time.monotonic()
     result = subprocess.run([cache, *arguments])

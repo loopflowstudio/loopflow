@@ -55,7 +55,9 @@ def _test_loop(source: Path, output: Path) -> None:
     validate(receipts, config["cohorts"], calibration)
     summary = summarize([r for r in receipts if r["cohort"] in warm_cohorts])
     totals = []
+    incremental = True
     for owner, cases in (("app", CASES[:3]), ("execution", CASES[3:])):
+        medians = {}
         for mode in ("cache", "incremental"):
             values = [
                 sum(
@@ -65,24 +67,22 @@ def _test_loop(source: Path, output: Path) -> None:
                 )
                 for cohort in warm_cohorts
             ]
+            medians[mode] = statistics.median(values)
             totals.append(
                 {
                     "owner": owner,
                     "mode": mode,
-                    "median": statistics.median(values),
+                    "median": medians[mode],
                     "min": min(values),
                     "max": max(values),
                 }
             )
-    incremental = all(
-        next(r["median"] for r in totals if r["owner"] == owner and r["mode"] == "incremental")
-        < next(r["median"] for r in totals if r["owner"] == owner and r["mode"] == "cache")
-        for owner in ("app", "execution")
-    )
-    registration = source / "registration" / "stop.json"
-    machine = source / "machine-verification.json"
-    interruption = source / "host-interruption.json"
-    disk_interruption = source / "disk-interruption.json"
+        incremental = incremental and medians["incremental"] < medians["cache"]
+
+    def observation(name: str):
+        path = source / name
+        return json.loads(path.read_text()) if path.exists() else None
+
     loads = [
         r[key][0]
         for r in receipts
@@ -94,17 +94,11 @@ def _test_loop(source: Path, output: Path) -> None:
     payload = {
         "configuration": config,
         "warm_cohorts": warm_cohorts,
-        "machine_verification": json.loads(machine.read_text()) if machine.exists() else None,
-        "registration_during_compile": json.loads(registration.read_text())
-        if registration.exists()
-        else None,
+        "machine_verification": observation("machine-verification.json"),
+        "registration_during_compile": observation("registration/stop.json"),
         "background_load": background,
-        "host_interruption": json.loads(interruption.read_text())
-        if interruption.exists()
-        else None,
-        "disk_interruption": json.loads(disk_interruption.read_text())
-        if disk_interruption.exists()
-        else None,
+        "host_interruption": observation("host-interruption.json"),
+        "disk_interruption": observation("disk-interruption.json"),
         "abandoned_attempts": {
             str(p.relative_to(source)): json.loads(p.read_text())
             for p in sorted((source / "abandoned-attempts").glob("*/receipts.json"))

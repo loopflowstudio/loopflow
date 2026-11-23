@@ -12,7 +12,7 @@ import zipfile
 from contextlib import ExitStack
 from pathlib import Path
 
-from test_loop import FILTERS, ROOT, _require_disk, _run
+from test_loop import FILTERS, ROOT, _private_cache_env, _require_disk, _run
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 import build_cache  # noqa: E402
@@ -73,21 +73,11 @@ def main() -> None:
         root = Path(temporary).resolve()
         _require_disk(root, reserve)
         a, b = root / "building", root / "registering"
-        env = {
-            k: v
-            for k, v in os.environ.items()
-            if not k.startswith(("LF_", "CARGO_", "SCCACHE_"))
-            and k not in ("RUSTFLAGS", "RUSTC_WORKSPACE_WRAPPER")
-        }
+        env = _private_cache_env(settings, root, root / "cache.sock")
         env.update(
-            settings,
             RUSTC_WRAPPER=str(wrapper),
             CARGO_TARGET_DIR=str(a / "target"),
             CARGO_INCREMENTAL="0",
-            SCCACHE_DIR=str(root / "cache"),
-            SCCACHE_SERVER_UDS=str(root / "cache.sock"),
-            SCCACHE_CONF=str(root / "loopflow/sccache.json"),
-            SCCACHE_IDLE_TIMEOUT="0",
         )
 
         revision = _run(["git", "rev-parse", "HEAD"], ROOT, env)

@@ -17,7 +17,8 @@ def _git(directory: Path, *args: str) -> None:
     subprocess.run(["git", "-C", str(directory), *args], check=True, capture_output=True)
 
 
-def test_roots_follow_creation_removal_and_multiple_repositories(tmp_path, monkeypatch):
+@pytest.fixture
+def repo(tmp_path):
     repo = tmp_path / "first repo"
     repo.mkdir()
     _git(repo, "init", "-q")
@@ -32,6 +33,10 @@ def test_roots_follow_creation_removal_and_multiple_repositories(tmp_path, monke
         "-qm",
         "initial",
     )
+    return repo
+
+
+def test_roots_follow_creation_removal_and_multiple_repositories(repo, tmp_path, monkeypatch):
     config = tmp_path / "cache/config.json"
     write_inventory(repo, config, {"cache": {"disk": {"size": 123456}}})
     assert json.loads(config.read_text())["basedirs"] == [str(repo.resolve())]
@@ -87,16 +92,18 @@ def test_worktree_hook_keeps_existing_content_and_runs_fail_soft(tmp_path):
     hooks.mkdir()
     _git(repo, "config", "core.hooksPath", str(hooks))
     hook = hooks / "post-checkout"
-    original = "#!/bin/sh\n# existing hook\ntrue\n"
+    original = '#!/bin/sh\nprintf "%s\\n" "$@" > hook-args\nexit 23\n'
     hook.write_text(original)
     install_hook(repo)
     installed = hook.read_text()
     install_hook(repo)
     assert hook.read_text() == installed
     assert installed.startswith("#!/bin/sh\n")
-    assert installed.endswith("# existing hook\ntrue\n")
+    assert installed.endswith(original.split("\n", 1)[1])
     assert installed.count("# loopflow build cache begin") == 1
-    assert subprocess.run([str(hook)], cwd=repo).returncode == 0
+    (hooks / "loopflow-build-cache.py").unlink()
+    assert subprocess.run([str(hook), "old", "new", "1"], cwd=repo).returncode == 23
+    assert (repo / "hook-args").read_text().splitlines() == ["old", "new", "1"]
 
 
 @pytest.fixture
@@ -124,21 +131,7 @@ def _cache_command(repo, *args):
     )
 
 
-def test_register_recovers_a_worktree_after_a_skipped_hook(tmp_path, pinned_cache):
-    repo = tmp_path / "repo"
-    repo.mkdir()
-    _git(repo, "init", "-q")
-    _git(
-        repo,
-        "-c",
-        "user.name=Fixture",
-        "-c",
-        "user.email=fixture@example.com",
-        "commit",
-        "--allow-empty",
-        "-qm",
-        "initial",
-    )
+def test_register_recovers_a_worktree_after_a_skipped_hook(repo, tmp_path, pinned_cache):
     install_hook(repo)
     tree = tmp_path / "skipped hook"
     _git(repo, "-c", "core.hooksPath=/dev/null", "worktree", "add", "--detach", str(tree))
@@ -159,32 +152,16 @@ def test_register_recovers_a_worktree_after_a_skipped_hook(tmp_path, pinned_cach
     assert state["diagnostic"] == "this checkout is listed for the next daemon start"
 
 
-def test_missing_wrapper_is_actionable(tmp_path, monkeypatch):
-    monkeypatch.setattr(build_cache, "configured_cache", lambda: (tmp_path / "missing", {}))
-    monkeypatch.setattr(build_cache, "inventory_path", lambda: tmp_path / "inventory")
-    monkeypatch.setattr(subprocess, "check_output", lambda *args, **kwargs: str(tmp_path))
-    assert build_cache.cache_status(tmp_path, *build_cache.configured_cache())["exit_code"] == 1
+def test_missing_wrapper_is_actionable(repo, pinned_cache):
+    pinned_cache.unlink()
+    status = _cache_command(repo, "status", "--json")
+    assert status.returncode == 1
+    assert "run install" in json.loads(status.stdout)["diagnostic"]
 
 
-def test_git_worktree_add_registers_even_an_older_revision_before_return(tmp_path, monkeypatch):
-    repo = tmp_path / "repo"
-    repo.mkdir()
-    _git(repo, "init", "-q")
-    _git(
-        repo,
-        "-c",
-        "user.name=Fixture",
-        "-c",
-        "user.email=fixture@example.com",
-        "commit",
-        "--allow-empty",
-        "-qm",
-        "before cache installation",
-    )
-    monkeypatch.setenv("CARGO_HOME", str(tmp_path / "cargo"))
-    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "private"))
-    monkeypatch.setenv("SCCACHE_CONF", str(build_cache.inventory_path()))
-    monkeypatch.setenv("SCCACHE_SERVER_UDS", str(tmp_path / "private/cache.sock"))
+def test_git_worktree_add_registers_even_an_older_revision_before_return(
+    repo, tmp_path, pinned_cache
+):
     install_hook(repo)
     tree = tmp_path / "new tree"
     _git(repo, "worktree", "add", "--detach", str(tree))

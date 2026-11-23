@@ -166,8 +166,12 @@ written empty, the ignored Wave `linear:` key) and fixtures that test them.
 
 ## Migration decisions (`remove_chapters.sql`, built in slice 1)
 
-- A live Wave with no Project gets one, named for the Wave, local until
-  connected (36 such Waves in the real store, 2026-11-22).
+- A live Wave with no Project gets one, named for the Wave (36 such Waves in
+  the real store, 2026-11-22). It is an ordinary local Project: in a connected
+  repository the drain queues a Linear `create` on the next export, using the
+  Wave's UUID so two Machines name one Linear Project. (QA run 5 confirmed this
+  on the real store: `spend` and dormant `engbot` queue creates; retiring dead
+  Waves before upgrading avoids creating them.)
 - A Wave with several Projects keeps one: the newest started open one, else
   the newest. Its other Projects are deleted, with their `project_changes`
   and unsent `tracker_actions` retired; their Tasks move to the kept Project
@@ -299,12 +303,68 @@ Project at all (the chapter removal dropped `currentProject` there); its title
 line, Objective detail and capture heading now show the one Project
 (`BacklogViewTests`, 115 Swift tests pass).
 
+## Slice 6 (concept review after QA run 5, 2026-11-23)
+
+Whole-area review of `a6d53b0b69` against base `43e031870e` (`scratch/concept-review.html`)
+found three mismatches inside this Task's scope plus the plural Swift sheet rename:
+
+1. **No stray Linear Project when connecting a new Wave to an existing Project.**
+   In `rust/loopflow-execution/src/ops/linear.rs` (`connect_async`), adding an
+   unregistered Wave calls `wave_lifecycle::add`, which runs `sync_after_save`
+   immediately — creating an empty Linear Project before `connect_async` runs
+   `link_wave_project_in` (and racing with `after_reply` on served calls).
+   - Extract `pub(crate) async fn add_local(repo, name, objective)` in
+     `rust/loopflow-execution/src/ops/wave_lifecycle.rs` (registers the Wave
+     and its Project, writes objective, commits `.lf/wave/<name>`, no sync).
+   - Have `connect_async` call `add_local` instead of `add`: `Some(key)` links
+     the existing Linear Project directly with zero `createProject` requests;
+     `None` already calls `sync_after_save` for `ActionOwner::Project(own)`.
+   - Add a focused test in `rust/loopflow-execution/src/ops/linear/` proving
+     `connect` for a new Wave with `project: Some(...)` in an already-connected
+     repository links the existing Project and sends zero `projectCreate` calls.
+
+2. **Stop passing dead `ActionOwner::Wave` from `wave_lifecycle`.**
+   No tracker action has owner `Wave` since Initiatives went, so
+   `Scope::First(&ActionOwner::Wave(..))` in `drain_repository` never prioritizes
+   the Project `create` (from `add`) or `project_name` rename (from `rename`).
+   - Have `planning_sync::sync_after_save` accept `Option<&ActionOwner>` (passing
+     `Scope::All` when `None`, `Scope::First(owner)` when `Some`).
+   - In `wave_lifecycle::add` and `wave_lifecycle::rename`, pass
+     `ActionOwner::Project(project_id)` for the Wave's Project; in
+     `wave_lifecycle::remove`, pass `None` (still pushes retired Wave to Git/hub
+     and drains any moved Tasks).
+
+3. **Align live docs with the built model and LOO-995's completion check.**
+   - `docs/surfaces.md:121` and `swift/README.md:1014` still mention "key results"
+     (and "its metric table"), failing LOO-995's
+     `grep -ri 'key result\|metric_target' rust/ swift/ docs/` live-text check.
+   - `docs/work.md:460,519` still say "Projects" (plural), and `docs/work.md:556`
+     says other Machines do not read back Project-less Tasks even though
+     `linear_events.rs:581` and `tracker_events.rs:209` import them via the Team
+     delta (only issues in *unlinked* Linear Projects stay out of Loopflow).
+
+4. **Rename Desktop's plural Project sheet names to singular.**
+   `WaveProjectsView` → `WaveProjectSheet` (file and type),
+   `model.projectsWave` → `model.projectWave`, and
+   `accessibilityIdentifier("wave-projects")` → `"wave-project"` across
+   `swift/LoopflowMac/` and `swift/LoopflowTests/`.
+
+Choices made for review (`scratch/concept-review.html`):
+- Keeping migration-made Projects as ordinary local Projects that create in
+  Linear on next export in connected repos (matching "every live Wave is one
+  Project"; alternative was a special local-only flag until `connect`).
+- Keeping `WaveProjectSheet` (renamed to singular) rather than deleting the
+  sheet while `openHistoricalReference` still uses it.
+
+Checks for Slice 6: focused `ops/linear` connect test, `wave_lifecycle::`,
+`grep -ri 'key result\|metric_target' rust/ swift/ docs/` clean on live files,
+`cargo clippy --all-targets -- -D warnings`, and Swift `WorkModelTests` /
+`BacklogViewTests` / `WaveDetailReadingTests`.
+
 ## Remains
 
-Nothing left to build here; `git grep` finds no list-shaped Project on the
-wire or in Swift. Next is gate: Swift DTO suites (`scripts/test_desktop.sh`), the full
-matrix in CI, the `oauth_tests` contention failure checked on the base. Gate also renames Desktop's
-plural Project sheet names (`WaveProjectsView`, `model.projectsWave`,
-`wave-projects`) to the singular (concept review after slice 5, page
-question 1). Open, not this Task: a queued create's field snapshot (page
-question 2).
+1. Build Slice 6 above.
+2. Gate: Swift DTO and desktop suites (`scripts/test_desktop.sh`), full matrix
+   in CI, and check the `oauth_tests` contention failure on the base.
+3. Open, not this Task: a queued create's field snapshot (`scratch/concept-review.html`
+   question 4).

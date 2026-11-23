@@ -5,22 +5,26 @@
 //! each one it has news for. A server restart forgets nothing. No process or
 //! clock per Session: Claude takes the message in its cross-session inbox,
 //! Codex as a turn its app-server starts, OpenCode and Pi as a turn their
-//! plugin or extension starts. A conversation the server cannot reach hears
-//! it at its next boundary.
+//! plugin or extension starts, and Antigravity through its language server.
+//! A conversation the server cannot reach hears it at its next boundary.
 
 use std::io::{Read, Write};
 use std::os::unix::net::UnixStream;
 use std::path::Path;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use anyhow::{anyhow, Context, Result};
 use serde_json::json;
 
+use loopflow_execution::harness::antigravity::LanguageServer;
 use loopflow_execution::steer::{IdleConversation, IdleReach, Inbox};
 use loopflow_storage::sqlite::SqliteStore;
 
 /// How long the watcher waits for a store change before reading the revision
-/// anyway: the change signal can miss a checkpoint or a Machine's sleep.
+/// anyway: the change signal can miss a checkpoint or a Machine's sleep. It
+/// is also how often idle conversations are read with no revision moving: a
+/// reopened Antigravity conversation reports nothing until someone types, so
+/// news saved while it was closed reaches it at the next sweep.
 const UNSIGNALLED: Duration = Duration::from_secs(60);
 const SEND_DEADLINE: Duration = Duration::from_secs(2);
 /// A provider's turn start loads nothing new; it answers once the turn exists.
@@ -54,19 +58,27 @@ fn watch() {
     }
 }
 
-/// The watcher's store and the revisions it last woke conversations for.
+/// The watcher's store, the revisions it last woke conversations for, and
+/// when it last did.
 #[derive(Default)]
 struct Watcher {
     store: Option<SqliteStore>,
     seen: Option<(i64, i64)>,
+    swept: Option<SystemTime>,
 }
 
 impl Watcher {
-    /// Wake idle conversations if the revisions moved since the last reading.
-    /// The first reading wakes too: what arrived while no server ran reaches
-    /// each idle conversation now. One that already heard it gets nothing;
-    /// claimed updates and confirmed steers say so.
+    /// Wake idle conversations if the revisions moved since the last reading,
+    /// or none did for `UNSIGNALLED`. The first reading wakes too: what
+    /// arrived while no server ran reaches each idle conversation now. One
+    /// that already heard it gets nothing; claimed updates and confirmed
+    /// steers say so.
     fn read(&mut self, path: &Path) {
+        let due = self.swept.is_none_or(|swept| {
+            swept
+                .elapsed()
+                .map_or(true, |elapsed| elapsed >= UNSIGNALLED)
+        });
         if self.store.is_none() && path.exists() {
             self.store = loopflow_execution::store::open_sqlite(path)
                 .inspect_err(|error| tracing::warn!(%error, "Task update watcher has no store"))
@@ -79,8 +91,9 @@ impl Watcher {
             .task_update_revision()
             .and_then(|updates| Ok((updates, store.steer_revision()?)))
         {
-            Ok(revision) if self.seen != Some(revision) => {
+            Ok(revision) if due || self.seen != Some(revision) => {
                 self.seen = Some(revision);
+                self.swept = Some(SystemTime::now());
                 wake_idle(store, None);
             }
             Ok(_) => {}
@@ -128,6 +141,7 @@ fn wake(store: &SqliteStore, conversation: &IdleConversation) {
                 Some((socket, token)) => Reach::Claude(socket, token),
                 None => return Ok(()),
             },
+            IdleReach::Antigravity(wake) => Reach::Antigravity(LanguageServer::find(wake)?),
             IdleReach::Codex(endpoint) => Reach::Codex(endpoint),
             IdleReach::Inbox(Inbox::Socket(socket)) => Reach::Socket(open_socket(socket)?),
         };
@@ -145,6 +159,7 @@ fn wake(store: &SqliteStore, conversation: &IdleConversation) {
             Reach::Claude(mut socket, token) => {
                 send_inbox(&mut socket, &token, thread, &steers.text)?
             }
+            Reach::Antigravity(server) => server.send(thread, &steers.text)?,
             Reach::Codex(endpoint) => start_codex_turn(endpoint, thread, &steers.text)?,
             Reach::Socket(mut socket) => start_extension_turn(&mut socket, thread, &steers.text)?,
         }
@@ -161,6 +176,7 @@ enum Reach<'a> {
     Claude(UnixStream, String),
     Codex(&'a Path),
     Socket(UnixStream),
+    Antigravity(LanguageServer),
 }
 
 /// The socket an OpenCode plugin or Pi extension listens on while its work
@@ -269,7 +285,7 @@ mod tests {
     use loopflow_execution::context_block::ContextDelivery;
     use loopflow_execution::steer::{Inbox, NativeBoundary, SteerAdapter};
     use loopflow_storage::sqlite::SqliteStore;
-    use std::io::Read;
+    use std::io::{BufRead, Read, Write};
     use std::os::unix::net::UnixListener;
     use std::path::{Path, PathBuf};
 
@@ -410,6 +426,10 @@ mod tests {
 
         /// The conversation's turn ends; its hook names its inbox.
         fn stop(&self, store: &SqliteStore, inbox: &Path) {
+            self.turn_end(store, Some(Inbox::Claude(inbox.to_owned())));
+        }
+
+        fn turn_end(&self, store: &SqliteStore, inbox: Option<Inbox>) {
             super::super::boundary::answer(
                 store,
                 &SessionBoundary {
@@ -419,7 +439,7 @@ mod tests {
                     callback: serde_json::json!({"hook_event_name":"Stop","session_id":"native"}),
                     gap: None,
                     printed: Vec::new(),
-                    inbox: Some(Inbox::Claude(inbox.to_owned())),
+                    inbox,
                 },
             )
             .unwrap();
@@ -626,6 +646,163 @@ mod tests {
             !wire.contains("staging bucket") && !wire.contains("pr/1"),
             "delivered news is not repeated"
         );
+    }
+
+    /// `agy`'s language server for conversation `wake-agy`, the log naming
+    /// its port after an earlier one, and the wake file its launch wrote.
+    /// The thread answers with the request's lowercased head and its body.
+    fn language_server(
+        fixture: &Fixture,
+    ) -> (
+        PathBuf,
+        std::thread::JoinHandle<(Vec<String>, serde_json::Value)>,
+    ) {
+        fixture
+            .store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE agent_sessions SET provider='agy' WHERE id='wake-agy'",
+                [],
+            )
+            .unwrap();
+        let server = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let log = fixture.home.path().join("agy.log");
+        std::fs::write(
+            &log,
+            format!(
+                "I server.go:1322] Language server listening on random port at 1 for HTTP\n\
+                 I server.go:1314] Language server listening on random port at {} for HTTP\n\
+                 I server.go:1314] Language server listening on random port at 2 for HTTPS (gRPC)\n",
+                server.local_addr().unwrap().port()
+            ),
+        )
+        .unwrap();
+        let wake = fixture.home.path().join("launch.wake");
+        std::fs::write(
+            &wake,
+            serde_json::json!({"log": log, "token": "launch-token"}).to_string(),
+        )
+        .unwrap();
+        server.set_nonblocking(true).unwrap();
+        let requested = std::thread::spawn(move || {
+            // The wake runs before the test joins; a conversation never woken
+            // fails the test instead of hanging it.
+            let stream = (0..100)
+                .find_map(|_| match server.accept() {
+                    Ok((stream, _)) => Some(stream),
+                    Err(_) => {
+                        std::thread::sleep(std::time::Duration::from_millis(50));
+                        None
+                    }
+                })
+                .expect("agy's language server was never called");
+            stream.set_nonblocking(false).unwrap();
+            let mut reader = std::io::BufReader::new(&stream);
+            let mut head = Vec::new();
+            loop {
+                let mut line = String::new();
+                reader.read_line(&mut line).unwrap();
+                if line == "\r\n" {
+                    break;
+                }
+                head.push(line.trim_end().to_ascii_lowercase());
+            }
+            let length: usize = head
+                .iter()
+                .find_map(|line| line.strip_prefix("content-length: "))
+                .unwrap()
+                .parse()
+                .unwrap();
+            let mut body = vec![0; length];
+            reader.read_exact(&mut body).unwrap();
+            (&stream)
+                .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 2\r\n\r\n{}")
+                .unwrap();
+            (
+                head,
+                serde_json::from_slice::<serde_json::Value>(&body).unwrap(),
+            )
+        });
+        (wake, requested)
+    }
+
+    #[test]
+    fn an_idle_antigravity_conversation_takes_its_news_from_agys_language_server() {
+        let fixture = fixture("wake-agy");
+        let (wake, requested) = language_server(&fixture);
+        let claim = fixture
+            .store
+            .session_attachment("wake-agy")
+            .unwrap()
+            .unwrap();
+        fixture
+            .store
+            .record_launch_inbox("wake-agy", &claim, &wake, true)
+            .unwrap();
+        // Its hook names no inbox: the launch recorded it.
+        fixture.turn_end(&fixture.store, None);
+        fixture.comment(&fixture.store, "c-1", "use the staging bucket");
+        after_turn(&fixture.store, "wake-agy");
+        let (head, body) = requested.join().unwrap();
+        assert_eq!(
+            head[0],
+            "post /exa.language_server_pb.languageserverservice/sendusercascademessage http/1.1"
+        );
+        assert!(head.contains(&"x-codeium-csrf-token: launch-token".to_string()));
+        assert_eq!(body["cascadeId"], "native");
+        assert!(body["items"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("use the staging bucket"));
+        assert_eq!(
+            fixture
+                .store
+                .session_steers("wake-agy", 0, 8)
+                .unwrap()
+                .pending,
+            0
+        );
+    }
+
+    /// `agy` reopened on its conversation starts no turn and runs no hook
+    /// until someone types: its launch says it is idle, and the watcher's
+    /// next sweep brings what was saved while it was closed.
+    #[test]
+    fn a_reopened_antigravity_conversation_hears_what_arrived_while_it_was_closed() {
+        let fixture = fixture("wake-agy");
+        let (wake, requested) = language_server(&fixture);
+        fixture.turn_end(&fixture.store, None);
+        // The provider that ran that turn has quit.
+        fixture
+            .store
+            .conn
+            .lock()
+            .unwrap()
+            .execute("UPDATE session_activity SET agent_process_id='earlier'", [])
+            .unwrap();
+        let path = fixture.store_path();
+        let mut watcher = Watcher::default();
+        fixture.comment(&fixture.store, "c-1", "use the staging bucket");
+        watcher.read(&path);
+        let claim = fixture
+            .store
+            .session_attachment("wake-agy")
+            .unwrap()
+            .unwrap();
+        fixture
+            .store
+            .record_launch_inbox("wake-agy", &claim, &wake, false)
+            .unwrap();
+        // Nothing new was saved since; a minute later the sweep runs anyway.
+        watcher.swept = Some(std::time::SystemTime::UNIX_EPOCH);
+        watcher.read(&path);
+        let (_, body) = requested.join().unwrap();
+        assert!(body["items"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("use the staging bucket"));
     }
 
     #[test]

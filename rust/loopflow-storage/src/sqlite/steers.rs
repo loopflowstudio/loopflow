@@ -10,6 +10,7 @@ use crate::steer::{
     Steer, SteerAdapter,
 };
 use crate::{StoreError, StoreResult};
+use loopflow_model::id::AgentProcessId;
 
 #[derive(Debug)]
 pub struct IdleCandidate {
@@ -250,17 +251,8 @@ impl SqliteStore {
         )?;
         if changed > 0 {
             // A provider naming its inbox for the first time has run no turn
-            // yet, whatever the one before it on this Session was doing: a
-            // reopened conversation is idle until its first turn says otherwise.
-            // A held terminal's status stream may already have moved the
-            // reading to this provider; with no turn read yet it is still 0.
-            conn.execute(
-                "UPDATE session_activity SET agent_process_id=?2,yielded=1,open_tools=0,pending_input=0,
-                    observed_at=unixepoch(),program_status=CASE WHEN agent_process_id IS ?2 THEN program_status END,cpu_sampled_at=NULL,cpu_quiet_since=NULL,
-                    attachment_token=COALESCE((SELECT attachment_token FROM agent_sessions WHERE id=?1),attachment_token)
-                 WHERE session_id=?1 AND (agent_process_id IS NOT ?2 OR observed_at=0)",
-                params![adapter.session, adapter.agent_process_id],
-            )?;
+            // yet, whatever the one before it on this Session was doing.
+            record_opened_idle(&conn, &adapter.session, &adapter.agent_process_id)?;
         }
         Ok(changed > 0)
     }
@@ -276,7 +268,8 @@ impl SqliteStore {
         let mut statement = conn.prepare(
             "SELECT s.id,s.agent_process_id,a.capability,s.provider_thread,s.cwd,
                 CASE WHEN s.provider='codex' THEN s.agent_endpoint END,s.agent_inbox,
-                s.agent_pid,s.agent_os_started_at,s.agent_socket
+                s.agent_pid,s.agent_os_started_at,s.agent_socket,
+                CASE WHEN s.provider='agy' THEN s.agent_inbox END
              FROM agent_sessions s INDEXED BY agent_sessions_unended_agent
              JOIN steer_adapters a ON a.agent_process_id=s.agent_process_id
              JOIN session_activity act ON act.session_id=s.id AND act.agent_process_id=s.agent_process_id
@@ -287,13 +280,16 @@ impl SqliteStore {
                AND (?1 IS NULL OR s.id=?1)",
         )?;
         let rows = statement.query_map([session], |row| {
-            // The query keeps only reachable conversations: with no endpoint
-            // or socket, the Claude key is there.
             let path = |column| row.get::<_, Option<String>>(column);
-            let reach = match (path(5)?, path(9)?) {
-                (Some(endpoint), _) => IdleReach::Codex(endpoint.into()),
-                (None, Some(socket)) => IdleReach::Inbox(Inbox::Socket(socket.into())),
-                (None, None) => IdleReach::Inbox(Inbox::Claude(row.get::<_, String>(6)?.into())),
+            // The query keeps only reachable conversations: with no endpoint,
+            // wake file or socket, the Claude key is there.
+            let reach = match (path(5)?, path(10)?, path(9)?) {
+                (Some(endpoint), _, _) => IdleReach::Codex(endpoint.into()),
+                (None, Some(wake), _) => IdleReach::Antigravity(wake.into()),
+                (None, None, Some(socket)) => IdleReach::Inbox(Inbox::Socket(socket.into())),
+                (None, None, None) => {
+                    IdleReach::Inbox(Inbox::Claude(row.get::<_, String>(6)?.into()))
+                }
             };
             let identity = row
                 .get::<_, Option<u32>>(7)?
@@ -773,6 +769,25 @@ impl SqliteStore {
         tx.commit()?;
         Ok(())
     }
+}
+
+/// A provider that has run no turn is idle, whatever the one before it on
+/// this Session was doing: a reopened conversation is idle until its first
+/// turn says otherwise. A held terminal's status stream may already have
+/// moved the reading to this provider; with no turn read yet it is still 0.
+pub(super) fn record_opened_idle(
+    conn: &Connection,
+    session: &str,
+    agent_process_id: &AgentProcessId,
+) -> rusqlite::Result<()> {
+    conn.execute(
+        "UPDATE session_activity SET agent_process_id=?2,yielded=1,open_tools=0,pending_input=0,
+            observed_at=unixepoch(),program_status=CASE WHEN agent_process_id IS ?2 THEN program_status END,cpu_sampled_at=NULL,cpu_quiet_since=NULL,
+            attachment_token=COALESCE((SELECT attachment_token FROM agent_sessions WHERE id=?1),attachment_token)
+         WHERE session_id=?1 AND (agent_process_id IS NOT ?2 OR observed_at=0)",
+        params![session, agent_process_id],
+    )?;
+    Ok(())
 }
 
 #[cfg(test)]

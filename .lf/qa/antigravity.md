@@ -117,3 +117,29 @@ Stop the holder's children (`pgrep -P <holder>`), the holder and the server
 by pid when done; check a server's `LF_HOME` with `ps eww -p <pid>` first.
 The holder's environment may not show `LF_HOME`; find it by its binary path
 (`pgrep -f '<Q>/bin/lf holder run'`).
+
+# Waking an idle `agy` work session
+
+Same private Machine, with `.lf/graphs/qa.yaml` of `- cmd: help task` then
+`- interactive: demo`: `lf task run <id> -a agy` starts the Task conversation,
+which runs one `task-session` turn and goes idle (`session_activity.yielded=1`,
+about 40 s). Hold a view with `uv run python tests/e2e/hold_tui.py $Q/v <checkout>
+$Q/bin/lf resume --task <id>` (from `tests/e2e`) and read `$Q/v/screen.txt`.
+Run `lf steer` from the disposable repository: from a checkout of a repository
+with a tracker it fails resolving the short Task id ("No Linear credential").
+
+- The launch's wake file and `agy` log are
+  `$LF_HOME/context-deliveries/<uuid>.wake` / `.agy.log`; `agent_sessions.agent_inbox`
+  names the wake file. The log's `… for HTTP` line is the port.
+- A woken turn is a `USER_EXPLICIT`/`USER_INPUT` row holding `<lf:steers>` in
+  the transcript; a steer taken mid-turn is a `SYSTEM_SDK` row from the
+  `PreInvocation` hook instead. `lf session steers <session> --json` shows
+  `delivered_at` and `pending`.
+- Reopen: in the view Esc, then ctrl+c twice (`hex 1b`, `hex 03`, `hex 03`);
+  steer; view again with `lf resume --task <id>`. The waiting steers arrive at
+  the watcher's minute sweep, not at once; a later steer wakes it within a few seconds.
+- Failed wake: move the `.agy.log` aside, steer: `logs/lf.log` reads "idle
+  conversation not woken" naming the log, and `pending` stays 1. Put it back:
+  the next sweep delivers it.
+- Rebuilding: stop the view (`quit` in its `in` file), `agy`, the holder and
+  the server by PID, `rm` then copy `$Q/bin/lf`, start the server again.

@@ -44,6 +44,8 @@ pub enum IdleReach {
     Codex(std::path::PathBuf),
     /// What the provider's own code listens on.
     Inbox(Inbox),
+    /// The wake file naming Antigravity's language-server log and launch token.
+    Antigravity(std::path::PathBuf),
 }
 
 /// Where code the provider loads takes a message for an idle conversation,

@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use async_trait::async_trait;
 use serde_json::Value;
 use tokio::io::{AsyncBufReadExt, BufReader};
@@ -476,7 +476,9 @@ impl super::Launcher for loopflow_harness::Antigravity {
         if let Some(trust) = cwd.and_then(trust) {
             args.extend(["--settings".into(), trust]);
         }
-        if let Some(input) = input.filter(|input| !input.is_empty()) {
+        let input = input.filter(|input| !input.is_empty());
+        let starts_turn = input.is_some();
+        if let Some(input) = input {
             crate::agent::validate_terminal_turn(&input)?;
             args.extend(["-i".into(), input]);
         }
@@ -485,9 +487,128 @@ impl super::Launcher for loopflow_harness::Antigravity {
             // Hook callbacks keep the conversation the person is in there:
             // a new one, or one `/new`, `/fork` or `/resume` switched to.
             client.reported_thread = Some(crate::context_block::reported_thread_path(&delivery));
+            if launch.kind.is_managed() {
+                args.extend(prepare_wake(
+                    launch.recording,
+                    &delivery,
+                    &mut client.process,
+                    starts_turn,
+                )?);
+            }
         }
         client.process.args(args);
         Ok(client)
+    }
+}
+
+// ---- Waking an idle work session ----
+
+/// The file a work session's launch leaves for the Machine server, readable
+/// only by its owner: `agy`'s log, which names the port its language server
+/// listens on, and the token the launch started that server with.
+#[derive(serde::Serialize, serde::Deserialize)]
+struct WakeFile {
+    log: PathBuf,
+    token: String,
+}
+
+/// Start `agy`'s language server with a token lf chose and its log where lf
+/// can read the port, write both to the wake file beside the delivery, and
+/// record that file as where this AgentProcess takes a wake. The token never
+/// reaches a hook. Returns the arguments that move the log.
+fn prepare_wake(
+    recording: &Recording,
+    delivery: &Path,
+    process: &mut std::process::Command,
+    starts_turn: bool,
+) -> Result<[String; 2]> {
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+    let token = uuid::Uuid::new_v4().simple().to_string();
+    let wake = delivery.with_extension("wake");
+    let file = WakeFile {
+        log: delivery.with_extension("agy.log"),
+        token: token.clone(),
+    };
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&wake)?
+        .write_all(&serde_json::to_vec(&file)?)?;
+    process.env("ANTIGRAVITY_SERVER_CSRF_TOKEN", token);
+    recording.store.record_launch_inbox(
+        &recording.session,
+        &recording.attachment,
+        &wake,
+        starts_turn,
+    )?;
+    Ok(["--log-file".into(), file.log.display().to_string()])
+}
+
+/// `agy`'s loopback language server for an idle conversation, as its wake
+/// file and log name it now: a restarted server logs a new port.
+pub struct LanguageServer {
+    port: u16,
+    token: String,
+}
+
+impl std::fmt::Debug for LanguageServer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LanguageServer")
+            .field("port", &self.port)
+            .finish_non_exhaustive()
+    }
+}
+
+/// How long `agy` takes to queue a message; it answers before the turn runs.
+const SEND_DEADLINE: std::time::Duration = std::time::Duration::from_secs(5);
+
+impl LanguageServer {
+    /// # Errors
+    /// The wake file or log is unreadable, or the log names no port yet.
+    pub fn find(wake: &Path) -> Result<Self> {
+        let file: WakeFile = std::fs::read(wake)
+            .map_err(anyhow::Error::from)
+            .and_then(|bytes| Ok(serde_json::from_slice(&bytes)?))
+            .with_context(|| format!("wake file {}", wake.display()))?;
+        let log = std::fs::read_to_string(&file.log)
+            .with_context(|| format!("agy log {}", file.log.display()))?;
+        let port = log
+            .lines()
+            .rev()
+            .find_map(|line| {
+                // Its HTTPS (gRPC) port is logged the same way.
+                let (_, rest) = line.split_once("Language server listening on random port at ")?;
+                rest.trim_end().strip_suffix(" for HTTP")?.parse().ok()
+            })
+            .ok_or_else(|| {
+                anyhow::anyhow!("{} names no language server port", file.log.display())
+            })?;
+        Ok(Self {
+            port,
+            token: file.token,
+        })
+    }
+
+    /// Start a turn in conversation `thread` with `text`, as the TUI does
+    /// for a typed prompt. An undocumented RPC, seen on `agy` 1.5.14.
+    ///
+    /// # Errors
+    /// The server is unreachable or refused the message.
+    pub fn send(&self, thread: &str, text: &str) -> Result<()> {
+        reqwest::blocking::Client::builder()
+            .timeout(SEND_DEADLINE)
+            .build()?
+            .post(format!(
+                "http://127.0.0.1:{}/exa.language_server_pb.LanguageServerService/SendUserCascadeMessage",
+                self.port
+            ))
+            .header("x-codeium-csrf-token", &self.token)
+            .json(&serde_json::json!({"cascadeId": thread, "items": [{"text": text}]}))
+            .send()?
+            .error_for_status()?;
+        Ok(())
     }
 }
 
@@ -694,6 +815,71 @@ mod tests {
                 "--dangerously-skip-permissions"
             ]
         );
+    }
+
+    #[test]
+    fn a_work_session_leaves_the_server_a_way_to_wake_it_and_a_chat_does_not() {
+        use crate::harness::Launcher;
+        use std::os::unix::fs::PermissionsExt;
+        let ledger = crate::journal::TestLedgerGuard::new();
+        let recording = super::super::admit_for_test(ledger.home());
+        let cwd = tempfile::tempdir().unwrap();
+        let config = AgentConfig {
+            agent: crate::config::Agent::parse("agy").unwrap(),
+            cwd: Some(cwd.path().to_owned()),
+            conversation_context: Some(crate::context_block::ContextDelivery {
+                identity: None,
+                repository: None,
+                repo: cwd.path().to_owned(),
+                home: ledger.home().to_owned(),
+                wave: None,
+                skill_file: None,
+                submitted_docs: None,
+                references: Vec::new(),
+            }),
+            ..AgentConfig::default()
+        };
+        let inbox = || -> Option<String> {
+            recording
+                .store
+                .conn
+                .lock()
+                .unwrap()
+                .query_row(
+                    "SELECT agent_inbox FROM agent_sessions WHERE id='fixture'",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap()
+        };
+        let open = |kind| {
+            let launch = crate::harness::Launch {
+                kind,
+                ..crate::harness::launch_for_test(HarnessKind::Antigravity, &config, &recording)
+            };
+            loopflow_harness::Antigravity.open(&launch).unwrap().process
+        };
+        let chat = open(crate::harness::LaunchKind::Chat);
+        assert!(!chat.get_args().any(|arg| arg == "--log-file"));
+        assert_eq!(inbox(), None, "a chat is never woken");
+
+        let work = open(crate::harness::LaunchKind::WorkSession);
+        let wake = std::path::PathBuf::from(inbox().expect("the launch records its wake file"));
+        assert_eq!(
+            std::fs::metadata(&wake).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        let file: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&wake).unwrap()).unwrap();
+        let token = work
+            .get_envs()
+            .find(|(key, _)| *key == "ANTIGRAVITY_SERVER_CSRF_TOKEN")
+            .and_then(|(_, value)| value)
+            .unwrap();
+        assert_eq!(file["token"].as_str().unwrap(), token);
+        let args: Vec<_> = work.get_args().collect();
+        let log = args.iter().position(|arg| *arg == "--log-file").unwrap() + 1;
+        assert_eq!(file["log"].as_str().unwrap(), args[log]);
     }
 
     #[test]

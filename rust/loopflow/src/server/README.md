@@ -784,14 +784,15 @@ and batches, prompt hooks are gated like tool hooks.
 The server keeps no list of conversations (`wake.rs`); it reads them from the
 store. A work session is idle when its last recorded native turn yielded
 (`session_activity`) and its AgentProcess is live, and reachable through its
-Codex app-server (`agent_sessions.agent_endpoint`) or what its boundaries
+Codex app-server (`agent_sessions.agent_endpoint`), the wake file an
+Antigravity launch saved in `agent_sessions.agent_inbox`, or what its boundaries
 saved: a Claude inbox key in `agent_sessions.agent_inbox`, where
 `sessions/<pid>.json` beside the key names the socket and must still name the
 conversation, or the socket an OpenCode plugin or Pi extension listens on in
 `agent_sessions.agent_socket`. One
 server thread waits on the store's change signal (`store::changes`) and reads
-the `task_updates` revision and the newest steer at start and whenever either
-moves; every idle conversation with news gets its unread steers, Task updates
+the `task_updates` revision and the newest steer at start, whenever either
+moves, and at least once a minute; every idle conversation with news gets its unread steers, Task updates
 among them, in one message, and is recorded as in a turn until its next Stop.
 One with no news is not connected to. A turn end checks
 its own conversation the same way. The steers are claimed as a hook claims
@@ -812,18 +813,27 @@ that lapses for the next boundary:
   another conversation, or whose provider refuses, closes without answering.
   A turn already running takes the message as a steer. OpenCode's TUI shows
   the answer but not the message that caused it.
+- Antigravity: `SendUserCascadeMessage` on `agy`'s loopback language server,
+  with the conversation as `cascadeId` and the token the launch set
+  (`ANTIGRAVITY_SERVER_CSRF_TOKEN`). The port is read from the launch's
+  `--log-file` at each wake, since `agy` picks it at random. This RPC is
+  undocumented (seen on `agy` 1.5.14); when a release breaks it, the wake fails
+  in `logs/lf.log` and the steer arrives at the next boundary.
 
 A conversation reopened after it was quit runs no turn until someone types.
 The first boundary that names a new inbox or socket records its provider as
 idle and sends what was saved while it was closed: an OpenCode plugin names
 its socket as it loads, a Pi extension at `session_start`. Claude's start hook
-reads those steers into its context instead, and starts no turn.
+reads those steers into its context instead, and starts no turn. `agy`
+reopened on its conversation runs no hook at all, so its launch records it as
+idle beside its wake file, and the watcher's next sweep sends what waited.
 
 A server that restarts reads the same conversations again. An unreachable
 Claude inbox or socket leaves its news unclaimed. After a failed send the steers arrive
 again. Chats and batches are never woken. No
-process or clock runs per Session: the watcher's only clock is the change
-signal's 60 s fallback for a missed checkpoint or a Machine's sleep.
+process or clock runs per Session: the watcher's only clock is a 60 s sweep,
+taken whenever no revision moved for that long. It covers a missed
+checkpoint, a Machine's sleep, a reopened `agy` and a wake that failed.
 
 A managed launch's agent starts only once the server answers. The launch
 opens a connection to the server, as a hook does; when nothing answers it runs `lf install server`

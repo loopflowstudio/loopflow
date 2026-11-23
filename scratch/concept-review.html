@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>LOO-1002 concept review: waking an idle work session</title>
+<style>
+  :root { color-scheme: light dark; --fg:#1d1f23; --bg:#fbfaf7; --muted:#6a6f78; --line:#dcd8cf;
+    --yes:#2f7d4f; --no:#b2452f; --prop:#2f5fb2; --card:#f2efe8; }
+  @media (prefers-color-scheme: dark) { :root { --fg:#e6e3dc; --bg:#16181c; --muted:#9aa0a8; --line:#33363d;
+    --yes:#6cc28f; --no:#e5866f; --prop:#86a9ec; --card:#1f2228; } }
+  body { font: 15px/1.55 ui-sans-serif, -apple-system, system-ui, sans-serif; color:var(--fg); background:var(--bg);
+    max-width: 980px; margin: 2.5rem auto; padding: 0 1.25rem; }
+  h1 { font-size: 1.5rem; margin-bottom: .2rem; } h2 { font-size: 1.15rem; margin-top: 2.2rem; }
+  p.lede { color: var(--muted); margin-top: 0; }
+  code { font: 13px ui-monospace, SFMono-Regular, Menlo, monospace; }
+  table { border-collapse: collapse; width: 100%; margin: .8rem 0; font-size: 14px; }
+  th, td { text-align: left; vertical-align: top; padding: .45rem .55rem; border-bottom: 1px solid var(--line); }
+  th { font-weight: 600; }
+  .yes { color: var(--yes); font-weight: 600; } .no { color: var(--no); font-weight: 600; }
+  .prop { border-left: 3px solid var(--prop); padding-left: .6rem; }
+  .tag { font-size: 12px; padding: 0 .35rem; border-radius: 3px; border: 1px solid var(--prop); color: var(--prop); }
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+  .card { background: var(--card); border-radius: 6px; padding: .8rem 1rem; }
+  .card h3 { margin: 0 0 .4rem; font-size: 1rem; }
+  pre { background: var(--card); padding: .7rem .9rem; border-radius: 6px; overflow-x: auto; font-size: 13px; line-height: 1.45; }
+  del { color: var(--no); } ins { color: var(--yes); text-decoration: none; }
+  ol li { margin-bottom: .55rem; }
+  @media (max-width: 720px) { .cols { grid-template-columns: 1fr; } }
+</style>
+</head><body>
+<h1>Waking an idle work session: do the concepts line up?</h1>
+<p class="lede">LOO-1002, reviewed after the build, against <code>origin/main</code> with the whole branch in it (HEAD <code>b497be0e89</code>). Replaces the pre-build review of <code>8fc8bdf64c</code>.</p>
+
+<p><b>Area taken:</b> how a steer or Task update reaches a work session that finished its turn, for all five harnesses: the idle reading, the store's wake address, the server's watcher and each provider's reach. OpenCode and Pi came from main (#1988); this branch adds Antigravity and the minute sweep. Reviewed as one area because the Antigravity reach should fit the model the other four share, not extend it.</p>
+
+<h2>The interaction</h2>
+<p><code>lf steer LOO-x 'reply with exactly WOKEN'</code>. The <code>agy</code> TUI for LOO-x sits idle. Within a second it shows lf's message as a prompt and answers. If <code>agy</code> was quit and reopened, nothing reports it, so the launch records it idle and the next sweep (at most a minute) sends what waited. If the RPC fails, the steer's claim lapses in 15 s and it arrives at the next boundary; <code>logs/lf.log</code> says why. A person learns one thing: an idle work session hears lf.</p>
+
+<h2>Product concepts and code concepts</h2>
+<table>
+<tr><th>What a person knows</th><th>Behind it in code</th><th>Lines up?</th><th>Where it doesn't</th></tr>
+<tr><td>A steer / Task update</td><td><code>steers</code>, <code>steer::claim</code>, <code>steer::delivered</code></td><td class="yes">yes</td><td></td></tr>
+<tr><td>The work session is idle</td><td><code>session_activity.yielded</code>: turn boundaries, plus <code>record_opened_idle</code> for a provider that has run no turn</td><td class="yes">yes</td><td>One writer for "opened idle", shared by a hook naming its inbox and a launch recording one. Before this branch it was inline SQL in one caller.</td></tr>
+<tr><td>A wake</td><td><code>server::wake::wake</code>: find reach, claim, send, <code>record_woken</code>, delivered</td><td class="yes">yes</td><td>Antigravity is one more <code>Reach</code> arm, no second watcher.</td></tr>
+<tr><td>"lf comes back to it" (sweep)</td><td><code>Watcher::swept</code>, 60 s <code>UNSIGNALLED</code></td><td class="yes">yes</td><td>The old 60 s fallback only re-read revisions; now it also wakes. One clock covers a missed checkpoint, sleep, a reopened <code>agy</code> and a failed wake. No per-Session clock.</td></tr>
+<tr><td>(implicit) where lf reaches it</td><td><code>agent_endpoint</code> (Codex), <code>agent_inbox</code> (Claude key <i>or</i> <code>agy</code> wake file), <code>agent_socket</code> (OpenCode, Pi) → <code>IdleReach</code></td><td class="no">partly</td><td>One idea in three columns, and <code>agent_inbox</code> means two things decoded by <code>provider='agy'</code>. <code>IdleReach</code> names the four cases in one place, so the code reads right; the schema doesn't. Below.</td></tr>
+<tr><td>Who records the address</td><td>lf-made: launch (<code>record_agent_endpoint</code>, <code>record_launch_inbox</code>). Provider-made: boundary (<code>record_agent_inbox</code>, socket)</td><td class="yes">yes</td><td>The pre-build mismatch is fixed: <code>agy</code>'s hook no longer carries an address the launch made.</td></tr>
+<tr><td>lf's message, not mine</td><td><code>SendUserCascadeMessage</code></td><td class="no">accepted</td><td>Renders as a typed prompt; <code>agy</code> offers no other idle entry (questions.md).</td></tr>
+</table>
+
+<h2>Biggest mismatch: the wake address has three homes</h2>
+<div class="cols">
+<div class="card"><h3>Existing</h3><pre>agent_endpoint  Codex app-server   (also read by
+                                    saved_session_connection)
+agent_inbox     Claude inbox key   | agy wake file
+                (by hook)          | (by launch, provider='agy')
+agent_socket    OpenCode / Pi socket (by boundary)</pre></div>
+<div class="card prop"><h3>Possible, <span class="tag">not this Task</span></h3><pre>agent_wake      one address
+agent_wake_kind codex | claude | agy | socket
+                written by whoever makes it</pre></div>
+</div>
+<p>Why it stays: <code>agent_endpoint</code> is also Codex's resume connection, so it can't fold in without splitting that reader; <code>agent_socket</code> came from main a day ago; and a merged column is a staged migration (expand, 30 days, contract). The decode lives in one query and one enum, which is where a reader looks. The Antigravity arm sits between Codex and socket in the <code>match</code>; the <code>provider='agy'</code> CASE makes its column distinct, so no row can be misread as a Claude key. Recommendation: leave it; it is a separate outcome if a sixth harness arrives.</p>
+
+<h2>Smaller findings</h2>
+<ol>
+<li><b>Antigravity claims before it connects.</b> <code>LanguageServer::find</code> reads files only; the network is first touched in <code>send</code>, after <code>claim</code>. The other reaches connect first so an unreachable conversation keeps its news. Cost here: a dead language server holds a 15 s claim, then the steer arrives at the next boundary. A typed prompt in that window gets it at the next tool. Nothing lost; not worth splitting a one-shot POST.</li>
+<li><b>A broken RPC logs once a minute</b> per idle <code>agy</code> conversation with news, now that the sweep retries. Bounded by news (none, no connect) and by the conversation going non-idle. Acceptable noise for an undocumented RPC that would otherwise fail silently.</li>
+<li><b>Launch fails if the wake can't be recorded.</b> <code>prepare_wake</code>'s <code>?</code> matches Codex's <code>record_agent_endpoint</code>, and a managed launch already requires the server. Consistent, so left.</li>
+</ol>
+
+<h2>What stays</h2>
+<p>Launch-recorded wake file (0600, beside the delivery), port read from <code>--log-file</code> at each wake, token only in the environment, the shared opened-idle writer, the sweep as the single clock, chats and batches never woken. Untested: a wake racing a typed prompt on <code>agy</code> (plan, Remaining 1).</p>
+
+<h2>Outcome</h2>
+<p>Nothing to change in this Task. The plan stands.</p>
+
+<h2>Questions</h2>
+<ol>
+<li>The three-column wake address: (a) leave it, (b) file a Task for one <code>agent_wake</code> column with a kind.</li>
+<li>A failed <code>agy</code> wake retried every minute: (a) keep the warn each time, (b) note it once per changed failure, as recording gaps do.</li>
+<li>Antigravity's claim-before-connect: (a) accept the 15 s claim, (b) probe the port before claiming.</li>
+</ol>
+</body></html>

@@ -120,7 +120,7 @@ row names the test that shows it; "no" is a gap with its owner.
 | fails the turn, with the question as its reason, when it asks one and nobody is there; the run stops after that one attempt | no: not read (Task 48edb9) | no: not read (Task 48edb9) | yes | yes | no: not read (Task 48edb9) | `task_graph_launch_tests::a_question_with_nobody_there_ends_the_step` |
 | stops on `lf task interrupt` with its turn recorded interrupted; the next `lf task run` starts the step again | yes | yes | yes | yes | yes | `a_worker_stops_on_interrupt_and_the_next_run_starts_its_step_again_on_claude_and_codex`, `…_on_opencode_and_pi`, `…_on_antigravity` |
 | moves to the next agent on a usage limit, a revoked login or a model the provider does not serve | yes | yes | yes | yes | yes | `harness::conformance_tests::each_harness_classifies_its_own_refusals`; `agent::tests::` fallthrough tests |
-| as an idle work session, hears a steer | yes | yes | yes | yes | no: next turn only (Task 540073) | `server::wake::tests::`; `harness::context::tests::` |
+| as an idle work session, hears a steer | yes | yes | yes | yes | yes | `server::wake::tests::`; `harness::context::tests::` |
 
 Context and steers reach every harness the same way: it runs
 `lf __context-block` when the conversation starts and after each tool. Claude
@@ -159,7 +159,10 @@ An OpenCode work session reports each turn's first request and its end, so the
 server knows when it is idle; Pi reports every event. Both name their socket
 as they start, so a work session reopened idle takes the steers saved while it
 was closed.
-Antigravity takes queued steers on its next turn.
+Antigravity starts a turn through the language server in its running `agy`
+process. `agy` reopened on its conversation runs no hook until someone types,
+so its launch records it as idle; steers saved while it was closed arrive
+within the server's one-minute sweep.
 
 Each harness's decoder reports a provider failure as an error event, and
 `drive::run` asks that harness what it means (`classify_failure`), once, at the

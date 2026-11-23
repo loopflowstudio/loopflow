@@ -1,0 +1,15 @@
+at: cd87c36057f953d062ebeadf36f092f2cacd652c
+first:
+  - path: rust/loopflow/src/server/README.md
+    why: the Antigravity reach beside main's Claude, Codex and socket reaches
+  - path: rust/loopflow-storage/src/steer.rs
+    why: IdleReach gains Antigravity
+  - path: rust/loopflow-storage/src/sqlite/steers.rs
+    why: an agy row's agent_inbox is its wake file, selected beside Codex's endpoint
+  - path: rust/loopflow-storage/src/sqlite/processes.rs
+    why: record_launch_inbox, the launch-side write
+  - path: rust/loopflow-execution/src/harness/antigravity.rs
+    why: launch token, log file, wake file; LanguageServer find and send
+  - path: rust/loopflow/src/server/wake.rs
+    why: the language-server send, with its stand-in test
+hide: []

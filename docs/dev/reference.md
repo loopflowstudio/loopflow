@@ -271,8 +271,8 @@ projection, shim, or API either maps to an existing concept or updates this page
 in the same change.
 
 A Task Session is an LfSession whose `task_id` names the Task: the Task its
-launch declared, else the deepest Task checkout holding its directory when it
-was created. A Graph run records its Task by the same rule, then the Task of
+launch declared, else the Task whose checkout is its directory's Git worktree
+when it was created. A Graph run records its Task by the same rule, then the Task of
 the Session that started it; a Task's work is those Sessions and runs, read by
 `task_id` and never by path. A Task can have any number; repo and Wave Sessions retain their
 explicit scopes. This term does not restore the retired Task Session controller

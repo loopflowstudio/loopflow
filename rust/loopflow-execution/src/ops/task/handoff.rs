@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use super::{block_on_task, lock_task_pr_mutation, task_error, task_holding, task_store};
+use super::{block_on_task, checkout_owner, lock_task_pr_mutation, task_error, task_store};
 use crate::git::worktrees::git_common_dir;
 use crate::git::{rev_parse, worktree_root};
 use crate::ops::error::OpsResult;
@@ -33,7 +33,7 @@ pub(super) fn read_design(caller: &Path, path: &Path) -> OpsResult<DesignHandoff
     let content = fs::read_to_string(&source_path)?;
     let source_task = block_on_task(async {
         let store = task_store().await?;
-        task_holding(&store, caller).await
+        checkout_owner(&store, caller).await
     })?;
     Ok(DesignHandoff {
         source_issue: source_task.as_ref().map(|task| task.identifier.clone()),

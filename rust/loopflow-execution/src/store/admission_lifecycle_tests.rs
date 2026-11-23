@@ -279,7 +279,7 @@ fn checkout_session_membership_survives_project_transfer_without_binding() {
     let (_dir, store, task_id) = store_with_task();
     let task = store.task(&task_id).unwrap().unwrap();
     let mut conversation = unpublished_conversation(None, None, 1);
-    conversation.cwd = task.worktree.as_ref().unwrap().join("src");
+    conversation.cwd = task.worktree.clone().unwrap();
     conversation.work_source = None;
     let session = crate::store::sessions::create_session(&store, conversation, None).unwrap();
     let before = crate::store::task_work::task_work(&store, &task_id).unwrap();

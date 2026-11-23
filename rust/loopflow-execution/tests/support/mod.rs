@@ -863,8 +863,8 @@ pub fn record_graph(home: &Path, cwd: &Path, graph: &str, label: &str, outcome: 
             sources: Vec::new(),
         })],
     );
-    // A Graph launched in a Task's checkout records that Task, the deepest
-    // checkout holding `cwd`.
+    // A Graph launched in a Task's checkout records that Task; fixture
+    // checkouts nest no Git worktrees, so the deepest one holding `cwd` is it.
     db.execute(
         "INSERT INTO graph_processes(lf_process_id,graph,compiled,task_id) VALUES(?1,?2,?3,
             (SELECT task_id FROM task_checkouts

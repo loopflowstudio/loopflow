@@ -78,21 +78,11 @@ pub(super) async fn resolve_managed_task(repo: &Path) -> OpsResult<ManagedTask> 
         }
         None => return Err(missing_task_registry()),
     };
-    // A worktree nested inside a Task's checkout holds that Task's work, but
-    // its branch is its own: only the Task whose checkout it is delivers it.
-    let owner = match crate::git::worktree_root(repo) {
-        Ok(root) => super::checkout_owner(&store, &root).await?,
-        Err(_) => None,
-    };
-    let task = match owner {
-        Some(task) => Some(task),
-        None => match crate::ops::run::select_execution_work(&store, repo).await? {
-            Some(selected) if selected.source == crate::session::WorkSource::Declared => {
-                selected.task
-            }
-            _ => None,
-        },
-    };
+    // A worktree nested inside a Task's checkout is no Task's: only the Task
+    // whose checkout it is, or one declared, delivers it.
+    let task = crate::ops::run::select_execution_work(&store, repo)
+        .await?
+        .and_then(|selected| selected.task);
     match task {
         Some(task) => Ok(ManagedTask::Managed {
             store,

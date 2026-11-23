@@ -164,7 +164,7 @@ pub(crate) async fn select_work(
     } else if selected_wave.is_some() {
         (None, crate::session::WorkSource::Declared)
     } else {
-        let task = super::task::task_holding(store, cwd).await?;
+        let task = super::task::checkout_owner(store, cwd).await?;
         (task, crate::session::WorkSource::Checkout)
     };
     let wave =
@@ -569,7 +569,7 @@ mod tests {
             .await
             .unwrap()
             .is_none());
-        assert!(crate::ops::task::task_holding(&store, other.path())
+        assert!(crate::ops::task::checkout_owner(&store, other.path())
             .await
             .unwrap()
             .is_none());
@@ -588,7 +588,7 @@ mod tests {
         assert_eq!(inferred_launch.source, crate::session::WorkSource::Checkout);
         assert_eq!(inferred_launch.context, launch.context);
         assert_eq!(
-            crate::ops::task::task_holding(&store, repo.path())
+            crate::ops::task::checkout_owner(&store, repo.path())
                 .await
                 .unwrap()
                 .unwrap()

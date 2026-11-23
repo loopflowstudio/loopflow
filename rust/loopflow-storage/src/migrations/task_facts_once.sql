@@ -1,8 +1,11 @@
 -- A Task's work is its Sessions and its Graph runs. Each records its Task
--- once, when it starts: the Task it names, else the deepest checkout holding
--- its directory on this Machine, else the Task of the Session that started
--- it. Membership reads that column and never matches a path, so a moved
--- repository or a reused checkout path changes no Task's work.
+-- once, when it starts: the Task it names, else the Task whose checkout is
+-- its directory's Git worktree on this Machine, else the Task of the Session
+-- that started it. Membership reads that column and never matches a path, so
+-- a moved repository or a reused checkout path changes no Task's work.
+--
+-- SQL cannot see Git, so history written before this rule takes the deepest
+-- checkout holding its directory, as membership read it by path until now.
 --
 -- Sessions written before this rule take it here. A Task's primary
 -- conversation names its Task even when it was chosen by path.
@@ -13,8 +16,7 @@ WHERE chosen.session_id=agent_sessions.id AND agent_sessions.task_id IS NULL
     AND (agent_sessions.wave_id IS NULL OR agent_sessions.wave_id IS chosen.wave_id);
 
 -- Every other Session that named nothing takes the deepest checkout holding
--- its directory, as membership read it by path until now. Each ancestor of
--- the directory is one index seek.
+-- its directory. Each ancestor of the directory is one index seek.
 UPDATE agent_sessions SET task_id=inside.task_id, wave_id=p.wave_id,
     work_source=coalesce(agent_sessions.work_source,'checkout')
 FROM (SELECT s.id, (WITH RECURSIVE up(path) AS (

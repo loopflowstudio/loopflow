@@ -283,6 +283,16 @@ fn a_worktree_inside_a_tasks_checkout_becomes_its_own_tasks_checkout() {
     };
     assert_eq!(delivers(&nested_root), None);
     assert_eq!(delivers(&outer_root), Some(outer.id.clone()));
+    // Bare `lf task status` says the nested worktree has no Task, while any
+    // directory of the outer checkout's own worktree is the outer Task's.
+    let status = |cwd: &Path| super::super::task_status(cwd, None).map(|status| status.task);
+    let error = status(&nested_root).unwrap_err().to_string();
+    assert!(error.contains("this checkout has no Task"), "{error}");
+    std::fs::create_dir_all(outer_root.join("src")).unwrap();
+    assert_eq!(
+        status(&outer_root.join("src")).unwrap().map(|task| task.id),
+        Some(outer.id.clone())
+    );
 
     let nested = table.create("Nested", None, Some(&nested_root)).unwrap();
     assert_ne!(nested.id, outer.id);

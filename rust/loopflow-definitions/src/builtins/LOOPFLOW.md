@@ -73,8 +73,10 @@ read is unknown, not an empty plan. To build on another open Task, `lf sync
 
 A child agent takes one piece of your work: `lf -b <skill> '<brief>'` runs
 one headless in this checkout on any model (`-a codex`), and your harness's
-own subagent is fine too. You answer for what it returns; check it before
-you use it.
+own subagent is fine too, working in this checkout. A separate checkout
+comes from `lf wt create <name>`, beside this one, never from the harness's
+own worktree tools, which nest one inside this checkout where it belongs to
+no Task. You answer for what it returns; check it before you use it.
 
 ## Notes
 

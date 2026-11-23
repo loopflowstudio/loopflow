@@ -282,8 +282,8 @@ fn build_bound_prompt(
 }
 
 /// An `lf` launch inside a registered Task's checkout binds to that Task unless
-/// the caller selected Work explicitly. Otherwise the checkout holding the
-/// directory wins over an ancestor's explicit declaration. An unavailable
+/// the caller selected Work explicitly. Otherwise the Task whose checkout is
+/// the directory's Git worktree wins over an ancestor's explicit declaration. An unavailable
 /// registry leaves context unresolved; it never reconstructs Task identity
 /// from process ancestry.
 pub fn implicit_binding(cli: &Cli) -> Result<Option<loopflow_execution::ops::WorkBinding>> {

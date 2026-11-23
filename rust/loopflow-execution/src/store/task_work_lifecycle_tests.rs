@@ -354,10 +354,11 @@ fn task_work_includes_checkout_binding_without_granting_ownership() {
             );
         }
     }
-    // A Graph is the Task's work when it ran in the checkout.
+    // A Graph is the Task's work when it ran in the checkout; the store
+    // cannot see Git below a path that is gone, so it runs at the root.
     let independent = store.test_graph(
         "independent",
-        "/missing/task%_/sub",
+        "/missing/task%_",
         &[("implement", None)],
         None,
     );
@@ -440,7 +441,7 @@ fn task_work_includes_checkout_binding_without_granting_ownership() {
         .unwrap();
         conn.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,task_id,wave_id) VALUES('child-session','Child','human',1,0,'/missing/task%_/child',?1,?2)", params![child.as_str(), wave]).unwrap();
     }
-    // Work in a nested checkout belongs to the deepest Task only.
+    // Work in a nested checkout belongs to that checkout's Task only.
     let child_graph = store.test_graph(
         "child",
         "/missing/task%_/child",

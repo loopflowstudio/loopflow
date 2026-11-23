@@ -45,7 +45,7 @@ kernel locks                 live local exclusion authority
 | Submitted creations | `creation_receipts` | Request IDs, content fingerprints, original resource identities and server-owned outcomes for Task creation and new Session threads |
 | Served command answers | `command_answers` | Request IDs, content fingerprints and first answers retained for one day so a lost reply can be retrieved without repeating the write |
 | Execution | `agent_sessions`, `session_events`, `session_activity` | Conversations, selected captures, observed provider transitions, native completions, turn receipts and the current observations availability is judged from |
-| Graph processes | `graph_processes`, `graph_process_steps` | One append-only row per Graph process and per step it started. A run records its Task (`task_id`) as it starts: the Task it names, else the deepest Task checkout holding its directory, else the Task of the Session that started it |
+| Graph processes | `graph_processes`, `graph_process_steps` | One append-only row per Graph process and per step it started. A run records its Task (`task_id`) as it starts: the Task it names, else the Task whose checkout is its directory's Git worktree, else the Task of the Session that started it |
 | Task graphs | `task_graphs` | The graph a Task took up, the step it stands at and the run carrying it |
 | Task on this Machine | `task_checkouts`, `task_moves` | Machine-local only: the checkout (worktree path, branch, base commit, parent PR) where this Machine has one and each move this Machine sent or received (`sent`, `arrived`) |
 | CLI processes | `processes` | Indexed command lifecycle and immutable causal ancestry, written by command start and completion |

@@ -4,6 +4,8 @@
 
 use std::collections::{HashMap, HashSet};
 
+use rusqlite::OptionalExtension;
+
 use crate::task_session::TaskSession;
 use crate::StoreResult;
 use loopflow_model::durable::TaskId;
@@ -61,22 +63,6 @@ pub(super) fn within(cwd: &str, root: &str) -> String {
     format!("({cwd}=rtrim({root},'/') OR instr({cwd},rtrim({root},'/')||'/')=1)")
 }
 
-/// The Task whose checkout here is the deepest one holding `cwd`, as a scalar
-/// subquery. Probes checkout roots from the cwd outward, so each ancestor is
-/// one index seek; relative paths walk the same way as absolute ones.
-fn deepest_checkout(cwd: &str) -> String {
-    format!(
-        "(WITH RECURSIVE up(path) AS (
-            SELECT rtrim({cwd},'/') WHERE {cwd} IS NOT NULL
-            UNION ALL
-            SELECT rtrim(rtrim(path,replace(path,'/','')),'/') FROM up WHERE path!='')
-         SELECT c.task_id FROM up CROSS JOIN task_checkouts c INDEXED BY task_checkouts_root
-            ON rtrim(c.worktree,'/')=up.path
-         WHERE up.path!='' OR substr({cwd},1,1)='/' OR {cwd}=''
-         ORDER BY length(up.path) DESC, c.task_id LIMIT 1)"
-    )
-}
-
 /// SQL for the Task whose checkout is exactly `root`, lower id on a shared root.
 fn checkout_at(root: &str) -> String {
     format!(
@@ -85,10 +71,42 @@ fn checkout_at(root: &str) -> String {
     )
 }
 
+/// The Task whose checkout is the Git worktree holding `dir` on this Machine:
+/// root equality, so a worktree nested inside a Task's checkout is no Task's.
+/// The root matches as `dir` is spelled and as it resolves through symlinks; a
+/// directory no Git worktree holds is its own root, the only answer the store
+/// has for a path that is gone.
+fn checkout_owner_in(
+    conn: &rusqlite::Connection,
+    dir: &std::path::Path,
+) -> StoreResult<Option<String>> {
+    let root = |dir: &std::path::Path| {
+        crate::address::worktree_root(dir).unwrap_or_else(|| dir.to_path_buf())
+    };
+    let spelled = root(dir);
+    let resolved = dir
+        .canonicalize()
+        .ok()
+        .map(|dir| root(&dir))
+        .filter(|resolved| *resolved != spelled);
+    Ok(conn.query_row(
+        &format!(
+            "SELECT coalesce({},{})",
+            checkout_at("?1"),
+            checkout_at("?2")
+        ),
+        rusqlite::params![
+            spelled.to_string_lossy(),
+            resolved.as_deref().map(std::path::Path::to_string_lossy)
+        ],
+        |row| row.get(0),
+    )?)
+}
+
 /// The Task a Session or a Graph run belongs to, read once as it starts: the
-/// Task it names, else the deepest checkout holding its directory on this
-/// Machine, else the Task of the Session that started it. A command run inside
-/// a checkout is that Task's work whoever ran it.
+/// Task it names, else the Task whose checkout is its directory's Git
+/// worktree on this Machine, else the Task of the Session that started it. A
+/// command run inside a checkout is that Task's work whoever ran it.
 pub(super) fn starting_task_in(
     conn: &rusqlite::Connection,
     named: Option<&TaskId>,
@@ -98,17 +116,25 @@ pub(super) fn starting_task_in(
     if let Some(named) = named {
         return Ok(Some(named.clone()));
     }
-    Ok(conn
-        .query_row(
-            &format!(
-                "SELECT coalesce({},(SELECT s.task_id FROM agent_sessions s WHERE s.id=?2 AND {}))",
-                deepest_checkout("?1"),
-                counts_for_task("s")
-            ),
-            rusqlite::params![cwd, started_by],
-            |row| row.get::<_, Option<String>>(0),
-        )?
-        .map(TaskId::from_raw))
+    let here = match cwd {
+        Some(cwd) => checkout_owner_in(conn, std::path::Path::new(cwd))?,
+        None => None,
+    };
+    let task = match here {
+        Some(task) => Some(task),
+        None => conn
+            .query_row(
+                &format!(
+                    "SELECT s.task_id FROM agent_sessions s WHERE s.id=?1 AND {}",
+                    counts_for_task("s")
+                ),
+                [started_by],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .optional()?
+            .flatten(),
+    };
+    Ok(task.map(TaskId::from_raw))
 }
 
 /// The Tasks conducted from the Tasks `members` selects: those filed from one
@@ -233,7 +259,6 @@ fn task_graph_row(
     conn: &rusqlite::Connection,
     task: &TaskId,
 ) -> StoreResult<Option<SavedTaskGraphRow>> {
-    use rusqlite::OptionalExtension;
     let Some((graph, step, start, carrier)) = conn
         .query_row(
             "SELECT graph,step,run_start,lf_process_id,run_pid,run_os_started_at,run_died_at
@@ -308,7 +333,6 @@ pub struct TaskRunRestarts {
 }
 
 fn run_restarts_in(conn: &rusqlite::Connection, task: &TaskId) -> StoreResult<TaskRunRestarts> {
-    use rusqlite::OptionalExtension;
     Ok(conn
         .query_row(
             "SELECT restarts,restarted_at FROM task_graphs WHERE task_id=?1",
@@ -389,7 +413,6 @@ fn write_auto_in(
 }
 
 pub(super) fn auto_in(conn: &rusqlite::Connection, task: &TaskId) -> StoreResult<Option<Auto>> {
-    use rusqlite::OptionalExtension;
     let Some((state, at, by)) = conn
         .query_row(
             "SELECT state,set_at,set_by FROM task_auto WHERE task_id=?1",
@@ -594,40 +617,13 @@ fn member_graphs(tx: &rusqlite::Connection, task: &TaskId) -> StoreResult<Vec<Me
 }
 
 impl SqliteStore {
-    /// The Task whose work `dir` is on this Machine: the one whose checkout is
-    /// the deepest holding it, so a checkout nested inside another is its own
-    /// Task's; two Tasks recorded on one root resolve to the lower id. `dir`
-    /// matches as named and as it resolves through symlinks. A worktree nested
-    /// in a checkout that no Task owns is still the outer Task's work.
-    pub fn task_holding(&self, dir: &std::path::Path) -> StoreResult<Option<TaskId>> {
-        self.task_at(dir, deepest_checkout)
-    }
-
-    /// The Task whose checkout is the worktree at `root` on this Machine: an
-    /// exact match, so a worktree nested inside another Task's checkout is
-    /// owned by nobody until a Task adopts it. Matching and ties follow
-    /// [`Self::task_holding`].
-    pub fn task_checkout_owner(&self, root: &std::path::Path) -> StoreResult<Option<TaskId>> {
-        self.task_at(root, checkout_at)
-    }
-
-    fn task_at(
-        &self,
-        path: &std::path::Path,
-        lookup: fn(&str) -> String,
-    ) -> StoreResult<Option<TaskId>> {
-        let resolved = path.canonicalize().ok().filter(|resolved| resolved != path);
+    /// The Task whose checkout is the Git worktree holding `dir` on this
+    /// Machine; two Tasks recorded on one root resolve to the lower id. Work
+    /// in a worktree nested inside a Task's checkout is no Task's until a Task
+    /// adopts that worktree as its own checkout.
+    pub fn task_checkout_owner(&self, dir: &std::path::Path) -> StoreResult<Option<TaskId>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        Ok(conn
-            .query_row(
-                &format!("SELECT coalesce({},{})", lookup("?1"), lookup("?2")),
-                rusqlite::params![
-                    path.to_string_lossy(),
-                    resolved.as_deref().map(std::path::Path::to_string_lossy)
-                ],
-                |row| row.get::<_, Option<String>>(0),
-            )?
-            .map(TaskId::from_raw))
+        Ok(checkout_owner_in(&conn, dir)?.map(TaskId::from_raw))
     }
 
     /// Held terminals of unfinished member Sessions, without loading
@@ -806,7 +802,6 @@ impl SqliteStore {
 
     /// The Task's Graph as it moves to another Machine.
     pub fn task_graph_record(&self, task: &TaskId) -> StoreResult<Option<SavedTaskGraphRecord>> {
-        use rusqlite::OptionalExtension;
         let conn = self.conn.lock().expect("store mutex poisoned");
         let Some((graph, step, run_start)) = conn
             .query_row(
@@ -1092,7 +1087,8 @@ mod tests {
     fn work_keeps_its_task_when_its_repository_moves_and_its_path_is_reused() {
         let dir = tempfile::tempdir().unwrap();
         let store = crate::test_fixture::open(&dir.path().join("db")).unwrap();
-        let repository = crate::test_fixture::repository(&store, "/repo");
+        let base = dir.path().canonicalize().unwrap();
+        let repository = crate::test_fixture::repository(&store, base.to_str().unwrap());
         let task = |title: &str| {
             store
                 .create_task(&crate::work::task::NewTask {
@@ -1108,14 +1104,19 @@ mod tests {
                 .id
         };
         let (first, second) = (task("First"), task("Second"));
+        let root = base.join("task");
+        let src = root.join("src");
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::write(root.join(".git"), "gitdir: /repo/.git/worktrees/task").unwrap();
+        let (root, src) = (root.to_str().unwrap(), src.to_str().unwrap());
         let checkout = |task: &TaskId| {
             store
                 .conn
                 .lock()
                 .unwrap()
                 .execute(
-                    "INSERT INTO task_checkouts(task_id,worktree) VALUES(?1,'/repo/task')",
-                    [task.as_str()],
+                    "INSERT INTO task_checkouts(task_id,worktree) VALUES(?1,?2)",
+                    [task.as_str(), root],
                 )
                 .unwrap();
         };
@@ -1141,8 +1142,8 @@ mod tests {
             id
         };
         checkout(&first);
-        let first_conversation = conversation("/repo/task/src");
-        let first_run = run("/repo/task/src", None);
+        let first_conversation = conversation(src);
+        let first_run = run(src, None);
         // A run the conversation starts elsewhere is its Task's work too,
         // and still is once the conversation is the Task's primary.
         let elsewhere = run("/tmp", Some(&first_conversation));
@@ -1153,9 +1154,9 @@ mod tests {
         // The repository moves, and another Task's clone takes the old path.
         store.relocate_repository(&repository, "/moved").unwrap();
         checkout(&second);
-        let second_conversation = conversation("/repo/task");
+        let second_conversation = conversation(root);
         // The checkout holding a run outranks the Session that started it.
-        let second_run = run("/repo/task", Some(&first_conversation));
+        let second_run = run(root, Some(&first_conversation));
         let work = |task: &TaskId| {
             let records = store.task_work_records(task).unwrap();
             let sessions: Vec<_> = records.sessions.into_iter().map(|s| s.id).collect();
@@ -1189,18 +1190,25 @@ mod tests {
     }
 
     #[test]
-    fn a_directory_is_held_by_its_deepest_checkout_and_owned_by_its_exact_one() {
+    fn a_directory_belongs_to_the_task_whose_checkout_is_its_git_worktree() {
         let dir = tempfile::tempdir().unwrap();
         let store = crate::test_fixture::open(&dir.path().join("db")).unwrap();
         let repository = crate::test_fixture::repository(&store, "/repo");
-        let task = |worktree: &str| {
+        let base = dir.path().canonicalize().unwrap();
+        let worktree = |path: &str| {
+            let path = base.join(path);
+            std::fs::create_dir_all(path.join("src")).unwrap();
+            std::fs::write(path.join(".git"), "gitdir: /repo/.git/worktrees/x").unwrap();
+            path
+        };
+        let task = |worktree: &std::path::Path| {
             let id = store
                 .create_task(&crate::work::task::NewTask {
                     parent_task_id: None,
                     id: TaskId::new(),
                     repository_id: repository.clone(),
                     project_id: None,
-                    title: worktree.into(),
+                    title: worktree.display().to_string(),
                     description: String::new(),
                     due_date: None,
                 })
@@ -1212,52 +1220,83 @@ mod tests {
                 .unwrap()
                 .execute(
                     "INSERT INTO task_checkouts(task_id,worktree) VALUES(?1,?2)",
-                    [id.as_str(), worktree],
+                    [id.as_str(), worktree.to_str().unwrap()],
                 )
                 .unwrap();
             id
         };
-        let (outer, nested) = (task("/repo/outer"), task("/repo/outer/nested"));
-        let (one, two) = (task("/repo/shared"), task("/repo/shared/"));
-        let holding = |path: &str| store.task_holding(std::path::Path::new(path)).unwrap();
-        assert_eq!(holding("/repo/outer/src"), Some(outer.clone()));
-        assert_eq!(holding("/repo/outer/nested/src"), Some(nested.clone()));
-        // A sibling sharing a name prefix is not inside the checkout.
-        assert_eq!(holding("/repo/outer/nestedness"), Some(outer.clone()));
+        let outer_root = worktree("outer");
+        let outer = task(&outer_root);
+        let nested = task(&worktree("outer/nested"));
+        // A worktree a harness nests inside the checkout belongs to no Task.
+        let claude = worktree("outer/.claude/worktrees/agent");
+        let shared = worktree("shared");
+        let (one, two) = (task(&shared), task(&shared.join("")));
         let lower = if one.as_str() < two.as_str() {
             one
         } else {
             two
         };
-        assert_eq!(holding("/repo/shared"), Some(lower.clone()));
-        assert_eq!(holding("/repo"), None);
-        assert_eq!(holding("/elsewhere"), None);
-        // A directory named through a symlink is in the checkout it resolves to.
-        let real = dir.path().canonicalize().unwrap().join("real");
-        std::fs::create_dir_all(real.join("src")).unwrap();
-        let link = dir.path().join("link");
-        std::os::unix::fs::symlink(&real, &link).unwrap();
-        let resolved = task(real.to_str().unwrap());
-        assert_eq!(
-            holding(link.join("src").to_str().unwrap()),
-            Some(resolved.clone())
-        );
+        let owner = |path: &std::path::Path| store.task_checkout_owner(path).unwrap();
 
-        // Owning a checkout is root equality: a worktree nested in another
-        // Task's checkout is that Task's work, but no Task's checkout.
-        let owner = |path: &str| {
+        assert_eq!(owner(&outer_root), Some(outer.clone()));
+        assert_eq!(owner(&outer_root.join("src")), Some(outer.clone()));
+        assert_eq!(owner(&outer_root.join("nested/src")), Some(nested));
+        assert_eq!(owner(&claude), None);
+        assert_eq!(owner(&claude.join("src")), None);
+        assert_eq!(owner(&shared), Some(lower.clone()));
+        assert_eq!(owner(&base), None);
+        // A directory named through a symlink is in the checkout it resolves to.
+        let link = dir.path().join("link");
+        std::os::unix::fs::symlink(&outer_root, &link).unwrap();
+        assert_eq!(owner(&link.join("src")), Some(outer.clone()));
+        // A directory that is gone is its own root.
+        assert_eq!(owner(&base.join("gone")), None);
+        std::fs::remove_dir_all(&outer_root).unwrap();
+        assert_eq!(owner(&outer_root), Some(outer.clone()));
+        assert_eq!(owner(&outer_root.join("src")), None);
+
+        // A Session and a Graph run started in the nested worktree get no
+        // Task; started in a subdirectory of a checkout, they get its Task.
+        let shared_src = shared.join("src");
+        let session = |cwd: &std::path::Path| {
+            let mut session = crate::test_fixture::unpublished_conversation(None, None, 1);
+            session.work_source = None;
+            session.cwd = cwd.into();
             store
-                .task_checkout_owner(std::path::Path::new(path))
+                .create_session_prepared(session, None)
                 .unwrap()
+                .task_id
         };
-        let claude = "/repo/outer/.claude/worktrees/agent";
-        assert_eq!(holding(claude), Some(outer.clone()));
-        assert_eq!(owner(claude), None);
-        assert_eq!(owner("/repo/outer"), Some(outer.clone()));
-        assert_eq!(owner("/repo/outer/"), Some(outer));
-        assert_eq!(owner("/repo/outer/nested"), Some(nested));
-        assert_eq!(owner("/repo/shared"), Some(lower));
-        assert_eq!(owner(link.to_str().unwrap()), Some(resolved));
+        assert_eq!(session(&claude.join("src")), None);
+        assert_eq!(session(&shared_src), Some(lower.clone()));
+        let graph = crate::graph::CompiledGraph {
+            name: "proof".into(),
+            steps: vec![],
+        };
+        let run = |cwd: &std::path::Path| {
+            let id = LfProcessId::new();
+            store
+                .record_graph(
+                    &id,
+                    &graph,
+                    None,
+                    &crate::graph_process::ExecutionStart::reserved(1),
+                    None,
+                    Some(cwd.to_str().unwrap()),
+                    None,
+                )
+                .unwrap();
+            store
+                .graph_process(id.as_str())
+                .unwrap()
+                .unwrap()
+                .1
+                .summary
+                .task_id
+        };
+        assert_eq!(run(&claude), None);
+        assert_eq!(run(&shared_src), Some(lower.clone()));
     }
 
     #[test]

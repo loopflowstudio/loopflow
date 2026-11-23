@@ -514,20 +514,12 @@ pub fn origin_branch(repo: &Path) -> Result<Option<String>, GitError> {
 /// Reads the filesystem instead of launching Git: Session and Task readers
 /// resolve every recorded checkout on each read.
 pub fn worktree_root(repo: &Path) -> Result<PathBuf, GitError> {
-    let start = repo.canonicalize()?;
-    let root = start.ancestors().find(|dir| {
-        let marker = dir.join(".git");
-        // A linked worktree or submodule has a `.git` file naming its Git dir.
-        marker.join("HEAD").is_file()
-            || std::fs::read(&marker).is_ok_and(|bytes| bytes.starts_with(b"gitdir:"))
-    });
-    match root {
-        Some(root) if !start.starts_with(root.join(".git")) => Ok(root.to_path_buf()),
-        _ => Err(GitError::CommandFailed {
+    loopflow_storage::address::worktree_root(&repo.canonicalize()?).ok_or_else(|| {
+        GitError::CommandFailed {
             command: "git rev-parse --show-toplevel".to_string(),
             stderr: format!("not a git work tree: {}", repo.display()),
-        }),
-    }
+        }
+    })
 }
 
 /// Prefer advertised remote defaults, then existing local branch conventions.

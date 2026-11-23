@@ -142,14 +142,12 @@ keeps every column; it belongs with LOO-939 (naming), not here. Noted in
 
 One rule in the store (`task_work::starting_task_in`), applied once when the
 row is written. The launch decides first and names the Task it found
-(`select_execution_work` → `task_holding`); the store
-fills in only what the launch left empty. Same order, two definitions of "the
-checkout holding this directory": they differ in a worktree nested inside a
-checkout and where two Tasks hold one root. Not built here (concept review,
-Mismatch A).
+(`select_execution_work` → `task_checkout_owner`); the store
+fills in only what the launch left empty. Both ask the same store answer, so
+the launch and the store agree on nested worktrees and shared roots.
 
-> the Task it names, else the deepest checkout holding its directory on this
-> Machine, else the Task of the Session that started it.
+> the Task it names, else the Task whose checkout is its directory's Git
+> worktree on this Machine, else the Task of the Session that started it.
 
 Checkout before caller: a command run inside a checkout is that Task's work
 whoever ran it (live store, 2026-11-17: the caller-first order gave 6,687
@@ -363,7 +361,7 @@ Drop `task_primary_sessions` with its three mirror triggers and make
 ship the release whose peer protocol accepts a `Disposition` without
 `planning_completed`, then stop sending it.
 
-## Next: implement (human review of the ownership split, 2026-11-23)
+## Built: one Git-root rule (human review of the ownership split, 2026-11-23)
 
 Answer on the page's question 1: "i think I prefer (c)": Git-root equality
 everywhere. A Task's work is what runs in its checkout's Git worktree (any
@@ -393,6 +391,29 @@ LOO-1075 (4a).
 3. Tests: a Session and a Graph run started in a nested worktree get no Task;
    one started in a subdirectory of the checkout gets the Task; `lf land` and
    bare `lf task status` in the nested worktree answer "no Task".
+
+Built. `SqliteStore::task_checkout_owner(dir)` is the one answer: the Task
+whose checkout is the Git worktree holding `dir` (exact root, as spelled and
+as resolved, lower id on a shared root). The store finds the root itself with
+`loopflow_storage::address::worktree_root`, a filesystem walk for `.git` that
+`git::worktree_root` now calls, so the counterexample dissolved: no caller has
+to pass a root. A directory no worktree holds is its own root, the only answer
+for a path that is gone (fixtures with missing paths ask at the root).
+`task_holding`, `deepest_checkout` and execution's `task_holding` are gone;
+`run.rs` select, `handoff.rs --design`, `task_status`, provider conversations
+and `starting_task_in` ask the owner, and delivery reads `select_execution_work`
+alone (owner, else declared). The migration's backfill keeps the deepest
+checkout and says why. LOOPFLOW.md's child-agent paragraph points at
+`lf wt create`; goldens regenerated. Tests: storage `task_work::` 9 (new
+`a_directory_belongs_to_the_task_whose_checkout_is_its_git_worktree`);
+execution `store::` 214, `ops::task::adoption::` 10 (nested status says "this
+checkout has no Task", a subdirectory of the outer checkout is the outer
+Task's), `ops::task::tests:: ops::run:: ops::human_session:: git::` passed;
+`golden_prompt`, `documented_commands::` passed; clippy clean. Not run here:
+`lf land` in a nested worktree end to end (`land_tests`, CI);
+`pr_landing` already asked the owner by Git root.
+
+Next: gate.
 
 ## Earlier: implement (concept review after the plan hub, 2026-11-22)
 

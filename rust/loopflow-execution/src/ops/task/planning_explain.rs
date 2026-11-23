@@ -203,9 +203,10 @@ async fn read_planning(
                 ),
                 None => None,
             };
-            let project = store
-                .sqlite
-                .task_move_project(&task.id, destination.as_ref().map(|wave| wave.id()))?;
+            let project = destination
+                .as_ref()
+                .map(|wave| store.sqlite.wave_project(wave.id()))
+                .transpose()?;
             report.action = Some(TaskPlanningAction::Move {
                 wave: destination.as_ref().map(|w| w.id().to_string()),
                 project: project.as_ref().map(ToString::to_string),
@@ -381,13 +382,12 @@ async fn read_creation(
         value: wave.id().to_string(),
         source: "explicit".into(),
     };
-    // The Project the Task joins: its Wave's, else the nearest ancestor's, else none.
-    let joined = store.sqlite.new_task_project(wave.id())?;
+    let joined = store.sqlite.wave_project(wave.id())?;
     if let Some(TaskPlanningAction::Create {
         project: selected, ..
     }) = &mut report.action
     {
-        *selected = joined.map(|id| id.to_string());
+        *selected = Some(joined.to_string());
     }
     Ok(())
 }

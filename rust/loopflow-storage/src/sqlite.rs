@@ -839,6 +839,10 @@ impl SqliteStore {
             &crate::work::edit::WorkEdit::for_target(wave.id().as_str(), &edits),
             crate::sqlite::planning_write::WriteOrigin::Local,
         )?;
+        if !saved && wave.retired_at().is_none() {
+            // A Wave is made with its one Project.
+            children::wave_project_in(&tx, wave.id())?;
+        }
         if !saved {
             tx.execute("UPDATE waves SET created_at=?2,retired_at=?3,superseded_by_wave_id=?4,retirement_reason=?5 WHERE id=?1",params![wave.id(),created_at,wave.retired_at().map(|at|at.unix_timestamp()),wave.superseded_by_wave_id(),wave.retirement_reason()])?;
         }

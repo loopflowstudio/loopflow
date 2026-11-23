@@ -382,7 +382,7 @@ fn work_table(work: &WorkRef) -> (&'static str, &str) {
 pub(super) fn task_wave_in(conn: &Connection, task: &TaskId) -> StoreResult<Option<WaveId>> {
     let wave: Option<String> = conn
         .query_row(
-            "SELECT wave_id FROM tasks WHERE id=?1",
+            "SELECT p.wave_id FROM tasks t LEFT JOIN projects p ON p.id=t.project_id WHERE t.id=?1",
             [task.as_str()],
             |row| row.get(0),
         )

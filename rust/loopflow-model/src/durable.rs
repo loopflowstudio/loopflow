@@ -48,6 +48,14 @@ prefixed_uuid_id!(
     DurableDataError::InvalidId
 );
 
+impl ProjectId {
+    /// A Wave's one Project shares the Wave's UUID, so every Machine that
+    /// makes it makes the same record.
+    pub fn for_wave(wave: &WaveId) -> Self {
+        Self(format!("proj_{}", wave.as_str().replace('-', "")))
+    }
+}
+
 impl TaskId {
     /// Linear UUIDs are also the creation UUID used by locally authored Tasks.
     pub fn from_issue(id: &str) -> Self {

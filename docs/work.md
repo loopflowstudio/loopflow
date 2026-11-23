@@ -326,7 +326,7 @@ Answer a lost line: lf repo tracker answer <id> --keep-theirs, or --use-mine.
 
 A Project whose Wave is not yet linked to a Linear Initiative stays local, and
 its Tasks wait in the queue until you run `lf wave plan connect <wave>`. A Task
-with no Project goes to Linear right away, as a team issue.
+in no Wave goes to Linear right away, as a team issue.
 
 ## Waves
 
@@ -416,32 +416,22 @@ $ lf wave status billing/refunds
   Refund a mischarged invoice   LOO-14   unstarted
 ```
 
-A Task belongs to the Wave it was filed in. A Project is optional: a Wave's
-link to a tracker Project. A new Task joins its Wave's Project, else the
-nearest parent Wave's, else none. Either way it lists under its own Wave, and
-nothing makes a Project for it.
+A Wave is one Project, made with the Wave: `lf wave create billing/refunds`
+makes the Project `refunds`. A Task in a Wave is in its Project, and lists
+under that Wave only. A Task in no Wave is in no Project.
 
-A Wave can hold several Projects, each with a name, a summary and a status;
-`lf wave status` and `lf wave plan billing --json` list them in the Wave's
-order, ended ones included. Projects start and end in the tracker: rename
-one, start another or mark one completed in Linear, and `lf wave sync` shows
-the same here. Within a Wave, a new Task joins the newest started Project, or
-the newest one that has not ended. With more than one open, the command says
-which it chose:
+The Project has a name, a summary and a status, and `lf wave status` and
+`lf wave plan billing --json` show it. It starts and ends in the tracker:
+rename it or mark it completed in Linear, and `lf wave sync` shows the same
+here. An ended Project is still the Wave's, and new Tasks still join it.
 
-```text
-$ lf task create --wave billing --title "Meter usage events"
-Meter usage events · LOO-12 in Project Invoicing
-```
+A tracker holds an issue in a Project. A Task in a Wave is its Project's issue
+there, and another Machine reading the tracker lists it under that Wave. A
+Task with no Wave goes to the tracker as an issue in no Project, which other
+Machines do not read back. An issue made in the tracker joins the Wave whose
+Project it is in.
 
-A tracker holds an issue in a Project, never a Wave. A Task in a parent's
-Project is that Project's issue there, and another Machine reading the tracker
-lists it under the parent. A Task with no Project still goes to the tracker, as
-an issue in no Project, which other Machines do not read back. An issue made
-in the tracker joins the Wave linked to its Project.
-
-`lf task move` keeps a Task's Project when the new Wave is that Project's
-Wave or below it, and otherwise places it again. A started Task keeps its
+`lf task move` puts a Task in the new Wave's Project. A started Task keeps its
 worktree and PR wherever it is.
 
 ### Nested Waves

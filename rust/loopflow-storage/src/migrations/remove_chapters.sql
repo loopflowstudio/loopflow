@@ -1,8 +1,7 @@
--- A Wave no longer selects one of its Projects (LOO-995): a new Task joins
--- the newest started Project of its Wave, else of the nearest ancestor Wave
--- that has one, else none, read from `projects` each time. Released
--- lf still reads these members, so they stay, unwritten, until a contract
--- drops them with their idle triggers and rebuilds `waves`.
+-- A Wave no longer selects one of its Projects (LOO-995): it has exactly
+-- one, and a Task in the Wave is in it. Released lf still reads these
+-- members, so they stay, unwritten, until a contract drops them with their
+-- idle triggers and rebuilds `waves`.
 -- leaving: waves.current_project_id LOO-995
 -- leaving: waves.project_activation_lf_process_id LOO-995
 -- leaving: waves.project_activation_started_at LOO-995
@@ -31,54 +30,43 @@ WHERE subject IN ('krs','metric_targets') AND phase IN ('queued','sent','conflic
 -- Live metrics are gone: no contract, instrument or observation is read.
 -- leaving: metric_instruments LOO-995
 -- leaving: metric_observations LOO-995
--- A Task records its own Wave. Its Project is optional: the Wave's, else the
--- nearest ancestor Wave's, else none, so the Wave is no longer read through
--- the Project.
-ALTER TABLE tasks ADD COLUMN wave_id TEXT REFERENCES waves(id);
-UPDATE tasks SET wave_id=(SELECT p.wave_id FROM projects p WHERE p.id=tasks.project_id)
-WHERE project_id IS NOT NULL;
-CREATE INDEX tasks_wave ON tasks(wave_id);
-DROP TRIGGER store_revision_tasks_update;
-CREATE TRIGGER store_revision_tasks_update AFTER UPDATE ON tasks
-WHEN NEW.id IS NOT OLD.id OR NEW.repository_id IS NOT OLD.repository_id OR
-    NEW.project_id IS NOT OLD.project_id OR NEW.wave_id IS NOT OLD.wave_id OR
-    NEW.external_issue_id IS NOT OLD.external_issue_id OR
-    NEW.issue_identifier IS NOT OLD.issue_identifier OR
-    NEW.created_at IS NOT OLD.created_at OR
-    NEW.issue_title IS NOT OLD.issue_title OR
-    NEW.issue_description IS NOT OLD.issue_description OR
-    NEW.worktree IS NOT OLD.worktree OR
-    NEW.workspace_slug IS NOT OLD.workspace_slug OR
-    NEW.abandon_reason IS NOT OLD.abandon_reason OR
-    NEW.updated_at IS NOT OLD.updated_at OR
-    NEW.abandoned_at IS NOT OLD.abandoned_at OR
-    NEW.primary_session_id IS NOT OLD.primary_session_id OR
-    NEW.planning_revision IS NOT OLD.planning_revision OR
-    NEW.planning_rank IS NOT OLD.planning_rank OR
-    NEW.planning_assignee IS NOT OLD.planning_assignee OR
-    NEW.planning_state IS NOT OLD.planning_state OR
-    NEW.planning_completed_at IS NOT OLD.planning_completed_at OR
-    NEW.planning_provider_revision IS NOT OLD.planning_provider_revision OR
-    NEW.planning_url IS NOT OLD.planning_url OR
-    NEW.planning_branch_name IS NOT OLD.planning_branch_name OR
-    NEW.planning_team_id IS NOT OLD.planning_team_id OR
-    NEW.planning_completed IS NOT OLD.planning_completed OR
-    NEW.planning_deleted_at IS NOT OLD.planning_deleted_at OR
-    NEW.branch IS NOT OLD.branch OR NEW.base_commit IS NOT OLD.base_commit OR
-    NEW.parent_pr_id IS NOT OLD.parent_pr_id OR
-    NEW.completion_request IS NOT OLD.completion_request OR
-    NEW.completion_error IS NOT OLD.completion_error OR
-    NEW.planning_due_date IS NOT OLD.planning_due_date OR
-    NEW.checkout_machine_id IS NOT OLD.checkout_machine_id OR
-    NEW.paused IS NOT OLD.paused OR NEW.shipped_at IS NOT OLD.shipped_at OR
-    NEW.ship_lf_process_id IS NOT OLD.ship_lf_process_id OR
-    NEW.ship_restarts IS NOT OLD.ship_restarts OR
-    NEW.ship_approved_lf_process_id IS NOT OLD.ship_approved_lf_process_id OR
-    NEW.ship_stopped_at IS NOT OLD.ship_stopped_at OR
-    NEW.ship_stopped_lf_process_id IS NOT OLD.ship_stopped_lf_process_id OR
-    NEW.regressed_in IS NOT OLD.regressed_in OR
-    NEW.ship_stopped_person IS NOT OLD.ship_stopped_person OR
-    (NEW.pm_snapshot_synced_at IS NULL) IS NOT (OLD.pm_snapshot_synced_at IS NULL)
-BEGIN
-    UPDATE store_revisions SET revision=revision+1 WHERE domain='planning';
-END;
+-- A Wave is exactly one Project. A Wave with several keeps its newest
+-- started open one, else its newest; the others go with their unsent edits
+-- and history, and their Tasks join the kept one here only: nothing is sent
+-- to a tracker for them.
+CREATE TEMP TABLE one_project_kept AS
+SELECT w.wave_id, (SELECT k.id FROM projects k WHERE k.wave_id=w.wave_id
+    ORDER BY (k.status='started' AND k.work_state='ready') DESC, k.created_at DESC, k.id DESC
+    LIMIT 1) AS kept
+FROM (SELECT DISTINCT wave_id FROM projects) w;
+CREATE TEMP TABLE one_project_dropped AS
+SELECT p.id, k.kept FROM projects p JOIN one_project_kept k ON k.wave_id=p.wave_id
+WHERE p.id!=k.kept;
+UPDATE tasks SET project_id=(SELECT d.kept FROM one_project_dropped d WHERE d.id=tasks.project_id)
+WHERE project_id IN (SELECT id FROM one_project_dropped);
+UPDATE task_creation_intents SET project_id=(SELECT d.kept FROM one_project_dropped d
+    WHERE d.id=task_creation_intents.project_id)
+WHERE project_id IN (SELECT id FROM one_project_dropped);
+UPDATE steers SET project_id=(SELECT d.kept FROM one_project_dropped d WHERE d.id=steers.project_id)
+WHERE project_id IN (SELECT id FROM one_project_dropped);
+UPDATE waves SET current_project_id=(SELECT d.kept FROM one_project_dropped d
+    WHERE d.id=waves.current_project_id)
+WHERE current_project_id IN (SELECT id FROM one_project_dropped);
+DELETE FROM tracker_actions WHERE project_id IN (SELECT id FROM one_project_dropped);
+DELETE FROM project_changes WHERE project_id IN (SELECT id FROM one_project_dropped);
+DELETE FROM project_events WHERE project_id IN (SELECT id FROM one_project_dropped);
+DELETE FROM plan_stamps WHERE owner_id IN (SELECT id FROM one_project_dropped);
+DELETE FROM projects WHERE id IN (SELECT id FROM one_project_dropped);
+DROP TABLE one_project_dropped;
+DROP TABLE one_project_kept;
+-- A live Wave with none gets one named for it. Its id comes from the Wave's,
+-- so every Machine that runs this, or later makes a missing one, makes the
+-- same record.
+INSERT INTO projects(id,wave_id,created_at,updated_at,description,project_name,project_slug,status)
+SELECT 'proj_'||replace(w.id,'-',''),w.id,w.created_at,w.created_at,'',w.name,w.name,'started'
+FROM waves w
+WHERE w.retired_at IS NULL AND NOT EXISTS(SELECT 1 FROM projects p WHERE p.wave_id=w.id);
+DROP INDEX idx_projects_wave;
+CREATE UNIQUE INDEX projects_wave ON projects(wave_id);
+-- Nothing orders a Wave's Projects.
+-- leaving: tracker_wave_projects.position LOO-995

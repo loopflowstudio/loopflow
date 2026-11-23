@@ -144,12 +144,12 @@ reduction. The best fix makes the system smaller.
 ## Work model
 
 Waves hold durable objectives, memory, cadence and budget under
-`.lf/wave/<name>/`; top-level `wave/` is ordinary content. A Wave holds
-Projects, each a Linear Project when connected, which group its Tasks and
-start and end; no Project is selected.
+`.lf/wave/<name>/`; top-level `wave/` is ordinary content. A Wave is
+exactly one Project, made with it, a Linear Project when connected; it groups
+the Wave's Tasks and starts and ends.
 Linear or Asana is the repository's tracker; without one each Machine's store
 holds the plan, carried by Git and a hub when one is named. A Task belongs to a repository
-and optionally a Project.
+and, in a Wave, to its Project.
 
 A Task takes up one Graph on its first `lf task run` (its own, else the Wave's
 default, else repository `graph:`, else `code`) and stands at a step of it.

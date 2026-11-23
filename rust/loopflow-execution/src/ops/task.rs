@@ -3215,17 +3215,6 @@ pub struct TaskEdit {
     pub sync: loopflow_storage::planning_sync::TrackerSync,
 }
 
-/// ` in Project <name>` for a Task whose Wave holds several open Projects, so
-/// creation and a move say which one the Task joined. Empty otherwise.
-pub fn joined_project_suffix(task: &loopflow_model::durable::TaskId) -> String {
-    let name = crate::store::read_existing_registry()
-        .ok()
-        .flatten()
-        .and_then(|store| store.sqlite.joined_project_name(task).ok().flatten());
-    name.map(|name| format!(" in Project {name}"))
-        .unwrap_or_default()
-}
-
 pub(crate) fn validate_task_edit_input(
     update: &loopflow_storage::work::task::TaskUpdate,
 ) -> OpsResult<()> {

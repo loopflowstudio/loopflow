@@ -422,7 +422,7 @@ fn scopes() -> String {
         SELECT tw.id FROM agent_sessions s JOIN tasks tw ON tw.id IN ({}) WHERE s.id=?1
         ), member_waves(id) AS (
         SELECT wave_id FROM agent_sessions WHERE id=?1
-        UNION SELECT t.wave_id FROM tasks t WHERE t.id IN member_tasks
+        UNION SELECT pr.wave_id FROM projects pr JOIN tasks t ON t.project_id=pr.id WHERE t.id IN member_tasks
         UNION SELECT w.parent_wave_id FROM waves w JOIN member_waves m ON w.id=m.id WHERE w.parent_wave_id IS NOT NULL
         ), applicable(id) AS (
         SELECT p.id FROM steers p WHERE

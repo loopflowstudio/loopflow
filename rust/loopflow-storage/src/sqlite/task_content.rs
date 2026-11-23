@@ -64,7 +64,7 @@ impl SqliteStore {
         )
     }
 
-    /// Save the Task's Wave and the Project it reaches there in one transaction.
+    /// Move the Task into `wave`'s Project, or out of every Wave with none.
     pub fn move_task(
         &self,
         id: &TaskId,
@@ -74,33 +74,21 @@ impl SqliteStore {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let task = super::children::task_on(&tx, id)?.ok_or(StoreError::NotFound)?;
-        let destination = move_project_in(&tx, &task, wave)?;
+        let destination = wave
+            .map(|wave| super::children::wave_project_in(&tx, wave))
+            .transpose()?;
         validate_move(&tx, &task, expected_project, destination.as_ref())?;
-        if task.project_id != destination || task.wave_id.as_ref() != wave {
+        if task.project_id != destination {
             planning_write::local(
                 &tx,
                 &crate::work::edit::WorkEdit::for_target(
                     id.as_str(),
-                    &[
-                        Edit::TaskWave(wave.map(ToString::to_string)),
-                        Edit::TaskProject(destination.map(|id| id.to_string())),
-                    ],
+                    &[Edit::TaskProject(destination.map(|id| id.to_string()))],
                 ),
             )?;
         }
         tx.commit()?;
         Ok(())
-    }
-
-    /// The Project a Task moved to `wave` is in afterwards.
-    pub fn task_move_project(
-        &self,
-        id: &TaskId,
-        wave: Option<&loopflow_model::id::WaveId>,
-    ) -> StoreResult<Option<ProjectId>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let task = super::children::task_on(&conn, id)?.ok_or(StoreError::NotFound)?;
-        move_project_in(&conn, &task, wave)
     }
 
     pub fn validate_task_move(
@@ -185,26 +173,6 @@ fn validate_edit(
         return Err(StoreError::InvalidData("Task title cannot be empty".into()));
     }
     Ok(task)
-}
-
-/// A moved Task keeps its Project when the new Wave is that Project's Wave
-/// or below it; otherwise it joins the Project the new Wave reaches.
-fn move_project_in(
-    conn: &rusqlite::Connection,
-    task: &Task,
-    wave: Option<&loopflow_model::id::WaveId>,
-) -> StoreResult<Option<ProjectId>> {
-    let Some(wave) = wave else {
-        return Ok(None);
-    };
-    if let Some(project) = &task.project_id {
-        if let Some(project_wave) = super::children::project_wave_in(conn, project.as_str())? {
-            if super::children::wave_within_in(conn, wave, &project_wave)? {
-                return Ok(Some(project.clone()));
-            }
-        }
-    }
-    super::children::task_project_in(conn, wave)
 }
 
 fn validate_move(

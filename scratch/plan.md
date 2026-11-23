@@ -36,6 +36,28 @@ real records with a name, summary and status that start and end.
 - No choice to explain: the "in Project <name>" line on `lf task create`
   and the "newest started" tie-break go.
 
+## Built (slice 1, storage and commands)
+
+- `tasks.wave_id`, `task_wave`, `with_task_waves`, `task_project_in`,
+  `wave_within_in`, `task_move_project`, `joined_project_name` and the
+  "in Project" suffix are gone; readers join `projects` for a Task's Wave again.
+- `upsert_wave_prepared` makes a new live Wave's Project; a Wave without one
+  (arrived from a released build) gets it on its first Task
+  (`wave_project_in`). Its id is `ProjectId::for_wave`, the Wave's UUID, so
+  Machines making it separately make one record, and its Linear `create`
+  carries that UUID.
+- Migration collapses and fills as below, then `projects_wave` (unique)
+  replaces `idx_projects_wave`; `tracker_wave_projects.position` leaving.
+- Linear import takes a tracker Project only when it is already the Wave's or
+  carries the Wave's Project id; other Projects in the Initiative are skipped,
+  so the unique index never fails an import.
+- Docs: `docs/work.md`, `docs/dev/planning.md`, `reference.md`,
+  `reference-models.md`, glossary, `AGENTS.md`, `split-wave`.
+
+Next: the Trackers section (connect links the Wave's Project; Initiative links
+go), then `lf wave status` showing the Project line, then tests outside
+storage that seeded a second Project in one Wave.
+
 ## Trackers
 
 - `lf wave plan connect <wave> <linear project>` links the Wave's Project to

@@ -4,7 +4,6 @@ use crate::process::attachment;
 use crate::session::WorkSource;
 use loopflow_model::durable::{ProjectId, TaskId};
 use loopflow_model::id::WaveId;
-use loopflow_storage::planning::LinearProjectId;
 use loopflow_storage::sqlite::SqliteStore;
 use loopflow_storage::test_fixture::{unpublished_conversation, unregistered_task};
 use std::sync::{Arc, Barrier};
@@ -23,28 +22,11 @@ fn store_with_task() -> (tempfile::TempDir, SqliteStore, TaskId) {
 }
 
 #[test]
-fn a_task_launches_in_any_project_of_its_wave() {
+fn a_task_launches_whatever_its_project_s_status() {
     let (_dir, store, task_id) = store_with_task();
     let task = store.task(&task_id).unwrap().unwrap();
-    let mut newer = store
-        .project(task.project_id.as_ref().unwrap())
-        .unwrap()
-        .unwrap();
-    newer.id = ProjectId::new();
-    newer.tracker_id = Some(LinearProjectId::new("218967b6-a760-4b7c-9a46-11d9d61a42c2").unwrap());
-    newer.name = "A newer started Project".into();
-    newer.created_at += time::Duration::days(1);
-    store.insert_project(&newer).unwrap();
-    // New Tasks now join the newer Project; this one still runs where it is,
-    // whatever its Project's status, and launching claims nothing.
+    // Launching claims nothing.
     crate::store::ownership::unassign_task(&store, &task_id).unwrap();
-    assert_eq!(
-        store
-            .new_task_project(task.wave_id.as_ref().unwrap())
-            .unwrap()
-            .unwrap(),
-        newer.id
-    );
     for status in [
         "started",
         "backlog",
@@ -213,11 +195,13 @@ fn checkout_session_membership_survives_project_transfer_without_binding() {
     assert_eq!(session.task_id, None);
     assert!(store.task_begun(&task_id).unwrap());
 
-    let successor = ProjectId::new();
-    store.conn.lock().unwrap().execute(
-            "INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES(?1,?2,'successor',2)",
-            rusqlite::params![successor.as_str(), task.wave_id.as_ref().unwrap().as_str()],
-        ).unwrap();
+    // The Task moves to another Wave's Project.
+    let (other, successor) = (WaveId::new(), ProjectId::new());
+    store.conn.lock().unwrap().execute_batch(&format!(
+            "INSERT INTO waves(id,name,repo,created_at) SELECT '{other}','successor',repo,2 FROM waves WHERE id='{}';
+             INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES('{successor}','{other}','successor',2);",
+            task.wave_id.as_ref().unwrap(),
+        )).unwrap();
     store
         .conn
         .lock()

@@ -137,38 +137,7 @@ impl SqliteStore {
     pub fn seed_project(&self, wave: &WaveId) -> StoreResult<Project> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        // The Wave's own open Project, not one it reaches through an ancestor.
-        let own = crate::sqlite::children::task_project_in(&tx, wave)?
-            .map(|id| crate::sqlite::children::project_in(&tx, &id))
-            .transpose()?
-            .filter(|project| project.wave_id == *wave);
-        let id = match own {
-            Some(project) => project.id,
-            None => {
-                let name: String =
-                    tx.query_row("SELECT name FROM waves WHERE id=?1", [wave], |row| {
-                        row.get(0)
-                    })?;
-                let id = ProjectId::new();
-                crate::sqlite::planning_write::create(
-                    &tx,
-                    "",
-                    &crate::work::edit::WorkEdit::for_target(
-                        id.as_str(),
-                        &[
-                            crate::work::edit::WorkValue::ProjectWave(wave.to_string()),
-                            crate::work::edit::WorkValue::ProjectSlug(Some(name.clone())),
-                            crate::work::edit::WorkValue::ProjectName(Some(name)),
-                            crate::work::edit::WorkValue::ProjectStatus(
-                                crate::work::project::ProjectStatus::Started,
-                            ),
-                        ],
-                    ),
-                    crate::sqlite::planning_write::WriteOrigin::Local,
-                )?;
-                id
-            }
-        };
+        let id = crate::sqlite::children::wave_project_in(&tx, wave)?;
         let project = crate::sqlite::children::project_in(&tx, &id)?;
         tx.commit()?;
         Ok(project)

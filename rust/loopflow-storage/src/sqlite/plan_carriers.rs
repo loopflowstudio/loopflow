@@ -733,30 +733,6 @@ mod tests {
         assert_eq!(unsent(&laptop), 0);
     }
 
-    #[test]
-    fn a_task_saved_before_it_had_its_own_wave_arrives_in_its_project_s_wave() {
-        let dir = tempfile::tempdir().unwrap();
-        let (laptop, hub) = (machine(&dir, "laptop"), machine(&dir, "hub"));
-        let (wave, task) = task(&laptop, "older");
-        // A build before `task_wave` sent the Task with its Project only.
-        let mut records = laptop
-            .plan_records_since(REPO, 0, usize::MAX)
-            .unwrap()
-            .records;
-        for record in &mut records {
-            record
-                .fields
-                .retain(|field| !matches!(field.value, WorkValue::TaskWave(_)));
-        }
-        hub.apply_plan_records(REPO, &records, None, &Default::default())
-            .unwrap();
-        assert_eq!(
-            hub.task(&task).unwrap().unwrap().wave_id,
-            Some(wave.clone())
-        );
-        assert_eq!(hub.list_tasks(Some(&wave)).unwrap().len(), 1);
-    }
-
     fn claim(store: &SqliteStore, task: &TaskId) -> loopflow_model::durable::MachineId {
         let facts = crate::test_fixture::ownership(store, store.task_scope(task).unwrap());
         store

@@ -10,13 +10,10 @@
 - `lf task status --json` gives `task.wave` as the leaf name (`refunds`),
   `lf task show` gives `execution.wave` as the path (`billing/refunds`).
   The installed build does the same; not changed here.
-- Open (QA 2026-11-20): a Linear-connected repository has no Git or hub plan
-  exchange (`plan_git::exchange_all` skips `tracker::connected`), and the
-  Linear import reads issues per Project only (`ListProjectIssues`). So on
-  another Machine a Task in an ancestor's Project lists under that Project's
-  Wave, and a Task with no Project never shows up. On main every Wave Task had
-  a Project, so connected Wave Tasks crossed Machines. LOO-980 rules out a
-  marker ("No Linear attachment") and removes team-issue ingest; its "own
-  Machines exchanging through Git on a tracker repository" is where
-  `tasks.wave_id` would cross. Its "Wave membership is derived from the link,
-  not stored" contradicts this branch's `tasks.wave_id`. `docs/work.md` now says this.
+- Migration-made Projects are ordinary local Projects. In a connected
+  repository the drain gives each a Linear `create` on the next export (the
+  same as a Wave made now); their UUID is the Wave's, so two Machines' creates
+  name one Linear Project. Retired Waves get none.
+- An arriving Project record (Git or hub exchange) for a Wave that already
+  holds a different Project fails the unique index. Only a released build can
+  send one (it makes Projects per chapter); not handled here.

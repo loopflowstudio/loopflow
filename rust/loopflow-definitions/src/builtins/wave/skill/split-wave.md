@@ -33,13 +33,13 @@ Each child gets a fresh goal, not a slice of the parent's prose:
    lf wave plan connect <wave>/<child>              # links its Linear Initiative
    lf task create --wave <wave>/<child> --title "…" --notes "…"
    ```
-   Write each child's `GOAL.md` and `MEMORY.md` in its directory. A child's
-   Tasks join its Project, else the parent's, and list under the child.
+   Write each child's `GOAL.md` and `MEMORY.md` in its directory. Each child
+   is its own Project, and its Tasks are in it.
 
 5. **Move only unstarted work,** with
    `lf task move <issue> --wave <wave>/<child>`. A started Task keeps its
    worktree, PR, Sessions and Graph where they are; never move it or restart
-   its worker. Keep the parent and its Projects while its active work
+   its worker. Keep the parent and its Project while its active work
    finishes.
 
 6. **Check.** Each child has a goal, memory and a connected Initiative.

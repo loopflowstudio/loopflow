@@ -125,10 +125,8 @@ pub fn create(
     } else {
         writeln!(
             io.output,
-            "{} · {}{}",
-            receipt.task.title,
-            receipt.task.identifier,
-            loopflow_execution::ops::task::joined_project_suffix(&receipt.task.id)
+            "{} · {}",
+            receipt.task.title, receipt.task.identifier
         )?;
     }
     if *run && approve {

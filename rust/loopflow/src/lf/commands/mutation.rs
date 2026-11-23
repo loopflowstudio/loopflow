@@ -305,13 +305,7 @@ fn task(repo: &Path, command: &TaskCommand, io: &mut CommandIo<'_>) -> Result<()
         } => {
             let result =
                 loopflow_execution::ops::task::task_move_membership(repo, issue, wave.as_deref())?;
-            let done = format!(
-                "membership saved{}",
-                loopflow_execution::ops::task::joined_project_suffix(
-                    &loopflow_model::durable::TaskId::from_raw(result.id.clone())
-                )
-            );
-            print_edit(&result, *json, &done, io)
+            print_edit(&result, *json, "membership saved", io)
         }
         _ => unreachable!("accepts selects Task mutations"),
     }

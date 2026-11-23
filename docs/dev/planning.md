@@ -415,34 +415,35 @@ its action. Retired actions never reenter delivery after a late acknowledgement
 or matching event.
 The documented unconditional-update race remains a protocol limit.
 
-## Projects of a Wave
+## A Wave's Project
 
 ```text
-$ lf wave create product --json          # no Project row, no tracker request
+$ lf wave create product --json          # its Project: product, started
 $ lf task create --wave product --title "Fix the parser"
 $ lf wave plan product --json            # projects: one, status started
 ```
 
-A Wave's Projects are the `projects` rows with its `wave_id`, listed in
-`planning_rank, created_at, id` order. None is selected, and nothing checks a
-Project's status before a Task registers or runs.
+A Wave is exactly one Project: the `projects` row with its `wave_id`, which a
+unique index keeps to one. `upsert_wave_prepared` makes it with a new Wave,
+named for the Wave and `started`; its id is `ProjectId::for_wave`, the Wave's
+own UUID, so Machines that make it separately make the same record. A Wave
+that arrived without one (from a released build) gets it when its first Task
+is saved (`wave_project_in`). Nothing checks the Project's status before a
+Task registers or runs, and an ended Project stays the Wave's.
 
-Creating a Task in a Wave, or moving one in, asks `new_task_project(wave)`:
-the Wave's newest `started` Project; else its newest `backlog`, `planned` or
-`paused` one; else none. Newest is by `created_at`, then `id`. On none, the
-same transaction makes a `started` Project named for the Wave. The answer is
-computed on each call and stored nowhere. With more than one open Project the
-command prints the one joined (`… in Project <name>`); `--json` carries the
-Task's `project_id` either way. A Project started in Linear under the Wave's
-Initiative becomes the answer once it is the newest started one.
+Creating a Task in a Wave, or moving one in, puts it in that Wave's Project;
+moving one out of every Wave clears it. A Task's Wave is its Project's.
 
 A Project made here has no tracker binding until the drain gives it a
 `create`, including one made before a tracker was connected. A Task's
-`issueCreate` waits for its Project's tracker ID.
+`issueCreate` waits for its Project's tracker ID. The tracker Project an
+import accepts is the Wave's own: the one already bound to it, or one carrying
+the Wave's Project id. Any other Linear Project in the Wave's Initiative is not
+imported.
 
 A Project's status changes in the tracker, mirrored both ways, or through
 abandonment, which writes `work_state` and `work_terminal_at`. A Task changes
-Project in the tracker; `lf task move` is the one way it changes Wave. Started
+Project, and so Wave, in the tracker or with `lf task move`. Started
 Tasks keep their identity, checkout, PR and captured execution wherever they
 are.
 

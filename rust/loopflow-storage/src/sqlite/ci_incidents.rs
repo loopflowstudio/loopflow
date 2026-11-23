@@ -284,7 +284,8 @@ impl super::SqliteStore {
                 )
              FROM ci_incidents ci
              LEFT JOIN tasks ts ON ts.id=ci.task_id
-             LEFT JOIN wave_addresses w ON w.id=ts.wave_id
+             LEFT JOIN projects p ON p.id=ts.project_id
+             LEFT JOIN wave_addresses w ON w.id=p.wave_id
              WHERE COALESCE(ci.provider_completed_at, ci.poll_observed_at,
                             ci.webhook_received_at, ci.created_at) >= ?1
                AND (?2 IS NULL OR w.slug=?2)

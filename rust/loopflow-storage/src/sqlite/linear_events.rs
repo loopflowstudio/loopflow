@@ -582,7 +582,17 @@ fn project_accepted_planning(
             Some((id, _)) => {
                 ProjectId::parse(&id).map_err(|error| StoreError::InvalidData(error.to_string()))
             }?,
-            None => ProjectId::new(),
+            // A tracker Project no Wave links is the Wave's own only when it
+            // carries the id the Wave's Project has or will take. Any other is
+            // not imported: a Wave is exactly one Project.
+            None => {
+                let own = sqlite::children::held_wave_project_in(tx, &wave_id)?
+                    .unwrap_or_else(|| ProjectId::for_wave(&wave_id));
+                if own.as_str().trim_start_matches("proj_") != external.replace('-', "") {
+                    continue;
+                }
+                own
+            }
         };
         let rank: Option<u32> = tx
             .query_row(

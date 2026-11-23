@@ -75,7 +75,6 @@ struct ConversationOpenButton: View {
 /// offers the one next action. An unstarted Task has no checkout and so no
 /// conversation: it says what Start will run.
 struct ConversationPlaceholder: View {
-    @Environment(\.theme) private var theme
     let workspace: SessionsWorkspace
     let model: WorkModel
     let sessions: SessionsStore
@@ -83,7 +82,6 @@ struct ConversationPlaceholder: View {
     var body: some View {
         if model.conversationIsOpening(workspace) {
             SessionOpeningView(screen: nil)
-                .foregroundStyle(theme.palette.text)
         } else if workspace.key.kind == .task, let task = model.task(id: workspace.key.id)?.task, task.awaitsStart {
             TaskStartOffer(model: model, task: task)
         } else {
@@ -117,24 +115,47 @@ struct ConversationPlaceholder: View {
 }
 
 /// Opening keeps available history readable until the terminal takes its place.
+/// An empty pane delays its centered spinner briefly so fast opens never flash;
+/// retained output stays clear of overlays while the pane strip shows progress.
 struct SessionOpeningView: View {
     let screen: String?
+    var spinnerDelay: Duration = .milliseconds(180)
     @Environment(\.palette) private var palette
+    @State private var showsSpinner: Bool
+
+    init(screen: String?, spinnerDelay: Duration = .milliseconds(180)) {
+        self.screen = screen
+        self.spinnerDelay = spinnerDelay
+        _showsSpinner = State(initialValue: spinnerDelay <= .zero)
+    }
 
     var body: some View {
-        ZStack(alignment: .topLeading) {
-            Color.clear
+        Group {
             if let screen {
                 ScrollView {
                     Text(screen).font(Typography.mono)
+                        .foregroundStyle(palette.text)
+                        .opacity(0.6)
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            } else {
+                ZStack {
+                    if showsSpinner {
+                        ProgressView()
+                            .accessibilityLabel("Opening session")
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .task(id: spinnerDelay) {
+                    guard !showsSpinner else { return }
+                    try? await Task.sleep(for: spinnerDelay)
+                    guard !Task.isCancelled else { return }
+                    showsSpinner = true
+                }
             }
-            ProgressView(ServerConnectionReading.openingTitle)
-                .controlSize(.small).padding(Spacing.sm).background(palette.background)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 
@@ -312,21 +333,6 @@ struct SplitDivider: View {
     }
 }
 
-/// How this Session's conversation relates to the one before it, on its own line above the terminal.
-struct ProviderTransitionRow: View {
-    @Environment(\.theme) private var theme
-    let transition: ProviderTransition
-    var body: some View {
-        Text(transition.explanation)
-            .font(Typography.meta)
-            .foregroundStyle(theme.palette.textSecondary)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, PaneGeometry.inset)
-            .padding(.vertical, Spacing.xs)
-            .help("Observed at " + Date(timeIntervalSince1970: TimeInterval(transition.observedAt)).formatted())
-    }
-}
-
 struct SessionPaneView: View {
     @Environment(\.theme) private var theme
     @State private var changingSession = false
@@ -351,14 +357,25 @@ struct SessionPaneView: View {
 
     private var showsStrip: Bool { item != nil || (store.visibleLayout?.allPanes.count ?? 0) > 1 }
 
+    /// Show progress in the Refresh slot only when the pane already has content
+    /// (retained scrollback or a mounted terminal), so an empty pane never shows two spinners.
+    private var showsStripSpinner: Bool {
+        guard let item else { return false }
+        let hasPaneContent = item.surface != nil || item.lastScreen != nil
+        if changingSession { return hasPaneContent }
+        switch item.state {
+        case .opening: return item.lastScreen != nil
+        case .prepared: return sessions.attachment(item.id) == .opening
+        case .pending: return model.conversationIsOpening(workspace) && item.lastScreen != nil
+        case .live, .failed, .ended: return false
+        }
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             if showsStrip {
                 strip
                 Rectangle().fill(theme.palette.border).frame(height: 1)
-            }
-            if let transition = item?.record.transition {
-                ProviderTransitionRow(transition: transition)
             }
             content
                 // Reserve the rounded edge before Ghostty measures its surface.
@@ -427,9 +444,7 @@ struct SessionPaneView: View {
             .help("Choose this Session's agent or open a companion pane\n\(programHeading.detail)")
             .accessibilityIdentifier("pane-program-\(pane.id)")
             if let item {
-                stripButton("arrow.clockwise", label: "Refresh session", id: "pane-refresh-session",
-                    help: "Reconnect this pane to the existing conversation.",
-                    disabled: changingSession) {
+                Button {
                     workspace.visit()
                     changingSession = true
                     Perf.userAction(.reconnect, scenario: "refresh_to_typing", id: item.id,
@@ -442,7 +457,26 @@ struct SessionPaneView: View {
                             Perf.reconnected(id: item.id, owner: workspace.performanceOwner)
                         }
                     }
+                } label: {
+                    Group {
+                        if showsStripSpinner {
+                            ProgressView()
+                                .controlSize(.mini)
+                        } else {
+                            Image(systemName: "arrow.clockwise")
+                                .font(Typography.meta)
+                                .foregroundStyle(theme.palette.textSecondary)
+                        }
+                    }
+                    .frame(width: 22, height: 20)
+                    .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
+                .disabled(changingSession)
+                .help("Reconnect this pane to the existing conversation.")
+                .accessibilityLabel("Refresh session")
+                .accessibilityValue(showsStripSpinner ? "Opening session" : "")
+                .accessibilityIdentifier("pane-refresh-session")
             }
             if let session = primarySession {
                 stripButton("plus.bubble", label: "Reset session", id: "pane-reset-session",
@@ -855,9 +889,9 @@ struct SessionPaneView: View {
     @ViewBuilder
     func _sessionPlaceholder(_ item: SessionItem) -> some View {
         switch item.state {
-        case .opening, .prepared:
+        case .opening, .prepared,
+             .pending where model.conversationIsOpening(workspace):
             SessionOpeningView(screen: item.lastScreen)
-                .foregroundStyle(theme.palette.text)
         case .ended(let output):
             VStack(alignment: .leading, spacing: Spacing.md) {
                 Text("No longer open here").foregroundStyle(theme.palette.text)
@@ -872,9 +906,6 @@ struct SessionPaneView: View {
             EmptyState(title: "Session failed to open", machine: message) {
                 openButton(item)
             }
-        case .pending where model.conversationIsOpening(workspace):
-            SessionOpeningView(screen: item.lastScreen)
-                .foregroundStyle(theme.palette.text)
         case .pending, .live:
             EmptyState(title: "Not running here", sentence: "This Session has no live terminal in this pane yet.") {
                 openButton(item)

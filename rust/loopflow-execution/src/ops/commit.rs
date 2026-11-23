@@ -13,6 +13,7 @@ use crate::graph::load_skill;
 
 use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::progress::Progress;
+use crate::prompt::change::{Change, ChangeRange};
 
 #[derive(Debug, Clone)]
 pub struct CommitOptions {
@@ -264,11 +265,10 @@ fn generate_commit_message(repo: &Path, agent: MessageAgent<'_>) -> OpsResult<Co
         .clone()
         .ok_or_else(|| OpsError::Message("commit-message skill has no content".to_string()))?;
 
-    let diff = git_stdout(repo, &["diff", "--cached"])?;
-    let diff = truncate_chars(&diff, 20_000);
+    let change = Change::read(repo, ChangeRange::Staged)?.prompt_section();
 
     let prompt = format!(
-        "{template}\n\n## Staged diff\n```diff\n{diff}\n```\n\n\
+        "{template}\n\n## Change\n{change}\n\
          Return exactly one JSON object with this schema:\n\
          {{\"title\":\"...\",\"body\":\"...\"}}\n\
          No markdown fences. No explanation."
@@ -351,18 +351,6 @@ fn parse_commit_message(raw: &str) -> Option<CommitMessage> {
         return None;
     }
     serde_json::from_str::<CommitMessage>(&trimmed[start..=end]).ok()
-}
-
-fn truncate_chars(text: &str, max_chars: usize) -> String {
-    if text.chars().count() <= max_chars {
-        return text.to_string();
-    }
-    let end = text
-        .char_indices()
-        .nth(max_chars)
-        .map(|(idx, _)| idx)
-        .unwrap_or(text.len());
-    format!("{}\n\n[diff truncated]", &text[..end])
 }
 
 fn ensure_draft_pr(repo: &Path, progress: &impl Progress) -> OpsResult<()> {

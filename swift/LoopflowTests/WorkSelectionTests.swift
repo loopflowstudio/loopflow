@@ -67,8 +67,10 @@ struct WorkSelectionTests {
         let wave = try #require(roadmap.waves.first)
         let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("Selection must not read") }, repoPath: wave.wave.repo)
         model.applyFixture(roadmap: .available(roadmap), waves: .available([]), workActivity: .loading, repos: [])
-        await model.receiveWorkLink(.wave(id: wave.wave.id, address: "loopflow://loopflow/wave/\(wave.wave.id)"))
+        // `lf open --wave` names the Wave in its link.
+        await model.receiveWorkLink(.wave(id: wave.wave.name, address: "loopflow://loopflow/wave/\(wave.wave.name)"))
         #expect(model.selection == .wave(id: wave.wave.id))
+        #expect(model.navigation.sidebarWaveID == wave.wave.id)
     }
 }
 

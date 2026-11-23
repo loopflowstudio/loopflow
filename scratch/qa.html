@@ -1,80 +1,72 @@
 <!doctype html>
-<meta charset="utf-8">
-<title>LOO-1065 QA: New Task File and Start</title>
+<html lang="en"><head><meta charset="utf-8"><title>LOO-1065 QA: New Task File and Start</title>
 <style>
-body{font:15px/1.5 -apple-system,sans-serif;max-width:980px;margin:2em auto;padding:0 1em;color:#222}
-h2{margin-top:2em;border-top:1px solid #ddd;padding-top:1em}
+body{font:15px/1.5 -apple-system,system-ui,sans-serif;max-width:980px;margin:2em auto;padding:0 1em;color:#222}
+h1{font-size:1.5em}h2{font-size:1.15em;margin-top:2em}
 img{max-width:100%;border:1px solid #ccc;margin:.5em 0}
-.ok{color:#176b2c;font-weight:600}.open{color:#8a5a00;font-weight:600}
+.ok{color:#176b2c;font-weight:600}.fixed{color:#8a4b00;font-weight:600}.open{color:#8b1a1a;font-weight:600}
 code{background:#f3f3f3;padding:0 .25em}
-</style>
-<h1>LOO-1065 QA: Mac New Task, File and Start</h1>
-<p>An isolated Dev bundle (<code>com.loopflow.mac.qa1065.dev</code>) built from this branch, running on a private Machine
-(<code>/tmp/q1065</code>: own HOME, LF_HOME, branch <code>lf server run</code>, stand-in <code>claude</code>). The repository
-<code>demo</code> has the default Graph <code>qa</code>, and its Wave <code>Ops</code> takes <code>review</code>. I drove the app through
-<code>.lf/qa/QAHook.swift</code>: synthesized clicks, text inserted into the sheet's field, ⌘↩ and Esc as key equivalents.
-Captures come from <code>cacheDisplay</code>. Every Task listed below was checked against <code>lf task list</code> / <code>lf task status</code>.</p>
+.pair{display:flex;gap:1em}.pair img{flex:1;min-width:0}
+</style></head><body>
+<h1>LOO-1065 QA: Mac New Task, File and Start (round 2)</h1>
+<p>Built from this branch at <code>1094e27194</code> plus the fix below, as an isolated Dev bundle
+(<code>com.loopflow.mac.qa1065.dev</code>) on a private Machine at <code>/tmp/q1065</code>: its own HOME and LF_HOME,
+the branch <code>lf server run</code>, a stand-in <code>claude</code>. Repository <code>demo</code> defaults to Graph
+<code>qa</code>; Wave Ops defaults to <code>review</code>. The screen was locked, so the app was driven through
+<code>.lf/qa/QAHook.swift</code> and captured with <code>cacheDisplay</code>. Round 1 (commit <code>852ae13c56</code>) covered File from the
+repository and a Wave, inherited Start and Esc; this round checks what changed after it.</p>
 
-<h2>1. File from the repository <span class="ok">works</span></h2>
-<p>New Task over an empty repository backlog. The sheet offers <b>Start with qa ⌘↩</b> with "demo's default", and <b>File to backlog</b> sits on its own line.</p>
-<img src="qa/s1-1.png">
-<p>Clicking File closed the sheet. The backlog then showed "Filed ff5cfc" with the row selected and its brief open. <code>lf task list</code> shows
-<code>ff5cfc · — ·</code> (unstarted, no workflow pinned), and the saved submission under <code>desktop-cache/submissions</code> was retired.</p>
-<img src="qa/s2-0.png">
+<h2>1. Refused Start keeps the draft <span class="ok">works</span></h2>
+<p>Server stopped, words typed, ⌘↩. The sheet stayed with the words, "In demo" and the workflow, and read
+"Not started. Loopflow server unavailable or owned by another account".</p>
+<img src="qa/r2-b4-1.png" alt="Not started line in the sheet">
 
-<h2>2. The Start picker follows the scope <span class="ok">works</span></h2>
-<p>With Ops selected, the sheet opened "In Ops" and read <b>Start with review ⌘↩</b>, "Ops's default", with the review steps (help graph, you at demo).</p>
-<img src="qa/s3-1.png">
-<p>⌘↩ started it: <code>431c5f</code> has a worktree and branch, and its status reads "Graph review: Waiting for you at demo." The Task page opened with the review bar.</p>
-<img src="qa/s4-0.png">
-<p>Unrelated to this change: the Files pane read "Files did not open: The Task file location changed". desktop.md already records this
-for the window a Task is started in (Task ea8659).</p>
+<h2>2. File across a server restart: the brief opens at once <span class="ok">works</span></h2>
+<p>Server stopped (launchd job booted out), then File: "Not filed." with the draft intact. I restarted the server and pressed
+File in the same sheet. It showed <b>Filing…</b>, closed, and the backlog had <b>8e090c</b> selected with its brief open
+while the app still said "The Machine is away; showing what was last read". Round 1 saw "Nothing selected" here for
+about 30 s. After reconnect the row stayed selected and <code>desktop-cache/submissions</code> was empty.</p>
+<div class="pair"><img src="qa/r2-d1-1.png" alt="Not filed"><img src="qa/r2-e1-1.png" alt="Filing…"></div>
+<div class="pair"><img src="qa/r2-e3-0.png" alt="Brief open while away"><img src="qa/r2-e50-0.png" alt="After reconnect"></div>
 
-<h2>3. File into a Wave <span class="ok">works</span></h2>
-<p>From Ops, File put <code>eb630a</code> in Ops's backlog. The row was selected under "Filed eb630a" and the toolbar offered "Start with review".</p>
-<img src="qa/s7-0.png">
+<h2>3. Opening a Wave by link, then New Task <span class="fixed">fixed</span></h2>
+<p><code>open loopflow://demo/wave/later</code> (the link <code>lf open --wave later</code> prints) left the window half-switched:
+the sidebar said "No working Tasks in this Wave" while the backlog still showed demo. New Task then opened on
+<b>Wave unavailable</b> with File and Start disabled, before any Wave was removed. Cause: the link carries the Wave's
+name and <code>WorkModel.receiveWorkLink</code> selected it as an ID. Round 1 hid this because the sheet used to fall back to
+the repository. The fix resolves the link's name to the Wave's ID; <code>WorkSelectionTests/deliveredWaveLinkSelectsWave</code>
+now delivers a named link (its fixture's ID and name differ) and checks the sidebar too. After the fix the link opens Later
+and the sheet reads "In Later · qa · Later's default".</p>
+<div class="pair"><img src="qa/r2-g0-0.png" alt="Later page"><img src="qa/r2-g0-1.png" alt="Sheet in Later"></div>
 
-<h2>4. The sheet's Wave is removed while it is open <span class="ok">reasonable</span></h2>
-<p>I opened the sheet in Wave <code>Later</code>, then ran <code>lf wave remove later</code>. The sheet's <b>In</b> switched to demo on its own, and the Start line
-switched to qa. File then filed <code>bfd33e</code> in the repository, revealed it and selected it. No refusal arrives, because the label changes
-before the press.</p>
-<img src="qa/s9-1.png">
-<img src="qa/s10-0.png">
+<h2>4. The sheet's Wave is removed while open <span class="ok">works</span></h2>
+<p><code>lf wave remove later</code> with the sheet open: "In Wave unavailable", "Choose another Wave or the repository.",
+workflow "Use default", File and Start disabled, words kept.</p>
+<img src="qa/r2-g1-1.png" alt="Wave unavailable">
 
-<h2>5. Server stopped, then back <span class="ok">works</span></h2>
-<p>I killed the private server and pressed File. The sheet stayed open with the words kept, showing "Not filed. Loopflow server unavailable or owned by another account".
-Nothing was saved to <code>submissions</code>.</p>
-<img src="qa/s11-1.png">
-<p>After restarting the server I pressed File again. The sheet closed and the notice read "Filed 8747cc" while the app still said
-"The Machine is away; showing what was last read". The new row was missing and the backlog read "Nothing selected".</p>
-<img src="qa/s12-0.png">
-<p>About 30 s later the app reconnected. 8747cc appeared selected with its brief open, and the saved submission was retired.</p>
-<img src="qa/s13-0.png">
+<h2>5. Admitted Start opens the Task <span class="ok">works</span></h2>
+<p>From Ops: "Start with review ⌘↩ · Ops's default". ⌘↩ closed the sheet and opened 5f515a with the bar
+"review · help graph · demo · Waiting for you at demo" and its conversation pane.</p>
+<div class="pair"><img src="qa/r2-h0-1.png" alt="Sheet in Ops"><img src="qa/r2-h2-0.png" alt="Started Task"></div>
 
-<h2>6. Small paths <span class="ok">works</span></h2>
+<h2>Checks</h2>
 <ul>
-<li>File with an empty request: clicking it filed nothing (Task count unchanged).</li>
-<li>Esc closed the sheet.</li>
+<li><code>scripts/test_desktop.sh --filter 'WorkSelectionTests/deliveredWaveLinkSelectsWave|NewTaskTests'</code>: 11 tests in 2 suites passed (agent, this run).</li>
 </ul>
-
-<h2>Fixed during this run</h2>
-<p>No product bugs found. <code>QAHook.swift</code> gained <code>insert</code> and <code>key</code>, because <code>type</code> cannot reach a sheet that is not key.
-desktop.md now records the New Task coordinates, how to find the private server's PID, and the zsh <code>kill $PIDS</code> trap.</p>
 
 <h2>What I couldn't reach</h2>
 <ul>
-<li><b>Choosing a named workflow, and Use default.</b> The Workflow menu is a SwiftUI <code>Menu</code>, which the hook can't open. Only the inherited
-default was driven live. The headless suite covers named workflows and Use default (plan.md).</li>
-<li><b>A confirmed refusal leading to retry.</b> I found no live input the server refuses after saving. A removed Wave turns into the repository
-before the press, and server-down fails before saving. The receipt logic is covered in <code>CreationSubmissionTests</code>.</li>
-<li><b>A reply lost mid-request, leading to recovery.</b> Timing a kill between send and answer isn't reliable by hand. The Rust fixture
-<code>task_create_answers…across_a_server_restart</code> covers it.</li>
-<li><b>Unlocked-display rendering and keyboard focus.</b> Everything here went through <code>cacheDisplay</code> and synthesized events.</li>
+<li>The Workflow and In menus (SwiftUI <code>Menu</code>; the hook can't open them). Choosing a named workflow, correcting with
+<b>Use default</b>, and picking the repository after <b>Wave unavailable</b> stay with the headless suite and an unlocked demo.</li>
+<li>A reply lost mid-request; covered by <code>task_create_tests::…across_a_server_restart</code>.</li>
+<li>Unlocked rendering and real keyboard focus: the screen was locked throughout.</li>
 </ul>
 
 <h2>Still wrong, worst first</h2>
-<ol>
-<li>In the restart case, "Filed 8747cc" shows for up to ~30 s above a backlog that lacks the row and reads "Nothing selected". It resolves itself.
-The lag comes from the app's reconnect, not from this change, but File makes it visible.</li>
-<li>Files pane "The Task file location changed" right after Start (already known, Task ea8659).</li>
-</ol>
+<ul>
+<li>The sheet answered no hook <code>click</code> this round (round 1's did); <code>dclick</code> (down and up through
+<code>sendEvent</code>) works. A hook quirk, not a product bug; recorded in <code>.lf/qa/desktop.md</code>.</li>
+<li>Files pane "The Task file location changed" right after Start (known, Task ea8659).</li>
+<li>While the server is away the sheet's workflow reads "…" and Start drops its name ("Start ⌘↩"). Readable, but says nothing about why.</li>
+</ul>
+</body></html>

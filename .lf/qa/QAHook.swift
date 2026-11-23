@@ -70,7 +70,8 @@ enum QAHook {
                 }
             }
             return "not found"
-        case "click":
+        case "click", "dclick":
+            let direct = parts.first == "dclick"
             let n = arg.split(separator: " ").compactMap { Double($0) }
             guard n.count == 3, windows.indices.contains(Int(n[0])) else { return "usage: click window x y" }
             let window = windows[Int(n[0])]
@@ -81,8 +82,13 @@ enum QAHook {
                                    windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)
             }
             // The up waits in the queue so an AppKit control's tracking loop finds it.
-            if let up = event(.leftMouseUp) { NSApp.postEvent(up, atStart: false) }
-            if let down = event(.leftMouseDown) { window.sendEvent(down) }
+            if direct {
+                if let down = event(.leftMouseDown) { window.sendEvent(down) }
+                if let up = event(.leftMouseUp) { window.sendEvent(up) }
+            } else {
+                if let up = event(.leftMouseUp) { NSApp.postEvent(up, atStart: false) }
+                if let down = event(.leftMouseDown) { window.sendEvent(down) }
+            }
             return "clicked \(window.title) \(point)"
         case "size":
             let n = arg.split(separator: " ").compactMap { Double($0) }

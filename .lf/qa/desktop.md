@@ -324,9 +324,14 @@ for each `<name>.req` write `SnapshotService().snapshotWindow(window, …)` to
   one PID. `open -n` beside a live instance leaves two; check `pgrep` first.
 - `lf desktop do new-task` opens the sheet and prints its scope. The QA hook's
   `snap` lists the sheet as an untitled window. Use `insert <words>` for its
-  focused field, `key return` for ⌘↩ and `key escape` for Esc. To file, click
-  **File to backlog** at the position in the snapshot. In the 540 pt sheet it
-  was at (74, 308), 33 pt lower after a refusal.
+  focused field, `key return` for ⌘↩ and `key escape` for Esc. To file, send
+  `dclick <sheet> x y` (mouse-down and mouse-up both through `sendEvent`) at
+  **File to backlog**'s position in the snapshot; the sheet answered no
+  `click`. The button sits at (74, 308) with the workflow outline, (74, 258)
+  while the server is away and the outline is unread, 33 pt lower after a
+  refusal. Read the sheet's height from `snap` first.
+- Open a Wave with `loopflow://<repo>/wave/<name>`, the link `lf open --wave`
+  prints; the sheet then opens "In <Wave>".
 - Set `graph: <name>` in the Wave's committed `.lf/wave/<name>/config.yaml` to
   exercise its default. Remove the chosen Wave with the sheet open to see
   **Wave unavailable**. Choosing the repository enables File and Start again.

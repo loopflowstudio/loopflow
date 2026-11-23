@@ -865,9 +865,10 @@ final class WorkModel {
         switch link {
         case .task(let link): await openTaskLink(link)
         case .session(let id, let address): await openSessionLink(id, address: address)
-        case .wave(let id, _):
-            if wave(id: id) == nil { await refresh() }
-            select(.wave(id: id))
+        case .wave(let name, _):
+            // A Wave link names the Wave (`loopflow://demo/wave/ops`); selection uses its ID.
+            if linkedWave(name) == nil { await refresh() }
+            select(.wave(id: linkedWave(name)?.wave.id ?? name))
         case .view(let expression, let address): await openView(expression: expression, url: URL(string: address))
         }
     }
@@ -3105,6 +3106,10 @@ final class WorkModel {
 
     func wave(id: String) -> WaveRoadmap? {
         roadmap.value?.waves.first { $0.wave.id == id }
+    }
+
+    private func linkedWave(_ name: String) -> WaveRoadmap? {
+        roadmap.value?.waves.first { $0.wave.name == name || $0.wave.id == name }
     }
 
     func rosterWave(id: String) -> WaveViewModel? {

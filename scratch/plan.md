@@ -24,7 +24,7 @@ The requested Desktop filter (`scripts/test_desktop.sh --filter 'NewTaskTests|Cr
 
 ## Remaining demo
 
-On an unlocked display, use the Workflow menu, correct a refused Start with **Use default**, and open the admitted conversation. File across a private server restart and check that the brief opens when the Machine answers. Earlier QA saw “Filed” above “Nothing selected” for about 30 seconds. The held-back-planning tests cover the fix headless.
+On an unlocked display, use the Workflow menu, correct a refused Start with **Use default**, pick the repository after **Wave unavailable**, and open the admitted conversation. [QA round 2](qa.html) drove File across a server restart live: the brief opened while the Machine was still away. It also fixed Wave links, which name the Wave while Desktop selected them by ID, so New Task opened on **Wave unavailable**.
 
 ## Prior checks
 

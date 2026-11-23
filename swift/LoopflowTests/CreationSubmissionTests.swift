@@ -52,6 +52,7 @@ struct CreationSubmissionTests {
         #expect(await server.submissions == 1)
         try await client().presented(saved.id)
         #expect(try await client().pending().isEmpty)
+        #expect(try await client().reconcile(saved) == nil)
     }
 
     @Test func unknownLaunchAndAnotherMachineNeverAuthorizeResubmission() async throws {
@@ -80,6 +81,7 @@ struct CreationSubmissionTests {
             lookup: { await server.lookup($0) }, send: { try await server.send($0) })
         let older = SubmittedCreation(requestID: "older", destination: "original-machine", payload: Data(),
             version: ServerProtocol.revision - 1, submittedAt: Date())
+        try await client.save(older)
         await server.unknown("older")
         #expect(try await client.reconcile(older)?.disposition == .inspect)
         await server.continuation("older")
@@ -154,9 +156,7 @@ struct CreationSubmissionTests {
     @Test func aReceiptForAnotherRequestIsRefusedAndNothingIsResent() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
-        let fixture = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
-            .deletingLastPathComponent().appendingPathComponent("tests/fixtures/dto/creation_lookup.json")
-        let receipts = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: fixture)) as? [Any])
+        let receipts = try #require(JSONSerialization.jsonObject(with: loadFixtureData("creation_lookup.json")) as? [Any])
         let other = String(decoding: try JSONSerialization.data(withJSONObject: receipts[0]), as: UTF8.self)
         actor Sends { var count = 0; func add() { count += 1 } }
         let sent = Sends()
@@ -170,9 +170,7 @@ struct CreationSubmissionTests {
     }
 
     @Test func lookupDispositionsRoundTrip() throws {
-        let file = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
-            .deletingLastPathComponent().appendingPathComponent("tests/fixtures/dto/creation_lookup.json")
-        let data = try Data(contentsOf: file)
+        let data = try loadFixtureData("creation_lookup.json")
         let receipts = try JSONDecoder().decode([CreationLookup].self, from: data)
         let encoded = try JSONSerialization.jsonObject(with: JSONEncoder().encode(receipts)) as? NSArray
         #expect(encoded == (try JSONSerialization.jsonObject(with: data) as? NSArray))

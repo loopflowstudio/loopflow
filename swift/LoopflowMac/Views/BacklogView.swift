@@ -51,6 +51,14 @@ struct BacklogState: Equatable {
         mark(id)
     }
 
+    mutating func showFiled(_ task: TaskCreateReceipt.CreatedTask) {
+        filter = .all
+        query = ""
+        selection = [task.id]
+        mark(task.id)
+        notice = .did("Filed \(task.identifier)")
+    }
+
     mutating func toggle(_ id: String) {
         if selection.contains(id) { selection.remove(id) } else { selection.insert(id) }
         mark(id)
@@ -627,7 +635,7 @@ struct BacklogView: View {
         .onChange(of: [list.state.filter.rawValue, list.state.query]) {
             // File clears both filters and selects its row before planning delivers it.
             if list.state.filter != .all || !list.state.query.isEmpty {
-                state.wrappedValue.keep(model.backlog(view).ids)
+                state.wrappedValue.keep(list.ids)
             }
         }
         .confirmationDialog(abandonTitle, isPresented: Binding(get: { abandoning != nil }, set: { if !$0 { abandoning = nil } })) {
@@ -801,7 +809,7 @@ struct BacklogView: View {
                             }
                             if isOpen {
                                 BacklogUnderTitle(identifier: task.task.identifier) {
-                                    BacklogBrief(model: model, view: view, task: task, state: state, perform: perform)
+                                    BacklogBrief(task: task, state: state, perform: perform)
                                 }
                             }
                         }
@@ -824,7 +832,9 @@ struct BacklogView: View {
             .focused($focused)
             .focusEffectDisabled()
             .onKeyPress(phases: .down) { press in key(press, list) }
-            .onChange(of: list.state.cursor) { _, row in if let row { proxy.scrollTo(row) } }
+            .onChange(of: list.state.cursor.flatMap { list.selection.contains($0) ? $0 : nil }, initial: true) { _, row in
+                if let row { proxy.scrollTo(row) }
+            }
         }
         .accessibilityIdentifier("backlog-list")
     }
@@ -1345,8 +1355,6 @@ struct BacklogActions: View {
 
 /// The opened Task's brief, cut at nine lines past 900 characters; Edit turns it into a field.
 struct BacklogBrief: View {
-    let model: WorkModel
-    let view: WorkNavigation.Board
     let task: RoadmapTask
     let state: Binding<BacklogState>
     let perform: (BacklogView.Action) -> Void
@@ -1389,6 +1397,7 @@ struct BacklogBrief: View {
         .frame(maxWidth: 720, alignment: .leading)
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.bottom, Spacing.sm)
+        .modifier(CreationPresentation(recovery: .shared, resource: .task(task.id)))
     }
 
     static func words(_ text: String) -> Int { text.split(whereSeparator: \.isWhitespace).count }

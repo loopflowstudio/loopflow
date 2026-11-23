@@ -172,36 +172,26 @@ File to backlog   Choose a workflow when you start.
                                       Cancel   Start with feature ⌘↩
 ```
 
-The sheet opens on the Wave you were looking at. **In** moves the Task to
-another Wave or to the repository.
+**In** starts on the Wave you were looking at. Choose another Wave or the
+repository to change where the Task lands.
 
-**Workflow for Start** picks the workflow **Start** will run, from
-[the same list Start offers](#start-picks-a-workflow), plus **Use default** to
-follow the selected Wave or repository. Beside it is whose choice that workflow
-is: the default of the Wave or repository above it, your own default, or chosen
-for this start once you pick a workflow. Changing **In** updates an inherited
-default and keeps an explicit choice in the draft; pick **Use default** to
-follow the scope again, even when both have the same name.
+**Workflow for Start** follows that scope's default. Pick a named workflow
+to keep it when you change scope, even if its name matches the default.
+**Use default** follows the scope again. The preview shows the workflow's
+steps and marks each one where you take part.
 
-Under **Workflow for Start** is the workflow as the Task will show it once
-started: its steps, a person before each one where you take part, then the same
-thing in words ("Runs on its own." when there are no stops). Change the menu
-and both lines update with it, along with the **Start** button label.
-
-- **Start with `<workflow>`** (⌘↩) files the Task and starts it on the workflow
-  shown.
-- **File to backlog** runs `lf task create` without `--run` or a workflow
-  override: the Task lands in that Wave's or repository's backlog, selected,
-  and nothing starts. A filed Task follows its scope's current default until
-  someone starts it, and **Start with…** can pick another workflow then.
+- **Start with `<workflow>`** (⌘↩) starts the workflow and opens the new
+  Task's conversation. The Machine resolves an inherited default at Start.
+- **File to backlog** runs `lf task create` and selects the new Task in its
+  backlog. When you start the filed Task, it offers the current default and
+  [the same workflow list](#start-picks-a-workflow).
 - **Cancel** (Esc) closes the sheet.
 
-If **File to backlog** is refused, the sheet stays open with what you typed,
-the selected scope and Start workflow, "Not filed." and the Machine's reason.
-If the Machine refuses **Start** before creating the Task, the request stays
-on screen with "Not started.", the error, **Try again** and **Discard**.
-After admission, setup errors appear in the Task's workspace. If the reply
-is lost, Desktop checks the original submission on its Machine.
+A refused File keeps the draft open with “Not filed.” and the Machine's
+reason. A refused Start keeps the request on screen with “Not started.”,
+**Try again** and **Discard**. After admission, setup errors appear in the
+Task's workspace. If the reply is lost, Desktop checks the original
+submission on its Machine.
 
 #### A Task that has not started
 
@@ -252,8 +242,8 @@ you. **More ›** holds the pieces other
 Graphs include, such as `build` and `deliver`, and Graphs with no
 `description:` ([describe a Graph](orchestration.md#describe-a-graph)). A
 Graph that runs for a Wave is not offered for a Task. The
-[New Task](#new-task) sheet's **Workflow for Start** menu (with **Use default**
-to follow the scope) and an unstarted Task's **Start with…** use this list.
+[New Task](#new-task) sheet's **Workflow for Start** menu and an unstarted Task's
+**Start with…** use this list.
 
 Start reaches unstarted Tasks only. Select a started Task and the button reads
 `Open`, with no ▾: it goes to the Task, where its step, its PR and what running

@@ -2587,11 +2587,15 @@ final class WorkModel {
 
     /// The graph a new Task in each scope would take up, keyed by repository and
     /// Wave. Rust resolves it; the New Task sheet only shows it.
-    private(set) var graphDefaults: [String: Reading<WaveGraph>] = [:] {
+    private var graphDefaults: [String: Reading<WaveGraph>] = [:] {
         didSet { reported("graph-defaults", "Graph defaults", from: oldValue, to: graphDefaults) }
     }
 
-    func graphDefaultKey(wave: WaveSnapshot?) -> String { "\(repoPath ?? ""):\(wave?.id ?? "")" }
+    func defaultWorkflow(in wave: WaveSnapshot?) -> WaveGraph.Default? {
+        graphDefaults[graphDefaultKey(wave: wave)]?.value?.default
+    }
+
+    private func graphDefaultKey(wave: WaveSnapshot?) -> String { "\(repoPath ?? ""):\(wave?.id ?? "")" }
 
     func loadGraphDefault(wave: WaveSnapshot?) async {
         let key = graphDefaultKey(wave: wave)
@@ -2639,33 +2643,30 @@ final class WorkModel {
         if owner.startingTask?.id == requestID { owner.startingTask = nil }
     }
 
-    /// New Task, filed only: `lf task create REQUEST` puts it in `wave`'s backlog
-    /// (nil: the repository's) and starts nothing. Its row is selected there,
-    /// with the filter and search out of its way. Throws while nothing is filed;
-    /// a request whose answer is lost belongs to recovery, as in `createTask`.
+    /// Close the submitting sheet on success or handoff to recovery. A refusal
+    /// throws back to the draft so its request can be corrected.
     func fileTask(request: String, wave: WaveSnapshot?) async throws {
         let owner = navigation
         let presentation = owner.paletteGeneration
         let destination = destinationGeneration
         let requestID = UUID().uuidString
-        let created: TaskCreated
+        let created: TaskCreated?
         do {
             created = try await query.createTask(request: request, wave: wave?.name, graph: nil, run: false,
                                                  cwd: repoPath, requestID: requestID)
-        } catch is SubmittedCreationError { return }
-        guard navigation === owner, owner.paletteGeneration == presentation,
-              destinationGeneration == destination else { return }
+        } catch is SubmittedCreationError { created = nil }
+
+        guard owner.paletteGeneration == presentation else { return }
+        if owner.palette == .newTask { owner.palette = nil }
+        guard let created, navigation === owner, destinationGeneration == destination else { return }
+
         let view: WorkNavigation.Board = wave.map { .wave($0.id) } ?? .repository
-        if navigation.waveView != view { select(wave.map { .wave(id: $0.id) }) }
-        var state = navigation.backlogs[view] ?? BacklogState()
-        state.filter = .all
-        state.query = ""
-        state.selection = []
-        state.select(created.receipt.task.id)
-        state.notice = .did("Filed \(created.receipt.task.identifier)")
-        navigation.backlogs[view] = state
-        // Its backlog row is the Task's presentation; nothing opens.
-        await CreationRecovery.shared.presented([requestID])
+        if owner.waveView != view { select(wave.map { .wave(id: $0.id) }) }
+        if isHidden(.backlog, in: view) { setHidden(.backlog, false, in: view) }
+        if let zoom = zoomedPart(in: view), zoom != .backlog { setZoomed(nil, in: view) }
+        let task = created.receipt.task
+        owner.backlogs[view, default: BacklogState()].showFiled(task)
+        CreationRecovery.shared.awaitingPresentation(requestID, of: .task(task.id))
     }
 
     /// Install a created Task's conversation from the answer: its row selects the

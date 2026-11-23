@@ -90,9 +90,11 @@ public actor CreationSubmissions {
 
     public func submit(_ change: ServedWrite, requestID: String) async throws -> String {
         let record = try await record(change, requestID: requestID)
-        active.insert(requestID)
+        // Recovery may already own this saved submission.
+        guard active.insert(requestID).inserted else {
+            throw SubmittedCreationError(requestID: requestID, cause: RegistryQueryError("This creation is already being sent"))
+        }
         defer { active.remove(requestID) }
-        // Saving precedes the first send. A lost answer leaves this exact record.
         do { return try await send(record.payload) }
         catch {
             // New Task can offer a retry once the original Machine confirms
@@ -105,8 +107,7 @@ public actor CreationSubmissions {
     }
 
     private func discardIfAbsent(_ record: SubmittedCreation) async throws -> Bool {
-        guard try await currentMachine() == record.destination,
-              try await receipt(record.id) == nil else { return false }
+        guard try await receipt(for: record) == nil else { return false }
         try FileManager.default.removeItem(at: url(record.id))
         return true
     }
@@ -117,28 +118,28 @@ public actor CreationSubmissions {
         // Own recovery before the first await, including destination lookup.
         guard active.insert(record.id).inserted else { return nil }
         defer { active.remove(record.id) }
-        guard try await currentMachine() == record.destination else {
-            throw RegistryQueryError("Waiting for the original Machine \(record.destination)")
-        }
         // A receipt reads the same on every revision; only sending the saved
         // payload again needs the revision it was written for.
-        var receipt = try await receipt(record.id)
-        if receipt == nil || receipt?.disposition == .continue {
-            guard record.version == ServerProtocol.revision else {
-                throw RegistryQueryError("This submitted creation requires protocol revision \(record.version); its request is retained")
-            }
-            // Another window may have listed this request before its refusal retired it.
-            guard FileManager.default.fileExists(atPath: url(record.id).path) else { return nil }
-            _ = try await send(record.payload)
-            receipt = try await self.receipt(record.id)
-            guard receipt != nil else { throw RegistryQueryError("The Machine has no receipt for creation \(record.id)") }
+        let known = try await receipt(for: record)
+        // Another window may have listed this request before its refusal retired it.
+        guard FileManager.default.fileExists(atPath: url(record.id).path) else { return nil }
+        if let known, known.disposition != .continue { return known }
+        guard record.version == ServerProtocol.revision else {
+            throw RegistryQueryError("This submitted creation requires protocol revision \(record.version); its request is retained")
+        }
+        _ = try await send(record.payload)
+        guard let receipt = try await receipt(for: record) else {
+            throw RegistryQueryError("The Machine has no receipt for creation \(record.id)")
         }
         return receipt
     }
 
-    private func receipt(_ id: String) async throws -> CreationLookup? {
-        let receipt = try await lookup(id).decode(CreationLookup?.self)
-        guard receipt == nil || receipt?.requestId == id else {
+    private func receipt(for record: SubmittedCreation) async throws -> CreationLookup? {
+        guard try await currentMachine() == record.destination else {
+            throw RegistryQueryError("Waiting for the original Machine \(record.destination)")
+        }
+        let receipt = try await lookup(record.id).decode(CreationLookup?.self)
+        guard receipt == nil || receipt?.requestId == record.id else {
             throw RegistryQueryError("The Machine returned the receipt for another creation")
         }
         return receipt

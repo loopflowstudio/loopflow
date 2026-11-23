@@ -10,17 +10,19 @@ import os
 @Suite("New Task", .serialized)
 @MainActor
 struct NewTaskTests {
-    private func fixture(_ name: String) throws -> String {
-        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-        return try String(contentsOf: root.appendingPathComponent("tests/fixtures/dto/\(name)"), encoding: .utf8)
+    private func fixtureArray(_ name: String) throws -> [[String: Any]] {
+        try #require(JSONSerialization.jsonObject(with: loadFixtureData(name)) as? [[String: Any]])
+    }
+
+    private func json(_ value: Any) throws -> String {
+        String(decoding: try JSONSerialization.data(withJSONObject: value), as: UTF8.self)
     }
 
     @Test("The sheet's fields map to one lf task create command and Rust's default read")
     func queriesPassFieldsThrough() async throws {
-        let receipts = try #require(JSONSerialization.jsonObject(with: Data(fixture("task_create_receipt.json").utf8)) as? [Any])
-        let receipt = String(decoding: try JSONSerialization.data(withJSONObject: receipts[0]), as: UTF8.self)
-        let graphs = try #require(JSONSerialization.jsonObject(with: Data(fixture("wave_graph.json").utf8)) as? [Any])
-        let repository = String(decoding: try JSONSerialization.data(withJSONObject: graphs[1]), as: UTF8.self)
+        let receipts = try fixtureArray("task_create_receipt.json")
+        let receipt = try json(receipts[0])
+        let repository = try json(fixtureArray("wave_graph.json")[1])
         let calls = OSAllocatedUnfairLock<[[String]]>(initialState: [])
         let query = RegistryQuery { args, _ in
             calls.withLock { $0.append(args) }
@@ -44,10 +46,10 @@ struct NewTaskTests {
             ["wave", "graph", "show", "--no-wave", "--json"],
         ])
         // A headless `-b` run answers with no conversation.
-        let batch = try RegistryQuery.decode([TaskCreated].self, from: fixture("task_create_receipt.json"))[1]
+        let batch = try RegistryQuery.decode(TaskCreated.self, from: json(receipts[1]))
         #expect(batch.receipt.sessionId == nil && batch.session == nil)
         // Every Wave and the repository decode, including a null Wave.
-        _ = try RegistryQuery.decode([WaveGraph].self, from: fixture("wave_graph.json"))
+        _ = try JSONDecoder().decode([WaveGraph].self, from: loadFixtureData("wave_graph.json"))
     }
 
     private func toggle(_ name: String, in sheet: NewTaskSheet) throws -> InspectableView<ViewType.Toggle> {
@@ -57,21 +59,14 @@ struct NewTaskTests {
     }
 
     private func catalogWithCode() throws -> String {
-        var entries = try #require(JSONSerialization.jsonObject(with: Data(fixture("graph_catalog.json").utf8)) as? [[String: Any]])
-        var code = entries[0]
+        var code = try #require(JSONSerialization.jsonObject(with: loadFixtureData("graph_composition.json")) as? [String: Any])
         code["name"] = "code"
-        code["workflow"] = [
-            "steps": [["name": "build", "interactive": false]],
-            "interactive_steps": [],
-            "sentence": "Runs on its own.",
-        ]
-        entries.append(code)
-        return String(decoding: try JSONSerialization.data(withJSONObject: entries), as: UTF8.self)
+        return try json(fixtureArray("graph_catalog.json") + [code])
     }
 
     private func model(catalog: OSAllocatedUnfairLock<String>,
                        write: @escaping @Sendable (ServedWrite) async throws -> String) async throws -> WorkModel {
-        let planning = try fixture("roadmap_snapshot.json")
+        let planning = String(decoding: try loadFixtureData("roadmap_snapshot.json"), as: UTF8.self)
         let model = WorkModel(query: RegistryQuery(write: write) { args, _ in
             if args.starts(with: ["plan", "list"]) { return planning }
             if args.starts(with: ["graph", "list"]) { return catalog.withLock { $0 } }
@@ -94,20 +89,12 @@ struct NewTaskTests {
     @Test("Start follows the scope or pins a named workflow, even when the names match",
           arguments: [true, false])
     func startChoice(explicit: Bool) async throws {
-        let (requests, received) = AsyncStream<ServedWrite>.makeStream()
-        let receipts = try #require(JSONSerialization.jsonObject(with: Data(fixture("task_create_receipt.json").utf8)) as? [[String: Any]])
-        var receipt = receipts[0]
-        let workflow = explicit ? "code" : "feature"
-        var row = try #require(receipt["row"] as? [String: Any])
-        var execution = try #require(row["execution"] as? [String: Any])
-        execution["reason"] = "Starting \(workflow)"
-        row["execution"] = execution
-        row["graph_name"] = workflow
-        receipt["graph"] = workflow
-        receipt["row"] = row
-        let admitted = String(decoding: try JSONSerialization.data(withJSONObject: receipt), as: UTF8.self)
+        let admitted = try json(fixtureArray("task_create_receipt.json")[0])
         let model = try await model(catalog: .init(initialState: catalogWithCode())) { change in
-            received.yield(change)
+            if case .taskCreate(_, _, _, let request, let wave, let graph, nil, true) = change {
+                #expect(request == "a brief" && wave == (explicit ? "product" : nil))
+                #expect(graph == (explicit ? "code" : nil))
+            } else { Issue.record("Start sent \(change)") }
             return admitted
         }
         let product = try #require(model.visibleRoadmaps.first?.wave)
@@ -132,58 +119,49 @@ struct NewTaskTests {
         #expect(try toggle("Use default", in: sheet).isOn())
         try sheet.inspect().find(button: product.displayName).tap()
         _ = try sheet.inspect().find(button: "Start with feature ⌘↩")
-        if explicit { try toggle("code", in: sheet).tap() }
-        try sheet.inspect().find(button: explicit ? "Start with code ⌘↩" : "Start with feature ⌘↩").tap()
-        #expect(model.navigation.palette == nil)
-        var iterator = requests.makeAsyncIterator()
-        let change = try #require(await iterator.next())
-        guard case .taskCreate(_, _, _, let request, let wave, let graph, _, let run) = change else {
-            Issue.record("Start sent \(change)"); return
+        if explicit {
+            try toggle("code", in: sheet).tap()
+        } else {
+            try sheet.inspect().find(button: model.repositoryName).tap()
         }
-        #expect(run && request == "a brief" && wave == product.name)
-        #expect(graph == (explicit ? "code" : nil))
+        try sheet.inspect().find(button: "Start with code ⌘↩").tap()
+        #expect(model.navigation.palette == nil)
         for await opened in Observations({ model.selection?.kind == .task }) where opened { break }
         let task = try #require(model.navigation.selectedTaskEvidence?.task)
         let bar = TaskWorkflowBar(model: model, task: task, work: .loading)
-        _ = try bar.inspect().find(text: "Starting \(workflow)")
+        _ = try bar.inspect().find(text: "Starting code")
     }
 
     @Test("File keeps a refused draft and selects its unstarted row even after its Start workflow disappears")
     func fileRefusalAndRetry() async throws {
-        let snapshot = try #require(JSONSerialization.jsonObject(with: Data(fixture("roadmap_snapshot.json").utf8)) as? [String: Any])
+        let snapshot = try #require(JSONSerialization.jsonObject(with: loadFixtureData("roadmap_snapshot.json")) as? [String: Any])
         let tasks = try #require(snapshot["tasks"] as? [String: Any])
         let rows = try #require(tasks["items"] as? [[String: Any]])
         let filedRow = try #require(rows.first { $0["lifecycle"] as? String == "unstarted" })
-        let row = try JSONDecoder().decode(RoadmapTask.self, from: JSONSerialization.data(withJSONObject: filedRow))
-        let receipt: [String: Any] = [
+        let row = try RegistryQuery.decode(RoadmapTask.self, from: json(filedRow))
+        let filed = try json([
             "task": ["id": row.id, "identifier": row.task.identifier, "title": row.task.name],
-            "graph": NSNull(), "session_id": NSNull(), "milestone": "filed", "session": NSNull(),
-            "row": filedRow,
-        ]
-        let filed = String(decoding: try JSONSerialization.data(withJSONObject: receipt), as: UTF8.self)
+            "graph": NSNull(), "session_id": NSNull(), "milestone": "filed", "session": NSNull(), "row": filedRow,
+        ])
         let catalog = OSAllocatedUnfairLock(initialState: try catalogWithCode())
-        let attempts = OSAllocatedUnfairLock<[Data]>(initialState: [])
-        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        defer { try? FileManager.default.removeItem(at: directory) }
-        let journal = CreationSubmissions(directory: directory, machine: { "machine" },
-            lookup: { _ in ReadOutput("null") }, send: { payload in
-                let first = attempts.withLock { $0.append(payload); return $0.count == 1 }
-                if first { throw ServerError(code: "unavailable", message: "Wave unavailable", data: .null) }
-                return filed
-            })
+        let attempts = OSAllocatedUnfairLock<[ServedWrite]>(initialState: [])
         let model = try await model(catalog: catalog) { change in
-            guard case .taskCreate(_, let id, _, _, _, _, _, _) = change else { throw RegistryQueryError("Expected task.create") }
-            return try await journal.submit(change, requestID: id)
+            let first = attempts.withLock { $0.append(change); return $0.count == 1 }
+            if first { throw ServerError(code: "unavailable", message: "Wave unavailable", data: .null) }
+            return filed
         }
         let product = try #require(model.visibleRoadmaps.first?.wave)
         let sheet = NewTaskSheet(model: model)
         try sheet.inspect().find(button: product.displayName).tap()
         try sheet.inspect().find(ViewType.TextField.self).setInput(row.task.name)
         try toggle("code", in: sheet).tap()
-        let remaining = try fixture("graph_catalog.json")
+        let remaining = String(decoding: try loadFixtureData("graph_catalog.json"), as: UTF8.self)
         catalog.withLock { $0 = remaining }
         await model.loadGraphCatalog(force: true)
-        model.navigation.backlogs[.wave(product.id)] = BacklogState(selection: ["other"], filter: .mine, query: "old")
+        let destination = WorkNavigation.Board.wave(product.id)
+        model.setHidden(.backlog, true, in: destination)
+        model.setZoomed(.tiles, in: destination)
+        model.navigation.backlogs[destination] = BacklogState(selection: ["other"], filter: .mine, query: "old")
         await sheet.file()
         let refused = try sheet.inspect()
         #expect(model.navigation.palette == .newTask)
@@ -193,17 +171,30 @@ struct NewTaskTests {
         _ = try refused.find(button: "Start with code ⌘↩")
         try refused.find(button: "File to backlog").tap()
         for await closed in Observations({ model.navigation.palette == nil }) where closed { break }
-        #expect(model.navigation.waveView == .wave(product.id))
-        for payload in attempts.withLock({ $0 }) {
-            let fields = try #require(JSONSerialization.jsonObject(with: payload) as? [String: Any])
-            #expect(fields["graph"] is NSNull && fields["run"] as? Bool == false)
-            #expect(fields["wave"] as? String == product.name && fields["request"] as? String == row.task.name)
+        #expect(model.navigation.waveView == destination)
+        #expect(!model.isHidden(.backlog, in: destination))
+        #expect(model.zoomedPart(in: destination) == nil)
+        let submissions = attempts.withLock { $0 }
+        #expect(submissions.count == 2)
+        for change in submissions {
+            guard case .taskCreate(_, _, _, let request, let wave, nil, nil, false) = change else {
+                Issue.record("File sent \(change)")
+                return
+            }
+            #expect(wave == product.name && request == row.task.name)
         }
-        let state = try #require(model.navigation.backlogs[.wave(product.id)])
+        let state = try #require(model.navigation.backlogs[destination])
         #expect(state.selection == [row.id] && state.filter == .all && state.query.isEmpty)
         #expect(state.notice == .did("Filed \(row.task.identifier)"))
-        let selected = try #require(model.backlog(.wave(product.id)).opened)
-        model.openBacklog(selected)
+        let brief = try BacklogView(model: model, view: destination).inspect().find(BacklogBrief.self).actualView()
+        #expect(brief.task.id == row.id)
+        let resource = CreationRecovery.Presentation.task(row.id)
+        #expect(!CreationRecovery.shared.requests(for: resource).isEmpty)
+        let pane = ImageRenderer(content: brief)
+        defer { withExtendedLifetime(pane) {} }
+        _ = try #require(pane.cgImage)
+        for await retired in Observations({ CreationRecovery.shared.requests(for: resource).isEmpty }) where retired { break }
+        model.openBacklog(brief.task)
         #expect(model.selection == .task(id: row.id))
         let offer = try TaskStartOffer(model: model, task: row).inspect()
         _ = try offer.find(textWhere: { text, _ in text.contains("It will run feature") && text.contains("You take part at demo.") })

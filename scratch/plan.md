@@ -6,7 +6,7 @@ The Machine's creation receipt distinguishes a confirmed refusal from a lost ans
 
 ## Checks
 
-- `scripts/test_desktop.sh --filter 'NewTaskTests|CreationSubmissionTests|TaskGraphProofTests'` passed. Swift Testing reported 24 tests in five suites, including two skipped display diagnostics. The headless walkthrough filed after the named workflow disappeared, opened the selected Task's offer for `feature`, and exercised Start with both a named workflow and the default.
+- `scripts/test_desktop.sh --filter 'NewTaskTests|CreationSubmissionTests|BacklogViewTests|TaskGraphProofTests'` passed. Swift Testing reported 37 tests in six suites, including two skipped display diagnostics. The headless File walkthrough revealed a hidden backlog, mounted its selected brief and observed submission retirement. Start exercised named and inherited workflows.
 - `task_create_tests::task_create_answers_and_its_conversation_starts_the_graph_across_a_server_restart` passed against a disposable Machine with a lost reply.
 - `cargo test -p loopflow --test integration documented_commands::` passed all four checks.
 

@@ -356,9 +356,11 @@ built targets in order of `.fingerprint` directory mtime, newest first.
 It holds Cargo's locks while cloning `.fingerprint`, `build` and `deps`;
 Cargo 1.100 keeps each unit under `build/<package>/<hash>/`, so a target it
 built seeds from `build` alone, ranked by that directory's mtime.
-A build starting in the source waits until the clone finishes. Each worktree
-builds its own top-level binaries and keeps its own incremental state. If every
-source is busy or the filesystem lacks copy-on-write clones, Cargo builds cold.
+A build starting in the source waits until the clone finishes. The hook skips
+siblings whose build records are as new as any tracked file in the checkout.
+Otherwise Cargo could treat a sibling's workspace code as fresh. Each worktree
+builds its own top-level binaries and keeps its own incremental state. If no
+source qualifies or the filesystem lacks copy-on-write clones, Cargo builds cold.
 
 In the [measured builds](benchmarks/crate-rebuild/results/loo-922.html), Cargo
 reused registry crates, build scripts and proc macros. Two seeded builds compiled

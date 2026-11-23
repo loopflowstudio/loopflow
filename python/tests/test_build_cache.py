@@ -393,6 +393,7 @@ def test_status_reads_a_fresh_daemon_before_its_first_cache_write(
 @pytest.fixture
 def cargo_repo(tmp_path, monkeypatch):
     """A repository whose app depends on a build-script crate outside the checkout."""
+    monkeypatch.setenv("RUSTUP_HOME", os.environ.get("RUSTUP_HOME", str(Path.home() / ".rustup")))
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("CARGO_HOME", str(tmp_path / "cargo"))
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
@@ -428,6 +429,7 @@ def cloning(tmp_path):
     """Skip where the temporary filesystem has no copy-on-write clones (ext4)."""
     probe = tmp_path / "clone-probe"
     probe.mkdir()
+    (probe / "artifact").write_bytes(b"clone this data")
     try:
         build_cache._clone(probe, tmp_path / "clone-probe-copy")
     except (OSError, subprocess.CalledProcessError):
@@ -472,6 +474,16 @@ def test_new_worktree_reuses_a_siblings_dependencies_and_rebuilds_its_own(cargo_
     status = json.loads(_cache_command(tree, "status", "--json").stdout)
     assert status["seed"]["source"] == str(cargo_repo.resolve())
     assert _cargo_build(tree) == {"build-script-build": True, "scripted": True, "app": False}
+
+
+def test_a_newer_sibling_build_cannot_supply_the_checkouts_executable(cargo_repo):
+    tree = _add_worktree(cargo_repo, "new tree")
+    (cargo_repo / "src/main.rs").write_text('fn main() { println!("sibling"); }\n')
+    _cargo_build(cargo_repo)
+
+    assert build_cache.seed_target(tree) is None
+    _cargo_build(tree)
+    assert subprocess.check_output([tree / "target/debug/app"], text=True).strip() == "1"
 
 
 def test_new_worktree_starts_cold_when_only_an_unbuilt_seed_is_idle(cargo_repo, cloning):

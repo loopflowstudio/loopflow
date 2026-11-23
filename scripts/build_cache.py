@@ -179,6 +179,25 @@ def _seed_sources(root: Path) -> list[tuple[Path, tuple[str, ...]]]:
     )
 
 
+def _oldest_checkout_mtime(root: Path) -> int:
+    paths = subprocess.check_output(["git", "ls-files", "-z"], cwd=root)
+    oldest = (root / ".git").stat().st_mtime_ns
+    for name in paths.split(b"\0"):
+        if name:
+            with suppress(FileNotFoundError):  # A sparse checkout can omit tracked paths.
+                oldest = min(oldest, (root / os.fsdecode(name)).lstat().st_mtime_ns)
+    return oldest
+
+
+def _predates_checkout(debug: Path, oldest: int) -> bool:
+    # Cargo compares checkout mtimes with its build records. A sibling can finish
+    # compiling different code while Git is still writing this worktree.
+    for pattern in (".fingerprint/*/*", "build/*/*/fingerprint/*"):
+        if any(record.stat().st_mtime_ns >= oldest for record in debug.glob(pattern)):
+            return False
+    return True
+
+
 def _clone_debug(debug: Path, entries: tuple[str, ...], target: Path) -> None:
     target.mkdir()
     staging = target / "debug.seeding"
@@ -202,10 +221,14 @@ def seed_target(repo: Path) -> Path | None:
     target = root / "target"
     if os.path.lexists(target):
         return None
-    for source, entries in _seed_sources(root):
+    sources = _seed_sources(root)
+    if not sources:
+        return None
+    oldest = _oldest_checkout_mtime(root)
+    for source, entries in sources:
         debug = source / "target/debug"
         with _quiescent(debug) as idle:
-            if not idle:
+            if not idle or not _predates_checkout(debug, oldest):
                 continue
             _clone_debug(debug, entries, target)
         commit = subprocess.run(

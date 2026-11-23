@@ -16,12 +16,12 @@ HEAD, so it never re-seeds. A seeded `<repo>.ready` can serve as a source once C
 The Machine's `cargo` is Homebrew's; rustup's `stable` (Cargo 1.100, CI's toolchain) is the
 other layout, with no `.fingerprint` or `deps`. Prepend
 `~/.rustup/toolchains/stable-aarch64-apple-darwin/bin` to `PATH` to drive it, and run the
-seeding tests under both. A fixture needs a registry crate to show `Fresh`; with
-`CARGO_HOME` left real, `itoa = "=1.0.19"` builds `--offline` from the local registry. Path
-crates always rebuild.
+seeding tests under both. The fixture builds an external path dependency offline
+in both worktrees. Cargo reports it fresh and rebuilds the checkout's application.
 
 The python-test job runs on ext4, where `cp --reflink=always` fails, so the seeding tests
-skip there. They are checked only on a Mac.
+that require a real clone skip there. The source lock and overlapping-build checks
+also run on filesystems without reflinks.
 
 `clonefile(2)` keeps file mtimes but gives cloned directories the clone time. The hook copies
 the source's `target/debug/.fingerprint` mtime (`build` under Cargo 1.100) and uses it to

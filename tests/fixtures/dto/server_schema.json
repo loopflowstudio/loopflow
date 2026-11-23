@@ -103,6 +103,19 @@
           "additionalProperties": false,
           "properties": {
             "kind": {
+              "const": "dismiss",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
               "const": "confirm",
               "type": "string"
             },
@@ -5611,6 +5624,18 @@
           "properties": {
             "kind": {
               "const": "recovered",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "dismissed",
               "type": "string"
             }
           },

@@ -291,5 +291,20 @@
       "kind": "reset"
     },
     "key": "context.diff"
+  },
+  "dismiss": {
+    "kind": "config.promote",
+    "destination": {
+      "kind": "personal_repo",
+      "repo": "/project"
+    },
+    "key": "context.diff",
+    "wave": null,
+    "action": {
+      "kind": "dismiss"
+    }
+  },
+  "dismissed": {
+    "kind": "dismissed"
   }
 }

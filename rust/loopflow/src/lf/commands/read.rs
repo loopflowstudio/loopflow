@@ -1205,7 +1205,7 @@ mod tests {
             "read",
             to_value(from_value::<Read>(fixture["read"].clone()).unwrap()).unwrap(),
         );
-        for name in ["write", "preview", "promote"] {
+        for name in ["write", "preview", "promote", "dismiss"] {
             check(
                 name,
                 to_value(
@@ -1218,16 +1218,13 @@ mod tests {
             "scope",
             to_value(from_value::<Scope>(fixture["scope"].clone()).unwrap()).unwrap(),
         );
-        check(
-            "move_result",
-            to_value(
-                from_value::<loopflow_execution::engine::config::promotion::Outcome>(
-                    fixture["move_result"].clone(),
-                )
-                .unwrap(),
+        for name in ["move_result", "dismissed"] {
+            let outcome = from_value::<loopflow_execution::engine::config::promotion::Outcome>(
+                fixture[name].clone(),
             )
-            .unwrap(),
-        );
+            .unwrap();
+            check(name, to_value(outcome).unwrap());
+        }
         check(
             "receipt",
             to_value(from_value::<Applied>(fixture["receipt"].clone()).unwrap()).unwrap(),

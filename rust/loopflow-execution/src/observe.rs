@@ -170,6 +170,16 @@ struct Entry {
     used: SystemTime,
 }
 
+impl Entry {
+    fn update(&mut self, answer: Answer) {
+        if self.answer.as_ref() != Some(&answer) {
+            self.answer = Some(answer);
+            self.revision += 1;
+        }
+        self.checked = SystemTime::now();
+    }
+}
+
 type SharedEntry = Arc<Mutex<Entry>>;
 
 /// A value computed from observed facts. Each variant is the whole identity
@@ -300,19 +310,19 @@ impl Cache {
                 .collect::<Vec<_>>()
         };
         for (fact, entry) in entries {
-            if entry.try_lock().map_or(true, |entry| {
-                entry.answer.is_none()
-                    || entry.checked.elapsed().unwrap_or_default() < fact.interval()
-            }) {
+            let Some(checked) = entry.try_lock().ok().and_then(|entry| {
+                (entry.answer.is_some()
+                    && entry.checked.elapsed().unwrap_or_default() >= fact.interval())
+                .then_some(entry.checked)
+            }) else {
                 continue;
-            }
+            };
             let answer = fact.observe();
             let mut entry = entry.lock().expect("observed fact");
-            if entry.answer.as_ref() != Some(&answer) {
-                entry.answer = Some(answer);
-                entry.revision += 1;
+            // A write can publish a newer observation while this poll is in flight.
+            if entry.checked == checked {
+                entry.update(answer);
             }
-            entry.checked = SystemTime::now();
         }
     }
 
@@ -444,6 +454,31 @@ fn scope<T>(reading: Option<Reading>, read: impl FnOnce() -> T) -> T {
     }
     let _restore = Restore(READING.replace(reading));
     read()
+}
+
+/// Publish a file change to existing served reads before returning to the writer.
+pub(crate) fn invalidate_path(path: &Path) {
+    let cache = SHARED.lock().expect("observation cache").upgrade();
+    let Some(cache) = cache else { return };
+    let path = absolute(path);
+    let facts = [
+        Some(Fact::File(path.clone())),
+        Some(Fact::Metadata(path.clone())),
+        path.parent()
+            .map(|parent| Fact::Directory(parent.to_owned())),
+    ];
+    for fact in facts.into_iter().flatten() {
+        let entry = cache
+            .entries
+            .lock()
+            .expect("observation cache")
+            .get(&fact)
+            .cloned();
+        if let Some(entry) = entry {
+            let mut entry = entry.lock().expect("observed fact");
+            entry.update(fact.observe());
+        }
+    }
 }
 
 pub fn active() -> bool {

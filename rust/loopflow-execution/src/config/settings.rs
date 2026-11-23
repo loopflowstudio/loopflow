@@ -232,9 +232,6 @@ pub(crate) fn validate_value(path: &[&str], value: &Value) -> Result<(), LoadErr
             return Err(invalid("stream must be stable, preview or dev"));
         }
     }
-    if !["gh", "local"].contains(&parsed.land.as_str()) {
-        return Err(invalid("land must be gh or local"));
-    }
     if parsed.machine.tasks.is_some() && parsed.machine.capacity.is_some() {
         return Err(invalid(
             "choose machine.tasks or machine.capacity in one declaration",

@@ -3,6 +3,7 @@ use crate::support;
 use std::fs;
 use std::path::Path;
 
+use loopflow_execution::config::catalog::LandMethod;
 use loopflow_execution::config::load_config;
 use loopflow_execution::config::load_config_or_default;
 use support::with_clean_home;
@@ -195,7 +196,7 @@ fn config_land_strategy() {
     let config = with_clean_home(|| load_config(Some(temp.path())))
         .unwrap()
         .unwrap();
-    assert_eq!(config.land, "local");
+    assert_eq!(config.land, LandMethod::Local);
 }
 
 #[test]
@@ -206,5 +207,5 @@ fn config_land_defaults_to_gh() {
     let config = with_clean_home(|| load_config(Some(temp.path())))
         .unwrap()
         .unwrap();
-    assert_eq!(config.land, "gh");
+    assert_eq!(config.land, LandMethod::Gh);
 }

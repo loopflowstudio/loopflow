@@ -398,6 +398,33 @@ mod tests {
     use std::path::Path;
 
     #[test]
+    fn served_scope_sees_each_checked_edit_before_the_next_write() {
+        let _lock = loopflow_test_support::env_lock().lock().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let _home = EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
+        let cache = crate::observe::Cache::shared();
+        let key = "context.diff";
+        let read =
+            || cache.capture(|| super::scope(None, None, &super::ScopeTarget::General).unwrap());
+        let (mut scope, mut dependencies) = read();
+        for enabled in [true, false, true] {
+            let file = &scope.files[0];
+            super::checked_edit(
+                &file.destination,
+                key,
+                &file.slots[key].entries,
+                &crate::config::files::edit::Change::Set {
+                    value: enabled.to_string(),
+                },
+            )
+            .unwrap();
+            assert!(dependencies.changed());
+            (scope, dependencies) = read();
+            assert_eq!(scope.settings[key].value.as_bool(), Some(enabled));
+        }
+    }
+
+    #[test]
     fn catalogue_wire_shape_includes_feature_category() {
         let fixture: serde_json::Value = serde_json::from_str(include_str!(
             "../../../../tests/fixtures/dto/configuration_catalog.json"

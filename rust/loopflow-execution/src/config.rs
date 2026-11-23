@@ -1094,7 +1094,7 @@ mod tests {
         assert!(!config.context.diff);
         assert_eq!(config.chrome, None);
         assert!(!config.pr);
-        assert_eq!(config.land, "gh");
+        assert_eq!(config.land, crate::config::catalog::LandMethod::Gh);
         assert!(config.context.exclude.is_empty());
         assert!(config.release.targets.is_empty());
     }

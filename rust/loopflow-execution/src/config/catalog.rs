@@ -288,6 +288,13 @@ pub struct DiffRestGroup {
     pub rest: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum LandMethod {
+    Gh,
+    Local,
+}
+
 definitions! {
     Config, DEFINITIONS, "", {
         skills: BTreeMap<String, Value> = BTreeMap::new();
@@ -326,7 +333,7 @@ definitions! {
     diff_groups: Vec<DiffGroup> = r#"[{title: Docs, paths: ["*.md", "*.mdx", "*.rst", "*.txt", "*.adoc", /docs/]}, {title: Data model, paths: [/migrations/, "*.sql", schema, /models/, "*.proto", dto]}, {rest: Everything else}, {title: Tests, paths: [/test/, tests/, /__tests__/, /spec/, /fixtures/, /test_, _test., .test., .spec., tests.]}, {title: Generated and lock files, paths: ["*.lock", "*.snap", "*.pbxproj", "-lock.json", .lock.json, .min., /generated/, /__generated__/, /__snapshots__/, /vendor/]}]"#, Repository, Replace, Portable, NextRead, Desktop, "Ordered headings for a Task's Diff; a file goes to the first group a path pattern matches, and to rest when none does";
     planning: Option<TrackerConfig> = "null", Repository, Replace, Portable, DomainAction, Planning, "Repository tracker and its settings";
     release: ReleaseConfig = "{targets: {}}", Repository, Merge, ReferencedAssets, DomainAction, Release, "Repository release targets";
-    land: String = "gh", Repository, Replace, Portable, DomainAction, Release, "Landing strategy: gh or local";
+    land: LandMethod = "gh", Repository, Replace, Portable, DomainAction, Release, "Landing strategy: gh or local";
     merge_method: Option<MergeMethod> = "null", Repository, Replace, Portable, DomainAction, Release, "Preferred allowed merge method";
     pr: bool = "false", Repository, Replace, Portable, DomainAction, Release, "Create a pull request after pushing";
     user: UserConfig = "{}", Personal, Merge, Portable, NextRead, Loopflow, "Display name; never an ownership credential";

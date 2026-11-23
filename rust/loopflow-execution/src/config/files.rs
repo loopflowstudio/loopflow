@@ -421,6 +421,7 @@ pub(crate) fn atomic_write(path: &Path, text: &str) -> Result<()> {
     file.write_all(text.as_bytes())?;
     file.as_file().sync_all()?;
     file.persist(path)?;
+    crate::observe::invalidate_path(path);
     File::open(parent)?.sync_all()?;
     Ok(())
 }

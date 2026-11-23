@@ -112,6 +112,7 @@ impl Receipt {
 pub enum Action {
     Preview,
     Resume,
+    Dismiss,
     Confirm { review: Review },
     Undo { receipt: Receipt },
 }
@@ -123,6 +124,7 @@ pub enum Outcome {
     Applied { receipt: Receipt },
     Pending,
     Recovered,
+    Dismissed,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -320,6 +322,12 @@ impl<'a> Move<'a> {
     }
 }
 
+fn remove_journal(path: &Path) -> Result<()> {
+    std::fs::remove_file(path)?;
+    crate::observe::invalidate_path(path);
+    Ok(())
+}
+
 pub fn run(
     source: &Destination,
     key: &str,
@@ -345,6 +353,10 @@ pub fn run(
         .into_iter()
         .map(|path| files::lock(path))
         .collect::<Result<Vec<_>>>()?;
+    if matches!(action, Action::Dismiss) {
+        remove_journal(&id)?;
+        return Ok(Outcome::Dismissed);
+    }
     let mut operation = Move::read(&source, &receiving, key)?;
     let persisted = match std::fs::read(&id) {
         Ok(bytes) => Some(serde_json::from_slice::<Pending>(&bytes)?),
@@ -358,11 +370,13 @@ pub fn run(
         operation.restore(&pending, true)?;
         let patches = operation.patches()?;
         operation.install(&patches, pending.undo)?;
-        std::fs::remove_file(&id)?;
+        remove_journal(&id)?;
         return Ok(Outcome::Recovered);
     }
     let (pending, patches) = match action {
-        Action::Resume => anyhow::bail!("move already finished; refresh Settings"),
+        Action::Dismiss | Action::Resume => {
+            anyhow::bail!("move already finished; refresh Settings")
+        }
         Action::Undo { receipt } => {
             let pending = Pending {
                 receipt: receipt.inverse(),
@@ -394,7 +408,7 @@ pub fn run(
     }
     operation.install(&patches, pending.undo)?;
     if across_files {
-        std::fs::remove_file(id)?;
+        remove_journal(&id)?;
     }
     Ok(Outcome::Applied {
         receipt: pending.receipt,
@@ -437,7 +451,15 @@ mod tests {
         .unwrap();
         set(&shared, key, "false").unwrap();
         assert!(run(&mine, key, None, &Action::Resume).is_err());
-        assert!(record.exists());
+        let journal_bytes = std::fs::read(&record).unwrap();
+        assert!(matches!(
+            run(&mine, key, None, &Action::Dismiss).unwrap(),
+            Outcome::Dismissed
+        ));
+        assert!(!record.exists());
+        assert_eq!(get(&shared, key).unwrap().value, false);
+        assert_eq!(get(&mine, key).unwrap().value, true);
+        std::fs::write(&record, journal_bytes).unwrap();
         assert_eq!(get(&mine, key).unwrap().value, true);
         set(&shared, key, "true").unwrap();
         set(&mine, "chrome", "false").unwrap();

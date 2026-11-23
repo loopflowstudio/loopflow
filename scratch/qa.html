@@ -92,3 +92,39 @@ tracker_actions after (fixed build):
 <ol><li>A Task moved out of a removed Wave keeps a now-redundant queued <code>project</code> action behind its create (sends the same value). Harmless.</li>
 <li><code>lf wave rename</code> commits as <code>lf wave rename: billing</code>, without the new name (<code>wave_lifecycle/recovery.rs</code>, not this branch).</li>
 <li>"1 Project stays readable in history" on every removal (already in <code>scratch/questions.md</code>).</li></ol>
+
+<h2>Third run, 2026-11-23: slice 4 (linked rename, removal line, Project link)</h2>
+<p>Branch <code>lf</code> at 6539d80aae, private Machine <code>/tmp/lf-qa-995/f</code>, fresh repository, then a bare origin and <code>repo.tracker.linear.team QA</code> with no Linear login. No Linear login, so the link was written into the store as the tracker read would write it (<code>projects.external_project_id</code> plus a <code>tracker_projects</code> row with a URL); everything after that went through the CLI.</p>
+<table>
+<tr><th>Scenario</th><th>Result</th></tr>
+<tr><td>Rename an unlinked Wave with a Task, no tracker</td><td class="ok">Project follows: <code>Project   ledger (local) · started</code>; Task stays.</td></tr>
+<tr><td><code>lf wave remove</code> of an empty Wave</td><td class="ok">No Projects line any more: "Removed Wave scratchpad. / scratchpad has no Tasks or Sessions."</td></tr>
+<tr><td>Status of a linked Wave</td><td class="ok"><code>(linked)</code> and the URL on the next line; <code>--json</code> carries <code>url</code> and <code>tracker_id</code>.</td></tr>
+<tr><td>Rename a linked Wave</td><td class="ok">Local Project renamed (name and slug); one <code>field</code> action <code>{"field":"project_name","value":"journal"}</code> queued, shown under the Project in <code>lf wave status</code> and in <code>lf repo tracker</code> as <code>journal name · queued</code>.</td></tr>
+<tr><td>Remove that linked Wave</td><td class="ok">Its queued rename retires; the Task moves to the repository and gets a <code>project</code> action.</td></tr>
+<tr><td>Removed Wave (<code>scratchpad</code>) after connecting the tracker</td><td class="ok">No create for its Project.</td></tr>
+<tr><td>Desktop Wave header</td><td>Not seen: <code>screencapture</code> answers "could not create image from display" in this run. <code>scripts/test_desktop.sh --filter 'WaveDetailReadingTests|WaveProjectsViewTests|DTOFixtureTests|WorkModelTests|RemoveWaveSheetTests'</code>: 106 pass, including "the Wave header names its Project and links it once the tracker has a URL".</td></tr>
+</table>
+<h3>Transcript</h3>
+<pre>$ lf wave status ledger            # after writing the link
+  Project   ledger (linked) · started
+            https://linear.app/qa/project/ledger-abc123
+$ lf wave rename ledger journal
+Renamed Wave ledger → journal
+$ lf wave status journal
+  Project   journal (linked) · started
+            https://linear.app/qa/project/ledger-abc123
+    name · queued · No Linear credential found. …
+$ lf repo tracker
+Tracker: linear. 2 open · 0 lost.
+  1b8591             create · queued · …
+  journal            name · queued · …</pre>
+<h3>Fixed</h3>
+<p>Nothing needed fixing. <code>.lf/qa/tracker.md</code> gained how to stand up a linked Project without a Linear login.</p>
+<h3>Not reached</h3>
+<ul><li>Sending the rename to Linear and reading back the new URL: needs a Linear login.</li>
+<li>The mounted Desktop header: no display capture here; covered by the view test above.</li></ul>
+<h3>Still wrong, worst first</h3>
+<ol><li>The URL keeps the old slug after a rename (<code>…/ledger-abc123</code> under <code>journal</code>) until the next tracker read; Linear redirects old slugs, so the link still opens.</li>
+<li><code>lf wave status</code> aligns its rows unevenly (<code>machine      unplaced</code>, <code>Project   …</code>); not this branch.</li>
+<li><code>lf config set --shared repo.tracker.linear.team</code> prints "saved; DomainAction" (seen before; not this branch).</li></ol>

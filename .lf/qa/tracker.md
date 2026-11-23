@@ -188,3 +188,12 @@ A repository with a Linear or Asana tracker has no Git plan exchange: after
 clone on a second home lists nothing. Cross-Machine checks there need a real
 tracker login. With a team configured and an `origin`, every create waits on
 "No Linear credential found"; without `origin`, on the origin error.
+
+Without a Linear login no command links a Wave's Project. To see what a
+linked one does (status line, its URL, a rename's `project_name` action),
+write the link the tracker read would: set `projects.external_project_id`
+and insert a `tracker_projects` row with the same `id`, `repo` (the
+`/private/tmp/…` spelling `waves.repo` holds), `tracker` `linear` and a
+`url`. `lf wave status <wave>` then prints `(linked)` and the URL under it.
+This skips the tracker read itself, so it shows the branch's handling of a
+link, not the import.

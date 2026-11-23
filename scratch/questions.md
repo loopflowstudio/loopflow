@@ -268,3 +268,4 @@ worktree is gone. Reversible in `checkout_owner_in` (`sqlite/task_work.rs`).
 - `lf wt create` inside a Task's checkout (Jack Heart): "a -- there should be
   a stack flag though". Branch from main stays the default; a stack flag is
   its own Task.
+- Then: "put the stack flag in here and the instructions as well"; LOO-1077 abandoned, built here.

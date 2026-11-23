@@ -1,0 +1,1 @@
+LOO-1080 chose a 60-second healthy CLI identity interval and a 60-second ceiling on restore retries for review. This trades a longer CLI-only logout and recovery window for bounded background launches. The direct daemon check keeps the existing five-second cadence.

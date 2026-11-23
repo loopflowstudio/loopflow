@@ -12,6 +12,15 @@ import Loopflow
 import GhosttyKit
 import IOKit
 
+private extension ghostty_input_key_s {
+    // Swift keeps a String passed as text alive for this synchronous call.
+    func send(to surface: ghostty_surface_t, text: UnsafePointer<CChar>? = nil) {
+        var key = self
+        key.text = text
+        _ = ghostty_surface_key(surface, key)
+    }
+}
+
 enum GhosttyTerminalShortcut: String {
     case copy = "c"
     case paste = "v"
@@ -1269,27 +1278,25 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
         let translated = translationEvent(event, surface: surface)
         let wasComposing = hasMarkedText()
         keyText = ""
-        defer { keyText = nil }
         interpretKeyEvents([translated])
+        let inserted = keyText ?? ""
+        keyText = nil
 
         if wasComposing || hasMarkedText() {
-            if let keyText, let first = keyText.utf8.first,
-               first >= 0x20 || keyText.utf8.count > 1 {
-                sendCommittedText(keyText, to: surface)
+            // AppKit may return the control character that ended composition.
+            if let first = inserted.utf8.first, first >= 0x20 || inserted.utf8.count > 1 {
+                sendCommittedText(inserted, to: surface)
             }
             return
         }
 
-        var key = translateKey(event, translationFlags: translated.modifierFlags)
-        let text = keyText.flatMap { $0.isEmpty ? nil : $0 } ?? translated.characters
-        if let text, let first = text.unicodeScalars.first, first.value >= 0x20,
-           first.value != 0x7f, !(0xf700...0xf8ff).contains(first.value) {
-            text.withCString {
-                key.text = $0
-                _ = ghostty_surface_key(surface, key)
-            }
+        let key = translateKey(event, translationFlags: translated.modifierFlags)
+        let text = inserted.isEmpty ? translated.characters : inserted
+        if let text, let scalar = text.unicodeScalars.first?.value,
+           scalar >= 0x20, scalar != 0x7f, !(0xf700...0xf8ff).contains(scalar) {
+            key.send(to: surface, text: text)
         } else {
-            _ = ghostty_surface_key(surface, key)
+            key.send(to: surface)
         }
     }
 
@@ -1302,7 +1309,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
 
         var key = translateKey(event)
         key.action = GHOSTTY_ACTION_RELEASE
-        _ = ghostty_surface_key(surface, key)
+        key.send(to: surface)
     }
 
     override func flagsChanged(with event: NSEvent) {
@@ -1331,16 +1338,14 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
         key.mods = translateMods(event.modifierFlags)
         key.keycode = UInt32(event.keyCode)
         key.action = event.modifierFlags.rawValue & mask != 0 ? GHOSTTY_ACTION_PRESS : GHOSTTY_ACTION_RELEASE
-        _ = ghostty_surface_key(surface, key)
+        key.send(to: surface)
     }
 
     // MARK: - NSTextInputClient
 
     func insertText(_ string: Any, replacementRange: NSRange) {
-        guard connectionAcceptsInput else { return }
-        guard let surface else { return }
-
-        guard let text = (string as? NSAttributedString)?.string ?? string as? String else { return }
+        guard connectionAcceptsInput, let surface,
+              let text = (string as? NSAttributedString)?.string ?? string as? String else { return }
 
         if hasMarkedText() { unmarkText() }
         if keyText != nil {
@@ -1670,9 +1675,9 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
         key.consumed_mods = GHOSTTY_MODS_NONE
         key.keycode = 0x09 // macOS V key
         key.unshifted_codepoint = 118 // v
-        _ = ghostty_surface_key(surface, key)
+        key.send(to: surface)
         key.action = GHOSTTY_ACTION_RELEASE
-        _ = ghostty_surface_key(surface, key)
+        key.send(to: surface)
         return true
     }
 
@@ -1740,9 +1745,9 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
         key.mods = GHOSTTY_MODS_NONE
         key.consumed_mods = GHOSTTY_MODS_NONE
         key.keycode = input.macKeyCode
-        _ = ghostty_surface_key(surface, key)
+        key.send(to: surface)
         key.action = GHOSTTY_ACTION_RELEASE
-        _ = ghostty_surface_key(surface, key)
+        key.send(to: surface)
     }
 
     // MARK: - Key Translation
@@ -1766,10 +1771,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
         guard !text.isEmpty else { return }
         var key = ghostty_input_key_s()
         key.action = GHOSTTY_ACTION_PRESS
-        text.withCString {
-            key.text = $0
-            _ = ghostty_surface_key(surface, key)
-        }
+        key.send(to: surface, text: text)
     }
 
     private func translateKey(_ event: NSEvent, translationFlags: NSEvent.ModifierFlags? = nil) -> ghostty_input_key_s {

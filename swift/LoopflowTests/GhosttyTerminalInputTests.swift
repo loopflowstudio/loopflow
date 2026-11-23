@@ -795,14 +795,10 @@ struct GhosttyTerminalInputTests {
         view.createSurface(manager: manager)
         defer { view.destroySurface(); window.contentView = nil }
         let surface = try #require(view.surface)
-        func viewport() -> String {
-            guard case .available(let text, _) = try? view.readText(region: .screen, maxBytes: 16384) else { return "" }
-            return text
-        }
         func waitForLine(_ line: String) async throws {
             let deadline = ContinuousClock.now + .seconds(3)
             while true {
-                let screen = viewport()
+                let screen = terminalViewport(view)
                 if screen.split(separator: "\n").contains(Substring(line)) { return }
                 try #require(ContinuousClock.now < deadline, "Waiting for \(line) in \(screen)")
                 try await Task.sleep(for: .milliseconds(20))
@@ -812,16 +808,13 @@ struct GhosttyTerminalInputTests {
         let scroll = "scroll_to_top"
         #expect(scroll.withCString { ghostty_surface_binding_action(surface, $0, UInt(scroll.utf8.count)) })
         try await waitForLine("history-1")
-        try #require(!viewport().contains("ready"))
+        try #require(!terminalViewport(view).contains("ready"))
         #expect(window.makeFirstResponder(view))
-        let event = try #require(NSEvent.keyEvent(
-            with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
-            windowNumber: window.windowNumber, context: nil, characters: "x",
-            charactersIgnoringModifiers: "x", isARepeat: false, keyCode: 7))
+        let event = try terminalKeyEvent("x", 7, windowNumber: window.windowNumber)
         if !view.performKeyEquivalent(with: event) { view.keyDown(with: event) }
         // These modes still encode ordinary printable keys as text.
         try await waitForLine("x")
-        #expect(viewport().contains("ready"))
+        #expect(terminalViewport(view).contains("ready"))
     }
 
     @Test("paste shortcuts reach only the focused terminal in a split")
@@ -875,11 +868,7 @@ struct GhosttyTerminalInputTests {
             #expect(window.makeFirstResponder(focused))
             pasteboard.clearContents()
             pasteboard.setString(marker, forType: .string)
-            let event = try #require(NSEvent.keyEvent(
-                with: .keyDown, location: .zero, modifierFlags: .command,
-                timestamp: 0, windowNumber: window.windowNumber, context: nil,
-                characters: "v", charactersIgnoringModifiers: "v", isARepeat: false, keyCode: 9
-            ))
+            let event = try terminalKeyEvent("v", 9, .command, windowNumber: window.windowNumber)
             #expect(root.performKeyEquivalent(with: event))
             let deadline = ContinuousClock.now + .seconds(3)
             while !terminalText(focused).contains(marker), ContinuousClock.now < deadline {

@@ -44,7 +44,7 @@ Clipboard paste, `lf desktop send`/`send-key`, selection, focus, connection reco
 
 1. **Built the Option-B slice.** Desktop key equivalents now probe for a binding before sending a key. The shared Session and Shell responder lets AppKit interpret Option on the side Ghostty selected, then encodes committed text with the original key. Clipboard paste still uses the paste API.
 2. **Built modifier, composition and shortcut ownership.** Each modifier release follows its physical key. Both Desktop shortcut monitors and the terminal's modifier handler defer during marked text. Input-source changes refresh Ghostty's keymap, and Edit → Select All selects terminal output. Ghostty's standalone shortcuts are removed before loading personal bindings. The Desktop menu keys for Quit, Settings and Close Window are unbound after loading them.
-3. **Verified held Session reattachment.** `SessionModifierInputTests` opens a prepared Session on a private Machine. Its provider sets the PTY to raw mode and requests Kitty disambiguation once. After reading the first batch it prints the second readiness marker. Desktop releases the first surface, prepares the same Session and waits for that marker on the new surface. The provider records both batches. A replacement process would still be waiting for its first batch.
+3. **Verified held Session reattachment.** `SessionModifierInputTests` opens a prepared Session on a private Machine. Its provider sets the PTY to raw mode and requests Kitty disambiguation once. The provider prints each batch as hex. Desktop reads the first result, releases the surface and prepares the same Session. The reopened pane must show that first result before Desktop sends the second batch. A replacement process would still be waiting for its first batch.
 
 **Remaining.** Nothing left to build. Gate publishes and CI repeats the headless byte checks. A person still checks physical input-source switching and real IME typing on the Mac (see Demo).
 
@@ -62,6 +62,11 @@ Clipboard paste, `lf desktop send`/`send-key`, selection, focus, connection reco
 - `scripts/test_desktop.sh --filter SessionModifierInputTests` passed without WindowServer. The provider recorded exactly `0d 1b 5b 31 33 3b 32 75 1b 5b 31 33 3b 35 75` on each surface. The existing held-terminal replay restored Kitty mode.
 - `LOOPFLOW_NATIVE_TESTS=1 swift test --package-path swift --no-parallel --filter nativeOpeningAndRecovery` passed. The former bare chat showed the prompt while the connection remained at generation zero. Opening the prepared Session exercised server loss, recovery and provider exit.
 - `scripts/test_desktop.sh --skip-build --filter 'GhosttyModifierInputTests|SessionModifierInputTests'` passed all eight headless tests. The two mounted diagnostics run in the display lane. Physical keyboard layout switching and IME typing remain manual.
+
+**Compress checks**
+
+- `swift build --build-tests --package-path swift` and `scripts/test_desktop.sh --skip-build --filter 'GhosttyModifierInputTests|SessionModifierInputTests'` passed. Eight headless tests ran, including the provider’s on-screen byte report before and after reopening. CI repeats these checks.
+- `LOOPFLOW_NATIVE_TESTS=1 uv run --no-sync python scripts/test_network.py swift test --skip-build --disable-sandbox --package-path swift --no-parallel --filter 'focusedKeyEquivalents|composingInFocusedTerminal|pasteShortcutFollowsFirstResponder|typingAfterKeyboardRestore|nativeOpeningAndRecovery'` passed all five mounted tests. An earlier direct Swift invocation carried this checkout’s Task ID into the private Machine and failed at Session launch. The wrapper clears inherited `LF_*` values.
 
 **Demo.** Open the isolated Session in Loopflow Desktop. Press Return, Shift-Return, and Control-Return; the fixture shows `0d`, `1b 5b 31 33 3b 32 75`, and `1b 5b 31 33 3b 35 75` once each. Close and reopen the pane and repeat. In legacy mode, Option-B shows `1b 62` with Option-as-Alt enabled and `∫` with it disabled on a US layout. Confirm `⌘Q`, `⌘,`, and `⌘⇧W` still reach Loopflow Desktop menus while the Kitty-mode Session is focused.
 

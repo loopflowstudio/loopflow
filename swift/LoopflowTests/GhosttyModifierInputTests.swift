@@ -23,7 +23,7 @@ struct GhosttyModifierInputTests {
         try await expectInput(expected, after: "\u{1b}[?2004h", userConfig: "macos-option-as-alt = \(setting)") { view in
             for side in [NX_DEVICELALTKEYMASK, NX_DEVICERALTKEYMASK] {
                 let flags = NSEvent.ModifierFlags.option.union(.init(rawValue: UInt(side)))
-                view.keyDown(with: try event("∫", 0x0B, flags, unmodified: "b"))
+                view.keyDown(with: try terminalKeyEvent("∫", 0x0B, flags, unmodified: "b"))
             }
         }
     }
@@ -32,21 +32,21 @@ struct GhosttyModifierInputTests {
     func kittyChords() async throws {
         try await expectInput("\r\u{1b}[13;2u\u{1b}[13;5u\u{1b}[9;2u\u{1b}[100;5u\u{1b}b", after: "\u{1b}[>1u") { view in
             for mods: NSEvent.ModifierFlags in [[], .shift, .control] {
-                view.keyDown(with: try event("\r", 36, mods))
+                view.keyDown(with: try terminalKeyEvent("\r", 36, mods))
             }
-            view.keyDown(with: try event("\u{19}", 48, .shift))
-            view.keyDown(with: try event("\u{4}", 2, .control, unmodified: "d"))
-            view.keyDown(with: try event("\u{f702}", 123, .option))
+            view.keyDown(with: try terminalKeyEvent("\u{19}", 48, .shift))
+            view.keyDown(with: try terminalKeyEvent("\u{4}", 2, .control, unmodified: "d"))
+            view.keyDown(with: try terminalKeyEvent("\u{f702}", 123, .option))
         }
     }
 
     @Test("Kitty reports shifted text, repeats and key releases")
     func kittyEventTypes() async throws {
         try await expectInput("\u{1b}[97:65;2u\u{1b}[47:63;2u\u{1b}[13;5:2u\u{1b}[13;5:3u", after: "\u{1b}[>15u") { view in
-            view.keyDown(with: try event("A", 0, .shift))
-            view.keyDown(with: try event("?", 44, .shift))
-            view.keyDown(with: try event("\r", 36, .control, repeating: true))
-            view.keyUp(with: try event("\r", 36, .control, type: .keyUp))
+            view.keyDown(with: try terminalKeyEvent("A", 0, .shift))
+            view.keyDown(with: try terminalKeyEvent("?", 44, .shift))
+            view.keyDown(with: try terminalKeyEvent("\r", 36, .control, repeating: true))
+            view.keyUp(with: try terminalKeyEvent("\r", 36, .control, type: .keyUp))
         }
     }
 
@@ -55,20 +55,20 @@ struct GhosttyModifierInputTests {
         let left = NSEvent.ModifierFlags(rawValue: UInt(NX_DEVICELSHIFTKEYMASK))
         let right = NSEvent.ModifierFlags(rawValue: UInt(NX_DEVICERSHIFTKEYMASK))
         try await expectInput("\u{1b}[57441;2u\u{1b}[57447;2u\u{1b}[57441;2:3u\u{1b}[57447;1:3u", after: "\u{1b}[>11u") { view in
-            view.flagsChanged(with: try event("", 0x38, [.shift, left], type: .flagsChanged))
-            view.flagsChanged(with: try event("", 0x3C, [.shift, left, right], type: .flagsChanged))
-            view.flagsChanged(with: try event("", 0x38, [.shift, right], type: .flagsChanged))
-            view.flagsChanged(with: try event("", 0x3C, [], type: .flagsChanged))
+            view.flagsChanged(with: try terminalKeyEvent("", 0x38, [.shift, left], type: .flagsChanged))
+            view.flagsChanged(with: try terminalKeyEvent("", 0x3C, [.shift, left, right], type: .flagsChanged))
+            view.flagsChanged(with: try terminalKeyEvent("", 0x38, [.shift, right], type: .flagsChanged))
+            view.flagsChanged(with: try terminalKeyEvent("", 0x3C, [], type: .flagsChanged))
         }
     }
 
     @Test("Standalone split and tab defaults leave their chords available to the terminal")
     func standaloneShortcuts() async throws {
         try await expectInput("\u{1b}[100;9u\u{1b}[13;9u\u{1b}[9;5u\u{1b}[49;9u", after: "\u{1b}[>11u") { view in
-            view.keyDown(with: try event("d", 2, .command))
-            view.keyDown(with: try event("\r", 36, .command))
-            view.keyDown(with: try event("\t", 48, .control))
-            view.keyDown(with: try event("1", 18, .command))
+            view.keyDown(with: try terminalKeyEvent("d", 2, .command))
+            view.keyDown(with: try terminalKeyEvent("\r", 36, .command))
+            view.keyDown(with: try terminalKeyEvent("\t", 48, .control))
+            view.keyDown(with: try terminalKeyEvent("1", 18, .command))
         }
     }
 
@@ -79,7 +79,7 @@ struct GhosttyModifierInputTests {
             view.setMarkedText("に", selectedRange: range, replacementRange: range)
             try #require(view.hasMarkedText())
             let shift = NSEvent.ModifierFlags(rawValue: UInt(NX_DEVICELSHIFTKEYMASK))
-            view.flagsChanged(with: try event("", 0x38, [.shift, shift], type: .flagsChanged))
+            view.flagsChanged(with: try terminalKeyEvent("", 0x38, [.shift, shift], type: .flagsChanged))
             view.setMarkedText("", selectedRange: range, replacementRange: range)
             #expect(!view.hasMarkedText())
             view.setMarkedText("にほん", selectedRange: range, replacementRange: range)
@@ -103,12 +103,12 @@ struct GhosttyModifierInputTests {
             try #require(window.makeFirstResponder(view))
 
             for (key, code): (String, UInt16) in [("q", 12), (",", 43), ("h", 4), ("m", 46), ("/", 44), ("n", 45)] {
-                #expect(try !view.performKeyEquivalent(with: event(key, code, .command)))
+                #expect(try !view.performKeyEquivalent(with: terminalKeyEvent(key, code, .command)))
             }
-            #expect(try !view.performKeyEquivalent(with: event("W", 13, [.command, .shift])))
-            #expect(try view.performKeyEquivalent(with: event("\r", 36, .control)))
-            #expect(try view.performKeyEquivalent(with: event("d", 2, .command)))
-            #expect(try view.performKeyEquivalent(with: event("a", 0, .command)))
+            #expect(try !view.performKeyEquivalent(with: terminalKeyEvent("W", 13, [.command, .shift])))
+            #expect(try view.performKeyEquivalent(with: terminalKeyEvent("\r", 36, .control)))
+            #expect(try view.performKeyEquivalent(with: terminalKeyEvent("d", 2, .command)))
+            #expect(try view.performKeyEquivalent(with: terminalKeyEvent("a", 0, .command)))
             let surface = try #require(view.surface)
             #expect(ghostty_surface_has_selection(surface))
         }
@@ -149,7 +149,7 @@ struct GhosttyModifierInputTests {
         host.layoutSubtreeIfNeeded()
         try #require(window.makeFirstResponder(view))
         for (text, code): (String, UInt16) in [("n", 45), ("k", 40)] {
-            let key = try event(text, code, .command, windowNumber: window.windowNumber)
+            let key = try terminalKeyEvent(text, code, .command, windowNumber: window.windowNumber)
             let range = NSRange(location: 0, length: 0)
             view.setMarkedText("に", selectedRange: range, replacementRange: range)
             try #require(view.hasMarkedText())
@@ -160,14 +160,6 @@ struct GhosttyModifierInputTests {
             #expect(model.navigation.palette == (text == "n" ? .newTask : .search))
             model.navigation.palette = nil
         }
-    }
-
-    private func event(_ text: String, _ code: UInt16, _ flags: NSEvent.ModifierFlags,
-                       type: NSEvent.EventType = .keyDown, unmodified: String? = nil,
-                       repeating: Bool = false, windowNumber: Int = 0) throws -> NSEvent {
-        try #require(NSEvent.keyEvent(with: type, location: .zero, modifierFlags: flags,
-            timestamp: 1, windowNumber: windowNumber, context: nil, characters: text, charactersIgnoringModifiers: unmodified ?? text,
-            isARepeat: repeating, keyCode: code))
     }
 
     private func expectInput(_ expected: String, after terminalOutput: String, userConfig: String = "",

@@ -22,28 +22,20 @@ struct SessionModifierInputTests {
         open STDIN, '<', '/dev/tty' or die $!;
         system('stty', 'raw', '-echo') == 0 or die 'stty';
         $| = 1;
-        print "\e[>1u";
-        open my $report, '>', "$ENV{HOME}/input.tmp" or die $!;
+        print "\e[>1uready\r\n";
+        $/ = 'x';
         for my $round (1..2) {
-            print "ready-$round\r\n";
             alarm 20;
-            my $keys = '';
-            while (1) {
-                sysread(STDIN, my $byte, 1) == 1 or die 'PTY closed';
-                last if $byte eq 'x';
-                $keys .= $byte;
-                die 'missing delimiter' if length($keys) > 128;
-            }
-            alarm 0;
-            my $hex = unpack('H*', $keys);
-            print "bytes-$round=$hex\r\n";
-            print {$report} "$hex\n";
+            my $keys = <STDIN>;
+            defined($keys) && chomp($keys) or die 'incomplete batch';
+            printf "bytes-%d=%s\r\n", $round, unpack('H*', $keys);
         }
-        close $report or die $!;
-        rename "$ENV{HOME}/input.tmp", "$ENV{HOME}/input.hex" or die $!;
+        # Keep the result on screen until Desktop acknowledges it.
+        <STDIN>;
         """#) { lf, _, initial in
             let pool = GhosttySurfacePool()
             var record = initial
+            var ready = "ready"
             for round in 1...2 {
                 let terminal = TerminalIdentity.session(record.id, machineId: fixtureMachineId)
                 let view = pool.view(for: terminal)
@@ -52,50 +44,33 @@ struct SessionModifierInputTests {
                 view.command = buildGhosttyShellCommand(argv: record.openArgv, env: lf.environment)
                 view.createSurface(manager: manager)
                 defer { view.destroySurface() }
-                _ = try #require(view.surface)
+                let surface = try #require(view.surface)
 
-                try await waitForLine("ready-\(round)", in: view)
+                try await waitForLine(ready, in: view)
                 for flags: NSEvent.ModifierFlags in [[], .shift, .control] {
-                    try send("\r", keyCode: 36, flags: flags, to: view)
+                    view.keyDown(with: try terminalKeyEvent("\r", 36, flags))
                 }
                 // An ordinary x delimits the entire batch, including any duplicate final chord.
-                try send("x", keyCode: 7, to: view)
+                view.keyDown(with: try terminalKeyEvent("x", 7))
+                ready = "bytes-\(round)=0d1b5b31333b32751b5b31333b3575"
+                try await waitForLine(ready, in: view)
                 if round == 1 {
-                    try await waitForLine("ready-2", in: view)
                     await pool.release(terminal)?.value
                     let prepared = try await lf.run(["session", "resume", record.id, "--prepare", "--json"])
                     record = try JSONDecoder().decode(SessionRecord.self, from: Data(prepared.utf8))
                 } else {
-                    let report = lf.cwd.appendingPathComponent("input.hex")
-                    let deadline = ContinuousClock.now + .seconds(20)
-                    while !FileManager.default.fileExists(atPath: report.path) {
-                        try #require(ContinuousClock.now < deadline, "Provider did not finish the second batch")
-                        try await Task.sleep(for: .milliseconds(20))
+                    view.keyDown(with: try terminalKeyEvent("x", 7))
+                    try await waitForSession(view) {
+                        view.childExited || ghostty_surface_process_exited(surface)
                     }
-                    let expected = "0d1b5b31333b32751b5b31333b3575\n"
-                    #expect(try String(contentsOf: report, encoding: .utf8) == expected + expected)
                 }
             }
         }
     }
 
-    private func send(_ text: String, keyCode: UInt16, flags: NSEvent.ModifierFlags = [],
-                      to view: GhosttyMetalView) throws {
-        let event = try #require(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags,
-            timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: 0, context: nil,
-            characters: text, charactersIgnoringModifiers: text, isARepeat: false, keyCode: keyCode))
-        view.keyDown(with: event)
-    }
-
     private func waitForLine(_ line: String, in view: GhosttyMetalView) async throws {
-        let deadline = ContinuousClock.now + .seconds(20)
-        while true {
-            GhosttyManager.shared.tick()
-            let screen = try view.readText(region: .screen, maxBytes: 16384)
-            if case .available(let text, _) = screen, view.connectionAcceptsInput,
-               text.components(separatedBy: "\n").contains(line) { return }
-            try #require(ContinuousClock.now < deadline && !view.childExited, "Waiting for \(line) in \(screen)")
-            try await Task.sleep(for: .milliseconds(20))
+        try await waitForSession(view) {
+            view.connectionAcceptsInput && terminalViewport(view).split(separator: "\n").contains(Substring(line))
         }
     }
 }

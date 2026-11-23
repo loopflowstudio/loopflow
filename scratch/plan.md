@@ -4,20 +4,13 @@
 
 Direction on record: [demo-notes.md](demo-notes.md) (verbatim feedback from Jack Heart during the live demo of PR #2033), [design.md](design.md), [explore.html](explore.html), [qa.html](qa.html), and [concept-review.html](concept-review.html). User docs: [Surfaces](../docs/surfaces.md#settings), [Configuration](../docs/config.md#inspect-effective-settings), [Connect clients](../docs/server.md#phone-access), and [Loopflow for macOS](../swift/README.md).
 
-## Remaining slice: Self-healing Settings observation
+## Remaining review
 
-**Experience & model.** Settings is a live window on the Machine’s configuration files, just like the main Desktop window (`WorkModel`), `Appearance`, `Mobile`, and `Machines`. When the local `lf` server restarts (`lf update`, `lf server restart`, sleep/wake, or startup right as Settings opens), both `personal` and `project` scopes keep the last good reading visible, pause edits (`editsDisabled == true`), show the error banner, and **reconnect automatically** once the server answers—without requiring manual **Refresh** in each scope or closing and reopening Settings.
+Check the sidebar and scoped forms in a compact Settings window on an unlocked display.
 
-**Code change (`swift/LoopflowMac/Services/ScopedSettingsModel.swift`).**
-- Replace the one-shot `observe()` body with a `while !Task.isCancelled && observation == id` loop with bounded exponential backoff (`1s → 2s → 4s → … → 30s`, resetting to `1s` once a healthy frame with `frame.body != nil` arrives, matching `WorkObservationRetry`).
-- Fetch `catalogue` inside the loop when `catalogue.isEmpty` or after a reconnect so cold-open during server startup and mid-session `lf update` restarts both recover cleanly.
-- On every failed attempt or ended stream, keep the last good scope visible via `reading = reading.failed(...)`, clear `self.stream = nil`, call `finishConfirmations(through: .max)` so no in-flight `confirmReading()` hangs, call `await stream.cancel()`, and then sleep the backoff delay before retrying.
-- Keep `refresh()` and `work.didSet` immediate: changing `observation = UUID()` cancels any in-flight backoff sleep via `.task(id: observation)` and connects immediately with fresh 1s backoff.
-- Leave YAML syntax errors untouched: the server delivers those as `SubscriptionFrame(body: nil, unavailable: ...)` without ending the stream, so the reconnect loop never churns while a file is broken on disk.
+## Settings observation
 
-**Verification.**
-- Add a deterministic test in `swift/LoopflowTests/SettingsWorkflowTests.swift` using `LocalServerFixture`: start `ScopedSettingsModel.observe()`, confirm initial `.available` reading, call `await server.stop()`, wait for `reading.failure != nil` (`editsDisabled == true`), restart the server with `try await server.status()`, wait for `reading.failure == nil` and `editsDisabled == false` **without** calling `model.refresh()`, and apply an edit to confirm writes work again.
-- Re-run `scripts/test_desktop.sh --filter 'SettingsWorkflowTests|ConfigurationSettingsTests|ContextSettingsWorkflowTests|ThemeWorkflowTests|DesignDisciplineTests'`.
+Personal and project scopes keep their last reading visible and pause edits while disconnected. Each retries the catalogue and scope with a 1–30 second delay that resets after a healthy reading. Refresh and scope selection start a fresh observation immediately. A file error stays on its live subscription.
 
 ## Already built on this branch (keep intact)
 
@@ -31,5 +24,5 @@ Direction on record: [demo-notes.md](demo-notes.md) (verbatim feedback from Jack
 - `cargo test -p loopflow-execution --lib config::` passed 114 tests, including `a_settings_write_leaves_only_the_settings_file_in_the_checkout` and shared catalog fixture.
 - `cargo test -p loopflow --test integration documented_commands::` passed all four checks.
 - `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings` passed.
-- `scripts/test_desktop.sh --filter 'SettingsWorkflowTests|ConfigurationSettingsTests|ContextSettingsWorkflowTests|ThemeWorkflowTests|DesignDisciplineTests'` passed headless suites; compact-window layout diagnostic awaits an unlocked display at visual review.
+- `scripts/test_desktop.sh --filter 'SettingsWorkflowTests|ConfigurationSettingsTests|ContextSettingsWorkflowTests|ThemeWorkflowTests|DesignDisciplineTests'` passed all five suites, including a cold start and a server restart with both scopes open. The checkout showed an offline file change and saved a Reset after reconnecting. The compact-window layout diagnostic needs an unlocked display.
 - QA round 4 ([qa.html](qa.html)) drove the branch app on a locked screen and verified Agent Policy fallbacks, emptied number field Reset, gated `In effect`, clean checkout `git status`, and broken-YAML live recovery. Visual review of sidebar chrome and scoped forms on an unlocked display remains for the human demo.

@@ -1,4 +1,4 @@
-at: d03af827926b71b24e2cd7ebcb4373b0eb07cd27
+at: a74b556a22f59565717c8de968abd1d99c3e524c
 first:
   - path: docs/surfaces.md
     why: Follow a setting from search through Undo
@@ -15,7 +15,7 @@ first:
   - path: swift/Loopflow/Models/ConfigurationEdit.swift
     why: Checked edits, move previews and receipts
   - path: swift/LoopflowMac/Services/ScopedSettingsModel.swift
-    why: Choose applicable work and observe its files
+    why: Reconnect scoped readings and confirm checked edits
   - path: swift/LoopflowMac/Views/ScopedSettings.swift
     why: Place settings in personal and project panes
   - path: swift/LoopflowMac/Views/SettingsWindow.swift
@@ -47,7 +47,7 @@ first:
   - path: swift/LoopflowTests/ContextSettingsWorkflowTests.swift
     why: Follow a checkout edit through agent launch
   - path: swift/LoopflowTests/SettingsWorkflowTests.swift
-    why: Exercise search switches and scoped writes
+    why: Exercise search, offline settings and writes after reconnect
   - path: swift/LoopflowTests/ThemeWorkflowTests.swift
     why: Cover older servers, checked theme writes and Undo
 hide:

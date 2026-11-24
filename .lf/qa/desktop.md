@@ -371,6 +371,14 @@ changes a few seconds after `return`; wait about 4 s before capturing. Dark:
 `config.yaml` confirms). `size 0 1400 900` gives the wide layout; the window
 will not go narrower than about 760 pt.
 
+Unlocked, the first switch click lands: don't send it twice, or the row
+toggles back. A Reset under a row moves the rows below it, so read positions
+again from a fresh capture. Release channel is the `stream` key. A Wave
+destination's Applies to menu won't open through the hook, so drive a Wave
+edit over the socket with `config.edit`
+(`{"kind":"shared_wave","repo":…,"wave":…}`, `expected` the entries the
+edit assumes: `[]` for an absent key).
+
 # Settings window with the screen locked
 
 The ⌘, window (`menu Settings…`) is a `NavigationSplitView` of grouped

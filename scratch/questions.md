@@ -98,3 +98,12 @@ Choices made headless for review; the plan says what each passed over.
 - Rescope docs: Claude drops out of `approvers` entirely; local
   `lf machine login claude` hands the terminal to `claude auth login`. Passed
   over: keeping the paste-code relay for this Machine only.
+- Rescope implement: `lf machine login claude` here runs plain
+  `claude auth login` on the inherited terminal, ignoring `approvers.claude`
+  and `--chrome-profile`, which a leftover setting now does nothing for.
+  Passed over: rejecting an `approvers.claude` entry in config validation.
+- Rescope implement: the `forwarded` overlay replaces the target's own Claude
+  row even when that row reads signed in (a forwarded token is what each
+  launch uses). Passed over: overlaying only a signed-out row.
+- Rescope implement: `lf machine logout claude mini` still runs
+  `claude auth logout` there. Passed over: refusing it like login.

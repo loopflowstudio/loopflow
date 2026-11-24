@@ -351,12 +351,6 @@ fn _record_stop(provider: &str, reason: &str, advice: &str) {
     );
 }
 
-/// The provider has no login here: no model of it can go on until someone
-/// signs in again, with the command that works where the advice is read.
-fn _sign_in_advice(provider: &str) -> String {
-    format!("run `{}`", crate::machine::login::sign_in_command(provider))
-}
-
 /// A provider whose client says it has no login is refused before its agent
 /// starts, as a revoked login would be after.
 fn _run_signed_in(
@@ -1071,7 +1065,7 @@ fn _run_with_retries(
                 result.stderr = format!(
                     "{}; {}",
                     result.stderr.trim_end_matches('.'),
-                    _sign_in_advice(&provider)
+                    crate::machine::login::sign_in_advice(&provider)
                 );
             }
             return Ok(result);
@@ -1130,7 +1124,7 @@ fn _run_with_retries(
                     delay
                 } else {
                     let advice = if revoked {
-                        _sign_in_advice(&provider)
+                        crate::machine::login::sign_in_advice(&provider)
                     } else {
                         _limit_stop_advice(&provider, launch, &rungs)
                     };

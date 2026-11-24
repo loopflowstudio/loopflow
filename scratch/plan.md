@@ -53,6 +53,25 @@ implement:
 - Rentals: prepare signs Claude in to nothing; the rental stops before renting
   when it has neither a forwarded token nor Codex to sign in (main's check).
 
+**Built (2026-11-23).** `login::reaches_other_machines` drops Claude;
+`login::require_reach(provider, machine)` refuses Claude with the forwarded-token
+message (CLI `login`/`--refused`, `ondemand add --logins`). `lf machine login
+claude` here runs `claude auth login` on this terminal, then confirms with the
+probe; the paste-code path, `REJECTION_GRACE`, `Login::answer` and the approver's
+returned code are gone (`Sent::Approved` carries nothing). `LoginState::Forwarded`
+overlays the Claude row of a remote `logins` when `forward.env` names
+`login::CLAUDE_TOKEN_ENV`. `login::sign_in_advice` replaces `sign_in_command`
+and the agent's `_sign_in_advice` wrapper. Rental `place` computes the sign-in
+list (`rental::sign_ins`) before renting and stops when it holds no Codex and
+`forward` carries no `CLAUDE_CODE_OAUTH_TOKEN` (`Forwarded::carries_env`).
+Verified: the forwarded variable reaches the remote launch probe
+(`session_launch_contract::a_signed_out_machine_refuses_the_launch_with_the_command_that_signs_it_in`,
+now with a Claude case). Fixtures: `machine_commands::a_command_approver_signs_machines_in_to_codex_without_a_terminal`
+(the `forwarded` row), `services_that_sign_in_here_only_never_reach_another_machine`
+(Claude's refusal, no SSH). Not tested: the rental no-agent-login stop (no
+rental fixture reaches `place`'s rent path); local `lf machine login claude`
+(hands the terminal to the real client).
+
 ## Outcome
 
 `lf machine login <provider> [<machine>…]` is the one sign-in command, for this
@@ -452,12 +471,14 @@ Machine with no login is refused before launch with the command that fixes it;
 ## Acceptance check at gate
 
 Headless, fixture SSH target with fake clients:
-`lf machine login claude fixture` with `approvers.claude.command` set to a
-script printing a code → exit 0, fake remote `claude` received the code on
-stdin, `lf machine logins fixture --json` shows claude signed in; then with
-the fake Codex signed out, `lf --machine fixture -a codex …` exits non-zero
-before any agent starts, naming `lf machine login codex fixture`.
-By a person at gate: `lf machine login claude mini` and `… codex mini` for real.
+`lf machine login codex fixture` with `approvers.codex.command` set → exit 0,
+`lf machine logins fixture --json` shows codex signed in and, with
+`forward.env: [CLAUDE_CODE_OAUTH_TOKEN]`, claude `forwarded`; with the fake
+clients signed out, `lf --machine fixture -a codex …` names `lf machine login
+codex fixture` and `-a claude` names `forward CLAUDE_CODE_OAUTH_TOKEN`, both
+before any agent starts; with the token forwarded, the Claude launch runs.
+By a person at gate: `lf machine login codex mini` for real, and a Claude
+launch on mini with the Doppler token forwarded.
 
 ## Checks
 

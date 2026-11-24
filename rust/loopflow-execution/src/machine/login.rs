@@ -1,14 +1,14 @@
 //! `lf machine login`: each provider's own sign-in, run on the Machine that
 //! keeps the login and approved where `approvers.<provider>` says.
 //!
-//! For Claude and Codex the target runs the client's login unmodified
-//! (`claude auth login`, `codex login --device-auth`), locally as a child or
-//! behind one SSH exchange without a PTY. lf reads its approval page, sends it
-//! to the approver and, for Claude, writes the code the page shows to the
-//! login's stdin. That code is useless without the PKCE verifier inside the
-//! `claude` process, and lf stores nothing: each client writes and refreshes
-//! its own login.
-use std::io::{BufRead, BufReader, Read, Write};
+//! For Codex the target runs `codex login --device-auth` unmodified, locally
+//! as a child or behind one SSH exchange without a PTY; lf reads its approval
+//! page and code and sends them to the approver. Claude signs in here only,
+//! with `claude auth login` in this terminal: another Machine runs Claude on
+//! the `claude setup-token` that `forward.env` carries as
+//! `CLAUDE_CODE_OAUTH_TOKEN`. lf stores nothing: each client writes and
+//! refreshes its own login.
+use std::io::{BufRead, BufReader, Read};
 use std::process::{Child, Command, Stdio};
 use std::sync::mpsc;
 use std::time::{Duration, SystemTime};
@@ -20,14 +20,12 @@ use crate::config::placement::Approver;
 use crate::provider_auth::Provider;
 use loopflow_model::durable::Machine;
 
-/// How long a sign-in may wait for its approval: Codex's device code lifetime,
-/// which Claude shares so both fail the same way.
+/// How long a sign-in may wait for its approval: Codex's device code lifetime.
 const APPROVAL_DEADLINE: Duration = Duration::from_secs(15 * 60);
 /// How long the login may take to print its approval page, SSH included.
 const PAGE_DEADLINE: Duration = Duration::from_secs(60);
-/// How long Claude may take to exit after complaining about the code; past
-/// it, the login is waiting for another paste.
-const REJECTION_GRACE: Duration = Duration::from_secs(1);
+/// The `claude setup-token` a launch on another Machine signs Claude in with.
+pub const CLAUDE_TOKEN_ENV: &str = "CLAUDE_CODE_OAUTH_TOKEN";
 
 /// Sign `machine` in to `provider`. A Machine whose route is `local` is this one.
 pub async fn login(
@@ -37,12 +35,18 @@ pub async fn login(
     api_key: bool,
     batch: bool,
 ) -> Result<()> {
-    if here(machine) && !matches!(provider, Provider::Claude | Provider::Codex) {
-        return crate::provider_auth::operations::connect(provider, chrome_profile, api_key).await;
+    if here(machine) {
+        match provider {
+            Provider::Claude => return claude_here(machine),
+            Provider::Codex => {}
+            service => {
+                return crate::provider_auth::operations::connect(service, chrome_profile, api_key)
+                    .await
+            }
+        }
     }
     let approver = approver(provider, chrome_profile)?;
     match provider {
-        Provider::Claude => claude(machine, approver.as_ref(), batch),
         Provider::Codex => codex(machine, approver.as_ref()),
         _ => {
             crate::machine::credentials::connect(machine, provider, approver.as_ref(), batch).await
@@ -51,22 +55,26 @@ pub async fn login(
 }
 
 /// Whether `lf machine login` can sign another Machine in to `provider`:
-/// the agents run their own login there, and GitHub, Linear and OpenCode send
-/// a credential. Asana, Notion and Doppler sign in here only.
+/// Codex runs its own login there, and GitHub, Linear and OpenCode send a
+/// credential. Claude arrives with each launch as a forwarded token; Asana,
+/// Notion and Doppler sign in on each Machine itself.
 pub fn reaches_other_machines(provider: Provider) -> bool {
     matches!(
         provider,
-        Provider::Claude
-            | Provider::Codex
-            | Provider::GitHub
-            | Provider::Linear
-            | Provider::OpenCodeZen
+        Provider::Codex | Provider::GitHub | Provider::Linear | Provider::OpenCodeZen
     )
 }
 
-/// Refuses a provider that cannot sign another Machine in, before anything
-/// connects to one.
-pub fn require_reach(provider: Provider) -> Result<()> {
+/// Refuses a provider that cannot sign `machine` (another Machine, or any
+/// when `None`) in, before anything connects to one.
+pub fn require_reach(provider: Provider, machine: Option<&str>) -> Result<()> {
+    if provider == Provider::Claude {
+        bail!(
+            "Claude reaches {} as a forwarded token: run `claude setup-token`, store it with \
+             `doppler secrets set {CLAUDE_TOKEN_ENV}`, and add {CLAUDE_TOKEN_ENV} to `forward.env`",
+            machine.unwrap_or("other Machines")
+        );
+    }
     if !reaches_other_machines(provider) {
         bail!(
             "{} signs in on each Machine itself; run `lf machine login {}` there",
@@ -77,47 +85,19 @@ pub fn require_reach(provider: Provider) -> Result<()> {
     Ok(())
 }
 
-fn claude(machine: &Machine, approver: Option<&Approver>, batch: bool) -> Result<()> {
+/// Claude's own login in this terminal, with its own page.
+fn claude_here(machine: &Machine) -> Result<()> {
+    let status = Command::new("claude")
+        .args(["auth", "login"])
+        .status()
+        .map_err(|error| match error.kind() {
+            std::io::ErrorKind::NotFound => not_installed(Provider::Claude, &name(machine)),
+            _ => anyhow::Error::from(error).context("start Claude's login"),
+        })?;
+    if !status.success() {
+        bail!("Claude's login exited with {status}");
+    }
     let name = name(machine);
-    if !matches!(approver, Some(Approver::Command { .. })) {
-        // A person pastes the code the page shows.
-        crate::machine::credentials::require_foreground(batch)?;
-    }
-    let mut login = Login::start(machine, Provider::Claude, &["claude", "auth", "login"])?;
-    // With `BROWSER=true` the login prints only the paste-code page; the
-    // localhost-callback one goes to `true`.
-    let url = login.next(url_in)?;
-    let page = Page {
-        provider: Provider::Claude,
-        machine: &name,
-        url: &url,
-        code: None,
-    };
-    let code = match send(approver, &page) {
-        Ok(Sent::Opened(place)) => {
-            eprintln!("Approve Claude for {name} {place}, then paste the code it shows:");
-            eprint!("> ");
-            let mut code = String::new();
-            std::io::stdin()
-                .lock()
-                .read_line(&mut code)
-                .context("read the pasted code")?;
-            code
-        }
-        Ok(Sent::Approved(code)) => code,
-        Err(error) => {
-            login.kill();
-            return Err(error);
-        }
-    };
-    let code = code.trim();
-    if code.is_empty() {
-        login.kill();
-        bail!("no code given; {name} was not signed in to Claude");
-    }
-    login.answer(code)?;
-    // A malformed code makes Claude complain on stderr and wait for another.
-    login.finish(code, true)?;
     match confirm(machine, Provider::Claude, LoginState::SignedIn, "login")? {
         Some(account) => println!("{name}: Claude signed in as {account}"),
         None => println!("{name}: Claude signed in"),
@@ -146,13 +126,13 @@ fn codex(machine: &Machine, approver: Option<&Approver>) -> Result<()> {
         Ok(Sent::Opened(place)) => {
             eprintln!("Approve Codex for {name} {place} with code {code}")
         }
-        Ok(Sent::Approved(_)) => {}
+        Ok(Sent::Approved) => {}
         Err(error) => {
             login.kill();
             return Err(error);
         }
     }
-    login.finish(&code, false)?;
+    login.finish(&code)?;
     let account = confirm(machine, Provider::Codex, LoginState::SignedIn, "login")?;
     println!(
         "{name}: Codex signed in ({})",
@@ -273,7 +253,8 @@ fn device_code_in(line: &str) -> Option<String> {
 pub struct LoginRow {
     pub provider: Provider,
     pub state: LoginState,
-    /// The account the client names: Claude's email and plan, a service login.
+    /// The account the client names: Claude's email and plan, a service
+    /// login, or the variable a forwarded login arrives in.
     #[serde(deserialize_with = "Option::deserialize")]
     pub account: Option<String>,
     /// The provider's last refusal here, when no launch of it has come since.
@@ -291,11 +272,14 @@ pub struct Refusal {
 }
 
 /// `unknown`: the client could not answer. Shown, never refused on.
+/// `forwarded`: each launch there carries the login from here (Claude's
+/// `CLAUDE_CODE_OAUTH_TOKEN`), which the Machine's own client cannot see.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum LoginState {
     SignedIn,
     SignedOut,
+    Forwarded,
     Unknown,
 }
 
@@ -304,13 +288,16 @@ impl LoginState {
         match self {
             Self::SignedIn => "signed in",
             Self::SignedOut => "signed out",
+            Self::Forwarded => "forwarded",
             Self::Unknown => "unknown",
         }
     }
 }
 
 /// Every provider's login on `machine`. Another Machine answers with its own
-/// `lf machine logins --json`, so its clients and store are the ones asked.
+/// `lf machine logins --json`, so its clients and store are the ones asked;
+/// its Claude row reads `forwarded` when this Machine's `forward.env` names
+/// `CLAUDE_CODE_OAUTH_TOKEN`.
 pub async fn logins(machine: &Machine) -> Result<Vec<LoginRow>> {
     if !here(machine) {
         let output = crate::machine::credentials::remote_command(
@@ -318,8 +305,24 @@ pub async fn logins(machine: &Machine) -> Result<Vec<LoginRow>> {
             &["machine", "logins", "--json"],
             None,
         )?;
-        return serde_json::from_slice(&output)
-            .with_context(|| format!("{}'s logins were unreadable", name(machine)));
+        let mut rows: Vec<LoginRow> = serde_json::from_slice(&output)
+            .with_context(|| format!("{}'s logins were unreadable", name(machine)))?;
+        let forwards_claude = crate::config::load_config(None)?
+            .unwrap_or_default()
+            .forward
+            .env
+            .iter()
+            .any(|name| name == CLAUDE_TOKEN_ENV);
+        if forwards_claude {
+            for row in rows
+                .iter_mut()
+                .filter(|row| row.provider == Provider::Claude)
+            {
+                row.state = LoginState::Forwarded;
+                row.account = Some(CLAUDE_TOKEN_ENV.to_string());
+            }
+        }
+        return Ok(rows);
     }
     let store = crate::provider_auth::operations::local_store().await?;
     let mut rows = Vec::new();
@@ -441,12 +444,15 @@ fn launcher_name() -> Option<String> {
         .filter(|name| !name.is_empty())
 }
 
-/// The command that signs this Machine in to `harness`, as whoever launched
-/// here would type it.
-pub fn sign_in_command(harness: &str) -> String {
+/// What signs this Machine in to `harness`, as whoever launched here would
+/// do it: Claude on another Machine is a forwarded token, the rest a sign-in.
+pub fn sign_in_advice(harness: &str) -> String {
     match launcher_name() {
-        Some(name) => format!("lf machine login {harness} {name}"),
-        None => format!("lf machine login {harness}"),
+        Some(_) if harness == Provider::Claude.as_str() => {
+            format!("forward {CLAUDE_TOKEN_ENV} (`lf set --global forward.env`)")
+        }
+        Some(name) => format!("run `lf machine login {harness} {name}`"),
+        None => format!("run `lf machine login {harness}`"),
     }
 }
 
@@ -566,8 +572,8 @@ pub(crate) struct Page<'a> {
 pub(crate) enum Sent {
     /// Opened for a person to approve; says where.
     Opened(String),
-    /// The approver command approved it; its first output line, if any.
-    Approved(String),
+    /// The approver command approved it.
+    Approved,
 }
 
 /// Sends `page` to `approver`. A page that could not open is printed instead.
@@ -586,7 +592,7 @@ pub(crate) fn send(approver: Option<&Approver>, page: &Page) -> Result<Sent> {
             )
         }
         Some(Approver::Command { command }) => {
-            return run_approver(command, page).map(Sent::Approved)
+            return run_approver(command, page).map(|()| Sent::Approved)
         }
     };
     if let Err(error) = opened {
@@ -600,7 +606,7 @@ pub(crate) fn send(approver: Option<&Approver>, page: &Page) -> Result<Sent> {
 }
 
 /// `sh -c <command>` with the page in `LF_APPROVE_*`; its stderr is the person's.
-fn run_approver(command: &str, page: &Page) -> Result<String> {
+fn run_approver(command: &str, page: &Page) -> Result<()> {
     let mut approve = Command::new("sh");
     approve
         .arg("-c")
@@ -614,23 +620,18 @@ fn run_approver(command: &str, page: &Page) -> Result<String> {
         Some(code) => approve.env("LF_APPROVE_CODE", code),
         None => approve.env_remove("LF_APPROVE_CODE"),
     };
-    let output = approve
-        .output()
+    let status = approve
+        .stdout(Stdio::null())
+        .status()
         .with_context(|| format!("run the approver for {}", page.provider.display_name()))?;
-    if !output.status.success() {
+    if !status.success() {
         bail!(
-            "the approver for {} exited with {}; {} was not signed in",
+            "the approver for {} exited with {status}; {} was not signed in",
             page.provider.display_name(),
-            output.status,
             page.machine
         );
     }
-    Ok(String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .next()
-        .unwrap_or_default()
-        .trim()
-        .to_string())
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -714,32 +715,12 @@ impl Login {
         }
     }
 
-    /// Writes the code; stdin stays open, since closing it stops the login.
-    fn answer(&mut self, code: &str) -> Result<()> {
-        let stdin = self.child.stdin.as_mut().expect("piped login stdin");
-        stdin
-            .write_all(format!("{code}\n").as_bytes())
-            .and_then(|()| stdin.flush())
-            .with_context(|| format!("send the code to {}", self.target))
-    }
-
-    /// Waits for the login to exit successfully, killing it at the deadline,
-    /// or, when `rejects_on_stderr`, a second after its first stderr line if
-    /// it has not exited by then.
-    fn finish(&mut self, code: &str, rejects_on_stderr: bool) -> Result<()> {
-        let mut rejected: Option<SystemTime> = None;
+    /// Waits for the login to exit successfully, killing it at the deadline.
+    /// Its stdin stays open meanwhile, since closing it stops the login.
+    fn finish(&mut self, code: &str) -> Result<()> {
         loop {
             while let Ok(line) = self.lines.try_recv() {
-                if rejects_on_stderr && line.0 && rejected.is_none() {
-                    rejected = Some(SystemTime::now());
-                }
                 self.remember(line);
-            }
-            if rejected.is_some_and(|at| at.elapsed().unwrap_or_default() > REJECTION_GRACE)
-                && matches!(self.child.try_wait(), Ok(None))
-            {
-                self.kill();
-                return Err(self.failure(None, code));
             }
             if let Some(status) = self.child.try_wait()? {
                 if status.success() {
@@ -771,7 +752,7 @@ impl Login {
     }
 
     fn failure(&self, exit: Option<i32>, code: &str) -> anyhow::Error {
-        // `sh: claude: command not found` over SSH.
+        // `sh: codex: command not found` over SSH.
         if exit == Some(127) {
             return not_installed(self.provider, &self.target);
         }
@@ -843,8 +824,8 @@ fn not_installed(provider: Provider, target: &str) -> anyhow::Error {
 
 /// Runs a login (`"$@"`) that stops when its stdin closes: when lf finishes,
 /// is interrupted or loses the connection. Closing an SSH exchange without a
-/// PTY signals nothing remote, and `claude auth login` would keep waiting for
-/// its localhost callback. The login reads stdin through a FIFO; the reader
+/// PTY signals nothing remote, and `codex login --device-auth` would keep
+/// polling. The login reads stdin through a FIFO; the reader
 /// copying stdin into it kills the login at EOF.
 const TIED_TO_STDIN: &str = r#"d=$(mktemp -d) && mkfifo "$d/in" || exit 1
 "$@" <"$d/in" & login=$!
@@ -898,8 +879,8 @@ pub(crate) fn name(machine: &Machine) -> String {
 
 fn strip_ansi(line: &str) -> String {
     static ANSI: once_cell::sync::Lazy<regex::Regex> = once_cell::sync::Lazy::new(|| {
-        // CSI styling, and OSC sequences such as the OSC 8 hyperlink Claude
-        // Code wraps its URL in: `ESC ] 8 ;; <url> BEL <text> ESC ] 8 ;; BEL`.
+        // CSI styling, and OSC sequences such as an OSC 8 hyperlink around
+        // a URL: `ESC ] 8 ;; <url> BEL <text> ESC ] 8 ;; BEL`.
         regex::Regex::new("\x1b\\[[0-9;?]*[ -/]*[@-~]|\x1b\\][^\x07\x1b]*(?:\x07|\x1b\\\\)")
             .expect("valid ANSI pattern")
     });

@@ -83,7 +83,7 @@ async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
         } => {
             use loopflow_execution::machine::login;
             if *refused || !machines.is_empty() {
-                login::require_reach(*provider)?;
+                login::require_reach(*provider, machines.first().map(String::as_str))?;
             }
             let targets = if *refused {
                 let targets = login::refused(*provider).await?;

@@ -69,6 +69,13 @@ pub fn read(directory: &Path) -> Result<Forwarded> {
     Ok(Forwarded { env, files })
 }
 
+impl Forwarded {
+    /// Whether each launch carries environment variable `name`.
+    pub fn carries_env(&self, name: &str) -> bool {
+        self.env.iter().any(|(carried, _)| carried == name)
+    }
+}
+
 /// Forwarded environment files older than this were never read by their
 /// launch (its SSH failed); the next delivery removes them.
 const UNREAD_MINUTES: u32 = 10;

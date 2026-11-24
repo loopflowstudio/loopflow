@@ -154,8 +154,9 @@ if '--version' in args:
     print('fixture'); sys.exit(0)
 if '--dangerously-bypass-hook-trust' in args:
     sys.exit(2)
-# The launch's login probe; `HOME/signed-out` models a Machine with no login.
-signed_out = os.path.exists(os.environ['HOME']+'/signed-out')
+# The launch's login probe; `HOME/signed-out` models a Machine with no login
+# of its own, which a forwarded Claude setup token signs in for the run.
+signed_out = os.path.exists(os.environ['HOME']+'/signed-out') and not os.environ.get('CLAUDE_CODE_OAUTH_TOKEN')
 if args[:2] == ['auth', 'status']:
     print(json.dumps({'loggedIn': not signed_out})); sys.exit(1 if signed_out else 0)
 if args[:2] == ['login', 'status']:
@@ -920,6 +921,46 @@ fn a_signed_out_machine_refuses_the_launch_with_the_command_that_signs_it_in() {
         "{stderr}"
     );
     assert!(!remote.home.path().join("received.json").exists());
+
+    // Claude on another Machine is the forwarded token; with it, the launch goes ahead.
+    let claude = |token: Option<&str>| {
+        let mut command = local.command();
+        if let Some(token) = token {
+            command.env("CLAUDE_CODE_OAUTH_TOKEN", token);
+        }
+        command
+            .args([
+                "--machine",
+                "fixture",
+                "-b",
+                "-a",
+                "claude",
+                ":",
+                "say done",
+            ])
+            .output()
+            .unwrap()
+    };
+    let output = claude(None);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success(), "{stderr}");
+    assert!(
+        stderr.contains(
+            "fixture has no Claude login; forward CLAUDE_CODE_OAUTH_TOKEN (`lf set --global forward.env`)"
+        ),
+        "{stderr}"
+    );
+    assert!(!remote.home.path().join("received.json").exists());
+    let config = local.home.path().join("machine/config.yaml");
+    let registered = fs::read_to_string(&config).unwrap();
+    fs::write(
+        &config,
+        format!("{registered}forward:\n  env: [CLAUDE_CODE_OAUTH_TOKEN]\n"),
+    )
+    .unwrap();
+    success(&claude(Some("fixture-setup-token")));
+    fs::remove_file(remote.home.path().join("received.json")).unwrap();
+    fs::write(&config, registered).unwrap();
 
     // Here, the same check names this Machine's own sign-in.
     fs::write(local.home.path().join("signed-out"), "").unwrap();

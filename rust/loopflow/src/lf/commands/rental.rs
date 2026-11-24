@@ -12,7 +12,9 @@ use serde::Serialize;
 use time::OffsetDateTime;
 
 use crate::lf::{OndemandCommand, PoolCommand};
+use loopflow_execution::machine::login;
 use loopflow_execution::machine_records::CopyCounts;
+use loopflow_execution::provider_auth::Provider as LoginProvider;
 use loopflow_execution::rental::recovery::{
     delete_sandbox, give_back, held_ids, now, open_store, refresh_all,
 };
@@ -174,7 +176,7 @@ pub fn run_ondemand(cmd: &OndemandCommand, batch: bool) -> anyhow::Result<()> {
             logins,
         } => {
             for provider in logins {
-                loopflow_execution::machine::login::require_reach(*provider)?;
+                loopflow_execution::machine::login::require_reach(*provider, Some("a rental"))?;
             }
             let ondemand = OnDemand {
                 name: name.clone(),
@@ -636,9 +638,18 @@ pub fn place(
     let (_, task) = runtime.block_on(loopflow_execution::ops::task::resolve_saved_task(
         repo, None, issue,
     ))?;
-    // A launch missing a value `forward` names is money for nothing.
-    loopflow_execution::machine::forward::read(repo)?;
-    let logins = require_ondemand(sqlite, name)?.logins;
+    // A launch missing a value `forward` names, or with no agent login to
+    // run on, is money for nothing.
+    let forwarded = loopflow_execution::machine::forward::read(repo)?;
+    let logins = sign_ins(&runtime, &require_ondemand(sqlite, name)?.logins)?;
+    if !forwarded.carries_env(login::CLAUDE_TOKEN_ENV) && !logins.contains(&LoginProvider::Codex) {
+        return Err(anyhow!(
+            "a rental from {name} would have no agent login: forward {token} \
+             (`lf set --global forward.env '[{token}]'` after `claude setup-token` and \
+             `doppler secrets set {token}`), or sign it in to Codex (`lf machine login codex` here)",
+            token = login::CLAUDE_TOKEN_ENV,
+        ));
+    }
     let (rental, machine) = rent(&runtime, sqlite, name, None, None, false)?;
     let label = machine.name();
     if let Err(error) = prepare(&runtime, &label, &logins, repo, &task.repository_id, batch) {
@@ -731,34 +742,39 @@ fn hand_off(
     Ok(())
 }
 
-/// Logins (Linear too when it holds the plan), then this repository cloned
-/// and bound to the Task's repository identity, so the forwarded run finds its
-/// plan there.
+/// What a rental signs in to at prepare: the template's `logins`, else every
+/// provider signed in here, in `sign_in_order`.
+fn sign_ins(
+    runtime: &tokio::runtime::Runtime,
+    logins: &[LoginProvider],
+) -> anyhow::Result<Vec<LoginProvider>> {
+    if !logins.is_empty() {
+        return Ok(sign_in_order(logins.iter().copied()));
+    }
+    let here = runtime.block_on(loopflow_execution::machine::connection::local_machine())?;
+    Ok(sign_in_order(
+        runtime
+            .block_on(login::logins(&here))?
+            .into_iter()
+            .filter(|row| row.state == login::LoginState::SignedIn)
+            .map(|row| row.provider),
+    ))
+}
+
+/// `logins` signed in, then this repository cloned and bound to the Task's
+/// repository identity, so the forwarded run finds its plan there.
 fn prepare(
     runtime: &tokio::runtime::Runtime,
     label: &str,
-    logins: &[loopflow_execution::provider_auth::Provider],
+    logins: &[LoginProvider],
     repo: &std::path::Path,
     repository: &RepositoryId,
     batch: bool,
 ) -> anyhow::Result<()> {
-    use loopflow_execution::machine::login;
-    let logins = if logins.is_empty() {
-        let here = runtime.block_on(loopflow_execution::machine::connection::local_machine())?;
-        sign_in_order(
-            runtime
-                .block_on(login::logins(&here))?
-                .into_iter()
-                .filter(|row| row.state == login::LoginState::SignedIn)
-                .map(|row| row.provider),
-        )
-    } else {
-        sign_in_order(logins.iter().copied())
-    };
     let machine = runtime.block_on(loopflow_execution::machine::connection::resolve_target(
         label, false,
     ))?;
-    for provider in logins {
+    for &provider in logins {
         runtime.block_on(login::login(&machine, provider, None, false, batch))?;
     }
     let (origin, script) = checkout_script(repo, repository)?;
@@ -779,19 +795,14 @@ fn prepare(
 
 /// The providers a rental signs in to, once each: those that reach another
 /// Machine, GitHub first because the checkout clones with it.
-fn sign_in_order(
-    providers: impl IntoIterator<Item = loopflow_execution::provider_auth::Provider>,
-) -> Vec<loopflow_execution::provider_auth::Provider> {
-    use loopflow_execution::provider_auth::Provider;
+fn sign_in_order(providers: impl IntoIterator<Item = LoginProvider>) -> Vec<LoginProvider> {
     let mut order = Vec::new();
     for provider in providers {
-        if loopflow_execution::machine::login::reaches_other_machines(provider)
-            && !order.contains(&provider)
-        {
+        if login::reaches_other_machines(provider) && !order.contains(&provider) {
             order.push(provider);
         }
     }
-    order.sort_by_key(|provider| *provider != Provider::GitHub);
+    order.sort_by_key(|provider| *provider != LoginProvider::GitHub);
     order
 }
 
@@ -872,7 +883,7 @@ mod tests {
         ];
         assert_eq!(
             sign_in_order(signed_in_here),
-            [Provider::GitHub, Provider::Claude, Provider::Linear]
+            [Provider::GitHub, Provider::Linear]
         );
     }
 

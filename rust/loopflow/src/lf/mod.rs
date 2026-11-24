@@ -2970,8 +2970,8 @@ pub enum MachineCommand {
     Login {
         /// claude, codex, github, linear, asana, notion, doppler or opencode
         provider: loopflow_execution::provider_auth::Provider,
-        /// Added Machines to sign in; asana, notion and doppler sign in on
-        /// this Machine only
+        /// Added Machines to sign in; claude, asana, notion and doppler sign
+        /// in on this Machine only (Claude reaches others as a forwarded token)
         machines: Vec<String>,
         /// Open the approval page in this Chrome profile, by name or directory
         #[arg(long)]
@@ -3123,8 +3123,9 @@ pub enum OndemandCommand {
         /// Above this hourly price nothing is rented
         #[arg(long, value_name = "USD")]
         max_usd_per_hour: loopflow_storage::rental::Usd,
-        /// Providers each rental is signed in to as it starts (claude, codex,
-        /// github, linear or opencode); unset, each of those signed in here
+        /// Providers each rental is signed in to as it starts (codex, github,
+        /// linear or opencode); unset, each of those signed in here. Claude
+        /// arrives with each launch as the token `forward.env` names
         #[arg(long, value_delimiter = ',', value_name = "PROVIDER")]
         logins: Vec<loopflow_execution::provider_auth::Provider>,
     },

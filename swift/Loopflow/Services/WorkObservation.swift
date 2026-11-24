@@ -337,10 +337,8 @@ public struct SubscriptionFrame<Body: Decodable>: Decodable {
 /// One served subscription speaking `lf <read> --json --subscribe`'s newline-delimited JSON.
 public struct LineSubscription: Sendable {
     public let lines: AsyncThrowingStream<Data, any Error>
-    /// Queue one newline-terminated request line.
-    public let send: @Sendable (Data) -> Void
     /// Ask for a reading begun after this request, even when its body is unchanged.
-    public func checkpoint(_ id: Int) { send(Data("{\"id\":\(id)}\n".utf8)) }
+    public let checkpoint: @Sendable (Int) -> Void
 
     /// Returns only after the subscription has ended.
     public let cancel: @Sendable () async -> Void
@@ -348,10 +346,10 @@ public struct LineSubscription: Sendable {
     /// which server sent it: `ServerLink.unreadable`.
     public let unreadable: @Sendable () -> String?
 
-    public init(lines: AsyncThrowingStream<Data, any Error>, send: @escaping @Sendable (Data) -> Void,
+    public init(lines: AsyncThrowingStream<Data, any Error>, checkpoint: @escaping @Sendable (Int) -> Void,
                 cancel: @escaping @Sendable () async -> Void, unreadable: @escaping @Sendable () -> String?) {
         self.lines = lines
-        self.send = send
+        self.checkpoint = checkpoint
         self.cancel = cancel
         self.unreadable = unreadable
     }

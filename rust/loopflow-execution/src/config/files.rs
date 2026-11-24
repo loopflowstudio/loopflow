@@ -12,7 +12,7 @@ use serde_yaml_ng::Value;
 use sha2::Digest;
 use yaml_edit::{Mapping, YamlFile};
 
-use super::{settings::SettingScope, ConfigSource};
+use super::{keys::Root, settings::SettingScope, ConfigSource};
 use crate::engine::Error;
 
 /// Your own settings for a clone, beside the committed `.lf/config.yaml`.
@@ -370,51 +370,29 @@ pub fn lock(path: &Path) -> Result<File> {
 }
 
 pub fn read_text(path: &Path) -> Result<String> {
-    match crate::observe::read_to_string(path) {
-        Ok(text) => Ok(text),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
-        Err(error) => Err(error).with_context(|| format!("Read {}", path.display())),
-    }
+    settings_text(path, Root::General)
 }
 
-/// The first settings write to a legacy Wave adopts its identity and
-/// preferences together, just as the Wave configuration reader sees them.
-pub(crate) fn settings_text(path: &Path, root: super::keys::Root) -> Result<String> {
-    if root == super::keys::Root::Wave && !crate::observe::try_exists(path)? {
-        if let Some((_, mapping)) =
+pub(crate) fn settings_text(path: &Path, root: Root) -> Result<String> {
+    Ok(settings_source(path, root)?.1)
+}
+
+/// Keep the source path so a config.yaml created during a first Wave edit
+/// is detected even when it contains the same text as the GOAL.md settings.
+fn settings_source(path: &Path, root: Root) -> Result<(PathBuf, String)> {
+    match crate::observe::read_to_string(path) {
+        Ok(text) => return Ok((path.into(), text)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error).with_context(|| format!("Read {}", path.display())),
+    }
+    if root == Root::Wave {
+        if let Some((goal, mapping)) =
             crate::work::wave::config::goal_settings(path.with_file_name("GOAL.md"))?
         {
-            return Ok(serde_yaml_ng::to_string(&mapping)?);
+            return Ok((goal, serde_yaml_ng::to_string(&mapping)?));
         }
     }
-    read_text(path)
-}
-
-pub(crate) fn update_settings<T>(
-    path: &Path,
-    root: super::keys::Root,
-    change: impl FnOnce(&mut Value) -> Result<T>,
-) -> Result<T> {
-    if root != super::keys::Root::Wave {
-        return update(path, change);
-    }
-    LockedFile::open(path)?.update_text(|original| {
-        let starting = settings_text(path, root)?;
-        let mut document = parse_document(&starting, path)?;
-        let result = change(&mut document)?;
-        let edited = edited_text(&starting, &document)?;
-        // A no-op must leave a legacy Wave in GOAL.md.
-        let text = if edited == starting {
-            original.to_owned()
-        } else {
-            edited
-        };
-        ensure!(
-            settings_text(path, root)? == starting,
-            Error::conflict(format!("{} changed during this edit", path.display()))
-        );
-        Ok((text, result))
-    })
+    Ok((path.into(), String::new()))
 }
 
 /// Read an authored configuration mapping in the typed layout, whichever
@@ -508,10 +486,18 @@ fn patch_node(node: &yaml_edit::YamlNode, before: &Value, after: &Value) -> Resu
 }
 
 pub fn update<T>(path: &Path, change: impl FnOnce(&mut Value) -> Result<T>) -> Result<T> {
+    update_settings(path, Root::General, change)
+}
+
+pub(crate) fn update_settings<T>(
+    path: &Path,
+    root: Root,
+    change: impl FnOnce(&mut Value) -> Result<T>,
+) -> Result<T> {
     if path.ends_with(PRIVATE_FILE) {
         protect_private_file(path)?;
     }
-    LockedFile::open(path)?.update(change)
+    LockedFile::open(path)?.update(root, change)
 }
 
 /// The same serialized, hand-edit-aware writer also edits definition frontmatter.
@@ -519,7 +505,7 @@ pub(crate) fn update_text<T>(
     path: &Path,
     change: impl FnOnce(&str) -> Result<(String, T)>,
 ) -> Result<T> {
-    LockedFile::open(path)?.update_text(change)
+    LockedFile::open(path)?.update_text(Root::General, change)
 }
 
 /// Hold a preference writer's fence across configuration acquisition and its command.
@@ -537,28 +523,32 @@ impl LockedFile {
         })
     }
 
-    pub fn update<T>(&self, change: impl FnOnce(&mut Value) -> Result<T>) -> Result<T> {
-        self.update_text(|original| {
+    pub fn update<T>(&self, root: Root, change: impl FnOnce(&mut Value) -> Result<T>) -> Result<T> {
+        self.update_text(root, |original| {
             let mut after = parse_document(original, &self.path)?;
             let result = change(&mut after)?;
             Ok((edited_text(original, &after)?, result))
         })
     }
 
-    fn update_text<T>(&self, change: impl FnOnce(&str) -> Result<(String, T)>) -> Result<T> {
-        let original = read_text(&self.path)?;
+    fn update_text<T>(
+        &self,
+        root: Root,
+        change: impl FnOnce(&str) -> Result<(String, T)>,
+    ) -> Result<T> {
+        let (source, original) = settings_source(&self.path, root)?;
         let (text, result) = change(&original)?;
-        if text == original {
-            return Ok(result);
-        }
+        let (current_source, current) = settings_source(&self.path, root)?;
         ensure!(
-            read_text(&self.path)? == original,
+            current_source == source && current == original,
             Error::conflict(format!(
                 "{} changed during this edit; retry with the current file",
                 self.path.display()
             ))
         );
-        atomic_write(&self.path, &text)?;
+        if text != original {
+            atomic_write(&self.path, &text)?;
+        }
         Ok(result)
     }
 }

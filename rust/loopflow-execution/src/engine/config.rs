@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 
 use crate::config::catalog::Definition;
 use crate::config::files::{edit, Destination};
-use crate::config::settings::EffectiveSetting;
+use crate::config::settings::{EffectiveSetting, ResolvedSettings};
 use crate::graph::Skill;
 
 /// `config.catalog`: every typed setting, its schema and its policies.
@@ -117,14 +117,13 @@ pub fn explain(destination: &Destination, key: &str) -> Result<Explanation> {
     let parts: Vec<_> = key.split('.').collect();
     let preference = crate::config::settings::preference_parts(&parts)?;
     let (skill, graph, step) = target_options(&parts[..parts.len() - preference.len()]);
-    let config = crate::config::load_wave_config(
+    let resolved = crate::config::resolved(
         destination.repository.as_deref(),
         destination.wave.as_deref(),
-    )?
-    .unwrap_or_default();
+    )?;
     let home = crate::store::lf_home_dir();
     let inspections = inspect_selection(
-        &config,
+        &resolved,
         destination.repository.as_deref().unwrap_or(&home),
         skill,
         graph,
@@ -299,8 +298,8 @@ pub fn inspect(
         "choose --skill or --graph"
     );
     anyhow::ensure!(step.is_none() || graph.is_some(), "--step requires --graph");
-    let config = crate::config::load_wave_config(Some(repo), wave)?.unwrap_or_default();
-    inspect_selection(&config, repo, skill, graph, step)
+    let resolved = crate::config::resolved(Some(repo), wave)?;
+    inspect_selection(&resolved, repo, skill, graph, step)
 }
 
 fn graph_steps(repo: &Path, graph: &str, step: Option<&str>) -> Result<Vec<Skill>> {
@@ -340,7 +339,7 @@ fn graph_steps(repo: &Path, graph: &str, step: Option<&str>) -> Result<Vec<Skill
 }
 
 fn inspect_selection(
-    config: &crate::config::Config,
+    general: &ResolvedSettings,
     repo: &std::path::Path,
     skill: Option<&str>,
     graph: Option<&str>,
@@ -350,7 +349,12 @@ fn inspect_selection(
         Ok(Inspection {
             skill: selection.map(|skill| skill.name.clone()),
             occurrence: selection.and_then(|skill| skill.occurrence.as_deref().cloned()),
-            settings: crate::config::settings::resolve(config, selection)?.settings,
+            settings: match selection {
+                Some(skill) => {
+                    crate::config::settings::resolve(&general.config, Some(skill))?.settings
+                }
+                None => general.settings.clone(),
+            },
         })
     };
     if let Some(graph) = graph {

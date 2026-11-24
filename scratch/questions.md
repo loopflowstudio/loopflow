@@ -25,3 +25,4 @@
 - Each Settings scope retries after 1–30 seconds. One successful reading resets its delay. Work tracks several subscriptions and waits for all of them to stay healthy before resetting its delay.
 - Each editor keeps the selected declaration’s slot and file address. Search and the form use the titles from the same ordered sections.
 - Review the compact window in the background so the current app keeps keyboard focus.
+- Keep the CLI checkpoint line format at the subprocess. Desktop Settings and Work pass its number directly to the server subscription.

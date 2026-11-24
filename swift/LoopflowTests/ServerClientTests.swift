@@ -259,7 +259,7 @@ struct ServerClientTests {
             return true
         }
         // Only the newest confirmation needs replay; it answers every earlier request.
-        for id in 1...100 { subscription.send(Data("{\"id\":\(id)}".utf8)) }
+        for id in 1...100 { subscription.checkpoint(id) }
         let confirmed = try #require(try await frames.next())
         let value = try JSONSerialization.jsonObject(with: confirmed) as! [String: Any]
         #expect(value["body"] as? String == "confirmed")
@@ -304,7 +304,7 @@ struct ServerClientTests {
         let value = try JSONSerialization.jsonObject(with: baseline) as! [String: Any]
         #expect(value["body"] as? String == "baseline")
         #expect(value["answers"] is NSNull)
-        subscription.send(Data(#"{"id":1}"#.utf8))
+        subscription.checkpoint(1)
         let confirmed = try #require(try await frames.next())
         let confirmation = try JSONSerialization.jsonObject(with: confirmed) as! [String: Any]
         #expect(confirmation["body"] as? String == "baseline")
@@ -435,10 +435,10 @@ struct ServerClientTests {
             }
             return true
         }
-        subscription.send(Data(#"{"id":1}"#.utf8))
+        subscription.checkpoint(1)
         guard case .reading(let frame) = try await updates.next() else { Issue.record("Missing reconnect baseline"); return }
         #expect(try frame.fields()["body"]?.string == "fresh")
-        await subscription.cancel()
+        subscription.cancel()
     }
 
     @Test(arguments: [false, true])
@@ -468,7 +468,7 @@ struct ServerClientTests {
         let subscription = ServerClient.subscribeEvents(.allPlans, location: peer.location)
         var frames = subscription.updates.makeAsyncIterator()
         guard case .reading = try await frames.next() else { Issue.record("Missing baseline"); return }
-        subscription.send(Data(#"{"id":7}"#.utf8))
+        subscription.checkpoint(7)
         if !gap {
             guard case .event(.taskSteer(_, let steer, _)) = try await frames.next() else { Issue.record("Missing event after baseline"); return }
             #expect(steer.text == "new direction")
@@ -582,7 +582,7 @@ struct ServerClientTests {
         var frames = subscription.lines.makeAsyncIterator()
         let first = try #require(try await frames.next())
         #expect((try JSONSerialization.jsonObject(with: first) as? [String: Any])?["answers"] as? Int == 1)
-        subscription.send(Data(#"{"id":4}"#.utf8 + [10]))
+        subscription.checkpoint(4)
         let last = try #require(try await frames.next())
         #expect((try JSONSerialization.jsonObject(with: last) as? [String: Any])?["unavailable"] as? String == "gone")
         do {

@@ -312,22 +312,13 @@ Work selection uses the theme’s selection fill and contrasting text.
 File selection keeps a neutral fill and edge; keyboard focus has a separate outline.
 Ordinary controls and links use text roles; the theme’s accent emphasizes deliberate actions.
 Status labels and shapes retain their meaning across palettes.
-Press **⌘,** to open [Settings](../docs/surfaces.md#settings). Search for a
-control or choose a pane in the sidebar. **Agents** sets your personal defaults.
-**Machines** shows connection health and the plan hub. Open **Project & Wave
-Config** for checkout and Wave overrides, Context, Git & Release, and Machine
-placement. **Save in** selects your file or the shared file, and **Open file…**
-opens it in its associated app.
 
-Choose **Settings → Appearance** (**⌘,**) to pick a theme for every window,
-Ghostty, and iPhone. Pick **System**, **Light**, or **Dark**; System follows
-macOS and lists both sides, Light or Dark lists only its own. Each side's
-heading names its chosen theme (**Light themes · Fjord Light**), then shows
-built-ins as cards and **Yours**, ending with a dashed **Import file…** tile. An
-imported file joins the side its own colors say; in Light or Dark mode the
-selection switches to that side. Every card is drawn in its own theme: a title
-bar strip, its name as a heading, Busy, Blocked and Error, ANSI 1–6, a selected
-row and a **Run** button:
+Press **⌘,** and choose **Appearance** to pick a theme for Desktop, Ghostty,
+and iPhone. **System** follows macOS and shows both light and dark themes.
+**Light** and **Dark** each show one side. Each heading names its selection
+(**Light themes · Fjord Light**). The cards preview each theme in its own
+colors. See the [Settings guide](../docs/surfaces.md#settings) for search,
+Machine connections, and project or Wave preferences.
 
 ```text
 ▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔
@@ -342,9 +333,9 @@ the same column. Clicking a card or changing **System** / **Light** / **Dark**
 applies immediately across every window and registers **Undo** (**⌘Z** or the
 Undo notice) to restore the previous `theme:` declaration, including absence.
 In System mode, picking the other side changes what macOS will use on that side.
-**Customize** follows the card you picked. **View → Appearance** uses the same
-mode setting. The chosen card is ringed in the system accent color. A theme
-with unreadable roles shows why under the cards and is not applied.
+**View → Appearance** uses the same mode setting. The system accent outlines
+the chosen card. If a theme fails a readability check, Settings shows the
+reason and keeps the current theme.
 
 Check font weight in an open shell or Session pane. Previewing, applying or
 cancelling a theme changes only its colors.
@@ -367,14 +358,12 @@ light half **Fig Leaf** a leaf-green ground with plum ink.
 
 Your themes are Ghostty theme files in `~/.lf/themes/`; `~/.config/ghostty/themes/`
 is read too, never written. Names resolve to yours, then built-ins, then Ghostty's.
-A file named like a built-in overrides it. **Customize <name>** opens the theme
-editor for the card chosen last: on a built-in it edits your copy; on yours it
-edits in place. Custom color, import, and asset changes stay staged in the
-editor until **Apply**; **Cancel** or closing the editor discards the draft.
-In the editor, **Delete <name>** stages removal of your file.
-**Revert <name> to built-in** stages removal of a built-in theme’s override.
-**Import file…** copies a theme into Yours on the side its colors say; in Light or
-Dark mode the selection switches to that side.
+A file named like a built-in overrides it. **Customize <name>** edits the
+last card you picked. **Import file…** opens a draft on the light or dark side
+indicated by the file’s colors. In Light or Dark mode the selection follows
+that side. **Apply** saves the draft in **Yours**. **Cancel** or closing the
+editor discards it. For a personal file, **Delete <name>** stages removal.
+**Revert <name> to built-in** removes an override when you apply.
 
 ```
 background = #171924

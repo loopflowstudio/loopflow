@@ -355,6 +355,8 @@ mod tests {
             "---\nagent: codex\nlinear:\n  initiative: lin-123\n---\n{body}"
         ))
         .unwrap();
+        update_wave_config(repo.path(), "scan", |_| Ok(())).unwrap();
+        assert!(!repo.path().join(".lf/wave/scan/config.yaml").exists());
         update_wave_config(repo.path(), "scan", |map| {
             map.insert("graph".into(), "code".into());
             Ok(())
@@ -373,6 +375,29 @@ mod tests {
                 .as_deref(),
             Some("lin-123")
         );
+    }
+
+    #[test]
+    fn first_edit_rechecks_the_source_of_the_wave_settings() {
+        for creates_config in [false, true] {
+            let repo = ConfigRepo::new();
+            repo.write("---\nagent: codex\n---\n").unwrap();
+            let result = update_wave_config(repo.path(), "scan", |map| {
+                if creates_config {
+                    repo.write_config("agent: codex\n");
+                } else {
+                    repo.write("---\nagent: claude\n---\n").unwrap();
+                }
+                map.insert("graph".into(), "code".into());
+                Ok(())
+            });
+            assert!(result.unwrap_err().contains("changed during this edit"));
+            assert_eq!(
+                repo.path().join(".lf/wave/scan/config.yaml").exists(),
+                creates_config
+            );
+            assert!(repo.layer().get("graph").is_none());
+        }
     }
 
     #[test]

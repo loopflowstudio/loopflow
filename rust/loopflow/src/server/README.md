@@ -448,7 +448,7 @@ case names one operation, including distinct claim/unassign and pin/unpin writes
 | `config.set`, `.unset` | `lf config set`, `lf config unset` (`lf set`, `lf unset`) | `engine::config` |
 | `config.scope` | `lf config scope --json` | read or subscribe to Global, a checkout or a Wave |
 | `config.preview`, `config.edit` | Desktop Settings | preview or apply a checked file edit |
-| `config.promote` | Desktop Settings | preview, confirm, resume or undo a declaration move |
+| `config.promote` | Desktop Settings | preview, confirm, resume, dismiss or undo a declaration move |
 | `config.theme` | none; the Machine's `theme:`, read by Desktop and the phone | `engine::config` |
 | `pr.publish`, `.open`, `.submit`, `.arm`, `.abandon`, `.reconcile`, `.request_review` | `lf pr publish`, `lf pr open`, `lf pr submit`, `lf pr arm`, `lf pr abandon`, `lf pr reconcile`, `lf pr request-review` | write; `engine::pr::publish`, `open`, `submit`, `arm`, `abandon`, `reconcile`, `request_review` |
 | `pr.land` | `lf pr land` (`lf land`) | write; `engine::pr::land` (detached; the Process carrying the landing) |
@@ -497,8 +497,8 @@ the phone's `view.select` Task list and its creation destinations all read it.
   `config.promote` takes the source destination, key, inspected Wave and
   action. Confirm takes the reviewed patches, projected result and receipt.
   A changed result returns a fresh preview. Resume finishes an interrupted
-  two-file move if the declarations still match. Request telemetry omits
-  setting values.
+  two-file move if the declarations still match. Dismiss clears the pending
+  move and keeps both files as they are. Request telemetry omits setting values.
 - A read uses the existing `Read` shape and answers with the JSON the command
   prints, serialized once. A command that prints bare text
   (`config repository --path`) answers a JSON string. Every shared read is

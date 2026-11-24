@@ -70,48 +70,19 @@ enum ServerClient {
             guard case .reading(let frame) = update else { return nil }
             return Data(frame.bytes)
         }
-        return LineSubscription(lines: watch.updates, send: checkpoints(watch), cancel: watch.cancel,
-                                unreadable: { unreadable.withLock { $0 } })
+        return LineSubscription(lines: watch.updates, checkpoint: { id in
+            guard let number = UInt64(exactly: id) else { watch.cancel(); return }
+            watch.checkpoint(number)
+        }, cancel: watch.cancel, unreadable: { unreadable.withLock { $0 } })
     }
 
     /// Readings and occurrences share one stream so the consumer applies its
     /// baseline before events. Reconnect replaces state without replaying events.
-    static func subscribeEvents(_ query: ServedRead, location: ServerLocation = .shared) -> ServerEventSubscription {
-        let watch = ServerLink.subscribe(query, events: true, connect: { try await links.link(for: location) }) { $0 }
-        return ServerEventSubscription(updates: watch.updates, send: checkpoints(watch), cancel: watch.cancel)
-    }
-
-    /// A subscription's stdin line, `{"id": n}`: a checkpoint. A subscription's
-    /// arguments are fixed; new arguments are a new subscription.
-    private static func checkpoints<Output>(_ watch: ServerWatch<Output>) -> @Sendable (Data) -> Void {
-        { line in
-            guard let checkpoint = try? JSONDecoder().decode(SubscriptionCheckpoint.self, from: line) else {
-                watch.cancel()
-                return
-            }
-            watch.checkpoint(checkpoint.id)
-        }
+    static func subscribeEvents(_ query: ServedRead, location: ServerLocation = .shared) -> ServerWatch<ServerSubscriptionUpdate> {
+        ServerLink.subscribe(query, events: true, connect: { try await links.link(for: location) }) { $0 }
     }
 
     private static let links = ServerLinks()
-}
-
-private struct SubscriptionCheckpoint: Decodable {
-    let id: UInt64
-    init(from decoder: Decoder) throws {
-        let box = try decoder.container(keyedBy: Keys.self)
-        guard box.allKeys == [.id] else {
-            throw DecodingError.dataCorrupted(.init(codingPath: [], debugDescription: "a subscription takes only checkpoints"))
-        }
-        id = try box.decode(UInt64.self, forKey: .id)
-    }
-    private enum Keys: String, CodingKey { case id, args }
-}
-
-struct ServerEventSubscription: Sendable {
-    let updates: AsyncThrowingStream<ServerSubscriptionUpdate, any Error>
-    let send: @Sendable (Data) -> Void
-    let cancel: @Sendable () async -> Void
 }
 
 /// One live connection per server location, reopened on demand with bounded

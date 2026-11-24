@@ -1,27 +1,7 @@
 # Choices & open threads
 
-## Decided for this pass (B1)
-
-- Jack Heart: “ok i think  i like b.  i think we could do something liek what rex does with a button that sorts by terminal status, or alternatively we could sort by what step theyre at” / “lets add b1” / “but also show the current step in the leftp ane, just not sort by it now”
-- Default Working Task order is **Start-Time Stack**: newest-started first (`started_at` desc, canonical Task ID tiebreaker), decoupled from backlog `planning_rank`. New arrivals not yet in `task_orders` prepend at the top ahead of saved rows.
-- Jack Heart (during `/demo`): “whqt is that arrows button” / “well, it needs a on/off state, and maybe an on-hover” / “1a” / “build it and return when ready”
-- **Sort by status** is now a non-destructive **on/off toggle** in the sidebar header (with active highlight + hover fill/tooltip) and `⌘K`: **On** sorts by `Blocked → Error → Available → Idle → Busy` (tie-broken by stack/drag order, keeping the currently selected Task in its status group until you switch away, drag disabled while On); **Off** restores the Start-Time Stack / saved `task_orders` drags. The toggle applies to repository and Wave Working lists in the window and starts Off on relaunch.
-- Show each Task's current Graph step in the left bar's row metadata (display only; do not sort by step in this pass).
-- Keep PR #2025's immediate drag feedback, side-aware `DropSide` drops, and refusal recovery.
-
-- Turning sorting on with a Task open holds its current status group. Selecting another Task releases the previous group. Selecting the open Task again keeps its group. Switching filters clears the hold.
-- Drags for one Working list reach the Machine in click order across retries. Each drag previews immediately. Saving the drop uses the same ordered Task membership as the views and can finish while Session activity is unavailable.
-- Start time uses the first recorded claim, then the first recorded start event, then creation time. Later handoffs keep the Task’s original start time.
-- The status grouping uses the shared activity flags. A Task with no Blocked, Error, Busy or Available flag occupies the Idle group. Busy wins over Available when both are present.
-- The sidebar uses the Task’s saved Graph cursor while a run carries it, the same position used to resume that Task. A standalone Graph process in the checkout does not move the Task.
-- The terminal's own completed program report reads “Finished”. On a Task row a live finished turn reads “Available” when the Machine reports availability.
-- Swift uses the selection enum’s declaration order when patching rows. That also keeps newly added activity flags in pending edits.
-- A missing bundled face falls back at the same type size, with a system serif for the New Task heading.
-
-- Font registration takes its inventory from the packaged TrueType files,
-  with the Fonts directory taking precedence over the bundle root.
-
-- A pinned selection read shares Task details across all its plans. Retained tiles without current Work keep their unavailable explanation.
+The decisions and exact wording for B1 are in [plan.md](plan.md) and
+[demo-notes.md](demo-notes.md).
 
 ## Open threads (not in B1)
 
@@ -29,16 +9,14 @@
 - Smart “heading to the end” sink for `Auto` / `deliver` / settling PRs (`B3` in `explore.html`) — Jack Heart: “i think we need something like moving auto to the bottom, or being able to 'close' certain tasks, but auto has to be smart enough to know like if its moving towards the end, that coutn even if its not explicitly auto”.
 - Manual “Close / Park” for individual Working Tasks (`B4` in `explore.html`).
 - LOO-937's Project-rank redesign remains separate from Working sidebar order.
+- Surfacing `TaskCondition::Blocked` in selection queries.
 
-## From QA round 4 (2026-11-23)
+## Private Machine QA (2026-11-23)
 
-- A returning Desktop launch opened by link stays on saved planning (“Updating…”), highlights the saved selection and ignores sidebar clicks; moving `desktop-cache/workspace.json` aside clears it. Left unfixed here: the stuck read is in workspace restore, not Working order. Worth its own Task if it reproduces unlocked.
-
-## From QA round 5 (2026-11-23)
-
-- The locked-screen restore issue reproduced with the same private workspace. Set its cache aside and used a fresh Dev window for the remaining controls. The saved Machine order survived both launches.
-- The installed `250e266b4` server returns Work rows without `graph_step`. Graph step is optional when reading a row, and current servers still write the key. The installed server refuses `desktop.dashboard.move` with `side` and leaves the shared order intact.
-
-## From sync onto main (2026-11-23)
-
-- `server_operations_match_their_lf_commands` fails after the merge at `config scope --json`: the server reports the personal config path as `/private/var/folders/…`, the CLI as `/var/folders/…`. The `config scope` read and that test arrived from main; this branch doesn't touch config code. Left for gate/CI to confirm whether main fails the same way.
+- In [rounds 4 and 5](qa.html), a returning locked-screen launch opened by
+  link stayed on saved planning (“Updating…”), highlighted the saved selection,
+  and ignored sidebar clicks. Moving the private `desktop-cache/workspace.json`
+  aside restored the window. The Machine order survived both launches.
+- In [round 5](qa.html), navigating from a Wave to the grid stalled twice for
+  17–18 seconds with the Machine under load. The sample was in SwiftUI layout.
+  The cause and behavior in an unlocked window remain open.

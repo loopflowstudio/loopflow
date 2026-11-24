@@ -8,38 +8,70 @@
 - Jack Heart (on OSC 7501 `done` + New Task modal `?` font boxes): “done makes the task seem done but i dont tink thats what it means” / “isnt done then also available” / “yes, file it in, along with your other points” / “sorry, i meant to do both here”
 - Jack Heart (during live `/demo`, [demo-notes.md](demo-notes.md)): “whqt is that arrows button” / “well, it needs a on/off state, and maybe an on-hover” / “1a” (toggle view: On shows status-sorted sidebar without overwriting saved drags; Off restores Start-Time Stack / drag order) / “build it and return when ready”
 
-Latest exploration page: [Explore Round 2](explore.html).
-Latest concept review: [Concept review at 14f44821e8](concept-review.html).
-Latest demo notes: [Demo notes](demo-notes.md).
+The [concept review at `14f44821e8`](concept-review.html) found that pinning an
+array index could pull Busy above Available and that the toggle was missing
+from Wave sidebars. `be25d7ddcb` replaced the index with a status group and
+extended sorting to Wave sidebars. Both were implementation choices for B1.
 
-## Built and aligned
+## Built
 
-- **Mac sidebar status sort:** The repository and Wave sidebars share a window-local toggle in the header and ⌘K. The selected Task keeps its status group across activity updates and repeated visits to the open row. Rows within each group follow shared order. Changing the filter releases the group. Saved Dashboards use arrangement order. Sidebar drags save order only in the repository with sorting off.
-- **Shared Working order (Start-Time Stack):** Repository, Wave, roadmap, CLI (`lf task list`, `lf wave show`), Working Tasks grid, and iOS share `ordered_tasks_in` + `TaskOrder` (`New(Reverse(started_at)) < Saved(pos) < Planning(rank)`). `start_times_in` reads first non-unclaim ownership, then first `started` event, then `created_at` (preserving original start time across handoffs). Backlog keeps its planning rank.
-- **Side-aware drags & recovery:** Sidebar (repository scope, sort Off) and Working Tasks grid drags route through `WorkModel.reorderWorkingTask` → `PendingChanges` (`orderWrites` serialized per repository across reconnects) → `desktop.dashboard.move` with `DropSide` (`before`/`after`) → `SqliteStore::reorder_working_task` CAS loop. Absent targets refuse as `not_found` naming the Task; `NoticeCenter.reread(keeping:)` protects refusal Notices across failed rereads.
-- **One-shot sort deleted:** `desktop.view.sort`, `TaskOrderEdit::SortByStatus`, `status_bucket`, and pending-sort preview are removed; `server_schema.json` regenerated.
-- **Status vocabulary & OSC 7501 `done`/`error`:** `SelectionState::Error` projects across queries, `attention`, Mac, and iOS; `Busy` beats `Available` on dual-state rows while both filters include them; a live interactive Session’s finished turn (`done` without `working`) reads `Available` on Task rows while the terminal pane keeps `Finished`; typing clears `done`/`error` in Ghostty and held terminals.
-- **Current Graph step:** `fill_task_contents_in` batches live `run_start` cursor or parked step (stripping `START`/`END`) across all plans into `ViewContent.graph_step` (optional on decode for older Machines); shown on Mac and iOS `TaskRow`.
-- **Packaged New Task fonts:** `scripts/app_bundle.py` copies `*.bundle` resources for Dev, QA, and Release; `AppFontRegistration` scans packaged `.ttf` files with same-size system fallback.
-- **Out of scope:** Graph-step sorting (`B2`), smart Auto sinking (`B3`), manual Close/Park (`B4`), LOO-937 Project rank, `TaskCondition::Blocked` in selection queries ([explore.html](explore.html), [questions.md](questions.md)).
+- Working Tasks with no saved position appear first, newest started first. The
+  first claim survives handoffs. Backlog keeps its planning rank. The repository,
+  Wave, roadmap, CLI, Working Tasks grid, and iOS use the shared Working order.
+- The Mac toggle starts Off and is shared by the repository and Wave sidebars
+  for that repository in the window. The header and ⌘K group Blocked, Error,
+  Available, Idle, and Busy. The open Task keeps its group through activity
+  updates and repeated visits to its row. The group is released when selection
+  leaves the Task or the filter changes. Rows in each group follow shared order.
+  Saved Dashboards use their arrangement. The one-shot Machine sort was removed.
+- The repository sidebar with sorting Off and the Working Tasks grid save drags.
+  Concurrent drops keep their chosen side, and a refused drop restores the last
+  Machine order and names the absent Task when a target or source is missing.
+- A live interactive Session’s finished turn reads Available on the Task row
+  and Finished in the terminal. Busy takes precedence over Available for a row
+  that matches both filters. Input clears finished and error reports in both
+  Ghostty and held terminals.
+- Mac and iOS show the Task’s Graph cursor when the Machine sends a step. New Task
+  fonts ship in Dev, QA, and Release bundles with a same-size system fallback.
 
-## Measurements
+User docs are in [surfaces.md](../docs/surfaces.md), [work.md](../docs/work.md),
+and the [Swift README](../swift/README.md). Deferred ideas stay in
+[questions.md](questions.md).
 
-- Synthetic store (10,000 Tasks, 406,666 events), 300 IDs: 0.78 ms start times, 0.33 ms Graph steps; 1,553-Task Machine store: 0.56 ms and 2.68 ms; 300-Session availability lookup 0.72 ms median.
-- `EXPLAIN QUERY PLAN` confirmed indexed lookups on 10,011-Task / 1,000-Graph / 103-saved-order stores.
-- Private QA rounds 1–5: [qa.html](qa.html).
+## Observed
 
-## Docs
+- `scripts/test_desktop.sh --filter 'WorkNavigationTests'` passed all 56 tests
+  after the group hold and Wave toggle landed. The tests cover the first
+  reading, changes to nearby rows, repeated keyboard selection, switching Tasks,
+  filters, and the saved Dashboard arrangement. The screen was locked.
+- [Private Machine QA round 5](qa.html) used the earlier repository-only toggle
+  with a fixed row position. It verified live OSC 7501 transitions, restoration
+  of shared order after toggling Off, and the iOS feed. The installed
+  `250e266b4` server served rows without `graph_step` and refused drops with
+  the newer `side` field. The stored order survived the refused drop.
+- For 300 IDs, the synthetic store (10,000 Tasks, 406,666 events) took 0.78 ms
+  for start times and 0.33 ms for Graph steps. The 1,553-Task Machine store
+  took 0.56 ms and 2.68 ms. The median lookup for 300 Sessions’ availability
+  was 0.72 ms.
+- `EXPLAIN QUERY PLAN` confirmed indexed lookups with 10,011 Tasks, 1,000
+  Graphs, and 103 saved positions.
 
-- `docs/surfaces.md`
-- `docs/work.md`
-- `swift/README.md`
+## Remaining verification
 
-## Verification
+Run the current build in an unlocked Dev window on a private Machine. Hover
+the toggle in both states. Send a prompt with sorting Off and check the row
+stays in place. Turn sorting On with a Busy Task open and check it starts in
+the Busy group. Open an Available Task, send a prompt, and check that it keeps
+its group while its status changes. Move to another Task and check the former
+selection sorts by its current status. Repeat in a Wave sidebar. Exercise a
+grid drag and the ⌘1–9, ⌃Tab, and ⌘K controls. Use
+[Desktop QA](../.lf/qa/desktop.md) for the private Machine setup. Earlier
+locked-screen workspace restore and Wave-to-grid findings are in [questions.md](questions.md).
 
-`scripts/test_desktop.sh --filter 'WorkNavigationTests'` passed all 56 tests, including the Wave toggle and open-Task group across navigation and list updates. The display was locked for this pass. Live hover and keyboard input remain for QA.
-
-## Gate
+At gate, also run `cargo test -p loopflow --test served_reads server_operations_match_their_lf_commands`
+on main. The post-sync run failed at `config scope --json` because the server
+reported `/private/var/folders` and the CLI reported `/var/folders`. The operation
+and test arrived with `250e266b4`.
 
 Run Cargo with the Task's `LF_*` variables cleared and stdin closed.
 
@@ -50,7 +82,3 @@ cargo test -p loopflow --test served_reads working_task_drop_keeps_its_side_afte
 scripts/test_desktop.sh --filter 'TaskConceptTests|TaskStatusTests|PendingChangesTests|WorkNavigationTests|DashboardWorkspaceTests'
 uv run python scripts/test_ios.py -only-testing:LoopflowiOSTests/TaskFeedTests
 ```
-
-After the sync onto main, `served_reads` `server_operations_match_their_lf_commands` failed at `config scope --json` (`/private/var/folders` vs `/var/folders`), a test and read that came from main ([questions.md](questions.md)). Gate checks whether main fails the same way.
-
-In Loopflow Dev (unlocked window), verify: hover highlight on `SidebarStatusToggle`, sending a prompt in a Working Task (sort Off and On), switching away from a latched Busy Task to an Available Task (confirming strict status order), toggling Sort by status in a Wave sidebar, grid drag, `⌘1–9`, `⌃Tab`, and `⌘K` sidebar filters.

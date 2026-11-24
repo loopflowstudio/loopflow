@@ -107,7 +107,8 @@ when the Machine reports it.
 
 Turn on **Sort by status** in a repository or Wave sidebar, or from **⌘K**,
 to group rows by Blocked, Error, Available, Idle and Busy. A Task with both
-busy and available conversations sorts as Busy. Each group keeps its saved order.
+busy and available conversations sorts as Busy. Each group follows the shared
+Working order.
 Sending a prompt updates the open Task’s status, but its row stays in the
 group it occupied when you opened it or turned sorting on. Other rows can
 move above or below it. Leaving the Task or changing the filter releases

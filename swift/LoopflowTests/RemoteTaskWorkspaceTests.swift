@@ -19,18 +19,23 @@ struct RemoteTaskWorkspaceTests {
             _ = try await world.laptop.run(["task", "move", task, "--machine", "mini", "--json"], cwd: world.repo)
 
             // Not started: mini owns the Task but has no checkout for it yet.
-            let files = TaskFilesStore(issue: task, cwd: "", machine: world.miniID, machineLabel: "mini", query: query)
+            let files = TaskFilesStore(issue: task, cwd: "", machine: world.miniID, localMachineID: world.laptopID, query: query)
             files.autosave = false
             await files.refreshChanges()
             #expect(files.notStarted)
             await files.readDirectory("", more: false)
             #expect(files.notStarted)
+            // The watch stays open on the unstarted Task and names mini as the laptop does.
             files.observeFiles()
+            try await eventually("the watch names mini before a checkout") { files.machineName == "mini" }
+            #expect(files.notStarted)
+            // A shell opens from the plan's owner before any conversation says where the Task runs.
             let workspace = SessionsWorkspace(key: WorkWorkspaceKey(repository: world.repo.path, kind: .task, id: task),
-                title: "Remote work", location: WorkspaceIdentity(machineId: world.miniID, worktree: ""),
-                localMachineId: world.laptopID)
+                title: "Remote work", location: nil, localMachineId: world.laptopID)
+            workspace.owner = world.miniID
             _ = workspace.sessionStore(repoPath: world.repo.path, query: query)
             let shell = try #require(try workspace.newShell(command: [], focus: false)?.content.selectedShell)
+            #expect(shell.location?.machineId == StructuredIdentity.prefixed(world.miniID, "home_"))
             // The attachment ends at the server's refusal; Desktop asks why in typed form.
             NotificationCenter.default.post(name: .ghosttySurfaceClosed, object: shell.terminal)
             try await eventually("the ended shell says Not started") { workspace.notStartedShells.contains(shell.id) }
@@ -39,8 +44,10 @@ struct RemoteTaskWorkspaceTests {
 
             let checkout = try await world.miniCheckout(task)
             try "changed on mini\n".write(to: checkout.appendingPathComponent("notes.txt"), atomically: true, encoding: .utf8)
-            await files.retry()
-            #expect(!files.notStarted)
+            // The same watch goes live once mini records the checkout; nothing asks again.
+            try await eventually("Files fills in from mini", showing: { "\(files.tree.listings.keys) \(String(describing: files.error))" }) {
+                !files.notStarted && files.tree.listings[""]?.entries.map(\.path).contains("document.txt") == true
+            }
             #expect(files.machineName == "mini")
 
             // An unchanged file reads from mini, even though the laptop never had a checkout.
@@ -97,6 +104,15 @@ struct RemoteTaskWorkspaceTests {
             #expect(reopened.tree.listings[""]?.entries.map(\.path).contains("document.txt") == true)
             await files.loadFile()
             #expect(files.document("notes.txt").snapshot?.content == "saved from the laptop\n")
+
+            // The laptop's own server restarts: the watch subscribes again and follows mini's next change.
+            await world.laptopServer.stop()
+            try await eventually("the watch reports the stopped server") { files.error != nil }
+            _ = try await world.laptopServer.status()
+            try "after restart\n".write(to: checkout.appendingPathComponent("restart.txt"), atomically: true, encoding: .utf8)
+            try await eventually("Files recovers after the server restarts", showing: { "\(String(describing: files.error))" }) {
+                files.error == nil && files.tree.listings[""]?.entries.map(\.path).contains("restart.txt") == true
+            }
         }
     }
 

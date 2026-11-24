@@ -64,19 +64,12 @@ final class TaskFilesTree {
         for path in paths { await load(path) }
     }
 
-    /// Follow the checkout until cancelled. The first reading is the tree
-    /// already read; a later revision, Machine or checkout re-reads it. An
-    /// outage keeps what was listed and says which Machine is away. A Task
-    /// with no checkout where it runs ends the reading; it is asked again
-    /// every few seconds, so Files fills in once the Task starts there.
+    /// Follow the Task's checkout until cancelled. The first reading is the
+    /// tree already read; a later revision, Machine or checkout re-reads it.
+    /// A reading with no checkout is **Not started**, and the same reading
+    /// fills Files in once the Task starts. An outage keeps what was listed
+    /// and says which Machine is away.
     func follow() async {
-        while !Task.isCancelled {
-            await watch()
-            try? await Task.sleep(for: .seconds(5))
-        }
-    }
-
-    private func watch() async {
         let watch = client.observeTaskFiles(issue: issue)
         defer { watch.cancel() }
         do {
@@ -93,10 +86,13 @@ final class TaskFilesTree {
                 machineID = body.machineID
                 checkout = body.checkout
                 revision = body.revision
-                if changed || recovered || notStarted { await reload() }
+                if body.notStarted {
+                    notStarted = true
+                    listings = [:]
+                } else if changed || recovered || notStarted {
+                    await reload()
+                }
             }
-        } catch let refusal as ServerError where refusal.notStarted {
-            notStarted = true
         } catch is CancellationError {
             return
         } catch {
@@ -117,9 +113,7 @@ struct TaskFilesTreeView: View {
     var body: some View {
         Group {
             if tree.notStarted {
-                StateView("Not started", sentence: "The Task has no checkout yet.") {
-                    Button("Try again") { Task { await tree.load(path) } }.buttonStyle(LoopflowButtonStyle(.accent))
-                }
+                StateView("Not started", sentence: "The Task has no checkout yet. Files appear once it starts.")
             } else {
                 switch tree.listings[path] {
                 case nil: ProgressView()

@@ -225,7 +225,7 @@ public enum ServerOperation: Encodable, Sendable {
     /// Continue an existing Session in a held terminal the server starts with its own
     /// environment, answered `{terminal_id}`. Repeating `request` starts nothing.
     /// Naming the Task continues it wherever it runs.
-    case sessionContinue(session: String, request: String, rows: Int, cols: Int, task: String?)
+    case sessionContinue(session: String, request: String, rows: Int, cols: Int, task: String?, agent: String?)
     /// Start a Task shell named `shellID` in the checkout of the Machine that runs
     /// the Task, answered `{terminal_id}`; repeating `shellID` starts nothing.
     /// A Task with no checkout is `not_found {reason: "not_started"}`.
@@ -239,7 +239,7 @@ public enum ServerOperation: Encodable, Sendable {
                          printed: [String], inbox: JSONValue?)
 
     private enum Keys: String, CodingKey {
-        case kind, bytes, session, request, argv, cwd, env, rows, cols, placement, task, machine, terminalID = "terminal_id"
+        case kind, bytes, session, request, argv, cwd, env, rows, cols, placement, task, machine, agent, terminalID = "terminal_id"
         case issue, shellID = "shell_id", bootstrap, command
         case moment, delivery, adapter, callback, gap, printed, inbox, query, change
     }
@@ -284,7 +284,7 @@ public enum ServerOperation: Encodable, Sendable {
             try box.encode(rows, forKey: .rows)
             try box.encode(cols, forKey: .cols)
             try box.encode(placement, forKey: .placement)
-        case .sessionContinue(let session, let request, let rows, let cols, let task):
+        case .sessionContinue(let session, let request, let rows, let cols, let task, let agent):
             var box = encoder.container(keyedBy: Keys.self)
             try box.encode("session.continue", forKey: .kind)
             try box.encode(session, forKey: .session)
@@ -293,6 +293,7 @@ public enum ServerOperation: Encodable, Sendable {
             try box.encode(cols, forKey: .cols)
             try box.encode(task, forKey: .task)
             try box.encodeNil(forKey: .machine)
+            try box.encode(agent, forKey: .agent)
         case .taskShellStart(let issue, let shellID, let rows, let cols):
             var box = encoder.container(keyedBy: Keys.self)
             try box.encode("task.shell.start", forKey: .kind)

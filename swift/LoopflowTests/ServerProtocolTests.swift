@@ -184,7 +184,7 @@ struct ServerProtocolTests {
             directory: "/repo", headless: false, after: nil, limit: 100, task: "task_00000000000000000000000000000001")), select: nil, requestID: nil)) == value("session_page"))
         #expect(try encoded(.request(id: "continue-1", operation: .sessionContinue(
             session: "session_5e55105e000040008000000000000001", request: "3f2a7c1e-9b4d-4e8a-a1c6-5d0e7f9b2c34",
-            rows: 40, cols: 60, task: "task_00000000000000000000000000000001"), select: nil, requestID: nil)) == value("session_continue"))
+            rows: 40, cols: 60, task: "task_00000000000000000000000000000001", agent: "claude"), select: nil, requestID: nil)) == value("session_continue"))
         let issue = "task_00000000000000000000000000000001"
         #expect(try encoded(.request(id: "shell-1", operation: .taskShellStart(
             issue: issue, shellID: "mobile-\(issue)", rows: 40, cols: 60), select: nil, requestID: nil)) == value("task_shell_start"))

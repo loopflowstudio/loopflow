@@ -114,7 +114,7 @@ final class RemoteMobileClient: MobileTaskCreationClient {
     func start(_ terminal: TerminalTarget, task: String, request: String, size: TerminalGeometry) async throws {
         let operation: ServerOperation = switch terminal {
         case .session(let id):
-            .sessionContinue(session: id, request: request, rows: size.rows, cols: size.columns, task: task)
+            .sessionContinue(session: id, request: request, rows: size.rows, cols: size.columns, task: task, agent: nil)
         case .shell:
             .taskShellStart(issue: task, shellID: Self.shellID(task: task), rows: size.rows, cols: size.columns)
         }

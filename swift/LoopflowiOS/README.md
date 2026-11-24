@@ -113,8 +113,8 @@ the sentence (**On mini**).
   has ended and offers **New shell**, which starts one on the new Machine.
 
 A Task with no conversation opens on its Changes. One with no checkout yet
-says **Not started** on Files, Changes and Shell, with **Try again**; Files
-fills in by itself once the Task starts. When the Machine running the Task
+says **Not started** on Files, Changes and Shell, with **Try again** on
+Changes and Shell; Files fills in by itself once the Task starts. When the Machine running the Task
 doesn’t answer, each view names it and offers **Try again** (**Reconnect** in a terminal). Once a
 conversation starts, it opens in place, without going back to the list. Task
 actions follow the Task itself, so they stay when the list's filter no longer

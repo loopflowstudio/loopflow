@@ -111,6 +111,23 @@ struct TaskFilesTests {
         #expect(reads.allSatisfy { !$0.contains("--machine") && !$0.joined().contains("/peer/checkout") })
     }
 
+    @Test func aTaskMovingBackToThisMacWatchesItsCheckoutDirectly() async throws {
+        let peer = RemoteFilesFixture()
+        let query = RegistryQuery(subscribeRead: { peer.subscribe($0) }) { args, cwd in try peer.read(args, cwd: cwd) }
+        let here = FileManager.default.temporaryDirectory.appendingPathComponent("lf-back-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: here, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: here) }
+        let store = TaskFilesStore(issue: "remote-task", cwd: "/peer/checkout", machine: "peer",
+                                   localMachineID: "laptop", query: query)
+        store.observeFiles()
+        try await eventually { store.machineName == "peer label" }
+        peer.move(to: "laptop", checkout: here.path, content: "one\n")
+        // This Mac's own checkout: no remote Machine, FSEvents instead of the served watch.
+        try await eventually { store.machine == nil && store.cwd == here.path }
+        #expect(store.machineName == nil)
+        try await eventually { peer.cancelled }
+    }
+
     @Test func releasingFilesStoreEndsRemoteObservation() async throws {
         let peer = RemoteFilesFixture()
         let query = RegistryQuery(subscribeRead: { peer.subscribe($0) }) { _, _ in
@@ -133,10 +150,14 @@ struct TaskFilesTests {
         let store = TaskFilesStore(issue: "remote-task", cwd: "", machine: "peer", query: query)
         store.observeFiles()
         try await eventually { peer.watching }
-        peer.refuse(ServerError(code: "not_found", message: "Task remote-task is not started",
-            data: .object(["reason": .string("not_started"), "task_id": .string("remote-task")])))
+        peer.unstarted()
         try await eventually { store.notStarted }
         #expect(store.error == nil)
+        #expect(store.machineName == "peer label")
+        // The checkout appears: the same watch clears Not started.
+        peer.start(checkout: "/peer/checkout")
+        try await eventually { !store.notStarted && store.cwd == "/peer/checkout" }
+        #expect(!peer.cancelled)
     }
 
     @Test func chooserFiltersScratchAndParentChangesAndPreservesDrafts() async throws {
@@ -1753,7 +1774,7 @@ struct TaskFilesTests {
         let picker = ReviewLayoutPicker(store: store, width: 800)
         for layout in ["New code", "Unified", "Side by side"] { _ = try picker.inspect().find(text: layout) }
         let url = try #require(URL(string: "https://github.com/loopflow/loopflow/pull/1949"))
-        let card = DeliveryCard(store: store.pullRequest, record: nil, taskOpen: true, url: url, localHead: nil)
+        let card = DeliveryCard(store: store.pullRequest, record: nil, taskOpen: true, url: url, localHead: nil, runsOn: nil)
         #expect(try card.inspect().find(viewWithAccessibilityIdentifier: "changes-open-github").button().labelView().text().string()
             == "Open on GitHub")
         _ = try card.inspect().find(button: "Read again")
@@ -1835,7 +1856,7 @@ private final class RemoteFilesFixture: Sendable {
     private struct State {
         var content = "one\ntwo\n"
         var machine = "peer"
-        var checkout = "/peer/checkout"
+        var checkout: String? = "/peer/checkout"
         var revision = 0
         var reads: [[String]] = []
         var watching = false
@@ -1869,10 +1890,20 @@ private final class RemoteFilesFixture: Sendable {
         let frame: [String: Any] = ["answers": NSNull(), "unavailable": reason, "body": NSNull(), "read_at": NSNull()]
         stream.continuation.yield(try! JSONSerialization.data(withJSONObject: frame))
     }
-    func refuse(_ error: ServerError) { stream.continuation.finish(throwing: error) }
+    /// The Task has no checkout on its Machine yet; the same watch stays open.
+    func unstarted() {
+        state.withLock { $0.checkout = nil }
+        emit()
+    }
+    func start(checkout: String) {
+        state.withLock { $0.checkout = checkout; $0.revision += 1 }
+        emit()
+    }
     private func emit() {
         let (machine, checkout, revision) = state.withLock { ($0.machine, $0.checkout, $0.revision) }
-        let body: [String: Any] = ["task_id": "remote-task", "machine_id": machine, "checkout": checkout, "revision": "r\(revision)"]
+        let body: [String: Any] = ["task_id": "remote-task", "machine_id": machine, "machine_label": "\(machine) label",
+                                   "checkout": checkout ?? NSNull(),
+                                   "revision": checkout == nil ? NSNull() : "r\(revision)"]
         let frame: [String: Any] = ["answers": NSNull(), "unavailable": NSNull(), "body": body, "read_at": NSNull()]
         stream.continuation.yield(try! JSONSerialization.data(withJSONObject: frame))
     }

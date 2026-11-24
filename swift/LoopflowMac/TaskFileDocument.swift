@@ -604,6 +604,8 @@ final class TaskFilesStore {
     /// one, else its ID.
     var machineName: String? { machine.map { machineLabel ?? $0 } }
     @ObservationIgnored private var machineLabel: String?
+    /// This Mac, which watches its own checkouts directly.
+    @ObservationIgnored private let localMachineID: String?
     /// Documents to read where the Task has moved, before their next ordinary read.
     @ObservationIgnored private var arriving: Set<String> = []
     let query: RegistryQuery
@@ -732,47 +734,78 @@ final class TaskFilesStore {
         invalidate([""])
     }
 
+    /// The served watch follows the Task: a reading with no checkout is **Not
+    /// started**, and the same watch goes live once one exists. A lost local
+    /// server is subscribed to again with a growing pause.
     private func observeServedFiles() {
         guard servedObservation == nil else { return }
         servedObservation = Task { [weak self, query, issue] in
-            do {
-                let subscription = try query.watchTaskFiles(issue: issue)
-                defer { Task { await subscription.cancel() } }
-                for try await line in subscription.lines {
-                    try Task.checkCancellation()
-                    let frame = try JSONDecoder().decode(SubscriptionFrame<TaskFilesRevision>.self, from: line)
-                    guard let self else { break }
-                    guard let revision = frame.body else {
-                        self.error = frame.unavailable ?? "Live file observation unavailable"
-                        continue
-                    }
-                    self.error = nil
-                    self.notStarted = false
-                    if revision.machineID != self.machine || revision.checkout != self.cwd {
-                        if revision.machineID != self.machine {
-                            self.machineLabel = nil
-                            self.arriving = Set(self.documents.keys)
+            var delay = Duration.seconds(1)
+            // A watch that ends lets the next `observeFiles` start another;
+            // a cancelled one was already replaced.
+            defer { if !Task.isCancelled { self?.servedObservation = nil } }
+            while !Task.isCancelled {
+                do {
+                    let subscription = try query.watchTaskFiles(issue: issue)
+                    defer { Task { await subscription.cancel() } }
+                    for try await line in subscription.lines {
+                        try Task.checkCancellation()
+                        let frame = try JSONDecoder().decode(SubscriptionFrame<TaskFilesRevision>.self, from: line)
+                        guard let self else { return }
+                        delay = .seconds(1)
+                        guard let revision = frame.body else {
+                            self.error = frame.unavailable ?? "Live file observation unavailable"
+                            continue
                         }
-                        self.machine = revision.machineID
-                        self.cwd = revision.checkout
-                    } else if revision.revision == self.servedRevision {
-                        continue
+                        self.error = nil
+                        // Back on this Mac, its own checkout is watched directly.
+                        if revision.machineID == self.localMachineID, let checkout = revision.checkout {
+                            self.relocate(machine: nil, cwd: checkout)
+                            return
+                        }
+                        if !self.receive(revision) { continue }
                     }
-                    let first = self.servedRevision == nil
-                    self.servedRevision = revision.revision
-                    // The first reading is the tree already read; later ones mean it changed.
-                    if !first { self.invalidate([""]) }
-                }
-            } catch let refusal as ServerError where refusal.notStarted {
-                self?.notStarted = true
-            } catch {
-                if let self, !Task.isCancelled {
+                    // The local server went away mid-stream; subscribe again.
+                    guard let self, !Task.isCancelled else { return }
+                    self.error = "Live file observation unavailable: the Loopflow server stopped answering"
+                } catch is CancellationError {
+                    return
+                } catch {
+                    guard let self, !Task.isCancelled else { return }
                     self.invalidation?.cancel()
                     self.error = "Live file observation unavailable: \(error.localizedDescription)"
                 }
+                do { try await Task.sleep(for: delay) } catch { return }
+                delay = min(delay * 2, .seconds(30))
             }
-            self?.servedObservation = nil
         }
+    }
+
+    /// Apply a served reading; false when it repeats the last one.
+    private func receive(_ revision: TaskFilesRevision) -> Bool {
+        let wasNotStarted = notStarted
+        notStarted = revision.notStarted
+        if revision.machineID != machine {
+            arriving = Set(documents.keys)
+            machine = revision.machineID
+        }
+        machineLabel = revision.machineLabel
+        if let checkout = revision.checkout, checkout != cwd {
+            cwd = checkout
+        } else if revision.revision == servedRevision {
+            return false
+        }
+        let first = servedRevision == nil
+        servedRevision = revision.revision
+        guard !revision.notStarted else { return true }
+        if wasNotStarted {
+            // The checkout appeared: read what Not started hid.
+            Task { await retry() }
+        } else if !first {
+            // The first reading is the tree already read; later ones mean it changed.
+            invalidate([""])
+        }
+        return true
     }
 
     private func invalidate(_ paths: [String]) {
@@ -902,11 +935,12 @@ final class TaskFilesStore {
     }
 
     init(issue: String, cwd: String, machine: String? = nil, machineLabel: String? = nil,
-         query: RegistryQuery = RegistryQueryLocal.shared) {
+         localMachineID: String? = nil, query: RegistryQuery = RegistryQueryLocal.shared) {
         self.issue = issue
         self.cwd = cwd
         self.machine = machine
         self.machineLabel = machineLabel
+        self.localMachineID = localMachineID.map { StructuredIdentity.prefixed($0, "home_") }
         self.query = query
         autosave = UserDefaults.standard.savesTaskFilesAutomatically
         savedPreference = autosave

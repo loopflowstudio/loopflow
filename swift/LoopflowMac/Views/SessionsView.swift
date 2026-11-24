@@ -167,6 +167,8 @@ final class SessionsWorkspace {
     var key: WorkWorkspaceKey
     var title: String
     var location: WorkspaceIdentity?
+    /// The Machine this Mac's plan says runs the Task, known before any checkout is read.
+    var owner: String?
     var presentation = WorkNavigation.WorkspacePresentation()
     var localMachineId: String?
 
@@ -189,11 +191,13 @@ final class SessionsWorkspace {
         guard key.kind == .task else {
             throw RegistryQueryError("Shells belong to Tasks; no shell was opened.")
         }
-        guard let location else {
-            throw RegistryQueryError("Open this Task's conversation before adding a shell; where it runs is not known yet.")
+        // The server starts the shell wherever the Task runs; the tab keeps that
+        // Machine for its label and Close.
+        guard let place = location ?? owner.map({ WorkspaceIdentity(machineId: $0, worktree: "") }) else {
+            throw RegistryQueryError("Where this Task runs is not known yet; no shell was opened.")
         }
         visit()
-        return multiplexer.newShell(command: command ?? [], location: location, focus: focus)
+        return multiplexer.newShell(command: command ?? [], location: place, focus: focus)
     }
 
     func toggleShell() throws {
@@ -359,7 +363,8 @@ final class SessionsWorkspace {
     func files(issue: String, cwd: String, machine: String? = nil, machineLabel: String? = nil,
                query: RegistryQuery = RegistryQueryLocal.shared) -> TaskFilesStore {
         if let files = taskFiles { return files }
-        let files = TaskFilesStore(issue: issue, cwd: cwd, machine: machine, machineLabel: machineLabel, query: query)
+        let files = TaskFilesStore(issue: issue, cwd: cwd, machine: machine, machineLabel: machineLabel,
+                                   localMachineID: localMachineId, query: query)
         files.measurementRepository = measurementRepository
         taskFiles = files
         files.restoreDrafts(unavailableDrafts)

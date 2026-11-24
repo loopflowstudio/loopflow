@@ -279,6 +279,7 @@ final class WorkModel {
             }
             workspace.opensConversationAutomatically = task.opensConversationAutomatically
             workspace.location = taskWorkspaceIdentity(task)
+            workspace.owner = task.runtime?.owner?.machine.id
             registry.updateCompletion(key, completed: task.isCompleted)
         }
         for key in warm {
@@ -801,7 +802,10 @@ final class WorkModel {
             guard let registry = workspaceRegistry else { return }
             switch key.kind {
             case .task:
-                if workspace.location == nil, let task = task(id: key.id)?.task { workspace.location = taskWorkspaceIdentity(task) }
+                if let task = task(id: key.id)?.task {
+                    if workspace.location == nil { workspace.location = taskWorkspaceIdentity(task) }
+                    workspace.owner = task.runtime?.owner?.machine.id
+                }
             case .wave, .repository: break
             }
             await registry.openConversation(in: workspace, store: store)

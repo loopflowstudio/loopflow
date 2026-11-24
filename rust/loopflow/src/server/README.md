@@ -231,8 +231,8 @@ the checkout from the owning Machine.
 Two errors name what went wrong:
 
 ```text
-← {"type":"error","id":"files","code":"not_found","message":"Task LOO-12 is not started","data":{"reason":"not_started","task_id":"…"}}
-← {"type":"error","id":"files","code":"unavailable","message":"mini did not answer; run `ssh mini lf server status`","data":{"resource":"machine","machine_id":"…","machine_label":"mini","machine_name":"…"}}
+← {"type":"error","id":"changes","code":"not_found","message":"Task LOO-12 is not started","data":{"reason":"not_started","task_id":"…"}}
+← {"type":"error","id":"changes","code":"unavailable","message":"mini did not answer; run `ssh mini lf server status`","data":{"resource":"machine","machine_id":"…","machine_label":"mini","machine_name":"…"}}
 ```
 
 No routed operation falls back to a local checkout, shell or Session.

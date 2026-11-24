@@ -31,13 +31,21 @@ final class RemoteTaskWorkspaceTests: XCTestCase {
             let shell = TerminalLink(client: client, task: task, target: .shell)
             shell.fit(columns: 80, rows: 24)
             try await eventually("the shell says Not started", showing: { "\(shell.state)" }) { shell.state == .notStarted }
+            // The one watch reads the unstarted Task, then fills Files in when mini checks it out.
+            let watching = Task { await files.follow() }
+            defer { watching.cancel() }
+            try await eventually("the watch names mini before a checkout") { files.machineID != nil }
+            XCTAssertTrue(files.notStarted)
+            XCTAssertNil(files.checkout)
 
             let checkout = try await world.miniCheckout(task.id)
             try "changed on mini\n".write(to: checkout.appendingPathComponent("notes.txt"), atomically: true, encoding: .utf8)
 
             // Files: the tree and an unchanged file read from mini; the laptop never had a checkout.
-            await files.load("")
-            XCTAssertFalse(files.notStarted)
+            try await eventually("Files fills in once mini has the checkout", showing: { "\(files.listings)" }) {
+                !files.notStarted && files.listing("")?.entries.map(\.path).contains("document.txt") == true
+            }
+            XCTAssertEqual(files.checkout, checkout.path)
             let entries = try XCTUnwrap(files.listing("")).entries.map(\.path)
             XCTAssertTrue(entries.contains("document.txt"), "\(entries)")
             let document = try await client.query.taskFile(issue: task.id, path: "document.txt")
@@ -73,9 +81,6 @@ final class RemoteTaskWorkspaceTests: XCTestCase {
             try await world.closeShell(task.id, startedOn: nil)
 
             // Mini goes away: the open watch and a new read both name it.
-            let watching = Task { await files.follow() }
-            defer { watching.cancel() }
-            try await eventually("the watch follows mini") { files.machineID != nil }
             await world.miniServer.stop()
             try world.disconnect(true)
             await files.load("")

@@ -1,4 +1,4 @@
-at: cb41b9ef0e8c50459f826d9d25cbff1caff114c4
+at: bcae93555820deb1ece27e2bc3535c8214a51693
 first:
   - path: docs/orchestration.md
     why: Pass sizing and the deciding step's prompt
@@ -18,6 +18,14 @@ first:
     why: Count repeated steps from the return target
   - path: rust/loopflow/tests/session_lifecycle_tests.rs
     why: Prompts the provider received across three passes
+  - path: docs/sessions.md
+    why: When an idle Task conversation wakes
+  - path: rust/loopflow-storage/src/sqlite/task_work.rs
+    why: Task position and Graph executions share a snapshot
+  - path: rust/loopflow-execution/src/harness/task_updates.rs
+    why: Only settled runs produce updates
+  - path: rust/loopflow/src/server/wake.rs
+    why: Idle inbox stays silent until settlement
   - path: docs/ops.md
     why: Commit and push behavior from the command line
   - path: rust/loopflow/src/lf/mod.rs
@@ -26,8 +34,6 @@ first:
     why: Push decision shared by whole and selected commits
   - path: rust/loopflow/tests/commit_tests.rs
     why: Remote heads and receipts across local checkpoints
-  - path: rust/loopflow-execution/src/harness/README.md
-    why: Planned Task conversation wakeups
 hide:
   - path: tests/goldens/builtin_implement.md
     why: Generated from the implement skill

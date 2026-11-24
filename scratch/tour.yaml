@@ -1,15 +1,27 @@
-at: dc028f2d421948c0461a92224ec5116197ef2a15
+at: 4d1244e4f3f5d504a30838ddc2df357908a751ed
 first:
   - path: docs/dev/machines.md
     why: How a steer reaches the owning Machine
   - path: scratch/plan.md
-    why: Two-home results and remaining receipt work
-  - path: rust/loopflow-storage/src/sqlite/linear_team_checks.rs
+    why: What each slice built; status slice remains
+  - path: tests/fixtures/dto/task_steer_receipt.json
+    why: The receipt every Task steer returns
+  - path: rust/loopflow-execution/src/engine/session.rs
+    why: One reader sentence for Session and Task steers
+  - path: rust/loopflow-execution/src/engine/task.rs
+    why: Save here, sync carriers, say where it reached
+  - path: rust/loopflow/src/lf/commands/write.rs
+    why: Owner over SSH, fallback only before admission
+  - path: rust/loopflow/src/lf/commands/session.rs
+    why: CLI steer shares the served path
+  - path: rust/loopflow-storage/src/migrations/planning_scope_checks.sql
+    why: Staged rename of the poll watermark table
+  - path: rust/loopflow-storage/src/sqlite/planning_scope_checks.rs
     why: Shared poll attempts and tracker watermarks
   - path: rust/loopflow-execution/src/ops/tracker_events.rs
     why: Select owned repositories and schedule their reads
   - path: rust/loopflow-execution/src/ops/tracker.rs
-    why: Identify each repository’s tracker feed
+    why: Identify each repository's tracker feed
   - path: rust/loopflow-execution/src/asana/mod.rs
     why: Bind the watermark to the resolved project
   - path: rust/loopflow-execution/src/linear/team_changes.rs
@@ -19,13 +31,17 @@ first:
   - path: rust/loopflow-execution/src/ops/plan_git.rs
     why: Keep unclaimed repositories receiving new plans
   - path: rust/loopflow/src/server/service.rs
-    why: Start the owner’s poller
+    why: Start the owner's poller
   - path: rust/loopflow/src/lf/commands/graph.rs
     why: Continue polling while a worker runs
-  - path: rust/loopflow-execution/src/ops/linear/asana_planning_tests.rs
-    why: Two projects share a team without losing direction
+  - path: rust/loopflow/tests/machine_commands.rs
+    why: Owner, offline, unregistered and lost-reply steers
   - path: rust/loopflow-execution/src/ops/linear/task_planning_tests.rs
     why: A sibling steer reaches worker and primary
-  - path: rust/loopflow/tests/machine_commands.rs
-    why: The quiet owner receives a hub-only steer
-hide: []
+  - path: rust/loopflow-execution/src/ops/linear/asana_planning_tests.rs
+    why: Two projects share a team without losing direction
+hide:
+  - path: tests/fixtures/dto/server_schema.json
+    why: Regenerated from lf server describe
+  - path: scratch/concept-review.html
+    why: Kickoff notes, cleared at submit

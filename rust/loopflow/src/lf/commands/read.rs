@@ -731,19 +731,14 @@ impl Read {
         mut self,
         query: impl FnOnce(&Machine, Sender, &Read) -> anyhow::Result<Response>,
     ) -> anyhow::Result<serde_json::Value> {
+        // A status asks whichever Machine claims the Task and reads here
+        // when that Machine cannot answer.
+        if let Self::TaskStatus { directory, issue } = &self {
+            return value(&super::waves::read_task_detail(directory, issue, true)?);
+        }
         if let Some(route) = self.peer_route()? {
-            let here = self.clone();
             let (machine, sender) = self.address_peer(route.clone())?;
-            let mut result = match (query(&machine, sender, &self), here) {
-                (Ok(answer), _) => answer.result,
-                // An owner that cannot answer leaves this Machine's reading,
-                // which says why the Task's progress is not read here.
-                (Err(error), Self::TaskStatus { directory, issue }) => {
-                    let reason = Some(format!("{error:#}"));
-                    return value(&super::waves::read_task_detail(&directory, &issue, reason)?);
-                }
-                (Err(error), _) => return Err(error),
-            };
+            let mut result = query(&machine, sender, &self)?.result;
             self.localize_peer_reading(&mut result, &machine, &route)?;
             return Ok(result);
         }
@@ -787,9 +782,6 @@ impl Read {
                     {
                         owner["label"] = label.clone();
                     }
-                }
-                if matches!(self, Self::TaskStatus { .. }) {
-                    super::waves::mark_owner_reading(reading, &route.task_id)?;
                 }
                 if let Some(session) = reading.pointer_mut("/current_session") {
                     super::ssh::localize_remote_session(session, machine, Some(route))?;
@@ -924,7 +916,7 @@ impl Read {
                 value(&super::desktop::read_task_pane(directory, issue)?)
             }
             Self::TaskStatus { directory, issue } => {
-                value(&super::waves::read_task_detail(directory, issue, None)?)
+                value(&super::waves::read_task_detail(directory, issue, false)?)
             }
             Self::TaskChanges { issue, base, head } => {
                 value(&task_changes(issue, base, head.as_deref())?)

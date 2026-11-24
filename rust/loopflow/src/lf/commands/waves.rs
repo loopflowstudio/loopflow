@@ -1457,44 +1457,27 @@ fn print_detail_json(detail: &TaskDetail) -> Result<()> {
 pub(crate) fn read_task_detail(
     directory: &Path,
     issue: &str,
-    unanswered: Option<String>,
+    ask_owner: bool,
 ) -> Result<TaskDetail> {
     let repo = loopflow_execution::ops::task::task_repository(directory, Some(issue))?;
     let store = loopflow_execution::store::read_existing_registry()?
         .map(Arc::new)
         .ok_or_else(|| anyhow!("no Loopflow store exists on this Machine"))?;
+    let rt = tokio::runtime::Runtime::new()?;
     let task = loopflow_execution::ops::task::registered_task(&store.sqlite, &repo, issue)?;
-    tokio::runtime::Runtime::new()?.block_on(async {
+    let mut unanswered = None;
+    if ask_owner {
+        if let Some(peer) = TaskPeer::resolve(&store.sqlite, &task.id)? {
+            match owner_detail(&peer, &repo, &task) {
+                Ok(detail) => return Ok(detail),
+                Err(error) => unanswered = Some(format!("{error:#}")),
+            }
+        }
+    }
+    rt.block_on(async {
         let status = loopflow_execution::ops::task::registered_task_status(&store, task).await?;
         task_detail(&store, status, unanswered).await
     })
-}
-
-/// The owner's own `task.status` reading says `here`; on this Machine it was
-/// read from the owner, which `runs_on` names. Keys a selected reading lacks
-/// stay absent.
-pub(crate) fn mark_owner_reading(
-    reading: &mut serde_json::Value,
-    task: &loopflow_model::durable::TaskId,
-) -> Result<()> {
-    if reading
-        .pointer("/reading/kind")
-        .and_then(|kind| kind.as_str())
-        != Some("here")
-    {
-        return Ok(());
-    }
-    let Some(store) = loopflow_execution::machine::task::read_registry()? else {
-        return Ok(());
-    };
-    let Some(peer) = TaskPeer::resolve(&store, task)? else {
-        return Ok(());
-    };
-    reading["reading"] = serde_json::to_value(TaskReading::Owner)?;
-    if let Some(runs_on) = reading.pointer_mut("/task/runs_on") {
-        *runs_on = serde_json::to_value(&peer.runs_on)?;
-    }
-    Ok(())
 }
 
 async fn task_detail(

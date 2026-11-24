@@ -273,13 +273,6 @@ fn working_task_drop_keeps_its_side_after_another_window_reorders() {
         .collect();
     assert_eq!(order, [&b, &c, &a]);
     assert_eq!(working(), [&c, &a, &b].map(String::as_str));
-
-    let sorted = read(repo.path(), home.path(), &["desktop", "sort"], None);
-    assert_eq!(
-        serde_json::from_str::<Vec<String>>(&sorted).unwrap(),
-        [a.clone(), b.clone(), c.clone()]
-    );
-    assert_eq!(working(), [a.as_str(), b.as_str(), c.as_str()]);
 }
 
 #[test]

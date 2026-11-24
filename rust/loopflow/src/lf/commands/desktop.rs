@@ -502,7 +502,6 @@ pub(crate) fn result_schema(path: &[String]) -> Option<schemars::Schema> {
         ["desktop", "hide" | "show" | "move" | "resize"] => Some(schema::<DesktopTileOutput<'_>>()),
         ["open"] => Some(schema::<super::open::OpenReport>()),
         ["desktop", "ls"] => Some(schema::<DesktopWindowInspection>()),
-        ["desktop", "sort"] => Some(schema::<Vec<String>>()),
         ["desktop", "actions"] => Some(schema::<Vec<DesktopActionDescriptor>>()),
         ["desktop", "capture"] => Some(schema::<DesktopTextReading>()),
         ["desktop", "events"] => Some(schema::<DesktopChange>()),

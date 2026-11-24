@@ -1,4 +1,4 @@
-at: ffc747d8b3e3d82bc66f31d168e870364db5d139
+at: dad2efdc673edffcbc1fdf88ac17f974edc326ef
 first:
   - path: docs/workspaces.md
     why: Open another Machine’s Session in a local tab
@@ -20,6 +20,8 @@ first:
     why: One hold for a Session or the phone's shell
   - path: swift/LoopflowiOS/RemoteMobileClient.swift
     why: Tickets, starts and the primary, addressed by Task
+  - path: swift/LoopflowMac/TaskFileDocument.swift
+    why: Desktop Files follows the served watch and reconnects
   - path: swift/LoopflowiOSTests/RemoteTaskWorkspaceTests.swift
     why: Two Machines behind the paired phone
   - path: scripts/ios_fixture_host.py
@@ -29,7 +31,9 @@ first:
   - path: rust/loopflow/src/lf/commands/open.rs
     why: Keep the selectors through launch and retry
   - path: rust/loopflow/src/lf/commands/open/conversation.rs
-    why: Select the owner’s Session and attach the tab
+    why: Select the owner’s Session, honor --agent, attach the tab
+  - path: rust/loopflow-execution/src/transport.rs
+    why: A remote viewer names this Machine's return command
   - path: rust/loopflow/src/lf/commands/waves.rs
     why: Plan rows expose a checkout only on its Machine
   - path: rust/loopflow-execution/src/ops/task/snapshot.rs
@@ -41,7 +45,7 @@ first:
   - path: rust/loopflow/src/lf/commands/read.rs
     why: Which reads follow ownership and how peers address them
   - path: rust/loopflow-execution/src/ops/task/workspace.rs
-    why: Filesystem events invalidate the checkout’s file tree
+    why: The files watch follows the Task's checkout record
   - path: rust/loopflow-execution/src/machine/client.rs
     why: Request identity and disconnect outcomes across Machines
   - path: rust/loopflow/src/lf/commands/work_route.rs

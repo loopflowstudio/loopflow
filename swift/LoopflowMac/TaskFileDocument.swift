@@ -4,6 +4,14 @@ import Combine
 import Loopflow
 import Observation
 
+extension UserDefaults {
+    static let taskFileAutosaveKey = "taskFilesAutosave"
+
+    var savesTaskFilesAutomatically: Bool {
+        object(forKey: Self.taskFileAutosaveKey) as? Bool ?? true
+    }
+}
+
 /// One native buffer per Task/path. Its view, undo stack and selection outlive navigation.
 @MainActor
 @Observable
@@ -833,13 +841,13 @@ final class TaskFilesStore {
         self.issue = issue
         self.cwd = cwd
         self.query = query
-        autosave = UserDefaults.standard.object(forKey: "taskFilesAutosave") as? Bool ?? true
+        autosave = UserDefaults.standard.savesTaskFilesAutomatically
         savedPreference = autosave
         preferenceChanges = NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)
             .sink { [weak self] _ in
                 Task { @MainActor [weak self] in
                     guard let self else { return }
-                    let enabled = UserDefaults.standard.object(forKey: "taskFilesAutosave") as? Bool ?? true
+                    let enabled = UserDefaults.standard.savesTaskFilesAutomatically
                     if self.savedPreference != enabled {
                         self.savedPreference = enabled
                         self.autosave = enabled

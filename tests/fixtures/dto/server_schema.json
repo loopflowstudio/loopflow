@@ -71,6 +71,83 @@
       ],
       "type": "object"
     },
+    "Action": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "preview",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "resume",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "dismiss",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "confirm",
+              "type": "string"
+            },
+            "review": {
+              "$ref": "#/$defs/Review2"
+            }
+          },
+          "required": [
+            "kind",
+            "review"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "undo",
+              "type": "string"
+            },
+            "receipt": {
+              "$ref": "#/$defs/Receipt"
+            }
+          },
+          "required": [
+            "kind",
+            "receipt"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "ActionKind": {
       "enum": [
         "create",
@@ -141,6 +218,27 @@
         "personal_scoped"
       ],
       "type": "string"
+    },
+    "Applied": {
+      "properties": {
+        "after": {
+          "items": {
+            "$ref": "#/$defs/Entry"
+          },
+          "type": "array"
+        },
+        "before": {
+          "items": {
+            "$ref": "#/$defs/Entry"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "before",
+        "after"
+      ],
+      "type": "object"
     },
     "Arrangement": {
       "description": "Occurrence order. Geometry belongs to the slot layout; members fill it in order.",
@@ -263,6 +361,36 @@
         }
       ]
     },
+    "Authored": {
+      "oneOf": [
+        {
+          "properties": {
+            "kind": {
+              "const": "absent",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "present",
+              "type": "string"
+            },
+            "value": true
+          },
+          "required": [
+            "kind",
+            "value"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "AuthoredFiles": {
       "description": "What happened to the authored files on the main checkout.",
       "oneOf": [
@@ -366,6 +494,50 @@
         }
       ]
     },
+    "Availability": {
+      "oneOf": [
+        {
+          "properties": {
+            "kind": {
+              "const": "none",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "destination": {
+              "$ref": "#/$defs/Destination"
+            },
+            "kind": {
+              "const": "move",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "destination"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "resume",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "BoardPr": {
       "properties": {
         "url": {
@@ -453,6 +625,60 @@
         "Loopflow"
       ],
       "type": "string"
+    },
+    "Change": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "set",
+              "type": "string"
+            },
+            "value": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "reset",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "entries": {
+              "items": {
+                "$ref": "#/$defs/Entry"
+              },
+              "type": "array"
+            },
+            "kind": {
+              "const": "restore",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "entries"
+          ],
+          "type": "object"
+        }
+      ]
     },
     "Check": {
       "properties": {
@@ -1609,6 +1835,14 @@
       ],
       "type": "object"
     },
+    "ConnectionState": {
+      "enum": [
+        "reachable",
+        "error",
+        "ended_rental"
+      ],
+      "type": "string"
+    },
     "ContextReport": {
       "properties": {
         "steps": {
@@ -1906,6 +2140,12 @@
             "type": "string"
           },
           "type": "array"
+        },
+        "unset": {
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [
@@ -1918,7 +2158,8 @@
         "combination",
         "portability",
         "lifecycle",
-        "description"
+        "description",
+        "unset"
       ],
       "type": "object"
     },
@@ -2226,6 +2467,22 @@
       "type": "object"
     },
     "Entry": {
+      "properties": {
+        "path": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "value": true
+      },
+      "required": [
+        "path",
+        "value"
+      ],
+      "type": "object"
+    },
+    "Entry2": {
       "additionalProperties": false,
       "properties": {
         "builtin": {
@@ -2584,6 +2841,21 @@
         "path",
         "key",
         "inspections"
+      ],
+      "type": "object"
+    },
+    "FilePreview": {
+      "properties": {
+        "patch": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "patch"
       ],
       "type": "object"
     },
@@ -4173,6 +4445,43 @@
         }
       ]
     },
+    "MachineStatus": {
+      "properties": {
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "local_version": {
+          "type": "string"
+        },
+        "machine": {
+          "$ref": "#/$defs/Machine"
+        },
+        "remote_version": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "state": {
+          "$ref": "#/$defs/ConnectionState"
+        },
+        "update_command": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "state",
+        "machine",
+        "local_version",
+        "remote_version",
+        "error",
+        "update_command"
+      ],
+      "type": "object"
+    },
     "MeasuredOperation": {
       "description": "The ordinary operation and its per-request work receipt in one response.",
       "oneOf": [
@@ -5331,6 +5640,78 @@
         }
       ],
       "description": "What a request asks for, named by its `kind`: a dotted resource and verb\n(`task.complete`, `plan.list`). `desktop.*` kinds are Desktop's own\narrangement state, not part of what other clients are offered."
+    },
+    "Outcome": {
+      "oneOf": [
+        {
+          "properties": {
+            "kind": {
+              "const": "preview",
+              "type": "string"
+            },
+            "review": {
+              "$ref": "#/$defs/Review2"
+            }
+          },
+          "required": [
+            "kind",
+            "review"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "applied",
+              "type": "string"
+            },
+            "receipt": {
+              "$ref": "#/$defs/Receipt"
+            }
+          },
+          "required": [
+            "kind",
+            "receipt"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "pending",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "recovered",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "dismissed",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        }
+      ]
     },
     "OwnershipKind": {
       "oneOf": [
@@ -7153,6 +7534,41 @@
         },
         {
           "additionalProperties": false,
+          "description": "Effective settings and editable declarations for Global, a checkout or a Wave.",
+          "properties": {
+            "directory": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "kind": {
+              "const": "config.scope",
+              "type": "string"
+            },
+            "target": {
+              "$ref": "#/$defs/ScopeTarget"
+            },
+            "wave": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "target",
+            "directory",
+            "wave"
+          ],
+          "type": "object",
+          "x-result": {
+            "$ref": "#/$defs/Scope"
+          }
+        },
+        {
+          "additionalProperties": false,
           "description": "`lf config get <key> <destination flags> --json`: one file's declaration.",
           "properties": {
             "destination": {
@@ -7514,6 +7930,30 @@
           "x-result": {
             "items": {
               "$ref": "#/$defs/MachineListing"
+            },
+            "type": "array"
+          }
+        },
+        {
+          "additionalProperties": false,
+          "description": "Check one registered connection by its durable identity.",
+          "properties": {
+            "kind": {
+              "const": "machine.status",
+              "type": "string"
+            },
+            "machine": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "machine"
+          ],
+          "type": "object",
+          "x-result": {
+            "items": {
+              "$ref": "#/$defs/MachineStatus"
             },
             "type": "array"
           }
@@ -7949,7 +8389,7 @@
           "type": "object",
           "x-result": {
             "items": {
-              "$ref": "#/$defs/Entry"
+              "$ref": "#/$defs/Entry2"
             },
             "type": "array"
           },
@@ -8103,6 +8543,21 @@
           }
         }
       ]
+    },
+    "Receipt": {
+      "properties": {
+        "receiving": {
+          "$ref": "#/$defs/Applied"
+        },
+        "source": {
+          "$ref": "#/$defs/Applied"
+        }
+      },
+      "required": [
+        "source",
+        "receiving"
+      ],
+      "type": "object"
     },
     "Records": {
       "description": "Oldest first; replacement moves a record to the end. No heartbeat or clock.",
@@ -8382,6 +8837,28 @@
         "state",
         "body",
         "commit"
+      ],
+      "type": "object"
+    },
+    "Review2": {
+      "properties": {
+        "changes": {
+          "items": {
+            "$ref": "#/$defs/FilePreview"
+          },
+          "type": "array"
+        },
+        "effective": {
+          "$ref": "#/$defs/EffectiveSetting"
+        },
+        "receipt": {
+          "$ref": "#/$defs/Receipt"
+        }
+      },
+      "required": [
+        "changes",
+        "effective",
+        "receipt"
       ],
       "type": "object"
     },
@@ -8693,6 +9170,112 @@
       "type": [
         "object",
         "boolean"
+      ]
+    },
+    "Scope": {
+      "description": "One resolver reading for the selected work and each editable declaration.",
+      "properties": {
+        "files": {
+          "items": {
+            "$ref": "#/$defs/ScopeFile"
+          },
+          "type": "array"
+        },
+        "settings": {
+          "additionalProperties": {
+            "$ref": "#/$defs/EffectiveSetting"
+          },
+          "type": "object"
+        }
+      },
+      "required": [
+        "settings",
+        "files"
+      ],
+      "type": "object"
+    },
+    "ScopeFile": {
+      "properties": {
+        "destination": {
+          "$ref": "#/$defs/Destination"
+        },
+        "path": {
+          "description": "Destination for checked edits.",
+          "type": "string"
+        },
+        "read_path": {
+          "description": "Document supplying these slots, or the destination when no document exists.",
+          "type": "string"
+        },
+        "slots": {
+          "additionalProperties": {
+            "$ref": "#/$defs/Slot"
+          },
+          "description": "Includes absent slots. Omitted keys do not apply at this destination.",
+          "type": "object"
+        }
+      },
+      "required": [
+        "destination",
+        "path",
+        "read_path",
+        "slots"
+      ],
+      "type": "object"
+    },
+    "ScopeTarget": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "general",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "skill",
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "name"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "graph": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "step",
+              "type": "string"
+            },
+            "step": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "graph",
+            "step"
+          ],
+          "type": "object"
+        }
       ]
     },
     "Secrets": {
@@ -11109,6 +11692,32 @@
         "id",
         "title",
         "reason"
+      ],
+      "type": "object"
+    },
+    "Slot": {
+      "properties": {
+        "declared": {
+          "$ref": "#/$defs/Authored"
+        },
+        "entries": {
+          "items": {
+            "$ref": "#/$defs/Entry"
+          },
+          "type": "array"
+        },
+        "key": {
+          "type": "string"
+        },
+        "promotion": {
+          "$ref": "#/$defs/Availability"
+        }
+      },
+      "required": [
+        "key",
+        "declared",
+        "entries",
+        "promotion"
       ],
       "type": "object"
     },
@@ -15105,6 +15714,37 @@
     },
     "TerminalId": {
       "type": "string"
+    },
+    "ThemeDeclaration": {
+      "description": "The same theme declaration read by the phone, with its exact slot for Desktop edits.",
+      "properties": {
+        "entries": {
+          "items": {
+            "$ref": "#/$defs/Entry"
+          },
+          "type": "array"
+        },
+        "key": {
+          "type": "string"
+        },
+        "lifecycle": {
+          "$ref": "#/$defs/Lifecycle"
+        },
+        "path": {
+          "type": "string"
+        },
+        "value": {
+          "description": "The YAML declaration, as JSON."
+        }
+      },
+      "required": [
+        "path",
+        "key",
+        "value",
+        "lifecycle",
+        "entries"
+      ],
+      "type": "object"
     },
     "Threshold": {
       "oneOf": [
@@ -19148,6 +19788,114 @@
         },
         {
           "additionalProperties": false,
+          "description": "Change a catalog setting if its authored declarations still match.",
+          "properties": {
+            "change": {
+              "$ref": "#/$defs/Change"
+            },
+            "destination": {
+              "$ref": "#/$defs/Destination"
+            },
+            "expected": {
+              "items": {
+                "$ref": "#/$defs/Entry"
+              },
+              "type": "array"
+            },
+            "key": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "config.edit",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "destination",
+            "key",
+            "expected",
+            "change"
+          ],
+          "type": "object",
+          "x-result": {
+            "$ref": "#/$defs/Applied"
+          }
+        },
+        {
+          "additionalProperties": false,
+          "description": "Preview a checked edit against the current configuration file.",
+          "properties": {
+            "change": {
+              "$ref": "#/$defs/Change"
+            },
+            "destination": {
+              "$ref": "#/$defs/Destination"
+            },
+            "expected": {
+              "items": {
+                "$ref": "#/$defs/Entry"
+              },
+              "type": "array"
+            },
+            "key": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "config.preview",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "destination",
+            "key",
+            "expected",
+            "change"
+          ],
+          "type": "object",
+          "x-result": {
+            "type": "string"
+          }
+        },
+        {
+          "additionalProperties": false,
+          "description": "Preview, confirm or undo a move to the next broader configuration file.",
+          "properties": {
+            "action": {
+              "$ref": "#/$defs/Action"
+            },
+            "destination": {
+              "$ref": "#/$defs/Destination"
+            },
+            "key": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "config.promote",
+              "type": "string"
+            },
+            "wave": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "destination",
+            "key",
+            "wave",
+            "action"
+          ],
+          "type": "object",
+          "x-result": {
+            "$ref": "#/$defs/Outcome"
+          }
+        },
+        {
+          "additionalProperties": false,
           "description": "The Machine's `theme:` choice: set to `value`, or read when null.\nDesktop owns its Apply/Cancel transaction and the phone reads it; no\nCLI spells it.",
           "properties": {
             "kind": {
@@ -19167,7 +19915,7 @@
           ],
           "type": "object",
           "x-result": {
-            "$ref": "#/$defs/Declaration"
+            "$ref": "#/$defs/ThemeDeclaration"
           }
         }
       ]

@@ -1663,6 +1663,12 @@ fn run() -> anyhow::Result<()> {
                         );
                     }
                     Some(Commands::Config {
+                        cmd: loopflow::lf::ConfigCommand::Scope(scope),
+                    }) => {
+                        journal::mark_effect_free_read();
+                        return scope.run(cli.wave.as_deref(), || configuration_directory(&cli));
+                    }
+                    Some(Commands::Config {
                         cmd: loopflow::lf::ConfigCommand::Catalog { json },
                     }) => {
                         journal::mark_effect_free_read();
@@ -3061,6 +3067,9 @@ fn execute_command(
             loopflow::lf::ConfigCommand::Migrate { accept } => {
                 loopflow_execution::config::migrate::run(*accept)
             }
+            loopflow::lf::ConfigCommand::Scope(scope) => in_directory_runtime(args, |repo| {
+                scope.run(cli.wave.as_deref(), || Ok(repo.to_owned()))
+            }),
             loopflow::lf::ConfigCommand::Catalog { json } => {
                 loopflow::lf::commands::config::catalog(*json)
             }

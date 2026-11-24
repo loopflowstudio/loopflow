@@ -662,26 +662,20 @@ impl SqliteStore {
         ))
     }
 
-    /// The Task's Graph position and what `lf graph show` says of
-    /// each of its Graphs, without listing its Sessions: a hook reads this.
+    /// The Task's Graph position and executions in one snapshot for Task updates.
     pub fn task_progress_records(
         &self,
         task: &TaskId,
     ) -> StoreResult<(
         Option<SavedTaskGraphRow>,
-        Vec<crate::execution::GraphProcessDetail>,
+        Vec<crate::graph_process::GraphExecution>,
     )> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.savepoint()?;
-        let graphs = member_graphs(&tx, task)?;
+        let graphs = graphs_of_task(&tx, task)?;
         let graph = task_graph_row(&tx, task)?;
         tx.commit()?;
-        drop(conn);
-        let details = graphs
-            .iter()
-            .map(|(graph, entry)| graph.detail(entry.clone()))
-            .collect();
-        Ok((graph, details))
+        Ok((graph, graphs))
     }
 
     /// Read the Task's Sessions, Graph runs and Graph in one SQLite snapshot,

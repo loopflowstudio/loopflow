@@ -53,13 +53,16 @@ pub fn task_overview(
 pub(crate) fn task_progress(
     store: &SqliteStore,
     task: &TaskId,
-) -> StoreResult<(Option<TaskGraph>, Vec<crate::durable::GraphProcessDetail>)> {
-    let (graph, details) = store.task_progress_records(task)?;
+) -> StoreResult<(
+    Option<TaskGraph>,
+    Vec<loopflow_storage::graph_process::GraphExecution>,
+)> {
+    let (graph, runs) = store.task_progress_records(task)?;
     Ok((
         graph
             .map(|row| decode_row(row).map(read_task_graph))
             .transpose()?,
-        details,
+        runs,
     ))
 }
 

@@ -23,13 +23,12 @@ Field case behind this: five `manabot` `coverage-working` Tasks (MTG-418..422) r
 - `uv run pytest python/tests/test_instruction_levels.py python/tests/test_loopflow_skill_alignment.py` passed all 23 tests.
 - `cargo fmt` and `cargo clippy --all-targets -- -D warnings` passed for this slice.
 
+**Task conversation wakeups.** Taking up a Graph and passing through steps write no steer. The Task keeps its last settled position while the Graph runs. Its next run update gives the outcome, the last step, and any recorded run error. The update reads all three from one snapshot. A process that died between steps without recording its exit reports an unknown outcome.
+
+- `cargo nextest run -p loopflow-execution -p loopflow --lib -E 'test(harness::task_updates::tests::) | test(server::wake::tests::an_idle_task_conversation_wakes_only_when_its_graph_settles)'` passed all 16 tests. The idle inbox received zero connections during the run and one message carrying `lint failed` after settlement. A reading saved mid-run by the previous format delivered a new comment and then the settled run.
+
+- `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings` passed.
+
 ## Remaining
 
-### Pass 3: quiet running steps in `task_updates`
-
-- `rust/loopflow-execution/src/harness/README.md` describes the intended Task updates.
-- `rust/loopflow-execution/src/harness/task_updates.rs`: for a Task's own conversation, while the Graph runs keep the last settled position (run start and intermediate steps write no steer), as conducted children already do (`"Steps passing inside a run are not news"`). Settled runs (finished, failed, crashed without `ended_at`), interactive/end stops, merges, comments and steers still report once. Add `graph.run.error` to `RunObservation` and its report. A stored mid-run reading stays quiet until the run settles.
-- Replace `a_run_between_steps_keeps_its_last_report` and the "child's own conversation hears its steps" assertion with: a run advancing across steps writes zero updates; settling writes one, with the error when failed.
-- Check through `server::wake` that an idle Task session is not woken mid-run.
-
-Final checks for gate: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `documented_commands`.
+Gate checks `documented_commands`.

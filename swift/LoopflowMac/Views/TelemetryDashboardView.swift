@@ -24,10 +24,7 @@ struct TelemetryDashboardView: View {
     @State private var codebaseError: String?
     @State private var isLoading = true
 
-    /// Repos recent capture manifests name, by absolute path.
-    private var repos: [String] {
-        Array(Set(usage.compactMap(\.repo))).sorted()
-    }
+    private var repos: [String] { usage.localCodebases }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -41,7 +38,7 @@ struct TelemetryDashboardView: View {
                         "Session usage · 30 days",
                         subtitle: "Provider-authored cumulative counters. Dashes are unknown; final receipts and evidence gaps remain explicit."
                     ) {
-                        DirectSessionUsageList(history: usage, repo: selectedRepo)
+                        DirectSessionUsageList(history: usage.shown(in: selectedRepo))
                     }
 
                     chartCard(
@@ -310,13 +307,31 @@ struct TelemetryDashboardView: View {
     }
 }
 
+extension [SessionHistory] {
+    /// Repos this Machine's runs name, by absolute path. A collected run's
+    /// `repo` names a checkout here only when its Work lives here, so other
+    /// Machines' paths never reach the codebase picker.
+    var localCodebases: [String] {
+        Set(filter { $0.origin == nil }.compactMap(\.repo)).sorted()
+    }
+
+    /// Runs in the selected codebase, plus collected runs no codebase here
+    /// holds, so a bare rental run is never hidden by the picker.
+    func shown(in repo: String?) -> [SessionHistory] {
+        let codebases = localCodebases
+        guard let repo, codebases.count > 1 else { return self }
+        return filter { run in
+            run.repo == repo || (run.origin != nil && !codebases.contains(run.repo ?? ""))
+        }
+    }
+}
+
 private struct DirectSessionUsageList: View {
     @Environment(\.palette) private var palette
     let history: [SessionHistory]
-    let repo: String?
 
     private var visible: [SessionHistory] {
-        history.filter { repo == nil || $0.repo == repo }.prefix(30).map { $0 }
+        Array(history.prefix(30))
     }
 
     var body: some View {

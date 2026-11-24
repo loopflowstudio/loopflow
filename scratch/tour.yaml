@@ -1,4 +1,4 @@
-at: 8bf881d62c
+at: 76b30891582840f688b92e2c48638b0c113c4b5f
 first:
   - path: rust/loopflow/src/server/README.md
     why: How clients open and follow a remote Task
@@ -21,7 +21,7 @@ first:
   - path: rust/loopflow/src/server/peers.rs
     why: Pooled requests, terminal requests and dedicated subscription connections
   - path: rust/loopflow/src/server/subscriptions.rs
-    why: Change readers when ownership moves, retaining subscribers and checkpoints
+    why: Follow ownership and recover subscriptions across peer outages
   - path: rust/loopflow/src/lf/commands/write.rs
     why: The owner checks the file revision before saving
   - path: rust/loopflow/src/server/ticket.rs
@@ -33,7 +33,9 @@ first:
   - path: rust/loopflow/src/server/remote.rs
     why: The WebSocket bridge carries a local or remote terminal
   - path: rust/loopflow/tests/machine_commands.rs
-    why: Follow a Task between two live servers; attach its Session and shell
+    why: Watch mini reconnect and type into its resumed Session
+  - path: rust/loopflow/tests/support/tailscale.rs
+    why: Isolated phone identity and TLS WebSocket connections
 hide:
   - path: tests/fixtures/dto/server_schema.json
     why: Generated from the protocol types

@@ -29,6 +29,21 @@ Claude lf starts with `--add-dir <main>` stops on Claude's "Adding a new
 directory" dialog and writes no `<pid>.json` until it is answered; trust it once
 by running `claude` there and choosing "Yes, I trust this folder".
 
+## A Task conversation hearing its Graph settle
+
+Give the private repository `graph: qa` with three `- cmd: help …` steps and
+`default_agent: claude:haiku`, and a bare `origin`. `lf task checkout <task>`
+starts the primary Claude; it stops on the `--add-dir` dialog, whose default is
+"No, exit" (Enter there exits Claude): attach with `lf resume --task <task>`
+in a drained PTY, wait about 15 s for the dialog, send `ESC [ B` then Enter.
+Once `yielded` is 1 and `inbox` is set, `lf task run <task>`, then read
+`lf session steers <session> --json` (each steer's `delivered_at`) and count
+`queue-operation` `enqueue` lines in the Task's transcript: one per wake. A
+steer written while the woken turn runs is delivered at its next tool
+boundary, with no second enqueue. A command Graph with no interactive step
+completes the Task about a second after the run settles, so "Task completed."
+arrives as its own steer.
+
 # Starting a stopped conversation
 
 Prepare a Session (`lf -a claude session resume --prepare --json`) and give it

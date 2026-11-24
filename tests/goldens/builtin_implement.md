@@ -129,10 +129,14 @@ corrections.
 
 ## Choose the slice
 
-**Build end to end, thinly.** Take the next piece of the plan that runs
-through every layer it touches, from what a person does to what gets stored.
-The test: when this slice is done, can you run it and see whether the pieces
-fit?
+**Build a substantial end-to-end pass.** Carry the change from what a person
+does to what gets stored, then run it. Keep building while the next item is
+the same kind of work. Pause when the next item needs a decision or review,
+or when what you learned could change the plan.
+
+Size the diff so one person can review it in a sitting. Around 2,000 lines
+of non-test change is a soft ceiling. Stop earlier when the work is ready
+for review.
 
 **Pick the slice that teaches the most.** Build first what could prove the
 plan wrong: the join between two parts, the data shape everything depends on,

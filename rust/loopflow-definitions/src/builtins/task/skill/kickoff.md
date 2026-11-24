@@ -64,13 +64,10 @@ Cover these where they matter and skip the rest:
 - **What goes** — the files, symbols, tests and fixtures this change removes,
   and the behavior and data that must survive. Never plan repairs to them.
   Add earlier attempts you find while reading.
-- **Slices** — a suggested order to build in. Each slice runs end to end,
-  thinly, through every layer it touches, so it can be run and the pieces
-  seen to fit. First the slice that teaches the most: the one that could
-  prove the plan wrong. Say exactly what the first slice is and what it would
-  show; sketch the next two or three. Don't plan sixteen. The plan changes as
-  slices land, and by the eighth it will have left this list behind. Each
-  slice removes what it replaced once it works.
+- **Passes** — a small change takes one. For larger changes, group related
+  work into 2–4 substantial end-to-end passes, aiming for at most five.
+  Start with the pass that could prove the plan wrong. Say exactly what it
+  will show and sketch the rest. Each pass removes what it replaces.
 
 "Done when" names behavior people see, not a list of files. Keep each finding
 beside the decision it informs, with source paths. Quote what people said word

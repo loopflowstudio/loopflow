@@ -256,7 +256,8 @@ impl ConcreteSkill {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ConcreteXor {
     pub router: Skill,
-    pub paths: HashMap<String, ConcretePath>,
+    /// Node numbers and routing prompts visit alternatives in name order.
+    pub paths: BTreeMap<String, ConcretePath>,
     pub sources: Vec<String>,
 }
 
@@ -1038,10 +1039,7 @@ pub fn build_xor_routing_suffix(xor_def: &ConcreteXor) -> String {
     let mut suffix = String::from(
         "## Routing\n\nAfter completing your analysis, choose one of these paths:\n\n",
     );
-    let mut keys: Vec<&String> = xor_def.paths.keys().collect();
-    keys.sort();
-    for key in &keys {
-        let path = &xor_def.paths[*key];
+    for (key, path) in &xor_def.paths {
         suffix.push_str(&format!("- **{key}**: {}\n", path.description));
     }
     suffix.push_str("\nReturn the declared JSON object with `path` set to one listed key.\n");

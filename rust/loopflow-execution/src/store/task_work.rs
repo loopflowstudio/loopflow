@@ -1,11 +1,12 @@
 //! Task membership and saved Graph positions, with observed execution state.
 use crate::graph::runner::ExecutionCursor;
 use crate::store::{sqlite::SqliteStore, StoreResult};
-use crate::task_graph::{CapturedGraph, TaskGraph, TaskGraphRun};
+use crate::task_graph::{CapturedGraph, TaskGraph, TaskGraphPosition, TaskGraphRun};
 use crate::task_work::{TaskOverview, TaskWork};
 use loopflow_model::durable::TaskId;
 use loopflow_model::id::LfProcessId;
 use loopflow_storage::graph_process::{ExecutionStart, TaskCarrier};
+use loopflow_storage::sqlite::task_work::SavedTaskGraphRow;
 
 /// A carrier whose OS process cannot be read stays potentially running.
 pub(crate) fn carrier_may_run(carrier: &TaskCarrier) -> bool {
@@ -50,17 +51,36 @@ pub fn task_overview(
     ))
 }
 
-pub(crate) fn task_progress(
-    store: &SqliteStore,
-    task: &TaskId,
-) -> StoreResult<(Option<TaskGraph>, Vec<crate::durable::GraphProcessDetail>)> {
-    let (graph, details) = store.task_progress_records(task)?;
-    Ok((
-        graph
-            .map(|row| decode_row(row).map(read_task_graph))
-            .transpose()?,
-        details,
-    ))
+/// Task conversations keep their last settled position while a run advances.
+/// A run arrives at its last step before it records its outcome, so the
+/// position waits for every run to settle.
+pub(crate) fn settled_task_position(
+    row: Option<SavedTaskGraphRow>,
+    previous: Option<&TaskGraphPosition>,
+    run_in_progress: bool,
+) -> StoreResult<Option<TaskGraphPosition>> {
+    let Some(row) = row else {
+        return Ok(None);
+    };
+    if run_in_progress {
+        return Ok(previous.cloned());
+    }
+    Ok(match row.run {
+        None => Some(TaskGraphPosition::At { step: row.step }),
+        Some((_, carrier)) if carrier_may_run(&carrier) => previous.cloned(),
+        Some((cursor, carrier)) => {
+            let graph: CapturedGraph = serde_json::from_str(&row.graph)?;
+            let cursor = serde_json::from_str(&cursor)?;
+            Some(TaskGraphPosition::Run {
+                at: graph
+                    .step_name_of(&cursor)
+                    .unwrap_or_else(|| row.step.clone()),
+                step: row.step,
+                lf_process_id: carrier.id.to_string(),
+                running: false,
+            })
+        }
+    })
 }
 
 fn read_task_graph(row: TaskGraphRow) -> TaskGraph {
@@ -200,7 +220,7 @@ pub struct TaskGraphRecord {
     pub run_start: Option<ExecutionCursor>,
 }
 
-fn decode_row(row: super::sqlite::task_work::SavedTaskGraphRow) -> StoreResult<TaskGraphRow> {
+fn decode_row(row: SavedTaskGraphRow) -> StoreResult<TaskGraphRow> {
     Ok(TaskGraphRow {
         graph: serde_json::from_str(&row.graph)?,
         step: row.step,

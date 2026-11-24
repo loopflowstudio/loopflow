@@ -2,9 +2,9 @@ description: Build the plan in chunks, then review the finished change whole.
 steps:
 - loop:
     - loop:
-        - implement         # one chunk of the plan, fresh context
+        - implement         # one reviewable end-to-end pass
         - cmd: sync
-        - realign           # decides: next chunk, or on
+        - realign           # regroup the remaining work, or move on to review
     - compress
     - qa
     - concept-review        # decides: the finished change, whole

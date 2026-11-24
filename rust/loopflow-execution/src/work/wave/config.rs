@@ -129,14 +129,11 @@ fn read_wave_file(repo: &Path, name: &str) -> Result<Option<(PathBuf, Mapping)>,
     let Some((path, content)) = wave_yaml(repo, name)? else {
         return Ok(None);
     };
-    let mut mapping = parse_mapping(&path, &content);
-    if path == goal_path(repo, name) {
-        let shared = crate::config::wave_config_keys();
-        mapping.retain(|key, _| {
-            key.as_str()
-                .is_some_and(|key| WAVE_ONLY_KEYS.contains(&key) || shared.contains(key))
-        });
-    }
+    let mapping = if path == goal_path(repo, name) {
+        parse_goal_settings(&path, &content)
+    } else {
+        parse_mapping(&path, &content)
+    };
     Ok(Some((path, mapping)))
 }
 
@@ -168,10 +165,17 @@ fn wave_yaml(repo: &Path, name: &str) -> Result<Option<(PathBuf, String)>, WaveC
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
         Err(source) => return Err(WaveConfigError::Read { path, source }),
     }
-    goal_settings(goal_path(repo, name))
+    goal_yaml(goal_path(repo, name))
 }
 
 pub(crate) fn goal_settings(path: PathBuf) -> Result<Option<(PathBuf, Mapping)>, WaveConfigError> {
+    Ok(goal_yaml(path)?.map(|(path, content)| {
+        let mapping = parse_goal_settings(&path, &content);
+        (path, mapping)
+    }))
+}
+
+fn goal_yaml(path: PathBuf) -> Result<Option<(PathBuf, String)>, WaveConfigError> {
     let content = match crate::observe::read_to_string(&path) {
         Ok(content) => content,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
@@ -181,6 +185,16 @@ pub(crate) fn goal_settings(path: PathBuf) -> Result<Option<(PathBuf, Mapping)>,
         .map(|(yaml, _)| yaml)
         .unwrap_or_default();
     Ok(Some((path, frontmatter)))
+}
+
+fn parse_goal_settings(path: &Path, content: &str) -> Mapping {
+    let mut mapping = parse_mapping(path, content);
+    let shared = crate::config::wave_config_keys();
+    mapping.retain(|key, _| {
+        key.as_str()
+            .is_some_and(|key| WAVE_ONLY_KEYS.contains(&key) || shared.contains(key))
+    });
+    mapping
 }
 
 fn parse_mapping(path: &Path, content: &str) -> Mapping {

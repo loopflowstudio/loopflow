@@ -267,7 +267,8 @@ at the next turn end or launch.
 
 Keep several Task conversations open while a Graph finishes and a teammate adds
 a comment. Each work session hears what changed on its Tasks: a Graph
-run or step that settled, its Graph position, a comment from anyone else. A
+run that settled, with its error when it failed or blocked, the Task stopping
+at an interactive step or the end, a comment from anyone else. A
 comment with direction is a steer (source `comment:<id>`) and arrives only as
 one.
 
@@ -286,8 +287,10 @@ Only interactive conversations read updates, never the Session whose comment
 it is, and only they look: a worker Run rebuilds no Task history. The Task's
 first reading is a baseline, and a conversation that just started marks the
 updates written before it as read. The steer is rendered as an observation,
-not direction. A run between steps keeps its last report until its next step
-or its end. The server caches the revision at which a Task had nothing new; a
+not direction. A run starting and steps passing inside it are not news: while
+the Graph runs, the reading keeps its last settled position and the
+conversation stays asleep. Desktop and `lf task status` show live steps from
+the store. A reading saved mid-run stays quiet until that run settles. The server caches the revision at which a Task had nothing new; a
 hook's process is too short-lived to.
 
 A Task with a parent is conducted by its parent's interactive conversations.

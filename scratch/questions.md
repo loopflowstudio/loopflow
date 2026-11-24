@@ -12,3 +12,6 @@ Headless kickoff + concept-review — reversible product choices taken in `scrat
    - Passed over: keeping LLM calls for temporary scratch files cleared before merge, or skipping commits on `scratch/` entirely.
 5. **Keep `build.yaml`'s nested two-loop topology unchanged** (update comments, builtin skill guidance, and teach the outer-review-loop pattern in `docs/orchestration.md`).
    - Passed over: collapsing the inner `implement`↔`realign` loop into a single pass.
+
+Superseded by steers (2026-11-23): items 1 and 2 (the cap and its held stop) are dropped — guidance only, aim for no more than 5 passes. See the top of `scratch/plan.md`.
+Item 4 (scratch-only commit skip) is dropped too.

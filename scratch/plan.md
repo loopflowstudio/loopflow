@@ -1,5 +1,25 @@
 # LOO-1082: Avoid deep Graph loops and cold-cache single-slice passes
 
+## Direction after concept-review (2026-11-23, supersedes conflicting sections below)
+
+Jack Heart, exact words:
+- "i dont like the cap on loops exactly. the problem here was that the iterations were too small, not that it kept going whent there was good work to do. we can tell it to aim for no more than 5 loops" — **drop `max_loop_passes`, the cap in `finish_step`, verdict-preserving held stops, the `Blocked` status plumbing for it, and their tests/docs.** Guidance only; the decision prompt shows the pass number and steps repeated; the decider may iterate past 5.
+- "we should not say thinly. we should say end to end in something more like thickly" — remove "Build end to end, thinly" everywhere, Slice 1 included.
+- "i thikn you can do all 4 as soft guidelines" — soft guidance in builtin skills, no runtime checks: (1) keep building while the next item is the same kind of work; end a pass when the next item needs a decision a review or the plan could change; (2) a pass is about as much as one review can judge, one diff a person reads in a sitting; (3) kickoff splits into 2–4 passes (aim ≤5), realign regroups the rest into the remaining passes; (4) ~2k lines of non-test change is a point to pause, a ceiling not a target.
+- On the `lf <step>:` prefix: "i generally like it" — the rule stays as it is.
+- "i dont tink commit messages are a problem really since they are already routed to cheap agents" — **drop the scratch-only commit-message skip**; `commit_step` and `commit-message` stay as they are.
+
+Still in scope: quiet `task-session` during running steps (settled-run `error` in the update stays useful for failed runs), pass-sizing skill text, pass number in the decision prompt.
+
+### Docs written (write-docs)
+
+- `docs/orchestration.md` — Loops section (pass sizing as guidelines, decision-prompt line `Decision pass 3. Iterating repeats 3 steps, back to implement.`, outer-review-loop example).
+- `rust/loopflow-execution/src/harness/README.md` — Task updates: run starts and passing steps are not news; settled runs carry their error.
+- `docs/config.md` — no change: no new setting.
+
+The decision-prompt wording in the docs is the target; `graph.rs` and its tests should match it.
+
+
 ## User-visible outcome
 
 Tasks running looped Graphs complete in **2–4 substantial passes** instead of 10–17 single-item micro-passes, without burning cold-cache tokens on loop overhead, scratch-only commit-message sessions, or per-step `task-session` wakeups — and when an autonomous loop does hit its pass cap, `lf task status`, `task-session`, and `lf task run` explain why and recover in one command with zero wasted decider sessions:

@@ -133,9 +133,9 @@ A `loop:` block repeats as long as its final step says `iterate`. The built-in
 # build (builtin)
 - loop:
     - loop:
-        - implement        # build one reviewable chunk
+        - implement        # build one substantial pass of the plan
         - cmd: sync
-        - realign          # decides: next chunk (iterate) or move on (advance)
+        - realign          # decides: next pass (iterate) or move on (advance)
     - compress             # simplify what the branch touched
     - qa                   # exercise the real change end to end
     - concept-review       # decides: ship whole change or loop back
@@ -143,8 +143,41 @@ A `loop:` block repeats as long as its final step says `iterate`. The built-in
 ```
 
 Any Skill can be the deciding step of a loop: it returns `advance`, `iterate`
-(with direction), or `blocked` (with a question). There is no arbitrary pass
-limit; loops continue while useful work remains.
+(with direction), or `blocked` (with a question).
+
+Every `iterate` starts each step of the loop again in a fresh conversation, so
+a Task finishes in a few thick passes rather than many thin ones. `kickoff`
+splits the work into 2–4 passes up front, aiming for no more than 5, and
+`realign` regroups what is left into the remaining passes. Within a pass,
+`implement` keeps building while the next item is the same kind of work, and
+stops when the next item needs a decision a review or the plan could change.
+A pass is about as much as one review can judge: one diff a person reads in a
+sitting. Around 2,000 lines of non-test change is a point to pause and let
+the loop look, a ceiling and not a target.
+
+These are guidelines, not a limit. The deciding step sees which pass it is on
+and how many steps the loop repeats:
+
+```text
+Decision pass 3. Iterating repeats 3 steps, back to implement.
+```
+
+It keeps iterating past 5 when real work is left, and returns `blocked` when
+passes shrink into small increments that no longer converge.
+
+Put the expensive reviews (`compress`, `qa`, `concept-review`) in an outer
+loop, as `build` does, so they judge the finished change once instead of every
+pass. In your own Graph:
+
+```yaml
+# .lf/graphs/coverage.yaml
+- loop:
+    - loop:
+        - implement
+        - realign          # next pass, or on to review
+    - coverage-review      # decides: whole change done, or back to implement
+- pr-publish
+```
 
 ### Docs-first (`write-docs`) and QA playbooks (`.lf/qa/`)
 

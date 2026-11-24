@@ -27,6 +27,9 @@ pub enum OpsError {
     Parse(String),
     #[error("{0}")]
     Message(String),
+    /// Refused before writing anything; the server sends its code.
+    #[error("{0}")]
+    Refused(crate::engine::Error),
     #[error("{0}")]
     DeliveryHeld(String),
     /// The commit landed in the checkout; only its push failed.

@@ -121,7 +121,12 @@ impl Error {
     pub fn written(error: &anyhow::Error) -> Self {
         use crate::store::StoreError;
         use loopflow_storage::work::selection::SelectionError;
-        if let Some(named) = error.chain().find_map(|cause| cause.downcast_ref::<Self>()) {
+        if let Some(named) = error.chain().find_map(|cause| {
+            cause.downcast_ref::<Self>().or(match cause.downcast_ref() {
+                Some(crate::ops::OpsError::Refused(refusal)) => Some(refusal),
+                _ => None,
+            })
+        }) {
             return named.clone();
         }
         let code = error.chain().find_map(|cause| {
@@ -149,5 +154,20 @@ impl Error {
             ErrorCode::OutcomeUnknown,
             format!("{error:#}; inspect the affected work before retrying"),
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Error, ErrorCode};
+    use crate::ops::OpsError;
+
+    #[test]
+    fn a_refused_write_keeps_its_code_and_words() {
+        let refusal = OpsError::Refused(Error::conflict("LOO-12 has 1 open child"));
+        let written = Error::written(&anyhow::Error::from(refusal).context("task.complete"));
+        assert_eq!(written, Error::conflict("LOO-12 has 1 open child"));
+        let failed = Error::written(&OpsError::Message("disk full".into()).into());
+        assert_eq!(failed.code, ErrorCode::OutcomeUnknown);
     }
 }

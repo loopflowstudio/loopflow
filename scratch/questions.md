@@ -50,3 +50,11 @@
   Passed over: a `rehome_destination` field on `ViewContent` (Desktop's dialog
   reads `RoadmapTask`, not view plans, so it would not reach the one client
   that names the destination). The fix would go on the roadmap Task row.
+- **A reopened abandoned Task restarts from its base** (qa): when the Task's
+  PR row is abandoned and origin no longer has the branch, checkout starts from
+  `base_commit` instead of refusing "missing locally and remotely". Passed over:
+  restoring from GitHub's `refs/pull/<n>/head`, which the plan's exclusions
+  rule out.
+- **Completion refusals answer `conflict`** (qa): they write nothing, so
+  `outcome_unknown` ("It may have happened") was wrong. `OpsError::Refused`
+  carries the code; `Error::written` reads it.

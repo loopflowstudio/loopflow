@@ -97,3 +97,35 @@ child stops. Read both in
 entry holding `<cross-session-message from="loopflow">`, then its reply.
 Afterwards stop that home's `lf server run`, its `lf holder run` and the
 `claude` children under it, by PID after checking `LF_HOME` with `ps eww`.
+
+# Completing a parent: `--children`, live children, reopen
+
+Same fake-GitHub world. `lf task create '<words>' --parent <id> --json` builds
+the tree; zsh does not split `${2:+--parent $2}`, so pass `--parent` literally.
+
+- A live child without a provider: commit `.lf/graphs/live.yaml` holding
+  `- cmd: task wait <some open Task>` before the child's checkout is placed,
+  then `lf task run <child> live`. Its Graph stays `running` until that Task
+  closes, which is what `--children abandon` refuses on.
+- `lf task interrupt <child>` answers "stopped Graph live at task wait …" but a
+  running `cmd:` step never reads the interrupt; the processes keep going and
+  the refusal stays. Stop them by PID (`lf task run` carrier first, then its
+  `graph run` and the step) from `ps -axo pid,ppid,command`, matching the
+  private `bin/lf` path. Status then reads `Stopped … exited with status 130`.
+- A merged child: commit in its checkout, `lf pr open`, merge its branch into
+  `main` on origin, delete the branch, set `state: MERGED`, `merge_commit` and
+  `merged_head`, then `lf pr reconcile` in that checkout.
+- Abandonment deletes the branch and checkout. The stand-in answers
+  `headRepository` (without it lf refuses "open PR has unavailable head
+  repository") and `pr close`, but does not close a PR when its head branch is
+  deleted the way GitHub does: the state file keeps it `OPEN`, so a later
+  `lf pr open` reuses that number instead of opening a new one.
+- Reopen, then `lf task run <child>`: the checkout comes back at the Task's
+  base (its old work is gone with the branch), and the Graph runs.
+- Refusals write nothing: diff `select … from tasks` and `count(*) from
+  task_events` before and after.
+- Served `task.complete`: hello as `"kind":"desktop"` (a `machine` client must
+  carry a sender), send `"children": null | "rehome" | "abandon"`. A refusal
+  answers `code: conflict`; a missing `children` key is `invalid`; an unknown
+  policy reads "this server has no operation `task.complete`", the message a
+  newer client gets from an older server.

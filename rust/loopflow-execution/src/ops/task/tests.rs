@@ -3104,11 +3104,9 @@ fn abandoning_children_waits_for_live_work_but_not_an_idle_conversation() {
         .test_graph("code", &worktree, &[("implement", None)], None);
     let blocked = blockers();
     assert_eq!(blocked.len(), 1, "{blocked:?}");
-    assert!(
-        blocked[0].contains("WORK-2 is running: Graph run"),
-        "{blocked:?}"
-    );
-    assert!(blocked[0].contains(live.as_str()), "{blocked:?}");
+    assert_eq!(blocked[0].0, "WORK-2");
+    assert!(blocked[0].1.starts_with("Graph run"), "{blocked:?}");
+    assert!(blocked[0].1.contains(live.as_str()), "{blocked:?}");
     conn.execute(
         "UPDATE graph_processes SET ended_at=started_at,exit_code=0 WHERE ended_at IS NULL",
         [],
@@ -3156,5 +3154,5 @@ fn abandoning_children_waits_for_live_work_but_not_an_idle_conversation() {
     .unwrap();
     let blocked = blockers();
     assert_eq!(blocked.len(), 1, "{blocked:?}");
-    assert!(blocked[0].contains("WORK-2 is running: Session conversation"));
+    assert_eq!(blocked[0], ("WORK-2".into(), "Session conversation".into()));
 }

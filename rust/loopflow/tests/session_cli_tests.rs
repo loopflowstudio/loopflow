@@ -789,19 +789,32 @@ fn a_merged_parent_stays_open_until_it_is_completed_with_its_children() {
         )),
         "{refusal}"
     );
-    assert!(
-        refusal.contains(&format!(
-            "\n  {landed}  Retry budget per host  #1980 merged\n"
-        )),
-        "{refusal}"
+    // Each row is the indented identifier, title and standing, in aligned columns.
+    let row = |indent: &str, id: &str, title: &str, standing: &str| {
+        let line = refusal
+            .lines()
+            .find(|line| line.starts_with(&format!("{indent}{id} ")))
+            .unwrap_or_else(|| panic!("no row for {id}: {refusal}"));
+        let fields: Vec<&str> = line
+            .split("  ")
+            .map(str::trim)
+            .filter(|f| !f.is_empty())
+            .collect();
+        assert_eq!(fields, [id, title, standing], "{refusal}");
+        line.len() - standing.len()
+    };
+    let column = row("  ", &landed, "Retry budget per host", "#1980 merged");
+    assert_eq!(
+        row("    ", &grandchild, "Tune the budget", "unstarted"),
+        column
     );
-    assert!(
-        refusal.contains(&format!("\n    {grandchild}  Tune the budget  unstarted\n")),
-        "{refusal}"
+    assert_eq!(
+        row("    ", &kept, "Budget dashboards", "#1982 open"),
+        column
     );
-    assert!(
-        refusal.contains(&format!("\n    {kept}  Budget dashboards  #1982 open\n")),
-        "{refusal}"
+    assert_eq!(
+        row("  ", &unstarted, "Document the budget", "unstarted"),
+        column
     );
     assert!(
         refusal.contains(&format!(

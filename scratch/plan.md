@@ -10,10 +10,10 @@ settle are never hidden):
 ```text
 $ lf task complete LOO-12
 Error: LOO-12 has 3 open children; say what happens to them:
-  LOO-14  Log each retry        #1980 merged
-    LOO-17  Retry metrics       unstarted
-  LOO-15  Retry budget          #1981 open, at ship-review
-  LOO-16  Backoff docs          unstarted
+  LOO-14    Log each retry  #1980 merged
+    LOO-17  Retry metrics   unstarted
+  LOO-15    Retry budget    #1981 open, at ship-review
+  LOO-16    Backoff docs    unstarted
   lf task complete LOO-12 --children rehome    # direct children move up to LOO-10 and stay open
   lf task complete LOO-12 --children abandon   # merged descendants done, the rest abandoned
 ```
@@ -359,6 +359,13 @@ Learned: one Rust-owned count is enough for the phone; its dialog names no
 destination, so carrying the rehome destination on `ViewContent` would only
 serve Desktop, which reads `RoadmapTask`, not view plans. Left as an open
 question in `scratch/questions.md`.
+
+QA (private Machine + iPhone SE Simulator, `scratch/qa.html`): CLI, served
+write and phone paths work end to end. Fixed in QA: aligned refusal tree; the
+live-work refusal leads with the running child and `lf task interrupt <id>`;
+completion refusals answer `conflict`, not `outcome_unknown`; a reopened
+abandoned Task checks out again from its base instead of failing on its
+deleted branch. Desktop's mounted dialog was not reached (menus only).
 
 Remaining: gate. Desktop's `rehomeDestination` still cannot see deleted
 ancestors (says "Top Level" where Rust continues to an open ancestor above a

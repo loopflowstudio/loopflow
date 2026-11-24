@@ -247,10 +247,10 @@ nothing, and lists the open descendant tree so grandchildren are not hidden:
 ```text
 $ lf task complete LOO-12
 Error: LOO-12 has 3 open children; say what happens to them:
-  LOO-14  Retry budget per host  #1980 merged
-    LOO-17  Retry metrics        unstarted
-  LOO-15  Log each retry         #1981 open, at ship-review
-  LOO-16  Document the budget    unstarted
+  LOO-14    Retry budget per host  #1980 merged
+    LOO-17  Retry metrics          unstarted
+  LOO-15    Log each retry         #1981 open, at ship-review
+  LOO-16    Document the budget    unstarted
   lf task complete LOO-12 --children rehome    # direct children move up to LOO-10 and stay open
   lf task complete LOO-12 --children abandon   # merged descendants done, the rest abandoned
 ```
@@ -283,8 +283,8 @@ LOO-12 done
 
 If any descendant that `--children abandon` would abandon has live work — a
 running Graph, headless run, or active turn — the command refuses without
-writing, names each blocker, and suggests stopping it or using `--children
-rehome`. Idle Task conversations waiting at an interactive step are closed
+writing, names each blocker, and suggests `lf task interrupt <child>` or
+`--children rehome`. Idle Task conversations waiting at an interactive step are closed
 cleanly and do not block.
 
 In Loopflow Desktop and on iOS, completing a parent with open children opens a
@@ -292,8 +292,9 @@ confirmation dialog with the same choices ([Surfaces](surfaces.md#changes-show-a
 
 `lf task reopen` works on both done and abandoned Tasks. It restores the Task
 to `started` (or `unstarted` if it never ran) and turns auto off. Reopening
-does not restore closed PRs or deleted branches; the next `lf task run` opens a
-new PR linked to the same issue.
+does not restore closed PRs or deleted branches: when abandoning deleted the
+branch, the next `lf task run` starts again from the Task's base and the next
+publish opens a new PR linked to the same issue.
 
 A done Task's conversation is still yours. `lf resume LOO-12` reopens it
 after the checkout is gone, in the repository's main checkout, and it goes on

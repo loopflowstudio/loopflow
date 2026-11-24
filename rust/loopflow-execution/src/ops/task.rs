@@ -1413,15 +1413,20 @@ async fn restore_task_checkout(
     // A different registered path was rejected above; no branch is reset.
     if !crate::git::worktrees::branch_exists(&repo, &task.branch)? {
         let remote = format!("refs/remotes/origin/{}", task.branch);
-        if recovered.is_none()
-            && !ref_exists(&repo, &remote)?
-            && store
-                .active_task_pr(&task.id)
-                .await
-                .map_err(task_error)?
-                .is_some_and(|pr| pr.github().is_some())
-        {
-            fetch(&repo, "origin", &task.branch)?;
+        let pr = store
+            .active_task_pr(&task.id)
+            .await
+            .map_err(task_error)?
+            .filter(|pr| pr.github().is_some());
+        // Abandoning deletes the branch with its PR; a reopened Task starts
+        // again from its base when origin no longer has it.
+        let abandoned = pr.as_ref().is_some_and(|pr| pr.abandoned_at.is_some());
+        if recovered.is_none() && !ref_exists(&repo, &remote)? && pr.is_some() {
+            if let Err(error) = fetch(&repo, "origin", &task.branch) {
+                if !abandoned {
+                    return Err(error.into());
+                }
+            }
         }
         let base = if let Some(commit) = recovered {
             commit
@@ -1439,7 +1444,7 @@ async fn restore_task_checkout(
                         TaskEventKind::CheckoutReady { .. } | TaskEventKind::PrStarted { .. }
                     )
                 });
-            if started {
+            if started && !abandoned {
                 return Err(task_error(format!("Task branch {} is missing locally and remotely; its committed work cannot be recovered from the base alone; use --recover-from COMMIT only after locating its retained history", task.branch)));
             }
             task.base_commit.clone()
@@ -2841,7 +2846,10 @@ pub fn task_complete(
         match task_work_status(&store, &task).await? {
             WorkStatus::Done => return Ok(done(task)),
             WorkStatus::Abandoned => {
-                return Err(task_error("An abandoned Task cannot be completed"))
+                return Err(refused(format!(
+                    "{} is abandoned; `lf task reopen {}` before completing it",
+                    task.identifier, task.identifier
+                )))
             }
             WorkStatus::Ready => {}
         }
@@ -2853,7 +2861,7 @@ pub fn task_complete(
             .map_err(task_error)?;
         if let Some(refusal) = task_completion_refusal(&store, &task).await? {
             if open > 0 || children.is_some() {
-                return Err(task_error(refusal));
+                return Err(refused(refusal));
             }
             // A leaf waits for its merge, as a Graph's `end` does.
             if let Some(request) = store
@@ -2866,16 +2874,31 @@ pub fn task_complete(
             return Ok(done(task));
         }
         if open > 0 && children.is_none() {
-            return Err(task_error(open_children_refusal(&store, &task)?));
+            return Err(refused(open_children_refusal(&store, &task)?));
         }
         if children == Some(ChildPolicy::Abandon) {
             let blocked = live_abandon_blockers(&store, &task)?;
             if !blocked.is_empty() {
-                return Err(task_error(format!(
-                    "{} has children with live work; stop it or use --children rehome:\n{}",
-                    task.identifier,
-                    blocked.join("\n")
-                )));
+                let mut running: Vec<&str> = blocked.iter().map(|(id, _)| id.as_str()).collect();
+                running.dedup();
+                let interrupt = running
+                    .iter()
+                    .map(|id| format!("`lf task interrupt {id}`"))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let lines = blocked
+                    .iter()
+                    .map(|(id, work)| format!("  {id} is running: {work}"));
+                return Err(refused(
+                    std::iter::once(format!(
+                        "{} {} still running; stop with {interrupt} or use --children rehome:",
+                        running.join(", "),
+                        if running.len() == 1 { "is" } else { "are" },
+                    ))
+                    .chain(lines)
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+                ));
             }
         }
         let completion = store
@@ -2897,11 +2920,17 @@ pub fn task_complete(
     })
 }
 
+/// A completion refusal: nothing was written, so a served client may retry.
+fn refused(message: impl Into<String>) -> OpsError {
+    OpsError::Refused(crate::engine::Error::conflict(message))
+}
+
 /// Why bare completion refuses: the open tree, then both choices.
 fn open_children_refusal(store: &SharedStore, task: &Task) -> OpsResult<String> {
     use loopflow_storage::sqlite::children::OpenDescendant;
 
-    fn lines(descendants: &[OpenDescendant], depth: usize, into: &mut Vec<String>) {
+    /// One row per descendant: indented identifier, title, standing.
+    fn rows(descendants: &[OpenDescendant], depth: usize, into: &mut Vec<[String; 3]>) {
         for descendant in descendants {
             let pr = descendant.pr.as_ref().and_then(|pr| {
                 pr.github()
@@ -2909,18 +2938,16 @@ fn open_children_refusal(store: &SharedStore, task: &Task) -> OpsResult<String> 
             });
             let step = descendant.step.as_ref().map(|step| format!("at {step}"));
             let standing = pr.into_iter().chain(step).collect::<Vec<_>>().join(", ");
-            into.push(format!(
-                "{}{}  {}  {}",
-                "  ".repeat(depth),
-                descendant.task.identifier,
-                descendant.task.title,
+            into.push([
+                format!("{}{}", "  ".repeat(depth), descendant.task.identifier),
+                descendant.task.title.clone(),
                 if standing.is_empty() {
                     descendant.state.label().to_string()
                 } else {
                     standing
-                }
-            ));
-            lines(&descendant.children, depth + 1, into);
+                },
+            ]);
+            rows(&descendant.children, depth + 1, into);
         }
     }
     let descendants = store
@@ -2938,7 +2965,19 @@ fn open_children_refusal(store: &SharedStore, task: &Task) -> OpsResult<String> 
         if open == 1 { "child" } else { "children" },
         if open == 1 { "it" } else { "them" },
     )];
-    lines(&descendants, 1, &mut text);
+    let mut tree = Vec::new();
+    rows(&descendants, 1, &mut tree);
+    let width = |column: usize| {
+        tree.iter()
+            .map(|row| row[column].chars().count())
+            .max()
+            .unwrap_or(0)
+    };
+    let (lead, title) = (width(0), width(1));
+    text.extend(
+        tree.iter()
+            .map(|[id, name, standing]| format!("{id:<lead$}  {name:<title$}  {standing}")),
+    );
     let id = &task.identifier;
     let rehome = match destination {
         Some(destination) => format!(
@@ -2956,16 +2995,16 @@ fn open_children_refusal(store: &SharedStore, task: &Task) -> OpsResult<String> 
     Ok(text.join("\n"))
 }
 
-/// What keeps `--children abandon` from settling `task`'s descendants: live
-/// work in any descendant it would abandon. A conversation idle in its held
+/// What keeps `--children abandon` from settling `task`'s descendants: each
+/// descendant it would abandon with live work, and that work. A conversation idle in its held
 /// terminal is not live; abandoning closes it.
-fn live_abandon_blockers(store: &SharedStore, task: &Task) -> OpsResult<Vec<String>> {
+fn live_abandon_blockers(store: &SharedStore, task: &Task) -> OpsResult<Vec<(String, String)>> {
     use loopflow_storage::sqlite::children::OpenDescendant;
 
     fn walk(
         store: &SharedStore,
         descendants: &[OpenDescendant],
-        into: &mut Vec<String>,
+        into: &mut Vec<(String, String)>,
     ) -> OpsResult<()> {
         for descendant in descendants {
             let merged = descendant
@@ -2988,11 +3027,7 @@ fn live_abandon_blockers(store: &SharedStore, task: &Task) -> OpsResult<Vec<Stri
                         None => false,
                     };
                     if !idle {
-                        into.push(format!(
-                            "  {} is running: {}",
-                            descendant.task.identifier,
-                            work.label()
-                        ));
+                        into.push((descendant.task.identifier.clone(), work.label()));
                     }
                 }
             }

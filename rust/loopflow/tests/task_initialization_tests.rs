@@ -488,6 +488,75 @@ fn missing_worktree_status_is_actionable_and_read_only() {
 }
 
 #[test]
+fn a_reopened_abandoned_task_checks_out_again_from_its_base() {
+    let repo = TestRepo::new();
+    let branch = "test/abandoned";
+    repo.create_branch(branch);
+    repo.create_file("work.txt", "abandoned work");
+    repo.stage_all();
+    repo.commit("Abandoned work");
+    repo.checkout("main");
+    let home = tempfile::tempdir().unwrap();
+    let target = tempfile::tempdir().unwrap();
+    let fixture = register_task_with_pr(home.path(), repo.path(), branch, &repo.head_sha());
+    let worktree = target.path().join("checkout");
+    let database = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    database
+        .execute(
+            "INSERT INTO task_checkouts(task_id,worktree) VALUES(?1,?2)
+             ON CONFLICT(task_id) DO UPDATE SET worktree=excluded.worktree",
+            rusqlite::params![fixture.task.id.as_str(), worktree.display().to_string()],
+        )
+        .unwrap();
+    let checkout = || {
+        unbound_command(
+            Path::new(env!("CARGO_BIN_EXE_lf")),
+            repo.path(),
+            &["task", "checkout", "INF-123", "--json"],
+        )
+        .env("LF_HOME", home.path())
+        .output()
+        .unwrap()
+    };
+    let first = checkout();
+    assert!(
+        first.status.success(),
+        "{}",
+        String::from_utf8_lossy(&first.stderr)
+    );
+    assert!(worktree.join("work.txt").exists());
+
+    // Abandoning closed its PR and deleted the branch and checkout.
+    fs::remove_dir_all(&worktree).unwrap();
+    for args in [vec!["worktree", "prune"], vec!["branch", "-D", branch]] {
+        assert!(Command::new("git")
+            .current_dir(repo.path())
+            .args(args)
+            .status()
+            .unwrap()
+            .success());
+    }
+    database
+        .execute(
+            "UPDATE task_prs SET publication_requested_at=1,github_number=7,
+                github_url='https://example.test/pr/7',abandoned_at=2 WHERE task_id=?1",
+            [fixture.task.id.as_str()],
+        )
+        .unwrap();
+    let reopened = checkout();
+    assert!(
+        reopened.status.success(),
+        "{}",
+        String::from_utf8_lossy(&reopened.stderr)
+    );
+    assert_eq!(
+        loopflow_execution::git::rev_parse(&worktree, "HEAD").unwrap(),
+        fixture.pr.base_commit
+    );
+    assert!(!worktree.join("work.txt").exists());
+}
+
+#[test]
 fn research_checkout_restores_and_reads_files_without_a_pull_request() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();

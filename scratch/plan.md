@@ -609,3 +609,34 @@ amchines ever basically". So slice 12 adds no cross-Machine handling: no
 second-Machine test, no create path that exists only because another
 Machine might hold the record. Delete such paths where slice 11 or earlier
 added them for Project creates.
+
+Built in slice 12: `tracker::create_wave_project` makes a Wave's Project in
+the repository's tracker and binds it, or fails with the tracker's error.
+`lf wave create` (Desktop's create too, through `wave_lifecycle::add`), `lf
+wave plan connect` with no Project named, and `lf wave sync` call it; sync
+prints "Made wave/<slug>'s Project in Linear." The drain calls the same create
+for an unbound live Project a queued Task names, before sending. Nothing
+queues a Project create: `uncreated` yields Tasks, `attach_in` and
+`creation_baseline` are Task-only, `accept_project` lost its "a create is out"
+check, the Linear/Asana Project create send and look arms went (Linear now
+retires an action it has no form for, as Asana did), and `remove_chapters.sql`
+retires Project creates released lf queued. Kept as lost-reply recovery: the
+Linear duplicate-id lookup and Asana's footer search. Tests:
+`adding_a_wave_makes_its_linear_project_before_it_returns`,
+`adding_a_wave_offline_fails_and_a_second_add_makes_its_project`,
+`a_wave_sync_binds_the_{linear,asana}_project_a_lost_create_reply_left`, the
+migration test's retired create; slice 11's storage test and
+`a_removed_waves_project_is_not_created_in_the_tracker` deleted. Execution
+`task_planning_tests::`, `asana_planning_tests::`, `linear::actions::`,
+`wave_lifecycle`; storage `tracker_actions::`, `linear_events::`, the
+migration test; `documented_commands::`; clippy on both crates: pass.
+`oauth_tests::…sqlite_contention…` fails (Remains 1, on the base).
+`check_migrations.py` fails: `planning_scope_checks.sql` is on origin/main and
+not here; the gate's sync brings it.
+
+Two choices differ from the slice text; see `scratch/questions.md`:
+tracker down leaves the Wave recorded with its Project unbound (rerunning
+`lf wave create` makes it), and a Task sent into an unbound Project creates it.
+
+Remains 3 (the Asana race) no longer applies: a Project is created by one
+command on one Machine.

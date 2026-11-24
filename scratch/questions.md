@@ -90,3 +90,18 @@
   `projects.planning_initiatives` (`WorkValue::ProjectInitiatives`, kept for
   released peers), so it went into `STILL_READ` under LOO-995. Dropping it
   from plan records instead would be a behavior change, left for the branch.
+- Slice 12: tracker unreachable during `lf wave create` fails the command
+  with "wave/<name> has no tracker Project yet: … Run `lf wave create <name>`
+  again", but the Wave stays recorded with its Project unbound; a second
+  `lf wave create` makes the Project. Recording nothing would mean rolling
+  back the store rows, the seeded `.lf/wave/<name>/` files and their commit
+  on main, or minting ids before `ensure_wave` (nested parents too). The
+  unbound Wave is the same state an upgraded or Git-arrived Wave is in.
+- Slice 12: a drain about to send a Task naming an unbound live Project
+  creates that Project first. Without it, `lf task create --wave <w>` into an
+  upgraded Wave's unbound Project errors on every pass until someone runs
+  `lf wave sync <w>`. No queue row; the create runs on the Machine sending
+  the Task. The alternative is a held Task plus a hint in its output.
+- Slice 12: `lf wave create a/b` makes the tracker Project for `a/b` only; a
+  parent `a` registered on the way gets its own when synced or when a Task
+  is sent into it.

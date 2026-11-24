@@ -1165,13 +1165,13 @@ impl Write {
         let (route, launching) = match self {
             Self::SessionResume { .. } => return self.remote_session(),
             Self::TaskRun { issue, .. } | Self::TaskAutoOn { issue, .. } => {
-                (remote_task(issue)?, true)
+                (remote_task(issue, None)?, true)
             }
             Self::TaskSave { issue, .. } | Self::TaskAutoOff { issue, .. } => {
-                (remote_task(issue)?, false)
+                (remote_task(issue, None)?, false)
             }
             Self::TaskClaim { issue, .. } | Self::TaskUnassign { issue, .. } => {
-                (remote_ownership_writer(issue)?, false)
+                (remote_ownership_writer(issue, None)?, false)
             }
             _ => return Ok(None),
         };

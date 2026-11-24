@@ -163,16 +163,32 @@ impl crate::machine::wire::Selection {
 
 /// The route of the Task `selector` names, when its Work lives on another
 /// Machine. Reads records only.
-pub fn remote_task(selector: &str) -> Result<Option<TaskExecutionRoute>> {
+pub fn remote_task(selector: &str, directory: Option<&Path>) -> Result<Option<TaskExecutionRoute>> {
     let Some(store) = read_registry()? else {
         return Ok(None);
     };
-    remote_task_in(&store, selector)
+    remote_task_in(&store, selector, directory)
 }
 
-fn remote_task_in(store: &SqliteStore, selector: &str) -> Result<Option<TaskExecutionRoute>> {
-    let Some(task) = resolve_task_id(store, selector, None)? else {
-        return Ok(None);
+fn remote_task_in(
+    store: &SqliteStore,
+    selector: &str,
+    directory: Option<&Path>,
+) -> Result<Option<TaskExecutionRoute>> {
+    // Short IDs and tracker labels can name different Tasks in different
+    // repositories. A client outside a repository can still address a Task.
+    let scoped = match directory.filter(|_| TaskId::parse(selector).is_err()) {
+        Some(path) => {
+            crate::store::children::resolve_task_id(store, selector, Some(&path.to_string_lossy()))?
+        }
+        None => None,
+    };
+    let task = match scoped {
+        Some(task) => task,
+        None => match resolve_task_id(store, selector, None)? {
+            Some(task) => task,
+            None => return Ok(None),
+        },
     };
     let route = crate::store::ownership::task_execution_route(store, &task)?;
     Ok((route.machine_id != crate::store::machines::local_machine(store)?.id).then_some(route))
@@ -182,11 +198,14 @@ fn remote_task_in(store: &SqliteStore, selector: &str) -> Result<Option<TaskExec
 /// a move from here has not arrived, which leaves the next entry here. A sent
 /// move's target is asked first: one that took the Task in, its answer lost,
 /// writes it like any Task that runs there.
-pub fn remote_ownership_writer(selector: &str) -> Result<Option<TaskExecutionRoute>> {
+pub fn remote_ownership_writer(
+    selector: &str,
+    directory: Option<&Path>,
+) -> Result<Option<TaskExecutionRoute>> {
     let Some(store) = read_registry()? else {
         return Ok(None);
     };
-    let Some(route) = remote_task_in(&store, selector)? else {
+    let Some(route) = remote_task_in(&store, selector, directory)? else {
         return Ok(None);
     };
     let Some(moving) = store.task_move_in_flight(&route.task_id)? else {

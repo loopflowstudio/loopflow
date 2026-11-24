@@ -4196,7 +4196,7 @@ fn server_routed_task_workspace() {
     checkout(&local, task.as_str(), &plan.local_path);
     let file = "document.txt";
     fs::write(plan.local_path.join(file), "old laptop copy").unwrap();
-    let _mini = served_mini(&fixture);
+    let server_on_mini = served_mini(&fixture);
     let (_server, socket) = served(&fixture);
     let mut client = Connection::open_at(Path::new(&socket)).unwrap();
     let read_file = Read::TaskFile {
@@ -4238,6 +4238,111 @@ fn server_routed_task_workspace() {
         .any(|entry| entry["path"] == file));
     let original = client.request(&read_file).unwrap().result;
     assert_eq!(original["content"], "from mini\n");
+    let graph = support::record_graph(
+        &fixture.root.path().join("remote/store"),
+        &plan.remote_path,
+        "remote-run",
+        "inspect",
+        "succeeded",
+    );
+    let session = "session_aabbccddeeff00112233445566778899";
+    plan.remote.test_session(
+        session,
+        &loopflow_storage::session_record::new_artifact_key(),
+    );
+    peer.execute(
+        "UPDATE agent_sessions SET cwd=?2,repo=?2,task_id=?3,wave_id=?4 WHERE id=?1",
+        rusqlite::params![
+            session,
+            plan.remote_path.to_str().unwrap(),
+            peer_task.as_str(),
+            plan.remote.task(&peer_task).unwrap().unwrap().wave_id,
+        ],
+    )
+    .unwrap();
+    let peer_client = || {
+        let output = mini_command(&fixture, &["server", "status"])
+            .output()
+            .unwrap();
+        assert_success(&output);
+        let status: Value = serde_json::from_slice(&output.stdout).unwrap();
+        let clients: Vec<_> = status["clients"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|row| {
+                row["client"]["kind"] == loopflow_execution::machine::wire::MACHINE_CLIENT
+            })
+            .collect();
+        assert_eq!(clients.len(), 1, "{status}");
+        (
+            clients[0]["id"].clone(),
+            clients[0]["requests"].as_u64().unwrap(),
+        )
+    };
+    let (connection_id, requests) = peer_client();
+    let directory = plan.local_path.clone();
+    let pane = client
+        .request(Read::TaskGet {
+            directory: directory.clone(),
+            issue: task.to_string(),
+        })
+        .unwrap()
+        .result;
+    let workspace = &pane["row"]["reference"]["workspace"];
+    assert_eq!(workspace["machine_id"], mini.id.as_str());
+    assert_eq!(workspace["worktree"], plan.remote_path.to_str().unwrap());
+    let detail = client
+        .request(Read::TaskDetail {
+            directory: directory.clone(),
+            issue: task.to_string(),
+        })
+        .unwrap()
+        .result;
+    assert_eq!(detail["task"]["id"], peer_task.as_str());
+    let runs = client
+        .request(Read::TaskRuns {
+            directory: directory.clone(),
+            task: task.to_string(),
+            after: None,
+        })
+        .unwrap()
+        .result;
+    assert_eq!(runs["entries"][0]["id"], graph);
+    let sessions = |task| Read::SessionList {
+        directory: directory.clone(),
+        task,
+        headless: true,
+        after: None,
+        limit: Some(1),
+    };
+    let scoped = client
+        .request(sessions(Some(task.to_string())))
+        .unwrap()
+        .result;
+    assert_eq!(scoped["entries"][0]["id"], session);
+    let local_sessions = client.request(sessions(None)).unwrap().result;
+    assert!(local_sessions["entries"].as_array().unwrap().is_empty());
+    // Both repositories use WORK-42. The next request on this same pipe
+    // resolves the label in its own repository on each Machine.
+    let (other, other_task) = task_on_mini(&fixture);
+    for db in [&local, &peer] {
+        db.execute(
+            "UPDATE tasks SET issue_identifier='WORK-42' WHERE id=?1",
+            [other_task.as_str()],
+        )
+        .unwrap();
+    }
+    let detail = client
+        .request(Read::TaskDetail {
+            directory: other.local_path.clone(),
+            issue: "WORK-42".into(),
+        })
+        .unwrap()
+        .result;
+    assert_eq!(detail["task"]["repo"], other.remote_path.to_str().unwrap());
+    assert_eq!(peer_client(), (connection_id, requests + 5));
+
     let save = |base: &Value| Write::TaskSave {
         directory: plan.local_path.clone(),
         issue: task.to_string(),
@@ -4285,10 +4390,31 @@ fn server_routed_task_workspace() {
         .result;
     assert!(diff["patch"].as_str().unwrap().contains("+edited on mini"));
 
+    // The draft fits the file limit, but its JSON escapes need an upload ticket.
+    let draft = "\"".repeat(loopflow_execution::machine::wire::MAX_MESSAGE / 2);
+    let preview = client
+        .request(Read::TaskDiff {
+            issue: task.to_string(),
+            path: Some(file.into()),
+            base: "head".into(),
+            head: None,
+            draft: Some(draft),
+        })
+        .unwrap()
+        .result;
+    assert!(preview["patch"].as_str().unwrap().contains("-from mini"));
+    // Restart the peer under an idle pipe. The next read reconnects once.
+    drop(server_on_mini);
+    let restarted = served_mini(&fixture);
+    assert_eq!(
+        client.request(&read_file).unwrap().result["content"],
+        "edited on mini\n"
+    );
     executable(
         &fixture.root.path().join("bin/ssh"),
         "#!/bin/sh\nexit 255\n",
     );
+    drop(restarted);
     let offline = client
         .request(&read_file)
         .unwrap_err()
@@ -4411,25 +4537,31 @@ fn task_on_mini(fixture: &Machines) -> (SharedPlan, loopflow_execution::durable:
     (plan, task)
 }
 
+fn mini_command(fixture: &Machines, args: &[&str]) -> Command {
+    let remote = fixture.root.path().join("remote");
+    let mut command = Command::new(remote.join(".local/bin/lf"));
+    command
+        .env_clear()
+        .env("HOME", &remote)
+        .env("PATH", "/usr/bin:/bin")
+        .current_dir(&remote)
+        .args(args);
+    command
+}
+
 /// Mini's own server, ready, as `lf server connect` there finds it.
 fn served_mini(fixture: &Machines) -> Child {
     use std::time::{Duration, Instant};
-    let remote = fixture.root.path().join("remote");
-    let lf = |args: &[&str]| {
-        let mut command = Command::new(remote.join(".local/bin/lf"));
-        command
-            .env_clear()
-            .env("HOME", &remote)
-            .env("PATH", "/usr/bin:/bin")
-            .current_dir(&remote)
-            .args(args);
-        command
-    };
-    let server = Child(lf(&["server", "run"]).spawn().unwrap());
+    let server = Child(mini_command(fixture, &["server", "run"]).spawn().unwrap());
     let deadline = Instant::now() + Duration::from_secs(20);
     loop {
-        let status: Value =
-            serde_json::from_slice(&lf(&["server", "status"]).output().unwrap().stdout).unwrap();
+        let status: Value = serde_json::from_slice(
+            &mini_command(fixture, &["server", "status"])
+                .output()
+                .unwrap()
+                .stdout,
+        )
+        .unwrap();
         if status["ready"] == true {
             return server;
         }

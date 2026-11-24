@@ -979,9 +979,11 @@ pub fn print_remote_task_status(
         directory: repo.to_owned(),
         issue: issue.into(),
     };
-    let Some((machine, mut connection)) = read.peer()? else {
+    let Some((machine, sender)) = read.peer()? else {
         return Ok(false);
     };
+    let mut connection =
+        loopflow_execution::machine::client::Connection::open_on(&machine, sender, None)?;
     if subscribe {
         print_remote_readings(connection, read)?;
     } else {

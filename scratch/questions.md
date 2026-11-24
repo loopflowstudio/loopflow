@@ -9,3 +9,5 @@
 - **Keep `lf task location --peers` as a CLI diagnostic command while deleting Desktop's `onMachine` and `pinTaskLocation` Task-view routing.** Passed over deleting `lf task location` entirely, which is documented as a separate peer-observation diagnostic tool.
 
 - File operations follow the execution Machine during an unfinished move. `remote_ownership_writer` keeps reporting progress on the source when arrival is unconfirmed. Using it for files would expose the source checkout during a peer outage. This first piece uses the existing one-shot transport so file routing and revision checks can be exercised before changing connection lifetimes.
+
+- A peer’s per-request refusal leaves the pipe available for the next read. Only a transport disconnect on a reused pipe earns a retry. The peer pool lives with the server and serves both client transports.

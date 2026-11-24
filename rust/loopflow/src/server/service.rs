@@ -19,6 +19,7 @@ use tokio_util::codec::{Framed, LinesCodec, LinesCodecError};
 
 use super::answers::{Answer, Remembered};
 use super::outbox::{Outbox, Reservation, MAX_OPEN, MAX_RETAINED, MAX_WRITES};
+use super::peers::PeerPool;
 use super::remote::Control;
 use super::subscriptions::{Member, Subscriptions};
 use super::ticket::{Admission, Purpose, Tickets};
@@ -58,8 +59,12 @@ impl Carrier for Lines {
     type Failure = LinesCodecError;
 }
 
-/// Welcomed connections by client ID, as `lf server status` lists them.
-pub(super) type Clients = Arc<Mutex<HashMap<String, ClientState>>>;
+/// Connections to this server and from it to other Machines.
+#[derive(Clone, Default)]
+pub(super) struct Clients {
+    listed: Arc<Mutex<HashMap<String, ClientState>>>,
+    peers: Arc<PeerPool>,
+}
 
 pub(super) struct ClientState {
     row: ConnectedClient,
@@ -91,7 +96,7 @@ impl Listed {
         let connected_at = time::OffsetDateTime::now_utc()
             .format(&time::format_description::well_known::Rfc3339)
             .expect("the current time formats as RFC 3339");
-        lock(clients).insert(
+        lock(&clients.listed).insert(
             id.clone(),
             ClientState {
                 row: ConnectedClient {
@@ -117,7 +122,7 @@ impl Listed {
     }
 
     fn requested(&self) {
-        if let Some(row) = lock(&self.clients).get_mut(&self.id) {
+        if let Some(row) = lock(&self.clients.listed).get_mut(&self.id) {
             row.row.requests += 1;
         }
     }
@@ -125,7 +130,7 @@ impl Listed {
 
 impl Drop for Listed {
     fn drop(&mut self) {
-        lock(&self.clients).remove(&self.id);
+        lock(&self.clients.listed).remove(&self.id);
     }
 }
 
@@ -135,7 +140,7 @@ pub(super) fn lock<T>(shared: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 
 /// Oldest connection first.
 fn connected(clients: &Clients) -> Vec<ConnectedClient> {
-    let mut rows: Vec<_> = lock(clients)
+    let mut rows: Vec<_> = lock(&clients.listed)
         .values()
         .map(|state| {
             let mut row = state.row.clone();
@@ -177,6 +182,7 @@ pub(super) async fn run() -> Result<()> {
     let instance: Arc<str> = uuid::Uuid::new_v4().to_string().into();
     let slots = Arc::new(Semaphore::new(MAX_CONNECTIONS));
     let clients = Clients::default();
+    let peers = clients.peers.clone();
     // One ticket store: a terminal or bulk connection on either carrier
     // redeems what a control connection on the same carrier requested.
     let tickets = Arc::new(Tickets::default());
@@ -211,6 +217,7 @@ pub(super) async fn run() -> Result<()> {
     tracing::info!(%instance, socket = %path.display(), "Loopflow server ready");
     tokio::select! {
         result = remote => result,
+        _ = peers.expiring() => unreachable!("peer expiry runs until shutdown"),
         _ = tickets.expiring() => unreachable!("ticket expiry runs until shutdown"),
         result = local(listener, instance, executable_sha256, slots, clients, remote_control, tickets.clone(), subscriptions, terminals) => result,
     }
@@ -529,7 +536,7 @@ enum Start {
 enum Origin {
     /// A client on this Machine: a write for Work another Machine runs is
     /// sent there.
-    Local,
+    Local(Arc<PeerPool>),
     /// Another Machine's `lf`: every operation runs here and is never sent
     /// on, in this Machine's checkout of the sender's repository.
     Machine(Box<Sender>),
@@ -706,7 +713,7 @@ pub(super) async fn session<C: Carrier>(
                 .await?;
                 continue;
             }
-            (false, _) => Origin::Local,
+            (false, _) => Origin::Local(listed.clients.peers.clone()),
         };
         if inflight.contains_key(&id) {
             send(
@@ -869,7 +876,7 @@ pub(super) async fn session<C: Carrier>(
                         .await
                         .map_err(unavailable)
                         .and_then(|placed| placed),
-                    Origin::Local => Ok(query),
+                    Origin::Local(_) => Ok(query),
                 };
                 let query = match placed {
                     Ok(query) => query,
@@ -1286,7 +1293,7 @@ async fn request(
     let write = operation.is_write();
     let mut operation = operation;
     // A command run here is followed by one exchange by each plan carrier.
-    let planned = matches!(origin, Origin::Local)
+    let planned = matches!(origin, Origin::Local(_))
         .then(|| operation.directory())
         .flatten();
     let started = Instant::now();
@@ -1397,7 +1404,7 @@ async fn operate(
                     let _held = reservation;
                     loopflow_execution::provider_auth::operations::served(|| {
                         Ok(serde_json::to_value(match origin {
-                            Origin::Local => change.run()?,
+                            Origin::Local(_) => change.run()?,
                             Origin::Machine(sender) => change.run_here(&sender)?,
                         })?)
                     })
@@ -1450,7 +1457,9 @@ async fn served(
                     loopflow_execution::journal::request::isolate(|| {
                         loopflow_execution::observe::Cache::shared()
                             .capture(|| match origin {
-                                Origin::Local => query.read(),
+                                Origin::Local(peers) => query.read_with(|machine, sender, read| {
+                                    peers.query(machine, sender, read)
+                                }),
                                 Origin::Machine(_) => query.read_here(),
                             })
                             .0

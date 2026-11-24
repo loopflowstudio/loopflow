@@ -88,13 +88,7 @@ lf server mobile --status   # show the saved approval and current readiness
 lf server mobile --off      # close phone connections
 ```
 
-Pair a phone signed into the same Tailscale account once to attach to running
-Sessions and open Tasks on this Machine or any SSH host, pool, or rental it can
-reach. **Files** shows the owning Machine’s directory tree and file contents,
-including unchanged files. **Changes**, **Shell**, and **Session** use that same
-Machine. The workspace shows **Not started** before a checkout exists and names
-the owning Machine in the error if it is unreachable.
-
+A phone signed into the same Tailscale account can attach to running Sessions.
 Setup requires a user-owned, untagged Machine with MagicDNS and HTTPS
 certificates enabled. For a custom daemon socket, set `TS_SOCKET` for the
 setup command and for an `lf server run` you start yourself. Service

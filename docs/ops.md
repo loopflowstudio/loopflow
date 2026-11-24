@@ -200,11 +200,10 @@ lf --wave product set machine mini               # default new Tasks in `product
 lf machine hub mini                              # exchange this Machine's plan with mini, live
 ```
 
-`--machine` runs the entire command on the target host in its saved repository,
-except `lf open`, which always presents on this Machine and attaches to the
-remote Machine. `lf machine remove mini` forgets the connection without
-stopping work running there. Machines that clone the same repository share its
-plan through Git; a hub makes that take seconds. See
+`--machine` runs the entire command on the target host in its saved repository.
+`lf machine remove mini` forgets the connection without stopping work running
+there. Machines that clone the same repository share its plan through Git; a
+hub makes that take seconds. See
 [Share the plan](work.md#share-the-plan-with-your-team).
 
 Group owned machines into a pool and fall back to on-demand rentals when none

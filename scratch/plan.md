@@ -1,19 +1,14 @@
-# LOO-1081 · Run and open a Task on Modal
+# LOO-1081 · Run a Task on Modal
 
-**Done when** a Task Session can send a Linear-backed Task to a fresh Modal Machine, advance its Graph, and open its work from the laptop or paired phone. Files show the remote working copy, Changes shows its uncommitted diff, a shell starts in that checkout, and the conversation resumes the same remote Session. An idle sandbox pays the small resource floor while quotes and caps still cover peak compute. Giving the Machine back needs neither a manual Git commit nor a database edit. Session history, transcripts and recorded usage remain available for analytics after an abrupt sandbox loss.
-
-The field case was `manabot`, Wave `coverage`, Project `rules`, Tasks MTG-418 through MTG-422. For MTG-421 the Desktop Session pane reported “The conversation belongs to a different Machine or checkout; nothing was opened.” Its shell opened on the Mac. Use disposable counterparts for the demo.
+**Done when** a Linear-backed Task runs its Graph on a fresh Modal Machine with the caller’s portable settings and a usable harness. An idle sandbox pays the small resource floor while quotes and caps cover peak compute. Giving it back needs neither a manual Git commit nor a database edit. Session history, transcripts and recorded usage remain available for analytics after abrupt loss.
 
 ## Model
 
-Six principles tie this work together across CLI, server, Desktop, and Mobile:
-
-1. **One server-side router owns cross-Machine Task workspaces.** A Task’s owning Machine (from the ownership log) serves its Files, Changes, Diff, Save, Shell, and Session. The local/paired Loopflow server routes all Task-scoped reads, writes, and terminal tickets to that owner over a pooled `Connection::open_on` connection — serving Desktop and Mobile through the exact same protocol instead of maintaining a separate client-side SSH-subprocess path in Desktop.
-2. **Adopting an authored Wave is separate from authoring a new one.** Cold acquisition on a fresh clone registers existing `.lf/wave/` files without writing or committing to `main` and without inventing a local `tracker_id: null` Project. It binds the sole In Progress Linear Project from a complete Initiative inventory; explicit `lf wave plan bind` handles ambiguous or misselected Waves.
-3. **Placing an unowned Task on a Machine is one atomic ownership entry.** Never claim locally first and move second. Write the target owner only after the remote checkout and server are ready.
-4. **Modal sizing separates burst ceiling from idle floor.** `--vcpus` and `--memory-gb` are burst ceilings with Modal’s minimum floor (`0.125` physical core, `128 MiB`) unless `--reserved` pins floor = ceiling. Admission, caps, and timeouts price the ceiling; uptime-derived cost is explicitly labeled as a ceiling estimate.
-5. **Container Linux is an ordinary Machine.** Missing systemd or cron never blocks `lf server connect` or `lf install`. Rentals receive the caller’s matching Linux `lf` build before remote GitHub login exists.
-6. **Execution adapts to the Machine’s installed harnesses; recovery never crash-loops on missing ones.** Personal preferences fall back to usable installed native harnesses on the execution Machine (`-a` stays exact; established threads keep their identity). A missing executable or login leaves recovery quiescent until inputs change.
+1. **Adopting an authored Wave is separate from authoring a new one.** Cold acquisition on a fresh clone registers existing `.lf/wave/` files without writing or committing to `main` and without inventing a local `tracker_id: null` Project. It binds the sole In Progress Linear Project from a complete Initiative inventory; explicit `lf wave plan bind` handles ambiguous or misselected Waves.
+2. **Placing an unowned Task on a Machine is one atomic ownership entry.** Never claim locally first and move second. Write the target owner only after the remote checkout and server are ready.
+3. **Modal sizing separates burst ceiling from idle floor.** `--vcpus` and `--memory-gb` are burst ceilings with Modal’s minimum floor (`0.125` physical core, `128 MiB`) unless `--reserved` pins floor = ceiling. Admission, caps, and timeouts price the ceiling; uptime-derived cost is explicitly labeled as a ceiling estimate.
+4. **Container Linux is an ordinary Machine.** Missing systemd or cron never blocks `lf server connect` or `lf install`. Rentals receive the caller’s matching Linux `lf` build before remote GitHub login exists.
+5. **Execution adapts to the Machine’s installed harnesses; recovery never crash-loops on missing ones.** Personal preferences fall back to usable installed native harnesses on the execution Machine (`-a` stays exact; established threads keep their identity). A missing executable or login leaves recovery quiescent until inputs change.
 
 ## 1. First slice — admit one usable Modal Machine
 
@@ -70,61 +65,21 @@ Jack Heart: “my config.yaml should more or less be copied over, crtainly all t
 - **Skip AppleDouble and binary hidden Markdown (`prompt/mod.rs::gather_md_files_from`):**
   - Skip macOS AppleDouble (`._*`) paths and unreadable-as-UTF-8 hidden `.md` dotfiles during recursive `scratch/` collection. Keep valid hidden notes, nested Markdown ordering, symlink refusal, and errors for ordinary unreadable `.md` files.
 
-## 4. One server-routed Task workspace across CLI, Desktop, and Mobile
-
-Ownership selects the execution Machine. The local/paired Loopflow server is the single cross-Machine router for Task workspaces, serving CLI, Desktop, and Mobile through one protocol and deleting Desktop’s duplicate client-side SSH-subprocess routing stack.
-
-- **Server-side Task routing and terminal ticket bridging (`commands/read.rs`, `commands/write.rs`, `server/service.rs`, `machine/client.rs`, `commands/waves.rs`):**
-  - Maintain a pooled/cached `Connection::open_on` per peer Machine on the server (reconnecting on error/EOF, with idle eviction) so browsing remote files and diffs does not pay a cold SSH handshake per request.
-  - Route all Task-scoped `Read` operations (`task.status`, `task.get`, `task.detail`, `task.changes`, `task.diff`, `task.file`, `task.files`) in `Read::read()` to the Task’s owning Machine when `Origin::Local` and another Machine owns it, matching how `task.status` already forwards via `Origin::Machine`.
-  - Add `task.save` to `Write::remote()` beside `task.run`, `task.auto.*`, `task.claim`, `task.unassign`, and `session.resume`.
-  - Route remote terminal operations (`session.attach`, `session.continue`, `session.start` / Task shell) in `server/service.rs`: when the target Session or Task shell lives on another Machine, open/reuse `Connection::open_on` to that owner, acquire the owner’s terminal/ticket, and issue a single-use, admission-bound ticket on the local/paired server that bridges stream and bulk bytes to the owner’s terminal. Reuse `session.start`, attachment, resize/input, and reconnect semantics from `server/README.md`.
-  - Populate `RoadmapTask` / `TaskReferenceSnapshot` from actual Task ownership (`task_execution_route`) rather than local `task_checkouts` alone — never exposing a stale local worktree as the active workspace when another Machine owns the Task.
-  - Support optional expected-owner checks on Task-scoped reads/writes so a Task move returns an immediate `conflict` from local SQLite before forwarding. Distinguish an unstarted Task (“not started”, no checkout yet) from an unreachable owner (`unavailable`, naming the Machine — never an empty diff or local shell). Maintain protocol schema (`tests/fixtures/dto/server_schema.json`), fixtures, and shared Swift decoding.
-- **Desktop (`swift/LoopflowMac/WorkModel.swift`, `Views/SessionsView.swift`, `swift/Loopflow/Services/RegistryQuery.swift`):**
-  - Drive remote Task Files, Changes, Diff, Save, Shell, and Session through the local Loopflow server’s routed operations — **deleting** the client-side `RegistryQuery.onMachine` CLI-over-SSH fanout and double-SSH `pinTaskLocation` wrapper for Task views.
-  - Resolve the Task’s owner from `RoadmapTask` / server readings before selecting retained panes, Sessions, or shells (including cold open, restoration, prefetch, and tab creation). Keep the placement check that caught the wrong record; invalidate stale panes, file watches, and attachments when ownership changes while retaining unsaved drafts at their original `(machine_id, checkout)`.
-- **Mobile (`swift/LoopflowiOS/TaskWorkspaceView.swift`, `RemoteMobileClient.swift`):**
-  - Expose Files (directory tree and file content, including unchanged files) and Shell alongside Changes and Session, calling the exact same paired-server operations and bridged terminal tickets. The phone still needs only one pairing.
-  - Show “not started” when the owner has no checkout; show an explicit error when the owner is unreachable (never an empty diff or local shell).
-- **CLI (`commands/open.rs`, `commands/open/conversation.rs`, `bin/lf.rs`):**
-  - `lf open` always presents on the calling Machine (never executes remotely on a headless container).
-  - `lf open --task <id> --tab` and `lf open --task <id> --session <sid> --tab` open a local tab attaching on the owning Machine, keeping `--task` / owner Machine and repository in `resume_argv`, exact-ID lookup, attachment receipt, and retry (fixing `open.rs::resume_argv` dropping `--task` when `--session` is set).
-  - For a remote-only Session with no local Task, accept `--machine <label>` with `lf open --session <sid> --tab` (in either flag position: `lf open --machine <label> --session <sid> --tab` or `lf --machine <label> open --session <sid> --tab`), resolving and attaching on `<label>` while presenting here. An unavailable owner yields a retryable failure.
-
 ## Gate and demo
 
-One two-Machine scenario runs through the public entry points. The fixture has a disposable Linear-backed repo, an active `rules` Project and a historical Project, a stale local checkout with different file bytes, and a fresh Linux owner without systemd or cron. The named checks are:
+Use a disposable Linear-backed Task on a fresh Linux Machine. Quote, rent, advance its Graph, inspect the retained skill routes from a direct SSH shell, refresh a login, then give it back with ordinary `lf machine end <label>`. Check one ownership entry, the recorded ceiling estimate and an unchanged main checkout. On a second rental, collect a known transcript and usage sample, cut access, and read them on the surviving Machine.
 
-```sh
-uv run pytest python/tests/test_rental_bridge.py -k modal
-cargo test -p loopflow --test integration machine_commands::modal_task_workspace
-scripts/test_desktop.sh --filter RemoteTaskWorkspaceTests
-uv run python scripts/test_ios.py -only-testing:LoopflowiOSTests/RemoteTaskWorkspaceTests
-```
-
-- The bridge test inspects SDK create arguments for burst and `--reserved`.
-- The CLI scenario quotes, rents, advances a real fixture Graph (with `scratch/plan.md` beside binary `scratch/._plan.md`), observes one atomic ownership entry despite delayed marker delivery, rotates a synthetic login via `lf machine forward`, and opens the same Session twice via `lf open`.
-- Both Desktop and Mobile tests exercise all four viewers (Files, Changes, Shell, Session) through the server-routed protocol against distinguishable Machine responses: assert remote-only **unchanged** file contents, an **uncommitted** diff hunk, shell output from `hostname` and `pwd`, and an input acknowledgement from the exact remote Session. Disconnect, reopen, and move the Task while a pane is retained; verify each action reaches the current owner or reports why (preserving unsaved drafts on move).
-- Run old-store (`v0.15.1`) promotion and concurrent `lf server connect` without systemd/cron on Linux.
-- On a second disposable rental, interrupt access after collecting a known transcript and usage sample. Read both from the surviving Machine.
-- Finish with ordinary `lf machine end <label>` (no `--force`), verifying remote records returned, cost labeled as a ceiling estimate, and `main` still at the starting commit.
-
-For the installed demo, run `lf task run <demo-task> --rent modal --quote`, then repeat without `--quote`. Open the Task with `lf open --task <demo-task> --tab`, Desktop, and the paired phone. Confirm all four viewers on the remote sandbox, then give it back with `lf machine end <label>`.
+LOO-1083 owns the server-routed CLI, Desktop and Mobile workspace. LOO-1084 owns cross-Machine steering and status.
 
 ## Docs
 
-The docs written ahead of implementation (eb22482548) still describe `lf machine forward`, server-routed remote Task views, harness fallback, and `lf open --machine`. The Modal sizing, Linux package selection, container startup, Wave adoption and Project binding passages now match the code. Before gate, cut any passage whose slice did not ship. The first command still fails `documented_commands` until it ships.
+The docs written ahead of implementation (eb22482548) still describe `lf machine forward` and harness fallback. The Modal sizing, Linux package selection, container startup, Wave adoption and Project binding passages now match the code. Before gate, cut any passage whose slice did not ship. The first command still fails `documented_commands` until it ships.
 
 Pages touched:
 
-- `docs/ops.md` (Modal burst vs. `--reserved` sizing, ceiling cost estimates, `--machine` exception for `lf open`, `lf machine forward`, container Linux without systemd/cron)
+- `docs/ops.md` (Modal burst vs. `--reserved` sizing, ceiling cost estimates, `lf machine forward`, container Linux without systemd/cron)
 - `docs/subscriptions.md` (Machine-aware harness fallback, quiescent recovery on missing executable/login, `lf machine forward <label> [--task | --session]`)
-- `docs/workspaces.md` (`lf open` always presenting locally, remote Tasks, and `--machine <label> --session <id>`)
-- `docs/surfaces.md` (Desktop server-routed Files, Changes, Diff, Save, Shell, and Session for remote Tasks; unreachable and move handling)
-- `docs/server.md` (Mobile single-pairing access to Files, Changes, Shell, and Session on remote Tasks)
 - `docs/work.md` (read-only cold Wave acquisition on fresh clones, idempotent `lf wave plan connect`, and `lf wave plan bind --replace`)
-- `docs/lf-reference.md` (`--machine` note for `lf open`)
 
 Open product question from writing the docs:
 

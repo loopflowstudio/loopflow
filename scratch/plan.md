@@ -490,8 +490,6 @@ chapter to clear updates that column.
 3. Name in the PR body: two Machines creating the same Asana Project at the
    same moment can still make two (footer read and POST are not atomic);
    Linear's client id rules it out (slice 11).
-4. Drop `.lf/run-slice11.log` (a Graph-run receipt) before landing — done in
-   the realign after slice 11.
 
 Concept review after slices 8–10 (`scratch/concept-review.html`): product and
 code concepts line up everywhere a person meets them; the unique index is

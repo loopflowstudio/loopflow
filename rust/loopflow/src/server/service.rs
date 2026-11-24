@@ -1171,15 +1171,24 @@ async fn task_shell(
     admission: &Admission,
 ) -> ServerMessage {
     let issue = shell_issue(&mut shell).clone();
+    let started_on = match &mut shell {
+        ServerOperation::TaskShellClose { machine, .. } => machine.take(),
+        _ => None,
+    };
     let placing = origin.clone();
     let placed = tokio::task::spawn_blocking(move || -> anyhow::Result<_> {
+        use loopflow_execution::machine::task::{remote_task, task_on};
         Ok(match placing {
             Origin::Machine(sender) => (
                 crate::lf::commands::work_route::peer_task_id(&sender.repository, &issue)?,
                 None,
             ),
             Origin::Local(_) => {
-                match loopflow_execution::machine::task::remote_task(&issue, None)? {
+                let route = match &started_on {
+                    Some(machine) => task_on(&issue, machine)?,
+                    None => remote_task(&issue, None)?,
+                };
+                match route {
                     Some(route) => {
                         let peer = crate::lf::commands::read::peer_of(&route)?;
                         (route.peer_selector, Some(peer))

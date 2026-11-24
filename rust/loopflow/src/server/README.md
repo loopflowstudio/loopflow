@@ -464,7 +464,7 @@ case names one operation, including distinct claim/unassign and pin/unpin writes
 | `task.changes` | `lf task changes <issue>` | read |
 | `task.diff`, `task.file`, `task.files` | `lf task diff`, `lf task file`, `lf task files` | read |
 | `task.files.watch` | none; Desktop's Files pane | subscription; file tree revision after a change under the checkout or a Task move |
-| `task.shell.start`, `.attach`, `.close` | Desktop's and the phone's Shell, once they move onto it | server; a Task shell by `shell_id`, held on the Machine that started it |
+| `task.shell.start`, `.attach`, `.close` | `lf desktop shell`, which Desktop's Shell runs; the phone's Shell once it moves onto it | server; a Task shell by `shell_id`, held on the Machine that started it |
 | `task.context` | `lf task context <issue>` | read |
 | `task.runs` | `lf task runs <issue>` | read |
 | `task.wait` | `lf task wait <issue> --until <state>` | `engine::task` |
@@ -718,10 +718,12 @@ its own owner process is restarted by `lf resume`, not attached
 a Task shell and never starts one; `task.shell.start {issue, shell_id, rows,
 cols, bootstrap, command}` runs `command` after login startup, then `$SHELL`,
 in the owner's checkout, idempotent by `shell_id`, and answers `{terminal_id}`;
-`task.shell.close` ends it. Desktop passes Ghostty's `bootstrap`; the phone
-passes null. A `shell_id` exists only on the
-Machine that started it, so after a move the new owner answers `not_found` and
-the client offers a new shell.
+`task.shell.close {issue, shell_id, machine}` ends it on `machine`, the
+Machine that started it, or where the Task runs when `machine` is null.
+Desktop passes Ghostty's `bootstrap`; the phone passes null. A `shell_id`
+exists only on the Machine that started it, so after a move attach reaches the
+new owner, which answers `not_found`, and the client offers a new shell. Close
+still reaches the shell on its own Machine.
 
 When the terminal is on another Machine, this server asks that Machine for its
 ticket and answers a ticket of its own, bound to the caller's admission like

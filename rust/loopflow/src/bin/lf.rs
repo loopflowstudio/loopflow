@@ -1957,10 +1957,7 @@ fn run() -> anyhow::Result<()> {
         Some(Commands::Desktop {
             cmd: loopflow::lf::DesktopCommand::Shell { args: shell },
         }) => {
-            ctrlc::set_handler(|| loopflow_execution::agent::exit_on_interrupt())
-                .expect("failed to set Ctrl+C handler");
-            journal::admit_process(&std::env::current_dir()?, &args);
-            return loopflow_execution::desktop::shells::run(&shell.to_request());
+            return loopflow::lf::commands::desktop::shell(shell);
         }
         Some(Commands::Task {
             cmd:

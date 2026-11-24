@@ -4910,6 +4910,25 @@ fn server_routed_task_workspace() {
         watches.checkpoint(&pane_id, 17).unwrap();
         assert_eq!(available_reading(&mut watches, &pane_id)["answers"], 17);
 
+        // A shell stays on the Machine that started it. Attach follows the
+        // Task; Close names the starting Machine.
+        let moving_shell = || TaskShellAttach {
+            issue: other_task.to_string(),
+            shell_id: "moving-shell".into(),
+        };
+        let moving = client
+            .request(TaskShellStart {
+                issue: other_task.to_string(),
+                shell_id: "moving-shell".into(),
+                rows: 24,
+                cols: 80,
+                bootstrap: None,
+                command: Vec::new(),
+            })
+            .unwrap()
+            .result;
+        client.request(moving_shell()).unwrap();
+
         loopflow_execution::store::ownership::move_claim(&other.remote, &other_task, &laptop.id)
             .unwrap();
         // Mini has released the checkout. The laptop still subscribes there
@@ -4920,6 +4939,21 @@ fn server_routed_task_workspace() {
             workspace_machine(available_reading(&mut watches, &pane_id)),
             laptop.id.as_str()
         );
+        let elsewhere = client
+            .request(moving_shell())
+            .unwrap_err()
+            .downcast::<Error>()
+            .unwrap();
+        assert_eq!(elsewhere.code, ErrorCode::NotFound, "{elsewhere:?}");
+        assert_eq!(elsewhere.data.unwrap()["shell_id"], "moving-shell");
+        client
+            .request(TaskShellClose {
+                issue: other_task.to_string(),
+                shell_id: "moving-shell".into(),
+                machine: Some(mini.id.clone()),
+            })
+            .unwrap();
+        held_ended(&peer, &moving["terminal_id"]);
         let mut frame = available_reading(&mut watches, &files_id);
         while frame["body"]["machine_id"] == mini.id.as_str() {
             frame = available_reading(&mut watches, &files_id);
@@ -4972,6 +5006,16 @@ fn server_routed_task_workspace() {
         assert_eq!(
             frame["body"]["checkout"],
             other.remote_path.to_str().unwrap()
+        );
+        // Back on mini, the shell Close ended there has ended.
+        let ended = client
+            .request(moving_shell())
+            .unwrap_err()
+            .downcast::<Error>()
+            .unwrap();
+        assert!(
+            ended.data.as_ref().unwrap()["terminal_id"].is_string(),
+            "{ended:?}"
         );
     }
     // Only mini has this provider thread. It prints its cwd only when lf resumes it.
@@ -5092,8 +5136,10 @@ exit 1
         .request(TaskShellClose {
             issue: task.to_string(),
             shell_id: "laptop-shell".into(),
+            machine: None,
         })
         .unwrap();
+    held_ended(&peer, &started["terminal_id"]);
     let ended = client
         .request(shell_attach())
         .unwrap_err()
@@ -5286,6 +5332,25 @@ fn served_ownership_routes_to_its_writer_and_never_falls_back_locally() {
             .is_some()
     );
     drop(server);
+}
+
+/// Wait until the Machine whose store `sql` opens records that `terminal` ended.
+fn held_ended(sql: &rusqlite::Connection, terminal: &Value) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    while sql
+        .query_row(
+            "SELECT ended_at IS NULL FROM held_terminals WHERE id=?1",
+            [terminal.as_str().unwrap()],
+            |row| row.get::<_, bool>(0),
+        )
+        .unwrap()
+    {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "{terminal} kept running"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
 }
 
 /// A Task mini runs and mini's records claim, read back to the laptop.

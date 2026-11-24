@@ -8,12 +8,14 @@ Undo restores identity and history; it never restarts a command. The shell is
 plain: no hooks or steers, and an `lf` typed in it is bare.
 
 `desktop::shells` owns creation receipts, startup resources and Close policy.
-The private `desktop shell` destination entry dispatches independently of macOS
-UI control and works on Linux without the app. Swift supplies Desktop's bundled
-shell integration. Existing Machine routing carries its inputs and the shared
-viewer stream across SSH; an unreachable Machine never opens a local shell.
-The destination shell runtime carries terminal bytes and Close status; it is
-not a GUI action and has no Desktop action-result schema. Exact command inspection
+The private `lf desktop shell <task> --id <shell>` viewer asks this Machine's
+server (`task.shell.start`, `task.shell.attach`, `task.shell.close`), which runs
+the shell wherever the Task runs and bridges its terminal back. It needs no
+macOS UI and works on Linux without the app. Swift supplies Desktop's bundled
+shell integration. An unreachable Machine never opens a local shell. After a
+move, `--close --started-on <machine>` still ends the shell on the Machine that
+started it. The viewer carries terminal bytes and Close status; it is not a GUI
+action and has no Desktop action-result schema. Exact command inspection
 reports a null result schema; public command listings omit the runtime.
 
 Creation accepts a JSON bootstrap with a `script` and relative UTF-8 `files`.

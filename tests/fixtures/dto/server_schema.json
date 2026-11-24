@@ -10300,6 +10300,13 @@
               "const": "task.shell.close",
               "type": "string"
             },
+            "machine": {
+              "description": "The Machine that started the shell, which keeps it after the\nTask moves; null closes it where the Task runs.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "shell_id": {
               "type": "string"
             }
@@ -10307,7 +10314,8 @@
           "required": [
             "kind",
             "issue",
-            "shell_id"
+            "shell_id",
+            "machine"
           ],
           "type": "object",
           "x-result": {

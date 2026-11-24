@@ -271,7 +271,14 @@ pub enum ServerOperation {
     /// Close a Task shell and end its terminal; answers `{}`.
     #[serde(rename = "task.shell.close")]
     #[schemars(extend("x-result" = schemars::json_schema!({"type": "object", "additionalProperties": false})))]
-    TaskShellClose { issue: String, shell_id: String },
+    TaskShellClose {
+        issue: String,
+        shell_id: String,
+        /// The Machine that started the shell, which keeps it after the
+        /// Task moves; null closes it where the Task runs.
+        #[serde(deserialize_with = "Option::deserialize")]
+        machine: Option<loopflow_model::durable::MachineId>,
+    },
     /// Mobile access readiness; same-user local socket only.
     #[serde(rename = "mobile.status")]
     #[schemars(extend("x-result" = generator.subschema_for::<super::mobile::Status>()))]

@@ -141,8 +141,6 @@ impl Ssh {
             "desktop",
             "shell",
             TASK,
-            "--checkout",
-            self.destination.repo.path().to_str().unwrap(),
             "--id",
             id,
             action,

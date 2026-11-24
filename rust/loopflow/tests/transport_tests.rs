@@ -1887,8 +1887,6 @@ fn completed_task_cleanup_ends_its_held_shell_and_settles_jobs() {
             "desktop",
             "shell",
             task,
-            "--checkout",
-            fixture.repo.path().to_str().unwrap(),
             "--id",
             "cleanup-shell",
             "--create",
@@ -2087,15 +2085,7 @@ fn shell_reconnects_and_settles(integrated: bool) {
     let _server = fixture.machine_server();
     let task = "task_5e55105e000040008000000000000005";
     fixture.shell_task(task);
-    let base = [
-        "desktop",
-        "shell",
-        task,
-        "--checkout",
-        fixture.repo.path().to_str().unwrap(),
-        "--id",
-        "desktop-shell",
-    ];
+    let base = ["desktop", "shell", task, "--id", "desktop-shell"];
     let mut command = fixture.command(&base);
     command.arg("--create");
     if integrated {
@@ -2226,15 +2216,7 @@ fn desktop_shell_repeated_lifecycles_leave_no_jobs() {
     fixture.shell_task(task);
     for cycle in 0..3 {
         let id = format!("cycle-{cycle}");
-        let base = [
-            "desktop",
-            "shell",
-            task,
-            "--checkout",
-            fixture.repo.path().to_str().unwrap(),
-            "--id",
-            &id,
-        ];
+        let base = ["desktop", "shell", task, "--id", &id];
         let ready = fixture.home.path().join("cycle-ready");
         let _ = std::fs::remove_file(&ready);
         let _ = std::fs::remove_file(fixture.home.path().join("shell-pid"));

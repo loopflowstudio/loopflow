@@ -194,6 +194,27 @@ fn remote_task_in(
     Ok((route.machine_id != crate::store::machines::local_machine(store)?.id).then_some(route))
 }
 
+/// The Task's route to `machine`, wherever the Task runs now; `None` when
+/// `machine` is this one or the Task is unknown here. A shell stays on the
+/// Machine that started it.
+pub fn task_on(
+    selector: &str,
+    machine: &loopflow_model::durable::MachineId,
+) -> Result<Option<TaskExecutionRoute>> {
+    let Some(store) = read_registry()? else {
+        return Ok(None);
+    };
+    if *machine == crate::store::machines::local_machine(&store)?.id {
+        return Ok(None);
+    }
+    let Some(task) = resolve_task_id(&store, selector, None)? else {
+        return Ok(None);
+    };
+    let mut route = crate::store::ownership::task_execution_route(&store, &task)?;
+    route.machine_id = machine.clone();
+    Ok(Some(route))
+}
+
 /// The other Machine that writes the Task's ownership: where it runs, unless
 /// a move from here has not arrived, which leaves the next entry here. A sent
 /// move's target is asked first: one that took the Task in, its answer lost,

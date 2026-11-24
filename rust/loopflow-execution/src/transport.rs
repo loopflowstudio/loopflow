@@ -1443,7 +1443,7 @@ pub fn relay_args(args: &[String]) -> Option<Relay> {
 }
 
 /// Paint an ended Desktop shell's retained screen without starting execution.
-pub(crate) fn shell_history(terminal: &TerminalId) -> Result<()> {
+pub fn shell_history(terminal: &TerminalId) -> Result<()> {
     if let Some(screen) = snapshot::last_screen(terminal.as_str()) {
         if std::env::var_os(STREAM_ENV).is_some() {
             io::stdout().write_all(&wire::frame(Tag::Snapshot, &screen))?;

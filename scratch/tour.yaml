@@ -1,13 +1,19 @@
-at: 44ec3355e5b1e96e994b53ca6db4e3de20e54543
+at: a707e73b0630a6da913095cb03b0ab606197853f
 first:
   - path: docs/ops.md
     why: Rent, price, update and return a Machine
+  - path: docs/dev/settings.md
+    why: Which remote settings update and which edits stay
   - path: docs/work.md
     why: Join a Wave and choose its Project
   - path: docs/telemetry.md
     why: Read a collected Session’s transcript, origin and token totals
   - path: scratch/plan.md
     why: Built behavior, Linux trials and remaining work
+  - path: rust/loopflow-execution/src/config/catalog.rs
+    why: The installation stream belongs to its Machine
+  - path: rust/loopflow-execution/src/config/remote.rs
+    why: Compare each forwarded declaration against its saved value
   - path: rust/loopflow-storage/src/rental.rs
     why: Admission prices the ceiling and records the floor
   - path: rust/loopflow-execution/src/rental/sandbox.py
@@ -21,7 +27,9 @@ first:
   - path: rust/loopflow-storage/src/sqlite/project_selection.rs
     why: Compare selections and match unfinished transitions
   - path: rust/loopflow/src/lf/commands/rental.rs
-    why: Prepare the rental and retry on its owner
+    why: Deliver preferences before handing over the rental
+  - path: rust/loopflow/src/bin/lf.rs
+    why: Receive the caller’s profile during server setup
   - path: rust/loopflow-storage/src/sqlite/task_ownership.rs
     why: Write destination ownership and its outgoing marker together
   - path: rust/loopflow-storage/src/migrations/rental_session_history.sql
@@ -43,7 +51,7 @@ first:
   - path: rust/loopflow-storage/src/sqlite/processes.rs
     why: Inspect live owners on the installed schema
   - path: rust/loopflow/tests/served_reads.rs
-    why: Concurrent connects and restart on an empty Machine
+    why: Read forwarded routes and independent edits through the CLI
   - path: rust/loopflow/src/lf/commands/binaries.rs
     why: Live Graph process across the v0.15.1 upgrade
 hide:

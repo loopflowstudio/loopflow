@@ -260,10 +260,10 @@ Why this beats storing `ChildPolicy` on `completion_request`:
 
 ### Docs
 
-`docs/work.md` Finish section and Reference paragraph (~line 608): bare refusal,
-`--children rehome` (nearest open ancestor or top-level), `--children abandon`
-(merged done, rest abandoned, live-work guard), and reopening abandoned Tasks.
-Delete "Abandoned Tasks cannot be reopened" in both places.
+Updated in place for review:
+- `docs/work.md` (`## File follow-ups from a Task`, `## Finish`, `## Reference`)
+- `docs/surfaces.md` (`### Changes show at once`, `### The backlog`)
+- `swift/LoopflowiOS/README.md` (`## Tasks`)
 
 ## What goes
 

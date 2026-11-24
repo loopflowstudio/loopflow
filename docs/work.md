@@ -203,14 +203,15 @@ at ship-review. lf task status LOO-15
 A merge is news once Loopflow has seen it: `lf land` and auto mode see their
 own, and a PR merged by hand on GitHub shows at the next `lf pr reconcile`.
 
-`lf wave show` lists a child under its parent. Once the parent is
-done or abandoned, a child still open is listed on its own; its link stays.
+`lf wave show` lists a child under its parent. Any open child whose parent is
+done or abandoned is listed on its own; its link stays.
 
 ## Finish
 
 ```bash
 lf --task LOO-12 land --wait-and-fix   # merge its PR, repairing CI until it lands
-lf task complete LOO-12                # mark the Task done
+lf task complete LOO-12                # mark a leaf Task done
+lf task reopen LOO-15                  # reopen a done or abandoned Task
 ```
 
 A Task whose Graph reaches `end` requests completion automatically (waiting
@@ -223,21 +224,61 @@ A Task with open children stays open after its PR merges. It reads
 leaves it open, so its conversation is still there to conduct them. A Task
 with no PR whose graph reached `end` stands the same way and reads
 `Finished · 1 child open`; once nothing under it is open it reads
-`Finished; complete the Task`. Complete it when the follow-ups are settled:
+`Finished; complete the Task`.
+
+Running bare `lf task complete` on a parent with open children refuses, writes
+nothing, and lists the open descendant tree so grandchildren are not hidden:
 
 ```text
 $ lf task complete LOO-12
+Error: LOO-12 has 3 open children; say what happens to them:
+  LOO-14  Retry budget per host  #1980 merged
+    LOO-17  Retry metrics        unstarted
+  LOO-15  Log each retry         #1981 open, at ship-review
+  LOO-16  Document the budget    unstarted
+  lf task complete LOO-12 --children rehome    # direct children move up to LOO-10 and stay open
+  lf task complete LOO-12 --children abandon   # merged descendants done, the rest abandoned
+```
+
+Pass `--children rehome` to move direct open children up to the nearest open
+ancestor (or make them top-level Tasks when no ancestor is open), keeping each
+child's subtree intact and leaving closed children linked under the done parent
+as history:
+
+```text
+$ lf task complete LOO-12 --children rehome
+LOO-12 done
+  LOO-14 moved up to LOO-10
+  LOO-15 moved up to LOO-10
+  LOO-16 moved up to LOO-10
+```
+
+Pass `--children abandon` to settle every open descendant: descendants whose PR
+merged are marked `done`, and the rest (unstarted or unmerged) are `abandoned`
+(closing their PRs and deleting their branches):
+
+```text
+$ lf task complete LOO-12 --children abandon
 LOO-12 done
   LOO-14 done: #1980 merged
     LOO-17 abandoned: no merged PR
-  LOO-16 abandoned: no merged PR
   LOO-15 abandoned: #1981 open, at ship-review
+  LOO-16 abandoned: no merged PR
 ```
 
-Completing a parent Task settles every open descendant: children whose PR
-merged are marked `done`, and all other open children (unstarted or unmerged)
-are `abandoned` (closing their PRs and deleting their branches). Abandoned
-Tasks cannot be reopened.
+If any descendant that `--children abandon` would abandon has live work — a
+running Graph, headless run, or active turn — the command refuses without
+writing, names each blocker, and suggests stopping it or using `--children
+rehome`. Idle Task conversations waiting at an interactive step are closed
+cleanly and do not block.
+
+In Loopflow Desktop and on iOS, completing a parent with open children opens a
+confirmation dialog with the same choices ([Surfaces](surfaces.md#changes-show-at-once)).
+
+`lf task reopen` works on both done and abandoned Tasks. It restores the Task
+to `started` (or `unstarted` if it never ran) and turns auto off. Reopening
+does not restore closed PRs or deleted branches; the next `lf task run` opens a
+new PR linked to the same issue.
 
 A done Task's conversation is still yours. `lf resume LOO-12` reopens it
 after the checkout is gone, in the repository's main checkout, and it goes on
@@ -605,15 +646,20 @@ once a PR merges on a Task that stays open (conducting children, or after
 `lf task reopen`), `lf task run <ID> --from <step>` (or `lf pr submit`) starts
 the next pass and opens the next PR linked to the same issue.
 
-`lf task complete` updates status only on a leaf Task; on a parent it also
-finishes children with merged PRs and abandons all other open children
-(closing their PRs and deleting their branches), recursing through open
-descendants. `lf task complete --json` carries `children`: each child's row,
-its `outcome` (`done` or `abandoned`) and its own `children`, `[]` when there
-were none. `lf task reopen` keeps the same PR and restores started Tasks to
-`started` (or `unstarted` if never started); abandoned Tasks cannot be
-reopened.
-`lf task abandon` cancels the Task, closes its PRs, and deletes its branches.
+`lf task complete` updates status only on a leaf Task (or queues completion if
+the leaf's PR is still open). On a parent with open children, bare
+`lf task complete` refuses and writes nothing; pass `--children rehome` to move
+direct open children up to the nearest open ancestor (or top level) or
+`--children abandon` to mark merged descendants `done` and abandon the rest
+(refusing without writing if any descendant it would abandon has a running
+Graph, headless run, or active turn, or if the parent's own PR is unmerged).
+`lf task complete --json` carries `children`: each affected child's row, its
+`outcome` (`done`, `abandoned`, or `rehomed`), and its own `children` (`[]`
+when none or when `rehomed`). `lf task reopen` works on both done and abandoned
+Tasks, restoring started Tasks to `started` (or `unstarted` if never started)
+and turning auto off; closed PRs and deleted branches are not restored.
+`lf task abandon` cancels the Task, closes its PRs, and deletes its branches,
+leaving any open children linked and open.
 
 **Idempotent creation (`--request-id`).** Scripts and Desktop can pass
 `--request-id <id>` to `lf task create` so a lost reply never creates a

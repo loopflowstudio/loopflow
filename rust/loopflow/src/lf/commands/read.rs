@@ -720,10 +720,27 @@ impl Read {
         mut self,
         query: impl FnOnce(&Machine, Sender, &Read) -> anyhow::Result<Response>,
     ) -> anyhow::Result<serde_json::Value> {
-        if let Some((machine, sender)) = self.peer()? {
-            return Ok(query(&machine, sender, &self)?.result);
+        if let Some(route) = self.peer_route()? {
+            let (machine, sender) = self.address_peer(route.clone())?;
+            let mut result = query(&machine, sender, &self)?.result;
+            self.localize_peer_reading(&mut result, &machine, &route)?;
+            return Ok(result);
         }
         self.read_here()
+    }
+
+    /// What `machine` answered for this read, as this Machine names it: a
+    /// routed Session list opens its Sessions with this Machine's `lf open`.
+    pub(crate) fn localize_peer_reading(
+        &self,
+        reading: &mut serde_json::Value,
+        machine: &Machine,
+        route: &loopflow_execution::durable::TaskExecutionRoute,
+    ) -> anyhow::Result<()> {
+        if let Self::SessionList { .. } = self {
+            super::ssh::localize_remote_sessions(reading, machine, route)?;
+        }
+        Ok(())
     }
 
     pub(crate) fn follows_task(&self) -> bool {

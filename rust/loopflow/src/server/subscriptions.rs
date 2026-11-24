@@ -505,12 +505,13 @@ impl Producer {
                 match current {
                     Some(route) => {
                         let mut placed = query.clone();
-                        let (placed, machine, sender) = tokio::task::spawn_blocking(move || {
-                            let (machine, sender) = placed.address_peer(route)?;
-                            anyhow::Ok((placed, machine, sender))
-                        })
-                        .await??;
-                        self.peer(&machine, sender, placed, select.clone())
+                        let (placed, machine, sender, route) =
+                            tokio::task::spawn_blocking(move || {
+                                let (machine, sender) = placed.address_peer(route.clone())?;
+                                anyhow::Ok((placed, machine, sender, route))
+                            })
+                            .await??;
+                        self.peer(&machine, sender, placed, select.clone(), &route)
                             .await
                             .map_err(|error| client::unavailable_on(&machine, error))
                     }
@@ -567,10 +568,12 @@ impl Producer {
         sender: Sender,
         query: Read,
         select: Option<Vec<String>>,
+        route: &loopflow_execution::durable::TaskExecutionRoute,
     ) -> Result<()> {
         let mut generation = lock(&self.requested).generation;
         let mut asked = generation;
         let labels_owner = matches!(query, Read::TaskFilesWatch { .. });
+        let placed = query.clone();
         let mut peer = super::peers::PeerSubscription::open(machine, sender, query, select).await?;
         self.latest.send_modify(|latest| latest.ready = true);
         loop {
@@ -606,6 +609,9 @@ impl Producer {
                                 body["machine_label"] = serde_json::json!(machine.label);
                             }
                         }
+                    }
+                    if let Some(body) = frame.get_mut("body") {
+                        placed.localize_peer_reading(body, machine, route)?;
                     }
                     self.publish(Some(frame), Vec::new(), generation, room)?;
                 }

@@ -4693,6 +4693,18 @@ fn server_routed_task_workspace() {
         .unwrap()
         .result;
     assert_eq!(scoped["entries"][0]["id"], session);
+    // Read here, mini's record names this Machine's Task and opens with `lf open`.
+    let record = &scoped["entries"][0];
+    assert!(
+        record["task_ids"]
+            .as_array()
+            .unwrap()
+            .contains(&Value::from(task.as_str())),
+        "{record}"
+    );
+    assert!(!record.to_string().contains("lf resume"), "{record}");
+    let argv = record["open_argv"].as_array().unwrap();
+    assert_eq!(argv[1..3], ["open", "--task"], "{record}");
     let local_sessions = client.request(sessions(None)).unwrap().result;
     assert!(local_sessions["entries"].as_array().unwrap().is_empty());
     // Both repositories use WORK-42. The next request on this same pipe

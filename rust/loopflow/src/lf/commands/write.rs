@@ -1300,7 +1300,9 @@ impl Write {
             wave: wave.clone().or(forward.wave),
             agent: agent.clone(),
         };
-        Remote::new(machine, repository, write, false, None).map(Some)
+        let mut remote = Remote::new(machine, repository, write, false, None)?;
+        remote.route = forward.route;
+        Ok(Some(remote))
     }
 
     /// `session.resume` / `session.new`: the conversation prepared where it
@@ -1313,21 +1315,16 @@ impl Write {
             let (cli, _) = self.session_spelling()?;
             return super::session::prepared(&cli, self.directory());
         };
-        let task = match self {
-            Self::SessionResume { id: Some(id), .. } => {
-                // A Session resumes on the Machine it moved to, carried there first.
-                loopflow_execution::ops::session_move::move_session(
-                    id,
-                    remote.machine.id.as_str(),
-                    false,
-                    run_task,
-                )?;
-                None
-            }
-            Self::SessionResume { task, .. } => task.as_deref(),
-            _ => None,
-        };
-        super::ssh::prepared_remotely(remote.call()?, &remote.machine, task)
+        if let Self::SessionResume { id: Some(id), .. } = self {
+            // A Session resumes on the Machine it moved to, carried there first.
+            loopflow_execution::ops::session_move::move_session(
+                id,
+                remote.machine.id.as_str(),
+                false,
+                run_task,
+            )?;
+        }
+        super::ssh::prepared_remotely(remote.call()?, &remote.machine, remote.route.as_ref())
     }
 
     /// The Session preparation as `lf` spells it. Its local preparation still
@@ -1417,6 +1414,8 @@ pub(super) struct Remote {
     machine: loopflow_model::durable::Machine,
     change: Write,
     sender: Sender,
+    /// The Task this Machine routed the change for, as it knows it.
+    route: Option<loopflow_execution::durable::TaskExecutionRoute>,
 }
 
 impl Remote {
@@ -1452,6 +1451,7 @@ impl Remote {
                 selection,
                 secrets,
             },
+            route: None,
         })
     }
 

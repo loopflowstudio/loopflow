@@ -1,4 +1,4 @@
-at: bd6b685a85aea1bd5a15e737bbdbbbaf5c82cb18
+at: 3977c633720517ea6e97f5c6172e8c62ee87ba3b
 first:
   - path: docs/work.md
     why: Pause and resume from the saved step
@@ -18,10 +18,16 @@ first:
     why: Stop verified jobs after their launching shell exits
   - path: rust/loopflow-execution/src/ops/human_session/moves.rs
     why: Carry a hold across Machines once
+  - path: rust/loopflow-execution/src/ops/task_execution.rs
+    why: Distinguish an interrupted step from a failed run
+  - path: rust/loopflow-execution/src/ops/task/run_recovery.rs
+    why: Recheck pause before counting and restarting a carrier
   - path: rust/loopflow-execution/src/task_graph.rs
     why: Follow the captured cursor to review or landing
   - path: rust/loopflow-storage/src/sqlite/task_details.rs
     why: Group only the Working Tasks being read
+  - path: rust/loopflow-storage/src/work/selection.rs
+    why: Select a held Task in either board section
   - path: rust/loopflow-storage/src/sqlite/selections.rs
     why: Supply each selected row with its group
   - path: rust/loopflow/src/lf/commands/waves.rs
@@ -34,6 +40,10 @@ first:
     why: Order sidebar rows and their keyboard shortcuts together
   - path: swift/LoopflowiOS/TaskListView.swift
     why: Group each repository’s Working Tasks on iPhone
+  - path: swift/Loopflow/Design/TaskRow.swift
+    why: Show the open conversation during a Graph hold
+  - path: swift/LoopflowMac/Views/TaskWorkView.swift
+    why: Use one pause action across Mac controls
   - path: swift/Loopflow/Services/PendingChanges.swift
     why: Keep rows visible while a write settles
   - path: rust/loopflow/tests/work/task_graph_launch_tests.rs

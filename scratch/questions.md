@@ -51,4 +51,9 @@ Keep saved order and status sorting inside each Working group. A drop reorders w
 
 Automatic verify cannot return across ship-review. Remove that outer loop and file a linked fix-forward Task for a failed merged claim.
 
+Use the recorded interrupt outcome for status. Say the step is stopped while
+paused, since an interrupt may also have occurred before the hold. Carrier
+recovery takes the same admission lock as pause through its restart count and
+launch, closing the gap between checking the hold and spawning the carrier.
+
 On unpause the action and lifecycle update immediately. The list keeps the row in place until the Machine returns the group for its saved cursor.

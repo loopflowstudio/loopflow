@@ -49,7 +49,8 @@ pub mod wt_timing;
 
 pub use abandon::{abandon_branch, AbandonOptions};
 pub use commit::{
-    commit_selected, commit_step, commit_workflow, step_commit_pending, CommitOptions,
+    commit_selected, commit_step, commit_workflow, step_commit_pending, CommitOptions, CommitPush,
+    CommitResult,
 };
 pub use error::{OpsError, OpsResult};
 pub use land::{arm, mark_ready, submit, LandOptions};

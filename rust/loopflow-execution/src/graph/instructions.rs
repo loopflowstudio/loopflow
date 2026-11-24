@@ -66,7 +66,12 @@ fn render_steps(
                         ))
                     })?;
                     if is_builtin_decision(skill, "loop-or-next") {
-                        output.push_str(&format!("{position}. Review the objective, changes and remaining findings in this conversation.\n   If this boundary's requirements are satisfied, continue after step {position}.\n   If the last pass made meaningful progress and specific work remains, state the next action and repeat steps {prefix}{} through {prefix}{index}, including intervening commands and branches, then reassess at step {position}.\n   If progress requires missing input or repeats a failure without new evidence, explain what needs resolving and stop. A deferred check alone is not a blocker; leave it to its declared gate/CI or review. There is no arbitrary pass limit.\n", target + 1));
+                        let first = target + 1;
+                        output.push_str(&format!("{position}. Review the objective, changes and remaining findings in this conversation.
+   If this boundary's requirements are satisfied, continue after step {position}.
+   If the last pass made meaningful progress, name a substantial next pass and its expected result. To run it, repeat steps {prefix}{first} through {prefix}{index}, including intervening commands and branches, and reassess at step {position}. Aim to finish within five passes. Continue past five when the work warrants it.
+   If passes shrink into small increments that no longer converge, a failure repeats with nothing learned, or progress needs missing input, explain what needs resolving and stop. A deferred check alone is not a blocker. Leave it to gate, CI or review.
+"));
                     } else {
                         output.push_str(&format!("{position}. {}\n   Use its criteria to decide in ordinary language: advance continues after step {position}; iterate repeats steps {prefix}{} through {prefix}{index}, including intervening commands and branches, then returns to this decision; blocked explains what needs resolving and stops here.\n", conversational_skill(skill), target + 1));
                     }
@@ -94,9 +99,7 @@ fn render_steps(
                     conversational_skill(&branch.router)
                 };
                 output.push_str(&format!("{position}. {instruction} Choose exactly one declared path, explain the choice, complete its steps, then rejoin after step {position}. If the choice is unresolved, explain and stop here.\n"));
-                let mut paths: Vec<_> = branch.paths.iter().collect();
-                paths.sort_by_key(|(name, _)| *name);
-                for (name, path) in paths {
+                for (name, path) in &branch.paths {
                     output.push_str(&format!("\nPath `{name}`: {}\n\n", path.description));
                     render_steps(
                         &path.steps,

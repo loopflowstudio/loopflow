@@ -3727,6 +3727,11 @@ fn an_auto_run_blocked_at_verification_waits_there_without_building_again() {
         "{}",
         String::from_utf8_lossy(&first.stderr)
     );
+    let status = task.text_status();
+    assert!(
+        status.contains("Graph is blocked: Main-source checks pass; the installed release must be checked first"),
+        "{status}"
+    );
     assert_eq!(stand_ins(&task).len(), 1);
     let again = task.run(&["-b", "--task", "INF-123", "task", "auto", "on"]);
     let stderr = String::from_utf8_lossy(&again.stderr);

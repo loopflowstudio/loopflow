@@ -1,5 +1,6 @@
 use crate::lf::{PrCommand, ReleaseCommand, WtCommand};
 use anyhow::{anyhow, Result};
+use loopflow_execution::engine::Diagnostics;
 use loopflow_execution::git::current_branch;
 use loopflow_execution::git::worktree_name::WorktreeName;
 use loopflow_execution::git::worktrees::{
@@ -385,7 +386,7 @@ pub fn run_commit(
         no_add,
         paths,
         agent_override,
-        &CliProgress,
+        &Diagnostics,
     )?;
     if json {
         println!("{}", serde_json::to_string(&committed)?);
@@ -393,28 +394,10 @@ pub fn run_commit(
     Ok(())
 }
 
-/// A step commit runs under a skill run or a Graph, whose stdout carries the
-/// answer, so its progress goes to stderr.
-struct StepCommitProgress;
-
-impl Progress for StepCommitProgress {
-    fn status(&self, msg: &str) {
-        eprintln!("{msg}");
-    }
-
-    fn error(&self, msg: &str) {
-        eprintln!("{msg}");
-    }
-
-    fn confirm(&self, _msg: &str) -> bool {
-        false
-    }
-}
-
 /// `lf commit --step <skill>`: everything a finished skill step left, as one commit.
 pub fn run_step_commit(step: &str, agent_override: Option<&str>) -> Result<()> {
     let repo_root = find_repo_root()?;
-    loopflow_execution::ops::commit_step(&repo_root, step, agent_override, &StepCommitProgress)?;
+    loopflow_execution::ops::commit_step(&repo_root, step, agent_override, &Diagnostics)?;
     Ok(())
 }
 

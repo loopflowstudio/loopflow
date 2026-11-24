@@ -558,7 +558,7 @@ writes! {
         version, target, ..
     } => loopflow_execution::engine::repo::release(directory, version.as_deref(), target.as_deref())?,
 
-    /// `lf [-a <agent>] commit [-m <message>] [-p] [--no-add] [<path>…] --json`.
+    /// `lf [-a <agent>] commit [-m <message>] [--no-push] [--no-add] [<path>…] --json`.
     #[serde(rename = "checkout.commit")]
     CheckoutCommit {
         directory: PathBuf,

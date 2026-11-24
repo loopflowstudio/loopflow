@@ -1357,8 +1357,8 @@ impl SqliteStore {
         )?)
     }
 
-    /// The Wave's Project, which its Tasks are in; for a Wave that has none
-    /// yet, the one its first Task makes.
+    /// The Wave's Project, which its Tasks are in; for a Wave whose Project
+    /// row is not recorded yet, the id that Project is made with.
     pub fn wave_project(&self, wave: &WaveId) -> StoreResult<ProjectId> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         Ok(held_wave_project_in(&conn, wave)?.unwrap_or_else(|| ProjectId::for_wave(wave)))

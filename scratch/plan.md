@@ -725,7 +725,7 @@ names the maker (`lf wave plan connect <wave>`; Asana: `lf wave create
 `connect_binds_the_linear_project_a_lost_create_reply_left`,
 `adding_the_wave_again_binds_the_asana_project_a_lost_create_reply_left`.
 Execution `task_planning_tests::`, `asana_planning_tests::`, `wave_lifecycle`
-pass.
+pass; `local_planning::wave_sync_` (3) passes (2026-11-24).
 
 ## Remains
 
@@ -737,7 +737,11 @@ pass.
    (`scratch/questions.md`): tracker down leaves the Wave recorded unbound,
    and a drain creates an unbound Project a Task is sent into.
 3. Reviewer's look: Asana's footer search stays as the synchronous create's
-   lost-reply recovery (a retried `lf wave sync` after a lost reply would
+   lost-reply recovery (a retried `lf wave create` after a lost reply would
    otherwise make a second Asana project). It was slice 11's cross-Machine
    path; if gate review finds it unneeded, delete it.
-4. Not this Task: a queued Task create's field snapshot ("3 sure": stays).
+4. Review slice 14's Asana choice (`scratch/questions.md`): the unbound
+   sentence names `lf wave create <wave>` there, since connect is Linear's.
+5. Not this Task: a queued Task create's field snapshot ("3 sure": stays).
+   Already on main: `lf wave status --sync` (no such flag) in
+   `task/delivery.rs:343`, `commands/tracker.rs:49`, `docs/dev/planning.md:274`.

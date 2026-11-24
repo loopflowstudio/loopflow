@@ -36,57 +36,29 @@ Focused checks on 2026-11-23:
 Next at gate: exercise the hover highlight in an unlocked Desktop window,
 then follow the walkthrough below.
 
-## Earlier implementation and verification
+## Earlier slices (one-shot sort since replaced by the toggle)
 
-The following runs exercised the earlier one-shot sort before the demo changed it.
+- Slice 1 (`820bcdc384`): shared row status. A Task with both Busy and
+  Available groups as Busy and matches both filters. Current OSC 7501 errors
+  appear on phone rows, match `state:error` and appear in selection attention.
+  Desktop drops cached Error on restore. Pending Task edits keep every state
+  in declaration order. On a private QA Machine copy, `lf desktop view show
+  'state:error'` returned the Error Task in members and attention.
+- Slice 2 (`ca02700fb8`): Working drags go through `PendingChanges` in click
+  order across reconnects; a refused drop clears its preview and its Notice
+  survives a failed reread. The pending-sort half was deleted with the toggle.
+- Slice 3 (`ecf3ac66eb`): current Graph step on Mac and phone rows. Running
+  cursor's step first, then the parked step; parked start/end show none.
+  `sidebar_step_follows_the_captured_cursor` and iOS
+  `TaskFeedTests/testTaskRowShowsItsCurrentGraphStep` passed. On a fresh
+  private Machine, `lf desktop view show 'kind:task state:working' --json`
+  reported `null`, `"review"`, `null` for a Task parked at start, review, end.
+- Choices recorded in [concept-review.html](concept-review.html#questions):
+  Busy beats Available for a dual-state Task (matches the printed **Busy**);
+  `SelectionState::Error` exists so iOS can show Error instead of folding it
+  into Blocked.
 
-### Slice 1### Slice 1 (built at `820bcdc384`) — Shared status for Task rows and Sort by status
-
-Sort saves Blocked, Error, Available, Idle, Busy, newest first within each group.
-A Task with both Busy and Available sorts as Busy and matches both filters.
-Current OSC 7501 errors appear on phone rows, match `state:error`, and appear
-in selection attention. Desktop drops cached Error on restore alongside other
-live activity. Pending Task edits retain all states in declaration order.
-
-On a private copy of the QA Machine with seeded Session reports, `lf desktop sort`
-returned Bravo (Blocked), Charlie (Error + Busy), Delta (Available), Hotel and
-Foxtrot (Idle), Alpha (Busy + Available). `lf desktop view show 'state:error'`
-returned Charlie in both members and attention. Alpha appeared in both the Busy
-and Available queries.
-
-- `cargo test -p loopflow-storage --lib status_sort_groups_by_row_status_then_newest_start` passed.
-- `cargo test -p loopflow --lib task_concepts_share_lifecycle_activity_membership_and_order` passed.
-- `scripts/test_desktop.sh --filter 'TaskStatusTests|TaskConceptTests/missingKeysFailAndSavedActivityCannotReturn|WorkSelectionTests/everyStateRustSendsDecodes'` passed all four tests.
-- `server::schema::tests::the_checked_in_schema_is_what_describe_prints` passed against the regenerated fixture.
-
-### Slice 2 (built at `ca02700fb8`) — Sort recovery on Desktop
-
-The sidebar and ⌘K submit Sort through `PendingChanges`. Each Working list
-sends its drags and sorts in click order across reconnects. Sort supersedes
-earlier drag previews in that list, and later drags preview immediately.
-Both controls disable while the Machine is away. A refusal clears the pending
-sort and its explanation survives a failed reread.
-
-- `scripts/test_desktop.sh --filter 'statusSortSupersedes|refusedStatusSort|sortRetriesAfter|sortIsDisabled|sortByStatusUpdates|refusedWorkingTaskDrop|workingTaskDropAcrossReceipt'` passed all seven tests.
-
-### Slice 3 (built at `ecf3ac66eb`) — Current Graph step on Mac and phone
-
-Selections use the running cursor when it names a step, then the parked step.
-The parked start and end positions have no step name. The phone draws the same
-step in its Task row as the sidebar.
-
-- `cargo test -p loopflow-execution --lib sidebar_step_follows_the_captured_cursor`, `cargo fmt --check`, and `cargo clippy --all-targets -- -D warnings` passed.
-- `uv run python scripts/test_ios.py -only-testing:LoopflowiOSTests/TaskFeedTests/testTaskRowShowsItsCurrentGraphStep` passed on the iOS 26.2 Simulator.
-- On a fresh private Machine, `lf desktop view show 'kind:task state:working' --json` reported `null`, `"review"`, and `null` for FIX-2 parked at start, review, and end.
-
-### Choices made for review (headless Graph)
-
-Recorded in [concept-review.html](concept-review.html#questions):
-1. **Dual-state `Busy` + `Available` Task in Sort by status:** Sort as `Busy` to match the word **Busy** printed on Mac and iOS rows (passed over changing row display to `Available`, because `working` beating `idle` is an established OSC 7501 & `TaskStatusTests` rule).
-2. **OSC 7501 `error` in Sort by status:** Add `SelectionState::Error` and sort `Blocked → Error → Available → Idle → Busy` (passed over folding `Error` into `Blocked`, which would hide `Error` on iOS).
-3. **Local preview for Sort by status:** No guessed local preview (passed over adding `started_at` to `ViewContent` solely for a transient preview); `PendingChanges` handles retry, offline disable, and superseding pre-sort drags cleanly.
-
-## Working order & built behavior (already implemented at `1e3b4007ce`)
+## Working order (implemented at `1e3b4007ce`)
 
 - Repository, Wave, roadmap and phone views share the Machine's Working order.
   A new Working Task precedes saved rows. Unsaved rows sort by first claim
@@ -95,46 +67,30 @@ Recorded in [concept-review.html](concept-review.html#questions):
   handoffs keep original start time. Backlog keeps its planning rank. LOO-938:
   “your order of your claimed tasks is NOT the proejct order, ut your order of hte backlog IS”.
 - A sidebar or grid drag saves the full Working order, carrying `DropSide`
-  (`before`/`after`) through preview and both Machine write paths. The Machine
-  applies it on each compare-and-commit attempt. Missing targets return
-  `not_found` naming the absent Task, clearing the preview and keeping the
-  refusal Notice through a failed reread. Saved Dashboards keep their own
-  arrangements.
-- **Sort by status** in the sidebar or ⌘K, and `lf desktop sort`, save a
-  one-shot status snapshot (updated in Slice 1 to `Blocked, Error, Available,
-  Idle, Busy`, newest first within each group). Subsequent turns leave the
-  saved rows in place.
-- `TaskSection` determines membership. Attached Sessions supply activity.
-  A Task can match both Available and Busy in filters. Shortcuts follow the
-  filtered list and the open conversation stays selected when its row leaves it.
+  (`before`/`after`) through preview and both Machine write paths. Missing
+  targets return `not_found` naming the absent Task. Saved Dashboards keep
+  their own arrangements.
+- `TaskSection` determines membership; attached Sessions supply activity.
+  Shortcuts follow the filtered list and the open conversation stays selected
+  when its row leaves it.
 - A live interactive Session's finished turn (`done` without `working`) reads
-  Available on the Task row (terminal pane keeps `Finished`). Finished or
-  failed reports clear on typing in both Ghostty and held terminals.
-- All SwiftPM app builders (`scripts/app_bundle.py`) copy `*.bundle` resources
-  for Dev, QA, and Release builds. `AppFontRegistration` scans packaged `.ttf`
-  files by absolute URL with a same-size system fallback.
-- Graph-step sorting (`B2`), automatic sinking (`B3`), manual parking (`B4`),
-  LOO-937 Project-rank ownership, and `TaskCondition::Blocked` in selection
-  reads stay outside LOO-1063 ([explore.html](explore.html),
+  Available on the Task row; the terminal pane keeps `Finished`. Finished or
+  failed reports clear on typing in Ghostty and held terminals.
+- `scripts/app_bundle.py` copies `*.bundle` resources for Dev, QA and Release.
+  `AppFontRegistration` scans packaged `.ttf` files with a same-size fallback.
+- Out of scope: Graph-step sorting (`B2`), automatic sinking (`B3`), manual
+  parking (`B4`), LOO-937 Project rank ([explore.html](explore.html),
   [questions.md](questions.md)).
 
-## Earlier verification notes (preserved from prior passes)
+## Measurements
 
-- Synthetic store (10,000 Tasks, 406,666 events) median query times for 300 IDs:
-  0.78 ms for start times, 0.33 ms for Graph steps; 1,553-Task Machine store:
-  0.56 ms and 2.68 ms; 300 Machine Sessions availability lookup: 0.72 ms median.
-- Private Machine QA rounds 1–3 recorded in [QA](qa.html). Round 3 verified a
-  returning store, new arrival prepending, `lf desktop sort`, Graph step display,
-  and packaged Dev bundle fonts. Unlocked Desktop walkthrough (live sidebar Sort
-  button, ⌘K sort, grid drag, ⌘1–9, ⌃Tab, live OSC 7501 `done` pane, iOS
-  Simulator feed) remains for gate.
-
-## Compression checks
-
-- `cargo fmt --all --check` and `cargo clippy --all-targets -- -D warnings` passed.
-- `cargo test -p loopflow-execution --lib store::selections::tests::` passed 25 tests, including repository and Wave tiles before and after their primary Session closes.
-- `scripts/test_desktop.sh --skip-build --filter 'statusSortSupersedes|refusedStatusSort|sortRetriesAfter|sortIsDisabled|sortByStatusUpdates|refusedWorkingTaskDrop|workingTaskDropAcrossReceipt|TaskPlanningReadabilityTests|sidebarAndGridShareTheOrder'` passed 21 tests after a Swift test build.
-- `EXPLAIN QUERY PLAN` on a private 10,011-Task store with 1,000 seeded Graph rows showed indexed lookups for Tasks, primary Sessions, checkouts, Graphs and the local Machine. The batch returned all 300 selected rows.
+- Synthetic store (10,000 Tasks, 406,666 events), 300 IDs: 0.78 ms start
+  times, 0.33 ms Graph steps; 1,553-Task Machine store: 0.56 ms and 2.68 ms;
+  300-Session availability lookup 0.72 ms median.
+- `EXPLAIN QUERY PLAN` on a 10,011-Task store with 1,000 Graph rows showed
+  indexed lookups for Tasks, primary Sessions, checkouts, Graphs and the local
+  Machine.
+- Private QA rounds 1–4: [qa.html](qa.html).
 
 ## Docs
 
@@ -153,6 +109,11 @@ cargo test -p loopflow --test served_reads working_task_drop_keeps_its_side_afte
 scripts/test_desktop.sh --filter 'TaskConceptTests|TaskStatusTests|PendingChangesTests|WorkNavigationTests|DashboardWorkspaceTests'
 uv run python scripts/test_ios.py -only-testing:LoopflowiOSTests/TaskFeedTests
 ```
+
+After the sync onto main, `served_reads` `server_operations_match_their_lf_commands`
+failed at `config scope --json` (`/private/var/folders` vs `/var/folders`), a
+test and read that came from main ([questions.md](questions.md)). Gate checks
+whether main fails the same way.
 
 In Loopflow Dev, select the lower of two Working rows while its conversation
 is Available and send a prompt. Watch the status change and hand back in place.

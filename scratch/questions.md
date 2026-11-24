@@ -33,3 +33,7 @@
 ## From QA round 4 (2026-11-23)
 
 - A returning Desktop launch opened by link stays on saved planning (“Updating…”), highlights the saved selection and ignores sidebar clicks; moving `desktop-cache/workspace.json` aside clears it. Left unfixed here: the stuck read is in workspace restore, not Working order. Worth its own Task if it reproduces unlocked.
+
+## From sync onto main (2026-11-23)
+
+- `server_operations_match_their_lf_commands` fails after the merge at `config scope --json`: the server reports the personal config path as `/private/var/folders/…`, the CLI as `/var/folders/…`. The `config scope` read and that test arrived from main; this branch doesn't touch config code. Left for gate/CI to confirm whether main fails the same way.

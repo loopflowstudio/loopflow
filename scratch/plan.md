@@ -77,7 +77,7 @@ During a build, `lf task pause INF-123` stops the worker, every subprocess in th
 
 - Two real Claude workers each ran a real `cargo build`. Pausing one stopped its worker, shell, `cargo`, `build-script-build` and primary in 2.3 s; the other build finished. A server restart and a comment left the held Task quiet, and `unpause --run` restarted the build in the same checkout (`scratch/qa.html`).
 - Fixed during QA: the paused run refusal named `lf-<hex>` and the cleanup refusal named `task_<hex>`; both now use the short identifier. Status called a paused step Blocked ("launch fresh work"); it now reads "<step> stopped when the Task was paused".
-- Mac and iPhone Paused views had no live walkthrough; headless Swift and Simulator tests cover them.
+- The Mac and iPhone Paused groups have had no live walkthrough yet; headless Swift and Simulator tests cover them (remaining step 1).
 
 ## Pause during interrupt and move
 

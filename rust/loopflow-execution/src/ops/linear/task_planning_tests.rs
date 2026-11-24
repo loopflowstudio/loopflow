@@ -975,7 +975,7 @@ fn owned_tracker_checks_deliver_a_late_comment_to_worker_and_primary_once() {
                 [],
             )
             .unwrap();
-            let attempted = db.last_team_attempt("team-1").unwrap().unwrap();
+            let attempted = db.last_scope_attempt("team-1").unwrap().unwrap();
             let due = check_owned_work(store, Some(&task.id)).await.unwrap();
             assert_eq!(
                 due,

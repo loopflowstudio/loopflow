@@ -39,8 +39,9 @@ For a repository without Linear or Asana the service also reads the shared
 plan. A save, here or in the CLI, sends its own records at once
 (`plan_carriers::send`: the hub, and a Git push with no fetch, five seconds at
 most). The service reads and sends (`plan_carriers::sync`) after each command
-it answers that names a directory, and fetches every such repository's plan
-refs every 60 s, which is when another Machine's change arrives with no hub.
+it answers that names a directory. For repositories with open local claims,
+the service and running Graph steps share a hub and Git exchange every 30 s.
+The service fetches Git plan refs every 60 s for repositories without claims.
 [Without a tracker](../../../../docs/dev/planning.md#without-a-tracker-stamps-and-carriers) has the carriers.
 
 ## Recovery pass

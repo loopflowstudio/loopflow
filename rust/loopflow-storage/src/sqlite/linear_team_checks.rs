@@ -3,15 +3,16 @@ use rusqlite::{params, OptionalExtension, TransactionBehavior};
 use super::SqliteStore;
 use crate::StoreResult;
 
-/// The team's last attempt and the watermark its last finished read reached.
+/// Last attempt for a planning scope, and its tracker watermark when it has one.
+/// Linear keeps its released team keys. Asana projects and carrier polls use prefixes.
 fn saved_check(
     conn: &rusqlite::Connection,
-    team: &str,
+    scope: &str,
 ) -> StoreResult<Option<(i64, Option<String>)>> {
     Ok(conn
         .query_row(
             "SELECT attempted_at,synced_through FROM linear_team_checks WHERE team_id=?1",
-            [team],
+            [scope],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .optional()?)
@@ -54,16 +55,16 @@ impl SqliteStore {
         Ok((open, finished))
     }
 
-    pub fn last_team_attempt(&self, team: &str) -> StoreResult<Option<i64>> {
+    pub fn last_scope_attempt(&self, scope: &str) -> StoreResult<Option<i64>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        Ok(saved_check(&conn, team)?.map(|(at, _)| at))
+        Ok(saved_check(&conn, scope)?.map(|(at, _)| at))
     }
 
     // The acquisition file lock spans network/ingestion; this transaction only
     // claims freshness. A crash leaves a bounded delay and the old watermark.
-    pub fn begin_linear_team_check(
+    pub fn begin_scope_check(
         &self,
-        team: &str,
+        scope: &str,
         now: i64,
         fresh_for: i64,
     ) -> StoreResult<Option<Option<String>>> {
@@ -71,19 +72,19 @@ impl SqliteStore {
             saved.as_ref().is_some_and(|(at, _)| now - at < fresh_for)
         };
         let mut conn = self.conn.lock().expect("store mutex poisoned");
-        // Nearly every check finds the team fresh; that answer takes no write lock.
-        if fresh(&saved_check(&conn, team)?) {
+        // Nearly every check finds the scope fresh; that answer takes no write lock.
+        if fresh(&saved_check(&conn, scope)?) {
             return Ok(None);
         }
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let saved = saved_check(&tx, team)?;
+        let saved = saved_check(&tx, scope)?;
         if fresh(&saved) {
             return Ok(None);
         }
         tx.execute(
             "INSERT INTO linear_team_checks(team_id,attempted_at) VALUES(?1,?2)
              ON CONFLICT(team_id) DO UPDATE SET attempted_at=excluded.attempted_at",
-            params![team, now],
+            params![scope, now],
         )?;
         tx.commit()?;
         Ok(Some(saved.and_then(|(_, through)| through)))
@@ -112,11 +113,11 @@ impl SqliteStore {
             .is_some_and(|through| now - through.unix_timestamp() < fresh_for))
     }
 
-    pub fn finish_linear_team_check(&self, team: &str, through: &str) -> StoreResult<()> {
+    pub fn finish_scope_check(&self, scope: &str, through: &str) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
             "UPDATE linear_team_checks SET synced_through=?2 WHERE team_id=?1",
-            params![team, through],
+            params![scope, through],
         )?;
         Ok(())
     }
@@ -132,22 +133,20 @@ mod tests {
         // 2026-10-29T00:00:00Z
         let start = 1_793_232_000;
         assert_eq!(
-            store.begin_linear_team_check("team", start, 10).unwrap(),
+            store.begin_scope_check("team", start, 10).unwrap(),
             Some(None)
         );
         // Begun but unfinished: nothing local answers yet.
         assert!(!store.linear_team_current("team", start, 10).unwrap());
         store
-            .finish_linear_team_check("team", "2026-10-29T00:00:00Z")
+            .finish_scope_check("team", "2026-10-29T00:00:00Z")
             .unwrap();
         assert!(store.linear_team_current("team", start + 9, 10).unwrap());
         assert!(!store.linear_team_current("team", start + 10, 10).unwrap());
         // A tighter budget stretches the window over the same delta.
         assert!(store.linear_team_current("team", start + 90, 100).unwrap());
         assert_eq!(
-            store
-                .begin_linear_team_check("team", start + 90, 100)
-                .unwrap(),
+            store.begin_scope_check("team", start + 90, 100).unwrap(),
             None
         );
     }

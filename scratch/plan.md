@@ -177,13 +177,27 @@ The two-Home fixture sent a steer through the sibling's Task comment command. A 
 - `cargo build -p loopflow --bin lf`, `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings` passed.
 - SQLite on 10,000 synthetic Tasks across four repositories, median of 21 warm reads: repository discovery 0.008 ms, issue IDs for one repository (2,500 rows) 1.903 ms. Both plans used `idx_tasks_repository` for Task lookups.
 
-### Slice 1b: Other carriers and the two-Machine demo (next)
+### Slice 1b: Other carriers and the two-Machine demo (implemented)
 
-- Asana reads a repository-named project within a team. Two repositories in the same team currently share a team watermark even though their project feeds differ. Key delta admission and scope matching by the project's identity before enabling periodic Asana reads. Exercise two projects in one team.
-- Add bounded hub/Git exchange for owned work. Keep the existing minute Git exchange for repositories with no local claims, which receives new plans there. Share background exchange attempts across Graphs and the server.
-- Exercise the timer in a two-Home demo with a running worker and an idle or stopped primary Session. Include loss of the server after a managed worker has started.
+The server and active Graph steps poll each Asana repository project independently.
+Admission uses the team GID and repository project name before contacting Asana.
+The completed watermark includes the project GID. A replacement project with
+the same name gets a full first read. Linear keeps its existing watermark.
 
-### Slice 2: Honest `lf steer <task>` routing and `TaskSteerReceipt`
+For owned work without a tracker, the server and running Graphs share a 30 s
+attempt per checkout. Hub and Git exchange concurrently with five-second
+deadlines. The server's minute Git exchange still discovers plans in repositories
+without a local claim.
+
+- Two private Machine homes shared a bare Git remote. After the managed Claude stand-in started a tool and the primary stopped, the owner server exited. The sibling ran `lf steer`. The owner stored the steer 27.99 s later. The worker's tool hook received it and the restarted server handed it to the primary as startup input. SQLite recorded one steer and one delivery for each Session.
+- The Asana fixture checked two projects in one team and then replaced one project under the same name. Both received their own comments and an older Task in the replacement project was imported.
+- The Git fixture checked unclaimed discovery, a claim moving the checkout to the owner timer, and the server sharing the Graph's last attempt. Both Git deadline and unsent-cursor checks passed.
+- A private owner server with no Git remote picked up a comment held only on its configured hub. The hub fixture uses a local SSH stand-in and the production server protocol.
+- Asana coverage used a stateful HTTP stand-in. The existing five-second tracker check still has to finish the project delta to advance its watermark.
+- With 10,000 saved scopes, SQLite used the `linear_team_checks` primary-key index for admission. The median fresh lookup took 0.0026 ms over 21 batches of 1,000 lookups.
+- Branch CLI build, six focused execution tests, the hub-only server test, four documented-command checks, `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings` passed. CI covers the full matrix.
+
+### Slice 2: Honest `lf steer <task>` routing and `TaskSteerReceipt` (next)
 - Define `TaskSteerReceipt { identifier, steer_id, delivery }` and `SteerDelivery { reached: SteerReached (owner | tracker | here), runs_on: Option<MachineRef>, sentence }` with strict required/nullable wire fields and the single Rust-authored `sentence`.
 - Generalize `steer_reader` (`commands/session.rs:142`) from one Session to a Task (its live workers, its conversation, or nothing) and move it beside `engine::session::steer`, so Session and Task steers word their reader the same way and the owner's server can author it.
 - Wire `Write::TaskSteer` into `Write::remote()` (bounded 15 s SSH timeout) with pre-admission fallback to local save + synchronous tracker/carrier sync for remote-owned Tasks (no fallback on `OutcomeUnknown`).

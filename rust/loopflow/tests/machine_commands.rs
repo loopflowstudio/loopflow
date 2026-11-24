@@ -1508,6 +1508,55 @@ impl Home {
     }
 }
 
+/// The only copy of the new comment is on the hub. The owner has no Git
+/// remote and nobody reads its plan or runs a Graph after its server starts.
+#[test]
+fn the_owner_server_picks_up_a_steer_from_its_hub() {
+    use loopflow_model::comment::{TaskComment, TaskCommentAuthor};
+    use loopflow_test_support::MachineServer;
+    use std::time::{Duration, Instant};
+
+    let fixture = preview_machines();
+    let plan = SharedPlan::new(&fixture);
+    git(&plan.local_path, &["remote", "remove", "origin"]);
+    let task = plan.local_task();
+    loopflow_execution::store::ownership::claim_task(&plan.local, &task).unwrap();
+    plan.to_remote();
+    let comment = TaskComment {
+        id: uuid::Uuid::new_v4().to_string(),
+        body: "Read this steer from the hub".into(),
+        author: TaskCommentAuthor::Person {
+            name: Some("Ada".into()),
+        },
+        created_at: Some("2026-11-22T12:00:00Z".into()),
+    };
+    plan.remote.append_task_comment(&task, &comment).unwrap();
+    assert_success(&fixture.run(&["machine", "hub", "mini"]));
+    let root = fixture.root.path();
+    let lf = env!("CARGO_BIN_EXE_lf");
+    let _hub = MachineServer::start(lf, &root.join("remote/store"));
+    let _owner = MachineServer::start_with_path(
+        lf,
+        &root.join("local"),
+        &format!("{}:/usr/bin:/bin", root.join("bin").display()),
+    );
+    let deadline = Instant::now() + Duration::from_secs(45);
+    loop {
+        let steers = plan.local.task_steers(&task).unwrap();
+        if steers.iter().any(|read| read.text.contains(&comment.body)) {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the hub's comment never reached its owner"
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    assert!(
+        loopflow_storage::steer_markers::task_marker(&root.join("local"), task.as_str()).is_file()
+    );
+}
+
 /// LOO-938's acceptance over the real carriers: three homes clone one bare
 /// remote and meet through its plan refs; the laptop then names mini its hub
 /// and reaches it with `ssh mini lf server connect`.

@@ -1,1 +1,1 @@
-Slice 1a took the sibling-sandbox Linear path first; Asana and hub/Git carriers are slice 1b in the plan.
+Asana admission uses the team GID and repository project name, the pair Asana resolves before reading Tasks. The watermark also records the resolved project GID so replacing that project resets its delta.

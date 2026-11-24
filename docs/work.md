@@ -293,8 +293,10 @@ processes stay on the Machine that ran them. Claims follow your Git
 Every command saves on this Machine first, so nothing waits on the network.
 Each Machine pushes its plan to a ref of its own on the remote
 (`refs/loopflow/plan/<machine id>`) as part of the save, for five seconds at
-most, and its server fetches the others' once a minute;
-`lf task sync <issue>` does both now. The refs stay out of
+most. Its server fetches the others’ refs about every 30 seconds while it owns
+open Tasks in the repository and once a minute otherwise. A running Graph step
+keeps checking its repository if the server exits. `lf task sync <issue>` does
+both now. The refs stay out of
 `git branch`, `git status` and a plain clone. A repository with no remote reads
 `Plan: this Machine.` and sends nothing.
 

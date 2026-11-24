@@ -4,7 +4,7 @@
 //! [`sync`] reads and sends: when asked, before a claim or a new Wave, and
 //! after a command the Machine server answers. [`read`] asks the hub alone,
 //! for a read nobody asked for.
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -25,6 +25,49 @@ fn exchange(store: &SqliteStore, repo: &str, until: Option<Instant>) -> Result<(
     let why = until.map_or(Why::Asked, Why::Read);
     let by_hub = super::plan_hub::exchange(store, repo, why);
     super::plan_git::exchange(store, repo, until).and(by_hub)
+}
+
+/// Repositories with an open claim on this Machine, each checkout once.
+pub(super) fn owned_repositories(store: &SqliteStore) -> Result<BTreeSet<String>> {
+    let machine = store.saved_local_machine()?;
+    Ok(store
+        .held_planning_scope(&machine.id)?
+        .repositories
+        .into_values()
+        .map(|(_, repo)| repo)
+        .collect())
+}
+
+/// Background exchanges share an attempt across the server and all Graphs in
+/// this checkout. Give Git its own deadline so an offline hub cannot starve it.
+pub(super) async fn poll_owned(
+    store: &crate::store::Store,
+    repo: &str,
+    window: i64,
+) -> Result<Option<i64>> {
+    let scope = format!("plan:{repo}");
+    let now = time::OffsetDateTime::now_utc().unix_timestamp();
+    if store
+        .sqlite
+        .begin_scope_check(&scope, now, window)?
+        .is_some()
+    {
+        let until = Instant::now() + WAIT;
+        let hub = on_thread(store, repo, move |sqlite, repo| {
+            super::plan_hub::exchange(sqlite, repo, Why::Read(until))
+        });
+        let git = on_thread(store, repo, move |sqlite, repo| {
+            super::plan_git::exchange(sqlite, repo, Some(until))
+        });
+        let (hub, git) = tokio::join!(hub, git);
+        for result in [hub, git] {
+            if let Err(error) = result {
+                tracing::debug!(%repo, error = %format!("{error:#}"), "owned plan exchange pending");
+            }
+        }
+        return Ok(Some(now));
+    }
+    Ok(store.sqlite.last_scope_attempt(&scope)?)
 }
 
 /// [`exchange`] for `repo`, when it has no Linear or Asana, for as long as

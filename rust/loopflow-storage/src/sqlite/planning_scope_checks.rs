@@ -3,6 +3,12 @@ use rusqlite::{params, OptionalExtension, TransactionBehavior};
 use super::SqliteStore;
 use crate::StoreResult;
 
+#[derive(Debug, PartialEq, Eq)]
+pub enum ScopeCheck {
+    Recent { attempted_at: i64 },
+    Started { since: Option<String> },
+}
+
 /// Last attempt for a planning scope, and its tracker watermark when it has one.
 /// Linear keeps its released team keys. Asana projects and carrier polls use prefixes.
 fn saved_check(
@@ -67,19 +73,22 @@ impl SqliteStore {
         scope: &str,
         now: i64,
         fresh_for: i64,
-    ) -> StoreResult<Option<Option<String>>> {
-        let fresh = |saved: &Option<(i64, Option<String>)>| {
-            saved.as_ref().is_some_and(|(at, _)| now - at < fresh_for)
+    ) -> StoreResult<ScopeCheck> {
+        let recent = |saved: &Option<(i64, Option<String>)>| {
+            saved
+                .as_ref()
+                .filter(|(at, _)| now - at < fresh_for)
+                .map(|(at, _)| ScopeCheck::Recent { attempted_at: *at })
         };
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         // Nearly every check finds the scope fresh; that answer takes no write lock.
-        if fresh(&saved_check(&conn, scope)?) {
-            return Ok(None);
+        if let Some(check) = recent(&saved_check(&conn, scope)?) {
+            return Ok(check);
         }
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let saved = saved_check(&tx, scope)?;
-        if fresh(&saved) {
-            return Ok(None);
+        if let Some(check) = recent(&saved) {
+            return Ok(check);
         }
         tx.execute(
             "INSERT INTO planning_scope_checks(scope,attempted_at) VALUES(?1,?2)
@@ -87,21 +96,16 @@ impl SqliteStore {
             params![scope, now],
         )?;
         tx.commit()?;
-        Ok(Some(saved.and_then(|(_, through)| through)))
+        Ok(ScopeCheck::Started {
+            since: saved.and_then(|(_, through)| through),
+        })
     }
 
-    /// Whether the scope's last finished delta is within `fresh_for`
+    /// Whether the Linear team's last finished delta is within `fresh_for`
     /// seconds of `now`.
-    pub fn scope_current(&self, scope: &str, now: i64, fresh_for: i64) -> StoreResult<bool> {
+    pub fn linear_team_current(&self, scope: &str, now: i64, fresh_for: i64) -> StoreResult<bool> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let through: Option<String> = conn
-            .query_row(
-                "SELECT synced_through FROM planning_scope_checks WHERE scope=?1",
-                [scope],
-                |row| row.get(0),
-            )
-            .optional()?
-            .flatten();
+        let through = saved_check(&conn, scope)?.and_then(|(_, through)| through);
         Ok(through
             .and_then(|through| {
                 time::OffsetDateTime::parse(
@@ -125,6 +129,7 @@ impl SqliteStore {
 
 #[cfg(test)]
 mod tests {
+    use super::ScopeCheck;
 
     #[test]
     fn finished_team_delta_answers_reads_inside_its_window() {
@@ -134,20 +139,22 @@ mod tests {
         let start = 1_793_232_000;
         assert_eq!(
             store.begin_scope_check("team", start, 10).unwrap(),
-            Some(None)
+            ScopeCheck::Started { since: None }
         );
         // Begun but unfinished: nothing local answers yet.
-        assert!(!store.scope_current("team", start, 10).unwrap());
+        assert!(!store.linear_team_current("team", start, 10).unwrap());
         store
             .finish_scope_check("team", "2026-10-29T00:00:00Z")
             .unwrap();
-        assert!(store.scope_current("team", start + 9, 10).unwrap());
-        assert!(!store.scope_current("team", start + 10, 10).unwrap());
+        assert!(store.linear_team_current("team", start + 9, 10).unwrap());
+        assert!(!store.linear_team_current("team", start + 10, 10).unwrap());
         // A tighter budget stretches the window over the same delta.
-        assert!(store.scope_current("team", start + 90, 100).unwrap());
+        assert!(store.linear_team_current("team", start + 90, 100).unwrap());
         assert_eq!(
             store.begin_scope_check("team", start + 90, 100).unwrap(),
-            None
+            ScopeCheck::Recent {
+                attempted_at: start
+            }
         );
     }
 

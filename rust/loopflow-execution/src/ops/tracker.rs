@@ -260,26 +260,26 @@ impl Tracker {
         Vec<(TrackerItem, Option<TrackerProject>, TrackerEvent)>,
         String,
     )> {
-        let (changes, watermark) = match self {
-            Self::Linear(client) => {
-                return Ok((
-                    client
-                        .team_changes(scope, since, through, live, finished)
-                        .await?,
-                    through.to_owned(),
+        match self {
+            Self::Linear(client) => Ok((
+                client
+                    .team_changes(scope, since, through, live, finished)
+                    .await?,
+                through.to_owned(),
+            )),
+            Self::Asana(client) => {
+                let (changes, watermark) = client.changes(since, through, live, finished).await?;
+                Ok((
+                    changes
+                        .into_iter()
+                        .map(|(issue, event)| (issue, None, event))
+                        .collect(),
+                    watermark,
                 ))
             }
-            Self::Asana(client) => client.changes(since, through, live, finished).await?,
             #[cfg(test)]
-            Self::Fake(_) => (Vec::new(), through.to_owned()),
-        };
-        Ok((
-            changes
-                .into_iter()
-                .map(|(issue, event)| (issue, None, event))
-                .collect(),
-            watermark,
-        ))
+            Self::Fake(_) => Ok((Vec::new(), through.to_owned())),
+        }
     }
 
     pub(crate) async fn fetch_issue(&self, id: &str) -> TrackerResult<TrackerEvent> {

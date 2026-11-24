@@ -56,10 +56,7 @@ macro_rules! writes {
             /// Run the shared operation where its Work lives and keep its
             /// declared result until serialization.
             pub(crate) fn run(&self) -> anyhow::Result<WriteResult> {
-                match self.remote()? {
-                    Some(result) => Ok(result),
-                    None => self.execute(None, None),
-                }
+                self.execute(self.remote()?, None)
             }
 
             /// Run a write another Machine sent here, never sending it on: in
@@ -73,10 +70,9 @@ macro_rules! writes {
             }
 
             /// `remote` is the Machine a Task or Session write goes to instead.
-            fn execute(&$this, $remote: Option<Remote>, origin: Option<&Sender>) -> anyhow::Result<WriteResult> {
-                let environment = origin.map(|sender| sender.selection.environment(&sender.secrets)).transpose()?.unwrap_or_default();
+            fn execute(&$this, $remote: Option<Remote>, $origin: Option<&Sender>) -> anyhow::Result<WriteResult> {
+                let environment = $origin.map(|sender| sender.selection.environment(&sender.secrets)).transpose()?.unwrap_or_default();
                 let $environment = environment.as_slice();
-                let $origin = origin;
                 let $directory = $this.directory();
                 let $task_repo = |issue: &str| loopflow_execution::ops::task::task_repository($directory, Some(issue));
                 match $this {
@@ -281,7 +277,7 @@ writes! {
         issue: String,
         message: String,
     } => task::TaskSteerReceipt;
-    { issue, message, .. } => steer_task(directory, issue, None, message, origin)?,
+    { issue, message, .. } => steer_task(&task_repo(issue)?, issue, None, message, origin)?,
 
     /// `lf task report <issue> <message> --json`: progress for the Task's
     /// thread; an agent's carries its Session's provenance.
@@ -1188,23 +1184,12 @@ macro_rules! directory_of {
 }
 
 impl Write {
-    /// Route writes that live elsewhere. Task direction can also be saved
-    /// here and exchanged when the owner cannot take the request directly.
-    fn remote(&self) -> anyhow::Result<Option<WriteResult>> {
+    /// Where an ordinary write must run. A steer handles its carrier fallback
+    /// inside `steer_task` before the first request is sent.
+    fn remote(&self) -> anyhow::Result<Option<Remote>> {
         use loopflow_execution::machine::task::{remote_ownership_writer, remote_task};
-        let execute = |remote| self.execute(Some(remote), None);
-        // A run starts agents there, which carry what `forward` names.
         let (route, launching) = match self {
-            Self::TaskSteer {
-                directory,
-                issue,
-                message,
-            } => {
-                return Ok(Some(WriteResult::TaskSteer(Box::new(steer_task(
-                    directory, issue, None, message, None,
-                )?))))
-            }
-            Self::SessionResume { .. } => return self.remote_session()?.map(execute).transpose(),
+            Self::SessionResume { .. } => return self.remote_session(),
             Self::TaskRun { issue, .. } | Self::TaskAutoOn { issue, .. } => {
                 (remote_task(issue)?, true)
             }
@@ -1241,14 +1226,7 @@ impl Write {
                 .unwrap_or_else(|| route.task_id.to_string());
         }
         let machine = find_machine(route.machine_id.as_str())?;
-        execute(Remote::new(
-            machine,
-            route.repository_id,
-            write,
-            launching,
-            source,
-        )?)
-        .map(Some)
+        Remote::new(machine, route.repository_id, write, launching, source).map(Some)
     }
 
     /// A resume of a conversation that lives on another Machine, carrying the
@@ -1445,24 +1423,11 @@ impl Remote {
 
     /// The answer of the destination's server; nothing runs here instead.
     pub(super) fn call<T: DeserializeOwned>(&self) -> anyhow::Result<T> {
-        self.request(self.connect(None)?)
-    }
-
-    fn connect(
-        &self,
-        until: Option<std::time::Instant>,
-    ) -> anyhow::Result<loopflow_execution::machine::client::Connection> {
-        loopflow_execution::machine::client::Connection::open_on(
+        let mut connection = loopflow_execution::machine::client::Connection::open_on(
             &self.machine,
             self.sender.clone(),
-            until,
-        )
-    }
-
-    fn request<T: DeserializeOwned>(
-        &self,
-        mut connection: loopflow_execution::machine::client::Connection,
-    ) -> anyhow::Result<T> {
+            None,
+        )?;
         let answer =
             connection.request(crate::server::wire::Operation::Write(self.change.clone()))?;
         Ok(serde_json::from_value(answer.result)?)
@@ -1472,88 +1437,63 @@ impl Remote {
 /// Resolve the Task once for the CLI or a served request. A Machine receiving
 /// a forwarded request can save or sync the steer, but never forwards it again.
 pub(super) fn steer_task(
-    directory: &Path,
+    repo: &Path,
     issue: &str,
     wave: Option<&str>,
     message: &str,
     sender: Option<&Sender>,
 ) -> anyhow::Result<task::TaskSteerReceipt> {
-    use loopflow_execution::{ops::task as tasks, store::machines};
-    use loopflow_model::durable::MachineRef;
+    use super::work_route::{peer_issue, TaskPeer};
+    use crate::server::wire::Operation;
 
-    let repo = tasks::task_repository(directory, Some(issue))?;
     let rt = tokio::runtime::Runtime::new()?;
     let (store, task) = rt
-        .block_on(tasks::resolve_saved_task(&repo, wave, issue))
+        .block_on(loopflow_execution::ops::task::resolve_saved_task(
+            repo, wave, issue,
+        ))
         .with_context(|| format!("resolving Task {issue}"))?;
-    let sqlite = &store.sqlite;
-    let (local, ownership) = sqlite.saved_task_ownership(&task.id)?;
-    let elsewhere = match ownership.owner.as_ref() {
-        Some(_) => ownership.owner_elsewhere(&local).cloned(),
-        None => {
-            let route =
-                loopflow_execution::store::ownership::task_execution_route(sqlite, &task.id)?;
-            (route.machine_id != local).then_some(MachineRef {
-                id: Some(route.machine_id),
-                label: None,
-            })
-        }
-    };
     let participant = match sender {
         Some(sender) => sender.selection.participant.clone(),
-        None => loopflow_execution::config::participant_name_in(&repo)?,
+        None => loopflow_execution::config::participant_name_in(repo)?,
     };
     let save = |fallback| rt.block_on(task::steer(&store, &task, message, participant, fallback));
-    let Some(mut owner) = elsewhere else {
+    let Some(peer) = TaskPeer::resolve(&store.sqlite, &task.id)? else {
         return save(None);
     };
-    if loopflow_execution::machine::task::move_awaiting_arrival(sqlite, &task.id)? {
-        return save(None);
-    }
-    let peer = machines::machines(sqlite)?
-        .into_iter()
-        .find(|m| Some(&m.id) == owner.id.as_ref());
-    let reason = match (sender, peer) {
-        (None, Some(machine)) => {
-            owner.label.clone_from(&machine.label);
-            let change = Write::TaskSteer {
-                directory: repo,
-                // Tracker peers can assign different local IDs to the same issue.
-                issue: task
-                    .tracker_id
-                    .as_ref()
-                    .map_or_else(|| task.id.to_string(), |id| id.as_str().to_owned()),
-                message: message.to_owned(),
-            };
-            let until = std::time::Instant::now() + std::time::Duration::from_secs(15);
-            let admitted = Remote::new(machine, task.repository_id.clone(), change, false, None)
-                .and_then(|remote| Ok((remote.connect(Some(until))?, remote)));
-            match admitted {
-                Ok((connection, remote)) => {
-                    // The owner may have saved it. Never replay a request made here.
-                    let mut receipt: task::TaskSteerReceipt =
-                        remote.request(connection).map_err(|error| {
-                            loopflow_execution::engine::Error::refused(
-                                &error,
-                                loopflow_execution::engine::ErrorCode::OutcomeUnknown,
-                            )
-                        })?;
-                    if receipt.delivery.reached == task::SteerReached::Owner {
-                        receipt.delivery.sentence =
-                            format!("{} · {}", owner.name(), receipt.delivery.sentence);
-                        receipt.delivery.runs_on = ownership.owner.map(|_| owner);
-                    }
-                    return Ok(receipt);
-                }
-                Err(error) => format!("{error:#}"),
-            }
+    let name = peer.machine.name();
+    let runs_on = peer.runs_on().map(|claim| claim.machine);
+    let open = match sender {
+        None => peer.connect(repo, &task, Some(TaskPeer::deadline())),
+        Some(_) if peer.registered.is_none() => Err(anyhow!("{name} is not registered here")),
+        Some(_) => Err(anyhow!("{name} now runs the Task")),
+    };
+    let mut connection = match open {
+        Ok(connection) => connection,
+        Err(error) => {
+            let mut receipt = save(Some((peer.machine, format!("{error:#}"))))?;
+            receipt.delivery.runs_on = runs_on;
+            return Ok(receipt);
         }
-        (_, None) => format!("{} is not registered here", owner.name()),
-        (Some(_), Some(_)) => format!("{} now runs the Task", owner.name()),
     };
-    let mut receipt = save(Some((owner, reason)))?;
-    if ownership.owner.is_none() {
-        receipt.delivery.runs_on = None;
+
+    // Once transmitted, the owner may have saved it even if the reply is lost.
+    let change = Write::TaskSteer {
+        directory: repo.to_owned(),
+        issue: peer_issue(&task),
+        message: message.to_owned(),
+    };
+    let mut receipt: task::TaskSteerReceipt = connection
+        .request(Operation::Write(change))
+        .and_then(|answer| Ok(serde_json::from_value(answer.result)?))
+        .map_err(|error| {
+            loopflow_execution::engine::Error::refused(
+                &error,
+                loopflow_execution::engine::ErrorCode::OutcomeUnknown,
+            )
+        })?;
+    if receipt.delivery.reached == task::SteerReached::Owner {
+        receipt.delivery.sentence = format!("{name} · {}", receipt.delivery.sentence);
+        receipt.delivery.runs_on = runs_on;
     }
     Ok(receipt)
 }

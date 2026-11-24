@@ -66,7 +66,7 @@ When a Task is owned by another Machine — whether a reachable peer (`laptop ->
   - `lf steer <task> <message> [--json]` (`rust/loopflow/src/lf/commands/session.rs`)
   - `lf task status [<issue>] [--json] [--subscribe]` (`rust/loopflow/src/bin/lf.rs`, `rust/loopflow/src/lf/commands/waves.rs`, `rust/loopflow/src/lf/commands/task_row.rs`)
 - **Server protocol & dispatch:**
-  - `Write::TaskSteer` (`rust/loopflow/src/lf/commands/write.rs`): routed via `Write::remote()` with pre-admission fallback; returns `TaskSteerReceipt`.
+  - `Write::TaskSteer` (`rust/loopflow/src/lf/commands/write.rs`): shares the CLI’s peer lookup and pre-admission fallback; returns `TaskSteerReceipt`.
   - `Read::TaskStatus` (`rust/loopflow/src/lf/commands/read.rs`, `waves.rs`): returns `TaskDetail` with `task.runs_on` and `reading`, degrading to `unobserved` on unreachable/unregistered owners.
   - List reads (`open_tasks`, `RoadmapTask`): carry `runs_on` and the same `reason`/`next` rule, no SSH.
   - `server/maintenance.rs`: periodic inbound sync for active/owned repositories (tracker + `plan_hub` + `plan_git`).
@@ -153,7 +153,7 @@ Run the focused tests that exercise the full path across CLI, server, tracker st
 
 ```bash
 env $(env | grep '^LF_' | cut -d= -f1 | sed 's/^/-u /') \
-  cargo test -p loopflow --test machine_commands --test dto_fixtures -- \
+  cargo test -p loopflow --test integration -- \
   cross_machine_steer a_status_read a_served_status_for_a_task_mini_runs task_detail_ task_steer_receipt < /dev/null
 env $(env | grep '^LF_' | cut -d= -f1 | sed 's/^/-u /') \
   cargo test -p loopflow-execution --lib owned_tracker_checks_deliver_a_late_comment_to_worker_and_primary_once < /dev/null
@@ -230,15 +230,11 @@ ownership, labeled once in `store::ownership::task_detail_facts`).
 Task with `runs_on` takes `next_move.reason` "Runs on … since …", no conducting
 reason, and `TaskRow.next == null`.
 
-`TaskDetail.reading` is `here | owner | unobserved { reason }`.
-`waves::task_place` decides: unregistered owner → read here, and `task_detail`
-itself marks it unobserved ("<name> is not registered here"); registered →
-`Connection::open_on` with a 15 s deadline (subscriptions open without one).
-An open or request failure falls back to the local reading with the error as
-reason (`TaskDetail::unobserved` rewrites `task.reason`, nulls `graph`).
-A live reply is tagged `owner` and gets the caller's `runs_on`. Text status
-prints `waves::unobserved_line` (same sentence as `task.reason`); the remote
-text header prints `runs_on`.
+`TaskDetail.reading` is `here | owner | unobserved { reason }`. Steering and
+status resolve the same Task peer, including the preferred Machine of an
+unclaimed Task. Both send the tracker issue ID when one exists. A one-shot
+status waits up to 15 seconds for the peer, then reports the failure beside
+the saved planning. A subscription keeps its open connection.
 
 Machine name: preferences' name, else the public name the claim carried, else
 the id (existing labeling; the open question resolves to this, docs say so).
@@ -250,13 +246,18 @@ the id (existing labeling; the open question resolves to this, docs say so).
 - Gate risk: `a_status_read_for_a_task_mini_runs_shows_a_rename_made_there` once read the local copy when it ran beside ~50 fixtures; alone and with its two neighbours it passed. The 15 s deadline is what changed, so a stand-in SSH round trip slower than 15 s falls back to `unobserved`. Its assertion now selects `reading`, so a repeat prints the reason.
 - Swift decodes `RoadmapTask` with synthesized `Decodable` and ignores `runs_on`; no Swift field until a view reads it.
 
+### Compress checks
+
+- `cargo test -p loopflow --test integration` with the peer routing, hub, and DTO filters passed all 10 distinct checks. The lost-reply fixture kept the steer on the owner alone.
+- `cargo test -p loopflow-execution -p loopflow-storage --lib` with the carrier, scope-check, and ownership filters passed 12 checks.
+- `cargo fmt --check` passed. The macOS linker warned about compact unwind table size while building the debug CLI.
+
 ## Remaining
 
 Every slice is built. What is left belongs to gate and CI:
 
 - Publish so CI runs `served_reads`, `binary(lf)`, `test(machine_commands::)` and the Swift DTO/protocol tests (`DTOFixtureTests`, `ServerProtocolTests`); none ran here.
 - Watch `a_status_read_for_a_task_mini_runs_shows_a_rename_made_there` under CI load (see Slice 3 gate risk). A repeat that prints a timeout reason means the stand-in SSH round trip exceeds 15 s; fix the fixture, not the deadline.
-- Review nit: `waves::task_place` (where a status read comes from) shares its name with `ops::task::task_place` (worktree placement). Rename the `waves` one if review agrees.
 
 ## Done when
 

@@ -356,7 +356,7 @@ $ lf task status MTG-321
 …
 MTG-321  Runs on mini since Nov 12 10:42
 $ lf task list
-MTG-321 · Jack · Runs on mini since Nov 12 10:42
+MTG-321 · Jack · Runs on mini since Nov 12 10:42 · Resume a Session anywhere
 $ lf machine list
 mini  mini.local  home_7c0d…
   MTG-321 since Nov 12 10:42
@@ -473,9 +473,9 @@ Machine has saved (planning, comments, PR) with the same failure as its
 reason. If the connection drops after the steer was sent, `lf steer` fails
 rather than saving it a second time; `lf task status` shows whether it landed.
 
-Status and lists never offer `lf task run` for a Task another Machine runs:
-`task.next` is `null`. `lf task list` names the Machine from the ownership log
-and dials no one. A Machine your preferences don't name shows the public name
+When the owner cannot answer, status returns `task.next: null`. A live
+reply carries the owner’s own next move. `lf task list` reads the Machine
+name from the ownership log without contacting the owner. A Machine your preferences don't name shows the public name
 its claim carried, else its id:
 
 ```console

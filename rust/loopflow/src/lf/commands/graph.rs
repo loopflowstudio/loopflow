@@ -1060,14 +1060,13 @@ impl RunningGraph<'_> {
         }
         let mut watch = tokio::time::interval(std::time::Duration::from_secs(1));
         watch.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-        let mut tracker = tokio::task::JoinSet::new();
-        if let (StepKind::Agent, Some(task)) = (kind, self.task.clone()) {
-            tracker.spawn(tracker_events::watch_owned_work(Some(task)));
-        }
+        let directions = tracker_events::watch_owned_work(self.task.clone());
+        tokio::pin!(directions);
         let mut signalled = false;
         let status = loop {
             tokio::select! {
                 status = child.wait() => break status,
+                _ = &mut directions, if kind == StepKind::Agent && self.task.is_some() => {},
                 _ = watch.tick(), if kind == StepKind::Agent && !signalled => {
                     if self.interrupted() {
                         if let Some(pid) = child.id() {
@@ -1078,7 +1077,6 @@ impl RunningGraph<'_> {
                 }
             }
         };
-        drop(tracker);
         drop(output);
         // A step that died before writing its end leaves what this Graph saw.
         if let Some(step) = &step {

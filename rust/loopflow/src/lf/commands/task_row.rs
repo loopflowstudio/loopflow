@@ -112,22 +112,6 @@ pub enum TaskReading {
     Unobserved { reason: String },
 }
 
-impl TaskDetail {
-    /// The reading of a Task another Machine runs that this Machine could not
-    /// ask: its reason names that, its Graph is unknown here and nothing here
-    /// moves it.
-    pub(crate) fn unobserved(&mut self, reason: String) {
-        let Some(runs_on) = &self.task.runs_on else {
-            return;
-        };
-        if !matches!(self.task.state, TaskState::Done | TaskState::Abandoned) {
-            self.task.reason = unobserved_reason(runs_on, &reason);
-            self.graph = None;
-        }
-        self.reading = TaskReading::Unobserved { reason };
-    }
-}
-
 /// `Runs on mini since Nov 12 10:42; mini is not registered here, so its
 /// Graph and Sessions are not read here`.
 pub fn unobserved_reason(runs_on: &TaskRunsOn, reason: &str) -> String {

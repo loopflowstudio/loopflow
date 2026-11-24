@@ -4809,6 +4809,19 @@ fn a_served_status_for_a_task_mini_runs_is_minis_answer() {
 
     let fixture = preview_machines();
     let (plan, task) = task_on_mini(&fixture);
+    // Status follows the claim even when the person asking cannot write ownership.
+    git(
+        &plan.local_path,
+        &["config", "user.email", "reader@example.test"],
+    );
+    let issue = "shared-tracker-issue";
+    rusqlite::Connection::open(fixture.root.path().join("local/loopflow.db"))
+        .unwrap()
+        .execute(
+            "UPDATE tasks SET external_issue_id=?1 WHERE id=?2",
+            [issue, task.as_str()],
+        )
+        .unwrap();
     let answer: Value =
         serde_json::from_str(include_str!("../../../tests/fixtures/dto/task_detail.json")).unwrap();
     let record = fixture.root.path().join("entry");
@@ -4839,6 +4852,7 @@ fn a_served_status_for_a_task_mini_runs_is_minis_answer() {
         "{read}"
     );
     let (_, request) = entry_input(&record);
+    assert_eq!(request["operation"]["issue"], issue);
     assert_eq!(request["operation"]["kind"], "task.status");
     assert_eq!(request["sender"]["repository"], plan.repository.as_str());
 }

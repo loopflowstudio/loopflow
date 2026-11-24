@@ -13,6 +13,7 @@ use anyhow::{anyhow, bail, Result};
 
 use loopflow_model::durable::{RepositoryId, TaskId};
 use loopflow_storage::sqlite::plan_carriers::NotTaken;
+use loopflow_storage::sqlite::planning_scope_checks::ScopeCheck;
 use loopflow_storage::sqlite::SqliteStore;
 
 use super::plan_hub::Why;
@@ -44,30 +45,25 @@ pub(super) async fn poll_owned(
     store: &crate::store::Store,
     repo: &str,
     window: i64,
-) -> Result<Option<i64>> {
+) -> Result<i64> {
     let scope = format!("plan:{repo}");
     let now = time::OffsetDateTime::now_utc().unix_timestamp();
-    if store
-        .sqlite
-        .begin_scope_check(&scope, now, window)?
-        .is_some()
+    if let ScopeCheck::Recent { attempted_at } =
+        store.sqlite.begin_scope_check(&scope, now, window)?
     {
-        let until = Instant::now() + WAIT;
-        let hub = on_thread(store, repo, move |sqlite, repo| {
-            super::plan_hub::exchange(sqlite, repo, Why::Read(until))
-        });
-        let git = on_thread(store, repo, move |sqlite, repo| {
-            super::plan_git::exchange(sqlite, repo, Some(until))
-        });
-        let (hub, git) = tokio::join!(hub, git);
-        for result in [hub, git] {
-            if let Err(error) = result {
-                tracing::debug!(%repo, error = %format!("{error:#}"), "owned plan exchange pending");
-            }
-        }
-        return Ok(Some(now));
+        return Ok(attempted_at);
     }
-    Ok(store.sqlite.last_scope_attempt(&scope)?)
+    let until = Instant::now() + WAIT;
+    let git = on_thread(store, repo, move |sqlite, repo| {
+        super::plan_git::exchange(sqlite, repo, Some(until))
+    });
+    let (hub, git) = tokio::join!(read(store, repo), git);
+    for result in [hub, git] {
+        if let Err(error) = result {
+            tracing::debug!(%repo, error = %format!("{error:#}"), "owned plan exchange pending");
+        }
+    }
+    Ok(now)
 }
 
 /// [`exchange`] for `repo`, when it has no Linear or Asana, for as long as

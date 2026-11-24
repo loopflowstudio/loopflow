@@ -1,7 +1,6 @@
 //! The `session` namespace: direction for conversations. `session.steer`
 //! saves a steer that one Session, every Session of a Wave, or every Session of
-//! a repository reads at its next provider
-//! boundary, without starting a turn.
+//! a repository reads at its next provider boundary, without starting a turn.
 
 use std::path::Path;
 
@@ -64,6 +63,7 @@ pub async fn steer(
 fn written(error: impl Into<anyhow::Error>) -> Error {
     Error::written(&error.into())
 }
+
 /// Who reads a steer saved for `session`, with no turn of its own to run it.
 pub fn steer_reader(
     sqlite: &crate::store::sqlite::SqliteStore,
@@ -97,17 +97,19 @@ pub(super) fn task_steer_reader(
         return Ok(format!("{} is finished", task.identifier));
     }
     for work in sqlite.task_open_work(&task.id)? {
-        if let OpenWork::Session { id, .. } = work {
-            if let Some(session) = sqlite.session(id.as_str())? {
-                if crate::ops::human_session::agent_running(sqlite, &session)? {
-                    let reader = if session.graph_lf_process_id.is_some() && !session.interactive {
-                        format!("{}'s worker", task.identifier)
-                    } else {
-                        session.id.to_string()
-                    };
-                    return Ok(live_reader(&reader));
-                }
-            }
+        let OpenWork::Session { id, .. } = work else {
+            continue;
+        };
+        let Some(session) = sqlite.session(id.as_str())? else {
+            continue;
+        };
+        if crate::ops::human_session::agent_running(sqlite, &session)? {
+            let reader = if session.graph_lf_process_id.is_some() && !session.interactive {
+                format!("{}'s worker", task.identifier)
+            } else {
+                session.id.to_string()
+            };
+            return Ok(live_reader(&reader));
         }
     }
     let scope = loopflow_storage::session::PrimaryScope::Task(task.id.clone());

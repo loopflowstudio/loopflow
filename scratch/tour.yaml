@@ -1,55 +1,45 @@
-at: 0efab21b2bc60e18f6e71a6b92d7a20022780aba
+at: e9dedf3045e31454013a72a42dbf3e8726094240
 first:
   - path: docs/dev/machines.md
-    why: Steer and read a Task another Machine runs
-  - path: scratch/plan.md
-    why: What each slice built and taught
+    why: See the reachable owner and sibling sandbox cases
   - path: rust/loopflow-model/src/durable.rs
-    why: TaskRunsOn, the one where-it-runs fact
+    why: Where a claimed Task runs
   - path: rust/loopflow/src/lf/commands/task_row.rs
-    why: runs_on on rows, TaskReading on status
-  - path: rust/loopflow/src/lf/commands/waves.rs
-    why: Owner read in 15 s, else unobserved here
+    why: Whose Machine answered the status read
   - path: tests/fixtures/dto/task_steer_receipt.json
-    why: The receipt every Task steer returns
-  - path: rust/loopflow-execution/src/engine/session.rs
-    why: One reader sentence for Session and Task steers
-  - path: rust/loopflow-execution/src/engine/task.rs
-    why: Save here, sync carriers, say where it reached
+    why: What a steer reports to its caller
+  - path: rust/loopflow/src/lf/commands/work_route.rs
+    why: Resolve the peer and its portable Task selector
   - path: rust/loopflow/src/lf/commands/write.rs
-    why: Owner over SSH, fallback only before admission
-  - path: rust/loopflow/src/lf/commands/session.rs
-    why: CLI steer shares the served path
+    why: Save locally only before sending the remote request
+  - path: rust/loopflow-execution/src/engine/task.rs
+    why: Read the acknowledgement for the saved comment
+  - path: rust/loopflow-execution/src/engine/session.rs
+    why: Name the Session that can read the steer
+  - path: rust/loopflow/src/lf/commands/waves.rs
+    why: Project the owner's reply or explain its absence
   - path: rust/loopflow-storage/src/migrations/planning_scope_checks.sql
-    why: Staged rename of the poll watermark table
+    why: Keep existing watermarks as new scopes join
   - path: rust/loopflow-storage/src/sqlite/planning_scope_checks.rs
-    why: Shared poll attempts and tracker watermarks
+    why: Share the attempt time across readers
   - path: rust/loopflow-execution/src/ops/tracker_events.rs
-    why: Select owned repositories and schedule their reads
-  - path: rust/loopflow-execution/src/ops/tracker.rs
-    why: Identify each repository's tracker feed
-  - path: rust/loopflow-execution/src/asana/mod.rs
-    why: Bind the watermark to the resolved project
+    why: Schedule reads for open local claims
   - path: rust/loopflow-execution/src/linear/team_changes.rs
     why: Recover late comments across the previous watermark
+  - path: rust/loopflow-execution/src/asana/mod.rs
+    why: Bind each watermark to its project
   - path: rust/loopflow-execution/src/ops/plan_carriers.rs
-    why: Share bounded hub and Git exchanges
-  - path: rust/loopflow-execution/src/ops/plan_git.rs
-    why: Keep unclaimed repositories receiving new plans
-  - path: rust/loopflow/src/server/service.rs
-    why: Start the owner's poller
+    why: Exchange with hub and Git concurrently
   - path: rust/loopflow/src/lf/commands/graph.rs
-    why: Continue polling while a worker runs
+    why: Keep polling through a running agent step
   - path: rust/loopflow/tests/machine_commands.rs
-    why: Steers and status for owner, offline, unregistered
+    why: Exercise peer reads, fallback, and lost replies
   - path: rust/loopflow-execution/src/ops/linear/task_planning_tests.rs
-    why: A sibling steer reaches worker and primary
+    why: Deliver a sibling steer to worker and conversation
   - path: rust/loopflow-execution/src/ops/linear/asana_planning_tests.rs
-    why: Two projects share a team without losing direction
+    why: Distinguish projects in one Asana team
 hide:
-  - path: tests/fixtures/dto/
-    why: runs_on null added to every Task row
   - path: tests/fixtures/dto/server_schema.json
-    why: Regenerated from lf server describe
+    why: Generated from the server protocol
   - path: scratch/concept-review.html
-    why: Kickoff notes, cleared at submit
+    why: Historical design alternatives

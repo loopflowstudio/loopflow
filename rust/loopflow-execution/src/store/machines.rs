@@ -1,6 +1,6 @@
 //! Machine declarations and presentation compose above saved Machine rows.
 use crate::store::{StoreError, StoreResult};
-use loopflow_model::durable::{Machine, MachineId};
+use loopflow_model::durable::{Machine, MachineId, MachineRef};
 use loopflow_storage::sqlite::{durable::SavedMachine, SqliteStore};
 use time::OffsetDateTime;
 fn invalid(error: impl std::fmt::Display) -> StoreError {
@@ -43,6 +43,17 @@ pub fn present(
 pub fn machine_by_id(store: &SqliteStore, id: &MachineId) -> StoreResult<Option<Machine>> {
     let saved = store.saved_machine(id)?;
     present(saved, id, &config(store)?)
+}
+
+/// A saved Machine can outlive its declaration in preferences.
+pub fn registered_machine(
+    store: &SqliteStore,
+    machine: &MachineRef,
+) -> StoreResult<Option<Machine>> {
+    let Some(id) = &machine.id else {
+        return Ok(None);
+    };
+    Ok(machine_by_id(store, id)?.filter(|machine| machine.label.is_some()))
 }
 
 pub fn local_machine(store: &SqliteStore) -> StoreResult<Machine> {

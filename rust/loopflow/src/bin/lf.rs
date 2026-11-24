@@ -1115,18 +1115,25 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
         } => {
             let status = loopflow_execution::ops::task::task_status(repo, issue.as_deref())?;
             // A Task another Machine runs is read where it runs.
-            let mut unanswered = None;
+            let mut remote_line = None;
             if let Some(task) = &status.task {
                 use loopflow::lf::commands::waves::RemoteStatus;
                 match loopflow::lf::commands::waves::print_remote_task_status(
-                    repo,
-                    &task.identifier,
-                    *json,
-                    *subscribe,
+                    repo, task, *json, *subscribe,
                 )? {
                     RemoteStatus::Printed => return Ok(()),
                     RemoteStatus::Here => {}
-                    RemoteStatus::Unanswered(reason) => unanswered = Some(reason),
+                    RemoteStatus::Unobserved { runs_on, reason } => {
+                        if *json {
+                            return loopflow::lf::commands::waves::print_task_detail(
+                                status,
+                                Some(reason),
+                            );
+                        }
+                        remote_line = Some(loopflow::lf::commands::task_row::unobserved_reason(
+                            &runs_on, &reason,
+                        ));
+                    }
                 }
             }
             if *subscribe {
@@ -1141,7 +1148,7 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
                 .map(drop);
             }
             if *json {
-                loopflow::lf::commands::waves::print_task_detail(status)?;
+                loopflow::lf::commands::waves::print_task_detail(status, None)?;
             } else {
                 println!(
                     "Tracker state: {}",
@@ -1199,17 +1206,13 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
                 // A move in flight reads as that, with its retry; a Task another
                 // Machine runs is read from its ownership. This Machine's records
                 // are what it left behind.
-                let elsewhere = match (&status.task, &status.ownership) {
-                    (Some(task), Some(ownership)) => {
-                        loopflow_execution::ops::task_ownership::moving_here(
-                            &task.id,
-                            &task.identifier,
-                        )?
-                        .or(loopflow::lf::commands::waves::unobserved_line(
-                            ownership, unanswered,
-                        )?)
-                        .map(|line| format!("{}  {line}", task.identifier))
-                    }
+                let elsewhere = match &status.task {
+                    Some(task) => loopflow_execution::ops::task_ownership::moving_here(
+                        &task.id,
+                        &task.identifier,
+                    )?
+                    .or(remote_line)
+                    .map(|line| format!("{}  {line}", task.identifier)),
                     _ => None,
                 };
                 if let Some(line) = &elsewhere {

@@ -2778,16 +2778,15 @@ pub async fn read_task_status(
     repo: &Path,
     selector: &str,
 ) -> OpsResult<TaskStatus> {
-    let task = crate::store::children::resolve_task_id(
-        &store.sqlite,
-        selector,
-        Some(&repo.to_string_lossy()),
-    )
-    .and_then(|id| id.map(|id| store.sqlite.task(&id)).transpose())
-    .map_err(task_error)?
-    .flatten()
-    .ok_or_else(|| task_error(format!("Task {selector} is not registered")))?;
-    registered_task_status(store, task).await
+    registered_task_status(store, registered_task(&store.sqlite, repo, selector)?).await
+}
+
+pub fn registered_task(store: &SqliteStore, repo: &Path, selector: &str) -> OpsResult<Task> {
+    crate::store::children::resolve_task_id(store, selector, Some(&repo.to_string_lossy()))
+        .and_then(|id| id.map(|id| store.task(&id)).transpose())
+        .map_err(task_error)?
+        .flatten()
+        .ok_or_else(|| task_error(format!("Task {selector} is not registered")))
 }
 
 pub async fn registered_task_status(store: &SharedStore, task: Task) -> OpsResult<TaskStatus> {

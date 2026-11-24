@@ -18,6 +18,7 @@ use super::tracker::message;
 use super::OpsResult;
 use crate::store::{SharedStore, Store};
 use loopflow_model::durable::TaskId;
+use loopflow_storage::sqlite::planning_scope_checks::ScopeCheck;
 use loopflow_storage::work::task::Task;
 
 pub(crate) async fn refresh_task_comments(store: &SharedStore, task: &Task) -> OpsResult<()> {
@@ -136,7 +137,7 @@ async fn check_scope(store: &Store, repository: &str, fresh_for: i64) -> OpsResu
         return Ok(false);
     };
     let now = OffsetDateTime::now_utc();
-    let Some(since) = store
+    let ScopeCheck::Started { since } = store
         .sqlite
         .begin_scope_check(&scope, now.unix_timestamp(), fresh_for)
         .map_err(message)?
@@ -313,6 +314,7 @@ pub(crate) async fn check_owned_work(
             } else {
                 super::plan_carriers::poll_owned(store, &repo, window)
                     .await
+                    .map(Some)
                     .map_err(message)
             };
             // Wake when the shared attempt expires, even if another reader made it.
@@ -352,7 +354,7 @@ pub(crate) async fn team_current(store: &Store, repository: &str) -> bool {
     };
     store
         .sqlite
-        .scope_current(
+        .linear_team_current(
             &scope,
             OffsetDateTime::now_utc().unix_timestamp(),
             crate::linear::delta_fresh_secs(),

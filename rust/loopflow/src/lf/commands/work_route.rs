@@ -1,13 +1,99 @@
 //! Work chooses execution; SSH transports the ordinary command unchanged.
 use std::path::Path;
+use std::time::{Duration, Instant};
 
 use crate::lf::{Cli, Commands, SessionCommand, TaskCommand};
 use anyhow::{anyhow, Result};
 use loopflow_execution::durable::TaskExecutionRoute;
 use loopflow_execution::machine::task::{read_registry, resolve_task_id};
 use loopflow_execution::ops::human_session::moves::conversation_task;
-use loopflow_model::durable::{MachineId, RepositoryId, RepositoryIdentity, TaskId};
+use loopflow_model::durable::{
+    Machine, MachineId, MachineRef, RepositoryId, RepositoryIdentity, TaskId, TaskRunsOn,
+};
 use loopflow_storage::sqlite::SqliteStore;
+use loopflow_storage::work::task::Task;
+
+/// The remote destination for Task status and direction. An unclaimed Task
+/// can have a preferred Machine without having a claim to show in the receipt.
+pub(super) struct TaskPeer {
+    pub machine: MachineRef,
+    since: Option<i64>,
+    pub registered: Option<Machine>,
+}
+
+impl TaskPeer {
+    pub fn resolve(store: &SqliteStore, task: &TaskId) -> Result<Option<Self>> {
+        let (local, ownership) = store.saved_task_ownership(task)?;
+        let (mut machine, since) = match ownership.runs_on(&local) {
+            Some(claim) => (claim.machine, Some(claim.since)),
+            None if ownership.owner.is_some() => return Ok(None),
+            None => {
+                let route =
+                    loopflow_execution::store::ownership::task_execution_route(store, task)?;
+                if route.machine_id == local {
+                    return Ok(None);
+                }
+                (
+                    MachineRef {
+                        id: Some(route.machine_id),
+                        label: None,
+                    },
+                    None,
+                )
+            }
+        };
+        if loopflow_execution::machine::task::move_awaiting_arrival(store, task)? {
+            return Ok(None);
+        }
+        let registered = loopflow_execution::store::machines::registered_machine(store, &machine)?;
+        if let Some(peer) = &registered {
+            machine.label.clone_from(&peer.label);
+        }
+        Ok(Some(Self {
+            machine,
+            since,
+            registered,
+        }))
+    }
+
+    pub fn runs_on(&self) -> Option<TaskRunsOn> {
+        Some(TaskRunsOn {
+            machine: self.machine.clone(),
+            since: self.since?,
+        })
+    }
+
+    pub fn connect(
+        &self,
+        repo: &Path,
+        task: &Task,
+        until: Option<Instant>,
+    ) -> Result<loopflow_execution::machine::client::Connection> {
+        use loopflow_execution::machine::wire::{Secrets, Selection, Sender};
+        let machine = self
+            .registered
+            .as_ref()
+            .ok_or_else(|| anyhow!("{} is not registered here", self.machine.name()))?;
+        let sender = Sender {
+            repository: task.repository_id.clone(),
+            selection: Selection::capture(repo, None)?,
+            secrets: Secrets::default(),
+        };
+        loopflow_execution::machine::client::Connection::open_on(machine, sender, until)
+    }
+
+    pub fn deadline() -> Instant {
+        Instant::now() + Duration::from_secs(15)
+    }
+}
+
+/// Tracker peers can retain different local Task IDs for the same issue.
+pub(super) fn peer_issue(task: &Task) -> String {
+    task.tracker_id
+        .as_ref()
+        .map_or(task.id.as_str(), |id| id.as_str())
+        .to_owned()
+}
 
 pub fn identity(
     bind: Option<&RepositoryId>,
@@ -663,6 +749,7 @@ pub fn location(
 #[cfg(test)]
 mod tests {
     use std::path::Path;
+    use std::time::{Duration, Instant};
 
     use super::{launch_task, repository_path, resolve, resolve_task, without_placement};
     use crate::lf::Cli;

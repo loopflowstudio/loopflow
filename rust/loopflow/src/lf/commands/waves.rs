@@ -2782,7 +2782,9 @@ fn derive_task_condition(
     let settled = runtime
         .map(|runtime| runtime.status)
         .filter(|status| status.is_terminal() && !unresolved_execution);
-    let (state, reason) = if let Some(status) = settled {
+    let (state, reason) = if runtime.is_some_and(|runtime| runtime.status == TaskState::Paused) {
+        (TaskConditionState::Clear, next_move.reason.clone())
+    } else if let Some(status) = settled {
         let reason = match status {
             TaskState::Abandoned => "Task is abandoned",
             _ => "Task is complete",
@@ -5006,6 +5008,97 @@ mod tests {
             OffsetDateTime::now_utc(),
         );
         assert_eq!(user_handoff.state, TaskConditionState::Waiting);
+    }
+
+    #[test]
+    fn pause_quiets_the_condition_until_unpause() {
+        let failed = TaskExecutionSnapshot {
+            state: TaskExecutionState::Blocked,
+            reason: "gate failed".into(),
+            step: None,
+            captured: None,
+            died: None,
+            outlook: None,
+        };
+        for (dirty, execution, released_state, released_reason) in [
+            (
+                false,
+                None,
+                TaskConditionState::Waiting,
+                "Waiting for review",
+            ),
+            (
+                true,
+                None,
+                TaskConditionState::Blocked,
+                "Task has uncommitted work",
+            ),
+            (
+                true,
+                Some(&failed),
+                TaskConditionState::Blocked,
+                "gate failed",
+            ),
+        ] {
+            for (status, state, reason) in [
+                (
+                    TaskState::Paused,
+                    TaskConditionState::Clear,
+                    "Task is paused",
+                ),
+                (TaskState::Idle, released_state, released_reason),
+            ] {
+                let runtime = TaskRuntimeSnapshot {
+                    work_id: "task-1".into(),
+                    status,
+                    reason: String::new(),
+                    updated_at: "2026-07-21T00:00:00Z".into(),
+                    provider: None,
+                    owner: Some(owned()),
+                    completion_pending: None,
+                };
+                let next_move = NextMove {
+                    owner: NextMoveOwner::User,
+                    reason: if status == TaskState::Paused {
+                        "Task is paused"
+                    } else {
+                        "Waiting for review"
+                    }
+                    .into(),
+                };
+                let condition = derive_task_condition(
+                    Some(&runtime),
+                    &next_move,
+                    LocalProgressEvidence {
+                        state: LocalProgressEvidenceState::Observed,
+                        unsettled: Some(dirty),
+                        dirty: Some(dirty),
+                        authored_commits: Some(false),
+                        recovery_required: Some(false),
+                        reason: None,
+                    },
+                    Some(&TaskActionEvidence {
+                        status,
+                        execution,
+                        latest_pr_phase: None,
+                        latest_pr_merge_request: None,
+                        latest_pr_presentation_current: None,
+                        at_end: false,
+                        open_children: 0,
+                        completion_refusal: None,
+                        run_refusal: None,
+                        ci: None,
+                        predecessor_phase: None,
+                        launch_refusal: None,
+                    }),
+                    execution,
+                    OffsetDateTime::now_utc(),
+                );
+                assert_eq!(condition.state, state);
+                assert_eq!(condition.reason, reason);
+                assert_eq!(condition.local_progress.dirty, Some(dirty));
+            }
+        }
     }
 
     #[test]

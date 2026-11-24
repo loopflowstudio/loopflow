@@ -50,7 +50,7 @@ extension TaskRowStatus {
     /// it needs, else its lifecycle. Whatever the word, a Task that needs
     /// someone keeps the reason as its line.
     public init(task: RoadmapTask, program: TaskRowStatus? = nil) {
-        let need = task.lifecycle == .paused ? nil : task.need
+        let need = task.need
         if let program {
             self = program
         } else if let need, need != .unknown {

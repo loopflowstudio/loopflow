@@ -4547,6 +4547,8 @@ fn served_pause_holds_the_remote_cursor_and_status_names_unpause() {
         .unwrap();
     assert_eq!(row["section"], "working");
     assert_eq!(row["working_group"], "paused");
+    assert_eq!(row["condition"]["state"], "clear");
+    assert_eq!(row["condition"]["reason"], refusal);
     assert_eq!(
         row["actions"],
         serde_json::json!({"recommended":"no_action","reason":"Task is paused"})

@@ -111,8 +111,9 @@ unpause, including after a Machine restart.
 An owned Task stays in **Working**, under **Paused** on Mac and iPhone.
 The Working rows in `lf task list --json` carry `working_group`.
 Find held Tasks with `lf task list --state paused`. Plain `lf task unpause LOO-12`
-lifts the hold. An interrupted step stays idle and ready for Run. A step that
-failed before pause still shows its failure.
+lifts the hold. An interrupted step stays idle and ready for Run. If a step
+failed before pause, its failure stays in the execution history and shows
+in the Task’s condition again on unpause.
 To run from the saved step immediately, use `lf task unpause LOO-12 --run`.
 
 Unassign clears the hold once cleanup settles. Complete, abandon, and reopen

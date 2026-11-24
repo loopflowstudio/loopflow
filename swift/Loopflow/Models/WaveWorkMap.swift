@@ -313,11 +313,11 @@ public struct RoadmapTask: Decodable, Sendable, Identifiable, Hashable {
     /// Task parked at a step has run, one that was only opened has not.
     public var graphHasRun: Bool { latestGraphProcess != nil }
 
-    /// Whether the Task needs someone, and how: nil when its condition is clear,
-    /// when it waits only for its first run, which its row offers as Start, or
-    /// when it is finished and so waits for nobody.
+    /// Whether the Task needs someone. A pause takes effect while the Machine
+    /// is still returning the condition from before the hold.
     public var need: TaskConditionState? {
-        switch condition.state {
+        guard lifecycle != .paused else { return nil }
+        return switch condition.state {
         case .clear: nil
         case .waiting: isCompleted || (!graphHasRun && actions.recommended == .run) ? nil : .waiting
         case .blocked: .blocked

@@ -70,7 +70,7 @@ lf --machine mini -a codex implement
   destination OS user with it. Loopflow does not choose a login, store a Claude
   or Codex token or refresh one. A Machine with no login is refused before
   launch with what fixes it. Only variables and home files named in personal
-  `forward` settings are sent; existing destination files are retained.
+  `forward` settings are sent. Existing destination files are retained.
 - **Service transfer:** OpenSSH verifies the host key and Loopflow checks the
   saved Machine identity before transfer. Credential bytes travel through SSH
   stdin, never in command arguments or logs, and land with owner-only

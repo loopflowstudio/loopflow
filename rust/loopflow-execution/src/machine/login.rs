@@ -603,13 +603,13 @@ fn run_approver(command: &str, page: &Page) -> Result<()> {
         .env("LF_APPROVE_URL", page.url)
         .env("LF_APPROVE_MACHINE", page.machine)
         .stdin(Stdio::null())
+        .stdout(Stdio::null())
         .stderr(Stdio::inherit());
     match page.code {
         Some(code) => approve.env("LF_APPROVE_CODE", code),
         None => approve.env_remove("LF_APPROVE_CODE"),
     };
     let status = approve
-        .stdout(Stdio::null())
         .status()
         .with_context(|| format!("run the approver for {}", page.provider.display_name()))?;
     if !status.success() {

@@ -157,6 +157,10 @@ import sys
 if '--version' in sys.argv:
     print('fixture')
     sys.exit(0)
+# The launch's login probe is not a launch.
+if sys.argv[1:3] == ['auth', 'status']:
+    print(json.dumps({'loggedIn': True}))
+    sys.exit(0)
 with open(os.path.join(os.environ['LF_HOME'], 'launches.jsonl'), 'a') as launches:
     launches.write(json.dumps({'args': sys.argv[1:], 'claude_home': os.environ.get('CLAUDE_CONFIG_DIR')}) + '\n')
 message = json.loads(sys.stdin.readline())

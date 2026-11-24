@@ -172,7 +172,7 @@ pub fn create(
                                 != loopflow_execution::store::ProcessIdentityEvidence::Dead
                         });
                     if !carrying {
-                        let last = store.sqlite.task_graphs(&task)?.pop().ok_or_else(|| {
+                        let last = store.sqlite.latest_task_graph(&task)?.ok_or_else(|| {
                             anyhow::anyhow!("creation Graph {graph_process} is unavailable")
                         })?;
                         let result = graph_result(&store.sqlite, &last.run)?;

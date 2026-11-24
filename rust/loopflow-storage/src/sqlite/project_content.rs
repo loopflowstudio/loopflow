@@ -83,7 +83,7 @@ mod tests {
     use loopflow_model::id::WaveId;
 
     #[test]
-    fn project_name_receipt_does_not_reconstruct_unrelated_order_evidence() {
+    fn a_project_rename_keeps_the_observation_it_was_based_on() {
         let home = tempfile::tempdir().unwrap();
         let store = crate::test_fixture::open(&home.path().join("store.db")).unwrap();
         let wave = Wave::new(WaveId::new(), "product".into(), "/repo".into());
@@ -103,15 +103,6 @@ mod tests {
         .unwrap();
         let project = store.list_projects(Some(wave.id())).unwrap().remove(0);
         store
-            .conn
-            .lock()
-            .unwrap()
-            .execute(
-                "UPDATE tracker_projects SET task_order_json='{}' WHERE id='linear-project'",
-                [],
-            )
-            .unwrap();
-        store
             .edit_project(&project.id, Some("Renamed"), None, None)
             .unwrap();
         let change = store
@@ -124,17 +115,17 @@ mod tests {
         );
         assert!(store.attempt_tracker_action(&change.id).unwrap());
         assert_eq!(store.project(&project.id).unwrap().unwrap().name, "Renamed");
-        let retained: (String, i64) = store
+        let retained: i64 = store
             .conn
             .lock()
             .unwrap()
             .query_row(
-                "SELECT task_order_json,observed_at FROM tracker_projects WHERE id='linear-project'",
+                "SELECT observed_at FROM tracker_projects WHERE id='linear-project'",
                 [],
-                |row| Ok((row.get(0)?, row.get(1)?)),
+                |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(retained, ("{}".into(), 17));
+        assert_eq!(retained, 17);
     }
 
     #[test]

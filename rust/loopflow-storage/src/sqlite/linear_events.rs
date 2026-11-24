@@ -231,11 +231,9 @@ pub fn accept_linear_inventory_in(
             &tx,
             &repo,
             &project.id,
-            &issues
+            issues
                 .iter()
-                .filter(|i| i.project_id.as_deref() == Some(&project.id))
-                .cloned()
-                .collect::<Vec<_>>(),
+                .filter(|i| i.project_id.as_deref() == Some(&project.id)),
             tracker,
         )?;
     }
@@ -265,7 +263,7 @@ pub fn accept_linear_project_order_in(
         None,
         tracker,
     )?;
-    let accepted = observe_order(&tx, repo, project, items, tracker)?;
+    let accepted = observe_order(&tx, repo, project, items.iter(), tracker)?;
     tx.commit()?;
     Ok(accepted)
 }
@@ -454,7 +452,7 @@ fn put_item(
                 "INSERT INTO task_events(task_id,kind_json,created_at)
                  SELECT t.id,json_object('kind','completed','summary','Completion observed in Linear'),?3
                  FROM tasks t JOIN repository_plans w ON w.id=t.repository_id
-                 WHERE t.external_issue_id=?1 AND w.repo=?2 AND t.planning_completed=0",
+                 WHERE t.external_issue_id=?1 AND w.repo=?2 AND t.planning_state IS NOT 'completed'",
                 params![item.id,repo,observed_at])?;
         }
         conn.execute(
@@ -467,45 +465,54 @@ fn put_item(
     Ok(true)
 }
 
-fn observe_order(
+fn observe_order<'a>(
     conn: &Connection,
     repo: &str,
     external: &str,
-    items: &[TrackerItem],
+    items: impl Iterator<Item = &'a TrackerItem>,
     tracker: &str,
 ) -> StoreResult<bool> {
     let project: Option<String> = conn.query_row("SELECT p.id FROM projects p JOIN waves w ON w.id=p.wave_id WHERE p.external_project_id=?1 AND w.repo=?2", params![external,repo], |row| row.get(0)).optional()?;
     let Some(project) = project.map(ProjectId::from_raw) else {
         return Ok(false);
     };
-    let mut items = items.iter().collect::<Vec<_>>();
+    let mut items = items.collect::<Vec<_>>();
     items.sort_by_key(|i| i.rank);
-    let mut observed = Vec::new();
+    // An older list must not order a mixture of old and retained newer facts.
+    let mut retained = conn.prepare(
+        "SELECT t.id FROM tracker_items i JOIN tasks t ON t.external_issue_id=i.id
+         WHERE i.repo=?1 AND i.tracker=?2 AND i.id=?3 AND i.needs_refresh=0
+           AND t.project_id=?4 AND t.planning_deleted_at IS NULL
+           AND i.revision IS ?5 AND i.rank=?6 AND i.project_id IS ?7",
+    )?;
+    let mut observed = Vec::with_capacity(items.len());
     for item in items {
-        // An older list must not order a mixture of old and retained newer facts.
-        let retained = conn.query_row(
-            "SELECT t.id,i.revision,i.rank,i.project_id
-             FROM tracker_items i JOIN tasks t ON t.external_issue_id=i.id
-             WHERE i.repo=?1 AND i.tracker=?2 AND i.id=?3 AND i.needs_refresh=0 AND t.project_id=?4 AND t.planning_deleted_at IS NULL",
-            params![repo,tracker,item.id,project.as_str()], |row| Ok((
-                row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?,
-                row.get::<_, u32>(2)?, row.get::<_, Option<String>>(3)?,
-            ))).optional()?;
-        let Some((id, revision, rank, membership)) = retained else {
+        let id = retained
+            .query_row(
+                params![
+                    repo,
+                    tracker,
+                    item.id,
+                    project.as_str(),
+                    item.revision,
+                    item.rank,
+                    item.project_id
+                ],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let Some(id) = id else {
             return Ok(false);
         };
-        if revision != item.revision || rank != item.rank || membership != item.project_id {
-            return Ok(false);
-        }
         observed.push(id);
     }
-    sqlite::planning_order::observe_in(conn, repo, external, &project, observed)
+    sqlite::planning_order::observe_in(conn, &project, observed)
 }
 
 // Both durable projections require the same confirmed Initiative/Wave association.
 // A partial read supplies that association without advancing full-Wave freshness.
 const ACCEPTED_WAVE_PROJECTS: &str = "
-    SELECT p.repo,p.tracker,p.id,p.observed_at,p.archived,p.membership_unresolved,p.task_order_json,p.revision,p.slug,p.name,p.summary,p.status,p.krs,p.metric_targets,p.initiative_ids,p.team_ids,p.description,p.description_revision,p.description_observed_at,m.wave_id FROM tracker_projects p
+    SELECT p.repo,p.tracker,p.id,p.observed_at,p.archived,p.membership_unresolved,p.revision,p.slug,p.name,p.summary,p.status,p.krs,p.metric_targets,p.initiative_ids,p.team_ids,p.description,p.description_revision,p.description_observed_at,m.wave_id FROM tracker_projects p
     JOIN tracker_wave_projects m ON m.project_id=p.id
     LEFT JOIN tracker_wave_sync sync ON sync.wave_id=m.wave_id AND sync.tracker=p.tracker
     JOIN waves w ON w.id=m.wave_id AND w.repo=p.repo
@@ -617,7 +624,10 @@ fn project_accepted_planning(
             &crate::work::edit::WorkEdit::for_target(id.as_str(), &edits),
             crate::sqlite::planning_write::WriteOrigin::Tracker,
         )?;
-        tx.execute("UPDATE projects SET pm_snapshot_synced_at=?2,planning_provider_revision=?3 WHERE id=?1",params![id.as_str(),observed_at,revision])?;
+        tx.execute(
+            "UPDATE projects SET pm_snapshot_synced_at=?2 WHERE id=?1",
+            params![id.as_str(), observed_at],
+        )?;
     }
     let mut query = tx.prepare(
         "SELECT i.id,i.revision,i.name,i.description,i.assignee,p.id,i.assignee_observed,i.project_id_observed,i.claimed_project_id
@@ -735,8 +745,8 @@ fn project_accepted_planning(
             crate::sqlite::planning_write::WriteOrigin::Tracker,
         )?;
         tx.execute(
-            "UPDATE tasks SET planning_provider_revision=?2,pm_snapshot_synced_at=?3 WHERE id=?1",
-            params![id.as_str(), revision, observed_at],
+            "UPDATE tasks SET pm_snapshot_synced_at=?2 WHERE id=?1",
+            params![id.as_str(), observed_at],
         )?;
     }
     observe_parents(tx, repo, tracker, &item_ids)

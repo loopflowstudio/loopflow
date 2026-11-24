@@ -92,12 +92,16 @@ lf sync --plan                      # preview what sync would do without touchin
 lf sync                             # merge main (or stack parent) into this branch
 lf sync LOO-12                      # stack this Task on LOO-12 and merge its branch
 lf wt create spike                  # create a sibling worktree
+lf wt create spike --stack          # branch from this checkout's branch; sync and PRs follow it
 lf wt prune --branches --dry-run    # preview cleanup of merged PRs and finished Tasks
 ```
 
 Automatic sync checkpoints staged and unstaged edits before merging while
 leaving generated `.lf/tmp/` telemetry local. Resolve merge conflicts normally,
 then run `lf sync --continue` (or `lf sync --abort`).
+
+In a checkout created with `--stack`, run `lf sync main` to follow the default
+branch for future syncs and new PRs. The base changes when the sync completes.
 
 ### Stack dependent Tasks
 

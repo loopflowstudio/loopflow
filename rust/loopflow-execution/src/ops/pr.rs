@@ -8,10 +8,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::agent::{run_agent, ProcessConfig};
 use crate::config::MergeMethod;
-use crate::git::worktrees::{list_worktrees, main_repo_root};
+use crate::git::worktrees::main_repo_root;
 use crate::git::{current_branch, get_default_branch, rev_parse};
 use crate::graph::load_skill;
 
+use crate::ops::checkout::{checkout_base, CheckoutBase};
 use crate::ops::commit::{commit_workflow, message_launch, CommitOptions, MessageAgent};
 use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::progress::Progress;
@@ -110,7 +111,7 @@ pub fn create_or_update_pr(
 
     let main_repo = resolve_main_repo(repo);
     let default_branch = get_default_branch(&main_repo)?;
-    let (stack, base_branch) = publication_base(repo, &main_repo, &default_branch)?;
+    let (stack, base_branch) = publication_base(repo, &default_branch)?;
 
     // Record the ancestry already present in Git before the first remote effect.
     // This recognizes completed merges without integrating or rewriting history.
@@ -154,7 +155,7 @@ pub fn create_or_update_pr(
     // to later Loopflow pushes and shipping requests in this worktree.
     let _mutation = crate::ops::task::lock_task_pr_mutation(repo)?;
     // Preparation may have selected a parent while copy generation was running.
-    let (stack, base_branch) = publication_base(repo, &main_repo, &default_branch)?;
+    let (stack, base_branch) = publication_base(repo, &default_branch)?;
     require_non_task_pr_range_nonempty(repo, stack.is_some(), &base_branch)?;
     let locked_branch = current_branch(repo)?;
     let locked_head = rev_parse(repo, "HEAD")?;
@@ -526,7 +527,7 @@ pub fn generate_pr_copy(
         .ok_or_else(|| OpsError::Message("pr-message skill has no content".to_string()))?;
     let main_repo = resolve_main_repo(repo);
     let default_branch = get_default_branch(&main_repo)?;
-    let (stack, base_branch) = publication_base(repo, &main_repo, &default_branch)?;
+    let (stack, base_branch) = publication_base(repo, &default_branch)?;
     require_non_task_pr_range_nonempty(repo, stack.is_some(), &base_branch)?;
     let log = git_stdout(
         repo,
@@ -2030,22 +2031,21 @@ fn update_pr(repo: &Path, number: u64, title: &str, body: &str) -> OpsResult<()>
 // PR base
 // ---------------------------------------------------------------------------
 
-/// The Task's stack and the base its PR should target: a stacked Task's live
-/// parent, else the default branch; a worktree without a stack follows its upstream.
-fn publication_base(
-    repo: &Path,
-    main_repo: &Path,
-    default_branch: &str,
-) -> OpsResult<(Option<StackedSync>, String)> {
-    let stack = crate::ops::task::task_stack(repo)?;
-    let base = match stack.as_ref() {
-        Some(stack) => stack
-            .live_parent_branch(default_branch)?
-            .unwrap_or(default_branch)
-            .to_string(),
-        None => pr_target(repo, main_repo, default_branch)?,
-    };
-    Ok((stack, base))
+/// The Task's stack and the base its PR should target, from
+/// [`checkout_base`]. A base branch
+/// origin lacks is pushed first, since a PR can only target a branch GitHub has.
+fn publication_base(repo: &Path, default_branch: &str) -> OpsResult<(Option<StackedSync>, String)> {
+    let base = checkout_base(repo, default_branch)?;
+    let branch = base.branch(default_branch)?.to_string();
+    match base {
+        CheckoutBase::Stacked(stack) => Ok((Some(*stack), branch)),
+        CheckoutBase::Branch(_) => {
+            if branch != default_branch {
+                push_unpushed_base(repo, &branch)?;
+            }
+            Ok((None, branch))
+        }
+    }
 }
 
 /// What publication knows about where an existing PR should point.
@@ -2233,50 +2233,20 @@ fn resolve_main_repo(repo: &Path) -> PathBuf {
     main_repo_root(repo).unwrap_or_else(|_| repo.to_path_buf())
 }
 
-fn pr_target(repo: &Path, main_repo: &Path, default_branch: &str) -> OpsResult<String> {
-    let current_branch =
-        current_branch(repo)?.ok_or_else(|| OpsError::Message("not on a branch".to_string()))?;
-
-    if let Ok(worktrees) = list_worktrees(main_repo) {
-        if let Some(state) = worktrees
-            .into_iter()
-            .find(|wt| wt.branch.as_deref() == Some(&current_branch))
-        {
-            if let Some(base_branch) = state.base_branch {
-                if base_branch != current_branch {
-                    return resolve_pr_target(repo, &base_branch);
-                }
-            }
-        }
+/// Push a base branch origin lacks, as stacking a Task on an unpushed parent
+/// does. Without a branch on origin it has no PR, so no merge request moves.
+fn push_unpushed_base(repo: &Path, base_branch: &str) -> OpsResult<()> {
+    if git_stdout(repo, &["fetch", "--quiet", "origin", base_branch]).is_ok() {
+        return Ok(());
     }
-
-    Ok(default_branch.to_string())
-}
-
-fn resolve_pr_target(repo: &Path, base_branch: &str) -> OpsResult<String> {
-    if base_branch == "main" {
-        return Ok("main".to_string());
-    }
-
-    let output = Command::new("gh")
-        .arg("pr")
-        .arg("view")
-        .arg(base_branch)
-        .arg("--json")
-        .arg("state")
-        .arg("-q")
-        .arg(".state")
-        .current_dir(repo)
-        .output()?;
-    if output.status.success() {
-        let state = String::from_utf8_lossy(&output.stdout)
-            .trim()
-            .to_uppercase();
-        if state == "MERGED" {
-            return Ok("main".to_string());
-        }
-    }
-    Ok(base_branch.to_string())
+    git_stdout(repo, &["push", "--quiet", "--set-upstream", "origin", base_branch]).map_err(
+        |error| {
+            OpsError::Message(format!(
+                "this branch builds on {base_branch}, which origin doesn't have, and pushing it failed: {error}"
+            ))
+        },
+    )?;
+    Ok(())
 }
 
 fn parse_generated_pr_copy(raw: &str) -> Option<PrCopy> {

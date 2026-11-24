@@ -3320,7 +3320,7 @@ mod tests {
                 .lock()
                 .unwrap()
                 .execute(
-                    "UPDATE tasks SET planning_completed=1 WHERE id=?1",
+                    "UPDATE tasks SET planning_state='completed' WHERE id=?1",
                     [task.as_str()],
                 )
                 .unwrap();
@@ -3889,7 +3889,12 @@ mod tests {
                 )
                 .unwrap();
                 tx.execute(
-                    "INSERT INTO task_primary_sessions(task_id,session_id) VALUES(?1,?2)",
+                    "UPDATE agent_sessions SET task_id=?1,wave_id=(SELECT p.wave_id FROM tasks t LEFT JOIN projects p ON p.id=t.project_id WHERE t.id=?1) WHERE id=?2",
+                    [task.id.as_str(), session.id.as_str()],
+                )
+                .unwrap();
+                tx.execute(
+                    "INSERT OR REPLACE INTO task_primary_sessions(task_id,session_id) VALUES(?1,?2)",
                     [task.id.as_str(), session.id.as_str()],
                 )
                 .unwrap();

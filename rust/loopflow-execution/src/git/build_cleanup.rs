@@ -444,7 +444,7 @@ mod tests {
         )
         .unwrap();
         conn.execute("INSERT INTO repository_plans(id,repo,selected) SELECT 'repo_'||lower(hex(randomblob(16))),w.repo,1 FROM waves w WHERE NOT EXISTS(SELECT 1 FROM repository_plans r WHERE r.repo=w.repo AND r.selected=1) GROUP BY w.repo", []).unwrap();
-        conn.execute("INSERT INTO tasks(repository_id,id,project_id,issue_identifier,created_at,planning_completed) VALUES((SELECT r.id FROM projects p JOIN waves w ON w.id=p.wave_id JOIN repository_plans r ON r.repo=w.repo AND r.selected=1 WHERE p.id=?2),?1,?2,'PROOF-1',1,1)", params![task.as_str(),project.as_str()]).unwrap();
+        conn.execute("INSERT INTO tasks(repository_id,id,project_id,issue_identifier,created_at,planning_state) VALUES((SELECT r.id FROM projects p JOIN waves w ON w.id=p.wave_id JOIN repository_plans r ON r.repo=w.repo AND r.selected=1 WHERE p.id=?2),?1,?2,'PROOF-1',1,'completed')", params![task.as_str(),project.as_str()]).unwrap();
         conn.execute(
             "INSERT INTO task_checkouts(task_id,worktree) VALUES(?1,?2)",
             params![task.as_str(), checkout.to_str().unwrap()],
@@ -482,7 +482,7 @@ with open(sys.argv[1], "a") as lock:
                 Connection::open(database)
                     .unwrap()
                     .execute(
-                        "UPDATE tasks SET planning_completed=0 WHERE id=?1",
+                        "UPDATE tasks SET planning_state='started' WHERE id=?1",
                         [task_id],
                     )
                     .unwrap();

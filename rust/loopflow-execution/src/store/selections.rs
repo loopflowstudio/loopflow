@@ -302,44 +302,5 @@ pub fn save_dashboard(
     }
 }
 
-pub fn reorder_task(
-    store: &SqliteStore,
-    repository: &RepositoryId,
-    task: &str,
-    to: &str,
-) -> StoreResult<Vec<String>> {
-    for _ in 0..3 {
-        let reading = Reading::acquire(store, loopflow_storage::rows::now_unix(), None)?;
-        let Some((read, work)) =
-            store.task_order_inputs(repository, &reading.inputs, &reading.values)?
-        else {
-            continue;
-        };
-        let resolution = repository_default()
-            .resolve(
-                repository.as_str(),
-                &work,
-                &std::collections::BTreeMap::new(),
-            )
-            .map_err(StoreError::from)?;
-        let mut order = resolution.task_ids();
-        let from = order
-            .iter()
-            .position(|id| id == task)
-            .ok_or(StoreError::NotFound)?;
-        let target = order
-            .iter()
-            .position(|id| id == to)
-            .ok_or(StoreError::NotFound)?;
-        move_into_place(&mut order, from, target);
-        if store.commit_task_order(repository, &read, &order)? {
-            return Ok(order);
-        }
-    }
-    Err(StoreError::Stale(
-        "the Task order kept changing; read it again before reordering".into(),
-    ))
-}
-
 #[cfg(test)]
 mod tests;

@@ -335,7 +335,7 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
     /// Process carrying a sync started detached.
     case checkoutSync(directory: String, onto: String?, preview: Bool, manual: Bool, continueSync: Bool, abort: Bool,
                       adopt: Bool)
-    case checkoutCreate(directory: String, name: String, preview: Bool, persistent: Bool)
+    case checkoutCreate(directory: String, name: String, preview: Bool, persistent: Bool, stack: Bool)
     /// Started detached and headless; the result is the Process carrying the run.
     case graphRun(directory: String, name: String, message: String?, agent: String?)
     /// Started detached and headless; the result is the Process carrying the run.
@@ -445,8 +445,9 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
             argv += Self.flags([("--plan", preview), ("--manual", manual), ("--continue", continueSync)])
             argv += Self.flags([("--abort", abort), ("--adopt", adopt)])
             return argv + ["--json"]
-        case .checkoutCreate(_, let name, let preview, let persistent):
-            return ["wt", "create", name] + Self.flags([("--plan", preview), ("--persistent", persistent)]) + ["--json"]
+        case .checkoutCreate(_, let name, let preview, let persistent, let stack):
+            let flags = Self.flags([("--plan", preview), ("--persistent", persistent), ("--stack", stack)])
+            return ["wt", "create", name] + flags + ["--json"]
         case .desktopPortfolioSet(let change): return ["desktop", "portfolio"] + change + ["--json"]
         case .desktopDashboardQuery(_, let id, let expression, let revision):
             return ["desktop", "dashboard", "query"] + (revision.map { ["--revision=\($0)"] } ?? []) + ["--", id, expression]
@@ -626,9 +627,9 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
         case .checkoutSync(let directory, let onto, let preview, let manual, let continueSync, let abort, let adopt):
             TaggedFields("checkout.sync", ["directory": directory, "onto": onto, "preview": preview, "manual": manual,
                                            "continue": continueSync, "abort": abort, "adopt": adopt])
-        case .checkoutCreate(let directory, let name, let preview, let persistent):
+        case .checkoutCreate(let directory, let name, let preview, let persistent, let stack):
             TaggedFields("checkout.create", ["directory": directory, "name": name, "preview": preview,
-                                             "persistent": persistent])
+                                             "persistent": persistent, "stack": stack])
         case .graphRun(let directory, let name, let message, let agent):
             TaggedFields("graph.run", ["directory": directory, "name": name, "message": message, "agent": agent])
         case .skillRun(let directory, let name, let message, let agent):
@@ -837,7 +838,7 @@ public struct RegistryQuery: Sendable {
             .desktopDashboardMove(directory: repoPath, board: "query:" + id, member: member.selector, destination: target.selector)))
     }
 
-    /// Move a Working Tasks member into `target`'s place in the repository's one Task order.
+    /// Move a Working Tasks member into `target`'s rank among its Project's Tasks.
     public func reorderTask(_ task: String, to target: String, repoPath: String) async throws -> [String] {
         try Self.decode([String].self, from: await write(
             .desktopDashboardMove(directory: repoPath, board: "working-tasks", member: "task:" + task, destination: "task:" + target)))

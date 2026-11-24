@@ -434,7 +434,7 @@ struct WorkNavigationProofTests {
             records.append([
                 "id": "row-\(index)", "run_id": "row-\(index)", "interactive": true, "work": NSNull(),
                 "title": "Conversation \(index)", "detail": "Local shell", "cwd": path,
-                "state": "active", "work_path": NSNull(), "action": sessionActionFixture(state: "active"), "blocked": false, "title_source": "generated", "ended": NSNull(), "start": NSNull(), "outlook": NSNull(), "status_line": NSNull(), "task_primary": false, "graph_membership": ["kind": "independent"], "task_ids": [], "agent_process_id": "44444444-4444-4444-8444-444444444444", "turn": NSNull(), "raw": false, "terminal_ids": [shell],
+                "state": "active", "work_path": NSNull(), "action": sessionActionFixture(state: "active"), "blocked": false, "title_source": "generated", "ended": NSNull(), "start": NSNull(), "outlook": NSNull(), "status_line": NSNull(), "graph_membership": ["kind": "independent"], "task_ids": [], "agent_process_id": "44444444-4444-4444-8444-444444444444", "turn": NSNull(), "raw": false, "terminal_ids": [shell],
                 "open_argv": ["must-not-launch"],
             ])
         }
@@ -586,12 +586,12 @@ struct WorkNavigationProofTests {
         [{"id":"navigation-split", "run_id": "navigation-split", "interactive": true,
           "work":{"kind":"task","id":"issue-review"},
           "title":"Navigation proof","detail":"Local cat PTY","cwd":"/tmp",
-          "state":"active","work_path":null,"action":\(sessionActionFixtureJSON(state: "active")),"blocked": false, "title_source":"generated","ended": null, "start": null, "outlook": null, "status_line": null, "task_primary":false, "graph_membership":{"kind":"independent"},"task_ids": ["issue-review"], "agent_process_id": "44444444-4444-4444-8444-444444444444", "turn":null,"raw":false,"terminal_ids":[],"open_argv":["/bin/cat"]}]
+          "state":"active","work_path":null,"action":\(sessionActionFixtureJSON(state: "active")),"blocked": false, "title_source":"generated","ended": null, "start": null, "outlook": null, "status_line": null, "graph_membership":{"kind":"independent"},"task_ids": ["issue-review"], "agent_process_id": "44444444-4444-4444-8444-444444444444", "turn":null,"raw":false,"terminal_ids":[],"open_argv":["/bin/cat"]}]
         """
         let otherRecords = """
         [{"id":"context-session", "run_id": "context-session", "interactive": true,"work":null,
           "title":"Other repository conversation","detail":"Existing external client","cwd":"/src/context",
-          "state":"active","work_path":null,"action":\(sessionActionFixtureJSON(state: "active")),"blocked": false, "title_source":"generated","ended": null, "start": null, "outlook": null, "status_line": null, "task_primary":false, "graph_membership":{"kind":"independent"},"task_ids": [], "agent_process_id": "44444444-4444-4444-8444-444444444444", "turn":null,"raw":false,"terminal_ids":[],"open_argv":["lf","session","resume","context-session"]}]
+          "state":"active","work_path":null,"action":\(sessionActionFixtureJSON(state: "active")),"blocked": false, "title_source":"generated","ended": null, "start": null, "outlook": null, "status_line": null, "graph_membership":{"kind":"independent"},"task_ids": [], "agent_process_id": "44444444-4444-4444-8444-444444444444", "turn":null,"raw":false,"terminal_ids":[],"open_argv":["lf","session","resume","context-session"]}]
         """
         let query = RegistryQuery { args, cwd in
             switch args.first {

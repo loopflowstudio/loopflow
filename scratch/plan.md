@@ -66,7 +66,7 @@ Built and its location stack deleted; see "Slice 3 status". `SessionsWorkspace.l
 
 `RemoteTaskWorkspaceTests` drove the last gaps closed: Files and Changes show **Not started** with **Retry** (`TaskFilesStore.notStarted`), the outage line has **Retry** (`retry()`), the Files header names the Machine by the plan's label, and an ended shell tab asks the server (`task.files`) whether the Task is started and says **Not started**.
 
-### 6. Mobile (`swift/LoopflowiOS`): built
+### 6. Mobile (`swift/LoopflowiOS`): done
 
 See "Slice 4 status". What follows is the design it was built from.
 
@@ -90,7 +90,7 @@ See "Slice 4 status". What follows is the design it was built from.
 - **Rust CLI & server (`loopflow`, `loopflow-execution`):** `server/peers.rs`, `server/service.rs`, `server/ticket.rs`, `server/remote.rs`, `server/subscriptions.rs`, `machine/client.rs`, `lf/commands/read.rs`, `lf/commands/write.rs`, `lf/commands/waves.rs`, `lf/commands/open.rs`, `lf/commands/open/conversation.rs`, `lf/commands/desktop.rs`, `lf/navigation.rs`, `bin/lf.rs`, `ops/task.rs`, `ops/task/snapshot.rs`, `desktop/shells.rs`.
 - **Shared Swift (`swift/Loopflow`):** `Services/ServerProtocol.swift`, `Services/RegistryQuery.swift`, `Models/WaveWorkMap.swift`, `Models/TaskWork.swift`.
 - **Desktop macOS (`swift/LoopflowMac`):** `WorkModel.swift`, `Views/SessionsView.swift`, `Views/WorkspacePanesView.swift`, `Views/TaskWorkView.swift`, `Views/TaskFilesView.swift`, `Views/TaskChangesView.swift`, `TaskFileDocument.swift`, `Services/RegistryQueryLocal.swift`, `Services/ServerClient.swift`.
-- **Mobile iOS (`swift/LoopflowiOS`):** `TaskWorkspaceView.swift`, `RemoteMobileClient.swift`, `SessionLink.swift`, `SessionView.swift` (shared terminal chrome).
+- **Mobile iOS (`swift/LoopflowiOS`):** `TaskWorkspaceView.swift`, `RemoteMobileClient.swift`, `TaskFilesTree.swift`, `TerminalLink.swift`, `TerminalView.swift` (Session and Shell terminal chrome).
 - **Docs:** `docs/surfaces.md`, `docs/workspaces.md`, `docs/server.md`, `docs/ops.md`, `docs/lf-reference.md`, `rust/loopflow/src/server/README.md`, `docs/dev/machines.md` (updating the client-side SSH note on line 247-252 and server routing description).
 
 ## Docs written ahead (write-docs, 2026-11-23)
@@ -184,7 +184,7 @@ Build thinly end to end in four slices; each slice runs and proves itself before
    - `RemoteTaskWorkspaceTests` (2026-11-23) builds both Machines with the CLI only: `machine add mini` over a stand-in `ssh`, `task move --machine mini`, then `lf --machine mini task checkout`, which clones the shared origin there. Through the laptop's server: Not started (Changes, tree, watch, ended shell tab), an unchanged file, mini's uncommitted hunk in Changes, Save onto mini, `lf desktop shell` printing mini's checkout from `pwd`, the Session argv from `prepareSession` answering typed input from mini's provider, an outage naming mini in the watch and a new read, Retry and reopen. The move test keeps a laptop shell running, saves a same-revision draft on mini, keeps a different-revision draft whole, and Close with `--started-on` ends the old shell on the laptop. Both tests passed headless (`scripts/test_desktop.sh --filter RemoteTaskWorkspaceTests`, 76 s; again at `6af0dff787` with its always-run teardown, 92.7 s); the neighbouring Files, panes and workspace suites passed (273 tests).
    - Taught: after a move, the re-read three-way-merged a dirty draft into the new Machine's file, and an edit overlapping the file there was dropped. `TaskFileDocument.arrive` now keeps such a draft whole beside the new file (`external`, saving unavailable); with the fix reverted the move test fails with the draft replaced by "Updated from disk". The headless fixture runs terminals under `script(1)`: Ghostty needs a display, so the pane's argv is what is exercised, not its rendering.
 
-4. **Slice 4: Mobile Files & Shell viewers + Docs + Gate.** Built; gate next.
+4. **Slice 4: Mobile Files & Shell viewers + Docs.** Complete; gate next.
    - Expose Files (directory tree + unchanged file content via `task.files` / `task.file`) and Shell (via `task.shell.start` / `task.shell.attach` + `/v1/ticket` WebSocket) alongside Changes and Session in `TaskWorkspaceView.swift` / `RemoteMobileClient.swift`.
    - Derive remote Task primary Session from routed `task.get` and pass `task` on `session.attach` / `session.continue`. Show **Not started** and explicit unreachable-Machine errors.
    - Update user and dev docs (`docs/surfaces.md`, `docs/workspaces.md`, `docs/server.md`, `docs/ops.md`, `docs/lf-reference.md`, `rust/loopflow/src/server/README.md`, `docs/dev/machines.md`).

@@ -1,9 +1,17 @@
-at: 76b30891582840f688b92e2c48638b0c113c4b5f
+at: ceb818f5a08ad2cb2943abf8fdce2462b9e95986
 first:
   - path: rust/loopflow/src/server/README.md
     why: How clients open and follow a remote Task
   - path: scratch/plan.md
     why: Implemented behavior and remaining workspace work
+  - path: rust/loopflow-execution/src/machine/wire.rs
+    why: Revision 10 addresses remote Sessions and Task shells
+  - path: swift/Loopflow/Services/ServerProtocol.swift
+    why: Desktop and phone negotiate the same revision
+  - path: rust/loopflow/src/lf/commands/waves.rs
+    why: Plan rows expose a checkout only on its Machine
+  - path: rust/loopflow-execution/src/ops/task/snapshot.rs
+    why: Which checkout appears in local Task status
   - path: rust/loopflow-storage/src/sqlite/repositories.rs
     why: Ownership routes carry portable Task selectors
   - path: rust/loopflow-storage/src/sqlite/children.rs
@@ -14,14 +22,12 @@ first:
     why: Filesystem events invalidate the checkout’s file tree
   - path: rust/loopflow-execution/src/machine/client.rs
     why: Request identity and disconnect outcomes across Machines
-  - path: rust/loopflow-execution/src/machine/wire.rs
-    why: Session attach and continue name their Task; Task shell operations
   - path: rust/loopflow/src/lf/commands/work_route.rs
     why: Which Machine runs a Session's terminal
   - path: rust/loopflow/src/server/peers.rs
     why: Pooled requests, terminal requests and dedicated subscription connections
   - path: rust/loopflow/src/server/subscriptions.rs
-    why: Follow ownership and recover subscriptions across peer outages
+    why: Retry peer outages and return typed refusals
   - path: rust/loopflow/src/lf/commands/write.rs
     why: The owner checks the file revision before saving
   - path: rust/loopflow/src/server/ticket.rs
@@ -33,7 +39,7 @@ first:
   - path: rust/loopflow/src/server/remote.rs
     why: The WebSocket bridge carries a local or remote terminal
   - path: rust/loopflow/tests/machine_commands.rs
-    why: Watch mini reconnect and type into its resumed Session
+    why: Follow a move, recover mini, and type remotely
   - path: rust/loopflow/tests/support/tailscale.rs
     why: Isolated phone identity and TLS WebSocket connections
 hide:

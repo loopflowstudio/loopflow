@@ -312,14 +312,20 @@ impl AsanaClient {
     /// events. A task someone created in Asana has no Loopflow identity
     /// yet; it takes one derived from its gid, so every machine claims the same
     /// one. Completed tasks Loopflow never tracked, and `finished` ones, are skipped.
-    pub async fn changes(
+    pub(crate) async fn changes(
         &self,
         since: Option<&str>,
+        through: &str,
         live: &[String],
         finished: &[String],
-    ) -> TrackerResult<Vec<(TrackerItem, TrackerEvent)>> {
-        let mut path = format!("/projects/{}/tasks", self.project().await?);
-        if let Some(since) = since {
+    ) -> TrackerResult<(Vec<(TrackerItem, TrackerEvent)>, String)> {
+        let project = self.project().await?;
+        let mut path = format!("/projects/{project}/tasks");
+        // A replacement project can have the same name and older tasks.
+        if let Some((_, since)) = since
+            .and_then(|s| s.split_once('/'))
+            .filter(|(gid, _)| *gid == project)
+        {
             path.push_str(&format!("?modified_since={since}"));
         }
         let tasks: Vec<Task> = self.pages(&path).await?;
@@ -344,7 +350,7 @@ impl AsanaClient {
             let event = self.issue_event(task.clone()).await?;
             changes.push((self.issue(&id, task).await?, event));
         }
-        Ok(changes)
+        Ok((changes, format!("{project}/{through}")))
     }
 
     /// Story listing accepts only Asana's own task gid, not `external:`.

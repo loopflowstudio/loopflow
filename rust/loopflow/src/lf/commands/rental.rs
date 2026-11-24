@@ -13,6 +13,8 @@ use anyhow::{anyhow, Context};
 use serde::Serialize;
 use time::OffsetDateTime;
 
+use super::task_row::TaskReading;
+use super::work_route::TaskPeer;
 use crate::lf::{OndemandCommand, PoolCommand};
 use loopflow_execution::installation::{ArtifactIdentity, ArtifactRole};
 use loopflow_execution::machine_records::CopyCounts;
@@ -656,14 +658,19 @@ pub fn place(
     if let Some(owner) = ownership.owner_elsewhere(&local) {
         let name = owner.name();
         // Only the owner can tell whether an interrupted launch started its Graph.
-        let detail = super::waves::remote_task_detail(repo, task.id.as_str())
+        let peer = TaskPeer::resolve(sqlite, &task.id)
             .with_context(|| format!("could not read {issue} on {name}"))?
             .ok_or_else(|| {
                 anyhow!("{issue} is owned on {name}; check its move before running it")
             })?;
-        let detail: super::task_row::TaskDetail = serde_json::from_value(detail)?;
+        let detail = super::waves::owner_detail(&peer, repo, &task)
+            .with_context(|| format!("could not read {issue} on {name}"))?;
+        if let TaskReading::Unobserved { reason } = &detail.reading {
+            return Err(anyhow!("could not read {issue} on {name}: {reason}"));
+        }
         eprintln!("{issue} on {name}: {}", detail.task.standing());
-        return Ok(detail.task.state.is_terminal() || !detail.graph_processes.is_empty());
+        return Ok(detail.task.state.is_some_and(|state| state.is_terminal())
+            || !detail.graph_processes.is_empty());
     }
     if let Some(label) = free_pool_machine(sqlite, placement)? {
         hand_off(repo, task.id.as_str(), &label)?;

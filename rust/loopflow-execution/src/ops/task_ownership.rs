@@ -4,7 +4,7 @@ use std::path::Path;
 
 use crate::ops::{OpsError, OpsResult};
 use crate::store::StoreResult;
-use loopflow_model::durable::{MachineId, TaskId, TaskOwnership};
+use loopflow_model::durable::{MachineId, TaskId, TaskOwnership, TaskRunsOn};
 use loopflow_storage::sqlite::task_moves::{MoveInFlight, MoveStage};
 use loopflow_storage::sqlite::SqliteStore;
 
@@ -136,28 +136,13 @@ pub(crate) async fn assert_assignee(store: &SqliteStore, repository: &Path, task
     }
 }
 
-/// Where a Task that another Machine owns runs, and since its claim reached
-/// that Machine: `Runs on mini since Nov 12 10:42`. `None` when `local` owns
-/// it or nobody does.
-pub fn runs_elsewhere(ownership: &TaskOwnership, local: &MachineId) -> Option<String> {
-    let machine = ownership.owner_elsewhere(local)?;
-    let since = ownership.since(machine.id.as_ref()?)?;
-    Some(format!(
+/// `Runs on mini since Nov 12 10:42`.
+pub fn runs_elsewhere(runs_on: &TaskRunsOn) -> String {
+    format!(
         "Runs on {} since {}",
-        machine.name(),
-        crate::output::format_time(since)
-    ))
-}
-
-/// [`runs_elsewhere`], read against this Machine's registry.
-pub fn runs_elsewhere_here(ownership: &TaskOwnership) -> OpsResult<Option<String>> {
-    let Some(store) = crate::store::read_existing_registry().map_err(message)? else {
-        return Ok(None);
-    };
-    let local = crate::store::machines::local_machine(&store.sqlite)
-        .map_err(message)?
-        .id;
-    Ok(runs_elsewhere(ownership, &local))
+        runs_on.machine.name(),
+        crate::output::format_time(runs_on.since)
+    )
 }
 
 /// `Not checked out on mini`: this Machine has no checkout of the Task, so it

@@ -313,6 +313,17 @@ pub enum SessionState {
     Closed,
 }
 
+impl SessionState {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Unknown => "unknown",
+            Self::Active => "active",
+            Self::Detached => "detached",
+            Self::Closed => "closed",
+        }
+    }
+}
+
 /// What opening a Session does here, as a person reads it. Every opening is
 /// `lf resume`: it adds a view, resumes saved history, or takes the
 /// conversation over from a client lf can't share.

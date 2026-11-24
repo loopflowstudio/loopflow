@@ -25,9 +25,7 @@ pub(super) fn start() {
     }
 }
 
-/// How often this server fetches and pushes the plan refs of every
-/// repository it plans without Linear or Asana. Commands it answers push
-/// sooner; this is how another Machine's change arrives with no hub.
+/// Repositories with no local claims still receive new plans by Git.
 const PLAN_EVERY: Duration = Duration::from_secs(60);
 
 pub(super) fn start_plan_exchange() {
@@ -48,7 +46,7 @@ fn exchange_plans() {
         }
         let exchanged = loopflow_execution::store::open_sqlite(&path)
             .map_err(anyhow::Error::from)
-            .and_then(|store| loopflow_execution::ops::plan_git::exchange_all(&store));
+            .and_then(|store| loopflow_execution::ops::plan_git::exchange_unowned(&store));
         if let Err(error) = exchanged {
             tracing::warn!(error = %format!("{error:#}"), "Git plan exchange did not run");
         }

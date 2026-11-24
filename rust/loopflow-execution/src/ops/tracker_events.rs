@@ -6,16 +6,19 @@
 //! Exactly-once, the baseline, and the monotonic-revision guard all live in the
 //! store; refresh supplies events without proposing a second write.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::path::Path;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
+use futures_util::{stream, StreamExt};
 use sha2::{Digest, Sha256};
 use time::OffsetDateTime;
 
 use super::tracker::message;
 use super::OpsResult;
 use crate::store::{SharedStore, Store};
+use loopflow_model::durable::TaskId;
+use loopflow_storage::sqlite::planning_scope_checks::ScopeCheck;
 use loopflow_storage::work::task::Task;
 
 pub(crate) async fn refresh_task_comments(store: &SharedStore, task: &Task) -> OpsResult<()> {
@@ -122,42 +125,8 @@ async fn check_scope(store: &Store, repository: &str, fresh_for: i64) -> OpsResu
         return Ok(false);
     }
     let repo = Path::new(repository);
-    let team = super::tracker::repository_scope(repo)?;
-    let mut scope_matches = HashMap::from([(repo.to_path_buf(), true)]);
-    let mut same_scope = |repo: &Path| {
-        *scope_matches.entry(repo.to_path_buf()).or_insert_with(|| {
-            super::tracker::repository_scope(repo).is_ok_and(|scope| scope == team)
-        })
-    };
-    let mut live = Vec::new();
-    let mut finished = Vec::new();
-    let waves: Vec<_> = store
-        .list_waves(None)
-        .await
-        .map_err(message)?
-        .into_iter()
-        .filter(|wave| same_scope(Path::new(wave.repo())))
-        .collect();
-    for task in store.list_tasks(None).await.map_err(message)? {
-        let task_repo = super::task::repository_for_task(store, &task)?;
-        if !same_scope(&task_repo) {
-            continue;
-        }
-        let Some(issue) = task.tracker_id else {
-            continue;
-        };
-        if store
-            .task_state(&task.id)
-            .await
-            .map_err(message)?
-            .is_terminal()
-        {
-            finished.push(issue.as_str().to_owned());
-        } else {
-            live.push(issue.as_str().to_owned());
-        }
-    }
-    let key = format!("{:x}", Sha256::digest(team.as_bytes()));
+    let scope = super::tracker::delta_scope(repo)?;
+    let key = format!("{:x}", Sha256::digest(scope.as_bytes()));
     let path = store
         .sqlite
         .home_dir()
@@ -168,19 +137,41 @@ async fn check_scope(store: &Store, repository: &str, fresh_for: i64) -> OpsResu
         return Ok(false);
     };
     let now = OffsetDateTime::now_utc();
-    let Some(since) = store
+    let ScopeCheck::Started { since } = store
         .sqlite
-        .begin_linear_team_check(&team, now.unix_timestamp(), fresh_for)
+        .begin_scope_check(&scope, now.unix_timestamp(), fresh_for)
         .map_err(message)?
     else {
         return Ok(false);
     };
+    let mut scope_matches = HashMap::from([(repo.to_path_buf(), true)]);
+    let mut same_scope = |repo: &Path| {
+        *scope_matches
+            .entry(repo.to_path_buf())
+            .or_insert_with(|| super::tracker::delta_scope(repo).is_ok_and(|other| other == scope))
+    };
+    let mut live = Vec::new();
+    let mut finished = Vec::new();
+    let waves: Vec<_> = store
+        .list_waves(None)
+        .await
+        .map_err(message)?
+        .into_iter()
+        .filter(|wave| same_scope(Path::new(wave.repo())))
+        .collect();
+    for path in store.sqlite.tracked_repositories().map_err(message)? {
+        if same_scope(Path::new(&path)) {
+            let (open, closed) = store.sqlite.tracked_issue_ids(&path).map_err(message)?;
+            live.extend(open);
+            finished.extend(closed);
+        }
+    }
     let through = now
         .format(&time::format_description::well_known::Rfc3339)
         .map_err(message)?;
     let client = super::tracker::Tracker::for_items(repo).await?;
-    let changes = client
-        .changes(&team, since.as_deref(), &through, &live, &finished)
+    let (changes, watermark) = client
+        .changes(&scope, since.as_deref(), &through, &live, &finished)
         .await
         .map_err(message)?;
     let changed = !changes.is_empty();
@@ -240,7 +231,7 @@ async fn check_scope(store: &Store, repository: &str, fresh_for: i64) -> OpsResu
     }
     store
         .sqlite
-        .finish_linear_team_check(&team, &through)
+        .finish_scope_check(&scope, &watermark)
         .map_err(message)?;
     Ok(changed)
 }
@@ -257,6 +248,97 @@ fn fresh_for(repository: &str) -> i64 {
     }
 }
 
+/// The owner checks for incoming direction even between provider boundaries.
+const OWNER_CHECK_INTERVAL: Duration = Duration::from_secs(30);
+
+/// Check the server's owned work, or a Graph's one Task for the life of
+/// its agent step. A busy database must leave the Graph free to interrupt
+/// its child. Only the bounded check occupies a blocking thread.
+pub async fn watch_owned_work(graph_task: Option<TaskId>) {
+    if graph_task.is_some() {
+        // The Graph already refreshed planning before launching this step.
+        tokio::time::sleep(OWNER_CHECK_INTERVAL).await;
+    }
+    loop {
+        let task = graph_task.clone();
+        let checked = crate::journal::request::spawn_blocking(move || {
+            tokio::runtime::Handle::current().block_on(async move {
+                match crate::store::open_existing_store().await.map_err(message)? {
+                    Some(store) => check_owned_work(&store, task.as_ref()).await,
+                    None => Ok(SystemTime::now() + OWNER_CHECK_INTERVAL),
+                }
+            })
+        })
+        .await;
+        let delay = match checked {
+            Ok(Ok(due)) => due.duration_since(SystemTime::now()).unwrap_or_default(),
+            failed => {
+                tracing::warn!(?failed, "could not check owned work for incoming direction");
+                OWNER_CHECK_INTERVAL
+            }
+        };
+        tokio::time::sleep(delay).await;
+    }
+}
+
+/// Read the plan for this Machine's open work. A running Graph needs only
+/// its Task's repository. All readers share the scope lock and last attempt.
+pub(crate) async fn check_owned_work(
+    store: &Store,
+    task: Option<&TaskId>,
+) -> OpsResult<SystemTime> {
+    let next_inventory = SystemTime::now() + OWNER_CHECK_INTERVAL;
+    let repositories = if let Some(task) = task {
+        if !store.sqlite.task_claimed_here(task).map_err(message)?
+            || store.task_state(task).await.map_err(message)?.is_terminal()
+        {
+            return Ok(next_inventory);
+        }
+        let scope = store.sqlite.task_scope(task).map_err(message)?;
+        store
+            .sqlite
+            .repository_path(&scope.repository)
+            .map_err(message)?
+            .into_iter()
+            .collect::<BTreeSet<_>>()
+    } else {
+        super::plan_carriers::owned_repositories(&store.sqlite).map_err(message)?
+    };
+    let next_check = stream::iter(repositories)
+        .map(|repo| async move {
+            let window = fresh_for(&repo).max(OWNER_CHECK_INTERVAL.as_secs() as i64);
+            let next = if super::tracker::connected(&repo) {
+                check_repository_bounded(store, &repo, window).await;
+                super::tracker::delta_scope(Path::new(&repo))
+                    .and_then(|scope| store.sqlite.last_scope_attempt(&scope).map_err(message))
+            } else {
+                super::plan_carriers::poll_owned(store, &repo, window)
+                    .await
+                    .map(Some)
+                    .map_err(message)
+            };
+            // Wake when the shared attempt expires, even if another reader made it.
+            match next {
+                Ok(Some(at)) => OffsetDateTime::from_unix_timestamp(at.saturating_add(window))
+                    .ok()
+                    .map(SystemTime::from)
+                    .filter(|due| *due > SystemTime::now())
+                    .unwrap_or(next_inventory),
+                Ok(None) => next_inventory,
+                Err(error) => {
+                    tracing::debug!(%repo, %error, "plan check time unavailable");
+                    next_inventory
+                }
+            }
+        })
+        .buffer_unordered(4)
+        .fold(next_inventory, |earliest, due| {
+            std::future::ready(earliest.min(due))
+        })
+        .await;
+    Ok(next_check)
+}
+
 /// The one freshness check for Linear reads: bring the repository's Team
 /// delta up to date (a no-op inside its window), then report whether local
 /// state is current enough to answer in place of a per-item read.
@@ -267,13 +349,13 @@ pub(crate) async fn team_current(store: &Store, repository: &str) -> bool {
         return false;
     }
     check_repository_bounded(store, repository, fresh_for(repository)).await;
-    let Ok(team) = super::tracker::repository_scope(std::path::Path::new(repository)) else {
+    let Ok(scope) = super::tracker::delta_scope(std::path::Path::new(repository)) else {
         return false;
     };
     store
         .sqlite
         .linear_team_current(
-            &team,
+            &scope,
             OffsetDateTime::now_utc().unix_timestamp(),
             crate::linear::delta_fresh_secs(),
         )
@@ -291,7 +373,7 @@ async fn check_repository_bounded(store: &Store, repository: &str, fresh_for: i6
     match check {
         Ok(Ok(changed)) => changed,
         result => {
-            tracing::debug!(?result, "Linear team check pending");
+            tracing::debug!(%repository, ?result, "tracker check pending");
             false
         }
     }

@@ -7,6 +7,26 @@ const ROADMAP: &str = include_str!("../../../tests/fixtures/dto/roadmap_snapshot
 const METRIC_PORTFOLIO: &str = include_str!("../../../tests/fixtures/dto/metric_portfolio.json");
 
 #[test]
+fn task_steer_receipt_requires_its_delivery_and_nullable_machine() {
+    use loopflow_execution::engine::task::TaskSteerReceipt;
+    let wire: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../tests/fixtures/dto/task_steer_receipt.json"
+    ))
+    .unwrap();
+    assert_eq!(
+        serde_json::to_value(serde_json::from_value::<TaskSteerReceipt>(wire.clone()).unwrap())
+            .unwrap(),
+        wire
+    );
+    let mut missing = wire;
+    missing["delivery"]
+        .as_object_mut()
+        .unwrap()
+        .remove("runs_on");
+    assert!(serde_json::from_value::<TaskSteerReceipt>(missing).is_err());
+}
+
+#[test]
 fn roadmap_requires_shared_lifecycle_and_selection_states() {
     use loopflow::lf::commands::waves::RoadmapTask;
     let wire: serde_json::Value = serde_json::from_str(include_str!(
@@ -351,7 +371,7 @@ fn task_detail_says_each_fact_once() {
     let detail: TaskDetail = serde_json::from_str(json).unwrap();
     assert_eq!(
         detail.task.state,
-        loopflow_execution::durable::TaskState::Active
+        Some(loopflow_execution::durable::TaskState::Active)
     );
     assert_eq!(
         detail.task.graph.as_ref().unwrap().step.as_deref(),
@@ -379,6 +399,44 @@ fn task_detail_says_each_fact_once() {
         serde_json::to_value(&detail).unwrap(),
         serde_json::from_str::<serde_json::Value>(json).unwrap()
     );
+}
+
+#[test]
+fn task_detail_requires_where_it_runs_and_whose_reading_it_is() {
+    use loopflow::lf::commands::task_row::{TaskDetail, TaskReading};
+    let wire: serde_json::Value =
+        serde_json::from_str(include_str!("../../../tests/fixtures/dto/task_detail.json")).unwrap();
+    let mut missing = wire.clone();
+    missing.as_object_mut().unwrap().remove("reading");
+    assert!(serde_json::from_value::<TaskDetail>(missing).is_err());
+    let mut missing = wire.clone();
+    missing["task"].as_object_mut().unwrap().remove("runs_on");
+    assert!(serde_json::from_value::<TaskDetail>(missing).is_err());
+    let mut missing = wire.clone();
+    missing["task"].as_object_mut().unwrap().remove("state");
+    assert!(serde_json::from_value::<TaskDetail>(missing).is_err());
+
+    let mut elsewhere = wire;
+    elsewhere["task"]["state"] = serde_json::Value::Null;
+    elsewhere["task"]["runs_on"] = serde_json::json!({
+        "machine": {"id": "home_0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b", "label": "modal-3"},
+        "since": 1_763_900_000
+    });
+    elsewhere["reading"] =
+        serde_json::json!({"kind": "unobserved", "reason": "modal-3 is not registered here"});
+    let detail: TaskDetail = serde_json::from_value(elsewhere.clone()).unwrap();
+    assert!(detail.task.state.is_none());
+    assert_eq!(
+        detail.reading,
+        TaskReading::Unobserved {
+            reason: "modal-3 is not registered here".into()
+        }
+    );
+    assert_eq!(
+        detail.task.runs_on.as_ref().unwrap().machine.name(),
+        "modal-3"
+    );
+    assert_eq!(serde_json::to_value(&detail).unwrap(), elsewhere);
 }
 
 #[test]

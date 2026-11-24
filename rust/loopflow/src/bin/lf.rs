@@ -1122,14 +1122,32 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
         } => {
             let status = loopflow_execution::ops::task::task_status(repo, issue.as_deref())?;
             // A Task another Machine runs is read where it runs.
+            let mut remote_line = None;
             if let Some(task) = &status.task {
-                if loopflow::lf::commands::waves::print_remote_task_status(
-                    repo,
-                    &task.identifier,
-                    *json,
-                    *subscribe,
+                use loopflow::lf::commands::waves::RemoteStatus;
+                match loopflow::lf::commands::waves::print_remote_task_status(
+                    repo, task, *json, *subscribe,
                 )? {
-                    return Ok(());
+                    RemoteStatus::Printed => return Ok(()),
+                    RemoteStatus::Here => {}
+                    RemoteStatus::Unobserved { runs_on, reason } => {
+                        if *json {
+                            return loopflow::lf::commands::waves::print_task_detail(
+                                status,
+                                Some(reason),
+                            );
+                        }
+                        remote_line = match status
+                            .execution
+                            .as_ref()
+                            .map(|execution| execution.status.lifecycle(task.state.as_deref()))
+                        {
+                            Some(state) if state.is_terminal() => Some(state.to_string()),
+                            _ => Some(loopflow::lf::commands::task_row::unobserved_reason(
+                                &runs_on, &reason,
+                            )),
+                        };
+                    }
                 }
             }
             if *subscribe {
@@ -1144,7 +1162,7 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
                 .map(drop);
             }
             if *json {
-                loopflow::lf::commands::waves::print_task_detail(status)?;
+                loopflow::lf::commands::waves::print_task_detail(status, None)?;
             } else {
                 println!(
                     "Tracker state: {}",
@@ -1202,19 +1220,13 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
                 // A move in flight reads as that, with its retry; a Task another
                 // Machine runs is read from its ownership. This Machine's records
                 // are what it left behind.
-                let elsewhere = match (&status.task, &status.ownership) {
-                    (Some(task), Some(ownership)) => {
-                        loopflow_execution::ops::task_ownership::moving_here(
-                            &task.id,
-                            &task.identifier,
-                        )?
-                        .or(
-                            loopflow_execution::ops::task_ownership::runs_elsewhere_here(
-                                ownership,
-                            )?,
-                        )
-                        .map(|line| format!("{}  {line}", task.identifier))
-                    }
+                let elsewhere = match &status.task {
+                    Some(task) => loopflow_execution::ops::task_ownership::moving_here(
+                        &task.id,
+                        &task.identifier,
+                    )?
+                    .or(remote_line)
+                    .map(|line| format!("{}  {line}", task.identifier)),
                     _ => None,
                 };
                 if let Some(line) = &elsewhere {
@@ -2748,6 +2760,19 @@ fn dispatch_here(
             let directory = loopflow_execution::repo::working_directory()?;
             let repo = selected_task_repository(&cli, &directory, Some(issue))?;
             loopflow::lf::commands::rental::place_by_default(&repo, issue, cli.batch)?;
+        }
+    }
+    // Status selects a Task to read even when it has no checkout to enter.
+    if let Some(Commands::Task {
+        cmd: TaskCommand::Status { issue, .. },
+    }) = &mut cli.command
+    {
+        if let Some(selected) = cli.task.take() {
+            anyhow::ensure!(
+                issue.as_ref().is_none_or(|issue| issue == &selected),
+                "conflicting Task selections"
+            );
+            issue.get_or_insert(selected);
         }
     }
     if loopflow::lf::commands::work_route::dispatch(&cli, args)? {

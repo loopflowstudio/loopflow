@@ -161,6 +161,7 @@ mod tests {
         "github_people",
         // Refresh attempts and watermarks do not change displayed Work.
         "linear_team_checks",
+        "planning_scope_checks",
         "machines",
         "session_export_changes",
         // Owned Machines' pools are read by `lf machine pool`, not workspace surfaces.

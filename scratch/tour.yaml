@@ -10,6 +10,20 @@ first:
     why: Revision 10 addresses remote Sessions and Task shells
   - path: swift/Loopflow/Services/ServerProtocol.swift
     why: Desktop and phone negotiate the same revision
+  - path: swift/LoopflowiOS/README.md
+    why: The phone's four views of a Task
+  - path: swift/LoopflowiOS/TaskWorkspaceView.swift
+    why: Session, Files, Changes and Shell switch in one screen
+  - path: swift/LoopflowiOS/TaskFilesTree.swift
+    why: Files follows task.files.watch across moves
+  - path: swift/LoopflowiOS/TerminalLink.swift
+    why: One hold for a Session or the phone's shell
+  - path: swift/LoopflowiOS/RemoteMobileClient.swift
+    why: Tickets, starts and the primary, addressed by Task
+  - path: swift/LoopflowiOSTests/RemoteTaskWorkspaceTests.swift
+    why: Two Machines behind the paired phone
+  - path: scripts/ios_fixture_host.py
+    why: Runs lf for Simulator tests
   - path: rust/loopflow/src/lf/navigation.rs
     why: Keep open on the calling Machine
   - path: rust/loopflow/src/lf/commands/open.rs

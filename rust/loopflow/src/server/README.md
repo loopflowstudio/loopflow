@@ -463,8 +463,8 @@ case names one operation, including distinct claim/unassign and pin/unpin writes
 | `task.list` (`closed: true`) | `lf task list --closed --wave <wave>` | read |
 | `task.changes` | `lf task changes <issue>` | read |
 | `task.diff`, `task.file`, `task.files` | `lf task diff`, `lf task file`, `lf task files` | read |
-| `task.files.watch` | none; Desktop's Files pane | subscription; file tree revision after a change under the checkout or a Task move |
-| `task.shell.start`, `.attach`, `.close` | `lf desktop shell`, which Desktop's Shell runs; the phone's Shell once it moves onto it | server; a Task shell by `shell_id`, held on the Machine that started it |
+| `task.files.watch` | none; Desktop's and the phone's Files | subscription; file tree revision after a change under the checkout or a Task move |
+| `task.shell.start`, `.attach`, `.close` | `lf desktop shell`, which Desktop's Shell runs; the phone's Shell (`shell_id` `mobile-<task>`) | server; a Task shell by `shell_id`, held on the Machine that started it |
 | `task.context` | `lf task context <issue>` | read |
 | `task.runs` | `lf task runs <issue>` | read |
 | `task.wait` | `lf task wait <issue> --until <state>` | `engine::task` |

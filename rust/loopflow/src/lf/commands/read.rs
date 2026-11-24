@@ -500,7 +500,8 @@ impl Read {
                 }
                 argv
             }
-            Self::TaskFilesWatch { issue } => words(&["task", "watch-files", issue]),
+            // No command streams it; this is the read each revision repeats.
+            Self::TaskFilesWatch { issue } => words(&["task", "files", issue, ".", "--json"]),
             Self::WaveList => words(&["wave", "list", "--all", "--json"]),
             Self::MachineSelf => words(&["machine", "self", "--json"]),
             Self::DesktopPortfolio => words(&["desktop", "portfolio", "--json"]),

@@ -1,119 +1,14 @@
 //! File observation in a retained Task checkout; never prepares or starts work.
 use std::collections::{BTreeSet, HashSet};
-use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    mpsc, Arc, Mutex,
-};
-use std::time::{Duration, Instant};
+use std::sync::{Arc, Mutex};
 
-use anyhow::{anyhow, ensure, Result};
+use anyhow::Result;
 use notify::{RecursiveMode, Watcher};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
 use super::{file_context, file_store};
 use loopflow_model::durable::{MachineId, TaskId};
-use loopflow_storage::sqlite::TaskCheckout;
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TaskFilesFrame {
-    pub request: String,
-    pub task_id: TaskId,
-    pub machine_id: MachineId,
-    pub checkout: String,
-    /// Checkout-relative paths that may change what the view shows: `.git/...`
-    /// for repository metadata, `""` for a rescan. Empty is a heartbeat.
-    pub paths: Vec<String>,
-}
-
-pub(crate) fn pinned_checkout(issue: &str, expected: &Path) -> Result<TaskCheckout> {
-    let checkout = file_context(&file_store()?, issue)?;
-    ensure!(
-        checkout.worktree == expected,
-        "The Task checkout changed; reopen the Task. No companion was retargeted."
-    );
-    ensure!(
-        expected.is_dir(),
-        "The recorded Task checkout is unavailable"
-    );
-    Ok(checkout)
-}
-
-/// The existing owned-line transport keeps stdin open and closes it on cancellation.
-/// Heartbeats recheck recorded ownership; filesystem events, not a read timer,
-/// invalidate contents. Access events from our own reads never cause another read,
-/// and neither do git-ignored writes such as `lf`'s own journal traces.
-pub fn watch_task_files(issue: &str, expected: &Path, request: &str) -> Result<()> {
-    let checkout = pinned_checkout(issue, expected)?;
-    let machine_id = crate::store::machines::local_machine(&file_store()?)?.id;
-    let (send, events) = mpsc::channel::<Vec<String>>();
-    let error = Arc::new(Mutex::new(None));
-    let failure = error.clone();
-    let observed = send.clone();
-    let _watcher = watch_checkout(expected, move |event| {
-        let paths = event.unwrap_or_else(|error| {
-            *failure.lock().expect("file observation error lock") = Some(error.to_string());
-            vec![String::new()]
-        });
-        let _ = observed.send(paths);
-    })?;
-    let closed = Arc::new(AtomicBool::new(false));
-    let input_closed = closed.clone();
-    std::thread::spawn(move || {
-        let mut byte = [0];
-        while std::io::stdin().read(&mut byte).is_ok_and(|n| n != 0) {}
-        input_closed.store(true, Ordering::Release);
-        let _ = send.send(Vec::new());
-    });
-    let mut paths = vec![String::new()];
-    let mut ignore_failed = false;
-    loop {
-        if closed.load(Ordering::Acquire) {
-            return Ok(());
-        }
-        if let Some(error) = error.lock().expect("file observation error lock").take() {
-            return Err(anyhow!("Live file observation failed: {error}"));
-        }
-        let current = pinned_checkout(issue, expected)?;
-        ensure!(
-            current.task_id == checkout.task_id,
-            "Task execution ownership changed; reopen the Task"
-        );
-        let frame = TaskFilesFrame {
-            request: request.into(),
-            task_id: current.task_id,
-            machine_id: machine_id.clone(),
-            checkout: expected.to_string_lossy().into_owned(),
-            paths,
-        };
-        println!("{}", serde_json::to_string(&frame)?);
-        std::io::stdout().flush()?;
-        let heartbeat = Instant::now() + Duration::from_secs(2);
-        paths = loop {
-            // Continuous ignored churn must not starve the heartbeat's ownership recheck.
-            let wait = heartbeat.saturating_duration_since(Instant::now());
-            if wait.is_zero() {
-                break Vec::new();
-            }
-            let Ok(first) = events.recv_timeout(wait) else {
-                break Vec::new();
-            };
-            if closed.load(Ordering::Acquire) {
-                break Vec::new();
-            }
-            std::thread::sleep(Duration::from_millis(150));
-            let batch = first
-                .into_iter()
-                .chain(events.try_iter().flatten())
-                .collect();
-            let relevant = relevant_paths(expected, batch, &mut ignore_failed);
-            if !relevant.is_empty() {
-                break relevant;
-            }
-        };
-    }
-}
 
 fn watch_checkout(
     expected: &Path,
@@ -274,4 +169,41 @@ fn relevant_paths(root: &Path, batch: BTreeSet<String>, ignore_failed: &mut bool
         .into_iter()
         .filter(|path| !ignored.contains(path))
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeSet;
+
+    use super::relevant_paths;
+
+    #[test]
+    fn ignored_build_output_never_invalidates_the_tree() {
+        let repo = tempfile::tempdir().unwrap();
+        let git = |args: &[&str]| {
+            assert!(std::process::Command::new("git")
+                .args(args)
+                .current_dir(repo.path())
+                .status()
+                .unwrap()
+                .success())
+        };
+        git(&["init", "-q"]);
+        std::fs::write(repo.path().join(".gitignore"), "target/\n").unwrap();
+        let batch: BTreeSet<String> = ["target/out", "note.txt", ".git/index"]
+            .map(String::from)
+            .into();
+        let mut ignore_failed = false;
+        assert_eq!(
+            relevant_paths(repo.path(), batch, &mut ignore_failed),
+            [".git/index", "note.txt"]
+        );
+        assert!(!ignore_failed);
+        // A rescan is never filtered.
+        let rescan: BTreeSet<String> = ["", "target/out"].map(String::from).into();
+        assert_eq!(
+            relevant_paths(repo.path(), rescan, &mut ignore_failed),
+            [""]
+        );
+    }
 }

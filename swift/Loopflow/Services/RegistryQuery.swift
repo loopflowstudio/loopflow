@@ -193,7 +193,8 @@ public enum ServedRead: Equatable, Sendable, Encodable {
         case .taskWait(let issue, let until):
             return ["task", "wait", issue, "--until", until, "--timeout", "0s", "--json"]
         case .taskFilesWatch(let issue):
-            return ["task", "watch-files", issue]
+            // No command streams it; this is the read each revision repeats.
+            return ["task", "files", issue, ".", "--json"]
         }
     }
 
@@ -1020,6 +1021,12 @@ public struct RegistryQuery: Sendable {
     /// and untracked state relative to the Task's recorded base.
     public func taskChanges(issue: String, base: String = "parent", head: String? = nil) async throws -> TaskChangesSnapshot {
         try await serve(.taskChanges(issue: issue, base: base, head: head)).decode(TaskChangesSnapshot.self)
+    }
+
+    /// One Task's screen, from wherever the Task runs: there its current
+    /// Session is the Task's saved primary.
+    public func taskDetail(issue: String) async throws -> TaskDetail {
+        try await serve(.taskDetail(directory: "/", issue: issue)).decode(TaskDetail.self)
     }
 
     public func sessionHistoryText(id: String) async throws -> String {

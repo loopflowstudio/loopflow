@@ -66,7 +66,10 @@ Built and its location stack deleted; see "Slice 3 status". `SessionsWorkspace.l
 
 `RemoteTaskWorkspaceTests` drove the last gaps closed: Files and Changes show **Not started** with **Retry** (`TaskFilesStore.notStarted`), the outage line has **Retry** (`retry()`), the Files header names the Machine by the plan's label, and an ended shell tab asks the server (`task.files`) whether the Task is started and says **Not started**.
 
-### 6. Mobile (`swift/LoopflowiOS/TaskWorkspaceView.swift`, `RemoteMobileClient.swift`, `SessionLink.swift`)
+### 6. Mobile (`swift/LoopflowiOS`): built
+
+See "Slice 4 status". What follows is the design it was built from.
+
 
 - **Single pairing, four viewers:** Keep the existing single Tailscale pairing to the user's primary Machine server. All four viewers (**Session**, **Files**, **Changes**, **Shell**) talk to that paired server, which routes to the Task's owning Machine transparently.
 - `TaskWorkspaceView.openConversation` asks the paired laptop's `desktop.view.get` for the primary, which can be absent locally. The routed `task.get` overview lists Session membership and carries no primary ID. Project the owner's saved primary through that reading using the existing Task primary selection. Use it for initial open and later readings, and pass the Task ID to `session.attach` and `session.continue` in `RemoteMobileClient`. Share the selection with the CLI where it fits.
@@ -130,7 +133,7 @@ After a move, an open shell continues on its original Machine. Reattaching by `s
 
 ## What goes
 
-Desktop's client-side SSH routing and `prepared_remotely`'s raw SSH viewer are gone (Slice 3). Still to go: `lf task watch-files --checkout --request`, its `task_files_frames.json` fixture and rejection test, once Mobile Files uses `task.files.watch`.
+Desktop's client-side SSH routing and `prepared_remotely`'s raw SSH viewer are gone (Slice 3); `lf task watch-files`, `TaskFilesFrame` and its fixture and observer test are gone (Slice 4).
 
 **Must survive:**
 - Local Task Files, Changes, Diff, Save, Shell, Session, and FSEvents watching on the local Machine.
@@ -181,11 +184,18 @@ Build thinly end to end in four slices; each slice runs and proves itself before
    - `RemoteTaskWorkspaceTests` (2026-11-23) builds both Machines with the CLI only: `machine add mini` over a stand-in `ssh`, `task move --machine mini`, then `lf --machine mini task checkout`, which clones the shared origin there. Through the laptop's server: Not started (Changes, tree, watch, ended shell tab), an unchanged file, mini's uncommitted hunk in Changes, Save onto mini, `lf desktop shell` printing mini's checkout from `pwd`, the Session argv from `prepareSession` answering typed input from mini's provider, an outage naming mini in the watch and a new read, Retry and reopen. The move test keeps a laptop shell running, saves a same-revision draft on mini, keeps a different-revision draft whole, and Close with `--started-on` ends the old shell on the laptop. Both tests passed headless (`scripts/test_desktop.sh --filter RemoteTaskWorkspaceTests`, 76 s; again at `6af0dff787` with its always-run teardown, 92.7 s); the neighbouring Files, panes and workspace suites passed (273 tests).
    - Taught: after a move, the re-read three-way-merged a dirty draft into the new Machine's file, and an edit overlapping the file there was dropped. `TaskFileDocument.arrive` now keeps such a draft whole beside the new file (`external`, saving unavailable); with the fix reverted the move test fails with the draft replaced by "Updated from disk". The headless fixture runs terminals under `script(1)`: Ghostty needs a display, so the pane's argv is what is exercised, not its rendering.
 
-4. **Slice 4: Mobile Files & Shell viewers + Docs + Gate.** Next.
+4. **Slice 4: Mobile Files & Shell viewers + Docs + Gate.** Built; gate next.
    - Expose Files (directory tree + unchanged file content via `task.files` / `task.file`) and Shell (via `task.shell.start` / `task.shell.attach` + `/v1/ticket` WebSocket) alongside Changes and Session in `TaskWorkspaceView.swift` / `RemoteMobileClient.swift`.
    - Derive remote Task primary Session from routed `task.get` and pass `task` on `session.attach` / `session.continue`. Show **Not started** and explicit unreachable-Machine errors.
    - Update user and dev docs (`docs/surfaces.md`, `docs/workspaces.md`, `docs/server.md`, `docs/ops.md`, `docs/lf-reference.md`, `rust/loopflow/src/server/README.md`, `docs/dev/machines.md`).
    - **Proves:** `LoopflowiOSTests/RemoteTaskWorkspaceTests` exercising all four viewers, unstarted, unreachable, and Task-move handling over one paired server connection.
+
+   **Slice 4 status (2026-11-24).**
+   - Built: `TaskWorkspaceView` switches **Session · Files · Changes · Shell** and names the Machine under the workflow sentence when it is not the paired one. `TaskFilesTree` browses `task.files` page by page and follows `task.files.watch` (re-reads on a revision, Machine or checkout change; resubscribes every 5 s after `not_started`). `TerminalLink` (was `SessionLink`) holds a Session or the shell `mobile-<task>`: `task.shell.attach`, then `task.shell.start` on first open, then the `/v1/ticket` WebSocket. `session.attach`/`continue` carry the Task. The primary comes from routed `task.detail`'s `current_session`. Swift `ServerOperation.taskShellStart/Attach` with shared fixtures `task_shell_start.json`/`task_shell_attach.json`; schema fixture regenerated.
+   - Deleted: `lf task watch-files`, `watch_task_files`, `TaskFilesFrame`, `task_files_frames.json`, `remote_file_observer_keeps_the_recorded_owner_and_streams_changes`, the Changes sheet and the "No changes yet" stand-in for an unstarted Task.
+   - Ran: `uv run python scripts/test_ios.py -only-testing:LoopflowiOSTests/RemoteTaskWorkspaceTests` passed both tests (31 s, 40 s), and `TaskActionsTests` (4). `ops::task::workspace::tests` (1), `server::schema::tests:: server::wire:: lf::tests::` (48), `documented_commands::` (4), and `scripts/test_desktop.sh --filter 'ServerProtocolTests|DTOFixtureTests|DesignDisciplineTests'` (80) passed.
+   - Taught: the Simulator cannot run `lf` (no OS account lookup), so `scripts/ios_fixture_host.py` runs the fixture's commands. A move whose destination has no checkout yet ends the files watch with `not_started`; the first fixture run waited on a watch that had ended. Held terminals' holders exit 60 s after their last terminal; the fixture closes the phone's shells on both Machines.
+   - Next: gate (the four acceptance commands below), then the Demo on a real phone.
 
 ## Acceptance check at gate
 

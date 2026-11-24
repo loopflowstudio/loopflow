@@ -1216,7 +1216,6 @@ impl TaskCommand {
             | Self::List { .. }
             | Self::Show { .. }
             | Self::Location { .. }
-            | Self::WatchFiles { .. }
             | Self::Status { .. }
             | Self::Diff { .. }
             | Self::Changes { .. }
@@ -2405,14 +2404,6 @@ using lf open's ordinary host selection. Preview and --quote open nothing."
     /// Run one cleanup pass for a Task, or all pending Tasks on this Machine
     #[command(hide = true)]
     Retire { issue: Option<String> },
-    /// Stream invalidations from an existing Task checkout (JSON lines)
-    WatchFiles {
-        issue: String,
-        #[arg(long)]
-        checkout: std::path::PathBuf,
-        #[arg(long)]
-        request: String,
-    },
     /// Show durable Task facts and its recorded work
     Status {
         /// Task issue; defaults to the Task in this checkout
@@ -2602,7 +2593,6 @@ impl TaskCommand {
             Self::Auto { cmd } => cmd.issue().as_deref(),
             Self::Detail { issue, .. }
             | Self::Show { issue, .. }
-            | Self::WatchFiles { issue, .. }
             | Self::Location { issue, .. }
             | Self::Claim { issue, .. }
             | Self::Unassign { issue, .. }
@@ -2636,7 +2626,6 @@ impl TaskCommand {
             Self::Auto { cmd } => cmd.issue_mut().as_mut(),
             Self::Detail { issue, .. }
             | Self::Show { issue, .. }
-            | Self::WatchFiles { issue, .. }
             | Self::Location { issue, .. }
             | Self::Claim { issue, .. }
             | Self::Unassign { issue, .. }

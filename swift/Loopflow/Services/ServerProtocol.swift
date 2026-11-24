@@ -226,6 +226,13 @@ public enum ServerOperation: Encodable, Sendable {
     /// environment, answered `{terminal_id}`. Repeating `request` starts nothing.
     /// Naming the Task continues it wherever it runs.
     case sessionContinue(session: String, request: String, rows: Int, cols: Int, task: String?)
+    /// Start a Task shell named `shellID` in the checkout of the Machine that runs
+    /// the Task, answered `{terminal_id}`; repeating `shellID` starts nothing.
+    /// A Task with no checkout is `not_found {reason: "not_started"}`.
+    case taskShellStart(issue: String, shellID: String, rows: Int, cols: Int)
+    /// A ticket for a Task shell's running terminal, like `sessionAttach`; an
+    /// ended or unknown shell is `not_found`.
+    case taskShellAttach(issue: String, shellID: String)
     /// A provider hook's turn or tool boundary, answered `{steers, update, waiting}`.
     /// Desktop never sends it; `lf __context-block` and the OpenCode and Pi plugins do.
     case sessionBoundary(moment: String, delivery: String, adapter: JSONValue, callback: JSONValue, gap: JSONValue?,
@@ -233,6 +240,7 @@ public enum ServerOperation: Encodable, Sendable {
 
     private enum Keys: String, CodingKey {
         case kind, bytes, session, request, argv, cwd, env, rows, cols, placement, task, machine, terminalID = "terminal_id"
+        case issue, shellID = "shell_id", bootstrap, command
         case moment, delivery, adapter, callback, gap, printed, inbox, query, change
     }
     public func encode(to encoder: Encoder) throws {
@@ -285,6 +293,21 @@ public enum ServerOperation: Encodable, Sendable {
             try box.encode(cols, forKey: .cols)
             try box.encode(task, forKey: .task)
             try box.encodeNil(forKey: .machine)
+        case .taskShellStart(let issue, let shellID, let rows, let cols):
+            var box = encoder.container(keyedBy: Keys.self)
+            try box.encode("task.shell.start", forKey: .kind)
+            try box.encode(issue, forKey: .issue)
+            try box.encode(shellID, forKey: .shellID)
+            try box.encode(rows, forKey: .rows)
+            try box.encode(cols, forKey: .cols)
+            // A login shell with no Ghostty startup: the phone draws it itself.
+            try box.encodeNil(forKey: .bootstrap)
+            try box.encode([String](), forKey: .command)
+        case .taskShellAttach(let issue, let shellID):
+            var box = encoder.container(keyedBy: Keys.self)
+            try box.encode("task.shell.attach", forKey: .kind)
+            try box.encode(issue, forKey: .issue)
+            try box.encode(shellID, forKey: .shellID)
         case .sessionBoundary(let moment, let delivery, let adapter, let callback, let gap, let printed, let inbox):
             var box = encoder.container(keyedBy: Keys.self)
             try box.encode("session.boundary", forKey: .kind)

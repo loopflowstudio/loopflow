@@ -10214,6 +10214,17 @@
         {
           "additionalProperties": false,
           "description": "Start a Task shell in the checkout of the Machine that runs the Task\nand answer `{terminal_id}`. `shell_id` names it there: repeating it\nanswers the same terminal and starts nothing. `command` runs first\nafter login startup; `bootstrap` is Desktop's Ghostty startup JSON.\nA Task with no checkout is `not_found {reason: \"not_started\"}`.",
+          "examples": [
+            {
+              "bootstrap": null,
+              "cols": 60,
+              "command": [],
+              "issue": "task_00000000000000000000000000000001",
+              "kind": "task.shell.start",
+              "rows": 40,
+              "shell_id": "mobile-task_00000000000000000000000000000001"
+            }
+          ],
           "properties": {
             "bootstrap": {
               "type": [
@@ -10267,6 +10278,13 @@
         {
           "additionalProperties": false,
           "description": "A ticket for a Task shell's running terminal, like `session.attach`.\nIt never starts one: an ended or unknown shell is `not_found`. A shell\nis named only on the Machine that started it.",
+          "examples": [
+            {
+              "issue": "task_00000000000000000000000000000001",
+              "kind": "task.shell.attach",
+              "shell_id": "mobile-task_00000000000000000000000000000001"
+            }
+          ],
           "properties": {
             "issue": {
               "type": "string"

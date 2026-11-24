@@ -1000,9 +1000,7 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
         TaskCommand::Claim { .. } | TaskCommand::Unassign { .. } => {
             unreachable!("shared mutation dispatch precedes this command")
         }
-        TaskCommand::Retire { .. }
-        | TaskCommand::WatchFiles { .. }
-        | TaskCommand::Location { .. } => {
+        TaskCommand::Retire { .. } | TaskCommand::Location { .. } => {
             unreachable!("workspace commands dispatch before repository binding")
         }
         TaskCommand::Checkout { .. } => unreachable!("checkout is dispatched before Work binding"),
@@ -1756,7 +1754,7 @@ fn run() -> anyhow::Result<()> {
                 || matches!(
                     cli.command,
                     Some(Commands::Task {
-                        cmd: TaskCommand::Location { .. } | TaskCommand::WatchFiles { .. }
+                        cmd: TaskCommand::Location { .. }
                     })
                 );
             // The target owns command flags, including --verbose; RUST_LOG controls transport logs.
@@ -1849,7 +1847,7 @@ fn run() -> anyhow::Result<()> {
     let location_read = matches!(
         cli.command,
         Some(Commands::Task {
-            cmd: TaskCommand::Location { .. } | TaskCommand::WatchFiles { .. }
+            cmd: TaskCommand::Location { .. }
         })
     );
     let desktop_read = desktop_intent_read(&cli);
@@ -1958,16 +1956,6 @@ fn run() -> anyhow::Result<()> {
             cmd: loopflow::lf::DesktopCommand::Shell { args: shell },
         }) => {
             return loopflow::lf::commands::desktop::shell(shell);
-        }
-        Some(Commands::Task {
-            cmd:
-                TaskCommand::WatchFiles {
-                    issue,
-                    checkout,
-                    request,
-                },
-        }) => {
-            return loopflow_execution::ops::task::watch_task_files(issue, checkout, request);
         }
         _ => {}
     }

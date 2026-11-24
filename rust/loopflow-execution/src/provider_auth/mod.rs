@@ -2,7 +2,7 @@
 //! providers, token extraction from vendor CLI artifacts, and store-direct
 //! persistence into store provider tokens.
 //!
-//! Called in-process by `lf account`. Each attempt retains its completion until
+//! Called in-process by `lf machine login`. Each attempt retains its completion until
 //! consumed, including credential persistence failure. Stored tokens own durable
 //! credential state; they do not establish whether a new attempt succeeded.
 
@@ -791,20 +791,6 @@ impl ProviderAuthService {
         }
 
         self.resolve_snapshot(provider).await
-    }
-
-    /// Read only the stored local credential; absence leaves ambient auth uninspected.
-    pub(crate) async fn cached_status(
-        &self,
-        provider: Provider,
-    ) -> Result<Option<ProviderAuthSnapshot>, AuthError> {
-        let Some(store) = &self.store else {
-            return Ok(None);
-        };
-        store
-            .provider_auth_snapshot(provider)
-            .await
-            .map_err(|_| AuthError::Filesystem("read local credential metadata failed".into()))
     }
 
     async fn resolve_snapshot(
@@ -1614,7 +1600,7 @@ fn extract_url(line: &str) -> Option<String> {
     })
 }
 
-fn strip_ansi_escape_codes(line: &str) -> String {
+pub(crate) fn strip_ansi_escape_codes(line: &str) -> String {
     static OSC_RE: Lazy<Regex> =
         Lazy::new(|| Regex::new(r"\x1b\]([^\x07\x1b]*)(?:\x07|\x1b\\)").expect("OSC regex"));
     let decoded = OSC_RE.replace_all(line, |captures: &regex::Captures<'_>| {
@@ -3028,7 +3014,7 @@ mod tests {
         assert!(!Provider::Linear.api_key_bills_per_token());
         assert_eq!(
             Provider::Linear.api_key_configure_error(),
-            Some("Linear requires OAuth. Run 'lf account connect linear' to connect.")
+            Some("Linear requires OAuth. Run 'lf machine login linear' to connect.")
         );
         // Refresh is wired: Linear resolves a PM OAuth endpoint.
         assert!(pm_oauth(Provider::Linear).is_some());
@@ -3042,7 +3028,7 @@ mod tests {
                 default_brokers(None)
                     .iter()
                     .any(|broker| broker.provider() == provider),
-                "`lf account connect {provider}` needs a registered broker"
+                "`lf machine login {provider}` needs a registered broker"
             );
         }
     }
@@ -3431,7 +3417,7 @@ mod tests {
     fn pm_provider_configure_errors_point_to_oauth() {
         assert_eq!(
             Provider::Linear.api_key_configure_error(),
-            Some("Linear requires OAuth. Run 'lf account connect linear' to connect.")
+            Some("Linear requires OAuth. Run 'lf machine login linear' to connect.")
         );
         assert_eq!(Provider::Claude.api_key_configure_error(), None);
     }

@@ -4,7 +4,6 @@ use std::time::Duration;
 
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 
-use crate::profile::{AccessProfile, EmailAddress, ProfileId};
 use crate::provider::Provider;
 use crate::rows::{map_wave_row, now_unix};
 use crate::token_crypto;
@@ -505,30 +504,6 @@ fn read_provider_account(row: &rusqlite::Row) -> StoreResult<ProviderAccount> {
         // Historical labels are applied from one configuration read per operation.
         login_email: None,
     })
-}
-
-fn read_access_profile(row: &rusqlite::Row) -> rusqlite::Result<StoreResult<AccessProfile>> {
-    let profile_id = row.get::<_, String>(0)?;
-    let chrome_directory = row.get(1)?;
-    let expected_login = row.get::<_, Option<String>>(2)?;
-    let created_at = row.get(3)?;
-    let updated_at = row.get(4)?;
-    Ok(ProfileId::parse(&profile_id)
-        .map_err(StoreError::InvalidData)
-        .and_then(|id| {
-            expected_login
-                .as_deref()
-                .map(EmailAddress::parse)
-                .transpose()
-                .map_err(StoreError::InvalidData)
-                .map(|expected_login| AccessProfile {
-                    id,
-                    chrome_directory,
-                    expected_login,
-                    created_at,
-                    updated_at,
-                })
-        }))
 }
 
 impl SqliteStore {
@@ -1102,51 +1077,6 @@ impl SqliteStore {
             [session, agent],
         )?;
         Ok(())
-    }
-
-    // -- Access profiles and provider routes ----------------------------------
-
-    pub fn upsert_access_profile(&self, profile: &AccessProfile) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        conn.execute(
-            "INSERT INTO access_profiles (
-                profile_id, chrome_directory, expected_login, created_at, updated_at
-             ) VALUES (?1, ?2, ?3, ?4, ?5)
-             ON CONFLICT(profile_id) DO UPDATE SET
-                chrome_directory = excluded.chrome_directory,
-                expected_login = excluded.expected_login,
-                updated_at = excluded.updated_at",
-            params![
-                profile.id.as_str(),
-                profile.chrome_directory,
-                profile.expected_login.as_ref().map(EmailAddress::as_str),
-                profile.created_at,
-                profile.updated_at,
-            ],
-        )?;
-        Ok(())
-    }
-
-    pub fn get_access_profile(&self, profile_id: &ProfileId) -> StoreResult<Option<AccessProfile>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        conn.query_row(
-            "SELECT profile_id, chrome_directory, expected_login, created_at, updated_at
-             FROM access_profiles WHERE profile_id = ?1",
-            [profile_id.as_str()],
-            read_access_profile,
-        )
-        .optional()?
-        .transpose()
-    }
-
-    pub fn list_access_profiles(&self) -> StoreResult<Vec<AccessProfile>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut statement = conn.prepare(
-            "SELECT profile_id, chrome_directory, expected_login, created_at, updated_at
-             FROM access_profiles ORDER BY profile_id",
-        )?;
-        let rows = statement.query_map([], read_access_profile)?;
-        rows.map(|row| row?).collect()
     }
 
     /// Transcript adoption changes its location, never its historical account.

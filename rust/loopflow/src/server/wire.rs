@@ -164,13 +164,6 @@ mod tests {
             include_str!(
                 "../../../loopflow-execution/tests/fixtures/dto/server/checkout_create.json"
             ),
-            include_str!("../../../loopflow-execution/tests/fixtures/dto/server/account_list.json"),
-            include_str!(
-                "../../../loopflow-execution/tests/fixtures/dto/server/account_disconnect.json"
-            ),
-            include_str!(
-                "../../../loopflow-execution/tests/fixtures/dto/server/account_connect.json"
-            ),
             include_str!("../../../loopflow-execution/tests/fixtures/dto/server/graph_run.json"),
             include_str!("../../../loopflow-execution/tests/fixtures/dto/server/skill_run.json"),
             include_str!("../../../loopflow-execution/tests/fixtures/dto/server/skill_list.json"),

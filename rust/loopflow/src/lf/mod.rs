@@ -369,14 +369,6 @@ impl Cli {
             return Err(clap::Error::raw(clap::error::ErrorKind::ArgumentConflict,
                 "root --json requires --context or --explain; use the command's own --json when available\n"));
         }
-        if let Some(Commands::Account { cmd, target, json }) = &self.command {
-            if let Some(misuse) = AccountCommand::misuse(cmd.as_ref(), target.as_deref(), *json) {
-                return Err(clap::Error::raw(
-                    clap::error::ErrorKind::ArgumentConflict,
-                    format!("{misuse}\n"),
-                ));
-            }
-        }
         Ok(self)
     }
 
@@ -592,21 +584,6 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: MachineCommand,
     },
-    /// Service authentication; native Claude and Codex logins belong to their clients
-    #[command(
-        after_help = "lf account linear --json\nlf account connect linear --chrome-profile Work"
-    )]
-    Account {
-        #[command(subcommand)]
-        cmd: Option<AccountCommand>,
-        /// A service provider
-        #[arg(value_parser = parse_service_provider)]
-        target: Option<String>,
-        /// Emit the accounts as one JSON document
-        #[arg(long)]
-        json: bool,
-    },
-
     /// This repository: its identity and checkout, its tracker, releases, CI,
     /// people and size
     #[command(args_conflicts_with_subcommands = true)]
@@ -1171,7 +1148,6 @@ impl Commands {
             Self::Pr { cmd } => pr_changes_work(cmd.as_ref()),
             Self::Wt { cmd } => cmd.changes_work(),
             Self::Machine { cmd } => cmd.changes_work(),
-            Self::Account { cmd, .. } => cmd.is_some(),
             Self::Server { .. } | Self::Holder { .. } => false,
             Self::Commit { .. } | Self::Sync(_) | Self::Steer { .. } => true,
             Self::Repo { cmd, .. } => cmd.as_ref().is_some_and(|cmd| cmd.changes_work()),
@@ -1442,13 +1418,12 @@ pub enum ServerCommand {
 impl MachineCommand {
     pub fn changes_work(&self) -> bool {
         match self {
-            Self::Self_ { .. } | Self::Doctor { .. } | Self::List { .. } | Self::Status { .. } => {
-                false
-            }
-            Self::Credentials { cmd } => match cmd {
-                MachineCredentialCommand::Inspect { .. } => false,
-                MachineCredentialCommand::Receive => true,
-            },
+            Self::Self_ { .. }
+            | Self::Doctor { .. }
+            | Self::List { .. }
+            | Self::Status { .. }
+            | Self::Logins { .. } => false,
+            Self::Credentials { .. } => true,
             Self::Pool { cmd } => match cmd {
                 PoolCommand::List { .. } => false,
                 PoolCommand::Add { .. }
@@ -1465,7 +1440,8 @@ impl MachineCommand {
             },
             Self::Hub { machine, clear } => machine.is_some() || *clear,
             Self::Prune { .. }
-            | Self::Connect { .. }
+            | Self::Login { .. }
+            | Self::Logout { .. }
             | Self::Public { .. }
             | Self::Add { .. }
             | Self::Rename { .. }
@@ -3048,16 +3024,42 @@ pub enum ConfigCommand {
 /// Name and connect to machines.
 #[derive(Debug, Subcommand)]
 pub enum MachineCommand {
-    /// Install a separate login on an added machine using this laptop's browser.
-    Connect {
-        target: String,
-        /// github, opencode or linear
+    /// Sign Machines in through each provider's own login, approved in this
+    /// Machine's browser; with no Machine named, this one
+    Login {
+        /// claude, codex, github, linear, asana, doppler or opencode
         provider: loopflow_execution::provider_auth::Provider,
-        email: Option<String>,
+        /// Added Machines to sign in; claude, asana and doppler sign
+        /// in on this Machine only (Claude reaches others as a forwarded token)
+        machines: Vec<String>,
+        /// Open the approval page in this Chrome profile, by name or directory
         #[arg(long)]
         chrome_profile: Option<String>,
+        /// Store an API key from the environment instead (OpenCode, this Machine)
+        #[arg(long, conflicts_with = "machines")]
+        api_key: bool,
+        /// Every added Machine whose login reads signed out, or that refused a
+        /// launch with none since
+        #[arg(long, conflicts_with_all = ["machines", "api_key"])]
+        refused: bool,
     },
-    /// Inspect or receive service credentials (credential bytes use stdin only).
+    /// Sign Machines out through each provider's own logout; with no Machine
+    /// named, this one
+    Logout {
+        /// claude, codex, github, linear, asana, doppler or opencode
+        provider: loopflow_execution::provider_auth::Provider,
+        /// Added Machines to sign out
+        machines: Vec<String>,
+    },
+    /// What a Machine is signed in to, asked of its own clients; with no
+    /// Machine named, this one
+    Logins {
+        /// An added Machine
+        machine: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Receive service credentials (credential bytes use stdin only).
     Credentials {
         #[command(subcommand)]
         cmd: MachineCredentialCommand,
@@ -3199,6 +3201,11 @@ pub enum OndemandCommand {
         /// Above this hourly price nothing is rented
         #[arg(long, value_name = "USD")]
         max_usd_per_hour: loopflow_storage::rental::Usd,
+        /// Providers each rental is signed in to as it starts (codex, github,
+        /// linear or opencode); unset, each of those signed in here. Claude
+        /// arrives with each launch as the token `forward.env` names
+        #[arg(long, value_delimiter = ',', value_name = "PROVIDER")]
+        logins: Vec<loopflow_execution::provider_auth::Provider>,
     },
     /// Templates, budgets and the machines each has rented
     List {
@@ -3224,51 +3231,8 @@ pub enum OndemandCommand {
 
 #[derive(Debug, Subcommand)]
 pub enum MachineCredentialCommand {
-    /// Report whether this account is installed, without logging in.
-    Inspect {
-        provider: loopflow_execution::provider_auth::Provider,
-        login: String,
-    },
     /// Receive a fresh login as JSON on stdin; preserve existing accounts.
     Receive,
-}
-
-/// Service credentials. Claude and Codex authenticate in their native clients.
-#[derive(Debug, Subcommand)]
-pub enum AccountCommand {
-    /// Connect a service
-    Connect {
-        #[arg(value_parser = parse_service_provider)]
-        target: String,
-        #[arg(long, conflicts_with = "api_key")]
-        chrome_profile: Option<String>,
-        #[arg(long)]
-        api_key: bool,
-    },
-    /// Disconnect a service
-    Disconnect {
-        #[arg(value_parser = parse_service_provider)]
-        target: String,
-    },
-}
-fn parse_service_provider(raw: &str) -> Result<String, String> {
-    match raw.parse::<loopflow_execution::provider_auth::Provider>() {
-        Ok(loopflow_execution::provider_auth::Provider::Claude) => {
-            Err("Claude signs in natively: run `claude`, then /login".to_owned())
-        }
-        Ok(loopflow_execution::provider_auth::Provider::Codex) => {
-            Err("Codex signs in natively: run `codex login`".to_owned())
-        }
-        Ok(_) => Ok(raw.to_owned()),
-        Err(error) => Err(error.to_string()),
-    }
-}
-impl AccountCommand {
-    fn misuse(cmd: Option<&Self>, target: Option<&str>, overview: bool) -> Option<String> {
-        cmd?;
-        (target.is_some() || overview)
-            .then(|| "put service arguments after the account verb".to_owned())
-    }
 }
 
 #[derive(Subcommand, Debug)]
@@ -3448,27 +3412,25 @@ mod tests {
     use clap::CommandFactory;
 
     #[test]
-    fn native_login_controls_are_absent_and_service_auth_remains() {
+    fn every_provider_signs_in_and_out_through_machine_login() {
         for args in [
             vec!["lf", "--account", "claude=old@", "implement"],
             vec!["lf", "--only-account", "codex=old@", "implement"],
-            vec!["lf", "account", "next"],
-            vec!["lf", "account", "use", "old@"],
-            vec!["lf", "account", "pause", "old@"],
-            vec!["lf", "account", "redeem-reset", "old@"],
             vec!["lf", "session", "list", "--blocked"],
             vec!["lf", "machine", "credentials", "renew"],
+            vec!["lf", "machine", "credentials", "inspect", "github", "jack"],
+            vec!["lf", "machine", "login", "codex", "mini", "--refused"],
         ] {
             assert!(Cli::try_parse_from(&args).is_err(), "{args:?}");
         }
-        for (provider, login) in [("claude", "/login"), ("codex", "codex login")] {
-            let error = Cli::try_parse_from(["lf", "account", "connect", provider]).unwrap_err();
-            assert!(error.to_string().contains(login), "{error}");
+        for provider in [
+            "claude", "codex", "github", "linear", "asana", "doppler", "opencode",
+        ] {
+            for verb in ["login", "logout"] {
+                assert!(Cli::try_parse_from(["lf", "machine", verb, provider, "mini"]).is_ok());
+            }
         }
-        for service in ["github", "linear", "asana", "doppler", "opencode"] {
-            assert!(Cli::try_parse_from(["lf", "account", "connect", service]).is_ok());
-            assert!(Cli::try_parse_from(["lf", "account", "disconnect", service]).is_ok());
-        }
+        assert!(Cli::try_parse_from(["lf", "machine", "login", "claude", "--refused"]).is_ok());
         assert!(
             Cli::try_parse_from(["lf", "session", "move", "--on", "claude", "-a", "codex"]).is_ok()
         );

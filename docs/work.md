@@ -388,7 +388,7 @@ Coworkers do not need to install `lf`: they keep working in Linear or Asana,
 and changes stay synchronized both ways:
 
 ```bash
-lf account connect linear                       # or: lf account connect asana
+lf machine login linear                         # or: lf machine login asana
 lf wave plan connect --all --team-key LOO       # Linear: one Team per repo; Tasks become LOO-12
 ```
 

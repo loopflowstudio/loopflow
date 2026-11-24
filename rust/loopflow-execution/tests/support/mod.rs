@@ -250,6 +250,8 @@ pub fn codex_app_server_script(output: &str, setup: &str) -> String {
     let rollout = codex_rollout_script();
     // Codex names threads and turns with UUIDs; a resumed thread keeps its id.
     codex_socket_script(&r#"#!/bin/sh
+# The launch's login probe.
+if [ "$1 $2" = "login status" ]; then echo 'Logged in using ChatGPT'; exit 0; fi
 __SETUP__
 read -r initialize
 echo '{"jsonrpc":"2.0","id":1,"result":{}}'

@@ -430,7 +430,24 @@ Work launched from your laptop onto a remote Machine carries your laptop's
 personal preferences; work started directly on the remote uses the remote's
 saved preferences. Credentials never forward automatically; opt in per
 variable or home file with `forward.env` and `forward.files`
-([Remote Machines and rentals](subscriptions.md#remote-machines-and-rentals)).
+([Per-run secrets](subscriptions.md#per-run-secrets)). Sign a Machine in with
+`lf machine login <provider> <machine>`.
+
+### Sign-in approvers
+
+```yaml
+# personal global configuration
+approvers:
+  codex: {chrome: Work}
+  github: {command: "my-approver"}
+```
+
+`approvers.<provider>` says where `lf machine login` sends a provider's
+approval page: unset opens the default browser, `chrome` a Chrome profile,
+`command` a program that approves on its own. It applies to Codex, GitHub,
+Linear, Asana and OpenCode, and is personal to this Machine.
+See [Choose who approves](subscriptions.md#choose-who-approves) for the
+command's environment.
 
 ## Releases
 

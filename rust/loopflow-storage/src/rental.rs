@@ -462,6 +462,9 @@ pub struct OnDemand {
     pub max_machines: u32,
     pub max_usd_per_hour: Usd,
     pub hours: f64,
+    /// Providers each rental is signed in to as it starts; empty, every
+    /// provider signed in on the Machine that rents it.
+    pub logins: Vec<crate::provider::Provider>,
 }
 
 impl OnDemand {

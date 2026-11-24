@@ -123,7 +123,7 @@ lf resume                                  # return to this checkout's conversat
 | Rent a machine from Daytona, Modal, RunPod, or AWS for one Task | `lf task run <ID> --rent <template>` |
 | Share plans in Git with no tracker, or two-way with Linear or Asana | `lf repo tracker` |
 | Cut a release from version bump to tag and GitHub Release | `lf repo release run <version>` |
-| Authenticate GitHub, Linear, Asana, and OpenCode | `lf account` |
+| Sign any Machine in to Codex, GitHub, or Linear, approved in your browser | `lf machine login codex mini` |
 
 ## Requirements
 

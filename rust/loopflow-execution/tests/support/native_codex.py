@@ -441,6 +441,10 @@ def _server(endpoint: str, home: Path) -> None:
 
 def main() -> None:
     args = sys.argv[1:]
+    # The launch's login probe is not a launch.
+    if args[:2] == ["login", "status"]:
+        print("Logged in using ChatGPT")
+        return
     home = Path(os.environ["LF_HOME"])
     # A wrapper can reject long argv without ever seeing the large payload: a
     # first request never rides argv. The server's configuration, instructions

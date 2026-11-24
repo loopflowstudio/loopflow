@@ -10,6 +10,7 @@ use loopflow_execution::machine::connection::{
     find_machine, install_command, local_machine, probe, report_version, update_command,
     verify_identity, ConnectionFailure, FailureKind, INSTALL_COMMAND,
 };
+use loopflow_execution::machine::login;
 use loopflow_execution::machine::ssh::remote_path;
 use loopflow_execution::store::Store;
 use loopflow_model::durable::{DefaultScope, Machine, MachineDefault, MachineSetting};
@@ -47,6 +48,13 @@ fn prune(json: bool) -> anyhow::Result<()> {
         );
     }
     Ok(())
+}
+
+/// This Machine, for signing it in: a fresh home gets its store here.
+async fn this_machine() -> anyhow::Result<Machine> {
+    let config = loopflow_execution::store::storage_config_from_env()?;
+    let store = loopflow_execution::store::open_store(&config).await?;
+    Ok(store.local_machine().await?)
 }
 
 async fn existing_store() -> anyhow::Result<Store> {
@@ -100,22 +108,53 @@ async fn listings(store: &Store, label: Option<&str>) -> anyhow::Result<Vec<Mach
 
 async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
     match cmd {
-        MachineCommand::Connect {
-            target,
+        MachineCommand::Login {
             provider,
-            email,
+            machines,
             chrome_profile,
+            api_key,
+            refused,
         } => {
-            let machine =
-                loopflow_execution::machine::connection::resolve_target(target, false).await?;
-            return loopflow_execution::machine::credentials::connect(
-                &machine,
-                *provider,
-                email.as_deref(),
-                chrome_profile.as_deref(),
-                batch,
+            if *refused || !machines.is_empty() {
+                login::require_reach(*provider, machines.first().map(String::as_str))?;
+            }
+            let targets = if *refused {
+                let targets = login::refused(*provider).await?;
+                if targets.is_empty() {
+                    println!("No Machine needs a {} login", provider.display_name());
+                }
+                targets
+            } else {
+                named_or_here(machines).await
+            };
+            return each(targets, "signed in", |machine| async move {
+                login::login(
+                    &machine,
+                    *provider,
+                    chrome_profile.as_deref(),
+                    *api_key,
+                    batch,
+                )
+                .await
+            })
+            .await;
+        }
+        MachineCommand::Logout { provider, machines } => {
+            return each(
+                named_or_here(machines).await,
+                "signed out",
+                |machine| async move { login::logout(&machine, *provider).await },
             )
             .await;
+        }
+        MachineCommand::Logins { machine, json } => {
+            let machine = match machine {
+                Some(target) => {
+                    loopflow_execution::machine::connection::resolve_target(target, false).await?
+                }
+                None => this_machine().await?,
+            };
+            return login::print_logins(&machine, *json).await;
         }
         MachineCommand::Credentials { cmd } => {
             return super::machine_credentials::receive(cmd).await
@@ -305,7 +344,9 @@ async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
             store.remove_machine(label).await?;
             println!("Removed {label}");
         }
-        MachineCommand::Connect { .. }
+        MachineCommand::Login { .. }
+        | MachineCommand::Logout { .. }
+        | MachineCommand::Logins { .. }
         | MachineCommand::Credentials { .. }
         | MachineCommand::Self_ { .. }
         | MachineCommand::Doctor { .. } => {
@@ -321,6 +362,52 @@ async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
         }
     }
     Ok(())
+}
+
+/// Each named Machine in turn, or this one; one Machine failing leaves the rest to try.
+async fn named_or_here(targets: &[String]) -> Vec<(String, anyhow::Result<Machine>)> {
+    if targets.is_empty() {
+        return vec![("this Machine".to_string(), this_machine().await)];
+    }
+    let mut resolved = Vec::new();
+    for target in targets {
+        let machine = loopflow_execution::machine::connection::resolve_target(target, false).await;
+        resolved.push((target.clone(), machine));
+    }
+    resolved
+}
+
+/// Runs `act` on every Machine, then names each that was not `done`. A single
+/// Machine's error is the whole error.
+async fn each<F, Fut>(
+    targets: Vec<(String, anyhow::Result<Machine>)>,
+    done: &str,
+    act: F,
+) -> anyhow::Result<()>
+where
+    F: Fn(Machine) -> Fut,
+    Fut: std::future::Future<Output = anyhow::Result<()>>,
+{
+    let single = targets.len() == 1;
+    let mut failed = Vec::new();
+    for (name, machine) in targets {
+        let result = match machine {
+            Ok(machine) => act(machine).await,
+            Err(error) => Err(error),
+        };
+        if let Err(error) = result {
+            if single {
+                return Err(error);
+            }
+            eprintln!("{name}: {error:#}");
+            failed.push(name);
+        }
+    }
+    if failed.is_empty() {
+        Ok(())
+    } else {
+        Err(anyhow!("not {done}: {}", failed.join(", ")))
+    }
 }
 
 fn print_machine(machine: &Machine, json: bool) -> anyhow::Result<()> {

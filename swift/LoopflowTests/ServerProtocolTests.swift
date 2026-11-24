@@ -268,8 +268,6 @@ struct ServerProtocolTests {
                                                       continueSync: false, abort: false, adopt: false)),
             ("checkout_create", "create-1", .checkoutCreate(directory: "/repo", name: "spike", preview: false,
                                                             persistent: false, stack: false)),
-            ("account_disconnect", "disconnect-1", .accountDisconnect(provider: "linear")),
-            ("account_connect", "connect-1", .accountConnect(provider: "linear", chromeProfile: "Profile 1", apiKey: false)),
             ("graph_run", "graph-1", .graphRun(directory: "/repo", name: "code", message: "Serve the graph namespace",
                                                agent: "claude")),
             ("skill_run", "skill-1", .skillRun(directory: "/repo", name: "debug", message: nil, agent: nil)),
@@ -367,14 +365,6 @@ struct ServerProtocolTests {
             return nil
         }
         #expect(marks == [.null, .string("extends"), .null])
-        #expect(ServedWrite.accountDisconnect(provider: "linear").cwd == "/")
-        let accounts = ServerClientMessage.request(id: "accounts-1",
-            operation: .read(.accountList(target: "linear")), select: nil, requestID: nil)
-        #expect(try encoded(accounts) == value("account_list"))
-        guard case .response(_, _, .object(let report)) = try answer("account_report") else {
-            Issue.record("Missing service auth result"); return
-        }
-        #expect(report["accounts"] != nil)
 
     }
 

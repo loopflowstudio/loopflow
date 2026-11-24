@@ -194,6 +194,10 @@ pub(super) fn run_with_io(
         loopflow_execution::machine::ssh::EXPECTED_MACHINE_ID_ENV.into(),
         target.id.to_string(),
     ));
+    environment.push((
+        loopflow_execution::machine::login::MACHINE_NAME_ENV.into(),
+        target.name(),
+    ));
     let mut extra_env: Vec<(&str, &str)> = environment
         .iter()
         .map(|(name, value)| (name.as_str(), value.as_str()))

@@ -42,9 +42,6 @@ impl Harness for Codex {
     fn title_args(&self, _name: &str) -> Vec<String> {
         vec!["-c".into(), "tui.terminal_title=[]".into()]
     }
-    fn sign_in_advice(&self) -> &'static str {
-        "run `codex login`"
-    }
     fn provider_env(&self) -> &'static [&'static str] {
         &["CODEX_ACCESS_TOKEN", "OPENAI_API_KEY"]
     }

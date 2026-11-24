@@ -341,18 +341,28 @@ Learned: tracker parent actions for rehome come from `planning_write::local`,
 the same path as `lf task update --parent`; no separate queueing needed. A
 Task with no tracker object queues none, so the CLI fixture cannot see one.
 
-Remaining (pass 3, iOS — the next pass; teaches whether one Rust-owned
-count is enough for a phone to ask before writing):
-- `ViewContent.open_children` in Rust + Swift + DTO fixtures.
-- iOS confirmation dialog on swipe for parents. Until then an iOS swipe on a
-  parent sends `children: null` and the refusal comes back as a Notice
-  (docs/surfaces.md already describes the dialog).
-- Swift `rehomeDestination` cannot see deleted ancestors, so it can say "Top
-  Level" where Rust continues past a deleted one to an open ancestor. Simpler
-  shape to weigh in the same pass: carry the destination identifier from Rust
-  beside `open_children` so neither Swift client re-derives the walk.
-- Deferred to gate: Swift `TaskCompleteConfirmationTests` and
-  `ServerProtocolTests` runs; full Rust suites in CI.
+Built (pass 3, iOS):
+- `ViewContent.open_children` (direct open children, `None` for non-Tasks),
+  filled in `selections.rs`; Swift `WorkViewPlan.Content.openChildren` with
+  explicit `decode(T?.self)` and `encode` of every nullable key (synthesized
+  encoding dropped nil keys, which broke the round-trip test once a decode
+  required them). DTO fixtures and `server_schema.json` regenerated.
+- `TaskFeed.complete`: a swipe on a parent sets `completing` and writes
+  nothing; the list's `confirmationDialog` sends `.rehome` / `.abandon`.
+  `TaskChildPolicy.question` is the one title for Desktop and the phone.
+- Tests: `cli_discovery::desktop_query_plan_reads_backlog_without_execution_or_desktop`
+  (`open_children == Some(1)` with one open and one done child),
+  `TaskFeedTests.testASwipedParentStaysUntilAskedWhatHappensToItsChildren`,
+  `testASwipedLeafSendsNoChildren`; macOS Swift suites for the DTO pass.
+
+Learned: one Rust-owned count is enough for the phone; its dialog names no
+destination, so carrying the rehome destination on `ViewContent` would only
+serve Desktop, which reads `RoadmapTask`, not view plans. Left as an open
+question in `scratch/questions.md`.
+
+Remaining: gate. Desktop's `rehomeDestination` still cannot see deleted
+ancestors (says "Top Level" where Rust continues to an open ancestor above a
+deleted one).
 
 ## Passes
 

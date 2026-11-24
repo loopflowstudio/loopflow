@@ -436,8 +436,8 @@ public enum ChangeComparison: Codable, Hashable, Sendable {
 }
 
 extension WorkViewPlan.Content {
-    // Required nullable keys decode with `decode(T?.self)`: synthesized decoding
-    // would accept a frame that omits them.
+    // Required nullable keys decode with `decode(T?.self)` and encode as null:
+    // synthesized coding would accept, and write, a frame that omits them.
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         work = try c.decode(WorkWorkspaceKey.self, forKey: .work)
@@ -449,5 +449,18 @@ extension WorkViewPlan.Content {
         argv = try c.decode([String]?.self, forKey: .argv)
         unavailable = try c.decode([String].self, forKey: .unavailable)
         openChildren = try c.decode(Int?.self, forKey: .openChildren)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(work, forKey: .work)
+        try c.encode(title, forKey: .title)
+        try c.encode(states, forKey: .states)
+        try c.encode(identifier, forKey: .identifier)
+        try c.encode(primarySession, forKey: .primarySession)
+        try c.encode(location, forKey: .location)
+        try c.encode(argv, forKey: .argv)
+        try c.encode(unavailable, forKey: .unavailable)
+        try c.encode(openChildren, forKey: .openChildren)
     }
 }

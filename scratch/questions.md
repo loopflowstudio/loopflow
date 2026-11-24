@@ -43,3 +43,10 @@
   `lf task complete` on a childless Task with an unmerged PR still writes
   `CompletionRequested`; any `--children` or open child refuses with the
   unmerged-PR error and writes nothing.
+- **Rehome destination stays derived in Swift** (implement, pass 3): the phone's
+  dialog says "Move Children Up" without a destination, so `ViewContent` carries
+  only `open_children`. Desktop's `WorkModel.rehomeDestination` walks
+  `RoadmapTask` parents and skips closed ones but cannot see deleted ancestors.
+  Passed over: a `rehome_destination` field on `ViewContent` (Desktop's dialog
+  reads `RoadmapTask`, not view plans, so it would not reach the one client
+  that names the destination). The fix would go on the roadmap Task row.

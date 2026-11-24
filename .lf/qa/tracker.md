@@ -245,3 +245,13 @@ Task `create` per Task. Copy the home (`cp -R`), then run any branch command
 on it. A Task record pushed the same way, with `task_project` naming the second
 Project, is how a released writer's Task in that Project arrives at a branch
 Machine.
+
+Which Machine creates a Wave's Project shows offline with two homes on one
+bare origin and no tracker yet: `lf wave create ledger` and a Task on the
+first, `lf task sync <id>`, clone on the second and `lf task list` (the Wave
+arrives). Then set `repo.tracker.linear.team` on one, commit, push, pull on
+the other, and save once on each. Each home's `tracker_actions` holds a
+Project `create` for the same `proj_<wave uuid>`, whichever home stamped
+`project_wave` (`plan_stamps`); Task creates only on the home that made the
+Task. What a second create does at Linear or Asana (bind, not duplicate) has
+no CLI stand-in; execution's `a_wave_project_another_machine_*` tests cover it.

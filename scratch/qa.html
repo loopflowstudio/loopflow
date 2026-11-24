@@ -273,3 +273,38 @@ create||task_b3f82c…    create||task_2e54b5…    create||task_b38681…   # n
 <li>The kept Project of an upgraded Wave gets no tracker create when another Machine made it, so this Machine's Tasks in it never reach Linear (above, and <code>scratch/questions.md</code>).</li>
 <li>Carried over: a failed connect for a missing credential still says "inspect the affected work before retrying".</li>
 </ol>
+
+<h2>Ninth run, 2026-11-24: slice 11 (any Machine creates a Wave's Project)</h2>
+<p>Branch <code>lf</code> at 913513f70a on private Machines under <code>/tmp/lf-qa-995/s</code>, with a Linear Team set and no login, so every action stays queued and readable. The returning home was written with the installed <code>lf</code> (0.16.0+62a368e5c, the branch's base), which still has chapters.</p>
+<table>
+<tr><th>Scenario</th><th>Result</th></tr>
+<tr><td>Run 8's upgrade case again. Installed lf: Wave <code>billing</code> with its Project and two Tasks. A second Project, <code>billing — Chapter 2</code>, arrives on another Machine's plan ref (<code>home_0123…</code>, later <code>at</code>). Then the Linear Team is set and a save runs. Queue: <code>billing</code> create plus three Task creates.</td><td>Ready to upgrade.</td></tr>
+<tr><td>Branch on that home: <code>lf wave status billing</code>, a save, <code>lf repo tracker</code></td><td><code>Project   billing — Chapter 2 (local) · started</code>, now with <code>create · queued</code> under it. <code>lf repo tracker</code>: 5 open, including <code>billing — Chapter 2   create</code>. Both Wave Tasks' queued creates name <code>proj_9999…</code>, the kept Project. Run 8's worst finding is gone.</td></tr>
+<tr><td><code>lf wave sync billing</code></td><td>Exit 0, shows the Project's and Tasks' queued creates.</td></tr>
+<tr><td>Fresh, two Machines <code>m1</code> and <code>m2</code> on one bare origin: <code>lf wave create ledger</code> and a Task on m1, then sync. Clone on m2 and list (the Wave arrives). Set the Linear Team on m2, push, pull on m1, save on each.</td><td>Both homes queue a Project <code>create</code> for the same <code>proj_04886c93…</code> (the Wave's UUID), stamped by m1. m1 also queues its two Tasks, and m2 only its own. Before slice 11, m2 queued no Project create.</td></tr>
+<tr><td>Real store (<code>~/.lf/loopflow.db</code>, read-only): unlinked Projects of live Waves stamped by another Machine</td><td>One, <code>qa-wave</code> in <code>/private/tmp/lfq63/repo</code>, a QA leftover. Dropping the stamp check adds no create for a real repository.</td></tr>
+</table>
+<h3>Transcript</h3>
+<pre>$ lf wave status billing      # released home, branch binary
+  Project   billing — Chapter 2 (local) · started
+    create · queued · No Linear credential found. Run `doppler run -- lf account connect linear`.
+  245335  unstarted   —             Refund ledger  ready
+  ba820b  unstarted   —             Refund webhooks  ready
+== m2   (Wave made on m1)
+Tracker: linear. 2 open · 0 lost.
+  ledger            create · queued · No Linear credential found. …
+  cfb79c            create · queued · No Linear credential found. …
+[('create', 'proj_04886c934e5e49b2ac684edaecbe83d5')]   # same id on m1</pre>
+<h3>Fixed</h3>
+<p>Nothing. The run found no break.</p>
+<h3>Not reached</h3>
+<ul>
+<li>The second create at the tracker: Linear refusing a reused id and lf binding the existing Project, and Asana's footer search before POST. A release <code>lf</code> has no tracker stand-in (seventh run). Execution's <code>a_wave_project_another_machine_created_in_linear_is_bound_not_duplicated</code> and <code>…_mirrored_in_asana_is_bound_not_duplicated</code> pass. The Linear stand-in refuses a reused id ("an entity with this id already exists"), so the test fails without the new fallback. Storage <code>every_unbound_project_of_a_live_wave_is_created_in_the_tracker</code> passes.</li>
+<li>Desktop: slice 11 changes no Desktop code.</li>
+</ul>
+<h3>Still wrong, worst first</h3>
+<ol>
+<li>Two Machines creating the same Asana Project at the same moment can still make two. The footer read and the POST are not atomic (plan, Remains 3).</li>
+<li>A failed Linear Project create now sends one more read (<code>find_project</code>) after every error, a rate limit included. That costs a request, not correctness: the original error is still what gets recorded.</li>
+<li>Carried over: a failed connect for a missing credential still says "inspect the affected work before retrying".</li>
+</ol>

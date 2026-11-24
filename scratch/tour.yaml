@@ -1,15 +1,29 @@
-at: f0ec4544443001e976451205d0d302f3082e76de
+at: c0effbb048c50e87c9aaab073294284b4b3772fd
 first:
   - path: docs/ops.md
     why: Rent, price, update and return a Machine
+  - path: docs/work.md
+    why: Join a Wave and choose its Project
   - path: scratch/plan.md
     why: Built behavior, Linux trials and remaining work
   - path: rust/loopflow-storage/src/rental.rs
     why: Admission prices the ceiling and records the floor
   - path: rust/loopflow-execution/src/rental/sandbox.py
     why: Image tools, SSH environment and Modal limits
+  - path: rust/loopflow-execution/src/work/wave/bootstrap.rs
+    why: Register authored identities without touching the checkout
+  - path: rust/loopflow-execution/src/ops/linear.rs
+    why: Acquire a complete Initiative under the planning lock
+  - path: rust/loopflow-storage/src/sqlite/linear_events.rs
+    why: Bind the sole accepted In Progress Project
+  - path: rust/loopflow-storage/src/sqlite/project_selection.rs
+    why: Compare selections and match unfinished transitions
   - path: rust/loopflow/src/lf/commands/rental.rs
-    why: Attach only after the uploaded build serves
+    why: Prepare the rental and retry on its owner
+  - path: rust/loopflow-storage/src/sqlite/task_ownership.rs
+    why: Write destination ownership and its outgoing marker together
+  - path: rust/loopflow/tests/machine_commands.rs
+    why: Lose the launch connection and retry placement
   - path: rust/loopflow/src/lf/commands/install/published.rs
     why: Find the Linux counterpart and verify its archive
   - path: rust/loopflow-execution/src/installation/server.rs
@@ -22,4 +36,6 @@ first:
     why: Concurrent connects and restart on an empty Machine
   - path: rust/loopflow/src/lf/commands/binaries.rs
     why: Live Graph process across the v0.15.1 upgrade
-hide: []
+hide:
+  - path: tests/fixtures/dto/server_schema.json
+    why: Generated from the reviewed protocol types

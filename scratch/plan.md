@@ -1,6 +1,6 @@
 # LOO-1081 · Run and open a Task on Modal
 
-**Done when** a Task Session can send a Linear-backed Task to a fresh Modal Machine, advance its Graph, and open its work from the laptop or paired phone. Files show the remote working copy, Changes shows its uncommitted diff, a shell starts in that checkout, and the conversation resumes the same remote Session. An idle sandbox pays the small resource floor while quotes and caps still cover peak compute. Giving the Machine back needs neither a manual Git commit nor a database edit.
+**Done when** a Task Session can send a Linear-backed Task to a fresh Modal Machine, advance its Graph, and open its work from the laptop or paired phone. Files show the remote working copy, Changes shows its uncommitted diff, a shell starts in that checkout, and the conversation resumes the same remote Session. An idle sandbox pays the small resource floor while quotes and caps still cover peak compute. Giving the Machine back needs neither a manual Git commit nor a database edit. Session history, transcripts and recorded usage remain available for analytics after an abrupt sandbox loss.
 
 The field case was `manabot`, Wave `coverage`, Project `rules`, Tasks MTG-418 through MTG-422. For MTG-421 the Desktop Session pane reported “The conversation belongs to a different Machine or checkout; nothing was opened.” Its shell opened on the Mac. Use disposable counterparts for the demo.
 
@@ -32,29 +32,32 @@ Run the normal rent path through quote, create, non-login SSH, installation, and
   - The private override first failed with ENOENT because socket discovery canonicalized a Machine home that did not yet exist. Server startup now creates that directory. An explicitly masked unit and a user-bus permission denial both remained errors.
   - The focused `container_connects_share_one_server_and_restart_it_after_exit` Linux fixture passed over the real server protocol. The v0.15.1 inventory fixture found its live Graph process before and after migration and surfaced a missing index on the migrated store. The new schema lookup used the covering primary-key index, averaging 1.1 µs across 1,000 reads on a copy with 10,000 historical processes.
   - The Modal bridge, pinned artifact and automatic scheduling fixtures passed. Gate still owns a live provider run and the full two-Machine scenario.
-- **Next:** acquire the authored Wave on a fresh checkout and bind its Linear Project (§2).
 
 ## 2. Adopt the existing Wave and hand off atomically
 
-`checkout_script` binds the repository ID. Today `ops/linear.rs::wave_for_initiative` searches only registered SQLite Waves, and `connect_async` calls `wave_lifecycle::add`, which runs `ensure_first_project` (inventing a local `tracker_id: null` Project) and commits normalized YAML to `main`. Separate adopting an authored Wave from creating a new one, and replace two-step ownership handoff with one atomic entry.
+- **Built.** Cold registration reads the Wave identity from authored files. A first complete Initiative read binds its sole In Progress Project under the planning lock. An ambiguous inventory leaves the choice open. Rental preparation reads that choice on the destination and binds the source's tracker Project there when needed. Reconnecting or re-adding the same Wave leaves its files alone.
+- `lf wave plan bind --replace` compares the observed selection in the write transaction. Replacing a generated first Project settles only its own pending transition and keeps both Project rows.
+- Placement records the target Machine and its outgoing ownership marker together. Repeating an interrupted placement checks the recorded owner's Graph before admission or dispatch.
+- Two isolated Machines exercised a broken launch connection. The ownership log held one entry naming the destination, and retry observed the existing Graph. A private CLI Machine accepted a legacy GOAL.md Wave by durable ID on its first `lf task list`; the clone kept its original HEAD and clean index. The Linear fixture exercised sole and ambiguous active Projects, reconnect, and a refused terminal replacement. Gate covers live Modal with Linear and the full prepared-rental handoff.
 
-- **Read-only cold Wave acquisition (`work/wave/bootstrap.rs`, `ops/linear.rs`, `ops/wave_lifecycle.rs`):**
-  - Separate read-only registration of existing `.lf/wave/` files from file seeding and new-Wave authoring (`wave_lifecycle::add`).
-  - Run cold Wave acquisition by durable ID across `task list`, `task checkout`, `wave_for_initiative`, `create`-existing, and `connect`, reusing the discovery and retirement rules in `work/wave/bootstrap.rs`. Never create files, never invent a local `tracker_id: null` Project, and never commit to `main` during cold acquisition.
-  - Import tracker inventory under the Wave planning lock and bind the **sole In Progress Linear Project** from a complete Initiative inventory. Missing, ambiguous (0 or >1 In Progress Projects), or offline inventory leaves the Wave unconfigured with a clear reason and the available Projects. Repeated acquisition respects existing choices and unfinished transitions.
-  - During rental `prepare`, if the Task’s Wave on the source Machine has a bound tracker Project ID and cold acquisition left the Wave unconfigured (e.g., multiple In Progress Projects), bind that exact Project via the existing public `lf wave plan bind` command — no rental-only carried-selection state.
-- **Idempotent reconnect and explicit rebind (`ops/linear.rs`, `ops/wave_lifecycle.rs`):**
-  - Reconnecting an already-bound Team and Initiative returns before normalizing legacy YAML, leaving `.lf/config.yaml`, `.lf/wave/`, Git index, and `main` HEAD untouched.
-  - A genuinely new Wave still creates its authored files and first Project; an intentional first connection still commits its authored binding. Keep the CLI/Swift `WaveAdded` receipt accurate when joining an existing Wave.
-  - Support repairing a previously misselected Wave via an explicit compare-and-replace on `lf wave plan bind` (e.g. `--replace`), retaining the old Project, work, and history and resolving any generated pending transition by its matching identity. Never treat a name or `tracker_id: null` alone as disposable.
-- **Single atomic ownership handoff (`commands/rental.rs::hand_off`, `ops/task_ownership.rs`, `store/ownership.rs`):**
-  - Only after remote checkout readiness, hand off an unowned Task with **one** ownership entry naming the target Machine (and use normal `Move` when the Task is already owned locally). Replace the unowned path’s separate local `Claim` then `Move`.
-  - Retain existing writer and person checks. Record the ownership entry and its outgoing marker together so a late or redelivered predecessor cannot reclaim the Task on the laptop. Retry after an uncertain remote start inspects the recorded owner and Graph before renting or launching again, preserving genuine later moves and work on an unreachable owner.
+- SQLite query plans at 1,000 Waves and 10,000 Projects used the Wave membership index, then keyed Project lookups. In warm reads the candidate query averaged about 47 µs and the inventory marker lookup about 2 µs.
+- `cargo nextest run -p loopflow-execution -p loopflow-storage --lib` passed the four named adoption, retirement and transition cases. `cargo test -p loopflow-execution --lib cold_clone_adopts_its_wave_and_only_the_unambiguous_project` also passed with a Task in the imported Project. `cargo clippy --all-targets -- -D warnings` passed. The two-Machine CLI test `a_placed_task_retries_on_its_owner_after_the_launch_connection_breaks` passed. The Swift decoder read both shared Wave receipts and rejected an absent Project key. Gate runs the broader planning and ownership suites.
+
+## 2a. Retain analytics after losing a rental
+
+Jack Heart: “we need some way to capture session history / usage data for analytics for sandboxes that we lose acces to”
+
+- **Next slice.** Collect while the sandbox is running, then finish the same collection on ordinary give-back. The current recovery path calls `copy_up` only on give-back. Its export copies Sessions, events and capture files. The local usage and transcript readers still need the originating turn and usage records.
+- Reuse the origin Machine and Session identities in `machine_records`. Capture observed turns, transcripts and token/cost facts on a durable Machine outside the sandbox. Resume incrementally after disconnection and deduplicate across live collection and the final copy. Surface the last successful collection when a sandbox disappears mid-turn.
+- Exercise two Machines with a live Session. Observe a turn and known usage on the collecting Machine, interrupt transport, then remove access to the sandbox without running `lf machine end`. Verify local history, transcript and usage totals after restart, including their origin. Repeated collection and clean teardown must count the same turn once.
 
 ## 3. Run on available harnesses and refresh forwarded logins
 
+- **Retain the first forwarded profile on a dev rental.** On modal-2 through modal-6, the install wrote `stream: dev` before profile delivery. Retention recorded a conflict with `applied: null`; `lf config show` reported `agent: Not selected`. In `config/remote.rs` and the setting catalog, compare the incoming portable settings with the corresponding local keys. Keep the bootstrap stream and independent edits. Exercise first delivery with just the stream present, with matching portable values, and with a conflicting personal edit.
 - **Machine-aware harness resolution and quiescent recovery (`ops/recovery.rs`, `server/recovery.rs`, session/graph launch):**
   - Resolve the named skill on the execution Machine before stamping a primary Session’s provider or starting a Graph worker, using existing launcher availability and native login checks.
+  - Exercise the retained `skills.<name>.agents` and `default_agent` ordering for `commit-message`, `loop-or-next` and `task-session`. With agy absent, Claude installed without a login, and Codex signed in, select the skill’s configured Codex model (e.g. `gpt-6.2-sol`). Repeat with a usable Claude login. An explicit parent launch override must not become the implicit model for independently launched helpers.
+  - Field count from the five rentals: 99.5% of turns went to `gpt-6.2-astra`, including 246 commit-message Sessions and 399 task-session wakeups (72.7M cached input).
   - A missing configured harness yields to the first usable configured fallback, then a usable installed native harness. Record the selected provider/model before recovery reads the Session. Explicit `-a <agent>` stays exact; an established thread keeps its identity.
   - If no candidate works (or an established thread’s harness is unavailable on this Machine), report which executables or logins are missing and treat missing executable/login as non-retryable in `ops/recovery.rs` — leaving recovery quiescent until inputs change instead of burning five backoff retries. Keep quota recovery and provider thread moves intact.
 - **Explicit credential re-forwarding (`machine/forward.rs`, `commands/machine.rs`):**
@@ -101,13 +104,14 @@ uv run python scripts/test_ios.py -only-testing:LoopflowiOSTests/RemoteTaskWorks
 - The CLI scenario quotes, rents, advances a real fixture Graph (with `scratch/plan.md` beside binary `scratch/._plan.md`), observes one atomic ownership entry despite delayed marker delivery, rotates a synthetic login via `lf machine forward`, and opens the same Session twice via `lf open`.
 - Both Desktop and Mobile tests exercise all four viewers (Files, Changes, Shell, Session) through the server-routed protocol against distinguishable Machine responses: assert remote-only **unchanged** file contents, an **uncommitted** diff hunk, shell output from `hostname` and `pwd`, and an input acknowledgement from the exact remote Session. Disconnect, reopen, and move the Task while a pane is retained; verify each action reaches the current owner or reports why (preserving unsaved drafts on move).
 - Run old-store (`v0.15.1`) promotion and concurrent `lf server connect` without systemd/cron on Linux.
+- On a second disposable rental, interrupt access after collecting a known transcript and usage sample. Read both from the surviving Machine.
 - Finish with ordinary `lf machine end <label>` (no `--force`), verifying remote records returned, cost labeled as a ceiling estimate, and `main` still at the starting commit.
 
 For the installed demo, run `lf task run <demo-task> --rent modal --quote`, then repeat without `--quote`. Open the Task with `lf open --task <demo-task> --tab`, Desktop, and the paired phone. Confirm all four viewers on the remote sandbox, then give it back with `lf machine end <label>`.
 
 ## Docs
 
-The docs written ahead of implementation (eb22482548) still describe `lf machine forward`, `lf wave plan bind --replace`, server-routed remote Task views, harness fallback, and `lf open --machine`. The Modal sizing, Linux package selection and container startup passages now match the code. Before gate, cut any passage whose slice did not ship. The first command still fails `documented_commands` until it ships.
+The docs written ahead of implementation (eb22482548) still describe `lf machine forward`, server-routed remote Task views, harness fallback, and `lf open --machine`. The Modal sizing, Linux package selection, container startup, Wave adoption and Project binding passages now match the code. Before gate, cut any passage whose slice did not ship. The first command still fails `documented_commands` until it ships.
 
 Pages touched:
 

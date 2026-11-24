@@ -10,3 +10,6 @@
 - **Record the Modal sizing mode at admission.** Old declarations live in personal YAML, while old rentals keep their hardware in SQLite. A missing mode on a declaration selects burst for the next create. A missing mode on a recorded rental retains its original full request and unbounded maximum. Only a recorded burst or reserved mode carries `ceiling_estimate_usd`.
 
 - **Pin packaged dev builds by GitHub Actions run ID.** The main package workflow checks out the triggering CI run's revision. Its own workflow head can already have advanced. Recording its run ID lets a packaged caller fetch a sibling Linux artifact directly. Clean source builds look up their commit, and the serving binary must match the uploaded bytes.
+
+- A repeated explicit placement treats an existing Graph run on the recorded owner as an acknowledgement. Plain `lf task run` remains the command to advance it. If the owner cannot be reached, placement stops before admitting another rental.
+- Count In Progress Projects across the complete Initiative before filtering to the repository Team. A second active Project outside that Team makes the automatic choice ambiguous.

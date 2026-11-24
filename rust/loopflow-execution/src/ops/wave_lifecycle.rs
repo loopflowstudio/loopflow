@@ -58,7 +58,7 @@ pub async fn add(repo: &Path, name: &str, objective: Option<&str>) -> OpsResult<
         .await
         .map_err(|error| {
             lifecycle_error(format!(
-                "wave/{} has no tracker Project yet: {}. Run `lf wave create {}` again to make it.",
+                "wave/{} has no tracker Project yet: {}. Run `lf wave sync {}` to make it.",
                 added.name,
                 error.to_string().trim_end_matches('.'),
                 added.name

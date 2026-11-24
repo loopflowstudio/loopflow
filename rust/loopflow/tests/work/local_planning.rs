@@ -1352,7 +1352,7 @@ fn task_creation_and_edits_save_offline_in_both_connection_modes() {
                 loopflow_storage::sqlite::tracker_actions::ActionKind::Order,
             )
             .is_some(),
-            // A Project not in the tracker yet keeps no order edit (see below).
+            // A Project not in the tracker yet queues its order when bound (below).
             mapped
         );
         let edited = store.task(&second).unwrap().unwrap();
@@ -1426,8 +1426,6 @@ fn task_creation_and_edits_save_offline_in_both_connection_modes() {
         );
         assert_eq!(sync.actions.is_empty(), !connected);
         if connected {
-            // A Project not in the tracker yet queues no reorder: the
-            // order edit is dropped, not held until the Project is made.
             assert_eq!(sync.actions.iter().any(|a| a.change == "order"), mapped);
             assert_eq!(sync.actions.iter().any(|a| a.change == "create"), !mapped);
             assert!(sync.actions.iter().any(|a| a.change == "title"));
@@ -1445,6 +1443,28 @@ fn task_creation_and_edits_save_offline_in_both_connection_modes() {
             .unwrap();
         assert_eq!(task["task"]["sync"], status["sync"]);
         assert!(task["reference"]["workspace"].is_null());
+        if connected && !mapped {
+            // `lf wave sync` makes the Project and binds it: the reorder made
+            // meanwhile is sent then, behind the Tasks' creates.
+            loopflow_execution::store::sqlite::linear_events::accept_linear_project_in(
+                &store,
+                wave.id(),
+                &project,
+                21,
+                loopflow_storage::planning_sync::TrackerKind::Linear,
+            )
+            .unwrap();
+            let order = unconfirmed(
+                &store,
+                loopflow_storage::sqlite::tracker_actions::ActionOwner::Project(project_id.clone()),
+                loopflow_storage::sqlite::tracker_actions::ActionKind::Order,
+            )
+            .unwrap();
+            assert_eq!(
+                store.tracker_action(&order).unwrap().unwrap().value,
+                serde_json::json!([second.as_str(), first.as_str()])
+            );
+        }
 
         if mapped {
             let mut incoming = snapshot.items[1].clone();

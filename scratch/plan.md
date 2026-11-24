@@ -661,6 +661,14 @@ Chosen for review (`scratch/concept-review.html`, questions 1 and 2):
   the drop; a storage test that binding an unbound Project with two reordered
   Tasks queues one `Order` and a one-Task Project queues none.
 
+Built: `accept_linear_project_in` queues `planning_order::send_local_order_in`
+when the Wave's Project was unbound; `owner_tracker` gives Projects no
+queued-create fallback; `lf wave create` offline names `lf wave sync <wave>`.
+`local_planning` binds the Project directly (its `lf` runs have no fake
+Linear) and checks the queued Order; sending an Order is covered where it was.
+The `tracker_actions` upgrade test now expects slice 12's retired Project
+create.
+
 ## Remains
 
 1. Gate: sync main, Swift DTO and desktop suites (`scripts/test_desktop.sh`),

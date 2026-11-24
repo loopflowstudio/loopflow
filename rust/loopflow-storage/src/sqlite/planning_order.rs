@@ -54,6 +54,31 @@ fn place_in_order(
     Ok(order)
 }
 
+/// Queue a newly bound Project's local order, which its Tasks may have taken
+/// while no tracker held it. One Task has no order to send.
+pub(super) fn send_local_order_in(conn: &Connection, project: &ProjectId) -> StoreResult<()> {
+    let order = conn
+        .prepare(
+            "SELECT id FROM tasks WHERE project_id=?1 AND planning_deleted_at IS NULL
+             ORDER BY planning_rank,id",
+        )?
+        .query_map([project.as_str()], |row| row.get::<_, String>(0))?
+        .collect::<Result<Vec<_>, _>>()?;
+    if order.len() < 2 {
+        return Ok(());
+    }
+    let base = observed_order(conn, project)?.map(|value| json!({"value":value}));
+    tracker_actions::enqueue(
+        conn,
+        &ActionOwner::Project(project.clone()),
+        ActionKind::Order,
+        None,
+        &json!(order),
+        base.as_ref(),
+    )?;
+    Ok(())
+}
+
 /// `task` takes `target`'s place among `target`'s Project's Tasks, or among
 /// the repository's standalone Tasks, moving into that Project first.
 pub(super) fn move_in(conn: &Connection, task: &Task, target: &Task) -> StoreResult<Vec<String>> {

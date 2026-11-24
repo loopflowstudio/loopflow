@@ -361,8 +361,9 @@ pub(super) fn read_action(row: &Row<'_>) -> StoreResult<Result<TrackerAction, Ac
     }))
 }
 
-/// The tracker an owner's actions go to: its binding's, else its pending
-/// creation's. An owner with neither enqueues nothing.
+/// The tracker an owner's actions go to: its binding's, else, for a Task, its
+/// pending creation's. An owner with neither enqueues nothing; a Project's
+/// binding sends its order then (`planning_order::send_local_order_in`).
 pub(crate) fn owner_tracker(
     conn: &Connection,
     owner: &ActionOwner,
@@ -388,10 +389,11 @@ pub(crate) fn owner_tracker(
             .optional()?,
         ActionOwner::Wave(_) => None,
     };
-    let tracker = match bound {
+    let tracker = match (bound, owner) {
         // A binding acquired before observations recorded their tracker.
-        Some(tracker) => Some(tracker.unwrap_or_else(|| "linear".into())),
-        None => conn
+        (Some(tracker), _) => Some(tracker.unwrap_or_else(|| "linear".into())),
+        (None, ActionOwner::Project(_)) => None,
+        (None, _) => conn
             .query_row(
                 &format!(
                     "SELECT tracker FROM tracker_actions WHERE {}=?1 AND kind='create'
@@ -1744,7 +1746,7 @@ mod upgrade_tests {
                  FROM tracker_actions ORDER BY seq"
             ),
             [
-                "project-new create - sent linear",
+                "project-new create - retired linear",
                 "project-new link initiative retired linear",
                 "task-new create - sent linear",
                 "task-bound field task_title sent linear",

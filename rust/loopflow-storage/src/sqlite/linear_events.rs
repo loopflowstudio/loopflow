@@ -10,7 +10,8 @@ use loopflow_model::durable::ProjectId;
 use loopflow_model::id::WaveId;
 use rusqlite::{named_params, params, Connection, OptionalExtension, Transaction};
 
-/// Accept a tracker Project as `wave`'s: the Wave's Project links it.
+/// Accept a tracker Project as `wave`'s: the Wave's Project links it. A
+/// Project that was unbound sends the order its Tasks took meanwhile.
 pub fn accept_linear_project_in(
     store: &SqliteStore,
     wave: &WaveId,
@@ -24,7 +25,20 @@ pub fn accept_linear_project_in(
     let repo: String = tx.query_row("SELECT repo FROM waves WHERE id=?1", [wave], |row| {
         row.get(0)
     })?;
+    let unbound: Option<String> = tx
+        .query_row(
+            "SELECT id FROM projects WHERE id=?1 AND external_project_id IS NULL",
+            [
+                sqlite::children::held_wave_project_in(&tx, wave)?
+                    .map(|own| own.as_str().to_owned()),
+            ],
+            |row| row.get(0),
+        )
+        .optional()?;
     accept_project(&tx, &repo, project, observed_at, Some(wave), tracker)?;
+    if let Some(own) = unbound {
+        super::planning_order::send_local_order_in(&tx, &ProjectId::from_raw(own))?;
+    }
     tx.commit()?;
     Ok(())
 }
@@ -854,6 +868,64 @@ mod tests {
             store.task_by_issue(&arriving.id).unwrap().unwrap().wave_id,
             Some(next.wave_id)
         );
+    }
+
+    #[test]
+    fn binding_an_unbound_project_queues_the_order_its_tasks_took() {
+        use super::tracker_actions::{ActionKind, ActionOwner};
+        use crate::planning_sync::TrackerKind::Linear;
+
+        let dir = tempfile::tempdir().unwrap();
+        let store = crate::test_fixture::open(&dir.path().join("db")).unwrap();
+        let repository = crate::test_fixture::repository(&store, "/repo");
+        let task_in = |project: &loopflow_model::durable::ProjectId| {
+            let id = loopflow_model::durable::TaskId::new();
+            store
+                .create_task(&crate::work::task::NewTask {
+                    parent_task_id: None,
+                    repository_id: repository.clone(),
+                    id: id.clone(),
+                    project_id: Some(project.clone()),
+                    title: "Local".into(),
+                    description: String::new(),
+                    due_date: None,
+                })
+                .unwrap();
+            id
+        };
+        let orders = |project: &loopflow_model::durable::ProjectId| {
+            store
+                .tracker_actions_for(&ActionOwner::Project(project.clone()))
+                .unwrap()
+                .into_iter()
+                .filter(|action| action.kind == ActionKind::Order)
+                .map(|action| action.value)
+                .collect::<Vec<_>>()
+        };
+        let billing = crate::test_fixture::project(&store, "/repo", "billing");
+        let first = task_in(&billing.id);
+        let second = task_in(&billing.id);
+        store.reorder_task(&second, &first).unwrap();
+        // Unbound: nothing carries the reorder yet.
+        assert!(orders(&billing.id).is_empty());
+        let observed = inventory().project;
+        super::accept_linear_project_in(&store, &billing.wave_id, &observed, 1, Linear).unwrap();
+        assert_eq!(
+            orders(&billing.id),
+            [serde_json::json!([second.as_str(), first.as_str()])]
+        );
+        // A later observation of the bound Project queues no second order.
+        super::accept_linear_project_in(&store, &billing.wave_id, &observed, 2, Linear).unwrap();
+        assert_eq!(orders(&billing.id).len(), 1);
+
+        let solo = crate::test_fixture::project(&store, "/repo", "solo");
+        task_in(&solo.id);
+        let other = TrackerProject {
+            id: "solo".into(),
+            ..observed
+        };
+        super::accept_linear_project_in(&store, &solo.wave_id, &other, 1, Linear).unwrap();
+        assert!(orders(&solo.id).is_empty());
     }
 
     #[test]

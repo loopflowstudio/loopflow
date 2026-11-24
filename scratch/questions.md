@@ -102,3 +102,7 @@
 - Concept review after slice 12 chose: binding an unbound Project queues its
   Tasks' local order once (slice 13), and the create failure names `lf wave
   sync` as the retry. Page questions 1–3.
+- Slice 13: binding a Project through `link_wave_project_in` (adopting an
+  existing tracker Project) queues no local order; only
+  `accept_linear_project_in` does, as the slice named. Linking adopts the
+  tracker's order.

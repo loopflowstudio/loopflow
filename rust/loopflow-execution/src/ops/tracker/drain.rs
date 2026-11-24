@@ -115,9 +115,9 @@ pub(crate) async fn drain_repository(
     drain(store, repo, &tracker, actions, scope, bound).await
 }
 
-/// A live Wave's Project the tracker does not hold yet (its Wave came from
-/// another checkout's files, or from an upgrade) is created here, before the
-/// Tasks that name it are sent. A failure leaves those Tasks to say why.
+/// A live Wave's Project the tracker does not hold yet (the upgrade made it
+/// locally) is created here, before the Tasks that name it are sent. A failure
+/// leaves those Tasks to say why.
 async fn create_named_projects(
     store: &Store,
     repo: &Path,

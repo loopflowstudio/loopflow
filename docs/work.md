@@ -562,11 +562,13 @@ $ lf wave status billing/refunds
 
 A Wave is one Project, made with the Wave: `lf wave create billing/refunds`
 makes the Project `refunds`, and in a repository with Linear or Asana makes it
-there too before it returns. Can't reach the tracker? The command fails; run it
-again. A Wave that arrived without one (from another checkout's files, or an
-upgrade) gets its tracker Project from `lf wave sync`, `lf wave plan connect`,
-or the first Task sent into it. Until then `lf wave status` says the Project
-is not in the tracker yet and names the `lf wave sync` that makes it. A Task
+there too before it returns. Can't reach the tracker? The command fails and
+names `lf wave sync billing/refunds`, which makes it. A Wave that arrived
+without one (from an upgrade) gets its tracker Project from `lf wave sync`,
+`lf wave plan connect`, or the first Task sent into it. Until then `lf wave
+status` says the Project is not in the tracker yet and names the `lf wave
+sync` that makes it. Tasks reordered meanwhile keep that order in the
+tracker. A Task
 in a Wave is in its Project, and lists under that Wave only. A Task in no
 Wave is in no Project.
 

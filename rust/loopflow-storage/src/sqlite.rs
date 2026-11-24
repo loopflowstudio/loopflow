@@ -29,11 +29,11 @@ mod linear_issue_state;
 mod subscription_events;
 mod task_started;
 
-mod linear_team_checks;
 mod machine_records;
 mod metrics;
 pub mod plan_carriers;
 pub mod planning_order;
+pub mod planning_scope_checks;
 mod planning_sync;
 pub mod planning_write;
 mod pr_landings;

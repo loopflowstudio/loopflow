@@ -693,9 +693,7 @@ impl Read {
     /// A Task another Machine runs is read by that Machine's server.
     pub fn read(&self) -> anyhow::Result<serde_json::Value> {
         if let Self::TaskStatus { directory, issue } = self {
-            if let Some(detail) = super::waves::remote_task_detail(directory, issue)? {
-                return Ok(detail);
-            }
+            return value(&super::waves::read_task_detail(directory, issue, true)?);
         }
         self.read_here()
     }
@@ -752,7 +750,7 @@ impl Read {
                 value(&super::desktop::read_task_pane(directory, issue)?)
             }
             Self::TaskStatus { directory, issue } => {
-                value(&super::waves::read_task_detail(directory, issue)?)
+                value(&super::waves::read_task_detail(directory, issue, false)?)
             }
             Self::TaskChanges { issue, base, head } => {
                 value(&task_changes(issue, base, head.as_deref())?)

@@ -147,7 +147,8 @@
       "url": "https://github.com/loopflowstudio/loopflow/pull/1718",
       "phase": "merged"
     },
-    "next": null
+    "next": null,
+    "runs_on": null
   },
   "children": [
     {
@@ -164,7 +165,8 @@
         "step": "ship-review"
       },
       "pr": null,
-      "next": "lf task run LOO-3"
+      "next": "lf task run LOO-3",
+      "runs_on": null
     }
   ]
 }

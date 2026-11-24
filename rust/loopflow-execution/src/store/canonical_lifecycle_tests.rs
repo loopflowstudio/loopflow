@@ -321,6 +321,13 @@ fn canonical_ids_commands_read_the_upgraded_work_and_native_history() {
         .unwrap();
     apply_sqlite(&conn).unwrap();
     apply_pending_migrations(&conn);
+    // The fixture's Task runs on its own Machine; make that Machine this one,
+    // so the commands read its Sessions here instead of asking an owner.
+    conn.execute_batch(
+        "UPDATE machines SET is_local=0;
+         UPDATE machines SET is_local=1 WHERE id='home_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';",
+    )
+    .unwrap();
     let binary = loopflow_test_support::lf_binary();
     let lf = |args: &[&str]| {
         let mut command = std::process::Command::new(binary);

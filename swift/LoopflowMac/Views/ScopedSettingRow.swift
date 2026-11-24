@@ -161,7 +161,9 @@ struct ScopedSettingRow: View {
             Picker(definition.title, selection: Binding(get: { declared }, set: { selection in
                 save(definition.change(to: selection.value, in: declaration), to: declaration)
             })) {
-                Text(unsetText).tag(ConfigurationScope.Authored.absent)
+                if declared == .absent {
+                    Text(unsetText).tag(ConfigurationScope.Authored.absent)
+                }
                 if declared == .present(.null) {
                     Text("Explicit null").tag(ConfigurationScope.Authored.present(.null))
                 }

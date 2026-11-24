@@ -157,8 +157,8 @@ writes the same files. **Project & Wave Config** has the **Applies to** and
 immediately. YAML resets and moves show a preview.
 
 An unset control shows the value in effect and its source, such as
-**On (Default)**. Lists can name several contributing files. Choosing the
-source-labeled option in a picker removes the declaration. A picker shows
+**On (Default)**. Lists can name several contributing files. Use **Reset** below a
+picker to remove its saved choice and see the inherited value. A picker shows
 **Explicit null** when its file declares a nullable key such as `chrome` as
 `null`. Lower declarations supply its value. **Reset** removes the key.
 

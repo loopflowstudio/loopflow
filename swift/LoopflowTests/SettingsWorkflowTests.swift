@@ -143,6 +143,45 @@ struct SettingsWorkflowTests {
         }
     }
 
+    @Test func resettingASavedPickerChoiceRevealsItsSourceAndUndoRestoresIt() async throws {
+        try await withThemeServer { location, paths in
+            let repo = paths.config.deletingLastPathComponent().appending(path: "project")
+            let folder = repo.appending(path: ".lf")
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            try Data("merge_method: squash\n".utf8).write(to: folder.appending(path: "config.yaml"))
+            let model = ScopedSettingsModel(location: location)
+            model.select(checkout: repo.path)
+            let notices = NoticeCenter()
+            let pane = ScopedSettings(model: model, pane: .project, checkouts: [repo.path], waves: [], notices: notices)
+            func row() throws -> InspectableView<ViewType.ClassifiedView> {
+                try pane.inspect().find(viewWithId: "merge_method")
+            }
+            async let _: Void = model.observe()
+            try await waitFor { model.file != nil }
+            let rebase = ConfigurationScope.Authored.present(.string("rebase"))
+            try row().find(ViewType.Picker.self).select(value: rebase)
+            try await waitFor { !model.saving && model.file?.slots["merge_method"]?.declared == rebase }
+            let picker = try row().find(ViewType.Picker.self)
+            #expect(try picker.selectedValue(ConfigurationScope.Authored.self) == rebase)
+            #expect(throws: (any Error).self) { try picker.find(text: "Rebase (from My repository settings)") }
+
+            model.destination = .sharedRepository
+            #expect(try row().find(ViewType.Picker.self).selectedValue(ConfigurationScope.Authored.self) == .present(.string("squash")))
+            _ = try row().find(text: "Rebase · My repository settings")
+
+            model.destination = .personalRepository
+            try row().find(button: "Reset").tap()
+            try await waitFor { !model.saving && model.file?.slots["merge_method"]?.declared == .absent }
+            let inherited = try row().find(ViewType.Picker.self)
+            #expect(try inherited.selectedValue(ConfigurationScope.Authored.self) == .absent)
+            _ = try inherited.find(text: "Squash (from Shared repository settings)")
+            #expect(throws: (any Error).self) { try row().find(button: "Reset") }
+            try #require(notices.current?.action).perform()
+            try await waitFor { model.file?.slots["merge_method"]?.declared == rebase }
+            #expect(try row().find(ViewType.Picker.self).selectedValue(ConfigurationScope.Authored.self) == rebase)
+        }
+    }
+
     @Test func personalAndProjectSettingsRecoverAfterServerRestart() async throws {
         let root = URL(fileURLWithPath: "/tmp/lf-reconnect-\(UUID().uuidString.prefix(8))").resolvingSymlinksInPath()
         let repo = root.appending(path: "project")

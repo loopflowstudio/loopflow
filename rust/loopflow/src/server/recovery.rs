@@ -140,9 +140,14 @@ impl Watcher {
             if let Some(failure) = loopflow_execution::ops::recovery::launch_failure(conversation) {
                 anyhow::bail!(failure);
             }
-            let mut start =
-                super::service::continuing(conversation.session.clone(), request.clone(), 0, 0)
-                    .map_err(|error| anyhow::anyhow!("{}", error.message))?;
+            let mut start = super::service::continuing(
+                conversation.session.clone(),
+                request.clone(),
+                0,
+                0,
+                None,
+            )
+            .map_err(|error| anyhow::anyhow!("{}", error.message))?;
             // The resume reads who started it from its request, not from an
             // environment the agent's own shells would inherit.
             let target = start.argv.len() - 2;

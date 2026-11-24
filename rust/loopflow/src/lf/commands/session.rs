@@ -955,6 +955,9 @@ pub(crate) fn prepared(cli: &crate::lf::Cli, directory: &Path) -> anyhow::Result
     let Some(crate::lf::Commands::Session { cmd }) = &cli.command else {
         bail!("not a Session command");
     };
+    // A served request carries its `--agent` here; a new conversation
+    // resolves its harness from the invocation's settings.
+    let _settings = loopflow_execution::config::settings::select_invocation(cli.setting_values()?);
     tokio::runtime::Runtime::new()?.block_on(async {
         let store = open_shared_store().await?;
         match cmd {

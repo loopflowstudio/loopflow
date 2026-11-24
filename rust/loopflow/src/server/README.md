@@ -212,13 +212,15 @@ recorded the move can publish a null workspace while the claim reaches the
 subscriber’s Machine. The destination reading's `reference.workspace.machine_id`
 names the new Machine, and `task.files.watch`
 sends a fresh file revision. Its body carries `task_id`, `machine_id`,
-`checkout` and an opaque `revision`. Refresh the tree when that revision
-changes. File events can coalesce while a client is busy. A checkpoint
+`machine_label` (this Machine's name for the owner), `checkout` and an opaque
+`revision`. Refresh the tree when that revision changes. A Task with no
+checkout on its Machine yet reads null `checkout` and `revision`, and the same
+subscription goes live once the checkout is recorded, including at a move's
+destination. File events can coalesce while a client is busy. A checkpoint
 returns the current revision. If the peer connection fails, a reading carries
 the reason in `unavailable` and a null body. The same subscription tries the
 current owner again after five seconds or when the planning revision changes.
-A peer refusal such as `not_found` with reason `not_started` ends the
-subscription with that error.
+Only a Task that does not exist ends the subscription (`not_found`).
 A draft carries its base revision, and
 `task.save`'s revision check is the only write guard after a move.
 
@@ -310,7 +312,8 @@ Revision 10 routes Task operations to the Task's Machine
 `session.continue` and `session.attach` carry required-nullable `task` and `machine`.
 `session.start` launches in the caller’s directory. Task shells use
 `task.shell.start`, `task.shell.attach` and `task.shell.close`.
-`task.files.watch` subscribes to checkout changes.
+`task.files.watch` follows the Task's checkout, including before it exists.
+`session.continue` carries the caller's `agent`.
 
 Revision 7 answers each write once it has committed, with `revisions`: the
 store domains it advanced and their value after the commit. Planning sync and
@@ -463,7 +466,7 @@ case names one operation, including distinct claim/unassign and pin/unpin writes
 | `task.list` (`closed: true`) | `lf task list --closed --wave <wave>` | read |
 | `task.changes` | `lf task changes <issue>` | read |
 | `task.diff`, `task.file`, `task.files` | `lf task diff`, `lf task file`, `lf task files` | read |
-| `task.files.watch` | none; Desktop's and the phone's Files | subscription; file tree revision after a change under the checkout or a Task move |
+| `task.files.watch` | none; Desktop's and the phone's Files | subscription; file tree revision after a change under the checkout, a new checkout or a Task move |
 | `task.shell.start`, `.attach`, `.close` | `lf desktop shell`, which Desktop's Shell runs; the phone's Shell (`shell_id` `mobile-<task>`) | server; a Task shell by `shell_id`, held on the Machine that started it |
 | `task.context` | `lf task context <issue>` | read |
 | `task.runs` | `lf task runs <issue>` | read |
@@ -654,10 +657,11 @@ the phone's `view.select` Task list and its creation destinations all read it.
   `outcome_unknown`, and repeating the same `request` settles it. It creates
   a process and, with `session.continue`, the only operation here that does;
   attaching never does.
-- `session.continue {session, request, rows, cols, task, machine}` starts `lf session resume`
+- `session.continue {session, request, rows, cols, task, machine, agent}` starts `lf session resume`
   of exactly that Session in a held terminal, in its recorded directory, with
   the server's environment and its own `LF_HOME` and `LF_BIN`, for a client
-  with no environment to send (the phone). It answers and repeats like
+  with no environment to send (the phone). A non-null `agent` is passed as
+  `--agent`: another harness than the Session's imports its history. It answers and repeats like
   `session.start`; a Session `run_refusal` refuses is `conflict`.
 - Bulk. An answer or reading larger than `limits.max_message` never travels on
   the control connection: the client receives `bulk {id, ticket, bytes}`, redeems

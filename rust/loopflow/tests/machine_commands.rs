@@ -4341,7 +4341,8 @@ while [ "$#" -ge 2 ]; do
   fi
   shift
 done
-exit 1
+printf 'mini fresh\n'
+if read -r -t 60 answer < /dev/tty; then printf 'mini fresh received %s\n' "$answer"; fi
 "#,
     );
     // Start before marking it primary so the recovery watcher sees a running
@@ -4355,6 +4356,7 @@ exit 1
             session: primary.clone(),
             task: None,
             machine: None,
+            agent: None,
             request: "existing-primary".into(),
             rows: 24,
             cols: 80,
@@ -4396,17 +4398,29 @@ echo %local-tab
         .write(true)
         .open(fifo)
         .unwrap();
+    // A Task with no conversation yet starts one on mini with the caller's agent.
+    let (fresh_plan, fresh) = task_on_mini(&fixture);
+    peer.execute(
+        "INSERT INTO task_checkouts(task_id,worktree) VALUES(?1,?2)",
+        [fresh.as_str(), fresh_plan.remote_path.to_str().unwrap()],
+    )
+    .unwrap();
     for (index, mut args) in [
         vec!["open", "--task", task.as_str()],
         vec!["open", "--task", task.as_str(), "--session", &sessions[1]],
         vec!["open", "--machine", "mini", "--session", &sessions[2]],
         vec!["--machine", "mini", "open", "--session", &sessions[2]],
+        vec!["-a", "claude", "open", "--task", fresh.as_str()],
     ]
     .into_iter()
     .enumerate()
     {
         args.extend(["--host", "tmux", "--tab", "--json"]);
-        let cwd = if index < 2 { &plan.local_path } else { &local };
+        let cwd = match index {
+            0 | 1 => &plan.local_path,
+            4 => &fresh_plan.local_path,
+            _ => &local,
+        };
         let opened = fixture.command(&args).current_dir(cwd).output().unwrap();
         let tab = || fs::read_to_string(local.join("tab-output")).unwrap_or_default();
         assert!(
@@ -4418,7 +4432,9 @@ echo %local-tab
         let receipt = &report["receipts"][0];
         assert_eq!(receipt["status"], "usable", "{receipt}");
         assert_eq!(receipt["destination"], "%local-tab");
-        let expected_retry = if index < 2 {
+        let expected_retry = if index == 4 {
+            serde_json::json!(["lf", "open", "--task", fresh.as_str()])
+        } else if index < 2 {
             let mut retry = vec!["lf", "open", "--task", task.as_str()];
             if index == 1 {
                 retry.extend(["--session", &sessions[1]]);
@@ -4441,13 +4457,18 @@ echo %local-tab
         }
         let text = tab();
         assert_eq!(text.lines().next(), cwd.canonicalize().unwrap().to_str());
+        let answer = match index {
+            4 => "mini fresh".to_owned(),
+            _ => format!("mini {}", threads[index.min(2)]),
+        };
         assert!(
-            text.contains(&format!(
-                "mini {} received tab-{index}",
-                threads[index.min(2)]
-            )),
+            text.contains(&format!("{answer} received tab-{index}")),
             "{text}"
         );
+        // Leaving names the command that returns from this Machine.
+        let retry: Vec<String> = serde_json::from_value(expected_retry).unwrap();
+        assert!(text.contains(&retry.join(" ")), "{text}");
+        assert!(!text.contains("lf resume"), "{text}");
         fs::remove_file(local.join("tab-closed")).unwrap();
     }
 }
@@ -4508,18 +4529,30 @@ fn server_routed_task_workspace() {
         &serde_json::json!({"reason":"not_started","task_id":peer_task})
     );
 
-    let refused = client
+    // The file watch follows the Task, not a checkout: it waits on mini.
+    let mut unstarted = Connection::open_at(Path::new(&socket)).unwrap();
+    unstarted
+        .set_read_timeout(Some(std::time::Duration::from_secs(20)))
+        .unwrap();
+    let unstarted_id = unstarted
         .subscribe(
             Read::TaskFilesWatch {
                 issue: task.to_string(),
             },
             None,
         )
-        .unwrap_err()
-        .downcast::<Error>()
         .unwrap();
-    assert_eq!(refused.code, ErrorCode::NotFound);
-    assert_eq!(refused.data, absent.data);
+    let waiting = available_reading(&mut unstarted, &unstarted_id);
+    assert_eq!(
+        waiting["body"],
+        serde_json::json!({
+            "task_id": peer_task,
+            "machine_id": mini.id,
+            "machine_label": "mini",
+            "checkout": null,
+            "revision": null,
+        })
+    );
 
     let board = client
         .request(Read::PlanList {
@@ -4547,6 +4580,13 @@ fn server_routed_task_workspace() {
     }
 
     checkout(&peer, peer_task.as_str(), &plan.remote_path);
+    let mut live = available_reading(&mut unstarted, &unstarted_id);
+    while live["body"]["checkout"].is_null() {
+        live = available_reading(&mut unstarted, &unstarted_id);
+    }
+    assert_eq!(live["body"]["checkout"], plan.remote_path.to_str().unwrap());
+    assert!(live["body"]["revision"].is_string(), "{live}");
+    drop(unstarted);
     fs::write(plan.remote_path.join(file), "from mini\n").unwrap();
     git(&plan.remote_path, &["add", file]);
     git(&plan.remote_path, &["commit", "-qm", "File on mini"]);
@@ -4857,10 +4897,16 @@ fn server_routed_task_workspace() {
             })
             .unwrap();
         held_ended(&peer, &moving["terminal_id"]);
+        // The laptop may read the Task before its checkout there is recorded.
         let mut frame = available_reading(&mut watches, &files_id);
-        while frame["body"]["machine_id"] == mini.id.as_str() {
+        while frame["body"]["machine_id"] == mini.id.as_str() || frame["body"]["checkout"].is_null()
+        {
             frame = available_reading(&mut watches, &files_id);
         }
+        assert_eq!(
+            frame["body"]["machine_label"],
+            laptop.label.clone().map_or(Value::Null, Value::from)
+        );
         assert_eq!(
             frame["body"]["checkout"],
             other.local_path.to_str().unwrap()
@@ -4905,7 +4951,10 @@ fn server_routed_task_workspace() {
             workspace_machine(available_reading(&mut watches, &pane_id)),
             mini.id.as_str()
         );
-        let frame = available_reading(&mut watches, &files_id);
+        let mut frame = available_reading(&mut watches, &files_id);
+        while frame["body"]["checkout"].is_null() {
+            frame = available_reading(&mut watches, &files_id);
+        }
         assert_eq!(
             frame["body"]["checkout"],
             other.remote_path.to_str().unwrap()
@@ -4951,6 +5000,7 @@ exit 1
         session: session.into(),
         task: Some(task.to_string()),
         machine: None,
+        agent: None,
         request: "resume-on-mini".into(),
         rows: 24,
         cols: 400,

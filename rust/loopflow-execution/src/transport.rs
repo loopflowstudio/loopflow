@@ -1709,12 +1709,15 @@ fn attach_with_terminal(
         terminal,
         ATTACH_TIMEOUT,
         input,
+        None,
     )
 }
 
 /// View a terminal ticket redeemed on this Machine's server. A viewer on
 /// another Machine (`LF_VIEWER_STREAM`) receives the protocol itself.
-pub fn relay_socket(socket: UnixStream) -> Result<()> {
+/// `returns` names how to come back from here when the terminal runs on
+/// another Machine, whose own lines name its local command.
+pub fn relay_socket(socket: UnixStream, returns: Option<&ReturnCommand>) -> Result<()> {
     if std::env::var_os(STREAM_ENV).is_some() {
         return stream::bridge_socket(socket);
     }
@@ -1725,7 +1728,46 @@ pub fn relay_socket(socket: UnixStream) -> Result<()> {
         None,
         COMMAND_ATTACH_TIMEOUT,
         &mut RelayInput::new(initial_focus(false)),
+        returns,
     )
+}
+
+/// A terminal on another Machine says how to return there (`lf resume <id>`);
+/// its viewer here shows the command that works from here instead.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReturnCommand {
+    pub owner: String,
+    pub here: String,
+}
+
+impl ReturnCommand {
+    /// The Session's own return command, as its Machine prints it.
+    pub fn for_session(session: &str, here: String) -> Self {
+        Self {
+            owner: format!("lf resume {session}"),
+            here,
+        }
+    }
+
+    fn rewrite<'a>(&self, bytes: &'a [u8]) -> std::borrow::Cow<'a, [u8]> {
+        let from = self.owner.as_bytes();
+        if from.is_empty() || !bytes.windows(from.len()).any(|window| window == from) {
+            return std::borrow::Cow::Borrowed(bytes);
+        }
+        let mut out = Vec::with_capacity(bytes.len());
+        let mut rest = bytes;
+        while let Some(at) = rest.windows(from.len()).position(|window| window == from) {
+            out.extend_from_slice(&rest[..at]);
+            out.extend_from_slice(self.here.as_bytes());
+            rest = &rest[at + from.len()..];
+        }
+        out.extend_from_slice(rest);
+        std::borrow::Cow::Owned(out)
+    }
+
+    fn rewrite_text(&self, text: &str) -> String {
+        text.replace(&self.owner, &self.here)
+    }
 }
 
 /// View the existing protocol over a command's stdin/stdout, such as SSH.
@@ -1756,6 +1798,7 @@ pub fn relay_over(argv: &[String], unfocused: bool) -> Result<()> {
             None,
             COMMAND_ATTACH_TIMEOUT,
             &mut RelayInput::new(initial_focus(unfocused)),
+            None,
         )
     })();
     // Leave is already written, but SSH must forward it before we stop its
@@ -1790,6 +1833,7 @@ fn view(
     mut terminal: Option<ViewerTerminal>,
     attach_timeout: Duration,
     input: &mut RelayInput,
+    returns: Option<&ReturnCommand>,
 ) -> Result<()> {
     let server = route.is_some();
     let (session, mut status, mut recovering) = match route {
@@ -2066,6 +2110,10 @@ fn view(
                 for piece in pieces {
                     let event = match piece {
                         wire::Piece::Bytes(bytes) => {
+                            let bytes = match returns {
+                                Some(returns) => returns.rewrite(&bytes),
+                                None => std::borrow::Cow::Borrowed(&bytes[..]),
+                            };
                             write_output(&mut terminal, stream, &bytes)?;
                             continue;
                         }
@@ -2093,6 +2141,8 @@ fn view(
                             return Ok(());
                         }
                         Event::Return { detach } => {
+                            let detach = returns
+                                .map_or(detach.clone(), |returns| returns.rewrite_text(&detach));
                             // The agent may have exited with its final output and
                             // status still buffered. A readiness write cannot discard them.
                             let acknowledged = send(
@@ -2131,6 +2181,8 @@ fn view(
                             }
                         }
                         Event::Hint { text } => {
+                            let text =
+                                returns.map_or(text.clone(), |returns| returns.rewrite_text(&text));
                             if let Some(terminal) = &mut terminal {
                                 output.drew();
                                 terminal.write(2, format!("\r\n{text}\r\n").as_bytes())?;

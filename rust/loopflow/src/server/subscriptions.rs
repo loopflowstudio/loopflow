@@ -570,6 +570,7 @@ impl Producer {
     ) -> Result<()> {
         let mut generation = lock(&self.requested).generation;
         let mut asked = generation;
+        let labels_owner = matches!(query, Read::TaskFilesWatch { .. });
         let mut peer = super::peers::PeerSubscription::open(machine, sender, query, select).await?;
         self.latest.send_modify(|latest| latest.ready = true);
         loop {
@@ -594,9 +595,17 @@ impl Producer {
                 message => message,
             };
             match message {
-                ServerMessage::Reading { frame, .. } => {
+                ServerMessage::Reading { mut frame, .. } => {
                     if let Some(answer) = frame["answers"].as_u64() {
                         generation = answer;
+                    }
+                    // The owner names itself; readers here use this Machine's name for it.
+                    if labels_owner {
+                        if let Some(body) = frame["body"].as_object_mut() {
+                            if body.contains_key("machine_label") {
+                                body["machine_label"] = serde_json::json!(machine.label);
+                            }
+                        }
                     }
                     self.publish(Some(frame), Vec::new(), generation, room)?;
                 }
@@ -609,8 +618,15 @@ impl Producer {
         }
     }
 
+    // A Task with no checkout here yet reads null and waits on the planning
+    // revision, which a recorded checkout advances; the same ID then goes live.
     async fn files(&self, issue: String, select: Option<Vec<String>>) -> Result<()> {
         let wake = self.wake.clone();
+        let mut planning = match self.registry.upgrade() {
+            Some(registry) => registry.planning(&self.key.database).as_ref().clone(),
+            None => return Ok(()),
+        };
+        planning.borrow_and_update();
         let mut files = tokio::task::spawn_blocking(move || {
             loopflow_execution::ops::task::TaskFilesWatch::open(&issue, move || wake.notify_one())
         })
@@ -635,7 +651,10 @@ impl Producer {
                 generation,
                 room,
             )?;
-            self.wake.notified().await;
+            tokio::select! {
+                _ = self.wake.notified() => {}
+                changed = planning.changed() => changed?,
+            }
         }
     }
 

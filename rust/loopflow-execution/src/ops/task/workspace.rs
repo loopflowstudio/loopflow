@@ -7,8 +7,9 @@ use anyhow::Result;
 use notify::{RecursiveMode, Watcher};
 use serde::Serialize;
 
-use super::{file_context, file_store};
+use super::file_store;
 use loopflow_model::durable::{MachineId, TaskId};
+use loopflow_storage::sqlite::SqliteStore;
 
 fn watch_checkout(
     expected: &Path,
@@ -43,21 +44,41 @@ fn watch_checkout(
     Ok(watcher)
 }
 
-/// One checkout's file invalidation. Readers rescan on a new revision, including
-/// when multiple changes coalesce while their connection is busy.
-#[derive(Debug, Clone, Serialize, schemars::JsonSchema)]
+/// A Task's file invalidation on this Machine. `checkout` and `revision` are
+/// null until the Task has a checkout here; readers rescan on a new revision,
+/// including when multiple changes coalesce while their connection is busy.
+#[derive(Debug, Clone, PartialEq, Serialize, schemars::JsonSchema)]
 pub struct TaskFilesRevision {
     pub task_id: TaskId,
     pub machine_id: MachineId,
-    pub checkout: PathBuf,
-    pub revision: String,
+    pub machine_label: Option<String>,
+    pub checkout: Option<PathBuf>,
+    pub revision: Option<String>,
+}
+
+/// Follows one Task's recorded checkout: it opens a directory watcher when the
+/// checkout appears and replaces it when the record changes.
+pub struct TaskFilesWatch {
+    issue: String,
+    store: SqliteStore,
+    wake: Arc<dyn Fn() + Send + Sync>,
+    watching: Option<CheckoutWatch>,
+    current: TaskFilesRevision,
+}
+
+impl std::fmt::Debug for TaskFilesWatch {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TaskFilesWatch")
+            .field("issue", &self.issue)
+            .field("current", &self.current)
+            .finish_non_exhaustive()
+    }
 }
 
 #[derive(Debug)]
-pub struct TaskFilesWatch {
+struct CheckoutWatch {
     _watcher: notify::RecommendedWatcher,
     pending: Arc<Mutex<PendingPaths>>,
-    current: TaskFilesRevision,
     ignore_failed: bool,
 }
 
@@ -68,18 +89,77 @@ struct PendingPaths {
 }
 
 impl TaskFilesWatch {
-    pub fn open(issue: &str, wake: impl Fn() + Send + 'static) -> Result<Self> {
+    /// # Errors
+    /// The Task does not exist, or the registry cannot be read.
+    pub fn open(issue: &str, wake: impl Fn() + Send + Sync + 'static) -> Result<Self> {
         let store = file_store()?;
-        let checkout = file_context(&store, issue)?;
-        let current = TaskFilesRevision {
-            task_id: checkout.task_id,
-            machine_id: crate::store::machines::local_machine(&store)?.id,
-            checkout: checkout.worktree,
-            revision: uuid::Uuid::new_v4().to_string(),
+        let task_id =
+            crate::store::children::resolve_task_id(&store, issue, None)?.ok_or_else(|| {
+                crate::engine::Error::new(
+                    crate::engine::ErrorCode::NotFound,
+                    format!("no Task exists for {issue:?}"),
+                )
+            })?;
+        let machine = crate::store::machines::local_machine(&store)?;
+        let mut watch = Self {
+            issue: issue.to_owned(),
+            store,
+            wake: Arc::new(wake),
+            watching: None,
+            current: TaskFilesRevision {
+                task_id,
+                machine_id: machine.id,
+                machine_label: machine.label,
+                checkout: None,
+                revision: None,
+            },
         };
+        watch.follow_record()?;
+        Ok(watch)
+    }
+
+    /// The current reading. A changed checkout record replaces the watcher.
+    pub fn reading(&mut self) -> Result<&TaskFilesRevision> {
+        self.follow_record()?;
+        let Some(watching) = &mut self.watching else {
+            return Ok(&self.current);
+        };
+        let batch = std::mem::take(&mut *watching.pending.lock().expect("file watch paths"));
+        if let Some(error) = batch.error {
+            return Err(error.into());
+        }
+        let checkout = self.current.checkout.as_deref().expect("watched checkout");
+        if !batch.paths.is_empty()
+            && !relevant_paths(checkout, batch.paths, &mut watching.ignore_failed).is_empty()
+        {
+            self.current.revision = Some(uuid::Uuid::new_v4().to_string());
+        }
+        Ok(&self.current)
+    }
+
+    fn follow_record(&mut self) -> Result<()> {
+        let checkout = self
+            .store
+            .task_checkout(&self.current.task_id)?
+            .map(|checkout| checkout.worktree);
+        if checkout == self.current.checkout {
+            return Ok(());
+        }
+        self.watching = None;
+        self.current.revision = None;
+        if let Some(path) = &checkout {
+            self.watching = Some(self.watch(path)?);
+            self.current.revision = Some(uuid::Uuid::new_v4().to_string());
+        }
+        self.current.checkout = checkout;
+        Ok(())
+    }
+
+    fn watch(&self, checkout: &Path) -> Result<CheckoutWatch> {
         let pending = Arc::new(Mutex::new(PendingPaths::default()));
         let changes = pending.clone();
-        let watcher = watch_checkout(&current.checkout, move |event| {
+        let wake = self.wake.clone();
+        let watcher = watch_checkout(checkout, move |event| {
             let mut batch = changes.lock().expect("file watch paths");
             match event {
                 Err(error) => batch.error = Some(error),
@@ -95,26 +175,11 @@ impl TaskFilesWatch {
             drop(batch);
             wake();
         })?;
-        Ok(Self {
+        Ok(CheckoutWatch {
             _watcher: watcher,
             pending,
-            current,
             ignore_failed: false,
         })
-    }
-
-    pub fn reading(&mut self) -> Result<&TaskFilesRevision> {
-        let batch = std::mem::take(&mut *self.pending.lock().expect("file watch paths"));
-        if let Some(error) = batch.error {
-            return Err(error.into());
-        }
-        if !batch.paths.is_empty()
-            && !relevant_paths(&self.current.checkout, batch.paths, &mut self.ignore_failed)
-                .is_empty()
-        {
-            self.current.revision = uuid::Uuid::new_v4().to_string();
-        }
-        Ok(&self.current)
     }
 }
 

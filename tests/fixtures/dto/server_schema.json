@@ -10150,6 +10150,7 @@
           "description": "Continue an existing Session in a held terminal: `lf session resume`\nof exactly `session`, in its directory, with the server's environment.\nAnswers `{terminal_id}`; repeating `request` answers the terminal it\nstarted. For a client with no environment of its own to send. A\nSession another Machine runs continues there.",
           "examples": [
             {
+              "agent": "claude",
               "cols": 60,
               "kind": "session.continue",
               "machine": null,
@@ -10160,6 +10161,13 @@
             }
           ],
           "properties": {
+            "agent": {
+              "description": "The caller's `--agent` (`harness[:model]`): the Session continues on\nit, importing its history when the harness differs. Null keeps the\nSession's own.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "cols": {
               "format": "uint16",
               "maximum": 65535,
@@ -10204,7 +10212,8 @@
             "rows",
             "cols",
             "task",
-            "machine"
+            "machine",
+            "agent"
           ],
           "type": "object",
           "x-result": {
@@ -14383,16 +14392,28 @@
       "type": "string"
     },
     "TaskFilesRevision": {
-      "description": "One checkout's file invalidation. Readers rescan on a new revision, including\nwhen multiple changes coalesce while their connection is busy.",
+      "description": "A Task's file invalidation on this Machine. `checkout` and `revision` are\nnull until the Task has a checkout here; readers rescan on a new revision,\nincluding when multiple changes coalesce while their connection is busy.",
       "properties": {
         "checkout": {
-          "type": "string"
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "machine_id": {
           "type": "string"
         },
+        "machine_label": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "revision": {
-          "type": "string"
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "task_id": {
           "type": "string"
@@ -14401,6 +14422,7 @@
       "required": [
         "task_id",
         "machine_id",
+        "machine_label",
         "checkout",
         "revision"
       ],

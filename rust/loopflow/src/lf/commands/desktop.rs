@@ -1343,7 +1343,7 @@ pub fn shell(args: &crate::lf::desktop_inputs::ShellArgs) -> Result<()> {
             return Err(error);
         }
     };
-    loopflow_execution::transport::relay_socket(client::redeem_terminal(&socket, issued)?)
+    loopflow_execution::transport::relay_socket(client::redeem_terminal(&socket, issued)?, None)
 }
 
 fn dispatch(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result<()> {

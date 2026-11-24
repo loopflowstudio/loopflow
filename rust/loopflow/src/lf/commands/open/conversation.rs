@@ -119,9 +119,13 @@ fn present(target: &mut Resolved, args: &OpenArgs, focus_new: bool) -> Result<Op
     let routed = target.execution_machine.is_some();
     if routed && mode == Mode::Here {
         let opening = Opening::lock(target)?;
-        let socket = routed_terminal(target)?;
+        let (socket, session) = routed_terminal(target)?;
         drop(opening);
-        loopflow_execution::transport::relay_socket(socket)?;
+        let returns = loopflow_execution::transport::ReturnCommand::for_session(
+            session.as_str(),
+            fallback_text(&target.fallback_argv()),
+        );
+        loopflow_execution::transport::relay_socket(socket, Some(&returns))?;
         return Ok(target.receipt(Some(host), None, OpenStatus::Usable, None));
     }
     if routed && mode == Mode::Tab {
@@ -214,9 +218,10 @@ fn open_tab(
     Ok(receipt)
 }
 
-/// Select the conversation on the owner. Only a missing running terminal
-/// calls for a continuation; a peer outage leaves the Session alone.
-fn routed_terminal(target: &Resolved) -> Result<UnixStream> {
+/// Select the conversation on the owner. A missing running terminal, or an
+/// `--agent` on another harness than the Session's, calls for a continuation;
+/// a peer outage leaves the Session alone.
+fn routed_terminal(target: &Resolved) -> Result<(UnixStream, LfSessionId)> {
     use loopflow_execution::engine::{Error, ErrorCode};
     use loopflow_execution::machine::{
         client,
@@ -227,47 +232,65 @@ fn routed_terminal(target: &Resolved) -> Result<UnixStream> {
     let mut client = Connection::open_at(&socket)?;
     let task = target.task.as_ref().map(|task| task.id.as_str());
     let machine = target.url.machine.as_ref();
-    let session = match task {
-        Some(task) => routed_task_session(&mut client, target, task)?,
-        None => target
-            .session
-            .as_deref()
-            .context("select an exact Session on this Machine")?
-            .into(),
+    let agent = loopflow_execution::config::agent_override();
+    let (session, provider) = match task {
+        Some(task) => routed_task_session(&mut client, target, task, agent.as_deref())?,
+        None => (
+            target
+                .session
+                .as_deref()
+                .context("select an exact Session on this Machine")?
+                .into(),
+            None,
+        ),
     };
-    let issued = match client.session_ticket(&session, None, task, machine) {
-        Err(error)
-            if error.downcast_ref::<Error>().is_some_and(|e| {
-                e.code == ErrorCode::NotFound
-                    && e.data.as_ref().and_then(|data| data["session"].as_str())
-                        == Some(session.as_str())
-            }) =>
-        {
-            let (rows, cols) = loopflow_execution::transport::size();
-            let started: SessionStarted = serde_json::from_value(
-                client
-                    .request(ServerOperation::SessionContinue {
-                        session: session.clone(),
-                        request: uuid::Uuid::new_v4().to_string(),
-                        rows,
-                        cols,
-                        task: task.map(str::to_owned),
-                        machine: machine.cloned(),
-                    })?
-                    .result,
-            )?;
-            client.session_ticket(&session, Some(started.terminal_id), task, machine)?
+    let continuing = |client: &mut Connection| -> Result<_> {
+        let (rows, cols) = loopflow_execution::transport::size();
+        let started: SessionStarted = serde_json::from_value(
+            client
+                .request(ServerOperation::SessionContinue {
+                    session: session.clone(),
+                    request: uuid::Uuid::new_v4().to_string(),
+                    rows,
+                    cols,
+                    task: task.map(str::to_owned),
+                    machine: machine.cloned(),
+                    agent: agent.clone(),
+                })?
+                .result,
+        )?;
+        client.session_ticket(&session, Some(started.terminal_id), task, machine)
+    };
+    // A running terminal on the Session's own harness is attached as it is.
+    let switching = agent.as_deref().is_some_and(|agent| {
+        provider.as_deref() != Some(loopflow_execution::config::parse_agent(agent).0.as_str())
+    });
+    let issued = if switching {
+        continuing(&mut client)?
+    } else {
+        match client.session_ticket(&session, None, task, machine) {
+            Err(error)
+                if error.downcast_ref::<Error>().is_some_and(|e| {
+                    e.code == ErrorCode::NotFound
+                        && e.data.as_ref().and_then(|data| data["session"].as_str())
+                            == Some(session.as_str())
+                }) =>
+            {
+                continuing(&mut client)?
+            }
+            answer => answer?,
         }
-        answer => answer?,
     };
-    client::redeem_terminal(&socket, issued)
+    Ok((client::redeem_terminal(&socket, issued)?, session))
 }
 
+/// The Task's Session on its owner and, for its primary, the harness it last ran.
 fn routed_task_session(
     client: &mut Connection,
     target: &Resolved,
     task: &str,
-) -> Result<LfSessionId> {
+    agent: Option<&str>,
+) -> Result<(LfSessionId, Option<String>)> {
     use crate::lf::commands::{read::Read, waves::DesktopTaskPane, write::Write};
     use loopflow_execution::ops::human_session::SessionRecord;
     let pane: DesktopTaskPane = serde_json::from_value(
@@ -298,7 +321,7 @@ fn routed_task_session(
                 .is_some_and(|overview| overview.sessions.iter().any(|s| s.id == id)),
             "Session does not belong to the selected Work. Nothing was opened."
         );
-        Ok(id)
+        Ok((id, None))
     } else {
         let record: SessionRecord = serde_json::from_value(
             client
@@ -307,11 +330,11 @@ fn routed_task_session(
                     id: None,
                     task: Some(task.to_owned()),
                     wave: None,
-                    agent: loopflow_execution::config::agent_override(),
+                    agent: agent.map(str::to_owned),
                 })?
                 .result,
         )?;
-        Ok(record.id)
+        Ok((record.id, record.provider))
     }
 }
 

@@ -245,6 +245,11 @@ pub enum ServerOperation {
         /// For a Session with no Task here, the Machine that runs it.
         #[serde(deserialize_with = "Option::deserialize")]
         machine: Option<loopflow_model::durable::MachineId>,
+        /// The caller's `--agent` (`harness[:model]`): the Session continues on
+        /// it, importing its history when the harness differs. Null keeps the
+        /// Session's own.
+        #[serde(deserialize_with = "Option::deserialize")]
+        agent: Option<String>,
     },
     /// Start a Task shell in the checkout of the Machine that runs the Task
     /// and answer `{terminal_id}`. `shell_id` names it there: repeating it

@@ -804,6 +804,7 @@ pub(super) async fn session<C: Carrier>(
                     cols,
                     task,
                     machine,
+                    agent,
                 }),
                 None,
                 _,
@@ -820,6 +821,7 @@ pub(super) async fn session<C: Carrier>(
                             cols,
                             task: None,
                             machine: None,
+                            agent,
                         };
                         // Repeating `request` starts nothing, so a lost pipe retries once.
                         answered(
@@ -829,7 +831,7 @@ pub(super) async fn session<C: Carrier>(
                     }
                     Ok(None) => {
                         let start = tokio::task::spawn_blocking(move || {
-                            continuing(session, request, rows, cols)
+                            continuing(session, request, rows, cols, agent)
                         })
                         .await
                         .map_err(unavailable)
@@ -1085,6 +1087,7 @@ pub(super) fn continuing(
     request: String,
     rows: u16,
     cols: u16,
+    agent: Option<String>,
 ) -> Result<loopflow_execution::transport::registry::Start, Error> {
     let registry = loopflow_execution::store::read_existing_registry()
         .map_err(unavailable)?
@@ -1107,14 +1110,18 @@ pub(super) fn continuing(
         return Err(Error::new(ErrorCode::Conflict, reason));
     }
     let (lf_bin, env) = held_env()?;
+    let mut argv = vec![lf_bin.to_string_lossy().into_owned()];
+    if let Some(agent) = agent {
+        argv.extend(["--agent".into(), agent]);
+    }
+    argv.extend([
+        "session".into(),
+        "resume".into(),
+        "--".into(),
+        session.to_string(),
+    ]);
     Ok(loopflow_execution::transport::registry::Start {
-        argv: vec![
-            lf_bin.to_string_lossy().into_owned(),
-            "session".into(),
-            "resume".into(),
-            "--".into(),
-            session.to_string(),
-        ],
+        argv,
         cwd: record.cwd.clone(),
         session: Some(session),
         request,
@@ -4237,7 +4244,7 @@ mod tests {
             );
             let id = session.id.clone();
             let start = tokio::task::spawn_blocking(move || {
-                super::continuing(id, "phone-continue".into(), 40, 60)
+                super::continuing(id, "phone-continue".into(), 40, 60, None)
             })
             .await
             .unwrap()
@@ -4268,6 +4275,7 @@ mod tests {
                     "phone-continue".into(),
                     40,
                     60,
+                    None,
                 )
             })
             .await

@@ -3650,6 +3650,7 @@ fn continuing_a_session_starts_one_held_terminal() {
                     cols: 60,
                     task: None,
                     machine: None,
+                    agent: None,
                 },
             ))
     };

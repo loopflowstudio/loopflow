@@ -646,15 +646,28 @@ fn asana_wave_projects_become_team_projects_holding_their_tasks() {
             .collect();
         assert_eq!(members, [&repository["gid"], &wave_project["gid"]]);
 
-        // Read back, the Task keeps its Project.
-        runtime.block_on(crate::ops::tracker_events::sync_repository(
-            &fixture.store,
-            repo.to_str().unwrap(),
-        ));
+        {
+            let mut asana = runtime.block_on(state.lock());
+            let modified = asana.tick();
+            let task = asana.tasks.get_mut(id.as_str()).unwrap();
+            task["name"] = json!("Updated in Asana");
+            task["modified_at"] = json!(modified);
+        }
+        let wave = runtime
+            .block_on(fixture.store.get_wave(&project.wave_id))
+            .unwrap()
+            .unwrap();
+        runtime
+            .block_on(crate::ops::planning_sync::refresh_wave(
+                &wave,
+                crate::ops::tracker::queued_tracker(repo).unwrap(),
+            ))
+            .unwrap();
         let local = runtime
             .block_on(fixture.store.get_task(&saved.id))
             .unwrap()
             .unwrap();
+        assert_eq!(local.title, "Updated in Asana");
         assert_eq!(local.project_id, saved.project_id);
     });
 }

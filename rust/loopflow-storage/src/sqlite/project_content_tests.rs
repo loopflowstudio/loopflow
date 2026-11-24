@@ -57,7 +57,8 @@ fn project_name_receipt_does_not_reconstruct_unrelated_order_evidence() {
         serde_json::to_value(&change.base).unwrap(),
         serde_json::json!({"revision":"2026-10-10T12:00:00Z", "value":{"field":"project_name","value":"Product"}})
     );
-    assert!(store.attempt_tracker_action(&change.id).unwrap());
+    let action = store.tracker_action(&change.id).unwrap().unwrap();
+    assert!(store.attempt_tracker_action(&action).unwrap());
     assert_eq!(store.project(&project.id).unwrap().unwrap().name, "Renamed");
     let retained: (String, i64) = store
         .conn

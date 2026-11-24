@@ -2131,7 +2131,7 @@ fn ordinary_task_creation_returns_resolvable_identifier_without_a_public_retry_t
 }
 
 #[test]
-fn wave_sync_without_a_linked_project_shows_local_planning() {
+fn wave_sync_offline_shows_the_pending_project_and_its_error() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(repo.path().join(".lf")).unwrap();
@@ -2158,6 +2158,12 @@ fn wave_sync_without_a_linked_project_shows_local_planning() {
             "--json",
         ],
     );
+    let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    db.execute(
+        "UPDATE tracker_actions SET error=NULL WHERE project_id IS NOT NULL",
+        [],
+    )
+    .unwrap();
     let synced = lf(
         repo.path(),
         home.path(),
@@ -2168,12 +2174,123 @@ fn wave_sync_without_a_linked_project_shows_local_planning() {
     let Value::String(text) = lf(repo.path(), home.path(), &["wave", "sync", "inbox"]) else {
         panic!("wave sync prints text");
     };
-    assert!(
-        text.starts_with(
-            "inbox: links no Linear Project; showing local planning (lf wave plan connect inbox)\n"
-        ),
-        "{text}"
+    let action = &synced["project"]["value"]["sync"]["actions"][0];
+    assert_eq!(action["phase"], "queued");
+    let reason = action["error"].as_str().unwrap();
+    assert!(!reason.is_empty());
+    assert!(text.contains(reason), "{text}");
+    assert!(!text.contains("wave plan connect"), "{text}");
+}
+
+#[test]
+fn wave_sync_retries_its_project_ahead_of_older_work() {
+    use crate::lf::commands::write::Write;
+    use loopflow_execution::test_support::planning_tasks::with_planning_task;
+    use loopflow_execution::work::wave::Wave;
+    use loopflow_model::id::WaveId;
+    use loopflow_storage::planning_sync::TrackerKind;
+
+    with_planning_task(|runtime, fixture, repo, _, state| {
+        let wave =
+            |name: String| Wave::new(WaveId::new(), name, repo.to_string_lossy().into_owned());
+        for n in 0..40 {
+            runtime
+                .block_on(fixture.store.create_wave(&wave(format!("older-{n}"))))
+                .unwrap();
+        }
+        fixture
+            .store
+            .sqlite
+            .enqueue_tracker_creations(repo.to_str().unwrap(), TrackerKind::Linear)
+            .unwrap();
+        let billing = wave("billing".into());
+        runtime
+            .block_on(fixture.store.create_wave(&billing))
+            .unwrap();
+        let sync = || {
+            serde_json::to_value(
+                Write::WaveSync {
+                    directory: repo.into(),
+                    wave: "billing".into(),
+                }
+                .run()
+                .unwrap(),
+            )
+            .unwrap()
+        };
+        runtime.block_on(state.lock()).field_outage = true;
+        let offline = sync();
+        let project = &offline["project"]["value"];
+        assert!(
+            project["sync"]["actions"][0]["error"].is_string(),
+            "{offline}"
+        );
+        let id = project["id"].as_str().unwrap();
+        {
+            let mut linear = runtime.block_on(state.lock());
+            linear.field_outage = false;
+            linear.export_mode = true;
+        }
+        let external = uuid::Uuid::parse_str(id.strip_prefix("proj_").unwrap())
+            .unwrap()
+            .to_string();
+        for _ in 0..2 {
+            let status = sync();
+            assert_eq!(status["project"]["value"]["id"], id);
+            assert_eq!(status["project"]["value"]["tracker_id"], external);
+            assert!(fixture.wave_refresh_at(&billing).is_some());
+        }
+        let linear = runtime.block_on(state.lock());
+        assert_eq!(
+            linear
+                .extra_projects
+                .iter()
+                .filter(|p| p["name"] == "billing")
+                .count(),
+            1
+        );
+    });
+}
+
+#[test]
+fn wave_sync_without_a_tracker_sends_the_plan_by_git() {
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    let git = |args: &[&str]| loopflow_execution::git::git_stdout(repo.path(), args).unwrap();
+    git(&["remote", "remove", "origin"]);
+    lf(
+        repo.path(),
+        home.path(),
+        &["wave", "add", "billing", "--json"],
     );
+    lf(
+        repo.path(),
+        home.path(),
+        &[
+            "task",
+            "create",
+            "--wave",
+            "billing",
+            "--title",
+            "Saved offline",
+            "--json",
+        ],
+    );
+    git(&[
+        "remote",
+        "add",
+        "origin",
+        repo.bare_path().to_str().unwrap(),
+    ]);
+    let synced = lf(
+        repo.path(),
+        home.path(),
+        &["wave", "sync", "billing", "--json"],
+    );
+    assert_eq!(synced["project"]["value"]["name"], "billing");
+    assert!(!git(&["ls-remote", "origin", "refs/loopflow/plan/*"])
+        .trim()
+        .is_empty());
 }
 
 #[test]

@@ -2900,7 +2900,51 @@ mod local_planning_tests {
                 task
             })
             .collect();
+        let old_remote = "former-chapter";
+        conn.execute(
+            "UPDATE projects SET external_project_id=?1 WHERE id=?2",
+            params![old_remote, oldest.as_str()],
+        )
+        .unwrap();
+        let membership =
+            |project: &str| serde_json::json!({"field":"task_project","value":project});
+        let unknown =
+            serde_json::json!({"field":"future_field","value":{"chapter":oldest.as_str()}});
+        let creation = serde_json::json!([unknown, membership(oldest.as_str())]);
+        let observed = serde_json::json!({"revision":"r1","value":membership(oldest.as_str())});
+        for (id, phase, kind, value) in [
+            ("create", "queued", "create", &creation),
+            ("move", "sent", "field", &membership(oldest.as_str())),
+            ("lost", "conflicted", "field", &membership(newest.as_str())),
+        ] {
+            conn.execute(
+                "INSERT INTO tracker_actions(id,task_id,subject,kind,value_json,phase,tracker,base_json,conflict_json)
+                 VALUES(?1,?2,CASE WHEN ?3='field' THEN 'task_project' END,?3,?4,?5,'linear',
+                 CASE WHEN ?3='field' THEN ?6 END,CASE WHEN ?5='conflicted' THEN ?6 END)",
+                params![id, tasks[0].as_str(), kind, value.to_string(), phase, observed.to_string()],
+            ).unwrap();
+        }
         upgrade_from_migration(&observers, &build, &conn, "remove_chapters");
+
+        let actions: String = conn
+            .query_row(
+                "SELECT json_group_array(json_array(id,phase,json(value_json),
+                 json_extract(base_json,'$.sent_project'),json_extract(base_json,'$.value.value'),
+                 json_extract(conflict_json,'$.value.value')) ORDER BY seq)
+             FROM tracker_actions WHERE task_id=?1",
+                [tasks[0].as_str()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let desired = membership(kept.as_str());
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&actions).unwrap(),
+            serde_json::json!([
+                ["create", "queued", [unknown, desired], null, null, null],
+                ["move", "sent", desired, old_remote, old_remote, null],
+                ["lost", "conflicted", desired, null, old_remote, old_remote],
+            ])
+        );
 
         let projects = |wave: &WaveId| -> Vec<String> {
             let mut query = conn

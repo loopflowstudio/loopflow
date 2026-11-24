@@ -649,9 +649,12 @@ if setup fails, `lf resume --task <ID>` retries it). See
 [Recover a submitted creation](server.md#recover-a-submitted-creation).
 
 **Tracker sync notes.** `lf task sync LOO-12` exchanges one Task now;
-`lf wave sync` refreshes from the tracker first. Without a tracker,
-`lf task sync` pushes and fetches the repository's plan and exchanges with the
-hub, then prints what each still has unsent. If Linear updates an issue or
+`lf wave sync billing` reads tracker changes, then gives billing’s Project
+priority among pending saves. If its create succeeds, status shows the link.
+If it stays queued, status shows the pending action and its last error when
+available. A linked Linear Wave also reads its Project and issues. Without a
+tracker, both commands exchange the repository’s plan through Git and its
+configured hub. `lf task sync` also shows what each still has unsent. If Linear updates an issue or
 Project without bumping `updatedAt`, Loopflow adopts the fresh reading and
 keeps your local edits queued. An issue moved into another Wave's Linear
 Project moves to that Wave.

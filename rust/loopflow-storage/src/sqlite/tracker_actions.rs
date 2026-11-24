@@ -202,6 +202,11 @@ const RELATION: &str = "relation:";
 const PR: &str = "pr:";
 
 impl TrackerAction {
+    /// The former chapter addressed by a send whose reply is still unknown.
+    pub(crate) fn sent_project(&self) -> Option<&str> {
+        self.base.as_ref()?.get("sent_project")?.as_str()
+    }
+
     /// The link a Task `link` action carries; `None` for every other action.
     pub fn task_link(&self) -> Option<TaskLink> {
         if self.kind != ActionKind::Link || !matches!(self.owner, ActionOwner::Task(_)) {
@@ -1241,13 +1246,23 @@ impl SqliteStore {
 
     /// Mark an unconfirmed action sent before its request leaves. Returns false
     /// when it resolved meanwhile.
-    pub fn attempt_tracker_action(&self, id: &str) -> StoreResult<bool> {
+    pub fn attempt_tracker_action(&self, action: &TrackerAction) -> StoreResult<bool> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        Ok(conn.execute(
-            "UPDATE tracker_actions SET phase='sent',sent_at=?2,error=NULL
-             WHERE id=?1 AND phase IN ('queued','sent')",
-            params![id, now_unix()],
-        )? == 1)
+        // Naming base_json in an UPDATE runs the canonical identity triggers
+        // over the whole payload. Only a translated move needs to change it.
+        let clear_destination = if action.sent_project().is_some() {
+            ",base_json=json_remove(base_json,'$.sent_project')"
+        } else {
+            ""
+        };
+        let sql = format!(
+            "UPDATE tracker_actions SET phase='sent',sent_at=?2,error=NULL{clear_destination}
+             WHERE id=?1 AND phase IN ('queued','sent')"
+        );
+        let changed = conn
+            .prepare_cached(&sql)?
+            .execute(params![action.id, now_unix()])?;
+        Ok(changed == 1)
     }
 
     /// A request the tracker rejected before acting leaves the action unsent.
@@ -1417,7 +1432,8 @@ mod tests {
         let (_dir, store) = store();
         let task = task(&store, true);
         let sent = enqueue(&store, &task, ActionKind::Field, "task_title").unwrap();
-        assert!(store.attempt_tracker_action(&sent).unwrap());
+        let action = store.tracker_action(&sent).unwrap().unwrap();
+        assert!(store.attempt_tracker_action(&action).unwrap());
         let unsent = enqueue(&store, &task, ActionKind::Field, "task_title").unwrap();
         let latest = enqueue(&store, &task, ActionKind::Field, "task_title").unwrap();
         let comment = enqueue(&store, &task, ActionKind::Comment, "c1").unwrap();

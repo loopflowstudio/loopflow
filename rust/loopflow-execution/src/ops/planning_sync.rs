@@ -10,7 +10,9 @@ use std::time::Duration;
 use crate::store::{open_store, StorageConfig, Store};
 use loopflow_model::durable::{ProjectId, TaskId};
 use loopflow_model::id::WaveId;
-use loopflow_storage::planning_sync::{ActionOwnerKind, LostAnswer, TrackerActionStatus};
+use loopflow_storage::planning_sync::{
+    ActionOwnerKind, LostAnswer, TrackerActionStatus, TrackerKind,
+};
 use loopflow_storage::sqlite::tracker_actions::{ActionOwner, ActionPhase};
 
 use super::tracker::drain::Scope;
@@ -155,16 +157,6 @@ pub fn answer_lost(repo: &Path, id: &str, answer: LostAnswer) -> OpsResult<Track
 
 /// Provider exit is also a useful boundary for Taskless conversations.
 pub(crate) fn check_directory(directory: &Path) -> OpsResult<()> {
-    sync_directory(directory, false)
-}
-
-/// `wave status --sync`'s exchange with Linear or Asana, before it refreshes
-/// the Wave inventory.
-pub fn refresh_directory(directory: &Path) -> OpsResult<()> {
-    sync_directory(directory, true)
-}
-
-fn sync_directory(directory: &Path, refresh: bool) -> OpsResult<()> {
     let repo = crate::repository::discover(directory)
         .map_err(message)?
         .to_string();
@@ -179,13 +171,28 @@ fn sync_directory(directory: &Path, refresh: bool) -> OpsResult<()> {
                     .await
                     .map_err(message);
             }
-            if refresh {
-                super::tracker_events::refresh_repository(&store, &repo).await;
-            } else {
-                super::tracker_events::sync_repository(&store, &repo).await;
-            }
+            super::tracker_events::sync_repository(&store, &repo).await;
             Ok(())
         })
+}
+
+/// Exchange the repository delta and queued saves, then read the selected
+/// Wave's Linear inventory if its Project is linked after delivery.
+pub async fn refresh_wave(wave: &crate::work::wave::Wave, tracker: TrackerKind) -> OpsResult<()> {
+    let store = planning_store().await?;
+    let project = store.sqlite.wave_project(wave.id()).map_err(message)?;
+    super::tracker_events::refresh_repository(&store, wave.repo(), &ActionOwner::Project(project))
+        .await;
+    if tracker == TrackerKind::Linear
+        && store
+            .project_of_wave(wave.id())
+            .await
+            .map_err(message)?
+            .is_some_and(|project| project.tracker_id.is_some())
+    {
+        super::linear::refresh_wave(Path::new(wave.repo()), wave.slug()).await?;
+    }
+    Ok(())
 }
 
 pub fn storage_config_from_env() -> OpsResult<crate::store::StorageConfig> {

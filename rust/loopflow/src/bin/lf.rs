@@ -3156,15 +3156,8 @@ fn execute_command(
                 &std::env::current_dir()?,
                 wave.as_deref(),
             )?;
-            if let loopflow::lf::commands::ops::PlanningRefresh::Unconnected(wave) = &refreshed {
-                if !*json {
-                    println!(
-                        "{wave}: links no Linear Project; showing local planning (lf wave plan connect {wave})"
-                    );
-                }
-            }
             loopflow::lf::commands::waves::status(
-                refreshed.wave().or(wave.as_deref()),
+                refreshed.as_deref().or(wave.as_deref()),
                 *json,
                 false,
             )

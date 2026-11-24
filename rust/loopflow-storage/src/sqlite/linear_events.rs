@@ -878,7 +878,7 @@ mod tests {
             .find(|a| a.subject.as_deref() == Some("project_name"))
             .unwrap();
         link(&first).unwrap();
-        assert!(store.attempt_tracker_action(&edit.id).unwrap());
+        assert!(store.attempt_tracker_action(&edit).unwrap());
         assert!(link(&second).is_err());
         assert_eq!(
             store.project_by_tracker_id(&first.id).unwrap().unwrap().id,

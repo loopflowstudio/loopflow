@@ -32,16 +32,48 @@ WHERE subject IN ('krs','metric_targets') AND phase IN ('queued','sent','conflic
 -- leaving: metric_observations LOO-995
 -- A Wave is exactly one Project. A Wave with several keeps its newest
 -- started open one, else its newest; the others go with their unsent edits
--- and history, and their Tasks join the kept one here only: nothing is sent
--- to a tracker for them.
+-- and history. Their Tasks join the kept Project locally. Only existing
+-- delivery requests can change tracker membership.
 CREATE TEMP TABLE one_project_kept AS
 SELECT w.wave_id, (SELECT k.id FROM projects k WHERE k.wave_id=w.wave_id
     ORDER BY (k.status='started' AND k.work_state='ready') DESC, k.created_at DESC, k.id DESC
     LIMIT 1) AS kept
 FROM (SELECT DISTINCT wave_id FROM projects) w;
 CREATE TEMP TABLE one_project_dropped AS
-SELECT p.id, k.kept FROM projects p JOIN one_project_kept k ON k.wave_id=p.wave_id
+SELECT p.id, p.external_project_id AS external, k.kept FROM projects p JOIN one_project_kept k ON k.wave_id=p.wave_id
 WHERE p.id!=k.kept;
+CREATE UNIQUE INDEX one_project_dropped_id ON one_project_dropped(id);
+
+-- Creates keep their identity through a lost reply. Change just the destination
+-- a retry would send, leaving the rest of the saved fields intact.
+WITH destinations AS (
+    SELECT a.seq, f.fullkey || '.value' AS path, d.kept
+    FROM tracker_actions a JOIN json_each(a.value_json) f
+    JOIN one_project_dropped d ON d.id=json_extract(f.value,'$.value')
+    WHERE a.task_id IS NOT NULL AND a.kind='create' AND a.phase IN ('queued','sent')
+      AND json_extract(f.value,'$.field')='task_project'
+)
+UPDATE tracker_actions SET value_json=json_set(value_json,d.path,d.kept)
+FROM destinations d WHERE tracker_actions.seq=d.seq;
+
+-- A move has a desired destination and, until the next send, may also have
+-- an earlier destination whose reply was lost. Compare that send and saved
+-- observations by external ID once the local Project record is gone.
+UPDATE tracker_actions AS a SET value_json=json_set(value_json,'$.value',d.kept),
+    base_json=CASE WHEN phase='sent' AND d.external IS NOT NULL
+        THEN json_set(COALESCE(base_json,'{}'),'$.sent_project',d.external) ELSE base_json END
+FROM one_project_dropped d WHERE a.task_id IS NOT NULL AND a.subject='task_project'
+    AND a.kind='field' AND a.phase IN ('queued','sent','conflicted')
+    AND json_extract(a.value_json,'$.value')=d.id;
+UPDATE tracker_actions AS a SET base_json=json_set(base_json,'$.value.value',d.external)
+FROM one_project_dropped d WHERE a.task_id IS NOT NULL AND a.subject='task_project'
+    AND a.phase IN ('queued','sent','conflicted') AND d.external IS NOT NULL
+    AND json_extract(a.base_json,'$.value.value')=d.id;
+UPDATE tracker_actions AS a SET conflict_json=json_set(conflict_json,'$.value.value',d.external)
+FROM one_project_dropped d WHERE a.task_id IS NOT NULL AND a.subject='task_project'
+    AND a.phase='conflicted' AND d.external IS NOT NULL
+    AND json_extract(a.conflict_json,'$.value.value')=d.id;
+
 UPDATE tasks SET project_id=(SELECT d.kept FROM one_project_dropped d WHERE d.id=tasks.project_id)
 WHERE project_id IN (SELECT id FROM one_project_dropped);
 UPDATE task_creation_intents SET project_id=(SELECT d.kept FROM one_project_dropped d

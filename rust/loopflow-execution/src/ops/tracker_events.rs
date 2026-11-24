@@ -13,9 +13,10 @@ use std::time::Duration;
 use sha2::{Digest, Sha256};
 use time::OffsetDateTime;
 
-use super::tracker::message;
+use super::tracker::{drain::Scope, message};
 use super::OpsResult;
 use crate::store::{SharedStore, Store};
+use loopflow_storage::sqlite::tracker_actions::ActionOwner;
 use loopflow_storage::work::task::Task;
 
 pub(crate) async fn refresh_task_comments(store: &SharedStore, task: &Task) -> OpsResult<()> {
@@ -302,23 +303,27 @@ async fn check_repository_bounded(store: &Store, repository: &str, fresh_for: i6
 
 /// Bound on-demand work and retain local planning when Linear is unavailable.
 pub async fn sync_repository(store: &Store, repository: &str) -> bool {
-    sync_scope(store, repository, fresh_for(repository)).await
+    sync_scope(store, repository, fresh_for(repository), Scope::All).await
 }
 
 /// An explicit planning refresh: the scope delta, however recently a check
 /// started, then pending deliveries. It runs before the Wave inventory, which
 /// would otherwise learn a remote completion first and leave the delta skipping
 /// that finished Task's other changes, such as a comment made alongside it.
-pub(crate) async fn refresh_repository(store: &Store, repository: &str) -> bool {
-    sync_scope(store, repository, 0).await
+pub(crate) async fn refresh_repository(
+    store: &Store,
+    repository: &str,
+    first: &ActionOwner,
+) -> bool {
+    sync_scope(store, repository, 0, Scope::First(first)).await
 }
 
-async fn sync_scope(store: &Store, repository: &str, fresh_for: i64) -> bool {
+async fn sync_scope(store: &Store, repository: &str, fresh_for: i64, scope: Scope<'_>) -> bool {
     let changed = check_repository_bounded(store, repository, fresh_for).await;
     if let Err(error) = super::tracker::drain::drain_repository(
         store,
         repository,
-        super::tracker::drain::Scope::All,
+        scope,
         super::tracker::drain::Bound::PASS,
     )
     .await

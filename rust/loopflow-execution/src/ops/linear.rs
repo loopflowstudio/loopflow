@@ -253,23 +253,6 @@ async fn linked_project(store: &Store, wave: &WaveId) -> OpsResult<Option<String
         .map(|id| id.as_str().to_owned()))
 }
 
-/// The Linear Project Wave `wave` links, read from this Machine's store alone.
-pub fn wave_link(repo: &Path, wave: &str) -> OpsResult<Option<String>> {
-    block_on_linear(async {
-        let store = planning_store().await?;
-        let locator = crate::work::wave::discover(repo, wave)
-            .map_err(|error| OpsError::Message(error.to_string()))?;
-        match store
-            .get_wave_at(&locator)
-            .await
-            .map_err(|error| OpsError::Message(error.to_string()))?
-        {
-            Some(registered) => linked_project(&store, registered.id()).await,
-            None => Ok(None),
-        }
-    })
-}
-
 /// This repository's live Waves whose Project links a Linear Project.
 async fn linked_waves(repo: &Path, store: &Store) -> OpsResult<Vec<(Wave, String)>> {
     let canonical =

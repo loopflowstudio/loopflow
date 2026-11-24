@@ -87,7 +87,7 @@ pub fn mark_issue_updated(issue: &mut serde_json::Value) {
     }
 }
 
-fn planning_project(id: &str) -> serde_json::Value {
+pub(crate) fn planning_project(id: &str) -> serde_json::Value {
     let completed = id == "prior-project";
     let name = match id {
         "project-1" => "Project",

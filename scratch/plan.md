@@ -21,7 +21,7 @@ real records with a name, summary and status that start and end.
 ## The model
 
 - A Wave has exactly one Project, made with the Wave. A Project belongs to
-  exactly one Wave. `projects.wave_id` is unique and not null.
+  exactly one Wave. `projects.wave_id` is unique and not null in the branch schema. The release-staging conflict is recorded below.
 - A Task in a Wave is in that Wave's Project. A Task in no Wave has no
   Project. A Task's Wave is read through its Project, as on main:
   `tasks.wave_id`, the `task_wave` plan field, its writer rule, its DTO and
@@ -176,7 +176,8 @@ written empty, the ignored Wave `linear:` key) and fixtures that test them.
 - A Wave with several Projects keeps one: the newest started open one, else
   the newest. Its other Projects are deleted, with their `project_changes`
   and unsent `tracker_actions` retired; their Tasks move to the kept Project
-  locally, and nothing is written to the tracker for them. ("the old ones
+  locally. The migration queues no new moves. An outstanding create or
+  move keeps its place and translates its destination for retry. ("the old ones
   just dont matter".) Real store, 2026-11-22: `coverage` 8 Projects,
   `infrastructure` 7, `product` 6, `academy` 6, `experiments` 5; 1,071 of
   1,548 Tasks have a Project.
@@ -393,14 +394,14 @@ later (`tracker_actions::tests::a_task_left_in_a_removed_waves_project_is_not_cr
 `provider_columns_preserve_released_observations_and_local_execution` has its
 `initiative_ids` back; an Initiative sweep had taken it out.
 
-## Decision pass 3 — remaining Wave–Project recovery work
+## Decision pass 3 — Wave–Project recovery
 
 Slice 7 delivered live ownership on reconnect, retirement of stale Project
 edits, and readable completed history. Two independent failures still break
 the promise that saved Wave work can reach the configured tracker. The
 current walkthrough and both review choices are in `scratch/concept-review.html`.
 
-### First slice — keep pending Task delivery usable through upgrade
+### Slice 8 — keep pending Task delivery usable through upgrade
 
 Use the released-schema fixture in
 `rust/loopflow-storage/src/sqlite/children.rs`
@@ -432,7 +433,7 @@ create referencing the deleted ID. The foreign-key check was clean.
   move to a surviving destination still reaches it. Additional unrecognized
   fields in a queued create survive translation.
 
-### Next slice — make the advertised Wave sync retry work
+### Slice 9 — make the advertised Wave sync retry work
 
 A private checkout with a Linear Team and no login had a queued Project
 create for `billing`. After clearing its recorded error as a probe,
@@ -462,12 +463,34 @@ and use explicit sync to attempt delivery. A Project-less Team issue would
 lose membership. Making connect the only retry would contradict its receipt.
 Changing the snapshot semantics of all tracker creates is a separate outcome.
 
+On the released schema with 10,000 Tasks, 10,000 actions (300 open or
+conflicted) and 1,000 discarded Projects, the four queue updates took
+80 ms median over seven warm runs. The create scan used
+`tracker_actions_unconfirmed`, the membership scans used
+`tracker_actions_task`, and all four used the temporary dropped-ID index. Naming `base_json` in
+every send ran canonical identity triggers even for an unchanged payload
+(319 µs versus 122 µs per single-row update). Only a resend with a former
+chapter to clear updates that column.
+
 ## Remains
 
-1. Implement the two recovery slices above, starting with the released-store
-   queue fixture. Neither fix has been built in this review.
-
+1. Release staging is blocked. `uv run python scripts/check_migrations.py` rejects
+   `CREATE UNIQUE INDEX projects_wave ON projects(wave_id)`. The same
+   check fails on the migration at 9d6b93a125, before the delivery fixes.
+   A released writer can still add another chapter. The earlier plan's
+   suggestion that keeping every column makes this additive is contradicted
+   by that writer. Before landing, stage the one-Project representation in
+   a shape that accepts released writes.
 2. Gate: Swift DTO and desktop suites (`scripts/test_desktop.sh`), full matrix
    in CI, and check the `oauth_tests` contention failure on the base.
 3. Open, not this Task: a queued create's field snapshot (`scratch/concept-review.html`
    discussion of create snapshots).
+
+## Slice 6 (human-review answer, 2026-11-23)
+
+Jack Heart, on the plural Swift names: "1 - i dont think we should have a
+wavesprojectview anymore". Delete `WaveProjectsView` (the Project sheet) and
+everything that opens it, including the Backlog menu's **Project** item; the
+Wave header's Project name and tracker link (slice 4) is the one place a
+Wave's Project shows in Desktop. Question 2 (a queued create's snapshot)
+unanswered: stays as built.

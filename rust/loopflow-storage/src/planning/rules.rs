@@ -69,8 +69,10 @@ pub fn decide(
 ) -> Decision {
     match action.kind {
         ActionKind::Create => create(observed, parent_uncreated),
-        ActionKind::Field if parent_uncreated => Decision::Hold,
-        ActionKind::Field => field(action, observed),
+        ActionKind::Field => match field(action, observed) {
+            Decision::Send if parent_uncreated => Decision::Hold,
+            decision => decision,
+        },
         ActionKind::State => state(action, observed),
         ActionKind::Order => order(action, observed),
         ActionKind::Comment => comment(action, observed),
@@ -125,7 +127,11 @@ fn field(action: &TrackerAction, observed: Option<&Observed>) -> Decision {
     let Some(remote) = observed.values.iter().find(|v| v.field() == value.field()) else {
         return Decision::Send;
     };
-    if same(remote, &value) {
+    // An upgrade may have translated the destination of an outstanding move.
+    // Seeing its original destination also acknowledges that send.
+    let original_move_landed = matches!(remote, WorkValue::TaskProject(Some(project))
+        if action.phase == ActionPhase::Sent && action.sent_project() == Some(project.as_str()));
+    if same(remote, &value) || original_move_landed {
         return confirmed(observed);
     }
     if action.phase == ActionPhase::Queued {
@@ -353,6 +359,38 @@ mod tests {
             decide(&sent, Some(&holding(vec![title("Theirs")], "r3")), false),
             Decision::Send,
             "an unsent save goes out over a provider edit"
+        );
+    }
+
+    #[test]
+    fn a_sent_move_compares_the_chapter_it_reached_before_upgrade() {
+        let membership = |project: Option<&str>| WorkValue::TaskProject(project.map(str::to_owned));
+        let mut sent = action(
+            ActionKind::Field,
+            ActionPhase::Sent,
+            json!(membership(Some("kept"))),
+        );
+        sent.base = Some(json!({"value":membership(Some("source")), "sent_project":"former"}));
+        let observed = |project| holding(vec![membership(project)], "r2");
+        for destination in ["former", "kept"] {
+            assert!(matches!(
+                decide(&sent, Some(&observed(Some(destination))), false),
+                Decision::Resolve(Resolution::Confirmed { .. })
+            ));
+        }
+        assert_eq!(
+            decide(&sent, Some(&observed(None)), false),
+            Decision::Resolve(Resolution::Conflicted {
+                remote: json!({"revision":"r2","value":membership(None)})
+            })
+        );
+        assert_eq!(
+            decide(&sent, Some(&observed(Some("source"))), false),
+            Decision::Send
+        );
+        assert_eq!(
+            decide(&sent, Some(&observed(Some("source"))), true),
+            Decision::Hold
         );
     }
 

@@ -62,3 +62,6 @@
 - Decision pass 3 chose to have explicit Wave sync attempt a pending Project
   create using the configured tracker. The connect receipt already directs
   people there after a deferred send.
+- A sent membership edit keeps its former external destination in its saved
+  baseline until the next send. Finding the issue there confirms the original
+  move. Retrying from its observed source sends it to the kept Project.

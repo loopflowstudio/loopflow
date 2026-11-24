@@ -478,7 +478,7 @@ impl Drain<'_> {
         if !self
             .store
             .sqlite
-            .attempt_tracker_action(&action.id)
+            .attempt_tracker_action(action)
             .map_err(message)?
         {
             return Ok(Step::Done);

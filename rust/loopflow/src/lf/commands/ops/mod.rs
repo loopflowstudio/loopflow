@@ -21,7 +21,9 @@ use loopflow_execution::skills::SkillSyncOptions;
 use loopflow_execution::skills::{
     installed_skill_directories, installed_skill_registries, sync_skills,
 };
-use loopflow_execution::work::wave::context::planning_wave;
+use loopflow_execution::work::wave::context::{
+    planning_wave, resolve_managed_wave_sync, WaveResolveError,
+};
 use std::io::{self, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -497,48 +499,21 @@ pub fn sync_planning(
     Ok(())
 }
 
-/// What `lf wave sync` refreshed.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum PlanningRefresh {
-    /// No tracker: the repository's whole plan, from the hub.
-    Repository,
-    /// One Wave, from the Linear Project it links.
-    Wave(String),
-    /// A Wave whose Project links no Linear Project has nothing to read; its
-    /// local planning stands.
-    Unconnected(String),
-}
-
-impl PlanningRefresh {
-    pub fn wave(&self) -> Option<&str> {
-        match self {
-            Self::Repository => None,
-            Self::Wave(wave) | Self::Unconnected(wave) => Some(wave),
-        }
-    }
-}
-
-/// Refresh shared planning before `wave status --sync` reads it: the Wave from
-/// Linear, or without a tracker the repository's plan by each carrier it has.
-pub fn refresh_status(directory: &std::path::Path, wave: Option<&str>) -> Result<PlanningRefresh> {
-    let repo = loopflow_execution::repo::working_directory_in(directory)?;
-    if !loopflow_execution::ops::tracker::connected(&repo.to_string_lossy()) {
+/// Refresh the selected Wave, or exchange the repository plan by its carriers.
+pub fn refresh_status(directory: &Path, wave: Option<&str>) -> Result<Option<String>> {
+    let repo = crate::lf::commands::tracker::status_repository(directory)?;
+    let Some(tracker) = loopflow_execution::ops::tracker::queued_tracker(&repo) else {
         crate::lf::commands::tracker::refresh(&repo)?;
-        return Ok(PlanningRefresh::Repository);
-    }
-    let wave =
-        planning_wave(&repo, wave)?.ok_or_else(|| anyhow::anyhow!("Select a Wave to refresh"))?;
-    if loopflow_execution::ops::linear::wave_link(&repo, &wave)?.is_none() {
-        return Ok(PlanningRefresh::Unconnected(wave));
-    }
-    // The Team delta brings changes and comments in and pending saves go out,
-    // so a save left by an outage is delivered on the next refresh.
-    if let Err(error) = loopflow_execution::ops::planning_sync::refresh_directory(&repo) {
-        tracing::debug!(%error, "planning delivery pending before refresh");
-    }
-    tokio::runtime::Runtime::new()?
-        .block_on(loopflow_execution::ops::linear::refresh_wave(&repo, &wave))?;
-    Ok(PlanningRefresh::Wave(wave))
+        return Ok(None);
+    };
+    let wave = resolve_managed_wave_sync(Some(&repo), wave).map_err(|error| match error {
+        WaveResolveError::NoContext => anyhow!("Select a Wave to refresh"),
+        error => error.into(),
+    })?;
+    tokio::runtime::Runtime::new()?.block_on(
+        loopflow_execution::ops::planning_sync::refresh_wave(&wave, tracker),
+    )?;
+    Ok(Some(wave.slug().to_owned()))
 }
 
 pub fn reteam(repo: &std::path::Path, apply: bool, json: bool) -> Result<()> {

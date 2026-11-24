@@ -8,6 +8,8 @@
 - Jack Heart (on OSC 7501 `done` + New Task modal `?` font boxes): “done makes the task seem done but i dont tink thats what it means” / “isnt done then also available” / “yes, file it in, along with your other points” / “sorry, i meant to do both here”
 - Jack Heart (during live `/demo`, [demo-notes.md](demo-notes.md)): “whqt is that arrows button” / “well, it needs a on/off state, and maybe an on-hover” / “1a” (toggle view: On shows status-sorted sidebar without overwriting saved drags; Off restores Start-Time Stack / drag order) / “build it and return when ready”
 
+- Jack Heart on `#1973` (LOO-937) vs LOO-1063, 2026-11-24: “1063 is right”. Working sidebar order stays Machine-local in `task_orders`, apart from Project/backlog `planning_rank`.
+
 The [concept review at `14f44821e8`](concept-review.html) found that pinning an
 array index could pull Busy above Available and that the toggle was missing
 from Wave sidebars. `be25d7ddcb` replaced the index with a status group and
@@ -20,14 +22,20 @@ between `WorkNavigation` and `WorkModel`, plus two stale status sentences in
 
 ## Next
 
-The held status group has one owner: `WorkNavigation.destination` releases it
-on any Task switch, filter change or non-Working scope; `applyTaskList` captures
-the open Task's group from the reading before a new one replaces it; and
-`sidebarRows` applies it only to the selected Task. Covered by
-`aTurnAfterSwitchingFiltersKeepsTheOpenTaskInItsGroup` and
-`selectingAnotherTaskDirectlyReleasesTheHeldGroup`. Remaining: gate
-(`documented_commands::` for the `swift/README.md` edits; `WorkNavigationTests`
-passed locally).
+Gate. The held status group has one owner (`10df280f65`); merge `8742243abf`
+brought in `62a368e5cc` and `#1973`, with all 8 conflicts resolved toward
+LOO-1063's Working order. After the merge, `leaving_guard`, the 25
+`store::selections::tests` and `task_concepts_share_lifecycle_activity_membership_and_order`
+passed; `WorkNavigationTests` passed before it. Gate runs
+`documented_commands::` for the `swift/README.md` edits.
+
+Open: `task_facts_once.sql:84` (on origin/main, immutable) still marks
+`-- leaving: task_orders LOO-877`. The `STILL_READ` entry only stops test stores
+refusing the reads; `scripts/due_removals.py` will still list `task_orders` and
+start LOO-877's drop once the staging window passes. Nothing retracts a mark
+today. Choice for gate or review: add a retraction mark that
+`check_migrations.py`/`due_removals.py`/`leaving_guard.rs` honor (and drop the
+`STILL_READ` entry), or record on LOO-877 that `task_orders` stays.
 
 ## Built
 

@@ -8,7 +8,6 @@ The decisions and exact wording for B1 are in [plan.md](plan.md) and
 - Sorting by Graph step (`B2` in `explore.html`).
 - Smart “heading to the end” sink for `Auto` / `deliver` / settling PRs (`B3` in `explore.html`) — Jack Heart: “i think we need something like moving auto to the bottom, or being able to 'close' certain tasks, but auto has to be smart enough to know like if its moving towards the end, that coutn even if its not explicitly auto”.
 - Manual “Close / Park” for individual Working Tasks (`B4` in `explore.html`).
-- LOO-937's Project-rank redesign remains separate from Working sidebar order.
 - Surfacing `TaskCondition::Blocked` in selection queries.
 
 ## Private Machine QA (2026-11-23)

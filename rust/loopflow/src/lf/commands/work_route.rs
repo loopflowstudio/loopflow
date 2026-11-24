@@ -148,14 +148,10 @@ fn launch_task(cli: &Cli) -> Option<&str> {
         Some(Commands::Task {
             cmd: TaskCommand::Run { issue, .. } | TaskCommand::Checkout { issue, .. },
         }) => issue.as_deref().or(cli.task.as_deref()),
-        // `resume --task X` opens the Task's conversation where the Task runs.
+        // `resume [<session>] --task X` opens the Task's conversation where
+        // the Task runs, wherever that Session last moved.
         Some(Commands::Session {
-            cmd:
-                SessionCommand::Resume {
-                    id: None,
-                    connection,
-                    ..
-                },
+            cmd: SessionCommand::Resume { connection, .. },
         }) if connection.task.is_some() => connection.task.as_deref(),
         // Ownership is written only on the Task's writer.
         Some(Commands::Task {
@@ -263,11 +259,11 @@ pub fn dispatch(cli: &Cli, args: &[String]) -> Result<bool> {
 /// Where `lf <args>` run from `directory` goes instead of running here, if
 /// anywhere. Reads records only; nothing is sent.
 pub fn forward(cli: &Cli, args: &[String], directory: &Path) -> Result<Option<Forward>> {
-    if let Some(forward) = moved_session(cli, args)? {
-        return Ok(Some(forward));
-    }
     let worktree_task = worktree_task(cli, directory)?;
     let Some(selector) = launch_task(cli).or(worktree_task.as_deref()) else {
+        if let Some(forward) = moved_session(cli, args)? {
+            return Ok(Some(forward));
+        }
         return primary_session(cli, args, directory);
     };
     let Some(store) = read_registry()? else {

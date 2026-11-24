@@ -60,7 +60,10 @@ macro_rules! writes {
                 if let Some(directory) = self.directory_mut() {
                     *directory = super::work_route::repository_path(&sender.repository)?;
                 }
-                if let Self::TaskSave { issue, .. } | Self::SessionResume { id: None, task: Some(issue), .. } = &mut self {
+                if let Self::TaskSave { issue, .. }
+                | Self::SessionResume { task: Some(issue), .. }
+                | Self::SessionNew { task: Some(issue), .. } = &mut self
+                {
                     *issue = super::work_route::peer_task_id(&sender.repository, issue)?;
                 }
                 let environment = sender.selection.environment(&sender.secrets)?;
@@ -420,6 +423,9 @@ writes! {
         directory: PathBuf,
         request_id: String,
         id: String,
+        /// The Task whose conversation this is; it is prepared where that Task runs.
+        #[serde(deserialize_with = "Option::deserialize")]
+        task: Option<String>,
         agent: Option<String>,
     } => loopflow_execution::ops::human_session::SessionRecord;
     { .. } => self.prepare_session(remote)?,
@@ -1213,7 +1219,7 @@ impl Write {
         use loopflow_execution::machine::task::{remote_ownership_writer, remote_task};
         // A run starts agents there, which carry what `forward` names.
         let (route, launching) = match self {
-            Self::SessionResume { .. } => return self.remote_session(),
+            Self::SessionResume { .. } | Self::SessionNew { .. } => return self.remote_session(),
             Self::TaskRun { issue, .. } | Self::TaskAutoOn { issue, .. } => {
                 (remote_task(issue, None)?, true)
             }
@@ -1258,29 +1264,43 @@ impl Write {
         Remote::new(machine, route.repository_id, write, launching, source).map(Some)
     }
 
-    /// A resume of a conversation that lives on another Machine, carrying the
-    /// Task and Wave this host resolved.
+    /// A conversation that lives on another Machine, prepared there. A named
+    /// Task decides the Machine, wherever its Session last moved; otherwise
+    /// `lf` routes the spelling as it would from a terminal.
     fn remote_session(&self) -> anyhow::Result<Option<Remote>> {
-        let Self::SessionResume {
-            directory,
-            id,
-            task,
-            wave,
-            agent,
-        } = self
-        else {
-            return Ok(None);
+        let (directory, task) = match self {
+            Self::SessionResume {
+                directory, task, ..
+            }
+            | Self::SessionNew {
+                directory, task, ..
+            } => (directory, task),
+            _ => return Ok(None),
         };
-        let (cli, args) = self.session_spelling()?;
-        let Some(forward) = super::work_route::forward(&cli, &args, directory)? else {
-            return Ok(None);
+        let (machine, route, wave, repository) = match task {
+            Some(task) => {
+                let Some(route) =
+                    loopflow_execution::machine::task::remote_task(task, Some(directory))?
+                else {
+                    return Ok(None);
+                };
+                (route.machine_id.clone(), Some(route), None, None)
+            }
+            None => {
+                let (cli, args) = self.session_spelling()?;
+                let Some(forward) = super::work_route::forward(&cli, &args, directory)? else {
+                    return Ok(None);
+                };
+                (
+                    forward.machine,
+                    forward.route,
+                    forward.wave,
+                    forward.repository,
+                )
+            }
         };
-        let machine = find_machine(forward.machine.as_str())?;
-        let repository = match forward.repository.clone().or(forward
-            .route
-            .as_ref()
-            .map(|route| route.repository_id.clone()))
-        {
+        let machine = find_machine(machine.as_str())?;
+        let repository = match repository.or(route.as_ref().map(|route| route.repository_id.clone())) {
             Some(repository) => repository,
             None => loopflow_execution::machine::task::current_repository(directory)?
                 .ok_or_else(|| {
@@ -1290,18 +1310,29 @@ impl Write {
                     )
                 })?,
         };
-        let write = Self::SessionResume {
-            directory: directory.clone(),
-            id: id.clone(),
-            task: match (&forward.route, id) {
-                (Some(route), None) => Some(route.peer_selector.clone()),
-                _ => task.clone(),
-            },
-            wave: wave.clone().or(forward.wave),
-            agent: agent.clone(),
-        };
+        let mut write = self.clone();
+        match &mut write {
+            Self::SessionResume {
+                task,
+                wave: resumed,
+                ..
+            } => {
+                if let Some(route) = &route {
+                    *task = Some(route.peer_selector.clone());
+                }
+                if resumed.is_none() {
+                    *resumed = wave;
+                }
+            }
+            Self::SessionNew { task, .. } => {
+                if let Some(route) = &route {
+                    *task = Some(route.peer_selector.clone());
+                }
+            }
+            _ => {}
+        }
         let mut remote = Remote::new(machine, repository, write, false, None)?;
-        remote.route = forward.route;
+        remote.route = route;
         Ok(Some(remote))
     }
 
@@ -1589,7 +1620,7 @@ mod tests {
             r#"{"kind":"task.auto.off","directory":"/r","issue":"FIX-1","reason":null}"#,
             r#"{"kind":"desktop.portfolio.set","change":{"action":"remove","path":"/r"}}"#,
             r#"{"kind":"session.resume","directory":"/r","id":null,"task":null,"wave":null,"agent":null}"#,
-            r#"{"kind":"session.new","directory":"/r","request_id":"new-thread","id":"session_1","agent":"codex"}"#,
+            r#"{"kind":"session.new","directory":"/r","request_id":"new-thread","id":"session_1","task":"FIX-1","agent":"codex"}"#,
             r#"{"kind":"task.save","directory":"/","issue":"FIX-1","path":"a.txt","revision":"r","content":"text"}"#,
             r#"{"kind":"task.run","directory":"/r","issue":"FIX-1","graph":null,"from":"implement","agent":"claude","approve":false}"#,
             r#"{"kind":"task.auto.on","directory":"/r","issue":"FIX-1"}"#,

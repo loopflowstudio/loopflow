@@ -18290,6 +18290,13 @@
             },
             "request_id": {
               "type": "string"
+            },
+            "task": {
+              "description": "The Task whose conversation this is; it is prepared where that Task runs.",
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           "required": [
@@ -18297,6 +18304,7 @@
             "directory",
             "request_id",
             "id",
+            "task",
             "agent"
           ],
           "type": "object",

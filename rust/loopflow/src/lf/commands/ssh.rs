@@ -440,16 +440,27 @@ pub(crate) fn localize_remote_session(
             .into();
         }
     }
-    if let (Some(route), Some(task_ids)) = (
-        route,
-        record
-            .get_mut("task_ids")
-            .and_then(serde_json::Value::as_array_mut),
-    ) {
-        let local = serde_json::Value::from(route.task_id.to_string());
-        if !task_ids.contains(&local) {
-            task_ids.push(local);
-        }
+    let Some(route) = route else {
+        return Ok(());
+    };
+    // Readers take a record's Task from its first ID, its Work and its
+    // workspace; each names the Task as this Machine knows it.
+    let local = serde_json::Value::from(route.task_id.to_string());
+    if let Some(task_ids) = record
+        .get_mut("task_ids")
+        .and_then(serde_json::Value::as_array_mut)
+    {
+        task_ids.retain(|id| id != &local);
+        task_ids.insert(0, local.clone());
+    }
+    if let Some(work) = record.get_mut("work").filter(|work| work["kind"] == "task") {
+        work["id"] = local.clone();
+    }
+    if let Some(task_id) = record
+        .pointer_mut("/workspace/task_id")
+        .filter(|task_id| !task_id.is_null())
+    {
+        *task_id = local;
     }
     Ok(())
 }
@@ -547,6 +558,8 @@ mod tests {
         json!({
             "id": "session_1",
             "task_ids": [peer_task],
+            "work": { "kind": "task", "id": peer_task },
+            "workspace": { "machine_id": "MACHINE_PEER", "worktree": "/src/app", "task_id": peer_task, "unavailable": null },
             "open_argv": ["/opt/lf", "resume", "session_1"],
             "action": {
                 "label": "Open here",
@@ -584,9 +597,26 @@ mod tests {
                 "--here"
             ]
         );
+        let local = route.task_id.to_string();
+        assert_eq!(record["task_ids"], json!([local, "TASK_PEER"]));
+        assert_eq!(record["work"], json!({ "kind": "task", "id": local }));
+        assert_eq!(record["workspace"]["task_id"], local.as_str());
+    }
+
+    #[test]
+    fn a_routed_record_keeps_other_work_and_an_unowned_workspace() {
+        let machine = mini();
+        let route = route_on(&machine);
+        let mut record = remote_record("TASK_PEER");
+        record["work"] = json!({ "kind": "wave", "id": "WAVE_PEER" });
+        record["workspace"]["task_id"] = serde_json::Value::Null;
+        record["task_ids"] = json!(["TASK_OTHER", route.task_id.to_string()]);
+        localize_remote_session(&mut record, &machine, Some(&route)).unwrap();
+        assert_eq!(record["work"], json!({ "kind": "wave", "id": "WAVE_PEER" }));
+        assert!(record["workspace"]["task_id"].is_null());
         assert_eq!(
             record["task_ids"],
-            json!(["TASK_PEER", route.task_id.to_string()])
+            json!([route.task_id.to_string(), "TASK_OTHER"])
         );
     }
 

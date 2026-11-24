@@ -1394,6 +1394,7 @@ fn server_operations_match_their_lf_commands() {
                     request_id: "new-thread-parity".into(),
                     directory: directory.clone(),
                     id: session.clone(),
+                    task: None,
                     agent: None,
                 },
                 // No fixture Session uses Pi, so this selection moves nothing.
@@ -2333,6 +2334,7 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
             id,
             agent,
             request_id,
+            task: _,
         } => {
             let mut spelled = Vec::new();
             if let Some(agent) = agent {
@@ -3213,6 +3215,7 @@ fn served_session_new_recovers_its_input_after_a_lost_reply_and_restart() {
         directory: repo.path().into(),
         id: id.into(),
         request_id: "lost-thread".into(),
+        task: None,
         agent: None,
     };
     let mut socket = UnixStream::connect(loopflow::server::socket_path().unwrap()).unwrap();

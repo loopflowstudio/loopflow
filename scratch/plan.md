@@ -487,9 +487,6 @@ chapter to clear updates that column.
    in CI, and check the `oauth_tests` contention failure on the base.
 2. Open, not this Task: a queued create's field snapshot (`scratch/concept-review.html`
    discussion of create snapshots).
-3. Name in the PR body: two Machines creating the same Asana Project at the
-   same moment can still make two (footer read and POST are not atomic);
-   Linear's client id rules it out (slice 11).
 
 Concept review after slice 11 (`scratch/concept-review.html`): product and
 code concepts line up everywhere, multi-Machine Project creation included. Left:
@@ -637,6 +634,3 @@ not here; the gate's sync brings it.
 Two choices differ from the slice text; see `scratch/questions.md`:
 tracker down leaves the Wave recorded with its Project unbound (rerunning
 `lf wave create` makes it), and a Task sent into an unbound Project creates it.
-
-Remains 3 (the Asana race) no longer applies: a Project is created by one
-command on one Machine.

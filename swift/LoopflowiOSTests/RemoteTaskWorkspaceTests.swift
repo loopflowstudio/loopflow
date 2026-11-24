@@ -74,9 +74,10 @@ final class RemoteTaskWorkspaceTests: XCTestCase {
             XCTAssertEqual(primary, session)
             try await client.start(.session(session), task: task.id, request: UUID().uuidString.lowercased(), size: size)
             let viewer = try await world.redeem(try await client.ticket(.session(session), task: task.id))
-            try await viewer.waitFor("provider on mini in \(checkout.path)")
+            // Mini's server may start the prepared conversation before the viewer
+            // attaches, so the provider's reply, not its first line, says where it runs.
             try viewer.type("hello\r")
-            try await viewer.waitFor("mini received hello")
+            try await viewer.waitFor("mini received hello in \(checkout.path)")
             try viewer.type("quit\r")
             try await world.closeShell(task.id, startedOn: nil)
 
@@ -207,13 +208,12 @@ private final class TwoMachines {
             export LF_HOME=\(shellEscape(remote.appendingPathComponent("store").path)) LF_BIN=\(shellEscape(binary))
             exec \(shellEscape(binary)) "$@"
             """)
-        // Mini's provider: it names where it runs and answers each line typed into it.
+        // Mini's provider: it answers each line typed into it with where it runs.
         try Self.executable(remote.appendingPathComponent("bin/claude"), """
             #!/bin/bash
             if [ "$1" = --version ]; then echo '2.1.302'; exit; fi
-            printf 'provider on mini in %s\\n' "$PWD"
             while IFS= read -r -t 60 line < /dev/tty; do
-              printf 'mini received %s\\n' "$line"
+              printf 'mini received %s in %s\\n' "$line" "$PWD"
               [ "$line" = quit ] && exit 0
             done
             """)
@@ -493,10 +493,11 @@ private final class TerminalConnection: @unchecked Sendable {
 
     func type(_ text: String) throws { try writeAll(fd, OwnerStream.input(Data(text.utf8))) }
 
-    /// Read the terminal until it has shown `expected`.
+    /// Read the terminal until it has shown `expected`. Line breaks are ignored: a snapshot
+    /// soft-wraps a line longer than the 80 columns, as a long checkout path is on CI.
     func waitFor(_ expected: String) async throws {
         let deadline = ContinuousClock.now + .seconds(20)
-        while !text.contains(expected) {
+        while !text.filter({ $0 != "\r" && $0 != "\n" && $0 != "\r\n" }).contains(expected) {
             guard ContinuousClock.now < deadline else { throw RegistryQueryError("The terminal never showed \(expected): \(text)") }
             let fd = fd
             let bytes = try await Task.detached { try readSome(fd, timeout: 1) }.value

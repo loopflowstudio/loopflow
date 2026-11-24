@@ -543,23 +543,23 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: Option<PrCommand>,
     },
-    /// Commit changes
+    /// Commit changes and push unless on the default branch
     Commit {
         #[arg(short = 'm', long = "message")]
         message: Option<String>,
-        /// Push the branch after committing
-        #[arg(short = 'p', long = "push")]
-        push: bool,
+        /// Keep the commit local
+        #[arg(long)]
+        no_push: bool,
         #[arg(long = "no-add")]
         no_add: bool,
         /// Commit only these paths, preserving other staged and unstaged edits
-        #[arg(value_name = "PATH", conflicts_with_all = ["no_add", "push"])]
+        #[arg(value_name = "PATH", conflicts_with = "no_add")]
         paths: Vec<String>,
         /// Print what the commit left
         #[arg(long)]
         json: bool,
         /// Commit everything a finished skill step left, titled `lf <SKILL>: …`, and push
-        #[arg(long, value_name = "SKILL", conflicts_with_all = ["message", "no_add", "push", "paths", "json"])]
+        #[arg(long, value_name = "SKILL", conflicts_with_all = ["message", "no_add", "no_push", "paths", "json"])]
         step: Option<String>,
     },
     /// Merge upstream into the current branch (default: main or stack parent)

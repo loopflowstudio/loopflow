@@ -114,12 +114,10 @@ fn walk<'a>(
             step,
         );
         if let ConcreteStep::Xor(branch) = step {
-            let mut names: Vec<_> = branch.paths.keys().collect();
-            names.sort();
-            for name in names {
+            for (name, alternative) in &branch.paths {
                 let mut path = path.to_vec();
                 path.push((index, name.clone()));
-                walk(&branch.paths[name].steps, &path, visit);
+                walk(&alternative.steps, &path, visit);
             }
         }
     }
@@ -209,11 +207,8 @@ impl CapturedGraph {
                         }
                     }
                     ConcreteStep::Xor(branch) => {
-                        let mut names: Vec<_> = branch.paths.keys().collect();
-                        names.sort();
-                        if let Some(step) = names
-                            .into_iter()
-                            .find_map(|name| scan(&branch.paths[name].steps, 0))
+                        if let Some(step) =
+                            branch.paths.values().find_map(|path| scan(&path.steps, 0))
                         {
                             return Some(step);
                         }
@@ -280,7 +275,8 @@ impl CapturedGraph {
 
     /// What a person calls the step `cursor` stands at, if the graph has it.
     pub fn step_name_of(&self, cursor: &ExecutionCursor) -> Option<String> {
-        self.place_of(cursor).map(|place| self.step_name(&place))
+        let (body, leaf) = cursor.current_body(&self.steps);
+        body.get(leaf.index).map(step_name)
     }
 
     /// Steps a person would name for `--from`, for messages.
@@ -353,7 +349,7 @@ fn workflow(steps: &[ConcreteStep]) -> (Vec<WorkflowStep>, Vec<u32>) {
 
 /// What a person calls `step`; an operation by the display name its Graph
 /// records it under.
-fn step_name(step: &ConcreteStep) -> String {
+pub fn step_name(step: &ConcreteStep) -> String {
     match step {
         ConcreteStep::Command(command) => command.item.display_name(),
         step => names(step)[0].to_owned(),
@@ -445,6 +441,15 @@ pub enum TaskGraphPosition {
     },
 }
 
+impl TaskGraphPosition {
+    /// Where the Task waits, or the step its run left.
+    pub fn step(&self) -> &str {
+        match self {
+            Self::At { step } | Self::Run { step, .. } => step,
+        }
+    }
+}
+
 /// A Task's run as its Graph row holds it.
 #[derive(Debug, Clone)]
 pub struct TaskGraphRun<'a> {
@@ -534,9 +539,7 @@ impl TaskGraph {
 
     /// Where the Task waits, or the step its run left.
     pub fn step(&self) -> &str {
-        match &self.position {
-            TaskGraphPosition::At { step } | TaskGraphPosition::Run { step, .. } => step,
-        }
+        self.position.step()
     }
 
     /// The interactive step a person takes part at now, such as `explore`.

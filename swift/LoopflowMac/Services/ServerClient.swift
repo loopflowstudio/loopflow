@@ -87,6 +87,9 @@ private actor ServerLinks {
     private var owners: [ObjectIdentifier: Owner] = [:]
     private var links: [ObjectIdentifier: Task<ServerLink, any Error>] = [:]
     private var failures: [ObjectIdentifier: Int] = [:]
+    /// Callers awaiting each location's opening, and how many of them cancelled;
+    /// when every one has, the opening is cancelled.
+    private var waiting: [ObjectIdentifier: (callers: Int, cancelled: Int)] = [:]
 
     func link(for location: ServerLocation) async throws -> ServerLink {
         let key = ObjectIdentifier(location)
@@ -100,7 +103,7 @@ private actor ServerLinks {
         while let opening = links[key] {
             // A failed open answers everyone it kept waiting; only a link that
             // opened and later closed is worth another attempt.
-            let link = try await opening.value
+            let link = try await wait(for: opening, key: key)
             if await !link.isClosed { return link }
             if links[key] == opening { links[key] = nil }
         }
@@ -108,18 +111,46 @@ private actor ServerLinks {
         let opening = Task {
             if attempt > 0 { try await Task.sleep(for: .milliseconds(min(100 << (attempt - 1), 3200))) }
             let path = try await location.path()
-            return try await ServerLink.open(.unix(path: path))
+            try Task.checkCancellation()
+            let link = try await ServerLink.open(.unix(path: path))
+            if Task.isCancelled {
+                await link.close()
+                throw CancellationError()
+            }
+            return link
         }
         links[key] = opening
         do {
-            let link = try await opening.value
+            let link = try await wait(for: opening, key: key)
             failures[key] = 0
             return link
         } catch {
-            failures[key] = attempt + 1
+            if !opening.isCancelled { failures[key] = attempt + 1 }
             if links[key] == opening { links[key] = nil }
             throw error
         }
+    }
+
+    /// A link nobody waits for any more is not opened: a cancelled reader
+    /// must not connect to a server that starts after it stopped.
+    private func wait(for opening: Task<ServerLink, any Error>, key: ObjectIdentifier) async throws -> ServerLink {
+        waiting[key, default: (0, 0)].callers += 1
+        defer {
+            let left = waiting[key, default: (1, 0)]
+            waiting[key] = left.callers > 1 ? (left.callers - 1, left.cancelled) : nil
+        }
+        return try await withTaskCancellationHandler {
+            try await opening.value
+        } onCancel: {
+            Task { await self.abandon(opening, key: key) }
+        }
+    }
+
+    private func abandon(_ opening: Task<ServerLink, any Error>, key: ObjectIdentifier) {
+        guard var waiters = waiting[key], links[key] == opening else { return }
+        waiters.cancelled += 1
+        waiting[key] = waiters
+        if waiters.cancelled >= waiters.callers { opening.cancel() }
     }
 }
 

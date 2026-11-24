@@ -195,7 +195,7 @@ impl ExecutionCursor {
     }
 
     /// Return no executable steps when the selection has no captured definition.
-    pub fn current_body<'a>(&'a self, steps: &'a [ConcreteStep]) -> (&'a [ConcreteStep], &'a Self) {
+    pub fn current_body<'a>(&self, steps: &'a [ConcreteStep]) -> (&'a [ConcreteStep], &Self) {
         match self.child.as_deref() {
             Some(NestedCursor::Xor { selected, cursor }) => {
                 match selected_body(steps, self.index, selected) {
@@ -343,7 +343,7 @@ mod tests {
     };
     use anyhow::{anyhow, Result};
     use async_trait::async_trait;
-    use std::collections::{HashMap, VecDeque};
+    use std::collections::{BTreeMap, HashMap, VecDeque};
     use std::path::{Path, PathBuf};
     use std::sync::{Arc, Mutex};
     use tempfile::tempdir;
@@ -524,7 +524,7 @@ mod tests {
     fn xor(graph: &str, repo: &Path) -> ConcreteStep {
         ConcreteStep::Xor(ConcreteXor {
             router: Skill::named("xor-route"),
-            paths: HashMap::from([(
+            paths: BTreeMap::from([(
                 "selected".to_owned(),
                 ConcretePath {
                     steps: crate::graph::compile_graph(
@@ -954,7 +954,7 @@ mod tests {
             ConcreteStep::Xor(ConcreteXor {
                 router: Skill::named("xor-route"),
                 sources: vec![],
-                paths: HashMap::from([(
+                paths: BTreeMap::from([(
                     "silence".to_owned(),
                     ConcretePath {
                         steps: vec![],
@@ -1033,7 +1033,7 @@ mod tests {
         let runner = GraphRunner::new(executor.clone());
         let items = vec![ConcreteStep::Xor(ConcreteXor {
             router: Skill::named("xor-route"),
-            paths: HashMap::from([(
+            paths: BTreeMap::from([(
                 "ship".to_string(),
                 ConcretePath {
                     steps: crate::graph::compile_graph(
@@ -1086,7 +1086,7 @@ mod tests {
 
         let items = vec![ConcreteStep::Xor(ConcreteXor {
             router: Skill::named("xor-route"),
-            paths: HashMap::from([(
+            paths: BTreeMap::from([(
                 "ship".to_string(),
                 ConcretePath {
                     steps: crate::graph::compile_graph(

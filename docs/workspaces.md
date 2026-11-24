@@ -44,11 +44,10 @@ lf open --task LOO-12 --session session_9f2 --tab  # one of LOO-12's Sessions, o
 lf open --machine code-1 --session session_4ab --tab  # a Session that exists only on code-1
 ```
 
-`lf open` always presents on the Machine you type it on. The tab opens in your
-host here and attaches to the conversation where it runs, through this
-Machine's Loopflow server; every host (Desktop, Rex, cmux, Herdr, tmux) works
-the same way. `lf --machine code-1 open …` means the same as
-`lf open --machine code-1 …`: it never runs `lf open` on the other Machine.
+`lf open` always presents on the Machine you type it on. With `--tab`, Rex,
+cmux, Herdr, and tmux open a local tab that attaches to the conversation through
+this Machine's Loopflow server. `lf --machine code-1 open …` means the same as
+`lf open --machine code-1 …`.
 
 The Task names its Machine, so `--task` needs no `--machine`. A checkout of the
 Task left on this Machine from before it moved is never opened in its place.

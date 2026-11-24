@@ -4421,11 +4421,6 @@ fn open_remote_workspace() {
         )
         .unwrap();
     }
-    peer.execute(
-        "INSERT INTO task_primary_sessions(task_id,session_id) VALUES(?1,?2)",
-        [task.as_str(), &sessions[0]],
-    )
-    .unwrap();
     fs::write(
         remote.join(".claude.json"),
         r#"{"projects":{"/":{"hasTrustDialogAccepted":true}}}"#,
@@ -4446,21 +4441,36 @@ done
 exit 1
 "#,
     );
-    // The first tab adds a view to a running primary. The other Sessions
-    // have only saved history and must continue before the tab can type.
-    loopflow_execution::machine::client::Connection::open_at(&server_socket(
-        &remote.join("store"),
-        "machine",
-    ))
-    .unwrap()
-    .request(loopflow::server::wire::ServerOperation::SessionContinue {
-        session: sessions[0].as_str().into(),
-        task: None,
-        machine: None,
-        request: "existing-primary".into(),
-        rows: 24,
-        cols: 80,
-    })
+    // Start before marking it primary so the recovery watcher sees a running
+    // conversation. The other Sessions have only saved history.
+    let peer_socket = server_socket(&remote.join("store"), "machine");
+    let mut client =
+        loopflow_execution::machine::client::Connection::open_at(&peer_socket).unwrap();
+    let primary: loopflow_model::id::LfSessionId = sessions[0].as_str().into();
+    let started = client
+        .request(loopflow::server::wire::ServerOperation::SessionContinue {
+            session: primary.clone(),
+            task: None,
+            machine: None,
+            request: "existing-primary".into(),
+            rows: 24,
+            cols: 80,
+        })
+        .unwrap();
+    let started: loopflow::server::wire::SessionStarted =
+        serde_json::from_value(started.result).unwrap();
+    let attached = client
+        .session_ticket(&primary, Some(started.terminal_id), None, None)
+        .unwrap();
+    bridged_terminal(
+        &peer_socket,
+        &attached.ticket,
+        &format!("mini {}", threads[0]),
+    );
+    peer.execute(
+        "INSERT INTO task_primary_sessions(task_id,session_id) VALUES(?1,?2)",
+        [task.as_str(), &sessions[0]],
+    )
     .unwrap();
     executable(
         &fixture.root.path().join("bin/tmux"),

@@ -9,6 +9,8 @@
 
 Derived from the Infrastructure Wave KRs: advancing and inspecting Tasks without Loopflow's plumbing blocking or misleading the person.
 
+The Task brief says “Ownership selects the execution Machine” and “`lf open` always presents on the calling Machine” (`.lf/prompts/20261123-211925-f4be887c-cb6f-45ac-bbbe-bdc514fccc5d-pCD10W-summary.md`). The Desktop regression is the MTG-421 error quoted above.
+
 ## The model (concept review, 2026-11-23)
 
 **The Task is the address.** A person opens a Task; the Task is on one Machine; every view shows that Machine's checkout. No client holds a second opinion about where the Task is, so nothing needs comparing.
@@ -50,6 +52,12 @@ The server shares idle peer connections across repositories, passing a `Sender` 
 - The local plan row names the owner in `runtime.owner`. Its `reference.workspace` is null while a peer owns the Task, even if a local checkout still exists. A routed `task.get` returns the owning Machine’s row and checkout.
 - The same ownership rule applies to local Task snapshots and the Task record in status. The checkout row stays in storage.
 
+## CLI behavior in place
+
+Both positions of `--machine` select the same registered Machine for `open`. A remote tab starts local `lf open --here` with the Task or Machine and exact Session selectors. The tab command can be replayed, and its host uses a local presentation directory. The original plan sent owner and repository selectors through a remote resume command. The Task selector alone is enough for the server to route a Task Session, and a Machine-only Session needs only its Machine and Session IDs.
+
+The owner's `task.get` supplies the checkout and validates an exact Session's Task membership. For a primary, `session.resume` uses the existing resolver on the owner. The viewer requests `session.attach` first and calls `session.continue` only when the refusal identifies the Session as having no running terminal. The next attach names the terminal just started. The tab reports usable when the peer's terminal acknowledges readiness. The retry command retains the selectors.
+
 ## Client work remaining
 
 ### 5. Desktop (`swift/LoopflowMac/WorkModel.swift`, `Views/SessionsView.swift`, `TaskFileDocument.swift`, `Views/TaskWorkView.swift`, `Views/WorkspacePanesView.swift`, `swift/Loopflow/Services/RegistryQuery.swift`)
@@ -63,14 +71,13 @@ The server shares idle peer connections across repositories, passing a `Sender` 
   - Keep the terminal's Machine label when the workspace moves. `SessionAttached` in `machine/wire.rs` currently supplies the ticket, terminal ID and expiry. Carry the Machine chosen by the server through the attachment receipt during the Desktop migration so the pane can label the actual process even if ownership changes between readings. Mobile uses the same receipt.
   - Unsaved drafts stay keyed by `(Task, path, base revision)`. Saving after a move goes to the new owner; a revision mismatch shows the existing save conflict with both versions and keeps the draft.
   - Render **Not started** for `not_found` with `reason == "not_started"`. On peer outages, show the Machine named in the routed error or the subscription's `unavailable` reading and offer **Retry**.
-  - For Task shells: `SessionsWorkspace.shellAttachment` runs local `lf desktop shell <issue> --id <tab.id> [--create --bootstrap <json>]` (no `--machine`, no `--checkout` local path assumptions), and `closePane` calls `task.shell.close` through `ServerClient` instead of spawning `lf --machine ... desktop shell --close`.
-  - For Task Sessions, give Desktop's `SessionRecord.open_argv` the local terminal attachment path from Slice 2. Remove the raw `ssh` argv that `prepared_remotely` builds for Desktop. When opening a Machine-only Session link, carry its `machine` query to the attachment.
+  - For Task shells, `SessionsWorkspace.shellAttachment` runs local `lf desktop shell <issue> --id <tab.id> [--create --bootstrap <json>]`. `closePane` uses `task.shell.close` through `ServerClient`. Desktop's Close ends the process on the Machine where it started. Today `task.shell.close` follows current Task ownership, so it would leave a pre-move shell running when the new owner cannot find its ID. Carry the shell's issuing Machine for explicit Close and keep new shells addressed by Task.
+  - For Task Sessions, reuse Slice 2's local attachment in `SessionRecord.open_argv`. `Write::prepare_session` and the direct CLI's `--prepare` both call `ssh::prepared_remotely`. Replace that shared preparation path with a local viewer command that retains the Task or Machine and exact Session. Keep the direct interactive `lf --machine … resume` path. Carry `WorkUrl.machine` into the Desktop attachment for a Machine-only Session.
 
 ### 6. Mobile (`swift/LoopflowiOS/TaskWorkspaceView.swift`, `RemoteMobileClient.swift`, `SessionLink.swift`)
 
 - **Single pairing, four viewers:** Keep the existing single Tailscale pairing to the user's primary Machine server. All four viewers (**Session**, **Files**, **Changes**, **Shell**) talk to that paired server, which routes to the Task's owning Machine transparently.
-- **Finding (Mobile primary Session discovery on remote Tasks):** `TaskWorkspaceView.swift:87-106` calls `client.task(id:directory:)` (`desktop.view.get`) on the paired laptop, which reads local SQLite and returns `primarySession == nil` for a remote-Machine Task.
-  - Read the owner's primary Session selection through the routed Task reading and pass the Task ID to `session.attach` and `session.continue` in `RemoteMobileClient`. Share the primary selection with the CLI path where it fits.
+- `TaskWorkspaceView.openConversation` asks the paired laptop's `desktop.view.get` for the primary, which can be absent locally. The routed `task.get` overview lists Session membership and carries no primary ID. Project the owner's saved primary through that reading using the existing Task primary selection. Use it for initial open and later readings, and pass the Task ID to `session.attach` and `session.continue` in `RemoteMobileClient`. Share the selection with the CLI where it fits.
 - **Files viewer (tree + unchanged files):**
   - Add `TaskFilesTreeView` inside `TaskWorkspaceView` (accessible from the Task workspace segmented control / toolbar alongside Session, Changes, and Shell).
   - Calls `client.query.taskFiles(issue: task.id, path: dir, ...)` to browse directories (with pagination via `next_cursor`) and opens any file (including **unchanged** files) in the existing `TaskFileView` (`client.query.taskFile(issue: task.id, path: path)`).
@@ -81,12 +88,6 @@ The server shares idle peer connections across repositories, passing a `Sender` 
   - Unstarted Task (`not_found { reason: "not_started" }` or `reading.checkout == nil` on an unstarted Task): show **Not started** on Files, Changes, and Shell (never `"No changes yet"` or a local shell).
   - On peer outages, show the Machine named in the routed error or the subscription's `unavailable` reading and offer **Try again**.
   - Task moved: the routed `task.get` subscription names the new Machine when it receives its checkout. Keep following through an intermediate null workspace. The workspace header updates and Files/Changes reload. Reattaching an old shell answers ended and offers **New shell**.
-
-### 7. CLI `lf open`
-
-Both positions of `--machine` select the same registered Machine for `open`. A remote tab starts local `lf open --here` with the Task or Machine and exact Session selectors. Its host uses a local presentation directory. On a Task, the routed pane supplies the checkout and Session membership. For a primary, the owner prepares its conversation through `session.resume`.
-
-The viewer requests `session.attach` first. A typed refusal identifying the Session as having no running terminal allows `session.continue`. The next attach names the terminal it started. The tab reports usable when the peer terminal's native client acknowledges readiness. Its retry command retains the selectors.
 
 ## Affected surfaces and consumers
 
@@ -143,7 +144,7 @@ After a move, an open shell continues on its original Machine. Reattaching by `s
 - `swift/LoopflowMac/WorkModel.swift`: `LinkedSession.location`, `onMachine` / `taskLocation` double-SSH probe in `prepareLinkedTask`.
 - `swift/LoopflowMac/Views/TaskWorkView.swift`: `onMachine` / `pinTaskLocation` branch in `GraphProcessLog`.
 - `swift/LoopflowMac/TaskFileDocument.swift`: `query.remoteMachine` branches and `observeRemoteFiles` subprocess watcher (replaced by server-routed `task.files.watch` subscription).
-- `rust/loopflow/src/lf/commands/ssh.rs`: `prepared_remotely` wrapping `open_argv` in raw `ssh` for Desktop (replaced by local server-routed `lf session attach` while keeping CLI `lf --machine <m> resume` interactive SSH working if invoked directly).
+- `rust/loopflow/src/lf/commands/ssh.rs`: the raw SSH viewer argv produced by `prepared_remotely`. Use the local attachment path and keep direct interactive `lf --machine <m> resume` working.
 - Obsolete Swift tests asserting `RegistryQuery.onMachine` / `pinTaskLocation` subprocess args (replaced with server-routed tests in `RemoteTaskWorkspaceTests` and updated `TaskFilesTests` / `RegistryQueryTests`).
 
 **Must survive:**
@@ -179,13 +180,13 @@ Build thinly end to end in four slices; each slice runs and proves itself before
 
    `cargo test -p loopflow --test integration open_remote_workspace` passed in 21.92 s. The fixture prestarted the primary on mini, retained a separate stale checkout on the laptop, and opened the Machine-only Session from outside Git. All four receipts reported usable and kept their retry selectors. The existing local cmux Task-tab check passed in 4.05 s. `cargo fmt --all` and `cargo clippy --all-targets -- -D warnings` passed.
 
-   **Next** is Slice 3. Use the local attachment from the Desktop pane and carry the Machine that issued the ticket in the attachment receipt. Move `lf desktop shell` and `prepared_remotely` with their Desktop consumers.
+   Upstream #1973 (`00d14c493b`) merged after that check. It records Session membership on the Session and exposes primary scope through `primary_scope`. On the merged branch, `open_remote_workspace` was updated to start the primary provider and verify its terminal before marking `task_primary_sessions` so automatic recovery does not race the prestart; after that fix, `open_remote_workspace` passed in 29.46 s and `documented_commands` (4 tests) passed in 35.13 s. Slice 2's exact-Session check uses the routed overview membership. Desktop fixtures should set Session membership and save the chosen primary, including when the owner's checkout differs from the Session's recorded cwd.
 
-3. **Slice 3: Desktop migration + deletion of `RegistryQuery.onMachine` / `pinTaskLocation`.**
+3. **Next, Slice 3. Desktop opens a remote Task through the local server.**
    - Switch Desktop Files, Changes, Diff, Save, Watch, Graph log, Shell, and Session onto local `ServerClient` routed operations addressed by Task id alone.
    - Delete the client location stack, including the placement guard at `SessionsView.swift:716`; reload Files/Changes when a reading names a new Machine; drafts stay keyed by `(Task, path, base revision)`.
    - Delete `RegistryQuery.onMachine`, `pinTaskLocation`, `remoteMachine`, `executionLocations`, and `RegistryQueryLocal`'s remote SSH subprocess runners; update `lf desktop shell` and `prepared_remotely` to attach through the local server ticket bridge.
-   - **Proves:** `RemoteTaskWorkspaceTests` on macOS exercises all four viewers (unchanged Files, Changes with an uncommitted hunk and Save, Shell `hostname`/`pwd`, Session input acknowledgement), disconnect and reopen, unstarted and unreachable states, and a move through the intermediate null workspace. The old terminal keeps its Machine label. A draft with the same base revision saves on the new owner. A draft with a different base revision shows a save conflict and survives.
+   - **Proves:** `RemoteTaskWorkspaceTests` on macOS exercises all four viewers (unchanged Files, Changes with an uncommitted hunk and Save, Shell `hostname`/`pwd`, Session input acknowledgement), disconnect and reopen, unstarted and unreachable states, and a move through the intermediate null workspace. The old terminal keeps its Machine label, and Close ends the old shell there. A draft with the same base revision saves on the new owner. A draft with a different base revision shows a save conflict and survives.
 
 4. **Slice 4: Mobile Files & Shell viewers + Docs + Gate.**
    - Expose Files (directory tree + unchanged file content via `task.files` / `task.file`) and Shell (via `task.shell.start` / `task.shell.attach` + `/v1/ticket` WebSocket) alongside Changes and Session in `TaskWorkspaceView.swift` / `RemoteMobileClient.swift`.

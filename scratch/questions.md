@@ -22,6 +22,8 @@
 
 - For the terminal label during a move, carry the Machine selected at attach time in the server receipt during the Desktop migration. `SessionAttached` currently carries only the ticket, terminal ID and expiry. Using the latest workspace reading for the label would let a move change the label on an existing terminal.
 
+- Desktop Close already ends a shell. After a move, use the Machine recorded by the shell attachment for Close. The Task still addresses new shells and reattach, so an old shell ID reaching the new owner returns ended.
+
 - A remote tab launches the public `lf open --here` with its selectors. The tab resolves the Session at startup, so the tab command can be replayed and never contains a single-use ticket. For a Machine-only Session, the retry command and Work link carry the registered Machine ID even after a rename.
 
 - A routed continuation uses the peer Session’s harness. Revision 10 `session.continue` carries Session, request, geometry and routing selectors. Switching harnesses on a remote exact Session with `lf open -a` would need a continuation operation that carries the override.

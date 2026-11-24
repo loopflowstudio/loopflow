@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>LOO-1066 · Ship Review — Settings Pane Redesign</title>
+<title>LOO-1066 · Ship Review — Settings Pane Redesign (Policy B)</title>
 <style>
 :root {
   color-scheme: light dark;
@@ -15,7 +15,6 @@
   --text: #2a2624;
   --text-2: #5f5752;
   --accent: #722f37;
-  --accent-text: #faf8f5;
   --ok: #386c48;
   --ok-bg: #dfeadf;
   --warn: #7f5a19;
@@ -36,7 +35,6 @@
     --text: #f5f1ea;
     --text-2: #c9c6c1;
     --accent: #a64954;
-    --accent-text: #faf8f5;
     --ok: #86ca9a;
     --ok-bg: #243c2c;
     --warn: #e0bf7d;
@@ -55,262 +53,120 @@ body {
   line-height: 1.55;
   -webkit-font-smoothing: antialiased;
 }
-main {
-  max-width: 820px;
-  margin: 0 auto;
-  padding: 36px 24px 80px;
-}
-header {
-  border-bottom: 1px solid var(--border);
-  padding-bottom: 20px;
-  margin-bottom: 32px;
-}
-h1 {
-  font-family: var(--font-serif);
-  font-weight: 400;
-  font-size: 32px;
-  line-height: 1.15;
-  letter-spacing: -0.025em;
-  font-variant-ligatures: none;
-  margin: 0 0 8px;
-}
-h2 {
-  font-family: var(--font-serif);
-  font-weight: 400;
-  font-size: 24px;
-  letter-spacing: -0.02em;
-  font-variant-ligatures: none;
-  margin: 40px 0 12px;
-}
-h3 {
-  font-size: 15px;
-  font-weight: 600;
-  margin: 18px 0 6px;
-}
+main { max-width: 840px; margin: 0 auto; padding: 36px 24px 80px; }
+header { border-bottom: 1px solid var(--border); padding-bottom: 20px; margin-bottom: 32px; }
+h1 { font-family: var(--font-serif); font-weight: 400; font-size: 32px; line-height: 1.15; letter-spacing: -0.025em; font-variant-ligatures: none; margin: 0 0 8px; }
+h2 { font-family: var(--font-serif); font-weight: 400; font-size: 24px; letter-spacing: -0.02em; font-variant-ligatures: none; margin: 38px 0 12px; }
+h3 { font-size: 15px; font-weight: 600; margin: 16px 0 6px; }
 p { margin: 0 0 12px; }
-.meta {
-  color: var(--text-2);
-  font-size: 14px;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px 16px;
-  align-items: center;
-}
+.meta { color: var(--text-2); font-size: 14px; display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; }
 .meta a { color: var(--text); }
-.pill {
-  display: inline-block;
-  font-size: 12px;
-  font-weight: 500;
-  padding: 2px 9px;
-  border-radius: 999px;
-}
+.pill { display: inline-block; font-size: 12px; font-weight: 500; padding: 2px 9px; border-radius: 999px; }
 .pill.ok { background: var(--ok-bg); color: var(--ok); }
 .pill.warn { background: var(--warn-bg); color: var(--warn); }
 .pill.info { background: var(--info-bg); color: var(--info); }
-.card {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 16px 18px;
-  margin: 14px 0;
-}
-code {
-  font-family: var(--font-mono);
-  font-size: 12.5px;
-  background: var(--surface-muted);
-  padding: 1px 5px;
-  border-radius: 4px;
-}
-pre {
-  font-family: var(--font-mono);
-  font-size: 12.5px;
-  line-height: 1.5;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 14px 16px;
-  overflow-x: auto;
-  margin: 12px 0;
-}
-table {
-  width: 100%;
-  border-collapse: collapse;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  overflow: hidden;
-  font-size: 14px;
-  margin: 14px 0;
-}
-th, td {
-  text-align: left;
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--border);
-  vertical-align: top;
-}
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 16px 18px; margin: 14px 0; }
+code { font-family: var(--font-mono); font-size: 12.5px; background: var(--surface-muted); padding: 1px 5px; border-radius: 4px; }
+figure { margin: 16px 0; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 12px; }
+figure img { display: block; width: 100%; height: auto; border-radius: 6px; }
+figcaption { margin-top: 8px; font-size: 13px; color: var(--text-2); }
+table { width: 100%; border-collapse: collapse; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; font-size: 14px; margin: 14px 0; }
+th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
 tr:last-child td { border-bottom: 0; }
-th {
-  font-weight: 600;
-  font-size: 12.5px;
-  color: var(--text-2);
-  background: var(--surface-muted);
-}
+th { font-weight: 600; font-size: 12.5px; color: var(--text-2); background: var(--surface-muted); }
 ul, ol { margin: 8px 0 14px; padding-left: 22px; }
 li { margin-bottom: 6px; }
-.cmd-block {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  background: var(--surface);
-  border: 1px solid var(--border-strong);
-  border-radius: 8px;
-  padding: 12px 14px;
-  font-family: var(--font-mono);
-  font-size: 13px;
-}
-.copy-btn {
-  appearance: none;
-  border: 1px solid var(--border-strong);
-  background: var(--surface-muted);
-  color: var(--text);
-  font-family: var(--font-sans);
-  font-size: 12px;
-  font-weight: 500;
-  padding: 4px 10px;
-  border-radius: 5px;
-  cursor: pointer;
-  flex-shrink: 0;
-}
-.copy-btn:hover { filter: brightness(0.96); }
 .q-item { margin-bottom: 16px; }
 .q-item strong { font-family: var(--font-mono); font-size: 12.5px; margin-right: 4px; }
-@media (max-width: 640px) {
-  main { padding: 22px 14px 56px; }
-  th, td { padding: 8px 10px; }
-}
+@media (max-width: 640px) { main { padding: 22px 14px 56px; } }
 </style>
 </head>
 <body>
 <main>
   <header>
-    <h1>Settings Pane Redesign · Ship Review</h1>
+    <h1>Settings Pane Redesign · Ship Review (Policy B)</h1>
     <div class="meta">
       <span>LOO-1066</span>
-      <a href="https://github.com/loopflowstudio/loopflow/pull/2033">PR #2033 (Open · Mergeable)</a>
-      <span class="pill ok">Vision C built</span>
-      <span class="pill info">66 files · +5,770 / −1,180</span>
+      <a href="https://github.com/loopflowstudio/loopflow/pull/2033">PR #2033 (Open · Mergeable · Clean)</a>
+      <span class="pill ok">Policy B + Visual Polish built</span>
+      <span class="pill info">head 031a057c</span>
     </div>
   </header>
 
   <h2>1. What ships</h2>
-  <p>Press <code>⌘,</code> in Loopflow for Mac to open a native macOS Settings window (searchable <code>NavigationSplitView</code> sidebar + inset grouped <code>Form</code> panes) replacing the old 5-tab toolbar and single-key YAML debugger (<code>ConfigurationSettingsView</code> and the 1-checkbox Editing tab are removed).</p>
+  <p>The redesigned macOS Settings window (<code>⌘,</code>) now follows <strong>Policy B (<code>1b</code>, <code>2a</code>)</strong>: six clean personal/global panes (<strong>General</strong>, <strong>Appearance</strong>, <strong>Shortcuts</strong> · divider · <strong>Agents</strong>, <strong>Machines</strong>, <strong>Mobile</strong>) separated by quiet dividers from one dedicated <strong>Project &amp; Wave Config</strong> pane at the bottom.</p>
 
-  <table>
-    <thead>
-      <tr><th>Sidebar group</th><th>Panes</th><th>What changed</th></tr>
-    </thead>
-    <tbody>
-      <tr>
-        <td><strong>App</strong></td>
-        <td>General, Appearance, Shortcuts, Mobile</td>
-        <td><strong>Autosave Task Files</strong> moved into General alongside global <code>user.name</code>, <code>repo_root</code>, <code>stream</code>, and <code>logs.linear_requests</code>. Theme cards and <strong>View → Appearance</strong> apply immediately with <code>⌘Z</code> Undo; <strong>Customize…</strong> keeps Apply/Cancel inside <code>ThemeEditor</code>. Mobile’s green readiness dot in the sidebar shares live state with the QR panel.</td>
-      </tr>
-      <tr>
-        <td><strong>Workflow</strong></td>
-        <td>Agents, Context, Git &amp; Release</td>
-        <td>Typed native controls for the full 47-key catalog. <strong>Applies to</strong> (Global, checkout, Wave, Skill, or Graph step) stays independent of <strong>Save in</strong> (My vs. Shared file). Click <strong>In effect</strong> on any row to open its precedence ladder, preview YAML diffs, <strong>Reset layer…</strong>, or <strong>Move to…</strong> (Promote across files with Undo and crash-journal recovery).</td>
-      </tr>
-      <tr>
-        <td><strong>Infrastructure</strong></td>
-        <td>Machines</td>
-        <td>Live <strong>Connection health</strong> (up to 4 concurrent identity-checked SSH probes, 30 s refresh while open), scoped <strong>Placement</strong>, and a directly editable <strong>This Machine (Global)</strong> section for global-only keys (<code>hub</code>, <code>pools</code>, <code>ondemands</code>, <code>forward.*</code>).</td>
-      </tr>
-    </tbody>
-  </table>
+  <figure>
+    <img src="compact-settings/general.png" alt="General pane at 760x592 with capsule search bar, monochrome SF Symbols, and dividers">
+    <figcaption><strong>General</strong> (unlocked display, 760 × 592 pt): capsule search bar, minimalist monochrome SF Symbols, two quiet dividers instead of section text headers, real defaults (<code>Git's user.name (Default)</code>, <code>~/src (Default)</code>, <code>stable (Default)</code>), and <code>Open ~/.lf/config.yaml</code>.</figcaption>
+  </figure>
 
-  <h3>Measured behavior from QA and automated checks</h3>
-  <pre># Server &amp; Desktop checks (head 7a7d474c / 67fc3f22)
-config.scope (all 47 entries, 31 warm reads):   16.4 ms median · 125.6 ms p95 (target &lt; 150 ms)
-3 back-to-back checked config.edit writes:      117 ms total, 0 stale-slot conflicts, subscription settled 323 ms
-Desktop suites (Settings/Context/Config/Theme/Design): 25 / 25 passed
-Rust config:: + engine::config::promotion:::    115 / 115 passed · clippy -D warnings clean
-New CLI command: lf config scope [--global] [--skill &lt;SKILL&gt; | --graph &lt;GRAPH&gt; --step &lt;STEP&gt;] [--json [-s]]
-SQLite schema changes: None (107 tables, 936 columns unchanged)</pre>
+  <figure>
+    <img src="compact-settings/project.png" alt="Project & Wave Config pane showing Applies to, Save in, and real effective values">
+    <figcaption><strong>Project &amp; Wave Config</strong>: <code>Applies to</code> (checkout/Wave + collapsed <code>Skill or Graph step</code>) and <code>Save in</code> (My vs. Shared). Every control displays its real effective value (<code>codex (from Shared repository settings)</code>, <code>Off (Default)</code>) instead of “Inherited”.</figcaption>
+  </figure>
+
+  <figure>
+    <img src="compact-settings/merge-method.png" alt="Cross-pane search jumping to Merge method in Project & Wave Config">
+    <figcaption><strong>Cross-pane search</strong>: searching <code>merge_method</code> jumps to the row in Project &amp; Wave Config, highlights it, and shows human-readable defaults (<code>GitHub PR (Default)</code>, <code>Squash when GitHub allows it (Default)</code>).</figcaption>
+  </figure>
+
+  <h3>Also hardened in this pass</h3>
+  <ul>
+    <li><strong>No “Inherited” anywhere:</strong> unset rows show their actual default or inherited source (e.g. <code>codex (from Shared repository settings)</code>); <code>In effect</code> provenance shows only when the file declares the key or a non-builtin layer participates.</li>
+    <li><strong>Instant checked Reset + Undo:</strong> simple controls reset immediately with human-titled Undo (<code>⌘Z</code>), including emptied number fields; previewed Reset stays on raw YAML disclosures.</li>
+    <li><strong>Automatic server reconnect:</strong> both Personal and Project scopes keep their last reading visible while disconnected, pause edits, and automatically reconnect (1–30 s backoff) when the server comes back (verified at 11–16 s in QA round 5).</li>
+    <li><strong>Clean checkout <code>git status</code>:</strong> config write locks moved under <code>$LF_HOME/locks/config/</code> so Settings writes never leave stray lock files in repositories.</li>
+    <li><strong>Toolbar cleanup:</strong> removed the unused sidebar-toggle toolbar strip in Settings.</li>
+  </ul>
 
   <h2>2. How to try it</h2>
-  <p>Launch the branch build of Desktop from this worktree:</p>
-  <div class="cmd-block">
-    <span id="demo-cmd">uv run python scripts/loopflow-dev.py run</span>
-    <button class="copy-btn" onclick="navigator.clipboard.writeText(document.getElementById('demo-cmd').textContent);this.textContent='Copied'">Copy</button>
-  </div>
-
-  <ol>
-    <li><strong>Sidebar, search &amp; row errors:</strong> Press <code>⌘,</code>. Type <code>agent</code> in sidebar search and press Return to jump to <strong>Agents</strong>. Enter <code>bogus::x</code> → error stays on that row while toggling <code>yolo</code> still saves. Enter <code>codex</code> → clears error and updates <strong>Effective agent order</strong>.</li>
-    <li><strong>Scoped edit, ladder, Promote &amp; Undo:</strong> Pick a checkout in <strong>Applies to</strong>, switch <strong>Save in</strong> between <em>My</em> and <em>Shared</em>, toggle <code>context.diff</code>, click <strong>In effect</strong> to expand the precedence ladder, preview <strong>Move to Shared Repository…</strong>, and press <code>⌘Z</code> to undo across panes.</li>
-    <li><strong>Instant theme switch &amp; visual pass (untried on unlocked screen):</strong> Open <strong>Appearance</strong>, click theme cards and switch <strong>View → Appearance</strong> between System, Light, and Dark, then press <code>⌘Z</code>. Resize the window in Light and Dark to inspect contrast and spacing.</li>
-    <li><strong>Live health dots:</strong> Check <strong>Mobile</strong> (sidebar green dot vs. QR panel) and <strong>Machines → Connection health</strong> against any registered SSH Machines.</li>
-  </ol>
+  <p>Say <strong>“launch demo”</strong> here and I’ll build the isolated <code>Loopflow Dev Settings.app</code> from <code>031a057c</code> against a fresh private demo server so you can eyeball Light/Dark, Appearance, and Project &amp; Wave Config live.</p>
 
   <h2>3. What is likeliest to surprise you</h2>
   <div class="card">
     <ul>
-      <li><strong>Applies to vs. Save in are two separate pickers</strong> (changed during concept review). A single combined scope picker hid a successful Shared edit whenever a personal override still won. Opening Settings defaults to Global (no extra Save in picker); choosing a checkout or Wave shows both.</li>
-      <li><strong>Native Apple chrome + instant apply.</strong> Settings uses system chrome, system accent, and colored SF Symbol sidebar badges (rather than Loopflow’s burgundy palette throughout), and commits toggles/pickers/theme clicks immediately with <code>⌘Z</code> Undo. Explicit Apply/Cancel stays only inside <code>ThemeEditor</code> and raw YAML disclosures.</li>
-      <li><strong>This Machine (Global) edits <code>~/.lf/config.yaml</code> directly</strong> inside Machines even while inspecting a checkout or Wave, without silently switching <code>Save in</code> for other panes.</li>
-      <li><strong>Inactive &amp; internal keys live under collapsed Advanced</strong> (<code>isolate</code>, <code>summaries</code>, <code>summary_tokens</code>, <code>portfolio</code>, <code>auth_browsers</code>), still reachable via sidebar search.</li>
-      <li><strong>Three-way null handling:</strong> Absent, <strong>Explicit null</strong> (which the resolver skips so lower layers still apply), and an authored value are distinct in Pickers and TextFields.</li>
-      <li><strong>Diverged interrupted 2-file moves require an explicit Dismiss.</strong> If a crash leaves a move journal and someone hand-edits one of the files, <strong>Finish interrupted move…</strong> refuses and offers <strong>Dismiss pending move</strong>, leaving both YAML files untouched.</li>
-      <li><strong>View → Appearance</strong> was added to the macOS menu bar for quick System / Light / Dark switching through the same <code>AppearanceStore</code> owner.</li>
+      <li><strong><code>Explicit null</code> appears in a Picker only when already declared in YAML</strong> (not offered as a menu option to author a no-op null, while still preserving and resetting hand-written YAML nulls).</li>
+      <li><strong>Search lists personal agent defaults first, then Project &amp; Wave Config overrides</strong>, opening each at its own destination.</li>
+      <li><strong><code>Open ~/.lf/config.yaml</code> creates an empty mapping</strong> if the personal file doesn’t exist yet; searching for a file-only global key (<code>pools</code>, <code>ondemands</code>, <code>forward.*</code>) highlights that button.</li>
+      <li><strong>Unused sidebar-toggle toolbar strip is removed</strong> so the Settings window stays fixed-sidebar like System Settings.</li>
     </ul>
   </div>
 
   <h2>4. Findings left outside the PR</h2>
   <table>
-    <thead>
-      <tr><th>Finding</th><th>Detail</th><th>Proposal</th></tr>
-    </thead>
+    <thead><tr><th>Finding</th><th>Detail</th><th>Proposal</th></tr></thead>
     <tbody>
       <tr>
-        <td><strong>F1 · Unlocked-display visual &amp; live SSH health check</strong></td>
-        <td>Automated QA ran while the Mac display was locked (macOS RenderBox draws grouped Forms white when locked) and on an isolated Machine with no registered SSH hosts. Layout, Light/Dark contrast on real pixels, window resize, and live <strong>Connection health</strong> probes have not been eyeballed yet.</td>
-        <td><span class="pill warn">Try in demo now</span> Check via <code>loopflow-dev.py run</code> before delivery (or at <code>verify</code>); fix any visual issues on this branch if found.</td>
+        <td><strong>F1 · Live Dark mode &amp; final eyeball pass</strong></td>
+        <td>Unlocked captures verified Light mode at compact 760 × 592; Dark mode and your live feel check on the second beauty pass are still yours to inspect.</td>
+        <td><span class="pill warn">Demo now or at verify</span> Say “launch demo” to inspect live, or advance to delivery.</td>
       </tr>
       <tr>
-        <td><strong>F2 · Key-derived row titles</strong></td>
-        <td>Catalog keys without hand-written labels render title-cased key names (e.g., <em>Repo Root</em>, <em>Linear Requests</em>), reading slightly less like native macOS Settings than hand-named rows.</td>
-        <td><span class="pill info">Drop or polish here</span> Worth fixing here only if specific labels stand out when you open the window; otherwise drop.</td>
+        <td><strong>F2 · Disconnect banner wording</strong></td>
+        <td>During a plain server restart, <code>ServerClient.swift:305</code>’s shared string reads “Loopflow server unavailable or owned by another account” without mentioning automatic retry.</td>
+        <td><span class="pill info">Drop</span> Shared across Desktop beyond Settings; leave for a server-status pass.</td>
       </tr>
       <tr>
-        <td><strong>F3 · Searching an open pane name keeps scroll offset</strong></td>
-        <td>Searching <code>Agents</code> when Agents is already the active pane keeps its prior scroll offset instead of jumping back to the top.</td>
-        <td><span class="pill info">Drop</span> Minor behavior; no user data or navigation impact.</td>
-      </tr>
-      <tr>
-        <td><strong>F4 · Program <code>Done</code> vs. <code>Available</code> collision</strong></td>
-        <td>Raised earlier in this chat: <code>ProgramStatusState.done</code> renders as <em>Done</em> on non-completed Task rows when a process exits 0, making the Task look finished.</td>
-        <td><span class="pill ok">Own Task</span> Unrelated to Settings; file as its own Task if you want it tracked.</td>
+        <td><strong>F3 · Program <code>Done</code> vs. <code>Available</code></strong></td>
+        <td>Raised earlier in this chat: <code>ProgramStatusState.done</code> renders “Done” on active Task rows after process exit 0.</td>
+        <td><span class="pill ok">Own Task</span> Separate from Settings; file if you want it tracked.</td>
       </tr>
     </tbody>
   </table>
 
-  <h2>5. Questions for your review</h2>
+  <h2>5. Questions</h2>
   <div class="card">
     <div class="q-item">
-      <h3>1. Demo &amp; visual polish (F1, F2, F3)</h3>
-      <p><strong>1a</strong> Ship as-is (advance to <code>deliver</code>: reflect, gate, land) and eyeball live pixels at <code>verify</code>.</p>
-      <p><strong>1b</strong> Let me demo with <code>loopflow-dev.py run</code> first, then decide whether anything goes back to <code>implement</code>.</p>
-      <p><strong>1c</strong> Fix F2 (hand-name remaining row titles) and/or F3 on this branch before delivering.</p>
-    </div>
-    <div class="q-item">
-      <h3>2. Any of the built defaults you want reversed?</h3>
-      <p><strong>2a</strong> Keep all built defaults (Native Apple chrome, instant-apply + Undo, Applies to / Save in split, This Machine (Global), Advanced disclosure, explicit Dismiss).</p>
-      <p><strong>2b</strong> Change a specific one (name which — e.g. Loopflow palette chrome instead of native Apple, or read-only Machines at checkout scope).</p>
+      <h3>1. Next step for PR #2033</h3>
+      <p><strong>1a</strong> Launch a live demo of <code>031a057c</code> right now so I can check Light/Dark and feel it.</p>
+      <p><strong>1b</strong> Looks ready — continue <code>feature</code> to delivery (<code>reflect</code> → <code>gate</code> → <code>land</code>, which also runs full CI on PR #2033).</p>
+      <p><strong>1c</strong> Specific tweaks to make before shipping (tell me what).</p>
     </div>
     <div class="q-item" style="margin-bottom:0">
-      <h3>3. Separate Task for Program <code>Done</code> vs. <code>Available</code> (F4)?</h3>
-      <p><strong>3a</strong> File a new Task to stop showing <em>Done</em> for program exit-0 on active Task rows (relabel or fold into <em>Available</em>).</p>
-      <p><strong>3b</strong> Skip for now.</p>
+      <h3>2. Separate Task for Program <code>Done</code> vs. <code>Available</code> (F3)?</h3>
+      <p><strong>2a</strong> File a standalone Task for it.</p>
+      <p><strong>2b</strong> Skip for now.</p>
     </div>
   </div>
 </main>

@@ -226,17 +226,26 @@ fn task(repo: &Path, command: &TaskCommand, io: &mut CommandIo<'_>) -> Result<()
         }
         TaskCommand::Complete {
             issue,
+            children,
             reason,
             json,
         } => {
-            let completion =
-                loopflow_execution::ops::task::task_complete(repo, issue, reason.as_deref())?;
+            let completion = loopflow_execution::ops::task::task_complete(
+                repo,
+                issue,
+                reason.as_deref(),
+                *children,
+            )?;
             if *json {
                 let completed = super::waves::task_completed(completion)?;
                 writeln!(io.output, "{}", serde_json::to_string_pretty(&completed)?)?;
             } else {
                 writeln!(io.output, "{} done", completion.task.identifier)?;
-                write_child_completions(io.output, &completion.children, 1)?;
+                let destination = completion
+                    .rehomed_to
+                    .as_ref()
+                    .map(|task| task.identifier.as_str());
+                write_child_completions(io.output, &completion.children, destination, 1)?;
             }
             Ok(())
         }
@@ -403,6 +412,7 @@ pub fn read_task_draft(input: &mut dyn Read) -> Result<String> {
 fn write_child_completions(
     output: &mut dyn std::io::Write,
     children: &[loopflow_storage::sqlite::children::ChildCompletion],
+    destination: Option<&str>,
     depth: usize,
 ) -> Result<()> {
     for child in children {
@@ -410,14 +420,17 @@ fn write_child_completions(
             output,
             "{}{}",
             "  ".repeat(depth),
-            child_completion_line(child)
+            child_completion_line(child, destination)
         )?;
-        write_child_completions(output, &child.children, depth + 1)?;
+        write_child_completions(output, &child.children, destination, depth + 1)?;
     }
     Ok(())
 }
 
-fn child_completion_line(child: &loopflow_storage::sqlite::children::ChildCompletion) -> String {
+fn child_completion_line(
+    child: &loopflow_storage::sqlite::children::ChildCompletion,
+    destination: Option<&str>,
+) -> String {
     use loopflow_storage::sqlite::children::ChildOutcome;
 
     let id = &child.task.identifier;
@@ -429,6 +442,10 @@ fn child_completion_line(child: &loopflow_storage::sqlite::children::ChildComple
         ChildOutcome::Done => {
             format!("{id} done: {}", pr.as_deref().unwrap_or("PR merged"))
         }
+        ChildOutcome::Rehomed => match destination {
+            Some(destination) => format!("{id} moved up to {destination}"),
+            None => format!("{id} moved to top level"),
+        },
         ChildOutcome::Abandoned => {
             let step = child.step.as_ref().map(|step| format!("at {step}"));
             let reasons: Vec<String> = pr.into_iter().chain(step).collect();

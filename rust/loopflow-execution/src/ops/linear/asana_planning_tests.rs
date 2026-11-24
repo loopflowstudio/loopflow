@@ -359,7 +359,7 @@ fn asana_status_title_and_comments_write_back_to_the_mirrored_task() {
         let id = saved.tracker_id.clone().unwrap();
         let id = id.as_str();
 
-        crate::ops::task::task_complete(repo, saved.id.as_str(), None).unwrap();
+        crate::ops::task::task_complete(repo, saved.id.as_str(), None, None).unwrap();
         assert_eq!(mirrored(runtime, &state, id)["completed"], true);
 
         crate::ops::task::task_reopen(saved.id.as_str(), None).unwrap();

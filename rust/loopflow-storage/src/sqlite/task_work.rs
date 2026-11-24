@@ -1475,11 +1475,11 @@ mod tests {
         let retained = store.task(&task).unwrap().unwrap();
         assert!(matches!(
             store.complete_task(&retained, request).unwrap(),
-            super::super::children::CompletionSettlement::Settled(_)
+            super::super::children::CompletionSettlement::Settled
         ));
         assert!(matches!(
             store.complete_task(&retained, request).unwrap(),
-            super::super::children::CompletionSettlement::Settled(_)
+            super::super::children::CompletionSettlement::Settled
         ));
         assert!(store.task_completion_pending(&task).unwrap().is_none());
         assert_eq!(

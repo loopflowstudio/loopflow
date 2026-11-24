@@ -676,7 +676,7 @@ fn a_follow_up_is_created_in_linear_under_its_parents_issue() {
 fn task_sync_still_adopts_a_newer_linear_state() {
     with_planning_task(|runtime, fixture, repo, task, state| {
         runtime.block_on(state.lock()).fail_completion = true;
-        crate::ops::task::task_complete(repo, task.id.as_str(), None).unwrap();
+        crate::ops::task::task_complete(repo, task.id.as_str(), None, None).unwrap();
         runtime.block_on(async {
             let mut provider = state.lock().await;
             provider.issues[0]["state"] = json!({"type":"started"});
@@ -700,7 +700,7 @@ fn answer_a_lost_completion(
     let mut answered = None;
     with_planning_task(|runtime, fixture, repo, task, state| {
         runtime.block_on(state.lock()).fail_completion = true;
-        crate::ops::task::task_complete(repo, task.id.as_str(), None).unwrap();
+        crate::ops::task::task_complete(repo, task.id.as_str(), None, None).unwrap();
         runtime.block_on(async {
             let mut provider = state.lock().await;
             provider.issues[0]["state"] = json!({"type":"started"});
@@ -740,7 +740,7 @@ fn answer_a_lost_completion(
 fn a_lost_completion_closes_when_linear_changes_the_state_again() {
     with_planning_task(|runtime, fixture, repo, task, state| {
         runtime.block_on(state.lock()).fail_completion = true;
-        crate::ops::task::task_complete(repo, task.id.as_str(), None).unwrap();
+        crate::ops::task::task_complete(repo, task.id.as_str(), None, None).unwrap();
         let move_to = |kind: &str| {
             runtime.block_on(async {
                 let mut provider = state.lock().await;

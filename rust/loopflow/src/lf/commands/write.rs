@@ -124,9 +124,15 @@ writes! {
 
     /// `lf task complete <issue>`.
     #[serde(rename = "task.complete")]
-    TaskComplete { directory: PathBuf, issue: String } => super::waves::TaskCompleted;
-    { issue, .. } => super::waves::task_completed(
-        loopflow_execution::ops::task::task_complete(&task_repo(issue)?, issue, None)?,
+    TaskComplete {
+        directory: PathBuf,
+        issue: String,
+        /// What happens to open children; `null` refuses while any are open.
+        #[serde(deserialize_with = "Option::deserialize")]
+        children: Option<loopflow_storage::sqlite::children::ChildPolicy>,
+    } => super::waves::TaskCompleted;
+    { issue, children, .. } => super::waves::task_completed(
+        loopflow_execution::ops::task::task_complete(&task_repo(issue)?, issue, None, *children)?,
     )?,
 
     /// `lf task reopen <issue>`.

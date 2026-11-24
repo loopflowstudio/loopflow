@@ -1,4 +1,4 @@
-at: dbe67790d2d51ff4b17a980b4184de020943e4df
+at: ff6437d957f85bb7aaebd4c96a4ee3d2139bf846
 first:
   - path: docs/work.md
     why: the refusal, rehome and abandon as people see them
@@ -13,11 +13,21 @@ first:
   - path: swift/LoopflowMac/Views/TaskWorkView.swift
     why: Desktop Complete… dialog with both layouts
   - path: swift/LoopflowMac/WorkModel.swift
+  - path: rust/loopflow-storage/src/work/selection.rs
+    why: open_children on each view plan Task
+  - path: swift/LoopflowiOS/TaskListView.swift
+    why: phone swipe asks before completing a parent
+  - path: swift/Loopflow/Models/WorkSelection.swift
+    why: Swift decode/encode of required nullable keys
   - path: rust/loopflow/tests/session_cli_tests.rs
     why: end-to-end CLI behavior of every choice
   - path: rust/loopflow-execution/src/ops/task/tests.rs
     why: live work blocks abandon; idle conversation does not
+  - path: swift/LoopflowiOSTests/TaskFeedTests.swift
+    why: parent swipe writes nothing until answered
 hide:
+  - path: swift/LoopflowiOSTests/task-reading.json
+    why: fixture gains open_children
   - path: tests/fixtures/dto/server_schema.json
     why: regenerated from lf server describe
   - path: scratch/concept-review.html

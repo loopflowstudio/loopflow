@@ -116,7 +116,7 @@ final class TaskFeedTests: XCTestCase {
     func testUnpauseLeavesThePausedListAndARefusalBringsTheTaskBack() async throws {
         let machineID = "HOME_\(UUID().uuidString.lowercased())"
         let server = try HeldServer(machineID: machineID, paused: true)
-        let feed = feed(server, machineID: machineID)
+        let feed = TaskFeed(client: client(server, machineID: machineID), notices: NoticeCenter())
         defer { feed.forget() }
         feed.filter = .paused
         await feed.start()

@@ -102,27 +102,22 @@ struct DashboardWorkspaceTests {
 
     @Test func aRefusedMoveReturnsTheRowAndSaysWhy() async throws {
         let ids = ["task_a", "task_b"]
-        var json = try #require(JSONSerialization.jsonObject(with: loadFixtureData("view_plan.json")) as? [String: Any])
-        json["dashboard_id"] = NSNull()
-        json["saved_revision"] = NSNull()
-        json["selection"] = ["id": "repository-default", "expression": ["kind": "repository"]]
-        var resolution = try #require(json["resolution"] as? [String: Any])
-        resolution["members"] = ids.map { ["source": ["repository-default"], "work": ["repository": "repo_11111111111111111111111111111111", "kind": "task", "id": $0]] }
-        json["resolution"] = resolution
-        let plan = String(decoding: try JSONSerialization.data(withJSONObject: json), as: UTF8.self)
+        let plan = fixtureWorkingPlan(ids)
+        let saved = String(decoding: try JSONEncoder().encode(plan), as: UTF8.self)
         let reason = "FIX-2 and FIX-1 are in different repositories; nothing changed."
         let query = RegistryQuery { args, _ in
             switch args {
-            case ["desktop", "dashboard", "move", "working-tasks/task:task_b", "--destination", "task:task_a"]: throw RegistryQueryError(reason)
-            case ["desktop", "view", "show", "--json"]: return plan
+            case ["desktop", "dashboard", "move", "working-tasks/task:task_b", "--destination", "task:task_a", "--side", "before"]: throw RegistryQueryError(reason)
+            case ["desktop", "view", "show", "--json"]: return saved
             default: throw RegistryQueryError("Unexpected command \(args)")
             }
         }
         let model = WorkModel(query: query, repoPath: "/repo")
-        model.applySelectionPlans([try JSONDecoder().decode(WorkViewPlan.self, from: Data(plan.utf8))], reason: "")
-        await model.reorderWorkingTask("task_b", to: "task_a").value
+        model.applySelectionPlans([plan], reason: "")
+        let source = try #require(plan.contents.last?.work)
+        await model.reorderWorkingTask(source, to: "task_a", side: .before).value
         #expect(model.workingTaskIDs == ids)
-        #expect(model.navigation.notices.current?.text == reason)
+        #expect(model.navigation.notices.current?.text == "task_b couldn't be reordered: \(reason)")
     }
 
     @Test func workingTasksOpensOnlyTheTasksItsGridShows() throws {

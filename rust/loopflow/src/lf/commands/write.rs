@@ -1445,7 +1445,10 @@ pub(super) fn steer_task(
 ) -> anyhow::Result<task::TaskSteerReceipt> {
     use super::work_route::{peer_issue, TaskPeer};
     use crate::server::wire::Operation;
+    use loopflow_execution::engine::{Error, ErrorCode};
 
+    loopflow_execution::ops::task::validate_task_comment_input(message)
+        .map_err(|error| Error::new(ErrorCode::Invalid, error.to_string()))?;
     let rt = tokio::runtime::Runtime::new()?;
     let (store, task) = rt
         .block_on(loopflow_execution::ops::task::resolve_saved_task(
@@ -1460,8 +1463,7 @@ pub(super) fn steer_task(
     let Some(peer) = TaskPeer::resolve(&store.sqlite, &task.id)? else {
         return save(None);
     };
-    let name = peer.machine.name();
-    let runs_on = peer.runs_on().map(|claim| claim.machine);
+    let name = peer.runs_on.machine.name();
     let open = match sender {
         None => peer.connect(repo, &task, Some(TaskPeer::deadline())),
         Some(_) if peer.registered.is_none() => Err(anyhow!("{name} is not registered here")),
@@ -1470,9 +1472,7 @@ pub(super) fn steer_task(
     let mut connection = match open {
         Ok(connection) => connection,
         Err(error) => {
-            let mut receipt = save(Some((peer.machine, format!("{error:#}"))))?;
-            receipt.delivery.runs_on = runs_on;
-            return Ok(receipt);
+            return save(Some((peer.runs_on.machine, format!("{error:#}"))));
         }
     };
 
@@ -1485,15 +1485,10 @@ pub(super) fn steer_task(
     let mut receipt: task::TaskSteerReceipt = connection
         .request(Operation::Write(change))
         .and_then(|answer| Ok(serde_json::from_value(answer.result)?))
-        .map_err(|error| {
-            loopflow_execution::engine::Error::refused(
-                &error,
-                loopflow_execution::engine::ErrorCode::OutcomeUnknown,
-            )
-        })?;
+        .map_err(|error| Error::refused(&error, ErrorCode::OutcomeUnknown))?;
     if receipt.delivery.reached == task::SteerReached::Owner {
         receipt.delivery.sentence = format!("{name} · {}", receipt.delivery.sentence);
-        receipt.delivery.runs_on = runs_on;
+        receipt.delivery.runs_on = Some(peer.runs_on.machine);
     }
     Ok(receipt)
 }

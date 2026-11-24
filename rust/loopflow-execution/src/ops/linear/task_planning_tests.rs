@@ -913,7 +913,7 @@ async fn steer_from_sibling(selector: &str, text: &str) {
             .unwrap();
             assert_eq!(
                 receipt.delivery.reached,
-                crate::engine::task::SteerReached::Tracker
+                crate::engine::task::SteerReached::Shared
             );
             assert!(
                 receipt.delivery.sentence.contains("in Linear"),

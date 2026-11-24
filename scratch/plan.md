@@ -198,33 +198,16 @@ The server and active Graph steps poll each Asana repository project independent
 
 - [Walkthrough and transcripts](qa.html): real loopback OpenSSH and a bare Git origin, three private Machines, with one Task carried forward from installed 0.16.0. Direct CLI and served receipts reached the owner; Git delivered after an SSH outage and retried a locally saved steer after Git returned; stalled SSH handshake returned saved status in 11.36 s.
 
-### Slice 4: Post-build concept alignment (to implement)
+### Slice 4: Claim-based status, selection and steering (implemented)
 
-Fix the four conceptual mismatches surfaced by the post-build concept review ([concept-review.html](concept-review.html)) so every surface, wire enum, and edge case agrees with the product model:
+Status and steering resolve peers from the Task's active claim. A Wave placement preference first matters when work starts. Local selections, state filters, Task rows and recommendations use the same rule for which lifecycle states this Machine can see. A remote status reply shows the owner's Graph sentence, Sessions and family. A terminal Task retains its standing when its owner cannot answer.
 
-1. **`TaskPeer` follows active claims only (`work_route.rs`, `waves.rs`, `write.rs`):**
-   - Replace `TaskPeer { machine, since: Option<i64>, registered }` with `TaskPeer { runs_on: TaskRunsOn, registered }`.
-   - In `TaskPeer::resolve`, resolve solely from `ownership.runs_on(&local)` (returning `Ok(None)` when unowned or owned here, and when `move_awaiting_arrival` is true). Delete the `task_execution_route` fallback for unowned Tasks.
-   - Simplify callers: `owner_detail`, `print_remote_task_status`, `print_remote_readings`, `steer_task`, and `print_remote_detail` always have `peer.runs_on: TaskRunsOn` (drop `peer.runs_on()` returning `Option`, drop `None => println!("Runs on {machine}; read from its server.")`).
-   - Add a regression test in `rust/loopflow/tests/machine_commands.rs`: an unowned Task in a Wave with `set machine mini` (while `mini` is offline) answers `lf task status --json` locally (`reading.kind == "here"`, `runs_on: null`, `state: "unstarted"`) and `lf steer --json` locally (`delivery.reached == "owner"`, `runs_on: null`) without dialing SSH.
-2. **Remote list, selection-state, and action parity (`selections.rs`, `waves.rs`):**
-   - In `rust/loopflow-storage/src/sqlite/selections.rs`, pass `runs_elsewhere: bool` (true when open, not `Moving`, and owned on another Machine) into `task_selection_states`; when true, omit the local `Unstarted`/`Idle`/`Active` runtime `SelectionState` while keeping `Open`, `Working`, and `Auto`. Update callers in `selections.rs` and `waves.rs` and add unit tests in `selections.rs`.
-   - In `rust/loopflow/src/lf/commands/waves.rs`:
-     - In `open_tasks`, `--state <state>` does not match an open non-moving Task with `runs_on.is_some()`.
-     - In `snapshot_task_detail`, when `elsewhere.is_some()`, set `actions` to `TaskAction::NoAction` with `runs_elsewhere(runs_on)` as its reason (so Desktop and JSON lists stop recommending `run` for a Task running on another Machine).
-   - Add assertions in `a_status_read_mini_cannot_answer_says_where_the_task_runs_and_why` verifying `lf task list --state unstarted` excludes the remote Task, `selection_states` contains `working` and not `unstarted`, and `actions.recommended == "no_action"`.
-3. **Remote status text parity, terminal status honesty, and steer validation (`waves.rs`, `bin/lf.rs`, `write.rs`):**
-   - In `print_remote_detail` (`waves.rs`), print `detail.graph.sentence` (when `detail.graph` is `Some`), `detail.sessions` (each session's id/state/title), and `detail.parent`/`detail.children` (`child.standing()`), matching `docs/dev/machines.md`.
-   - In `bin/lf.rs` (`TaskCommand::Status`), do not set `remote_line` (`"Runs on …; … so its Graph and Sessions are not read here"`) when the Task is terminal (`done`/`abandoned`), matching `task_detail` in `waves.rs`.
-   - In `write::steer_task` (`write.rs`), call `loopflow_execution::ops::task::validate_task_comment_input(message)` before `TaskPeer::resolve`/`peer.connect` (returning `ErrorCode::Invalid`), and when `connection.request` fails, preserve an existing `loopflow_execution::engine::Error` (e.g. `NotFound`, `Invalid`) instead of overwriting its code with `OutcomeUnknown` (keeping `OutcomeUnknown` for transport/decode/lost-reply failures).
-   - Add tests covering remote text printing (`graph.sentence` / sessions), terminal unobserved text status, and empty-message remote steer returning `Invalid` without dialing SSH.
-4. **Rename `SteerReached::Tracker` → `SteerReached::Shared` (`engine/task.rs`, fixtures, tests, docs):**
-   - Rename `SteerReached::Tracker` to `SteerReached::Shared` (wire value `"shared"`: `owner | shared | here`).
-   - Regenerate `tests/fixtures/dto/server_schema.json` and update `tests/fixtures/dto/task_steer_receipt.json` (if needed), `rust/loopflow/tests/machine_commands.rs`, `rust/loopflow-execution/src/ops/linear/task_planning_tests.rs`, `docs/work.md`, and `docs/dev/machines.md`.
+Steer validation runs before peer lookup. The existing `Error::refused` already carries a peer's typed rejection, including its data, through the served write. The SSH fixtures distinguish that reply from losing the acknowledgement after a write. Git, hub and tracker acknowledgements all use `shared`.
+
+On November 23 the filtered integration run passed all 15 cases, including five move and resume regressions. The storage selection test, Linear late-comment delivery test and four documented-command checks passed. `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings` passed. Regenerating the schema with the branch CLI changed one enum value.
 
 ## Remaining
 
-- Implement and verify **Slice 4** (above), then run the acceptance checks, `cargo fmt --check`, and `cargo clippy --all-targets -- -D warnings`.
 - Publish so CI runs `served_reads`, `binary(lf)`, the full `test(machine_commands::)` and the Swift DTO/protocol tests (`DTOFixtureTests`, `ServerProtocolTests`).
 - Watch `a_status_read_for_a_task_mini_runs_shows_a_rename_made_there` under CI load (15 s stand-in SSH round trip).
 

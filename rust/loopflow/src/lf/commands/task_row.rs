@@ -234,10 +234,7 @@ impl TaskNames {
     }
 
     pub(crate) fn row(&self, task: RoadmapTask) -> TaskRow {
-        let state = (task.runs_on.is_none()
-            || task.lifecycle.is_terminal()
-            || task.lifecycle == TaskState::Moving)
-            .then_some(task.lifecycle);
+        let state = task.lifecycle.observed_here(task.runs_on.is_some());
         let next = next_command(&task);
         let summary = task.task;
         TaskRow {

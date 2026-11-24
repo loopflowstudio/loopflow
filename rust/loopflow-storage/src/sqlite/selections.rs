@@ -119,7 +119,7 @@ fn work_in(
         let runs_elsewhere = ownership.is_some_and(|claim| claim.owner_elsewhere(&local).is_some());
         let lifecycle = state.lifecycle(task.state.as_deref());
         let states = task_selection_states(
-            lifecycle,
+            lifecycle.observed_here(runs_elsewhere),
             TaskSection::of(lifecycle, owned, runs_elsewhere),
             owned || published.contains(&task.id),
             auto_on.contains(&task.id),
@@ -189,26 +189,27 @@ impl TaskOrder {
 /// The same lifecycle, section, auto setting and activity set for roadmap rows
 /// and selections.
 pub fn task_selection_states(
-    state: TaskState,
+    state: Option<TaskState>,
     section: TaskSection,
     claimed_or_published: bool,
     auto: bool,
     activity: Option<&TaskActivity>,
 ) -> BTreeSet<SelectionState> {
     let mut states = activity.map_or_else(BTreeSet::new, |activity| activity.states.clone());
-    if claimed_or_published && !state.is_terminal() {
+    let open = matches!(section, TaskSection::Backlog | TaskSection::Working);
+    if claimed_or_published && open {
         states.insert(SelectionState::Open);
     }
-    if auto && !state.is_terminal() {
+    if auto && open {
         states.insert(SelectionState::Auto);
     }
-    states.insert(match state {
+    states.extend(state.map(|state| match state {
         TaskState::Unstarted => SelectionState::Unstarted,
         TaskState::Idle => SelectionState::Idle,
         TaskState::Active => SelectionState::Active,
         TaskState::Moving => SelectionState::Moving,
         TaskState::Done | TaskState::Abandoned => SelectionState::Done,
-    });
+    }));
     states.insert(match section {
         TaskSection::Backlog => SelectionState::Backlog,
         TaskSection::Working => SelectionState::Working,
@@ -833,5 +834,38 @@ impl SqliteStore {
             ));
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::task_selection_states;
+    use crate::execution::{TaskSection, TaskState};
+    use crate::work::selection::SelectionState;
+    use std::collections::BTreeSet;
+
+    #[test]
+    fn task_selection_states_show_only_observed_runtime_states() {
+        use SelectionState::{Auto, Open, Working};
+        for state in [TaskState::Unstarted, TaskState::Idle, TaskState::Active] {
+            let states = task_selection_states(
+                state.observed_here(true),
+                TaskSection::Working,
+                true,
+                true,
+                None,
+            );
+            assert_eq!(states, BTreeSet::from([Open, Working, Auto]));
+        }
+        for (state, expected) in [
+            (TaskState::Moving, SelectionState::Moving),
+            (TaskState::Done, SelectionState::Done),
+            (TaskState::Abandoned, SelectionState::Done),
+        ] {
+            let section = TaskSection::of(state, true, true);
+            let states =
+                task_selection_states(state.observed_here(true), section, true, true, None);
+            assert!(states.contains(&expected));
+        }
     }
 }

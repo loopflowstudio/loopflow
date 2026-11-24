@@ -3403,7 +3403,7 @@ pub fn task_comment(
     block_on_task(task_comment_async(repo, wave, issue, message, steer))
 }
 
-pub(crate) fn validate_task_comment_input(message: &str) -> OpsResult<()> {
+pub fn validate_task_comment_input(message: &str) -> OpsResult<()> {
     if message.trim().is_empty() {
         return Err(task_error("Task comment cannot be empty"));
     }

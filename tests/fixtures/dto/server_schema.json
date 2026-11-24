@@ -12093,7 +12093,7 @@
       "description": "Where the steer has been saved so far.",
       "enum": [
         "owner",
-        "tracker",
+        "shared",
         "here"
       ],
       "type": "string"

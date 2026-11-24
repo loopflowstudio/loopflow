@@ -140,7 +140,7 @@ pub fn auto_off(issue: &str, reason: Option<&str>) -> Result<AutoOff> {
 #[serde(rename_all = "snake_case")]
 pub enum SteerReached {
     Owner,
-    Tracker,
+    Shared,
     Here,
 }
 
@@ -218,7 +218,7 @@ pub async fn steer(
                         format!("{name} reads it when it next syncs")
                     };
                     (
-                        SteerReached::Tracker,
+                        SteerReached::Shared,
                         format!("Queued {id} in {carrier} for {name}; {reason}. {next}"),
                     )
                 }

@@ -8,59 +8,35 @@ use loopflow_execution::durable::TaskExecutionRoute;
 use loopflow_execution::machine::task::{read_registry, resolve_task_id};
 use loopflow_execution::ops::human_session::moves::conversation_task;
 use loopflow_model::durable::{
-    Machine, MachineId, MachineRef, RepositoryId, RepositoryIdentity, TaskId, TaskRunsOn,
+    Machine, MachineId, RepositoryId, RepositoryIdentity, TaskId, TaskRunsOn,
 };
 use loopflow_storage::sqlite::SqliteStore;
 use loopflow_storage::work::task::Task;
 
-/// The remote destination for Task status and direction. An unclaimed Task
-/// can have a preferred Machine without having a claim to show in the receipt.
+/// The Machine claiming a Task elsewhere and its SSH route, when registered.
 pub(super) struct TaskPeer {
-    pub machine: MachineRef,
-    since: Option<i64>,
+    pub runs_on: TaskRunsOn,
     pub registered: Option<Machine>,
 }
 
 impl TaskPeer {
     pub fn resolve(store: &SqliteStore, task: &TaskId) -> Result<Option<Self>> {
         let (local, ownership) = store.saved_task_ownership(task)?;
-        let (mut machine, since) = match ownership.runs_on(&local) {
-            Some(claim) => (claim.machine, Some(claim.since)),
-            None if ownership.owner.is_some() => return Ok(None),
-            None => {
-                let route =
-                    loopflow_execution::store::ownership::task_execution_route(store, task)?;
-                if route.machine_id == local {
-                    return Ok(None);
-                }
-                (
-                    MachineRef {
-                        id: Some(route.machine_id),
-                        label: None,
-                    },
-                    None,
-                )
-            }
+        let Some(mut runs_on) = ownership.runs_on(&local) else {
+            return Ok(None);
         };
         if loopflow_execution::machine::task::move_awaiting_arrival(store, task)? {
             return Ok(None);
         }
-        let registered = loopflow_execution::store::machines::registered_machine(store, &machine)?;
+        let registered =
+            loopflow_execution::store::machines::registered_machine(store, &runs_on.machine)?;
         if let Some(peer) = &registered {
-            machine.label.clone_from(&peer.label);
+            runs_on.machine.label.clone_from(&peer.label);
         }
         Ok(Some(Self {
-            machine,
-            since,
+            runs_on,
             registered,
         }))
-    }
-
-    pub fn runs_on(&self) -> Option<TaskRunsOn> {
-        Some(TaskRunsOn {
-            machine: self.machine.clone(),
-            since: self.since?,
-        })
     }
 
     pub fn connect(
@@ -73,7 +49,7 @@ impl TaskPeer {
         let machine = self
             .registered
             .as_ref()
-            .ok_or_else(|| anyhow!("{} is not registered here", self.machine.name()))?;
+            .ok_or_else(|| anyhow!("{} is not registered here", self.runs_on.machine.name()))?;
         let sender = Sender {
             repository: task.repository_id.clone(),
             selection: Selection::capture(repo, None)?,
@@ -228,6 +204,10 @@ fn launch_task(cli: &Cli) -> Option<&str> {
                     ..
                 },
         }) if connection.task.is_some() => connection.task.as_deref(),
+        Some(Commands::Steer {
+            target: Some(target),
+            ..
+        }) if cli.task.as_ref() == Some(target) => None,
         // Ownership is written only on the Task's writer.
         Some(Commands::Task {
             cmd: TaskCommand::Claim { issue, .. } | TaskCommand::Unassign { issue, .. },

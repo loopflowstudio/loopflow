@@ -7,3 +7,5 @@ Desktop's board does not show a `runs_on` badge yet: Swift ignores the `runs_on`
 Status follows the same claim as steering when a different person owns the Task on a registered Machine. Unowned Tasks never dial a Wave placement Machine on status or steer; claim and move operations retain their writer rules.
 
 Headless QA used three private Machine homes, a shared bare Git origin and loopback OpenSSH with temporary keys. The run used disposable Tasks and provider inputs.
+
+A global Task selector on status addresses the same Task as the positional selector. It can read an unowned Task before it has a checkout.

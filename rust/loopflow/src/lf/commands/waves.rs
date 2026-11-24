@@ -988,7 +988,7 @@ fn owner_detail(peer: &TaskPeer, repo: &Path, task: &Task) -> Result<TaskDetail>
     let mut detail: TaskDetail = serde_json::from_value(answer.result)?;
     if detail.reading == TaskReading::Here {
         detail.reading = TaskReading::Owner;
-        detail.task.runs_on = peer.runs_on();
+        detail.task.runs_on = Some(peer.runs_on.clone());
     }
     Ok(detail)
 }
@@ -1030,19 +1030,16 @@ pub fn print_remote_task_status(
         let detail = match owner_detail(&peer, repo, task) {
             Ok(detail) => detail,
             Err(error) => {
-                return Ok(match peer.runs_on() {
-                    Some(runs_on) => RemoteStatus::Unobserved {
-                        runs_on,
-                        reason: format!("{error:#}"),
-                    },
-                    None => RemoteStatus::Here,
+                return Ok(RemoteStatus::Unobserved {
+                    runs_on: peer.runs_on,
+                    reason: format!("{error:#}"),
                 })
             }
         };
         if json {
             print_detail_json(&detail)?;
         } else {
-            print_remote_detail(&peer.machine.name(), &detail)?;
+            print_remote_detail(&peer.runs_on, &detail);
         }
     }
     Ok(RemoteStatus::Printed)
@@ -1059,17 +1056,14 @@ fn unasked(store: &loopflow_storage::sqlite::SqliteStore, runs_on: &TaskRunsOn) 
     })
 }
 
-fn print_remote_detail(machine: &str, detail: &TaskDetail) -> Result<()> {
+fn print_remote_detail(runs_on: &TaskRunsOn, detail: &TaskDetail) {
     let task = &detail.task;
     println!("{} · {}", task.title, task.identifier);
     if detail.reading == TaskReading::Owner {
-        match &task.runs_on {
-            Some(runs_on) => println!(
-                "{}; read from its server.",
-                loopflow_execution::ops::task_ownership::runs_elsewhere(runs_on)
-            ),
-            None => println!("Runs on {machine}; read from its server."),
-        }
+        println!(
+            "{}; read from its server.",
+            loopflow_execution::ops::task_ownership::runs_elsewhere(runs_on)
+        );
     }
     if let Some(state) = task.state {
         println!(
@@ -1090,6 +1084,21 @@ fn print_remote_detail(machine: &str, detail: &TaskDetail) -> Result<()> {
             None => println!("Graph: {}", graph.name),
         }
     }
+    if let Some(graph) = &detail.graph {
+        println!("{}", graph.sentence);
+    }
+    for session in &detail.sessions {
+        println!(
+            "  Session: {}  {}  {}",
+            session.id,
+            session.title,
+            session.state.label()
+        );
+    }
+    if let Some(parent) = &detail.parent {
+        println!("  parent: {}", parent.identifier);
+    }
+    print_task_children(&detail.children);
     if let Some(pr) = &task.pr {
         println!("PR #{}: {}", pr.number, pr.url);
     }
@@ -1108,7 +1117,6 @@ fn print_remote_detail(machine: &str, detail: &TaskDetail) -> Result<()> {
     if let Some(next) = &task.next {
         println!("Next: {next}");
     }
-    Ok(())
 }
 
 /// The `--subscribe` readings of the Machine's server, one JSON line each.
@@ -1129,7 +1137,7 @@ fn print_remote_readings(
     });
     let id = connection.subscribe(read, peer_paths)?;
     let owner = serde_json::to_value(TaskReading::Owner)?;
-    let runs_on = serde_json::to_value(peer.runs_on())?;
+    let runs_on = serde_json::to_value(&peer.runs_on)?;
     // As here, the subscription ends when stdin closes, after its first
     // reading; closing this end of the pipe ends it on the other Machine too.
     let printed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -1394,24 +1402,28 @@ pub fn print_task_family(task: &Task) -> Result<()> {
         }
         let children = store.sqlite.task_children(&task.id)?;
         let children = task_rows(&store, children.iter().collect()).await?;
-        let width = |text: fn(&TaskRow) -> &str| {
-            children
-                .iter()
-                .map(|row| text(row).chars().count())
-                .max()
-                .unwrap_or(0)
-        };
-        let (identifier, title) = (width(|row| &row.identifier), width(|row| &row.title));
-        for child in &children {
-            println!(
-                "  child: {:identifier$}  {:title$}  {}",
-                child.identifier,
-                child.title,
-                child.standing()
-            );
-        }
+        print_task_children(&children);
         Ok(())
     })
+}
+
+fn print_task_children(children: &[TaskRow]) {
+    let width = |text: fn(&TaskRow) -> &str| {
+        children
+            .iter()
+            .map(|row| text(row).chars().count())
+            .max()
+            .unwrap_or(0)
+    };
+    let (identifier, title) = (width(|row| &row.identifier), width(|row| &row.title));
+    for child in children {
+        println!(
+            "  child: {:identifier$}  {:title$}  {}",
+            child.identifier,
+            child.title,
+            child.standing()
+        );
+    }
 }
 
 /// `lf task status --json`.
@@ -1601,10 +1613,11 @@ async fn open_tasks(
     Ok(details
         .into_iter()
         .filter(|task| {
-            query
-                .state
-                .as_deref()
-                .is_none_or(|state| task.lifecycle.label() == state)
+            query.state.as_deref().is_none_or(|state| {
+                task.lifecycle
+                    .observed_here(task.runs_on.is_some())
+                    .is_some_and(|observed| observed.label() == state)
+            })
         })
         .collect())
 }
@@ -2407,12 +2420,9 @@ async fn snapshot_task_detail(
     );
     // An open Task another Machine runs moves there; this Machine's execution
     // records are what it left behind.
-    let elsewhere = runs_on.as_ref().filter(|_| {
-        !matches!(
-            status,
-            TaskState::Done | TaskState::Abandoned | TaskState::Moving
-        )
-    });
+    let lifecycle = status.lifecycle(task.state.as_deref());
+    let observed = lifecycle.observed_here(runs_on.is_some());
+    let elsewhere = runs_on.as_ref().filter(|_| observed.is_none());
     let conducting = finished
         .filter(|_| {
             elsewhere.is_none()
@@ -2504,7 +2514,14 @@ async fn snapshot_task_detail(
         Some(&execution),
         observed_at,
     );
-    let actions = derive_task_actions(&action_evidence);
+    let actions = if elsewhere.is_some() {
+        TaskActionModel {
+            recommended: Some(TaskAction::NoAction),
+            reason: next_move.reason.clone(),
+        }
+    } else {
+        derive_task_actions(&action_evidence)
+    };
     let work_status = runtime.status.work_status();
     let run_control = loopflow_execution::ops::task_run::task_run_control(
         &loopflow_execution::ops::task_run::TaskRunEvidence {
@@ -2525,7 +2542,6 @@ async fn snapshot_task_detail(
         .get(&task.id)
         .cloned()
         .ok_or_else(|| anyhow!("Task {} has no graph", task.id))?;
-    let lifecycle = status.lifecycle(task.state.as_deref());
     let section = TaskSection::of(lifecycle, runtime.owner.is_some(), runs_on.is_some());
     let owned_by_you = runtime.owner.as_ref().is_some_and(|holder| {
         reads
@@ -2551,7 +2567,7 @@ async fn snapshot_task_detail(
         reference,
         lifecycle,
         selection_states: task_selection_states(
-            lifecycle,
+            observed,
             section,
             runtime.owner.is_some() || pr.as_ref().is_some_and(|pr| pr.publication.is_some()),
             facts.auto_on.contains(&task.id),

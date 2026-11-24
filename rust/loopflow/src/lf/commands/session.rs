@@ -759,12 +759,10 @@ async fn list(
             let mut line = format!(
                 "{}  {:<7} {}  {}",
                 session.id,
-                match session.state {
-                    _ if session.availability.is_some() => "available",
-                    SessionState::Unknown => "unknown",
-                    SessionState::Active => "active",
-                    SessionState::Detached => "detached",
-                    SessionState::Closed => "closed",
+                if session.availability.is_some() {
+                    "available"
+                } else {
+                    session.state.label()
                 },
                 place,
                 match &session.account {

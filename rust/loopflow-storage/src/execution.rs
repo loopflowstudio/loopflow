@@ -100,6 +100,11 @@ impl TaskState {
         matches!(self, Self::Done | Self::Abandoned)
     }
 
+    /// State this Machine can report from its own records and the shared plan.
+    pub fn observed_here(self, runs_elsewhere: bool) -> Option<Self> {
+        (!runs_elsewhere || self.is_terminal() || self == Self::Moving).then_some(self)
+    }
+
     /// Has a checkout and is still open and unheld.
     pub fn is_started(&self) -> bool {
         matches!(self, Self::Idle | Self::Active | Self::Moving)

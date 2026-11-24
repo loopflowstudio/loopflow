@@ -2,8 +2,11 @@
   "identifier": "MTG-419",
   "steer_id": "11111111-1111-4111-8111-111111111111",
   "delivery": {
-    "reached": "owner",
-    "runs_on": null,
-    "sentence": "Saved 11111111-1111-4111-8111-111111111111; MTG-419's worker reads it at its next boundary"
+    "reached": "shared",
+    "runs_on": {
+      "id": "home_11111111111111111111111111111111",
+      "label": "mini"
+    },
+    "sentence": "Queued 11111111-1111-4111-8111-111111111111 in Git for mini; mini is not registered here. mini reads it when it next syncs"
   }
 }

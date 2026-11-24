@@ -72,7 +72,7 @@ arrive the same way. When the Task runs on another Machine, the steer goes to
 that Machine ([Steer and read a Task another Machine runs](dev/machines.md#steer-and-read-a-task-another-machine-runs)).
 
 `lf steer LOO-12 --json` returns the receipt: `delivery.reached` is `owner`
-(the steer is in the store of the Machine running the Task), `tracker` (it is
+(the steer is in the store of the Machine running the Task), `shared` (it is
 in Linear, Asana or the plan carrier, waiting for that Machine to sync) or
 `here` (only this Machine has it so far); `delivery.runs_on` names the Machine
 the Task runs on, or `null`; `delivery.sentence` is the line above. The thread

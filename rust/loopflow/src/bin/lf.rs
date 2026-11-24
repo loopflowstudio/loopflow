@@ -1130,9 +1130,16 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
                                 Some(reason),
                             );
                         }
-                        remote_line = Some(loopflow::lf::commands::task_row::unobserved_reason(
-                            &runs_on, &reason,
-                        ));
+                        remote_line = match status
+                            .execution
+                            .as_ref()
+                            .map(|execution| execution.status.lifecycle(task.state.as_deref()))
+                        {
+                            Some(state) if state.is_terminal() => Some(state.to_string()),
+                            _ => Some(loopflow::lf::commands::task_row::unobserved_reason(
+                                &runs_on, &reason,
+                            )),
+                        };
                     }
                 }
             }
@@ -2742,6 +2749,19 @@ fn dispatch_here(
             let directory = loopflow_execution::repo::working_directory()?;
             let repo = selected_task_repository(&cli, &directory, Some(issue))?;
             loopflow::lf::commands::rental::place_by_default(&repo, issue, cli.batch)?;
+        }
+    }
+    // Status selects a Task to read even when it has no checkout to enter.
+    if let Some(Commands::Task {
+        cmd: TaskCommand::Status { issue, .. },
+    }) = &mut cli.command
+    {
+        if let Some(selected) = cli.task.take() {
+            anyhow::ensure!(
+                issue.as_ref().is_none_or(|issue| issue == &selected),
+                "conflicting Task selections"
+            );
+            issue.get_or_insert(selected);
         }
     }
     if loopflow::lf::commands::work_route::dispatch(&cli, args)? {

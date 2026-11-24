@@ -445,7 +445,8 @@ Runs on mini since Nov 12 10:42; read from its server.
 …
 ```
 
-The rest is mini's own answer: its Graph, its Sessions, its sentence.
+Mini reports where its Graph stands, lists its Sessions and shows the Task's
+parent and children.
 `--json` and `--subscribe` say so with `reading.kind: "owner"` and
 `task.runs_on` naming mini. One-shot status waits at most 15 seconds for mini.
 
@@ -467,14 +468,13 @@ incoming steers after its next tool call. With the server running, a steer
 also wakes an idle or stopped Task conversation. With no open Tasks owned
 here, background tracker reads stop. A low Linear budget stretches the interval.
 
-When mini is added but can't be reached, the steer takes the same tracker
-route and its sentence names the SSH or server failure; status shows what this
-Machine has saved (planning, comments, PR) with the same failure as its
-reason. If the connection drops after the steer was sent, `lf steer` fails
-rather than saving it a second time; `lf task status` shows whether it landed.
+When mini is registered but offline, the steer goes through the shared plan.
+Its receipt names the connection failure. Status gives the same reason and
+shows the saved planning, comments and PR. If the connection drops after the
+steer was sent, check `lf task status` to see whether mini saved it.
 
 When the owner cannot answer, status returns `task.state: null` and
-`task.next: null` for open work. A live reply carries the owner’s own state
+`task.next: null` for open work. Finished Tasks keep their terminal state. A live reply carries the owner’s own state
 and next move. `lf task list` puts work held on another Machine in Working
 and reads the Machine name from the ownership log without contacting the
 owner. A Machine your preferences don't name shows the public name its
@@ -486,13 +486,15 @@ MTG-419 · Jack · Runs on modal-3 since Nov 23 09:05 · Stop refactoring foo
 ```
 
 List JSON carries the local lifecycle projection. Its `section` is the
-board placement, and `lf task status` reads the owner for live state.
+board placement. An open Task running elsewhere offers no local run action and
+does not match a local runtime state filter. Status and steering read an unowned
+Task here even when its Wave names a Machine for its next run.
 
 | `--json` field | Says |
 |---|---|
 | `task.runs_on` | `{machine, since}`, or `null` when this Machine runs it or nobody does |
 | `reading.kind` (status) | `here`, `owner` (the owning Machine answered) or `unobserved` with its `reason` |
-| `delivery.reached` (steer) | `owner`, `tracker` or `here` (only this Machine has it so far) |
+| `delivery.reached` (steer) | `owner`, `shared` (in Linear, Asana, Git or the hub) or `here` (only this Machine has it so far) |
 
 ## Own and rent Machines
 

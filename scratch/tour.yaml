@@ -1,0 +1,21 @@
+at: 05968c2e1cf3f9fd38a7b42a99ac267a084fb8b8
+first:
+  - path: rust/loopflow/src/server/README.md
+    why: Intended workspace protocol across Machines
+  - path: scratch/plan.md
+    why: Implemented file operations and remaining workspace work
+  - path: rust/loopflow-storage/src/sqlite/repositories.rs
+    why: Ownership route includes the shared tracker key
+  - path: rust/loopflow-storage/src/sqlite/children.rs
+    why: Indexed Task lookup within the receiving repository
+  - path: rust/loopflow/src/lf/commands/read.rs
+    why: File requests follow the execution owner through moves
+  - path: rust/loopflow/src/lf/commands/write.rs
+    why: Owner checks the revision and saves the draft
+  - path: rust/loopflow/src/server/service.rs
+    why: Peer requests resolve locally in the sender’s repository
+  - path: rust/loopflow-execution/src/machine/client.rs
+    why: Lost reads identify the unavailable Machine
+  - path: rust/loopflow/tests/machine_commands.rs
+    why: Two servers exercise moving, editing and losing connectivity
+hide: []

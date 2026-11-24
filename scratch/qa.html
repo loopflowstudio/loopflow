@@ -1,6 +1,14 @@
-<!doctype html><meta charset="utf-8"><title>LOO-1066 QA round 5: Settings reconnect</title>
+<!doctype html><meta charset="utf-8"><title>LOO-1066 Settings review</title>
 <style>body{font:15px/1.5 -apple-system,sans-serif;max-width:1100px;margin:2em auto;padding:0 1em}table{border-collapse:collapse}td,th{border:1px solid #ddd;padding:6px 10px;vertical-align:top}code{font-size:13px}</style>
-<h1>Settings redesign: QA round 5 (automatic reconnect, declaration-bound edits)</h1>
+<h1>Settings redesign</h1>
+<section id="compact">
+<h2>Compact window review on an unlocked display</h2>
+<p>The branch app opened Settings on a disposable checkout named Sample. Resizing to the minimum produced a 760 × 592 pt window. WindowServer captured it in the background, so the title and sidebar selection have the inactive window appearance.</p>
+<figure><img src="compact-settings/general.png" width="760" style="max-width:100%" alt="General pane with all seven sidebar labels visible"><figcaption>The search field, two dividers and full Project &amp; Wave Config label fit alongside General.</figcaption></figure>
+<figure><img src="compact-settings/project.png" width="760" style="max-width:100%" alt="Project form showing Sample, My repository settings and the shared starting preference"><figcaption>The checkout and destination occupy separate rows. The starting preference and its shared repository source fit on one line.</figcaption></figure>
+<figure><img src="compact-settings/merge-method.png" width="760" style="max-width:100%" alt="Search has scrolled to the highlighted Merge method row"><figcaption>Searching for <code>merge_method</code> and pressing Return revealed the row with its full default choice.</figcaption></figure>
+</section>
+<h2>QA round 5 · Automatic reconnect and declaration edits</h2>
 <p>Branch build of e753cd0c45 (fresh <code>cargo build -p loopflow --bin lf</code>; the earlier binary predated the last commit's Rust change). Private Machine <code>/tmp/lf-qa-1066</code> (own HOME, LF_HOME, branch <code>lf server run</code>), disposable repository with shared <code>default_agent: codex</code>, <code>yolo: true</code>. Isolated bundle <code>com.loopflow.mac.qa1066.dev</code> with <code>.lf/qa/QAHook.swift</code>, removed afterwards. The screen was <b>locked</b> (idle ~58 min), so Forms were read as text with <code>views</code>/<code>tree</code>. Rounds 1–4 are in git history.</p>
 
 <h2>Scenarios</h2>
@@ -23,7 +31,7 @@
 </ul>
 
 <h2>Couldn't reach</h2><ul>
-<li>How the sidebar and scoped forms <i>look</i> in a compact window: the screen was locked, and Forms draw white while locked. This is the plan's one remaining review item and needs an unlocked display.</li>
+<li>The screen was locked during round 5. The <a href="#compact">compact window review</a> above shows the forms after unlocking.</li>
 <li>Undo from the notice: hook clicks don't reach it while the window is never key (unchanged from round 4; <code>ContextSettingsWorkflowTests</code> covers it).</li>
 </ul>
 

@@ -4,9 +4,11 @@
 
 Direction on record: [demo-notes.md](demo-notes.md) (verbatim feedback from Jack Heart during the live demo of PR #2033), [design.md](design.md), [explore.html](explore.html), [qa.html](qa.html), and [concept-review.html](concept-review.html). User docs: [Surfaces](../docs/surfaces.md#settings), [Configuration](../docs/config.md#inspect-effective-settings), [Connect clients](../docs/server.md#phone-access), and [Loopflow for macOS](../swift/README.md).
 
-## Remaining review
+## Compact window review
 
-Check the sidebar and scoped forms in a compact Settings window on an unlocked display.
+Reviewed the 760 × 592 pt Settings window on an unlocked display. All seven sidebar labels fit. The project form shows the checkout, destination and agent source in full. Searching for `merge_method` reveals its row with the full default value. See the [window captures](qa.html#compact).
+
+`LOOPFLOW_NATIVE_TESTS=1 swift test --package-path swift --filter searchScrollsBetweenProjectSectionsInACompactWindow` passed on the unlocked Mac.
 
 ## Settings observation
 

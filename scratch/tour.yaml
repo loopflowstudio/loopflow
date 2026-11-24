@@ -1,11 +1,13 @@
-at: 7460263ba0974dbd7a3cafe52dc5904ffbc2860b
+at: 50ee2e2d46323311d868dd417ed91bb59138b7e5
 first:
   - path: docs/surfaces.md
     why: Follow a setting from search through Undo
   - path: docs/config.md
     why: Defaults, explicit null and Reset
   - path: scratch/plan.md
-    why: Design choices and remaining visual check
+    why: Design choices and compact window review
+  - path: scratch/qa.html
+    why: See the sidebar and project controls at minimum width
   - path: rust/loopflow-execution/src/config/catalog.rs
     why: Each setting’s schema, applicability and fallback
   - path: rust/loopflow-execution/src/engine/config/scope.rs

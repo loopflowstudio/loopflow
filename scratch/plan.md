@@ -1,5 +1,38 @@
 # LOO-957: Sign Machines in the way each provider documents
 
+## Rescope (2026-11-23) — supersedes the Claude design below
+
+Observed 2026-11-23: modal-3…6 (Claude Code 2.1.311) read `loggedIn: false`
+for Claude; their steps ran on Codex. `main` carries Claude to a rental only
+through `forward.env`, and nothing named `CLAUDE_CODE_OAUTH_TOKEN`. The Doppler
+`CLAUDE_CODE_OAUTH_TOKEN` (a `claude setup-token`) answered from an empty HOME
+(`authMethod: oauth_token`). `forward.env: [CLAUDE_CODE_OAUTH_TOKEN]` is now
+set in personal config.
+
+Asked "should LOO-957 shrink to: Claude by forwarded token; Codex keeps the
+sign-in on the rental?" Answer: "ok lets switch to that", then "go ahead and
+rebuil".
+
+So:
+- **Claude reaches other Machines only as a forwarded setup token**
+  (`forward.env` naming `CLAUDE_CODE_OAUTH_TOKEN`). Delete the remote
+  `claude auth login` paste-code path, Claude's approver and its tests.
+  `lf machine login claude` with no Machine still runs Claude's own login
+  here; naming another Machine refuses and says to forward
+  `CLAUDE_CODE_OAUTH_TOKEN` (after `claude setup-token` and
+  `doppler secrets set CLAUDE_CODE_OAUTH_TOKEN`).
+- **Codex keeps the device login on the target** (`codex login --device-auth`),
+  approvers and `--refused` included.
+- **Rental prepare** stops signing Claude in; it relies on `forward`, and
+  `main`'s check that a rental carries some agent login stays.
+- **The launch login check** counts Claude signed in when the launch carries
+  `CLAUDE_CODE_OAUTH_TOKEN` (the probe already runs with the launch's env;
+  verify it does for a forwarded variable), and its refusal for Claude names
+  `forward.env`, not `lf machine login claude <machine>`.
+- `lf account` retirement, services, and Asana/Notion/Doppler staying here
+  are unchanged.
+- Docs (`docs/subscriptions.md`, `docs/ops.md`, help text) say the same.
+
 ## Outcome
 
 `lf machine login <provider> [<machine>…]` is the one sign-in command, for this

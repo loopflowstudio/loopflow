@@ -22,6 +22,7 @@ use loopflow_execution::ops::graph_process;
 use loopflow_execution::ops::WorkBinding;
 use loopflow_execution::output::Colors;
 use loopflow_execution::process::launch_log::{release_launcher, PendingLog};
+use loopflow_execution::process::GraphHeld;
 use loopflow_execution::store::SharedStore;
 use loopflow_model::durable::WorkRef;
 use loopflow_model::id::LfProcessId;
@@ -711,14 +712,13 @@ fn report_outcome(outcome: GraphOutcome) -> Result<()> {
         // Each stop printed why as it stopped.
         GraphOutcome::Completed | GraphOutcome::StoppedAt(_) => Ok(()),
         GraphOutcome::Interrupted => Err(loopflow_execution::process::CommandExit(130).into()),
-        GraphOutcome::Waiting => Err(loopflow_execution::process::GraphHeld(
+        GraphOutcome::Waiting => Err(GraphHeld(
             "Graph stopped before its last step; inspect its history and effects".into(),
         )
         .into()),
-        GraphOutcome::Blocked(reason) => Err(loopflow_execution::process::GraphHeld(format!(
-            "Graph is blocked: {reason}"
-        ))
-        .into()),
+        GraphOutcome::Blocked(reason) => {
+            Err(GraphHeld(format!("{} {reason}", GraphHeld::BLOCKED_PREFIX)).into())
+        }
     }
 }
 

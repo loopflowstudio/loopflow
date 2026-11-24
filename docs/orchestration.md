@@ -158,7 +158,9 @@ Decision pass 3. Iterating repeats 3 steps, back to implement.
 ```
 
 It keeps iterating past 5 when real work is left, and returns `blocked` when
-passes shrink into small increments that no longer converge.
+passes shrink into small increments that no longer converge. `lf task status`
+shows the reason the decider gave. If the step succeeds and the Graph then
+fails, status shows the Graph error.
 
 ### Docs-first (`write-docs`) and QA playbooks (`.lf/qa/`)
 

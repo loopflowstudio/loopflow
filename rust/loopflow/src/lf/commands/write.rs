@@ -1311,25 +1311,13 @@ impl Write {
                 })?,
         };
         let mut write = self.clone();
-        match &mut write {
-            Self::SessionResume {
-                task,
-                wave: resumed,
-                ..
-            } => {
-                if let Some(route) = &route {
-                    *task = Some(route.peer_selector.clone());
-                }
-                if resumed.is_none() {
-                    *resumed = wave;
-                }
-            }
-            Self::SessionNew { task, .. } => {
-                if let Some(route) = &route {
-                    *task = Some(route.peer_selector.clone());
-                }
-            }
-            _ => {}
+        if let (Self::SessionResume { task, .. } | Self::SessionNew { task, .. }, Some(route)) =
+            (&mut write, &route)
+        {
+            *task = Some(route.peer_selector.clone());
+        }
+        if let Self::SessionResume { wave: resumed, .. } = &mut write {
+            *resumed = resumed.take().or(wave);
         }
         let mut remote = Remote::new(machine, repository, write, false, None)?;
         remote.route = route;

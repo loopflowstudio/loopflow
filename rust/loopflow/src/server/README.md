@@ -642,8 +642,9 @@ the phone's `view.select` Task list and its creation destinations all read it.
   Machine's server over SSH and returns its answer; it never falls back to
   local execution. A Session write naming a `task` goes where that Task runs,
   even when the Session last moved elsewhere, and the record it returns names
-  this Machine's Task first in `task_ids`, `work` and `workspace`. Requests create no Process rows; diagnostics the shared
-  functions print go to the request's log. A refusal the shared code names
+  this Machine's Task first in `task_ids`, `work` and `workspace`. Requests
+  create no Process rows; diagnostics the shared functions print go to the
+  request's log. A refusal the shared code names
   (an empty name is `invalid`, a stale Dashboard revision `conflict`, a missing
   record `not_found`) answers that code; any other failure is
   `outcome_unknown`, since the write may have taken partial effect. A lost

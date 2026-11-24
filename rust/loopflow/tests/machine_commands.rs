@@ -5967,26 +5967,23 @@ fn a_served_task_conversation_write_is_prepared_where_the_task_runs() {
     for (kind, write) in [
         (
             "session.new",
-            Box::new(|directory: std::path::PathBuf, task: String, id: String| {
-                Mutation::SessionNew {
-                    directory,
-                    request_id: "reset-on-mini".into(),
-                    id,
-                    task: Some(task),
-                    agent: None,
-                }
-            }) as Box<dyn Fn(std::path::PathBuf, String, String) -> Mutation>,
+            (|directory, task, id| Mutation::SessionNew {
+                directory,
+                request_id: "reset-on-mini".into(),
+                id,
+                task: Some(task),
+                agent: None,
+            }) as fn(std::path::PathBuf, String, String) -> Mutation,
         ),
-        (
-            "session.resume",
-            Box::new(|directory, task, id| Mutation::SessionResume {
+        ("session.resume", |directory, task, id| {
+            Mutation::SessionResume {
                 directory,
                 id: Some(id),
                 task: Some(task),
                 wave: None,
                 agent: None,
-            }),
-        ),
+            }
+        }),
     ] {
         let fixture = preview_machines();
         let (plan, task) = task_on_mini(&fixture);

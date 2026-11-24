@@ -769,6 +769,15 @@ impl Read {
                     }
                 }
                 replace_present(reading, "/row/reference/workspace/machine_label", &label);
+                // The owner names itself by its own hostname; here it has this Machine's label.
+                for pointer in ["/row/runtime/owner/machine", "/ownership/owner/machine"] {
+                    if let Some(owner) = reading
+                        .pointer_mut(pointer)
+                        .filter(|owner| owner["id"] == machine.id.as_str())
+                    {
+                        owner["label"] = label.clone();
+                    }
+                }
                 if let Some(session) = reading.pointer_mut("/current_session") {
                     super::ssh::localize_remote_session(session, machine, Some(route))?;
                 }
@@ -776,6 +785,12 @@ impl Read {
             Self::CreationGet { .. } => {
                 if let Some(id) = reading.get_mut("task_id").filter(|id| !id.is_null()) {
                     *id = task;
+                }
+                // A Reset's receipt carries the Session as the direct answer did.
+                let reset = reading["kind"] == "session.new";
+                if let Some(session) = reading.get_mut("result").filter(|r| reset && r.is_object())
+                {
+                    super::ssh::localize_remote_session(session, machine, Some(route))?;
                 }
             }
             Self::TaskFilesWatch { .. } => {
@@ -1577,9 +1592,13 @@ mod tests {
                 "task": { "id": "TASK_PEER", "identifier": "LOO-7" },
                 "row": {
                     "task": { "id": "TASK_PEER", "repo": "/workspace/app" },
-                    "runtime": { "work_id": "TASK_PEER" },
+                    "runtime": {
+                        "work_id": "TASK_PEER",
+                        "owner": { "machine": { "id": machine.id.as_str(), "label": "self" } },
+                    },
                     "reference": { "workspace": { "machine_label": "self", "worktree": "/workspace/app.loo-7" } },
                 },
+                "ownership": { "owner": { "machine": { "id": "home_other", "label": "other" } } },
             });
             task_get()
                 .localize_peer_reading(&mut pane, &machine, &route)
@@ -1592,6 +1611,9 @@ mod tests {
                 pane["row"]["reference"]["workspace"]["machine_label"],
                 "mini"
             );
+            assert_eq!(pane["row"]["runtime"]["owner"]["machine"]["label"], "mini");
+            // A Machine other than the route's keeps the label it came with.
+            assert_eq!(pane["ownership"]["owner"]["machine"]["label"], "other");
             // The files live in the owner's checkout; an unbound repository
             // has no path here but the owner's.
             assert_eq!(
@@ -1599,6 +1621,42 @@ mod tests {
                 "/workspace/app.loo-7"
             );
             assert_eq!(pane["row"]["task"]["repo"], "/workspace/app");
+        }
+
+        #[test]
+        fn a_reset_receipt_opens_its_session_with_this_machines_lf_open() {
+            let machine = mini();
+            let route = route_on(&machine);
+            let mut receipt = json!({
+                "kind": "session.new",
+                "task_id": null,
+                "result": {
+                    "id": "abc123",
+                    "open_argv": ["/peer/lf", "session", "resume", "abc123"],
+                    "action": { "help": "Continue with: lf resume abc123" },
+                },
+            });
+            Read::CreationGet {
+                request_id: "r1".into(),
+                task: Some("LOO-7".into()),
+            }
+            .localize_peer_reading(&mut receipt, &machine, &route)
+            .unwrap();
+            assert_eq!(receipt["task_id"], serde_json::Value::Null);
+            let argv: Vec<&str> = receipt["result"]["open_argv"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|arg| arg.as_str().unwrap())
+                .collect();
+            assert_eq!(
+                argv[1..],
+                ["open", "--task", "LOO-7", "--session", "abc123", "--here"]
+            );
+            assert_eq!(
+                receipt["result"]["action"]["help"],
+                "Continue with: lf open --task LOO-7 --session abc123"
+            );
         }
 
         #[test]

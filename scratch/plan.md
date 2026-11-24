@@ -223,6 +223,7 @@ Build thinly end to end; each slice runs and proves itself before moving on, and
    - `Read::CreationGet` carries required-nullable `task` (`lf server receipt --task`); a non-null receipt `task_id` is localized. Swift `SubmittedCreation.task` reads the saved payload's `task`, so Desktop and Mobile route lookups by it and `Resource.task` falls back to it for `session.new` receipts (which carry null).
    - Desktop `WorkModel` runs `openWarmConversations()` when `subscribedTaskRow` updates; `retainedRepositoryConversation`'s mock answers `--repo` only.
    - Ran (realign, 2026-11-24): `cargo test -p loopflow --lib lf::commands::read::tests::` 10/10 (4 new `peer_readings::`); `machine_commands::server_routed_task_workspace` passes (43 s; asserts localized `row.task.id`/`repo`, `machine_label: "mini"`, routed `creation.get` for a receipt kept on mini). Swift (implement): 78 of 79 in `CreationSubmissionTests|RegistryQueryTests|WorkNavigationTests` pass; `mountedPresentationRetiresNormalAndPromotedResults` fails on a ViewInspector `task` modifier lookup in a view this branch does not touch (`scratch/questions.md`, gate checks main).
+   - QA (2026-11-24, `scratch/qa.html`): every routed reading checked over the laptop socket; Desktop opened mini's Session pane and typed through it. Fixed: routed Task readings named the owner by its own hostname in `runtime.owner`/`ownership.owner`, and a routed `session.new` receipt carried the owner's `lf session resume` argv; both now localized (`read::tests::peer_readings`).
 
 ## Remaining before merge
 

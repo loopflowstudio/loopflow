@@ -1,58 +1,57 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><title>LOO-1083 QA · Slice 7: Reset and New conversation on a mini Task</title>
+<html lang="en"><head><meta charset="utf-8"><title>LOO-1083 QA · Slice 8: peer readings and routed receipts</title>
 <style>
 body{font:15px/1.5 -apple-system,system-ui,sans-serif;max-width:1100px;margin:2em auto;padding:0 1em;color:#222}
 h1{font-size:1.5em}h2{margin-top:2em;border-bottom:1px solid #ddd}
 table{border-collapse:collapse;width:100%}td,th{border:1px solid #ddd;padding:.5em;vertical-align:top;text-align:left}
 th{background:#f5f5f5}code,pre{font:13px ui-monospace,Menlo,monospace}pre{background:#f6f6f6;padding:.6em;overflow-x:auto}
 img{max-width:100%;border:1px solid #ccc}.bad{color:#a00}.ok{color:#070}figure{margin:1em 0}
-</style></head><body>
-<h1>LOO-1083 QA · Slice 7: Reset session and New conversation on a Task mini runs</h1>
-<p>Branch <code>lf</code> at <code>a69ea38292</code>, then with this run's fixes. Two private Machines on one Mac (laptop, mini) under <code>/tmp/q83</code>, joined by a stand-in <code>ssh</code>; stand-in <code>claude</code> on each prints its Machine, its <code>--session-id</code>, and echoes lines read from its tty. Screen locked throughout. Recipe: <code>.lf/qa/remote-task-workspace.md</code>. Earlier runs: <code>45b450065a:scratch/qa.html</code>.</p>
-<p>The Task <code>65d69a</code> was filed on the laptop, moved to mini while unstarted, and run from the laptop (<code>lf task run</code> → mini, stops at <code>demo</code> with a Session). The laptop's own store never saw that Graph.</p>
+</style>
+</head><body>
+<h1>LOO-1083 QA · Slice 8: peer readings name this Machine's Task, repository and owner; <code>creation.get</code> routes by Task</h1>
+<p>Branch <code>lf</code> at <code>248f39c2fc</code> plus this run's two fixes, on two private Machines on one Mac (<code>/tmp/q83</code>: laptop and mini, stand-in <code>ssh</code> and <code>claude</code>). Task <code>65d69a</code> “Reset me on mini” only ever ran on mini. Both Machines share the Task ID; the repository is <code>/private/tmp/q83/laptop/src/repo</code> on the laptop and <code>/private/tmp/q83/mini/src/origin</code> on mini. The screen was locked.</p>
 
 <h2>Scenarios</h2>
 <table>
 <tr><th>Scenario</th><th>What I did</th><th>What I saw</th></tr>
-<tr><td>Reset session, server half</td><td>Desktop's exact <code>session.new</code> over the laptop socket: <code>{id, task: task_65d69a…, agent: "claude", request_id}</code></td>
-<td class="ok">Laptop logged it and routed it to mini. Answer: <code>task_ids[0]</code> and <code>work.id</code> are the laptop's Task, workspace mini's checkout, <code>open_argv</code> <code>lf open --task … --session … --here</code>. Opening that argv in a PTY: <code>provider on mini … args: --session-id a9f279f5…</code> (was <code>ed1363de…</code>), typed <code>after reset</code> → <code>mini received: after reset</code>; detach printed <code>Return with: lf open --task … --session …</code>.</td></tr>
-<tr><td>Same Reset sent again</td><td>Same request ID</td><td class="ok">Same answer; mini launched nothing new (claude log unchanged).</td></tr>
-<tr><td>Reset without its Task</td><td><code>task: null</code></td><td>Refused: <code>outcome_unknown</code> "Session … was not found; inspect the affected work before retrying". Expected refusal; the code overstates a plain not-found. Desktop always sends the Task now.</td></tr>
-<tr><td>Reset session, click</td><td>Dev build with the QA hook: clicked <code>plus.bubble</code> in the Session strip (twice), and the Brief tab as a control</td>
-<td>Neither did anything: no request reached the server and Brief stayed unselected. Hook clicks don't reach pane strip controls; this is also why the Slice 6 run saw "no reset request". The click itself is unchecked.</td></tr>
-<tr><td>New conversation</td><td>The argv Desktop builds for a remote Task: <code>lf desktop shell task_65d69a… --id qa-newconv-1 --create -- lf --interactive --task 65d69a : '&lt;prompt&gt;'</code>, in a PTY</td>
-<td class="ok">Shell ran on mini: <code>provider on mini in …/origin.65d69a-reset-me-on</code>, new thread <code>9aae5f1a…</code>, typed line reached mini. Laptop: no checkout, no provider. Served <code>session.list --task</code> from the laptop then listed both Sessions, each opening with <code>lf open --task</code>. Closed with <code>--close --started-on &lt;mini&gt;</code>.</td></tr>
-<tr><td><code>lf session list --task 65d69a</code> on the laptop</td><td>CLI, repo cwd</td>
-<td><span class="bad">Before: "No Sessions."</span> while mini ran two. <span class="ok">After: both, the hint naming <code>lf open --task …</code>; with mini unreachable: <code>Error: machine "mini": unreachable: …</code>.</span></td></tr>
-<tr><td>Open the Task in Desktop</td><td><code>loopflow://repo/task/65d69a</code> in the Dev build</td>
-<td><span class="bad">Before: the Session slot showed <b>Not started</b> with Start, brief "Unstarted", while the header read "Waiting for you at demo."</span> The laptop's plan row ("No Task Graph has run") outranked the routed <code>task.get</code>, whose <code>row</code> from mini says <code>active</code>/<code>working</code>. <span class="ok">After: the Session pane (Claude) opens, Files names <code>mini origin.65d69a-reset-me-on</code>; <code>desktop focus -p session</code> → <code>usable</code>, capture shows mini's provider and the line typed after reset.</span></td></tr>
-<tr><td>Creation receipt for a routed Reset</td><td><code>creation.get</code> on each socket</td>
-<td class="bad">Laptop answers <code>null</code>; mini holds the receipt. Desktop's recovery re-sends on <code>null</code> and then throws "The Machine has no receipt for creation …". Only bites when a Reset's answer is lost. Recorded in <code>scratch/questions.md</code>.</td></tr>
+<tr><td><code>task.get</code> subscription from the laptop</td><td>Laptop socket, <code>{kind: task.get, directory: laptop repo, issue: 65d69a}</code></td>
+<td>Routed to mini. <code>row.task.repo</code> = laptop repo, <code>row.task.id</code> = laptop Task, <code>row.reference.workspace.machine_label</code> = <code>mini</code>, worktree mini's checkout. <b>But</b> <code>row.runtime.owner.machine.label</code> and <code>ownership.owner.machine.label</code> said <code>Jacks-MacBook-Pro-2</code>, mini's name for itself. <span class="ok">Fixed</span>: both now say <code>mini</code> (only when the id is the routed Machine's).</td></tr>
+<tr><td><code>task.status</code>, <code>task.detail</code></td><td>Same Task, one-shot requests</td>
+<td class="ok"><code>task.detail.task.repo</code> is the laptop's; <code>current_session.open_argv</code> = <code>lf open --task task_65d69a… --session 191391… --here</code>, help says the same. Session <code>cwd</code> stays mini's checkout (that is where it runs). <code>graph_processes[].entry.repo</code> still names mini's repository path; no surface reads it.</td></tr>
+<tr><td><code>task.files.watch</code></td><td>Subscription by <code>issue</code></td>
+<td class="ok"><code>task_id</code> laptop's, <code>machine_label: mini</code>, <code>checkout</code> mini's.</td></tr>
+<tr><td><code>session.list --task</code> (served)</td><td><code>{task: 65d69a, headless: false, after: null, limit: null}</code></td>
+<td class="ok">Both Sessions, <code>workspace.task_id</code> laptop's, argv <code>lf open --task …</code>.</td></tr>
+<tr><td>Reset, then lose the answer</td><td>Desktop's <code>session.new {id: 191391…, task, agent: null, request_id}</code> over the laptop socket; then <code>lf server receipt &lt;request&gt;</code> with and without <code>--task 65d69a</code></td>
+<td>Without <code>--task</code>: <code>null</code> (the receipt is on mini). With it: mini's receipt, <code>complete</code>, “Conversation changed”. <b>But</b> its <code>result.open_argv</code> was mini's own <code>env LF_HOME=/private/tmp/q83/mini/lfh … lf session resume 191391…</code>, while the direct answer said <code>lf open --task … --session … --here</code>. <span class="ok">Fixed</span>: a <code>session.new</code> receipt's result is localized like the direct answer.</td></tr>
+<tr><td>Open the recovered Session</td><td>Ran the receipt's <code>open_argv</code> in a PTY, typed <code>hello-s8</code>, <code>Ctrl+]</code></td>
+<td class="ok"><pre>provider on mini in /private/tmp/q83/mini/src/origin.65d69a-reset-me-on
+args: --session-id 3baf8939-78e8-4c63-8360-defc3f476ce0
+mini received: hello-s8
+Detached from “65d69a Reset me on mini”; it keeps running. Return with: lf open --task task_65d69a… --session 191391…</pre>New thread from the Reset; return line names the laptop's command.</td></tr>
+<tr><td>Desktop opens the Task only mini ran</td><td>Fresh Dev bundle (<code>com.loopflow.qa83b.dev</code>) on the laptop home, <code>loopflow://repo/task/task_65d69a…</code>, then <code>lf desktop state</code>, <code>send</code>, <code>capture</code></td>
+<td class="ok">Session pane opened by itself (no <b>Not started</b> page), <code>attachment: usable</code>, subject the Reset Session, location mini's checkout. Typed <code>desk-s8</code> → <code>mini received: desk-s8</code>; the capture also shows the CLI viewer's <code>hello-s8</code>, so both views share the one terminal.</td></tr>
 </table>
-
-<h2>Screens</h2>
-<figure><img src="qa/s7-not-started-before.png" alt=""><figcaption>Before: a Task mini runs, waiting at demo, offered as Not started.</figcaption></figure>
-<figure><img src="qa/s7-session-after.png" alt=""><figcaption>After: its Session pane opens and Files names mini. (The terminal draws blank through <code>cacheDisplay</code> while locked; <code>desktop capture</code> read mini's provider.)</figcaption></figure>
 
 <h2>Fixed in this run</h2>
 <ul>
-<li><code>lf session list --task</code> asks the owner's server for a Task another Machine runs (<code>session.rs::list_remote_task</code>), as <code>lf task status</code> does. Test: <code>server_routed_task_workspace</code> runs the CLI from the laptop's checkout; it fails with "No Sessions." without the fix.</li>
-<li>Desktop: for a Task owned by another Machine, the routed reading's <code>lifecycle</code>/<code>section</code> decide (<code>WorkModel.ownerStanding</code>, <code>RoadmapTask.standing(as:)</code>). Test: <code>DesktopHeadlessTests/remoteTaskStandsWhereItsOwnerSays</code>; fails without the fix.</li>
+<li><code>Read::localize_peer_reading</code>: a routed <code>task.get</code>/<code>task.status</code>/<code>task.detail</code> names its owner by this Machine's label in <code>row.runtime.owner.machine</code> and <code>ownership.owner.machine</code>. Desktop's Files strip and Machine control read <code>runtime.owner.machine.label</code> from the subscribed row when the plan has no row.</li>
+<li><code>creation.get</code> for a routed <code>session.new</code>: the receipt's result gets this Machine's <code>lf open --task … --session …</code>, not the owner's <code>lf session resume</code> under its own <code>LF_HOME</code>.</li>
 </ul>
 
 <h2>Checks</h2>
-<pre>cargo test -p loopflow --test integration machine_commands::server_routed_task_workspace   ok, 31 s (fails without the CLI fix)
-cargo clippy -p loopflow --all-targets -- -D warnings; cargo fmt                       clean
-scripts/test_desktop.sh --filter 'DesktopHeadlessTests|WorkDestinationTests|WorkspacePanesTests|WorkCacheTests|EmptyStateTests|WorkNavigationTests|TaskConceptTests|RemoteTaskWorkspaceTests|WarmPaneMountTests'
-                                                                                        200 tests, 1 failure (below)
-Dev build: open a mini-run Task → Session pane usable on mini; Files on mini</pre>
+<ul>
+<li><code>cargo test -p loopflow --lib lf::commands::read::tests::</code>: 11 passed (one new, one extended). Run here.</li>
+<li>Real product: the scenarios above, branch <code>lf</code> rebuilt and both servers restarted after each fix. Run here.</li>
+<li>Gate: the four acceptance commands in <code>scratch/plan.md</code>, then CI.</li>
+</ul>
 
 <h2>Still wrong, worst first</h2>
-<ol>
-<li><code>WorkNavigationTests/retainedRepositoryConversation</code> fails at this branch's head, with or without this run's change (<code>pane(forSessionId: "repo-primary")</code> is nil). Not established whether main fails too; gate must look.</li>
-<li>A routed Reset whose answer is lost leaves Desktop's recovery stuck: the laptop has no receipt for a creation mini took (<code>scratch/questions.md</code>).</li>
-<li>The sidebar for a Task only mini has run says "No working Tasks in this list" / "Open Task is outside this list": the list reads the laptop's store only, by design (no fanout), and that store calls it backlog.</li>
-<li>Unchecked: clicking Reset session and New conversation in the app. The hook can't reach the strip or the "…" menu while locked; both were driven through the exact requests and argv the app sends.</li>
-<li><code>lf session list --task</code> for a remote Task applies <code>--task</code>, <code>--headless</code> and paging only, as the served read does; <code>--on</code>, <code>--available</code>, <code>--search</code>, <code>--primary</code> are ignored there.</li>
-</ol>
+<ul>
+<li><code>lf server receipt &lt;id&gt; --task nope</code> prints <code>null</code>, the same as “no such creation”; an unknown Task is not reported.</li>
+<li><code>graph_processes[].entry.repo</code> in routed Task readings is mini's repository path. Nothing reads it today.</li>
+<li>Carried over: the sidebar for a Task only mini has run says “No working Tasks in this list” (the list reads the laptop's store, by design).</li>
+<li>Carried over, unchecked: clicking Reset session and New conversation in the app; the screen was locked and hook clicks don't reach pane strips.</li>
+<li>Carried over: <code>lf session list --task</code> for a remote Task honors only <code>--task</code>, <code>--headless</code> and paging.</li>
+</ul>
 </body></html>

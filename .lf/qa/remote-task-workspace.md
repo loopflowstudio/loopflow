@@ -132,3 +132,26 @@ remove `QAHook.swift` and its `LoopflowApp.swift` line.
 - A served `session.list` needs `headless`, `after` and `limit` beside `task`.
 - `creation.get` for a routed `session.new` answers `null` on the laptop; the
   receipt is in mini's store (ask mini's socket).
+
+# Peer readings and routed receipts (Slice 8 run)
+
+- Request shapes that cost a retry: `task.get`, `task.status` and
+  `task.detail` take `{directory, issue}` (not `id`); `task.files.watch` takes
+  only `{issue}`; served `session.list` wants `headless: false`, not null. A
+  `subscribe` envelope carries `resume: null` where a request has
+  `request_id`; with `request_id` instead the server says it "has no operation
+  `task.get`".
+- Two private Machines on one Mac share Task IDs but not repository paths, so
+  the localized keys to look at are `row.task.repo` (the laptop's path), the
+  owner labels (`row.runtime.owner.machine.label`,
+  `ownership.owner.machine.label`, `workspace.machine_label`: all `mini`, never
+  mini's hostname) and every `open_argv` (`lf open --task … --session …`).
+- A lost Reset: send `session.new` with a `request_id`, then `lf server
+  receipt <request> --task <id> --json` on the laptop. Without `--task` it
+  prints `null`. Run the receipt's `result.open_argv` in a PTY: the stand-in
+  prints the Reset's new `--session-id` on mini.
+- With the screen locked, a Dev bundle opened at `loopflow://repo/task/<id>`
+  still attaches the Session pane: `lf desktop state --json` shows
+  `attachment: "usable"`, and `desktop send` / `send-key enter` / `capture -p
+  session` round-trip through mini. A Reset leaves an `lf holder run` under
+  mini's `LF_HOME`; stop it by PID with the servers.

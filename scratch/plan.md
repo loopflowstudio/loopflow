@@ -673,8 +673,50 @@ pass. The local_planning test calls `accept_linear_project_in` in place of
 `lf wave sync` and checks the queued Order, not its arrival in Linear; the
 Order's send is covered by the existing order tests.
 
+## Slice 14 — sync refreshes, connect makes (concept review after slice 13)
+
+Found: Desktop's planning clock (`WorkModel.keepPlanningCurrent`, every five
+minutes and on opening a Wave) calls the served `wave.sync`, which since
+slices 9 and 12 runs `tracker::create_wave_project` inside
+`planning_sync::refresh_wave`. Opening Desktop on an upgraded store makes a
+tracker Project for every live Wave it shows (QA's dormant `engbot`), with no
+command issued; offline, each tick for an unbound Wave fails before its
+repository exchange and the error is swallowed. The "not in Linear yet" line
+is computed in the CLI printer from repository config; Desktop shows nothing
+for an unbound Project.
+
+Chosen for review (`scratch/concept-review.html`, questions 1–3):
+
+- `refresh_wave` no longer calls `create_wave_project`. Sync, on any surface
+  or clock, reads and delivers queued saves; it never makes a Project.
+- `lf wave plan connect <wave>` (no Project named) is the retry verb. The
+  `wave_lifecycle.rs` create error, the status line, `docs/work.md`
+  (lines ~570, ~681) and `docs/dev/planning.md` (~439) name it. Makers of a
+  tracker Project: `lf wave create`, connect, and the drain before sending a
+  Task into an unbound Project.
+- `ProjectSummary.unbound: Option<String>` (required, nullable; Rust, Swift
+  `ProjectPlanningSnapshot`, DTO fixtures, server schema): the sentence
+  "not in <Tracker> yet; `lf wave plan connect <wave>` makes it", set for a
+  live Wave's untracked Project in a repository with a tracker, filled in
+  `waves.rs::project_planning`. `print_project` prints it and drops its own
+  `queued_tracker` read; Desktop's `WaveProjectView` prints it under the name.
+- Stale Swift docs: `keepPlanningCurrent` cites `lf wave status --sync` (no
+  such flag; it is `lf wave sync`); `RegistryQuery.addWave` says "its first
+  Task makes its first Project".
+- Passed over: sync keeps creating and Desktop's clock gets a non-creating
+  refresh (a new served op or flag); as built (background tracker writes).
+- Tests: `local_planning::wave_sync_makes_only_its_own_project` becomes a
+  sync-makes-no-Project test (unbound stays unbound, no tracker Project
+  create requested) plus connect making it;
+  `a_wave_sync_binds_the_{linear,asana}_project_a_lost_create_reply_left`
+  run through connect; `wave_sync_offline_fails_with_the_tracker_error_…`
+  re-checked for what sync now does offline; status/DTO tests for `unbound`
+  (`dto_fixtures::`, `server::schema::tests::`, `status_tests::`, Swift
+  `DTOFixtureTests|WaveDetailReadingTests`).
+
 ## Remains
 
+0. Slice 14 above.
 1. Gate: sync main, Swift DTO and desktop suites (`scripts/test_desktop.sh`),
    the full matrix in CI, and the `oauth_tests::…sqlite_contention…` failure
    checked on the base. `check_migrations.py` passes since the base merge

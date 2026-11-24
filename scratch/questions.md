@@ -109,3 +109,8 @@
 - Sync with #2039 applies read-only authored Wave adoption to the one-Project
   model. Linear rental preparation uses named connect with the locally linked
   Project ID. An unbound Wave gives the rental no Project to link.
+- Concept review after slice 13 chose: sync never makes a tracker Project;
+  `lf wave plan connect <wave>` is the retry verb, and the unbound sentence
+  goes on the wire (`ProjectSummary.unbound`) so Desktop shows it. Found
+  because Desktop's planning clock calls `wave.sync` every five minutes.
+  Page questions 1–3.

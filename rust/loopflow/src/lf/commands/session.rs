@@ -508,7 +508,11 @@ impl SessionFacts {
 
 /// `lf session list`.
 pub fn list_sessions(args: &SessionListArgs) -> anyhow::Result<()> {
-    let filter = list_filter(args, &std::env::current_dir()?)?;
+    let directory = std::env::current_dir()?;
+    if !args.subscribe && list_remote_task(args, &directory)? {
+        return Ok(());
+    }
+    let filter = list_filter(args, &directory)?;
     if args.subscribe {
         // This process reads the subscription itself, so it watches
         // transcripts the way the Machine server does.
@@ -771,6 +775,45 @@ async fn list(
     } else {
         copied_sessions(store, filter)?
     };
+    print_sessions(sessions, copied);
+    Ok(())
+}
+
+/// `lf session list --task <task>` for a Task another Machine runs, from that
+/// Machine's server, opening with this Machine's `lf open`. `false` when the
+/// Task runs here.
+fn list_remote_task(args: &SessionListArgs, directory: &std::path::Path) -> anyhow::Result<bool> {
+    let Some(task) = &args.task else {
+        return Ok(false);
+    };
+    let mut read = super::read::Read::SessionList {
+        directory: directory.to_owned(),
+        headless: args.headless,
+        after: args.page.then(|| args.after.clone().unwrap_or_default()),
+        limit: args.page.then_some(u32::try_from(args.limit)?),
+        task: Some(task.clone()),
+    };
+    if read.peer_route()?.is_none() {
+        return Ok(false);
+    }
+    let reading = read.read()?;
+    if args.json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&loopflow_execution::read_stream::selected_answer(
+                &reading
+            )?)?
+        );
+    } else {
+        print_sessions(serde_json::from_value(reading)?, Vec::new());
+    }
+    Ok(true)
+}
+
+fn print_sessions(
+    sessions: Vec<loopflow_execution::ops::human_session::SessionRecord>,
+    copied: Vec<loopflow_execution::machine_records::CopiedSession>,
+) {
     if sessions.is_empty() && copied.is_empty() {
         println!("No Sessions.");
     } else {
@@ -823,7 +866,6 @@ async fn list(
             );
         }
     }
-    Ok(())
 }
 
 /// Copied Sessions the filter's Task or repository selects; none when it names

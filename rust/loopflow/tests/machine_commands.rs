@@ -4731,6 +4731,15 @@ fn server_routed_task_workspace() {
     assert!(!record.to_string().contains("lf resume"), "{record}");
     let argv = record["open_argv"].as_array().unwrap();
     assert_eq!(argv[1..3], ["open", "--task"], "{record}");
+    // `lf session list --task` here lists what mini runs, not this store's none.
+    let listed = fixture
+        .command(&["session", "list", "--headless", "--task", task.as_str()])
+        .current_dir(&plan.local_path)
+        .output()
+        .unwrap();
+    let listed = String::from_utf8_lossy(&listed.stdout);
+    assert!(listed.contains(session), "{listed}");
+    assert!(!listed.contains("lf resume"), "{listed}");
     let local_sessions = client.request(sessions(None)).unwrap().result;
     assert!(local_sessions["entries"].as_array().unwrap().is_empty());
     // Both repositories use WORK-42. The next request on this same pipe

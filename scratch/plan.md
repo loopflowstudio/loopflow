@@ -57,9 +57,10 @@ During a build, `lf task pause INF-123` stops the worker, every subprocess in th
 
 ## Remaining, in order
 
-1. **Task bar (revision 4)** — per `scratch/explore.html` Round 5 V4, after the Working groups demo ("4 im done with until the next slice is finsihed").
-2. **Named gaps for the PR:** Codex tool commands run in their own OS session and stay outside signal authority on 0.171.0 (open choice: accept, or a PreToolUse prefix that registers the session); a pause issued after a move's payload is sent but before the destination has a checkout is refused until arrival.
-3. **Gate / CI:** five-harness worker matrix, Linux session enumeration, lifeline/attachment/hosted-terminal suites.
+1. **Demo the Working groups** (next step): pause one of two owned Tasks with the other in auto; Mac sidebar shows Active / Shipping / Paused, the paused Task's Session stays open, verify runs on its own after deliver.
+2. **Task bar (revision 4)** — per `scratch/explore.html` Round 5 V4, after the Working groups demo ("4 im done with until the next slice is finsihed").
+3. **Named gaps for the PR:** Codex tool commands run in their own OS session and stay outside signal authority on 0.171.0 (open choice: accept, or a PreToolUse prefix that registers the session); a pause issued after a move's payload is sent but before the destination has a checkout is refused until arrival.
+4. **Gate / CI:** five-harness worker matrix, Linux session enumeration, lifeline/attachment/hosted-terminal suites.
 
 ## QA on a private Machine
 
@@ -89,14 +90,6 @@ During a build, `lf task pause INF-123` stops the worker, every subprocess in th
 - `cargo nextest run` with `LOOPFLOW_TEST_LF="$PWD/target/debug/lf"` passed 13 focused macOS checks, including stopping one of two builds, crash recovery, competing PID ownership, wire fixtures, and documented commands. Five CLI fixtures had timed out building the executable inside the test deadline before using the prepared binary.
 - `scripts/test_desktop.sh --skip-build --filter 'PendingChangesTests|everyStateRustSendsDecodes|pausedTaskShowsInItsOwnListAndOpensOnUnpause'` passed 19 tests after building the Swift package with tests.
 - `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, and the architecture and Swift module checks passed. Gate and CI cover the other harnesses and Linux.
-
-## Checks for Mac and iPhone pause controls (pre-demo: separate Paused list, closed conversation; slice 1 replaces these tests)
-
-- `scripts/test_desktop.sh --skip-build --filter 'pausedTaskShowsInItsOwnListAndOpensOnUnpause|pausedTaskOffersUnpauseAfterCleanupAndKeepsAutoOffAvailable|boardPickerAndProjectionKeepServerOrderAndMembership|desktopInspectionRetainsUnavailableWorkAndExactPanes'` passed four tests after the Swift build. A paused row stayed out of Working, opened without entering the warm conversation set, and the Workflow bar’s Unpause button issued plain unpause.
-- `uv run python scripts/test_ios.py -only-testing:LoopflowiOSTests/TaskActionsTests/testPausedTaskOpensFromItsOwnFilterWithUnpause -only-testing:LoopflowiOSTests/TaskFeedTests/testUnpauseLeavesThePausedListAndARefusalBringsTheTaskBack` passed on an iOS 26.2 Simulator. The phone requested `kind:task state:paused`; a refused unpause returned the row to that list.
-- `PendingChangesTests/pauseMovesBothListsAndARefusalRestoresTheRow` passed headless. The pending pause kept the owner and auto mark. A refusal restored the original row.
-- Seven Rust checks passed across `a_pausing_task_names_the_work_to_wait_for`, `task_delivery_preserves_execution_and_due_unstarted_tasks`, `documented_commands::`, and `golden_prompts_match`. `cargo fmt` and `cargo clippy --all-targets -- -D warnings` passed.
-- `uv run python scripts/check_swift_multiplatform_boundaries.py` and `uv run python scripts/check_architecture.py` passed.
 
 ## Checks for served pause
 

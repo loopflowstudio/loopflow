@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>LOO-1084 concept review: where a Task runs, and where a steer went</title>
+<style>
+:root{--bg:#fbfaf7;--fg:#1d1c1a;--mut:#6b675f;--line:#dedad2;--card:#fff;--yes:#2f7d4a;--no:#b3412e;--new:#2a5db0;--newbg:#eaf1fc;--oldbg:#f6ecea;--code:#f1efe9}
+@media (prefers-color-scheme:dark){:root{--bg:#161614;--fg:#e9e6df;--mut:#9d988d;--line:#34322e;--card:#1e1d1b;--yes:#6cc28a;--no:#ec8c78;--new:#86aef2;--newbg:#1b2638;--oldbg:#33211d;--code:#262522}}
+body{background:var(--bg);color:var(--fg);font:16px/1.55 ui-sans-serif,-apple-system,"Segoe UI",sans-serif;max-width:980px;margin:2.5rem auto;padding:0 1.25rem}
+h1{font-size:1.6rem;margin-bottom:.2rem}h2{margin-top:2.4rem;font-size:1.2rem;border-bottom:1px solid var(--line);padding-bottom:.3rem}
+code,pre{font:13.5px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--code);border-radius:4px}
+code{padding:.05rem .3rem}pre{padding:.8rem 1rem;overflow:auto;margin:.4rem 0}
+table{border-collapse:collapse;width:100%;font-size:14.5px;margin:.6rem 0}
+th,td{border-bottom:1px solid var(--line);padding:.45rem .5rem;text-align:left;vertical-align:top}
+th{color:var(--mut);font-weight:600}
+.y{color:var(--yes);font-weight:700}.n{color:var(--no);font-weight:700}
+.lead{color:var(--mut)}
+.cols{display:grid;grid-template-columns:1fr 1fr;gap:1rem}
+@media (max-width:760px){.cols{grid-template-columns:1fr}}
+.card{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:.9rem 1rem}
+.old{background:var(--oldbg)}.new{background:var(--newbg);border-color:var(--new)}
+.tag{display:inline-block;font-size:12px;padding:.05rem .45rem;border-radius:9px;border:1px solid currentColor;margin-left:.3rem}
+.tag.p{color:var(--new)}.tag.e{color:var(--mut)}
+.term{background:#111;color:#ddd;border-radius:6px;padding:.7rem .9rem;font:13px/1.5 ui-monospace,Menlo,monospace;white-space:pre-wrap}
+.term .d{color:#8a8a8a}.term .g{color:#7fd19b}.term .r{color:#f19a8a}
+ol.q li{margin:.5rem 0}
+</style>
+</head>
+<body>
+<h1>LOO-1084: where a Task runs, and where a steer went</h1>
+<p class="lead">Concept review of the kickoff plan before implement (base <code>fc1b574420</code>). Nothing is built yet; every proposal below is a plan change, already written into <code>scratch/plan.md</code>.</p>
+
+<p><b>Area taken:</b> how one Machine sees and steers a Task another Machine runs — Task ownership as people read it (status, lists, Desktop board), Task steers and their receipts, and how inbound tracker comments reach the owner. Not the server supervisor on containers (LOO-1081/1083) and not remote viewers (LOO-1083).</p>
+
+<h2>One interaction, as it fails today</h2>
+<p>An agent on <code>modal-2</code> watches four sibling sandboxes. It has no SSH route to any of them.</p>
+<div class="term"><span class="d">modal-2$</span> lf task status MTG-419 --json | jq .task.reason,.task.next
+<span class="r">"No Task Graph has run; independent Sessions may still be active"
+"lf task run MTG-419"</span>
+<span class="d">modal-2$</span> lf task list
+MTG-419 · Jack Heart · Runs on modal-3 since Nov 23 14:02 · Fix deck import   <span class="d">← text knows; --json does not</span>
+<span class="d">modal-2$</span> lf steer MTG-419 "stop refactoring foo"
+<span class="r">Saved steer_8f1…</span>                                     <span class="d">← sits in Linear; modal-3 never polls</span></div>
+<p>The plan fixes all three. The review's question is whether the names and records it adds match what the agent is trying to learn: <em>who runs this, could I see it, and will my direction reach it?</em></p>
+
+<h2>Product concepts vs code concepts</h2>
+<table>
+<tr><th>What a person knows / does</th><th>Code (kickoff plan)</th><th></th><th>What is wrong</th></tr>
+<tr><td>"This Task runs on modal-3"</td><td><code>TaskOwnership::owner_elsewhere</code>, <code>runs_elsewhere</code> sentence (text only); plan adds <code>TaskDetail.owner: TaskOwner</code></td><td class="n">no</td><td>One name for three ideas: <code>runtime.owner</code> is the person, <code>next_move.owner</code> is who moves it next, and now <code>owner</code> is a Machine. And it lands only on <code>TaskDetail</code>, so <code>lf task list --json</code> and the Desktop board keep saying "idle, run it".</td></tr>
+<tr><td>"I couldn't see its live state"</td><td><code>execution_source: local | remote | remote_unreachable {machine, reason}</code></td><td class="n">no</td><td>Repeats the machine from <code>owner</code>; "execution source" names nothing a person says. The fact is whose store answered.</td></tr>
+<tr><td>"Did my steer get there?"</td><td><code>delivery.status: delivered_live | saved_on_owner | queued | local_only</code> + <code>reason</code> + <code>sentence</code></td><td class="n">no</td><td>Two facts in one enum: <em>where the steer is</em> and <em>who reads it there</em>. The caller only acts on the first. <code>delivered_live</code> overclaims: a live worker reads at its next boundary.</td></tr>
+<tr><td>"Here's my receipt"</td><td><code>TaskSteerReceipt</code> flattening the whole <code>TaskComments</code> thread</td><td class="n">no</td><td>A receipt that is mostly the thread. No consumer reads it: Swift sends <code>task.steer</code> without decoding the reply; no test or builtin parses it.</td></tr>
+<tr><td>"Who will read it"</td><td><code>steer_reader</code> (Session steers) vs plan's new "reader inspection helper"</td><td class="n">no</td><td>Two authors of one sentence for Session and Task steers.</td></tr>
+<tr><td>Steer a Task on a reachable Machine</td><td><code>Write::remote</code> routes <code>TaskSteer</code> like <code>TaskRun</code>/<code>TaskClaim</code></td><td class="y">yes</td><td>One owner for "a Task write goes to its Machine". Fallback only before admission; <code>OutcomeUnknown</code> never double-writes.</td></tr>
+<tr><td>The owner hears steers from anywhere</td><td>Inbound sync in <code>server/maintenance.rs</code> + <code>RunningGraph::spawn</code>, shared <code>linear_team_checks</code> lock</td><td class="y">yes</td><td>The tracker is already the carrier; this closes the loop without a relay. Two pollers is justified: Linux <code>register</code> has only <code>systemctl --user</code>, absent in containers.</td></tr>
+<tr><td>"Polls when it has work"</td><td>30 s live / 120 s owned-idle / 0 tiers</td><td class="n">no</td><td>A distinction nobody sees, needing a live-process classifier, to save quota <code>delta_fresh_secs()</code> already paces. An idle owned Task's stopped Session is exactly what a steer should wake fast.</td></tr>
+<tr><td>Task is Working, just elsewhere</td><td><code>TaskState</code> unchanged (6 variants)</td><td class="y">yes</td><td>Right call; where it is read from is not a state.</td></tr>
+</table>
+
+<h2>Biggest mismatch: "where it runs" is a sentence, not a fact</h2>
+<p>The product already has the concept, worded well: <code>Runs on mini since Nov 12 10:42</code>. But it exists only inside two text printers (<code>waves.rs:918</code>, <code>bin/lf.rs:1205</code>), each recomputing it from ownership. Every JSON reader — agents, Desktop, iOS — is blind to it, which is how <code>modal-2</code> got told to <code>lf task run</code> a Task running next door. The kickoff plan patches <code>TaskDetail</code> and leaves lists and the board wrong.</p>
+<div class="cols">
+<div class="card old"><b>Kickoff plan</b> <span class="tag e">replaced</span>
+<pre>TaskDetail {
+  task: TaskRow { reason, next, … },
+  owner: Option&lt;TaskOwner&gt;,          // a Machine
+  execution_source:
+    local | remote{machine}
+    | remote_unreachable{machine, reason},
+}
+RoadmapTask { runtime.owner /* a person */, … }
+// lists: still "lf task run MTG-419"</pre></div>
+<div class="card new"><b>Proposed</b> <span class="tag p">in plan</span>
+<pre>TaskRow     { …, runs_on: Option&lt;TaskRunsOn&gt; }
+RoadmapTask { …, runs_on: Option&lt;TaskRunsOn&gt; }
+TaskRunsOn  { machine: MachineRef, since }
+TaskDetail  { …, reading:
+    here | owner | unobserved{reason} }
+// snapshot_task_detail: runs_on set ⇒
+//   reason "Runs on modal-3 since …", next null
+// printers read the record; runs_elsewhere = Display</pre></div>
+</div>
+<div class="term"><span class="d">modal-2$</span> lf task list --json | jq '.[0] | .runs_on.machine.label, .next_move'
+<span class="g">"modal-3"</span>
+<span class="d">modal-2$</span> lf task status MTG-419
+MTG-419  Runs on modal-3 since Nov 23 14:02; <span class="g">modal-3 is not registered here, so its Graph and Sessions are not read here</span></div>
+
+<h2>The steer receipt, before and after</h2>
+<div class="cols">
+<div class="card old"><b>Kickoff plan</b> <span class="tag e">replaced</span>
+<pre>TaskSteerReceipt {
+  comments: [...whole thread...],
+  identifier, pending_sync, conflicts,
+  refresh_error, steer_id,
+  delivery: { status: delivered_live
+      | saved_on_owner | queued | local_only,
+    owner_machine, reason, sentence } }</pre></div>
+<div class="card new"><b>Proposed</b> <span class="tag p">in plan</span>
+<pre>TaskSteerReceipt { identifier, steer_id, delivery }
+SteerDelivery {
+  reached: owner | tracker | here,
+  runs_on: Option&lt;MachineRef&gt;,
+  sentence,   // steer_reader, generalized to Tasks
+}</pre></div>
+</div>
+<div class="term"><span class="d">laptop$</span> lf steer MTG-419 "also check bar"
+<span class="g">Saved steer_2c… on modal-3; MTG-419's worker reads it at its next boundary</span>
+<span class="d">modal-2$</span> lf steer MTG-419 "stop refactoring foo"
+<span class="g">Queued steer_8f… in Linear for modal-3; modal-3 is not registered here and reads it when it next syncs</span></div>
+
+<h2>Tested against</h2>
+<table>
+<tr><th>Path</th><th>Holds?</th></tr>
+<tr><td><b>Normal:</b> laptop → reachable mini, live worker</td><td><code>reached: owner</code>, owner authors the reader sentence; <code>reading: owner</code>. Same as kickoff, fewer fields.</td></tr>
+<tr><td><b>Failure:</b> modal-2 → unregistered modal-3; Linear offline at send</td><td><code>reached: here</code> (was <code>local_only</code>); the existing pending-export drain sends it later. Lists and status both say "Runs on modal-3", <code>next: null</code>.</td></tr>
+<tr><td><b>Recovery:</b> modal-3 restarts with no server, Graph step mid-run</td><td><code>RunningGraph::spawn</code> polls; watermark in <code>linear_team_checks</code>; 30 s lookback + idempotent ingest ⇒ no drop, no duplicate.</td></tr>
+<tr><td><b>Counterexample:</b> caller wants to know a steer reached a <em>finished</em> worker that nothing reads</td><td>Still <code>reached: owner</code>; the sentence says "nothing reads it until its Graph continues it". If a caller ever needs to branch on that, a <code>reader</code> enum can be added; today none does. <em>Kept as question 2.</em></td></tr>
+<tr><td><b>Counterexample:</b> six sandboxes share one Linear key</td><td>Each polls ~2/min at full budget ⇒ ~720/h. <code>delta_fresh_secs()</code> reads Linear's remaining-budget headers, so they stretch together; the 10% urgent reserve holds. Tiers would not change this much.</td></tr>
+</table>
+
+<h2>What did not change</h2>
+<p>Direct SSH for reachable owners with pre-admission fallback; inbound sync as the cross-sandbox carrier (no relay, no SSH mesh); the 30 s lookback fix in <code>team_changes</code>; <code>TaskState</code> untouched; no migration; slice order (inbound ingestion first, because it is the part that can fail to hold).</p>
+
+<h2>Questions</h2>
+<ol class="q">
+<li>Field name for where a Task runs: <b>a</b> <code>runs_on</code> (chosen, matches "Runs on mini since …") · <b>b</b> <code>machine</code> · <b>c</b> keep kickoff's <code>owner</code>.</li>
+<li>Steer receipt: <b>a</b> <code>reached: owner | tracker | here</code> + sentence (chosen) · <b>b</b> also a typed <code>reader</code> (<code>live | starts | none</code>) for callers that branch on it · <b>c</b> kickoff's four statuses.</li>
+<li>Comment thread in the steer receipt: <b>a</b> drop it (chosen; <code>lf task status</code> has it) · <b>b</b> keep it flattened.</li>
+<li>Inbound polling: <b>a</b> one rule, owns open Tasks ⇒ every <code>max(30 s, delta_fresh)</code> (chosen) · <b>b</b> kickoff's 30/120 s tiers by live process.</li>
+<li>Lists and the Desktop board: <b>a</b> carry <code>runs_on</code> and the "Runs on …" reason now, in this Task (chosen) · <b>b</b> fix <code>lf task status</code> only and file lists separately.</li>
+</ol>
+</body>
+</html>

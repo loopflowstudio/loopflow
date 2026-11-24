@@ -337,3 +337,4 @@ unresolved execution in the Task's work", while `lf task show` keeps the run
 out of the Task's history (by design: it blocks a second run, it isn't the
 Task's). "in the Task's checkout" would match. Not changed: the sentence is
 shared wording outside this Task's slices.
+- `lf sync main` in a `--stack` checkout (Jack Heart): "b". Already built in 93fbc3ded5; the page labelled (a) as built by mistake.

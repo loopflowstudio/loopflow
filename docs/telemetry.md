@@ -1,8 +1,8 @@
 # Telemetry
 
 Your agents have been working: launched by hand, running Tasks, landing PRs.
-Every run left a record on this machine. This page reads it back: what each
-conversation cost, what each command did, what is running right now, and
+This Machine keeps local records and the history it collected from rentals.
+Telemetry shows what each conversation cost, what each command did, what is running, and
 whether Loopflow's own records are sound. Desktop's Telemetry view shows the
 same records; it keeps no copy of its own.
 
@@ -23,6 +23,20 @@ reports it: Pi and OpenCode report per-turn cost; Claude, Codex and Antigravity
 report tokens, plus Claude's running `total_cost_usd`; an Antigravity row
 counts the conversation lf started, not its subagents'), finished streams (`FINAL`),
 and any recording gaps (`GAPS`).
+
+When a rental disappears, its inputs and provider turns still appear under
+their original Work and date. An input counts the turns recorded for the
+selected Work, so a Task filter leaves out turns from before the Session joined
+the Task. The usage table and Desktop Task History show the Machine as
+`from modal-1`, for example. An input recorded on this Machine too is counted
+once, as this Machine's. A collected run of a Task or Wave kept here names this
+Machine's checkout, so Desktop Telemetry groups it with that codebase; `--context`
+reads its copied capture and turns.
+
+`lf session usage --session <id> --json` totals the Session’s native turns
+across Machines. A turn observed again after a continuation counts once.
+A single origin has an `origin_machine_id` and, for a copy, a collection time.
+A Session on several Machines lists each in `origins` with its collection time.
 
 For work sessions and workers, turn-end hooks ask the server to record each
 turn from the provider's transcript; at exit, the launching process catches any
@@ -59,9 +73,15 @@ lf session history search "cleanupPeriodDays" --since 30d     # search recent co
 lf session retention                                          # what providers still keep and what expires next
 ```
 
-Conversation text stays in each provider's native store (Claude, Codex, Pi
-or Antigravity files, or OpenCode's SQLite DB); Loopflow reads it on demand rather than
-duplicating it. Claude removes conversations idle longer than
+On the execution Machine, Loopflow reads conversations on demand from Claude,
+Codex, Pi or Antigravity files, or from OpenCode’s SQLite database. A rental’s
+collecting Machine keeps the turns it saw. The same transcript command reads
+them after the rental disappears. `lf session history search` also searches these
+copies. A collected hit shows its origin (for example, `from modal-1`). With
+`--json`, its `origin` carries the Machine ID and label. Local hits carry
+`"origin": null`. The time window and Work filters select Sessions by inputs
+recorded on the origin Machine.
+Claude removes conversations idle longer than
 `cleanupPeriodDays` (30 days by default in Claude's `settings.json`); Codex,
 OpenCode, and Pi keep everything.
 

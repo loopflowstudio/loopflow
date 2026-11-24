@@ -416,6 +416,9 @@ pub fn missing_login(
     let provider = harness.parse::<Provider>().ok()?;
     let mut command = local_command(status_argv(provider)?);
     command.envs(env);
+    for key in crate::provider_auth::api_key_env_names() {
+        command.env_remove(key);
+    }
     let started = std::time::Instant::now();
     let (state, _) = answer(provider, &mut command, LAUNCH_PROBE_DEADLINE);
     tracing::debug!(

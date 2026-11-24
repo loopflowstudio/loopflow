@@ -1057,7 +1057,14 @@ mod tests {
         );
         // The input reads its turns as the rows said: it ended with the last.
         let pending = store
-            .pending_inputs(None, None, None, None, (0, true, None), Some(&input))
+            .pending_inputs(
+                None,
+                None,
+                None,
+                None,
+                (0, true, None),
+                crate::sqlite::sessions::HistorySelection::Input(&input),
+            )
             .unwrap();
         assert_eq!(pending.inputs.len(), 1);
         assert_eq!(pending.inputs[0].latest, at + 60);

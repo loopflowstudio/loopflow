@@ -1060,6 +1060,24 @@ pub(super) fn explicit_agent() -> Result<Option<String>, LoadError> {
         .map(str::to_owned))
 }
 
+/// A separately launched helper resolves its own agent. Other invocation
+/// settings (for example `yolo`) still reach its process.
+pub fn independent_agent(command: &mut std::process::Command) -> Result<(), LoadError> {
+    command.env_remove(super::AGENT_OVERRIDE_ENV);
+    if let Ok(text) = std::env::var("LF_SETTINGS") {
+        let mut values: Value =
+            serde_yaml_ng::from_str(&text).map_err(|e| invalid(format!("LF_SETTINGS: {e}")))?;
+        if let Some(map) = values.as_mapping_mut() {
+            map.remove("agent");
+        }
+        command.env(
+            "LF_SETTINGS",
+            serde_yaml_ng::to_string(&values).expect("settings serialize"),
+        );
+    }
+    Ok(())
+}
+
 fn environment() -> Result<Value, LoadError> {
     if crate::journal::request::active() {
         return Ok(Value::Mapping(Default::default()));

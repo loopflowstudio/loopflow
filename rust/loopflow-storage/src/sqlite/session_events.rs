@@ -2,7 +2,7 @@ use rusqlite::{params, OptionalExtension, TransactionBehavior};
 use serde_json::Value;
 
 use crate::session::{SessionEvent, SessionEventKind};
-use crate::session_record::ProviderSessionRef;
+use crate::session_record::{ProviderSessionRef, SessionHistory};
 use crate::{ProviderAccountId, StoreError, StoreResult};
 use loopflow_model::id::AgentSessionId;
 
@@ -322,16 +322,42 @@ impl SqliteStore {
             "SELECT json_extract(e.payload,'$.evidence.since'),json_extract(e.payload,'$.evidence.observed_at')
              FROM session_events c
              JOIN history.session_history e ON c.seq=e.captured_event AND c.kind='captured' AND c.receipt_key=?1
-             WHERE e.kind='silence'
+             WHERE e.kind='silence' AND json_extract(e.payload,'$.evidence.observed_at') IS NOT NULL
              ORDER BY CAST(substr(e.receipt_key,length(?1)+10) AS INTEGER),e.seq",
         )?;
         let rows = query.query_map([input], |row| Ok((row.get(0)?, row.get(1)?)))?;
         Ok(rows.collect::<Result<_, _>>()?)
     }
 
-    /// What filled the context of each provider turn one input started, in
-    /// order; `None` for a turn completed before turns retained it.
-    pub fn input_turn_context(
+    /// Each silence the recorder observed in one history row's input, as
+    /// `(since, until)`; a collected input's are its origin's copies.
+    pub fn history_silences(&self, history: &SessionHistory) -> StoreResult<Vec<(i64, i64)>> {
+        match (&history.artifact_key, &history.origin, history.captured) {
+            (Some(input), None, _) => self.input_silences(input),
+            (Some(_), Some(origin), Some(captured)) => {
+                self.copied_input_silences(&origin.machine_id, &history.session_id, captured)
+            }
+            _ => Ok(Vec::new()),
+        }
+    }
+
+    /// What filled the context of each ended provider turn one history row's
+    /// input started, in ending order; `None` for a turn completed before
+    /// turns retained it. A collected input's turns are its origin's copies.
+    pub fn history_turn_context(
+        &self,
+        history: &SessionHistory,
+    ) -> StoreResult<Vec<Option<crate::session::TurnContext>>> {
+        match (&history.artifact_key, &history.origin, history.captured) {
+            (Some(input), None, _) => self.input_turn_context(input),
+            (Some(_), Some(origin), Some(captured)) => {
+                self.copied_input_turn_context(&origin.machine_id, &history.session_id, captured)
+            }
+            _ => Ok(Vec::new()),
+        }
+    }
+
+    fn input_turn_context(
         &self,
         input: &str,
     ) -> StoreResult<Vec<Option<crate::session::TurnContext>>> {
@@ -614,7 +640,7 @@ impl SqliteStore {
         after: i64,
         limit: usize,
     ) -> StoreResult<Vec<SessionEvent>> {
-        self.read_history(session, after, limit, None, (None, None, None))
+        self.read_history(session, after, limit, None, (None, None, None), None)
     }
 
     /// Keep provenance and unknown evidence; transcript payloads belong to detail.
@@ -623,8 +649,9 @@ impl SqliteStore {
         session: &str,
         input: &str,
         scope: (Option<&str>, Option<&str>, Option<&str>),
+        origin: Option<&loopflow_model::durable::MachineId>,
     ) -> StoreResult<Vec<SessionEvent>> {
-        self.read_history(session, 0, 0, Some(input), scope)
+        self.read_history(session, 0, 0, Some(input), scope, origin)
     }
 
     /// The turns of `session` the scope selects: those `input` started, or
@@ -681,15 +708,30 @@ impl SqliteStore {
         limit: usize,
         input: Option<&str>,
         scope: (Option<&str>, Option<&str>, Option<&str>),
+        origin: Option<&loopflow_model::durable::MachineId>,
     ) -> StoreResult<Vec<SessionEvent>> {
         let task = scope.2.map(loopflow_model::id::TaskSelector::parse);
         let conn = self.conn.lock().expect("store mutex poisoned");
+        // A copy keeps its origin's rows in the shape `history.session_history` has.
+        let source = match origin {
+            None => "(SELECT seq,session_id,receipt_key,kind,lf_process_id,task_id,wave_id,observed_at,payload
+                 FROM history.session_history WHERE ?15 IS NULL)",
+            Some(_) => {
+                "(SELECT json_extract(row,'$.seq') AS seq,json_extract(row,'$.session_id') AS session_id,
+                    json_extract(row,'$.receipt_key') AS receipt_key,json_extract(row,'$.kind') AS kind,
+                    json_extract(row,'$.lf_process_id') AS lf_process_id,json_extract(row,'$.task_id') AS task_id,
+                    json_extract(row,'$.wave_id') AS wave_id,json_extract(row,'$.observed_at') AS observed_at,
+                    json_extract(row,'$.payload') AS payload
+                 FROM machine_records WHERE origin_machine_id=?15 AND kind='history'
+                    AND json_extract(row,'$.session_id')=?8)"
+            }
+        };
         // Observations answer to their own scope. Inputs are Session state in
         // the store and turns are in `history.turns`, not history.
-        let mut query = conn.prepare(
+        let mut query = conn.prepare(&format!(
             "SELECT e.seq,e.session_id,NULL,NULL,
                     NULL,e.lf_process_id,e.task_id,e.wave_id,e.observed_at,e.payload
-             FROM history.session_history e
+             FROM {source} e
              WHERE e.session_id=?8 AND e.seq>?2
              AND (?4 IS NULL OR substr(e.receipt_key,1,length(?4)+1)=?4||':')
              AND (e.kind IN ('manifest','runs','terminal') OR (
@@ -697,8 +739,8 @@ impl SqliteStore {
                  AND (?6 IS NULL OR e.task_id IN (SELECT t.id FROM projects p CROSS JOIN tasks t ON t.project_id=p.id
                          WHERE p.id=?10 OR p.project_slug=?6 OR p.external_project_id=?11))
                  AND (?7 IS NULL OR e.task_id IN (SELECT id FROM tasks WHERE id=?12 OR issue_identifier=?13 OR external_issue_id=?14))))
-             ORDER BY e.seq LIMIT ?3",
-        )?;
+             ORDER BY e.seq LIMIT ?3"
+        ))?;
         let rows = query.query_map(
             params![
                 session,
@@ -717,6 +759,7 @@ impl SqliteStore {
                 task.as_ref().map(|task| &task.id),
                 task.as_ref().map(|task| &task.label),
                 task.as_ref().map(|task| &task.external),
+                origin.map(|origin| origin.as_str()),
             ],
             |row| {
                 Ok((

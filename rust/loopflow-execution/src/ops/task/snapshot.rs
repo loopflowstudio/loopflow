@@ -157,7 +157,6 @@ pub(super) async fn snapshot_here(
         task.worktree.as_deref().unwrap_or(&repo),
         &repo,
         wave.as_ref().map(|w| w.slug()),
-        None,
     );
     let provider = agent.ok().map(|agent| agent.harness.as_str().to_owned());
     let machine_id = task.worktree.is_some().then_some(local);

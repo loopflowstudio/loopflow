@@ -352,6 +352,24 @@ impl SqliteStore {
         .optional()
         .map_err(Into::into)
     }
+
+    /// This Machine's path for the repository a Task or Wave belongs to.
+    pub fn work_repository_path(
+        &self,
+        task: Option<&TaskId>,
+        wave: Option<&loopflow_model::id::WaveId>,
+    ) -> StoreResult<Option<String>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.query_row(
+            "SELECT coalesce(
+                (SELECT r.repo FROM tasks t JOIN repository_plans r ON r.id=t.repository_id
+                 WHERE t.id=?1),
+                (SELECT repo FROM waves WHERE id=?2))",
+            params![task.map(TaskId::as_str), wave.map(|wave| wave.as_str())],
+            |row| row.get(0),
+        )
+        .map_err(Into::into)
+    }
 }
 
 #[cfg(test)]

@@ -639,6 +639,16 @@ fn resolve_capture(key: &str) -> StoreResult<(PathBuf, crate::session::LfSession
     Ok((dir, owner))
 }
 
+/// Where an input's capture lives here: a collected input's is the copy of
+/// its origin's.
+pub fn history_record_dir(lf_home: &Path, history: &SessionHistory) -> Option<PathBuf> {
+    let home = match &history.origin {
+        Some(origin) => crate::machine_records::copies_home(lf_home, &origin.machine_id),
+        None => lf_home.to_path_buf(),
+    };
+    record_dir(&home, history.artifact_key.as_deref()?)
+}
+
 // Session captures retain their published on-disk layout; the directory name
 // does not make Run an owner. SQLite selects captures by artifact key.
 pub fn record_dir(lf_home: &Path, artifact_key: &str) -> Option<PathBuf> {
@@ -977,6 +987,7 @@ pub(crate) fn project_input_history(
     history: &[loopflow_storage::session::SessionEvent],
     turns: &[loopflow_storage::session::Turn],
     names: (Option<String>, Option<String>),
+    origin: Option<SessionOrigin>,
 ) -> std::io::Result<SessionHistory> {
     let mut facts = Vec::new();
     let mut terminal: Option<TerminalReceipt> = None;
@@ -1009,7 +1020,9 @@ pub(crate) fn project_input_history(
     let usage = reduce_usage(turns);
     gaps += usage.gaps + usize::from(manifest.is_none());
     let current = session.captured.is_some() && session.current_capture == session.captured;
+    let native_turn = turns.first().filter(|_| artifact_key.is_none());
     Ok(SessionHistory {
+        origin,
         session_id: session.id.clone(),
         captured: session.captured,
         artifact_key: artifact_key.map(str::to_owned),
@@ -1029,6 +1042,7 @@ pub(crate) fn project_input_history(
         repo: manifest
             .as_ref()
             .and_then(|m| m.repo.as_ref().map(|p| p.to_string_lossy().into_owned()))
+            .or_else(|| native_turn.and_then(|turn| turn.repository.clone()))
             .or_else(|| current.then(|| session.repo.clone()).flatten()),
         worktree: manifest
             .as_ref()
@@ -1037,7 +1051,11 @@ pub(crate) fn project_input_history(
         skill: manifest
             .as_ref()
             .map(|m| m.skill.clone())
-            .unwrap_or_else(|| current.then(|| session.skill.clone()).flatten()),
+            .unwrap_or_else(|| {
+                native_turn
+                    .and_then(|turn| turn.skill.clone())
+                    .or_else(|| current.then(|| session.skill.clone()).flatten())
+            }),
         skill_version: session.skill_version.clone(),
         recorded_outcome: terminal.as_ref().map(|receipt| receipt.outcome.clone()),
         recorded_at: terminal
@@ -1056,6 +1074,7 @@ pub(crate) fn project_input_history(
         harness: manifest
             .as_ref()
             .map(|m| m.harness.clone())
+            .or_else(|| native_turn.and_then(|turn| turn.provider.clone()))
             .or_else(|| current.then(|| session.provider.clone()).flatten())
             .unwrap_or_else(|| "unknown".into()),
         model: manifest

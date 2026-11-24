@@ -39,14 +39,16 @@ pub struct WaveAdded {
     pub id: WaveId,
     pub name: String,
     pub created: bool,
-    pub project: Project,
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub project: Option<Project>,
     pub main_checkout: PathBuf,
     pub files: AuthoredFiles,
     pub summary: Vec<String>,
 }
 
 /// Register a Wave, seed its authored files on the main checkout, ensure its
-/// first Project and commit the files. Re-adding a live Wave changes nothing.
+/// first Project and commit the files. Re-adding a Wave whose files name it
+/// writes nothing to the checkout.
 pub async fn add(repo: &Path, name: &str, objective: Option<&str>) -> OpsResult<WaveAdded> {
     let main = crate::repository::discover(repo)
         .map_err(lifecycle_error)?
@@ -55,22 +57,53 @@ pub async fn add(repo: &Path, name: &str, objective: Option<&str>) -> OpsResult<
     let _lifecycle = recovery::lock(&main)?;
     let locator = crate::work::wave::discover(&main, name).map_err(lifecycle_error)?;
     let store = super::planning_sync::planning_store().await?;
-    // A clone's authored Waves join the store with the first explicit write here.
-    crate::work::wave::bootstrap::register_authored_waves(&store.sqlite, &main.to_string_lossy())
-        .map_err(lifecycle_error)?;
-    let held = || async {
-        store
-            .get_wave_at(&locator)
-            .await
-            .map(|wave| wave.is_some())
-            .map_err(lifecycle_error)
-    };
-    // Another Machine may have made a Wave of this name: read the plan first,
-    // so this command joins that Wave and does not make a second.
-    let created = !held().await? && {
+    let mut existing = crate::work::wave::bootstrap::find_or_register(
+        &store.sqlite,
+        &main.to_string_lossy(),
+        &locator,
+    )
+    .map_err(lifecycle_error)?;
+    if existing.is_none() {
         super::plan_carriers::look_first(&store, &main).await;
-        !held().await?
-    };
+        existing = store
+            .sqlite
+            .get_wave_at(&locator)
+            .map_err(lifecycle_error)?;
+    }
+    // A Wave whose authored files already name it is adopted without writing
+    // to the checkout; any other Wave gets its files seeded below.
+    let adopted = existing
+        .as_ref()
+        .filter(|_| crate::work::wave::bootstrap::names_its_wave(&main, locator.slug()));
+    if let Some(wave) = adopted {
+        let mut summary = Vec::new();
+        if let Err(error) = super::linear::acquire_wave_inventory(&store, wave).await {
+            summary.push(error.to_string());
+        }
+        // A Linear Initiative chooses its own Project; any other Wave gets a first one.
+        let project = if super::linear::authored_initiative(wave).is_none() {
+            Some(ensure_first_project(&store, wave).await?)
+        } else {
+            let selected = store
+                .sqlite
+                .selected_project(wave.id())
+                .map_err(lifecycle_error)?;
+            if selected.is_none() {
+                summary.push(super::project::unconfigured(&store, wave)?);
+            }
+            selected
+        };
+        return Ok(WaveAdded {
+            id: wave.id().clone(),
+            name: wave.slug().to_owned(),
+            created: false,
+            project,
+            main_checkout: main,
+            files: AuthoredFiles::Unchanged,
+            summary,
+        });
+    }
+    let created = existing.is_none();
     let wave = crate::work::wave::ensure_wave_row(&store, &main, locator.slug())
         .await
         .map_err(lifecycle_error)?;
@@ -95,7 +128,7 @@ pub async fn add(repo: &Path, name: &str, objective: Option<&str>) -> OpsResult<
         id: wave.id().clone(),
         name: wave.slug().to_string(),
         created,
-        project,
+        project: Some(project),
         main_checkout: main,
         files,
         summary: Vec::new(),

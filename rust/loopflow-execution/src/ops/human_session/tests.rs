@@ -2261,3 +2261,73 @@ fn list_primary_selects_current_scopes_before_paging() {
         );
     });
 }
+
+/// `lf machine forward --session` after a refresh that left Codex without a
+/// usable login: the restart is refused before the running provider stops.
+#[test]
+fn a_restart_without_a_usable_login_leaves_the_running_provider_alone() {
+    let _lock = crate::journal::test_env_lock();
+    tokio::runtime::Runtime::new().unwrap().block_on(async {
+        let fixture = LiveSessionFixture::new().await;
+        let bin = tempfile::tempdir().unwrap();
+        let codex = bin.path().join("codex");
+        std::fs::write(&codex, "#!/bin/sh\necho 'Not logged in' >&2\nexit 1\n").unwrap();
+        std::fs::set_permissions(&codex, std::os::unix::fs::PermissionsExt::from_mode(0o755))
+            .unwrap();
+        let _path = crate::test_ambient::EnvGuard::clear(&["PATH", "CODEX_ACCESS_TOKEN"]);
+        std::env::set_var("PATH", format!("{}:/usr/bin:/bin", bin.path().display()));
+
+        let session = fixture.codex_session("forward-refresh", None);
+        let mut provider = fixture.run(&session);
+        let session = fixture.store.sqlite.session(&session.id).unwrap().unwrap();
+        let refused = super::restart_provider(&fixture.store.sqlite, &session)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            refused.contains("was not restarted: This Machine has no Codex login"),
+            "{refused}"
+        );
+        assert!(
+            provider.0.try_wait().unwrap().is_none(),
+            "the running provider was stopped"
+        );
+    });
+}
+
+/// A repository Session or chat a steer could not start says why, and which
+/// command opens it; nothing else starts it again.
+#[test]
+fn a_stopped_session_that_is_not_a_tasks_says_why_its_start_failed() {
+    let mut summary = summary_fixture();
+    summary.agent_process_id = Some(loopflow_model::id::AgentProcessId::new());
+    summary.agent_process_evidence = crate::store::ProcessIdentityEvidence::Dead;
+    summary.agent_end = Some(crate::session::AgentEnd {
+        at: 4_000,
+        exit_code: Some(1),
+    });
+    let login = "codex has no usable login on this Machine; run `codex login`";
+    summary.start_failure = Some(format!(
+        "{}{login}",
+        crate::ops::recovery::WAITING_FOR_HARNESS
+    ));
+    let waiting = surfaced(&summary);
+    assert_eq!(
+        line(&waiting),
+        format!("could not start: {login}; `lf resume metadata` opens it")
+    );
+    let outlook = waiting.outlook.unwrap();
+    assert_eq!(
+        (outlook.kind, outlook.reason.as_deref()),
+        (super::SessionOutlookKind::CouldNotStart, Some(login))
+    );
+
+    // A held terminal that did not start.
+    summary.start_failure = Some("no PTY left".into());
+    let failed = surfaced(&summary);
+    assert!(
+        line(&failed)
+            .ends_with(" (exit 1) · last start failed: no PTY left; `lf resume metadata` opens it"),
+        "{}",
+        line(&failed)
+    );
+}

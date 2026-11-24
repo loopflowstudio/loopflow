@@ -6,7 +6,7 @@ use crate::lf::{Cli, Commands, SessionCommand, TaskCommand};
 use anyhow::{anyhow, Result};
 use loopflow_execution::durable::TaskExecutionRoute;
 use loopflow_execution::machine::task::{read_registry, resolve_task_id};
-use loopflow_execution::ops::human_session::moves::conversation_task;
+use loopflow_execution::ops::human_session::moves::other_machine;
 use loopflow_model::durable::{
     Machine, MachineId, RepositoryId, RepositoryIdentity, TaskId, TaskRunsOn,
 };
@@ -461,15 +461,7 @@ fn moved_session(cli: &Cli, args: &[String]) -> Result<Option<Forward>> {
 /// else where the Session moved.
 fn session_machine(store: &SqliteStore, id: &str) -> Result<Option<MachineId>> {
     let id = loopflow_model::id::canonical_session(id);
-    Ok(match conversation_task(store, &id)? {
-        Some(task) => {
-            let runs_on = loopflow_execution::store::ownership::task_execution_route(store, &task)?
-                .machine_id;
-            (runs_on != loopflow_execution::store::machines::local_machine(store)?.id)
-                .then_some(runs_on)
-        }
-        None => store.session_moved_to(&id)?,
-    })
+    other_machine(store, &id)
 }
 
 /// The other Machine whose held terminal runs `session`: the Task's owner

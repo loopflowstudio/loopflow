@@ -817,6 +817,14 @@ fn print_sessions(
                 line.push_str(&format!("  {}", turn.describe(now)));
             }
             println!("{line}");
+            // A stopped Session says why it is down and what brings it back.
+            if let Some(status) = session
+                .status_line
+                .as_ref()
+                .filter(|_| session.outlook.is_some())
+            {
+                println!("  {status}");
+            }
             if let Some(action) = session.action {
                 println!("  {} — {}", action.label, action.help);
             }
@@ -833,6 +841,16 @@ fn print_sessions(
                 session.title,
                 session.origin_name()
             );
+            if let Some(failure) = session
+                .start_failure
+                .as_deref()
+                .filter(|_| session.completed_at.is_none())
+            {
+                println!(
+                    "  could not start: {}",
+                    loopflow_execution::ops::recovery::start_failure_reason(failure)
+                );
+            }
         }
     }
 }

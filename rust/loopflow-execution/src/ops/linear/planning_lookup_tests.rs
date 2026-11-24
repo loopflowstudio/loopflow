@@ -1560,7 +1560,7 @@ async fn inventory_refresh_retains_unmapped_local_projects() {
     )
     .await
     .unwrap();
-    assert!(observed.is_empty());
+    assert!(observed.managed.is_empty());
     assert_eq!(
         fixture.store.get_project(&local.id).await.unwrap(),
         Some(local)

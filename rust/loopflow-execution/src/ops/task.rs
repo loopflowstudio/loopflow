@@ -1289,6 +1289,21 @@ fn prepare_task(
                 task.identifier
             )));
         }
+        // A carrier or an exact issue lookup can deliver the Task before its Initiative inventory.
+        if let Some(wave) = wave.as_ref().filter(|_| {
+            task.worktree.is_none() && task.tracker_id.is_some() && !options.from_last_fetch
+        }) {
+            if super::tracker::queued_tracker(&main)
+                == Some(loopflow_storage::planning_sync::TrackerKind::Linear)
+            {
+                if let Err(error) = super::linear::acquire_wave_inventory(&store, wave).await {
+                    crate::journal::request::diagnostic(format_args!(
+                        "Wave {}: {error}",
+                        wave.slug()
+                    ));
+                }
+            }
+        }
         validate_task_preparation(&store, &task).await?;
         options.validate_directive((!fetched).then_some(&task))?;
         options.validate_workspace_name(&task)?;
@@ -2319,7 +2334,7 @@ async fn creation_record(
                 task_id: Some(id.clone()),
                 work_source: Some(crate::session::WorkSource::Declared),
                 request: admit.request,
-                ..crate::session::conversation(main, "task/session", title.to_string())
+                ..crate::session::conversation(main, "task/session", title.to_string(), wave)
                     .map_err(|error| task_error(format!("{error:#}")))?
             };
             crate::store::sessions::discover_session_repo(&mut session).map_err(task_error)?;
@@ -2531,14 +2546,9 @@ pub fn resolve_task_agent(
     worktree: &Path,
     repository: &Path,
     wave: Option<&str>,
-    skill: Option<&crate::graph::Skill>,
 ) -> OpsResult<crate::config::Agent> {
     let shared = crate::config::resolved_for_task(worktree, repository, wave)?;
-    let Some(skill) = skill else {
-        return Ok(crate::config::Agent::parse(shared.config.agent()?)?);
-    };
-    let resolved = crate::config::settings::resolve(&shared.config, Some(skill))?;
-    Ok(crate::config::Agent::parse(resolved.config.agent()?)?)
+    Ok(crate::config::Agent::parse(shared.config.agent()?)?)
 }
 
 fn task_configuration_refusal(
@@ -2548,7 +2558,7 @@ fn task_configuration_refusal(
 ) -> Option<String> {
     let worktree = task.worktree.as_deref()?;
     // Each Graph step can select its own agent.
-    match resolve_task_agent(worktree, repository, wave, None) {
+    match resolve_task_agent(worktree, repository, wave) {
         Ok(_) | Err(OpsError::Load(crate::error::LoadError::AgentSelection)) => None,
         Err(error) => Some(error.to_string()),
     }

@@ -56,8 +56,11 @@ moves to the next entry in `agents` and logs why:
 codex: provider usage limit; continuing on claude:fable
 ```
 
-- **Graph steps** also skip entries whose CLI isn't installed on this Machine.
-  If every entry hits a usage limit, a Graph step waits 5, 15, 30, then 60
+- A new Session or worker walks the Skill’s model order on its execution Machine.
+  It checks the launcher and, for Claude and Codex, the native login. The first
+  usable entry keeps its configured model. If the whole list is unavailable,
+  Loopflow checks the other installed harnesses.
+- **Graph steps** that exhaust the order on a usage limit wait 5, 15, 30, then 60
   minutes, retrying from the first entry after each wait before stopping.
 - **Other headless commands** stop once the list is exhausted (commit message
   generation falls back to a default title).

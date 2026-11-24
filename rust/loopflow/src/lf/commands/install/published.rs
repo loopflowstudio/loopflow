@@ -76,7 +76,17 @@ pub fn install(switch: Option<Stream>) -> Result<()> {
         let tag = stream_release(&client, stream)?;
         install_release(&client, stream, &tag, &directory, app.as_deref())?;
     }
-    schedule(None)
+    schedule_after_install(schedule(None))
+}
+
+fn schedule_after_install(result: Result<()>) -> Result<()> {
+    match result {
+        Err(error) if error.is::<MissingCrontab>() => {
+            eprintln!("Automatic updates and cleanup are unscheduled: {error}");
+            Ok(())
+        }
+        other => other,
+    }
 }
 
 /// The release a release stream is at: preview's newest, or stable's GitHub Latest.
@@ -236,9 +246,26 @@ fn record_stream(home: &Path, stream: Stream) -> Result<()> {
 /// Loopflow.app on a Mac. GitHub keeps those artifacts behind authentication,
 /// so this uses the `gh` login.
 fn main_build(directory: &Path, app: Option<&Path>) -> Result<()> {
-    let target =
-        package_target().ok_or_else(|| anyhow!("no main package is built for this platform"))?;
-    let runs = gh(&[
+    let target = package_target(std::env::consts::OS, std::env::consts::ARCH)
+        .ok_or_else(|| anyhow!("no main package is built for this platform"))?;
+    let (run, revision) = main_run(None)?;
+    let temporary = tempfile::tempdir()?;
+    let candidate = download_main_cli(run, target, temporary.path())?;
+    // Mounted until promotion has copied the app out of it.
+    let image = app
+        .map(|_| DiskImage::download(run, temporary.path()))
+        .transpose()?;
+    let source = image.as_ref().map(DiskImage::app);
+    promote_build(&candidate, directory, source.as_deref().zip(app))?;
+    println!(
+        "main: {revision}\ninstalled: {}",
+        directory.join("lf").display()
+    );
+    Ok(())
+}
+
+fn main_run(revision: Option<&str>) -> Result<(u64, String)> {
+    let mut args = vec![
         "run",
         "list",
         "--repo",
@@ -253,33 +280,52 @@ fn main_build(directory: &Path, app: Option<&Path>) -> Result<()> {
         "1",
         "--json",
         "databaseId,headSha",
-    ])?;
-    let (run, revision) = newest_run(&runs)?;
-    let temporary = tempfile::tempdir()?;
-    download_artifact(run, &format!("lf-{target}"), temporary.path())?;
-    let archive = temporary.path().join(format!("lf-{target}.tar.gz"));
-    let status = Command::new("tar")
-        .arg("-xzf")
-        .arg(&archive)
-        .arg("-C")
-        .arg(temporary.path())
-        .status()
-        .context("unpack the main package")?;
-    if !status.success() {
-        bail!("could not unpack {} ({status})", archive.display());
+    ];
+    if let Some(revision) = revision {
+        args.extend(["--commit", revision]);
     }
-    let candidate = temporary.path().join("lf");
-    // Mounted until promotion has copied the app out of it.
-    let image = app
-        .map(|_| DiskImage::download(run, temporary.path()))
-        .transpose()?;
-    let source = image.as_ref().map(DiskImage::app);
-    promote_build(&candidate, directory, source.as_deref().zip(app))?;
-    println!(
-        "main: {revision}\ninstalled: {}",
-        directory.join("lf").display()
-    );
-    Ok(())
+    newest_run(&gh(&args)?)
+}
+
+/// Fetch the Linux counterpart of this executable before the rental has any logins.
+pub(crate) fn rental_cli(arch: &str, directory: &Path) -> Result<PathBuf> {
+    let target = package_target("linux", arch)
+        .with_context(|| format!("no Linux package for architecture {arch:?}"))?;
+    if let Some(run) = option_env!("LOOPFLOW_MAIN_PACKAGE_RUN").filter(|run| !run.is_empty()) {
+        return download_main_cli(run.parse()?, target, directory);
+    }
+    if !crate::build_info::provenance().is_release() {
+        let revision = crate::build_info::source_revision();
+        anyhow::ensure!(
+            revision.len() == 40 && revision.bytes().all(|b| b.is_ascii_hexdigit()),
+            "this executable has no published source revision"
+        );
+        let (run, _) = main_run(Some(revision))?;
+        return download_main_cli(run, target, directory);
+    }
+    let tag = format!("v{}", env!("CARGO_PKG_VERSION"));
+    let client = http_client()?;
+    let name = format!("lf-{target}.tar.gz");
+    let manifest = release_manifest(&client, &tag)?;
+    let bytes = release_asset(&client, &tag, &name)?;
+    verify_asset(&manifest, &name, &bytes)?;
+    fs::write(directory.join(&name), bytes)?;
+    unpack_cli(directory, &name)
+}
+
+fn download_main_cli(run: u64, target: &str, directory: &Path) -> Result<PathBuf> {
+    let name = format!("lf-{target}");
+    download_artifact(run, &name, directory)?;
+    unpack_cli(directory, &format!("{name}.tar.gz"))
+}
+
+fn unpack_cli(directory: &Path, name: &str) -> Result<PathBuf> {
+    checked(
+        Command::new("tar")
+            .current_dir(directory)
+            .args(["-xzf", name, "lf"]),
+    )?;
+    Ok(directory.join("lf"))
 }
 
 fn promote_build(candidate: &Path, directory: &Path, app: Option<(&Path, &Path)>) -> Result<()> {
@@ -378,8 +424,8 @@ fn checked(command: &mut Command) -> Result<()> {
 }
 
 /// The package name CI gives this platform's `lf`.
-fn package_target() -> Option<&'static str> {
-    match (std::env::consts::OS, std::env::consts::ARCH) {
+fn package_target(os: &str, arch: &str) -> Option<&'static str> {
+    match (os, arch) {
         ("macos", "aarch64") => Some("aarch64-apple-darwin"),
         ("macos", "x86_64") => Some("x86_64-apple-darwin"),
         ("linux", "x86_64") => Some("x86_64-unknown-linux-gnu"),
@@ -834,10 +880,17 @@ fn cron_schedule(
     Ok(())
 }
 
+#[derive(Debug, thiserror::Error)]
+#[error("crontab is missing; install cron and run `lf install schedule`")]
+struct MissingCrontab;
+
 fn read_crontab() -> Result<String> {
-    let listed = Command::new("crontab").arg("-l").output().context(
-        "automatic installation and cleanup need cron; install it and rerun `lf install schedule`",
-    )?;
+    let listed = match Command::new("crontab").arg("-l").output() {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Err(MissingCrontab.into())
+        }
+        result => result.context("list crontab")?,
+    };
     // `crontab -l` fails when the user has no crontab yet.
     Ok(if listed.status.success() {
         String::from_utf8(listed.stdout)?
@@ -1462,6 +1515,51 @@ printf updated > "$LF_APPLICATIONS_DIR/Loopflow.app/Contents/MacOS/lf"
     }
 
     #[test]
+    fn automatic_scheduling_recognizes_an_absent_crontab() {
+        use loopflow_execution::config::environment::EnvVarGuard;
+        let _env = loopflow_test_support::env_lock().lock().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let _path = EnvVarGuard::set("PATH", home.path().to_str().unwrap());
+        let schedule = || super::cron_schedule(home.path(), Path::new("lf"), home.path(), None);
+        assert!(schedule().unwrap_err().is::<super::MissingCrontab>());
+        super::schedule_after_install(schedule()).unwrap();
+        let crontab = home.path().join("crontab");
+        fs::write(&crontab, "#!/bin/sh\nexit 1\n").unwrap();
+        fs::set_permissions(&crontab, fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(super::schedule_after_install(schedule()).is_err());
+    }
+
+    #[test]
+    fn rental_downloads_the_linux_cli_from_the_pinned_main_run() {
+        use loopflow_execution::config::environment::EnvVarGuard;
+        let _env = loopflow_test_support::env_lock().lock().unwrap();
+        let package = tempfile::tempdir().unwrap();
+        fs::write(package.path().join("lf"), b"Linux build from run 42").unwrap();
+        let target = package_target("linux", "aarch64").unwrap();
+        let artifact = format!("lf-{target}");
+        assert!(std::process::Command::new("tar")
+            .current_dir(package.path())
+            .args(["-czf", &format!("{artifact}.tar.gz"), "lf"])
+            .status()
+            .unwrap()
+            .success());
+        let gh = package.path().join("gh");
+        fs::write(&gh, format!(
+            "#!/bin/sh\nif [ \"$1 $2 $3 $6 $7\" = 'run download 42 --name {artifact}' ]; then exec /bin/cp '{}/{artifact}.tar.gz' \"$9/\"; fi\nexit 1\n",
+            package.path().display()
+        )).unwrap();
+        fs::set_permissions(&gh, fs::Permissions::from_mode(0o755)).unwrap();
+        let _path = EnvVarGuard::set(
+            "PATH",
+            &format!("{}:/usr/bin:/bin", package.path().display()),
+        );
+        let destination = tempfile::tempdir().unwrap();
+        let cli = super::download_main_cli(42, target, destination.path()).unwrap();
+        assert_eq!(fs::read(cli).unwrap(), b"Linux build from run 42");
+        assert!(super::download_main_cli(43, target, destination.path()).is_err());
+    }
+
+    #[test]
     fn main_installs_the_newest_green_run_for_this_platform() {
         let runs = r#"[{"databaseId":42,"headSha":"5c9c22ac36f327d11368654218902a63f3f88b1b"}]"#;
         assert_eq!(
@@ -1472,7 +1570,8 @@ printf updated > "$LF_APPLICATIONS_DIR/Loopflow.app/Contents/MacOS/lf"
             .unwrap_err()
             .to_string()
             .contains("no green main build"));
-        assert!(package_target().is_some_and(|target| target.contains(std::env::consts::ARCH)));
+        assert!(package_target(std::env::consts::OS, std::env::consts::ARCH)
+            .is_some_and(|target| target.contains(std::env::consts::ARCH)));
     }
 
     #[cfg(target_os = "macos")]

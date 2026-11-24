@@ -510,12 +510,13 @@ writes! {
     /// bound as the Wave's current Project.
     #[serde(rename = "wave.plan.bind")]
     WavePlanBind {
+        replace: bool,
         directory: PathBuf,
         wave: String,
         project: String,
     } => loopflow_storage::work::project::Project;
-    { wave, project, .. } => {
-        loopflow_execution::engine::wave::planning_bind(directory, wave, project)?
+    { wave, project, replace, .. } => {
+        loopflow_execution::engine::wave::planning_bind(directory, wave, project, *replace)?
     },
 
     /// `lf wave plan connect [<wave>|--all] [--team-key <key>]
@@ -1667,7 +1668,7 @@ mod tests {
             r#"{"kind":"task.report","directory":"/r","issue":"FIX-1","message":"landed"}"#,
             r#"{"kind":"task.interrupt","directory":"/r","issue":"FIX-1"}"#,
             r#"{"kind":"session.steer","directory":"/r","session":null,"wave":"product","message":"ship by Friday"}"#,
-            r#"{"kind":"wave.plan.bind","directory":"/r","wave":"product","project":"3f1c"}"#,
+            r#"{"kind":"wave.plan.bind","replace":false,"directory":"/r","wave":"product","project":"3f1c"}"#,
             r#"{"kind":"wave.plan.connect","directory":"/r","wave":null,"all":true,"team_key":null,"team_name":null}"#,
             r#"{"kind":"wave.plan.reteam","directory":"/r","apply":false}"#,
             r#"{"kind":"repo.release","directory":"/r","version":"minor","target":null}"#,

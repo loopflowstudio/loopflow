@@ -29,7 +29,7 @@ pub const HANDSHAKE: Duration = Duration::from_secs(10);
 pub const ANSWER: Duration = Duration::from_secs(120);
 
 /// `lf server status`: readiness observed without opening Work.
-#[derive(Debug, serde::Serialize)]
+#[derive(Debug, serde::Deserialize, serde::Serialize)]
 pub struct Status {
     pub socket: PathBuf,
     pub ready: bool,

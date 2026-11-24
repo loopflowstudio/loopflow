@@ -57,7 +57,7 @@ When a Task is owned by another Machine — whether a reachable peer (`laptop ->
 
 - **Task ownership:** Append-only `task_ownership` log (`rust/loopflow-storage/src/sqlite/task_ownership.rs`), replicated via tracker comments (`<!-- loopflow-ownership:... -->`) or `plan_carriers` (`plan_hub` / `plan_git`). `TaskOwnership::owner_elsewhere(&local)` is the single predicate for whether another Machine owns a Task — regardless of whether that Machine is in `declared_machines`.
 - **Steer persistence and delivery:** `steers` + `steer_delivered` + `task_comments` + `tracker_actions` on each Machine, with `steer_markers::task_marker` waking mid-turn tool hooks and `store_revisions` waking `server/wake.rs`.
-- **Live execution facts (Graph, `sentence`, Sessions):** Authoritative only on the owning Machine's local store and OS processes (`rust/loopflow-execution/src/store/task_work.rs`, `ops/task_execution.rs`). Never inferred on another Machine; either read live from the owning Machine's server or explicitly reported as `RemoteUnreachable`.
+- **Live execution facts (Graph, `sentence`, Sessions):** Authoritative only on the owning Machine's local store and OS processes (`rust/loopflow-execution/src/store/task_work.rs`, `ops/task_execution.rs`). Never inferred on another Machine; either read live from the owning Machine's server or reported as `reading: unobserved { reason }`.
 - **Delivery receipt & remote status prose:** Computed once in Rust (`SteerDelivery::sentence`, `TaskReading`, `TaskRow::reason`, `TaskRunsOn`) and carried verbatim to CLI and JSON consumers; `lf task list` and `lf task status` text stop calling `runs_elsewhere` themselves.
 
 ## Affected surfaces and consumers

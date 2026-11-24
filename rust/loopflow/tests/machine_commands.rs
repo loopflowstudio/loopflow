@@ -215,7 +215,7 @@ fn remote_file_input_reaches_the_command_without_replacing_the_transport_script(
 }
 
 #[test]
-fn remote_session_open_returns_an_owner_pinned_terminal_command() {
+fn remote_session_open_returns_a_local_viewer_of_the_owners_session() {
     let fixture = Machines::new();
     let machine = fixture.json(&["machine", "add", "mini", "--json"]);
     let mut record: Value = serde_json::from_str::<Vec<Value>>(include_str!(
@@ -254,8 +254,19 @@ fn remote_session_open_returns_an_owner_pinned_terminal_command() {
         .iter()
         .map(|v| v.as_str().unwrap())
         .collect::<Vec<_>>();
-    assert_eq!(argv[0], env!("CARGO_BIN_EXE_lf"));
-    assert!(argv.contains(&"-T"));
+    // The viewer opens here; this Machine's server attaches it on mini.
+    assert_eq!(
+        argv,
+        [
+            env!("CARGO_BIN_EXE_lf"),
+            "open",
+            "--machine",
+            machine["id"].as_str().unwrap(),
+            "--session",
+            id.as_str(),
+            "--here",
+        ]
+    );
     for target in [
         vec!["session", "resume", id.as_str()],
         vec!["session", "resume"],
@@ -272,11 +283,6 @@ fn remote_session_open_returns_an_owner_pinned_terminal_command() {
         arguments.push("--json");
         assert_eq!(fixture.json(&arguments)["open_argv"], opened["open_argv"]);
     }
-    assert_eq!(&argv[1..4], &["session", "attach", "--"]);
-    let script = argv.last().unwrap();
-    assert!(script.contains("LF_VIEWER_STREAM='1'"), "{script}");
-    assert!(script.contains("/remote/private home"), "{script}");
-    assert!(!script.contains("session remote"), "{script}");
     assert_eq!(opened["workspace"], record["workspace"]);
 }
 
@@ -5868,9 +5874,18 @@ fn a_served_resume_opens_the_session_on_your_session_machine_as_a_typed_operatio
         .iter()
         .map(|arg| arg.as_str().unwrap())
         .collect();
-    assert_eq!(argv[0], env!("CARGO_BIN_EXE_lf"));
-    assert_eq!(&argv[1..4], &["session", "attach", "--"]);
-    assert!(argv.last().unwrap().contains("LF_VIEWER_STREAM='1'"));
+    assert_eq!(
+        argv,
+        [
+            env!("CARGO_BIN_EXE_lf"),
+            "open",
+            "--machine",
+            machine["id"].as_str().unwrap(),
+            "--session",
+            record["id"].as_str().unwrap(),
+            "--here",
+        ]
+    );
     assert_eq!(opened["workspace"], record["workspace"]);
 }
 

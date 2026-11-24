@@ -276,7 +276,7 @@ pub(super) fn run_with_io(
             output(&mut io, &String::from_utf8(bytes)?)?;
             return Ok(());
         }
-        let record = prepared_remotely(record, &target, forward_agent)?;
+        let record = prepared_remotely(record, &target, None)?;
         if connection.json || cli.json {
             output(&mut io, &format!("{}\n", serde_json::to_string(&record)?))?;
         } else {
@@ -369,23 +369,31 @@ fn viewed_remotely(
     Ok(record)
 }
 
-/// A Session `target` prepared, opened from here through `lf session attach`.
+/// A Session `target` prepared, opened here by `lf open --here`, which this
+/// Machine's server attaches where it runs. `task` is the caller's selector.
 pub(super) fn prepared_remotely(
-    record: SessionRecord,
+    mut record: SessionRecord,
     target: &Machine,
-    forward_agent: bool,
+    task: Option<&str>,
 ) -> anyhow::Result<SessionRecord> {
-    let mut record = viewed_remotely(record, target, forward_agent)?;
+    anyhow::ensure!(
+        record
+            .workspace
+            .as_ref()
+            .is_some_and(|workspace| workspace.machine_id == target.id),
+        "Session reply does not belong to the addressed Machine"
+    );
     if !record.open_argv.is_empty() {
-        record.open_argv.splice(
-            0..0,
-            [
-                std::env::current_exe()?.to_string_lossy().into_owned(),
-                "session".into(),
-                "attach".into(),
-                "--".into(),
-            ],
-        );
+        let mut argv = vec![
+            std::env::current_exe()?.to_string_lossy().into_owned(),
+            "open".into(),
+        ];
+        match task {
+            Some(task) => argv.extend(["--task".into(), task.to_owned()]),
+            None => argv.extend(["--machine".into(), target.id.to_string()]),
+        }
+        argv.extend(["--session".into(), record.id.to_string(), "--here".into()]);
+        record.open_argv = argv;
     }
     Ok(record)
 }

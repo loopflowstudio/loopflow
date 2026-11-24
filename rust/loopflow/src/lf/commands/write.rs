@@ -1313,16 +1313,21 @@ impl Write {
             let (cli, _) = self.session_spelling()?;
             return super::session::prepared(&cli, self.directory());
         };
-        if let Self::SessionResume { id: Some(id), .. } = self {
-            // A Session resumes on the Machine it moved to, carried there first.
-            loopflow_execution::ops::session_move::move_session(
-                id,
-                remote.machine.id.as_str(),
-                false,
-                run_task,
-            )?;
-        }
-        super::ssh::prepared_remotely(remote.call()?, &remote.machine, false)
+        let task = match self {
+            Self::SessionResume { id: Some(id), .. } => {
+                // A Session resumes on the Machine it moved to, carried there first.
+                loopflow_execution::ops::session_move::move_session(
+                    id,
+                    remote.machine.id.as_str(),
+                    false,
+                    run_task,
+                )?;
+                None
+            }
+            Self::SessionResume { task, .. } => task.as_deref(),
+            _ => None,
+        };
+        super::ssh::prepared_remotely(remote.call()?, &remote.machine, task)
     }
 
     /// The Session preparation as `lf` spells it. Its local preparation still

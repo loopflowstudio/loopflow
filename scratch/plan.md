@@ -194,7 +194,7 @@ The server and active Graph steps poll each Asana repository project independent
 
 `TaskOwnership::runs_on(local)` produces `TaskRunsOn { machine: MachineRef, since }` on `RoadmapTask` and `TaskRow`. `TaskDetail.reading` is `here | owner | unobserved { reason }`. Unobserved open Tasks carry `TaskRow.state: null` and `TaskRow.next: null`, and `TaskSection::of` places work held on another Machine in `Working`. Subscriptions annotate the owner's frames with `reading: owner` and the caller's `runs_on` before field selection.
 
-### QA checks (at `8092a8ef19`)
+### QA checks (at `8092a8ef19`, then `53b19786df`)
 
 - [Walkthrough and transcripts](qa.html): real loopback OpenSSH and a bare Git origin, three private Machines, with one Task carried forward from installed 0.16.0. Direct CLI and served receipts reached the owner; Git delivered after an SSH outage and retried a locally saved steer after Git returned; stalled SSH handshake returned saved status in 11.36 s.
 
@@ -212,6 +212,7 @@ After merging main (`00d14c493b`, #1973, which rewrote Task order in `selections
 
 - Publish so CI runs `served_reads`, `binary(lf)`, the full `test(machine_commands::)` and the Swift DTO/protocol tests (`DTOFixtureTests`, `ServerProtocolTests`).
 - Watch `a_status_read_for_a_task_mini_runs_shows_a_rename_made_there` under CI load (15 s stand-in SSH round trip).
+- Open from QA at `53b19786df` ([qa.html](qa.html)): `RoadmapTask.lifecycle` stays `unstarted` (and `runtime`/`execution` reasons say "No Task Graph has run") for open Tasks running elsewhere; Desktop's `TaskRowStatus(task:)` would label them "Unstarted" in Working. A non-null wire field: needs a DTO decision with the Desktop pass.
 
 ## Done when
 

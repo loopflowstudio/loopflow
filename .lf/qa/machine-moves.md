@@ -8,7 +8,13 @@ and the QA graph before the first Start. Give each clone a Git identity.
 On the owner, run `lf server run`, give it a temporary public name with
 `lf machine public sandbox-b`, and create a Task with `--run --json`.
 Wait for the Graph to reach its interactive step. The two callers' first
-`lf task list` discovers the Task and its claim.
+`lf task list` discovers the Task and its claim. Run `lf set --global
+default_agent claude` in each home first: with a stand-in `claude` on PATH,
+`lf task create --run` otherwise stops at "No agent selected". A caller with no
+`lf server run` learns later owner changes (a completion) only when a command
+exchanges; `lf task sync <id>` there does it at once. For the unowned case,
+`lf wave create placed`, `lf --wave placed set machine sandbox-b` and
+`lf task create '<words>' --wave placed` on the laptop.
 
 On macOS, stock `/usr/sbin/sshd -D -e -f <config>` can run as your user on
 a high port at `127.0.0.1`. Generate throwaway host and client keys with
@@ -37,7 +43,9 @@ For an offline peer, close only the test SSH master with `ssh -S <socket>
 -O exit <route>` and stop the test daemon by PID. A cached master otherwise
 keeps the route alive. The master socket lives in `/tmp/lf-ssh-<uid>-<hash>/`,
 where `<hash>` is the first 16 hex digits of SHA-256 of the caller's
-`LF_HOME`. Break and restore the sibling's origin to check a steer saved
+canonical `LF_HOME` (`/private/tmp/…` on macOS, not `/tmp/…`). Stopping the
+sshd listener leaves an open master serving reads, so a status that still says
+"read from its server" after the kill came through it. Break and restore the sibling's origin to check a steer saved
 locally. Run `lf task sync <id>` on the sibling to send it and watch the
 owner import it during its next background exchange.
 

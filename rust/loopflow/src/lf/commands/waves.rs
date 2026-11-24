@@ -1060,10 +1060,14 @@ fn print_remote_detail(runs_on: &TaskRunsOn, detail: &TaskDetail) {
     let task = &detail.task;
     println!("{} · {}", task.title, task.identifier);
     if detail.reading == TaskReading::Owner {
-        println!(
-            "{}; read from its server.",
-            loopflow_execution::ops::task_ownership::runs_elsewhere(runs_on)
-        );
+        // A finished Task runs nowhere; its last claim only names who answered.
+        match task.state.is_some_and(|state| state.is_terminal()) {
+            true => println!("Read from {}'s server.", runs_on.machine.name()),
+            false => println!(
+                "{}; read from its server.",
+                loopflow_execution::ops::task_ownership::runs_elsewhere(runs_on)
+            ),
+        }
     }
     if let Some(state) = task.state {
         println!(

@@ -444,7 +444,8 @@ Runs on mini since Nov 12 10:42; read from its server.
 ```
 
 Mini reports where its Graph stands, lists its Sessions and shows the Task's
-parent and children.
+parent and children. A finished Task opens with `Read from mini's server.`
+instead: it runs nowhere.
 `--json` and `--subscribe` say so with `reading.kind: "owner"` and
 `task.runs_on` naming mini. One-shot status waits at most 15 seconds for mini.
 

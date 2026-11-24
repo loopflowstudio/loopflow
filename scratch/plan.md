@@ -220,7 +220,8 @@ Build thinly end to end; each slice runs and proves itself before moving on, and
 
 ## Remaining before merge
 
-- QA verification of Reset session on a remote Task and (if reachable) **New conversation** on a mini-owned Task (`scratch/qa.html`).
+- `WorkNavigationTests/retainedRepositoryConversation` fails at this head (before and after the Slice 7 QA fixes); find whether main fails too, and fix it here if this branch broke it.
+- Clicking Reset session and New conversation in the app on an unlocked display (QA drove their exact requests; `scratch/qa.html`).
 - Gate: the four acceptance commands below, then CI.
 
 ## Acceptance check at gate

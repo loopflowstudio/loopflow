@@ -1,66 +1,58 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8">
-<title>LOO-1083 QA · Slice 6 on the Dev build</title>
+<html lang="en"><head><meta charset="utf-8"><title>LOO-1083 QA · Slice 7: Reset and New conversation on a mini Task</title>
 <style>
-body{font:15px/1.5 -apple-system,system-ui,sans-serif;max-width:980px;margin:2rem auto;padding:0 1rem;color:#222}
-h1{font-size:1.5rem}h2{margin-top:2.2rem;border-bottom:1px solid #ddd}
-pre{background:#f5f5f5;padding:.7rem;overflow:auto;font-size:13px;white-space:pre-wrap}
-img{max-width:100%;border:1px solid #ccc;margin:.4rem 0}
-table{border-collapse:collapse;width:100%}td,th{border:1px solid #ddd;padding:.35rem .5rem;vertical-align:top;text-align:left}
-.ok{color:#16702e}.fix{color:#8a4b00}.open{color:#a01818}
+body{font:15px/1.5 -apple-system,system-ui,sans-serif;max-width:1100px;margin:2em auto;padding:0 1em;color:#222}
+h1{font-size:1.5em}h2{margin-top:2em;border-bottom:1px solid #ddd}
+table{border-collapse:collapse;width:100%}td,th{border:1px solid #ddd;padding:.5em;vertical-align:top;text-align:left}
+th{background:#f5f5f5}code,pre{font:13px ui-monospace,Menlo,monospace}pre{background:#f6f6f6;padding:.6em;overflow-x:auto}
+img{max-width:100%;border:1px solid #ccc}.bad{color:#a00}.ok{color:#070}figure{margin:1em 0}
 </style></head><body>
-<h1>LOO-1083 QA: Slice 6 on the Dev build (2026-11-24)</h1>
-<p>Laptop and mini as two private homes on this Mac, mini reached through a stand-in <code>ssh</code>, each running the branch <code>lf server run</code>. An isolated Dev bundle of Desktop with the QA hook, screen locked, on the laptop's home. Stand-in <code>claude</code> on each Machine prints where it runs and echoes lines read from its tty. Recipe: <code>.lf/qa/remote-task-workspace.md</code>. Earlier runs' reports are in git history (<code>44e0611b51:scratch/qa.html</code>).</p>
+<h1>LOO-1083 QA · Slice 7: Reset session and New conversation on a Task mini runs</h1>
+<p>Branch <code>lf</code> at <code>a69ea38292</code>, then with this run's fixes. Two private Machines on one Mac (laptop, mini) under <code>/tmp/q83</code>, joined by a stand-in <code>ssh</code>; stand-in <code>claude</code> on each prints its Machine, its <code>--session-id</code>, and echoes lines read from its tty. Screen locked throughout. Recipe: <code>.lf/qa/remote-task-workspace.md</code>. Earlier runs: <code>45b450065a:scratch/qa.html</code>.</p>
+<p>The Task <code>65d69a</code> was filed on the laptop, moved to mini while unstarted, and run from the laptop (<code>lf task run</code> → mini, stops at <code>demo</code> with a Session). The laptop's own store never saw that Graph.</p>
 
 <h2>Scenarios</h2>
 <table>
 <tr><th>Scenario</th><th>What I did</th><th>What I saw</th></tr>
-<tr><td>Move an open Task laptop → mini</td><td>Laptop Task with a running Session, shown in Desktop (pane <code>usable</code>, laptop provider). <code>lf task move … --machine mini</code>, no visit.</td>
-<td class="ok">Strip and Files switched to <code>origin.d1d217-move-me-with</code> on mini; no "Session location unavailable"; the pane showed <code>provider on mini in …</code>. (First run, before fixes: see the three rows below.)</td></tr>
-<tr><td>Type into the moved pane</td><td><code>desktop send -p session</code></td>
-<td class="fix">Before: pane stuck at <code>attachment: opening</code>, input refused ("Session input is paused or held by another viewer"); same for a Task that was on mini from the start. A local Session reached <code>usable</code>. Cause: <code>transport::relay_socket</code>, the viewer for a ticket bridged to another Machine, passed no <code>connection::Status</code>, so Desktop never got a <code>connected</code>/<code>native_ready</code> reading. After: <code>usable</code>; mini printed <code>mini received after the move</code>.</td></tr>
-<tr><td>Close and reopen a pane whose Session was born on mini</td><td><code>desktop close -p session</code>, then <code>focus</code></td>
-<td class="fix">Before: pane <code>failed</code>; the laptop server logged <code>session.resume {id, task: null}</code> → "Session 55a57e… was not found", and the Task fell back to its Not started page. Desktop's shared repository store prepared by bare id. After: the store names the Session's Task when the record is on another Machine; reopened <code>usable</code>, input reached mini, no "not found".</td></tr>
-<tr><td>Move with a second window on the same repository</td><td>Relaunch restored a stale window ("Updating…") beside the live one; move a Task shown in both</td>
-<td class="fix">Before, run 1: Desktop died at the move (AppKit DisplayCycle loop). Stack: <code>SessionPaneView.browserTabs</code> → <code>SessionsWorkspace.files(for:)</code> → <code>TaskFilesStore.relocate</code> during render; the two windows read the Task differently and moved the shared store back and forth. Run 2, after moving that relocation to <code>onChange</code>: main thread spun at 86% CPU until the app died; <code>sample</code> showed the <code>workspace</code> getter and <code>workspacePanel</code> both writing <code>SessionsWorkspace.location</code> during render from different readings. After both fixes: move completes, CPU 0.2%, pane <code>usable</code> on mini, input reaches mini.</td></tr>
-<tr><td>Files after the move</td><td><code>desktop do files path=notes.txt</code></td><td class="ok">Header <code>mini origin.341d8f-fourth-move</code>.</td></tr>
-<tr><td>Diff chip on a mini Task</td><td>Brief on Talk on mini</td><td class="ok">"No pull request yet. Changes below are on mini."</td></tr>
-<tr><td>New conversation on a mini-owned Task</td><td>Tried the Session header icon, the ⌘/ popover, a fresh unstarted mini Task</td>
-<td class="open">Not reached. The header's <code>plus.bubble</code> is Reset session (two clicks on Talk on mini; no reset request reached the server). New conversation sits in the "…" menu and the ⌘/ popover, which the locked-screen hook cannot open; the ⌘/ key went to the stale window. A link to an unstarted mini Task starts its conversation on mini first, so the Not started page's New session button was never on screen.</td></tr>
+<tr><td>Reset session, server half</td><td>Desktop's exact <code>session.new</code> over the laptop socket: <code>{id, task: task_65d69a…, agent: "claude", request_id}</code></td>
+<td class="ok">Laptop logged it and routed it to mini. Answer: <code>task_ids[0]</code> and <code>work.id</code> are the laptop's Task, workspace mini's checkout, <code>open_argv</code> <code>lf open --task … --session … --here</code>. Opening that argv in a PTY: <code>provider on mini … args: --session-id a9f279f5…</code> (was <code>ed1363de…</code>), typed <code>after reset</code> → <code>mini received: after reset</code>; detach printed <code>Return with: lf open --task … --session …</code>.</td></tr>
+<tr><td>Same Reset sent again</td><td>Same request ID</td><td class="ok">Same answer; mini launched nothing new (claude log unchanged).</td></tr>
+<tr><td>Reset without its Task</td><td><code>task: null</code></td><td>Refused: <code>outcome_unknown</code> "Session … was not found; inspect the affected work before retrying". Expected refusal; the code overstates a plain not-found. Desktop always sends the Task now.</td></tr>
+<tr><td>Reset session, click</td><td>Dev build with the QA hook: clicked <code>plus.bubble</code> in the Session strip (twice), and the Brief tab as a control</td>
+<td>Neither did anything: no request reached the server and Brief stayed unselected. Hook clicks don't reach pane strip controls; this is also why the Slice 6 run saw "no reset request". The click itself is unchecked.</td></tr>
+<tr><td>New conversation</td><td>The argv Desktop builds for a remote Task: <code>lf desktop shell task_65d69a… --id qa-newconv-1 --create -- lf --interactive --task 65d69a : '&lt;prompt&gt;'</code>, in a PTY</td>
+<td class="ok">Shell ran on mini: <code>provider on mini in …/origin.65d69a-reset-me-on</code>, new thread <code>9aae5f1a…</code>, typed line reached mini. Laptop: no checkout, no provider. Served <code>session.list --task</code> from the laptop then listed both Sessions, each opening with <code>lf open --task</code>. Closed with <code>--close --started-on &lt;mini&gt;</code>.</td></tr>
+<tr><td><code>lf session list --task 65d69a</code> on the laptop</td><td>CLI, repo cwd</td>
+<td><span class="bad">Before: "No Sessions."</span> while mini ran two. <span class="ok">After: both, the hint naming <code>lf open --task …</code>; with mini unreachable: <code>Error: machine "mini": unreachable: …</code>.</span></td></tr>
+<tr><td>Open the Task in Desktop</td><td><code>loopflow://repo/task/65d69a</code> in the Dev build</td>
+<td><span class="bad">Before: the Session slot showed <b>Not started</b> with Start, brief "Unstarted", while the header read "Waiting for you at demo."</span> The laptop's plan row ("No Task Graph has run") outranked the routed <code>task.get</code>, whose <code>row</code> from mini says <code>active</code>/<code>working</code>. <span class="ok">After: the Session pane (Claude) opens, Files names <code>mini origin.65d69a-reset-me-on</code>; <code>desktop focus -p session</code> → <code>usable</code>, capture shows mini's provider and the line typed after reset.</span></td></tr>
+<tr><td>Creation receipt for a routed Reset</td><td><code>creation.get</code> on each socket</td>
+<td class="bad">Laptop answers <code>null</code>; mini holds the receipt. Desktop's recovery re-sends on <code>null</code> and then throws "The Machine has no receipt for creation …". Only bites when a Reset's answer is lost. Recorded in <code>scratch/questions.md</code>.</td></tr>
 </table>
 
 <h2>Screens</h2>
-<p>Moved Task, no visit: strip names mini's checkout (<code>origin.d1d217-move-me-with</code>), Files says mini. The terminal draws blank through <code>cacheDisplay</code> while locked; <code>desktop capture</code> read <code>provider on mini in …</code>.</p>
-<img src="qa/s6-moved-strip.png" alt="Moved Task strip naming mini's checkout">
-<p>The final build after a move with two windows open:</p>
-<img src="qa/s6-final-move.png" alt="Final move on mini">
-<p>The stale restored window that shares workspaces with the live one (the second reader in the render loops):</p>
-<img src="qa/s6-stale-window.png" alt="Stale Updating window">
-<p>Brief on a mini Task:</p>
-<img src="qa/s6-mini-brief.png" alt="Brief says changes are on mini">
+<figure><img src="qa/s7-not-started-before.png" alt=""><figcaption>Before: a Task mini runs, waiting at demo, offered as Not started.</figcaption></figure>
+<figure><img src="qa/s7-session-after.png" alt=""><figcaption>After: its Session pane opens and Files names mini. (The terminal draws blank through <code>cacheDisplay</code> while locked; <code>desktop capture</code> read mini's provider.)</figcaption></figure>
 
 <h2>Fixed in this run</h2>
 <ul>
-<li><code>transport::relay_socket</code> reports to Desktop through <code>connection::Status</code>; <code>view</code> decides reconnecting by whether it knows the held terminal (<code>id</code>), not by having a route. Test: <code>open_remote_workspace</code> now opens a bridged <code>--here</code> relay with <code>LF_SERVER_STATUS</code> and waits for <code>connected</code> + <code>native_ready</code>; it fails at that check without the fix.</li>
-<li><code>SessionsStore.preparationWork</code>: a repository-wide store names the Session's Task when the record is on another Machine (only once this Mac's ID is known), for prepare and provider switch.</li>
-<li><code>SessionsWorkspace.filesPlace</code> / <code>follow</code>: view bodies read Files with <code>follow: false</code>; <code>browserTabs</code> follows its window's reading with <code>onChange</code>.</li>
-<li><code>SessionsContentView.location(for:)</code>: the <code>workspace</code> getter and <code>workspacePanel</code> compute one location per workspace.</li>
+<li><code>lf session list --task</code> asks the owner's server for a Task another Machine runs (<code>session.rs::list_remote_task</code>), as <code>lf task status</code> does. Test: <code>server_routed_task_workspace</code> runs the CLI from the laptop's checkout; it fails with "No Sessions." without the fix.</li>
+<li>Desktop: for a Task owned by another Machine, the routed reading's <code>lifecycle</code>/<code>section</code> decide (<code>WorkModel.ownerStanding</code>, <code>RoadmapTask.standing(as:)</code>). Test: <code>DesktopHeadlessTests/remoteTaskStandsWhereItsOwnerSays</code>; fails without the fix.</li>
 </ul>
 
 <h2>Checks</h2>
-<pre>cargo test -p loopflow --test integration machine_commands::open_remote_workspace   ok, 13.8 s (fails without the transport fix, 46 s)
-cargo clippy -p loopflow-execution -p loopflow --all-targets -- -D warnings   clean; cargo fmt
-scripts/test_desktop.sh --filter 'RemoteTaskWorkspaceTests|TaskFilesTests|WorkspacePanesTests|SessionsStoreTests|WarmPaneMountTests'   107 passed
-  (first run 16 issues: preparationWork treated every Session as remote while localMachineId was unset; fixed)
-Dev build: move laptop → mini with two windows; close/reopen a mini-born Session; input reaches mini in both</pre>
+<pre>cargo test -p loopflow --test integration machine_commands::server_routed_task_workspace   ok, 31 s (fails without the CLI fix)
+cargo clippy -p loopflow --all-targets -- -D warnings; cargo fmt                       clean
+scripts/test_desktop.sh --filter 'DesktopHeadlessTests|WorkDestinationTests|WorkspacePanesTests|WorkCacheTests|EmptyStateTests|WorkNavigationTests|TaskConceptTests|RemoteTaskWorkspaceTests|WarmPaneMountTests'
+                                                                                        200 tests, 1 failure (below)
+Dev build: open a mini-run Task → Session pane usable on mini; Files on mini</pre>
 
 <h2>Still wrong, worst first</h2>
-<ul>
-<li class="open">New conversation on a mini-owned Task is unchecked on the Dev build (see above). Needs an unlocked display, or a <code>desktop do</code> action for it.</li>
-<li class="open">The bridged-viewer status bug went unseen by Desktop's <code>RemoteTaskWorkspaceTests</code> ("Session input ack" passed before the fix); that fixture does not exercise the pane's <code>LF_SERVER_STATUS</code> gate.</li>
-<li class="open">Reset session on a remote Session: the provider on mini exited 1 around the second click, mini's recovery restarted it, and the pane kept "command exited with status 1; retry with lf open --task … --session …" until refreshed. No reset request appeared in the laptop server log, so what the click did is unclear. Outside this slice.</li>
-<li class="open">With the stale second window present, the live window's sidebar kept highlighting "Third move" while the panes showed other Tasks, and a moved Task's row sometimes read "Open Task is outside this list". Known two-window behavior (desktop.md); cosmetic here.</li>
-<li class="open">During the third move the laptop server logged <code>unavailable: failed to run git rev-parse --verify 6e2f466…^{commit}: No such file or directory</code> once; a read hit the moved checkout's old directory. It did not recur after the fixes.</li>
-<li class="open">The Files tab row sometimes shows a second "Files…" title beside the Files tab after a move (see final screenshot).</li>
-</ul>
+<ol>
+<li><code>WorkNavigationTests/retainedRepositoryConversation</code> fails at this branch's head, with or without this run's change (<code>pane(forSessionId: "repo-primary")</code> is nil). Not established whether main fails too; gate must look.</li>
+<li>A routed Reset whose answer is lost leaves Desktop's recovery stuck: the laptop has no receipt for a creation mini took (<code>scratch/questions.md</code>).</li>
+<li>The sidebar for a Task only mini has run says "No working Tasks in this list" / "Open Task is outside this list": the list reads the laptop's store only, by design (no fanout), and that store calls it backlog.</li>
+<li>Unchecked: clicking Reset session and New conversation in the app. The hook can't reach the strip or the "…" menu while locked; both were driven through the exact requests and argv the app sends.</li>
+<li><code>lf session list --task</code> for a remote Task applies <code>--task</code>, <code>--headless</code> and paging only, as the served read does; <code>--on</code>, <code>--available</code>, <code>--search</code>, <code>--primary</code> are ignored there.</li>
+</ol>
 </body></html>

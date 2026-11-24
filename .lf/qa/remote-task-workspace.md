@@ -111,3 +111,24 @@ remove `QAHook.swift` and its `LoopflowApp.swift` line.
   by the time the window draws.
 - A Session with no viewer ends after two minutes (idle owners); its pane then
   says "Session ended." Refresh or focus reopens it on mini.
+
+# Reset session and New conversation on a Task mini runs (Slice 7 run)
+
+- A Task that only ever ran on mini: `lf task create`, `lf task move <id>
+  --machine mini` while unstarted, then `lf task run <id>` from the laptop
+  (it runs on mini; with the `qa` Graph it stops at demo with a Session).
+  The laptop's plan row then says "No Task Graph has run": that is the case
+  where Desktop must still open the Session pane, not **Not started**.
+- Hook clicks do not reach a pane strip's controls (Reset session's
+  `plus.bubble`, the Brief/Diff/Files tabs): nothing changes and no request
+  reaches the server. Send Desktop's Reset over the socket instead, exactly as
+  `RegistryQuery.resetSession` encodes it: `session.new {directory,
+  request_id, id, task: <laptop Task id>, agent}`. Then open its `open_argv` in
+  a PTY: the stand-in prints a new `--session-id` on mini.
+- New conversation on a remote Task is a shell on the owner:
+  `lf desktop shell <task id> --id <tab> --create -- lf --interactive --task
+  <identifier> : '<prompt>'` (Desktop adds `--bootstrap`); close it with
+  `--close --started-on <owner machine id>`.
+- A served `session.list` needs `headless`, `after` and `limit` beside `task`.
+- `creation.get` for a routed `session.new` answers `null` on the laptop; the
+  receipt is in mini's store (ask mini's socket).

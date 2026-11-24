@@ -1,9 +1,15 @@
-at: 4d1244e4f3f5d504a30838ddc2df357908a751ed
+at: 0efab21b2bc60e18f6e71a6b92d7a20022780aba
 first:
   - path: docs/dev/machines.md
-    why: How a steer reaches the owning Machine
+    why: Steer and read a Task another Machine runs
   - path: scratch/plan.md
-    why: What each slice built; status slice remains
+    why: What each slice built and taught
+  - path: rust/loopflow-model/src/durable.rs
+    why: TaskRunsOn, the one where-it-runs fact
+  - path: rust/loopflow/src/lf/commands/task_row.rs
+    why: runs_on on rows, TaskReading on status
+  - path: rust/loopflow/src/lf/commands/waves.rs
+    why: Owner read in 15 s, else unobserved here
   - path: tests/fixtures/dto/task_steer_receipt.json
     why: The receipt every Task steer returns
   - path: rust/loopflow-execution/src/engine/session.rs
@@ -35,12 +41,14 @@ first:
   - path: rust/loopflow/src/lf/commands/graph.rs
     why: Continue polling while a worker runs
   - path: rust/loopflow/tests/machine_commands.rs
-    why: Owner, offline, unregistered and lost-reply steers
+    why: Steers and status for owner, offline, unregistered
   - path: rust/loopflow-execution/src/ops/linear/task_planning_tests.rs
     why: A sibling steer reaches worker and primary
   - path: rust/loopflow-execution/src/ops/linear/asana_planning_tests.rs
     why: Two projects share a team without losing direction
 hide:
+  - path: tests/fixtures/dto/
+    why: runs_on null added to every Task row
   - path: tests/fixtures/dto/server_schema.json
     why: Regenerated from lf server describe
   - path: scratch/concept-review.html

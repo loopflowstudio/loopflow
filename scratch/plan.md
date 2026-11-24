@@ -59,7 +59,7 @@ Both positions of `--machine` select the same registered Machine for `open`. A r
 
 The owner's `task.get` supplies the checkout and validates an exact Session's Task membership. For a primary, `session.resume` uses the existing resolver on the owner. The viewer requests `session.attach` first and calls `session.continue` only when the refusal identifies the Session as having no running terminal. The next attach names the terminal just started. The tab reports usable when the peer's terminal acknowledges readiness. The retry command retains the selectors.
 
-## Client work remaining
+## Client behavior in place
 
 ### 5. Desktop (`swift/LoopflowMac`): done
 
@@ -199,34 +199,16 @@ Build thinly end to end in four slices; each slice runs and proves itself before
 
 5. **Slice 5 (post-build concept review, 2026-11-24): Close the remaining Task-subscription, remote-`--agent`, and Desktop local-assumption gaps before gate.** Review record: `scratch/concept-review.html`.
 
-   Build **5A first** (wire rev 10 + server + CLI — proves the model immediately in Rust integration tests before touching Swift), then **5B** (Desktop + Mobile):
-
-   - **5A. Wire (rev 10, unshipped), Rust server & CLI:**
-     - **Task-scoped `task.files.watch` (`ops/task/workspace.rs`, `server/subscriptions.rs`, `server/README.md`, `tests/fixtures/dto/server_schema.json`):**
-       - Change `TaskFilesRevision` to `{ task_id: TaskId, machine_id: MachineId, machine_label: Option<String>, checkout: Option<PathBuf>, revision: Option<String> }` (required-nullable keys, no `#[serde(default)]`).
-       - In `Producer::files`, when an existing Task has no checkout yet on the owning Machine, emit `{ machine_id, machine_label, checkout: None, revision: None }` and wait on `store_revisions` (planning/checkout changes) until `task_checkouts` appears, then open `TaskFilesWatch` and emit the live revision under the **same subscription ID**. A nonexistent Task still ends with `not_found`. One-shot `task.files`/`task.file`/`task.changes`/`task.diff` still return `not_found { reason: "not_started" }`.
-     - **Caller `--agent` across remote Session resume/continue + local farewell (`machine/wire.rs`, `ops/human_session/primary.rs`, `server/service.rs`, `commands/open/conversation.rs`, `transport.rs`, `server/README.md`, `rust/loopflow-execution/tests/fixtures/dto/server/session_continue.json`):**
-       - Add required-nullable `agent: Option<String>` to `ServerOperation::SessionContinue`.
-       - Honor `agent` through `Write::SessionResume` → `ensure_task` / `prepare` (fixes QA #1: `lf open --task -a claude` on an owner with no `default_agent` refusing `"No agent selected"`).
-       - Pass `agent: config::agent_override()` from `open/conversation.rs::routed_terminal` into `SessionContinue` (`service.rs::continuing` passes `--agent <agent>` to `lf session resume`). When `agent_override()` is set and differs from the Session's current provider, call `SessionContinue` directly instead of blindly attaching to the running old-harness terminal (fixes `lf -a codex open --task` and Desktop's remote agent switcher).
-       - Pass the calling Machine's `fallback_text(&target.fallback_argv())` into `transport::relay_socket` for bridged remote Sessions so leave/detach prints `lf open --task <id>` (or `lf open --machine <m> --session <id>`) instead of the peer's local-only `lf resume <id>` (fixes QA #3).
-     - **Proves:** Extend `machine_commands::server_routed_task_workspace` (`task.files.watch` on an unstarted Task stays open with `checkout: null` and transitions live once checkout is created, and follows a move through an unstarted destination under the same ID) and `open_remote_workspace` (`lf open --task <id> -a <harness>` on a peer with no `default_agent`, switching harness on a running remote Session, and farewell naming `lf open --task`).
-
-   - **5B. Desktop & Mobile clients (`swift/Loopflow`, `swift/LoopflowMac`, `swift/LoopflowiOS`):**
-     - Update Swift `TaskFilesRevision` (`machineLabel: String?`, `checkout: String?`, `revision: String?`) and `ServerOperation.sessionContinue(..., agent: String?)` + shared DTO/protocol tests.
-     - **Mobile (`TaskFilesTree.swift`, `RemoteMobileClient.swift`):** Delete the 5-second `while !Task.isCancelled` polling loop in `TaskFilesTree.follow()`; derive `notStarted = (body.checkout == nil)` on the single `observeTaskFiles` stream and reload on checkout/revision/Machine changes; pass `agent: nil` in `sessionContinue`.
-     - **Desktop (`TaskFileDocument.swift`, `Views/SessionsView.swift`, `PullRequestStore.swift`):**
-       - Pass `localMachineId` into `TaskFilesStore`; update `machine` from `TaskFilesRevision` as `revision.machineID == localMachineId ? nil : revision.machineID` (fixing move-back-to-Mac leaving `store.machine` non-nil) and `machineLabel = revision.machineLabel` (eliminating raw `home_...` flash); set `notStarted = (revision.checkout == nil)`.
-       - Reconnect `observeServedFiles` across local server restarts with bounded backoff (matching `WorkSubscriptions`), clearing `error` once readings resume (fixes QA #2).
-       - Let `SessionsWorkspace.newShell` resolve a Task's Machine from `location ?? task?.runtime?.owner` (matching `files(for:)`) so Shell opens without requiring the conversation to open first.
-       - Update `TaskDelivery.describe` (`PullRequestStore.swift`) so a remote Task's Diff chip does not say `"Changes below are local."` (fixes QA #7).
-     - **Proves:** Extend Desktop & iOS `RemoteTaskWorkspaceTests` (unstarted watch transitions live without polling; move mini → laptop restores local state; local server restart recovers Desktop Files watch; `newShell` without conversation; remote Diff chip) and run the four gate commands below.
-
-   **Slice 5 status (2026-11-24).** Complete; gate next.
+   **Slice 5 status (2026-11-24).** Complete; gate next. Built against the three review findings: Task-scoped files watch, `--agent` through remote resume/continue with this Machine's `lf open` farewell, and Desktop's location-gated shell and "local" Diff chip.
    - 5A built: `TaskFilesWatch` follows the Task record, not a directory: an unstarted Task reads `{checkout: null, revision: null}` and the watch opens on the checkout when `task_checkouts` advances the planning revision (the producer waits on the shared planning watcher beside file events). A peer reading's `machine_label` is rewritten to the serving Machine's name for the owner. `session.continue` carries required-nullable `agent` (`--agent` on the held `lf session resume`). `session::prepared` now selects the Clap spelling's settings (`select_invocation`), which is what QA #1 was: a served `session.resume` dropped `--agent` before `session::conversation` resolved the harness. `routed_terminal` continues directly when `--agent` names another harness than the primary's (or for an exact Session, whose provider the overview lacks). `transport::ReturnCommand` rewrites the owner's `lf resume <id>` in a bridged viewer's output, detach and hint lines to this Machine's `lf open …`.
    - 5B built: Swift `TaskFilesRevision` (`machineLabel`, nullable `checkout`/`revision`, `notStarted`), `sessionContinue(…, agent:)`. Mobile `TaskFilesTree.follow` is one stream; its Not started has no **Try again**. Desktop `TaskFilesStore` takes `localMachineID`, hands a reading for this Mac to FSEvents through `relocate`, sets `notStarted` and the label from readings, and resubscribes with 1 s → 30 s backoff when its server stream ends or fails. `SessionsWorkspace.owner` (set from `runtime.owner` beside `location`) lets `newShell` open before any conversation. `TaskDelivery.describe(runsOn:)` says "Changes below are on mini." / "The checkout on mini is ahead of the PR".
    - Ran: `machine_commands::server_routed_task_workspace` (34 s; unstarted watch goes live under its ID with `machine_label: "mini"`; the move loops wait through null checkouts), `open_remote_workspace` (19 s; a fifth case opens a Task with no conversation via `-a claude`; every tab's text names `lf open …` and never `lf resume`), `server::schema::tests:: server::wire:: server::service::tests::continuing_a_session` (11), `server::subscriptions::` under nextest (14; under `cargo test` the batch collides on shared fixture state and each passes alone), fmt, clippy. Desktop `ServerProtocolTests|DTOFixtureTests|PullRequestTests|TaskFilesTests|RemoteTaskWorkspaceTests` (138, then 59 after the move-back change); iOS `RemoteTaskWorkspaceTests` (2).
    - Not covered: switching harness on a *running* remote Session (`lf -a codex open --task` while claude runs) has no fixture: it needs a second harness stand-in on mini. Move-back to this Mac is covered in `TaskFilesTests` (fixture stream), not end to end: the Desktop two-Machine fixture's mini has no route back to the laptop (`lf --machine mini task move … --machine <laptop>` answers "machine … is not added").
+
+## Remaining before merge
+
+- Gate: the four acceptance commands below, then CI.
+- `server::subscriptions::` passes alone and under nextest but its tests collide on shared fixture state in one `cargo test` process. Give each test its own fixture home (or hold `env_lock`) so the module passes under both runners.
 
 ## Acceptance check at gate
 

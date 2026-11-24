@@ -29,7 +29,9 @@ their original Work and date. An input counts the turns recorded for the
 selected Work, so a Task filter leaves out turns from before the Session joined
 the Task. The usage table and Desktop Task History show the Machine as
 `from modal-1`, for example. An input recorded on this Machine too is counted
-once, as this Machine's.
+once, as this Machine's. A collected run of a Task or Wave kept here names this
+Machine's checkout, so Desktop Telemetry groups it with that codebase; `--context`
+reads its copied capture and turns.
 
 `lf session usage --session <id> --json` totals the Session’s native turns
 across Machines. A turn observed again after a continuation counts once.

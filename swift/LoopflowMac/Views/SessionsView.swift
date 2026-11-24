@@ -404,7 +404,7 @@ final class SessionsWorkspace {
         // This Mac's plan names another owner without its checkout; the
         // served watch reads that checkout from the owner.
         let reading = task?.reference.workspace?.identity
-        let owner = task?.runtime?.owner?.machine.id.map { StructuredIdentity.prefixed($0, "home_") }
+        let owner = task?.ownerMachineId
         let place = reading ?? location
         let machine: String? = if let reading { reading.machineId }
             else if let owner, owner != localMachineId { owner }
@@ -1861,32 +1861,26 @@ struct SessionsContentView: View {
         let key = key(for: .task(id: taskId))
         let entry = workspaces.workspace(for: key, title: found.task.task.name, location: found.task.reference.workspace?.identity)
         let issue = found.task.task.identifier
-        if let owner = found.task.runtime?.owner?.machine.id.map({ StructuredIdentity.prefixed($0, "home_") }),
-           owner != StructuredIdentity.prefixed(machineId, "home_") {
+        let lf: String
+        let checkout: WorkspaceIdentity
+        if let owner = found.task.ownerMachineId, owner != StructuredIdentity.prefixed(machineId, "home_") {
             // The server starts the shell where the Task runs, and that
             // Machine's own `lf` opens the conversation; nothing checks out here.
-            entry.presentation.content = .terminals
-            entry.visit()
-            if let pane = entry.multiplexer.newShell(command: TaskConversationLaunch(task: issue).arguments(lf: "lf"),
-                    location: WorkspaceIdentity(machineId: owner, worktree: "")),
-               let tab = pane.content.selectedShell {
-                Perf.retarget(.newConversation, from: taskId, to: tab.id, owner: origin.performanceOwner)
-            }
-            return
-        }
-        let checkout: WorkspaceIdentity
-        if let workspace = found.task.reference.workspace, workspace.localExists == true, let identity = workspace.identity {
-            checkout = identity
+            lf = "lf"
+            checkout = WorkspaceIdentity(machineId: owner, worktree: "")
         } else {
-            let repo = store.repoPath
-            checkout = try await LocalWaveAgentLauncher.checkoutTask(repoPath: repo, issue: issue)
-            origin.preparedTaskWorktrees[taskId] = checkout
+            if let workspace = found.task.reference.workspace, workspace.localExists == true, let identity = workspace.identity {
+                checkout = identity
+            } else {
+                checkout = try await LocalWaveAgentLauncher.checkoutTask(repoPath: store.repoPath, issue: issue)
+                origin.preparedTaskWorktrees[taskId] = checkout
+            }
+            lf = try LocalWaveAgentLauncher.machineLf().path
+            guard checkout.machineId == machineId else { throw RegistryQueryError("Open a conversation on its owning Machine") }
+            // The captured entry receives a late preparation reply without changing selection.
+            entry.location = checkout
         }
-        // The captured entry receives a late preparation reply without changing selection.
-        let lf = try LocalWaveAgentLauncher.machineLf().path
-        guard checkout.machineId == machineId else { throw RegistryQueryError("Open a conversation on its owning Machine") }
         entry.presentation.content = .terminals
-        entry.location = checkout
         entry.visit()
         if let pane = entry.multiplexer.newShell(command: TaskConversationLaunch(task: issue).arguments(lf: lf), location: checkout),
            let tab = pane.content.selectedShell {

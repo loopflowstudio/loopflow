@@ -397,64 +397,52 @@ pub(crate) fn localize_remote_session(
     machine: &Machine,
     route: Option<&TaskExecutionRoute>,
 ) -> anyhow::Result<()> {
-    let Some(fields) = record.as_object_mut() else {
-        return Ok(());
-    };
-    let Some(id) = fields
+    static TASK_RESUME: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(r"lf resume --task [^\s`]+").expect("the pattern is valid")
+    });
+    let Some(id) = record
         .get("id")
         .and_then(serde_json::Value::as_str)
         .map(str::to_owned)
     else {
         return Ok(());
     };
-    let session = match route {
-        Some(route) => format!("lf open --task {} --session {id}", route.peer_selector),
-        None => format!("lf open --machine {} --session {id}", machine.id),
+    let [flag, selector] = match route {
+        Some(route) => ["--task".to_owned(), route.peer_selector.clone()],
+        None => ["--machine".to_owned(), machine.id.to_string()],
     };
+    let session = format!("lf open {flag} {selector} --session {id}");
     let primary = match route {
-        Some(route) => format!("lf open --task {}", route.peer_selector),
+        Some(_) => format!("lf open {flag} {selector}"),
         None => session.clone(),
     };
-    let task_resume = regex::Regex::new(r"lf resume --task [^\s`]+")?;
     let session_resume = format!("lf resume {id}");
-    let localize = |text: &mut serde_json::Value| {
-        if let Some(line) = text.as_str() {
-            let line = task_resume.replace_all(line, primary.as_str());
-            *text = line.replace(&session_resume, &session).into();
-        }
-    };
-    if let Some(help) = fields
-        .get_mut("action")
-        .and_then(|action| action.get_mut("help"))
-    {
-        localize(help);
-    }
-    if let Some(command) = fields
-        .get_mut("outlook")
-        .and_then(|outlook| outlook.get_mut("command"))
-    {
-        localize(command);
-    }
-    if let Some(status_line) = fields.get_mut("status_line") {
-        localize(status_line);
-    }
-    if let Some(argv) = fields.get_mut("open_argv") {
-        if argv.as_array().is_some_and(|argv| !argv.is_empty()) {
-            let mut open = vec![
-                std::env::current_exe()?.to_string_lossy().into_owned(),
-                "open".into(),
-            ];
-            match route {
-                Some(route) => open.extend(["--task".into(), route.peer_selector.clone()]),
-                None => open.extend(["--machine".into(), machine.id.to_string()]),
+    for pointer in ["/action/help", "/outlook/command", "/status_line"] {
+        if let Some(text) = record.pointer_mut(pointer) {
+            if let Some(line) = text.as_str() {
+                let line = TASK_RESUME.replace_all(line, primary.as_str());
+                *text = line.replace(&session_resume, &session).into();
             }
-            open.extend(["--session".into(), id, "--here".into()]);
-            *argv = open.into();
+        }
+    }
+    if let Some(argv) = record.get_mut("open_argv") {
+        if argv.as_array().is_some_and(|argv| !argv.is_empty()) {
+            let exe = std::env::current_exe()?.to_string_lossy().into_owned();
+            *argv = vec![
+                exe,
+                "open".into(),
+                flag,
+                selector,
+                "--session".into(),
+                id,
+                "--here".into(),
+            ]
+            .into();
         }
     }
     if let (Some(route), Some(task_ids)) = (
         route,
-        fields
+        record
             .get_mut("task_ids")
             .and_then(serde_json::Value::as_array_mut),
     ) {

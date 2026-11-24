@@ -280,6 +280,11 @@ public struct RoadmapTask: Decodable, Sendable, Identifiable, Hashable {
     /// open, and its Session slot offers Start instead.
     public var awaitsStart: Bool { lifecycle == .unstarted }
 
+    /// The Machine this plan says runs the Task, as `WorkspaceIdentity` names it.
+    public var ownerMachineId: String? {
+        runtime?.owner?.machine.id.map { StructuredIdentity.prefixed($0, "home_") }
+    }
+
     /// Whether a Graph has run for the Task. A stopped Graph still counts: a
     /// Task parked at a step has run, one that was only opened has not.
     public var graphHasRun: Bool { latestGraphProcess != nil }

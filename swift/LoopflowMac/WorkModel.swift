@@ -324,7 +324,7 @@ final class WorkModel {
     /// prepares the conversation where the Task runs now.
     private func follow(_ task: RoadmapTask, in workspace: SessionsWorkspace, store: SessionsStore) {
         workspace.awaitsStart = task.awaitsStart
-        guard workspace.follow(owner: task.runtime?.owner?.machine.id) else { return }
+        guard workspace.follow(owner: task.ownerMachineId) else { return }
         navigation.preparedTaskWorktrees[task.id] = nil
         if let id = workspace.multiplexer.sessionPane?.sessionId { store.release(id) }
     }
@@ -342,7 +342,7 @@ final class WorkModel {
     /// Where the Task's checkout is: one this Mac prepared while the Task runs
     /// here, else the plan's. A checkout on a Machine the Task has left is not it.
     func taskWorkspaceIdentity(_ task: RoadmapTask) -> WorkspaceIdentity? {
-        let owner = task.runtime?.owner?.machine.id.map { StructuredIdentity.prefixed($0, "home_") }
+        let owner = task.ownerMachineId
         if let prepared = navigation.preparedTaskWorktrees[task.id], owner == nil || prepared.machineId == owner {
             return prepared
         }

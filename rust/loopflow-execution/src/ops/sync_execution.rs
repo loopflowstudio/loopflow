@@ -209,8 +209,7 @@ pub fn checkpoint_uncommitted_work(repo: &Path, message: &str) -> Result<bool> {
     let run = |args: &[&str]| crate::git::git_stdout_inheriting(repo, args, &inherit_index);
     run(&["read-tree", staged_tree.trim()])?;
     run(&["reset", "-q", "HEAD", "--", ":(top,glob)[.]lf/tmp/**"])?;
-    // Filenames can consist entirely of whitespace.
-    if run(&["diff", "--cached", "--name-only"])?.is_empty() {
+    if !crate::git::has_staged_changes(repo, &inherit_index)? {
         return Ok(false);
     }
     crate::git::commit(repo, message, &inherit_index)?;

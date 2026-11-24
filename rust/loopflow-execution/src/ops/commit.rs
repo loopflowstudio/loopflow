@@ -6,8 +6,8 @@ use serde::Deserialize;
 use crate::agent::{run_agent, AgentConfig, ProcessConfig};
 use crate::config::load_config_or_default;
 use crate::git::{
-    commit, current_branch, git_stdout, git_stdout_inheriting, is_clean, push, push_with_upstream,
-    stage_all,
+    commit, current_branch, git_stdout, git_stdout_inheriting, has_staged_changes, is_clean, push,
+    push_with_upstream, stage_all,
 };
 use crate::graph::load_skill;
 
@@ -78,7 +78,7 @@ fn commit_selected_with(
         args.extend(selected.iter().map(String::as_str));
         run(&args)?;
     }
-    if run(&["diff", "--cached", "--name-only"])?.trim().is_empty() {
+    if !has_staged_changes(repo, &inherit_index)? {
         return Err(OpsError::Message(
             "Nothing selected to commit; edit the selected files or select changed paths.".into(),
         ));
@@ -144,10 +144,7 @@ pub fn commit_workflow(
         stage_all(repo, inherit_git)?;
     }
 
-    if git_stdout(repo, &["diff", "--cached", "--name-only"])?
-        .trim()
-        .is_empty()
-    {
+    if !has_staged_changes(repo, inherit_git)? {
         // Staging a working-tree reversal can restore HEAD's tree. A clean
         // checkout can still have a local checkpoint to publish.
         if is_clean(repo)? {
@@ -213,10 +210,8 @@ pub fn commit_step(
     progress: &impl Progress,
 ) -> OpsResult<bool> {
     stage_all(repo, &|_| {})?;
-    let staged = !git_stdout(repo, &["diff", "--cached", "--name-only"])?
-        .trim()
-        .is_empty();
-    let written = if staged {
+    // The index can change while the agent writes. commit_workflow reads it again.
+    let written = if has_staged_changes(repo, &|_| {})? {
         progress.status("Writing the commit message...");
         generate_commit_message(repo, MessageAgent::Fallback(agent))
             .inspect_err(|error| progress.error(&error.to_string()))

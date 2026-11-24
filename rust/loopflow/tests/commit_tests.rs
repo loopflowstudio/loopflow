@@ -183,6 +183,26 @@ fn selected_commit_saves_untracked_scratch_without_unrelated_staged_work() {
 }
 
 #[test]
+fn whole_and_selected_commits_save_a_whitespace_filename() {
+    let repo = TestRepo::new();
+    let name = " ";
+    repo.create_file(name, "first");
+    let result = commit_workflow(
+        repo.path(),
+        &commit_options("First"),
+        &NullProgress,
+        &|_| {},
+    )
+    .unwrap();
+    assert!(result.committed);
+    assert_eq!(git_output(repo.path(), &["show", "HEAD: "]), "first");
+
+    repo.create_file(name, "second");
+    commit_selected(repo.path(), &[name.into()], Some("Second")).unwrap();
+    assert_eq!(git_output(repo.path(), &["show", "HEAD: "]), "second");
+}
+
+#[test]
 fn selected_commit_with_no_changes_explains_what_to_do() {
     let _env = EnvGuard::new(&[]);
     let repo = TestRepo::new();

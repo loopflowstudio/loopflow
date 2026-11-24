@@ -656,6 +656,19 @@ pub fn is_clean(repo: &Path) -> Result<bool, GitError> {
     Ok(String::from_utf8_lossy(&output.stdout).trim().is_empty())
 }
 
+/// Compare this index to HEAD without interpreting filenames in Git's output.
+pub(crate) fn has_staged_changes(
+    repo: &Path,
+    inherit: &impl Fn(&mut Command),
+) -> Result<bool, GitError> {
+    let args = ["diff", "--cached", "--quiet"];
+    let output = run_git_inheriting(repo, &args, inherit)?;
+    if output.status.code() == Some(1) {
+        return Ok(true);
+    }
+    successful_stdout(&args, output).map(|_| false)
+}
+
 /// Stage all changes.
 pub fn stage_all(repo: &Path, inherit: &impl Fn(&mut Command)) -> Result<(), GitError> {
     git_stdout_inheriting(repo, &["add", "-A"], inherit)?;

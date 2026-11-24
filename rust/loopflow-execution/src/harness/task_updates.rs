@@ -225,26 +225,14 @@ fn write_task(store: &SqliteStore, task: &TaskId) -> StoreResult<()> {
         return Ok(());
     };
     let (stored, old) = reading(store, task)?;
-    let previous_position = old.as_ref().and_then(|old| old.position.as_ref());
-    let (position, graphs) =
-        crate::store::task_work::settled_task_progress(store, task, previous_position)?;
-    let mut observation = TaskObservation {
-        position,
-        runs: HashMap::new(),
-        comments: BTreeSet::new(),
-        pr: store
-            .task_prs(task)?
-            .last()
-            .map(|pr| pr.phase().as_str().to_owned()),
-        closed: match store.task_state(task)? {
-            state @ (TaskState::Done | TaskState::Abandoned) => Some(state.label().to_owned()),
-            _ => None,
-        },
-    };
+    let (graph_row, graphs) = store.task_progress_records(task)?;
+    let mut runs = HashMap::new();
+    let mut run_in_progress = false;
     let mut changes = Vec::new();
     for graph in graphs {
         let Some(outcome) = crate::process::os_process::observed_result(&graph.run).outcome()
         else {
+            run_in_progress = true;
             continue;
         };
         let step = graph.latest().map(|step| graph.step_detail(step));
@@ -260,10 +248,26 @@ fn write_task(store: &SqliteStore, task: &TaskId) -> StoreResult<()> {
         if old.is_some() && previous.and_then(|run| run.outcome.as_deref()) != Some(outcome) {
             changes.push(run.report(&id, graph.run.error.as_deref()));
         }
-        observation.runs.insert(id, run);
+        runs.insert(id, run);
     }
     let comments = store.task_undirected_comments(task)?;
-    observation.comments = comments.iter().map(|comment| comment.id.clone()).collect();
+    let observation = TaskObservation {
+        position: crate::store::task_work::settled_task_position(
+            graph_row,
+            old.as_ref().and_then(|old| old.position.as_ref()),
+            run_in_progress,
+        )?,
+        runs,
+        comments: comments.iter().map(|comment| comment.id.clone()).collect(),
+        pr: store
+            .task_prs(task)?
+            .last()
+            .map(|pr| pr.phase().as_str().to_owned()),
+        closed: match store.task_state(task)? {
+            state @ (TaskState::Done | TaskState::Abandoned) => Some(state.label().to_owned()),
+            _ => None,
+        },
+    };
     if old.as_ref() == Some(&observation) {
         return Ok(());
     }

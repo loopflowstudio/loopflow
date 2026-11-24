@@ -1,41 +1,47 @@
-at: d1d96fa54ac718bd26bb5174b8db91e89f0958f8
+at: 7ef9d4559bf75937182eeee219848d311fe358e5
 first:
   - path: docs/orchestration.md
-    why: Pass sizing and the outer review loop
+    why: How much work belongs in a pass
   - path: docs/sessions.md
-    why: When an idle Task conversation wakes
+    why: When a Task conversation wakes
   - path: docs/ops.md
     why: Which checkpoints push
   - path: rust/loopflow-definitions/src/builtins/task/skill/kickoff.md
-    why: Plan related work in substantial passes
+    why: Group related work into substantial passes
   - path: rust/loopflow-definitions/src/builtins/task/skill/implement.md
     why: Build until the next decision or review
   - path: rust/loopflow-definitions/src/builtins/task/skill/realign.md
-    why: Regroup the remaining work
+    why: Regroup what remains
+  - path: rust/loopflow-execution/src/graph/mod.rs
+    why: Captured XOR paths keep their traversal order
+  - path: rust/loopflow-execution/src/graph/compiled.rs
+    why: Path order determines node numbers
   - path: rust/loopflow-execution/src/graph/output.rs
-    why: One contract instructs and decodes the step
+    why: Decision and routing contracts
   - path: rust/loopflow/src/lf/commands/graph.rs
     why: Show the pass number and repeated steps
   - path: rust/loopflow-storage/src/sqlite/task_work.rs
-    why: Snapshot the Task position and Graph executions together
-  - path: rust/loopflow-execution/src/store/task_work.rs
-    why: Read the last settled Task position
+    why: Read the Task position and runs together
   - path: rust/loopflow-execution/src/harness/task_updates.rs
-    why: Deliver newly settled outcomes and errors
+    why: One reading drives run reports and position changes
+  - path: rust/loopflow-execution/src/store/task_work.rs
+    why: Hold the position while any run advances
   - path: rust/loopflow-execution/src/ops/task_execution.rs
-    why: Show the Graph error after a successful step
+    why: Show what stopped the Graph
   - path: rust/loopflow-execution/src/ops/commit.rs
-    why: One push decision for whole and selected commits
+    why: Whole and selected commits share the push decision
+  - path: rust/loopflow-execution/src/git/mod.rs
+    why: Detect staged changes in the chosen index
   - path: rust/loopflow-execution/src/engine/checkout.rs
-    why: Translate manual commit options and report the result
+    why: Translate manual options and report the checkpoint
   - path: rust/loopflow/tests/session_lifecycle_tests.rs
     why: Provider prompts across three passes
   - path: rust/loopflow/src/server/wake.rs
     why: Idle inbox delivery after settlement
   - path: rust/loopflow/tests/work/task_graph_launch_tests.rs
-    why: Read the blocked decision and resume at verification
+    why: Resume a blocked decision at verification
   - path: rust/loopflow/tests/commit_tests.rs
-    why: Remote heads, local checkpoints and retry receipts
+    why: Remote heads, local checkpoints and clean retries
 hide:
   - path: tests/goldens/builtin_implement.md
     why: Generated from the implement skill

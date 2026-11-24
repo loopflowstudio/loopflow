@@ -14,7 +14,7 @@ This step also decides a loop. Do the step's work first, then judge from its res
 
 - advance when what this step requires is done. Later obligations belong to later steps.
 - iterate when the last pass made progress and you can name a substantial next pass within scope and the result it should produce. Aim to finish within five passes. Continue past five when the work warrants it.
-- blocked when passes shrink into small increments that no longer converge, the last pass made no progress, a failure repeats with nothing learned, or you need input you can't supply.
+- blocked when passes shrink into small increments that no longer converge, the last pass made no progress, a failure repeats with nothing learned, or you need input you can't supply. The Graph stops here. Give the reason.
 
 Leave checks that can't run here to gate, CI or review. Report them as deferred. Carry the next action and the paths it needs in the summary.";
 
@@ -27,18 +27,14 @@ pub enum GraphOutput {
 
 impl GraphOutput {
     pub fn instructions(&self) -> String {
-        format!("\n\nReturn the final answer as the declared JSON value: {}. This output contract supersedes saved instructions to run Graph decision or router commands. The selected successful completion supplies the decision. Return blocked with a reason when a person must resolve the question. That stops the Graph at this position; explain the missing input in the reason.", self.schema())
+        format!("\n\nReturn the final answer as the declared JSON value: {}. This output contract supersedes saved instructions to run Graph decision or router commands.", self.schema())
     }
 
     /// Append the step's output instructions and return the contract used to decode its answer.
     pub fn append_step_instructions(step: &ConcreteStep, prompt: &mut String) -> Option<Self> {
         let output = match step {
             ConcreteStep::Skill(skill) if skill.returns.is_some() => Self::Decision,
-            ConcreteStep::Xor(branch) => {
-                let mut paths: Vec<_> = branch.paths.keys().cloned().collect();
-                paths.sort();
-                Self::Route(paths)
-            }
+            ConcreteStep::Xor(branch) => Self::Route(branch.paths.keys().cloned().collect()),
             _ => return None,
         };
         prompt.push_str(&output.instructions());

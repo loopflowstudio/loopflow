@@ -39,6 +39,8 @@ Field case behind this: five `manabot` `coverage-working` Tasks (MTG-418..422) r
 - `cargo test -p loopflow --lib task_graph_launch_tests::an_auto_run_blocked_at_verification_waits_there_without_building_again` passed. The CLI printed the dependency in Task status and the second run started at verification.
 - `cargo test -p loopflow --test integration documented_commands::` passed all 4 tests. `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings` passed.
 
+**Final compression.** The focused nextest run passed all 25 tests. It covered captured XOR node numbers and routing, the three-pass decision prompt, settled Task wakeups, and manual, selected, step and sync commits. With a staged filename consisting of one space, Git emitted the bytes `20 0a` for `--name-only` and exit 1 for `--quiet`. Whole and selected commits saved that file. Formatting, `git diff --check` and `cargo clippy --all-targets -- -D warnings` passed.
+
 ## Remaining
 
 Gate runs branch CI.

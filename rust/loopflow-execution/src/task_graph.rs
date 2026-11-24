@@ -114,12 +114,10 @@ fn walk<'a>(
             step,
         );
         if let ConcreteStep::Xor(branch) = step {
-            let mut names: Vec<_> = branch.paths.keys().collect();
-            names.sort();
-            for name in names {
+            for (name, alternative) in &branch.paths {
                 let mut path = path.to_vec();
                 path.push((index, name.clone()));
-                walk(&branch.paths[name].steps, &path, visit);
+                walk(&alternative.steps, &path, visit);
             }
         }
     }
@@ -209,11 +207,8 @@ impl CapturedGraph {
                         }
                     }
                     ConcreteStep::Xor(branch) => {
-                        let mut names: Vec<_> = branch.paths.keys().collect();
-                        names.sort();
-                        if let Some(step) = names
-                            .into_iter()
-                            .find_map(|name| scan(&branch.paths[name].steps, 0))
+                        if let Some(step) =
+                            branch.paths.values().find_map(|path| scan(&path.steps, 0))
                         {
                             return Some(step);
                         }

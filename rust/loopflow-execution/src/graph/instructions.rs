@@ -99,9 +99,7 @@ fn render_steps(
                     conversational_skill(&branch.router)
                 };
                 output.push_str(&format!("{position}. {instruction} Choose exactly one declared path, explain the choice, complete its steps, then rejoin after step {position}. If the choice is unresolved, explain and stop here.\n"));
-                let mut paths: Vec<_> = branch.paths.iter().collect();
-                paths.sort_by_key(|(name, _)| *name);
-                for (name, path) in paths {
+                for (name, path) in &branch.paths {
                     output.push_str(&format!("\nPath `{name}`: {}\n\n", path.description));
                     render_steps(
                         &path.steps,

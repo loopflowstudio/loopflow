@@ -99,12 +99,15 @@ connection returns. See [Connect clients](server.md) for connection recovery.
 ### Working Tasks in the sidebar
 
 Mac and iPhone show three groups within Working. **Active** holds the ordinary
-working rows, including those waiting for you to land after `lf task auto off`.
+working rows. Turning auto off moves a Shipping Task to Active immediately
+if its Graph still has a landing ahead. It returns to Shipping after landing
+when only automatic steps remain.
 **Shipping** holds Tasks with auto on and Tasks on a landing Graph with no human
 step left before landing. Graphs such as `research` stay Active unless auto is on.
 **Paused** holds owned Tasks whose Graph is on hold, including those with auto on.
 Their rows still show the conversation’s status and fall back to Paused when
-it has none. Each group keeps the shared Working order.
+it has none. Paused Tasks stay out of Portfolio Now. Each group keeps the
+shared Working order.
 
 In the default order, open the second Working Task and send a prompt. Its row
 stays second as the conversation turns Busy and then Available again.

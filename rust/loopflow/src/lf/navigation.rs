@@ -712,6 +712,7 @@ pub fn command_merges(argv: &[String]) -> bool {
 mod landing_tests {
     use super::command_merges;
     use loopflow_execution::task_graph::CapturedGraph;
+    use loopflow_storage::sqlite::AutoState;
 
     fn write(repo: &std::path::Path, path: &str, content: &str) {
         let path = repo.join(path);
@@ -756,6 +757,27 @@ mod landing_tests {
                 "{step}"
             );
         }
+    }
+
+    #[test]
+    fn turning_auto_off_keeps_a_running_task_active_until_it_passes_land() {
+        let repo = tempfile::tempdir().unwrap();
+        let graph = CapturedGraph::load("code", repo.path()).unwrap().unwrap();
+        let off = Some(AutoState::Off);
+        for (step, ships) in [
+            ("gate", false),
+            ("land --wait-and-fix", false),
+            ("verify", true),
+        ] {
+            let cursor = graph.find(step).unwrap().cursor();
+            assert_eq!(
+                graph.ships_before_review("start", Some(&cursor), off, command_merges),
+                ships,
+                "{step}"
+            );
+        }
+        assert!(!graph.ships_before_review("land --wait-and-fix", None, off, command_merges));
+        assert!(graph.ships_before_review("end", None, off, command_merges));
     }
 
     #[test]

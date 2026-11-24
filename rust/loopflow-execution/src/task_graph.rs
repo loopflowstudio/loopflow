@@ -243,11 +243,17 @@ impl CapturedGraph {
         })
     }
 
-    /// Could any remaining path need a person before its next landing?
-    fn needs_review(&self, place: &Place, merges: &mut dyn FnMut(&[String]) -> bool) -> bool {
+    /// Could any remaining path need a person before or at its next landing?
+    fn needs_review(
+        &self,
+        place: &Place,
+        stop_at_landing: bool,
+        merges: &mut dyn FnMut(&[String]) -> bool,
+    ) -> bool {
         fn scan(
             steps: &[ConcreteStep],
             after: bool,
+            stop_at_landing: bool,
             merges: &mut dyn FnMut(&[String]) -> bool,
         ) -> bool {
             steps.iter().rev().fold(after, |later, step| match step {
@@ -255,20 +261,21 @@ impl CapturedGraph {
                 ConcreteStep::Xor(branch) => branch
                     .paths
                     .values()
-                    .any(|path| scan(&path.steps, later, merges)),
-                _ => later && landing_name(step, &mut *merges).is_none(),
+                    .any(|path| scan(&path.steps, later, stop_at_landing, merges)),
+                _ if landing_name(step, &mut *merges).is_some() => stop_at_landing,
+                _ => later,
             })
         }
         let mut steps = self.steps.as_slice();
         let mut later = false;
         for (index, selected) in &place.path {
-            later = scan(&steps[index + 1..], later, merges);
+            later = scan(&steps[index + 1..], later, stop_at_landing, merges);
             let ConcreteStep::Xor(branch) = &steps[*index] else {
                 unreachable!("validated XOR path")
             };
             steps = &branch.paths[selected].steps;
         }
-        scan(&steps[place.index..], later, merges)
+        scan(&steps[place.index..], later, stop_at_landing, merges)
     }
 
     /// Whether no human step remains before landing from the current cursor or stop.
@@ -290,13 +297,10 @@ impl CapturedGraph {
         } else if step == END {
             return true;
         } else {
-            let interactive = self.interactive_step(step);
-            if auto == Some(AutoState::Off) && landing_stop(step, interactive.is_some()) {
-                return false;
-            }
-            interactive.or_else(|| self.find(step))
+            self.interactive_step(step).or_else(|| self.find(step))
         };
-        place.is_some_and(|place| !self.needs_review(&place, &mut merges))
+        let stop_at_landing = auto == Some(AutoState::Off);
+        place.is_some_and(|place| !self.needs_review(&place, stop_at_landing, &mut merges))
     }
 
     /// The place `cursor` stands at, if the graph has it.

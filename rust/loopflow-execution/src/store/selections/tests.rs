@@ -407,6 +407,14 @@ fn sidebar_step_follows_the_captured_cursor_and_disappears_without_a_graph() {
     store
         .advance_task_graph_run(&id, &carrier, &deliver)
         .unwrap();
+    mark(loopflow_storage::sqlite::AutoState::On);
+    assert_eq!(row().working_group, Some(Shipping));
+    mark(loopflow_storage::sqlite::AutoState::Off);
+    assert_eq!(row().working_group, Some(Active));
+    let verify = serde_json::to_string(&graph.find("verify").unwrap().cursor()).unwrap();
+    store
+        .advance_task_graph_run(&id, &carrier, &verify)
+        .unwrap();
     assert_eq!(row().working_group, Some(Shipping));
     let past_end = serde_json::to_string(&crate::graph::runner::ExecutionCursor {
         index: graph.steps.len(),

@@ -164,10 +164,11 @@ impl Watcher {
                     return Ok(Some(failure.clone()));
                 }
             }
-            let Some(session) = store.session(&conversation.session)? else {
-                return Ok(None);
-            };
-            loopflow_execution::ops::recovery::launch_failure(store, &session, &mut agents)
+            loopflow_execution::ops::recovery::launch_failure(
+                store,
+                &conversation.session,
+                &mut agents,
+            )
         };
         match recover_conversations(store, unix(now), held, readiness, start) {
             Ok(wake) => self.conversations_due = wake.map(time_at),

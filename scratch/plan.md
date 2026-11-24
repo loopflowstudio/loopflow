@@ -50,7 +50,7 @@ Jack Heart: “we need some way to capture session history / usage data for anal
 
 Live QA steered a stopped repository Session without Codex login. A held terminal exited with the login error while `lf session list` stayed at `unknown`. [Live QA](qa.html)
 
-- `ops::recovery::launch_failure` takes an `LfSession` (its recorded harness, else its skill's resolution) and is the one readiness check for Task recovery, steer wakeup (`server/wake.rs::start_stopped`) and `human_session::restart_provider`. `TaskConversation.provider` is gone; recovery reads the Session row when a conversation is due.
+- `ops::recovery::launch_failure` takes a Session ID (its recorded harness, else its skill's resolution) and is the one readiness check for Task recovery, steer wakeup (`server/wake.rs::start_stopped`) and `human_session::restart_provider`. `TaskConversation.provider` is gone; each caller passes the ID and the check reads the Session row.
 - Steer wakeup records `start_failure` instead of spawning an unavailable harness, records a held start's error, and clears it on a held start. A person's start (including a steer's resume) still clears it via `record_persons_start`. A steer is read once; a later steer tries again.
 - `session_ending` shows `start_failure` for every stopped interactive Session except a finished Task's conversation, whose failure is history. A non-Task Session reads `could not start: <why>; \`lf resume <id>\` opens it`, and a held-start error on one that had run reads `… · last start failed: <why>` (previously dropped when no left-reason applied).
 - `restart_provider` refuses with `Session <id> was not restarted: <why>` before stopping anything, so `lf machine forward --task|--session` fails over SSH before printing "Resuming".

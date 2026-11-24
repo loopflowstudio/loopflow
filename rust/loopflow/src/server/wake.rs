@@ -98,7 +98,13 @@ impl Watcher {
                     let mut agents = loopflow_execution::agent::MachineAgents::default();
                     start_stopped(
                         store,
-                        |session| launch_failure(store, session, &mut agents),
+                        |session| {
+                            loopflow_execution::ops::recovery::launch_failure(
+                                store,
+                                session,
+                                &mut agents,
+                            )
+                        },
                         |session, request| hold(terminals, session, request),
                     );
                 }
@@ -149,18 +155,6 @@ fn start_stopped(
         if let Err(error) = store.record_start_failure(&session, failure.as_deref()) {
             tracing::warn!(%session, %error, "start failure unrecorded");
         }
-    }
-}
-
-/// What would stop `session`'s provider starting here.
-fn launch_failure(
-    store: &SqliteStore,
-    session: &LfSessionId,
-    agents: &mut loopflow_execution::agent::MachineAgents,
-) -> Result<Option<String>> {
-    match store.session(session)? {
-        Some(session) => loopflow_execution::ops::recovery::launch_failure(store, &session, agents),
-        None => Ok(None),
     }
 }
 

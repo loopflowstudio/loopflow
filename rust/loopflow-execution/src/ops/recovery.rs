@@ -8,7 +8,6 @@
 //! [`launch_failure`] what would stop one.
 
 use loopflow_model::id::LfSessionId;
-use loopflow_storage::session::LfSession;
 use loopflow_storage::sqlite::session_recovery::{TaskConversation, CONVERSATION_STARTS};
 use loopflow_storage::sqlite::SqliteStore;
 
@@ -70,18 +69,22 @@ pub const WAITING_FOR_HARNESS: &str = "Waiting for a harness: ";
 /// or for one that never bound an agent, the harness its skill resolves to,
 /// missing or without a usable login. Every server start of a stopped
 /// interactive Session asks this before spawning: Task recovery, a steer's
-/// wakeup and a provider restart.
+/// wakeup and a provider restart. A Session no longer recorded has nothing
+/// to stop.
 pub fn launch_failure(
     store: &SqliteStore,
-    session: &LfSession,
+    session: &LfSessionId,
     machine: &mut crate::agent::MachineAgents,
 ) -> anyhow::Result<Option<String>> {
+    let Some(session) = store.session(session)? else {
+        return Ok(None);
+    };
     let reason = match session.provider.as_deref() {
         Some(provider) => match loopflow_harness::HarnessKind::parse(provider) {
             Some(kind) => machine.failure(kind).map(str::to_owned),
             None => Some(format!("unknown harness {provider}")),
         },
-        None => match crate::session::pending_agent(store, session, machine) {
+        None => match crate::session::pending_agent(store, &session, machine) {
             Ok(agent) => machine.failure(agent.harness).map(str::to_owned),
             Err(error) if error.is::<crate::error::LoadError>() => Some(error.to_string()),
             Err(error) => return Err(error),

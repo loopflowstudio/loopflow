@@ -13,6 +13,14 @@ const WORK_WIDTH: usize = 22;
 const SESSION_WIDTH: usize = 22;
 const NUM_WIDTH: usize = 12;
 
+/// A Machine whose reading of a Session `lf session usage --session` totals.
+struct Origin {
+    machine: loopflow_model::durable::MachineId,
+    name: String,
+    /// When a copy was collected; `None` for this Machine's own reading.
+    collected_at: Option<i64>,
+}
+
 /// Read all turns of one Session, including a rental's last collected reading.
 pub(super) fn session(id: &str, json: bool) -> Result<()> {
     let store = loopflow_storage::sqlite::SqliteStore::open_read_only(
@@ -22,14 +30,14 @@ pub(super) fn session(id: &str, json: bool) -> Result<()> {
     let canonical = loopflow_model::id::canonical_session(id);
     let id = canonical.as_str();
     let _snapshot = store.read_snapshot()?;
-    let mut sources = Vec::new();
+    let mut origins = Vec::new();
     let mut turns = Vec::new();
     if store.session(id)?.is_some() {
-        sources.push((
-            store.saved_local_machine()?.id,
-            "this Machine".to_owned(),
-            None,
-        ));
+        origins.push(Origin {
+            machine: store.saved_local_machine()?.id,
+            name: "this Machine".to_owned(),
+            collected_at: None,
+        });
         turns = store.session_turns(id)?;
     }
     let copies = store.copied_session_origins(id)?;
@@ -39,31 +47,39 @@ pub(super) fn session(id: &str, json: bool) -> Result<()> {
             .into_iter()
             .map(|turn| ((turn.thread.clone(), turn.turn.clone()), turn))
             .collect();
-        for (origin, collected_at) in copies {
-            for turn in store.collected_turns(&origin, id)? {
+        for (machine, collected_at) in copies {
+            for turn in store.collected_turns(&machine, id)? {
                 native.insert((turn.thread.clone(), turn.turn.clone()), turn);
             }
             let name = labels
-                .get(&origin)
+                .get(&machine)
                 .cloned()
-                .unwrap_or_else(|| origin.to_string());
-            sources.push((origin, name, Some(collected_at)));
+                .unwrap_or_else(|| machine.to_string());
+            origins.push(Origin {
+                machine,
+                name,
+                collected_at: Some(collected_at),
+            });
         }
         turns = native.into_values().collect();
     }
-    anyhow::ensure!(!sources.is_empty(), "Session {id} was not found");
+    anyhow::ensure!(!origins.is_empty(), "Session {id} was not found");
     let usage = loopflow_storage::session_record::reduce_usage(&turns);
     if json {
-        let single = (sources.len() == 1).then(|| &sources[0]);
-        let mut result = serde_json::json!({ "session_id":id,
-            "origin_machine_id":single.map(|(id,_,_)| id),
-            "collected_at":single.and_then(|(_,_,at)| *at), "usage":usage });
-        if sources.len() > 1 {
-            result["origins"] = sources
+        let single = (origins.len() == 1).then(|| &origins[0]);
+        let mut result = serde_json::json!({
+            "session_id": id,
+            "origin_machine_id": single.map(|origin| &origin.machine),
+            "collected_at": single.and_then(|origin| origin.collected_at),
+            "usage": usage,
+        });
+        if origins.len() > 1 {
+            result["origins"] = origins
                 .iter()
-                .map(|(id, _, at)| {
+                .map(|origin| {
                     serde_json::json!({
-                        "machine_id":id, "collected_at":at
+                        "machine_id": origin.machine,
+                        "collected_at": origin.collected_at,
                     })
                 })
                 .collect();
@@ -72,17 +88,18 @@ pub(super) fn session(id: &str, json: bool) -> Result<()> {
     } else {
         println!(
             "Session {id} · from {}",
-            sources
+            origins
                 .iter()
-                .map(|(_, name, _)| name.as_str())
+                .map(|origin| origin.name.as_str())
                 .collect::<Vec<_>>()
                 .join(", ")
         );
-        for (_, name, at) in &sources {
-            if let Some(at) = at {
+        for origin in &origins {
+            if let Some(at) = origin.collected_at {
                 println!(
-                    "Collected {} from {name}",
-                    loopflow_execution::output::format_time(*at)
+                    "Collected {} from {}",
+                    loopflow_execution::output::format_time(at),
+                    origin.name
                 );
             }
         }

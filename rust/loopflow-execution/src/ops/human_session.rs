@@ -1502,7 +1502,7 @@ pub fn restart_provider(store: &SqliteStore, session: &LfSession) -> Result<()> 
         bail!(reason);
     }
     let mut agents = crate::agent::MachineAgents::default();
-    if let Some(failure) = crate::ops::recovery::launch_failure(store, session, &mut agents)? {
+    if let Some(failure) = crate::ops::recovery::launch_failure(store, &session.id, &mut agents)? {
         let reason = failure
             .strip_prefix(crate::ops::recovery::WAITING_FOR_HARNESS)
             .unwrap_or(&failure);

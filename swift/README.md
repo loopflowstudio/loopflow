@@ -318,14 +318,13 @@ Work selection uses the theme’s selection fill and contrasting text.
 File selection keeps a neutral fill and edge; keyboard focus has a separate outline.
 Ordinary controls and links use text roles; the theme’s accent emphasizes deliberate actions.
 Status labels and shapes retain their meaning across palettes.
-Choose **Settings → Appearance** to preview the whole workspace. Pick
-**System**, **Light** or **Dark**; System follows macOS and lists both sides,
-Light or Dark lists only its own. Each side's heading names its chosen theme
-(**Light themes · Fjord Light**), then shows built-ins as cards and **Yours**,
-ending with a dashed **Import file…** tile. An imported file joins the side its
-own colors say; in Light or Dark mode the preview switches to that side. Every card is drawn in its
-own theme: a title bar strip, its name as a heading, Busy, Blocked and Error,
-ANSI 1–6, a selected row and a **Run** button:
+
+Press **⌘,** and choose **Appearance** to pick a theme for Desktop, Ghostty,
+and iPhone. **System** follows macOS and shows both light and dark themes.
+**Light** and **Dark** each show one side. Each heading names its selection
+(**Light themes · Fjord Light**). The cards preview each theme in its own
+colors. See the [Settings guide](../docs/surfaces.md#settings) for search,
+Machine connections, and project or Wave preferences.
 
 ```text
 ▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔
@@ -336,9 +335,13 @@ Busy  Blocked  Error
 ```
 
 Families sort by name after Loopflow, so a family's light and dark halves sit in
-the same column. Clicking a card previews it in every window; the chosen card is
-ringed in the window's focus color. A theme with unreadable roles shows why
-under the cards, before **Apply**.
+the same column. Clicking a card or changing **System** / **Light** / **Dark**
+applies immediately across every window and registers **Undo** (**⌘Z** or the
+Undo notice) to restore the previous `theme:` declaration, including absence.
+In System mode, picking the other side changes what macOS will use on that side.
+**View → Appearance** uses the same mode setting. The system accent outlines
+the chosen card. If a theme fails a readability check, Settings shows the
+reason and keeps the current theme.
 
 Check font weight in an open shell or Session pane. Previewing, applying or
 cancelling a theme changes only its colors.
@@ -349,10 +352,9 @@ theme: "light:Folio,dark:Fig"   # System
 theme: "Fig"                    # Dark (or Light) mode: one name
 ```
 
-**Apply** rewrites only that line; **Cancel**, Escape or closing writes nothing.
-Edit it by hand and every window follows; a misspelled name keeps the last theme
-and names the fix. Absent means Loopflow Light/Dark. A repository's
-`.lf/config.yaml` never sets the theme.
+Selection rewrites only that line. Edit it by hand and every window follows; a
+misspelled name keeps the last theme and names the fix. Absent means Loopflow
+Light/Dark. A repository's `.lf/config.yaml` never sets the theme.
 
 Built-ins are 12 families, each a light and a dark theme. **Loopflow Light** keeps
 the original cream/burgundy; **Loopflow Dark** is blue-grey with rose headings and
@@ -362,11 +364,12 @@ light half **Fig Leaf** a leaf-green ground with plum ink.
 
 Your themes are Ghostty theme files in `~/.lf/themes/`; `~/.config/ghostty/themes/`
 is read too, never written. Names resolve to yours, then built-ins, then Ghostty's.
-A file named like a built-in overrides it. **Customize <name>**, beside Cancel and Apply,
-acts on the card chosen last: on a built-in it writes your copy; on yours it edits in
-place. **Delete <name>** removes yours (**Revert <name> to built-in** for an override).
-**Import file…** copies a theme into Yours on the side its colors say; in Light or
-Dark mode the preview switches to that side.
+A file named like a built-in overrides it. **Customize <name>** edits the
+last card you picked. **Import file…** opens a draft on the light or dark side
+indicated by the file’s colors. In Light or Dark mode the selection follows
+that side. **Apply** saves the draft in **Yours**. **Cancel** or closing the
+editor discards it. For a personal file, **Delete <name>** stages removal.
+**Revert <name> to built-in** removes an override when you apply.
 
 ```
 background = #171924
@@ -380,7 +383,7 @@ loopflow-titlebar = #242f50
 
 Theme files can contain up to 256 KiB of UTF-8. Background and foreground
 require six-digit RGB values. Cursor, selection, `palette = N=#RRGGBB` and
-`loopflow-` roles are optional. Preview lists defaults, repeated colors and
+`loopflow-` roles are optional. Diagnostics list defaults, repeated colors and
 omitted settings such as fonts, commands, keybindings, includes and theme references.
 
 The title bar is its own role. A file that leaves it out gets a bar from its
@@ -389,9 +392,10 @@ stays readable; a theme you made before the role existed may show a slightly
 darker bar. **Customize** lists **Title bar** under Actions and focus, and saving
 states it: after that, changing **Button** leaves the bar alone.
 
-Unreadable app, default, selection or cursor text prevents Apply. ANSI colors keep
-their source values. Loopflow reads personal non-color settings from your Ghostty
-configuration at launch, ignores its `theme =` setting and leaves the file untouched.
+Unreadable app, default, selection or cursor text prevents saving the theme. ANSI
+colors keep their source values. Loopflow reads personal non-color settings from
+your Ghostty configuration at launch, ignores its `theme =` setting and leaves
+the file untouched.
 Source and license notices ship offline with the catalogue.
 
 Under the jump bar, the workflow bar reads where the Task stands:
@@ -687,8 +691,8 @@ Files reached through symlinks remain readable within the checkout and show a
 read-only explanation. If a regular file becomes a symlink, its retained draft
 and Undo survive while editing, Save and autosave stop.
 
-Typing autosaves after two quiet seconds. Disable **Autosave Task Files** in the
-Settings → Editing for explicit **Save** (⌘S). Both modes receive filesystem changes live,
+Typing autosaves after two quiet seconds. Disable **Autosave Task Files** in
+**Settings → General** for explicit **Save** (⌘S). Both modes receive filesystem changes live,
 including atomic replacements. Disjoint local edits survive; disk wins overlaps
 without a conflict dialog. Incoming updates reset Undo to the surviving local
 edits, so Undo cannot restore text the LLM replaced. IME composition completes
@@ -1384,7 +1388,7 @@ drafts remain retained; no remote planning tree or execution record is imported.
 
 Every Desktop gesture is a `DesktopAction` in `LoopflowMac/DesktopActions.swift`:
 name (the `lf desktop` verb), title, arguments, default keys and `perform`.
-`DesktopActionMonitor`, the View and File menus, the Keyboard Shortcuts window and
+`DesktopActionMonitor`, the View and File menus, **Settings → Shortcuts**, the Keyboard Shortcuts window and
 the Desktop socket look actions up there; nothing else mutates navigation or panes.
 Keys and menus act on the shown workspace's focused pane; a socket request names an
 exact window and pane, and `lf desktop` resolves those from one inspection (see the

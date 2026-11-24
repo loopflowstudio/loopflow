@@ -49,7 +49,9 @@ enum RegistryQueryLocal {
                 name: "Task history", process: process, frameLimit: 32 * 1024 * 1024, silence: nil,
                 configurationChanged: { try ReaderLaunchConfiguration.current() != configuration },
                 decode: { $0 })
-            return LineSubscription(lines: reader.frames, send: reader.send, cancel: reader.cancel, unreadable: { nil })
+            return LineSubscription(lines: reader.frames, checkpoint: { id in
+                reader.send(Data("{\"id\":\(id)}\n".utf8))
+            }, cancel: reader.cancel, unreadable: { nil })
         }.value
     }, subscribeWork: {
         try WorkSubscriptions.observe { ServerClient.subscribe($0) }

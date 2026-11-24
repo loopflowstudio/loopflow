@@ -122,7 +122,7 @@ pub fn add_ondemand(store: &SqliteStore, ondemand: &OnDemand) -> StoreResult<()>
     require_free_name(store, &ondemand.name)?;
     let declaration = crate::config::placement::OnDemandDeclaration {
         provider: ondemand.provider,
-        hardware: ondemand.hardware.clone(),
+        hardware: ondemand.rental_hardware(),
         max_machines: ondemand.max_machines,
         max_usd_per_hour: ondemand.max_usd_per_hour,
         hours: ondemand.hours,

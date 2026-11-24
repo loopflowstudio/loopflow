@@ -174,6 +174,38 @@ fn assert_success(output: &Output) {
 }
 
 #[test]
+fn modal_ondemand_list_records_the_sizing_mode_before_any_rental() {
+    let fixture = Machines::new();
+    for (name, flags) in [("burst", &[][..]), ("reserved", &["--reserved"][..])] {
+        let mut args = vec![
+            "ondemand",
+            "add",
+            name,
+            "--provider",
+            "modal",
+            "--vcpus",
+            "8",
+            "--memory-gb",
+            "16",
+            "--max",
+            "1",
+            "--max-usd-per-hour",
+            "1.00",
+        ];
+        args.extend_from_slice(flags);
+        assert_success(&fixture.run(&args));
+    }
+
+    let listings = fixture.json(&["ondemand", "list", "--json"]);
+    let listings = listings.as_array().unwrap();
+    assert_eq!(listings.len(), 2);
+    for listing in listings {
+        assert_eq!(listing["hardware"]["modal_sizing"], listing["name"]);
+        assert!(listing["rentals"].as_array().unwrap().is_empty());
+    }
+}
+
+#[test]
 fn remote_file_input_reaches_the_command_without_replacing_the_transport_script() {
     let fixture = Machines::new();
     fixture.json(&["machine", "add", "mini", "--json"]);

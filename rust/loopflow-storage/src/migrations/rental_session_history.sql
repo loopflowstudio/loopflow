@@ -15,6 +15,19 @@ ALTER TABLE machine_records_expanded RENAME TO machine_records;
 CREATE INDEX machine_record_session ON machine_records(origin_machine_id,kind,json_extract(row,'$.session_id'));
 CREATE INDEX machine_record_lookup ON machine_records(kind,key,observed_at);
 
+-- Search by the input time on its origin. Collection can happen days later.
+CREATE INDEX machine_record_input_time ON machine_records(coalesce(json_extract(row,'$.started_at'),json_extract(row,'$.observed_at'),
+        json_extract(row,'$.usage.observed_at'),json_extract(row,'$.ended_at')))
+    WHERE CASE kind WHEN 'turn' THEN 1
+        WHEN 'session_event' THEN json_extract(row,'$.kind')='captured'
+        WHEN 'history' THEN json_extract(row,'$.kind')='manifest' END;
+CREATE INDEX machine_record_input_task ON machine_records(json_extract(row,'$.task_id'),
+    coalesce(json_extract(row,'$.started_at'),json_extract(row,'$.observed_at'),
+        json_extract(row,'$.usage.observed_at'),json_extract(row,'$.ended_at')))
+    WHERE CASE kind WHEN 'turn' THEN 1
+        WHEN 'session_event' THEN json_extract(row,'$.kind')='captured'
+        WHEN 'history' THEN json_extract(row,'$.kind')='manifest' END;
+
 -- One position per Session, regardless of how many times its state changed.
 CREATE TABLE session_export_changes (
     position INTEGER PRIMARY KEY,

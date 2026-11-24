@@ -224,6 +224,67 @@ impl SqliteStore {
         copied_rows(&conn, origin, kind, session)
     }
 
+    /// Visit transcript rows once per origin Session with an input in the requested Work and window.
+    /// The visitor can stop the SQLite cursor as soon as the caller has enough hits.
+    pub fn visit_copied_transcripts(
+        &self,
+        since: i64,
+        wave: Option<&str>,
+        project: Option<&str>,
+        task: Option<&str>,
+        mut visit: impl FnMut(MachineId, &[u8]) -> StoreResult<std::ops::ControlFlow<()>>,
+    ) -> StoreResult<()> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let snapshot = conn.savepoint()?;
+        let task_id = task
+            .map(|selector| super::children::resolve_task_id_in(&snapshot, selector, None, None))
+            .transpose()?
+            .flatten();
+        let task = task_id.as_ref().map(TaskId::as_str).or(task);
+        let task_filter = if task.is_some() {
+            "AND json_extract(r.row,'$.task_id')=?7"
+        } else {
+            "AND ?7 IS NULL"
+        };
+        let sql = format!(
+            "WITH sessions AS (
+                SELECT DISTINCT r.origin_machine_id, json_extract(r.row,'$.session_id') AS session
+                FROM machine_records r
+                LEFT JOIN tasks t ON t.id=json_extract(r.row,'$.task_id')
+                LEFT JOIN projects p ON p.id=coalesce(json_extract(r.row,'$.project_id'),t.project_id)
+                WHERE CASE r.kind WHEN 'turn' THEN 1
+                    WHEN 'session_event' THEN json_extract(r.row,'$.kind')='captured'
+                    WHEN 'history' THEN json_extract(r.row,'$.kind')='manifest' END
+                  AND coalesce(json_extract(r.row,'$.started_at'),json_extract(r.row,'$.observed_at'),
+                      json_extract(r.row,'$.usage.observed_at'),json_extract(r.row,'$.ended_at'))>=?1 {task_filter}
+                  AND (?2 IS NULL OR coalesce(json_extract(r.row,'$.wave_id'),p.wave_id) IN
+                      (SELECT id FROM wave_addresses WHERE slug=?2 OR id=?3))
+                  AND (?4 IS NULL OR p.project_slug=?4 OR p.id=?5 OR p.external_project_id=?6)
+            )
+            SELECT s.origin_machine_id, tr.row FROM sessions s CROSS JOIN machine_records tr
+            WHERE tr.origin_machine_id=s.origin_machine_id AND tr.kind='transcript'
+              AND json_extract(tr.row,'$.session_id')=s.session"
+        );
+        let mut statement = snapshot.prepare(&sql)?;
+        let mut rows = statement.query(params![
+            since,
+            wave,
+            wave.map(loopflow_model::id::canonical_uuid),
+            project,
+            project.map(|p| loopflow_model::id::canonical_prefixed(p, "proj_")),
+            project.map(loopflow_model::id::canonical_uuid),
+            task,
+        ])?;
+        while let Some(row) = rows.next()? {
+            let origin = MachineId::from_raw(row.get::<_, String>(0)?);
+            let body = row.get_ref(1)?.as_bytes().map_err(rusqlite::Error::from)?;
+            if visit(origin, body)?.is_break() {
+                break;
+            }
+        }
+        Ok(())
+    }
+
     /// Keep `origin`'s rows as copies, replacing older copies of the same rows.
     pub fn import_records(&self, origin: &MachineId, records: &[Record]) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");

@@ -261,6 +261,7 @@ Returned modal-1 (2 sessions copied; ceiling estimate $0.24)
   refresh grant stays local).
 - Your Machine collects rental Session history while its server runs. After a
   sandbox disappears, `lf session list` names the origin (`from modal-1`).
+  Search the collected text with `lf session history search <text> --task <id>`.
   Read the last collected transcript with `lf session history show <id> --transcript`
   and its token and cost totals with `lf session usage --session <id>`.
 - Task rentals return 15 minutes after their last Task finishes. Give-back

@@ -66,7 +66,12 @@ lf session retention                                          # what providers s
 On the execution Machine, Loopflow reads conversations on demand from Claude,
 Codex, Pi or Antigravity files, or from OpenCode’s SQLite database. A rental’s
 collecting Machine keeps the turns it saw. The same transcript command reads
-them after the rental disappears. Claude removes conversations idle longer than
+them after the rental disappears. `lf session history search` also searches these
+copies. A collected hit shows its origin (for example, `from modal-1`). With
+`--json`, its `origin` carries the Machine ID and label. Local hits carry
+`"origin": null`. The time window and Work filters select Sessions by inputs
+recorded on the origin Machine.
+Claude removes conversations idle longer than
 `cleanupPeriodDays` (30 days by default in Claude's `settings.json`); Codex,
 OpenCode, and Pi keep everything.
 

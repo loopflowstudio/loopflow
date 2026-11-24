@@ -44,7 +44,13 @@ Jack Heart: “my config.yaml should more or less be copied over, crtainly all t
 
 Post-build concept review (`scratch/concept-review.html`) and live Modal QA (`scratch/qa.html`) found three conceptual splits in `HEAD` (`afdf8d0b45`). Implement in this order so the highest-leverage analytics gap proves out first:
 
-### 4.1 Unify collected rental Sessions into `SessionHistory`, `lf session usage`, and `lf session history search`
+### 4.1 Collected rental analytics
+
+Search now reads local provider files and the collecting Machine’s transcript rows. Work selection uses the origin’s captured inputs, manifests and provider turns. A Task with no recorded Wave or Project on the turn resolves through the local plan. Search results carry a nullable `SessionOrigin` for reuse in `SessionHistory`.
+
+- `cargo test -p loopflow --test integration machine_commands::a_lost_rentals_transcript_and_usage_survive_on_its_collecting_machine -- --exact` passed. With the rental directory offline, the CLI returned the quoted request and its Machine label, found it by Task, Project and Wave, and excluded it from a later time window. `cargo fmt --all` and `cargo clippy --all-targets -- -D warnings` passed. Gate runs the documented-command checks.
+- Synthetic SQLite fixture, 10,000 Tasks, 100,000 copied turns, 100,000 transcript rows. `EXPLAIN QUERY PLAN` picked `machine_record_input_time` for the window, `machine_record_input_task` for a Task, and `machine_record_session` for transcript bodies before and after `ANALYZE`. Warm in-memory SQL reads after `ANALYZE` took 0.17 ms for 100 windowed rows and 0.07 ms for one Task’s ten rows. These timings exclude CLI startup and text matching.
+- Next, project the immutable captures and uncaptured turns into the Rust and Swift history DTOs and usage reports. Retain the input’s attribution when a Session continues on a different Machine.
 
 - **Experience:** Running Tasks on Modal and losing a sandbox never leaves a blank hole in `lf session usage --task <ID>`, `lf session usage --wave <W>`, `lf session usage --days <N>`, `lf session usage --weekly`, `lf session history search <text>`, or Desktop’s Telemetry / Task History views. Collected rental records appear beside local work, labeled with their origin Machine (`from modal-1`). `lf session usage --session <id>` remains available as a single-Session drill-down reading the exact same turns.
 - **Storage & DTO (`loopflow-storage`, `loopflow-execution`, `swift/Loopflow`, `tests/fixtures/dto`):**
@@ -54,7 +60,6 @@ Post-build concept review (`scratch/concept-review.html`) and live Modal QA (`sc
   - Keep queries indexed at 10,000 Tasks / 100,000 copied turns (verify with `EXPLAIN QUERY PLAN`; add a targeted index on `machine_records` if needed for time/task selection).
 - **CLI (`usage.rs`, `history_transcript.rs`):**
   - Render `origin` clearly in `lf session usage` table rows (e.g., `from modal-1` when `origin` is `Some`).
-  - Extend `lf session history search` to search `RecordKind::Transcript` rows in `machine_records` under the same `since`, `WorkFilter`, and case-insensitive prefilter, tagging hits with `origin` / `from modal-1`.
   - Keep `lf session usage --session <id>` consistent with the same origin label and turn totals.
 - **Tests:** Extend `a_lost_rentals_transcript_and_usage_survive_on_its_collecting_machine` (and focused storage/CLI tests) to verify `lf session usage --days 1`, `lf session usage --task <ID>`, `lf session usage --wave <W>`, and `lf session history search <marker>` all return the lost Modal sandbox’s turns and transcript, plus Swift/Rust DTO round-trip tests and `EXPLAIN QUERY PLAN` check.
 

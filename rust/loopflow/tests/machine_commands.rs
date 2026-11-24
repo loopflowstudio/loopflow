@@ -5084,23 +5084,50 @@ fn a_lost_rentals_transcript_and_usage_survive_on_its_collecting_machine() {
             [id, thread],
         )
         .unwrap();
+    let request = r#"Count the marbles in "jar A""#;
     let project = remote.join(".claude/projects/-fixture");
     fs::create_dir_all(&project).unwrap();
     let transcript = project.join(format!("{thread}.jsonl"));
     fs::write(
         &transcript,
         json!({"type":"user","userType":"external","uuid":"first-turn",
-        "timestamp":"2026-10-16T10:00:00Z","message":{"role":"user","content":"Count the marbles"}})
+        "timestamp":"2026-10-16T10:00:00Z","message":{"role":"user","content":request}})
         .to_string(),
     )
     .unwrap();
-    pod.record_turn_start(id, &thread.into(), "first-turn", 100);
+    let repo = loopflow_test_support::TestRepo::new();
+    let task_id = SharedPlan::create_task(&local, &repo.path().canonicalize().unwrap());
+    let task = local.task(&task_id).unwrap().unwrap();
+    let project = local
+        .project(task.project_id.as_ref().unwrap())
+        .unwrap()
+        .unwrap();
+    let started = chrono::Utc::now().timestamp() - 3600;
+    pod.record_turn_start(id, &thread.into(), "first-turn", started);
+    pod.record_session_turn_origin(
+        &thread.into(),
+        "first-turn",
+        &loopflow_storage::session::SessionTurnOrigin {
+            session_id: id.into(),
+            lf_process_id: loopflow_model::id::LfProcessId::new(),
+            agent_process_id: loopflow_model::id::AgentProcessId::new(),
+            captured_event: None,
+            task_id: Some(task_id.to_string()),
+            wave_id: None,
+            project_id: None,
+            repository: None,
+            skill: None,
+            provider: Some("claude".into()),
+            graph: None,
+            step: None,
+        },
+    );
     pod.retain_session_observation(
         &session,
         &loopflow_storage::session::SessionObservation {
             artifact_key: session.artifact_key.clone().unwrap(),
             source: "silence:sample".into(),
-            observed_at: 101,
+            observed_at: started + 1,
             task_id: None,
             wave_id: None,
             payload: json!({"source":"silence","detail":"waiting for the count"}),
@@ -5137,7 +5164,7 @@ fn a_lost_rentals_transcript_and_usage_survive_on_its_collecting_machine() {
         id,
         &thread.into(),
         "first-turn",
-        100,
+        started + 2,
         &json!({
             "final":true,"usage":{"input_tokens":31,"output_tokens":7,"cost_usd":0.25}
         })
@@ -5171,6 +5198,43 @@ fn a_lost_rentals_transcript_and_usage_survive_on_its_collecting_machine() {
     let text = fixture.run(&["session", "history", "show", id, "--transcript"]);
     assert_success(&text);
     assert!(String::from_utf8_lossy(&text.stdout).contains("Count the marbles"));
+    let search = |options: &[&str]| {
+        let mut args = vec!["session", "history", "search", "MARBLES", "--json"];
+        args.extend_from_slice(options);
+        fixture.json(&args)["hits"].clone()
+    };
+    for scope in [
+        ["--since", "1d"],
+        ["--task", task.identifier.as_str()],
+        ["--project", project.slug.as_str()],
+        ["--wave", "owners"],
+    ] {
+        let hits = search(&scope);
+        assert_eq!(hits.as_array().unwrap().len(), 1, "{scope:?}: {hits}");
+        assert_eq!(hits[0]["session_id"], id);
+        assert_eq!(hits[0]["snippet"], request);
+        assert_eq!(
+            hits[0]["origin"],
+            json!({"machine_id":origin, "label":"mini"})
+        );
+    }
+    for scope in [
+        ["--task", "MISSING-123"],
+        ["--wave", "unrelated"],
+        ["--project", "unrelated"],
+        ["--since", "2099-01-01T00:00:00Z"],
+        ["--limit", "0"],
+    ] {
+        assert_eq!(search(&scope), json!([]), "{scope:?}");
+    }
+    assert_eq!(
+        search(&["--task", &task.identifier, "--since", "30m"]),
+        json!([]),
+        "collecting an hour-old input now must not move it into the last half hour"
+    );
+    let result = fixture.run(&["session", "history", "search", r#""JAR A""#]);
+    assert_success(&result);
+    assert!(String::from_utf8_lossy(&result.stdout).contains("from mini"));
     let usage = || fixture.json(&["session", "usage", "--session", id, "--json"]);
     let before = usage();
     assert_eq!(before["origin_machine_id"], origin.as_str());

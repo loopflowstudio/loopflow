@@ -769,7 +769,7 @@ pub struct PendingHistory {
 /// One selected input: a captured input, or a native turn no input captured.
 #[derive(Debug, Clone)]
 pub struct PendingInput {
-    session_id: String,
+    pub session_id: String,
     input: Option<String>,
     caller: Option<String>,
     started: i64,

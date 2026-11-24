@@ -206,6 +206,8 @@ Steer validation runs before peer lookup. The existing `Error::refused` already 
 
 On November 23 the filtered integration run passed all 15 cases, including five move and resume regressions. The storage selection test, Linear late-comment delivery test and four documented-command checks passed. `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings` passed. Regenerating the schema with the branch CLI changed one enum value.
 
+After merging main (`00d14c493b`, #1973, which rewrote Task order in `selections.rs`) at `893907a8fb`, the acceptance filter under "Acceptance check at gate" passed its 10 integration cases and the storage selection test. `cargo fmt --check`, clippy and the Linear late-comment test were not rerun on the merged head.
+
 ## Remaining
 
 - Publish so CI runs `served_reads`, `binary(lf)`, the full `test(machine_commands::)` and the Swift DTO/protocol tests (`DTOFixtureTests`, `ServerProtocolTests`).

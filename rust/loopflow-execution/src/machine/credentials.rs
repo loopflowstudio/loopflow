@@ -124,7 +124,7 @@ pub(crate) async fn connect(
             };
             Credential::OpenCode { login, entry }
         }
-        _ => unreachable!("login::reaches_other_machines admits only these here"),
+        _ => unreachable!("login::require_reach admits only these"),
     };
     send(machine, &credential)?;
     println!(

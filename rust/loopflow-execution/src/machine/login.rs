@@ -35,21 +35,16 @@ pub async fn login(
     api_key: bool,
     batch: bool,
 ) -> Result<()> {
-    if here(machine) {
-        match provider {
-            Provider::Claude => return claude_here(machine),
-            Provider::Codex => {}
-            service => {
-                return crate::provider_auth::operations::connect(service, chrome_profile, api_key)
-                    .await
-            }
-        }
-    }
-    let approver = approver(provider, chrome_profile)?;
     match provider {
-        Provider::Codex => codex(machine, approver.as_ref()),
-        _ => {
-            crate::machine::credentials::connect(machine, provider, approver.as_ref(), batch).await
+        Provider::Claude if here(machine) => claude_here(machine),
+        Provider::Codex => codex(machine, approver(provider, chrome_profile)?.as_ref()),
+        service if here(machine) => {
+            crate::provider_auth::operations::connect(service, chrome_profile, api_key).await
+        }
+        service => {
+            require_reach(service, Some(&name(machine)))?;
+            let approver = approver(service, chrome_profile)?;
+            crate::machine::credentials::connect(machine, service, approver.as_ref(), batch).await
         }
     }
 }
@@ -411,17 +406,16 @@ pub fn probe(machine: &Machine, provider: Provider, deadline: Duration) -> Login
     }
 }
 
-/// The launch check: whether `harness`'s client here, with the launch's
-/// `env`, definitely has no login. Anything short of a definite answer
-/// launches: lf never refuses a working login on its own misreading.
-pub fn signed_out_here(harness: &str, env: &std::collections::BTreeMap<String, String>) -> bool {
-    let Some(provider) = harness.parse::<Provider>().ok() else {
-        return false;
-    };
-    let Some(argv) = status_argv(provider) else {
-        return false;
-    };
-    let mut command = local_command(argv);
+/// The launch check: `mini has no Codex login` when `harness`'s client here,
+/// with the launch's `env`, definitely has no login. Anything short of a
+/// definite answer launches: lf never refuses a working login on its own
+/// misreading.
+pub fn missing_login(
+    harness: &str,
+    env: &std::collections::BTreeMap<String, String>,
+) -> Option<String> {
+    let provider = harness.parse::<Provider>().ok()?;
+    let mut command = local_command(status_argv(provider)?);
     command.envs(env);
     let started = std::time::Instant::now();
     let (state, _) = answer(provider, &mut command, LAUNCH_PROBE_DEADLINE);
@@ -431,7 +425,10 @@ pub fn signed_out_here(harness: &str, env: &std::collections::BTreeMap<String, S
         elapsed_ms = started.elapsed().as_millis(),
         "login probe"
     );
-    state == LoginState::SignedOut
+    (state == LoginState::SignedOut).then(|| {
+        let machine = launcher_name().unwrap_or_else(|| "This Machine".to_string());
+        format!("{machine} has no {} login", provider.display_name())
+    })
 }
 
 /// The name the launching Machine gives this one, so the sign-in advice a
@@ -444,26 +441,17 @@ fn launcher_name() -> Option<String> {
         .filter(|name| !name.is_empty())
 }
 
-/// What signs this Machine in to `harness`, as whoever launched here would
+/// What signs this Machine in to `provider`, as whoever launched here would
 /// do it: Claude on another Machine is a forwarded token, the rest a sign-in.
-pub fn sign_in_advice(harness: &str) -> String {
+pub fn sign_in_advice(provider: Provider) -> String {
+    let provider = provider.as_str();
     match launcher_name() {
-        Some(_) if harness == Provider::Claude.as_str() => {
+        Some(_) if provider == Provider::Claude.as_str() => {
             format!("forward {CLAUDE_TOKEN_ENV} (`lf set --global forward.env`)")
         }
-        Some(name) => format!("run `lf machine login {harness} {name}`"),
-        None => format!("run `lf machine login {harness}`"),
+        Some(name) => format!("run `lf machine login {provider} {name}`"),
+        None => format!("run `lf machine login {provider}`"),
     }
-}
-
-/// `mini has no Codex login`, naming this Machine as its launcher does.
-pub fn no_login(harness: &str) -> String {
-    let provider = match harness.parse::<Provider>() {
-        Ok(provider) => provider.display_name(),
-        Err(_) => harness,
-    };
-    let machine = launcher_name().unwrap_or_else(|| "This Machine".to_string());
-    format!("{machine} has no {provider} login")
 }
 
 /// How long `logins` and a finished sign-in wait for a client, SSH included.

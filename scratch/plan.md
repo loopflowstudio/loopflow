@@ -60,8 +60,9 @@ claude` here runs `claude auth login` on this terminal, then confirms with the
 probe; the paste-code path, `REJECTION_GRACE`, `Login::answer` and the approver's
 returned code are gone (`Sent::Approved` carries nothing). `LoginState::Forwarded`
 overlays the Claude row of a remote `logins` when `forward.env` names
-`login::CLAUDE_TOKEN_ENV`. `login::sign_in_advice` replaces `sign_in_command`
-and the agent's `_sign_in_advice` wrapper. Rental `place` computes the sign-in
+`login::CLAUDE_TOKEN_ENV`. `login::sign_in_advice(Provider)` replaces `sign_in_command`
+and the Claude and Codex harnesses' own advice; `login::missing_login` is the
+launch check and its refusal line. Rental `place` computes the sign-in
 list (`rental::sign_ins`) before renting and stops when it holds no Codex and
 `forward` carries no `CLAUDE_CODE_OAUTH_TOKEN` (`Forwarded::carries_env`).
 Verified: the forwarded variable reaches the remote launch probe

@@ -345,10 +345,10 @@ fn _run_signed_in(
     retry: bool,
 ) -> Result<AgentProcessResult, CoreError> {
     let provider = launch.agent.harness.as_str();
-    if crate::machine::login::signed_out_here(provider, &launch.env) {
+    if let Some(missing) = crate::machine::login::missing_login(provider, &launch.env) {
         return Ok(AgentProcessResult {
             exit_code: 1,
-            stderr: crate::machine::login::no_login(provider),
+            stderr: missing,
             failure: Some(AgentFailure::CredentialInvalidated),
             ..Default::default()
         });
@@ -359,9 +359,8 @@ fn _run_signed_in(
 /// What signs this Machine in again: `lf machine login` for a provider it
 /// knows, else the harness's own client.
 fn _sign_in_advice(kind: loopflow_harness::HarnessKind) -> String {
-    let provider = kind.as_str();
-    match provider.parse::<crate::provider_auth::Provider>() {
-        Ok(_) => crate::machine::login::sign_in_advice(provider),
+    match kind.as_str().parse::<crate::provider_auth::Provider>() {
+        Ok(provider) => crate::machine::login::sign_in_advice(provider),
         Err(_) => kind.harness().sign_in_advice().to_owned(),
     }
 }

@@ -97,7 +97,6 @@ async fn approve(
 pub async fn disconnect(provider: Provider) -> Result<()> {
     let service = local_auth_service().await?;
     service.disconnect(provider).await?;
-    println!("Disconnected local {}", provider.display_name());
     Ok(())
 }
 

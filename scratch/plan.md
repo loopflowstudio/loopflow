@@ -354,7 +354,13 @@ reaches others by forwarded token.
 Tests: `machine_commands::services_that_sign_in_here_only_never_reach_another_machine`,
 `rental::tests::a_rental_signs_in_once_to_each_provider_that_reaches_it_github_first`.
 
-## Next: Claude's token fails like a login (concept review, 2026-11-23)
+## Done: Claude's token fails like a login (concept review, 2026-11-23)
+
+Built as below (`Forwarded::lacks_login` carries the left-out name to
+`logins`). Checks run: `machine::forward::` unit, `session_launch_contract`
+`a_signed_out_machine_refuses…`, `machine_commands::a_command_approver…`,
+`documented_commands::` — all pass. Clippy left to gate.
+
 
 QA (`scratch/qa.html`, "rough, worst first" 1): with `forward.env:
 [CLAUDE_CODE_OAUTH_TOKEN]` set as the docs say, any launch from a shell
@@ -392,7 +398,7 @@ making every missing `forward.env` value optional.
 
 ## Remaining (gate)
 
-Implementation is complete apart from the section above. Left for gate and after:
+Implementation is complete. Left for gate and after:
 
 - Gate's headless acceptance fixture (below); its parts exist as
   `machine_commands::a_command_approver_signs_machines_in_to_codex_without_a_terminal`

@@ -328,6 +328,10 @@ touch '{remote}/codex-approved' '{local}/codex-approved'
     // Named without a value here, nothing would reach a launch.
     let unset = login_states(&fixture, &["machine", "logins", "mini", "--json"]);
     assert_eq!(unset[0].1, before[0].1);
+    assert_eq!(
+        unset[0].2,
+        Value::from("CLAUDE_CODE_OAUTH_TOKEN has no value here")
+    );
     let output = fixture
         .command(&["machine", "logins", "mini", "--json"])
         .env("CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-oat01-fixture")

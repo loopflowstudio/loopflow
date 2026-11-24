@@ -916,12 +916,17 @@ fn a_signed_out_machine_refuses_the_launch_with_the_command_that_signs_it_in() {
     assert!(!remote.home.path().join("received.json").exists());
 
     // Claude on another Machine is the forwarded token; with it, the launch goes ahead.
-    let claude = |token: Option<&str>| {
-        let mut command = local.command();
-        if let Some(token) = token {
-            command.env("CLAUDE_CODE_OAUTH_TOKEN", token);
-        }
-        command
+    let config = local.home.path().join("machine/config.yaml");
+    let registered = fs::read_to_string(&config).unwrap();
+    fs::write(
+        &config,
+        format!("{registered}forward:\n  env: [CLAUDE_CODE_OAUTH_TOKEN]\n"),
+    )
+    .unwrap();
+    let claude = |token: &str| {
+        local
+            .command()
+            .env("CLAUDE_CODE_OAUTH_TOKEN", token)
             .args([
                 "--machine",
                 "fixture",
@@ -934,25 +939,32 @@ fn a_signed_out_machine_refuses_the_launch_with_the_command_that_signs_it_in() {
             .output()
             .unwrap()
     };
-    let output = claude(None);
+    // Named but with no value here, Claude reads signed out there.
+    let output = claude("");
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(!output.status.success(), "{stderr}");
     assert!(
         stderr.contains(
-            "fixture has no Claude login; forward CLAUDE_CODE_OAUTH_TOKEN (`lf set --global forward.env`)"
+            "fixture has no Claude login; give this Machine CLAUDE_CODE_OAUTH_TOKEN \
+             (`doppler secrets set CLAUDE_CODE_OAUTH_TOKEN`, or run under `doppler run`) \
+             and name it in `forward.env` (`lf set --global forward.env`)"
         ),
         "{stderr}"
     );
     assert!(!remote.home.path().join("received.json").exists());
-    let config = local.home.path().join("machine/config.yaml");
-    let registered = fs::read_to_string(&config).unwrap();
-    fs::write(
-        &config,
-        format!("{registered}forward:\n  env: [CLAUDE_CODE_OAUTH_TOKEN]\n"),
-    )
-    .unwrap();
-    success(&claude(Some("fixture-setup-token")));
+    success(&claude("fixture-setup-token"));
     fs::remove_file(remote.home.path().join("received.json")).unwrap();
+
+    // A missing Claude token is Claude's login, so Codex launches still run.
+    fs::remove_file(remote.home.path().join("signed-out")).unwrap();
+    success(
+        &local
+            .command()
+            .env("CLAUDE_CODE_OAUTH_TOKEN", "")
+            .args(["--machine", "fixture", "-b", "-a", "codex", ":", "say done"])
+            .output()
+            .unwrap(),
+    );
     fs::write(&config, registered).unwrap();
 
     // Here, the same check names this Machine's own sign-in.

@@ -106,7 +106,8 @@ lf machine logout codex mini
 (`claude auth status`, `codex login status`) and shows `unknown` when one can't
 answer. On another Machine, Claude reads `forwarded` when your `forward.env`
 names `CLAUDE_CODE_OAUTH_TOKEN` and this Machine has its value (exported or in
-Doppler). Each row also shows the provider's last
+Doppler); named with no value here, it shows the Machine's own answer with
+`CLAUDE_CODE_OAUTH_TOKEN has no value here`. Each row also shows the provider's last
 refusal there, login missing or usage limit, and when. `lf machine logout` runs
 each provider's own logout.
 
@@ -117,7 +118,7 @@ and with none left stops before an agent starts:
 
 ```
 mini has no Codex login; run `lf machine login codex mini`
-mini has no Claude login; forward CLAUDE_CODE_OAUTH_TOKEN (`lf set --global forward.env`)
+mini has no Claude login; give this Machine CLAUDE_CODE_OAUTH_TOKEN (`doppler secrets set CLAUDE_CODE_OAUTH_TOKEN`, or run under `doppler run`) and name it in `forward.env` (`lf set --global forward.env`)
 ```
 
 An unknown answer launches anyway. To sign Codex in again wherever it is
@@ -181,7 +182,9 @@ never read is removed by the next delivery. Only commands that may start an
 agent carry anything. A destination that already has a named file keeps its
 own, and the launch says so when its copy differs. A named variable with no
 value, or a named file missing here, stops the launch, and an on-demand rental,
-before anything is rented or sent. Loopflow does not read, choose among or
+before anything is rented or sent. `CLAUDE_CODE_OAUTH_TOKEN` is the exception:
+it is Claude's login, so without a value the launch goes without it and Claude
+reads signed out there, while Codex launches run as usual. Loopflow does not read, choose among or
 refresh what it forwards. Forward Claude's setup token, not its login files;
 sign Codex in with `lf machine login codex`, not by forwarding `auth.json`.
 

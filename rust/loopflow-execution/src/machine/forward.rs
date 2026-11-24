@@ -15,6 +15,8 @@ use crate::machine::ssh::sh_quote;
 pub struct Forwarded {
     env: Vec<(String, SecretString)>,
     files: Vec<(PathBuf, Vec<u8>)>,
+    /// Named logins this Machine has no value for, which launches go without.
+    missing_logins: Vec<String>,
 }
 
 impl std::fmt::Debug for Forwarded {
@@ -28,16 +30,20 @@ impl std::fmt::Debug for Forwarded {
                 "files",
                 &self.files.iter().map(|(path, _)| path).collect::<Vec<_>>(),
             )
+            .field("missing_logins", &self.missing_logins)
             .finish()
     }
 }
 
 /// Every value `forward` names, or the first one this Machine cannot supply.
+/// Claude's token is a login, not a secret the launch needs: without a value
+/// it is left out, and Claude reads signed out where the launch runs.
 pub fn read(directory: &Path) -> Result<Forwarded> {
     let config = crate::config::load_config(Some(directory))?
         .unwrap_or_default()
         .forward;
     let mut env = Vec::new();
+    let mut missing_logins = Vec::new();
     for name in config.env {
         if !valid_name(&name) {
             bail!("forward.env entry {name:?} is not an environment variable name");
@@ -45,14 +51,15 @@ pub fn read(directory: &Path) -> Result<Forwarded> {
         let value = std::env::var(&name)
             .ok()
             .filter(|value| !value.is_empty())
-            .or_else(|| doppler_value(&name, directory))
-            .ok_or_else(|| {
-                anyhow!(
-                    "forward.env names {name}, which has no value on this Machine: export it, \
-                     or store it with `doppler secrets set {name}`"
-                )
-            })?;
-        env.push((name, SecretString::new(value)));
+            .or_else(|| doppler_value(&name, directory));
+        match value {
+            Some(value) => env.push((name, SecretString::new(value))),
+            None if name == crate::machine::login::CLAUDE_TOKEN_ENV => missing_logins.push(name),
+            None => bail!(
+                "forward.env names {name}, which has no value on this Machine: export it, \
+                 or store it with `doppler secrets set {name}`"
+            ),
+        }
     }
     let home = dirs::home_dir().context("this user has no home directory")?;
     let mut files = Vec::new();
@@ -66,7 +73,11 @@ pub fn read(directory: &Path) -> Result<Forwarded> {
         })?;
         files.push((relative, bytes));
     }
-    Ok(Forwarded { env, files })
+    Ok(Forwarded {
+        env,
+        files,
+        missing_logins,
+    })
 }
 
 impl Forwarded {
@@ -79,6 +90,11 @@ impl Forwarded {
     /// Whether each launch carries environment variable `name`.
     pub fn carries_env(&self, name: &str) -> bool {
         self.env.iter().any(|(carried, _)| carried == name)
+    }
+
+    /// Whether `forward.env` names login `name` but this Machine has no value.
+    pub fn lacks_login(&self, name: &str) -> bool {
+        self.missing_logins.iter().any(|missing| missing == name)
     }
 }
 
@@ -222,7 +238,8 @@ fn doppler_value(name: &str, directory: &Path) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{home_relative, sourced, valid_name};
+    use super::{home_relative, read, sourced, valid_name};
+    use crate::config::environment::EnvVarGuard;
 
     #[test]
     fn names_and_paths_are_checked_before_anything_moves() {
@@ -244,5 +261,38 @@ mod tests {
             sourced(".lf/forward/abc", "exec lf\n"),
             "f=\"$HOME\"/'.lf/forward/abc'; . \"$f\"; rm -f \"$f\"\nexec lf\n"
         );
+    }
+
+    #[test]
+    fn a_missing_claude_token_is_left_out_while_other_missing_names_stop_the_launch() {
+        let _env = loopflow_test_support::env_lock().lock().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let _home = EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
+        // No `doppler` to ask, and neither name has a value here.
+        let _path = EnvVarGuard::set("PATH", home.path().to_str().unwrap());
+        let _token = EnvVarGuard::set("CLAUDE_CODE_OAUTH_TOKEN", "");
+        let _other = EnvVarGuard::set("LF_TEST_FORWARD_DEPLOY", "");
+        let config = home.path().join("config.yaml");
+        std::fs::write(&config, "forward:\n  env: [CLAUDE_CODE_OAUTH_TOKEN]\n").unwrap();
+        let forwarded = read(home.path()).unwrap();
+        assert!(!forwarded.carries_env("CLAUDE_CODE_OAUTH_TOKEN"));
+        assert!(forwarded.lacks_login("CLAUDE_CODE_OAUTH_TOKEN"));
+
+        std::fs::write(
+            &config,
+            "forward:\n  env: [CLAUDE_CODE_OAUTH_TOKEN, LF_TEST_FORWARD_DEPLOY]\n",
+        )
+        .unwrap();
+        let error = read(home.path()).unwrap_err().to_string();
+        assert!(
+            error.contains("forward.env names LF_TEST_FORWARD_DEPLOY"),
+            "{error}"
+        );
+
+        let _token = EnvVarGuard::set("CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-oat01-fixture");
+        std::fs::write(&config, "forward:\n  env: [CLAUDE_CODE_OAUTH_TOKEN]\n").unwrap();
+        let forwarded = read(home.path()).unwrap();
+        assert!(forwarded.carries_env("CLAUDE_CODE_OAUTH_TOKEN"));
+        assert!(!forwarded.lacks_login("CLAUDE_CODE_OAUTH_TOKEN"));
     }
 }

@@ -295,7 +295,8 @@ impl LoginState {
 /// Every provider's login on `machine`. Another Machine answers with its own
 /// `lf machine logins --json`, so its clients and store are the ones asked;
 /// its Claude row reads `forwarded` when this Machine's `forward.env` names
-/// `CLAUDE_CODE_OAUTH_TOKEN` and this Machine has its value.
+/// `CLAUDE_CODE_OAUTH_TOKEN` and this Machine has its value, and says so when
+/// the name has no value here.
 pub async fn logins(machine: &Machine) -> Result<Vec<LoginRow>> {
     if !here(machine) {
         let output = crate::machine::credentials::remote_command(
@@ -306,15 +307,17 @@ pub async fn logins(machine: &Machine) -> Result<Vec<LoginRow>> {
         let mut rows: Vec<LoginRow> = serde_json::from_slice(&output)
             .with_context(|| format!("{}'s logins were unreadable", name(machine)))?;
         // Only a token this Machine can supply reaches a launch from here.
-        let forwards_claude = crate::machine::forward::read(&std::env::current_dir()?)
-            .is_ok_and(|forwarded| forwarded.carries_env(CLAUDE_TOKEN_ENV));
-        if forwards_claude {
+        if let Ok(forwarded) = crate::machine::forward::read(&std::env::current_dir()?) {
             for row in rows
                 .iter_mut()
                 .filter(|row| row.provider == Provider::Claude)
             {
-                row.state = LoginState::Forwarded;
-                row.account = Some(CLAUDE_TOKEN_ENV.to_string());
+                if forwarded.carries_env(CLAUDE_TOKEN_ENV) {
+                    row.state = LoginState::Forwarded;
+                    row.account = Some(CLAUDE_TOKEN_ENV.to_string());
+                } else if forwarded.lacks_login(CLAUDE_TOKEN_ENV) {
+                    row.account = Some(format!("{CLAUDE_TOKEN_ENV} has no value here"));
+                }
             }
         }
         return Ok(rows);
@@ -447,7 +450,11 @@ pub fn sign_in_advice(provider: Provider) -> String {
     let provider = provider.as_str();
     match launcher_name() {
         Some(_) if provider == Provider::Claude.as_str() => {
-            format!("forward {CLAUDE_TOKEN_ENV} (`lf set --global forward.env`)")
+            format!(
+                "give this Machine {CLAUDE_TOKEN_ENV} (`doppler secrets set {CLAUDE_TOKEN_ENV}`, \
+                 or run under `doppler run`) and name it in `forward.env` \
+                 (`lf set --global forward.env`)"
+            )
         }
         Some(name) => format!("run `lf machine login {provider} {name}`"),
         None => format!("run `lf machine login {provider}`"),

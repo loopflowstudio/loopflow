@@ -116,7 +116,7 @@ fn work_in(
             .ok_or_else(|| invalid(format!("Task {} has no state", task.id)))?;
         let ownership = owners.get(&task.id);
         let owned = ownership.is_some();
-        let runs_elsewhere = ownership.is_some_and(|claim| claim.owner_elsewhere(&local).is_some());
+        let runs_elsewhere = ownership.is_some_and(|claim| claim.runs_on(&local).is_some());
         let lifecycle = state.lifecycle(task.state.as_deref());
         let states = task_selection_states(
             lifecycle.observed_here(runs_elsewhere),

@@ -176,8 +176,7 @@ pub async fn steer(
     let repo = repository_for_task(store, task)?;
     let repo = repo.to_string_lossy();
     let owner = ActionOwner::Task(task.id.clone());
-    crate::ops::task::validate_task_comment_input(message)
-        .map_err(|error| Error::new(ErrorCode::Invalid, error.to_string()))?;
+    // Callers validate before any peer is dialed; the append validates again.
     let comment = append_task_comment_as(store, task, message, true, || Ok(participant))?;
     let steer = store
         .sqlite

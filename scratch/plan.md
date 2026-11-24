@@ -35,4 +35,19 @@ Field case behind this: five `manabot` `coverage-working` Tasks (MTG-418..422) r
 
 ## Remaining
 
-Gate runs branch CI.
+**Surface blocked loop decisions and post-step Graph failures in `lf task status` (`project_execution`).** Post-build concept review (`scratch/concept-review.html`) found that `task_updates` (updated in this branch) and `ops::task_execution::project_execution()` disagree when the latest step exited `0` (`ExecutionResult::Succeeded`) but `graph.run` failed:
+
+1. A loop decider returning `blocked` (including the new non-convergence rule in `DECISION_CRITERIA`) exits `0` while `graph.run` exits `3` (`GraphHeld::EXIT`) with `graph.run.error = Some("Graph is blocked: <reason>")`.
+2. A post-step `lf commit --step` failing to push (`OpsError::PushFailed`) runs after the skill step exited `0` while `graph.run` exits `1` with `graph.run.error`.
+
+In both cases, `task_updates` wakes `task-session` with `graph.run.error` and tells it to read `lf task status`, but `project_execution()` (`rust/loopflow-execution/src/ops/task_execution.rs:348-365`) checks only `latest.run.result()` (`Succeeded`), reports `TaskExecutionState::Idle` (`"Graph stopped after <step>..."`), drops `graph.run.error`, and causes `task_actions` / `lf wave status` to recommend `lf task run` instead of showing `Blocked`.
+
+**Fix (one pass):**
+- In `rust/loopflow-execution/src/ops/task_execution.rs` (`project_execution`, `(Dead, Dead)` branch when `process.result() == ExecutionResult::Succeeded`): inspect `graph.run` when `graph.run.result() == ExecutionResult::Failed`:
+  - If `graph.run.exit_code == Some(i32::from(crate::process::GraphHeld::EXIT))`: when `graph.run.error` starts with `"Graph is blocked:"`, return `(TaskExecutionState::Blocked, error.trim_end_matches('.').to_string())`; otherwise keep `TaskExecutionState::Idle` so `GraphOutcome::Waiting` (`lf pr land`) still turns into `Waiting` via `snapshot.rs`.
+  - Otherwise (non-held `graph.run` failure after the latest step succeeded, e.g. `lf commit --step` `PushFailed`): return `(TaskExecutionState::Blocked, format!("{label}: {ended}. Inspect its history and effects, then launch fresh work"))` using `graph.run.error` / `graph.run.exit_code`.
+  - Keep `TaskExecutionState::Idle` when `graph.run.result() != ExecutionResult::Failed` (e.g. Graph killed with no exit record, preserving `a_graph_runs_while_its_processes_do_and_blocks_on_a_failed_step`).
+- Add focused unit tests in `rust/loopflow-execution/src/ops/task_execution.rs` covering: `GraphOutcome::Blocked` (`exit_code = 3`, `"Graph is blocked: ..."` -> `Blocked` with reason), `GraphOutcome::Waiting` (`exit_code = 3`, `"Graph stopped before its last step..."` -> `Idle`), and post-step `graph.run` failure (`exit_code = 1`, `PushFailed` error -> `Blocked` with reason).
+- Verify with `cargo test -p loopflow-execution --lib ops::task_execution::tests::` and `cargo test -p loopflow --lib task_graph_launch_tests::an_auto_run_blocked_at_verification_waits_there_without_building_again`, plus `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings`.
+
+Then gate runs branch CI.

@@ -7,4 +7,5 @@
 
 The commit workflow keeps release pushes unconditional and checks the branch for manual and step checkpoints. Task updates keep the existing saved reading format and attach the run error when delivering a change.
 
-The loop cap (`max_loop_passes`) and the scratch-only commit-message skip were dropped by steers; see `scratch/plan.md`. `scratch/concept-review.html` predates those steers.
+The loop cap (`max_loop_passes`) and the scratch-only commit-message skip were dropped by steers; see `scratch/plan.md`. `scratch/concept-review.html` was rewritten post-build to match `HEAD`.
+- Truthful `Blocked` status in `ops::task_execution::project_execution()` for `GraphOutcome::Blocked` and post-step `graph.run` failures (such as `lf commit --step` `PushFailed`), keeping `GraphOutcome::Waiting` and unrecorded-exit kills `Idle`. Passed over: leaving `project_execution()` as `Idle` when the last step exited `0`.

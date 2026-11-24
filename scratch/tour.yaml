@@ -1,7 +1,7 @@
-at: 4185bb97edc2444d0807e7817ea729046bd60fca
+at: ef6c3e0aaaadf6c7f7906f4907c4966a0ce3d65a
 first:
   - path: docs/telemetry.md
-    why: Search collected conversations after a rental disappears
+    why: Read a lost rental’s turns and usage
   - path: docs/ops.md
     why: Rent, price, update and return a Machine
   - path: docs/subscriptions.md
@@ -12,6 +12,24 @@ first:
     why: Join a Wave and choose its Project
   - path: scratch/plan.md
     why: Built behavior, Linux trials and remaining work
+  - path: rust/loopflow-storage/src/session_record.rs
+    why: Attribute a history row to its recording Machine
+  - path: rust/loopflow-storage/src/migrations/rental_session_history.sql
+    why: Index origin time and Work and invalidate served history
+  - path: rust/loopflow-storage/src/sqlite/machine_records.rs
+    why: Prefer the native dispatch when another Machine replays it
+  - path: rust/loopflow-storage/src/sqlite/sessions.rs
+    why: Rank local and copied inputs under one budget
+  - path: rust/loopflow-execution/src/store/sessions.rs
+    why: Project selected inputs and resolve Machine names
+  - path: rust/loopflow/src/lf/commands/usage.rs
+    why: Count each turn across a continued Session
+  - path: swift/Loopflow/Services/RegistryQuery.swift
+    why: Decode the origin and identify Desktop history rows
+  - path: swift/LoopflowMac/Views/TaskHistoryView.swift
+    why: Show where the Task’s provider turns ran
+  - path: swift/LoopflowMac/Views/TelemetryDashboardView.swift
+    why: Attribute usage in Desktop Telemetry
   - path: rust/loopflow/src/lf/commands/machine.rs
     why: Refresh credentials and select the conversation to resume
   - path: rust/loopflow-execution/src/machine/forward.rs
@@ -54,12 +72,6 @@ first:
     why: Receive the caller’s profile during server setup
   - path: rust/loopflow-storage/src/sqlite/task_ownership.rs
     why: Write destination ownership and its outgoing marker together
-  - path: rust/loopflow-storage/src/session_record.rs
-    why: Identify the Machine that recorded a search hit
-  - path: rust/loopflow-storage/src/migrations/rental_session_history.sql
-    why: Keep old copies and track which Sessions changed
-  - path: rust/loopflow-storage/src/sqlite/machine_records.rs
-    why: Select copied transcripts by input time and Work
   - path: rust/loopflow/src/lf/commands/history_transcript.rs
     why: Search local and copied turns under one limit
   - path: rust/loopflow-execution/src/machine_records.rs
@@ -67,7 +79,7 @@ first:
   - path: rust/loopflow-execution/src/rental/recovery.rs
     why: Collect on the server’s recovery pass and finish at give-back
   - path: rust/loopflow/tests/machine_commands.rs
-    why: Exercise placement retries and transcript search after sandbox loss
+    why: Read usage after loss and continue the Session locally
   - path: rust/loopflow/src/lf/commands/install/published.rs
     why: Find the Linux counterpart and verify its archive
   - path: rust/loopflow-execution/src/installation/server.rs

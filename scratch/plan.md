@@ -207,9 +207,9 @@ Why this beats storing `ChildPolicy` on `completion_request`:
 - Menu item (`TaskWorkView.swift`): reads `Complete Task…` when children are
   open (was `Complete Task & Settle Children…`), with updated help text.
 - `TaskCompleteConfirmation` (`TaskWorkView.swift`):
-  - Title: `Complete LOO-12? 3 children are open` (or `1 child is open`, using
-    direct open children when matching `Move`, or descendants count when
-    grandchildren exist — clarify in message when grandchildren exist).
+  - Title: `Complete LOO-12? 3 children are open` (or `1 child is open`),
+    counting direct open children like the CLI refusal; the message names
+    which descendants Finish marks done.
   - Resolve rehome destination by walking `parentId` up to the nearest open
     ancestor in `model` (`Complete & Move Children to LOO-10`); if none is open
     (or `parentId == nil`), `Complete & Move Children to Top Level`. Matches
@@ -341,13 +341,18 @@ Learned: tracker parent actions for rehome come from `planning_write::local`,
 the same path as `lf task update --parent`; no separate queueing needed. A
 Task with no tracker object queues none, so the CLI fixture cannot see one.
 
-Remaining (pass 2, iOS):
+Remaining (pass 3, iOS — the next pass; teaches whether one Rust-owned
+count is enough for a phone to ask before writing):
 - `ViewContent.open_children` in Rust + Swift + DTO fixtures.
 - iOS confirmation dialog on swipe for parents. Until then an iOS swipe on a
   parent sends `children: null` and the refusal comes back as a Notice
   (docs/surfaces.md already describes the dialog).
 - Swift `rehomeDestination` cannot see deleted ancestors, so it can say "Top
-  Level" where Rust continues past a deleted one to an open ancestor.
+  Level" where Rust continues past a deleted one to an open ancestor. Simpler
+  shape to weigh in the same pass: carry the destination identifier from Rust
+  beside `open_children` so neither Swift client re-derives the walk.
+- Deferred to gate: Swift `TaskCompleteConfirmationTests` and
+  `ServerProtocolTests` runs; full Rust suites in CI.
 
 ## Passes
 
@@ -358,8 +363,9 @@ Remaining (pass 2, iOS):
    conversations). Policy enum, `rehome_destination`, descendant refusal, live
    guard, rehome, reopen tests, CLI flag, wire `children`, fixtures, tests 1–6,
    docs.
-2. **Desktop + iOS**: `ServedWrite` field, Desktop dialog (both all-merged and
-   unmerged layouts), `ViewContent.open_children` in `selections.rs` + Swift +
+2. **Desktop** (built): `ServedWrite` field, Desktop dialog (both all-merged and
+   unmerged layouts).
+3. **iOS**: `ViewContent.open_children` in `selections.rs` + Swift +
    fixtures, iOS confirmation dialog, view tests.
 
 ## Exclusions

@@ -1,11 +1,13 @@
-at: ff6437d957f85bb7aaebd4c96a4ee3d2139bf846
+at: 5b9d4429d079f37c1fdd438aac2669dc78e6448e
 first:
   - path: docs/work.md
-    why: the refusal, rehome and abandon as people see them
+    why: Completing parents and reopening abandoned Tasks
   - path: rust/loopflow-storage/src/sqlite/children.rs
-    why: ChildPolicy, complete_task_now, rehome, descendant tree
+    why: Atomic completion, PR history, and checkout readiness
   - path: rust/loopflow-execution/src/ops/task.rs
-    why: task_complete order of refusals and the live guard
+    why: Reopen, checkout placement, and completion refusals
+  - path: rust/loopflow-execution/src/ops/task/lifecycle.rs
+    why: Cleanup shares the reopen lock
   - path: rust/loopflow/src/lf/mod.rs
     why: the --children flag and help
   - path: rust/loopflow/src/lf/commands/mutation.rs
@@ -19,6 +21,8 @@ first:
     why: phone swipe asks before completing a parent
   - path: swift/Loopflow/Models/WorkSelection.swift
     why: Swift decode/encode of required nullable keys
+  - path: rust/loopflow/tests/task_initialization_tests.rs
+    why: Reopened Tasks reach Run, checkout, and publication
   - path: rust/loopflow/tests/session_cli_tests.rs
     why: end-to-end CLI behavior of every choice
   - path: rust/loopflow-execution/src/ops/task/tests.rs

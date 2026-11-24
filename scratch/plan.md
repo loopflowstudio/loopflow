@@ -100,137 +100,31 @@ Three distinct lifecycles must stay separate in storage and execution:
        `lf task run` takes the normal `task.worktree.is_none()` placement path
        (creating a fresh checkout from current `origin/main` on the Task's
        branch).
-     - `restore_task_checkout` and `finish_task_checkout` judge whether the
-       **current checkout epoch** finished initializing (checking whether
-       `CheckoutReady` or `PrStarted` occurred *after* the latest
-       `CheckoutInitializing`), rather than scanning all historical events from
-       `id > 0`. This lets a reopened Task initialize a fresh checkout cleanly
-       while keeping the missing-branch refusal intact for any active checkout,
-       and deletes the published-PR-only `let abandoned = pr...` workaround in
-       `restore_task_checkout`.
+     - Checkout restoration and finalization both use `task_checkout_ready`.
+       The latest `CheckoutInitializing`, `CheckoutReady` or historical
+       `PrStarted` decides readiness. The lookup reads the indexed event log
+       backwards inside SQLite.
+     - Placement that discovers an open PR and publication both use the next
+       sequence after the Task's stored PR history.
 
 ## Design
 
-### Storage (`rust/loopflow-storage/src/sqlite/children.rs`)
-
-Built on `HEAD`:
-- `ChildPolicy { Rehome, Abandon }`, `ChildOutcome::Rehomed`, `OpenDescendant`,
-  `ParentCompletion`, `complete_task_now`, `open_descendants`,
-  `rehome_destination`, `rehome_children`.
-- `request_family_completion` and `family: bool` removed; pending completion
-  always returns `WaitingForChildren` when children are open;
-  `TaskEventKind::FamilyCompletionRequested` marked historical-only.
-
-Remaining fixes for the next pass:
-- **`reopen_task(&self, id: &TaskId, note: Option<&str>, clear_abandoned_checkout: bool) -> StoreResult<Task>`**
-  (or keep `reopen_task(&self, id, note)` defaulting `clear_abandoned_checkout = false` and add `reopen_task_with_checkout_clear` / update callers — updating the 4 internal callers directly is cleaner and keeps one API):
-  Inside the `IMMEDIATE` transaction, when `abandoned` is true:
-  1. Compute `target = if has_prior_work(&tx, id)? { "started" } else { "unstarted" }` **before** modifying `task_checkouts`.
-  2. Archive any abandoned active PR:
-     ```sql
-     UPDATE task_prs SET historical=1
-     WHERE task_id=?1 AND historical=0 AND abandoned_at IS NOT NULL
-     ```
-  3. When `clear_abandoned_checkout` is true, delete the stale checkout row:
-     ```sql
-     DELETE FROM task_checkouts WHERE task_id=?1
-     ```
-     (Triggers `cancel_task_retirement_checkout_delete` and advances
-     `store_revisions` automatically.)
-  4. Clear `abandoned_at`, `abandon_reason`, `completion_request`,
-     `completion_error`; set `planning_state` via `task_state::decide_in`;
-     delete `task_auto`; record the reopened progress event.
-  5. When reopening a **done** Task (`abandoned == false`), neither `task_prs`
-     nor `task_checkouts` is touched.
-- **`rehome_destination_in`**: stop walking upward if an ancestor row is
-  soft-deleted (`planning_deleted_at IS NOT NULL`) and return `Ok(None)`. A
-  deleted Task already breaks the visible tree in `task_hierarchy` and Desktop,
-  so rehoming never teleports children under an invisible grandparent, and Rust
-  matches Desktop's ancestor walk.
-
-### Execution (`rust/loopflow-execution/src/ops/task.rs`, `task_run.rs`, `error.rs`, `engine/mod.rs`)
-
-Built on `HEAD`:
-- `task_complete(repo, issue, note, children)` with pre-flight checks,
-  `open_children_refusal`, `live_abandon_blockers`, `settle_children`,
-  `OpsError::Refused(Error::conflict(...))` wired into `Error::written`.
-
-Remaining fixes for the next pass:
-- **`task_reopen` (`ops/task.rs`)**:
-  Under `retirement::lock(&task.id)`, determine `clear_abandoned_checkout`:
-  true iff the Task is currently abandoned (`task_work_status == Abandoned`)
-  AND `task.worktree` is `Some(path)` where `!path.exists()` AND either
-  `task.branch.is_empty()` or `!crate::git::worktrees::branch_exists(&repo, &task.branch)?`.
-  Pass `clear_abandoned_checkout` into `store.sqlite.reopen_task(...)`.
-- **`restore_task_checkout` & `finish_task_checkout` (`ops/task.rs`)**:
-  - Replace the full-history `.any(|e| CheckoutReady | PrStarted)` scan in both
-    functions with a shared helper `current_checkout_ready(events: &[TaskEvent]) -> bool`
-    that scans `events` in reverse and returns `true` if `CheckoutReady` or
-    `PrStarted` appears after the latest `CheckoutInitializing` (and `false` if
-    `CheckoutInitializing` appears first or none exists).
-  - Delete the QA workaround (`let abandoned = pr.as_ref().is_some_and(|pr| pr.abandoned_at.is_some());`
-    and its `if !abandoned` branches) in `restore_task_checkout`. When an
-    abandoned Task's checkout & branch were deleted, `reopen_task` already
-    cleared `task_checkouts`, so `prepare_task` runs the normal placement path
-    and creates a fresh checkout from current `origin/main`. When a retained
-    local branch or worktree survived abandonment, `restore_task_checkout`
-    restores it cleanly.
-- **`complete_task_now` error mapping in `task_complete` (`ops/task.rs:190`)**:
-  Map `StoreError::InvalidData(msg) | StoreError::InvalidAuthority(msg)` from
-  `complete_task_now` to `refused(msg)` (`OpsError::Refused(Error::conflict(msg))`),
-  so raced refusals (e.g., a child filed between pre-check and transaction)
-  still answer `conflict`, never `outcome_unknown`.
-- **`open_children_refusal` (`ops/task.rs:221-241`)**:
-  Include `"running"` in `standing` whenever `descendant.state == TaskState::Moving`
-  (e.g. `#1981 open, running`, or `running` when there is no PR), so running
-  children that will block `--children abandon` are visible in the bare refusal.
-- **Abandoned refusal copy**:
-  - `rust/loopflow-execution/src/ops/task_run.rs:23`: change
-    `"Task is abandoned; recover it before running a Graph"` to
-    `"Task is abandoned; reopen it before running a Graph"`.
-  - `rust/loopflow-execution/src/ops/task.rs:1356` (`validate_preparation_status`):
-    change `"Task {} is abandoned; inspect its retained history with `lf task status {}`"` to
-    `"Task {} is abandoned; `lf task reopen {}` reopens it without moving its Graph"`
-    (matching `WorkStatus::Done`).
-
-### CLI, wire, Desktop, iOS, and docs
-
-Built on `HEAD`:
-- CLI `--children <rehome|abandon>`, `after_help`, `TaskCommand::Reopen` help,
-  rehome text output (`moved up to LOO-10` / `moved to top level`).
-- Wire `Write::TaskComplete { directory, issue, children }` and
-  `ViewContent.open_children: Option<u32>`, Swift `TaskChildPolicy`,
-  `ServedWrite.taskComplete`, `WorkViewPlan.Content`, DTO fixtures.
-- Desktop `TaskCompleteConfirmation` (safe-first button ordering for both
-  all-merged and unmerged cases), `WorkModel.rehomeDestination`, `TaskActionItems`.
-- iOS `TaskFeed.complete` + `confirmationDialog` before writing.
-- Docs: `docs/work.md`, `docs/surfaces.md`, `swift/LoopflowiOS/README.md`.
-  Note: update the one sentence in `docs/work.md` (`"starts again from the Task's base"`)
-  to `"starts a fresh checkout from main"` if `prepare_task` places fresh from
-  `origin/main` when the abandoned checkout was deleted.
-
-## What goes
-
-Already removed on `HEAD`:
-- `request_family_completion`, `family: bool`, writers of `FamilyCompletionRequested`.
-- Silent-abandon default of bare `lf task complete` / `task.complete` with `children: null`.
-- `reopen_task`'s abandoned refusal and Desktop's "cannot be reopened" / "Settle Children" copy.
-
-Removed in this pass:
-- The `let abandoned = pr.as_ref().is_some_and(...)` workaround in
-  `restore_task_checkout` (`ops/task.rs:1416-1449`) — replaced by archiving the
-  abandoned PR and clearing the deleted `task_checkouts` row in `reopen_task`
-  plus epoch-scoped `current_checkout_ready`.
-
-Survives: Graph-end `CompletionRequested` waiting for children (and leaf
-`- cmd: task complete` pending on unmerged PR); recursive abandon semantics;
-`--json` `children` shape; `"PR closed without merge; reopen the same PR or abandon the Task"`
-for an **open** Task whose PR was closed externally on GitHub; preserved
-checkouts/branches when `cleanup_abandoned` failed before reopen.
+- Storage keeps immediate completion and rehoming in one transaction. The
+  ancestor walk follows visible parent links, skips completed or abandoned
+  ancestors, and ends at a deleted ancestor.
+- Reopening and abandonment cleanup share the retirement lock. Reopen
+  checks the checkout path and local branch on disk, then commits the
+  planning change, PR archival, and checkout removal together.
+- Bare parent completion reads the tree before observing the parent's PR.
+  A moving child shows `running` alongside its PR. Both preflight and
+  transactional refusals report `conflict`.
+- CLI, served writes, Desktop, and iOS share the child policy. Desktop names
+  the rehome destination and orders the safe button first. iOS uses
+  `open_children` to ask before writing.
 
 ## Acceptance check (gate)
 
-All existing checks on `HEAD` pass, plus the reopened-abandoned lifecycle checks:
+Gate runs the existing suites alongside these lifecycle checks.
 
 1. **Bare refusal + running indicator:** `task_complete(P, None)` refuses with
    `ErrorCode::Conflict`, writes nothing, lists indented descendants, and marks
@@ -279,41 +173,39 @@ confirm `lf task status` recommends `run` (not "PR closed without merge") and
 `Complete Task…` → the two-choice dialog, and reopen an abandoned Task → **Run**
 is immediately clickable.
 
+## Placement discovery
+
+A private CLI run reopened a published Task successfully, then checkout failed
+with `UNIQUE constraint failed: task_prs.task_id, task_prs.sequence`. The QA
+GitHub stand-in still reported an open PR on the branch. Placement can also
+discover a newly opened PR on a restored branch. Placement now allocates a discovered PR after
+the last stored sequence, using the same indexed lookup as publication.
+The remote-branch fixture picked up PR 8 as sequence 2 after PR 7 closed.
+
 ## Status
 
-Built on `HEAD` (`4f0a3df928`):
-- Storage/execution/CLI/Desktop/iOS/docs for explicit parent completion
-  (`ChildPolicy`, `complete_task_now`, `rehome_children`, `open_descendants`,
-  `live_abandon_blockers`, `OpsError::Refused`, `ViewContent.open_children`,
-  Desktop `TaskCompleteConfirmation`, iOS swipe confirmation dialog, initial
-  `reopen_task` unblocking).
-- Verified in QA (`scratch/qa.html`) on a private Machine + iPhone SE Simulator.
+The storage, execution, CLI, Desktop, iOS and documentation changes are built.
+The earlier private Machine and iPhone Simulator run is in `scratch/qa.html`.
+Gate owns the full Rust and Swift suites and the final app check.
 
-Remaining (concept-review pass → implement → gate):
-1. Fix reopened-abandoned Task lifecycle cleanly: archive abandoned PR
-   (`historical = 1`), clear dead `task_checkouts` when worktree & branch are
-   gone on disk, scope `restore_task_checkout`/`finish_task_checkout` to the
-   current checkout epoch (`CheckoutInitializing`), delete QA's `restore_task_checkout`
-   workaround, update abandoned refusal copy (`task_run.rs`, `validate_preparation_status`)
-   and `docs/work.md` reopen wording.
-2. Map `complete_task_now` refusal errors (`InvalidData`/`InvalidAuthority`) to
-   `OpsError::Refused(Error::conflict(...))`.
-3. Show `running` alongside PR in `open_children_refusal` when `state == Moving`.
-4. Stop `rehome_destination_in` at deleted ancestors (`planning_deleted_at IS NOT NULL`).
-5. Add tests covering 1–7 above (including Desktop `RoadmapTask` / `task_run_control`
-   and `task_actions` after reopening an abandoned Task) and run gate.
+### Verification in this checkout
 
-## Passes
-
-1. **Storage + execution + CLI + docs** (built).
-2. **Desktop** (built).
-3. **iOS** (built).
-4. **Concept-review alignment pass (next `implement` pass):** reopened-abandoned
-   PR archival + dead checkout clearing + checkout-epoch check, `complete_task_now`
-   conflict mapping, `running` standing in refusal tree, deleted-ancestor stop
-   in `rehome_destination_in`, tests, and doc line update.
-5. **Gate**: Swift `TaskCompleteConfirmationTests`, `TaskFeedTests`,
-   `ServerProtocolTests` and the full Rust suites in CI; acceptance check; demo.
+- Private CLI with local bare origin and GitHub stand-in: Task `08a5f7`
+  reported `lf task run 08a5f7` after reopening, checked out the advanced
+  `origin/main`, then published PR 101. The stored sequences were
+  `(1, 100, historical)` and `(2, 101, current)`. The fixture marked PR
+  100 closed after verifying its remote head had been deleted.
+- `task_initialization_tests::reopen` passed all three cases, including
+  Desktop's Run control, retained work, and placement of a new remote PR.
+- The focused parent CLI, live-work, transaction-conflict and documented
+  command tests passed.
+- `cargo fmt` and `cargo clippy --all-targets -- -D warnings` passed.
+- SQLite used the current-PR index, checkout primary key, Task/event index
+  and two Task primary-key lookups on the Machine's 1,622 Tasks and
+  75,899 events. With 10,000 synthetic Tasks and 110,000 events, warm median
+  statement times were 3.7 µs for checkout readiness, 1.3 µs per ancestor,
+  0.8 µs for the next sequence, 1.4 µs for PR archival and 1.5 µs for
+  checkout deletion (in-memory, excluding triggers and transaction commit).
 
 ## Exclusions
 

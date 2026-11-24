@@ -41,7 +41,7 @@
   bare `lf task complete` on a childless Task with an unmerged PR still writes
   `CompletionRequested`; any `--children` or open child refuses with `conflict`
   and writes nothing.
-- **Reopening an abandoned Task archives its closed PR and clears a deleted checkout** (concept review pass 2, proposed):
+- **Reopening an abandoned Task archives its closed PR and clears a deleted checkout** (concept review pass 2, built):
   When `lf task reopen` reopens an abandoned Task, `reopen_task` marks its
   abandoned PR (`abandoned_at IS NOT NULL`) as `historical = 1`, and
   `task_reopen` clears the stale `task_checkouts` row when abandoning already
@@ -58,3 +58,11 @@
   Nothing is written, so `outcome_unknown` ("It may have happened") is wrong.
   Both pre-flight refusals and `complete_task_now` transaction refusals return
   `OpsError::Refused(Error::conflict(...))`.
+
+- The private CLI run exposed an open PR during fresh placement. A discovered
+  PR gets the next sequence from the same Task history as publication.
+- Checkout readiness uses the newest placement event from SQLite. The
+  existing Task/event index avoids decoding every historical event.
+- Abandon cleanup takes the same lock as reopen and retirement, including
+  cleanup after a parent settles its children. A reopen that finishes first
+  cancels the obsolete cleanup.

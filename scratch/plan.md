@@ -13,14 +13,15 @@
 
 - [`14f44821e8` review]: replaced integer slot pinning with `StatusGroup` and extended sorting to Wave sidebars (`be25d7ddcb`).
 - [`5317225dbe` review]: unified `heldStatusGroup` ownership in `WorkNavigation` + pre-update latching in `WorkModel.applyTaskList` and aligned two stale status sentences in [swift/README.md](../swift/README.md) (`10df280f65`, simplified in `aef236355e`).
-- [`0bc19e976d` review](concept-review.html) (against base `62a368e5cc` after merge `8742243abf` brought in `#1973`): 8 of 9 product-to-code pairings align, including all runtime ordering, drag persistence, status-toggle, status-group hold, Graph step, OSC 7501, and font pairings. One pairing contradicts the product: `task_orders` is permanently live in runtime, yet immutable `task_facts_once.sql:84` still marks `-- leaving: task_orders LOO-877`, leaving `leaving_guard.rs` (`STILL_READ`), `scripts/due_removals.py`, `scripts/check_migrations.py`, `rust/loopflow-storage/SCHEMA.md`, `docs/dev/reference.md`, and `docs/dev/reference-code.md` claiming `task_orders` is leaving for deletion on `2026-12-24` and `tasks.planning_rank` is the single Task order.
+- [`0bc19e976d` review]: 8 of 9 product-to-code pairings aligned; flagged `task_orders` still marked `-- leaving: task_orders LOO-877` across `leaving_guard.rs`, `due_removals.py`, `check_migrations.py`, `SCHEMA.md`, `reference.md`, and `reference-code.md`. Resolved by `89425281fa` (`keep_task_orders.sql` + `-- keeping:`), `4d4d6f7b3a`, and QA round 8 (`d15cc919ff`).
+- [`d15cc919ff` review](concept-review.html) (against base `6601da8ef8` after `8c71894fe4` synced `origin/main`): 9 of 9 pairings align across Working membership, two-order runtime and schema lifecycle (`-- keeping: task_orders LOO-1063`), side-aware drags, non-destructive status toggle and Wave scope, single-owner `heldStatusGroup`, row status vocabulary, Graph step display, OSC 7501 `done`/`error` handling, and packaged fonts. Nothing to change.
 
 ## Next
 
-Gate: sync `origin/main` (brings `planning_scope_checks.sql`, which
-`check_migrations.py` needs), then `documented_commands::` for the edited
-`docs/dev/*.md`, `swift/README.md` and `MIGRATIONS.md`, and the
-`server_operations_match_their_lf_commands` check on main.
+Gate: `origin/main` is synced at `6601da8ef8` (`planning_scope_checks.sql` in
+place). Run `documented_commands::` for the edited `docs/dev/*.md`,
+`swift/README.md` and `MIGRATIONS.md`, and check
+`server_operations_match_their_lf_commands` on main.
 
 ## Built
 

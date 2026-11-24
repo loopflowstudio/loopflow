@@ -16,12 +16,10 @@
   --tint: #e3f3ea;
   --warn: #8b3b26;
   --warn-tint: #f8e9e4;
-  --busy: #20528a;
-  --error: #9c2b2b;
   --built-bg: #eef2ee;
   --built-ink: #2c433b;
-  --proposed-bg: #e3f3ea;
-  --proposed-ink: #12624c;
+  --before-bg: #f8e9e4;
+  --before-ink: #8b3b26;
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -34,12 +32,10 @@
     --tint: #213b31;
     --warn: #ffb9a1;
     --warn-tint: #3a231c;
-    --busy: #92c5ff;
-    --error: #ff9d9d;
-    --built-bg: #222e29;
-    --built-ink: #d4e0d8;
-    --proposed-bg: #213b31;
-    --proposed-ink: #9fe5c6;
+    --built-bg: #213b31;
+    --built-ink: #9fe5c6;
+    --before-bg: #3a231c;
+    --before-ink: #ffb9a1;
   }
 }
 * { box-sizing: border-box; }
@@ -76,12 +72,10 @@ pre {
   border-radius: .35rem;
   vertical-align: middle;
 }
-.badge-built { background: var(--built-bg); border: 1px solid var(--line); color: var(--built-ink); }
-.badge-proposed { background: var(--proposed-bg); border: 1px solid var(--proposed-ink); color: var(--proposed-ink); }
-.badge-warn { background: var(--warn-tint); border: 1px solid var(--warn); color: var(--warn); }
+.badge-built { background: var(--built-bg); border: 1px solid var(--accent); color: var(--built-ink); }
+.badge-before { background: var(--before-bg); border: 1px solid var(--warn); color: var(--before-ink); }
 .trace, .callout { background: var(--surface); border: 1px solid var(--line); border-radius: .9rem; padding: clamp(.9rem, 3vw, 1.5rem); }
-.callout { border-inline-start: .3rem solid var(--warn); }
-.callout.proposal { border-inline-start-color: var(--accent); margin-top: 1rem; }
+.callout { border-inline-start: .3rem solid var(--accent); }
 .steps { display: flex; flex-wrap: wrap; gap: .4rem; margin: .4rem 0 1rem; }
 .steps button {
   border: 1px solid var(--line);
@@ -104,9 +98,10 @@ pre {
   gap: .5rem;
   padding: .55rem .75rem;
   border-bottom: 1px solid var(--line);
-  background: var(--built-bg);
+  background: var(--before-bg);
+  color: var(--before-ink);
 }
-.panel.proposed header { background: var(--proposed-bg); color: var(--proposed-ink); }
+.panel.built header { background: var(--built-bg); color: var(--built-ink); }
 .panel-bar {
   display: flex;
   align-items: center;
@@ -176,46 +171,30 @@ pre {
 <body>
 <main>
 <header>
-  <p class="reference">LOO-1063 · Concept review of built branch at <code>0bc19e976d</code> against base <code>62a368e5cc</code></p>
+  <p class="reference">LOO-1063 · Concept review (pass 2) of built branch at <code>d15cc919ff</code> against base <code>6601da8ef8</code></p>
   <h1>Working Task order, its schema record, and the sidebar status toggle</h1>
-  <p><strong>Area reviewed:</strong> Working Task ordering across Storage, Execution, CLI/Server, Mac Desktop, and iOS; the separation between Machine-local Working order (<code>task_orders</code>) and shared Project/backlog rank (<code>tasks.planning_rank</code>); the Mac sidebar <strong>Sort by status</strong> toggle and open-Task status-group hold; row status vocabulary and Graph step display; Desktop drag persistence and recovery; OSC 7501 <code>done</code>/<code>error</code> handling; and packaged New Task fonts — reviewed fresh against base <code>62a368e5cc</code> after <code>10df280f65</code> unified <code>heldStatusGroup</code> ownership and merge <code>8742243abf</code> brought in <code>#1973</code> (LOO-937).</p>
+  <p><strong>Area reviewed:</strong> Working Task ordering across Storage, Execution, CLI/Server, Mac Desktop, and iOS; the separation and schema lifecycle of Machine-local Working order (<code>task_orders</code>) vs. shared Project/backlog rank (<code>tasks.planning_rank</code>); the Mac sidebar <strong>Sort by status</strong> toggle and open-Task status-group hold; row status vocabulary and Graph step display; Desktop drag persistence and recovery; OSC 7501 <code>done</code>/<code>error</code> handling; and packaged New Task fonts — reviewed fresh as a whole against base <code>6601da8ef8</code>.</p>
 </header>
 
-<section class="callout" aria-labelledby="biggest-mismatch">
-  <h2 id="biggest-mismatch">Biggest mismatch: <code>task_orders</code> is permanently live in runtime, yet still marked leaving for deletion across schema, guards, automation, and architecture docs</h2>
-  <p><span class="badge badge-warn">Mismatch · Built at 0bc19e976d</span> All 8 UI, selection, drag, status-group, and terminal pairings now align — including the <code>heldStatusGroup</code> ownership fixed in <code>10df280f65</code> and simplified in <code>aef236355e</code>. When merge <code>8742243abf</code> brought in <code>#1973</code> (LOO-937), Jack Heart resolved the product conflict explicitly: <strong>“1063 is right”</strong> — Working order stays Machine-local in <code>task_orders</code>, apart from Project/backlog <code>tasks.planning_rank</code>. Runtime code follows that decision, but the store’s own lifecycle records still carry <code>#1973</code>’s superseded model:</p>
-  <ol>
-    <li><strong><code>leaving_guard.rs</code> hides <code>task_orders</code> in <code>STILL_READ</code> under a false premise.</strong>
-      <br><a href="../rust/loopflow-storage/src/leaving_guard.rs#L18-L27">leaving_guard.rs:18–27</a> lists <code>("task_orders", "LOO-1063")</code> inside <em>“Marked leaving while production still reads them, each until its Task removes the last read.”</em> LOO-1063 is not removing reads from <code>task_orders</code>; it is keeping <code>task_orders</code> permanently.</li>
-    <li><strong><code>due_removals.py</code> and <code>check_migrations.py</code> still schedule and authorize dropping <code>task_orders</code>.</strong>
-      <br><a href="../rust/loopflow-storage/src/migrations/task_facts_once.sql#L84">task_facts_once.sql:84</a> (on <code>origin/main</code>, immutable) carries <code>-- leaving: task_orders LOO-877</code>. Today, <code>uv run python scripts/due_removals.py</code> schedules <code>LOO-877</code> to drop it after <code>2026-12-24</code> (the weekly LaunchAgent runs <code>lf task run LOO-877 -a claude</code>), and <a href="../scripts/check_migrations.py#L502-L509">check_migrations.py</a> will approve <code>DROP TABLE task_orders</code> in LOO-877’s contract.</li>
-    <li><strong><code>SCHEMA.md</code>, <code>reference.md</code>, and <code>reference-code.md</code> still claim <code>task_orders</code> is leaving and <code>planning_rank</code> is the one Task order.</strong>
-      <br><a href="../rust/loopflow-storage/SCHEMA.md#L184">SCHEMA.md:184</a> prints <code>task_orders — leaving → LOO-877, task_facts_once</code> under <em>“Never add a read or write to one.”</em> <a href="../docs/dev/reference.md#L116">docs/dev/reference.md:116</a> and <a href="../docs/dev/reference-code.md#L54">docs/dev/reference-code.md:54</a> still say <code>Task order is tasks.planning_rank; task_orders is leaving, LOO-877</code>.</li>
-  </ol>
-</section>
-
-<section class="callout proposal" aria-labelledby="recommendation">
-  <h2 id="recommendation">Recommendation: forward retraction with <code>-- keeping:</code>, one active-leaving reader, and aligned architecture records</h2>
-  <p><span class="badge badge-proposed">Proposed for next implement pass</span> Migrations on <code>origin/main</code> are immutable, so a reversed deprecation must be expressed forward in the same migration log rather than buried in a test allowlist or an external Linear comment.</p>
+<section class="callout" aria-labelledby="verdict">
+  <h2 id="verdict">Outcome: 9 of 9 pairings align — nothing left to change</h2>
+  <p><span class="badge badge-built">Built · d15cc919ff</span> The single mismatch flagged in pass 1 (at <code>0bc19e976d</code>) — <code>task_orders</code> remaining marked <code>-- leaving: task_orders LOO-877</code> across schema, test guards, removal scheduling, and dev reference docs despite staying permanently live in runtime — is closed across every layer:</p>
   <ul>
-    <li><strong>Add <code>-- keeping: &lt;table&gt;[.&lt;column&gt;] &lt;Task ID&gt;</code> as the exact dual of <code>-- leaving:</code>.</strong>
-      <br>In <a href="../scripts/check_migrations.py">scripts/check_migrations.py</a>, add one chronological resolver <code>active_leaving_marks(catalog)</code> that replays <code>-- leaving:</code> (add) and <code>-- keeping:</code> (retract) in catalog order. Validate in <code>_check_staging</code> that every <code>-- keeping:</code> names a current member that was marked leaving before this migration. In <code>_check_contract</code>, check drops against the <em>still-active</em> marks from <code>expand_file</code> (so if a member was kept later, a contract of <code>task_facts_once</code> cannot drop it even if all marks were retracted).</li>
-    <li><strong>Share that one resolver across <code>due_removals.py</code> and <code>schema_page.py</code>, and mirror it in <code>leaving_guard.rs</code>.</strong>
-      <br><a href="../scripts/due_removals.py">due_removals.py</a> and <a href="../scripts/schema_page.py">schema_page.py</a> both call <code>check_migrations.active_leaving_marks(catalog)</code>. <a href="../rust/loopflow-storage/src/leaving_guard.rs">leaving_guard.rs</a> replays <code>-- leaving:</code> and <code>-- keeping:</code> over <code>migration_sqls()</code> in catalog order and deletes <code>("task_orders", "LOO-1063")</code> from <code>STILL_READ</code>.</li>
-    <li><strong>Add forward migration <code>keep_task_orders.sql</code> and regenerate <code>SCHEMA.md</code>.</strong>
-      <br>Create one comment-only migration (via <code>scripts/new_migration.py keep_task_orders</code>) containing <code>-- keeping: task_orders LOO-1063</code> with a brief comment explaining that Working Task order stays Machine-local apart from Project/backlog <code>tasks.planning_rank</code>. Run <code>uv run python scripts/schema_page.py</code> so <code>SCHEMA.md:184</code> lists <code>task_orders</code> as a live table.</li>
-    <li><strong>Align the architecture docs and migration rules.</strong>
-      <br>Update <a href="../docs/dev/reference.md#L116">docs/dev/reference.md:116</a> and <a href="../docs/dev/reference-code.md#L54">docs/dev/reference-code.md:54</a> to state the two-order model (<code>task_orders</code> for Machine-local Working order; <code>tasks.planning_rank</code> for shared Project/backlog rank), and document <code>-- keeping:</code> in <a href="../rust/loopflow-storage/src/MIGRATIONS.md#L140-L171">MIGRATIONS.md</a>.</li>
+    <li><strong>Forward retraction in the migration log:</strong> <a href="../rust/loopflow-storage/src/migrations/keep_task_orders.sql">keep_task_orders.sql</a> records <code>-- keeping: task_orders LOO-1063</code> without editing immutable <code>task_facts_once.sql</code> (<code>89425281fa</code>).</li>
+    <li><strong>One chronological mark replay across Python and Rust:</strong> <a href="../scripts/check_migrations.py">check_migrations.py</a> parses <code>-- leaving:</code> and <code>-- keeping:</code> with one regex and helper (<code>_marks</code>, <code>_apply_marks</code>, <code>active_leaving_marks</code>, compressed in <code>4d4d6f7b3a</code>), shared by <a href="../scripts/due_removals.py">due_removals.py</a> and <a href="../scripts/schema_page.py">schema_page.py</a>, and mirrored in <a href="../rust/loopflow-storage/src/leaving_guard.rs">leaving_guard.rs</a> with <code>("task_orders", "LOO-1063")</code> removed from <code>STILL_READ</code>.</li>
+    <li><strong>Aligned schema, schema DTOs, and docs:</strong> <a href="../rust/loopflow-storage/SCHEMA.md#L185">SCHEMA.md:185</a> lists <code>task_orders</code> as a live table; <a href="../docs/dev/reference.md#L116">reference.md:116</a>, <a href="../docs/dev/reference-code.md#L54">reference-code.md:54</a>, <a href="../rust/loopflow-storage/src/MIGRATIONS.md#L167-L176">MIGRATIONS.md</a>, and <a href="../rust/loopflow/src/lf/commands/desktop.rs#L1978">DesktopTileRecord::Tasks</a> / <a href="../tests/fixtures/dto/server_schema.json#L2331">server_schema.json</a> all state the two-order model consistently.</li>
+    <li><strong>Synced and verified on a copy of the live store:</strong> <code>8c71894fe4</code> synced <code>origin/main</code> (<code>6601da8ef8</code>), and QA round 8 (<code>d15cc919ff</code>) migrated a backup of the real 1,622-Task store cleanly through <code>keep_task_orders</code> while preserving saved orders and passing <code>check_migrations.py</code>, <code>schema_page.py --check</code>, and <code>due_removals.py</code>.</li>
   </ul>
+  <p>No further model or design mismatch remains in the area. No additional changes are proposed; the branch is ready to advance to gate.</p>
 </section>
 
 <section class="trace" aria-labelledby="trace-title">
-  <h2 id="trace-title">Walk the lifecycle: Built at 0bc19e976d vs Proposed</h2>
-  <p>Switch scenarios to compare <span class="badge badge-built">Built · 0bc19e976d</span> against <span class="badge badge-proposed">Proposed</span> across today’s records, the 30-day removal run, a contract attempt, and runtime ordering.</p>
+  <h2 id="trace-title">Before (pass 1 at 0bc19e976d) vs. Built now (d15cc919ff)</h2>
+  <p>Switch scenarios to compare the prior mismatch <span class="badge badge-before">Before · 0bc19e976d</span> against what is now <span class="badge badge-built">Built · d15cc919ff</span> across schema records, day +30 automation, contract enforcement, counterexamples, and runtime interactions.</p>
 
   <div class="steps" role="group" aria-label="Lifecycle scenario">
     <button type="button" data-scene="today" aria-pressed="true">1 · Today: schema, guard, and docs</button>
-    <button type="button" data-scene="day30" aria-pressed="false">2 · Day +30 (2026-12-24): due_removals --start</button>
+    <button type="button" data-scene="day30" aria-pressed="false">2 · Day +30 (2026-12-24): due_removals</button>
     <button type="button" data-scene="contract" aria-pressed="false">3 · Contract tries DROP TABLE task_orders</button>
     <button type="button" data-scene="redep" aria-pressed="false">4 · Counterexample: kept now, left again later</button>
     <button type="button" data-scene="runtime" aria-pressed="false">5 · Runtime: drags, turns, and status toggle</button>
@@ -224,25 +203,25 @@ pre {
   <div class="comparison">
     <article class="panel">
       <header>
+        <h3>Before (pass 1)</h3>
+        <span class="badge badge-before">0bc19e976d</span>
+      </header>
+      <div class="panel-bar" id="before-bar"></div>
+      <ul class="records" id="before-records" aria-label="Before records"></ul>
+      <p class="notice warn" id="before-notice"></p>
+    </article>
+    <article class="panel built">
+      <header>
         <h3>Built now</h3>
-        <span class="badge badge-built">Built · 0bc19e976d</span>
+        <span class="badge badge-built">Built · d15cc919ff</span>
       </header>
       <div class="panel-bar" id="built-bar"></div>
       <ul class="records" id="built-records" aria-label="Built records"></ul>
-      <p class="notice warn" id="built-notice"></p>
-    </article>
-    <article class="panel proposed">
-      <header>
-        <h3>Proposed</h3>
-        <span class="badge badge-proposed">Proposed</span>
-      </header>
-      <div class="panel-bar" id="proposed-bar"></div>
-      <ul class="records" id="proposed-records" aria-label="Proposed records"></ul>
-      <p class="notice" id="proposed-notice"></p>
+      <p class="notice" id="built-notice"></p>
     </article>
   </div>
   <p id="observation" role="status"></p>
-  <noscript><p>1) Built leaves task_orders marked leaving in SCHEMA.md, reference.md, reference-code.md, and STILL_READ in leaving_guard.rs. Proposed retracts the mark forward with keep_task_orders.sql (-- keeping: task_orders LOO-1063), removing STILL_READ and updating SCHEMA.md and dev docs. 2) On 2026-12-24, Built lets due_removals.py schedule task_orders for LOO-877; Proposed keeps only LOO-877’s five genuinely leaving columns. 3) Built’s check_migrations.py approves DROP TABLE task_orders in a contract of task_facts_once; Proposed refuses it. 4) If a future migration marks task_orders leaving again, Proposed restarts the 30-day clock from that later migration.</p></noscript>
+  <noscript><p>At d15cc919ff, keep_task_orders.sql retracts task_facts_once.sql's leaving mark forward with -- keeping: task_orders LOO-1063. check_migrations.py, due_removals.py, schema_page.py, and leaving_guard.rs replay marks in catalog order, so task_orders is no longer in STILL_READ, due_removals.py, or SCHEMA.md's leaving list, and any contract of task_facts_once trying to drop task_orders fails CI.</p></noscript>
 </section>
 
 <section aria-labelledby="pairs">
@@ -253,102 +232,102 @@ pre {
         <th scope="col">Product concept</th>
         <th scope="col">Code concept</th>
         <th scope="col">Aligns?</th>
-        <th scope="col">Notes (at <code>0bc19e976d</code> against base <code>62a368e5cc</code>)</th>
+        <th scope="col">Notes (at <code>d15cc919ff</code> against base <code>6601da8ef8</code>)</th>
       </tr>
     </thead>
     <tbody>
       <tr>
         <th scope="row">Working membership</th>
-        <td><code>TaskSection::of(lifecycle, owned)</code> → <code>SelectionState::Working</code> / <code>Backlog</code> / <code>Done</code>.</td>
+        <td><code>TaskSection::of(lifecycle, owned, runs_elsewhere)</code> → <code>SelectionState::Working</code> / <code>Backlog</code> / <code>Done</code>.</td>
         <td><span class="fit yes">Yes</span></td>
         <td>One predicate feeds roadmap, selections, sidebar, Wave views, CLI, and iOS.</td>
       </tr>
       <tr>
-        <th scope="row">Two Task orders: Machine-local Working order (Start-Time Stack + saved drags) vs. shared Project/backlog rank</th>
-        <td>Runtime: <code>ordered_tasks_in</code> + <code>TaskOrder</code> / <code>TaskPosition</code> + <code>start_times_in</code> + <code>task_orders</code> vs <code>planning_order::reorder_in</code> (<code>tasks.planning_rank</code>).<br>Lifecycle records: <code>task_facts_once.sql:84</code> (<code>-- leaving: task_orders LOO-877</code>), <code>leaving_guard.rs</code> <code>STILL_READ</code>, <code>due_removals.py</code>, <code>SCHEMA.md:184</code>, <code>reference.md:116</code>, <code>reference-code.md:54</code>.</td>
-        <td><span class="fit no">No</span></td>
-        <td><strong>Runtime aligns; schema lifecycle and ownership records contradict it.</strong> Merge <code>8742243abf</code> brought in <code>#1973</code>’s leaving mark and docs, and added a temporary <code>STILL_READ</code> exemption. <span class="badge badge-proposed">Proposed</span> Retract forward with <code>-- keeping: task_orders LOO-1063</code> in <code>keep_task_orders.sql</code>, share <code>active_leaving_marks</code> across the three Python scripts, mirror in <code>leaving_guard.rs</code> (dropping <code>STILL_READ</code>), regenerate <code>SCHEMA.md</code>, and update <code>reference.md</code> / <code>reference-code.md</code> / <code>MIGRATIONS.md</code>.</td>
+        <th scope="row">Two Task orders &amp; their schema lifecycle: Machine-local Working order vs. shared Project/backlog rank</th>
+        <td>Runtime: <code>ordered_tasks_in</code> + <code>TaskOrder</code> / <code>TaskPosition</code> + <code>start_times_in</code> + <code>task_orders</code> vs. <code>planning_order::reorder_in</code> (<code>tasks.planning_rank</code>).<br>Lifecycle: <code>keep_task_orders.sql</code> (<code>-- keeping: task_orders LOO-1063</code>), <code>check_migrations.py</code> (<code>active_leaving_marks</code>), <code>due_removals.py</code>, <code>schema_page.py</code> (<code>SCHEMA.md:185</code>), <code>leaving_guard.rs</code>, <code>reference.md:116</code>, <code>reference-code.md:54</code>, <code>MIGRATIONS.md</code>.</td>
+        <td><span class="fit yes">Yes</span></td>
+        <td><strong>Resolved in <code>89425281fa</code> &amp; compressed in <code>4d4d6f7b3a</code>.</strong> Working order is Machine-local in <code>task_orders</code>; Project/backlog rank stays shared in <code>tasks.planning_rank</code>. Forward <code>-- keeping:</code> aligns schema guards, <code>due_removals.py</code>, <code>SCHEMA.md</code>, DTO descriptions, and dev docs without touching immutable <code>task_facts_once.sql</code>.</td>
       </tr>
       <tr>
         <th scope="row">Drag a Working Task above or below another</th>
         <td><code>TaskOrderDrag.side</code> → <code>DropSide</code> → <code>PendingCommand.reorder</code> → <code>orderWrites</code> → <code>desktop.dashboard.move</code> → <code>SqliteStore::reorder_working_task</code> CAS loop.</td>
         <td><span class="fit yes">Yes</span></td>
-        <td>Immediate preview in repository sidebar and Working Tasks grid (matching <code>move_into_place</code> across all 4 relative cases), side-aware across concurrent reorders, click-ordered across blips, atomic refusal with <code>NoticeCenter.reread(keeping:)</code> and named absent Task. Dead <code>SqliteStore::reorder_task</code> deleted in <code>aef236355e</code>.</td>
+        <td>Immediate preview in repository sidebar and Working Tasks grid (matching <code>move_into_place</code> across all 4 relative cases), side-aware across concurrent reorders, click-ordered across blips, typed refusals (<code>not_found</code> / <code>invalid</code>) restoring confirmed order with <code>NoticeCenter.reread(keeping:)</code> and naming the absent Task.</td>
       </tr>
       <tr>
         <th scope="row">Non-destructive “Sort by status” toggle (offline-capable)</th>
-        <td><code>WorkNavigation.sidebarSortByStatus</code> + <code>SidebarStatusToggle</code> + <code>WorkModel.sidebarRows</code> (one-pass <code>Dictionary(grouping:)</code>) + <code>⌘K</code> <code>.sortWorkingTasks</code>.</td>
+        <td><code>WorkNavigation.sidebarSortByStatus</code> + <code>SidebarStatusToggle</code> + <code>WorkModel.sidebarRows</code> (single-pass <code>Dictionary(grouping:)</code>) + <code>⌘K</code> <code>.sortWorkingTasks</code>.</td>
         <td><span class="fit yes">Yes</span></td>
-        <td>Starts Off, hover &amp; On/Off accent fill, tooltips, accessible value, never writes <code>task_orders</code>, keeps grid and phone on shared order, works offline.</td>
+        <td>Starts Off, hover &amp; On/Off accent fill, tooltips, accessible value, never writes <code>task_orders</code>, keeps grid and phone on shared order, works offline. One-shot Machine sort deleted.</td>
       </tr>
       <tr>
         <th scope="row">Working sidebar scope for Sort by status</th>
-        <td><code>WorkNavigation.SidebarScope.isWorkingList</code> driving <code>sidebarRows</code>, <code>WorkNavigator</code>, and <code>WorkPalette</code>; <code>canReorderSidebar</code> for drags.</td>
+        <td><code>WorkNavigation.SidebarScope.isWorkingList</code> driving <code>sidebarRows</code>, <code>WorkNavigator</code>, <code>WorkPalette</code>, and <code>holdSelectedStatusGroup</code>; <code>canReorderSidebar</code> for drags.</td>
         <td><span class="fit yes">Yes</span></td>
-        <td>Repository and Wave sidebars share the toggle for that repository; saved Dashboards keep their own arrangement and hide the toggle; drags stay repository-only when sorting is Off.</td>
+        <td>Repository and Wave sidebars share the toggle for that repository; saved Dashboards keep their own arrangement and hide the toggle (header and ⌘K); drags stay repository-only when sorting is Off.</td>
       </tr>
       <tr>
         <th scope="row">Open Task stays in its status group across turns while Sort is On</th>
-        <td><code>WorkNavigation.heldStatusGroup: (taskID, StatusGroup)?</code> owned by <code>WorkNavigation.destination.didSet</code> &amp; <code>sidebarFilter.didSet</code>, latched in <code>WorkModel.applyTaskList</code> (pre- and post-update) and <code>setSelection</code>.</td>
+        <td><code>WorkNavigation.heldStatusGroup: (taskID, StatusGroup)?</code> cleared by <code>WorkNavigation.destination.didSet</code> &amp; <code>sidebarFilter.didSet</code>, latched in <code>WorkModel.applyTaskList</code> (pre- and post-update), <code>setSelection</code>, and <code>toggleSidebarSortByStatus</code>.</td>
         <td><span class="fit yes">Yes</span></td>
-        <td>Fixed in <code>10df280f65</code> and simplified in <code>aef236355e</code>. Any selection change (including direct <code>owner.selection =</code> in session binding/creation) clears the hold immediately; same-Task <code>.work ↔ .entered</code> keeps it; filter switches clear the old hold and pre-update latching captures the open Task’s live group before its next turn moves it.</td>
+        <td>Any selection switch (including direct <code>owner.selection =</code>), filter switch, or non-Working scope clears the hold; same-Task <code>.work ↔ .entered</code> preserves it; pre-update latching captures the pre-turn group before incoming activity moves the row.</td>
       </tr>
       <tr>
         <th scope="row">Row status vocabulary &amp; priority</th>
         <td><code>SelectionState::Error</code>, <code>ProgramStatusState.summaryOrder</code>, <code>[WorkSelectionState].programState</code>, <code>WorkNavigation.StatusGroup</code>, <code>SessionProgramStatus</code>.</td>
         <td><span class="fit yes">Yes</span></td>
-        <td><code>Blocked → Error → Available → Idle → Busy</code> matches every row label and docs; dual-state <code>Busy+Available</code> prints and sorts as <strong>Busy</strong> while matching both filters. Stale <code>swift/README.md</code> lines aligned in <code>10df280f65</code>.</td>
+        <td>Grouping order <code>Blocked → Error → Available → Idle → Busy</code> matches row labels and docs; dual-state <code>Busy+Available</code> prints and sorts as <strong>Busy</strong> while matching both filters.</td>
       </tr>
       <tr>
         <th scope="row">Current Graph step on Mac &amp; phone rows</th>
         <td><code>fill_task_contents_in</code> resolves live <code>run_start</code> cursor or parked step (stripping <code>START</code>/<code>END</code>) into <code>ViewContent.graph_step</code> (<code>decodeIfPresent</code> on read for older servers); Mac and iOS pass to <code>TaskRow</code>.</td>
         <td><span class="fit yes">Yes</span></td>
-        <td>Batched once per snapshot across all plans; compatible with older servers; Dashboard tiles omit it because their workflow sentence already prints below the row.</td>
+        <td>Batched once per snapshot across all plans (early-returns on empty Task sets); compatible with older servers; Dashboard tiles omit it because their workflow sentence already prints below the row.</td>
       </tr>
       <tr>
         <th scope="row">Finished turn reads Available, clears on typing; New Task uses packaged fonts</th>
-        <td><code>available_sql</code> + <code>SessionProgramStatus</code> + <code>acknowledge_results</code> / <code>ProgramStatusReducer.interaction</code>; <code>scripts/app_bundle.py</code> + <code>AppFontRegistration</code>.</td>
+        <td><code>available_sql</code> + <code>SessionProgramStatus</code> + <code>Terminal::acknowledge_results</code> / <code>ProgramStatusReducer.interaction</code>; <code>scripts/app_bundle.py</code> + <code>AppFontRegistration</code>.</td>
         <td><span class="fit yes">Yes</span></td>
-        <td>Terminal pane keeps <code>Finished</code>; Task row reads <code>Available</code>; typing clears <code>done</code>/<code>error</code> in Ghostty and held terminals; packaged fonts resolve across Dev/QA/Release with same-size fallback.</td>
+        <td>Terminal pane keeps <code>Finished</code>; Task row reads <code>Available</code>; typing clears <code>done</code>/<code>error</code> in Ghostty and held terminals; packaged fonts resolve across Dev/QA/Release with same-size system fallback.</td>
       </tr>
     </tbody>
   </table>
 </section>
 
 <section aria-labelledby="survives">
-  <h2 id="survives">Failure, recovery &amp; counterexamples checked (with proposal)</h2>
+  <h2 id="survives">Failure, recovery &amp; counterexamples checked</h2>
   <dl class="scenarios">
+    <div>
+      <dt>Live store upgrade &amp; fresh store creation</dt>
+      <dd>Verified in QA round 8 on a backup of the live 1,622-Task store: <code>keep_task_orders.sql</code> runs zero DDL, records one <code>schema_migrations</code> row, keeps both existing <code>task_orders</code> rows intact, and lets older binaries keep opening the store.</dd>
+    </div>
     <div>
       <dt>Contract of <code>task_facts_once</code> drops its 5 real leaving columns</dt>
       <dd><code>active_leaving_marks</code> still includes <code>tasks.planning_completed</code>, <code>tasks.planning_provider_revision</code>, <code>projects.planning_provider_revision</code>, <code>tracker_projects.task_order_json</code>, and <code>pm_projects.task_order_json</code>. LOO-877 drops those five after <code>2026-12-24</code> and fails CI if it touches <code>task_orders</code>.</dd>
     </div>
     <div>
-      <dt>All marks of an expand migration are later retracted with <code>-- keeping:</code></dt>
-      <dd><code>_check_contract</code> checks whether <code>expand_file</code> originally had any <code>leaving_marks</code>, then requires every drop to be covered by its <em>remaining</em> active marks — avoiding a silent bypass when the filtered list becomes empty.</dd>
+      <dt>All marks of an expand migration retracted with <code>-- keeping:</code></dt>
+      <dd><code>_check_contract</code> checks whether <code>expand_file</code> originally carried any <code>leaving</code> mark, then requires every drop to be covered by its remaining active marks — preventing a silent bypass when the active set empties.</dd>
     </div>
     <div>
-      <dt>Typo or stale member in <code>-- keeping:</code></dt>
-      <dd><code>_check_staging</code> fails if a <code>-- keeping:</code> mark names a member that does not exist in <code>after</code> or is not currently marked leaving before that migration, matching exact grain (<code>table</code> vs <code>table.column</code>).</dd>
+      <dt>Typo, wrong grain, or non-leaving member in <code>-- keeping:</code></dt>
+      <dd><code>_check_staging</code> fails if a <code>-- keeping:</code> mark names a missing table/column or a member not marked leaving by an earlier migration (tested in <code>test_a_keeping_mark_names_a_member_marked_leaving</code>).</dd>
     </div>
     <div>
-      <dt>A kept member is deprecated again in a later migration</dt>
-      <dd>Chronological replay over <code>catalog.ordered()</code> removes <code>task_orders</code> at <code>keep_task_orders.sql</code> and re-adds it at the later marking migration — starting a fresh 30-day staging clock from the later merge and rejecting contracts naming the old <code>task_facts_once</code>.</dd>
+      <dt>A kept member is marked leaving again later</dt>
+      <dd>Chronological replay removes it at <code>keep_task_orders.sql</code> and re-adds it at the later migration, restarting the 30-day staging clock from the later merge (tested in <code>test_marking_a_kept_member_again_restarts_its_clock</code>).</dd>
     </div>
     <div>
-      <dt>Comment-only migration on existing stores &amp; older binaries</dt>
-      <dd><code>keep_task_orders.sql</code> runs zero DDL statements (additive, no lock contention). Existing stores apply it cleanly as one <code>schema_migrations</code> row at install, and older builds still open the store because no table or column changed.</dd>
+      <dt>Concurrent drag from another window or refused drop</dt>
+      <dd>Side-aware CAS loop (<code>prepare_task_order</code> / <code>commit_task_order</code>) lands on the chosen side after concurrent reorders; a missing/non-Working Task returns typed <code>not_found</code>, restores confirmed order in sidebar and grid, and keeps the refusal Notice visible through the reread.</dd>
     </div>
     <div>
-      <dt><code>leaving_guard.rs</code> still catches every genuinely leaving member</dt>
-      <dd>Replaying <code>-- leaving:</code> and <code>-- keeping:</code> over <code>migration_sqls()</code> (already in canonical catalog order) keeps every other leaving table/column denied in test stores while removing the misleading <code>STILL_READ</code> entry for <code>task_orders</code>.</dd>
+      <dt>Machine goes offline (&gt;10 s) or blips mid-drag</dt>
+      <dd>Sort toggle continues working locally offline; drags serialize per <code>(machine, repository)</code> via <code>orderWrites</code> so quick drags arrive in click order across blips; mutation controls disable after 10 s offline.</dd>
     </div>
     <div>
-      <dt>Machine goes offline (&gt;10 s), refuses a drag, or switches filters before Enter</dt>
-      <dd>Unchanged and verified: sort toggle works offline, drags serialize per repository and restore confirmed order on refusal, and <code>WorkNavigation</code> + pre-update <code>holdSelectedStatusGroup()</code> keep the open Task in its pre-turn group across turns.</dd>
-    </div>
-    <div>
-      <dt><code>origin/main</code> moved ahead (<code>planning_scope_checks.sql</code>)</dt>
-      <dd>Syncing with <code>origin/main</code> before gate brings in <code>planning_scope_checks.sql</code>; <code>keep_task_orders.sql</code> stays an unmerged slug until merge, when <code>build.rs</code> and <code>check_migrations.py</code> order it by first-parent commit.</dd>
+      <dt>Filter or scope switch before sending a prompt with Sort On</dt>
+      <dd>Switching filter clears the prior hold; pre-update latching in <code>applyTaskList</code> captures the open Task’s live group before its turn updates status, keeping the row from jumping mid-turn.</dd>
     </div>
   </dl>
 </section>
@@ -367,19 +346,25 @@ pre {
 </section>
 
 <section aria-labelledby="questions">
-  <h2 id="questions">Choices recorded for review</h2>
-  <p>Option <strong>a</strong> is written into <a href="plan.md">plan.md</a> for the next implement pass. Both choices are reversible; reply with e.g. <code>1b</code> to change one.</p>
+  <h2 id="questions">Choices built for review</h2>
+  <p>Option <strong>a</strong> is built on this branch. All three choices are reversible; reply with e.g. <code>1b</code> or <code>3b</code> if you want one changed.</p>
   <ol class="choices">
-    <li>How should the codebase record that <code>task_orders</code> stays live after immutable <code>task_facts_once.sql</code> marked it <code>-- leaving: task_orders LOO-877</code>?
+    <li>How the schema records that <code>task_orders</code> stays live after immutable <code>task_facts_once.sql</code> marked it <code>-- leaving: task_orders LOO-877</code>:
       <ol type="a">
-        <li><strong>Retract forward with <code>-- keeping: task_orders LOO-1063</code> in a new comment-only migration <code>keep_task_orders.sql</code> (recommended).</strong> One rule across <code>check_migrations.py</code>, <code>due_removals.py</code>, <code>schema_page.py</code> (<code>SCHEMA.md</code>), and <code>leaving_guard.rs</code>; removes the false <code>STILL_READ</code> entry and blocks LOO-877 from dropping <code>task_orders</code> automatically on 2026-12-24.</li>
-        <li>Leave <code>task_orders</code> in <code>leaving_guard.rs</code>’s <code>STILL_READ</code> permanently and add a manual note on Linear Task LOO-877 not to drop it (leaves <code>SCHEMA.md</code>, <code>due_removals.py</code>, and <code>check_migrations.py</code> permanently contradicting the product).</li>
+        <li><strong>Forward retraction with <code>-- keeping: task_orders LOO-1063</code> in <code>keep_task_orders.sql</code> (built).</strong> One chronological replay across <code>check_migrations.py</code>, <code>due_removals.py</code>, <code>schema_page.py</code>, and <code>leaving_guard.rs</code>; removes <code>STILL_READ</code> and stops LOO-877 from dropping <code>task_orders</code>.</li>
+        <li>Keep <code>task_orders</code> permanently in <code>leaving_guard.rs</code>’s <code>STILL_READ</code> and leave a manual note on LOO-877.</li>
       </ol>
     </li>
-    <li>Should <code>-- keeping:</code> carry a Task ID (<code>-- keeping: task_orders LOO-1063</code>) matching <code>-- leaving:</code>’s exact grammar?
+    <li>Grammar of <code>-- keeping:</code> in migration comments:
       <ol type="a">
-        <li><strong>Yes — <code>-- keeping: &lt;table&gt;[.&lt;column&gt;] &lt;Task ID&gt;</code> (recommended).</strong> Shares one parser with <code>-- leaving:</code> and records why the deprecation was reversed right in the migration log.</li>
+        <li><strong>Carry the Task ID — <code>-- keeping: &lt;table&gt;[.&lt;column&gt;] &lt;Task ID&gt;</code> (built).</strong> Shares one parser with <code>-- leaving:</code> and records why the deprecation was retracted in the migration log.</li>
         <li>Omit the Task ID and accept bare <code>-- keeping: &lt;table&gt;[.&lt;column&gt;]</code>.</li>
+      </ol>
+    </li>
+    <li>Open Task position while <strong>Sort by status</strong> is toggled On:
+      <ol type="a">
+        <li><strong>Hold the open Task in its pre-turn status group until selection or filter changes, and disable sidebar dragging while On (built).</strong> Prevents sending a prompt from jumping the open row while keeping saved drags untouched.</li>
+        <li>Re-group the open Task immediately on every status change while Sort is On.</li>
       </ol>
     </li>
   </ol>
@@ -388,82 +373,82 @@ pre {
 <script>
 const scenes = {
   today: {
-    barBuilt: 'Current branch at 0bc19e976d (after #1973 merge)',
-    barProposed: 'With keep_task_orders.sql + active_leaving_marks',
-    built: [
+    barBefore: 'Pass 1 at 0bc19e976d (after #1973 merge)',
+    barBuilt: 'Built now at d15cc919ff (keep_task_orders.sql merged in branch)',
+    before: [
       { title: 'rust/loopflow-storage/SCHEMA.md:184', pill: 'Contradicts runtime', bad: true, mismatch: true, body: '- task_orders — leaving → LOO-877, task_facts_once: repository_id, task_ids_json' },
       { title: 'rust/loopflow-storage/src/leaving_guard.rs:26', pill: 'False STILL_READ', bad: true, mismatch: true, body: 'const STILL_READ = &[ ..., ("task_orders", "LOO-1063") ]; // "until its Task removes the last read"' },
       { title: 'docs/dev/reference.md:116 & reference-code.md:54', pill: 'Stale model', bad: true, mismatch: true, body: 'Task order is tasks.planning_rank; task_orders is leaving, LOO-877' }
     ],
-    proposed: [
-      { title: 'rust/loopflow-storage/src/migrations/keep_task_orders.sql', pill: 'Forward mark', good: true, ok: true, body: '-- Working Task order stays Machine-local apart from Project/backlog rank.\n-- keeping: task_orders LOO-1063' },
-      { title: 'rust/loopflow-storage/SCHEMA.md:184 & leaving_guard.rs', pill: 'Aligned', good: true, ok: true, body: '- task_orders: repository_id, task_ids_json   (STILL_READ entry deleted)' },
-      { title: 'docs/dev/reference.md:116 & reference-code.md:54', pill: 'Two orders', good: true, ok: true, body: 'task_orders holds Machine-local Working order; tasks.planning_rank holds shared Project/backlog rank' }
+    built: [
+      { title: 'rust/loopflow-storage/src/migrations/keep_task_orders.sql', pill: 'Forward mark', good: true, ok: true, body: '-- Working Task order stays Machine-local in `task_orders`, apart from the\n-- shared Project and backlog rank in `tasks.planning_rank`.\n-- keeping: task_orders LOO-1063' },
+      { title: 'rust/loopflow-storage/SCHEMA.md:185 & leaving_guard.rs', pill: 'Aligned', good: true, ok: true, body: '- task_orders: repository_id, task_ids_json   (STILL_READ entry deleted)' },
+      { title: 'docs/dev/reference.md:116 & reference-code.md:54', pill: 'Two orders', good: true, ok: true, body: 'task_orders is this Machine\'s Working Task order, apart from shared Project and backlog rank in tasks.planning_rank' }
     ],
-    builtNotice: 'Every generated and checked architecture record still says task_orders is leaving, even though Jack Heart decided “1063 is right”.',
-    proposedNotice: 'One forward directive aligns SCHEMA.md, leaving_guard.rs, check_migrations.py, due_removals.py, and dev reference docs.',
-    observation: 'No merged migration is edited: task_facts_once.sql keeps its exact origin/main bytes.'
+    beforeNotice: 'Every generated and checked architecture record contradicted the live runtime after #1973 merged.',
+    builtNotice: 'SCHEMA.md, leaving_guard.rs, check_migrations.py, due_removals.py, DesktopTileRecord::Tasks, and dev docs all agree.',
+    observation: 'No merged migration was edited: task_facts_once.sql keeps its exact origin/main bytes.'
   },
   day30: {
+    barBefore: '2026-12-24 · LaunchAgent runs due_removals.py --start',
     barBuilt: '2026-12-24 · LaunchAgent runs due_removals.py --start',
-    barProposed: '2026-12-24 · LaunchAgent runs due_removals.py --start',
-    built: [
+    before: [
       { title: 'due_removals.py LOO-877 member list', pill: 'Schedules drop', bad: true, mismatch: true, body: 'LOO-877  tasks.planning_completed, ..., task_orders, ...  drop after 2026-12-24  unstarted' },
       { title: 'Automated action', pill: 'Hazard', bad: true, mismatch: true, body: 'lf task run LOO-877 -a claude  # told task_orders is due for removal' }
     ],
-    proposed: [
+    built: [
       { title: 'due_removals.py LOO-877 member list', pill: '5 real drops only', good: true, ok: true, body: 'LOO-877  tasks.planning_completed, tasks.planning_provider_revision, projects.planning_provider_revision, tracker_projects.task_order_json, pm_projects.task_order_json  drop after 2026-12-24' },
-      { title: 'task_orders status', pill: 'Safe', good: true, ok: true, body: 'Excluded from due_removals.py — never listed and never handed to LOO-877.' }
+      { title: 'task_orders status', pill: 'Safe', good: true, ok: true, body: 'Excluded from due_removals.py — verified in QA round 8 and test_due_removals.py.' }
     ],
-    builtNotice: 'Even after LOO-877 drops its 5 real columns, due_removals.py keeps listing LOO-877 forever because task_orders still exists.',
-    proposedNotice: 'LOO-877 drops only the 5 genuinely superseded columns and then disappears cleanly from due_removals.py.',
+    beforeNotice: 'due_removals.py kept listing LOO-877 forever because task_orders still existed.',
+    builtNotice: 'LOO-877 drops only the 5 genuinely superseded columns and then clears cleanly from due_removals.py.',
     observation: 'One shared active_leaving_marks(catalog) function drives check_migrations.py, due_removals.py, and schema_page.py.'
   },
   contract: {
+    barBefore: 'CI runs check_migrations.py on a contract of task_facts_once',
     barBuilt: 'CI runs check_migrations.py on a contract of task_facts_once',
-    barProposed: 'CI runs check_migrations.py on a contract of task_facts_once',
-    built: [
+    before: [
       { title: 'Contract migration SQL', pill: 'Drops live table', bad: true, mismatch: true, body: '-- expand: task_facts_once\n-- exports: ...\nDROP TABLE task_orders;' },
       { title: 'scripts/check_migrations.py', pill: 'PASSES (bug)', bad: true, mismatch: true, body: 'exit 0 — task_facts_once.sql marked task_orders leaving 30+ days ago.' }
     ],
-    proposed: [
+    built: [
       { title: 'Contract migration SQL', pill: 'Blocked by CI', good: true, ok: true, body: '-- expand: task_facts_once\n-- exports: ...\nDROP TABLE task_orders;' },
-      { title: 'scripts/check_migrations.py', pill: 'FAILS (safe)', good: true, ok: true, body: 'migration check failed: drop_877.sql drops table task_orders, which task_facts_once no longer marks leaving' }
+      { title: 'scripts/check_migrations.py', pill: 'FAILS (safe)', good: true, ok: true, body: 'migration check failed: drop_877.sql drops table task_orders, which task_facts_once does not mark leaving or a later migration keeps' }
     ],
-    builtNotice: 'Nothing in CI prevents LOO-877 from dropping task_orders once the 30-day staging window clears.',
-    proposedNotice: 'CI actively protects task_orders because active_leaving_marks sees keep_task_orders.sql retracted task_facts_once’s mark.',
-    observation: 'Also safe if all marks of an expand migration were retracted: _check_contract still enforces against the empty active set.'
+    beforeNotice: 'Nothing in CI prevented LOO-877 from dropping task_orders once 30 days elapsed.',
+    builtNotice: 'CI actively refuses DROP TABLE task_orders (tested in test_a_contract_cannot_drop_a_kept_member).',
+    observation: 'Also safe if every mark of an expand migration is retracted: _check_contract enforces against the empty active set.'
   },
   redep: {
+    barBefore: 'Counterexample: a kept table is later deprecated again',
     barBuilt: 'Counterexample: a kept table is later deprecated again',
-    barProposed: 'Counterexample: a kept table is later deprecated again',
-    built: [
-      { title: 'No retraction mechanism', pill: 'N/A', bad: true, mismatch: true, body: 'Original task_facts_once clock keeps ticking; no way to reset staging window or express reversal.' }
+    before: [
+      { title: 'No retraction mechanism', pill: 'N/A', bad: true, mismatch: true, body: 'Original task_facts_once clock kept ticking; no way to express reversal or restart staging.' }
     ],
-    proposed: [
+    built: [
       { title: 'Catalog replay order', pill: 'Chronological', good: true, ok: true, body: '1. task_facts_once.sql:   -- leaving: task_orders LOO-877   → active = {task_orders @ T1}\n2. keep_task_orders.sql:  -- keeping: task_orders LOO-1063  → active = {}\n3. future_migration.sql:  -- leaving: task_orders LOO-2000  → active = {task_orders @ T3}' },
       { title: 'Staging clock & contract check', pill: 'Fresh 30d window', good: true, ok: true, body: 'Contract of task_facts_once is still rejected; contract of future_migration waits 30 days from T3.' }
     ],
-    builtNotice: 'Without chronological replay, immutable migrations cannot express a change of mind cleanly.',
-    proposedNotice: 'Chronological replay over catalog.ordered() makes leaving/keeping compose without special cases.',
-    observation: 'leaving_guard.rs walks MIGRATIONS in the same canonical order, so Rust test stores and Python scripts always agree.'
+    beforeNotice: 'Immutable migrations had no forward way to reverse a deprecation.',
+    builtNotice: 'Verified in test_marking_a_kept_member_again_restarts_its_clock; leaving_guard.rs replays in the same order.',
+    observation: 'One regex and one apply helper keep staging validation and catalog replay identical.'
   },
   runtime: {
-    barBuilt: 'Runtime behavior verified in QA round 7 (0bc19e976d)',
-    barProposed: 'Runtime behavior unchanged — already aligned',
-    built: [
+    barBefore: 'Runtime behavior at 0bc19e976d (QA round 7)',
+    barBuilt: 'Runtime behavior at d15cc919ff (QA rounds 7 & 8)',
+    before: [
       { title: 'Start-Time Stack & drags', pill: 'Aligned', good: true, ok: true, body: 'Working Tasks sort newest-started first; drags persist in task_orders (side-aware CAS) across sidebar, grid, Wave views, CLI, and iOS. Backlog keeps planning_rank.' },
-      { title: 'Sort by status toggle & open-Task hold', pill: 'Aligned', good: true, ok: true, body: 'Toggle On/Off shared across repo & Wave sidebars; WorkNavigation owns heldStatusGroup release and applyTaskList holds pre-update before turns.' },
+      { title: 'Sort by status toggle & open-Task hold', pill: 'Aligned', good: true, ok: true, body: 'Toggle On/Off shared across repo & Wave sidebars; WorkNavigation owns heldStatusGroup release and applyTaskList latches pre-update before turns.' },
       { title: 'Row status, Graph step, OSC 7501 & fonts', pill: 'Aligned', good: true, ok: true, body: 'Blocked → Error → Available → Idle → Busy; done→Available (row) / Finished (pane); typing clears done/error; New Task fonts bundled.' }
     ],
-    proposed: [
-      { title: 'Start-Time Stack & drags', pill: 'Unchanged', good: true, ok: true, body: 'Same runtime behavior — now backed by honest schema lifecycle records.' },
-      { title: 'Sort by status toggle & open-Task hold', pill: 'Unchanged', good: true, ok: true, body: 'Same runtime behavior — 8 of 9 pairings already align.' },
-      { title: 'Row status, Graph step, OSC 7501 & fonts', pill: 'Unchanged', good: true, ok: true, body: 'Same runtime behavior — no UI or storage query changes needed.' }
+    built: [
+      { title: 'Start-Time Stack & drags', pill: 'Aligned + verified', good: true, ok: true, body: 'Live-store backup migrated cleanly through keep_task_orders; saved orders preserved; DesktopTileRecord::Tasks & server_schema.json describe Working order accurately.' },
+      { title: 'Sort by status toggle & open-Task hold', pill: 'Aligned', good: true, ok: true, body: 'Unchanged and verified in QA round 7; non-destructive toggle, single-owner group hold, offline-capable.' },
+      { title: 'Row status, Graph step, OSC 7501 & fonts', pill: 'Aligned', good: true, ok: true, body: 'Unchanged and verified; selection reads early-return on empty Task sets (4d4d6f7b3a).' }
     ],
-    builtNotice: 'All runtime interactions passed QA round 7; only the schema lifecycle & architecture records remain out of step.',
-    proposedNotice: 'Closing the schema-lifecycle mismatch completes all 9 of 9 pairings cleanly before gate.',
-    observation: 'Every runtime test and private-Machine QA round 7 check stays valid.'
+    beforeNotice: 'Runtime was already aligned, but backed by contradicting schema lifecycle records.',
+    builtNotice: 'All 9 of 9 pairings now align end-to-end across runtime, schema lifecycle, tooling, and docs.',
+    observation: 'Ready to advance to gate.'
   }
 };
 
@@ -490,12 +475,12 @@ function renderRecords(el, items) {
 
 function show(name) {
   const s = scenes[name];
+  document.getElementById('before-bar').textContent = s.barBefore;
   document.getElementById('built-bar').textContent = s.barBuilt;
-  document.getElementById('proposed-bar').textContent = s.barProposed;
+  renderRecords(document.getElementById('before-records'), s.before);
   renderRecords(document.getElementById('built-records'), s.built);
-  renderRecords(document.getElementById('proposed-records'), s.proposed);
+  document.getElementById('before-notice').textContent = s.beforeNotice;
   document.getElementById('built-notice').textContent = s.builtNotice;
-  document.getElementById('proposed-notice').textContent = s.proposedNotice;
   document.getElementById('observation').textContent = s.observation;
 }
 

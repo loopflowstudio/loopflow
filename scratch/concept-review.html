@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>LOO-1083 concept review (post-build, pass 2): remote Task workspaces at HEAD</title>
+<title>LOO-1083 concept review (post-build, pass 3): remote Task workspaces at HEAD</title>
 <style>
   :root {
     --bg: #fbfaf7; --fg: #1d1c1a; --muted: #6b665e; --line: #e2ddd3; --card: #ffffff;
@@ -49,120 +49,103 @@
 <body>
 <main>
 
-<h1>Remote Task workspaces: post-build concept review (pass 2)</h1>
-<p class="lede">LOO-1083 review at <code>HEAD</code> (<code>f28db78cd5</code>) against base <code>62a368e5cc</code>, 2026-11-24.
+<h1>Remote Task workspaces: post-build concept review (pass 3)</h1>
+<p class="lede">LOO-1083 review at <code>HEAD</code> (<code>45b450065a</code>) against base <code>62a368e5cc</code>, 2026-11-24.
 Area taken: <b>opening, watching, and acting on a Task's workspace (Files, Changes, Diff, Save, Shell, Session) when another Machine owns it</b> across CLI, Desktop, Mobile, and <code>lf server</code>.
-Slices 1–5 and two live two-Machine QA runs are committed; this review re-evaluates the whole built area at <code>HEAD</code>.</p>
+Slices 1–6 and three live two-Machine QA runs are committed; this review evaluates the whole built area as someone seeing it for the first time.</p>
 
-<p><span class="built">built at HEAD</span> marks behavior committed at <code>f28db78cd5</code>.
-<span class="new">proposed</span> marks Slice 6 in <code>scratch/plan.md</code>, finishing the remaining Desktop and remote-Session projection gaps before gate. No wire schema change is needed.</p>
+<p><span class="built">built at HEAD</span> marks behavior committed at <code>45b450065a</code>.
+<span class="new">proposed</span> marks Slice 7 in <code>scratch/plan.md</code>, closing the remaining remote-Session identity, routing, and Browser-strip gaps before gate.</p>
 
 <div class="callout info">
-  <b>What holds at HEAD (Slices 1–5 + QA2 fixes):</b>
+  <b>What holds at HEAD (Slices 1–6 + QA3 fixes):</b>
   <code>lf server</code> is the single cross-Machine router (<code>PeerPool</code>, protocol rev 10, portable Task selectors).
-  <code>task.files.watch</code> now follows the Task record before its checkout exists (waiting for <code>.git</code>), carries <code>machine_label</code>, and recovers across moves and server restarts — Mobile deleted its 5-second polling loop and Desktop Files follows moves cleanly with drafts kept by <code>(Task, path, base revision)</code>.
-  CLI <code>lf open --task</code> / <code>--machine</code> honors <code>-a &lt;harness&gt;</code> through <code>session.resume</code> and <code>session.continue</code>, and rewrites both detach and leave lines to this Machine's <code>lf open …</code>.
-  Desktop Shell opens from <code>workspace.owner</code> before any conversation, and the Diff chip names the remote Machine ("Changes below are on mini.").
+  <code>task.files.watch</code> follows the Task record before its checkout exists (waiting for <code>.git</code>), carries <code>machine_label</code>, and recovers across moves and server restarts.
+  CLI <code>lf open --task</code> / <code>--machine</code> honors <code>-a &lt;harness&gt;</code> through <code>session.resume</code> and <code>session.continue</code>, rewrites detach and leave lines to <code>lf open …</code>, and bridged viewers report readiness (<code>connection::Status</code>) so Desktop panes reach <code>usable</code> and accept live input.
+  Desktop Files, Changes, Diff, Save, Shell, and Session panes follow Task owner transitions (including across two open windows without render loops), keeping drafts by <code>(Task, path, base revision)</code> and running shells on their starting Machine.
+  Mobile exposes Session, Files, Changes, and Shell over the existing single pairing.
 </div>
 
 <h2>Two concrete interactions where HEAD still breaks the model</h2>
 
-<h3>1. Moving a Task while it is open in Desktop (and starting a new conversation on a remote Task)</h3>
-<p>A Task is open in Desktop on <code>laptop</code> with its Session pane and Files pane visible. Someone runs <code>lf task move &lt;task&gt; --machine mini</code> (or opens a remote Task and clicks <b>New conversation</b>).</p>
+<h3>1. Refreshing, switching agent, or resetting a remote Task's Session in Desktop</h3>
+<p>A tracker-backed Task (Linear or Asana, like <code>MTG-421</code>, where <code>laptop</code> has local UUID <code>task_laptop</code> and <code>mini</code> has <code>task_peer</code>) is open in Desktop on <code>laptop</code>. The person clicks <b>Refresh</b>, chooses another harness from the <b>Session agent</b> menu, closes and reopens the pane, or clicks <b>Reset session</b> (<code>plus.bubble</code>) in the Session strip.</p>
 <div class="cols">
   <div class="card">
-    <h3><span class="built">built at HEAD</span> Pane holds a stale client-side location</h3>
-    <div class="flow">Task open on laptop:
-  pane.content = .session(id: sid, location: laptop_wt)
-  browser      = .browser(taskId, …, location: laptop_wt)
-  workspace.location = laptop_wt; workspace.owner = laptop
+    <h3><span class="built">built at HEAD</span> Peer UUID leaks &amp; <code>session.new</code> is unrouted</h3>
+    <div class="flow">mini answers session.resume / session.list --task:
+  task_ids: ["task_peer"]
+  work: { kind: "task", id: "task_peer" }
+  workspace: { machine_id: mini, task_id: "task_peer", … }
 
-lf task move &lt;task&gt; --machine mini (Session keeps same sid):
-  plan.list → runtime.owner = mini, reference.workspace = null
-  WorkModel sets workspace.location = nil, workspace.owner = mini
-    → Files follows cleanly: "mini origin.dc5441-…"
-    → Session pane is NOT retired or re-prepared:
-      • openWarmConversations gates on workspace.location != nil
-      • openWarmConversation skips presentSession because
-        pane(forSessionId: sid) != nil (same sid!)
-      • SessionsStore.prepare never updates pane.content.location
-      • reconcileMembership only sees local session.list (sid gone)
-    → _terminal checks surface.workspace == pane.content.location
-      → MISMATCH → renders "Session location unavailable"
-    → strip checks pane.content.location != workspace.location
-      → BOTH Session &amp; Browser strips print stale "repo.dc5441-…"
+localize_remote_session() on laptop:
+  task_ids.push("task_laptop") → ["task_peer", "task_laptop"]
+  work.id &amp; workspace.task_id  → still "task_peer"!
 
-Click "New conversation" on a Task owned by mini:
-  reference.workspace is nil → newTaskSession runs LOCAL
-  `lf task checkout` on the Mac → rogue local checkout + local shell!</div>
-    <p class="muted">Observed live in QA2 (<code>scratch/qa/s5-f5b.png</code>). Files follows the Task; the Session pane, Browser strip, and "New conversation" still behave as if a local checkout location owns them.</p>
+Desktop acts on the remote Session:
+  1. Refresh / Reopen / Switch agent:
+     preparationWork() reads record.taskIds.first → "task_peer"
+     → laptop sends session.resume { id, task: "task_peer" }
+     → laptop SQLite has no "task_peer" → not routed → "Session not found"
+  2. Session header menu → Files / Diff / Brief:
+     paneTaskId reads record.work.id → "task_peer" → model.task() = nil
+  3. Refresh / Switch agent on a MOVED Session (laptop → mini):
+     work_route::forward hits moved_session() BEFORE --task
+     → Forward.route = None → prepared_remotely() rewrites open_argv
+       and action.help to `--machine mini` instead of `--task MTG-421`!
+  4. Reset session (plus.bubble in Session strip):
+     Write::SessionNew has no `task` field &amp; is omitted from Write::remote()
+     → runs locally on laptop → "Session not found" (peer-born) or
+       resets the stale laptop row (moved)</div>
   </div>
   <div class="card proposed">
-    <h3><span class="new">proposed</span> Desktop panes follow Task ownership</h3>
-    <div class="flow">lf task move &lt;task&gt; --machine mini:
-  WorkModel sees workspace.owner changed (laptop → mini):
-    1. Clear stale preparedTaskWorktrees[task.id]
-    2. Retire old laptop Session surface; clear stale laptop
-       location on Session and Browser panes
-       (running ShellTabs stay on laptop, labelled laptop)
-    3. Update workspace.owner = mini, workspace.location = nil
+    <h3><span class="new">proposed</span> One local Task identity &amp; one Task-routed Session boundary</h3>
+    <div class="flow">localize_remote_session() on laptop:
+  • puts route.task_id FIRST in task_ids (task_ids[0] = "task_laptop")
+  • rewrites work.id = "task_laptop" (when work.kind == "task")
+  • rewrites workspace.task_id = "task_laptop" (when present)
 
-  Selected/visible started Task (!awaitsStart) with owner != nil:
-    → openWarmConversations prepares on mini through local server
-    → SessionRecord returns with workspace = mini_wt
-    → adopt/prepare ALWAYS calls updateSessionLocation(sid, mini_wt)
-      even when pane(forSessionId: sid) already exists
-    → pane.content.location == surface.workspace == mini_wt
-    → Session attaches on mini; strip drops stale laptop path
-    → If mini is offline: shows "Conversation failed to open"
-      naming mini + Retry (never "Session location unavailable")
-
-Click "New conversation" on a Task owned by mini:
-  owner != localMachineId → skips local checkoutTask completely
-  → entry.newShell(command: ["lf", "--interactive", "--task", …])
-  → routed task.shell.start runs on mini (or shows Not started)</div>
-    <p class="muted">One source of truth for Task placement across all four Desktop views. Running shells stay put; everything else follows the owner.</p>
+Write::SessionResume &amp; Write::SessionNew (rev 10, unshipped):
+  • SessionNew carries required-nullable `task: Option&lt;String&gt;`
+    (Desktop resetSession passes preparationWork, matching prepare &amp; switch)
+  • Write::remote() routes BOTH SessionResume and SessionNew via remote_session()
+  • Explicit --task resolves TaskExecutionRoute FIRST (before moved_session),
+    carrying route.peer_selector to the peer and route back into
+    prepared_remotely() so open_argv &amp; help always stay `--task`-addressed
+  • Write::run_here translates peer_task_id for TaskSave, SessionResume,
+    and SessionNew whenever task is Some</div>
   </div>
 </div>
 
-<h3>2. Inspecting or opening a remote Session's record from this Machine</h3>
-<p>A Task runs on <code>mini</code>. Desktop displays the Session's <i>Open here</i> button tooltip (<code>SessionRecord.action.help</code>), or resolves an exact remote Session link through Task-scoped <code>session.list</code>.</p>
+<h3>2. Browser pane strip after a Task moves</h3>
+<p>A Task moves <code>laptop → mini</code> while Desktop shows Session + Browser side by side (seen in <code>scratch/qa/s6-final-move.png</code>).</p>
 <div class="cols">
   <div class="card">
-    <h3><span class="built">built at HEAD</span> Peer's local commands leak through</h3>
-    <div class="flow">Write::SessionResume → mini → ssh::prepared_remotely():
-  • rewrites record.open_argv → `lf open --task … --session … --here`
-  • leaves record.action.help → "View the running conversation here:
-                                 lf resume b3bc…"  (fails on laptop!)
-  • leaves record.outlook.command &amp; status_line → `lf resume …`
-
-Read::SessionList { task: Some(issue) } → mini:
-  • returns mini's raw SessionRecords with NO localization:
-    - open_argv has mini's binary path `/home/mini/.local/bin/lf …`
-    - action.help / outlook.command say `lf resume …`
-    - task_ids has mini's local Task UUID (fails Desktop's
-      record.names(task:) on tracker-backed peers with different UUIDs)</div>
+    <h3><span class="built">built at HEAD</span> Duplicate "Files" title in Browser strip</h3>
+    <div class="flow">Move laptop → mini:
+  follow(owner:) clears browser pane.content.location = nil
+  openWarmConversation sets workspace.location = mini_wt
+  showsContext checks:
+    if case .browser = pane.content, workspace.location == nil { return false }
+    return pane.content.location != workspace.location  // nil != mini_wt → TRUE!
+  → strip prints:  faf63c ▾  Brief  Diff  Files      Files</div>
   </div>
   <div class="card proposed">
-    <h3><span class="new">proposed</span> One calling-Machine localization boundary</h3>
-    <div class="flow">localize_remote_session(record, machine, local_task_id, task):
-  Used by BOTH Write::SessionResume and routed Read::SessionList:
-  • open_argv → [current_exe, "open",
-                 "--task" &lt;task&gt; | "--machine" &lt;machine.id&gt;,
-                 "--session", &lt;id&gt;, "--here"]
-  • action.help, outlook.command, status_line →
-    replaces peer `lf resume …` with calling Machine's
-    `lf open --task &lt;task&gt;` (primary) or
-    `lf open --task &lt;task&gt; --session &lt;id&gt;` /
-    `lf open --machine &lt;machine.id&gt; --session &lt;id&gt;`
-  • task_ids → includes this Machine's local TaskId when routed
-    for a Task (tracker-backed peers match cleanly)</div>
+    <h3><span class="new">proposed</span> A Task Browser never lives apart from its Task</h3>
+    <div class="flow">showsContext:
+  guard workspace.key.kind == .task else { return true }
+  if case .browser = pane.content { return false }
+  return pane.content.location != workspace.location
+
+Files already prints "mini origin.faf63c-…" in files-location.
+Only a running Shell tab (or a Session apart from the Task) shows
+strip context.</div>
   </div>
 </div>
 
 <h2>Do the product's concepts and the code's line up?</h2>
 <table>
-  <tr><th>What a person knows</th><th>Code behind it at <code>HEAD</code> (<code>f28db78cd5</code>)</th><th></th><th>Assessment</th></tr>
+  <tr><th>What a person knows</th><th>Code behind it at <code>HEAD</code> (<code>45b450065a</code>)</th><th></th><th>Assessment</th></tr>
   <tr>
     <td><b>Task</b>: one outcome, opened by name</td>
     <td><code>task_execution_route</code> + <code>peer_selector</code> (tracker key / identifier / local ID)</td>
@@ -177,33 +160,39 @@ Read::SessionList { task: Some(issue) } → mini:
   </tr>
   <tr>
     <td><b>Files, Changes, Diff &amp; Save</b> (including live watch)</td>
-    <td>Routed <code>task.files/file/changes/diff/save</code> + Task-scoped <code>task.files.watch</code> (nullable checkout/revision, <code>machine_label</code>, waits for <code>.git</code>); Desktop <code>TaskFilesStore</code> reconnects and keeps drafts by <code>(Task, path, base revision)</code>; Diff chip names remote Machine</td>
+    <td>Routed <code>task.files/file/changes/diff/save</code> + Task-scoped <code>task.files.watch</code> (nullable checkout/revision, <code>machine_label</code>, waits for <code>.git</code>); Desktop <code>TaskFilesStore</code> follows via <code>onChange</code>, reconnects, keeps drafts by <code>(Task, path, base revision)</code>; Diff chip names remote Machine</td>
     <td><span class="yes">yes</span></td>
-    <td><span class="built">built at HEAD</span> Works across unstarted, move, outage, and local server restart on CLI, Desktop, and Mobile.</td>
+    <td><span class="built">built at HEAD</span> Works across unstarted, move, outage, two windows, and local server restart on CLI, Desktop, and Mobile.</td>
   </tr>
   <tr>
     <td><b>Shell in the Task</b></td>
-    <td><code>task.shell.start/attach/close</code> over bridged tickets; Desktop <code>newShell</code> opens via <code>location ?? owner</code>; running shells stay labelled on their starting Machine across moves; Mobile <code>mobile-&lt;task&gt;</code></td>
+    <td><code>task.shell.start/attach/close</code> over bridged tickets; Desktop <code>newShell</code> opens via <code>location ?? owner</code>; running shells stay labelled on their starting Machine across moves (Close passes <code>--started-on</code>); Mobile <code>mobile-&lt;task&gt;</code></td>
     <td><span class="yes">yes</span></td>
     <td><span class="built">built at HEAD</span> Opens before any conversation; no local Mac fallback.</td>
   </tr>
   <tr>
-    <td><b>Desktop Session &amp; Browser panes across a move</b></td>
-    <td><code>PaneContent.session(id:location:)</code> + <code>workspace.location</code> + <code>preparedTaskWorktrees</code> stay frozen on the old Machine after a move; <code>_terminal</code> compares <code>surface.workspace == pane.content.location</code> → <code>"Session location unavailable"</code>; <code>newTaskSession</code> creates a local checkout on remote Tasks</td>
+    <td><b>Desktop Session pane &amp; live input across a move</b></td>
+    <td><code>WorkModel.follow</code> + <code>SessionsWorkspace.follow(owner:)</code> retire old viewers and clear stale locations; <code>onPrepared</code> syncs pane location; <code>relay_socket</code> reports <code>connection::Status</code> so remote panes reach <code>usable</code>; remote <b>New conversation</b> runs <code>lf --interactive --task …</code> in a routed shell</td>
+    <td><span class="yes">yes</span></td>
+    <td><span class="built">built at HEAD</span> Live move verified in QA3 with two windows; remote Session takes typed input.</td>
+  </tr>
+  <tr>
+    <td><b>Remote Session records &amp; Session actions (Refresh, Switch agent, Reset)</b></td>
+    <td><code>localize_remote_session</code> appends local <code>task_id</code> behind peer's UUID and leaves <code>work.id</code> / <code>workspace.task_id</code> as peer UUIDs; <code>moved_session</code> beats explicit <code>--task</code> in <code>work_route::forward</code> (dropping Task route on moved-Session refresh/switch); <code>Write::SessionNew</code> lacks <code>task</code> and is unrouted in <code>Write::remote()</code></td>
     <td><span class="no">no</span></td>
-    <td><b>Biggest mismatch</b> (below). Leftover client-held location layer fighting the server-routed model. <span class="new">proposed</span>: follow owner transitions in <code>WorkModel</code>, always sync pane location from prepared <code>SessionRecord</code>, clear stale Browser strip location, route <code>newTaskSession</code> through <code>newShell</code>.</td>
+    <td><b>Biggest mismatch</b> (below). One Task has two IDs in Desktop after localization, and one of the three strip controls (Reset) ignores ownership. <span class="new">proposed</span>: Slice 7.</td>
+  </tr>
+  <tr>
+    <td><b>Task Browser pane strip</b></td>
+    <td><code>showsContext</code> suppresses <code>.browser</code> only when <code>workspace.location == nil</code>, so after a move clears Browser location and warm open sets <code>workspace.location</code>, the strip prints a duplicate <code>Files</code> context label</td>
+    <td><span class="no">no</span></td>
+    <td>Leftover client-location comparison on a pane that never lives apart from its Task. <span class="new">proposed</span>: return <code>false</code> for Task <code>.browser</code> in <code>showsContext</code>.</td>
   </tr>
   <tr>
     <td><b>CLI <code>lf open</code> &amp; harness switching</b></td>
     <td><code>lf open --task</code> / <code>--machine</code> (both flag orders) → <code>SessionResume</code> + <code>SessionAttach</code> / <code>SessionContinue { agent }</code>; <code>ReturnCommand</code> rewrites detach and leave lines to <code>lf open …</code></td>
     <td><span class="yes">yes</span></td>
     <td><span class="built">built at HEAD</span> Works without remote <code>default_agent</code>; farewell commands work on the calling Machine.</td>
-  </tr>
-  <tr>
-    <td><b>Remote Session records &amp; help commands</b></td>
-    <td><code>prepared_remotely</code> rewrites <code>open_argv</code> only, leaving <code>action.help</code> / <code>outlook.command</code> / <code>status_line</code> as <code>lf resume &lt;id&gt;</code>; routed <code>session.list --task</code> returns raw peer records without rewriting <code>open_argv</code>, help, or <code>task_ids</code></td>
-    <td><span class="no">no</span></td>
-    <td>One concept ("how this Machine opens a remote Session") owned in two half-places. <span class="new">proposed</span>: one <code>localize_remote_session</code> helper at the peer boundary for both <code>SessionResume</code> and routed <code>SessionList</code>.</td>
   </tr>
   <tr>
     <td><b>Unreachable Machine</b></td>
@@ -219,34 +208,29 @@ Read::SessionList { task: Some(issue) } → mini:
   </tr>
 </table>
 
-<h2>The biggest mismatch: Desktop panes still guard on a stale client-held location</h2>
+<h2>The biggest mismatch: remote Session identity &amp; preparation writes still split across two rules</h2>
 <div class="callout">
-  Slice 3 deleted Desktop's client-side SSH routing and placement guard, and Slice 5 made Files and Shell follow <code>task.runtime.owner</code>.
-  The Session pane, Browser strip, and <b>New conversation</b> action are the last holdouts: Desktop still caches Task/Session location in four places (<code>pane.content.location</code>, <code>workspace.location</code>, <code>preparedTaskWorktrees</code>, and <code>SessionRecord.workspace</code>) and lets them drift when ownership changes.
-  When a Task and its Session move (keeping the same <code>LfSessionId</code>), <code>WorkspacePanesView._terminal</code> compares the new record against the old pane location and prints <b>Session location unavailable</b> beside the stale laptop worktree name — the exact kind of client-opinion failure LOO-1083 set out to end.
+  Slice 6 added <code>localize_remote_session</code> and QA3 added <code>SessionsStore.preparationWork</code> so Desktop could reopen and switch agents on peer-born Sessions.
+  Together they exposed three leaks in the boundary: (1) <code>localize_remote_session</code> appended this Machine's Task ID at the end of <code>task_ids</code> and left <code>work.id</code> and <code>workspace.task_id</code> holding the peer's local SQLite UUID, breaking tracker-backed remote Tasks (like <code>MTG-421</code>) on reopen, switch-agent, and menu actions; (2) <code>work_route::forward</code> matched <code>moved_session</code> ahead of explicit <code>--task</code>, stripping the Task route and downgrading <code>open_argv</code> / help to <code>--machine</code>; and (3) <b>Reset session</b> (<code>Write::SessionNew</code>, sitting right beside Refresh in the Session strip) still calls <code>prepare_session(remote)</code> with <code>remote</code> always <code>None</code> and has no <code>task</code> selector on the unshipped rev 10 wire.
 </div>
 
 <div class="cols">
   <div class="card">
-    <h3>Before (<code>HEAD</code> at <code>f28db78cd5</code>)</h3>
+    <h3>Before (<code>HEAD</code> at <code>45b450065a</code>)</h3>
     <ul>
-      <li><code>WorkModel</code> updates <code>workspace.owner</code> on move without retiring the old Machine's Session surface or clearing stale <code>preparedTaskWorktrees</code> / Browser location</li>
-      <li><code>openWarmConversations</code> skips Tasks when <code>workspace.location == nil</code>; <code>openWarmConversation</code> skips updating pane location when <code>pane(forSessionId:) != nil</code></li>
-      <li><code>SessionsStore.prepare</code> adopts a prepared <code>SessionRecord</code> without syncing <code>pane.content.location</code> → <code>"Session location unavailable"</code></li>
-      <li>Browser strip prints stale laptop checkout whenever <code>workspace.location</code> is <code>nil</code></li>
-      <li><code>newTaskSession</code> runs local <code>lf task checkout</code> on remote Tasks (creating a stale Mac checkout)</li>
-      <li>Remote <code>SessionRecord</code>s keep peer <code>lf resume &lt;id&gt;</code> in <code>action.help</code> / <code>status_line</code>, and routed <code>session.list --task</code> skips localization</li>
+      <li><code>localize_remote_session</code> leaves <code>task_ids[0]</code>, <code>work.id</code>, and <code>workspace.task_id</code> as the peer's private Task UUID</li>
+      <li><code>Write::SessionResume</code> with <code>id: Some</code> + <code>task: Some</code> on a moved Session loses <code>route</code> in <code>work_route::forward</code> → rewrites <code>open_argv</code> / help to <code>--machine</code> instead of <code>--task</code></li>
+      <li><code>Write::SessionNew</code> has no <code>task</code> field and is skipped by <code>Write::remote()</code> → clicking <b>Reset session</b> on a remote Task runs locally on the Mac</li>
+      <li><code>WorkspacePanesView.showsContext</code> prints a duplicate <code>Files</code> title in the Browser strip after a move</li>
     </ul>
   </div>
   <div class="card proposed">
-    <h3><span class="new">proposed</span> After (Slice 6, no wire change)</h3>
+    <h3><span class="new">proposed</span> After (Slice 7, still rev 10)</h3>
     <ul>
-      <li>Owner change on a retained Task workspace clears stale <code>preparedTaskWorktrees</code>, retires the old Machine's Session surface, clears stale Session/Browser pane locations, and leaves running <code>ShellTab</code>s on their starting Machine</li>
-      <li>Selected/visible started Tasks (<code>!awaitsStart</code>) warm-open from <code>owner != nil</code> (no list fanout on <code>prefetchConversations</code>)</li>
-      <li>Every Session preparation/adoption syncs <code>pane.content.location</code> via <code>updateSessionLocation</code> (renewing pane incarnation for scripts while preventing mismatch)</li>
-      <li>Task Browser strip omits stale checkout text when Files owns its Machine header</li>
-      <li><code>newTaskSession</code> on a remote owner runs <code>lf --interactive --task …</code> through <code>entry.newShell</code> (zero local checkout fallback)</li>
-      <li>One <code>localize_remote_session</code> helper rewrites <code>open_argv</code>, <code>action.help</code>, <code>outlook.command</code>, <code>status_line</code>, and local <code>task_ids</code> for both <code>SessionResume</code> and routed <code>SessionList</code></li>
+      <li><code>localize_remote_session</code> puts <code>route.task_id</code> first in <code>task_ids</code> and rewrites <code>work.id</code> (when <code>kind == "task"</code>) and <code>workspace.task_id</code> (when non-null) to <code>route.task_id</code></li>
+      <li><code>Write::remote_session</code> handles both <code>SessionResume</code> and <code>SessionNew</code>, resolving explicit <code>task</code> first so Task-addressed Session writes always carry <code>route</code> (translating <code>peer_selector</code> in <code>run_here</code> and localizing replies with <code>--task</code>)</li>
+      <li><code>Write::SessionNew</code> gains required-nullable <code>task: Option&lt;String&gt;</code> in rev 10; Desktop <code>resetSession</code> passes <code>preparationWork</code> just like <code>prepare</code> and <code>switchProvider</code></li>
+      <li><code>WorkspacePanesView.showsContext</code> returns <code>false</code> for any Task <code>.browser</code> pane</li>
     </ul>
   </div>
 </div>
@@ -254,41 +238,47 @@ Read::SessionList { task: Some(issue) } → mini:
 <h3>Counterexamples tried</h3>
 <table>
   <tr><th>Case</th><th>Proposed behavior</th><th>Holds?</th></tr>
-  <tr><td>Unstarted Task owned by <code>mini</code> (<code>owner == mini</code>, <code>location == nil</code>, <code>awaitsStart == true</code>)</td><td>Warm opening checks <code>!awaitsStart</code>, so selecting an unstarted remote Task shows <code>TaskStartOffer</code> and does not call <code>prepareTaskSession</code>.</td><td><span class="yes">yes</span> (caught &amp; revised)</td></tr>
-  <tr><td>Opening a repo with 16 working remote Tasks</td><td><code>prefetchConversations</code> still requires a local <code>reference.workspace</code>, preserving the zero list/board SSH fanout bound; only the selected/visible Task opens its peer Session.</td><td><span class="yes">yes</span> (caught &amp; revised)</td></tr>
-  <tr><td>Task moves <code>laptop → mini</code> while <code>mini</code> is unreachable</td><td>Owner change retires the dead <code>laptop</code> surface and clears stale pane location; warm open fails with <code>mini is unavailable</code> → pane shows failure naming <code>mini</code> + <b>Retry</b>, never <b>Session location unavailable</b>.</td><td><span class="yes">yes</span></td></tr>
-  <tr><td>Task moves <code>laptop → mini</code> while a Shell tab runs on <code>laptop</code></td><td>Owner change touches only Session and Browser panes; <code>ShellTab</code> keeps its <code>laptop</code> identity and label until closed with <code>--started-on</code>.</td><td><span class="yes">yes</span></td></tr>
-  <tr><td>Task moves <code>mini → laptop</code> (back to this Mac)</td><td>Owner change clears stale <code>mini</code> <code>preparedTaskWorktrees</code> and retires <code>mini</code>'s bridged viewer; local <code>reference.workspace</code> and <code>session.list</code> take over cleanly.</td><td><span class="yes">yes</span></td></tr>
-  <tr><td>Script holding a pre-move <code>DesktopPaneTarget</code> sends input after move</td><td><code>updateSessionLocation</code> still renews the pane's <code>incarnation</code>, so stale script targets still fail with <code>DesktopTargetError</code>.</td><td><span class="yes">yes</span></td></tr>
-  <tr><td>Click <b>New conversation</b> on an unstarted remote Task</td><td>Routes through <code>task.shell.start</code> on <code>mini</code> → returns <code>not_started</code> → shell tab shows <b>Not started</b>; no local checkout is created on the Mac.</td><td><span class="yes">yes</span></td></tr>
+  <tr><td>Tracker-backed Task (<code>MTG-421</code>: laptop UUID ≠ mini UUID) — close &amp; reopen Session, switch agent, or open Files from Session menu</td><td><code>task_ids[0]</code>, <code>work.id</code>, and <code>workspace.task_id</code> all hold laptop's local Task ID; <code>preparationWork</code> and <code>paneTaskId</code> send laptop's ID; laptop translates to <code>MTG-421</code> for mini.</td><td><span class="yes">yes</span></td></tr>
+  <tr><td>Moved Session (<code>laptop → mini</code>) — Refresh or Switch agent, then Task moves again <code>mini → box2</code></td><td>Explicit <code>task</code> resolves <code>route</code> ahead of <code>moved_session</code>, so localized <code>open_argv</code> stays <code>lf open --task &lt;selector&gt; --session &lt;id&gt; --here</code> and still follows the second move.</td><td><span class="yes">yes</span></td></tr>
+  <tr><td>Click <b>Reset session</b> on a remote Task's Session, and connection drops mid-flight</td><td><code>CreationSubmissions</code> persists the exact <code>Write::SessionNew</code> with <code>request_id</code> and <code>task</code>; retry resends the same <code>request_id</code> to mini, where mini deduplicates via its own <code>creation_receipts</code> and returns the new thread without resetting twice.</td><td><span class="yes">yes</span></td></tr>
+  <tr><td>Unassigned remote Session (<code>task == None</code>, moved or <code>--machine</code>)</td><td><code>remote_session</code> falls back to <code>moved_session</code> / local handling; <code>localize_remote_session</code> with <code>route: None</code> leaves <code>task_ids</code> / <code>work</code> untouched and opens by <code>--machine</code>.</td><td><span class="yes">yes</span></td></tr>
+  <tr><td>Selected JSON read (<code>select: ["id", "status_line"]</code>) of routed <code>session.list --task</code></td><td><code>localize_remote_session</code> mutates only keys already present in the JSON object; omitted fields stay omitted.</td><td><span class="yes">yes</span></td></tr>
+  <tr><td>Shell tab left running on <code>laptop</code> after Task moves to <code>mini</code></td><td><code>showsContext</code> returns <code>false</code> only for Task <code>.browser</code>; the running Shell tab still compares <code>pane.content.location != workspace.location</code> and keeps its <code>laptop</code> label.</td><td><span class="yes">yes</span></td></tr>
 </table>
 
-<h3>What follows across layers (Slice 6)</h3>
+<h3>What follows across layers (Slice 7)</h3>
 <table>
   <tr><th>Layer</th><th>Change</th></tr>
-  <tr><td>Rust server (Slice 6A)</td><td>Extract <code>localize_remote_session</code> in <code>lf/commands/ssh.rs</code> (or <code>work_route.rs</code>) and apply it to both <code>Write::SessionResume</code> (<code>prepared_remotely</code>) and routed <code>Read::SessionList { task: Some(..) }</code>: rewrite <code>open_argv</code>, <code>action.help</code>, <code>outlook.command</code>, <code>status_line</code> to this Machine's <code>lf open …</code> spelling, and ensure local <code>task_id</code> is in <code>task_ids</code>. Also isolate <code>server::subscriptions::</code> test state so the module passes under both <code>cargo test</code> and nextest.</td></tr>
-  <tr><td>Desktop (Slice 6B)</td><td>Detect Task owner transitions in <code>WorkModel</code> (retire old Machine Session surface, clear stale <code>preparedTaskWorktrees</code> and Session/Browser pane locations, keep running shells); sync <code>pane.content.location</code> on every Session prepare/adopt (even when <code>pane(forSessionId:)</code> exists); warm-open selected/visible started Tasks from <code>owner != nil</code> without list prefetch fanout; drop stale checkout context from Task Browser strip; route remote <code>newTaskSession</code> through <code>entry.newShell</code> with <code>lf</code>.</td></tr>
-  <tr><td>Tests</td><td>Extend Rust unit/integration tests for localized remote <code>SessionRecord</code> (<code>action.help</code>, <code>status_line</code>, routed <code>session.list --task</code>) and Desktop <code>RemoteTaskWorkspaceTests</code> for a live Task + Session move through <code>WorkModel</code> / <code>SessionsWorkspace</code> / <code>WorkspacePanesView</code>.</td></tr>
+  <tr><td>Rust server &amp; wire (Slice 7A)</td><td>Add required-nullable <code>task: Option&lt;String&gt;</code> to <code>Write::SessionNew</code> (rev 10, unshipped); regenerate <code>tests/fixtures/dto/server_schema.json</code>. Route both <code>Write::SessionResume</code> and <code>Write::SessionNew</code> in <code>Write::remote()</code> through <code>remote_session()</code>, resolving explicit <code>task</code> before <code>moved_session</code> so <code>Remote.route</code> is preserved and <code>task</code> is rewritten to <code>route.peer_selector</code>; translate <code>peer_task_id</code> in <code>Write::run_here</code> for <code>SessionResume</code> and <code>SessionNew</code> whenever <code>task</code> is <code>Some</code>. In <code>ssh::localize_remote_session</code>, put <code>route.task_id</code> first in <code>task_ids</code> and rewrite <code>work.id</code> (when <code>work.kind == "task"</code>) and <code>workspace.task_id</code> (when non-null) to <code>route.task_id</code>.</td></tr>
+  <tr><td>Desktop &amp; shared Swift (Slice 7B)</td><td>Add <code>task: String?</code> to <code>ServedWrite.sessionNew</code>, pass <code>work: preparationWork(previous.record)</code> from <code>SessionsStore.reset</code> through <code>RegistryQuery.resetSession</code>, and update <code>RegistryQueryLocal</code> + encoding fixtures. Simplify <code>WorkspacePanesView.showsContext</code> to return <code>false</code> for any Task <code>.browser</code> pane.</td></tr>
+  <tr><td>Tests</td><td>Unit tests for <code>localize_remote_session</code> (local <code>task_id</code> at index 0, <code>work.id</code>, <code>workspace.task_id</code>, non-task <code>work</code> untouched, selected readings), <code>Write::SessionNew</code> wire encoding/schema in Rust and Swift, and integration coverage in <code>machine_commands::server_routed_task_workspace</code> for routed <code>session.new</code> + moved-Session <code>session.resume</code> keeping <code>--task</code>.</td></tr>
 </table>
 
 <h3>Outside this review (separate scope)</h3>
 <ul>
   <li><b>Git observation lag on peer reads:</b> <code>lf task changes</code> right after an edit reads mini's shared <code>observe.rs</code> cache (a few seconds). Existing server-wide observation design.</li>
   <li><b>Skewed peer executable message:</b> when a peer's server runs a different binary, <code>Connection::open_peer</code> times out at 10s instead of surfacing <code>lf server connect</code>'s stderr. General peer-handshake diagnostic.</li>
+  <li><b>Two-window sidebar selection highlight:</b> when a stale restored window shares a repository with a live window, sidebar highlight drift is pre-existing Desktop two-window behavior (<code>desktop.md</code>).</li>
 </ul>
 
 <h2>Open questions</h2>
 <ol class="q">
-  <li>When a Task moves to another Machine while open in Desktop, its Session pane should:
+  <li>When a Task moves to another Machine while open in Desktop, its Session pane:
     <ol>
-      <li>retire the old Machine's viewer and automatically re-open the moved Session on the new owner when the Task is visible <span class="new">proposed for Slice 6</span></li>
-      <li>retire the old Machine's viewer and show an explicit "Open conversation" placeholder until clicked</li>
+      <li>retires the old Machine's viewer and automatically re-opens the moved Session on the new owner when the Task is visible <span class="built">built at HEAD</span></li>
+      <li>retires the old Machine's viewer and shows an explicit "Open conversation" placeholder until clicked</li>
     </ol>
   </li>
   <li>Clicking <b>New conversation</b> on a Task owned by another Machine:
     <ol>
-      <li>starts <code>lf --interactive --task …</code> in a routed shell tab on the owning Machine (zero local checkout) <span class="new">proposed for Slice 6</span></li>
+      <li>starts <code>lf --interactive --task …</code> in a routed shell tab on the owning Machine (zero local checkout) <span class="built">built at HEAD</span></li>
       <li>disables the action for remote Tasks until a dedicated remote secondary-Session operation exists</li>
+    </ol>
+  </li>
+  <li>Clicking <b>Reset session</b> (<code>plus.bubble</code>) on a remote Task's Session:
+    <ol>
+      <li>routes <code>session.new</code> with its <code>task</code> selector to the owning Machine and returns a localized record <span class="new">proposed for Slice 7</span></li>
+      <li>disables Reset session on remote Tasks</li>
     </ol>
   </li>
   <li>When a Task moves, a Shell already running on the old Machine:

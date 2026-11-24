@@ -432,7 +432,7 @@ struct DesktopHeadlessTests {
         #expect(try await tapped(4) == ["task", "run", task.task.identifier, "--from", "review-design", "--json"])
 
         // Completion has its own operation and does not move the Workflow.
-        model.completeTask(task)
+        model.completeTask(task, children: nil)
         for _ in 0..<200 where await started.calls.last?.contains("complete") != true { try await Task.sleep(for: .milliseconds(5)) }
         #expect(await started.calls.last == ["task", "complete", task.task.identifier, "--json"])
 

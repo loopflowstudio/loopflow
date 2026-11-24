@@ -122,7 +122,7 @@ writes! {
     super::task_create::answer(request_id, created.receipt, created.session)?
     },
 
-    /// `lf task complete <issue>`.
+    /// `lf task complete <issue> [--children rehome|abandon]`.
     #[serde(rename = "task.complete")]
     TaskComplete {
         directory: PathBuf,

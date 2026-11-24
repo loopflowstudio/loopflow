@@ -3077,3 +3077,84 @@ fn pr_mutation_lock_refuses_a_concurrent_writer() {
     let error = lock_task_pr_mutation(repo.path()).expect_err("second writer must be refused");
     assert!(error.to_string().contains("already running"));
 }
+
+#[test]
+fn abandoning_children_waits_for_live_work_but_not_an_idle_conversation() {
+    let _ledger = crate::journal::TestLedgerGuard::new();
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let fixture = runtime.block_on(task_fixture("WORK-2"));
+    let store = &fixture.store;
+    let mut parent = fixture.task.clone();
+    parent.id = TaskId::new();
+    parent.identifier = "WORK-1".into();
+    parent.tracker_id = None;
+    store.sqlite.seed_unplaced_task(&parent);
+    let conn = rusqlite::Connection::open(&fixture.database_path).unwrap();
+    conn.execute(
+        "UPDATE tasks SET parent_task_id=?1 WHERE id=?2",
+        [parent.id.as_str(), fixture.task.id.as_str()],
+    )
+    .unwrap();
+    let blockers = || super::live_abandon_blockers(store, &parent).unwrap();
+    assert!(blockers().is_empty());
+
+    let worktree = fixture.task.worktree.as_ref().unwrap().to_string_lossy();
+    let live = store
+        .sqlite
+        .test_graph("code", &worktree, &[("implement", None)], None);
+    let blocked = blockers();
+    assert_eq!(blocked.len(), 1, "{blocked:?}");
+    assert!(
+        blocked[0].contains("WORK-2 is running: Graph run"),
+        "{blocked:?}"
+    );
+    assert!(blocked[0].contains(live.as_str()), "{blocked:?}");
+    conn.execute(
+        "UPDATE graph_processes SET ended_at=started_at,exit_code=0 WHERE ended_at IS NULL",
+        [],
+    )
+    .unwrap();
+
+    // A live conversation held in its terminal, with no turn running.
+    let terminal = loopflow_model::id::TerminalId::new();
+    conn.execute(
+        "INSERT INTO held_terminals(id,holder_build,created_at) VALUES(?1,'fixture',1)",
+        [&terminal],
+    )
+    .unwrap();
+    let agent = store.sqlite.test_lf_process();
+    let me = crate::process::OsProcess::read(std::process::id())
+        .unwrap()
+        .unwrap();
+    conn.execute(
+        "UPDATE processes SET pid=?2,os_started_at=?3,held_terminal_id=?4 WHERE id=?1",
+        rusqlite::params![agent, me.pid, me.started_at, terminal],
+    )
+    .unwrap();
+    store
+        .sqlite
+        .test_session("conversation", &crate::session_record::new_artifact_key());
+    conn.execute(
+        "UPDATE agent_sessions SET task_id=?1,interactive=1,held_terminal_id=?2,agent_process_id=?3,
+            wave_id=(SELECT p.wave_id FROM tasks t LEFT JOIN projects p ON p.id=t.project_id WHERE t.id=?1)
+         WHERE id='conversation'",
+        rusqlite::params![fixture.task.id.as_str(), terminal, agent],
+    )
+    .unwrap();
+    assert_eq!(
+        store.sqlite.task_open_work(&fixture.task.id).unwrap().len(),
+        1,
+        "the conversation is open work"
+    );
+    assert!(blockers().is_empty(), "{:?}", blockers());
+
+    // Run headless in the same terminal, it is live work.
+    conn.execute(
+        "UPDATE agent_sessions SET interactive=0 WHERE id='conversation'",
+        [],
+    )
+    .unwrap();
+    let blocked = blockers();
+    assert_eq!(blocked.len(), 1, "{blocked:?}");
+    assert!(blocked[0].contains("WORK-2 is running: Session conversation"));
+}

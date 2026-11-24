@@ -284,12 +284,21 @@ public enum ServedRead: Equatable, Sendable, Encodable {
     }
 }
 
+/// What completing a parent does with its open children, as Rust's `ChildPolicy`.
+public enum TaskChildPolicy: String, Equatable, Sendable {
+    /// Direct open children move up to the nearest open ancestor, or to the top level.
+    case rehome
+    /// Merged descendants are done; the rest are abandoned.
+    case abandon
+}
+
 /// A write Loopflow makes inside the app, encoded as its Rust `Write`: what
 /// `argv` does in `cwd`, given `input` on stdin. Served requests retain their
 /// own trace without recording an OS Process.
 public enum ServedWrite: Equatable, Sendable, Encodable {
     case taskCreate(directory: String, requestID: String, title: String?, request: String?, wave: String?, parent: String?, graph: String?, session: String?, run: Bool)
-    case taskComplete(directory: String, issue: String)
+    /// `children` nil refuses while the Task has open children.
+    case taskComplete(directory: String, issue: String, children: TaskChildPolicy?)
     case taskReopen(directory: String, issue: String)
     case taskAbandon(directory: String, issue: String)
     case taskUpdate(directory: String, issue: String, notes: String?, rank: Int?)
@@ -395,7 +404,8 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
             argv.append("--json")
             if let request { argv += ["--", request] }
             return argv
-        case .taskComplete(_, let issue): return ["task", "complete", issue, "--json"]
+        case .taskComplete(_, let issue, let children):
+            return ["task", "complete", issue] + (children.map { ["--children", $0.rawValue] } ?? []) + ["--json"]
         case .taskReopen(_, let issue): return ["task", "reopen", issue, "--json"]
         case .taskAbandon(_, let issue): return ["task", "abandon", issue, "--json"]
         case .taskUpdate(_, let issue, let notes, let rank):
@@ -574,8 +584,8 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
         case .taskCreate(let directory, let requestID, let title, let request, let wave, let parent, let graph, let session, let run):
             TaggedFields("task.create", ["directory": directory, "request_id": requestID, "title": title,
                 "request": request, "wave": wave, "parent": parent, "graph": graph, "session": session, "run": run])
-        case .taskComplete(let directory, let issue):
-            TaggedFields("task.complete", ["directory": directory, "issue": issue])
+        case .taskComplete(let directory, let issue, let children):
+            TaggedFields("task.complete", ["directory": directory, "issue": issue, "children": children?.rawValue])
         case .taskReopen(let directory, let issue):
             TaggedFields("task.reopen", ["directory": directory, "issue": issue])
         case .taskAbandon(let directory, let issue):

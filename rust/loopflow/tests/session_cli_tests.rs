@@ -965,6 +965,25 @@ fn a_merged_parent_stays_open_until_it_is_completed_with_its_children() {
     assert_eq!(status["children"][0]["identifier"], under_moved);
     assert_eq!(state(&moved), "unstarted");
 
+    // A parent whose PR has not merged refuses either choice and arms no
+    // request that could settle its children later.
+    let (unmerged_id, unmerged) = file("Limit headers", None);
+    let (_, waiting) = file("Limit header docs", Some(&unmerged));
+    publish(&unmerged_id, 1995, false);
+    for policy in ["rehome", "abandon"] {
+        let refusal = refused(&["task", "complete", &unmerged, "--children", policy]);
+        assert!(refusal.contains("not merged"), "{refusal}");
+    }
+    let request: Option<i64> = database
+        .query_row(
+            "SELECT completion_request FROM tasks WHERE id=?1",
+            [&unmerged_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(request, None);
+    assert_eq!(state(&waiting), "unstarted");
+
     // With no open ancestor, children become top-level.
     let (_, lone) = file("Burst limits", None);
     let (_, freed) = file("Burst config", Some(&lone));

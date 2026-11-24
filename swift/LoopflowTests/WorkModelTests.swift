@@ -864,7 +864,7 @@ struct WorkModelStreamTests {
         await feed.send(try fixture.planningFrame(sequence: 1, answers: nil))
         try await eventually { model.roadmap.value != nil }
         let found = try #require(model.task(id: "issue-now"))
-        model.completeTask(found.task)
+        model.completeTask(found.task, children: nil)
         try await eventually { model.pendingChanges.changes.isEmpty }
         let notice = try #require(model.navigation.notices.current)
         #expect(notice.text.hasPrefix("\(found.task.task.identifier) couldn't be completed"))

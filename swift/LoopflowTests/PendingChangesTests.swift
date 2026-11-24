@@ -107,7 +107,7 @@ struct PendingChangesTests {
 
     private func complete(_ changes: PendingChanges, _ issue: String) {
         changes.make(.complete(task: issue), subject: issue, verb: "completed",
-                     write: .taskComplete(directory: "/repo", issue: issue), notices: notices, show: nil)
+                     write: .taskComplete(directory: "/repo", issue: issue, children: nil), notices: notices, show: nil)
     }
 
     @Test func completeHidesTheRowUntilACoveringReading() async throws {
@@ -148,7 +148,7 @@ struct PendingChangesTests {
         let changes = changes()
         var shown = false
         changes.make(.complete(task: "LOO-3"), subject: "LOO-3", verb: "completed",
-                     write: .taskComplete(directory: "/repo", issue: "LOO-3"), notices: notices,
+                     write: .taskComplete(directory: "/repo", issue: "LOO-3", children: nil), notices: notices,
                      show: Notice.Action("Show") { shown = true })
         #expect(identifiers(changes.apply(to: try plan())) == ["LOO-1", "LOO-2"])
         await machine.fail(ServerError(code: "conflict", message: "its PR #12 is open", data: .null))
@@ -162,7 +162,7 @@ struct PendingChangesTests {
     @Test func aRefusalWhileOtherWritesMovedTheStoreWaitsForTheReading() async throws {
         let changes = changes()
         changes.make(.complete(task: "LOO-1"), subject: "LOO-1", verb: "completed",
-                     write: .taskComplete(directory: "/repo", issue: "LOO-1"), notices: notices, show: nil)
+                     write: .taskComplete(directory: "/repo", issue: "LOO-1", children: nil), notices: notices, show: nil)
         // Another write's planning sync advanced planning while this one failed.
         await machine.fail(ServerError(code: "outcome_unknown", message: "its PR #12 is open", data: .null,
                                        revisions: Revisions(["planning": 6])))
@@ -204,7 +204,7 @@ struct PendingChangesTests {
                     try task("LOO-4", wave: "other")]
         let working = { (rows: [RoadmapTask]) in rows.filter { $0.section == .working }.map(\.task.identifier) }
         changes.make(.complete(task: "LOO-1"), subject: "LOO-1", verb: "completed",
-                     write: .taskComplete(directory: "/repo", issue: "LOO-1"), notices: notices, show: nil)
+                     write: .taskComplete(directory: "/repo", issue: "LOO-1", children: nil), notices: notices, show: nil)
         let ada = try JSONDecoder().decode(TaskOwner.self, from: Data(#"{"person":"Ada","person_key":"ada@example.com","person_id":null,"machine":{"id":"home_1","label":"laptop"}}"#.utf8))
         changes.make(.claim(task: "LOO-3", owner: ada), subject: "LOO-3", verb: "claimed",
                      write: .taskClaim(directory: "/repo", issue: "LOO-3"), notices: notices, show: nil)

@@ -304,7 +304,7 @@ struct WorkNavigationTests {
         model.applyStartedFixture(working: ["issue-review", "issue-now"])
         model.select(.task(id: "issue-review"))
         let changed = try #require(model.task(id: "issue-review")?.task)
-        if command == "abandon" { model.abandonTask(changed) } else { model.completeTask(changed) }
+        if command == "abandon" { model.abandonTask(changed) } else { model.completeTask(changed, children: nil) }
         // The write is still held: the row is gone and the next Task is open.
         #expect(model.sidebarTaskIDs == ["issue-now"])
         #expect(model.selection == .task(id: "issue-now"))

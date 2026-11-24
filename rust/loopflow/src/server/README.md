@@ -260,7 +260,7 @@ same window, so they do not say the failed write took effect. Older clients
 must update.
 
 ```text
-→ {"type":"request","id":"c-1","operation":{"kind":"task.complete","directory":"/repo","issue":"LOO-2"},"select":null,"request_id":"6f1c…"}
+→ {"type":"request","id":"c-1","operation":{"kind":"task.complete","directory":"/repo","issue":"LOO-2","children":null},"select":null,"request_id":"6f1c…"}
 ← {"type":"response","id":"c-1","trace_id":"…","result":{…},"revisions":{"planning":412}}
 ← {"type":"reading","id":"tasks","checkpoint":"…","frame":{"answers":null,"unavailable":null,"body":[…],"work":null,"read_at":{"planning":412,"sessions":90,…}}}
 ```

@@ -255,12 +255,12 @@ struct TaskActionItems: View {
                 .accessibilityIdentifier("task-reopen")
         } else {
             let hasOpenChildren = model.hasOpenChildren(task)
-            Button(hasOpenChildren ? "Complete Task & Settle Children…" : "Complete Task") {
+            Button(hasOpenChildren ? "Complete Task…" : "Complete Task") {
                 model.beginComplete(task)
             }
             .disabled(unavailable)
             .help(hasOpenChildren
-                ? "Completing this Task marks merged children done and abandons all other open children"
+                ? "Mark this Task done and choose whether its open children move up or are abandoned"
                 : "Mark this Task done")
             .accessibilityIdentifier("task-complete")
             Button(task.runtime?.owner == nil ? "Claim Task" : "Unassign Task") {
@@ -327,7 +327,8 @@ struct TaskAbandonConfirmation: ViewModifier {
     }
 }
 
-/// The window's one Complete… confirmation when completing a parent will settle open children.
+/// The window's one Complete… confirmation for a parent with open children:
+/// move them up and keep them open, or settle them with the parent.
 struct TaskCompleteConfirmation: ViewModifier {
     let model: WorkModel
 
@@ -335,50 +336,59 @@ struct TaskCompleteConfirmation: ViewModifier {
         model.navigation.completing.flatMap { model.task(id: $0)?.task }
     }
 
-    private func summary(for descendants: [RoadmapTask]) -> (done: [RoadmapTask], abandoned: [RoadmapTask]) {
-        let done = descendants.filter { $0.pr?.phase == .merged }
-        let abandoned = descendants.filter { $0.pr?.phase != .merged }
-        return (done, abandoned)
+    /// What `Complete & Move Children` says and does.
+    static func moveLabel(to destination: RoadmapTask?) -> String {
+        destination.map { "Complete & Move Children to \($0.task.identifier)" }
+            ?? "Complete & Move Children to Top Level"
     }
 
-    private func message(for descendants: [RoadmapTask]) -> String {
-        let (done, abandoned) = summary(for: descendants)
-        var lines: [String] = []
+    static func title(_ task: RoadmapTask, openChildren: Int) -> String {
+        openChildren == 1
+            ? "Complete \(task.task.identifier)? 1 child is open"
+            : "Complete \(task.task.identifier)? \(openChildren) children are open"
+    }
+
+    static func message(descendants: [RoadmapTask], destination: RoadmapTask?) -> String {
+        let done = descendants.filter { $0.pr?.phase == .merged }.map(\.task.identifier)
+        let abandoned = descendants.filter { $0.pr?.phase != .merged }.map(\.task.identifier)
+        let place = destination.map { "under \($0.task.identifier)" } ?? "at the top level"
+        var lines = ["Move keeps its children open \(place)."]
         if !done.isEmpty {
-            let names = done.map(\.task.identifier).joined(separator: ", ")
-            lines.append("Marked done (PR merged): \(names).")
+            lines.append("Finishing marks merged children done: \(done.joined(separator: ", ")).")
         }
         if !abandoned.isEmpty {
-            let names = abandoned.map(\.task.identifier).joined(separator: ", ")
-            lines.append("Abandoned (PRs closed, branches deleted, cannot be reopened): \(names).")
+            lines.append("Abandoning closes PRs and deletes branches for \(abandoned.joined(separator: ", ")); "
+                + "each can be reopened later.")
         }
         return lines.joined(separator: "\n")
     }
 
     func body(content: Content) -> some View {
         let descendants = completing.map { model.openDescendants(of: $0) } ?? []
-        let (_, abandoned) = summary(for: descendants)
-        let title: String = if let task = completing {
-            descendants.count == 1
-                ? "Complete \(task.task.identifier) and settle 1 open child?"
-                : "Complete \(task.task.identifier) and settle \(descendants.count) open children?"
-        } else {
-            "Complete Task?"
-        }
+        let destination = completing.flatMap { model.rehomeDestination(of: $0) }
+        let allMerged = descendants.allSatisfy { $0.pr?.phase == .merged }
+        let title = completing.map {
+            Self.title($0, openChildren: model.openChildCount($0))
+        } ?? "Complete Task?"
         content.confirmationDialog(
             title,
             isPresented: Binding(get: { completing != nil }, set: { if !$0 { model.navigation.completing = nil } }),
             presenting: completing
         ) { task in
-            Button(
-                abandoned.isEmpty ? "Complete & Finish Children" : "Complete & Settle Children",
-                role: abandoned.isEmpty ? nil : .destructive
-            ) {
+            let finish = { (children: TaskChildPolicy) in
                 model.navigation.completing = nil
-                model.completeTaskFromInput(task)
+                model.completeTaskFromInput(task, children: children)
+            }
+            // The first button is the default: the one that keeps work.
+            if allMerged {
+                Button("Complete & Finish Children") { finish(.abandon) }
+                Button(Self.moveLabel(to: destination)) { finish(.rehome) }
+            } else {
+                Button(Self.moveLabel(to: destination)) { finish(.rehome) }
+                Button("Complete & Abandon Children", role: .destructive) { finish(.abandon) }
             }
         } message: { _ in
-            Text(message(for: descendants))
+            Text(Self.message(descendants: descendants, destination: destination))
         }
     }
 }

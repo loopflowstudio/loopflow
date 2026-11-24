@@ -77,7 +77,7 @@ final class TaskFeed {
         guard let directory = directory(of: task) else { return }
         let issue = task.identifier ?? task.work.id
         pendingChanges.make(.complete(task: issue), subject: issue, verb: "completed",
-                            write: .taskComplete(directory: directory, issue: issue), notices: notices,
+                            write: .taskComplete(directory: directory, issue: issue, children: nil), notices: notices,
                             show: Notice.Action("Show", perform: show)) { [weak self] in
             try? await self?.observation?.refresh()
         }

@@ -2800,17 +2800,33 @@ final class WorkModel {
                .taskMove(directory: directory(task), issue: issue, wave: wave, machine: nil), "moved")
     }
 
-    func completeTaskFromInput(_ task: RoadmapTask) {
+    func completeTaskFromInput(_ task: RoadmapTask, children: TaskChildPolicy?) {
         let owner = navigation.performanceOwner
         Perf.userAction(.completeTask, scenario: "complete_to_row_gone", id: task.id,
                         repository: repoPath, liveSessions: liveSessionCount, owner: owner) {
             Perf.acknowledged(.completeTask, id: task.id, owner: owner)
-            completeTask(task)
+            completeTask(task, children: children)
         }
     }
 
+    /// Where rehoming moves the Task's open children: its nearest open ancestor,
+    /// or nil for the top level, as Rust's `rehome_destination` reads it.
+    func rehomeDestination(of task: RoadmapTask) -> RoadmapTask? {
+        var seen: Set<String> = [task.task.id]
+        var parent = task.task.parentId
+        while let id = parent, seen.insert(id).inserted, let ancestor = self.task(id: id)?.task {
+            if !ancestor.isCompleted { return ancestor }
+            parent = ancestor.task.parentId
+        }
+        return nil
+    }
+
     func hasOpenChildren(_ task: RoadmapTask) -> Bool {
-        taskIndex.openChildren[task.task.id] != nil
+        openChildCount(task) > 0
+    }
+
+    func openChildCount(_ task: RoadmapTask) -> Int {
+        taskIndex.openChildren[task.task.id]?.count ?? 0
     }
 
     func openDescendants(of task: RoadmapTask) -> [RoadmapTask] {
@@ -2829,10 +2845,10 @@ final class WorkModel {
         return descendants
     }
 
-    /// Complete immediately when no open children exist; confirm first when children will settle.
+    /// Complete immediately when no open children exist; otherwise ask what happens to them.
     func beginComplete(_ task: RoadmapTask) {
         if !hasOpenChildren(task) {
-            completeTaskFromInput(task)
+            completeTaskFromInput(task, children: nil)
         } else {
             navigation.completing = task.id
         }
@@ -2847,11 +2863,12 @@ final class WorkModel {
 
     /// The row is gone and the next Task selected in the click; a refusal
     /// brings the row back and the Notice says why.
-    func completeTask(_ task: RoadmapTask) {
+    func completeTask(_ task: RoadmapTask, children: TaskChildPolicy?) {
         let owner = navigation.performanceOwner
         let issue = task.task.identifier
         moveSelection(past: task)
-        change(task, .complete(task: issue), .taskComplete(directory: directory(task), issue: issue), "completed") {
+        change(task, .complete(task: issue),
+               .taskComplete(directory: directory(task), issue: issue, children: children), "completed") {
             Perf.completionAccepted(id: task.id, owner: owner)
         }
     }

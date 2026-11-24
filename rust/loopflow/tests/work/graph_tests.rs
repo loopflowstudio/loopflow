@@ -633,10 +633,7 @@ fn checkout_task_identity_ignores_main_and_parent_upstreams() {
         let repo = loopflow_test_support::TestRepo::new();
         support::bind_task_planning(&repo);
         let home = TempDir::new().unwrap();
-        let _server = loopflow_test_support::MachineServer::start(
-            loopflow_test_support::lf_binary(),
-            home.path(),
-        );
+        let _server = support::start_machine_server(home.path());
         let checkout = repo.path().canonicalize().unwrap();
         let child =
             support::register_task_with_pr(home.path(), &checkout, "child-task", &repo.head_sha());
@@ -1198,10 +1195,7 @@ fn task_run_history_reads_only_that_tasks_runs_without_starting_it() {
     let repo = loopflow_test_support::TestRepo::new();
     repo.create_branch("task-history");
     let home = TempDir::new().unwrap();
-    let _server = loopflow_test_support::MachineServer::start(
-        loopflow_test_support::lf_binary(),
-        home.path(),
-    );
+    let _server = support::start_machine_server(home.path());
     let task =
         support::register_task_with_pr(home.path(), repo.path(), "task-history", &repo.head_sha());
     let runtime = tokio::runtime::Runtime::new().unwrap();
@@ -1309,10 +1303,7 @@ fn task_run_history_reads_only_that_tasks_runs_without_starting_it() {
 fn lf_launches_inside_a_task_checkout_bind_to_that_task() {
     let repo = loopflow_test_support::TestRepo::new();
     let home = TempDir::new().unwrap();
-    let _server = loopflow_test_support::MachineServer::start(
-        loopflow_test_support::lf_binary(),
-        home.path(),
-    );
+    let _server = support::start_machine_server(home.path());
     let task =
         support::register_task_with_pr(home.path(), repo.path(), "task-binding", &repo.head_sha());
     let sibling_worktree = repo.create_named_worktree("task-sibling");
@@ -1480,10 +1471,7 @@ fn bound_graphs_keep_task_context_and_leave_other_graphs_and_shared_edits_alone(
     support::bind_task_planning(&repo);
     let caller = TestRepo::new();
     let home = TempDir::new().unwrap();
-    let _server = loopflow_test_support::MachineServer::start(
-        loopflow_test_support::lf_binary(),
-        home.path(),
-    );
+    let _server = support::start_machine_server(home.path());
     let checkout = repo.path().canonicalize().unwrap();
     let task = support::register_task_with_pr(
         home.path(),
@@ -1946,10 +1934,7 @@ fn task_graph_read_keeps_captured_topology_and_counts_both_returns() {
     let repo = loopflow_test_support::TestRepo::new();
     support::bind_task_planning(&repo);
     let home = TempDir::new().unwrap();
-    let _server = loopflow_test_support::MachineServer::start(
-        loopflow_test_support::lf_binary(),
-        home.path(),
-    );
+    let _server = support::start_machine_server(home.path());
     // A Task's Graphs are those whose Processes ran in its checkout, as Processes name it.
     let checkout = repo.path().canonicalize().unwrap();
     repo.create_branch("task-graph-read");
@@ -2143,10 +2128,7 @@ fn three_nested_loops_each_return_to_their_own_first_step() {
     let repo = loopflow_test_support::TestRepo::new();
     support::bind_task_planning(&repo);
     let home = TempDir::new().unwrap();
-    let _server = loopflow_test_support::MachineServer::start(
-        loopflow_test_support::lf_binary(),
-        home.path(),
-    );
+    let _server = support::start_machine_server(home.path());
     let checkout = repo.path().canonicalize().unwrap();
     let task =
         support::register_task_with_pr(home.path(), &checkout, "nested-loops", &repo.head_sha());
@@ -2234,10 +2216,7 @@ fn the_research_graph_stops_at_its_findings_then_reaches_end() {
     let repo = loopflow_test_support::TestRepo::new();
     support::bind_task_planning(&repo);
     let home = TempDir::new().unwrap();
-    let _server = loopflow_test_support::MachineServer::start(
-        loopflow_test_support::lf_binary(),
-        home.path(),
-    );
+    let _server = support::start_machine_server(home.path());
     let checkout = repo.path().canonicalize().unwrap();
     let task =
         support::register_task_without_pr(home.path(), &checkout, "research-end", &repo.head_sha());

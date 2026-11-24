@@ -227,7 +227,13 @@ them. Nothing here needs WindowServer focus.
   clicking the status toggle again. If a SwiftUI button misses `click`, use
   `drag` with the same start and end point, which sends mouse-down and
   mouse-up directly to the window. This activated both states of the sidebar
-  status toggle. Use a link to select a Task.
+  status toggle. To select a Task, `click` its sidebar row: points are PNG
+  pixels ÷ 2, and the `.out` echoes y flipped from the bottom. An `open -g`
+  `loopflow://` link may reach the installed app instead of the QA bundle,
+  and `lf desktop view 'task:<id>'` opens a filtered view, not the Task.
+- Restarting the private server resumes each Task's conversation in a new
+  holder, so stand-ins come back and `$QA_MK/<checkout>/{prompt,stop,error,blocked}`
+  markers drive Busy, Available, Error and Blocked again without relaunching.
 - Clicks land only in a window whose `lf desktop state` reading is
   `current`. Locked, a launch may mount no window until a
   `loopflow://<repo>/task/<id>` link arrives, and with a saved

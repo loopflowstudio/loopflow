@@ -96,6 +96,10 @@ and the [Swift README](../swift/README.md). Deferred ideas stay in
   in Busy, the group is released when another Task is selected, and the Wave
   sidebar shares the toggle.
 
+- [QA round 7](qa.html) at `aef236355e` ran the merged build on the private
+  Machine: Working drops, Project rank edits, arrivals and the status toggle
+  in the repository and Wave sidebars behaved as built. No defects.
+
 ## Remaining verification
 
 In an unlocked key window on an idle display: hover the toggle in both

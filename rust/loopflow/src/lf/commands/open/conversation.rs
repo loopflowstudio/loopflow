@@ -109,13 +109,6 @@ fn present(target: &mut Resolved, args: &OpenArgs, focus_new: bool) -> Result<Op
     if let Some(reason) = &target.execution_unavailable {
         anyhow::bail!("{reason}");
     }
-    if mode == Mode::Tab && matches!(host, OpenHost::Terminal | OpenHost::Desktop) {
-        anyhow::bail!(
-            "{} has no sibling-tab support. Open a terminal and run: {} --here",
-            host.label(),
-            fallback_text(&target.fallback_argv())
-        );
-    }
     let routed = target.execution_machine.is_some();
     if routed && mode == Mode::Here {
         let opening = Opening::lock(target)?;
@@ -129,6 +122,7 @@ fn present(target: &mut Resolved, args: &OpenArgs, focus_new: bool) -> Result<Op
         return Ok(target.receipt(Some(host), None, OpenStatus::Usable, None));
     }
     if routed && mode == Mode::Tab {
+        refuse_tabless(target, mode, host)?;
         // The local tab resolves and locks its selection when --here runs.
         return open_tab(target, args, host, focus_new);
     }
@@ -170,6 +164,7 @@ fn present(target: &mut Resolved, args: &OpenArgs, focus_new: bool) -> Result<Op
         }
     }
     anyhow::ensure!(mode != Mode::Focus, "Not open");
+    refuse_tabless(target, mode, host)?;
     resolve(target, true)?;
     if mode == Mode::Desktop {
         return desktop_open(target, focus_new);
@@ -191,6 +186,17 @@ fn present(target: &mut Resolved, args: &OpenArgs, focus_new: bool) -> Result<Op
         return Ok(target.receipt(Some(host), None, OpenStatus::Usable, None));
     }
     open_tab(target, args, host, focus_new)
+}
+
+fn refuse_tabless(target: &Resolved, mode: Mode, host: OpenHost) -> Result<()> {
+    if mode == Mode::Tab && matches!(host, OpenHost::Terminal | OpenHost::Desktop) {
+        anyhow::bail!(
+            "{} has no sibling-tab support. Open a terminal and run: {} --here",
+            host.label(),
+            fallback_text(&target.fallback_argv())
+        );
+    }
+    Ok(())
 }
 
 fn open_tab(

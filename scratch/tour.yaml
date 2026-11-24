@@ -1,7 +1,9 @@
-at: a707e73b0630a6da913095cb03b0ab606197853f
+at: dbdcbf1d7b8a8ea04bca95ff071c0de1ce5fcdd1
 first:
   - path: docs/ops.md
     why: Rent, price, update and return a Machine
+  - path: docs/subscriptions.md
+    why: Which login starts a Session on each Machine
   - path: docs/dev/settings.md
     why: Which remote settings update and which edits stay
   - path: docs/work.md
@@ -14,6 +16,14 @@ first:
     why: The installation stream belongs to its Machine
   - path: rust/loopflow-execution/src/config/remote.rs
     why: Compare each forwarded declaration against its saved value
+  - path: rust/loopflow-execution/src/agent/availability.rs
+    why: Check installed clients and choose a configured model
+  - path: rust/loopflow-execution/src/session.rs
+    why: Bind the primary Session to its skill’s agent
+  - path: rust/loopflow-execution/src/prompt/process.rs
+    why: Prepare the worker for the selected harness
+  - path: rust/loopflow/src/server/recovery.rs
+    why: Wait for the login before counting a start
   - path: rust/loopflow-storage/src/rental.rs
     why: Admission prices the ceiling and records the floor
   - path: rust/loopflow-execution/src/rental/sandbox.py
@@ -50,6 +60,8 @@ first:
     why: Start and replace a detached Linux server
   - path: rust/loopflow-storage/src/sqlite/processes.rs
     why: Inspect live owners on the installed schema
+  - path: rust/loopflow/tests/settings_launch_tests.rs
+    why: Exercise primary, worker and commit routes together
   - path: rust/loopflow/tests/served_reads.rs
     why: Read forwarded routes and independent edits through the CLI
   - path: rust/loopflow/src/lf/commands/binaries.rs

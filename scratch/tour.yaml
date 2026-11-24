@@ -1,15 +1,19 @@
-at: e9dedf3045e31454013a72a42dbf3e8726094240
+at: 19d2e4e0a5f68fc13626ad08f41bbfa133347242
 first:
   - path: docs/dev/machines.md
-    why: See the reachable owner and sibling sandbox cases
+    why: Compare reachable, offline and unclaimed Tasks
+  - path: docs/work.md
+    why: Read the steer receipt
   - path: rust/loopflow-model/src/durable.rs
     why: Where a claimed Task runs
+  - path: rust/loopflow-storage/src/execution.rs
+    why: Which lifecycle states this Machine can observe
   - path: rust/loopflow/src/lf/commands/task_row.rs
     why: Whose Machine answered the status read
   - path: tests/fixtures/dto/task_steer_receipt.json
     why: What a steer reports to its caller
   - path: rust/loopflow/src/lf/commands/work_route.rs
-    why: Resolve the peer and its portable Task selector
+    why: Route status and steers from the claim
   - path: rust/loopflow/src/lf/commands/write.rs
     why: Save locally only before sending the remote request
   - path: rust/loopflow-execution/src/engine/task.rs
@@ -17,7 +21,9 @@ first:
   - path: rust/loopflow-execution/src/engine/session.rs
     why: Name the Session that can read the steer
   - path: rust/loopflow/src/lf/commands/waves.rs
-    why: Project the owner's reply or explain its absence
+    why: Render the owner’s status and project list actions
+  - path: rust/loopflow-storage/src/sqlite/selections.rs
+    why: Match selections to the observed lifecycle
   - path: rust/loopflow-storage/src/migrations/planning_scope_checks.sql
     why: Keep existing watermarks as new scopes join
   - path: rust/loopflow-storage/src/sqlite/planning_scope_checks.rs

@@ -57,7 +57,7 @@ fn workspace_plan(
         store,
         repository,
         inventory,
-        &mut crate::lf::navigation::shipping_reader(),
+        crate::lf::navigation::command_merges,
     )?;
     plan.selection = selected;
     Ok(plan)

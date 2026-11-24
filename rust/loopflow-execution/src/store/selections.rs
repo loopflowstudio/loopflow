@@ -2,7 +2,9 @@
 use crate::store::session_projection::Reading;
 use crate::store::{StoreError, StoreResult};
 use loopflow_model::durable::RepositoryId;
-use loopflow_storage::sqlite::selections::{repository_default, TaskSelectionReading};
+use loopflow_storage::sqlite::selections::{
+    repository_default, GraphTile, GraphTileInput, TaskSelectionReading,
+};
 use loopflow_storage::sqlite::sessions::{SessionProjection, SessionProjectionInputs};
 use loopflow_storage::sqlite::SqliteStore;
 use loopflow_storage::work::selection::{
@@ -31,17 +33,11 @@ pub fn plan_selection(
     store: &SqliteStore,
     repository: &RepositoryId,
     selection: Selection,
-    ships: loopflow_storage::sqlite::ShipsBeforeReview<'_>,
+    merges: fn(&[String]) -> bool,
 ) -> StoreResult<ViewPlan> {
+    let mut tile = graph_tile_reader(merges);
     let plan = read_projected(store, |inputs, projection| {
-        store.projected_plan_selection(
-            repository,
-            selection.clone(),
-            inputs,
-            projection,
-            running_step,
-            ships,
-        )
+        store.projected_plan_selection(repository, selection.clone(), inputs, projection, &mut tile)
     })?;
     prepare_plan(store, plan)
 }
@@ -50,10 +46,11 @@ pub fn all_view_plans(
     store: &SqliteStore,
     source: Option<&str>,
     repos: &[String],
-    ships: loopflow_storage::sqlite::ShipsBeforeReview<'_>,
+    merges: fn(&[String]) -> bool,
 ) -> StoreResult<Vec<ViewPlan>> {
+    let mut tile = graph_tile_reader(merges);
     let plans = read_projected(store, |inputs, projection| {
-        store.projected_all_view_plans(source, repos, inputs, projection, running_step, ships)
+        store.projected_all_view_plans(source, repos, inputs, projection, &mut tile)
     })?;
     plans
         .into_iter()
@@ -64,10 +61,11 @@ pub fn all_view_plans(
 pub fn selection_plans(
     store: &SqliteStore,
     repository: &RepositoryId,
-    ships: loopflow_storage::sqlite::ShipsBeforeReview<'_>,
+    merges: fn(&[String]) -> bool,
 ) -> StoreResult<Vec<ViewPlan>> {
+    let mut tile = graph_tile_reader(merges);
     let plans = read_projected(store, |inputs, projection| {
-        store.projected_selection_plans(repository, inputs, projection, running_step, ships)
+        store.projected_selection_plans(repository, inputs, projection, &mut tile)
     })?;
     plans
         .into_iter()
@@ -109,13 +107,13 @@ pub fn view_plan(
     store: &SqliteStore,
     repository: &RepositoryId,
     source: Option<&str>,
-    ships: loopflow_storage::sqlite::ShipsBeforeReview<'_>,
+    merges: fn(&[String]) -> bool,
 ) -> StoreResult<ViewPlan> {
     let selection = match source {
         Some(source) => Selection::parse(source, None).map_err(StoreError::from)?,
         None => repository_default(),
     };
-    plan_selection(store, repository, selection, ships)
+    plan_selection(store, repository, selection, merges)
 }
 
 pub fn edit_dashboard(
@@ -160,9 +158,24 @@ pub fn edit_dashboard(
     )
 }
 
-fn running_step(graph: &str, cursor: &str) -> StoreResult<Option<String>> {
-    let graph: crate::task_graph::CapturedGraph = serde_json::from_str(graph)?;
-    Ok(graph.step_name_of(&serde_json::from_str(cursor)?))
+fn graph_tile_reader(
+    merges: fn(&[String]) -> bool,
+) -> impl FnMut(GraphTileInput<'_>) -> StoreResult<GraphTile> {
+    let mut cached = crate::task_graph::cached_merges(merges);
+    move |input| {
+        let graph: crate::task_graph::CapturedGraph = serde_json::from_str(input.graph)?;
+        let cursor: Option<crate::graph::runner::ExecutionCursor> =
+            input.cursor.map(serde_json::from_str).transpose()?;
+        let running_step = cursor
+            .as_ref()
+            .and_then(|cursor| graph.step_name_of(cursor));
+        let ships = input.need_ship
+            && graph.ships_before_review(input.step, cursor.as_ref(), input.auto, &mut cached);
+        Ok(GraphTile {
+            running_step,
+            ships,
+        })
+    }
 }
 
 fn prepare_plan(store: &SqliteStore, mut plan: ViewPlan) -> StoreResult<ViewPlan> {

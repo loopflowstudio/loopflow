@@ -18,7 +18,7 @@ use loopflow_model::durable::{RepositoryId, TaskOwnership};
 /// Durable facts about a set of Tasks, read in one snapshot.
 #[derive(Debug)]
 pub struct TaskDetailFacts {
-    pub working_groups: HashMap<String, WorkingGroup>,
+    pub working_groups: HashMap<TaskId, WorkingGroup>,
     pub states: HashMap<TaskId, TaskState>,
     /// Unsettled pauses, with the first worker OS session awaiting cleanup when recorded.
     pub pause_cleanup: HashMap<TaskId, PauseCleanup>,
@@ -78,7 +78,7 @@ impl SqliteStore {
             let remote = owner.is_some_and(|owner| owner.runs_on(&local).is_some());
             (TaskSection::of(state, owner.is_some(), remote) == TaskSection::Working).then(|| {
                 (
-                    task.id.as_str(),
+                    &task.id,
                     state.observed_here(remote),
                     auto.get(&task.id).copied(),
                 )
@@ -176,11 +176,11 @@ impl SqliteStore {
 pub type ShipsBeforeReview<'a> =
     &'a mut dyn FnMut(&str, &str, Option<&str>, Option<AutoState>) -> StoreResult<bool>;
 
-pub(super) fn working_groups_in<'a>(
+fn working_groups_in<'a>(
     conn: &Connection,
-    working: impl Iterator<Item = (&'a str, Option<TaskState>, Option<AutoState>)>,
+    working: impl Iterator<Item = (&'a TaskId, Option<TaskState>, Option<AutoState>)>,
     ships: ShipsBeforeReview<'_>,
-) -> StoreResult<HashMap<String, WorkingGroup>> {
+) -> StoreResult<HashMap<TaskId, WorkingGroup>> {
     let mut groups = HashMap::new();
     let mut inspect = HashMap::new();
     for (id, state, auto) in working {
@@ -188,12 +188,12 @@ pub(super) fn working_groups_in<'a>(
             (Some(TaskState::Paused), _) => WorkingGroup::Paused,
             (_, Some(AutoState::On)) => WorkingGroup::Shipping,
             (Some(_), _) => {
-                inspect.insert(id, auto);
+                inspect.insert(id.as_str(), (id.clone(), auto));
                 WorkingGroup::Active
             }
             (None, _) => WorkingGroup::Active,
         };
-        groups.insert(id.to_owned(), group);
+        groups.insert(id.clone(), group);
     }
     if !inspect.is_empty() {
         let mut query = conn.prepare(
@@ -203,13 +203,14 @@ pub(super) fn working_groups_in<'a>(
         let mut rows = query.query([ids_json(inspect.keys().copied())])?;
         while let Some(row) = rows.next()? {
             let id: String = row.get(0)?;
+            let (task_id, auto) = &inspect[id.as_str()];
             if ships(
                 &row.get::<_, String>(1)?,
                 &row.get::<_, String>(2)?,
                 row.get::<_, Option<String>>(3)?.as_deref(),
-                inspect[id.as_str()],
+                *auto,
             )? {
-                groups.insert(id, WorkingGroup::Shipping);
+                groups.insert(task_id.clone(), WorkingGroup::Shipping);
             }
         }
     }

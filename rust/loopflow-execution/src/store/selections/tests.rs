@@ -1,6 +1,6 @@
 use crate::process::attachment;
 use crate::store::selections;
-use crate::task_graph::tests::ships_before_review;
+use crate::task_graph::tests::test_merges;
 
 use loopflow_model::durable::RepositoryId;
 use loopflow_storage::sqlite::SqliteStore;
@@ -14,7 +14,7 @@ fn view_plan(
     repo: &RepositoryId,
     query: Option<&str>,
 ) -> crate::store::StoreResult<loopflow_storage::work::selection::ViewPlan> {
-    selections::view_plan(store, repo, query, &mut ships_before_review)
+    selections::view_plan(store, repo, query, test_merges)
 }
 
 fn fixture() -> (tempfile::TempDir, SqliteStore, RepositoryId) {
@@ -300,7 +300,7 @@ fn one_task_order_reorders_working_tasks_and_every_plan_and_arrivals_prepend() {
             .task_ids(),
         [two, one]
     );
-    let plans = selections::selection_plans(&store, &repo, &mut ships_before_review).unwrap();
+    let plans = selections::selection_plans(&store, &repo, test_merges).unwrap();
     let wave = plans
         .iter()
         .find(|plan| {
@@ -447,7 +447,7 @@ fn repository_and_wave_tiles_open_only_the_unfinished_primary() {
     .unwrap();
 
     let check = |primary: Option<&str>| {
-        let tiles: Vec<_> = selections::selection_plans(&store, &repo, &mut ships_before_review)
+        let tiles: Vec<_> = selections::selection_plans(&store, &repo, test_merges)
             .unwrap()
             .into_iter()
             .flat_map(|plan| plan.contents)
@@ -486,13 +486,9 @@ fn a_wave_scoped_reading_skips_repositories_without_that_wave() {
         )
         .unwrap();
     let repos = ["/repo".to_string(), "/other".to_string()];
-    let all = selections::all_view_plans(
-        &store,
-        Some("kind:task state:working"),
-        &repos,
-        &mut ships_before_review,
-    )
-    .unwrap();
+    let all =
+        selections::all_view_plans(&store, Some("kind:task state:working"), &repos, test_merges)
+            .unwrap();
     assert_eq!(
         all.iter()
             .map(|plan| plan.repo_path.as_str())
@@ -503,7 +499,7 @@ fn a_wave_scoped_reading_skips_repositories_without_that_wave() {
         &store,
         Some("wave:11111111-1111-1111-1111-111111111111 kind:task state:working"),
         &repos,
-        &mut ships_before_review,
+        test_merges,
     )
     .unwrap();
     assert_eq!(scoped.len(), 1);
@@ -515,7 +511,7 @@ fn a_wave_scoped_reading_skips_repositories_without_that_wave() {
 fn wave_default_plan_uses_three_slot_strip() {
     use loopflow_storage::work::selection::{SlotLayout, SlotNode, SplitAxis};
     let (_dir, store, repo) = fixture();
-    let plans = selections::selection_plans(&store, &repo, &mut ships_before_review).unwrap();
+    let plans = selections::selection_plans(&store, &repo, test_merges).unwrap();
     let wave = plans
         .iter()
         .find(|plan| {
@@ -661,7 +657,7 @@ fn repository_queries_include_tasks_without_a_wave() {
 #[test]
 fn dashboards_leave_repository_and_wave_defaults_unchanged() {
     let (_dir, store, repo) = fixture();
-    let defaults = selections::selection_plans(&store, &repo, &mut ships_before_review).unwrap();
+    let defaults = selections::selection_plans(&store, &repo, test_merges).unwrap();
     let id = DashboardId("backlog".into());
     let saved = selections::edit_dashboard(&store, &repo, &id, "state:backlog", None).unwrap();
     let named = store
@@ -674,7 +670,7 @@ fn dashboards_leave_repository_and_wave_defaults_unchanged() {
     assert!(dashboard.pinned);
     assert_eq!(dashboard.contents.len(), 2);
     assert!(dashboard.contents[0].primary_session.is_none());
-    let plans = selections::selection_plans(&store, &repo, &mut ships_before_review).unwrap();
+    let plans = selections::selection_plans(&store, &repo, test_merges).unwrap();
     assert_eq!(plans.len(), defaults.len() + 1);
     for (before, after) in defaults.iter().zip(&plans) {
         assert_eq!(before.selection, after.selection);
@@ -954,7 +950,7 @@ fn query_plans_include_backlog_without_creating_execution_and_keep_saved_edits()
     let plan = view_plan(&store, &repo, Some("query:picked")).unwrap();
     assert_eq!(plan.saved_revision, Some(second.revision));
     assert_eq!(plan.arrangement, second.arrangement);
-    let plans = selections::selection_plans(&store, &repo, &mut ships_before_review).unwrap();
+    let plans = selections::selection_plans(&store, &repo, test_merges).unwrap();
     let observed = plans
         .iter()
         .find(|plan| plan.dashboard_id.as_ref() == Some(&id))

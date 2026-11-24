@@ -50,8 +50,6 @@ fn defaults_include_child_waves_and_working_wave_tasks() {
     ]
     .into_iter()
     .map(|(key, parent_wave)| SelectionWork {
-        lifecycle: None,
-        auto: None,
         states: match key.id.as_str() {
             "backlog" => BTreeSet::from([SelectionState::Backlog]),
             "done" => BTreeSet::from([SelectionState::Done]),
@@ -111,8 +109,6 @@ fn defaults_include_child_waves_and_working_wave_tasks() {
 #[test]
 fn nested_sources_survive_insertions_and_report_unavailable_queries_and_cycles() {
     let work = vec![SelectionWork {
-        lifecycle: None,
-        auto: None,
         key: key("task", WorkWorkspaceKind::Task),
         parent_wave: None,
         name: String::new(),
@@ -302,8 +298,6 @@ fn query_work() -> Vec<SelectionWork> {
     let wave = WaveId::new();
     vec![
         SelectionWork {
-            lifecycle: None,
-            auto: None,
             key: key(wave.as_str(), WorkWorkspaceKind::Wave),
             parent_wave: None,
             name: "Product".into(),
@@ -311,8 +305,6 @@ fn query_work() -> Vec<SelectionWork> {
             activity_known: false,
         },
         SelectionWork {
-            lifecycle: None,
-            auto: None,
             key: key("a", WorkWorkspaceKind::Task),
             parent_wave: Some(wave.clone()),
             name: "FIX-1".into(),
@@ -320,8 +312,6 @@ fn query_work() -> Vec<SelectionWork> {
             activity_known: true,
         },
         SelectionWork {
-            lifecycle: None,
-            auto: None,
             key: key("b", WorkWorkspaceKind::Task),
             parent_wave: Some(wave),
             name: "FIX-2".into(),
@@ -550,8 +540,6 @@ fn working_tasks_are_the_working_section_and_the_others_have_their_own_queries()
     ]
     .into_iter()
     .map(|(id, state, section)| SelectionWork {
-        lifecycle: None,
-        auto: None,
         key: key(id, WorkWorkspaceKind::Task),
         parent_wave: Some(wave.clone()),
         name: id.into(),
@@ -559,8 +547,6 @@ fn working_tasks_are_the_working_section_and_the_others_have_their_own_queries()
         activity_known: true,
     })
     .chain([SelectionWork {
-        lifecycle: None,
-        auto: None,
         key: key(wave.as_str(), WorkWorkspaceKind::Wave),
         parent_wave: None,
         name: "wave".into(),

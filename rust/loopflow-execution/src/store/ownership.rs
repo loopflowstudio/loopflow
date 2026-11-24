@@ -325,9 +325,15 @@ pub fn task_ownership(
 pub fn task_detail_facts(
     store: &SqliteStore,
     tasks: &[&Task],
-    ships: loopflow_storage::sqlite::ShipsBeforeReview<'_>,
+    merges: fn(&[String]) -> bool,
 ) -> StoreResult<loopflow_storage::sqlite::TaskDetailFacts> {
-    let (local, mut facts) = store.saved_task_detail_facts(tasks, ships)?;
+    let mut cached = crate::task_graph::cached_merges(merges);
+    let mut ships = |graph: &str, step: &str, cursor: Option<&str>, auto| -> StoreResult<bool> {
+        let graph: crate::task_graph::CapturedGraph = serde_json::from_str(graph)?;
+        let cursor = cursor.map(serde_json::from_str).transpose()?;
+        Ok(graph.ships_before_review(step, cursor.as_ref(), auto, &mut cached))
+    };
+    let (local, mut facts) = store.saved_task_detail_facts(tasks, &mut ships)?;
     let mut names = machine_names(store)?;
     names.insert(local, local_label());
     for ownership in facts.ownership.values_mut() {

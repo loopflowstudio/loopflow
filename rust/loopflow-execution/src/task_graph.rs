@@ -271,6 +271,34 @@ impl CapturedGraph {
         scan(&steps[place.index..], later, merges)
     }
 
+    /// Whether no human step remains before landing from the current cursor or stop.
+    pub fn ships_before_review(
+        &self,
+        step: &str,
+        cursor: Option<&ExecutionCursor>,
+        auto: Option<AutoState>,
+        mut merges: impl FnMut(&[String]) -> bool,
+    ) -> bool {
+        if !Self::has_landing(&self.steps, &mut merges) {
+            return false;
+        }
+        let place = if let Some(cursor) = cursor {
+            if cursor.index == self.steps.len() {
+                return true;
+            }
+            self.place_of(cursor)
+        } else if step == END {
+            return true;
+        } else {
+            let interactive = self.interactive_step(step);
+            if auto == Some(AutoState::Off) && landing_stop(step, interactive.is_some()) {
+                return false;
+            }
+            interactive.or_else(|| self.find(step))
+        };
+        place.is_some_and(|place| !self.needs_review(&place, &mut merges))
+    }
+
     /// The place `cursor` stands at, if the graph has it.
     pub fn place_of(&self, cursor: &ExecutionCursor) -> Option<Place> {
         let mut path = Vec::new();
@@ -635,34 +663,17 @@ fn landing_stop(step: &str, interactive: bool) -> bool {
     step != START && step != END && !interactive
 }
 
-/// The Task's captured cursor takes precedence over the stop its run left.
-pub fn ships_before_review(
-    graph: &str,
-    step: &str,
-    cursor: Option<&str>,
-    auto: Option<AutoState>,
-    mut merges: impl FnMut(&[String]) -> bool,
-) -> crate::store::StoreResult<bool> {
-    let graph: CapturedGraph = serde_json::from_str(graph)?;
-    if !CapturedGraph::has_landing(&graph.steps, &mut merges) {
-        return Ok(false);
+/// Tasks in a list often share a Graph. Parse each command's argv once per reading.
+pub(crate) fn cached_merges(merges: fn(&[String]) -> bool) -> impl FnMut(&[String]) -> bool {
+    let mut commands = std::collections::HashMap::<Vec<String>, bool>::new();
+    move |argv| {
+        if let Some(&result) = commands.get(argv) {
+            return result;
+        }
+        let result = merges(argv);
+        commands.insert(argv.to_vec(), result);
+        result
     }
-    let place = if let Some(cursor) = cursor {
-        let cursor: ExecutionCursor = serde_json::from_str(cursor)?;
-        if cursor.index == graph.steps.len() {
-            return Ok(true);
-        }
-        graph.place_of(&cursor)
-    } else if step == END {
-        return Ok(true);
-    } else {
-        let interactive = graph.interactive_step(step);
-        if auto == Some(AutoState::Off) && landing_stop(step, interactive.is_some()) {
-            return Ok(false);
-        }
-        interactive.or_else(|| graph.find(step))
-    };
-    Ok(place.is_some_and(|place| !graph.needs_review(&place, &mut merges)))
 }
 
 /// Name the committed file a teammate's graph selection needs.
@@ -682,15 +693,8 @@ pub(crate) fn validate_graph_name(name: &str) -> Result<(), String> {
 
 #[cfg(test)]
 pub(crate) mod tests {
-    pub(crate) fn ships_before_review(
-        graph: &str,
-        step: &str,
-        cursor: Option<&str>,
-        auto: Option<AutoState>,
-    ) -> crate::store::StoreResult<bool> {
-        super::ships_before_review(graph, step, cursor, auto, |args| {
-            args.get(1).is_some_and(|arg| arg == "land")
-        })
+    pub(crate) fn test_merges(args: &[String]) -> bool {
+        args.get(1).is_some_and(|arg| arg == "land")
     }
 
     use super::{interactive_summary, CapturedGraph, TaskGraph, TaskGraphRun};

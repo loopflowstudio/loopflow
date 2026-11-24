@@ -708,26 +708,6 @@ pub fn command_merges(argv: &[String]) -> bool {
         .is_ok_and(|cli| cli.merges())
 }
 
-/// Tasks in a list often run the same Graph. Resolve each command once per reading.
-pub(crate) fn shipping_reader() -> impl FnMut(
-    &str,
-    &str,
-    Option<&str>,
-    Option<loopflow_storage::sqlite::AutoState>,
-) -> loopflow_storage::StoreResult<bool> {
-    let mut commands = std::collections::HashMap::<Vec<String>, bool>::new();
-    move |graph, step, cursor, auto| {
-        loopflow_execution::task_graph::ships_before_review(graph, step, cursor, auto, |argv| {
-            if let Some(merges) = commands.get(argv) {
-                return *merges;
-            }
-            let merges = command_merges(argv);
-            commands.insert(argv.to_vec(), merges);
-            merges
-        })
-    }
-}
-
 #[cfg(test)]
 mod landing_tests {
     use super::command_merges;
@@ -767,13 +747,11 @@ mod landing_tests {
         write(repo.path(), ".lf/graphs/ship.yaml",
             "- xor:\n    paths:\n      direct:\n        description: Land now\n        graph: deliver\n      review:\n        description: Review first\n        steps:\n          - interactive: demo\n- interactive: verify\n");
         let graph = CapturedGraph::load("ship", repo.path()).unwrap().unwrap();
-        let saved = serde_json::to_string(&graph).unwrap();
-        let mut ships = super::shipping_reader();
-        assert!(!ships(&saved, "start", None, None).unwrap());
+        assert!(!graph.ships_before_review("start", None, None, command_merges));
         for (step, expected) in [("reflect", true), ("demo", false), ("verify", false)] {
-            let cursor = serde_json::to_string(&graph.find(step).unwrap().cursor()).unwrap();
+            let cursor = graph.find(step).unwrap().cursor();
             assert_eq!(
-                ships(&saved, "start", Some(&cursor), None).unwrap(),
+                graph.ships_before_review("start", Some(&cursor), None, command_merges),
                 expected,
                 "{step}"
             );
@@ -783,7 +761,6 @@ mod landing_tests {
     #[test]
     fn only_graphs_that_land_ship_after_the_last_review() {
         let repo = tempfile::tempdir().unwrap();
-        let mut ships = super::shipping_reader();
         for (name, expected) in [
             ("code", true),
             ("feature", true),
@@ -791,23 +768,24 @@ mod landing_tests {
             ("pursue", false),
         ] {
             let graph = CapturedGraph::load(name, repo.path()).unwrap().unwrap();
-            let saved = serde_json::to_string(&graph).unwrap();
             assert_eq!(
-                ships(&saved, "end", None, None).unwrap(),
+                graph.ships_before_review("end", None, None, command_merges),
                 expected,
                 "{name}"
             );
             if expected {
                 for step in ["deliver", "verify"] {
-                    let cursor =
-                        serde_json::to_string(&graph.find(step).unwrap().cursor()).unwrap();
+                    let cursor = graph.find(step).unwrap().cursor();
                     assert!(
-                        ships(&saved, "start", Some(&cursor), None).unwrap(),
+                        graph.ships_before_review("start", Some(&cursor), None, command_merges),
                         "{name}: {step}"
                     );
                 }
             } else {
-                assert!(!ships(&saved, "start", None, None).unwrap(), "{name}");
+                assert!(
+                    !graph.ships_before_review("start", None, None, command_merges),
+                    "{name}"
+                );
             }
         }
     }

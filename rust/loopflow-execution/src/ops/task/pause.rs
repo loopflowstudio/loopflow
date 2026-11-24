@@ -29,8 +29,14 @@ fn lock(name: &str) -> OpsResult<File> {
     Ok(file)
 }
 
+fn cleanup_lock_file(task: &TaskId) -> OpsResult<File> {
+    retirement::lock_file(&format!("pause-{task}"))
+}
+
 pub(crate) fn cleanup_lock(task: &TaskId) -> OpsResult<File> {
-    lock(&format!("pause-{task}"))
+    let file = cleanup_lock_file(task)?;
+    file.lock_exclusive()?;
+    Ok(file)
 }
 
 async fn resolve(issue: &str, route: TaskRoute) -> OpsResult<(SharedStore, Task, File)> {
@@ -121,6 +127,10 @@ fn finish(
             task.identifier
         )));
     }
+    settle(sqlite, task)
+}
+
+fn settle(sqlite: &SqliteStore, task: &Task) -> OpsResult<Option<String>> {
     let finishing = draining(sqlite, &task.id)?;
     sqlite
         .settle_task_pause(&task.id, finishing.is_some())
@@ -144,7 +154,7 @@ fn finish_if_jobs_exited(store: &SqliteStore, task: &Task) -> OpsResult<()> {
             )));
         }
     }
-    finish(store, task, &[])?;
+    settle(store, task)?;
     Ok(())
 }
 
@@ -154,7 +164,7 @@ pub(crate) fn before_unassign(store: &SqliteStore, task: &Task) -> OpsResult<()>
         .map_err(task_error)?
         .is_some()
     {
-        let lock = retirement::lock_file(&format!("pause-{}", task.id))?;
+        let lock = cleanup_lock_file(&task.id)?;
         lock.try_lock_exclusive().map_err(|err| {
             if err.kind() == std::io::ErrorKind::WouldBlock {
                 task_error(format!("{} is still stopping", task.identifier))

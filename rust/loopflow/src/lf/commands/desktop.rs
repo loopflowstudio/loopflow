@@ -727,7 +727,7 @@ pub(crate) fn read_plans(
     Ok(selections::selection_plans(
         &store.sqlite,
         &repository,
-        &mut crate::lf::navigation::shipping_reader(),
+        crate::lf::navigation::command_merges,
     )?)
 }
 
@@ -750,7 +750,7 @@ pub(crate) fn subscribe_plans(
                     Ok(selections::selection_plans(
                         &store.sqlite,
                         &repository,
-                        &mut crate::lf::navigation::shipping_reader(),
+                        crate::lf::navigation::command_merges,
                     )?)
                 });
             async move { result }
@@ -782,7 +782,7 @@ pub(crate) fn subscribe_view_plan(
                         &store.sqlite,
                         &repository,
                         expression.as_deref(),
-                        &mut crate::lf::navigation::shipping_reader(),
+                        crate::lf::navigation::command_merges,
                     )?)
                 });
             async move { result }
@@ -816,7 +816,7 @@ pub(crate) fn read_all_view_plans(
         &store.sqlite,
         expression,
         &portfolio_repos()?,
-        &mut crate::lf::navigation::shipping_reader(),
+        crate::lf::navigation::command_merges,
     )?)
 }
 
@@ -838,7 +838,7 @@ pub(crate) fn subscribe_all_view_plans(
                 &store.sqlite,
                 args.expression.as_deref(),
                 &portfolio_repos()?,
-                &mut crate::lf::navigation::shipping_reader(),
+                crate::lf::navigation::command_merges,
             )?)
         },
         transport,
@@ -861,7 +861,7 @@ pub fn plan_view(
         &store.sqlite,
         &repository,
         expression,
-        &mut crate::lf::navigation::shipping_reader(),
+        crate::lf::navigation::command_merges,
     )?)
 }
 
@@ -911,7 +911,7 @@ fn view_plan(
                 id: SelectionId("work-default".into()),
                 expression,
             },
-            &mut crate::lf::navigation::shipping_reader(),
+            crate::lf::navigation::command_merges,
         )?
     } else {
         plan_view(

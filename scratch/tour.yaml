@@ -1,4 +1,4 @@
-at: 3977c633720517ea6e97f5c6172e8c62ee87ba3b
+at: 855d851020cca5096515bc7ac615f7540feacee6
 first:
   - path: docs/work.md
     why: Pause and resume from the saved step
@@ -29,7 +29,9 @@ first:
   - path: rust/loopflow-storage/src/work/selection.rs
     why: Select a held Task in either board section
   - path: rust/loopflow-storage/src/sqlite/selections.rs
-    why: Supply each selected row with its group
+    why: Fill Task tiles and Working groups in one Graph read
+  - path: rust/loopflow-execution/src/store/selections.rs
+    why: Parse each captured Graph once per tile
   - path: rust/loopflow/src/lf/commands/waves.rs
     why: Share roadmap membership with the CLI
   - path: rust/loopflow-definitions/src/builtins/task/graph/code.yaml
@@ -45,7 +47,7 @@ first:
   - path: swift/LoopflowMac/Views/TaskWorkView.swift
     why: Use one pause action across Mac controls
   - path: swift/Loopflow/Services/PendingChanges.swift
-    why: Keep rows visible while a write settles
+    why: Keep rows in place while pause or unpause settles
   - path: rust/loopflow/tests/work/task_graph_launch_tests.rs
     why: Stop the worker while its conversation survives
   - path: rust/loopflow/tests/machine_commands.rs

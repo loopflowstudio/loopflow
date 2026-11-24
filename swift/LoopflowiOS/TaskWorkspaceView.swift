@@ -133,7 +133,7 @@ struct TaskWorkspaceView: View {
                 }
                 if let pause = actions.pause {
                     Button(pause.rawValue, systemImage: pause == .pause ? "pause" : "play") {
-                        feed.pendingChanges.setPause(pause, row: row, directory: directory, notices: feed.notices, show: nil) {
+                        feed.pendingChanges.setPause(pause, issue: issue, directory: directory, notices: feed.notices, show: nil) {
                             await feed.refresh()
                         }
                     }

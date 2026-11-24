@@ -3,7 +3,7 @@ use super::children::{TaskIdentifiers, TASK_VISIBLE};
 use super::sessions::{SessionProjection, SessionProjectionInputs};
 use super::task_work::{END, START};
 use super::{AutoState, SqliteStore};
-use crate::execution::{TaskSection, TaskState};
+use crate::execution::{TaskSection, TaskState, WorkingGroup};
 use crate::work::selection::{
     move_into_place, Arrangement, Dashboard, DashboardId, DashboardReading, DropSide, Selection,
     SelectionError, SelectionExpression, SelectionId, SelectionResolution, SelectionState,
@@ -16,7 +16,7 @@ use loopflow_model::id::{LfSessionId, WaveId};
 use loopflow_model::program_status::State;
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use std::cmp::Reverse;
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 fn invalid(error: impl std::fmt::Display) -> StoreError {
     StoreError::InvalidData(error.to_string())
@@ -94,17 +94,13 @@ fn work_in(
     let mut work = Vec::with_capacity(tasks.len());
     for task in tasks {
         let activity = activity.get(&task.id);
-        let lifecycle = task.lifecycle.observed_here(task.runs_elsewhere);
-        let auto = auto.get(&task.id).copied();
         work.push(SelectionWork {
-            lifecycle,
-            auto,
             key: key(WorkWorkspaceKind::Task, task.id.to_string()),
             states: task_selection_states(
-                lifecycle,
+                task.lifecycle.observed_here(task.runs_elsewhere),
                 task.section(),
                 task.owned || published.contains(&task.id),
-                auto,
+                auto.get(&task.id).copied(),
                 activity,
             ),
             parent_wave: task.wave_id,
@@ -118,8 +114,6 @@ fn work_in(
     // Tasks precede the alphabetized Waves, then the repository.
     for wave in waves {
         work.push(SelectionWork {
-            lifecycle: None,
-            auto: None,
             key: key(WorkWorkspaceKind::Wave, wave.id().to_string()),
             parent_wave: wave.parent_wave_id().cloned(),
             name: wave.name().to_string(),
@@ -128,8 +122,6 @@ fn work_in(
         });
     }
     work.push(SelectionWork {
-        lifecycle: None,
-        auto: None,
         key: key(WorkWorkspaceKind::Repository, repository.to_string()),
         parent_wave: None,
         name: repo,
@@ -450,49 +442,14 @@ impl<'a> RepositoryViews<'a> {
         })
     }
 
-    fn fill_working_groups(
-        &self,
-        conn: &Connection,
-        plans: &mut [ViewPlan],
-        ships: super::task_details::ShipsBeforeReview<'_>,
-    ) -> StoreResult<()> {
-        let selected: BTreeSet<_> = plans
-            .iter()
-            .flat_map(|plan| &plan.contents)
-            .filter(|content| content.states.contains(&SelectionState::Working))
-            .map(|content| &content.work)
-            .collect();
-        let groups = super::task_details::working_groups_in(
-            conn,
-            selected.into_iter().map(|key| {
-                let item = self.by_key[key];
-                (item.key.id.as_str(), item.lifecycle, item.auto)
-            }),
-            ships,
-        )?;
-        for content in plans.iter_mut().flat_map(|plan| &mut plan.contents) {
-            if content.states.contains(&SelectionState::Working) {
-                content.working_group = groups.get(&content.work.id).copied();
-            }
-        }
-        Ok(())
-    }
-
-    fn selected(
-        &self,
-        conn: &Connection,
-        selection: Selection,
-        ships: super::task_details::ShipsBeforeReview<'_>,
-    ) -> StoreResult<ViewPlan> {
+    fn selected(&self, selection: Selection) -> StoreResult<ViewPlan> {
         let saved = selection
             .referenced_query()
             .and_then(|id| self.catalog.iter().find(|saved| &saved.id == id));
-        let mut plan = self.plan(
+        self.plan(
             saved.map_or(selection, |saved| saved.selection.clone()),
             saved,
-        )?;
-        self.fill_working_groups(conn, std::slice::from_mut(&mut plan), ships)?;
-        Ok(plan)
+        )
     }
 
     fn plan(&self, selection: Selection, saved: Option<&Dashboard>) -> StoreResult<ViewPlan> {
@@ -563,18 +520,54 @@ impl<'a> RepositoryViews<'a> {
     }
 }
 
-/// Resolve the captured cursor in execution, where the Graph's step names live.
-type RunningStep = fn(&str, &str) -> StoreResult<Option<String>>;
+/// Inputs for reading a Task's captured Graph once per tile.
+#[derive(Debug)]
+pub struct GraphTileInput<'a> {
+    pub graph: &'a str,
+    pub step: &'a str,
+    pub cursor: Option<&'a str>,
+    pub auto: Option<AutoState>,
+    pub need_ship: bool,
+}
+
+/// What a Task tile reads from its captured Graph in one parse.
+#[derive(Debug)]
+pub struct GraphTile {
+    pub running_step: Option<String>,
+    pub ships: bool,
+}
+
+/// Resolve a captured Graph once per Task tile.
+pub type GraphTileReader<'a> = &'a mut dyn FnMut(GraphTileInput<'_>) -> StoreResult<GraphTile>;
 
 fn fill_task_contents_in(
     conn: &Connection,
     plans: &mut [ViewPlan],
-    running_step: RunningStep,
+    graph_tile: GraphTileReader<'_>,
 ) -> StoreResult<()> {
     // A Task may appear in several plans. One row supplies all of its tiles.
     let mut tasks = HashMap::<String, Vec<&mut ViewContent>>::new();
+    let mut inspect = HashSet::<String>::new();
     for content in plans.iter_mut().flat_map(|plan| &mut plan.contents) {
         if content.identifier.is_some() {
+            if content.states.contains(&SelectionState::Working) {
+                let group = if content.states.contains(&SelectionState::Paused) {
+                    WorkingGroup::Paused
+                } else if content.states.contains(&SelectionState::Auto) {
+                    WorkingGroup::Shipping
+                } else {
+                    if content.states.iter().any(|state| {
+                        matches!(
+                            state,
+                            SelectionState::Idle | SelectionState::Active | SelectionState::Moving
+                        )
+                    }) {
+                        inspect.insert(content.work.id.clone());
+                    }
+                    WorkingGroup::Active
+                };
+                content.working_group = Some(group);
+            }
             tasks
                 .entry(content.work.id.clone())
                 .or_default()
@@ -586,15 +579,21 @@ fn fill_task_contents_in(
     }
     let mut query = conn.prepare(
         "SELECT t.id,t.issue_title,s.id,c.worktree,(SELECT id FROM machines WHERE is_local=1),
-                g.step,g.run_start,CASE WHEN g.run_start IS NOT NULL THEN g.graph END
+                g.step,g.run_start,a.state,
+                CASE WHEN g.run_start IS NOT NULL OR t.id IN (SELECT value FROM json_each(?2))
+                     THEN g.graph END
          FROM tasks t
          LEFT JOIN task_primary_sessions p ON p.task_id=t.id
          LEFT JOIN agent_sessions s ON s.id=p.session_id AND s.completed_at IS NULL
          LEFT JOIN task_checkouts c ON c.task_id=t.id
          LEFT JOIN task_graphs g ON g.task_id=t.id
+         LEFT JOIN task_auto a ON a.task_id=t.id
          WHERE t.id IN (SELECT value FROM json_each(?1))",
     )?;
-    let mut rows = query.query([super::children::ids_json(tasks.keys().map(String::as_str))])?;
+    let mut rows = query.query(params![
+        super::children::ids_json(tasks.keys().map(String::as_str)),
+        super::children::ids_json(inspect.iter().map(String::as_str)),
+    ])?;
     while let Some(row) = rows.next()? {
         let id: String = row.get(0)?;
         let title: String = row.get(1)?;
@@ -606,19 +605,38 @@ fn fill_task_contents_in(
             }),
             None => None,
         };
-        let parked = row
-            .get::<_, Option<String>>(5)?
-            .filter(|step| !matches!(step.as_str(), START | END));
-        let step = match row.get::<_, Option<String>>(6)? {
-            Some(cursor) => running_step(&row.get::<_, String>(7)?, &cursor)?.or(parked),
-            None => parked,
+        let step_name = row.get::<_, Option<String>>(5)?;
+        let cursor = row.get::<_, Option<String>>(6)?;
+        let auto = row
+            .get::<_, Option<String>>(7)?
+            .as_deref()
+            .map(AutoState::parse)
+            .transpose()?;
+        let graph = row.get::<_, Option<String>>(8)?;
+        let tile = match (graph.as_deref(), step_name.as_deref()) {
+            (Some(graph), Some(step)) => graph_tile(GraphTileInput {
+                graph,
+                step,
+                cursor: cursor.as_deref(),
+                auto,
+                need_ship: inspect.contains(&id),
+            })?,
+            _ => GraphTile {
+                running_step: None,
+                ships: false,
+            },
         };
+        let parked = step_name.filter(|step| !matches!(step.as_str(), START | END));
+        let step = tile.running_step.or(parked);
         for content in tasks
             .remove(&id)
             .expect("query selects only the requested Tasks")
         {
             content.title.clone_from(&title);
             content.graph_step.clone_from(&step);
+            if tile.ships && content.working_group == Some(WorkingGroup::Active) {
+                content.working_group = Some(WorkingGroup::Shipping);
+            }
             content.primary_session.clone_from(&primary);
             content.location.clone_from(&location);
             if primary.is_none() {
@@ -660,17 +678,15 @@ impl SqliteStore {
         selection: Selection,
         inputs: &SessionProjectionInputs,
         projection: &SessionProjection,
-        running_step: RunningStep,
-        ships: super::task_details::ShipsBeforeReview<'_>,
+        graph_tile: GraphTileReader<'_>,
     ) -> StoreResult<Option<ViewPlan>> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let Some(snapshot) = inputs.pin(&mut conn)? else {
             return Ok(None);
         };
         let work = work_in(&snapshot, repository, projection)?;
-        let mut plan = RepositoryViews::read(&snapshot, repository, &work)?
-            .selected(&snapshot, selection, ships)?;
-        fill_task_contents_in(&snapshot, std::slice::from_mut(&mut plan), running_step)?;
+        let mut plan = RepositoryViews::read(&snapshot, repository, &work)?.selected(selection)?;
+        fill_task_contents_in(&snapshot, std::slice::from_mut(&mut plan), graph_tile)?;
         Ok(Some(plan))
     }
 
@@ -683,8 +699,7 @@ impl SqliteStore {
         repos: &[String],
         inputs: &SessionProjectionInputs,
         projection: &SessionProjection,
-        running_step: RunningStep,
-        ships: super::task_details::ShipsBeforeReview<'_>,
+        graph_tile: GraphTileReader<'_>,
     ) -> StoreResult<Option<Vec<ViewPlan>>> {
         let selection = match source {
             Some(source) => Selection::parse(source, None).map_err(StoreError::from)?,
@@ -710,15 +725,12 @@ impl SqliteStore {
                     continue;
                 }
                 plans.push(
-                    RepositoryViews::read(&snapshot, &repository, &work)?.selected(
-                        &snapshot,
-                        selection.clone(),
-                        ships,
-                    )?,
+                    RepositoryViews::read(&snapshot, &repository, &work)?
+                        .selected(selection.clone())?,
                 );
             }
         }
-        fill_task_contents_in(&snapshot, &mut plans, running_step)?;
+        fill_task_contents_in(&snapshot, &mut plans, graph_tile)?;
         Ok(Some(plans))
     }
 
@@ -728,8 +740,7 @@ impl SqliteStore {
         repository: &RepositoryId,
         inputs: &SessionProjectionInputs,
         projection: &SessionProjection,
-        running_step: RunningStep,
-        ships: super::task_details::ShipsBeforeReview<'_>,
+        graph_tile: GraphTileReader<'_>,
     ) -> StoreResult<Option<Vec<ViewPlan>>> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let Some(snapshot) = inputs.pin(&mut conn)? else {
@@ -753,8 +764,7 @@ impl SqliteStore {
         for saved in &views.catalog {
             plans.push(views.plan(saved.selection.clone(), Some(saved))?);
         }
-        views.fill_working_groups(&snapshot, &mut plans, ships)?;
-        fill_task_contents_in(&snapshot, &mut plans, running_step)?;
+        fill_task_contents_in(&snapshot, &mut plans, graph_tile)?;
         Ok(Some(plans))
     }
 

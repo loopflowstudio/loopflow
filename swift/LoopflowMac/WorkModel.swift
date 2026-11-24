@@ -2766,7 +2766,7 @@ final class WorkModel {
     }
 
     func setPause(_ action: TaskActions.Pause, task: RoadmapTask) {
-        pendingChanges.setPause(action, row: task, directory: directory(task), notices: navigation.notices,
+        pendingChanges.setPause(action, issue: task.task.identifier, directory: directory(task), notices: navigation.notices,
                                 show: Notice.Action("Show") { [weak self] in self?.select(.task(id: task.id)) }) { [weak self] in
             try? await self?.confirmWorkUpdate()
         }

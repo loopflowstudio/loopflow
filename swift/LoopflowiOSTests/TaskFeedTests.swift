@@ -124,7 +124,7 @@ final class TaskFeedTests: XCTestCase {
         let expression = await server.expression
         XCTAssertEqual(expression, "kind:task state:working")
         await server.refuse("land is still finishing")
-        feed.pendingChanges.make(.unpause(task: "LOO-2", owned: true), subject: "LOO-2", verb: "unpaused",
+        feed.pendingChanges.make(.unpause(task: "LOO-2"), subject: "LOO-2", verb: "unpaused",
                                  write: .taskUnpause(directory: "/repo", issue: "LOO-2", run: false),
                                  notices: feed.notices, show: nil)
         XCTAssertEqual(identifiers(feed), ["LOO-1", "LOO-2", "LOO-3"])

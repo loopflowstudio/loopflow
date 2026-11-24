@@ -15,7 +15,7 @@ public enum PendingCommand: Equatable, Sendable {
     /// if it was started; with no viewer, the section moves only.
     case claim(task: String, owner: TaskOwner?)
     case pause(task: String)
-    case unpause(task: String, owned: Bool)
+    case unpause(task: String)
     /// Backlog.
     case unassign(task: String)
     /// Leaves every list filtered to another Wave; nil leaves it in none.
@@ -28,7 +28,7 @@ public enum PendingCommand: Equatable, Sendable {
     public var task: String? {
         switch self {
         case .complete(let task), .abandon(let task), .reopen(let task), .claim(let task, _), .unassign(let task),
-             .move(let task, _), .pause(let task), .unpause(let task, _): task
+             .move(let task, _), .pause(let task), .unpause(let task): task
         case .renameSession, .reorder: nil
         }
     }
@@ -105,14 +105,13 @@ public final class PendingChanges {
         return nil
     }
 
-    public func setPause(_ action: TaskActions.Pause, row: RoadmapTask, directory: String, notices: NoticeCenter,
+    public func setPause(_ action: TaskActions.Pause, issue: String, directory: String, notices: NoticeCenter,
                          show: Notice.Action?, answered: @escaping @MainActor () async -> Void) {
-        let issue = row.task.identifier
         let change: (command: PendingCommand, write: ServedWrite, verb: String) = switch action {
         case .pause:
             (.pause(task: issue), .taskPause(directory: directory, issue: issue), "paused")
         case .unpause:
-            (.unpause(task: issue, owned: row.runtime?.owner != nil), .taskUnpause(directory: directory, issue: issue, run: false), "unpaused")
+            (.unpause(task: issue), .taskUnpause(directory: directory, issue: issue, run: false), "unpaused")
         }
         make(change.command, subject: issue, verb: change.verb, write: change.write,
              notices: notices, show: show, answered: answered)
@@ -330,11 +329,8 @@ public final class PendingChanges {
                 }
             case .pause:
                 contents.updateStates(of: matches) { $0.pausing() }
-            case .unpause(_, let owned):
-                contents.updateStates(of: matches) { states in
-                    guard states.contains(.paused) else { return states }
-                    return states.unpausing().inSection(owned ? .working : .backlog)
-                }
+            case .unpause:
+                contents.updateStates(of: matches) { $0.unpausing() }
             case .claim:
                 contents.updateStates(of: matches) { states in
                     Self.started(states) ? states.inSection(.working) : states
@@ -383,13 +379,10 @@ public final class PendingChanges {
                 tasks[index].lifecycle = .paused
                 tasks[index].selectionStates = tasks[index].selectionStates.pausing()
                 if tasks[index].section == .working { tasks[index].workingGroup = .paused }
-            case .unpause(_, let owned):
+            case .unpause:
                 guard tasks[index].lifecycle == .paused else { continue }
                 tasks[index].selectionStates = tasks[index].selectionStates.unpausing()
                 tasks[index].lifecycle = .idle
-                tasks[index].section = owned ? .working : .backlog
-                // The next reading knows whether the saved Graph returns to Shipping.
-                if !owned { tasks[index].workingGroup = nil }
             case .claim(_, let owner):
                 if let owner { tasks[index].runtime?.owner = owner }
                 if tasks[index].lifecycle.isWorking {

@@ -87,7 +87,7 @@ struct TaskConceptTests {
         #expect(try action.labelView().text().string() == "Unpause")
         #expect(!action.isDisabled())
         try action.tap()
-        #expect(model.pendingChanges.changes.last?.command == .unpause(task: row.task.identifier, owned: row.runtime?.owner != nil))
+        #expect(model.pendingChanges.changes.last?.command == .unpause(task: row.task.identifier))
         #expect(throws: (any Error).self) { try view.find(button: "Start") }
     }
 

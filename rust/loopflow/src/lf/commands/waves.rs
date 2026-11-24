@@ -2260,7 +2260,7 @@ impl<'a> DetailReads<'a> {
         let facts = loopflow_execution::store::ownership::task_detail_facts(
             &store.sqlite,
             tasks,
-            &mut crate::lf::navigation::shipping_reader(),
+            crate::lf::navigation::command_merges,
         )?;
         let mut planning_connections = HashMap::new();
         for open in facts.tracker_actions.values() {
@@ -2597,7 +2597,7 @@ async fn snapshot_task_detail(
         ),
         reference,
         lifecycle,
-        working_group: facts.working_groups.get(task.id.as_str()).copied(),
+        working_group: facts.working_groups.get(&task.id).copied(),
         selection_states: task_selection_states(
             observed,
             section,
@@ -3896,7 +3896,7 @@ mod tests {
             let plans = selections::selection_plans(
                 &store.sqlite,
                 &repo,
-                &mut crate::lf::navigation::shipping_reader(),
+                crate::lf::navigation::command_merges,
             )
             .unwrap();
             for id in [
@@ -3910,7 +3910,7 @@ mod tests {
                 &store.sqlite,
                 Some("kind:task state:working"),
                 &["/repo".into()],
-                &mut crate::lf::navigation::shipping_reader(),
+                crate::lf::navigation::command_merges,
             )
             .unwrap();
             assert_eq!(phone.len(), 1);
@@ -3922,7 +3922,7 @@ mod tests {
                     &store.sqlite,
                     &repo,
                     Some(query),
-                    &mut crate::lf::navigation::shipping_reader(),
+                    crate::lf::navigation::command_merges,
                 )
                 .unwrap();
                 assert_eq!(plan.resolution.task_ids(), expected, "{query}");
@@ -4011,7 +4011,7 @@ mod tests {
             &store.sqlite,
             &repo,
             Some("state:error"),
-            &mut crate::lf::navigation::shipping_reader(),
+            crate::lf::navigation::command_merges,
         )
         .unwrap();
         assert_eq!(errors.resolution.task_ids(), [active]);
@@ -4032,7 +4032,7 @@ mod tests {
             &store.sqlite,
             &repo,
             Some("kind:task state:working"),
-            &mut crate::lf::navigation::shipping_reader(),
+            crate::lf::navigation::command_merges,
         )
         .unwrap();
         for (id, group) in [(active, "shipping"), (other, "paused")] {

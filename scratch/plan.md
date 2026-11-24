@@ -1,6 +1,6 @@
 # LOO-957: Sign Machines in the way each provider documents
 
-## Rescope (2026-11-23) — supersedes the Claude design below
+## Rescope (2026-11-23)
 
 Observed 2026-11-23: modal-3…6 (Claude Code 2.1.311) read `loggedIn: false`
 for Claude; their steps ran on Codex. `main` carries Claude to a rental only
@@ -29,7 +29,7 @@ So:
   `CLAUDE_CODE_OAUTH_TOKEN` (the probe already runs with the launch's env;
   verify it does for a forwarded variable), and its refusal for Claude names
   `forward.env`, not `lf machine login claude <machine>`.
-- `lf account` retirement, services, and Asana/Notion/Doppler staying here
+- `lf account` retirement, services, and Asana/Doppler staying here (main dropped Notion)
   are unchanged.
 - Docs (`docs/subscriptions.md`, `docs/ops.md`, help text) say the same.
 
@@ -75,28 +75,30 @@ rental fixture reaches `place`'s rent path); local `lf machine login claude`
 ## Outcome
 
 `lf machine login <provider> [<machine>…]` is the one sign-in command, for this
-Machine (no Machine named) and any other. For Claude and Codex it runs the provider's own login
-**on the target Machine** and sends its approval page to this Machine's
-browser. The credential is created where it is used, by the unmodified client,
-and never crosses the network. `lf account` is gone; services (GitHub, Linear,
-Asana, Notion, Doppler, OpenCode) sign in through the same command.
+Machine (no Machine named) and any other. Codex runs its own device login
+**on the target Machine** and sends the approval page to this Machine's
+browser; the credential is created where it is used and never crosses the
+network. Claude reaches other Machines only as a forwarded
+`CLAUDE_CODE_OAUTH_TOKEN` (`claude setup-token`, kept in Doppler, named in
+`forward.env`); here, `lf machine login claude` runs `claude auth login`.
+`lf account` is gone; services (GitHub, Linear, Asana, Doppler, OpenCode) sign
+in through the same command.
 
 ## Demo
 
 ```bash
-lf set --global approvers.claude.chrome Work
-lf machine login claude mini
-#   Approve Claude for mini in Chrome (Work), then paste the code it shows:
-#   > ****
-#   mini: Claude signed in as jack@… (max)
+lf set --global forward.env '[CLAUDE_CODE_OAUTH_TOKEN]'
+lf set --global approvers.codex.chrome Work
 lf machine login codex mini
 #   Approve Codex for mini in Chrome (Work) with code ABCD-1234
 #   mini: Codex signed in (ChatGPT)
 lf machine logins mini
-#   claude   signed in   jack@… (max)
+#   claude   forwarded   CLAUDE_CODE_OAUTH_TOKEN
 #   codex    signed in   ChatGPT
 #   github   signed in   jack-heart
 #   linear   signed out
+lf machine login claude mini
+#   refuses: forward CLAUDE_CODE_OAUTH_TOKEN (claude setup-token, doppler secrets set …)
 lf --machine mini -a codex implement      # on a mini with no Codex login:
 #   mini has no Codex login; run `lf machine login codex mini`
 ```
@@ -128,45 +130,28 @@ These decide the mechanism; each was run with an empty `HOME` and no browser.
 
 ### One sign-in: run the provider's flow on the target, approve here
 
-`machine::sign_in(target, provider, approver)` where `target` is this Machine
-or an added one. For Claude and Codex:
+`login::login(machine, provider, …)`; a Machine with route `local` is this one.
+For Codex: start `BROWSER=true codex login --device-auth` (a local child, or
+one `bounded_ssh_args` exchange with no PTY, under `TIED_TO_STDIN` so the
+remote login dies when lf's stdin closes), read the URL and code, hand them to
+the approver, wait for Codex's own poll, then probe (`codex login status`).
+Nothing of that output is shown or logged.
 
-1. Start the login on the target: locally as a child, remotely as one SSH
-   exchange (`bounded_ssh_args`, no PTY) running `BROWSER=true claude auth login`
-   or `codex login --device-auth`. `BROWSER=true` keeps an owned Mac mini from
-   opening a window of its own.
-2. Read its output for the approval URL (and Codex's code). Nothing else in
-   that output is shown or logged.
-3. Hand them to the approver (below). For Claude, the approver returns the code
-   the page shows; lf writes it to the login's stdin.
-4. Wait for the login to exit, then ask the target who it is
-   (`claude auth status --json`, `codex login status`) and print it.
+For Claude here: plain `claude auth login` on the inherited terminal, then the
+probe. For Claude elsewhere: `login::require_reach` refuses before any SSH and
+names `claude setup-token`, `doppler secrets set CLAUDE_CODE_OAUTH_TOKEN` and
+`forward.env`. lf stores no Claude token; Doppler holds it and `forward`
+carries it per launch.
 
-Same implementation for here and there; the only difference is whether the
-child is local or behind SSH. Signing in here also pastes a code instead of
-using Claude's localhost callback — **made for review**: one path over a
-slightly smoother local flow; `claude auth login` by hand stays available.
-
-What this answers from the brief's open decisions:
-- *Where a Claude setup token sits / "collect, store"*: nowhere. Claude keeps
-  its own login on that Machine and refreshes it. lf relays a one-time PKCE
-  code on stdin and stores nothing.
-- *Codex write-back*: nothing to write back. No `auth.json` is copied; each
-  Machine has its own login and its own refresh grant, as the CI guide asks.
-- *Several unattended rentals*: each runs the flow once at prepare, approved by
-  the approver command when one is set.
-
-Services keep their current transfer in `machine/credentials.rs` (GitHub
-token, refreshed Linear access token, fresh OpenCode device login), now reached
-through the same command. Their local form is today's `lf account connect`
-code (`provider_auth/operations.rs::connect`, `configure` for `--api-key`).
+Services keep their transfer in `machine/credentials.rs` (GitHub token,
+refreshed Linear access token, fresh OpenCode device login).
 
 ### The approver: one personal setting per provider
 
 ```yaml
 approvers:
-  claude: {chrome: Work}
-  codex:  {command: "subpersona approve"}
+  codex:  {chrome: Work}
+  github: {command: "subpersona approve"}
 ```
 
 `approvers: BTreeMap<Provider, Approver>`, Personal, HostLocal, in
@@ -178,14 +163,11 @@ or `Command(String)`.
 | --- | --- |
 | unset | opens the default browser (`open`/`xdg-open`); a person approves |
 | `chrome: <profile>` | `open_chrome_profile`; a person approves |
-| `command: <cmd>` | runs `sh -c <cmd>` with `LF_APPROVE_PROVIDER`, `LF_APPROVE_URL`, `LF_APPROVE_CODE` (Codex), `LF_APPROVE_MACHINE`; exit 0 is approved; for Claude its first stdout line is the code |
+| `command: <cmd>` | runs `sh -c <cmd>` with `LF_APPROVE_PROVIDER`, `LF_APPROVE_URL`, `LF_APPROVE_CODE` (any device-code page), `LF_APPROVE_MACHINE`; exit 0 is approved |
 
-The setting covers every provider whose sign-in opens a browser: Claude and
-Codex, and the services' OAuth and device pages (GitHub, Linear, Asana, Notion,
-OpenCode), which `auth_browsers` chose for today.
-
-A person pasting Claude's code needs a foreground terminal
-(`credentials::require_foreground`); a command approver doesn't. `--chrome-profile`
+The setting covers Codex and the services' OAuth and device pages (GitHub,
+Linear, Asana, OpenCode). Claude is not covered: here its own client opens its
+page, and a leftover `approvers.claude` does nothing. `--chrome-profile`
 on `lf machine login` overrides the setting for one run. A persona switcher
 rewrites `approvers.*`; an agent-driven browser is a command. lf keeps no
 account and no account-to-profile table.
@@ -257,7 +239,7 @@ without a token to resend.
 
 `lf machine logout <provider> [<machine>…]` runs the provider's own logout
 (`claude auth logout`, `codex logout`, `gh auth logout`, the stored token for
-Linear/Asana/Notion/Doppler/OpenCode). Kept because retiring
+Linear/Asana/Doppler/OpenCode). Kept because retiring
 `lf account disconnect` would otherwise drop it.
 
 ## Surfaces
@@ -278,16 +260,16 @@ Linear/Asana/Notion/Doppler/OpenCode). Kept because retiring
 ## Absent and error states
 
 - Target unreachable: the SSH error, nothing started.
-- Client missing on the target: "Claude Code is not installed on mini; …".
+- Client missing on the target: "Codex is not installed on mini; …".
 - Approver command exits non-zero, or the login exits non-zero: the login's
   last error line (never its URL or code), nothing written.
 - Codex device code disabled for the account: Codex's own error, plus "enable
   device code login in ChatGPT security settings".
-- Approval not finished in 15 minutes (Codex's code lifetime; Claude uses the
-  same deadline): kill the login, say so.
+- Approval not finished in 15 minutes (Codex's code lifetime): kill the
+  login, say so.
 - Ctrl-C: kill the local child or close the SSH session; the remote login dies
   with it. Closing a PTY-less exchange signals nothing remote (QA found
-  `claude auth login` still waiting on mini), so the login runs under
+  a remote login still waiting on mini), so the login runs under
   `TIED_TO_STDIN`: it reads stdin through a FIFO and dies at its EOF, and lf
   keeps stdin open until the login exits.
 
@@ -295,8 +277,9 @@ Linear/Asana/Notion/Doppler/OpenCode). Kept because retiring
 
 LOO-913 stands: lf chooses no login, switches nothing, polls no quota, refreshes
 no provider token. Sign-in completes in the provider's flow with the unmodified
-client. Nothing Loopflow operates sees a credential. The only secret lf moves
-for Claude/Codex is the one-time code, on SSH stdin. Independent of LOO-926;
+client. Nothing Loopflow operates sees a credential. For Codex lf moves no secret;
+for Claude it forwards the person's own setup token by name, per launch,
+from Doppler. Independent of LOO-926;
 the two meet only at `forward::deliver`'s call sites. PR #1966 adds
 `HarnessKind` and a per-harness trait: if it merges first, the sign-in command,
 status probe and logout live on that trait instead of a `match` in
@@ -338,126 +321,53 @@ slice follows its merge moves them onto the trait. Still open after slice 3
 Must survive: `forward.*` for per-run secrets; service transfers' identity
 checks on both ends; LOO-913's fallback and wait rules.
 
-## Slices
+## Slices (all built; history in git)
 
-1. **Claude on another Machine, end to end.** `lf machine login claude
-   <machine>` with the approver unset or `chrome:` (the rename lands here, so
-   no slice ships `connect` for Claude): SSH `claude auth login`, parse
-   the URL, open it, read the pasted code, write it to stdin, print
-   `claude auth status`. Test with a fake `claude` on a fixture SSH target that
-   prints the probed output and records stdin; assert the code reaches the
-   remote and never appears in lf's output or logs. This is the slice that
-   could prove the plan wrong: no PTY, stdin pass-through over
-   `bounded_ssh_args`, and a real sign-in against mini done by a person at gate.
-   **Built (2026-11-17).** `machine/login.rs`: `login::login(machine, provider, …)`
-   where a Machine with route `local` is this one, so here and there share
-   `Login` (child or one `bounded_ssh_args` exchange, `BROWSER=true`).
-   `lf machine connect` is gone; `lf machine login <provider> [<machine>…]`
-   takes Claude here or remote, services remote through `credentials::connect`
-   (its `email` parameter deleted) and here through `connect_target`, `--api-key`
-   here only. `Approver` has `Browser` and `Chrome`. `claude_status` is the
-   probe slices 2–3 reuse. Fixture: `machine_commands::claude_login_*` (the
-   PTY helper now makes the terminal controlling and captures what it shows).
-   Taught: stdin pass-through over a PTY-less SSH exchange works; the error
-   line must come from stderr, since stdout's unterminated paste prompt flushes
-   last. Codex still errors with "not built yet" until slice 2.
-   Remaining for a person at gate: a real `lf machine login claude mini`.
-2. **Codex, the command approver, this Machine as target.** **Built
-   (2026-11-17)**, on the `match` in `machine/login.rs` (PR #1966 still open).
-   `codex login --device-auth` on either target: lf reads the URL and the
-   `ABCD-1234` line (probed against codex-cli 0.169.0), sends both to the
-   approver and waits for Codex's own poll; failures add the ChatGPT
-   device-code hint. `approvers.<provider>` is `config::placement::Approver`
-   (`Chrome`/`Command`, one type; `--chrome-profile` becomes a one-run
-   `Chrome`); `login::send` is the one dispatch, also used by service sign-in
-   here and OpenCode's fresh device login. A command approver needs no
-   terminal, for Claude too. `lf machine logins [<machine>] [--json]`: Claude
-   and Codex from their clients, services from the store; another Machine
-   answers with its own `lf machine logins --json` over `remote_command`.
-   Deleted: `auth_browsers` (catalog row, validation, the old store export in
-   `config/migrate.rs`), `AccessProfile`, `AuthBrowserBinding`, `ProfileId`,
-   their store reads/writes and the interactive profile picker. Fixtures:
-   `machine_commands::command_approvers_sign_machines_in_to_codex_and_claude_without_a_terminal`,
-   `machine_commands::a_refusing_approver_leaves_the_machine_signed_out`.
-   Not yet: the logins rows carry no last refusal (slice 4, with `--refused`);
-   the probes have no timeout (slice 3 bounds them for the launch check);
-   `lf machine credentials inspect` still answers service transfers (slice 4).
-3. **Launch check and rentals.** **Built (2026-11-17)**, still on the `match`
-   (#1966 open). `login::probe(machine, provider, deadline) -> LoginRow` is the
-   one probe: `logins`, a finished sign-in and the launch check read it; the
-   private `Status` and public `ClaudeStatus`/`claude_status` are gone. Every
-   `run_agent` attempt goes through `_run_signed_in`: a definite signed-out
-   (`login::signed_out_here`, the launch's env, 2 s deadline, fail-open) is an
-   `AgentFailure::CredentialInvalidated` before the agent starts, so the order
-   moves to the next provider or stops with `<Machine> has no Codex login; run
-   `lf machine login codex <Machine>``. The launcher passes the name it gives
-   the target in `LF_MACHINE_NAME` (`machine::task::forwarding_environment`);
-   a mid-run revocation prints the same advice. Measured here: `claude auth
-   status --json` 0.34–0.39 s, `codex login status` 0.02–0.05 s, inside the
-   0.5 s p95 bound, so the check stays on every launch. `--logins` on
-   `lf ondemand add` is a field of the `ondemands.<name>` config template, not
-   a store column: templates live in `~/.lf/config.yaml` (the plan's "store"
-   premise was wrong), so no migration. Rental prepare signs in to that list,
-   else every provider `logins` shows signed in here, GitHub first for the
-   clone; the planning-transport check for Linear is gone. Deleted:
-   `AGENT_LOGIN_ENV`, `AGENT_LOGIN_FILES`, `carries_agent_login`,
-   `read_for_rental` and its test; `lf ondemand rent` no longer refuses
-   without a forwarded login. Fixture:
-   `session_launch_contract::a_signed_out_machine_refuses_the_launch_with_the_command_that_signs_it_in`
-   (remote and here), and the forward test now carries a generic per-run secret
-   (`forwarded_secrets_reach_a_remote_launch_only_by_name`). Not tested: rental
-   prepare's sign-in loop end to end (no rental fixture reaches prepare).
-4. **Retire `lf account`.** **Built (2026-11-17)**, on the `match` (#1966
-   open). `lf machine logout <provider> [<machine>…]`: Claude and Codex run
-   their own logout here or over SSH and the probe must then read signed out;
-   services here go through `operations::disconnect`, remotely through the
-   target's own `lf machine logout`. `LoginRow.refused` is
-   `SqliteStore::unanswered_refusal`: the provider's latest
-   `agent_limit_recoveries` row with no `kind='agent'` process of it started
-   since (range scan on `processes_recent`). `--refused` reads every added
-   Machine's `logins --json` and signs in those reading signed out or refused;
-   no sign-in time is recorded, so a refused Machine stays selected until a
-   launch there. `logins` service rows read the client's own record first
-   (gh's `hosts.yml` user, OpenCode's active export entry), else the store;
-   service transfers' pre-check reads the target's `logins --json`, and
-   `lf machine credentials inspect` is gone (the receiving end keeps its
-   identity checks). Deleted: `Commands::Account`, `AccountCommand`,
-   `parse_service_provider`, navigation's leading-value case,
-   `commands/account.rs`, `engine/account.rs`, `account_status.rs`,
-   `operations::served`/`narrate!`, `cached_status`, the `account.*` served
-   routes and five DTO fixtures, Swift `accountList/Connect/Disconnect`.
-   `operations::connect`/`disconnect` take a `Provider`. Fixtures:
-   `machine_commands::refused_signs_in_again_only_the_machines_that_signed_out_or_refused_a_launch`,
-   `auth_tests::service_auth_survives_subscription_removal` (now through
-   `machine login --api-key`/`logout`/`logins`), storage
-   `a_refusal_stands_until_its_provider_launches_again`.
-   `rg 'lf account' docs rust swift` finds nothing. Not run here: Swift
-   `ServerProtocolTests` (CI); a real `lf machine login claude mini` and
-   `codex mini` (a person at gate).
+1. Remote sign-in over a PTY-less SSH exchange (`machine/login.rs`); taught
+   that stdin pass-through works and error lines must come from stderr.
+   Claude's paste-code relay built here was deleted by the rescope.
+2. Codex device login, command approver, `lf machine logins [--json]`;
+   `auth_browsers`, `AccessProfile` and the profile picker deleted.
+3. `login::probe` and the launch check (`_run_signed_in`, 2 s, fail-open;
+   measured `claude auth status --json` 0.34–0.39 s, `codex login status`
+   0.02–0.05 s); `--logins` lives on the `ondemands.<name>` config template;
+   `AGENT_LOGIN_ENV`/`read_for_rental` deleted.
+4. `lf machine logout`, `--refused` (`SqliteStore::unanswered_refusal`),
+   `lf account` and its routes, fixtures and Swift calls deleted.
+5. Rescope: Claude by forwarded token (see top).
+
+PR #1966 (`HarnessKind` trait) was still open at slice 4; the sign-in,
+probe and logout stay on the `match` in `machine/login.rs` unless it merges
+first.
 
 ## Built: one set of providers that reach other Machines (concept review)
 
-`login::reaches_other_machines` (Claude, Codex, GitHub, Linear, OpenCode) is
+`login::reaches_other_machines` (Codex, GitHub, Linear, OpenCode) is
 the one set: `login::require_reach` refuses the others before any SSH (the CLI
 calls it per named Machine before `resolve_target`, which already asks the
 Machine's lf version over SSH; `login::login` calls it again), rental
 `prepare`'s default goes through `rental::sign_in_order`, `ondemand add
 --logins` rejects the rest, and `credentials::connect`'s catch-all is
-`unreachable!`. Asana, Notion and Doppler sign in on each Machine itself.
+`unreachable!`. Asana and Doppler sign in on each Machine itself; Claude
+reaches others by forwarded token.
 Tests: `machine_commands::services_that_sign_in_here_only_never_reach_another_machine`,
 `rental::tests::a_rental_signs_in_once_to_each_provider_that_reaches_it_github_first`.
 
 ## Remaining (gate)
 
-All four slices are built on the `match` (#1966 still open). Left:
+Implementation is complete, rescope included. Left for gate and after:
 
 - Gate's headless acceptance fixture (below); its parts exist as
-  `machine_commands::command_approvers_sign_machines_in_to_codex_and_claude_without_a_terminal`
-  and `session_launch_contract::a_signed_out_machine_refuses_the_launch_with_the_command_that_signs_it_in`.
-- Rental prepare's sign-in loop has no end-to-end test (no rental fixture
-  reaches prepare); note it in the PR.
+  `machine_commands::a_command_approver_signs_machines_in_to_codex_without_a_terminal`
+  (with the `forwarded` row) and
+  `session_launch_contract::a_signed_out_machine_refuses_the_launch_with_the_command_that_signs_it_in`
+  (Codex and Claude cases).
+- Not tested, note in the PR: rental `place`'s no-agent-login stop and
+  prepare's sign-in loop (no rental fixture reaches rent); local
+  `lf machine login claude` (hands the terminal to the real client).
 - Swift `ServerProtocolTests` — CI.
-- A real `lf machine login claude mini` and `codex mini` — a person at gate.
+- By a person: `lf machine login codex mini` for real, and a Claude launch on
+  mini with the Doppler token forwarded.
 - Open in `scratch/questions.md`: whether a usage-limit refusal should count
   for `--refused`.
 
@@ -498,6 +408,6 @@ Machines and rentals"; "Choose who approves", "Rentals", "Per-run secrets",
 transfer text, updated in slice 4.
 
 Settled while writing: `logins` is `lf ondemand add … --logins
-claude,github`, a field of the `ondemands.<name>` config template (slice 3
+codex,github`, a field of the `ondemands.<name>` config template (slice 3
 found templates in `~/.lf/config.yaml`, not the store). `LF_APPROVE_CODE` is set for any device-code page (Codex,
 GitHub, OpenCode), not only Codex.

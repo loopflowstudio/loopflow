@@ -1,0 +1,557 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LOO-1082 Concept Review — Autonomous Looped Graph Execution</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --surface: #f6f8fa;
+    --surface-2: #eef1f5;
+    --border: #d0d7de;
+    --text: #1f2328;
+    --muted: #59636e;
+    --accent: #0969da;
+    --accent-bg: #ddf4ff;
+    --yes: #1a7f37;
+    --yes-bg: #dafbe1;
+    --no: #cf222e;
+    --no-bg: #ffebe9;
+    --warn: #9a6700;
+    --warn-bg: #fff8c5;
+    --existing: #59636e;
+    --existing-bg: #eaeef2;
+    --proposed: #6639ba;
+    --proposed-bg: #fbefff;
+    --code-bg: #f0f3f6;
+    --term-bg: #161b22;
+    --term-text: #e6edf3;
+    --term-muted: #8b949e;
+    --term-green: #3fb950;
+    --term-red: #f85149;
+    --term-yellow: #d29922;
+    --term-blue: #58a6ff;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0d1117;
+      --surface: #161b22;
+      --surface-2: #1c2128;
+      --border: #30363d;
+      --text: #e6edf3;
+      --muted: #8b949e;
+      --accent: #58a6ff;
+      --accent-bg: rgba(56, 139, 253, 0.15);
+      --yes: #3fb950;
+      --yes-bg: rgba(46, 160, 67, 0.18);
+      --no: #f85149;
+      --no-bg: rgba(248, 81, 73, 0.18);
+      --warn: #d29922;
+      --warn-bg: rgba(187, 128, 9, 0.18);
+      --existing: #8b949e;
+      --existing-bg: rgba(139, 148, 158, 0.16);
+      --proposed: #d2a8ff;
+      --proposed-bg: rgba(163, 113, 247, 0.18);
+      --code-bg: #1c2128;
+      --term-bg: #010409;
+    }
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 2rem 1.25rem 4rem;
+    background: var(--bg);
+    color: var(--text);
+    font: 15px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  }
+  main { max-width: 1040px; margin: 0 auto; }
+  header {
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 1.25rem;
+    margin-bottom: 2rem;
+  }
+  .eyebrow {
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 0.35rem;
+  }
+  h1 { margin: 0 0 0.5rem; font-size: 1.75rem; line-height: 1.25; }
+  h2 {
+    margin: 2.25rem 0 0.85rem;
+    font-size: 1.25rem;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 0.35rem;
+  }
+  h3 { margin: 1.35rem 0 0.5rem; font-size: 1rem; }
+  p { margin: 0.5rem 0 0.9rem; }
+  code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 0.88em;
+    background: var(--code-bg);
+    padding: 0.12em 0.38em;
+    border-radius: 5px;
+  }
+  .lead { font-size: 1.02rem; color: var(--muted); max-width: 78ch; }
+  .status-bar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-top: 0.9rem;
+  }
+  .badge {
+    display: inline-block;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 0.15rem 0.55rem;
+    border-radius: 999px;
+    white-space: nowrap;
+  }
+  .badge-yes { color: var(--yes); background: var(--yes-bg); }
+  .badge-no { color: var(--no); background: var(--no-bg); }
+  .badge-existing { color: var(--existing); background: var(--existing-bg); }
+  .badge-proposed { color: var(--proposed); background: var(--proposed-bg); }
+  .badge-warn { color: var(--warn); background: var(--warn-bg); }
+  .badge-accent { color: var(--accent); background: var(--accent-bg); }
+
+  .callout {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-left: 4px solid var(--no);
+    border-radius: 8px;
+    padding: 1rem 1.2rem;
+    margin: 1rem 0 1.5rem;
+  }
+  .callout.proposed { border-left-color: var(--proposed); }
+  .callout.info { border-left-color: var(--accent); }
+  .callout-title {
+    font-weight: 700;
+    margin-bottom: 0.35rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 1rem 0 1.5rem;
+    font-size: 14px;
+  }
+  th, td {
+    border: 1px solid var(--border);
+    padding: 0.65rem 0.75rem;
+    text-align: left;
+    vertical-align: top;
+  }
+  th {
+    background: var(--surface);
+    font-weight: 600;
+    font-size: 13px;
+  }
+  tr:nth-child(even) td { background: color-mix(in srgb, var(--surface) 45%, transparent); }
+
+  .split {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: 1rem;
+    margin: 1rem 0 1.5rem;
+  }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1rem 1.1rem;
+  }
+  .card-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.65rem;
+    font-weight: 600;
+  }
+
+  .term {
+    background: var(--term-bg);
+    color: var(--term-text);
+    border-radius: 8px;
+    padding: 0.85rem 1rem;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 12.5px;
+    line-height: 1.5;
+    overflow-x: auto;
+    margin: 0.5rem 0 0.75rem;
+    white-space: pre-wrap;
+  }
+  .t-dim { color: var(--term-muted); }
+  .t-green { color: var(--term-green); }
+  .t-red { color: var(--term-red); }
+  .t-yellow { color: var(--term-yellow); }
+  .t-blue { color: var(--term-blue); }
+
+  .flow {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.4rem;
+    margin: 0.65rem 0;
+    font-size: 13px;
+  }
+  .node {
+    padding: 0.25rem 0.6rem;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  }
+  .node.bad { border-color: var(--no); background: var(--no-bg); }
+  .node.good { border-color: var(--yes); background: var(--yes-bg); }
+  .arrow { color: var(--muted); font-weight: 700; }
+
+  .q-list { list-style: none; padding: 0; margin: 1rem 0; }
+  .q-item {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1rem 1.15rem;
+    margin-bottom: 0.9rem;
+  }
+  .q-head { font-weight: 700; margin-bottom: 0.4rem; }
+  .opts { list-style: none; padding: 0; margin: 0.45rem 0 0; }
+  .opts li {
+    padding: 0.3rem 0.5rem;
+    border-radius: 6px;
+    margin-bottom: 0.25rem;
+  }
+  .opts li.chosen {
+    background: var(--proposed-bg);
+    border: 1px solid color-mix(in srgb, var(--proposed) 35%, transparent);
+  }
+  .opt-key { font-weight: 700; font-family: ui-monospace, monospace; margin-right: 0.35rem; }
+
+  .counterexamples {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(290px, 1fr));
+    gap: 0.85rem;
+    margin: 1rem 0 1.5rem;
+  }
+  .cx {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.85rem 1rem;
+    font-size: 13.5px;
+  }
+  .cx strong { display: block; margin-bottom: 0.3rem; }
+  ul.tight { margin: 0.3rem 0 0.7rem; padding-left: 1.25rem; }
+  ul.tight li { margin-bottom: 0.25rem; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <div class="eyebrow">Concept Review · LOO-1082 · Pre-Build (HEAD 3b6d485db0)</div>
+    <h1>Autonomous Looped Graph Execution on a Task</h1>
+    <p class="lead">
+      <strong>Area reviewed:</strong> How a looped Graph runs autonomous multi-pass work on a Task — pass sizing, loop deciders and bounds, per-step commit checkpoints, Task conversation wakeups, and stop-and-recover semantics across <code>transitions</code>, <code>GraphRunner</code>, <code>RunningGraph</code>, <code>task_execution</code>, <code>task_updates</code>, and <code>ops::commit</code>.
+    </p>
+    <div class="status-bar">
+      <span class="badge badge-existing">Committed on branch: scratch/plan.md + scratch/questions.md only (0 code changes)</span>
+      <span class="badge badge-proposed">Revised plan written to scratch/plan.md</span>
+      <span class="badge badge-accent">No irreversible product choices</span>
+    </div>
+  </header>
+
+  <section>
+    <h2>1. Do the product's concepts and the code's concepts line up?</h2>
+    <table>
+      <thead>
+        <tr>
+          <th style="width: 24%;">Product concept (person knows &amp; does)</th>
+          <th style="width: 30%;">Code concept (types, records, APIs)</th>
+          <th style="width: 8%;">Lines up?</th>
+          <th style="width: 38%;">What is wrong / what changes</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>
+            <strong>Seeing why a Graph blocked and recovering in one command</strong><br>
+            When a loop hits its pass cap or a decider returns <code>blocked</code>, <code>lf task status</code> and the Task conversation say why it stopped and how to continue or advance, without re-running work already done.
+          </td>
+          <td>
+            <span class="badge badge-existing">Existing</span> <code>project_execution()</code> in <code>ops/task_execution.rs:330</code> checks only <code>latest.run.result()</code>; <code>task_updates::RunObservation</code> omits <code>graph.run.error</code>.<br>
+            <span class="badge badge-warn">Kickoff plan</span> intercepted <code>Iterate</code> inside <code>RunningGraph::run_skill</code> and discarded the <code>GraphVerdict</code>.
+          </td>
+          <td><span class="badge badge-no">No</span></td>
+          <td>
+            <strong>Biggest mismatch — two broken seams:</strong><br>
+            1. <em>Code hides the stop:</em> deciding step exited <code>0</code> while <code>graph.run</code> exited <code>3</code> (<code>GraphHeld</code>), so <code>lf task status</code> reports <code>Idle</code> (<code>"Graph stopped after realign"</code>) and drops the block reason. <code>task-session</code> hears <code>"failed · realign: succeeded"</code> with no reason.<br>
+            2. <em>Action has no single owner &amp; traps recovery:</em> discarding <code>Iterate</code> in <code>run_skill</code> forces bare <code>lf task run</code> to burn a full cold-cache decider session just to hit the same cap again, and forces <code>--setting max_loop_passes=10</code> to re-run the decider instead of continuing with its saved direction.
+          </td>
+        </tr>
+        <tr>
+          <td>
+            <strong>Bounded autonomous loop</strong><br>
+            Loops warn at pass 4+, stop cleanly at <code>max_loop_passes</code> (default <code>6</code>; <code>0</code>/<code>null</code> = unlimited) configurable globally, per repo, per Wave, per Skill/step, or via <code>--setting</code>. Live humans are never capped.
+          </td>
+          <td>
+            <span class="badge badge-existing">Existing</span> <code>transitions::finish_step</code> accepts <code>Iterate</code> up to <code>u32::MAX</code>; <code>RunningGraph</code> has no pass limit.<br>
+            <span class="badge badge-warn">Kickoff plan</span> resolved config via <code>load_config_or_default(Some(cwd))</code> in <code>run_skill</code>.
+          </td>
+          <td><span class="badge badge-no">No</span></td>
+          <td>
+            <strong>Wrong owner + dropped scope:</strong><br>
+            1. <code>load_config_or_default</code> passes <code>wave = None</code>, silently ignoring <code>.lf/wave/&lt;name&gt;/config.yaml</code> and private Wave overrides.<br>
+            2. Loop transition rules belong in <code>transitions::finish_step</code> (one owner), fed by <code>SkillExecutor::loop_pass_limit</code>.
+          </td>
+        </tr>
+        <tr>
+          <td>
+            <strong>Cohesive loop passes</strong><br>
+            Slice 1 de-risks the shape thinly; later passes batch cohesive items inside one warm-cache <code>implement</code> session so Tasks finish in 1–4 passes instead of 10–17 micro-passes.
+          </td>
+          <td>
+            <span class="badge badge-existing">Existing</span> <code>implement.md</code> (<em>"Build end to end, thinly"</em>), <code>realign.md</code> (<em>"the next slice"</em>), <code>kickoff.md</code>, <code>output.rs</code> (<em>"not from ... the number of passes"</em>), <code>instructions.rs</code> &amp; <code>docs/orchestration.md</code> (<em>"no arbitrary pass limit"</em>), stale <code>loop-or-next.md</code> (<em>"name it on the loop with <code>step:</code>"</em>).
+          </td>
+          <td><span class="badge badge-no">No</span></td>
+          <td>
+            Prompts optimize for single-item thin slices while Graph execution cold-starts every step in the loop (50:1 warm cache thrown away on 1-line cards like <em>Diregraf Ghoul</em>). <code>loop-or-next.md</code> still teaches pre-PR #1962 <code>step:</code> syntax.
+          </td>
+        </tr>
+        <tr>
+          <td>
+            <strong>Step commits</strong><br>
+            Code edits get an LLM commit message; temporary <code>scratch/</code> working notes (cleared before PR merge) commit and push cheaply without spawning an agent.
+          </td>
+          <td>
+            <span class="badge badge-existing">Existing</span> <code>ops::commit::commit_step</code> spawns a cold-cache <code>commit-message</code> agent whenever anything is staged (246 sessions / 2.95M uncached tokens across 5 field Tasks).
+          </td>
+          <td><span class="badge badge-no">No</span></td>
+          <td>
+            One action treats ephemeral <code>scratch/</code> checkpoints like durable branch code commits. Fixed in one owner (<code>ops::commit::commit_step</code>) using <code>git diff --cached --name-only --no-renames -z</code> (<code>--no-renames</code> catches code→scratch renames).
+          </td>
+        </tr>
+        <tr>
+          <td>
+            <strong>Task conversation updates</strong><br>
+            An idle <code>task-session</code> wakes when the Graph settles (finished, blocked, failed, interactive stop), merges, closes, or receives a comment/steer — not on every healthy step tick.
+          </td>
+          <td>
+            <span class="badge badge-existing">Existing</span> <code>harness::task_updates::write</code> emits a steer on every running step start (399 turns / 72.7M cached tokens across 5 Tasks), while <code>TaskObservation::news()</code> in the same file suppresses them for conducted children.
+          </td>
+          <td><span class="badge badge-no">No</span></td>
+          <td>
+            One idea under two conflicting rules in the same file: conducted parents already follow <em>"Steps passing inside a run are not news"</em>, while the Task's own conversation wakes for pure narration.
+          </td>
+        </tr>
+        <tr>
+          <td>
+            <strong>Live step progress</strong><br>
+            Desktop and <code>lf task status</code> show the active step and loop pass while a Graph runs.
+          </td>
+          <td>
+            <span class="badge badge-existing">Existing</span> SQLite <code>graph_processes</code>, <code>graph_process_steps</code>, <code>task_graphs</code>, <code>GraphStepProcess::position()</code>.
+          </td>
+          <td><span class="badge badge-yes">Yes</span></td>
+          <td>Already reads SQLite directly; completely unaffected by quiet <code>task_updates</code>.</td>
+        </tr>
+        <tr>
+          <td>
+            <strong>Autonomous vs. live human loops</strong><br>
+            <code>lf task auto on</code> / <code>-b</code> stands in autonomously and is bounded; a live human at an <code>interactive:</code> step is never refused.
+          </td>
+          <td>
+            <span class="badge badge-existing">Existing</span> <code>RunningGraph::stands_in</code> separates live humans (<code>interactive &amp;&amp; !standing_in</code>) from autonomous runs; <code>execute()</code> hands blocked interactive steps back via <code>arrive_task_graph</code>.
+          </td>
+          <td><span class="badge badge-yes">Yes</span></td>
+          <td>Aligned. Auto-standing-in <code>ship-review</code> hitting the pass cap automatically returns the Task to <code>At { step: "ship-review" }</code> for the person.</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>2. The biggest mismatch: stopping at a loop cap and recovering</h2>
+    <div class="callout">
+      <div class="callout-title">
+        <span class="badge badge-no">Biggest Mismatch</span>
+        <span>A <code>Blocked</code> Graph stop is invisible to <code>lf task status</code> and <code>task-session</code>, and the kickoff plan's recovery path traps the person in wasted sessions.</span>
+      </div>
+      <p style="margin-bottom:0;">
+        In the kickoff plan, <code>RunningGraph::run_skill</code> threw away the decider's <code>Iterate</code> verdict on pass 6 and returned <code>SkillOutcome::Blocked</code>. Because the deciding step itself exited <code>0</code> while the Graph exited <code>3</code>, three surfaces broke at once: <code>lf task status</code> said <code>Idle</code> without the reason, <code>task-session</code> woke with <code>"failed · realign: succeeded"</code>, and running <code>lf task run</code> (with or without raising <code>max_loop_passes</code>) re-ran a cold-cache <code>realign</code> session from scratch.
+      </p>
+    </div>
+
+    <div class="split">
+      <div class="card">
+        <div class="card-head">
+          <span>Before (Existing + Kickoff Plan)</span>
+          <span class="badge badge-warn">Broken stop &amp; recovery</span>
+        </div>
+        <div class="flow">
+          <span class="node">realign (exit 0)</span>
+          <span class="arrow">→</span>
+          <span class="node bad">run_skill drops Iterate verdict</span>
+          <span class="arrow">→</span>
+          <span class="node bad">GraphHeld (exit 3)</span>
+        </div>
+        <div class="term"><span class="t-dim"># 1. Person checks status after pass 6 stops:</span>
+$ lf task status MTG-421
+<span class="t-yellow">execution: idle</span>   <span class="t-red">← hides Blocked!</span>
+<span class="t-dim">Graph stopped after realign; inspect its history and effects before launching fresh work</span>
+<span class="t-dim">Stopped at build. `lf task run` starts it again.</span>
+
+<span class="t-dim"># 2. task-session wakes once, blind to why:</span>
+<span class="t-dim">Task MTG-421: Stopped at realign. Run build (lfp_9a) · failed · realign · pass 6 (lfp_b2): succeeded.</span>
+
+<span class="t-dim"># 3. Person follows status advice or raises cap:</span>
+$ lf task run MTG-421
+<span class="t-red">→ cold-starts realign AGAIN at pass 6 of 6 → blocks again!</span>
+
+$ lf --setting max_loop_passes=10 task run MTG-421
+<span class="t-yellow">→ cold-starts realign AGAIN to re-decide what pass 6 already decided!</span></div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <span>After (Revised Model)</span>
+          <span class="badge badge-proposed">Proposed</span>
+        </div>
+        <div class="flow">
+          <span class="node">realign (exit 0)</span>
+          <span class="arrow">→</span>
+          <span class="node good">cursor saves Iterate verdict</span>
+          <span class="arrow">→</span>
+          <span class="node good">finish_step enforces cap</span>
+        </div>
+        <div class="term"><span class="t-dim"># 1. Person checks status after pass 6 stops:</span>
+$ lf task status MTG-421
+<span class="t-red">execution: blocked</span>
+<span class="t-green">Graph is blocked: loop at realign reached its pass limit (6 of 6; last direction: "Batch remaining 4 FDN cards"). Advance with `--from compress`, re-evaluate with `--from realign`, or raise `max_loop_passes` (e.g. `lf --setting max_loop_passes=10 task run`) to continue.</span>
+
+<span class="t-dim"># 2. task-session wakes ONCE with the exact reason &amp; commands:</span>
+<span class="t-green">Task MTG-421: Stopped at realign. Run build (lfp_9a) · failed · realign · pass 6 (lfp_b2): succeeded. Graph is blocked: loop at realign reached its pass limit (6 of 6; …)</span>
+
+<span class="t-dim"># 3a. Person raises cap and resumes:</span>
+$ lf --setting max_loop_passes=10 task run MTG-421
+<span class="t-green">→ settles saved Iterate verdict in &lt;10ms (0 wasted realign sessions) → jumps straight to implement with saved direction!</span>
+
+<span class="t-dim"># 3b. Person runs bare `lf task run` without raising cap:</span>
+$ lf task run MTG-421
+<span class="t-green">→ stops immediately in &lt;10ms (0 LLM calls) repeating exact recovery commands.</span>
+
+<span class="t-dim"># 3c. Person advances past the loop:</span>
+$ lf task run MTG-421 --from compress
+<span class="t-green">→ fresh cursor at compress → runs compress → qa → concept-review.</span></div>
+      </div>
+    </div>
+
+    <div class="callout proposed">
+      <div class="callout-title">
+        <span class="badge badge-proposed">Architecture Follows the Concept</span>
+        <span>One owner per job, zero new tables, zero schema migrations</span>
+      </div>
+      <ul class="tight">
+        <li><strong>Loop transitions &amp; pass bound:</strong> <code>transitions::finish_step(steps, index, progress, max_passes)</code> owns all backward-edge rules (<code>repeats</code>, <code>direction</code>, <code>verdict</code>, and <code>max_passes</code>). <code>GraphRunner::tick</code> asks <code>SkillExecutor::loop_pass_limit(&amp;skill)</code> when settling a saved verdict.</li>
+        <li><strong>Wave-aware config resolution:</strong> <code>RunningGraph</code> resolves <code>max_loop_passes</code> via <code>load_wave_config(Some(self.cwd), wave)</code> + <code>config::settings::resolve(&amp;config, Some(&amp;skill.skill))</code>, honoring <code>--setting</code>, <code>LF_SETTINGS</code>, personal/repo/Wave, Skill, and Graph-step scopes.</li>
+        <li><strong>Truthful blocked status &amp; updates:</strong> <code>ops::task_execution::project_execution</code> checks <code>graph.run.error</code> when <code>latest.run</code> succeeded (marking <code>"Graph is blocked:"</code> and non-<code>GraphHeld</code> errors as <code>TaskExecutionState::Blocked</code> while keeping <code>GraphOutcome::Waiting</code> handoffs <code>Idle</code>); <code>task_updates::RunObservation</code> includes <code>graph.run.error</code> on settled runs.</li>
+        <li><strong>Step commits:</strong> <code>ops::commit::commit_step</code> checks <code>git diff --cached --name-only --no-renames -z</code>; when every staged path starts with <code>scratch/</code>, it commits and pushes deterministically (<code>lf &lt;step&gt;: update scratch/…</code>) with 0 LLM calls.</li>
+        <li><strong>Quiet running steps:</strong> <code>harness::task_updates::write</code> records only settled runs and ignores <code>TaskGraphPosition::Run { running: true, .. }</code> movement, aligning a Task's own conversation with conducted child notices.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section>
+    <h2>3. Counterexamples tested against the revised model</h2>
+    <div class="counterexamples">
+      <div class="cx">
+        <strong>1. Bare <code>lf task run</code> after cap stop (no cap raise)</strong>
+        Because <code>cursor.progress.verdict</code> keeps <code>Some(Iterate, …)</code>, <code>GraphRunner::tick</code> re-settles immediately against <code>max_loop_passes = 6</code> and stops in &lt;10ms with <strong>0 LLM calls</strong> and prints exact recovery commands instead of wasting a decider session.
+      </div>
+      <div class="cx">
+        <strong>2. Auto-standing-in <code>interactive: ship-review</code> hits cap</strong>
+        <code>execute()</code> sees <code>(GraphOutcome::Blocked(_), Some(skill))</code> with <code>skill.interactive_step() == Some("ship-review")</code> and calls <code>arrive_task_graph</code>, handing the Task cleanly back to the person at <code>At { step: "ship-review" }</code>. Live humans (<code>!standing_in</code>) get <code>loop_pass_limit = None</code> and are never capped.
+      </div>
+      <div class="cx">
+        <strong>3. <code>lf pr land</code> handoff (<code>GraphOutcome::Waiting</code>)</strong>
+        <code>lf pr land</code> exits <code>0</code> and returns <code>Waiting</code> → <code>GraphHeld("Graph stopped before its last step…")</code>. <code>project_execution</code> only promotes <code>"Graph is blocked:"</code> (or non-<code>GraphHeld</code> errors) to <code>TaskExecutionState::Blocked</code>, so healthy landing handoffs stay <code>Idle</code>.
+      </div>
+      <div class="cx">
+        <strong>4. Wave-scoped <code>max_loop_passes</code></strong>
+        A Wave like <code>optimize</code> or <code>coverage</code> sets <code>max_loop_passes: 12</code> in <code>.lf/wave/&lt;name&gt;/config.yaml</code>. Using <code>load_wave_config</code> (resolving Wave from CLI <code>--wave</code> or Task's <code>wave_id</code>) instead of <code>load_config_or_default</code> ensures Wave settings take effect.
+      </div>
+      <div class="cx">
+        <strong>5. Nested loops in <code>build.yaml</code></strong>
+        <code>repeats</code> is keyed per loop edge and stays cumulative across outer passes. Inner <code>realign</code> is bounded to 6 total passes across the whole run (never 6 × 6 = 36), and outer <code>concept-review</code> is bounded to 6 passes.
+      </div>
+      <div class="cx">
+        <strong>6. Code file renamed into <code>scratch/</code></strong>
+        Default <code>git diff --cached --name-only -z</code> can report only the destination path on a rename. Passing <code>--no-renames</code> exposes the deleted source path outside <code>scratch/</code> so real code changes always invoke <code>commit-message</code>.
+      </div>
+      <div class="cx">
+        <strong>7. Pre-upgrade <code>task_update_readings</code> &amp; crashed runs</strong>
+        While a run is live (<code>running: true</code>), <code>task_updates::write</code> retains <code>old.position</code> and omits unsettled runs, producing 0 spurious wakeups on upgrade. A SIGKILL'd run still yields <code>observed_result().outcome() == Some("unknown")</code> and <code>running: false</code>, waking <code>task-session</code> once.
+      </div>
+      <div class="cx">
+        <strong>8. Explicit <code>--from &lt;decider&gt;</code> after steering</strong>
+        If a person steers the Task or edits <code>scratch/plan.md</code> and wants the decider to re-evaluate from scratch without raising the cap, <code>lf task run ISSUE --from realign</code> creates a fresh cursor (clearing <code>verdict</code> and <code>repeats</code>) and re-runs <code>realign</code>.
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>4. Outside this work (separate outcomes)</h2>
+    <ul class="tight">
+      <li><strong>Cross-skill provider session/thread sharing (LOO-435):</strong> Reusing one warm provider conversation across different skills inside a Graph requires provider-specific prompt-cache and transcript boundary design across Claude, Codex, OpenCode, Pi, and Antigravity.</li>
+      <li><strong>External repository custom Graphs (e.g., <code>manabot/.lf/graphs/coverage-working.yaml</code>):</strong> Automatically benefit from updated builtin skills (<code>extends: builtin</code>), <code>max_loop_passes</code>, zero-LLM scratch commits, and quiet <code>task-session</code> wakeups; moving heavy reviews into an outer loop is an edit in those repos, guided by the updated <code>docs/orchestration.md</code>.</li>
+      <li><strong>Hiding <code>Write commit message</code> from the Task Session list:</strong> Separate store/UI presentation decision noted in PR #1955.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>5. Decisions made for review</h2>
+    <p class="lead" style="font-size: 14px;">
+      None of these choices are irreversible once shipped. The highlighted option in each question is what the revised <code>scratch/plan.md</code> builds; reply with e.g. <code>"1b, 2a"</code> to steer any of them.
+    </p>
+    <ol class="q-list">
+      <li class="q-item">
+        <div class="q-head">1. Default autonomous loop cap &amp; warning threshold</div>
+        <ul class="opts">
+          <li class="chosen"><span class="opt-key">1a</span> <strong>Chosen for review:</strong> Default <code>max_loop_passes = 6</code> (<code>0</code> or <code>null</code> = unlimited), deep-loop warning from pass 4 onward, final-pass notice on pass <code>max</code>, autonomous deciders only (live human interactive steps uncapped).</li>
+          <li><span class="opt-key">1b</span> Tighter default <code>max_loop_passes = 4</code> (warns at pass 3, stops at 4; requires raising for 5–6 pass Tasks and <code>optimize</code>).</li>
+          <li><span class="opt-key">1c</span> Warning-only by default (<code>max_loop_passes: null</code>), opt-in cap per repo/Wave.</li>
+        </ul>
+      </li>
+      <li class="q-item">
+        <div class="q-head">2. Resuming after hitting <code>max_loop_passes</code></div>
+        <ul class="opts">
+          <li class="chosen"><span class="opt-key">2a</span> <strong>Chosen for review:</strong> Preserve the decider's <code>Iterate</code> verdict on <code>cursor.progress.verdict</code> and enforce the cap in <code>transitions::finish_step</code>. Raising <code>max_loop_passes</code> continues straight into the loop body with 0 wasted decider sessions; bare <code>lf task run</code> stops immediately in &lt;10ms; <code>--from &lt;next&gt;</code> advances; <code>--from &lt;decider&gt;</code> re-evaluates.</li>
+          <li><span class="opt-key">2b</span> Discard the verdict on cap stop so any <code>lf task run</code> re-runs the decider from scratch (simpler cursor, but wastes a cold-cache decider session on every resume or accidental rerun).</li>
+        </ul>
+      </li>
+      <li class="q-item">
+        <div class="q-head">3. <code>task-session</code> wakeups during healthy Graph runs</div>
+        <ul class="opts">
+          <li class="chosen"><span class="opt-key">3a</span> <strong>Chosen for review:</strong> Silence all intermediate running-step updates for a Task's own conversation (matching conducted children); wake once when a run settles (finished, blocked, failed, crashed, interactive stop), PR merges, Task closes/reopens, or a comment/steer arrives.</li>
+          <li><span class="opt-key">3b</span> Keep one wakeup when a Graph starts running, silencing only subsequent step ticks.</li>
+        </ul>
+      </li>
+      <li class="q-item">
+        <div class="q-head">4. <code>scratch/</code>-only automatic step commits</div>
+        <ul class="opts">
+          <li class="chosen"><span class="opt-key">4a</span> <strong>Chosen for review:</strong> Keep committing and pushing <code>scratch/</code> checkpoints, but write a deterministic subject (<code>lf &lt;step&gt;: update scratch/…</code>) with 0 LLM calls whenever every staged path (with <code>--no-renames</code>) is under <code>scratch/</code>.</li>
+          <li><span class="opt-key">4b</span> Skip committing <code>scratch/</code>-only changes altogether (saves commits too, but loses pushed crash-recovery checkpoints between steps).</li>
+        </ul>
+      </li>
+    </ol>
+  </section>
+</main>
+</body>
+</html>

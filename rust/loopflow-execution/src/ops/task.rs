@@ -1413,12 +1413,14 @@ async fn restore_task_checkout(
     // A different registered path was rejected above; no branch is reset.
     if !crate::git::worktrees::branch_exists(&repo, &task.branch)? {
         let remote = format!("refs/remotes/origin/{}", task.branch);
-        let pr = store
-            .active_task_pr(&task.id)
-            .await
-            .map_err(task_error)?
-            .filter(|pr| pr.github().is_some());
-        if recovered.is_none() && !ref_exists(&repo, &remote)? && pr.is_some() {
+        if recovered.is_none()
+            && !ref_exists(&repo, &remote)?
+            && store
+                .active_task_pr(&task.id)
+                .await
+                .map_err(task_error)?
+                .is_some_and(|pr| pr.github().is_some())
+        {
             fetch(&repo, "origin", &task.branch)?;
         }
         let base = if let Some(commit) = recovered {
@@ -2865,33 +2867,16 @@ pub fn task_complete(
                 .request_task_completion(&task.id, note)
                 .map_err(task_error)?
             {
-                settle_completion(&store, &mut task, request).await?;
+                store
+                    .sqlite
+                    .fail_task_completion(&task.id, request, &refusal)
+                    .map_err(task_error)?;
             }
-            return Ok(done(task));
+            return Err(task_error(refusal));
         }
-        if children == Some(ChildPolicy::Abandon) {
-            let blocked = live_abandon_blockers(&store, &task)?;
-            if !blocked.is_empty() {
-                let mut running: Vec<&str> = blocked.iter().map(|(id, _)| id.as_str()).collect();
-                running.dedup();
-                let interrupt = running
-                    .iter()
-                    .map(|id| format!("`lf task interrupt {id}`"))
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                let lines = blocked
-                    .iter()
-                    .map(|(id, work)| format!("  {id} is running: {work}"));
-                return Err(refused(
-                    std::iter::once(format!(
-                        "{} {} still running; stop with {interrupt} or use --children rehome:",
-                        running.join(", "),
-                        if running.len() == 1 { "is" } else { "are" },
-                    ))
-                    .chain(lines)
-                    .collect::<Vec<_>>()
-                    .join("\n"),
-                ));
+        if open > 0 && children == Some(ChildPolicy::Abandon) {
+            if let Some(refusal) = live_abandon_refusal(&store, &task)? {
+                return Err(refused(refusal));
             }
         }
         let completion = store
@@ -3003,10 +2988,9 @@ fn open_children_refusal(store: &SharedStore, task: &Task) -> OpsResult<String> 
     Ok(text.join("\n"))
 }
 
-/// What keeps `--children abandon` from settling `task`'s descendants: each
-/// descendant it would abandon with live work, and that work. A conversation idle in its held
-/// terminal is not live; abandoning closes it.
-fn live_abandon_blockers(store: &SharedStore, task: &Task) -> OpsResult<Vec<(String, String)>> {
+/// Why `--children abandon` refuses: any descendant it would abandon with live
+/// work. A conversation idle in its held terminal is not live; abandoning closes it.
+fn live_abandon_refusal(store: &SharedStore, task: &Task) -> OpsResult<Option<String>> {
     use loopflow_storage::sqlite::children::OpenDescendant;
 
     fn walk(
@@ -3049,7 +3033,30 @@ fn live_abandon_blockers(store: &SharedStore, task: &Task) -> OpsResult<Vec<(Str
         .map_err(task_error)?;
     let mut blocked = Vec::new();
     walk(store, &descendants, &mut blocked)?;
-    Ok(blocked)
+    if blocked.is_empty() {
+        return Ok(None);
+    }
+    let mut running: Vec<&str> = blocked.iter().map(|(id, _)| id.as_str()).collect();
+    // `walk` emits all blockers for one descendant consecutively.
+    running.dedup();
+    let interrupt = running
+        .iter()
+        .map(|id| format!("`lf task interrupt {id}`"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let lines = blocked
+        .iter()
+        .map(|(id, work)| format!("  {id} is running: {work}"));
+    Ok(Some(
+        std::iter::once(format!(
+            "{} {} still running; stop with {interrupt} or use --children rehome:",
+            running.join(", "),
+            if running.len() == 1 { "is" } else { "are" },
+        ))
+        .chain(lines)
+        .collect::<Vec<_>>()
+        .join("\n"),
+    ))
 }
 
 /// Follow-ups for children a completion settled. Each child is already

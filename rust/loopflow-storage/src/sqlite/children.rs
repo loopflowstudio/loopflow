@@ -720,6 +720,7 @@ impl SqliteStore {
                 "UPDATE tasks SET abandoned_at=NULL,abandon_reason=NULL,completion_request=NULL,completion_error=NULL WHERE id=?1",
                 [id.as_str()],
             )?;
+            // Check before deleting a removed checkout so prior work still reopens as started.
             let target = if has_prior_work(&tx, id)? {
                 "started"
             } else {
@@ -2845,10 +2846,14 @@ fn complete_children(conn: &Connection, parent: &TaskId) -> StoreResult<Vec<Chil
 /// Rehoming moves only direct children; each brings its own subtree along.
 /// Closed children keep their link as history.
 fn rehome_children(conn: &Connection, parent: &TaskId) -> StoreResult<ParentCompletion> {
+    let open = children_where(conn, parent, &open_task_children_where())?;
+    if open.is_empty() {
+        return Ok(ParentCompletion::default());
+    }
     let destination = rehome_destination_in(conn, parent)?;
     let edit = Edit::TaskParent(destination.as_ref().map(|task| task.id.to_string()));
-    let mut children = Vec::new();
-    for child in children_where(conn, parent, &open_task_children_where())? {
+    let mut children = Vec::with_capacity(open.len());
+    for child in open {
         planning_write::local(
             conn,
             &crate::work::edit::WorkEdit::for_target(
@@ -2857,8 +2862,8 @@ fn rehome_children(conn: &Connection, parent: &TaskId) -> StoreResult<ParentComp
             ),
         )?;
         children.push(ChildCompletion {
-            pr: active_task_pr_on(conn, &child.id)?,
-            step: parked_step(conn, &child.id)?,
+            pr: None,
+            step: None,
             task: task_on(conn, &child.id)?.ok_or(StoreError::NotFound)?,
             outcome: ChildOutcome::Rehomed,
             children: Vec::new(),

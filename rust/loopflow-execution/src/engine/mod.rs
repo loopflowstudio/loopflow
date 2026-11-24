@@ -107,10 +107,21 @@ impl Error {
         self
     }
 
+    fn named(error: &anyhow::Error) -> Option<&Self> {
+        error.chain().find_map(|cause| {
+            cause.downcast_ref::<Self>().or_else(|| {
+                let crate::ops::OpsError::Refused(refusal) = cause.downcast_ref()? else {
+                    return None;
+                };
+                Some(refusal)
+            })
+        })
+    }
+
     /// The [`Error`] a shared function named anywhere in `error`'s chain, else
     /// `otherwise` with the error's text.
     pub fn refused(error: &anyhow::Error, otherwise: ErrorCode) -> Self {
-        match error.chain().find_map(|cause| cause.downcast_ref::<Self>()) {
+        match Self::named(error) {
             Some(named) => named.clone(),
             None => Self::new(otherwise, error.to_string()),
         }
@@ -121,12 +132,7 @@ impl Error {
     pub fn written(error: &anyhow::Error) -> Self {
         use crate::store::StoreError;
         use loopflow_storage::work::selection::SelectionError;
-        if let Some(named) = error.chain().find_map(|cause| {
-            cause.downcast_ref::<Self>().or(match cause.downcast_ref() {
-                Some(crate::ops::OpsError::Refused(refusal)) => Some(refusal),
-                _ => None,
-            })
-        }) {
+        if let Some(named) = Self::named(error) {
             return named.clone();
         }
         let code = error.chain().find_map(|cause| {

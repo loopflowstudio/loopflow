@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LOO-1083 concept review: where a remote Task's workspace lives</title>
+<style>
+  :root {
+    --bg: #fbfaf7; --fg: #1d1c1a; --muted: #6b665e; --line: #e2ddd3; --card: #ffffff;
+    --yes: #1f7a4d; --yes-bg: #e5f4ec; --no: #a3361f; --no-bg: #fbe9e4;
+    --new: #2954a3; --new-bg: #e6eefb; --code: #f1ede5;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #161513; --fg: #ebe8e2; --muted: #a39d92; --line: #34312c; --card: #1e1d1a;
+      --yes: #6fd3a0; --yes-bg: #183327; --no: #f19a83; --no-bg: #3a1f18;
+      --new: #8fb3f5; --new-bg: #1a2742; --code: #262420;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.55 -apple-system, "SF Pro Text", "Helvetica Neue", sans-serif; }
+  main { max-width: 980px; margin: 0 auto; padding: 40px 24px 80px; }
+  h1 { font-size: 26px; margin: 0 0 6px; }
+  h2 { font-size: 19px; margin: 44px 0 10px; }
+  h3 { font-size: 16px; margin: 22px 0 8px; }
+  p.lede { color: var(--muted); margin: 0 0 18px; }
+  code { font: 13px ui-monospace, "SF Mono", Menlo, monospace; background: var(--code); padding: 1px 5px; border-radius: 4px; }
+  table { width: 100%; border-collapse: collapse; background: var(--card); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  th, td { text-align: left; vertical-align: top; padding: 9px 12px; border-bottom: 1px solid var(--line); }
+  th { font-weight: 600; background: var(--code); }
+  tr:last-child td { border-bottom: 0; }
+  .yes { color: var(--yes); background: var(--yes-bg); font-weight: 600; padding: 1px 7px; border-radius: 10px; white-space: nowrap; }
+  .no { color: var(--no); background: var(--no-bg); font-weight: 600; padding: 1px 7px; border-radius: 10px; white-space: nowrap; }
+  .new { color: var(--new); background: var(--new-bg); font-weight: 600; padding: 1px 7px; border-radius: 10px; white-space: nowrap; }
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 760px) { .cols { grid-template-columns: 1fr; } }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; }
+  .card.proposed { border-color: var(--new); }
+  .card h3 { margin-top: 0; }
+  .flow { font: 13px/1.6 ui-monospace, "SF Mono", Menlo, monospace; white-space: pre; overflow-x: auto; background: var(--code); padding: 10px 12px; border-radius: 6px; }
+  .strike { text-decoration: line-through; color: var(--muted); }
+  .callout { border-left: 4px solid var(--no); background: var(--no-bg); padding: 12px 16px; border-radius: 0 8px 8px 0; margin: 16px 0; }
+  ol.q > li { margin: 14px 0; }
+  ol.q ol { list-style: lower-alpha; margin-top: 6px; }
+  .muted { color: var(--muted); }
+</style>
+</head>
+<body>
+<main>
+
+<h1>Where does a remote Task's workspace live?</h1>
+<p class="lede">LOO-1083 concept review, 2026-11-23, at <code>20fa14b217</code> (kickoff design only; no code built yet).
+Area taken: <b>opening a Task's workspace (Files, Changes, Save, Shell, Session) when another Machine owns it</b>, across CLI, Desktop and Mobile,
+plus how the server, wire and stores decide which Machine answers. That whole area is what the plan rebuilds, so the review covers all of it rather than one slice.</p>
+
+<p><span class="new">proposed</span> marks what the revised plan builds. Everything else describes code on this branch today or the kickoff plan.
+The plan in <code>scratch/plan.md</code> has already been rewritten to the proposal; nothing is implemented.</p>
+
+<h2>One interaction, with its failure</h2>
+<p>A Task runs on <code>modal-1</code>. The laptop still has a checkout of it from before it moved. Jack opens the Task in Desktop and clicks the Session.</p>
+<div class="cols">
+  <div class="card">
+    <h3>Today</h3>
+    <div class="flow">Desktop reads plan.list
+  → reference.workspace = laptop checkout   (stale row, stamped local)
+Desktop pins location = laptop
+Files  → laptop bytes                     (wrong)
+Shell  → laptop $SHELL                    (wrong)
+Session→ session.resume answers modal-1
+  → guard: location ≠ record.workspace
+  → "The conversation belongs to a different
+     Machine or checkout; nothing was opened."</div>
+    <p class="muted">Two routers disagree: Desktop's <code>location</code> and Rust's ownership. The guard is the referee and refuses.</p>
+  </div>
+  <div class="card">
+    <h3>Kickoff plan</h3>
+    <div class="flow">Desktop reads runtime.owner = modal-1
+every request carries expected_owner = modal-1
+server checks route == expected_owner
+Files/Shell/Session → routed to modal-1   (right)
+Task moves to modal-2:
+  every open pane → conflict{actual_owner}
+  panes invalidate, drafts parked at
+  (modal-1, /work/checkout)
+  "moved" notice → Reopen</div>
+    <p class="muted">Fixes the routing, keeps two routers. A move becomes an error on every pane, and a draft is filed under a Machine nobody can save to.</p>
+  </div>
+</div>
+<div class="card proposed" style="margin-top:16px">
+  <h3><span class="new">proposed</span> The Task is the address</h3>
+  <div class="flow">Desktop sends Task id only
+server resolves ownership → modal-1 (pooled ssh peer)
+Files/Changes/Save/Shell/Session → modal-1
+Task moves to modal-2:
+  task.get subscription re-routes (same id); next reading names modal-2
+  Files/Changes reload; header says modal-2
+  draft saves to modal-2 if base revision still matches, else the existing save conflict keeps it
+  Shell on modal-1 keeps running, labelled modal-1; reopening it on modal-2 → ended → New shell
+modal-2 unreachable → unavailable{machine: modal-2} → "modal-2 is unreachable · Retry"</div>
+</div>
+
+<h2>Do the product's concepts and the code's line up?</h2>
+<table>
+  <tr><th>What a person knows</th><th>Code behind it</th><th></th><th>What is wrong</th></tr>
+  <tr><td><b>Task</b>: one outcome, opened by name (<code>LOO-1083</code>)</td><td><code>task_id</code> UUID per Machine; <code>identifier</code>, <code>tracker_id</code></td><td><span class="no">no</span></td><td>One Task, two UUIDs on two Machines (MTG-421). The plan already forwards the portable selector (<code>tracker_id</code>, else identifier) to peers. Kept.</td></tr>
+  <tr><td><b>The Task's Machine</b>: "it's on modal-1"</td><td><code>task_ownership</code> → <code>task_execution_route</code>; also <code>runtime.owner.machine</code>, <code>workspace.machine_id</code>, <code>execution_machine</code>, <code>task_machine</code>, <code>RegistryQuery.remoteMachine</code>, <code>SessionsStore.executionLocations</code>, <code>SessionsWorkspace.location</code>, <code>LinkedSession.location</code>; kickoff adds <code>expected_owner</code>, <code>actual_owner</code></td><td><span class="no">no</span></td><td>One idea under ten names, held by two routers. <b>Biggest mismatch</b>, below.</td></tr>
+  <tr><td><b>Files / Changes</b> of the Task</td><td><code>task.files</code>, <code>task.file</code>, <code>task.diff</code>, <code>task.changes</code>; Desktop also SSHes <code>lf --machine … task watch-files</code></td><td><span class="no">no</span></td><td>Two transports for one view. Plan routes all through the server and adds <code>task.files.watch</code>. Kept.</td></tr>
+  <tr><td><b>Save</b> an edit</td><td><code>task.save {revision, content}</code>; refuses on content-revision mismatch</td><td><span class="yes">yes</span></td><td>Already the right guard. The kickoff's <code>expected_owner</code> on save duplicated it. <span class="new">proposed</span>: revision is the only write guard.</td></tr>
+  <tr><td><b>Unsaved draft</b></td><td>Desktop <code>drafts</code>; kickoff keys by <code>(machine_id, checkout)</code></td><td><span class="no">no</span></td><td>A person's draft belongs to the Task's file, not to a Machine. <span class="new">proposed</span>: <code>(Task, path, base revision)</code>.</td></tr>
+  <tr><td><b>Shell</b> in the Task</td><td><code>desktop_shells</code> receipts + held terminal; reached by <code>lf --machine … desktop shell</code> over SSH</td><td><span class="no">no</span></td><td>Named for Desktop although Mobile gets it too; bypasses the server. Plan adds <code>task.shell.start/attach/close</code> through the ticket bridge. Kept, minus <code>expected_owner</code>. The <code>desktop_shells</code> table name stays (a rename is a migration with no change people see).</td></tr>
+  <tr><td><b>Session</b>: the agent's conversation</td><td><code>session.attach/continue/start {session}</code>; local <code>agent_sessions</code></td><td><span class="no">no</span></td><td>A Session born on a sandbox has no row here, so the id alone cannot route. Plan adds <code>task</code> and <code>machine</code> selectors. Kept, minus <code>expected_owner</code>.</td></tr>
+  <tr><td><b>Moved</b>: "the Task is somewhere else now"</td><td>kickoff: <code>conflict</code> error on 14 operations</td><td><span class="no">no</span></td><td>A move is ordinary, not a failure. <span class="new">proposed</span>: the subscription follows the Task; no error code.</td></tr>
+  <tr><td><b>Not started</b></td><td><code>OpsError::Message("…not checked out…")</code> → <code>unavailable</code></td><td><span class="no">no</span></td><td>Indistinguishable from an outage. Plan types it <code>not_found{reason: not_started}</code>. Kept.</td></tr>
+  <tr><td><b>Machine unreachable</b></td><td>untyped SSH failure</td><td><span class="no">no</span></td><td>Plan types it <code>unavailable{resource: machine, …}</code> naming the Machine. Kept.</td></tr>
+  <tr><td><b><code>lf open</code></b>: show it here</td><td><code>lf --machine X open</code> runs <code>open</code> on X; <code>resume_argv</code> drops <code>--task</code> with <code>--session</code></td><td><span class="no">no</span></td><td>"Open" always presents on this Machine. Plan normalizes both flag positions into <code>OpenSelection.machine</code>. Kept.</td></tr>
+</table>
+
+<h2>The biggest mismatch: two routers for one fact</h2>
+<div class="callout">The person knows one fact, "this Task is on modal-1". The code keeps it in two places: Rust's ownership log and Desktop's pinned location. Every bug in MTG-421 is the two disagreeing. The kickoff plan fixed which one wins by having the client send its opinion on every request and the server refuse when they differ. That keeps both routers and adds a referee.</div>
+
+<div class="cols">
+  <div class="card">
+    <h3>Before (kickoff)</h3>
+    <ul>
+      <li><span class="strike"><code>expected_owner</code></span> on <code>task.status/get/detail/changes/diff/file/files/runs/files.watch/save</code>, <code>task.shell.*</code>, <code>session.attach/continue/start</code></li>
+      <li><span class="strike"><code>conflict {expected_owner, actual_owner}</code></span> error and its row on every surface</li>
+      <li>Desktop resolves the owner itself, threads <code>ownerMachineId</code> through every call</li>
+      <li>Placement guard at <code>SessionsView.swift:716</code> kept</li>
+      <li>Drafts parked at <span class="strike"><code>(machine_id, checkout)</code></span></li>
+      <li>"Task moved" notice + Reopen on Desktop, Refresh on Mobile</li>
+    </ul>
+  </div>
+  <div class="card proposed">
+    <h3><span class="new">proposed</span> After</h3>
+    <ul>
+      <li>Requests name the Task; the local server alone resolves and routes</li>
+      <li>Subscriptions re-route when <code>task_ownership</code> advances, same <code>id</code>; <code>task.files.watch</code> sends one whole-tree invalidation</li>
+      <li>Panes read their Machine from the answer (<code>reference.workspace.machine_id</code>, attach answer)</li>
+      <li>Placement guard and <code>SessionsWorkspace.location</code> deleted with the rest of the location stack</li>
+      <li>Drafts keyed by <code>(Task, path, base revision)</code>; <code>task.save</code>'s revision check decides</li>
+      <li>Running terminals stay on their Machine; a stale <code>shell_id</code> on the new owner answers ended → New shell</li>
+    </ul>
+  </div>
+</div>
+
+<h3>Counterexamples tried</h3>
+<table>
+  <tr><th>Case</th><th>Proposed behavior</th><th>Holds?</th></tr>
+  <tr><td>Move A→B while a draft is open; A had uncommitted edits B never got</td><td>B's file is at another revision → save conflict shows both versions; draft kept</td><td><span class="yes">yes</span></td></tr>
+  <tr><td>Move A→B; file identical on B</td><td>Save lands on B, where the Task now is</td><td><span class="yes">yes</span></td></tr>
+  <tr><td>Two one-shot reads straddle a move (Files from A, Diff from B)</td><td>The <code>task.get</code> subscription delivers B's reading; panes reload on the Machine change. A brief mixed view is possible between the two</td><td><span class="yes">yes</span>, transient</td></tr>
+  <tr><td>Shell running on A, Task moves to B</td><td>Shell keeps running on A, labelled A; it is a real process and may hold output the person wants</td><td><span class="yes">yes</span></td></tr>
+  <tr><td>B unreachable after the move</td><td>Re-routed subscription answers <code>unavailable</code> naming B; never falls back to A or local</td><td><span class="yes">yes</span></td></tr>
+  <tr><td>Session on a sandbox with no local row</td><td><code>session.attach{session, task}</code> or <code>{session, machine}</code> routes it</td><td><span class="yes">yes</span></td></tr>
+</table>
+
+<h3>What follows across layers</h3>
+<table>
+  <tr><th>Layer</th><th>Change from kickoff</th></tr>
+  <tr><td>Wire (rev 10)</td><td>Drop <code>expected_owner</code> everywhere and the <code>conflict</code> shape. Still rev 10: new <code>task</code>/<code>machine</code> on session ops, <code>task.shell.*</code>, <code>task.files.watch</code>.</td></tr>
+  <tr><td>Server</td><td><code>server/subscriptions.rs</code> watches the <code>task_ownership</code> revision beside each routed stream and swaps the peer stream in place.</td></tr>
+  <tr><td>Desktop</td><td>Delete <code>location</code>, <code>confirmLocation</code>, <code>retainLocation</code>, the placement guard; no owner threading. Smaller than the kickoff.</td></tr>
+  <tr><td>Mobile</td><td>No moved state; the header follows the reading. Old Shell → ended → New shell.</td></tr>
+  <tr><td>Tests</td><td>Slice 1 proves the re-route (same subscription id, next reading names the new Machine) and the stale-revision save after a move.</td></tr>
+</table>
+
+<h3>First slice</h3>
+<p>Unchanged in order: Slice 1 (peer pool, routed reads/writes/subscriptions, bridged terminal tickets, stale-checkout fix in <code>task_reference</code>) shows soonest whether the model holds, because the two-Machine integration test exercises every claim above, including the move, before any Swift changes.</p>
+
+<h2>Questions</h2>
+<ol class="q">
+  <li>When a Task moves, a Shell already running on the old Machine:
+    <ol>
+      <li>keeps running, labelled with its Machine, until the person closes it <span class="new">built into the plan</span></li>
+      <li>is closed by the move, like the agent Session</li>
+      <li>stays but its pane is detached and shows "on modal-1 · reattach"</li>
+    </ol>
+  </li>
+  <li>An unsaved draft after a move:
+    <ol>
+      <li>saves to the new owner when the base revision matches, else the save conflict <span class="new">built into the plan</span></li>
+      <li>always asks before saving to a different Machine than it was opened on</li>
+    </ol>
+  </li>
+  <li>The Desktop shell table and operation are named <code>desktop_shells</code> / <code>lf desktop shell</code> while Mobile uses them too:
+    <ol>
+      <li>leave the names; the wire says <code>task.shell.*</code> <span class="new">built into the plan</span></li>
+      <li>rename to Task shell everywhere in this Task (adds a migration)</li>
+      <li>file the rename as its own Task</li>
+    </ol>
+  </li>
+  <li><code>lf open</code> with a remote-only Session:
+    <ol>
+      <li>accept both <code>lf open --machine X</code> and <code>lf --machine X open</code>, one field <span class="new">built into the plan</span></li>
+      <li>only <code>lf open --machine X</code>; root <code>--machine</code> keeps meaning "run there"</li>
+    </ol>
+  </li>
+</ol>
+
+</main>
+</body>
+</html>

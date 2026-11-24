@@ -343,6 +343,14 @@ final class WorkNavigation {
         case workingTasks
         /// One Dashboard member shown as full Work; the trail returns through its Dashboard.
         case entered(from: Board, work: WorkReference)
+
+        var selection: WorkReference? {
+            switch self {
+            case .work(let work): work
+            case .entered(_, let work): work
+            case .dashboard, .view, .workingTasks: nil
+            }
+        }
     }
     /// A view a tile can be entered from: a saved Dashboard, Working Tasks or a Wave
     /// view, of a Wave or of the repository (its default Wave, over every Task).
@@ -353,21 +361,17 @@ final class WorkNavigation {
         case repository
     }
     static let workingTasksTitle = "Working Tasks"
+    /// Entering or leaving the same Task keeps its held status group; any other move releases it.
     var destination: Destination = .work(nil) {
         didSet {
-            if heldStatusGroup != nil, selection?.kind != .task || !sidebarScope.isWorkingList {
+            if heldStatusGroup != nil,
+               selection?.kind != .task || !sidebarScope.isWorkingList || selection != oldValue.selection {
                 heldStatusGroup = nil
             }
         }
     }
     var selection: WorkReference? {
-        get {
-            switch destination {
-            case .work(let work): work
-            case .entered(_, let work): work
-            case .dashboard, .view, .workingTasks: nil
-            }
-        }
+        get { destination.selection }
         set { destination = .work(newValue) }
     }
     var showsSelection: Bool {

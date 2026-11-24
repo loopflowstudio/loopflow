@@ -146,6 +146,8 @@ final class WorkModel {
         let next: Reading<WorkViewPlan> = plan.map { .available($0, readAt: readAt) }
             ?? (kept?.failed(reason) ?? .unavailable(lastGood: nil, reason: reason))
         guard previous?.wave != wave || previous?.reading != next else { return }
+        // Hold the open Task's group from the reading it was seen in, before this one moves it.
+        if previous?.wave == wave { holdSelectedStatusGroup() }
         taskListReadings[key] = (wave, next)
         holdSelectedStatusGroup()
         endLaunchWhenCurrent()
@@ -2223,7 +2225,9 @@ final class WorkModel {
     var sidebarRows: [SidebarTaskRow] {
         let rows = filteredSidebarRows
         guard navigation.sidebarScope.isWorkingList, navigation.sidebarSortByStatus else { return rows }
-        let held = navigation.heldStatusGroup
+        let held = navigation.heldStatusGroup.flatMap { held in
+            selection.map { resolvedTaskID($0.id) } == held.taskID ? held : nil
+        }
         // Grouping retains the shared Task order within each status.
         let groups = Dictionary(grouping: rows) { row in
             if let held, held.taskID == row.id { return held.group }

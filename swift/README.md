@@ -150,7 +150,7 @@ apply to work that has never started; an unassigned running Task remains Active.
 A Task is **Available** when one of its conversations is available for your next
 turn, and **Busy** when a current activity report says it is working. An open
 conversation with unknown activity adds neither. With an available conversation
-and a busy one, the Task matches both filters; its board badge shows Available.
+and a busy one, the Task matches both filters; its board badge shows Busy.
 The board and sidebar use the same activity reading. These badges describe
 conversations; the Task's lifecycle and NOW condition remain separate.
 
@@ -299,10 +299,10 @@ and owner are in the Task pane, not the row.
 
 Follow a conversation in the pane and sidebar: Busy for a working report,
 Available for an idle report, Blocked for a question or permission request, and
-Done for a reported result. Both labels use the same report wording. A pane
+Finished in the pane for a reported result, where the Task row reads Available. A pane
 describes its own conversation; a Task's Available/Busy filters and board badge
 aggregate all its conversations in Rust, so a busy pane can belong to an
-Available Task. Reported Done is a program result, independent of Task lifecycle.
+Available Task. Reported Finished is a program result, independent of Task lifecycle.
 Reconnect restores the current report without sending another prompt. Quiet output
 does not change activity; clearing a report removes its label without completing
 the Task.

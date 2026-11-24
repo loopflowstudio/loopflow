@@ -315,6 +315,36 @@ struct WorkNavigationTests {
         #expect(model.sidebarTaskIDs == ["open", "ready"])
     }
 
+    @Test func aTurnAfterSwitchingFiltersKeepsTheOpenTaskInItsGroup() {
+        let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("Unexpected command") }, repoPath: "/repo")
+        func report(_ state: WorkSelectionState) {
+            model.applyStartedFixture([("busy", [.working, .busy]), ("open", [.working, state]), ("idle", [.working])])
+        }
+        report(.available)
+        model.select(.task(id: "open"))
+        model.toggleSidebarSortByStatus()
+        #expect(model.sidebarTaskIDs == ["open", "idle", "busy"])
+        model.navigation.sidebarFilter = .available
+        model.navigation.sidebarFilter = .working
+        report(.busy)
+        #expect(model.sidebarTaskIDs == ["open", "idle", "busy"])
+    }
+
+    @Test func selectingAnotherTaskDirectlyReleasesTheHeldGroup() {
+        let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("Unexpected command") }, repoPath: "/repo")
+        func report(_ state: WorkSelectionState) {
+            model.applyStartedFixture([("open", [.working, state]), ("other", [.working, .available]), ("idle", [.working])])
+        }
+        report(.available)
+        model.select(.task(id: "open"))
+        model.toggleSidebarSortByStatus()
+        report(.busy)
+        #expect(model.sidebarTaskIDs == ["open", "other", "idle"])
+        model.navigation.selection = .task(id: "other")
+        #expect(model.navigation.heldStatusGroup == nil)
+        #expect(model.sidebarTaskIDs == ["other", "idle", "open"])
+    }
+
     @Test func firstReadingHoldsTheGroupWhenRowsAboveTheOpenTaskLeave() {
         let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("Unexpected command") }, repoPath: "/repo")
         model.applySelectionPlans([fixtureWorkingPlan(["open"])], reason: "")

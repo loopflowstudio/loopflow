@@ -29,3 +29,14 @@ A source-side pause during a move belongs to the sender until it records the sen
 Use the existing live-agent index for both worker selection and duplicate PID/birth checks. With 10,000 Tasks and 100 live agents, both query plans used that index, and worker selection looked up captures, Graph steps, and Graphs by primary key.
 
 Use the existing batched latest-Graph read for a single Task status or interrupt. Only the board constructs the full Graph detail it returns.
+
+## Stack sync
+
+Resolve against LOO-1063 using its current Graph ownership, remote Task
+projection, and Working order. Keep the implemented pause lifecycle and the
+Task's scratch notes during the sync. The post-demo changes in plan.md are
+the next implementation slice.
+
+- `cargo test -p loopflow --test integration machine_commands::served_pause_holds_the_remote_cursor_and_status_names_unpause -- --exact` passed on macOS. Gate and CI run broader suites.
+- `swift build --package-path swift --target LoopflowMac --jobs 2` built the macOS target with warnings in existing code.
+- `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings` passed.

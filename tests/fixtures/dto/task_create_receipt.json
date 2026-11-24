@@ -70,9 +70,8 @@
       },
       "workspace": null,
       "interactive": true,
-      "primary_scope": null,
+      "primary_scope": "task",
       "availability": null,
-      "task_primary": true,
       "program_status": null,
       "agent_process_id": null,
       "preview": null,
@@ -176,7 +175,8 @@
       },
       "pr": null,
       "section": "working",
-      "owned_by_you": true
+      "owned_by_you": true,
+      "runs_on": null
     },
     "parent": null
   },
@@ -305,7 +305,8 @@
       },
       "pr": null,
       "section": "working",
-      "owned_by_you": true
+      "owned_by_you": true,
+      "runs_on": null
     },
     "parent": null
   }

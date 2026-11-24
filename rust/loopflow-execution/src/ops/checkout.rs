@@ -1,4 +1,5 @@
-//! Checkout freshness shared by interactive syncs and unattended installs.
+//! Checkout freshness shared by interactive syncs and unattended installs,
+//! and the one answer for what a checkout builds on.
 
 use std::fs::{File, OpenOptions};
 use std::path::Path;
@@ -6,11 +7,14 @@ use std::process::Command;
 
 use fs2::FileExt;
 
+use crate::git::worktrees::stacked_base;
 use crate::git::{
     absolute_git_dir, current_branch, find_worktree_for_branch, get_default_branch,
     intervention_state, is_ancestor, rev_parse,
 };
 use crate::ops::git_operation::begin_sync_operation;
+use crate::ops::pr::gh_available;
+use crate::ops::task::{task_stack, StackedSync};
 use crate::ops::{OpsError, OpsResult, Progress};
 
 fn git(repo: &Path, args: &[&str]) -> OpsResult<String> {
@@ -101,6 +105,80 @@ fn preserve_untracked_collisions(repo: &Path, stash: &str) -> OpsResult<()> {
         );
     }
     Ok(())
+}
+
+/// What a checkout builds on. `lf sync` merges it and `lf pr open` targets it.
+#[derive(Debug)]
+pub enum CheckoutBase {
+    /// This checkout's Task is stacked on another Task.
+    Stacked(Box<StackedSync>),
+    /// The branch `lf wt create --stack` recorded until its PR merges, else
+    /// the default branch.
+    Branch(String),
+}
+
+impl CheckoutBase {
+    pub fn stack(&self) -> Option<&StackedSync> {
+        match self {
+            Self::Stacked(stack) => Some(stack.as_ref()),
+            Self::Branch(_) => None,
+        }
+    }
+
+    /// The branch a PR targets: a stack parent while its PR is open, then the
+    /// default branch.
+    ///
+    /// # Errors
+    /// A stack parent closed without merging, naming both ways out.
+    pub fn branch<'a>(&'a self, default_branch: &'a str) -> OpsResult<&'a str> {
+        match self {
+            Self::Stacked(stack) => Ok(stack
+                .live_parent_branch(default_branch)?
+                .unwrap_or(default_branch)),
+            Self::Branch(branch) => Ok(branch),
+        }
+    }
+
+    /// The ref sync merges: a live stack parent is read from origin, where its
+    /// Task pushes from whichever Machine runs it; any other base is local.
+    ///
+    /// # Errors
+    /// As [`Self::branch`].
+    pub fn sync_ref(&self, default_branch: &str) -> OpsResult<String> {
+        match self {
+            Self::Stacked(stack) => Ok(match stack.live_parent_branch(default_branch)? {
+                Some(parent) => format!("origin/{parent}"),
+                None => default_branch.to_string(),
+            }),
+            Self::Branch(branch) => Ok(branch.clone()),
+        }
+    }
+}
+
+/// The one reader for a checkout's base; sync and publication both call it.
+pub fn checkout_base(repo: &Path, default_branch: &str) -> OpsResult<CheckoutBase> {
+    if let Some(stack) = task_stack(repo)? {
+        return Ok(CheckoutBase::Stacked(Box::new(stack)));
+    }
+    Ok(CheckoutBase::Branch(match stacked_base(repo)? {
+        Some(base) if !branch_pr_merged(repo, &base)? => base,
+        _ => default_branch.to_string(),
+    }))
+}
+
+/// Whether `branch`'s PR has merged; without `gh` nothing says so.
+fn branch_pr_merged(repo: &Path, branch: &str) -> OpsResult<bool> {
+    if !gh_available() {
+        return Ok(false);
+    }
+    let output = Command::new("gh")
+        .args(["pr", "view", branch, "--json", "state", "-q", ".state"])
+        .current_dir(repo)
+        .output()?;
+    Ok(output.status.success()
+        && String::from_utf8_lossy(&output.stdout)
+            .trim()
+            .eq_ignore_ascii_case("MERGED"))
 }
 
 const STASH_MESSAGE: &str = "lf checkout update: caller edits in ";
@@ -196,7 +274,7 @@ pub fn refresh_main(repo: &Path, progress: &impl Progress) -> OpsResult<String> 
     // independent. Wait for the other refresh, then fetch again for this call.
     let _lock = lock_shared(repo, "lf-main-refresh.lock")?;
     let branch = get_default_branch(repo)?;
-    let target = crate::git::integration_base(repo)?;
+    let target = crate::git::default_branch_upstream(repo, &branch)?;
     if target == branch {
         return Ok(branch);
     }

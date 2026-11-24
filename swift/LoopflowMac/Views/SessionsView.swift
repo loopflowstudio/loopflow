@@ -29,6 +29,8 @@ extension FocusedValues {
 }
 
 struct ConsoleCommands: Commands {
+    let appearance: AppearanceStore
+    @Environment(\.undoManager) private var undoManager
     @FocusedValue(\.consoleActions) private var actions
     var body: some Commands {
         CommandGroup(after: .newItem) {
@@ -40,6 +42,12 @@ struct ConsoleCommands: Commands {
                 .keyboardShortcut("w", modifiers: [.command, .shift])
         }
         CommandMenu("View") {
+            Picker("Appearance", selection: Binding(get: { appearance.selection.mode }, set: { mode in
+                Task { await appearance.applyMode(mode, manager: undoManager) }
+            })) {
+                ForEach(AppearanceMode.allCases, id: \.self) { Text($0.menuTitle).tag($0) }
+            }
+            .disabled(appearance.saving || appearance.editing)
             Button("Navigator") { actions?.navigate() }.keyboardShortcut("k")
             Button("Toggle Sidebar") { actions?.toggleSidebar() }.keyboardShortcut("\\")
             Button("Focus Sidebar") { actions?.focusSidebar() }.disabled(actions == nil)
@@ -1857,6 +1865,8 @@ struct SessionsContentView: View {
         case .bind(let id):
             guard let record = store.sessions.first(where: { $0.id == id })?.record else { return }
             model.beginSessionBinding(record)
+        case .sortWorkingTasks:
+            model.toggleSidebarSortByStatus()
         case .graphLog(let id):
             model.select(.task(id: id))
             navigation.content = .terminals

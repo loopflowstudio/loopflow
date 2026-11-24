@@ -223,10 +223,6 @@ struct ServerProtocolTests {
         let destination = JSONValue.object(["kind": .string("personal_global")])
         let operations: [(ConfigOperation, String)] = [
             (.configCatalog, #"{"kind":"config.catalog"}"#),
-            (.configGet(destination: destination, key: "theme"),
-             #"{"kind":"config.get","destination":{"kind":"personal_global"},"key":"theme"}"#),
-            (.configExplain(destination: destination, key: "theme"),
-             #"{"kind":"config.explain","destination":{"kind":"personal_global"},"key":"theme"}"#),
             (.configUnset(destination: destination, key: "theme"),
              #"{"kind":"config.unset","destination":{"kind":"personal_global"},"key":"theme"}"#),
             (.configTheme(value: nil), #"{"kind":"config.theme","value":null}"#),
@@ -273,7 +269,7 @@ struct ServerProtocolTests {
             ("checkout_sync", "sync-1", .checkoutSync(directory: "/repo", onto: nil, preview: true, manual: false,
                                                       continueSync: false, abort: false, adopt: false)),
             ("checkout_create", "create-1", .checkoutCreate(directory: "/repo", name: "spike", preview: false,
-                                                            persistent: false)),
+                                                            persistent: false, stack: false)),
             ("account_disconnect", "disconnect-1", .accountDisconnect(provider: "linear")),
             ("account_connect", "connect-1", .accountConnect(provider: "linear", chromeProfile: "Profile 1", apiKey: false)),
             ("graph_run", "graph-1", .graphRun(directory: "/repo", name: "code", message: "Serve the graph namespace",

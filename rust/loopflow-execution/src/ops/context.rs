@@ -2,6 +2,7 @@
 //! absence. The read timestamp is not planning freshness or execution admission.
 use std::path::Path;
 
+use loopflow_model::durable::TaskId;
 use serde::{Deserialize, Serialize};
 
 use crate::store::SharedStore;
@@ -181,12 +182,7 @@ async fn read_context(
         report.process = ContextFact::bound(id, "inspecting_process");
     }
     let session_task = if let Some(record) = &session_record {
-        let tasks = store.sqlite.session_task_ids(&record.id)?;
-        anyhow::ensure!(
-            tasks.len() <= 1,
-            "Session belongs to multiple Tasks; select an explicit Task to inspect its context"
-        );
-        tasks.first().map(ToString::to_string)
+        store.sqlite.session_task(&record.id)?
     } else {
         None
     };
@@ -195,7 +191,7 @@ async fn read_context(
         .and_then(|s| s.wave_id.as_ref())
         .map(ToString::to_string);
     let selection = WorkSelection {
-        task: work.task.or(session_task.as_deref()),
+        task: work.task.or(session_task.as_ref().map(TaskId::as_str)),
         wave: work.wave.or(session_wave.as_deref()),
     };
     // Repo/Wave conversations must not acquire checkout membership merely

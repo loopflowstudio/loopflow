@@ -18,10 +18,11 @@ use loopflow_execution::graph::ConcreteStep;
 use loopflow_execution::graph::ConcreteXor;
 use loopflow_execution::graph::GraphDefinition;
 use loopflow_execution::journal::{self, LfEventFields, LfEventType, LfNode};
-use loopflow_execution::ops::graph_process;
 use loopflow_execution::ops::WorkBinding;
+use loopflow_execution::ops::{graph_process, tracker_events};
 use loopflow_execution::output::Colors;
 use loopflow_execution::process::launch_log::{release_launcher, PendingLog};
+use loopflow_execution::process::GraphHeld;
 use loopflow_execution::store::SharedStore;
 use loopflow_model::durable::WorkRef;
 use loopflow_model::id::LfProcessId;
@@ -711,14 +712,13 @@ fn report_outcome(outcome: GraphOutcome) -> Result<()> {
         // Each stop printed why as it stopped.
         GraphOutcome::Completed | GraphOutcome::StoppedAt(_) => Ok(()),
         GraphOutcome::Interrupted => Err(loopflow_execution::process::CommandExit(130).into()),
-        GraphOutcome::Waiting => Err(loopflow_execution::process::GraphHeld(
+        GraphOutcome::Waiting => Err(GraphHeld(
             "Graph stopped before its last step; inspect its history and effects".into(),
         )
         .into()),
-        GraphOutcome::Blocked(reason) => Err(loopflow_execution::process::GraphHeld(format!(
-            "Graph is blocked: {reason}"
-        ))
-        .into()),
+        GraphOutcome::Blocked(reason) => {
+            Err(GraphHeld(format!("{} {reason}", GraphHeld::BLOCKED_PREFIX)).into())
+        }
     }
 }
 
@@ -886,10 +886,10 @@ impl RunningGraph<'_> {
     }
 
     /// The captured step the runner is about to run.
-    fn current(&self) -> Option<ConcreteStep> {
+    fn current(&self) -> Option<&ConcreteStep> {
         let position = self.position.lock().expect("Graph position mutex poisoned");
         let (body, leaf) = position.current_body(self.steps);
-        body.get(leaf.index).cloned()
+        body.get(leaf.index)
     }
 
     /// Reserve the step about to spawn under the id minted for it, so the
@@ -912,7 +912,7 @@ impl RunningGraph<'_> {
         let Some(task) = self.task.as_ref().filter(|_| self.task_run.is_some()) else {
             return Ok(None);
         };
-        let Some(step) = self.current().as_ref().and_then(|step| {
+        let Some(step) = self.current().and_then(|step| {
             loopflow_execution::task_graph::landing_name(
                 step,
                 crate::lf::navigation::command_merges,
@@ -1060,10 +1060,13 @@ impl RunningGraph<'_> {
         }
         let mut watch = tokio::time::interval(std::time::Duration::from_secs(1));
         watch.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        let directions = tracker_events::watch_owned_work(self.task.clone());
+        tokio::pin!(directions);
         let mut signalled = false;
         let status = loop {
             tokio::select! {
                 status = child.wait() => break status,
+                _ = &mut directions, if kind == StepKind::Agent && self.task.is_some() => {},
                 _ = watch.tick(), if kind == StepKind::Agent && !signalled => {
                     if self.interrupted() {
                         if let Some(pid) = child.id() {
@@ -1258,19 +1261,19 @@ impl SkillExecutor for &RunningGraph<'_> {
         .await;
         let name = &skill.skill.name;
         print_step_progress(ctx.progress, name);
-        let current = self.current();
-        let output = current.as_ref().and_then(GraphOutput::for_step);
         let mut message = self.message.unwrap_or_default().to_owned();
-        if skill.returns.is_some() {
+        let step = {
             let position = self.position.lock().expect("Graph position mutex poisoned");
             let (body, leaf) = position.current_body(self.steps);
-            let traversals = leaf.progress.repeats.get(&leaf.index.to_string());
-            let target = match return_target(body, leaf.index).map(|target| &body[target]) {
-                Some(ConcreteStep::Skill(target)) => target.skill.name.as_str(),
-                _ => "an earlier step",
-            };
-            message.push_str(&format!("\n\nDecision pass {}. The backward edge returns to {target}. Compare the preceding pass's intended progress with its observed results; new evidence counts as progress. Missing prior evidence is an evidence gap, not proof of no progress.", u64::from(traversals.copied().unwrap_or(0)) + 1));
-        }
+            if let Some(start) = return_target(body, leaf.index) {
+                let traversals = leaf.progress.repeats.get(&leaf.index.to_string());
+                let pass = u64::from(traversals.copied().unwrap_or(0)) + 1;
+                let steps = leaf.index - start + 1;
+                let target = loopflow_execution::task_graph::step_name(&body[start]);
+                message.push_str(&format!("\n\nDecision pass {pass}. Iterating repeats {steps} steps, back to {target}.\nCompare what the preceding pass set out to do with what changed or was learned. Say when earlier results are missing."));
+            }
+            body.get(leaf.index)
+        };
         if let Some(direction) = &ctx.direction {
             message.push_str(&format!(
                 "\n\nPrevious step feedback or iteration direction:\n{direction}"
@@ -1281,12 +1284,8 @@ impl SkillExecutor for &RunningGraph<'_> {
             let step = skill.interactive_step().unwrap_or(name);
             message.push_str(&stand_in_message(step, skill.returns.is_some()));
         }
-        if let Some(instructions) = current
-            .as_ref()
-            .and_then(GraphOutput::for_step_instructions)
-        {
-            message.push_str(&instructions);
-        }
+        let output =
+            step.and_then(|step| GraphOutput::append_step_instructions(step, &mut message));
         let mut step_cli = self.launcher.process_options();
         // spawn carries verbosity for skills, operations, and correction turns.
         step_cli.verbose = false;
@@ -1511,7 +1510,8 @@ mod tests {
             runtime.block_on(async {
                 let conn = rusqlite::Connection::open(&fixture.database).unwrap();
                 for index in 0..2 {
-                    conn.execute("DELETE FROM linear_team_checks", []).unwrap();
+                    conn.execute("DELETE FROM planning_scope_checks", [])
+                        .unwrap();
                     conn.execute(
                         "UPDATE tasks SET issue_title='Old title' WHERE id=?1",
                         [task.id.as_str()],

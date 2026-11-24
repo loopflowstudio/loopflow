@@ -13,7 +13,7 @@ use crate::execution::TaskState;
 use crate::planning_sync::TrackerActions;
 use crate::work::task::{Task, TaskEvent, TaskId, TaskPr, TaskPrId};
 use crate::{StoreError, StoreResult, TrackerState};
-use loopflow_model::durable::{RepositoryId, TaskOwner};
+use loopflow_model::durable::{RepositoryId, TaskOwnership};
 
 /// Durable facts about a set of Tasks, read in one snapshot.
 #[derive(Debug)]
@@ -28,7 +28,8 @@ pub struct TaskDetailFacts {
     /// A pending completion request's reason.
     pub completion_pending: HashMap<TaskId, String>,
     pub issue_urls: HashMap<TaskId, String>,
-    pub owners: HashMap<TaskId, TaskOwner>,
+    /// Each owned Task's ownership; unowned Tasks are absent.
+    pub ownership: HashMap<TaskId, TaskOwnership>,
     pub tracker_states: HashMap<TaskId, TrackerState>,
     pub latest_events: HashMap<TaskId, TaskEvent>,
     /// The name of the graph each Task took up.
@@ -67,6 +68,7 @@ impl SqliteStore {
                 |row| Ok((TaskId::from_raw(row.get::<_, String>(0)?), PauseCleanup { worker_session: row.get(1)? })),
             )?
         };
+        let (local, ownership) = super::task_ownership::ownerships_in(&snapshot, &ids)?;
         let facts = TaskDetailFacts {
             states,
             pause_cleanup,
@@ -118,7 +120,7 @@ impl SqliteStore {
                 &json,
                 |row| Ok((TaskId::from_raw(row.get::<_, String>(0)?), row.get::<_, String>(1)?)),
             )?,
-            owners: super::task_ownership::owners_in(&snapshot, &ids)?,
+            ownership,
             tracker_states: tracker_states_in(&snapshot, tasks, true)?,
             latest_events: keyed(
                 &snapshot,
@@ -149,7 +151,6 @@ impl SqliteStore {
             tracker_actions: super::planning_sync::task_tracker_actions_in(&snapshot, &ids)?,
             repository_paths: repository_paths_in(&snapshot)?,
         };
-        let local = super::task_ownership::local_machine_in(&snapshot)?;
         snapshot.commit()?;
         Ok((local, facts))
     }

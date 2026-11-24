@@ -251,17 +251,13 @@ fn nodes(steps: &[ConcreteStep], next: &mut u32) -> Vec<GraphNode> {
                 paths: Vec::new(),
             },
             ConcreteStep::Xor(branch) => {
-                let mut names: Vec<_> = branch.paths.keys().collect();
-                names.sort();
-                let paths = names
-                    .into_iter()
-                    .map(|name| {
-                        let path = &branch.paths[name];
-                        CompiledGraphPath {
-                            name: name.clone(),
-                            description: path.description.clone(),
-                            steps: nodes(&path.steps, next),
-                        }
+                let paths = branch
+                    .paths
+                    .iter()
+                    .map(|(name, path)| CompiledGraphPath {
+                        name: name.clone(),
+                        description: path.description.clone(),
+                        steps: nodes(&path.steps, next),
                     })
                     .collect();
                 GraphNode {
@@ -310,10 +306,8 @@ pub fn location(
             else {
                 anyhow::bail!("cursor child does not belong to a captured XOR");
             };
-            let mut paths: Vec<_> = branch.paths.iter().collect();
-            paths.sort_by_key(|(name, _)| *name);
             index += 1;
-            for (name, path) in paths {
+            for (name, path) in &branch.paths {
                 if name == selected {
                     return Ok(index + locate(&path.steps, cursor)?);
                 }
@@ -534,7 +528,7 @@ mod tests {
         assert!(missing.unavailable.is_some());
     }
 
-    use std::collections::{BTreeMap, HashMap};
+    use std::collections::BTreeMap;
 
     use crate::graph::compile_graph;
     use crate::graph::compiled::{
@@ -798,7 +792,7 @@ mod tests {
     fn a_selected_xor_path_is_drawn_honestly_with_captured_ids() {
         let branch = ConcreteXor {
             router: Skill::named("xor-route"),
-            paths: HashMap::from([
+            paths: BTreeMap::from([
                 (
                     "fix".to_string(),
                     ConcretePath {

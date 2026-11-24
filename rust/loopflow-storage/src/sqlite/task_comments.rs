@@ -261,6 +261,23 @@ impl SqliteStore {
         Ok(())
     }
 
+    /// Which transport has acknowledged this exact local comment, if any.
+    pub fn comment_carrier(&self, task: &TaskId, comment: &str) -> StoreResult<Option<String>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn
+            .query_row(
+                "SELECT tracker FROM tracker_actions
+             WHERE task_id=?1 AND subject=?2 AND kind='comment' AND phase='confirmed'
+             UNION ALL
+             SELECT c.carrier FROM plan_changes p JOIN plan_carriers c ON c.repo=p.repo
+             WHERE p.owner_table='task_comments' AND p.owner_id=?2 AND c.sent_seq>=p.seq
+             LIMIT 1",
+                params![task.as_str(), comment],
+                |row| row.get(0),
+            )
+            .optional()?)
+    }
+
     pub fn pending_task_comments(&self, task: &TaskId) -> StoreResult<Vec<TaskComment>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut query = conn.prepare(

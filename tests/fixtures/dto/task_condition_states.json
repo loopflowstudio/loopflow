@@ -35,6 +35,7 @@
     },
     "section": "backlog",
     "owned_by_you": false,
+    "runs_on": null,
     "actions": {
       "recommended": null,
       "reason": "Task is ready to start"
@@ -136,6 +137,7 @@
     },
     "section": "done",
     "owned_by_you": false,
+    "runs_on": null,
     "actions": {
       "recommended": "no_action",
       "reason": "Task is completed"
@@ -432,6 +434,7 @@
     },
     "section": "working",
     "owned_by_you": false,
+    "runs_on": null,
     "actions": {
       "recommended": "run",
       "reason": "resume the parked Task"
@@ -698,6 +701,7 @@
     },
     "section": "backlog",
     "owned_by_you": false,
+    "runs_on": null,
     "actions": {
       "recommended": "run",
       "reason": "resume the parked Task"
@@ -800,6 +804,7 @@
     },
     "section": "backlog",
     "owned_by_you": false,
+    "runs_on": null,
     "actions": {
       "recommended": "no_action",
       "reason": "Waiting for your answer"
@@ -1067,6 +1072,7 @@
     },
     "section": "backlog",
     "owned_by_you": false,
+    "runs_on": null,
     "actions": {
       "recommended": "run",
       "reason": "resume the parked Task"
@@ -1169,6 +1175,7 @@
     },
     "section": "backlog",
     "owned_by_you": false,
+    "runs_on": null,
     "actions": {
       "recommended": "open_pr",
       "reason": "merge head head-commits on GitHub"

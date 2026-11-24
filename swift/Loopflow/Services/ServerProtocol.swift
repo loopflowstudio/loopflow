@@ -94,8 +94,8 @@ public struct ServerError: LocalizedError, Sendable, Equatable {
     public let code: ServerErrorCode?
     public let message: String
     public let data: JSONValue
-    /// The domains a failed write advanced before it failed; nil when it
-    /// changed nothing, so the change was refused.
+    /// Domains that advanced while the write ran, including concurrent writes.
+    /// Nil when the Machine observed no advance.
     public let revisions: Revisions?
 
     public init(code: String, message: String, data: JSONValue, revisions: Revisions? = nil) {
@@ -292,10 +292,11 @@ public enum ServerOperation: Encodable, Sendable {
 /// never a file plus a scope. Mirrors `Read::Config*` and `Write::Config*`.
 public enum ConfigOperation: Encodable, Sendable {
     case configCatalog
-    case configGet(destination: JSONValue, key: String)
-    case configExplain(destination: JSONValue, key: String)
     /// `value` is YAML.
     case configSet(destination: JSONValue, key: String, value: String)
+    case configPreview(destination: JSONValue, key: String, expected: [ConfigurationEntry], change: ConfigurationChange)
+    case configEdit(destination: JSONValue, key: String, expected: [ConfigurationEntry], change: ConfigurationChange)
+    case configPromote(destination: JSONValue, key: String, wave: String?, action: MoveAction)
     case configUnset(destination: JSONValue, key: String)
     /// The serving Machine's `theme:`: set to `value` (YAML), or read when nil.
     case configTheme(value: String?)
@@ -307,12 +308,14 @@ public enum ConfigOperation: Encodable, Sendable {
     private var tagged: TaggedFields {
         switch self {
         case .configCatalog: TaggedFields("config.catalog")
-        case .configGet(let destination, let key):
-            TaggedFields("config.get", ["destination": destination, "key": key])
-        case .configExplain(let destination, let key):
-            TaggedFields("config.explain", ["destination": destination, "key": key])
         case .configSet(let destination, let key, let value):
             TaggedFields("config.set", ["destination": destination, "key": key, "value": value])
+        case .configPreview(let destination, let key, let expected, let change):
+            TaggedFields("config.preview", ["destination": destination, "key": key, "expected": expected, "change": change])
+        case .configEdit(let destination, let key, let expected, let change):
+            TaggedFields("config.edit", ["destination": destination, "key": key, "expected": expected, "change": change])
+        case .configPromote(let destination, let key, let wave, let action):
+            TaggedFields("config.promote", ["destination": destination, "key": key, "wave": wave, "action": action])
         case .configUnset(let destination, let key):
             TaggedFields("config.unset", ["destination": destination, "key": key])
         case .configTheme(let value):
@@ -403,8 +406,8 @@ public enum ServerMessage: Sendable {
     /// `id` is nil before a request exists. An error for a subscription ends it.
     /// `code` is the Rust `ErrorCode`'s wire name: incompatible, invalid,
     /// not_found, conflict, unavailable, outcome_unknown or busy. `data` is
-    /// structured detail, `.null` when there is none. `revisions` is what a
-    /// failed write advanced first; nil when it changed nothing.
+    /// structured detail, `.null` when there is none. `revisions` has the
+    /// same meaning as `ServerError.revisions`.
     case error(id: String?, code: String, message: String, data: JSONValue, revisions: Revisions?)
 
     /// One message's line. The envelope is scanned, not parsed: a reading of

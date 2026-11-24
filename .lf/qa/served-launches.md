@@ -4,8 +4,9 @@ Read when the change launches Graphs or Tasks through the server socket.
 
 Build with `cargo build -p loopflow --bin lf`. Use a disposable Git repository
 and separate `HOME` and `LF_HOME`; clear inherited `LF_*`, then set `LF_BIN` to
-the absolute branch-built binary. Start that binary's `server run` there and
-read the socket from `server status`. Never fault the installed Machine's store.
+the absolute branch-built binary. Create the `LF_HOME` directory before starting
+that binary's `server run`. `server status` prints JSON with the socket path.
+Never fault the installed Machine's store.
 
 Connect over the Unix socket with newline-delimited JSON: send the current
 hello from `rust/loopflow-execution/tests/fixtures/dto/server/hello.json`, then requests shaped like
@@ -39,20 +40,29 @@ A Swift command-line probe can import the built module with
 Encode `ServerClientMessage` values in the probe, then send those exact JSON
 lines to the private server. This exercises production encoding, not a window.
 
+For `checkout.commit`, encode `ServedWrite.checkoutCommit` with `push` set
+to `false` on an unpublished branch, then send `push: true` with a clean
+checkout. Compare `git rev-parse HEAD` and `git ls-remote --heads origin
+<branch>` after each request. The second request should publish the existing
+SHA. Run the same pair through the CLI using the operation's Swift `argv`.
+An installed server can handle the same wire request in its own private home.
+Send an unknown operation first and verify that a supported request still
+works on that connection. Feed the response to Swift's `ServerMessage(line:)`
+with an extra envelope field to exercise decoding across versions.
+
 To delay a report, SIGSTOP the launched command before it reports, leaving its
 execution owner running. Check that a live owner waits beyond the unknown grace.
 In this disposable home only, make the registry unavailable and restore it;
 check recovery both before and after the uncertain reply. Resume the command
 and inspect its actual result without launching it again. Find completed direct
-Graphs with `lf graph list --processes`, then `lf process show <ID>`; the live
-process list cannot find a finished run. Stop the private server and every
-remaining child after the scenarios.
+Graphs with `lf graph list --runs`, then `lf graph show <ID>`. Stop the private
+server and every remaining child after the scenarios.
 
 For Task-run retries, a bare `lf task run` returns at registration; poll
 `lf task status <id>` (`Graph <name>: running|stopped at <step>`) rather than
 `lf task wait`, which blocks until the Task is done. `lf task show <id> --json`
-has the position at `.execution.work.graph.position`, and `lf process show
-<graph>` lists each attempt's steps. A Graph reads the Task's checkout, so a
+has the position at `.execution.work.graph.position`, and `lf graph show
+<run-id>` lists that attempt's steps. A Graph reads the Task's checkout, so a
 Graph file added on `main` is invisible until the branch has it. To make a step
 slow or failing, point `LF_BIN` at a wrapper that intercepts that step's argv;
 the stand-in step registers no process, so `lf task interrupt` reports it as

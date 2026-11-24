@@ -284,6 +284,7 @@ plan, code and memory and keeps open findings with the work.
 - Edit it in place until it merges; `build.rs` orders it by origin/main's first-parent history. Once on origin/main it is immutable: fix forward.
 - Destructive change is staged: a new migration is additive against origin/main's schema, or a contract (`-- expand: <migration>`, `-- exports: <where>`) that drops only what its expand step superseded once that step has been on origin/main for the window `check_migrations.py` measures (`STAGING_DAYS`), exporting the data first. A rebuild that keeps every column is additive. CI measures; nothing at runtime refuses.
 - When code stops using a table or column, mark it in that Task's migration (`-- leaving: <table>[.<column>] <Task ID>`); the drop date counts from that merge, and `scripts/due_removals.py` lists what is due. `rust/loopflow-storage/SCHEMA.md` maps every table to its concept and shows what is leaving.
+- Storage-crate test stores deny SQL that names a leaving member (`leaving_guard.rs`), so a mark makes every remaining read fail with the member's name. A member still read on purpose goes in `STILL_READ` with the Task that removes the read; test inspection that reads every column opens its own connection.
 - Test the merged frontier against the finished migration, not the steps between. Historical fixtures that call current storage APIs after seeding use `upgrade_from_migration` to reach the current schema first.
 - Tables read by Work projections use `store_revision_<table>_<insert|update|delete>` triggers to advance their domain in `store_revisions` inside the write. An observation stamp is a reading time, not a change: planning update triggers compare every other column and count a stamp only when it goes NULL ↔ value (`planning_update_triggers_compare_every_column`); a new column joins its table's `WHEN` clause.
 - Runtime migration preflights recognize draft markers inside release batches and keep external lock guards through commit or rollback. Upgrade fixtures start before the whole release batch.
@@ -376,6 +377,7 @@ Make the choice; don't leave it as a question.
 - Fixtures that change process environment share `loopflow_test_support::env_lock`.
 - macOS SMAppService fixtures register temporary bundles with LaunchServices and launch bundle-owned update code through it. An external test runner writing a registered app can fail App Management; it does not model an app update. Cleanup unregisters the unique service job and LaunchServices entry.
 - `store::opening::open_ephemeral` applies every migration; don't replay one with `apply_migration_for_test`.
+- `register_task_fixture` registers the path it is given; `lf` registers Git's canonical root. On macOS pass `repo.path().canonicalize()`, or `/var/folders` and `/private/var` become two repositories with two plan carriers.
 - Fake `gh` scripts route `api graphql` calls by query name; renaming a query means grepping `rust/loopflow/tests/` for the old name.
 - Tests that redirect process-wide stdout/stderr run in isolated child processes.
 - Lifetime tests start a held terminal beside a `MachineServer` and view it from a PTY; a `--json` viewer on a pipe dies with its stdin and hides retirement bugs. With `RUST_LOG` set, diagnostics go to stderr, not `logs/lf.log`.
@@ -451,9 +453,18 @@ gate or CI; it never blocks an earlier step. Real failures still get fixed.
 Scratch keeps one line per check: command, result, and who runs it later;
 once gate clears scratch, the PR body keeps them.
 
+A served subscription suppresses identical readings. After a write, use a
+checkpoint on the same subscription when the next edit needs the saved value.
+A separate read can show an intermediate value that Undo restores before the
+subscription sends a frame.
+
 Swift async process fixtures install `terminationHandler` before `run()` and
 await its completion. Don't call blocking `waitUntilExit()` on a cooperative
 executor; it can stay in Foundation's run loop after the child has exited.
+
+Swift fixtures modeling an installed Machine can run `lf desktop portfolio --json`
+in the fixture home before starting `LocalServerFixture`. This finishes first-open
+SQLite migrations before server readiness or view timing is measured.
 
 Headless Swift view tests inspect production leaf views directly when a parent
 needs `@Environment` Observation objects, which ViewInspector can't inject.

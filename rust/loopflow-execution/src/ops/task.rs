@@ -1827,7 +1827,7 @@ impl StackParentBranch {
                 "{pushes} {identifier}'s branch {branch} to origin"
             )),
             Self::LeftOut { left_out } => Some(format!(
-                "this Task bases on origin/{branch} and leaves out {left_out} local {identifier} commit{} not on origin; run `lf commit -p` in {identifier}'s checkout to include them",
+                "this Task bases on origin/{branch} and leaves out {left_out} local {identifier} commit{} not on origin; run `lf commit` in {identifier}'s checkout to include them",
                 if *left_out == 1 { "" } else { "s" }
             )),
         }
@@ -2662,37 +2662,13 @@ pub fn task_worktree_blocker_after(
     }))
 }
 
-pub(crate) async fn task_for_checkout(store: &SharedStore, repo: &Path) -> OpsResult<Option<Task>> {
-    match counted_task(&store.sqlite, repo)? {
+/// The Task whose checkout is the Git worktree holding `dir`. A worktree
+/// nested inside another Task's checkout has no owner until a Task adopts it.
+pub(crate) async fn checkout_owner(store: &SharedStore, dir: &Path) -> OpsResult<Option<Task>> {
+    match store.sqlite.task_checkout_owner(dir).map_err(task_error)? {
         Some(id) => store.get_task(&id).await.map_err(task_error),
         None => Ok(None),
     }
-}
-
-/// The Task a conversation run in `cwd` belongs to: the one whose checkout
-/// on this Machine holds it. A launch counts toward it, with usage rows; a
-/// raw conversation only lists under it. Both ask here, so whether a calling
-/// Session's Task should outrank its checkout's is decided by changing this
-/// function alone.
-pub(crate) fn counted_task(
-    store: &SqliteStore,
-    cwd: &Path,
-) -> OpsResult<Option<loopflow_model::durable::TaskId>> {
-    // Branch names are not checkout identity: another clone can use the same
-    // branch.
-    let Ok(root) = crate::git::worktree_root(cwd) else {
-        return Ok(None);
-    };
-    let mut id = None;
-    for checkout in store.task_checkouts().map_err(task_error)? {
-        if crate::git::worktree_root(&checkout.worktree).ok().as_ref() == Some(&root) {
-            if id.is_some() {
-                return Err(task_error("Multiple Tasks claim this checkout"));
-            }
-            id = Some(checkout.task_id);
-        }
-    }
-    Ok(id)
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
@@ -2723,7 +2699,7 @@ pub fn task_status(repo: &Path, issue: Option<&str>) -> OpsResult<TaskStatus> {
                 super::planning_sync::find_task(&store, &repo.to_string_lossy(), issue).await?
             }
             None => Some(
-                task_for_checkout(&store, repo)
+                checkout_owner(&store, repo)
                     .await?
                     .ok_or_else(|| task_error("this checkout has no Task"))?,
             ),
@@ -2800,16 +2776,15 @@ pub async fn read_task_status(
     repo: &Path,
     selector: &str,
 ) -> OpsResult<TaskStatus> {
-    let task = crate::store::children::resolve_task_id(
-        &store.sqlite,
-        selector,
-        Some(&repo.to_string_lossy()),
-    )
-    .and_then(|id| id.map(|id| store.sqlite.task(&id)).transpose())
-    .map_err(task_error)?
-    .flatten()
-    .ok_or_else(|| task_error(format!("Task {selector} is not registered")))?;
-    registered_task_status(store, task).await
+    registered_task_status(store, registered_task(&store.sqlite, repo, selector)?).await
+}
+
+pub fn registered_task(store: &SqliteStore, repo: &Path, selector: &str) -> OpsResult<Task> {
+    crate::store::children::resolve_task_id(store, selector, Some(&repo.to_string_lossy()))
+        .and_then(|id| id.map(|id| store.task(&id)).transpose())
+        .map_err(task_error)?
+        .flatten()
+        .ok_or_else(|| task_error(format!("Task {selector} is not registered")))
 }
 
 pub async fn registered_task_status(store: &SharedStore, task: Task) -> OpsResult<TaskStatus> {
@@ -3426,7 +3401,7 @@ pub fn task_comment(
     block_on_task(task_comment_async(repo, wave, issue, message, steer))
 }
 
-pub(crate) fn validate_task_comment_input(message: &str) -> OpsResult<()> {
+pub fn validate_task_comment_input(message: &str) -> OpsResult<()> {
     if message.trim().is_empty() {
         return Err(task_error("Task comment cannot be empty"));
     }
@@ -3438,6 +3413,18 @@ pub fn append_task_comment(
     task: &Task,
     message: &str,
     steer: bool,
+) -> OpsResult<String> {
+    append_task_comment_as(store, task, message, steer, || {
+        crate::config::participant_name().map_err(task_error)
+    })
+}
+
+pub(crate) fn append_task_comment_as(
+    store: &Store,
+    task: &Task,
+    message: &str,
+    steer: bool,
+    participant: impl FnOnce() -> OpsResult<Option<String>>,
 ) -> OpsResult<String> {
     validate_task_comment_input(message)?;
     let id = uuid::Uuid::new_v4().to_string();
@@ -3453,7 +3440,7 @@ pub fn append_task_comment(
             loopflow_model::comment::TaskCommentAuthor::Integration,
         )
     } else {
-        let name = crate::config::participant_name().map_err(task_error)?;
+        let name = participant()?;
         let requester = name
             .as_ref()
             .map(|name| {
@@ -3549,9 +3536,8 @@ fn live_execution(store: &SqliteStore, task: &Task) -> OpsResult<Option<String>>
     use crate::ops::task_execution::TaskExecutionState;
     use crate::store::ProcessIdentityEvidence;
     let graph = store
-        .latest_task_graphs(&[&task.id])
+        .latest_task_graph(&task.id)
         .map_err(task_error)?
-        .remove(&task.id)
         .filter(|graph| {
             crate::process::RecordedProcess::from(&graph.run).evidence()
                 != ProcessIdentityEvidence::Dead

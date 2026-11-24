@@ -128,8 +128,151 @@ fn configuration_edits_use_the_server_without_work_processes() {
     assert!(refused.message.contains("does not apply"), "{refused:?}");
     assert!(!repo.path().join(".lf/config.yaml").exists());
     let theme = request(Operation::Write(Write::ConfigTheme { value: None })).unwrap();
+    let id = connection
+        .subscribe(
+            Read::ConfigScope {
+                target: loopflow_execution::engine::config::ScopeTarget::General,
+                directory: Some(repo.path().to_owned()),
+                wave: None,
+            },
+            None,
+        )
+        .unwrap();
+    let frame = connection.reading(&id).unwrap().unwrap();
+    assert_eq!(
+        frame["body"]["settings"]["context.diff"]["value"], false,
+        "{frame}"
+    );
+    assert!(frame["read_at"].is_null());
     assert_eq!(theme["value"], "Hearth");
     assert_eq!(fs::read(&database).unwrap(), before);
+}
+
+#[test]
+fn working_task_drop_keeps_its_side_after_another_window_reorders() {
+    use loopflow::lf::commands::read::Read;
+    use loopflow::lf::commands::write::Write;
+    use loopflow_storage::work::selection::{DropSide, ViewPlan};
+
+    let home = tempfile::tempdir().unwrap();
+    let _env = EnvGuard::with_home(&[], Some(home.path()));
+    std::env::set_var("LF_HOME", home.path().canonicalize().unwrap());
+    let repo = TestRepo::new();
+    let _server = Server::start(repo.path(), home.path());
+    for name in ["first", "second", "third"] {
+        let checkout = home.path().join(name);
+        assert!(std::process::Command::new("git")
+            .current_dir(repo.path())
+            .args(["worktree", "add", "-q"])
+            .arg(&checkout)
+            .status()
+            .unwrap()
+            .success());
+        read(
+            repo.path(),
+            home.path(),
+            &[
+                "task",
+                "create",
+                "--worktree",
+                checkout.to_str().unwrap(),
+                "--title",
+                name,
+                "--json",
+            ],
+            None,
+        );
+    }
+    let working = || {
+        let plan = server_read(Read::DesktopViewGet {
+            directory: repo.path().to_owned(),
+            expression: Some("kind:task state:working".into()),
+        });
+        serde_json::from_value::<ViewPlan>(plan)
+            .unwrap()
+            .resolution
+            .task_ids()
+    };
+    let [a, b, c]: [String; 3] = working().try_into().unwrap();
+    let move_tile = |member: &str, target: &str, side| Write::DesktopDashboardMove {
+        directory: repo.path().to_owned(),
+        board: "working-tasks".into(),
+        member: format!("task:{member}"),
+        destination: format!("task:{target}"),
+        side,
+    };
+
+    // One window still shows A, B, C while another moves A to C's slot.
+    assert_eq!(
+        server_write(move_tile(&a, &c, None)),
+        serde_json::json!([b, c, a])
+    );
+    for (change, expected) in [
+        (move_tile(&b, &a, Some(DropSide::Before)), [&c, &b, &a]),
+        (move_tile(&a, &c, Some(DropSide::After)), [&c, &a, &b]),
+    ] {
+        let args = spelled(&change);
+        let expected = expected.map(String::as_str);
+        assert_eq!(server_write(change), serde_json::json!(expected));
+        assert_eq!(working(), expected);
+
+        // Repeating a relative move through the one-shot CLI leaves it on that side.
+        let cli = read(
+            repo.path(),
+            home.path(),
+            &args.iter().map(String::as_str).collect::<Vec<_>>(),
+            None,
+        );
+        assert_eq!(serde_json::from_str::<Vec<String>>(&cli).unwrap(), expected);
+        assert_eq!(working(), expected);
+    }
+
+    // A drop onto a Task that has left Working is refused by name, and the
+    // client hears that nothing happened.
+    let gone = "task_00000000000000000000000000000000";
+    let refused = loopflow_execution::machine::client::Connection::open()
+        .unwrap()
+        .request(loopflow::server::wire::Operation::Write(move_tile(
+            &b,
+            gone,
+            Some(DropSide::Before),
+        )))
+        .unwrap_err()
+        .downcast::<loopflow_execution::engine::Error>()
+        .unwrap();
+    assert_eq!(
+        (refused.code, refused.message.as_str()),
+        (
+            loopflow_execution::engine::ErrorCode::NotFound,
+            "task_00000000000000000000000000000000 is not a Working Task here; nothing changed."
+        )
+    );
+    assert_eq!(working(), [c.as_str(), a.as_str(), b.as_str()]);
+
+    // A saved board can move the same Tasks without changing their shared order.
+    server_write(Write::DesktopDashboardQuery {
+        directory: repo.path().to_owned(),
+        id: "board".into(),
+        expression: "kind:task state:working".into(),
+        revision: None,
+    });
+    let board = server_write(Write::DesktopDashboardMove {
+        directory: repo.path().to_owned(),
+        board: "query:board".into(),
+        member: format!("task:{b}"),
+        destination: format!("task:{c}"),
+        side: None,
+    });
+    let board: loopflow_storage::work::selection::Dashboard =
+        serde_json::from_value(board).unwrap();
+    let order: Vec<_> = board
+        .arrangement
+        .order
+        .iter()
+        .map(|tile| &tile.work.id)
+        .collect();
+    assert_eq!(order, [&b, &c, &a]);
+    assert_eq!(working(), [&c, &a, &b].map(String::as_str));
 }
 
 #[test]
@@ -181,7 +324,7 @@ fn served_binding_moves_the_conversation_to_the_task_checkout() {
     });
     assert_eq!(bound["id"], session["id"]);
     assert_eq!(bound["cwd"], destination.to_str().unwrap());
-    assert_eq!(bound["task_primary"], true);
+    assert_eq!(bound["primary_scope"], "task");
     assert_eq!(processes(&home.path().join("loopflow.db")), before);
 }
 
@@ -273,7 +416,7 @@ fn served_session_adoption_matches_cli_without_new_execution() {
         assert_eq!(bound["id"], session["id"]);
         assert_eq!(bound["cwd"], session["cwd"]);
         assert_eq!(bound["agent_process_id"], session["agent_process_id"]);
-        assert_eq!(bound["task_primary"], true);
+        assert_eq!(bound["primary_scope"], "task");
         assert_eq!(bound["work"]["id"], first["id"]);
         assert_eq!(bound["task_ids"], serde_json::json!([first["id"]]));
         let connection = rusqlite::Connection::open(&database).unwrap();
@@ -723,7 +866,12 @@ fn screen_reads_are_compact_passive_and_match_cli() {
     )
     .unwrap();
     conn.execute(
-        "INSERT OR REPLACE INTO task_primary_sessions(session_id,task_id) VALUES(?1,?2)",
+        "INSERT OR REPLACE INTO task_primary_sessions(task_id,session_id) VALUES(?2,?1)",
+        rusqlite::params![session.id.as_str(), registered.task.id.as_str()],
+    )
+    .unwrap();
+    conn.execute(
+        "UPDATE agent_sessions SET task_id=?2,wave_id=(SELECT p.wave_id FROM tasks t LEFT JOIN projects p ON p.id=t.project_id WHERE t.id=?2) WHERE id=?1",
         rusqlite::params![session.id.as_str(), registered.task.id.as_str()],
     )
     .unwrap();
@@ -772,7 +920,10 @@ fn server_operations_match_their_lf_commands() {
     repo.commit("Comparison base");
     let base = repo.head_sha();
     repo.create_branch("served-reads");
-    register_task_with_pr(home.path(), repo.path(), "served-reads", &base);
+    // Under the path Git names, as `lf` registers it: the server's owned check
+    // and `lf` then carry one plan, not one per spelling of the temp directory.
+    let canonical = repo.path().canonicalize().unwrap();
+    register_task_with_pr(home.path(), &canonical, "served-reads", &base);
     repo.create_file("edit.txt", "working\n");
     let graph = support::record_graph(home.path(), repo.path(), "code", "implement", "succeeded");
     let task_diff = |path: Option<&str>, draft: Option<&str>| Read::TaskDiff {
@@ -900,6 +1051,7 @@ fn server_operations_match_their_lf_commands() {
         | Read::MachineSelf
         | Read::DesktopPortfolio
         | Read::ConfigSettings { .. }
+        | Read::ConfigScope { .. }
         | Read::ConfigCatalog
         | Read::ConfigGet { .. }
         | Read::ConfigExplain { .. }
@@ -914,6 +1066,7 @@ fn server_operations_match_their_lf_commands() {
         | Read::WavePlan { .. }
         | Read::TaskList { .. }
         | Read::MachineList
+        | Read::MachineStatus { .. }
         | Read::SessionHistory(_)
         | Read::PlanList { .. }
         | Read::RepoTracker { .. }
@@ -983,6 +1136,11 @@ fn server_operations_match_their_lf_commands() {
                     skill: Some("implement".into()),
                     graph: None,
                     step: None,
+                },
+                Read::ConfigScope {
+                    target: loopflow_execution::engine::config::ScopeTarget::General,
+                    directory: Some(repo.path().to_owned()),
+                    wave: None,
                 },
                 Read::ConfigCatalog,
                 Read::ConfigGet {
@@ -1135,6 +1293,14 @@ fn server_operations_match_their_lf_commands() {
             ],
         ),
     };
+    // The server checks its owned Task's plan carriers as it starts. Carry the
+    // plan by Git first, so that check finds nothing new to record mid-read.
+    read(
+        repo.path(),
+        home.path(),
+        &["wave", "status", "task-pr-tests", "--sync", "--json"],
+        None,
+    );
     let server = Server::start(repo.path(), home.path());
     let database = home.path().join("loopflow.db");
     // A server read changes no Work.
@@ -1318,6 +1484,9 @@ fn server_operations_match_their_lf_commands() {
         | Write::DesktopDashboardMove { .. }
         // configuration_edits_use_the_server_without_work_processes covers settings.
         | Write::ConfigSet { .. }
+        | Write::ConfigPromote { .. }
+        | Write::ConfigPreview { .. }
+        | Write::ConfigEdit { .. }
         | Write::ConfigUnset { .. }
         | Write::ConfigTheme { .. } => (
             [
@@ -1404,6 +1573,7 @@ fn server_operations_match_their_lf_commands() {
                     board: "query:served".into(),
                     member: format!("task:{task_id}"),
                     destination: format!("task:{task_id}"),
+                    side: None,
                 }) as Box<dyn Fn() -> Write>,
                 Box::new(|| Write::DesktopDashboardPin {
                     directory: directory.clone(),
@@ -1573,8 +1743,24 @@ fn server_operations_match_their_lf_commands() {
         let args: Vec<&str> = args.iter().map(String::as_str).collect();
         let printed: Value =
             serde_json::from_str(&read(repo.path(), home.path(), &args, None)).unwrap();
-        assert_eq!(last(&written), last(&printed), "{args:?}");
-        assert_eq!(last(&written).0, format!("served {steer}"));
+        if steer {
+            for receipt in [&written, &printed] {
+                assert_eq!(receipt["identifier"], "INF-123");
+                assert_eq!(receipt["delivery"]["reached"], "owner");
+                assert!(receipt["delivery"]["runs_on"].is_null());
+                assert!(receipt.get("comments").is_none());
+            }
+            let reader = |r: &Value| {
+                r["delivery"]["sentence"]
+                    .as_str()
+                    .unwrap()
+                    .replace(r["steer_id"].as_str().unwrap(), "<id>")
+            };
+            assert_eq!(reader(&written), reader(&printed));
+        } else {
+            assert_eq!(last(&written), last(&printed), "{args:?}");
+            assert_eq!(last(&written).0, "served false");
+        }
     }
     let stop = Write::TaskAutoOff {
         directory: directory.clone(),
@@ -1957,14 +2143,35 @@ struct Server(std::process::Child);
 
 impl Server {
     fn start(repo: &Path, home: &Path) -> Self {
-        let server = Self(isolated_lf(repo, home, &["server", "run"]));
-        let deadline = std::time::Instant::now() + Duration::from_secs(20);
-        // This test binary is another executable than the server's, and the
-        // server is as ready for it as for its own `lf`.
-        while !loopflow_execution::machine::client::status().unwrap().ready {
-            assert!(std::time::Instant::now() < deadline, "server did not start");
-            std::thread::sleep(Duration::from_millis(20));
-        }
+        use std::io::{ErrorKind, Write};
+        use std::os::unix::net::UnixStream;
+
+        let mut server = Self(isolated_lf(repo, home, &["server", "run"]));
+        let path = loopflow::server::socket_path().unwrap();
+        let mut socket = loop {
+            match UnixStream::connect(&path) {
+                Ok(socket) => break socket,
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        ErrorKind::NotFound | ErrorKind::ConnectionRefused
+                    ) =>
+                {
+                    assert!(
+                        server.0.try_wait().unwrap().is_none(),
+                        "server exited before listening on {}",
+                        path.display()
+                    );
+                    std::thread::sleep(Duration::from_millis(20));
+                }
+                Err(error) => panic!("connect to {}: {error}", path.display()),
+            }
+        };
+        // The listener binds before the server hashes its executable. Wait for the
+        // answer on this connection, including on a cold debug build.
+        socket.write_all(b"{\"type\":\"status\"}\n").unwrap();
+        let answer: Value = serde_json::from_reader(socket).unwrap();
+        assert_eq!(answer["type"], "status", "{answer}");
         server
     }
 }
@@ -2445,8 +2652,8 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
             if let Some(message) = message {
                 spelled.extend(words(&["--message", message]));
             }
-            if *push {
-                spelled.push("--push".into());
+            if !*push {
+                spelled.push("--no-push".into());
             }
             if *no_add {
                 spelled.push("--no-add".into());
@@ -2687,6 +2894,7 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
             name,
             preview,
             persistent,
+            stack,
         } => {
             let mut spelled = words(&["wt", "create", name]);
             if *preview {
@@ -2694,6 +2902,9 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
             }
             if *persistent {
                 spelled.push("--persistent".into());
+            }
+            if *stack {
+                spelled.push("--stack".into());
             }
             spelled.push("--json".into());
             (path(directory), spelled)
@@ -2826,18 +3037,34 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
             board,
             member,
             destination,
-        } => (
-            path(directory),
-            words(&[
+            side,
+        } => {
+            let mut args = words(&[
                 "desktop",
                 "dashboard",
                 "move",
                 &format!("{board}/{member}"),
                 "--destination",
                 destination,
-            ]),
-        ),
-        Write::ConfigSet { .. } | Write::ConfigUnset { .. } | Write::ConfigTheme { .. } => {
+            ]);
+            if let Some(side) = side {
+                use loopflow_storage::work::selection::DropSide;
+                args.extend(words(&[
+                    "--side",
+                    match side {
+                        DropSide::Before => "before",
+                        DropSide::After => "after",
+                    },
+                ]));
+            }
+            (path(directory), args)
+        }
+        Write::ConfigSet { .. }
+        | Write::ConfigPromote { .. }
+        | Write::ConfigPreview { .. }
+        | Write::ConfigEdit { .. }
+        | Write::ConfigUnset { .. }
+        | Write::ConfigTheme { .. } => {
             unreachable!("settings writes are compared on their own")
         }
     };

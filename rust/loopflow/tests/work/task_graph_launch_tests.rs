@@ -1055,6 +1055,11 @@ impl GraphTask {
             [self.registered.task.id.as_str()],
         )
         .unwrap();
+        db.execute(
+            "UPDATE agent_sessions SET task_id=?1,wave_id=(SELECT p.wave_id FROM tasks t LEFT JOIN projects p ON p.id=t.project_id WHERE t.id=?1) WHERE id='opening-primary'",
+            [self.registered.task.id.as_str()],
+        )
+        .unwrap();
         let lf = self.home.path().join("lf-open-fixture");
         fs::write(
             &lf,
@@ -1510,6 +1515,7 @@ fn a_task_takes_up_its_waves_graph_and_keeps_the_one_it_named() {
             "graph",
             "graph_processes",
             "parent",
+            "reading",
             "sessions",
             "stack_parent",
             "summary",
@@ -4302,6 +4308,11 @@ fn an_auto_run_blocked_at_verification_waits_there_without_building_again() {
         at("check"),
         "{}",
         String::from_utf8_lossy(&first.stderr)
+    );
+    let status = task.text_status();
+    assert!(
+        status.contains("Graph is blocked: Main-source checks pass; the installed release must be checked first"),
+        "{status}"
     );
     assert_eq!(stand_ins(&task).len(), 1);
     let again = task.run(&["-b", "--task", "INF-123", "task", "auto", "on"]);

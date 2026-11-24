@@ -1,5 +1,6 @@
 import Foundation
 import Loopflow
+import ViewInspector
 import XCTest
 @testable import LoopflowiOS
 
@@ -91,14 +92,13 @@ private actor HeldServer: ServerCarrier {
 
 @MainActor
 final class TaskFeedTests: XCTestCase {
-    private func feed(_ server: HeldServer, machineID: String) -> TaskFeed {
+    private func client(_ server: HeldServer, machineID: String) -> RemoteMobileClient {
         let endpoint = ServerEndpoint(
             client: ServerClientIdentity(kind: "mobile", platform: "ios", name: "Loopflow", version: "test"),
             control: { server }, ticketed: { throw RegistryQueryError("No ticketed reads here") })
-        let client = RemoteMobileClient(
+        return RemoteMobileClient(
             savedMachine: SavedMachine(endpoint: URL(string: "ws://fixture.invalid")!, machineID: machineID),
             endpoint: endpoint)
-        return TaskFeed(client: client, notices: NoticeCenter())
     }
 
     private func identifiers(_ feed: TaskFeed) -> [String] {
@@ -132,10 +132,23 @@ final class TaskFeedTests: XCTestCase {
         XCTAssertEqual(identifiers(feed), ["LOO-1", "LOO-2", "LOO-3"])
     }
 
+    func testTaskRowShowsItsCurrentGraphStep() async throws {
+        let id = "HOME_\(UUID().uuidString.lowercased())"
+        let server = try HeldServer(machineID: id)
+        let client = client(server, machineID: id)
+        let feed = TaskFeed(client: client, notices: NoticeCenter())
+        defer { feed.forget() }
+        await feed.start()
+        try await until { feed.loaded }
+        let task = try XCTUnwrap(feed.shownRepositories.first?.tasks.first)
+        let list = TaskListView(client: client, machineTheme: MachineTheme(), onForget: {}, onChangeAddress: {})
+        XCTAssertEqual(try list.link(task).inspect().find(text: "review").string(), "review")
+    }
+
     func testCompleteHidesTheRowBeforeTheMachineAnswers() async throws {
         let machineID = "HOME_\(UUID().uuidString.lowercased())"
         let server = try HeldServer(machineID: machineID)
-        let feed = feed(server, machineID: machineID)
+        let feed = TaskFeed(client: client(server, machineID: machineID), notices: NoticeCenter())
         defer { feed.forget() }
         await feed.start()
         try await until { identifiers(feed) == ["LOO-1", "LOO-2", "LOO-3"] }
@@ -149,7 +162,7 @@ final class TaskFeedTests: XCTestCase {
         let machineID = "HOME_\(UUID().uuidString.lowercased())"
         let server = try HeldServer(machineID: machineID)
         await server.refuse("its PR #12 is open")
-        let feed = feed(server, machineID: machineID)
+        let feed = TaskFeed(client: client(server, machineID: machineID), notices: NoticeCenter())
         defer { feed.forget() }
         await feed.start()
         try await until { identifiers(feed).count == 3 }

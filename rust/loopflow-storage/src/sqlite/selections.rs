@@ -1,16 +1,21 @@
 //! Saved selection and layout intent share one transaction and one Work snapshot.
+use super::children::{TaskIdentifiers, TASK_VISIBLE};
 use super::sessions::{SessionProjection, SessionProjectionInputs};
+use super::task_work::{END, START};
 use super::SqliteStore;
 use crate::execution::{TaskSection, TaskState};
-
 use crate::work::selection::{
-    Arrangement, Dashboard, DashboardId, DashboardReading, Selection, SelectionExpression,
-    SelectionId, SelectionResolution, SelectionState, SelectionWork, SlotLayout, WorkWorkspaceKey,
+    move_into_place, Arrangement, Dashboard, DashboardId, DashboardReading, DropSide, Selection,
+    SelectionError, SelectionExpression, SelectionId, SelectionResolution, SelectionState,
+    SelectionWork, SlotLayout, ViewContent, ViewLocation, ViewPlan, WorkWorkspaceKey,
     WorkWorkspaceKind,
 };
 use crate::{StoreError, StoreResult};
-use loopflow_model::durable::RepositoryId;
+use loopflow_model::durable::{MachineId, RepositoryId, TaskId};
+use loopflow_model::id::{LfSessionId, WaveId};
+use loopflow_model::program_status::State;
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
+use std::cmp::Reverse;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 fn invalid(error: impl std::fmt::Display) -> StoreError {
@@ -70,28 +75,45 @@ fn work_in(
     repository: &RepositoryId,
     projection: &SessionProjection,
 ) -> StoreResult<Vec<SelectionWork>> {
-    let repo: String = conn.query_row(
-        "SELECT repo FROM repository_plans WHERE id=?1",
-        [repository.as_str()],
-        |row| row.get(0),
+    let repo = repository_path_in(conn, repository)?;
+    let saved = task_order_in(conn, repository)?;
+    let tasks = ordered_tasks_in(conn, repository, &saved, |_| true)?;
+    let identifiers = TaskIdentifiers::read(conn)?;
+    let ids: Vec<_> = tasks.iter().map(|row| row.id.clone()).collect();
+    let published = super::task_started::published_in(conn, &ids)?;
+    let auto_on = super::task_details::auto_on_in(
+        conn,
+        &super::children::ids_json(ids.iter().map(TaskId::as_str)),
     )?;
-    let mut waves = super::waves_in(conn, Some(&repo))?;
-    waves.sort_by(|a, b| (a.name(), a.id().as_str()).cmp(&(b.name(), b.id().as_str())));
+    let activity = task_activity_in(conn, &repo, projection)?;
     let key = |kind, id| WorkWorkspaceKey {
         repository: repository.to_string(),
         kind,
         id,
     };
-    let repository_work = SelectionWork {
-        key: key(WorkWorkspaceKind::Repository, repository.to_string()),
-        parent_wave: None,
-        name: repo.clone(),
-        states: BTreeSet::new(),
-        activity_known: false,
-    };
-    let mut wave_work = Vec::with_capacity(waves.len());
-    for wave in &waves {
-        wave_work.push(SelectionWork {
+    let mut work = Vec::with_capacity(tasks.len());
+    for task in tasks {
+        let activity = activity.get(&task.id);
+        work.push(SelectionWork {
+            key: key(WorkWorkspaceKind::Task, task.id.to_string()),
+            states: task_selection_states(
+                task.lifecycle.observed_here(task.runs_elsewhere),
+                task.section(),
+                task.owned || published.contains(&task.id),
+                auto_on.contains(&task.id),
+                activity,
+            ),
+            parent_wave: task.wave_id,
+            name: identifiers.short(&task.id).ok_or(StoreError::NotFound)?,
+            activity_known: activity.is_none_or(|activity| activity.known),
+        });
+    }
+
+    let mut waves = super::waves_in(conn, Some(&repo))?;
+    waves.sort_by(|a, b| (a.name(), a.id().as_str()).cmp(&(b.name(), b.id().as_str())));
+    // Tasks precede the alphabetized Waves, then the repository.
+    for wave in waves {
+        work.push(SelectionWork {
             key: key(WorkWorkspaceKind::Wave, wave.id().to_string()),
             parent_wave: wave.parent_wave_id().cloned(),
             name: wave.name().to_string(),
@@ -99,54 +121,93 @@ fn work_in(
             activity_known: false,
         });
     }
-    let tasks = super::children::repository_tasks_in(conn, repository)?;
-    let reading = task_selection_in(conn, repository, &repo, projection)?;
-    // State, publication and ownership for every Task in a fixed number of
-    // statements: a query per Task costs thousands on a large repository.
-    let ids: Vec<_> = tasks.iter().map(|task| task.id.clone()).collect();
-    let ids_json = super::children::ids_json(ids.iter().map(|id| id.as_str()));
-    let task_states = super::task_details::states_in(conn, &ids_json)?;
-    let auto_on = super::task_details::auto_on_in(conn, &ids_json)?;
-    let published = super::task_started::published_in(conn, &ids)?;
-    let owners = super::task_ownership::owners_in(conn, &ids)?;
-    let mut task_work = Vec::with_capacity(tasks.len());
-    for task in tasks {
-        let state = *task_states
-            .get(&task.id)
-            .ok_or_else(|| invalid(format!("Task {} has no state", task.id)))?;
-        let owned = owners.contains_key(&task.id);
-        let states = task_selection_states(
-            state,
-            owned,
-            published.contains(&task.id),
-            auto_on.contains(&task.id),
-            task.state.as_deref(),
-            reading.activity.get(&task.id),
-        );
-        let activity_known = reading
-            .activity
-            .get(&task.id)
-            .is_none_or(|activity| activity.known);
-        let order = reading.order.key(task.id.as_str(), task.rank, &states);
-        task_work.push((
-            order,
-            SelectionWork {
-                key: key(WorkWorkspaceKind::Task, task.id.to_string()),
-                parent_wave: task.wave_id,
-                name: task.identifier,
-                states,
-                activity_known,
-            },
-        ));
+    work.push(SelectionWork {
+        key: key(WorkWorkspaceKind::Repository, repository.to_string()),
+        parent_wave: None,
+        name: repo,
+        states: BTreeSet::new(),
+        activity_known: false,
+    });
+    Ok(work)
+}
+
+struct SelectionTask {
+    id: TaskId,
+    rank: u32,
+    wave_id: Option<WaveId>,
+    lifecycle: TaskState,
+    owned: bool,
+    runs_elsewhere: bool,
+}
+
+impl SelectionTask {
+    fn section(&self) -> TaskSection {
+        TaskSection::of(self.lifecycle, self.owned, self.runs_elsewhere)
     }
-    task_work.sort_by(|left, right| left.0.cmp(&right.0));
-    // Tasks precede the already alphabetized Waves, then the repository.
-    Ok(task_work
-        .into_iter()
-        .map(|(_, task)| task)
-        .chain(wave_work)
-        .chain([repository_work])
-        .collect())
+
+    fn working(&self) -> bool {
+        self.section() == TaskSection::Working
+    }
+}
+
+// A drop and a view use the same order. Session activity only describes the rows.
+fn ordered_tasks_in(
+    conn: &Connection,
+    repository: &RepositoryId,
+    saved: &[String],
+    include: impl Fn(&SelectionTask) -> bool,
+) -> StoreResult<Vec<SelectionTask>> {
+    let mut query = conn.prepare(&format!(
+        "SELECT t.id,t.planning_rank,p.wave_id,t.planning_state,{}
+         FROM tasks t LEFT JOIN projects p ON p.id=t.project_id
+         WHERE t.repository_id=?1 AND {TASK_VISIBLE}",
+        super::durable::task_state_sql("t")
+    ))?;
+    let mut found = query.query([repository.as_str()])?;
+    let mut rows = Vec::new();
+    while let Some(row) = found.next()? {
+        let state: String = row.get(4)?;
+        let runtime = TaskState::parse(&state)
+            .ok_or_else(|| invalid(format!("invalid Task state {state:?}")))?;
+        rows.push(SelectionTask {
+            id: TaskId::from_raw(row.get::<_, String>(0)?),
+            rank: row.get(1)?,
+            wave_id: row.get(2)?,
+            lifecycle: runtime.lifecycle(row.get::<_, Option<String>>(3)?.as_deref()),
+            owned: false,
+            runs_elsewhere: false,
+        });
+    }
+    let ids: Vec<_> = rows.iter().map(|row| row.id.clone()).collect();
+    let (local, owners) = super::task_ownership::ownerships_in(conn, &ids)?;
+    rows.retain_mut(|row| {
+        let ownership = owners.get(&row.id);
+        row.owned = ownership.is_some();
+        row.runs_elsewhere = ownership.is_some_and(|claim| claim.runs_on(&local).is_some());
+        include(row)
+    });
+    let starts = start_times_in(
+        conn,
+        rows.iter()
+            .filter(|row| row.working())
+            .map(|row| row.id.as_str()),
+    )?;
+    let order = TaskOrder::from_ids(saved.iter().cloned());
+    rows.sort_by_cached_key(|row| {
+        let id = row.id.as_str();
+        order.key(id, row.rank, starts.get(id).copied())
+    });
+    Ok(rows)
+}
+
+fn repository_path_in(conn: &Connection, repository: &RepositoryId) -> StoreResult<String> {
+    conn.query_row(
+        "SELECT repo FROM repository_plans WHERE id=?1",
+        [repository.as_str()],
+        |row| row.get(0),
+    )
+    .optional()?
+    .ok_or(StoreError::NotFound)
 }
 
 /// Conversation activity is independent of Task lifecycle and ownership.
@@ -166,51 +227,84 @@ pub struct TaskSelectionReading {
 #[derive(Debug)]
 pub struct TaskOrder(HashMap<String, usize>);
 
+#[derive(Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub enum TaskPosition {
+    New(Reverse<i64>),
+    Saved(usize),
+    Planning(u32),
+}
+
 impl TaskOrder {
-    pub fn key(
-        &self,
-        id: &str,
-        rank: u32,
-        states: &BTreeSet<SelectionState>,
-    ) -> (usize, bool, u32, String) {
-        let waiting = states.contains(&SelectionState::Available)
-            || states.contains(&SelectionState::Blocked);
-        (
-            self.0.get(id).copied().unwrap_or(usize::MAX),
-            !waiting,
-            rank,
-            id.to_owned(),
+    fn from_ids(ids: impl IntoIterator<Item = String>) -> Self {
+        Self(
+            ids.into_iter()
+                .enumerate()
+                .map(|(position, id)| (id, position))
+                .collect(),
         )
     }
+
+    pub fn key(&self, id: &str, rank: u32, started_at: Option<i64>) -> (TaskPosition, String) {
+        let position = match started_at {
+            None => TaskPosition::Planning(rank),
+            Some(at) => self
+                .0
+                .get(id)
+                .copied()
+                .map_or(TaskPosition::New(Reverse(at)), TaskPosition::Saved),
+        };
+        (position, id.to_owned())
+    }
+}
+
+fn start_times_in<'a>(
+    conn: &Connection,
+    ids: impl Iterator<Item = &'a str>,
+) -> StoreResult<HashMap<String, i64>> {
+    let mut ids = ids.peekable();
+    if ids.peek().is_none() {
+        return Ok(HashMap::new());
+    }
+    let mut statement = conn.prepare(
+        "SELECT t.id, COALESCE(
+            (SELECT MIN(o.at) FROM task_ownership o WHERE o.task_id=t.id AND o.kind != 'unclaim'),
+            (SELECT e.created_at FROM task_events e WHERE e.task_id=t.id
+             AND json_extract(e.kind_json,'$.kind')='started' ORDER BY e.id LIMIT 1),
+            t.created_at)
+         FROM tasks t WHERE t.id IN (SELECT value FROM json_each(?1))",
+    )?;
+    let rows = statement.query_map([super::children::ids_json(ids)], |row| {
+        Ok((row.get(0)?, row.get(1)?))
+    })?;
+    Ok(rows.collect::<rusqlite::Result<_>>()?)
 }
 
 /// The same lifecycle, section, auto setting and activity set for roadmap rows
 /// and selections.
 pub fn task_selection_states(
-    runtime: TaskState,
-    owned: bool,
-    published: bool,
+    state: Option<TaskState>,
+    section: TaskSection,
+    claimed_or_published: bool,
     auto: bool,
-    plan_state: Option<&str>,
     activity: Option<&TaskActivity>,
 ) -> BTreeSet<SelectionState> {
-    let state = runtime.lifecycle(plan_state);
     let mut states = activity.map_or_else(BTreeSet::new, |activity| activity.states.clone());
-    if (owned || published) && !state.is_terminal() {
+    let open = matches!(section, TaskSection::Backlog | TaskSection::Working);
+    if claimed_or_published && open {
         states.insert(SelectionState::Open);
     }
-    if auto && !state.is_terminal() {
+    if auto && open {
         states.insert(SelectionState::Auto);
     }
-    states.insert(match state {
+    states.extend(state.map(|state| match state {
         TaskState::Unstarted => SelectionState::Unstarted,
         TaskState::Idle => SelectionState::Idle,
         TaskState::Active => SelectionState::Active,
         TaskState::Moving => SelectionState::Moving,
         TaskState::Paused => SelectionState::Paused,
         TaskState::Done | TaskState::Abandoned => SelectionState::Done,
-    });
-    states.insert(match TaskSection::of(runtime, owned, plan_state) {
+    }));
+    states.insert(match section {
         TaskSection::Backlog => SelectionState::Backlog,
         TaskSection::Working => SelectionState::Working,
         TaskSection::Paused => SelectionState::Paused,
@@ -219,12 +313,11 @@ pub fn task_selection_states(
     states
 }
 
-fn task_selection_in(
+fn task_activity_in(
     conn: &Connection,
-    repository: &RepositoryId,
     repo: &str,
     projection: &SessionProjection,
-) -> StoreResult<TaskSelectionReading> {
+) -> StoreResult<HashMap<crate::execution::TaskId, TaskActivity>> {
     let sessions = super::sessions::session_summaries_in(
         conn,
         &crate::session::SessionFilter {
@@ -240,7 +333,7 @@ fn task_selection_in(
         .iter()
         .filter(|session| session.completed_at.is_none())
     {
-        for task in &session.task_ids {
+        if let Some(task) = session.member_task() {
             let activity = activity
                 .entry(task.clone())
                 .or_insert_with(|| TaskActivity {
@@ -261,38 +354,28 @@ fn task_selection_in(
                 .iter()
                 .flat_map(|status| &status.records)
             {
-                match report.state {
-                    loopflow_model::program_status::State::Working => {
-                        activity.states.insert(SelectionState::Busy);
-                    }
-                    loopflow_model::program_status::State::Blocked => {
-                        activity.states.insert(SelectionState::Blocked);
-                    }
-                    _ => {}
-                }
+                let state = match report.state {
+                    State::Working => SelectionState::Busy,
+                    State::Blocked => SelectionState::Blocked,
+                    State::Error => SelectionState::Error,
+                    _ => continue,
+                };
+                activity.states.insert(state);
             }
         }
     }
-    Ok(TaskSelectionReading {
-        order: TaskOrder(
-            task_order_in(conn, repository)?
-                .into_iter()
-                .enumerate()
-                .map(|(position, id)| (id, position))
-                .collect(),
-        ),
-        activity,
-    })
+    Ok(activity)
 }
 
 fn task_order_in(conn: &Connection, repository: &RepositoryId) -> StoreResult<Vec<String>> {
     let order: Option<String> = conn
         .query_row(
-            "SELECT task_ids_json FROM task_orders WHERE repository_id=?1",
+            "SELECT o.task_ids_json FROM repository_plans r LEFT JOIN task_orders o ON o.repository_id=r.id WHERE r.id=?1",
             [repository.as_str()],
             |row| row.get(0),
         )
-        .optional()?;
+        .optional()?
+        .ok_or(StoreError::NotFound)?;
     Ok(order
         .as_deref()
         .map(serde_json::from_str)
@@ -333,130 +416,181 @@ fn definitions(catalog: &[Dashboard]) -> BTreeMap<DashboardId, Selection> {
 /// Selection IDs of the built-in plan behind each Wave view.
 pub const WAVE_DEFAULT_PREFIX: &str = "wave-default:";
 
-fn plan_in(
-    conn: &Connection,
-    repository: &RepositoryId,
-    selection: Selection,
-    saved: Option<&Dashboard>,
-    queries: &BTreeMap<DashboardId, Selection>,
-    work: &[SelectionWork],
-) -> StoreResult<crate::work::selection::ViewPlan> {
-    use crate::work::selection::{ViewContent, ViewLocation, ViewPlan};
-    let resolution = selection
-        .resolve(repository.as_str(), work, queries)
-        .map_err(StoreError::from)?;
-    let mut arrangement = saved.map_or_else(
-        || Arrangement::automatic(&[]),
-        |saved| saved.arrangement.clone(),
-    );
-    arrangement.reconcile(&resolution);
-    let selected: BTreeSet<_> = arrangement
-        .order
-        .iter()
-        .map(|member| member.work.clone())
-        .collect();
-    let mut contents = Vec::new();
-    for key in selected {
-        let facts = work.iter().find(|item| item.key == key);
-        let mut content = ViewContent {
-            work: key.clone(),
-            title: facts.map_or_else(|| key.id.clone(), |item| item.name.clone()),
-            states: facts.map_or_else(BTreeSet::new, |item| item.states.clone()),
-            identifier: None,
-            primary_session: None,
-            location: None,
-            argv: None,
-            unavailable: Vec::new(),
+/// The built-in and saved views of one repository share these selection facts.
+struct RepositoryViews<'a> {
+    repository: &'a RepositoryId,
+    path: String,
+    work: &'a [SelectionWork],
+    by_key: HashMap<&'a WorkWorkspaceKey, &'a SelectionWork>,
+    catalog: Vec<Dashboard>,
+    queries: BTreeMap<DashboardId, Selection>,
+}
+
+impl<'a> RepositoryViews<'a> {
+    fn read(
+        conn: &Connection,
+        repository: &'a RepositoryId,
+        work: &'a [SelectionWork],
+    ) -> StoreResult<Self> {
+        let catalog = catalog_in(conn, repository)?;
+        Ok(Self {
+            repository,
+            path: repository_path_in(conn, repository)?,
+            work,
+            by_key: work.iter().map(|item| (&item.key, item)).collect(),
+            queries: definitions(&catalog),
+            catalog,
+        })
+    }
+
+    fn selected(&self, selection: Selection) -> StoreResult<ViewPlan> {
+        let saved = selection
+            .referenced_query()
+            .and_then(|id| self.catalog.iter().find(|saved| &saved.id == id));
+        self.plan(
+            saved.map_or(selection, |saved| saved.selection.clone()),
+            saved,
+        )
+    }
+
+    fn plan(&self, selection: Selection, saved: Option<&Dashboard>) -> StoreResult<ViewPlan> {
+        let resolution = selection
+            .resolve(self.repository.as_str(), self.work, &self.queries)
+            .map_err(StoreError::from)?;
+        let mut arrangement = saved.map_or_else(
+            || Arrangement::automatic(&[]),
+            |saved| saved.arrangement.clone(),
+        );
+        arrangement.reconcile(&resolution);
+        let selected: BTreeSet<_> = arrangement
+            .order
+            .iter()
+            .map(|member| member.work.clone())
+            .collect();
+        let contents = selected
+            .into_iter()
+            .map(|key| {
+                let facts = self.by_key.get(&key);
+                ViewContent {
+                    identifier: facts
+                        .filter(|_| key.kind == WorkWorkspaceKind::Task)
+                        .map(|item| item.name.clone()),
+                    title: facts.map_or_else(|| key.id.clone(), |item| item.name.clone()),
+                    states: facts.map_or_else(BTreeSet::new, |item| item.states.clone()),
+                    work: key,
+                    graph_step: None,
+                    primary_session: None,
+                    location: None,
+                    argv: None,
+                    unavailable: if facts.is_some() {
+                        Vec::new()
+                    } else {
+                        vec!["Work is unavailable; retained intent only".into()]
+                    },
+                }
+            })
+            .collect();
+        // A Wave view's built-in plan fills its footer strip, the repository's included
+        // (the repository page is its default Wave); saved and unsaved queries start golden.
+        let default_slots = if selection.id.0.starts_with(WAVE_DEFAULT_PREFIX)
+            || selection.id == repository_default().id
+        {
+            SlotLayout::strip(3)
+        } else {
+            SlotLayout::golden()
         };
-        if facts.is_none() {
-            content
-                .unavailable
-                .push("Work is unavailable; retained intent only".into());
-        } else if key.kind == WorkWorkspaceKind::Task {
-            let task_id = loopflow_model::durable::TaskId::parse(&key.id).map_err(invalid)?;
-            let task = super::children::task_on(conn, &task_id)?.ok_or(StoreError::NotFound)?;
-            content.identifier = Some(task.identifier);
-            content.title = task.title;
-            let primary = super::sessions::primary_session_in(
-                conn,
-                &crate::session::PrimaryScope::Task(task_id.clone()),
-            )?;
-            content.primary_session = primary.as_ref().map(|session| session.id.to_string());
+        Ok(ViewPlan {
+            name: saved.and_then(|saved| saved.name.clone()),
+            pinned: saved.is_some_and(|saved| saved.pinned),
+            dashboard_id: saved.map(|saved| saved.id.clone()),
+            repository: self.repository.to_string(),
+            repo_path: self.path.clone(),
+            selection,
+            saved_revision: saved.map(|saved| saved.revision),
+            resolution,
+            projection: arrangement.project(),
+            arrangement,
+            slots: saved
+                .and_then(|saved| saved.slots.clone())
+                .unwrap_or(default_slots),
+            contents,
+            // The application resolves the claimant: it reads Git, not the store.
+            viewer: None,
+        })
+    }
+}
+
+/// Resolve the captured cursor in execution, where the Graph's step names live.
+type RunningStep = fn(&str, &str) -> StoreResult<Option<String>>;
+
+fn fill_task_contents_in(
+    conn: &Connection,
+    plans: &mut [ViewPlan],
+    running_step: RunningStep,
+) -> StoreResult<()> {
+    // A Task may appear in several plans. One row supplies all of its tiles.
+    let mut tasks = HashMap::<String, Vec<&mut ViewContent>>::new();
+    for content in plans.iter_mut().flat_map(|plan| &mut plan.contents) {
+        if content.identifier.is_some() {
+            tasks
+                .entry(content.work.id.clone())
+                .or_default()
+                .push(content);
+        }
+    }
+    if tasks.is_empty() {
+        return Ok(());
+    }
+    let mut query = conn.prepare(
+        "SELECT t.id,t.issue_title,s.id,c.worktree,(SELECT id FROM machines WHERE is_local=1),
+                g.step,g.run_start,CASE WHEN g.run_start IS NOT NULL THEN g.graph END
+         FROM tasks t
+         LEFT JOIN task_primary_sessions p ON p.task_id=t.id
+         LEFT JOIN agent_sessions s ON s.id=p.session_id AND s.completed_at IS NULL
+         LEFT JOIN task_checkouts c ON c.task_id=t.id
+         LEFT JOIN task_graphs g ON g.task_id=t.id
+         WHERE t.id IN (SELECT value FROM json_each(?1))",
+    )?;
+    let mut rows = query.query([super::children::ids_json(tasks.keys().map(String::as_str))])?;
+    while let Some(row) = rows.next()? {
+        let id: String = row.get(0)?;
+        let title: String = row.get(1)?;
+        let primary = row.get::<_, Option<LfSessionId>>(2)?.map(String::from);
+        let location = match row.get(3)? {
+            Some(cwd) => Some(ViewLocation {
+                cwd,
+                machine_id: MachineId::from_raw(row.get::<_, String>(4)?).to_string(),
+            }),
+            None => None,
+        };
+        let parked = row
+            .get::<_, Option<String>>(5)?
+            .filter(|step| !matches!(step.as_str(), START | END));
+        let step = match row.get::<_, Option<String>>(6)? {
+            Some(cursor) => running_step(&row.get::<_, String>(7)?, &cursor)?.or(parked),
+            None => parked,
+        };
+        for content in tasks
+            .remove(&id)
+            .expect("query selects only the requested Tasks")
+        {
+            content.title.clone_from(&title);
+            content.graph_step.clone_from(&step);
+            content.primary_session.clone_from(&primary);
+            content.location.clone_from(&location);
             if primary.is_none() {
                 content
                     .unavailable
                     .push("No primary Session is recorded".into());
             }
-            if let Some(checkout) = super::children::task_checkout_in(conn, &task_id)? {
-                content.location = Some(ViewLocation {
-                    machine_id: super::durable::map_local_machine(conn)?.id.to_string(),
-                    cwd: checkout.worktree.display().to_string(),
-                });
-            }
-            if content.location.is_none() {
+            if location.is_none() {
                 content
                     .unavailable
                     .push("Recorded execution location is unavailable".into());
             }
         }
-        contents.push(content);
     }
-    // A Wave view's built-in plan fills its footer strip, the repository's included
-    // (the repository page is its default Wave); saved and unsaved queries start golden.
-    let default_slots = if selection.id.0.starts_with(WAVE_DEFAULT_PREFIX)
-        || selection.id == repository_default().id
-    {
-        SlotLayout::strip(3)
-    } else {
-        SlotLayout::golden()
-    };
-    let repo_path = conn
-        .query_row(
-            "SELECT repo FROM repository_plans WHERE id=?1",
-            [repository.as_str()],
-            |row| row.get(0),
-        )
-        .optional()?
-        .ok_or(StoreError::NotFound)?;
-    Ok(ViewPlan {
-        name: saved.and_then(|saved| saved.name.clone()),
-        pinned: saved.is_some_and(|saved| saved.pinned),
-        dashboard_id: saved.map(|saved| saved.id.clone()),
-        repository: repository.to_string(),
-        repo_path,
-        selection,
-        saved_revision: saved.map(|saved| saved.revision),
-        resolution,
-        projection: arrangement.project(),
-        arrangement,
-        slots: saved
-            .and_then(|saved| saved.slots.clone())
-            .unwrap_or(default_slots),
-        contents,
-        // The application resolves the claimant: it reads Git, not the store.
-        viewer: None,
-    })
-}
-
-fn plan_selection_in(
-    conn: &Connection,
-    repository: &RepositoryId,
-    selection: Selection,
-    projection: &SessionProjection,
-) -> StoreResult<crate::work::selection::ViewPlan> {
-    let catalog = catalog_in(conn, repository)?;
-    let work = work_in(conn, repository, projection)?;
-    let saved = selection
-        .referenced_query()
-        .and_then(|id| catalog.iter().find(|saved| &saved.id == id));
-    plan_in(
-        conn,
-        repository,
-        saved.map_or(selection, |saved| saved.selection.clone()),
-        saved,
-        &definitions(&catalog),
-        &work,
-    )
+    Ok(())
 }
 
 #[derive(Debug)]
@@ -483,14 +617,16 @@ impl SqliteStore {
         selection: Selection,
         inputs: &SessionProjectionInputs,
         projection: &SessionProjection,
-    ) -> StoreResult<Option<crate::work::selection::ViewPlan>> {
+        running_step: RunningStep,
+    ) -> StoreResult<Option<ViewPlan>> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let Some(snapshot) = inputs.pin(&mut conn)? else {
             return Ok(None);
         };
-        Ok(Some(plan_selection_in(
-            &snapshot, repository, selection, projection,
-        )?))
+        let work = work_in(&snapshot, repository, projection)?;
+        let mut plan = RepositoryViews::read(&snapshot, repository, &work)?.selected(selection)?;
+        fill_task_contents_in(&snapshot, std::slice::from_mut(&mut plan), running_step)?;
+        Ok(Some(plan))
     }
 
     /// One consistent reading of the same selection across `repos` (canonical
@@ -502,7 +638,8 @@ impl SqliteStore {
         repos: &[String],
         inputs: &SessionProjectionInputs,
         projection: &SessionProjection,
-    ) -> StoreResult<Option<Vec<crate::work::selection::ViewPlan>>> {
+        running_step: RunningStep,
+    ) -> StoreResult<Option<Vec<ViewPlan>>> {
         let selection = match source {
             Some(source) => Selection::parse(source, None).map_err(StoreError::from)?,
             None => repository_default(),
@@ -515,26 +652,24 @@ impl SqliteStore {
         let mut plans = Vec::new();
         for repo in repos {
             if let Some(repository) = super::repositories::repository_id_in(&snapshot, repo)? {
+                let work = work_in(&snapshot, &repository, projection)?;
                 if !waves.is_empty()
-                    && !work_in(&snapshot, &repository, projection)?
-                        .iter()
-                        .any(|item| {
-                            item.key.kind == WorkWorkspaceKind::Wave
-                                && waves.iter().any(|wave| {
-                                    item.key.id == *wave || item.name.eq_ignore_ascii_case(wave)
-                                })
-                        })
+                    && !work.iter().any(|item| {
+                        item.key.kind == WorkWorkspaceKind::Wave
+                            && waves.iter().any(|wave| {
+                                item.key.id == *wave || item.name.eq_ignore_ascii_case(wave)
+                            })
+                    })
                 {
                     continue;
                 }
-                plans.push(plan_selection_in(
-                    &snapshot,
-                    &repository,
-                    selection.clone(),
-                    projection,
-                )?);
+                plans.push(
+                    RepositoryViews::read(&snapshot, &repository, &work)?
+                        .selected(selection.clone())?,
+                );
             }
         }
+        fill_task_contents_in(&snapshot, &mut plans, running_step)?;
         Ok(Some(plans))
     }
 
@@ -544,53 +679,31 @@ impl SqliteStore {
         repository: &RepositoryId,
         inputs: &SessionProjectionInputs,
         projection: &SessionProjection,
-    ) -> StoreResult<Option<Vec<crate::work::selection::ViewPlan>>> {
+        running_step: RunningStep,
+    ) -> StoreResult<Option<Vec<ViewPlan>>> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let Some(snapshot) = inputs.pin(&mut conn)? else {
             return Ok(None);
         };
-        let catalog = catalog_in(&snapshot, repository)?;
-        let queries = definitions(&catalog);
         let work = work_in(&snapshot, repository, projection)?;
-        let mut plans = vec![plan_in(
-            &snapshot,
-            repository,
-            repository_default(),
-            None,
-            &queries,
-            &work,
-        )?];
+        let views = RepositoryViews::read(&snapshot, repository, &work)?;
+        let mut plans = vec![views.plan(repository_default(), None)?];
         for wave in work
             .iter()
             .filter(|item| item.key.kind == WorkWorkspaceKind::Wave)
         {
-            plans.push(plan_in(
-                &snapshot,
-                repository,
-                Selection {
-                    id: crate::work::selection::SelectionId(format!(
-                        "{WAVE_DEFAULT_PREFIX}{}",
-                        wave.key.id
-                    )),
-                    expression: crate::work::selection::SelectionExpression::Wave {
-                        wave: loopflow_model::id::WaveId::parse(&wave.key.id).map_err(invalid)?,
-                    },
+            let selection = Selection {
+                id: SelectionId(format!("{WAVE_DEFAULT_PREFIX}{}", wave.key.id)),
+                expression: SelectionExpression::Wave {
+                    wave: loopflow_model::id::WaveId::parse(&wave.key.id).map_err(invalid)?,
                 },
-                None,
-                &queries,
-                &work,
-            )?);
+            };
+            plans.push(views.plan(selection, None)?);
         }
-        for saved in &catalog {
-            plans.push(plan_in(
-                &snapshot,
-                repository,
-                saved.selection.clone(),
-                Some(saved),
-                &queries,
-                &work,
-            )?);
+        for saved in &views.catalog {
+            plans.push(views.plan(saved.selection.clone(), Some(saved))?);
         }
+        fill_task_contents_in(&snapshot, &mut plans, running_step)?;
         Ok(Some(plans))
     }
 
@@ -626,14 +739,11 @@ impl SqliteStore {
         let Some(snapshot) = inputs.pin(&mut conn)? else {
             return Ok(None);
         };
-        let repo: String = snapshot.query_row(
-            "SELECT repo FROM repository_plans WHERE id=?1",
-            [repository.as_str()],
-            |row| row.get(0),
-        )?;
-        Ok(Some(task_selection_in(
-            &snapshot, repository, &repo, projection,
-        )?))
+        let repo = repository_path_in(&snapshot, repository)?;
+        Ok(Some(TaskSelectionReading {
+            order: TaskOrder::from_ids(task_order_in(&snapshot, repository)?),
+            activity: task_activity_in(&snapshot, &repo, projection)?,
+        }))
     }
 
     pub fn dashboards(&self, repository: &RepositoryId) -> StoreResult<Vec<Dashboard>> {
@@ -782,24 +892,61 @@ impl SqliteStore {
         Ok(saved)
     }
 
-    /// Read the saved order and membership before application reordering.
-    pub fn task_order_inputs(
+    pub fn task_start_times<'a>(
         &self,
-        repository: &RepositoryId,
-        inputs: &SessionProjectionInputs,
-        projection: &SessionProjection,
-    ) -> StoreResult<Option<(Vec<String>, Vec<SelectionWork>)>> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let Some(snapshot) = inputs.pin(&mut conn)? else {
-            return Ok(None);
-        };
-        Ok(Some((
-            task_order_in(&snapshot, repository)?,
-            work_in(&snapshot, repository, projection)?,
-        )))
+        ids: impl Iterator<Item = &'a str>,
+    ) -> StoreResult<HashMap<String, i64>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        start_times_in(&conn, ids)
     }
 
-    pub fn commit_task_order(
+    pub fn reorder_working_task(
+        &self,
+        repository: &RepositoryId,
+        task: &str,
+        target: &str,
+        side: Option<DropSide>,
+    ) -> StoreResult<Vec<String>> {
+        // Prepare outside the Machine's write lock. A competing drag needs a fresh order.
+        for _ in 0..3 {
+            let (saved, order) = self.prepare_task_order(repository, task, target, side)?;
+            if self.commit_task_order(repository, &saved, &order)? {
+                return Ok(order);
+            }
+        }
+        Err(StoreError::Stale(
+            "the Task order kept changing; read it again before reordering".into(),
+        ))
+    }
+
+    fn prepare_task_order(
+        &self,
+        repository: &RepositoryId,
+        task: &str,
+        target: &str,
+        side: Option<DropSide>,
+    ) -> StoreResult<(Vec<String>, Vec<String>)> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let snapshot = conn.savepoint()?;
+        let saved = task_order_in(&snapshot, repository)?;
+        let mut order: Vec<_> =
+            ordered_tasks_in(&snapshot, repository, &saved, SelectionTask::working)?
+                .into_iter()
+                .map(|row| row.id.to_string())
+                .collect();
+        let position = |id: &str| {
+            order
+                .iter()
+                .position(|task| task == id)
+                .ok_or_else(|| SelectionError::NotWorking(id.to_owned()))
+        };
+        let from = position(task)?;
+        let to = position(target)?;
+        move_into_place(&mut order, from, to, side);
+        Ok((saved, order))
+    }
+
+    fn commit_task_order(
         &self,
         repository: &RepositoryId,
         read: &[String],
@@ -817,7 +964,6 @@ impl SqliteStore {
         tx.commit()?;
         Ok(true)
     }
-
     pub fn delete_dashboard(
         &self,
         repository: &RepositoryId,
@@ -835,5 +981,52 @@ impl SqliteStore {
             ));
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{task_order_in, task_selection_states};
+    use crate::execution::{TaskSection, TaskState};
+    use crate::work::selection::SelectionState;
+    use std::collections::BTreeSet;
+
+    #[test]
+    fn a_task_order_changed_after_preparation_keeps_the_new_order() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = crate::test_fixture::open(&dir.path().join("db")).unwrap();
+        let repo = crate::test_fixture::repository(&store, "/repo");
+        let order = ["b".to_owned(), "a".to_owned()];
+        assert!(store.commit_task_order(&repo, &[], &order).unwrap());
+        assert!(!store.commit_task_order(&repo, &[], &[]).unwrap());
+        assert_eq!(
+            task_order_in(&store.conn.lock().unwrap(), &repo).unwrap(),
+            order
+        );
+    }
+
+    #[test]
+    fn task_selection_states_show_only_observed_runtime_states() {
+        use SelectionState::{Auto, Open, Working};
+        for state in [TaskState::Unstarted, TaskState::Idle, TaskState::Active] {
+            let states = task_selection_states(
+                state.observed_here(true),
+                TaskSection::Working,
+                true,
+                true,
+                None,
+            );
+            assert_eq!(states, BTreeSet::from([Open, Working, Auto]));
+        }
+        for (state, expected) in [
+            (TaskState::Moving, SelectionState::Moving),
+            (TaskState::Done, SelectionState::Done),
+            (TaskState::Abandoned, SelectionState::Done),
+        ] {
+            let section = TaskSection::of(state, true, true);
+            let states =
+                task_selection_states(state.observed_here(true), section, true, true, None);
+            assert!(states.contains(&expected));
+        }
     }
 }

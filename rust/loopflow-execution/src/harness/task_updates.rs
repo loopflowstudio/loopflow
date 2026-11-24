@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::durable::{GraphStepProcess, TaskState};
-use crate::store::{StoreError, StoreResult};
+use crate::store::StoreResult;
 use crate::task_graph::TaskGraphPosition;
 use loopflow_model::comment::TaskCommentAuthor;
 use loopflow_model::durable::TaskId;
@@ -82,9 +82,7 @@ impl TaskObservation {
 
     /// The step the Task stands at or last left.
     fn step(&self) -> Option<&str> {
-        self.position.as_ref().map(|position| match position {
-            TaskGraphPosition::At { step } | TaskGraphPosition::Run { step, .. } => step.as_str(),
-        })
+        self.position.as_ref().map(TaskGraphPosition::step)
     }
 
     /// How each run that ended without succeeding ended, by run.
@@ -146,29 +144,30 @@ struct RunObservation {
 }
 
 impl RunObservation {
-    fn report(&self, id: &LfProcessId) -> String {
-        let outcome = self.outcome.as_deref().unwrap_or(if self.completed {
-            "stopped (outcome unavailable)"
-        } else {
-            "running"
-        });
-        let status = self
-            .step
-            .as_ref()
-            .map(|step| {
-                format!(
-                    "{} ({}): {}",
-                    step.position(),
-                    step.lf_process_id,
-                    step.outcome.as_deref().unwrap_or("running")
-                )
-            })
-            .unwrap_or_else(|| "starting".into());
-        format!("Run {} ({id}) · {outcome} · {status}.", self.name)
+    fn report(&self, id: &LfProcessId, error: Option<&str>) -> String {
+        let outcome = self
+            .outcome
+            .as_deref()
+            .expect("only settled runs are reported");
+        let mut report = format!("Run {} ({id}) · {outcome}", self.name);
+        if let Some(step) = &self.step {
+            report.push_str(&format!(
+                " · {} ({}): {}",
+                step.position(),
+                step.lf_process_id,
+                step.outcome.as_deref().unwrap_or("outcome unavailable")
+            ));
+        }
+        report.push('.');
+        if let Some(error) = error {
+            report.push(' ');
+            report.push_str(error);
+        }
+        report
     }
 }
 
-/// Write what changed on the Session's Tasks, and on the Tasks it conducts,
+/// Write what changed on the Session's Task and on the Tasks it conducts,
 /// since their last readings as Task steers. Only an interactive conversation
 /// reads them, so only one looks; a worker Run pays nothing.
 pub fn write(store: &SqliteStore, session_id: &str) -> StoreResult<()> {
@@ -179,13 +178,12 @@ pub fn write(store: &SqliteStore, session_id: &str) -> StoreResult<()> {
         return Ok(());
     }
     let revision = store.task_update_revision()?;
-    for task in store.session_task_ids(session_id)? {
+    if let Some(task) = store.session_task(session_id)? {
         let quiet = quiet_key(store, &task);
-        if quiet_at(quiet.as_ref()) == Some(revision) {
-            continue;
+        if quiet_at(quiet.as_ref()) != Some(revision) {
+            write_task(store, &task)?;
+            set_quiet_at(quiet, revision);
         }
-        write_task(store, &task)?;
-        set_quiet_at(quiet, revision);
     }
     for (task, closed) in store.session_conducted_tasks(session_id)? {
         let quiet = quiet_key(store, &task);
@@ -226,11 +224,40 @@ fn write_task(store: &SqliteStore, task: &TaskId) -> StoreResult<()> {
         return Ok(());
     };
     let (stored, old) = reading(store, task)?;
-    let (graph, graphs) = crate::store::task_work::task_progress(store, task)?;
-    let mut observation = TaskObservation {
-        position: graph.map(|graph| graph.position),
-        runs: HashMap::new(),
-        comments: BTreeSet::new(),
+    let (graph_row, graphs) = store.task_progress_records(task)?;
+    let mut runs = HashMap::new();
+    let mut run_in_progress = false;
+    let mut changes = Vec::new();
+    for graph in graphs {
+        let Some(outcome) = crate::process::os_process::observed_result(&graph.run).outcome()
+        else {
+            run_in_progress = true;
+            continue;
+        };
+        let step = graph.latest().map(|step| graph.step_detail(step));
+        let id = graph.run.id;
+        let run = RunObservation {
+            name: graph.name,
+            outcome: Some(outcome.to_owned()),
+            completed: true,
+            step,
+        };
+        // Older readings included running steps with no outcome.
+        let previous = old.as_ref().and_then(|old| old.runs.get(&id));
+        if old.is_some() && previous.and_then(|run| run.outcome.as_deref()) != Some(outcome) {
+            changes.push(run.report(&id, graph.run.error.as_deref()));
+        }
+        runs.insert(id, run);
+    }
+    let comments = store.task_undirected_comments(task)?;
+    let observation = TaskObservation {
+        position: crate::store::task_work::settled_task_position(
+            graph_row,
+            old.as_ref().and_then(|old| old.position.as_ref()),
+            run_in_progress,
+        )?,
+        runs,
+        comments: comments.iter().map(|comment| comment.id.clone()).collect(),
         pr: store
             .task_prs(task)?
             .last()
@@ -240,41 +267,6 @@ fn write_task(store: &SqliteStore, task: &TaskId) -> StoreResult<()> {
             _ => None,
         },
     };
-    let mut changes = Vec::new();
-    for graph in graphs {
-        let id = LfProcessId::parse(&graph.entry.summary.id)
-            .map_err(|error| StoreError::InvalidData(error.to_string()))?;
-        let prior = old.as_ref().and_then(|old| old.runs.get(&id));
-        // Exit and next start are separate commits. Keep this run's last
-        // reported facts until its next step or terminal result.
-        if graph.entry.ended_at.is_none()
-            && graph
-                .steps
-                .last()
-                .is_some_and(|step| step.completed_at.is_some())
-        {
-            if let Some(prior) = prior {
-                observation.runs.insert(id, prior.clone());
-            }
-            continue;
-        }
-        let run = RunObservation {
-            name: graph.entry.summary.name,
-            outcome: store.graph_process(id.as_str())?.and_then(|(graph, _)| {
-                crate::process::os_process::observed_result(&graph.run)
-                    .outcome()
-                    .map(str::to_owned)
-            }),
-            completed: graph.entry.ended_at.is_some(),
-            step: graph.steps.last().cloned(),
-        };
-        if prior != Some(&run) {
-            changes.push(run.report(&id));
-        }
-        observation.runs.insert(id, run);
-    }
-    let comments = store.task_undirected_comments(task)?;
-    observation.comments = comments.iter().map(|comment| comment.id.clone()).collect();
     if old.as_ref() == Some(&observation) {
         return Ok(());
     }
@@ -302,21 +294,22 @@ fn write_task(store: &SqliteStore, task: &TaskId) -> StoreResult<()> {
         if let Some(closing) = observation.closing(old) {
             changes.push(format!("Task {closing}."));
         }
-        if old.position != observation.position || !changes.is_empty() {
+        let took_up_graph = old.position.is_none()
+            && matches!(&observation.position, Some(TaskGraphPosition::At { step }) if step == "start");
+        if (old.position != observation.position && !took_up_graph) || !changes.is_empty() {
             let mut text = format!(
                 "Task {identifier}: {}.",
                 position_text(observation.position.as_ref())
             );
-            for (shown, change) in changes.iter().enumerate() {
-                if text.len() + change.len() + 1 > UPDATE_BYTES {
-                    text.push_str(&format!(
-                        " {} more changes; read `lf task status` for them.",
-                        changes.len() - shown
-                    ));
-                    break;
-                }
+            for change in &changes {
                 text.push(' ');
                 text.push_str(change);
+                if text.len() > UPDATE_BYTES {
+                    let more = "… Read `lf task status` for the full update.";
+                    text.truncate(text.floor_char_boundary(UPDATE_BYTES - more.len()));
+                    text.push_str(more);
+                    break;
+                }
             }
             updates.push((format!("update:-:{task}:{key}"), text));
         }
@@ -415,10 +408,12 @@ mod tests {
                 &graph,
                 20,
                 Some(1),
-                Some("it failed"),
+                Some(&format!("provider refused: {}", "é".repeat(4_000))),
             )
             .unwrap();
         let text = deliver(&store);
+        assert!(text.contains("provider refused: "));
+        assert!(text.len() <= super::UPDATE_BYTES);
         assert!(text.contains(&format!("Run feature ({graph}) · failed")));
         assert!(text.contains("implement ("));
         assert!(text.contains(": succeeded"));
@@ -436,17 +431,93 @@ mod tests {
     }
 
     #[test]
-    fn a_run_between_steps_keeps_its_last_report() {
+    fn a_run_reports_once_after_its_last_step_with_its_error() {
         let (_home, store, _task) = task_session();
+        assert!(quiet(&store), "baseline before launch");
         let run = store.test_graph("feature", "/task-updates", &[("implement", None)], None);
-        assert!(quiet(&store));
+        assert!(quiet(&store), "run start");
         finish_step(&store, &run, 0, None);
-        assert!(quiet(&store));
-        // Repeated labels are distinct occurrences, identified by Process id.
+        assert!(quiet(&store), "between steps");
         let step = next_step(&store, &run, 0);
-        assert!(deliver(&store).contains(&format!("implement ({step}): running")));
+        assert!(quiet(&store), "next step");
         finish_run(&store, &run, "failed");
-        assert!(deliver(&store).contains(&format!("Run feature ({run}) · failed")));
+        let updates = pending(&store, "reader");
+        assert_eq!(updates.len(), 1);
+        assert!(updates[0].contains(&format!("Run feature ({run}) · failed")));
+        assert!(updates[0].contains(&format!("implement ({step}): failed. it failed")));
+        deliver(&store);
+        assert!(quiet(&store));
+    }
+
+    #[test]
+    fn a_graph_that_died_between_steps_reports_its_unrecorded_exit_once() {
+        let (_home, store, _task) = task_session();
+        assert!(quiet(&store));
+        let run = store.test_graph(
+            "feature",
+            "/task-updates",
+            &[("implement", Some("succeeded"))],
+            None,
+        );
+        assert!(quiet(&store));
+        // Its reservation dates from before boot and no process recorded an exit.
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE graph_processes SET started_at=1 WHERE lf_process_id=?1",
+                [&run],
+            )
+            .unwrap();
+        assert!(deliver(&store).contains(&format!("Run feature ({run}) · unknown")));
+        assert!(quiet(&store));
+    }
+
+    #[test]
+    fn a_reading_saved_mid_run_stays_quiet_until_the_run_settles() {
+        let (_home, store, task) = task_session();
+        let run = store.test_graph("feature", "/task-updates", &[("implement", None)], None);
+        let graph = crate::task_graph::CapturedGraph {
+            name: "feature".into(),
+            steps: Vec::new(),
+        };
+        crate::store::task_work::take_up_task_graph(&store, &task, &graph).unwrap();
+        let start = loopflow_storage::graph_process::ExecutionStart {
+            pid: Some(std::process::id()),
+            ..loopflow_storage::graph_process::ExecutionStart::reserved(1)
+        };
+        store
+            .start_task_graph_run(&task, "start", None, r#"{"index":0}"#, (&run, &start))
+            .unwrap();
+        let saved = serde_json::json!({
+            "position": {"kind":"run","step":"start","at":"earlier step","lf_process_id":run,"running":true},
+            "runs": {(run.as_str()): {"name":"feature","outcome":null,"completed":false,"step":null}},
+            "comments": [], "closed": null, "pr": null
+        });
+        store
+            .save_task_update(&task, None, &saved.to_string(), &[])
+            .unwrap();
+        comment(
+            &store,
+            &task,
+            "PR: https://example.test/pr/1",
+            TaskCommentAuthor::Person {
+                name: Some("jack".into()),
+            },
+        );
+        let updates = pending(&store, "reader");
+        assert_eq!(updates.len(), 1, "only the new comment");
+        assert!(deliver(&store).contains("new comment from jack: PR:"));
+        assert!(quiet(&store));
+        // A run arrives at its last step before it records its outcome.
+        store.arrive_task_graph(&task, &run, "end").unwrap();
+        assert!(quiet(&store), "arrived but unsettled");
+        finish_run(&store, &run, "succeeded");
+        let updates = pending(&store, "reader");
+        assert_eq!(updates.len(), 1);
+        assert!(updates[0].contains("At end (Task completion is separate)"));
+        assert!(updates[0].contains(&format!("Run feature ({run}) · succeeded")));
     }
 
     #[test]
@@ -614,11 +685,7 @@ mod tests {
             (vec![], vec![]),
             "steps passing inside a child's run are not news to its parent"
         );
-        let (notices, updates) = unread(&store, "child-reader");
-        assert!(
-            notices.is_empty() && updates.len() == 1,
-            "the child's own conversation hears its steps"
-        );
+        assert_eq!(unread(&store, "child-reader"), (vec![], vec![]));
 
         finish_run(&store, &run, "succeeded");
         store.set_task_graph_step(&child, "ship-review").unwrap();
@@ -630,10 +697,11 @@ mod tests {
             )]
         );
         assert!(updates.is_empty(), "a child's updates stay with the child");
-        assert!(
-            unread(&store, "child-reader").0.is_empty(),
-            "a notice is for the conductor, not the Task's own conversation"
-        );
+        let (notices, updates) = unread(&store, "child-reader");
+        assert!(notices.is_empty());
+        assert_eq!(updates.len(), 1);
+        assert!(updates[0].contains("At ship-review · available for review"));
+        assert!(updates[0].contains(&format!("Run feature ({run}) · succeeded")));
 
         store
             .save_steer(
@@ -749,7 +817,7 @@ mod tests {
 
         sql(
             &store,
-            "UPDATE tasks SET planning_completed=1,planning_state='completed' WHERE id=?1",
+            "UPDATE tasks SET planning_state='completed' WHERE id=?1",
             &child,
         );
         let (notices, _) = unread(&store, "reader");

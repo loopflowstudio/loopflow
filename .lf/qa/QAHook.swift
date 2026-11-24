@@ -56,6 +56,43 @@ enum QAHook {
                 lines.append("\(index) \(window.title) \(file)")
             }
             return lines.joined(separator: "\n")
+        case "views":
+            // The NSView tree with window-space centers, text field values and each clip view's scroll origin.
+            guard let index = Int(arg), windows.indices.contains(index), let root = windows[index].contentView?.superview else { return "usage: views window" }
+            var lines: [String] = []
+            func dump(_ view: NSView, _ depth: Int) {
+                guard depth < 40 else { return }
+                let box = view.convert(view.bounds, to: nil)
+                let height = view.window?.contentView?.frame.height ?? 0
+                let clip = (view as? NSClipView).map { " origin=\(Int($0.bounds.origin.y)) document=\(Int($0.documentView?.frame.height ?? 0))" } ?? ""
+                let text = (view as? NSTextField).map { " text=\($0.stringValue.prefix(80)) placeholder=\($0.placeholderString ?? "")" } ?? ""
+                lines.append(String(repeating: " ", count: depth) + "\(type(of: view)) @\(Int(box.midX)),\(Int(height - box.midY)) \(Int(view.frame.width))x\(Int(view.frame.height))" + clip + text)
+                view.subviews.forEach { dump($0, depth + 1) }
+            }
+            dump(root, 0)
+            return lines.joined(separator: "\n")
+        case "field":
+            // field <placeholder>|<text>: replaces the text of the field with that placeholder; an empty <text> clears it.
+            let pieces = arg.split(separator: "|", maxSplits: 1, omittingEmptySubsequences: false).map(String.init)
+            guard pieces.count == 2 else { return "usage: field placeholder|text" }
+            func search(_ view: NSView) -> NSTextField? {
+                if let field = view as? NSTextField, field.placeholderString == pieces[0] { return field }
+                for child in view.subviews { if let found = search(child) { return found } }
+                return nil
+            }
+            for window in windows {
+                guard let root = window.contentView?.superview, let field = search(root) else { continue }
+                window.makeFirstResponder(field)
+                (window.firstResponder as? NSTextView)?.selectAll(nil)
+                (window.firstResponder as? NSTextView)?.insertText(pieces[1], replacementRange: NSRange(location: NSNotFound, length: 0))
+                return "typed into \(window.title)"
+            }
+            return "not found"
+        case "return":
+            // Return in the field `field` focused; `arg` is the window title.
+            guard let window = windows.first(where: { $0.title == arg }) ?? windows.last else { return "no window" }
+            (window.firstResponder as? NSTextView)?.insertNewline(nil)
+            return "return in \(window.title)"
         case "tree":
             var lines: [String] = []
             for (index, window) in windows.enumerated() {
@@ -84,6 +121,24 @@ enum QAHook {
             if let up = event(.leftMouseUp) { NSApp.postEvent(up, atStart: false) }
             if let down = event(.leftMouseDown) { window.sendEvent(down) }
             return "clicked \(window.title) \(point)"
+        case "drag":
+            // A SwiftUI DragGesture: down, a few moves, up, each sent straight to the window.
+            let n = arg.split(separator: " ").compactMap { Double($0) }
+            guard n.count == 5, windows.indices.contains(Int(n[0])) else { return "usage: drag window x y x2 y2" }
+            let window = windows[Int(n[0])]
+            let height = window.contentView?.frame.height ?? window.frame.height
+            func event(_ type: NSEvent.EventType, _ x: Double, _ y: Double) -> NSEvent? {
+                NSEvent.mouseEvent(with: type, location: NSPoint(x: x, y: height - y), modifierFlags: [],
+                                   timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                                   context: nil, eventNumber: 0, clickCount: 1, pressure: 1)
+            }
+            event(.leftMouseDown, n[1], n[2]).map(window.sendEvent)
+            for step in 1...12 {
+                let t = Double(step) / 12
+                event(.leftMouseDragged, n[1] + (n[3] - n[1]) * t, n[2] + (n[4] - n[2]) * t).map(window.sendEvent)
+            }
+            event(.leftMouseUp, n[3], n[4]).map(window.sendEvent)
+            return "dragged \(window.title)"
         case "size":
             let n = arg.split(separator: " ").compactMap { Double($0) }
             guard n.count == 3, windows.indices.contains(Int(n[0])) else { return "usage: size window w h" }

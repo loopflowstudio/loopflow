@@ -42,7 +42,7 @@ pub fn ended_step_recovery(
     store: &SqliteStore,
     task: &TaskId,
 ) -> StoreResult<Option<(String, AgentLimitRecovery)>> {
-    let Some(graph) = store.task_graphs(task)?.pop() else {
+    let Some(graph) = store.latest_task_graph(task)? else {
         return Ok(None);
     };
     let Some(step) = graph.latest() else {

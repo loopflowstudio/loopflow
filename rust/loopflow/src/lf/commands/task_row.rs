@@ -15,6 +15,7 @@ use loopflow_execution::durable::{GraphProcessDetail, TaskState};
 use loopflow_execution::session::GraphProcessSummaryState;
 use loopflow_execution::store::SharedStore;
 use loopflow_model::comment::{TaskComment, TaskComments};
+use loopflow_model::durable::TaskRunsOn;
 use loopflow_storage::rows::unix_to_datetime;
 use loopflow_storage::work::task::PrPhase;
 
@@ -31,14 +32,21 @@ pub struct TaskRow {
     /// The `id` of the Task this one was filed from; `null` for top-level work.
     #[serde(deserialize_with = "Option::deserialize")]
     pub parent_id: Option<String>,
-    pub state: TaskState,
+    /// `null` when live execution is on another Machine and was not read.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub state: Option<TaskState>,
     /// Why it is in that state, or what it waits on.
     pub reason: String,
     pub graph: Option<TaskRowGraph>,
     /// Its published pull request.
     pub pr: Option<TaskRowPr>,
-    /// The command that moves it on; `null` while it moves by itself or is closed.
+    /// The command that moves it on; `null` while it moves by itself, runs on
+    /// another Machine or is closed.
     pub next: Option<String>,
+    /// The Machine that runs it when another Machine than this one owns it;
+    /// `null` when this Machine owns it or nobody does.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub runs_on: Option<TaskRunsOn>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -60,6 +68,8 @@ pub struct TaskRowPr {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskDetail {
     pub task: TaskRow,
+    /// Whose store answered for the Task's Graph, Sessions and Graph processes.
+    pub reading: TaskReading,
     /// As `lf session list` lists them, joined by `id`.
     pub sessions: Vec<SessionFacts>,
     /// Which of `sessions` is the Task's conversation, the one the server
@@ -90,14 +100,39 @@ pub struct TaskDetail {
     pub children: Vec<TaskRow>,
 }
 
+/// Whose store a `lf task status` reading of the Task's Graph and Sessions
+/// came from. Wire type; no defaults.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum TaskReading {
+    /// This Machine, which owns the Task or where nobody does.
+    Here,
+    /// The server of the Machine in `task.runs_on`.
+    Owner,
+    /// Neither: the Task runs on `task.runs_on`, and `reason` says why that
+    /// Machine was not read.
+    Unobserved { reason: String },
+}
+
+/// `Runs on mini since Nov 12 10:42; mini is not registered here, so its
+/// Graph and Sessions are not read here`.
+pub fn unobserved_reason(runs_on: &TaskRunsOn, reason: &str) -> String {
+    format!(
+        "{}; {reason}, so its Graph and Sessions are not read here",
+        loopflow_execution::ops::task_ownership::runs_elsewhere(runs_on)
+    )
+}
+
 impl TaskRow {
     /// Where the Task stands, in a few words: "idle at ship-review · #12 open".
     pub fn standing(&self) -> String {
-        let state = self.state.label();
-        let open = !matches!(self.state, TaskState::Done | TaskState::Abandoned);
-        let mut standing = match self.graph.as_ref().and_then(|graph| graph.step.as_deref()) {
-            Some(step) if open => format!("{state} at {step}"),
-            _ => state.to_owned(),
+        let open = self.state.is_none_or(|state| !state.is_terminal());
+        let mut standing = match self.state {
+            Some(state) => match self.graph.as_ref().and_then(|graph| graph.step.as_deref()) {
+                Some(step) if open => format!("{state} at {step}"),
+                _ => state.to_string(),
+            },
+            None => self.reason.clone(),
         };
         if let Some(pr) = self.pr.as_ref().filter(|_| open) {
             standing.push_str(&format!(" · #{} {}", pr.number, pr.phase.as_str()));
@@ -199,7 +234,7 @@ impl TaskNames {
     }
 
     pub(crate) fn row(&self, task: RoadmapTask) -> TaskRow {
-        let state = task.lifecycle;
+        let state = task.lifecycle.observed_here(task.runs_on.is_some());
         let next = next_command(&task);
         let summary = task.task;
         TaskRow {
@@ -217,10 +252,13 @@ impl TaskNames {
             parent_id: summary.parent_id,
             state,
             reason: task.conducting.unwrap_or(task.next_move.reason),
-            graph: task.graph_name.map(|name| TaskRowGraph {
-                name,
-                step: task.step,
-            }),
+            graph: task
+                .graph_name
+                .filter(|_| state.is_some())
+                .map(|name| TaskRowGraph {
+                    name,
+                    step: task.step,
+                }),
             pr: task.pr.and_then(|pr| {
                 let github = pr.publication?.github?;
                 Some(TaskRowPr {
@@ -230,6 +268,7 @@ impl TaskNames {
                 })
             }),
             next,
+            runs_on: task.runs_on,
         }
     }
 }
@@ -238,6 +277,7 @@ fn next_command(task: &RoadmapTask) -> Option<String> {
     let id = &task.task.identifier;
     match task.lifecycle {
         TaskState::Done | TaskState::Abandoned | TaskState::Paused | TaskState::Moving => None,
+        _ if task.runs_on.is_some() => None,
         _ if task.finished.is_some() => task
             .conducting
             .is_none()

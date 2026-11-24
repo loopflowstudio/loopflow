@@ -222,6 +222,13 @@ final class WorkNavigation {
         case repository
         case wave(String)
         case dashboard(String)
+
+        var isWorkingList: Bool {
+            switch self {
+            case .repository, .wave: true
+            case .dashboard: false
+            }
+        }
     }
     var sidebarScope: SidebarScope {
         if case .saved(let id) = trailBoard { return .dashboard(id) }
@@ -237,12 +244,31 @@ final class WorkNavigation {
     /// Each Wave view's backlog selection, filter, search and draft; it outlives entering a Task.
     var backlogs: [Board: BacklogState] = [:]
     var showsSlotHints = false
+    var sidebarSortByStatus = false
+    enum StatusGroup: CaseIterable {
+        case blocked, error, available, idle, busy
+
+        init(_ states: [WorkSelectionState]) {
+            self = switch states.programState {
+            case .blocked: .blocked
+            case .error: .error
+            case .idle: .available
+            case .working: .busy
+            default: .idle
+            }
+        }
+    }
+    var heldStatusGroup: (taskID: String, group: StatusGroup)?
+    var canReorderSidebar: Bool { sidebarScope == .repository && sidebarFilter != .paused && !sidebarSortByStatus }
     var sidebarFilter: SidebarFilter = .working {
         willSet {
             if newValue != sidebarFilter { Perf.begin(Perf.hierarchyInteraction, "filter", id: "outline:\(newValue.rawValue)", liveSessions: liveSessionCount, owner: performanceOwner) }
         }
         didSet {
-            if oldValue != sidebarFilter { Perf.acknowledged(Perf.hierarchyInteraction, id: "outline:\(sidebarFilter.rawValue)", owner: performanceOwner) }
+            if oldValue != sidebarFilter {
+                heldStatusGroup = nil
+                Perf.acknowledged(Perf.hierarchyInteraction, id: "outline:\(sidebarFilter.rawValue)", owner: performanceOwner)
+            }
         }
     }
     var sidebarFocusRequested = false
@@ -320,6 +346,14 @@ final class WorkNavigation {
         case workingTasks
         /// One Dashboard member shown as full Work; the trail returns through its Dashboard.
         case entered(from: Board, work: WorkReference)
+
+        var selection: WorkReference? {
+            switch self {
+            case .work(let work): work
+            case .entered(_, let work): work
+            case .dashboard, .view, .workingTasks: nil
+            }
+        }
     }
     /// A view a tile can be entered from: a saved Dashboard, Working Tasks or a Wave
     /// view, of a Wave or of the repository (its default Wave, over every Task).
@@ -330,15 +364,17 @@ final class WorkNavigation {
         case repository
     }
     static let workingTasksTitle = "Working Tasks"
-    var destination: Destination = .work(nil)
-    var selection: WorkReference? {
-        get {
-            switch destination {
-            case .work(let work): work
-            case .entered(_, let work): work
-            case .dashboard, .view, .workingTasks: nil
+    /// Entering or leaving the same Task keeps its held status group; any other move releases it.
+    var destination: Destination = .work(nil) {
+        didSet {
+            if heldStatusGroup != nil,
+               selection?.kind != .task || !sidebarScope.isWorkingList || selection != oldValue.selection {
+                heldStatusGroup = nil
             }
         }
+    }
+    var selection: WorkReference? {
+        get { destination.selection }
         set { destination = .work(newValue) }
     }
     var showsSelection: Bool {

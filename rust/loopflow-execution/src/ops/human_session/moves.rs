@@ -175,10 +175,7 @@ pub fn conversation_task(store: &SqliteStore, session: &str) -> Result<Option<Ta
     if let Some(PrimaryScope::Task(task)) = store.primary_scope(session)? {
         return Ok(Some(task));
     }
-    Ok(match store.session_task_ids(session)?.as_slice() {
-        [task] => Some(task.clone()),
-        _ => None,
-    })
+    Ok(store.session_task(session)?)
 }
 
 /// Claim the Task for `to`, then stop its Graph, commit and push its

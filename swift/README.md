@@ -90,14 +90,15 @@ yourself, call `/usr/bin/log`, since zsh's builtin `log` shadows it:
 /usr/bin/log show --last 1h --predicate 'process == "runningboardd" AND eventMessage CONTAINS "loopflow" AND eventMessage CONTAINS "termination reported by launchd"'
 ```
 
-Working Tasks lists owned, started, unfinished Tasks, on any Machine this store
-records, in the repository's shared Task order. It is the
-repository's built-in query, so opening a Task neither adds nor reorders it.
-Click a Wave to scope the sidebar to its Working Tasks and subwaves; its backlog
-keeps the open work nobody is running. **‹ Repo** returns to Working Tasks. Unstarted Tasks
-open their brief beside **Start**, which runs the Task's Workflow; opening alone
-starts nothing. Waves follow Tasks in the same scrolling sidebar, with counts
-from the planning inventory.
+Working Tasks lists owned, started, unfinished Tasks on any Machine this store
+records. Drag in the repository sidebar or Working Tasks grid to save an order.
+Turn on **Sort by status** in a repository or Wave sidebar to group Tasks by
+activity. [Sidebar order, filters and shortcuts](../docs/surfaces.md#working-tasks-in-the-sidebar).
+
+Click a Wave to see its Working Tasks and subwaves. Its backlog holds the open
+work nobody is running. **‹ Repo** returns to Working Tasks. Unstarted Tasks
+open their brief beside **Start**, which runs the Task's Workflow. Waves follow
+Tasks in the same scrolling sidebar, with counts from the planning inventory.
 
 **New Wave**, under the sidebar's Waves or in the Portfolio, is one form: a
 name, and a repository picker when there is more than one to choose from.
@@ -126,14 +127,10 @@ Click a row to select its retained workspace. The title-bar **Repo › Wave › 
 path follows hierarchy: click a name to go there, or the **›** after it to list and
 search what it contains; Back and **⌘[ / ⌘]** follow visits. **⌘K** searches Work
 across repositories and opens another repository in its own window. Its
-**Sidebar shows** picker and the sidebar’s own filter offer Working tasks,
-Available, Busy, and Paused. The Wave board also lists paused Tasks.
-Open one to read its history and choose **Unpause** in the workflow bar.
-The filter keeps the selected Work open. Click a Wave and its name moves into the
-sidebar header; the rows below keep that same relative Task order until
-**‹ repo** returns to Working Tasks. **⌘1–9** selects the sidebar's Task rows by
-position and **⌃Tab / ⌃⇧Tab** cycles them. Missing slots do nothing. Selecting a
-Dashboard's Task, from any of these, keeps the Dashboard in the path, as its tile does.
+**Sidebar shows** picker filters the rows to **Working tasks**, **Available**,
+**Busy**, or **Paused** while keeping the selected workspace open. **⌘1–9** selects a
+visible row by position and **⌃Tab / ⌃⇧Tab** cycles the rows. Missing slots do
+nothing. Selecting a Dashboard's Task keeps the Dashboard in the path, as its tile does.
 With sidebar focus, **⌘F** searches its visible Tasks and Waves; **Search all Work**
 widens the same navigator. **Shift-F10** opens the focused Task's actions without
 changing the open workspace.
@@ -153,17 +150,19 @@ apply to work that has never started; an unassigned running Task remains Active.
 A Task is **Available** when one of its conversations is available for your next
 turn, and **Busy** when a current activity report says it is working. An open
 conversation with unknown activity adds neither. With an available conversation
-and a busy one, the Task matches both filters; its board badge shows Available.
+and a busy one, the Task matches both filters; its board badge shows Busy.
 The board and sidebar use the same activity reading. These badges describe
 conversations; the Task's lifecycle and NOW condition remain separate.
 
-Task conversations include Sessions bound to the Task and Sessions working in
-its checkout. Repository and Wave primary conversations keep their own scope,
-even in a Task checkout. The Task's conversation list and breadcrumb Session
-picker use the same membership.
+A Task's conversations are the Sessions that started for it: launched for the
+Task, or started inside its checkout. Each Session and Graph run records its Task
+when it starts, so moving the repository on disk, or cloning another one into a
+path a removed checkout used, leaves every Task's list as it was. Repository and
+Wave primary conversations keep their own scope, even in a Task checkout. The
+Task's conversation list and breadcrumb Session picker use the same membership.
 
-A Task's row is its whole title, wrapped rather than cut, then its ID and one
-status word. A row that needs someone adds one line saying why:
+A sidebar row shows the Task’s full title, then its ID, current Graph step
+when available, and one status word. A row that needs someone adds one line saying why:
 
 ```text
 Loopflow for Mac's Task workspace matches
@@ -174,8 +173,10 @@ Approve the plan?
 
 The word is the first of these that applies:
 
-1. What the Task's program reports: **Busy**, **Available**, **Blocked**,
-   **Done**. A blocked program's line is what it asked.
+1. When programs report, the row shows the highest-priority report.
+   **Blocked** takes precedence over **Error**, then **Busy**, then **Available**.
+   A finished turn on a live interactive Session reads **Available** once its
+   programs have stopped reporting work. A blocked program's line is what it asked.
 2. **Blocked** or **Waiting**, when the Task's condition says so and no
    program reports. The line is the condition's reason, the one
    `lf plan list` prints. A Task whose Graph has never run waits on nobody,
@@ -193,10 +194,8 @@ second rule. Click the row on any of them and the Task opens.
 The selected row is filled; rows carry no stripe or border. A Wave's count
 beside its name is in the same face as its name.
 
-Drag a Task in the sidebar to change its shared order. Ordinary repository and
-Wave lists, boards and Task pickers keep that relative order after refresh.
-Filtering or opening a Task leaves the order intact. Saved Dashboard arrangements,
-search results and Done's completion-date ordering keep their own order.
+Saved Dashboard arrangements, search results, the backlog's planning rank, and
+Done's completion-date ordering keep their own order.
 
 Each Work keeps one pane layout and document store. The browser offers Brief,
 Diff, Files, Task & workflow, Graph processes and web pages. Rex, Herdr and cmux
@@ -208,8 +207,8 @@ Waves pair that conversation with their objective, status, planning and
 full Task inventory, followed by their metrics. **Project history** and **Workflow**
 open the existing planning inspectors. The sidebar starts at 240 points wide;
 drag its edge to resize or use the title-bar button or **⌘\** to toggle it.
-Its scroll position survives Wave and Task navigation. Working order survives
-relaunch; ordinary launch restores the selected Work.
+Its scroll position survives Wave and Task navigation. Ordinary launch restores
+the selected Work.
 
 Closing a repository window keeps its panes, selected Work and file drafts until
 Desktop quits. Reopening a known repository shows retained content immediately,
@@ -302,10 +301,10 @@ and owner are in the Task pane, not the row.
 
 Follow a conversation in the pane and sidebar: Busy for a working report,
 Available for an idle report, Blocked for a question or permission request, and
-Done for a reported result. Both labels use the same report wording. A pane
+Finished in the pane for a reported result, where the Task row reads Available. A pane
 describes its own conversation; a Task's Available/Busy filters and board badge
 aggregate all its conversations in Rust, so a busy pane can belong to an
-Available Task. Reported Done is a program result, independent of Task lifecycle.
+Available Task. Reported Finished is a program result, independent of Task lifecycle.
 Reconnect restores the current report without sending another prompt. Quiet output
 does not change activity; clearing a report removes its label without completing
 the Task.
@@ -314,14 +313,13 @@ Work selection uses the theme’s selection fill and contrasting text.
 File selection keeps a neutral fill and edge; keyboard focus has a separate outline.
 Ordinary controls and links use text roles; the theme’s accent emphasizes deliberate actions.
 Status labels and shapes retain their meaning across palettes.
-Choose **Settings → Appearance** to preview the whole workspace. Pick
-**System**, **Light** or **Dark**; System follows macOS and lists both sides,
-Light or Dark lists only its own. Each side's heading names its chosen theme
-(**Light themes · Fjord Light**), then shows built-ins as cards and **Yours**,
-ending with a dashed **Import file…** tile. An imported file joins the side its
-own colors say; in Light or Dark mode the preview switches to that side. Every card is drawn in its
-own theme: a title bar strip, its name as a heading, Busy, Blocked and Error,
-ANSI 1–6, a selected row and a **Run** button:
+
+Press **⌘,** and choose **Appearance** to pick a theme for Desktop, Ghostty,
+and iPhone. **System** follows macOS and shows both light and dark themes.
+**Light** and **Dark** each show one side. Each heading names its selection
+(**Light themes · Fjord Light**). The cards preview each theme in its own
+colors. See the [Settings guide](../docs/surfaces.md#settings) for search,
+Machine connections, and project or Wave preferences.
 
 ```text
 ▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔
@@ -332,9 +330,13 @@ Busy  Blocked  Error
 ```
 
 Families sort by name after Loopflow, so a family's light and dark halves sit in
-the same column. Clicking a card previews it in every window; the chosen card is
-ringed in the window's focus color. A theme with unreadable roles shows why
-under the cards, before **Apply**.
+the same column. Clicking a card or changing **System** / **Light** / **Dark**
+applies immediately across every window and registers **Undo** (**⌘Z** or the
+Undo notice) to restore the previous `theme:` declaration, including absence.
+In System mode, picking the other side changes what macOS will use on that side.
+**View → Appearance** uses the same mode setting. The system accent outlines
+the chosen card. If a theme fails a readability check, Settings shows the
+reason and keeps the current theme.
 
 Check font weight in an open shell or Session pane. Previewing, applying or
 cancelling a theme changes only its colors.
@@ -345,10 +347,9 @@ theme: "light:Folio,dark:Fig"   # System
 theme: "Fig"                    # Dark (or Light) mode: one name
 ```
 
-**Apply** rewrites only that line; **Cancel**, Escape or closing writes nothing.
-Edit it by hand and every window follows; a misspelled name keeps the last theme
-and names the fix. Absent means Loopflow Light/Dark. A repository's
-`.lf/config.yaml` never sets the theme.
+Selection rewrites only that line. Edit it by hand and every window follows; a
+misspelled name keeps the last theme and names the fix. Absent means Loopflow
+Light/Dark. A repository's `.lf/config.yaml` never sets the theme.
 
 Built-ins are 12 families, each a light and a dark theme. **Loopflow Light** keeps
 the original cream/burgundy; **Loopflow Dark** is blue-grey with rose headings and
@@ -358,11 +359,12 @@ light half **Fig Leaf** a leaf-green ground with plum ink.
 
 Your themes are Ghostty theme files in `~/.lf/themes/`; `~/.config/ghostty/themes/`
 is read too, never written. Names resolve to yours, then built-ins, then Ghostty's.
-A file named like a built-in overrides it. **Customize <name>**, beside Cancel and Apply,
-acts on the card chosen last: on a built-in it writes your copy; on yours it edits in
-place. **Delete <name>** removes yours (**Revert <name> to built-in** for an override).
-**Import file…** copies a theme into Yours on the side its colors say; in Light or
-Dark mode the preview switches to that side.
+A file named like a built-in overrides it. **Customize <name>** edits the
+last card you picked. **Import file…** opens a draft on the light or dark side
+indicated by the file’s colors. In Light or Dark mode the selection follows
+that side. **Apply** saves the draft in **Yours**. **Cancel** or closing the
+editor discards it. For a personal file, **Delete <name>** stages removal.
+**Revert <name> to built-in** removes an override when you apply.
 
 ```
 background = #171924
@@ -376,7 +378,7 @@ loopflow-titlebar = #242f50
 
 Theme files can contain up to 256 KiB of UTF-8. Background and foreground
 require six-digit RGB values. Cursor, selection, `palette = N=#RRGGBB` and
-`loopflow-` roles are optional. Preview lists defaults, repeated colors and
+`loopflow-` roles are optional. Diagnostics list defaults, repeated colors and
 omitted settings such as fonts, commands, keybindings, includes and theme references.
 
 The title bar is its own role. A file that leaves it out gets a bar from its
@@ -385,9 +387,10 @@ stays readable; a theme you made before the role existed may show a slightly
 darker bar. **Customize** lists **Title bar** under Actions and focus, and saving
 states it: after that, changing **Button** leaves the bar alone.
 
-Unreadable app, default, selection or cursor text prevents Apply. ANSI colors keep
-their source values. Loopflow reads personal non-color settings from your Ghostty
-configuration at launch, ignores its `theme =` setting and leaves the file untouched.
+Unreadable app, default, selection or cursor text prevents saving the theme. ANSI
+colors keep their source values. Loopflow reads personal non-color settings from
+your Ghostty configuration at launch, ignores its `theme =` setting and leaves
+the file untouched.
 Source and license notices ship offline with the catalogue.
 
 Under the jump bar, the workflow bar reads where the Task stands:
@@ -683,8 +686,8 @@ Files reached through symlinks remain readable within the checkout and show a
 read-only explanation. If a regular file becomes a symlink, its retained draft
 and Undo survive while editing, Save and autosave stop.
 
-Typing autosaves after two quiet seconds. Disable **Autosave Task Files** in the
-Settings → Editing for explicit **Save** (⌘S). Both modes receive filesystem changes live,
+Typing autosaves after two quiet seconds. Disable **Autosave Task Files** in
+**Settings → General** for explicit **Save** (⌘S). Both modes receive filesystem changes live,
 including atomic replacements. Disjoint local edits survive; disk wins overlaps
 without a conflict dialog. Incoming updates reset Undo to the surviving local
 edits, so Undo cannot restore text the LLM replaced. IME composition completes
@@ -1057,24 +1060,10 @@ codebase tree, and registry health.
 
 ## Work tracking
 
-The sidebar presents the repository's retained working Task order, then direct Wave
-rows. Opening started, unpaused Work appends once. Activity and query refresh never
-reorder slots; explicit pause hides a slot without deleting its stored position.
-Working references are saved through WorkCache; they convey no execution authority.
-Unstarted Tasks show their brief beside a Start offer in the Session slot without
-joining the working set. Only Start runs anything.
+Work observation keeps the last successful reading on failure. Missing planning
+leaves an unavailable row. Wave navigation retains the sidebar viewport.
 
-The navigator's Working tasks / Available / Running choice filters presentation
-without selecting Work or changing panes, clients, focus or drafts. Missing planning
-keeps an unavailable row. Work observation retains its last reading on failure.
-Wave navigation leaves working positions and the sidebar viewport intact.
-
-Title-bar breadcrumbs follow hierarchy as a jump bar: each name navigates, and the
-› after it lists what is inside (repository › Waves, Wave › Tasks) with a filter
-that searches that scope. Back follows visits, and Cmd+K routes
-cross-repository Work to its own window. Cmd+1–9 and Control+Tab address the same
-stable eligible slots, independent of the filter. Each Work owns one retained
-workspace. Dashboard queries compose those workspaces side by side; ordinary
+Each Work owns one retained workspace. Dashboard queries compose those workspaces side by side; ordinary
 navigation selects one destination. Rust owns query membership and arrangement,
 including hidden occurrences and duplicate suppression. Tiles show the primary
 Session or explicit zoom without acquiring a provider.
@@ -1380,7 +1369,7 @@ drafts remain retained; no remote planning tree or execution record is imported.
 
 Every Desktop gesture is a `DesktopAction` in `LoopflowMac/DesktopActions.swift`:
 name (the `lf desktop` verb), title, arguments, default keys and `perform`.
-`DesktopActionMonitor`, the View and File menus, the Keyboard Shortcuts window and
+`DesktopActionMonitor`, the View and File menus, **Settings → Shortcuts**, the Keyboard Shortcuts window and
 the Desktop socket look actions up there; nothing else mutates navigation or panes.
 Keys and menus act on the shown workspace's focused pane; a socket request names an
 exact window and pane, and `lf desktop` resolves those from one inspection (see the

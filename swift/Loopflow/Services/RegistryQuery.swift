@@ -51,6 +51,7 @@ public enum ServedRead: Equatable, Sendable, Encodable {
     case waveList
     case machineSelf
     case desktopPortfolio
+    case configScope(directory: String?, wave: String?, target: ConfigurationTarget)
     case configSettings(directory: String, wave: String?, skill: String?, graph: String?, step: String?)
     case graphList(directory: String)
     case desktopViewGet(directory: String, expression: String?)
@@ -61,6 +62,7 @@ public enum ServedRead: Equatable, Sendable, Encodable {
     case wavePlan(directory: String, wave: String)
     case taskList(directory: String, wave: String, after: String?)
     case machineList
+    case machineStatus(machine: String)
     case sessionHistory(since: String, limit: Int, wave: String?, project: String?, task: String?)
     case planList(directory: String, wave: String?, task: String?, all: Bool)
     case repoTracker(directory: String)
@@ -130,6 +132,8 @@ public enum ServedRead: Equatable, Sendable, Encodable {
             return ["desktop", "view", "list", "--all", "--json"] + (expression.map { ["--expression", $0] } ?? [])
         case .desktopPortfolio:
             return ["desktop", "portfolio", "--json"]
+        case .configScope(let directory, let wave, let target):
+            return ["config", "scope", "--json"] + target.arguments + (directory == nil ? ["--global"] : []) + (wave.map { ["--wave", $0] } ?? [])
         case .configSettings(_, let wave, let skill, let graph, let step):
             return ["config", "settings", "--json"] + (wave.map { ["--wave", $0] } ?? [])
                 + (skill.map { ["--skill", $0] } ?? []) + (graph.map { ["--graph", $0] } ?? [])
@@ -150,6 +154,7 @@ public enum ServedRead: Equatable, Sendable, Encodable {
             return ["wave", "plan", wave, "--json"]
         case .taskList(_, let wave, let after):
             return ["task", "list", "--closed", "--wave", wave, "--json"] + (after.map { ["--after", $0] } ?? [])
+        case .machineStatus(let machine): return ["machine", "status", machine, "--json"]
         case .machineList:
             return ["machine", "list", "--json"]
         case .sessionHistory(let since, let limit, let wave, let project, let task):
@@ -230,6 +235,7 @@ public enum ServedRead: Equatable, Sendable, Encodable {
         case .viewSelect(let expression):
             TaggedFields("view.select", ["expression": expression])
         case .desktopPortfolio: TaggedFields("desktop.portfolio")
+        case .configScope(let directory, let wave, let target): TaggedFields("config.scope", ["directory": directory, "wave": wave, "target": target])
         case .configSettings(let directory, let wave, let skill, let graph, let step):
             TaggedFields("config.settings", ["directory": directory, "wave": wave, "skill": skill, "graph": graph, "step": step])
         case .graphList(let directory): TaggedFields("graph.list", ["directory": directory])
@@ -245,6 +251,7 @@ public enum ServedRead: Equatable, Sendable, Encodable {
             TaggedFields("wave.plan", ["directory": directory, "wave": wave])
         case .taskList(let directory, let wave, let after):
             TaggedFields("task.list", ["directory": directory, "wave": wave, "after": after, "closed": true])
+        case .machineStatus(let machine): TaggedFields("machine.status", ["machine": machine])
         case .machineList: TaggedFields("machine.list")
         case .sessionHistory(let since, let limit, let wave, let project, let task):
             TaggedFields("session.history", ["since": since, "limit": limit, "wave": wave, "project": project, "task": task])
@@ -336,7 +343,7 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
     /// Process carrying a sync started detached.
     case checkoutSync(directory: String, onto: String?, preview: Bool, manual: Bool, continueSync: Bool, abort: Bool,
                       adopt: Bool)
-    case checkoutCreate(directory: String, name: String, preview: Bool, persistent: Bool)
+    case checkoutCreate(directory: String, name: String, preview: Bool, persistent: Bool, stack: Bool)
     /// Service credentials on the Machine, run from `/`.
     case accountDisconnect(provider: String)
     /// Served, no browser profile is chosen interactively.
@@ -367,7 +374,7 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
     case desktopDashboardHide(directory: String, id: String, member: String)
     case desktopDashboardShow(directory: String, id: String, member: String)
     case desktopDashboardSlots(directory: String, id: String, revision: Int64, slots: String)
-    case desktopDashboardMove(directory: String, board: String, member: String, destination: String)
+    case desktopDashboardMove(directory: String, board: String, member: String, destination: String, side: DropSide?)
 
     /// The equivalent `lf` command, without its `--cwd`.
     public var argv: [String] {
@@ -447,15 +454,16 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
             return ["repo", "release", "run"] + [version].compactMap { $0 } + argument("--target", target) + ["--json"]
         case .checkoutCommit(_, let message, let push, let noAdd, let paths, let agent):
             var argv = argument("--agent", agent) + ["commit"] + argument("--message", message)
-            argv += Self.flags([("--push", push), ("--no-add", noAdd)])
+            argv += Self.flags([("--no-push", !push), ("--no-add", noAdd)])
             return argv + paths + ["--json"]
         case .checkoutSync(_, let onto, let preview, let manual, let continueSync, let abort, let adopt):
             var argv = ["sync"] + argument(nil, onto)
             argv += Self.flags([("--plan", preview), ("--manual", manual), ("--continue", continueSync)])
             argv += Self.flags([("--abort", abort), ("--adopt", adopt)])
             return argv + ["--json"]
-        case .checkoutCreate(_, let name, let preview, let persistent):
-            return ["wt", "create", name] + Self.flags([("--plan", preview), ("--persistent", persistent)]) + ["--json"]
+        case .checkoutCreate(_, let name, let preview, let persistent, let stack):
+            let flags = Self.flags([("--plan", preview), ("--persistent", persistent), ("--stack", stack)])
+            return ["wt", "create", name] + flags + ["--json"]
         case .desktopPortfolioSet(let change): return ["desktop", "portfolio"] + change + ["--json"]
         case .desktopDashboardQuery(_, let id, let expression, let revision):
             return ["desktop", "dashboard", "query"] + (revision.map { ["--revision=\($0)"] } ?? []) + ["--", id, expression]
@@ -471,8 +479,9 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
             return ["desktop", "dashboard", "show", "query:\(id)/\(member)"]
         case .desktopDashboardSlots(_, let id, let revision, _):
             return ["desktop", "dashboard", "slots", "query:" + id, "--revision=\(revision)"]
-        case .desktopDashboardMove(_, let board, let member, let destination):
+        case .desktopDashboardMove(_, let board, let member, let destination, let side):
             return ["desktop", "dashboard", "move", "\(board)/\(member)", "--destination", destination]
+                + argument("--side", side?.rawValue)
         }
     }
 
@@ -650,9 +659,9 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
         case .checkoutSync(let directory, let onto, let preview, let manual, let continueSync, let abort, let adopt):
             TaggedFields("checkout.sync", ["directory": directory, "onto": onto, "preview": preview, "manual": manual,
                                            "continue": continueSync, "abort": abort, "adopt": adopt])
-        case .checkoutCreate(let directory, let name, let preview, let persistent):
+        case .checkoutCreate(let directory, let name, let preview, let persistent, let stack):
             TaggedFields("checkout.create", ["directory": directory, "name": name, "preview": preview,
-                                             "persistent": persistent])
+                                             "persistent": persistent, "stack": stack])
         case .accountDisconnect(let provider):
             TaggedFields("account.disconnect", ["provider": provider])
         case .accountConnect(let provider, let chromeProfile, let apiKey):
@@ -698,9 +707,9 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
             TaggedFields("desktop.dashboard.show", ["directory": directory, "id": id, "member": member])
         case .desktopDashboardSlots(let directory, let id, let revision, let slots):
             TaggedFields("desktop.dashboard.slots", ["directory": directory, "id": id, "revision": revision, "slots": slots])
-        case .desktopDashboardMove(let directory, let board, let member, let destination):
+        case .desktopDashboardMove(let directory, let board, let member, let destination, let side):
             TaggedFields("desktop.dashboard.move", ["directory": directory, "board": board, "member": member,
-                                       "destination": destination])
+                                       "destination": destination, "side": side])
         }
     }
 
@@ -858,17 +867,10 @@ public struct RegistryQuery: Sendable {
             .desktopDashboardSlots(directory: repoPath, id: id, revision: revision, slots: input)))
     }
 
-    /// Move `member`'s tile into `target`'s place in a Dashboard's order, as the
-    /// repository order's drop does; Rust applies the move and decides the mode.
+    /// Move `member`'s tile into `target`'s place in a saved Dashboard's order.
     public func reorderDashboard(id: String, member: WorkWorkspaceKey, to target: WorkWorkspaceKey, repoPath: String) async throws -> Dashboard {
         try Self.decode(Dashboard.self, from: await write(
-            .desktopDashboardMove(directory: repoPath, board: "query:" + id, member: member.selector, destination: target.selector)))
-    }
-
-    /// Move a Working Tasks member into `target`'s place in the repository's one Task order.
-    public func reorderTask(_ task: String, to target: String, repoPath: String) async throws -> [String] {
-        try Self.decode([String].self, from: await write(
-            .desktopDashboardMove(directory: repoPath, board: "working-tasks", member: "task:" + task, destination: "task:" + target)))
+            .desktopDashboardMove(directory: repoPath, board: "query:" + id, member: member.selector, destination: target.selector, side: nil)))
     }
 
     public func portfolio(_ arguments: [String] = []) async throws -> Portfolio {
@@ -954,7 +956,7 @@ public struct RegistryQuery: Sendable {
                     }
                     continuation.onTermination = { _ in reader.cancel() }
                 }
-                return LineSubscription(lines: lines, send: subscription.send, cancel: subscription.cancel,
+                return LineSubscription(lines: lines, checkpoint: subscription.checkpoint, cancel: subscription.cancel,
                                         unreadable: subscription.unreadable)
             }
         }
@@ -1175,8 +1177,8 @@ public struct RegistryQuery: Sendable {
 
 
     /// Send `change` under `requestID`; a repeat under it gets the first answer.
-    /// Returns the revisions it advanced. A refusal throws a `ServerError` whose
-    /// `revisions` is nil; a change that failed partway carries what it advanced.
+    /// Returns the revisions observed across the write. A Machine failure
+    /// carries its code and revisions in `ServerError`.
     public func change(_ change: ServedWrite, requestID: String) async throws -> Revisions? {
         try await self.change(change, requestID)
     }

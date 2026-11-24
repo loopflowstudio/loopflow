@@ -20,7 +20,9 @@ forward migration.
 - A member the product stopped using carries `-- leaving: <table>[.<column>]
   <Task ID>` in the migration that stopped using it. The mark names a current
   member, and a contract whose expand step carries marks drops only marked
-  members.
+  members. A later `-- keeping: <table>[.<column>] <Task ID>` retracts the mark,
+  since merged migrations never change; marking the member again restarts its
+  clock.
 
     uv run python scripts/check_migrations.py
 
@@ -52,9 +54,10 @@ DRAFT_MARKER = re.compile(r"^--[ \t]*draft:[ \t]*([a-z][a-z0-9_]*)[ \t]*$", re.M
 # exported the data it drops before the SQL ran.
 EXPAND_MARKER = re.compile(r"^--[ \t]*expand:[ \t]*([a-z][a-z0-9_]*)[ \t]*$", re.MULTILINE)
 EXPORTS_MARKER = re.compile(r"^--[ \t]*exports:[ \t]*(\S.*?)[ \t]*$", re.MULTILINE)
-# A member the product stopped using, and the Task that drops it.
-LEAVING_LINE = re.compile(r"^--[ \t]*leaving:(.*)$", re.MULTILINE)
-LEAVING_MARK = re.compile(
+# A member the product stopped using, and the Task that drops it; or a member
+# the product took back, and the Task that kept it.
+MARK_LINE = re.compile(r"^--[ \t]*(leaving|keeping):(.*)$", re.MULTILINE)
+MARK = re.compile(
     r"[ \t]*([a-z_][a-z0-9_]*(?:\.[a-z_][a-z0-9_]*)?)[ \t]+([A-Z][A-Z0-9]*-\d+)[ \t]*"
 )
 # How long an expand migration has been on origin/main before its contract may
@@ -64,8 +67,8 @@ STAGING_DAYS = 30
 
 
 @dataclass(frozen=True)
-class Leaving:
-    """`-- leaving: tasks.worktree LOO-877`: `member` is `table` or `table.column`."""
+class Mark:
+    """A `-- leaving:` or `-- keeping:` mark; `member` is `table` or `table.column`."""
 
     member: str
     task: str
@@ -78,14 +81,34 @@ class Leaving:
         return self.member == name
 
 
-def leaving_marks(name: str, sql: str) -> list[Leaving]:
+def _marks(name: str, sql: str) -> list[tuple[str, Mark]]:
     marks = []
-    for line in LEAVING_LINE.findall(sql):
-        mark = LEAVING_MARK.fullmatch(line)
+    for verb, line in MARK_LINE.findall(sql):
+        mark = MARK.fullmatch(line)
         if mark is None:
-            _fail(f"{name}: `-- leaving:{line}` is not `-- leaving: <table>[.<column>] <Task ID>`")
-        marks.append(Leaving(member=mark.group(1), task=mark.group(2)))
+            _fail(f"{name}: `-- {verb}:{line}` is not `-- {verb}: <table>[.<column>] <Task ID>`")
+        marks.append((verb, Mark(member=mark.group(1), task=mark.group(2))))
     return marks
+
+
+# Each leaving member with the migration that marked it last, in apply order.
+ActiveMarks = dict[str, tuple[str, Mark]]
+
+
+def _apply_marks(active: ActiveMarks, name: str, marks: list[tuple[str, Mark]]) -> None:
+    for verb, mark in marks:
+        if verb == "leaving":
+            active[mark.member] = (name, mark)
+        else:
+            active.pop(mark.member, None)
+
+
+def active_leaving_marks(catalog: Catalog) -> ActiveMarks:
+    """The leaving marks no later migration kept, replayed in the order `build.rs` applies."""
+    active: ActiveMarks = {}
+    for name in catalog.ordered():
+        _apply_marks(active, name, _marks(name, catalog.files[name].decode()))
+    return active
 
 
 def drop_after(merged_at: dt.datetime) -> dt.date:
@@ -452,14 +475,22 @@ def _check_staging(local: dict[str, bytes], main: dict[str, bytes], unmerged: li
     """A new slug is additive, or a dated contract that exports what it drops."""
     catalog = Catalog.of_origin_main(main)
     conn = catalog.replay()
+    active = active_leaving_marks(catalog)
     for name in unmerged:
         sql = local[name].decode()
         before = _schema(conn)
         _apply(conn, name, sql)
         after = _schema(conn)
-        for mark in leaving_marks(name, sql):
+        marks = _marks(name, sql)
+        for verb, mark in marks:
             if not after.has(mark.member):
-                _fail(f"{name} marks {mark.member} leaving, but no such table or column exists")
+                action = (
+                    f"marks {mark.member} leaving" if verb == "leaving" else f"keeps {mark.member}"
+                )
+                _fail(f"{name} {action}, but no such table or column exists")
+            if verb == "keeping" and mark.member not in active:
+                _fail(f"{name} keeps {mark.member}, which no earlier migration marks leaving")
+        _apply_marks(active, name, marks)
         drops, breaks = _compare(before, after)
         if breaks:
             _fail(
@@ -467,10 +498,12 @@ def _check_staging(local: dict[str, bytes], main: dict[str, bytes], unmerged: li
                 f" and drop the old one in a contract {STAGING_DAYS} days after that merges"
             )
         if drops:
-            _check_contract(name, sql, drops, catalog)
+            _check_contract(name, sql, drops, catalog, active)
 
 
-def _check_contract(name: str, sql: str, drops: list[str], catalog: Catalog) -> None:
+def _check_contract(
+    name: str, sql: str, drops: list[str], catalog: Catalog, active: ActiveMarks
+) -> None:
     """A contract names an aged expand step, exports, and drops only what that step superseded."""
     dropped = ", ".join(drops)
     expand = EXPAND_MARKER.search(sql)
@@ -499,13 +532,15 @@ def _check_contract(name: str, sql: str, drops: list[str], catalog: Catalog) -> 
             f"{name} contracts {step}, which merged {age.days} days ago; its contract clears on"
             f" {drop_after(merged_at):%Y-%m-%d} ({STAGING_DAYS} days)"
         )
-    marks = leaving_marks(expand_file, catalog.files[expand_file].decode())
-    if marks:
+    expand_marks = _marks(expand_file, catalog.files[expand_file].decode())
+    if any(verb == "leaving" for verb, _ in expand_marks):
+        # A member a later migration kept is no longer this step's to drop.
+        marks = [mark for marked, mark in active.values() if marked == expand_file]
         for item in drops:
             if not any(mark.covers(item) for mark in marks):
                 _fail(
-                    f"{name} drops {item}, which {step} does not mark leaving;"
-                    " a contract of a marking migration drops only marked members"
+                    f"{name} drops {item}, which {step} does not mark leaving or a later"
+                    " migration keeps; a contract of a marking migration drops only marked members"
                 )
     left_behind = _schema(catalog.replay(before=expand_file)).members()
     for item in drops:

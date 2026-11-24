@@ -98,6 +98,10 @@ impl Error {
         }
     }
 
+    pub(crate) fn conflict(message: impl Into<String>) -> Self {
+        Self::new(ErrorCode::Conflict, message)
+    }
+
     pub fn with(mut self, data: serde_json::Value) -> Self {
         self.data = Some(data);
         self

@@ -30,11 +30,11 @@ mod linear_issue_state;
 mod subscription_events;
 mod task_started;
 
-mod linear_team_checks;
 mod machine_records;
 mod metrics;
 pub mod plan_carriers;
 pub mod planning_order;
+pub mod planning_scope_checks;
 mod planning_sync;
 pub mod planning_write;
 mod pr_landings;
@@ -325,89 +325,28 @@ fn open_unmigrated(path: &Path) -> StoreResult<Connection> {
     Ok(conn)
 }
 
-/// SQL for an open Task and a Done Task over alias `t`, for this registry's schema.
-fn task_state_sql(conn: &Connection) -> StoreResult<(String, &'static str)> {
-    // This guard reads the installed release without migrating it. Its completion
-    // owner may still be the Workflow, rather than the candidate's planning field.
-    let planning_completion: bool = conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('tasks') WHERE name='planning_completed')",
-        [],
-        |row| row.get(0),
-    )?;
-    let open = if planning_completion {
-        durable::task_open_sql("t")
-    } else {
-        "t.abandoned_at IS NULL AND NOT EXISTS(SELECT 1 FROM task_workflows wf \
-         WHERE wf.task_id=t.id AND wf.node='end' AND wf.edge IS NULL)"
-            .to_owned()
-    };
-    let done = if planning_completion {
-        "t.abandoned_at IS NULL AND t.planning_completed IS 1"
-    } else {
-        "t.abandoned_at IS NULL AND EXISTS(SELECT 1 FROM task_workflows wf \
-         WHERE wf.task_id=t.id AND wf.node='end' AND wf.edge IS NULL)"
-    };
-    Ok((open, done))
-}
-
-/// Every branch a Task names, on the Task or any of its PRs, and whether
+/// Every branch a Task names, on its checkout or any of its PRs, and whether
 /// that Task is still open.
 pub fn read_task_branches(path: &Path) -> StoreResult<Vec<(String, bool)>> {
     let conn = open_unmigrated(path)?;
-    let (open, _) = task_state_sql(&conn)?;
-    let checkouts: bool = conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='task_checkouts')",
-        [],
-        |row| row.get(0),
-    )?;
-    // A registry from before `task_checkouts` keeps the branch on the Task
-    // (removed by Task 538340).
-    let checkout_branches = if checkouts {
-        "SELECT task_id, branch FROM task_checkouts"
-    } else {
-        "SELECT id AS task_id, branch FROM tasks"
-    };
     let mut statement = conn.prepare(&format!(
         "SELECT b.branch,({open}) FROM tasks t JOIN \
-         ({checkout_branches} UNION SELECT task_id, branch FROM task_prs) b \
-         ON b.task_id=t.id"
+         (SELECT task_id, branch FROM task_checkouts UNION SELECT task_id, branch FROM task_prs) b \
+         ON b.task_id=t.id",
+        open = durable::task_open_sql("t"),
     ))?;
     let rows = statement.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;
     rows.map(|row| row.map_err(StoreError::from)).collect()
 }
 
+/// This Machine's Task checkouts, read from a registry without migrating it.
 pub fn read_task_worktree_ownership(path: &Path) -> StoreResult<Vec<TaskWorktreeOwnership>> {
     let conn = open_unmigrated(path)?;
-    let (open, done) = task_state_sql(&conn)?;
-    // Old registries still protect unfinished work, but cannot grant deletion
-    // until they can establish this machine's positive checkout ownership.
-    let (checkouts, placed, local_flag, local_route): (bool, bool, bool, bool) = conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='task_checkouts'), \
-         EXISTS(SELECT 1 FROM pragma_table_info('tasks') WHERE name='checkout_machine_id'), \
-         EXISTS(SELECT 1 FROM pragma_table_info('machines') WHERE name='is_local'), \
-         EXISTS(SELECT 1 FROM pragma_table_info('machines') WHERE name='route')",
-        [],
-        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
-    )?;
-    let query = if checkouts {
-        format!(
-            "SELECT t.id,c.worktree,({done}),({open}) FROM task_checkouts c \
-             JOIN tasks t ON t.id=c.task_id"
-        )
-    } else {
-        // A registry from before `task_checkouts` (removed by Task 538340).
-        let local = if placed && local_flag {
-            "COALESCE(t.checkout_machine_id=(SELECT id FROM machines WHERE is_local=1),0)"
-        } else if placed && local_route {
-            "COALESCE(t.checkout_machine_id=(SELECT id FROM machines WHERE route='local'),0)"
-        } else {
-            "0"
-        };
-        format!(
-            "SELECT t.id,t.worktree,({done}) AND ({local}),({open}) FROM tasks t \
-             WHERE t.worktree IS NOT NULL AND t.worktree != ''"
-        )
-    };
+    let query = format!(
+        "SELECT t.id,c.worktree,t.abandoned_at IS NULL AND t.planning_state IS 'completed',({open}) \
+         FROM task_checkouts c JOIN tasks t ON t.id=c.task_id",
+        open = durable::task_open_sql("t"),
+    );
     let mut statement = conn.prepare(&query)?;
     let rows = statement.query_map([], |row| {
         Ok(TaskWorktreeOwnership {
@@ -643,6 +582,8 @@ impl SqliteStore {
         crate::instrumentation::observe_sqlite(&conn);
         configure_write_connection(&mut conn, path, SQLITE_WRITE_BUSY_TIMEOUT)?;
         super::migration_runner::apply_sqlite(build, &conn, observers)?;
+        #[cfg(test)]
+        crate::leaving_guard::install(&conn);
         crate::history::attach(&conn, path);
         Ok(Self::with_history(conn, token_key, Some(path)))
     }

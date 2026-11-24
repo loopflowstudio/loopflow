@@ -208,7 +208,8 @@ fn creation_adopts_only_the_selected_work() {
     assert_eq!(table.primary(&plain), None);
     assert_eq!(table.session(&research).task_id, None);
 
-    // A checkout alone selects no conversation, however recent.
+    // A checkout alone selects no primary, however recent, and the
+    // conversation already open in it stays out of the Task.
     let adopted = table.create("Prototype", None, Some(&root)).unwrap();
     assert_eq!(adopted.worktree.as_deref(), Some(root.as_path()));
     assert_eq!(adopted.branch, "prototype");
@@ -235,6 +236,74 @@ fn creation_adopts_only_the_selected_work() {
         crate::git::current_branch(&root).unwrap().as_deref(),
         Some("prototype")
     );
+}
+
+#[test]
+fn a_worktree_inside_a_tasks_checkout_becomes_its_own_tasks_checkout() {
+    let table = Table::new(false);
+    let outer_root = table.worktree("outer");
+    let outer = table.create("Outer", None, Some(&outer_root)).unwrap();
+    let nested_path = outer_root.join("nested");
+    git(
+        &table.main(),
+        &[
+            "worktree",
+            "add",
+            "-b",
+            "nested",
+            nested_path.to_str().unwrap(),
+        ],
+    );
+    let nested_root = nested_path.canonicalize().unwrap();
+    // Until a Task adopts it, the nested worktree is nobody's checkout: bare
+    // `lf resume` there does not open the outer Task's conversation.
+    let resume = |cwd: &Path| {
+        table
+            .runtime
+            .block_on(crate::ops::human_session::existing_connection(
+                &table.store,
+                cwd,
+                crate::ops::human_session::SessionTarget::Context,
+            ))
+    };
+    let error = resume(&nested_root).unwrap_err().to_string();
+    assert!(error.contains("no associated work conversation"), "{error}");
+    assert_eq!(
+        resume(&outer_root).unwrap().0,
+        Some(crate::session::PrimaryScope::Task(outer.id.clone()))
+    );
+    // Its branch is its own, so `lf pr open` and `lf commit` there deliver no Task.
+    let delivers = |cwd: &Path| match table
+        .runtime
+        .block_on(super::super::delivery::resolve_managed_task(cwd))
+        .unwrap()
+    {
+        super::super::delivery::ManagedTask::Managed { task, .. } => Some(task.id),
+        super::super::delivery::ManagedTask::Unmanaged => None,
+    };
+    assert_eq!(delivers(&nested_root), None);
+    assert_eq!(delivers(&outer_root), Some(outer.id.clone()));
+    // Bare `lf task status` says the nested worktree has no Task, while any
+    // directory of the outer checkout's own worktree is the outer Task's.
+    let status = |cwd: &Path| super::super::task_status(cwd, None).map(|status| status.task);
+    let error = status(&nested_root).unwrap_err().to_string();
+    assert!(error.contains("this checkout has no Task"), "{error}");
+    std::fs::create_dir_all(outer_root.join("src")).unwrap();
+    assert_eq!(
+        status(&outer_root.join("src")).unwrap().map(|task| task.id),
+        Some(outer.id.clone())
+    );
+
+    let nested = table.create("Nested", None, Some(&nested_root)).unwrap();
+    assert_ne!(nested.id, outer.id);
+    assert_eq!(nested.worktree.as_deref(), Some(nested_root.as_path()));
+    assert_eq!(delivers(&nested_root), Some(nested.id.clone()));
+    assert_eq!(table.task(&outer.id).worktree, Some(outer_root.clone()));
+    assert_eq!(
+        table.create("Retry", None, Some(&outer_root)).unwrap().id,
+        outer.id
+    );
+    assert_eq!(table.count("tasks"), 2);
 }
 
 #[test]
@@ -468,7 +537,8 @@ fn binding_refuses_background_and_closed_sessions() {
         );
         assert!(refusal(table.create("Same work", Some(session), None))
             .contains("unfinished interactive Session"));
-        assert_eq!(table.session(session).task_id, None);
+        // Each started in the Task's checkout, so it is the Task's work.
+        assert_eq!(table.session(session).task_id, Some(task.id.clone()));
     }
     assert_eq!(table.primary(&task), None);
     assert_eq!(table.count("tasks"), 1);

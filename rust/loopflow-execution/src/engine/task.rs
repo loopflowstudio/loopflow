@@ -135,33 +135,109 @@ pub fn auto_off(issue: &str, reason: Option<&str>) -> Result<AutoOff> {
     })
 }
 
-/// `task.steer`: direction for the Task's runs, as `lf steer <issue>
-/// <message>` does. The delivery is [`super::session::steer`]'s Task scope:
-/// the entry joins the Task's thread and the store saves it as the Task's
-/// steer, which every Session on the Task, now or later, reads at its next
-/// boundary. Returns the thread with the entry.
-pub fn steer(
-    directory: &Path,
-    issue: &str,
-    wave: Option<&str>,
+/// Where the steer has been saved so far.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum SteerReached {
+    Owner,
+    Shared,
+    Here,
+}
+
+#[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct SteerDelivery {
+    pub reached: SteerReached,
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub runs_on: Option<loopflow_model::durable::MachineRef>,
+    pub sentence: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct TaskSteerReceipt {
+    pub identifier: String,
+    pub steer_id: loopflow_model::id::SteerId,
+    pub delivery: SteerDelivery,
+}
+
+/// Save a direction once. When the owner could not be reached, wait for the
+/// exchange and read the acknowledgement for this comment before answering.
+pub async fn steer(
+    store: &crate::store::Store,
+    task: &crate::work::task::Task,
     message: &str,
-) -> Result<TaskComments> {
-    let repo = crate::ops::task::task_repository(directory, Some(issue)).map_err(written)?;
-    tokio::runtime::Runtime::new()
-        .map_err(written)?
-        .block_on(async {
-            let (store, task) = crate::ops::task::resolve_saved_task(&repo, wave, issue)
-                .await
-                .map_err(written)?;
-            super::session::steer(
-                &store,
-                &repo,
-                super::session::SteerScope::Task { issue, wave },
-                message,
+    participant: Option<String>,
+    elsewhere: Option<(loopflow_model::durable::MachineRef, String)>,
+) -> anyhow::Result<TaskSteerReceipt> {
+    use crate::ops::{
+        planning_sync,
+        task::{append_task_comment_as, repository_for_task},
+    };
+    use loopflow_storage::sqlite::tracker_actions::ActionOwner;
+    let repo = repository_for_task(store, task)?;
+    let repo = repo.to_string_lossy();
+    let owner = ActionOwner::Task(task.id.clone());
+    // Callers validate before any peer is dialed; the append validates again.
+    let comment = append_task_comment_as(store, task, message, true, || Ok(participant))?;
+    let steer = store
+        .sqlite
+        .steer_by_source(&format!("comment:{comment}"), "local")?
+        .ok_or_else(|| {
+            Error::new(
+                ErrorCode::OutcomeUnknown,
+                format!("comment {comment} derived no steer"),
             )
-            .await?;
-            store.task_comments(&task.id).map_err(written)
-        })
+        })?;
+    let id = &steer.id;
+    let delivery = match elsewhere {
+        None => {
+            planning_sync::sync_after_save(store, &repo, &owner).await;
+            let reader = super::session::task_steer_reader(&store.sqlite, task)?;
+            SteerDelivery {
+                reached: SteerReached::Owner,
+                runs_on: None,
+                sentence: format!("Saved {id}; {reader}"),
+            }
+        }
+        Some((machine, reason)) => {
+            planning_sync::sync_saved(store, &repo, &owner).await;
+            let name = machine.name();
+            let carrier = store.sqlite.comment_carrier(&task.id, &comment)?;
+            let (reached, sentence) = match carrier {
+                Some(carrier) => {
+                    let carrier = match carrier.as_str() {
+                        "linear" => "Linear",
+                        "asana" => "Asana",
+                        "git" => "Git",
+                        "hub" => "the hub",
+                        other => other,
+                    };
+                    let next = if store.sqlite.task_state(&task.id)?.is_terminal() {
+                        format!("{} is finished", task.identifier)
+                    } else {
+                        format!("{name} reads it when it next syncs")
+                    };
+                    (
+                        SteerReached::Shared,
+                        format!("Queued {id} in {carrier} for {name}; {reason}. {next}"),
+                    )
+                }
+                None => (
+                    SteerReached::Here,
+                    format!("Saved {id} here for {name}; {reason}. Sync is pending."),
+                ),
+            };
+            SteerDelivery {
+                reached,
+                runs_on: Some(machine),
+                sentence,
+            }
+        }
+    };
+    Ok(TaskSteerReceipt {
+        identifier: task.identifier.clone(),
+        steer_id: steer.id,
+        delivery,
+    })
 }
 
 /// `task.report`: progress for the Task's thread, as `lf task report <issue>

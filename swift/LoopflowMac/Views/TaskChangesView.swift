@@ -172,25 +172,21 @@ struct TaskChangesView: View {
     // MARK: Hidden paths and groups
 
     /// Your own settings for this repository, in its `.lf/config.local.yaml`.
-    /// Reading through it resolves every layer: built-in, the repository's
-    /// `.lf/config.yaml`, your global preferences, then yours here.
     private var personalFile: JSONValue {
-        ConfigurationDestination.personalRepository.address(repository: store.cwd, wave: "")
-    }
-
-    private func explain(_ key: String) async throws -> ConfigurationValue? {
-        let data = try await ServerClient.configuration(.configExplain(destination: personalFile, key: key))
-        return try JSONDecoder().decode(ConfigurationExplanation.self, from: data).inspections.first?.settings[key]
+        .object(["kind": .string(ConfigurationDestination.personalRepository.rawValue), "repo": .string(store.cwd)])
     }
 
     private func readSettings() async {
         // A checkout on another Machine keeps the defaults for this window only.
         guard store.query.remoteMachine == nil else { return }
         do {
-            if let groups = try await explain("diff_groups").flatMap({ DiffGroupSetting.parse($0.value) }) {
+            struct Inspection: Decodable { let settings: [String: ConfigurationValue] }
+            let work = ServedRead.configSettings(directory: store.cwd, wave: nil, skill: nil, graph: nil, step: nil)
+            let settings = try await ServerClient.read(work).decode([Inspection].self).first?.settings
+            if let groups = settings?["diff_groups"].flatMap({ DiffGroupSetting.parse($0.value) }) {
                 store.diffGroups = groups
             }
-            if let hidden = try await explain("diff_hidden").flatMap(TaskFilesStore.hidden(from:)) {
+            if let hidden = settings?["diff_hidden"].flatMap(TaskFilesStore.hidden(from:)) {
                 savedHidden = hidden.filter { $0.source == nil }.map(\.pattern)
                 store.hidden = hidden
             }

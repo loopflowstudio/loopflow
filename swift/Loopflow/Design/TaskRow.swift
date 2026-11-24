@@ -235,6 +235,16 @@ extension ProgramStatusState {
     }
 }
 
+extension Array where Element == WorkSelectionState {
+    public var programState: ProgramStatusState? {
+        if contains(.blocked) { return .blocked }
+        if contains(.error) { return .error }
+        if contains(.busy) { return .working }
+        if contains(.available) { return .idle }
+        return nil
+    }
+}
+
 extension WorkViewPlan.Content {
     /// A Task's status from the states its list reading carries: what its
     /// conversation reports, else its lifecycle. The reading carries no time
@@ -243,9 +253,7 @@ extension WorkViewPlan.Content {
     /// it is the word only when the reading gives no other.
     public var status: TaskRowStatus? {
         if states.contains(.paused) { return .lifecycle(.paused) }
-        if states.contains(.blocked) { return .program(.blocked) }
-        if states.contains(.busy) { return .program(.working) }
-        if states.contains(.available) { return .program(.idle) }
+        if let state = states.programState { return .program(state) }
         if let state = states.lazy.compactMap({ TaskState(rawValue: $0.rawValue) }).first { return .lifecycle(state) }
         return unavailable.isEmpty ? nil : .unavailable(unavailable)
     }

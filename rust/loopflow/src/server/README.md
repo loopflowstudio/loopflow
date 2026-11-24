@@ -39,8 +39,9 @@ For a repository without Linear or Asana the service also reads the shared
 plan. A save, here or in the CLI, sends its own records at once
 (`plan_carriers::send`: the hub, and a Git push with no fetch, five seconds at
 most). The service reads and sends (`plan_carriers::sync`) after each command
-it answers that names a directory, and fetches every such repository's plan
-refs every 60 s, which is when another Machine's change arrives with no hub.
+it answers that names a directory. For repositories with open local claims,
+the service and running Graph steps share a hub and Git exchange every 30 s.
+The service fetches Git plan refs every 60 s for repositories without claims.
 [Without a tracker](../../../../docs/dev/planning.md#without-a-tracker-stamps-and-carriers) has the carriers.
 
 ## Recovery pass
@@ -406,7 +407,7 @@ case names one operation, including distinct claim/unassign and pin/unpin writes
 | `task.run` | `lf task run <issue>` | `engine::task` |
 | `task.auto.on` | `lf task auto on <issue>` | `engine::task` |
 | `task.auto.off` | `lf task auto off <issue>` | `engine::task` |
-| `task.steer` | `lf steer <issue> <message>` | `engine::task`; the thread entry the store saves as the Task's steer |
+| `task.steer` | `lf steer <issue> <message>` | `engine::task`; the saved steer ID and delivery receipt |
 | `task.report` | `lf task report <issue> <message>` | `engine::task` |
 | `task.pause` | `lf task pause <issue>` | Stop work on the execution Machine and return its receipt |
 | `task.unpause` | `lf task unpause <issue> [--run]` | Lift the hold there and return the requested run, or null |
@@ -443,10 +444,14 @@ case names one operation, including distinct claim/unassign and pin/unpin writes
 | `graph.run` | `lf graph <name>` (`lf -b`, detached; `task.run` keeps the Task spelling) | write; `engine::graph::run` (the Process carrying the Graph) |
 | `graph.run.get` | `lf graph show <id>` | read |
 | `session.history.get` | `lf session history show <session-id>` | read; rendered history |
+| `machine.status` | `lf machine status <id> --json` | live identity-checked connection or ended rental, up to four concurrent probes |
 | `machine.self`, `.list`, `.doctor` | `lf machine self`, `lf machine list`, `lf machine doctor` (`lf doctor`) | read |
 | `work.resolve` | `lf open <url> --link`; a `work` noun would shadow the builtin `work` skill | read |
 | `config.catalog`, `.settings`, `.get`, `.explain` | `lf config catalog`, `lf config settings`, `lf config get`, `lf config explain` | `engine::config` |
 | `config.set`, `.unset` | `lf config set`, `lf config unset` (`lf set`, `lf unset`) | `engine::config` |
+| `config.scope` | `lf config scope --json` | read or subscribe to Global, a checkout or a Wave |
+| `config.preview`, `config.edit` | Desktop Settings | preview or apply a checked file edit |
+| `config.promote` | Desktop Settings | preview, confirm, resume, dismiss or undo a declaration move |
 | `config.theme` | none; the Machine's `theme:`, read by Desktop and the phone | `engine::config` |
 | `pr.publish`, `.open`, `.submit`, `.arm`, `.abandon`, `.reconcile`, `.request_review` | `lf pr publish`, `lf pr open`, `lf pr submit`, `lf pr arm`, `lf pr abandon`, `lf pr reconcile`, `lf pr request-review` | write; `engine::pr::publish`, `open`, `submit`, `arm`, `abandon`, `reconcile`, `request_review` |
 | `pr.land` | `lf pr land` (`lf land`) | write; `engine::pr::land` (detached; the Process carrying the landing) |
@@ -484,8 +489,19 @@ the phone's `view.select` Task list and its creation destinations all read it.
   {value}`, `config.unset` and `config.explain` take `{destination, key}`, where
   a destination names an owner (`personal_global`, `shared_repo {repo}`,
   …), never a file plus a scope. `config.theme {value}` reads or sets the
-  serving Machine's `theme:`. A failed or uncertain save is never replayed; setting values are
-  omitted from request telemetry.
+  serving Machine's `theme:`. The reply includes the entries for a checked
+  edit and Undo. `config.scope {directory, wave, target}` reads or subscribes
+  to effective values and the authored slots in applicable files.
+  A null directory selects Global. A target selects general work, a Skill or
+  an authored Graph step. Each editable slot names its key and includes the
+  YAML path components and values to pass as `expected` to `config.preview`
+  or `config.edit`. The first renders the patch. The second checks the
+  entries under the file lock and returns the before and after entries.
+  `config.promote` takes the source destination, key, inspected Wave and
+  action. Confirm takes the reviewed patches, projected result and receipt.
+  A changed result returns a fresh preview. Resume finishes an interrupted
+  two-file move if the declarations still match. Dismiss clears the pending
+  move and keeps both files as they are. Request telemetry omits setting values.
 - A read uses the existing `Read` shape and answers with the JSON the command
   prints, serialized once. A command that prints bare text
   (`config repository --path`) answers a JSON string. Every shared read is
@@ -544,8 +560,8 @@ the phone's `view.select` Task list and its creation destinations all read it.
   the run stands in at interactive steps only while auto is on, and
   otherwise stops before the next one. A null `agent` uses each step's
   configured harness. `lf task run <issue> --json` and `lf task auto on --json`
-  print the same value. `task.auto.off {directory, issue, reason}` turns auto off (`{issue, was_on}`); only `task.auto.on` turns it on, `task.steer` and `task.report {message}` save to the
-  thread and return it, and `task.interrupt` returns its receipt.
+  print the same value. `task.auto.off {directory, issue, reason}` turns auto off (`{issue, was_on}`); only `task.auto.on` turns it on. `task.report {message}` returns the updated thread. `task.steer`
+  returns the identifier, steer ID and delivery receipt. `task.interrupt` returns its receipt.
 - A write uses the shared `Write` shape. `Write::run` calls the shared Rust
   function its CLI handler calls and returns the typed value; the CLI prints
   that value with `--json` and renders it as text otherwise. Nothing parses
@@ -769,7 +785,7 @@ steers (`task_updates::write`) and claims the Session's unread steers
 1. The hook inserts the row with `claimed_at`, for up to eight steers, oldest
    first. A hook running beside it finds them claimed.
 2. It prints them ahead of the block, with what changed on the Session's
-   Tasks since its last update (Graph runs and steps, its Graph position,
+   Tasks since its last update (settled Graph runs, interactive and end stops,
    comments from anyone else). The Session's first read records the baseline
    and prints no update.
 3. It stamps `delivered_at`.

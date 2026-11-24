@@ -393,14 +393,14 @@ struct TaskListView: View {
         feed.repositories.first { $0.repository == repository }?.name ?? "Repository"
     }
 
-    private func link(_ task: WorkViewPlan.Content) -> some View {
+    func link(_ task: WorkViewPlan.Content) -> some View {
         Button {
             if task.primarySession != nil { Perf.opening(task.work.id) }
             selectedTask = MobileTask(task)
         } label: {
             // The list reading carries no issue link: the whole row opens the Task.
             TaskRow(id: task.work.id, title: task.title, identifier: task.identifier, status: task.status,
-                    auto: task.states.contains(.auto))
+                    auto: task.states.contains(.auto), context: task.graphStep)
                 .contentShape(Rectangle())
                 .accessibilityElement(children: .combine)
         }

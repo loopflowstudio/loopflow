@@ -193,9 +193,9 @@ fn an_order_must_permute_every_occurrence_including_hidden_ones() {
 #[test]
 fn moving_into_place_is_a_move_not_a_swap() {
     let mut order = vec!["a", "b", "c"];
-    move_into_place(&mut order, 2, 0);
+    move_into_place(&mut order, 2, 0, None);
     assert_eq!(order, ["c", "a", "b"]);
-    move_into_place(&mut order, 1, 2);
+    move_into_place(&mut order, 1, 2, None);
     assert_eq!(order, ["c", "b", "a"]);
 }
 
@@ -474,6 +474,11 @@ fn query_selection_plan_wire_roundtrips() {
         serde_json::to_value(&plan).unwrap(),
         serde_json::from_str::<serde_json::Value>(fixture).unwrap()
     );
+    assert_eq!(plan.contents[0].graph_step.as_deref(), Some("review"));
+    let mut content = serde_json::to_value(&plan.contents[0]).unwrap();
+    content.as_object_mut().unwrap().remove("graph_step");
+    let older_content: super::selection::ViewContent = serde_json::from_value(content).unwrap();
+    assert_eq!(older_content.graph_step, None);
     assert_eq!(plan.projection, plan.arrangement.project());
     plan.arrangement.validate(&plan.resolution.members).unwrap();
 }

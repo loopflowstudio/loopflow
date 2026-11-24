@@ -876,6 +876,53 @@ mod tests {
         );
     }
 
+    #[test]
+    fn an_idle_task_conversation_wakes_only_when_its_graph_settles() {
+        use loopflow_storage::graph_process::RunOwner;
+
+        let fixture = fixture("wake-graph");
+        let (listener, inbox) = fixture.idle_claude();
+        listener.set_nonblocking(true).unwrap();
+        let store = &fixture.store;
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "INSERT INTO task_checkouts(task_id,worktree) VALUES(?1,'/wake')",
+                [fixture.task.as_str()],
+            )
+            .unwrap();
+        let run = store.test_graph(
+            "feature",
+            "/wake",
+            &[("implement", Some("succeeded")), ("gate", None)],
+            None,
+        );
+        let path = fixture.store_path();
+        let mut watcher = Watcher::default();
+        watcher.read(&path);
+        assert_eq!(
+            listener.accept().unwrap_err().kind(),
+            std::io::ErrorKind::WouldBlock
+        );
+
+        store
+            .finish_run(RunOwner::GraphRun, &run, 20, Some(1), Some("lint failed"))
+            .unwrap();
+        watcher.read(&path);
+        let content = received(&listener)[1]["message"]["content"].to_string();
+        assert!(content.contains(&format!("Run feature ({run}) · failed")));
+        assert!(content.contains("lint failed"));
+
+        fixture.stop(store, &inbox);
+        after_turn(store, "wake-graph");
+        assert_eq!(
+            listener.accept().unwrap_err().kind(),
+            std::io::ErrorKind::WouldBlock
+        );
+    }
+
     /// A bare interactive `lf <skill>` in the Task's checkout: never woken,
     /// it hears the update at its next prompt.
     #[test]

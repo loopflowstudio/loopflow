@@ -70,7 +70,7 @@ struct PendingChangesTests {
         json["projection"] = ["visible": members, "suppressed": []]
         json["contents"] = members.enumerated().map { index, member in
             ["work": member["work"]!, "title": "Task \(index + 1)", "states": states, "identifier": "LOO-\(index + 1)",
-             "primary_session": NSNull(), "location": NSNull(), "argv": NSNull(), "unavailable": [], "face": NSNull(),
+             "graph_step": NSNull(), "primary_session": NSNull(), "location": NSNull(), "argv": NSNull(), "unavailable": [], "face": NSNull(),
              "pane_revision": NSNull()]
         }
         let value = try JSONDecoder().decode(WorkViewPlan.self, from: JSONSerialization.data(withJSONObject: json))
@@ -240,6 +240,32 @@ struct PendingChangesTests {
         #expect(product.first { $0.task.identifier == "LOO-3" }?.runtime?.owner == ada)
         #expect(product.first { $0.task.identifier == "LOO-4" }?.task.waveId == "product")
         #expect(changes.apply(to: [rows[3]], readAt: at(4), wave: "other").isEmpty)
+    }
+
+    @Test func workingDragsPreviewImmediatelyAndRetryInOrder() async throws {
+        let changes = changes()
+        let initial = fixtureWorkingPlan(["a", "b", "c"])
+        func drag(_ source: String, before target: String, machine: String) -> Task<Void, Never> {
+            let member = WorkWorkspaceKey(repository: initial.repository, kind: .task, id: source)
+            return changes.make(.reorder(machine: machine, member: member, target: target, side: .before),
+                subject: source, verb: "reordered", write: .desktopDashboardMove(directory: "/repo", board: "working-tasks",
+                    member: member.selector, destination: "task:" + target, side: .before), notices: notices, show: nil)
+        }
+        func order(_ machine: String) -> [String]? {
+            changes.workingOrder(initial, machine: machine, readAt: at(4))?.resolution.members.map(\.work.id)
+        }
+        let first = drag("c", before: "a", machine: "one")
+        await machine.fail(URLError(.networkConnectionLost))
+        let other = drag("b", before: "a", machine: "two")
+        #expect(order("one") == ["c", "a", "b"])
+        #expect(order("two") == ["b", "a", "c"])
+        let last = drag("b", before: "c", machine: "one")
+        #expect(order("one") == ["b", "c", "a"])
+        let ids = changes.changes.map(\.requestID)
+        for revision in 5...7 { await machine.answer(at(Int64(revision))) }
+        for write in [first, other, last] { await write.value }
+        #expect(machine.sent.filter { $0 != ids[1] } == [ids[0], ids[0], ids[2]])
+        #expect(order("one") == ["b", "c", "a"])
     }
 
     @Test(arguments: [nil, URLError.networkConnectionLost, .notConnectedToInternet, .cannotConnectToHost,

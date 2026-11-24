@@ -282,7 +282,7 @@ struct DesktopAction {
             let model = context.model
             let id = try context.string("tile")
             let tiles: [WorkMemberRef]? = switch model.navigation.destination {
-            case .workingTasks: model.workingTaskMembers
+            case .workingTasks: model.boardTiles(.workingTasks)
             case .dashboard, .view: model.selectedViewPlan?.projection.visible
             case .work: model.navigation.waveView.map { model.boardTiles($0) }
             case .entered: nil
@@ -300,7 +300,7 @@ struct DesktopAction {
             guard let wave = model.navigation.waveView, let plan = model.boardPlan(wave) else {
                 throw DesktopTargetError("This window shows no Wave view. Nothing changed.")
             }
-            let pages = plan.slots.pages(model.boardTiles(wave)).count
+            let pages = plan.slots.pages(plan.taskTiles).count
             guard let page = Int(try context.string("page")), (1...pages).contains(page) else {
                 throw DesktopArgumentError("page must be 1 to \(pages); nothing changed.")
             }

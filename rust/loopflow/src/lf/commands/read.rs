@@ -202,6 +202,16 @@ pub enum Read {
         graph: Option<String>,
         step: Option<String>,
     },
+    /// Effective settings and editable declarations for Global, a checkout or a Wave.
+    #[serde(rename = "config.scope")]
+    #[schemars(extend("x-result" = generator.subschema_for::<loopflow_execution::engine::config::Scope>()))]
+    ConfigScope {
+        target: loopflow_execution::engine::config::ScopeTarget,
+        #[serde(deserialize_with = "Option::deserialize")]
+        directory: Option<PathBuf>,
+        #[serde(deserialize_with = "Option::deserialize")]
+        wave: Option<String>,
+    },
     /// `lf config get <key> <destination flags> --json`: one file's declaration.
     #[serde(rename = "config.get")]
     #[schemars(extend("x-result" = generator.subschema_for::<loopflow_execution::engine::config::Declaration>()))]
@@ -285,6 +295,12 @@ pub enum Read {
     #[serde(rename = "machine.list")]
     #[schemars(extend("x-result" = generator.subschema_for::<Vec<crate::lf::commands::machine::MachineListing>>()))]
     MachineList,
+    /// Check one registered connection by its durable identity.
+    #[serde(rename = "machine.status")]
+    #[schemars(extend("x-result" = generator.subschema_for::<Vec<super::machine::MachineStatus>>()))]
+    MachineStatus {
+        machine: loopflow_model::durable::MachineId,
+    },
     /// `lf session history`: what Sessions did, by Work.
     #[serde(rename = "session.history")]
     #[schemars(extend("x-result" = generator.subschema_for::<crate::lf::commands::activity::WorkActivitySnapshot>()))]
@@ -482,6 +498,26 @@ impl Read {
             Self::MachineSelf => words(&["machine", "self", "--json"]),
             Self::DesktopPortfolio => words(&["desktop", "portfolio", "--json"]),
             Self::ConfigCatalog => words(&["config", "catalog", "--json"]),
+            Self::ConfigScope {
+                directory,
+                wave,
+                target,
+            } => {
+                let mut argv = directory.as_ref().map_or_else(
+                    || words(&["config", "scope", "--global", "--json"]),
+                    |dir| at(dir, &["config", "scope", "--json"]),
+                );
+                argv.extend(optional("--wave", wave.as_ref()));
+                use loopflow_execution::engine::config::ScopeTarget;
+                match target {
+                    ScopeTarget::General => {}
+                    ScopeTarget::Skill { name } => argv.extend(words(&["--skill", name])),
+                    ScopeTarget::Step { graph, step } => {
+                        argv.extend(words(&["--graph", graph, "--step", step]))
+                    }
+                }
+                argv
+            }
             Self::ConfigGet { destination, key } => {
                 destination_argv(destination, &["config", "get", key, "--json"])
             }
@@ -553,6 +589,9 @@ impl Read {
                 );
                 argv.extend(optional("--after", after.as_ref()));
                 argv
+            }
+            Self::MachineStatus { machine } => {
+                words(&["machine", "status", machine.as_str(), "--json"])
             }
             Self::MachineList => words(&["machine", "list", "--json"]),
             Self::SessionHistory(window) => {
@@ -665,9 +704,7 @@ impl Read {
     /// A Task another Machine runs is read by that Machine's server.
     pub fn read(&self) -> anyhow::Result<serde_json::Value> {
         if let Self::TaskStatus { directory, issue } = self {
-            if let Some(detail) = super::waves::remote_task_detail(directory, issue)? {
-                return Ok(detail);
-            }
+            return value(&super::waves::read_task_detail(directory, issue, true)?);
         }
         self.read_here()
     }
@@ -724,7 +761,7 @@ impl Read {
                 value(&super::desktop::read_task_pane(directory, issue)?)
             }
             Self::TaskStatus { directory, issue } => {
-                value(&super::waves::read_task_detail(directory, issue)?)
+                value(&super::waves::read_task_detail(directory, issue, false)?)
             }
             Self::TaskChanges { issue, base, head } => {
                 value(&task_changes(issue, base, head.as_deref())?)
@@ -769,6 +806,15 @@ impl Read {
                 skill.as_deref(),
                 graph.as_deref(),
                 step.as_deref(),
+            )?),
+            Self::ConfigScope {
+                directory,
+                wave,
+                target,
+            } => value(&loopflow_execution::engine::config::scope(
+                directory.as_deref(),
+                wave.as_deref(),
+                target,
             )?),
             Self::ConfigCatalog => value(&loopflow_execution::engine::config::catalog()),
             Self::ConfigGet { destination, key } => {
@@ -853,6 +899,9 @@ impl Read {
                 wave,
                 after.as_deref(),
             )?),
+            Self::MachineStatus { machine } => {
+                value(&block_on(super::machine::status_by_id(machine))??)
+            }
             Self::MachineList => value(&block_on(machines())??),
             Self::SessionHistory(window) => value(&super::activity::snapshot(window)?),
             Self::PlanList {
@@ -957,6 +1006,7 @@ impl Read {
             | Self::SkillList { directory, .. }
             | Self::PrChecks { directory, .. }
             | Self::PrReviews { directory, .. } => Some(directory),
+            Self::ConfigScope { directory, .. } => directory.as_mut(),
             Self::SessionHistoryGet { .. }
             | Self::CreationGet { .. }
             | Self::ViewSelect { .. }
@@ -975,6 +1025,7 @@ impl Read {
             | Self::SessionUsage { .. }
             | Self::TaskContext { .. }
             | Self::MachineList
+            | Self::MachineStatus { .. }
             | Self::SessionHistory(_)
             | Self::RepoPath { .. }
             | Self::SessionRetention
@@ -1013,6 +1064,11 @@ impl Read {
             events,
         };
         let subscription = match self {
+            Self::ConfigScope {
+                directory,
+                wave,
+                target,
+            } => super::setting::subscribe_scope(directory, wave, target, transport),
             Self::DesktopViewList { directory } => {
                 super::desktop::subscribe_plans(None, directory, transport)
             }
@@ -1118,6 +1174,60 @@ fn value(value: &impl Serialize) -> anyhow::Result<serde_json::Value> {
 #[cfg(test)]
 mod tests {
     use super::Read;
+
+    #[test]
+    fn machine_status_shares_the_desktop_wire_shape() {
+        use super::super::machine::MachineStatus;
+        use serde_json::{from_value, to_value, Value};
+
+        let fixture: Value = serde_json::from_str(include_str!(
+            "../../../../../tests/fixtures/dto/machine_status.json"
+        ))
+        .unwrap();
+        let read: Read = from_value(fixture["read"].clone()).unwrap();
+        assert_eq!(to_value(read).unwrap(), fixture["read"]);
+        let status: Vec<MachineStatus> = from_value(fixture["status"].clone()).unwrap();
+        assert_eq!(to_value(status).unwrap(), fixture["status"]);
+    }
+
+    #[test]
+    fn checkout_scope_and_checked_edit_share_the_desktop_wire_shape() {
+        use loopflow_execution::{config::files::edit::Applied, engine::config::Scope};
+        use serde_json::{from_value, to_value, Value};
+        let fixture: Value = serde_json::from_str(include_str!(
+            "../../../../../tests/fixtures/dto/configuration_scope.json"
+        ))
+        .unwrap();
+        let check = |key: &str, value: Value| assert_eq!(value, fixture[key]);
+        check(
+            "read",
+            to_value(from_value::<Read>(fixture["read"].clone()).unwrap()).unwrap(),
+        );
+        for name in ["write", "preview", "promote", "dismiss"] {
+            check(
+                name,
+                to_value(
+                    from_value::<crate::lf::commands::write::Write>(fixture[name].clone()).unwrap(),
+                )
+                .unwrap(),
+            );
+        }
+        check(
+            "scope",
+            to_value(from_value::<Scope>(fixture["scope"].clone()).unwrap()).unwrap(),
+        );
+        for name in ["move_result", "dismissed"] {
+            let outcome = from_value::<loopflow_execution::engine::config::promotion::Outcome>(
+                fixture[name].clone(),
+            )
+            .unwrap();
+            check(name, to_value(outcome).unwrap());
+        }
+        check(
+            "receipt",
+            to_value(from_value::<Applied>(fixture["receipt"].clone()).unwrap()).unwrap(),
+        );
+    }
 
     /// The JSON Desktop's `ServedRead` encodes.
     #[test]

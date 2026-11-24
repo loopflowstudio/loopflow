@@ -47,12 +47,7 @@ struct WorkNavigator: View {
         }
     }
 
-    private var rowOrder: [WorkReference] {
-        model.sidebarTaskIDs.map { .task(id: $0) }
-            + model.visibleRoadmaps.map { .wave(id: $0.wave.id) }
-    }
-
-    private func moveFocus(_ direction: MoveCommandDirection) {
+    private func moveFocus(_ direction: MoveCommandDirection, in rowOrder: [WorkReference]) {
         guard direction == .up || direction == .down, !rowOrder.isEmpty else { return }
         let offset = direction == .down ? 1 : -1
         let current = focusedWork.flatMap { rowOrder.firstIndex(of: $0) }
@@ -62,6 +57,9 @@ struct WorkNavigator: View {
 
     var body: some View {
         @Bindable var navigation = model.navigation
+        let rows = model.sidebarRows
+        let ids = rows.map(\.id)
+        let rowOrder = ids.map { WorkReference.task(id: $0) } + model.visibleRoadmaps.map { .wave(id: $0.wave.id) }
         VStack(spacing: 0) {
             if let status = model.workStatus.progress {
                 WorkReadStatus(status: status)
@@ -72,17 +70,21 @@ struct WorkNavigator: View {
                 if let wave = model.sidebarWave { waveRow(wave) }
             }.padding([.horizontal, .top], Spacing.sm)
             WorkTaskList(navigation: model.navigation) {
-                // Read once: each read re-filters the plan and every Task's Sessions.
-                let taskIDs = model.sidebarTaskIDs
                 let scope = model.navigation.sidebarScope
+                let dragOrder = model.navigation.canReorderSidebar ? rows.map(\.work.id) : []
                 VStack(alignment: .leading, spacing: Spacing.xs) {
-                    NewTaskRow(model: model)
+                    HStack {
+                        NewTaskRow(model: model)
+                        if scope.isWorkingList {
+                            SidebarStatusToggle(isOn: model.navigation.sidebarSortByStatus, toggle: model.toggleSidebarSortByStatus)
+                        }
+                    }
                     if case .dashboard = scope {
                         HStack {
                             Text(listTitle).font(Typography.textStrong).lineLimit(1)
                                 .matchedGeometryEffect(id: scope, in: scopeTitle)
                             Spacer()
-                            Text("\(taskIDs.count)").font(Typography.meta).monospacedDigit()
+                            Text("\(rows.count)").font(Typography.meta).monospacedDigit()
                         }.foregroundStyle(palette.textTertiary).padding(Spacing.sm)
                     } else {
                         Picker("Show Tasks", selection: $navigation.sidebarFilter) {
@@ -90,17 +92,16 @@ struct WorkNavigator: View {
                         }
                         .pickerStyle(.menu).labelsHidden().accessibilityLabel("Show Tasks")
                     }
-                    // ⌘N counts the rows on screen; sidebar Task IDs are already unique.
-                    ForEach(Array(taskIDs.enumerated()), id: \.element) { index, id in
-                        taskRow(id, slotHint: index < 9 ? "⌘\(index + 1)" : nil)
+                    ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
+                        taskRow(row, dragOrder: dragOrder, slotHint: index < 9 ? "⌘\(index + 1)" : nil)
                     }
-                    if taskIDs.isEmpty, let emptyListText {
+                    if rows.isEmpty, let emptyListText {
                         Text(emptyListText)
                             .font(Typography.text)
                             .foregroundStyle(palette.textSecondary).padding(Spacing.sm)
                     }
                     if let selection = model.selection, selection.kind == .task,
-                       !taskIDs.contains(where: { model.isSelected(.task(id: $0)) }) {
+                       !rows.contains(where: { model.isSelected(.task(id: $0.id)) }) {
                         VStack(alignment: .leading, spacing: Spacing.xs) {
                             Text("Open Task is outside this list")
                             let target: WorkNavigation.SidebarFilter = model.task(id: selection.id)?.task.lifecycle == .paused ? .paused : .working
@@ -122,7 +123,7 @@ struct WorkNavigator: View {
         .foregroundStyle(palette.text).background(palette.surfaceMuted)
         .accessibilityIdentifier("work-navigator")
         .background(SidebarResponderCapture(memory: focusMemory))
-        .onMoveCommand(perform: moveFocus)
+        .onMoveCommand { moveFocus($0, in: rowOrder) }
         .onKeyPress(.home) { focusedWork = rowOrder.first; return .handled }
         .onKeyPress(.end) { focusedWork = rowOrder.last; return .handled }
         .onKeyPress("f", phases: .down) { key in
@@ -143,7 +144,7 @@ struct WorkNavigator: View {
             let source = model.showsSavedWork ? "saved" : "fresh"
             DispatchQueue.main.async { LaunchJournal.home.mark(.usable, ["source": source]) }
         }
-        .onChange(of: model.sidebarTaskIDs) { before, after in
+        .onChange(of: ids) { before, after in
             Perf.rowsChanged(from: before, to: after, owner: model.navigation.performanceOwner)
         }
         .onChange(of: model.navigation.sidebarFilter) { _, filter in
@@ -237,7 +238,8 @@ struct WorkNavigator: View {
             .matchedGeometryEffect(id: scope, in: scopeTitle)
     }
 
-    private func taskRow(_ id: String, slotHint: String?) -> some View {
+    private func taskRow(_ row: WorkModel.SidebarTaskRow, dragOrder: [String], slotHint: String?) -> some View {
+        let id = row.id
         let found = model.task(id: id)
         let selected = model.isSelected(.task(id: id))
         let muted = model.selection?.kind == .wave && found?.wave?.wave.id != model.selection?.id
@@ -248,7 +250,7 @@ struct WorkNavigator: View {
         // row's hover, so a crossing re-renders that hint, not rows or the sidebar.
         return RowHover { hover in TaskRow(
             id: id, presentation: presentation, task: found?.task, status: status,
-            auto: model.sidebarAutoTaskIDs.contains(id), selected: selected, muted: muted,
+            graphStep: row.graphStep, auto: row.states.contains(.auto), selected: selected, muted: muted,
             slotHint: slotHint, showsSlotHint: model.navigation.showsSlotHints, hover: hover)
         .background {
             Button {
@@ -265,8 +267,7 @@ struct WorkNavigator: View {
         }
         .renderFlash()
         }
-        .modifier(TaskOrderDragging(model: model, workID: model.navigation.sidebarScope == .repository ? model.workingTaskWorkID(row: id) : nil,
-                                    drag: taskDrag))
+        .modifier(TaskOrderDragging(model: model, work: row.work, order: dragOrder, drag: taskDrag))
         .contextMenu {
             actions(for: id)
         }
@@ -618,6 +619,33 @@ private struct SidebarResponderCapture: NSViewRepresentable {
     }
 }
 
+struct SidebarStatusToggle: View {
+    let isOn: Bool
+    let toggle: () -> Void
+    @Environment(\.palette) private var palette
+    @State private var hovering = false
+
+    private var fill: Color {
+        if isOn { return palette.accent.opacity(hovering ? 0.28 : 0.16) }
+        return hovering ? palette.actionHover : .clear
+    }
+
+    var body: some View {
+        Button(action: toggle) {
+            Label("Sort by status", systemImage: "arrow.up.arrow.down")
+                .labelStyle(.iconOnly)
+                .padding(Spacing.sm)
+                .foregroundStyle(isOn ? palette.accentInk : palette.textSecondary)
+                .background(fill, in: RoundedRectangle(cornerRadius: CornerRadius.control))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .help(isOn ? "Sorted by status. Click to restore saved order." : "Sort by status: Blocked, Error, Available, Idle, Busy.")
+        .accessibilityValue(isOn ? "On" : "Off")
+    }
+}
+
 /// Owns one row's hover. Its body never reads the flag, so hovering does not
 /// re-run the row; leaves given the flag read it themselves.
 private struct RowHover<Content: View>: View {
@@ -634,30 +662,32 @@ private struct RowHover<Content: View>: View {
 /// places it at once. A system drag would hold its image for the drop animation.
 private struct TaskOrderDragging: ViewModifier {
     let model: WorkModel
-    let workID: String?
+    let work: WorkWorkspaceKey
+    let order: [String]
     let drag: TaskOrderDrag.State
     @Environment(\.palette) private var palette
 
     func body(content: Content) -> some View {
-        if let workID {
-            let dragging = drag.source == workID
+        if !order.isEmpty {
+            let dragging = drag.source == work.id
+            let landing = drag.landing(on: work.id)
             content
                 .background(dragging ? palette.surfaceMuted : .clear)
                 .shadow(color: .black.opacity(dragging ? 0.18 : 0), radius: 6, y: 2)
                 .offset(y: dragging ? drag.offset : 0)
                 .zIndex(dragging ? 1 : 0)
                 .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(TaskOrderDrag.space)) } action: {
-                    drag.frames[workID] = $0
+                    drag.frames[work.id] = $0
                 }
                 .highPriorityGesture(DragGesture(minimumDistance: 4, coordinateSpace: .named(TaskOrderDrag.space))
-                    .onChanged { drag.move(workID, by: $0.translation.height, at: $0.location.y,
-                                           order: model.workingTaskMembers.map(\.work.id)) }
+                    .onChanged { drag.move(work.id, by: $0.translation.height, at: $0.location.y,
+                                           order: order) }
                     .onEnded { _ in
-                        guard let (source, target) = drag.end() else { return }
-                        model.reorderWorkingTask(source, to: target)
+                        guard let (target, side) = drag.end() else { return }
+                        model.reorderWorkingTask(work, to: target, side: side)
                     })
-                .overlay(alignment: drag.landing(on: workID) ?? .top) {
-                    if drag.landing(on: workID) != nil {
+                .overlay(alignment: landing ?? .top) {
+                    if landing != nil {
                         Rectangle().fill(palette.accent).frame(height: 2)
                             .allowsHitTesting(false).accessibilityIdentifier("task-order-insertion")
                     }
@@ -674,33 +704,34 @@ extension TaskOrderDrag {
     /// The sidebar row being dragged and the row it would take the place of.
     @MainActor @Observable final class State {
         var source: String?
-        var target: String?
-        /// The dragged row lands after the target when it comes from above.
-        var below = false
+        private var drop: (target: String, side: DropSide)?
         var offset: CGFloat = 0
         /// Each row's frame in the list, read only while a drag picks its target.
         @ObservationIgnored var frames: [String: CGRect] = [:]
 
         func landing(on row: String) -> Alignment? {
-            target == row ? (below ? .bottom : .top) : nil
+            guard let drop, drop.target == row else { return nil }
+            return drop.side == .after ? .bottom : .top
         }
 
         func move(_ row: String, by translation: CGFloat, at y: CGFloat, order: [String]) {
             source = row
             offset = translation
             let under = { (id: String) in self.frames[id].map { $0.minY <= y && y < $0.maxY } == true }
-            // Another row under the pointer is the target; back over its own row, none.
-            if let over = order.first(where: { $0 != row && under($0) }) { target = over } else if under(row) { target = nil }
-            if let target {
-                below = (order.firstIndex(of: row) ?? 0) < (order.firstIndex(of: target) ?? 0)
+            // Keep the insertion line between rows. Returning to the source cancels the drop.
+            let hovered = order.first { $0 != row && under($0) }
+            guard let target = hovered ?? (under(row) ? nil : drop?.target),
+                  let side = TaskOrderDrag.side(moving: row, onto: target, in: order) else {
+                drop = nil
+                return
             }
+            drop = (target, side)
         }
 
         /// Clears the drag in the same frame the caller moves the row.
-        func end() -> (String, String)? {
-            defer { source = nil; target = nil; offset = 0 }
-            guard let source, let target else { return nil }
-            return (source, target)
+        func end() -> (target: String, side: DropSide)? {
+            defer { source = nil; drop = nil; offset = 0 }
+            return drop
         }
     }
 }

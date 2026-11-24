@@ -313,7 +313,7 @@ struct WorkCacheTests {
         #expect(atLoad.count <= limit + 1) // Sixteen and a one-slot page, not the whole board.
         #expect(registry.openWork.count == Prefetch.working.count)
 
-        let tiles = model.workingTaskMembers.map(\.work.id)
+        let tiles = model.boardTiles(.workingTasks).map(\.work.id)
         let page = try #require(tiles.firstIndex { !atLoad.contains($0) })
         model.turnPage(.workingTasks, to: page)
         await spin { await !source.preparedTasks.contains(tiles[page]) }
@@ -339,7 +339,7 @@ struct WorkCacheTests {
         model.selectWorkingTasksDashboard()
         await spin { registry.preparationCount > 0 }
         let prepared = await source.preparedTasks
-        let cold = try #require(model.workingTaskMembers.map(\.work.id).first { !prepared.contains($0) })
+        let cold = try #require(model.boardTiles(.workingTasks).map(\.work.id).first { !prepared.contains($0) })
 
         let pane = try #require(registry.retained(key(cold))).multiplexer.focusedPane
         let target = DesktopPaneTarget(repository: key(cold).repository, window: UUID().uuidString, work: key(cold),
@@ -986,7 +986,6 @@ private actor Source {
             record["primary_scope"] = wave == nil ? "repository" : "wave"
             record["wave_id"] = waveId ?? NSNull()
             record["task_ids"] = []
-            record["task_primary"] = false
             record["workspace"] = ["machine_id": "home-a", "worktree": "/src/loopflow." + (wave ?? "repo"), "task_id": NSNull()]
             record["state"] = "closed"
             record["action"] = sessionActionFixture(state: "closed")
@@ -1003,7 +1002,7 @@ private actor Source {
             var record = (page["entries"] as! [[String: Any]])[0]
             record["id"] = "conversation-" + id
             record["task_ids"] = [id]
-            record["task_primary"] = true
+            record["primary_scope"] = "task"
             record["workspace"] = ["machine_id": location.machineId, "worktree": location.worktree, "task_id": id]
             record["state"] = "closed"
             record["action"] = sessionActionFixture(state: "closed")

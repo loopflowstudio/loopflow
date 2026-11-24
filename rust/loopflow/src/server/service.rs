@@ -184,6 +184,9 @@ pub(super) async fn run() -> Result<()> {
     let (remote_control, remote_requests) = mpsc::channel(8);
     super::maintenance::start();
     super::maintenance::start_plan_exchange();
+    tokio::spawn(loopflow_execution::ops::tracker_events::watch_owned_work(
+        None,
+    ));
     // Held terminals keep running in their holders whether or not this server
     // can host them; without a registry their views wait for the next server.
     let terminals = match Registry::open(&executable_sha256) {
@@ -1493,6 +1496,34 @@ async fn served(
 /// A write as request telemetry records it: setting values and authored text
 /// stay out.
 fn telemetry(change: &crate::lf::commands::write::Write) -> anyhow::Result<serde_json::Value> {
+    use crate::lf::commands::write::Write;
+
+    // Checked writes also carry previous values, and a move review includes
+    // file patches. Record only the setting address for these operations.
+    let address = match change {
+        Write::ConfigEdit {
+            destination, key, ..
+        } => {
+            Some(serde_json::json!({"kind": "config.edit", "destination": destination, "key": key}))
+        }
+        Write::ConfigPreview {
+            destination, key, ..
+        } => Some(
+            serde_json::json!({"kind": "config.preview", "destination": destination, "key": key}),
+        ),
+        Write::ConfigPromote {
+            destination,
+            key,
+            wave,
+            ..
+        } => Some(
+            serde_json::json!({"kind": "config.promote", "destination": destination, "key": key, "wave": wave}),
+        ),
+        _ => None,
+    };
+    if let Some(address) = address {
+        return Ok(address);
+    }
     let mut target = serde_json::to_value(change)?;
     if let Some(fields) = target.as_object_mut() {
         for field in [
@@ -1607,7 +1638,12 @@ async fn effect(
                 tracing::info!(request = %id, %trace_id, diagnostic = line, "Server command diagnostic");
             }
             tracing::info!(request = %id, %instance, %trace_id, ok = result.is_ok(), "Server command finished");
-            result.map_err(|error| Error::written(&error))
+            result.map_err(|error| {
+                match crate::lf::commands::desktop::DesktopError::refusal(&error) {
+                    Some(code) => Error::new(code, format!("{error:#}")),
+                    None => Error::written(&error),
+                }
+            })
         })
     })
     .await
@@ -1917,6 +1953,30 @@ mod tests {
                 .unwrap()
                 .contains("codex"));
         });
+    }
+
+    #[test]
+    fn checked_config_requests_record_only_the_setting_address() {
+        use crate::lf::commands::write::Write;
+        use serde_json::{from_str, from_value, json, Value};
+
+        let fixture: Value = from_str(include_str!(
+            "../../../../tests/fixtures/dto/configuration_scope.json"
+        ))
+        .unwrap();
+        for name in ["write", "preview", "promote"] {
+            let request = &fixture[name];
+            let change: Write = from_value(request.clone()).unwrap();
+            let mut expected = json!({
+                "kind": request["kind"],
+                "destination": request["destination"],
+                "key": request["key"],
+            });
+            if let Some(wave) = request.get("wave") {
+                expected["wave"] = wave.clone();
+            }
+            assert_eq!(super::telemetry(&change).unwrap(), expected);
+        }
     }
 
     /// Serialize the tests that read an empty Machine registry through env.
@@ -3270,7 +3330,7 @@ mod tests {
                 .lock()
                 .unwrap()
                 .execute(
-                    "UPDATE tasks SET planning_completed=1 WHERE id=?1",
+                    "UPDATE tasks SET planning_state='completed' WHERE id=?1",
                     [task.as_str()],
                 )
                 .unwrap();
@@ -3839,7 +3899,12 @@ mod tests {
                 )
                 .unwrap();
                 tx.execute(
-                    "INSERT INTO task_primary_sessions(task_id,session_id) VALUES(?1,?2)",
+                    "UPDATE agent_sessions SET task_id=?1,wave_id=(SELECT p.wave_id FROM tasks t LEFT JOIN projects p ON p.id=t.project_id WHERE t.id=?1) WHERE id=?2",
+                    [task.id.as_str(), session.id.as_str()],
+                )
+                .unwrap();
+                tx.execute(
+                    "INSERT OR REPLACE INTO task_primary_sessions(task_id,session_id) VALUES(?1,?2)",
                     [task.id.as_str(), session.id.as_str()],
                 )
                 .unwrap();

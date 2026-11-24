@@ -148,9 +148,8 @@ pub(super) async fn read_task_snapshot(store: &SharedStore, task: Task) -> OpsRe
     };
     let started_by = store
         .sqlite
-        .latest_task_graphs(&[&task.id])
+        .latest_task_graph(&task.id)
         .map_err(task_error)?
-        .get(&task.id)
         .map(|graph| starter(graph.caller_session.as_ref()))
         .transpose()?;
     Ok(TaskSnapshot {

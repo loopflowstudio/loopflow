@@ -364,17 +364,15 @@ fn prepare_land(
     if !options.strict && !crate::git::worktrees::is_persistent_worktree(repo_root)? {
         let message = options
             .commit_message
-            .clone()
-            .unwrap_or_else(|| "lf land: stage uncommitted changes".to_string());
+            .as_deref()
+            .unwrap_or("lf land: stage uncommitted changes");
         let commit_options = CommitOptions {
             add: true,
-            push: false,
-            create_draft_pr: false,
             message: Some(message),
-            agent: options.agent.clone(),
+            agent: options.agent.as_deref(),
             ..CommitOptions::for_task("land")
         };
-        let _ = commit_workflow(repo_root, &commit_options, progress, &|_| {})?;
+        commit_workflow(repo_root, &commit_options, progress, &|_| {})?;
     }
 
     Ok(())

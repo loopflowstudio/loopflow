@@ -197,8 +197,7 @@ fn context_environment(
         crate::steer::STEER_SESSION_ENV,
         loopflow_storage::steer_markers::session_marker(&home, session),
     );
-    // A Session belongs to at most one Task: Task checkouts do not nest.
-    if let [task] = store.session_task_ids(session)?.as_slice() {
+    if let Some(task) = store.session_task(session)? {
         command.env(
             crate::steer::STEER_TASK_ENV,
             loopflow_storage::steer_markers::task_marker(&home, task.as_str()),

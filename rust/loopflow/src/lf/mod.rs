@@ -3,6 +3,7 @@
 use std::path::PathBuf;
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
+use loopflow_storage::work::selection::DropSide;
 
 pub mod aliases;
 mod desktop_inputs;
@@ -506,7 +507,7 @@ pub enum Commands {
         /// A Session or Task ID; omit it with `--wave` or `--repo`
         target: Option<String>,
         message: String,
-        /// Print the saved steer, or for a Task its thread with the entry
+        /// Print the saved steer or the Task delivery receipt
         #[arg(long = "json", id = "steer_json")]
         json: bool,
     },
@@ -551,23 +552,23 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: Option<PrCommand>,
     },
-    /// Commit changes
+    /// Commit changes and push unless on the default branch
     Commit {
         #[arg(short = 'm', long = "message")]
         message: Option<String>,
-        /// Push the branch after committing
-        #[arg(short = 'p', long = "push")]
-        push: bool,
+        /// Keep the commit local
+        #[arg(long)]
+        no_push: bool,
         #[arg(long = "no-add")]
         no_add: bool,
         /// Commit only these paths, preserving other staged and unstaged edits
-        #[arg(value_name = "PATH", conflicts_with_all = ["no_add", "push"])]
+        #[arg(value_name = "PATH", conflicts_with = "no_add")]
         paths: Vec<String>,
         /// Print what the commit left
         #[arg(long)]
         json: bool,
         /// Commit everything a finished skill step left, titled `lf <SKILL>: …`, and push
-        #[arg(long, value_name = "SKILL", conflicts_with_all = ["message", "no_add", "push", "paths", "json"])]
+        #[arg(long, value_name = "SKILL", conflicts_with_all = ["message", "no_add", "no_push", "paths", "json"])]
         step: Option<String>,
     },
     /// Merge upstream into the current branch (default: main or stack parent)
@@ -1104,6 +1105,9 @@ pub enum DashboardCommand {
         /// Tile whose place it takes
         #[arg(long)]
         destination: String,
+        /// Place the tile before or after the destination in the current order
+        #[arg(long, value_enum)]
+        side: Option<DropSide>,
     },
     /// Resize the divider between two tiles on a saved Dashboard; ratio is the addressed one's share
     Resize {
@@ -1115,40 +1119,6 @@ pub enum DashboardCommand {
         #[arg(long)]
         ratio: f64,
     },
-}
-
-impl DashboardCommand {
-    /// The verb a saved tile edit names, with its arguments, or none for a
-    /// Dashboard record edit.
-    pub fn tile_verb(&self) -> Option<(&str, &str, std::collections::BTreeMap<String, String>)> {
-        match self {
-            Self::Hide { tile } => Some(("hide", tile, Default::default())),
-            Self::Show { tile } => Some(("show", tile, Default::default())),
-            Self::Move { tile, destination } => Some((
-                "move",
-                tile,
-                [("destination".to_owned(), destination.clone())].into(),
-            )),
-            Self::Resize {
-                tile,
-                toward,
-                ratio,
-            } => Some((
-                "resize",
-                tile,
-                [
-                    ("toward".to_owned(), toward.clone()),
-                    ("ratio".to_owned(), ratio.to_string()),
-                ]
-                .into(),
-            )),
-            Self::Query { .. }
-            | Self::Pin { .. }
-            | Self::Unpin { .. }
-            | Self::Rename { .. }
-            | Self::Slots { .. } => None,
-        }
-    }
 }
 
 // ── Which commands change state ─────────────────────────────────────────────
@@ -1483,6 +1453,7 @@ impl ConfigCommand {
             Self::User { .. }
             | Self::Settings { .. }
             | Self::Catalog { .. }
+            | Self::Scope { .. }
             | Self::Get { .. }
             | Self::Explain { .. } => false,
             Self::Set { .. } | Self::Unset { .. } => true,
@@ -1704,7 +1675,7 @@ pub struct SessionListArgs {
     pub after: Option<String>,
     #[arg(long)]
     pub task: Option<String>,
-    /// Conversations attributed to this Wave or inside one of its Tasks' checkouts
+    /// Conversations attributed to this Wave or to one of its Tasks
     #[arg(long, id = "session_wave", value_name = "W")]
     pub wave: Option<String>,
     /// Current primary conversations; omit the value to include all three scopes
@@ -2992,6 +2963,8 @@ pub enum ConfigCommand {
         #[arg(long)]
         json: bool,
     },
+    /// Inspect effective settings and declarations for Global, a checkout or a Wave
+    Scope(commands::setting::ScopeArgs),
     /// Show effective settings and their sources without launching
     Settings {
         #[arg(long)]
@@ -3388,6 +3361,10 @@ pub enum WtCommand {
         /// Keep this workspace after delivery
         #[arg(long)]
         persistent: bool,
+        /// Start the branch from this checkout's branch instead of main, and
+        /// keep following it: `lf sync` merges it and `lf pr` targets it
+        #[arg(long)]
+        stack: bool,
         /// Print the worktree, or the placement with --plan
         #[arg(long)]
         json: bool,
@@ -4384,7 +4361,6 @@ mod tests {
         let loop_cli = Cli::try_parse_from(["lf", "loop", "infrastructure"])
             .expect("unknown names remain eligible for skill discovery");
         assert!(matches!(loop_cli.command, Some(Commands::External(_))));
-        assert!(Cli::try_parse_from(["lf", "wt", "create", "child", "--stack"]).is_err());
         assert!(Cli::try_parse_from(["lf", "wt", "create", "child", "--child"]).is_err());
         assert!(Cli::try_parse_from(["lf", "wt", "up"]).is_err());
         assert!(Cli::try_parse_from(["lf", "wt", "down"]).is_err());

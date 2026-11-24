@@ -61,7 +61,7 @@ pub(super) fn graphs_in(
 ) -> StoreResult<Vec<GraphExecution>> {
     let graph_processes = conn
         .prepare(&format!(
-            "SELECT {},g.repo,g.cwd,g.graph,g.compiled,g.caller_session_id FROM graph_processes g
+            "SELECT {},g.repo,g.cwd,g.graph,g.compiled,g.caller_session_id,g.task_id FROM graph_processes g
              WHERE ({scope}) ORDER BY g.rowid",
             run_columns("g")
         ))?
@@ -73,6 +73,7 @@ pub(super) fn graphs_in(
                 row.get::<_, String>("graph")?,
                 row.get::<_, String>("compiled")?,
                 row.get::<_, Option<loopflow_model::id::LfSessionId>>("caller_session_id")?,
+                row.get::<_, Option<String>>("task_id")?,
             ))
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -103,8 +104,12 @@ pub(super) fn graphs_in(
     }
     graph_processes
         .into_iter()
-        .map(|(run, repo, cwd, name, compiled, caller_session)| {
+        .map(|(run, repo, cwd, name, compiled, caller_session, task)| {
             Ok(GraphExecution {
+                task_id: task
+                    .map(|id| TaskId::parse(&id))
+                    .transpose()
+                    .map_err(invalid)?,
                 compiled: serde_json::from_str::<CompiledGraph>(&compiled)?,
                 steps: steps.remove(run.id.as_str()).unwrap_or_default(),
                 run,
@@ -122,16 +127,7 @@ pub(super) fn entry_in(
     conn: &Connection,
     graph: &GraphExecution,
 ) -> StoreResult<GraphProcessInventoryEntry> {
-    let task = conn
-        .query_row(
-            "SELECT task_id FROM graph_processes WHERE lf_process_id=?1",
-            [graph.id()],
-            |row| row.get::<_, Option<String>>(0),
-        )?
-        .map(|id| TaskId::parse(&id))
-        .transpose()
-        .map_err(invalid)?;
-    let wave = match &task {
+    let wave = match &graph.task_id {
         Some(task) => super::durable::task_wave_in(conn, task)?,
         None => conn
             .query_row(
@@ -147,22 +143,18 @@ pub(super) fn entry_in(
             .transpose()
             .map_err(invalid)?,
     };
-    Ok(entry_of(graph, task, wave))
+    Ok(entry_of(graph, wave))
 }
 
-/// The Graph's inventory entry once its Task and Wave are known.
-pub fn entry_of(
-    graph: &GraphExecution,
-    task_id: Option<TaskId>,
-    wave_id: Option<WaveId>,
-) -> GraphProcessInventoryEntry {
+/// The Graph's inventory entry in its Wave.
+pub fn entry_of(graph: &GraphExecution, wave_id: Option<WaveId>) -> GraphProcessInventoryEntry {
     let run = &graph.run;
     GraphProcessInventoryEntry {
         summary: GraphProcessSummary {
             id: run.id.to_string(),
             name: graph.name.clone(),
             state: GraphProcessSummaryState::of_run(run.result()),
-            task_id,
+            task_id: graph.task_id.clone(),
             wave_id,
             updated_at: run
                 .ended_at
@@ -456,8 +448,8 @@ impl SqliteStore {
     }
 
     /// A Graph run's record of itself as it starts: the graph it launched
-    /// with, the Task it started for, the OS process it runs as and the held
-    /// terminal it runs in.
+    /// with, the Task it belongs to ([`super::task_work::starting_task_in`]),
+    /// the OS process it runs as and the held terminal it runs in.
     #[allow(clippy::too_many_arguments)]
     pub fn record_graph(
         &self,
@@ -470,6 +462,12 @@ impl SqliteStore {
         held_terminal: Option<&loopflow_model::id::TerminalId>,
     ) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
+        let task = super::task_work::starting_task_in(
+            &conn,
+            task,
+            cwd.map(std::path::Path::new),
+            start.caller_session.as_ref(),
+        )?;
         conn.execute(
             "INSERT INTO graph_processes(lf_process_id,graph,compiled,task_id,started_at,pid,os_started_at,repo,cwd,held_terminal_id,caller_session_id)
              VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
@@ -477,7 +475,7 @@ impl SqliteStore {
                 graph_process,
                 compiled.name,
                 serde_json::to_string(compiled)?,
-                task.map(TaskId::as_str),
+                task.as_ref().map(TaskId::as_str),
                 start.started_at,
                 start.pid,
                 start.os_started_at,
@@ -741,25 +739,11 @@ impl SqliteStore {
                 })
                 .collect(),
         };
-        // A Graph started in a checkout is that Task's, as the launch binds it.
-        let task = {
-            let conn = self.conn.lock().expect("store mutex poisoned");
-            conn.query_row(
-                "SELECT task_id FROM task_checkouts
-                 WHERE ?1=rtrim(worktree,'/') OR ?1 LIKE rtrim(worktree,'/')||'/%'
-                 ORDER BY length(worktree) DESC LIMIT 1",
-                [cwd],
-                |row| row.get::<_, String>(0),
-            )
-            .optional()
-            .unwrap()
-            .map(|task| TaskId::parse(&task).unwrap())
-        };
         process(&graph_process, None, graph_outcome);
         self.record_graph(
             &graph_process,
             &compiled,
-            task.as_ref(),
+            None,
             &start,
             Some(cwd),
             Some(cwd),

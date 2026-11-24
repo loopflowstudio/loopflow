@@ -202,7 +202,7 @@ rental. See [Connect clients](server.md) for server lifecycle and phone access.
 
 ```bash
 lf machine add mini                              # register an SSH host; offers to install lf
-ssh mini                                         # sign in with Claude/Codex on mini
+lf machine login codex mini                      # approve here; mini keeps its own login
 lf --machine mini task list                      # run any lf command on mini
 lf task move LOO-12 --machine mini               # move a Task and its Session to mini
 lf --wave product set machine mini               # default new Tasks in `product` to mini
@@ -234,11 +234,15 @@ lf machine end code-1                                # return a rented machine e
   `AWS_REGION`). Pass keys via `doppler run -- lf …`.
 - **Options:** `--gpu` requests a GPU (RunPod, AWS, Modal); `--spot` rents
   interruptible capacity (AWS, RunPod).
-- **Credentials on rentals:** Owned SSH machines use their own native logins.
-  For unattended rentals, forward explicitly named tokens or auth files via
-  `forward.env` / `forward.files` ([Remote Machines and rentals](subscriptions.md#remote-machines-and-rentals)).
-  Linear receives a short-lived access token refreshed from your laptop (the
-  refresh grant stays local).
+- **Credentials on rentals:** A rented machine is signed in as it is
+  prepared, once per provider, to the template's `--logins` or every provider
+  signed in here that reaches another Machine: Codex, GitHub, Linear and
+  OpenCode. Claude arrives with each launch as the
+  [forwarded](subscriptions.md#sign-in-on-any-machine)
+  `CLAUDE_CODE_OAUTH_TOKEN`. Asana and Doppler sign in on each Machine itself.
+  With [approvers](subscriptions.md#choose-who-approves) set to a command, that
+  needs no one present. Linear receives a short-lived access token refreshed
+  from your laptop (the refresh grant stays local).
 - **Automatic cleanup:** Rented machines return 15 minutes after their last
   Task finishes, copying Sessions and Graph runs back home first so
   `lf session list` shows them (`from code-1`). Unpushed work blocks return
@@ -271,14 +275,14 @@ agent.
 ## Authentication
 
 ```bash
-codex login                                      # native login on the execution Machine
-lf -a codex implement
-lf account connect linear --chrome-profile Work  # service auth
+lf machine login codex mini          # Codex's own sign-in, on mini
+lf machine login linear --chrome-profile Work
+lf machine logins mini
 ```
 
-Claude Code and Codex own their native logins and credential refresh. `lf account`
-manages service authentication for GitHub, Linear, Asana, Notion, Doppler, and
-OpenCode. See [Native authentication](subscriptions.md).
+Claude Code and Codex own their native logins and credential refresh;
+`lf machine login` runs them where they are used and signs in GitHub, Linear,
+Asana, Doppler and OpenCode. See [Native authentication](subscriptions.md).
 
 ## Reference
 
@@ -292,12 +296,11 @@ OpenCode. See [Native authentication](subscriptions.md).
 | `lf repo release run\|check\|status\|regress\|promote` | End-to-end releases and stable promotion |
 | `lf commit`, `lf sync [TASK\|BRANCH]`, `lf wt …` | Git operations with Task and stack awareness |
 | `lf machine …`, `lf pool …`, `lf ondemand …` | SSH machines, pools, and cloud rentals |
+| `lf machine login\|logins\|logout` | What each Machine is signed in to |
 | `lf server status`, `lf install` | Local client server and updates |
-| `lf account` | Service authentication (GitHub, Linear, Asana, OpenCode) |
 
 Full flags: [`lf pr`](lf-reference.md#lf-pr), [`lf repo`](lf-reference.md#lf-repo),
-[`lf wt`](lf-reference.md#lf-wt), [`lf machine`](lf-reference.md#lf-machine),
-[`lf account`](lf-reference.md#lf-account).
+[`lf wt`](lf-reference.md#lf-wt), [`lf machine`](lf-reference.md#lf-machine).
 
 Next: [Surfaces](surfaces.md): Loopflow Desktop, Rex, cmux, Herdr, tmux, and
 building your own UI.

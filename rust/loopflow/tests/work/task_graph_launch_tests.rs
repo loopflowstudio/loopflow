@@ -897,6 +897,10 @@ import sys
 if '--version' in sys.argv:
     print('fixture')
     sys.exit(0)
+# The launch's login probe is not a launch.
+if sys.argv[1:3] == ['auth', 'status']:
+    print(json.dumps({'loggedIn': True}))
+    sys.exit(0)
 security = shutil.which('security')
 stores = glob.glob(os.path.join(os.path.dirname(security), 'keychain', '*')) if security else []
 claude_home = os.environ.get('CLAUDE_CONFIG_DIR') or os.path.join(os.environ['HOME'], '.claude')
@@ -1511,6 +1515,7 @@ fn a_task_takes_up_its_waves_graph_and_keeps_the_one_it_named() {
             "graph",
             "graph_processes",
             "parent",
+            "reading",
             "sessions",
             "stack_parent",
             "summary",

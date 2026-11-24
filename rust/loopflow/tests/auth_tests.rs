@@ -1,5 +1,5 @@
 use crate::support;
-use std::process::{Command, Stdio};
+use std::process::{Command, Output, Stdio};
 
 #[test]
 fn service_auth_survives_subscription_removal() {
@@ -20,11 +20,15 @@ fn service_auth_survives_subscription_removal() {
         );
         output
     };
-    run(&["account", "connect", "opencode", "--api-key"]);
-    let output = run(&["account", "opencode", "--json"]);
-    let status: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(status["accounts"][0]["provider"], "opencodezen");
-    assert_eq!(status["accounts"][0]["state"], "active");
+    let opencode = |output: Output| -> serde_json::Value {
+        let rows: Vec<serde_json::Value> = serde_json::from_slice(&output.stdout).unwrap();
+        rows.into_iter()
+            .find(|row| row["provider"] == "opencodezen")
+            .unwrap()
+    };
+    run(&["machine", "login", "opencode", "--api-key"]);
+    let row = opencode(run(&["machine", "logins", "--json"]));
+    assert_eq!(row["state"], "signed_in");
     let rt = tokio::runtime::Runtime::new().unwrap();
     let store = rt
         .block_on(loopflow_execution::store::open_existing_store())
@@ -34,21 +38,28 @@ fn service_auth_survives_subscription_removal() {
         .block_on(store.get_provider_token("opencodezen"))
         .unwrap()
         .is_some());
-    run(&["account", "disconnect", "opencode"]);
+    run(&["machine", "logout", "opencode"]);
     assert!(rt
         .block_on(store.get_provider_token("opencodezen"))
         .unwrap()
         .is_none());
-    let all = run(&["account", "--json"]);
-    let status: serde_json::Value = serde_json::from_slice(&all.stdout).unwrap();
-    let providers: Vec<_> = status["accounts"]
-        .as_array()
-        .unwrap()
+    let all = run(&["machine", "logins", "--json"]);
+    let rows: Vec<serde_json::Value> = serde_json::from_slice(&all.stdout).unwrap();
+    let providers: Vec<_> = rows
         .iter()
         .map(|row| row["provider"].as_str().unwrap())
         .collect();
     assert_eq!(
         providers,
-        ["github", "opencodezen", "linear", "asana", "doppler"]
+        [
+            "claude",
+            "codex",
+            "github",
+            "opencodezen",
+            "linear",
+            "asana",
+            "doppler"
+        ]
     );
+    assert_eq!(opencode(all)["state"], "signed_out");
 }

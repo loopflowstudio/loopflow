@@ -40,12 +40,13 @@ pub fn remote(repo: &Path) -> Option<String> {
         .map(|name| (*name).to_owned())
 }
 
-/// One Git exchange for every repository this Machine plans without Linear
-/// or Asana. The Machine server runs this on its timer.
-pub fn exchange_all(store: &SqliteStore) -> Result<()> {
+/// The minute exchange discovers plans even when this Machine owns nothing.
+pub fn exchange_unowned(store: &SqliteStore) -> Result<()> {
+    let owned = super::plan_carriers::owned_repositories(store)?;
     for path in store.repository_paths()? {
         let repo = path.to_string_lossy();
-        if !path.is_dir() || crate::ops::tracker::connected(&repo) {
+        if owned.contains(repo.as_ref()) || !path.is_dir() || crate::ops::tracker::connected(&repo)
+        {
             continue;
         }
         if let Err(error) = exchange(store, &repo, None) {
@@ -56,7 +57,7 @@ pub fn exchange_all(store: &SqliteStore) -> Result<()> {
 }
 
 /// [`exchange`] for a clone this Machine has saved nothing in and never read
-/// a plan for, which registers it for [`exchange_all`]. `false` when the
+/// a plan for, which registers it for [`exchange_unowned`]. `false` when the
 /// Machine already knows the clone, or it has no remote.
 pub fn first_exchange(store: &SqliteStore, repo: &str, until: Instant) -> Result<bool> {
     if store.repository_id(repo)?.is_some() || remote(Path::new(repo)).is_none() {
@@ -160,7 +161,7 @@ fn exchange_with(
         until,
     )?;
     let me = crate::store::machines::local_machine(store)?.id;
-    let seen = seen_refs(path)?;
+    let seen = seen_refs(path, until)?;
     let mine = seen.get(me.as_str());
 
     // A ref that cannot be read does not stop the others or this Machine's push.
@@ -175,9 +176,9 @@ fn exchange_with(
         let read = (|| {
             let base = taken
                 .get(machine)
-                .filter(|base| commit_exists(path, base))
+                .filter(|base| commit_exists(path, base, until))
                 .or(mine);
-            let (records, theirs) = changed_records(path, base.map(String::as_str), tip)?;
+            let (records, theirs) = changed_records(path, base.map(String::as_str), tip, until)?;
             let skipped = store.apply_plan_records(repo, &records, None, &names)?;
             // A ref with anything not taken is read from the same place again.
             if skipped.is_empty() {
@@ -216,11 +217,12 @@ fn exchange_with(
 }
 
 /// Each fetched plan ref's Machine and commit.
-fn seen_refs(repo: &Path) -> Result<HashMap<String, String>> {
-    let listed = git(
+fn seen_refs(repo: &Path, until: Option<Instant>) -> Result<HashMap<String, String>> {
+    let listed = git_until(
         repo,
         &["for-each-ref", "--format=%(refname) %(objectname)", SEEN],
         None,
+        until,
     )?;
     Ok(String::from_utf8_lossy(&listed)
         .lines()
@@ -229,11 +231,12 @@ fn seen_refs(repo: &Path) -> Result<HashMap<String, String>> {
         .collect())
 }
 
-fn commit_exists(repo: &Path, commit: &str) -> bool {
-    git(
+fn commit_exists(repo: &Path, commit: &str, until: Option<Instant>) -> bool {
+    git_until(
         repo,
         &["cat-file", "-e", &format!("{commit}^{{commit}}")],
         None,
+        until,
     )
     .is_ok()
 }
@@ -244,17 +247,23 @@ fn changed_records(
     repo: &Path,
     base: Option<&str>,
     tip: &str,
+    until: Option<Instant>,
 ) -> Result<(Vec<StampedRecord>, Option<RepositoryId>)> {
     let empty;
     let base = match base {
         Some(base) => base,
         None => {
-            let hashed = git(repo, &["hash-object", "-t", "tree", "--stdin"], Some(b""))?;
+            let hashed = git_until(
+                repo,
+                &["hash-object", "-t", "tree", "--stdin"],
+                Some(b""),
+                until,
+            )?;
             empty = String::from_utf8_lossy(&hashed).trim().to_owned();
             &empty
         }
     };
-    let diff = git(
+    let diff = git_until(
         repo,
         &[
             "diff-tree",
@@ -268,6 +277,7 @@ fn changed_records(
             tip,
         ],
         None,
+        until,
     )?;
     // `:<mode> <mode> <old> <new> <status>\0<path>\0`, repeated.
     let mut parts = diff.split(|byte| *byte == 0);
@@ -283,7 +293,12 @@ fn changed_records(
         .iter()
         .map(|(blob, _)| format!("{blob}\n"))
         .collect::<String>();
-    let blobs = git(repo, &["cat-file", "--batch"], Some(wanted.as_bytes()))?;
+    let blobs = git_until(
+        repo,
+        &["cat-file", "--batch"],
+        Some(wanted.as_bytes()),
+        until,
+    )?;
     let mut rest = blobs.as_slice();
     let (mut records, mut repository) = (Vec::new(), None);
     for (_, file) in &files {
@@ -363,19 +378,18 @@ fn publish(
     until: Option<Instant>,
 ) -> Result<()> {
     let key = repo.to_string_lossy();
-    let mine = git(
+    let tip = git_until(
         repo,
         &[
-            "rev-parse",
-            "--verify",
-            "--quiet",
-            &format!("{SEEN}{me}^{{commit}}"),
+            "for-each-ref",
+            "--format=%(objectname)",
+            &format!("{SEEN}{me}"),
         ],
         None,
-    )
-    .ok()
-    .map(|tip| String::from_utf8_lossy(&tip).trim().to_owned());
-    let mine = mine.as_ref();
+        until,
+    )?;
+    let tip = String::from_utf8_lossy(&tip);
+    let mine = (!tip.trim().is_empty()).then(|| tip.trim());
     let mut since = if mine.is_some() { sent_seq } else { 0 };
     let mut files = Vec::new();
     loop {
@@ -393,10 +407,11 @@ fn publish(
         }
     }
     let named = mine.is_some_and(|mine| {
-        git(
+        git_until(
             repo,
             &["cat-file", "-p", &format!("{mine}:{REPOSITORY}")],
             None,
+            until,
         )
         .is_ok_and(|held| String::from_utf8_lossy(&held).trim() == repository.as_str())
     });
@@ -416,9 +431,25 @@ fn publish(
     file(&mut stream, REPOSITORY, repository.as_str().as_bytes());
     stream.extend_from_slice(&files);
     // A commit left by a push that failed is replaced, never built on.
-    git(repo, &["fast-import", "--quiet", "--force"], Some(&stream))?;
-    let tree = |commit: &str| git(repo, &["rev-parse", &format!("{commit}^{{tree}}")], None);
-    if mine.is_none_or(|mine| tree(mine).ok() != tree(&own).ok()) {
+    git_until(
+        repo,
+        &["fast-import", "--quiet", "--force"],
+        Some(&stream),
+        until,
+    )?;
+    let tree = |commit: &str| {
+        git_until(
+            repo,
+            &["rev-parse", &format!("{commit}^{{tree}}")],
+            None,
+            until,
+        )
+    };
+    let changed = match mine {
+        Some(mine) => tree(mine)? != tree(&own)?,
+        None => true,
+    };
+    if changed {
         git_until(
             repo,
             &[
@@ -431,7 +462,12 @@ fn publish(
             None,
             until,
         )?;
-        git(repo, &["update-ref", &format!("{SEEN}{me}"), &own], None)?;
+        git_until(
+            repo,
+            &["update-ref", &format!("{SEEN}{me}"), &own],
+            None,
+            until,
+        )?;
     }
     store.plan_sent(&key, Carrier::Git, since)?;
     Ok(())
@@ -445,19 +481,16 @@ fn file(stream: &mut Vec<u8>, path: &str, content: &[u8]) {
     stream.push(b'\n');
 }
 
-/// Run Git in `repo` with no terminal to ask on, giving it `input`. A failure
-/// is Git's own reason.
-fn git(repo: &Path, args: &[&str], input: Option<&[u8]>) -> Result<Vec<u8>> {
-    git_until(repo, args, input, None)
-}
-
-/// [`git`], stopped at `until` when it has not answered by then.
+/// Run Git without a terminal, stopping its process group at the deadline.
 fn git_until(
     repo: &Path,
     args: &[&str],
     input: Option<&[u8]>,
     until: Option<Instant>,
 ) -> Result<Vec<u8>> {
+    if until.is_some_and(|deadline| Instant::now() >= deadline) {
+        bail!("git {} did not answer in time", args[0]);
+    }
     let mut command = Command::new("git");
     command
         .arg("-C")
@@ -685,6 +718,45 @@ mod tests {
         (root, origin, laptop, mini)
     }
 
+    #[tokio::test]
+    async fn the_minute_git_exchange_yields_claimed_work_to_the_shared_owner_poll() {
+        let (_root, _origin, sender, owner) = machines();
+        let task = sender.task("Before the claim");
+        sender.exchange();
+        // Register the checkout before its first minute tick.
+        crate::repository::location::ensure_repository(&owner.store, &owner.repo).unwrap();
+        super::exchange_unowned(&owner.store).unwrap();
+        assert_eq!(owner.title(&task).as_deref(), Some("Before the claim"));
+        git(
+            Path::new(&owner.repo),
+            &["config", "user.email", "owner@example.test"],
+        );
+        crate::store::ownership::claim_task(&owner.store, &task).unwrap();
+
+        sender.retitle(&task, "First edit");
+        sender.exchange();
+        super::exchange_unowned(&owner.store).unwrap();
+        assert_eq!(owner.title(&task).as_deref(), Some("Before the claim"));
+        let store = crate::store::Store {
+            sqlite: owner.store.clone(),
+        };
+        crate::ops::tracker_events::check_owned_work(&store, Some(&task))
+            .await
+            .unwrap();
+        assert_eq!(owner.title(&task).as_deref(), Some("First edit"));
+        sender.retitle(&task, "Second edit");
+        sender.exchange();
+        // The server shares the Graph's attempt; the next due read catches up.
+        crate::ops::tracker_events::check_owned_work(&store, None)
+            .await
+            .unwrap();
+        assert_eq!(owner.title(&task).as_deref(), Some("First edit"));
+        crate::ops::plan_carriers::poll_owned(&store, &owner.repo, 0)
+            .await
+            .unwrap();
+        assert_eq!(owner.title(&task).as_deref(), Some("Second edit"));
+    }
+
     #[test]
     fn a_task_made_on_one_clone_is_on_another_and_the_later_title_wins_on_both() {
         let (_root, origin, laptop, mini) = machines();
@@ -785,9 +857,12 @@ mod tests {
         assert!(format!("{error:#}").starts_with("fatal:"), "{error:#}");
         assert_eq!(laptop.unsent(), 1);
         std::fs::rename(&away, origin.bare_path()).unwrap();
-        // A push that has not answered by the deadline is stopped.
+        // An expired send leaves the cursor where it was.
         let error = send(&laptop.store, &laptop.repo, std::time::Instant::now()).unwrap_err();
-        assert_eq!(format!("{error:#}"), "git push did not answer in time");
+        assert!(
+            format!("{error:#}").ends_with("did not answer in time"),
+            "{error:#}"
+        );
         assert_eq!(laptop.unsent(), 1);
 
         // A push the remote refuses, its copy of the ref being ahead of the

@@ -118,17 +118,23 @@ pub async fn create_wave_project(store: &Store, repo: &Path, wave: &WaveId) -> O
     Ok(true)
 }
 
-#[cfg(any(test, feature = "test-support"))]
-thread_local! {
-    pub(crate) static SCOPE_READS: std::cell::RefCell<std::collections::BTreeMap<std::path::PathBuf, usize>> = const { std::cell::RefCell::new(std::collections::BTreeMap::new()) };
-}
-
 /// The team every repository Task belongs to: a Linear Team or an Asana team.
 pub fn repository_scope(repo: &Path) -> OpsResult<String> {
-    #[cfg(any(test, feature = "test-support"))]
-    SCOPE_READS.with_borrow_mut(|reads| *reads.entry(repo.to_path_buf()).or_default() += 1);
     match transport(repo) {
         Some(TrackerConfig::Asana { team }) => Ok(crate::asana::team_gid(&team)),
+        _ => super::linear::repository_team_id(repo),
+    }
+}
+
+/// The configured delta feed. Asana resolves this exact (team, project name)
+/// pair to one gid; checking freshness must not itself contact Asana.
+pub(super) fn delta_scope(repo: &Path) -> OpsResult<String> {
+    match transport(repo) {
+        Some(TrackerConfig::Asana { team }) => Ok(format!(
+            "asana:{}/{}",
+            crate::asana::team_gid(&team),
+            repository_name(repo)
+        )),
         _ => super::linear::repository_team_id(repo),
     }
 }
@@ -266,28 +272,37 @@ impl Tracker {
 
     /// Items in the repository's planning scope changed since `since`: new items
     /// people created there and edits to known ones, with their events.
-    pub async fn changes(
+    pub(super) async fn changes(
         &self,
         scope: &str,
         since: Option<&str>,
         through: &str,
         live: &[String],
         finished: &[String],
-    ) -> TrackerResult<Vec<(TrackerItem, Option<TrackerProject>, TrackerEvent)>> {
-        let changes = match self {
-            Self::Linear(client) => {
-                return Ok(client
+    ) -> TrackerResult<(
+        Vec<(TrackerItem, Option<TrackerProject>, TrackerEvent)>,
+        String,
+    )> {
+        match self {
+            Self::Linear(client) => Ok((
+                client
                     .team_changes(scope, since, through, live, finished)
-                    .await?)
+                    .await?,
+                through.to_owned(),
+            )),
+            Self::Asana(client) => {
+                let (changes, watermark) = client.changes(since, through, live, finished).await?;
+                Ok((
+                    changes
+                        .into_iter()
+                        .map(|(issue, event)| (issue, None, event))
+                        .collect(),
+                    watermark,
+                ))
             }
-            Self::Asana(client) => client.changes(since, live, finished).await?,
             #[cfg(test)]
-            Self::Fake(_) => Vec::new(),
-        };
-        Ok(changes
-            .into_iter()
-            .map(|(issue, event)| (issue, None, event))
-            .collect())
+            Self::Fake(_) => Ok((Vec::new(), through.to_owned())),
+        }
     }
 
     pub(crate) async fn fetch_issue(&self, id: &str) -> TrackerResult<TrackerEvent> {

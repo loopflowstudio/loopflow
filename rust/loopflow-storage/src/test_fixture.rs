@@ -191,7 +191,13 @@ pub fn ownership(store: &SqliteStore, scope: TaskScope) -> OwnershipFacts {
 pub fn steer() -> (tempfile::TempDir, SqliteStore, SteerAdapter) {
     let home = tempfile::tempdir().unwrap();
     let store = crate::test_fixture::open(&home.path().join("store.db")).unwrap();
-    store.test_session("session", &crate::session_record::new_artifact_key());
+    let adapter = start_steer_session(&store, "session");
+    (home, store, adapter)
+}
+
+/// Attach a fixture Session and select its native thread for tool callbacks.
+pub fn start_steer_session(store: &SqliteStore, session: &str) -> SteerAdapter {
+    store.test_session(session, &crate::session_record::new_artifact_key());
     let process = LfProcessId::new();
     store
         .conn
@@ -204,7 +210,7 @@ pub fn steer() -> (tempfile::TempDir, SqliteStore, SteerAdapter) {
         .unwrap();
     let claim = store
         .attach_session(
-            "session",
+            session,
             None,
             &process,
             None,
@@ -215,9 +221,9 @@ pub fn steer() -> (tempfile::TempDir, SqliteStore, SteerAdapter) {
         )
         .unwrap();
     store
-        .record_agent_process_identity("session", &claim, std::process::id(), 1)
+        .record_agent_process_identity(session, &claim, std::process::id(), 1)
         .unwrap();
-    let adapter = store.reserve_steer_adapter("session", &claim).unwrap();
+    let adapter = store.reserve_steer_adapter(session, &claim).unwrap();
     store
         .with_provider_context(
             &adapter,
@@ -226,7 +232,7 @@ pub fn steer() -> (tempfile::TempDir, SqliteStore, SteerAdapter) {
             || Ok(()),
         )
         .unwrap();
-    (home, store, adapter)
+    adapter
 }
 
 /// Host the fixture's Session in a held terminal.

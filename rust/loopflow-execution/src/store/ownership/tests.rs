@@ -214,6 +214,7 @@ fn hand_back_rejects_a_changed_repository_with_the_same_held_set() {
             max_machines: 1,
             max_usd_per_hour: Usd::parse("1.00").unwrap(),
             hours: 1.0,
+            logins: Vec::new(),
         },
     )
     .unwrap();

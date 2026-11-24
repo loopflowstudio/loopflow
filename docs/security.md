@@ -52,18 +52,25 @@ user can; the execution boundary above is the only containment. See
 
 ```bash
 lf machine add mini
-lf machine connect mini github
-lf machine connect mini opencode
-lf machine connect mini linear
-ssh mini                         # sign in with the native Claude/Codex client
+lf set --global forward.env '[CLAUDE_CODE_OAUTH_TOKEN]'
+lf machine login codex mini
+lf machine login github mini
+lf machine login linear mini
 lf --machine mini -a codex implement
 ```
 
-- **Native logins:** Claude and Codex authenticate on the execution Machine.
-  For unattended rentals, opt in to forwarding via `forward.env` and
-  `forward.files` ([Remote Machines and rentals](subscriptions.md#remote-machines-and-rentals)).
-  Only variables and home files named in personal `forward` settings are sent.
-  Existing destination files are retained.
+- **Native logins:** Codex signs in on the destination through its own
+  device login, run there over SSH with no terminal; only the approval page
+  opens here ([Sign in on any Machine](subscriptions.md#sign-in-on-any-machine)).
+  The login, and every refresh of it, stays on the destination. Claude reaches
+  the destination as the `claude setup-token` you keep in Doppler and name in
+  `forward.env`: it travels on SSH stdin with each launch, is set for that run
+  only, and is never written there. Anyone who can read that launch's
+  environment on the destination can use the token until it expires; trust the
+  destination OS user with it. Loopflow does not choose a login, store a Claude
+  or Codex token or refresh one. A Machine with no login is refused before
+  launch with what fixes it. Only variables and home files named in personal
+  `forward` settings are sent. Existing destination files are retained.
 - **Service transfer:** OpenSSH verifies the host key and Loopflow checks the
   saved Machine identity before transfer. Credential bytes travel through SSH
   stdin, never in command arguments or logs, and land with owner-only

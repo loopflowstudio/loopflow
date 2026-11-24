@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use axum::extract::{Path as Segment, State};
+use axum::extract::{Path as Segment, Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
@@ -186,12 +186,30 @@ async fn membership(
     data(json!({}))
 }
 
-async fn project_tasks(State(state): State<Shared>) -> Response {
+async fn project_tasks(
+    State(state): State<Shared>,
+    Segment(project): Segment<String>,
+    Query(query): Query<BTreeMap<String, String>>,
+) -> Response {
     let asana = state.lock().await;
     if asana.offline {
         return StatusCode::SERVICE_UNAVAILABLE.into_response();
     }
-    data(json!(asana.tasks.values().cloned().collect::<Vec<_>>()))
+    let tasks = asana
+        .tasks
+        .values()
+        .filter(|task| {
+            task["memberships"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|m| m["project"]["gid"] == project)
+                && query
+                    .get("modified_since")
+                    .is_none_or(|since| task["modified_at"].as_str().unwrap() >= since.as_str())
+        })
+        .collect::<Vec<_>>();
+    data(json!(tasks))
 }
 
 async fn remove(State(state): State<Shared>, Segment(gid): Segment<String>) -> Response {
@@ -726,5 +744,102 @@ fn a_wave_sync_binds_the_asana_project_a_lost_create_reply_left() {
             .unwrap()
             .iter()
             .any(|member| member["project"]["gid"] == "1200000000000099"));
+    });
+}
+
+#[test]
+fn owned_asana_projects_in_one_team_receive_their_own_direction() {
+    with_asana(|runtime, fixture, repo, state| {
+        let other = repo.with_file_name("other");
+        std::fs::create_dir_all(other.join(".lf")).unwrap();
+        std::fs::copy(repo.join(".lf/config.yaml"), other.join(".lf/config.yaml")).unwrap();
+        crate::git::git_stdout(&other, &["init", "-q"]).unwrap();
+        let mut tasks = Vec::new();
+        for (path, direction) in [(repo, "first project"), (other.as_path(), "second project")] {
+            crate::git::git_stdout(path, &["config", "user.email", "owner@example.test"]).unwrap();
+            let task = crate::ops::task::task_create(
+                path,
+                None,
+                Some(direction.into()),
+                None,
+                Default::default(),
+                Default::default(),
+                None,
+            )
+            .unwrap();
+            crate::store::ownership::claim_task(&fixture.store.sqlite, &task.id).unwrap();
+            let mut asana = runtime.block_on(state.lock());
+            let issue = task.tracker_id.as_ref().unwrap().as_str();
+            let created = asana.tick();
+            asana.stories.entry(issue.to_owned()).or_default().push(json!({
+                "gid": format!("{issue}-story"), "created_at": created,
+                "html_text": format!("<body>Steer the {direction}</body>"), "resource_subtype":"comment_added",
+                "created_by":{"gid":"123","name":"Ada"}
+            }));
+            tasks.push((task.id, direction));
+        }
+        runtime.block_on(async {
+            let store = &fixture.store;
+            crate::ops::tracker_events::check_owned_work(store, Some(&tasks[0].0))
+                .await
+                .unwrap();
+            assert!(store
+                .task_steers(&tasks[1].0)
+                .await
+                .unwrap()
+                .iter()
+                .all(|s| !s.text.contains("Steer the")));
+            crate::ops::tracker_events::check_owned_work(store, None)
+                .await
+                .unwrap();
+            for (task, direction) in &tasks {
+                let steers = store.task_steers(task).await.unwrap();
+                assert_eq!(
+                    steers
+                        .iter()
+                        .filter(|s| s.text.contains("Steer the"))
+                        .count(),
+                    1
+                );
+                assert!(steers
+                    .iter()
+                    .any(|s| s.text.contains(&format!("Steer the {direction}"))));
+            }
+
+            // The name now resolves to a different gid. Its existing Tasks
+            // predate the old project's watermark and still have to arrive.
+            {
+                let mut asana = state.lock().await;
+                let replacement = "1200000000000042";
+                asana
+                    .projects
+                    .iter_mut()
+                    .find(|p| p["name"] == "fixture")
+                    .unwrap()["gid"] = json!(replacement);
+                let mut imported = asana
+                    .tasks
+                    .values()
+                    .find(|t| t["name"] == "first project")
+                    .unwrap()
+                    .clone();
+                imported["gid"] = json!("replacement-task");
+                imported["name"] = json!("Already in the replacement project");
+                imported["external"] = Value::Null;
+                imported["memberships"] = json!([{"project":{"gid":replacement}}]);
+                asana.tasks.insert("replacement-task".into(), imported);
+            }
+            crate::ops::tracker_events::refresh_repository(
+                store,
+                repo.to_str().unwrap(),
+                crate::ops::tracker::drain::Scope::All,
+            )
+            .await;
+            assert!(store
+                .list_tasks(None)
+                .await
+                .unwrap()
+                .iter()
+                .any(|t| t.title == "Already in the replacement project"));
+        });
     });
 }

@@ -52,7 +52,8 @@ to one. `uv run python scripts/due_removals.py` prints when each may drop.
 
 ## Linear events
 
-- `linear_team_checks`: team_id, attempted_at, synced_through
+- `linear_team_checks` — **leaving → LOO-1084, planning_scope_checks**: team_id, attempted_at, synced_through
+- `planning_scope_checks`: scope, attempted_at, synced_through
 - `pm_issue_changes`: issue_id, revision_ns, removed
 - `pm_items`: repo, provider, id, identifier, project_id, observed_at, needs_refresh, revision, branch_name, url, name, description, rank, completed, completed_at, due_date, state, team_id, assignee, completed_at_observed, due_date_observed, assignee_observed, claimed_project_id, project_id_observed
 - `pm_project_name_cutover` — **leaving → LOO-954, unused_store_members**: repo, provider, id, body, observed_at, archived, membership_unresolved, converted_at

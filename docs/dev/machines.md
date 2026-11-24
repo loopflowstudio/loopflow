@@ -52,10 +52,19 @@ preparation. `--context`/`--explain` skip both, and neither side admits a Proces
 Names and paths resolve at the destination. Missing or changed identity fails without
 initialization, repair or local fallback.
 
-`lf machine connect mini <provider>` installs supported service credentials
-through SSH stdin. Claude and Codex instead use native authentication established
-on the destination. Personal `forward` settings can send named variables and home
-files; native clients interpret them. Launch does not select or refresh logins. See [native authentication](../subscriptions.md#remote-machines-and-rentals).
+`lf machine login <provider> mini` signs a Machine in. For Codex it runs
+`codex login --device-auth` on the destination as one SSH exchange with no PTY
+(`BROWSER=true`, so the destination opens no window of its own), reads the
+approval URL and code from its output, hands them to the approver here and then
+reads `codex login status` there. Claude never signs in remotely: the
+`CLAUDE_CODE_OAUTH_TOKEN` named in `forward.env` rides each launch, and the
+launch's login probe (`claude auth status --json`, run with the launch's
+environment) sees it. Nothing else in that
+output is shown or logged. Services install their credentials through SSH stdin
+into `lf machine credentials receive`. `lf machine logins --json` on the
+destination is the one remote read of what is signed in. Personal `forward`
+settings send per-run variables and home files; native clients interpret them.
+See [Sign in on any Machine](../subscriptions.md#sign-in-on-any-machine).
 
 Remove forgets the connection without contacting the remote. Historical machine
 identity and routes remain in SQLite, and ownership entries keep naming the Machine. Previously observed routes
@@ -167,7 +176,8 @@ inside one IMMEDIATE transaction:
 
 A write for a Task another Machine runs travels as the operation itself, not
 as a command line. Running, claiming or unassigning the Task, setting
-its auto, and opening or resuming its Session, reach the writer the same way:
+its auto, steering it, and opening or resuming its Session, reach the writer
+the same way:
 
 ```bash
 lf task auto off LOO-123 --json         # LOO-123 runs on mini; mini's server answers
@@ -190,7 +200,9 @@ A writer with an older `lf` fails the call and names its version and the
 update command, for example ``mini runs lf 0.15.2, which cannot take this
 operation; update it with `ssh -- 'mini' 'lf install'` ``. A writer with a newer
 protocol asks you to update this Machine with `lf install`. Nothing falls back
-to running the write locally.
+to running the write locally, except a steer, which is a Task comment and has
+another way there
+([Steer and read a Task another Machine runs](#steer-and-read-a-task-another-machine-runs)).
 
 Nothing routes to another person's Machine, and nobody moves or unclaims
 another person's claim; moving a Task to another person is deferred. The Machine in a claim
@@ -425,6 +437,72 @@ on the Task (on or off, who, when), carried whether or not the Task has run. The
 it would have on the laptop. `lf task auto off MTG-321` turns it off on either
 Machine. A Machine ships only Tasks it owns: once a Task has
 left, its old checkout starts nothing.
+
+## Steer and read a Task another Machine runs
+
+From the laptop, where mini is added (`lf machine add mini`), a steer and a
+status read go straight to mini's server:
+
+```console
+$ lf steer MTG-321 "also check bar"
+mini · Saved 0199a2f1; MTG-321's worker reads it at its next boundary
+$ lf task status MTG-321
+Check the parser · MTG-321
+Runs on mini since Nov 12 10:42; read from its server.
+…
+```
+
+Mini reports where its Graph stands, lists its Sessions and shows the Task's
+parent and children. A finished Task opens with `Read from mini's server.`
+instead: it runs nowhere.
+`--json` and `--subscribe` say so with `reading.kind: "owner"` and
+`task.runs_on` naming mini. One-shot status waits at most 15 seconds for mini.
+
+A rented sandbox has no route to its siblings. On `modal-2`, steering a Task
+`modal-3` runs goes through the tracker instead:
+
+```console
+$ lf steer MTG-419 "stop refactoring foo"
+Queued 0199a2f4 in Linear for modal-3; modal-3 is not registered here. modal-3 reads it when it next syncs
+$ lf task status MTG-419
+…
+MTG-419  Runs on modal-3 since Nov 23 09:05; modal-3 is not registered here, so its Graph and Sessions are not read here
+```
+
+A Machine that owns open Tasks reads its tracker, hub or Git plan about every
+30 seconds. A managed Graph worker needs `lf server` to start. If the server
+exits during a step, the running Graph keeps checking and the worker reads
+incoming steers after its next tool call. With the server running, a steer
+also wakes an idle or stopped Task conversation. With no open Tasks owned
+here, background tracker reads stop. A low Linear budget stretches the interval.
+
+When mini is registered but offline, the steer goes through the shared plan.
+Its receipt names the connection failure. Status gives the same reason and
+shows the saved planning, comments and PR. If the connection drops after the
+steer was sent, check `lf task status` to see whether mini saved it.
+
+When the owner cannot answer, status returns `task.state: null` and
+`task.next: null` for open work. Finished Tasks keep their terminal state. A live reply carries the owner’s own state
+and next move. `lf task list` puts work held on another Machine in Working
+and reads the Machine name from the ownership log without contacting the
+owner. A Machine your preferences don't name shows the public name its
+claim carried, else its id.
+
+```console
+$ lf task list
+MTG-419 · Jack · Runs on modal-3 since Nov 23 09:05 · Stop refactoring foo
+```
+
+List JSON carries the local lifecycle projection. Its `section` is the
+board placement. An open Task running elsewhere offers no local run action and
+does not match a local runtime state filter. Status and steering read an unowned
+Task here even when its Wave names a Machine for its next run.
+
+| `--json` field | Says |
+|---|---|
+| `task.runs_on` | `{machine, since}`, or `null` when this Machine runs it or nobody does |
+| `reading.kind` (status) | `here`, `owner` (the owning Machine answered) or `unobserved` with its `reason` |
+| `delivery.reached` (steer) | `owner`, `shared` (in Linear, Asana, Git or the hub) or `here` (only this Machine has it so far) |
 
 ## Own and rent Machines
 

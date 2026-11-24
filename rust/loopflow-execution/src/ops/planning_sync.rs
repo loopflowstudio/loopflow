@@ -84,7 +84,7 @@ where
     }
 }
 
-async fn sync_saved(store: &Store, repo: &str, saved: Option<&ActionOwner>) {
+pub(crate) async fn sync_saved(store: &Store, repo: &str, saved: Option<&ActionOwner>) {
     let attempt = async {
         if !super::tracker::connected(repo) {
             return super::plan_carriers::send(store, repo)
@@ -189,8 +189,12 @@ pub async fn refresh_wave(wave: &crate::work::wave::Wave, tracker: TrackerKind) 
         ));
     }
     let project = store.sqlite.wave_project(wave.id()).map_err(message)?;
-    super::tracker_events::refresh_repository(&store, wave.repo(), &ActionOwner::Project(project))
-        .await;
+    super::tracker_events::refresh_repository(
+        &store,
+        wave.repo(),
+        Scope::First(&ActionOwner::Project(project)),
+    )
+    .await;
     if tracker == TrackerKind::Linear
         && store
             .project_of_wave(wave.id())

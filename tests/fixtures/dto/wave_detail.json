@@ -441,7 +441,8 @@
           "unstarted",
           "backlog"
         ],
-        "owned_by_you": false
+        "owned_by_you": false,
+        "runs_on": null
       },
       {
         "task": {
@@ -600,7 +601,8 @@
           "unstarted",
           "backlog"
         ],
-        "owned_by_you": false
+        "owned_by_you": false,
+        "runs_on": null
       }
     ],
     "truncated": false

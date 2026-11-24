@@ -793,7 +793,10 @@ fn server_operations_match_their_lf_commands() {
     repo.commit("Comparison base");
     let base = repo.head_sha();
     repo.create_branch("served-reads");
-    register_task_with_pr(home.path(), repo.path(), "served-reads", &base);
+    // Under the path Git names, as `lf` registers it: the server's owned check
+    // and `lf` then carry one plan, not one per spelling of the temp directory.
+    let canonical = repo.path().canonicalize().unwrap();
+    register_task_with_pr(home.path(), &canonical, "served-reads", &base);
     repo.create_file("edit.txt", "working\n");
     let graph = support::record_graph(home.path(), repo.path(), "code", "implement", "succeeded");
     let task_diff = |path: Option<&str>, draft: Option<&str>| Read::TaskDiff {
@@ -947,7 +950,6 @@ fn server_operations_match_their_lf_commands() {
         | Read::SessionRetention
         | Read::MachineDoctor
         | Read::RepoCi { .. }
-        | Read::AccountList { .. }
         | Read::SkillList { .. }
         | Read::PrChecks { .. }
         | Read::PrReviews { .. }
@@ -1163,6 +1165,14 @@ fn server_operations_match_their_lf_commands() {
             ],
         ),
     };
+    // The server checks its owned Task's plan carriers as it starts. Carry the
+    // plan by Git first, so that check finds nothing new to record mid-read.
+    read(
+        repo.path(),
+        home.path(),
+        &["wave", "status", "task-pr-tests", "--sync", "--json"],
+        None,
+    );
     let server = Server::start(repo.path(), home.path());
     let database = home.path().join("loopflow.db");
     // A server read changes no Work.
@@ -1315,8 +1325,6 @@ fn server_operations_match_their_lf_commands() {
         | Write::CheckoutCommit { .. }
         | Write::CheckoutSync { .. }
         | Write::CheckoutCreate { .. }
-        | Write::AccountDisconnect { .. }
-        | Write::AccountConnect { .. }
 
 
 
@@ -1601,8 +1609,24 @@ fn server_operations_match_their_lf_commands() {
         let args: Vec<&str> = args.iter().map(String::as_str).collect();
         let printed: Value =
             serde_json::from_str(&read(repo.path(), home.path(), &args, None)).unwrap();
-        assert_eq!(last(&written), last(&printed), "{args:?}");
-        assert_eq!(last(&written).0, format!("served {steer}"));
+        if steer {
+            for receipt in [&written, &printed] {
+                assert_eq!(receipt["identifier"], "INF-123");
+                assert_eq!(receipt["delivery"]["reached"], "owner");
+                assert!(receipt["delivery"]["runs_on"].is_null());
+                assert!(receipt.get("comments").is_none());
+            }
+            let reader = |r: &Value| {
+                r["delivery"]["sentence"]
+                    .as_str()
+                    .unwrap()
+                    .replace(r["steer_id"].as_str().unwrap(), "<id>")
+            };
+            assert_eq!(reader(&written), reader(&printed));
+        } else {
+            assert_eq!(last(&written), last(&printed), "{args:?}");
+            assert_eq!(last(&written).0, "served false");
+        }
     }
     let stop = Write::TaskAutoOff {
         directory: directory.clone(),
@@ -2487,23 +2511,6 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
             }
             spelled.push("--json".into());
             (path(directory), spelled)
-        }
-        Write::AccountDisconnect { provider } => {
-            ("/".into(), words(&["account", "disconnect", provider]))
-        }
-        Write::AccountConnect {
-            provider,
-            chrome_profile,
-            api_key,
-        } => {
-            let mut spelled = words(&["account", "connect", provider]);
-            if let Some(profile) = chrome_profile {
-                spelled.extend(words(&["--chrome-profile", profile]));
-            }
-            if *api_key {
-                spelled.push("--api-key".into());
-            }
-            ("/".into(), spelled)
         }
         Write::GraphRun {
             directory,

@@ -243,18 +243,14 @@ pub(crate) fn validate_value(path: &[&str], value: &Value) -> Result<(), LoadErr
             "choose machine.tasks or machine.capacity in one declaration",
         ));
     }
-    for (provider, browsers) in &parsed.auth_browsers {
+    for (provider, approver) in &parsed.approvers {
         provider
             .parse::<crate::provider_auth::Provider>()
             .map_err(|error| invalid(error.to_string()))?;
-        for profiles in std::iter::once(&browsers.default).chain(browsers.accounts.values()) {
-            let mut seen = std::collections::HashSet::new();
-            for profile in profiles {
-                crate::profile::ProfileId::parse(profile).map_err(invalid)?;
-                if !seen.insert(profile) {
-                    return Err(invalid("browser profiles must be unique"));
-                }
-            }
+        let (crate::config::placement::Approver::Chrome { chrome: value }
+        | crate::config::placement::Approver::Command { command: value }) = approver;
+        if value.trim().is_empty() {
+            return Err(invalid(format!("approvers.{provider} cannot be empty")));
         }
     }
     for (name, template) in &parsed.ondemands {

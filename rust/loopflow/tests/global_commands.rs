@@ -258,7 +258,7 @@ fn machine_commands_and_catalog_work_without_git_or_a_repository() {
         vec!["list"],
         vec!["graph", "show", "pursue"],
         vec!["help", "graph", "pursue"],
-        vec!["account"],
+        vec!["machine", "logins"],
         vec!["wave", "list", "--json"],
     ] {
         let output = command(home.path(), cwd.path(), &args)

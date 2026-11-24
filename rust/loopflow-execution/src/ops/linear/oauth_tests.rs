@@ -202,7 +202,7 @@ async fn pm_read_linear_oauth_invalid_grant() {
             failure_message(scoped(fixture.context(&graphql), &oauth, forced_read(&repo)).await);
         assert!(
             error.contains("invalid_grant")
-                && error.contains("doppler run -- lf account connect linear")
+                && error.contains("doppler run -- lf machine login linear")
         );
         assert!(!error.contains("synthetic-secret"));
         assert_eq!(exchanges.lock().await.len(), 1);
@@ -306,7 +306,7 @@ async fn linear_oauth_classifies_failures_without_partial_writes() {
         let (url, requests) = test_server::spawn(vec![response.clone(), response]).await;
         let error = failure_message(fixture.resolve(&url).await);
         assert_eq!(
-            error.contains("doppler run -- lf account connect linear"),
+            error.contains("doppler run -- lf machine login linear"),
             reconnect
         );
         assert!(!error.contains("synthetic-secret"));
@@ -461,7 +461,7 @@ async fn linear_oauth_missing_credential_and_legacy_guidance() {
                 .await,
         );
         assert_eq!(
-            error.contains("doppler run -- lf account connect linear"),
+            error.contains("doppler run -- lf machine login linear"),
             reconnect
         );
         fixture.assert_token(&original).await;

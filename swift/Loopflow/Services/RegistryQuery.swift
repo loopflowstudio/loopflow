@@ -75,8 +75,6 @@ public enum ServedRead: Equatable, Sendable, Encodable {
     /// How failed CI was detected, repaired and landed on this Machine since
     /// `since` (`7d`, `24h` or an RFC 3339 instant).
     case repoCi(since: String, wave: String?, repo: String?)
-    /// Every login's state on this Machine; `cached` skips the providers.
-    case accountList(target: String?)
     /// The commands, skills, graphs and Waves under `path`, as `lf list` shows them.
     case skillList(directory: String, path: [String])
     /// The branch's check report as the provider prints it, with its state.
@@ -179,8 +177,6 @@ public enum ServedRead: Equatable, Sendable, Encodable {
             return ["machine", "doctor", "--json"]
         case .repoCi(let since, let wave, let repo):
             return ["repo", "ci", "--since", since] + argument("--wave", wave) + argument("--repo", repo) + ["--json"]
-        case .accountList(let target):
-            return ["account"] + argument(nil, target) + ["--json"]
         case .skillList(_, let path):
             return ["list"] + path + ["--json"]
         case .prChecks(_, let required):
@@ -269,8 +265,6 @@ public enum ServedRead: Equatable, Sendable, Encodable {
         case .machineDoctor: TaggedFields("machine.doctor")
         case .repoCi(let since, let wave, let repo):
             TaggedFields("repo.ci", ["since": since, "wave": wave, "repo": repo])
-        case .accountList(let target):
-            TaggedFields("account.list", ["target": target])
         case .skillList(let directory, let path): TaggedFields("skill.list", ["directory": directory, "path": path])
         case .prChecks(let directory, let required):
             TaggedFields("pr.checks", ["directory": directory, "required": required])
@@ -341,10 +335,6 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
     case checkoutSync(directory: String, onto: String?, preview: Bool, manual: Bool, continueSync: Bool, abort: Bool,
                       adopt: Bool)
     case checkoutCreate(directory: String, name: String, preview: Bool, persistent: Bool, stack: Bool)
-    /// Service credentials on the Machine, run from `/`.
-    case accountDisconnect(provider: String)
-    /// Served, no browser profile is chosen interactively.
-    case accountConnect(provider: String, chromeProfile: String?, apiKey: Bool)
     /// Started detached and headless; the result is the Process carrying the run.
     case graphRun(directory: String, name: String, message: String?, agent: String?)
     /// Started detached and headless; the result is the Process carrying the run.
@@ -377,8 +367,6 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
     public var argv: [String] {
         switch self {
         case .prPublish, .prOpen, .prSubmit, .prArm, .prLand, .prAbandon, .prReconcile, .prRequestReview: return prArgv
-        case .accountDisconnect, .accountConnect:
-            return accountArgv
         case .graphRun(_, let name, let message, let agent):
             return ["--batch"] + argument("--agent", agent) + ["graph", name] + argument(nil, message)
         case .skillRun(_, let name, let message, let agent):
@@ -527,17 +515,6 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
         }
     }
 
-    private var accountArgv: [String] {
-        switch self {
-        case .accountDisconnect(let provider):
-            return ["account", "disconnect", provider]
-        case .accountConnect(let provider, let chromeProfile, let apiKey):
-            return ["account", "connect", provider] + argument("--chrome-profile", chromeProfile)
-                + Self.flags([("--api-key", apiKey)])
-        default: return []
-        }
-    }
-
     /// The flags that are on, in order.
     private static func flags(_ flags: [(String, Bool)]) -> [String] {
         flags.filter(\.1).map(\.0)
@@ -649,10 +626,6 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
         case .checkoutCreate(let directory, let name, let preview, let persistent, let stack):
             TaggedFields("checkout.create", ["directory": directory, "name": name, "preview": preview,
                                              "persistent": persistent, "stack": stack])
-        case .accountDisconnect(let provider):
-            TaggedFields("account.disconnect", ["provider": provider])
-        case .accountConnect(let provider, let chromeProfile, let apiKey):
-            TaggedFields("account.connect", ["provider": provider, "chrome_profile": chromeProfile, "api_key": apiKey])
         case .graphRun(let directory, let name, let message, let agent):
             TaggedFields("graph.run", ["directory": directory, "name": name, "message": message, "agent": agent])
         case .skillRun(let directory, let name, let message, let agent):

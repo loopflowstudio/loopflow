@@ -106,21 +106,21 @@ fn logs_in(
     Ok(logs)
 }
 
-/// Each listed Task's current owner as this Machine reads it, with Machine
-/// labels as best known here; Tasks without an owner are absent.
-pub(super) fn owners_in(
+/// Each listed Task's ownership as this Machine reads it, with Machine
+/// labels as written; Tasks without an owner are absent.
+pub(super) fn ownerships_in(
     conn: &Connection,
     tasks: &[TaskId],
-) -> StoreResult<HashMap<TaskId, TaskOwner>> {
+) -> StoreResult<(MachineId, HashMap<TaskId, TaskOwnership>)> {
     let local = local_machine_in(conn)?;
-    let mut owners = HashMap::new();
-    for (task, rows) in logs_in(conn, tasks)? {
-        let Some(owner) = read_log(&rows, &local).owner else {
-            continue;
-        };
-        owners.insert(task, owner);
+    let mut owned = HashMap::new();
+    for (task, log) in logs_in(conn, tasks)? {
+        let ownership = ownership_from_log(log, &local);
+        if ownership.owner.is_some() {
+            owned.insert(task, ownership);
+        }
     }
-    Ok(owners)
+    Ok((local, owned))
 }
 
 /// Who holds a Task after an entry, with the Machine label as written.
@@ -231,10 +231,8 @@ fn name_person_in(conn: &Connection, id: &str, name: Option<&str>) -> StoreResul
     Ok(())
 }
 
-fn reading_in(conn: &Connection, task: &TaskId) -> StoreResult<(Vec<TaskOwnershipEntry>, Reading)> {
-    let rows = log_in(conn, task)?;
-    let reading = read_log(&rows, &local_machine_in(conn)?);
-    Ok((rows, reading))
+fn reading_in(conn: &Connection, task: &TaskId) -> StoreResult<Reading> {
+    Ok(read_log(&log_in(conn, task)?, &local_machine_in(conn)?))
 }
 
 /// Apply observed display labels without changing the saved owner.
@@ -245,12 +243,19 @@ pub fn label_owner(owner: &mut TaskOwner, names: &HashMap<MachineId, String>) {
 }
 
 pub(super) fn ownership_in(conn: &Connection, task: &TaskId) -> StoreResult<TaskOwnership> {
-    let (log, reading) = reading_in(conn, task)?;
-    Ok(TaskOwnership {
+    Ok(ownership_from_log(
+        log_in(conn, task)?,
+        &local_machine_in(conn)?,
+    ))
+}
+
+fn ownership_from_log(log: Vec<TaskOwnershipEntry>, local: &MachineId) -> TaskOwnership {
+    let reading = read_log(&log, local);
+    TaskOwnership {
         owner: reading.owner,
         superseded_by: reading.superseded_by,
         log,
-    })
+    }
 }
 
 /// An unfinished Task a Machine owns: the owner as the log names them, and
@@ -274,35 +279,32 @@ pub(super) fn held_in(conn: &Connection, machine: &MachineId) -> StoreResult<Vec
         rows.collect::<Result<Vec<_>, _>>()?
     };
     let candidates: Vec<_> = candidates.into_iter().map(TaskId::from_raw).collect();
-    let local = local_machine_in(conn)?;
-    let mut logs = logs_in(conn, &candidates)?;
+    let (_, mut ownerships) = ownerships_in(conn, &candidates)?;
     let mut held = Vec::new();
     for task in candidates {
-        let rows = logs.remove(&task).unwrap_or_default();
-        let Some(owner) = read_log(&rows, &local).owner else {
+        let Some(ownership) = ownerships.remove(&task) else {
             continue;
         };
-        if owner.machine.id.as_ref() != Some(machine) {
+        let since = ownership.since(machine);
+        let Some(owner) = ownership
+            .owner
+            .filter(|owner| owner.machine.id.as_ref() == Some(machine))
+        else {
             continue;
-        }
-        let since = rows
-            .iter()
-            .rev()
-            .find(|row| row.machine_id.as_ref() == Some(machine))
-            .map(|row| row.at);
+        };
         held.push(HeldTask { task, owner, since });
     }
     Ok(held)
 }
 
 pub(super) fn owned_in(conn: &Connection, task: &TaskId) -> StoreResult<bool> {
-    Ok(reading_in(conn, task)?.1.owner.is_some())
+    Ok(reading_in(conn, task)?.owner.is_some())
 }
 
 /// Whether this Machine holds the Task by a claim nobody has claimed after.
 fn claimed_here_in(conn: &Connection, task: &TaskId) -> StoreResult<bool> {
     let local = local_machine_in(conn)?;
-    let (_, reading) = reading_in(conn, task)?;
+    let reading = reading_in(conn, task)?;
     Ok(reading.superseded_by.is_none()
         && reading.owner.and_then(|holder| holder.machine.id) == Some(local))
 }
@@ -415,7 +417,7 @@ pub(super) fn writer_in(
     task: &TaskId,
     me: &OwnershipFacts,
 ) -> StoreResult<(MachineId, bool)> {
-    let (_, reading) = reading_in(conn, task)?;
+    let reading = reading_in(conn, task)?;
     if let Some(holder) = &reading.owner {
         if let Some(machine) = &holder.machine.id {
             if is_mine_in(conn, me, holder)? && is_my_machine_in(conn, me, machine)? {
@@ -451,7 +453,7 @@ fn my_claim_in(
     me: &OwnershipFacts,
 ) -> StoreResult<Option<(MachineId, TaskOwner)>> {
     let local = require_writer_in(conn, task, me)?;
-    let (_, reading) = reading_in(conn, task)?;
+    let reading = reading_in(conn, task)?;
     match reading.owner {
         None => Ok(None),
         Some(holder) if !is_mine_in(conn, me, &holder)? => {
@@ -757,7 +759,7 @@ fn notify_superseded_in(
     held: bool,
     machine_names: &HashMap<MachineId, String>,
 ) -> StoreResult<()> {
-    let (_, reading) = reading_in(conn, task)?;
+    let reading = reading_in(conn, task)?;
     let local = local_machine_in(conn)?;
     let (text, lost) = match (reading.owner, reading.superseded_by) {
         (Some(mut owner), Some(mut later)) => {
@@ -811,7 +813,7 @@ pub(super) fn reassert_in(
     task: &TaskId,
     planning_connected: bool,
 ) -> StoreResult<Option<TaskOwnershipEntry>> {
-    let (_, reading) = reading_in(conn, task)?;
+    let reading = reading_in(conn, task)?;
     let (true, Some(holder)) = (reading.reassert, reading.owner) else {
         return Ok(None);
     };
@@ -996,7 +998,7 @@ impl SqliteStore {
         if !me.matches_task_in(&tx, task)? {
             return Ok(None);
         }
-        if reading_in(&tx, task)?.1.owner.is_none() {
+        if reading_in(&tx, task)?.owner.is_none() {
             claim_in(&tx, task, me)?;
         }
         let entry = move_in(&tx, task, target, me)?;
@@ -1034,7 +1036,7 @@ impl SqliteStore {
         if !me.matches_task_in(&tx, task)? {
             return Ok(None);
         }
-        let (rows, _) = reading_in(&tx, task)?;
+        let rows = log_in(&tx, task)?;
         if rows.last().map(|row| &row.id) != Some(&sent.id) {
             return Err(StoreError::InvalidAuthority(format!(
                 "Task {task} changed hands after its move {}; it stays where that left it",

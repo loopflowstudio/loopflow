@@ -124,21 +124,21 @@ async fn create_named_projects(
     tracker: &Tracker,
     actions: &[TrackerAction],
 ) {
-    let mut named: Vec<loopflow_model::durable::ProjectId> = Vec::new();
-    for parent in actions.iter().flat_map(parents_named) {
-        if let ActionOwner::Project(project) = parent {
-            if !named.contains(&project) {
-                named.push(project);
-            }
-        }
-    }
+    let named: HashSet<_> = actions
+        .iter()
+        .flat_map(parents_named)
+        .filter_map(|parent| match parent {
+            ActionOwner::Project(project) => Some(project),
+            _ => None,
+        })
+        .collect();
     for id in named {
         let Ok(Some(project)) = store.sqlite.project(&id) else {
             continue;
         };
-        if project.tracker_id.is_some()
-            || !matches!(store.sqlite.get_wave(&project.wave_id), Ok(Some(wave)) if !wave.is_retired())
-        {
+        let live =
+            matches!(store.sqlite.get_wave(&project.wave_id), Ok(Some(wave)) if !wave.is_retired());
+        if project.tracker_id.is_some() || !live {
             continue;
         }
         if let Err(error) = tracker.create_project(store, repo, &project).await {
@@ -328,7 +328,7 @@ struct Drain<'a> {
     store: &'a Store,
     repo: &'a Path,
     tracker: &'a Tracker,
-    /// Projects and Tasks whose creation is queued.
+    /// Tasks whose creation is queued.
     creating: HashSet<ActionOwner>,
     limit: usize,
     until: Instant,
@@ -370,8 +370,8 @@ impl Drain<'_> {
         false
     }
 
-    /// Whether this action names a Project or a parent Task being created
-    /// that has no remote id yet.
+    /// Whether this action names a parent Task being created that has no
+    /// remote id yet.
     fn parent_uncreated(&self, action: &TrackerAction) -> bool {
         parents_named(action)
             .iter()

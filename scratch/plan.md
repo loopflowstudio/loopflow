@@ -622,6 +622,12 @@ Two choices differ from the slice text; see `scratch/questions.md`:
 tracker down leaves the Wave recorded with its Project unbound (rerunning
 `lf wave create` makes it), and a Task sent into an unbound Project creates it.
 
+Compress after slice 12: `lf wave create` no longer runs a repository
+exchange after making the Project (it only sent the queued Project create);
+the drain's comments name Tasks as the only queued creates. Execution
+`task_planning_tests::`, `asana_planning_tests::`, `ops::tracker` (55) pass;
+clippy clean.
+
 ## Remains
 
 1. Gate: sync main, Swift DTO and desktop suites (`scripts/test_desktop.sh`),

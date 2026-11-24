@@ -62,7 +62,6 @@ pub async fn add(repo: &Path, name: &str, objective: Option<&str>) -> OpsResult<
                 added.name, added.name
             ))
         })?;
-    sync_wave_project(&store, &added.main_checkout.to_string_lossy(), &added.id).await?;
     Ok(added)
 }
 

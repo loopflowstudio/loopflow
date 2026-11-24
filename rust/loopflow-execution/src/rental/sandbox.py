@@ -52,7 +52,7 @@ TOOLS = [
     "useradd -m -s /bin/bash lf && echo 'lf ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/lf",
     # sshd sessions read the environment from here, not from the image.
     "printf 'RUSTUP_HOME=/usr/local/rustup\\nCARGO_HOME=/usr/local/cargo\\nIS_SANDBOX=1\\n"
-    f"PATH={ENV['PATH']}:/home/lf/.local/bin\\n'"
+    f"PATH={ENV['PATH']}:/root/.local/bin:/home/lf/.local/bin\\n'"
     " > /etc/environment",
 ]
 

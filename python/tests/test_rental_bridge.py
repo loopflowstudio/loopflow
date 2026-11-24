@@ -303,7 +303,7 @@ def test_modal_caps_both_resources_and_stops_at_the_admitted_deadline(
     assert reply["route"] == "ssh://lf@modal.test:4321"
 
 
-def test_modal_non_login_ssh_finds_the_uploaded_cli_and_provider_tools(tmp_path):
+def test_non_login_ssh_finds_the_uploaded_cli_and_provider_tools(tmp_path):
     environment = tmp_path / "environment"
     for command in bridge.TOOLS:
         if "/etc/environment" in command:
@@ -312,7 +312,7 @@ def test_modal_non_login_ssh_finds_the_uploaded_cli_and_provider_tools(tmp_path)
                 check=True,
             )
     settings = dict(line.split("=", 1) for line in environment.read_text().splitlines())
-    assert "/home/lf/.local/bin" in settings["PATH"].split(":")
+    assert {"/root/.local/bin", "/home/lf/.local/bin"} <= set(settings["PATH"].split(":"))
     packages = next(
         command.split("npm install -g ")[1].split()
         for command in bridge.TOOLS

@@ -1,0 +1,7 @@
+{
+  "path": "/fixture/config.yaml",
+  "key": "theme",
+  "value": "dark",
+  "lifecycle": "next_read",
+  "entries": [{ "path": ["theme"], "value": "dark" }]
+}

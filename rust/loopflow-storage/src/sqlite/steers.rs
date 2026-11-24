@@ -226,6 +226,50 @@ impl SqliteStore {
         })
     }
 
+    /// Record a person's conversation as idle at its provider process's first
+    /// boundary, whatever the process before it on this Session was doing: a
+    /// new provider runs no turn until one starts. True when this boundary was
+    /// the first. A held terminal's status stream may already have moved the
+    /// reading to this process; with no turn read yet it is still 0. A
+    /// headless run reports through the stream lf owns.
+    pub fn record_first_boundary(&self, adapter: &SteerAdapter) -> StoreResult<bool> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        // Only a boundary that will write takes the Machine's write lock: a
+        // later boundary, a worker or a process with no steer capability reads.
+        let first: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM agent_sessions s
+                WHERE s.id=?1 AND s.agent_process_id=?2 AND s.interactive=1
+                  AND EXISTS(SELECT 1 FROM steer_adapters a
+                    WHERE a.agent_process_id=?2 AND a.capability=?3)
+                  AND NOT EXISTS(SELECT 1 FROM session_activity
+                    WHERE session_id=?1 AND agent_process_id=?2 AND observed_at<>0))",
+            params![
+                adapter.session,
+                adapter.agent_process_id,
+                adapter.capability
+            ],
+            |row| row.get(0),
+        )?;
+        if !first {
+            return Ok(false);
+        }
+        // The write repeats only what another connection can change between
+        // the read and it: which process is current, and its own reading.
+        let changed = conn.execute(
+            "INSERT INTO session_activity(session_id,attachment_token,observed_at,open_tools,pending_input,yielded,agent_process_id)
+             SELECT s.id,s.attachment_token,unixepoch(),0,0,1,s.agent_process_id FROM agent_sessions s
+             WHERE s.id=?1 AND s.agent_process_id=?2
+             ON CONFLICT(session_id) DO UPDATE SET agent_process_id=excluded.agent_process_id,
+                yielded=1,open_tools=0,pending_input=0,observed_at=excluded.observed_at,
+                program_status=CASE WHEN session_activity.agent_process_id IS excluded.agent_process_id THEN session_activity.program_status END,
+                cpu_sampled_at=NULL,cpu_quiet_since=NULL,
+                attachment_token=COALESCE(excluded.attachment_token,session_activity.attachment_token)
+             WHERE session_activity.agent_process_id IS NOT excluded.agent_process_id OR session_activity.observed_at=0",
+            params![adapter.session, adapter.agent_process_id],
+        )?;
+        Ok(changed > 0)
+    }
+
     /// Save where an idle conversation takes messages: Claude's inbox key in
     /// `agent_inbox`, an OpenCode or Pi socket in `agent_socket`. Written only
     /// when it changes, which is the answer.
@@ -248,20 +292,6 @@ impl SqliteStore {
                 adapter.capability
             ],
         )?;
-        if changed > 0 {
-            // A provider naming its inbox for the first time has run no turn
-            // yet, whatever the one before it on this Session was doing: a
-            // reopened conversation is idle until its first turn says otherwise.
-            // A held terminal's status stream may already have moved the
-            // reading to this provider; with no turn read yet it is still 0.
-            conn.execute(
-                "UPDATE session_activity SET agent_process_id=?2,yielded=1,open_tools=0,pending_input=0,
-                    observed_at=unixepoch(),program_status=CASE WHEN agent_process_id IS ?2 THEN program_status END,cpu_sampled_at=NULL,cpu_quiet_since=NULL,
-                    attachment_token=COALESCE((SELECT attachment_token FROM agent_sessions WHERE id=?1),attachment_token)
-                 WHERE session_id=?1 AND (agent_process_id IS NOT ?2 OR observed_at=0)",
-                params![adapter.session, adapter.agent_process_id],
-            )?;
-        }
         Ok(changed > 0)
     }
 

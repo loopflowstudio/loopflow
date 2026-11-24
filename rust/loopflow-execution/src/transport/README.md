@@ -132,6 +132,10 @@ any older holder, and no field has a default:
 | `restore {terminal}` | `done`. The PTY returns to the modes it had before its child ran |
 | `forget {terminal}` | `done`. An exited terminal's ring is dropped; a running one is an error |
 
+When starting a held terminal, the server fills missing or empty `TERM` with
+`xterm-256color` and `COLORTERM` with `truecolor`. Programs launched from
+Desktop can detect color, and a terminal caller keeps its own settings.
+
 Anything else answers `error {message}` and the connection keeps taking
 requests. A `TerminalId` names one PTY and is never reused: a `read` of a
 terminal the holder does not hold, or from a position past what that

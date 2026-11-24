@@ -75,6 +75,7 @@ _SWIFT_TEST_INPUTS = (
     "python/tests/conftest.py",
 )
 _PROCESS_INPUTS = (
+    "rust/loopflow/src/server/mobile/tailscale/",
     "rust/loopflow-storage/src/copy.rs",
     "rust/loopflow-execution/src/journal/os_process.rs",
     "rust/loopflow/src/lf/commands/install",

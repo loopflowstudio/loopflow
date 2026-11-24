@@ -32,7 +32,7 @@ fn edit(
     keys: &[&str],
     value: Option<serde_yaml_ng::Value>,
 ) -> StoreResult<bool> {
-    file.update(|document| {
+    file.update(crate::config::keys::Root::General, |document| {
         if let Some(value) = value {
             crate::config::settings::insert(document, keys, value);
             Ok(true)

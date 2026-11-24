@@ -127,12 +127,26 @@ and its directory are private; remote proxies must never forward this endpoint.
 The remote carrier (`remote.rs`, `lf server mobile`) speaks the same protocol
 over WebSocket on the host's Tailscale address: one text frame per message on
 `/v1/machine`, ticketed connections on `/v1/ticket`, binary frames for terminal
-bytes. It admits another untagged node of the approved owner through
-`tailscale whois`. The Machine's own node is refused unless
-`mobile-same-device` exists in the lf home, which is how an iOS Simulator on the
-same Mac connects; create it only on a Mac with one account. Setup saves the endpoint, owner and enabled choice in
-Machine-local `mobile.yaml`, using the shared atomic file writer. It does not
-add service state to `config.yaml` or the preferences catalogue.
+bytes. Setup saves the endpoint, owner and enabled choice in Machine-local
+`mobile.yaml`.
+
+`mobile/tailscale.rs` uses the Tailscale LocalAPI. On macOS it discovers the
+App Store endpoint via `IPNExtension` and the Standalone endpoint via
+`/Library/Tailscale/ipnport`. The default daemon socket is
+`/var/run/tailscaled.socket` on macOS and `/var/run/tailscale/tailscaled.sock`
+on Linux. An explicit `TS_SOCKET` selects only that socket.
+
+Binding reads full status to verify the saved owner and MagicDNS name, then
+loads the TLS certificate and key into memory. Each TCP connection needs a
+WhoIs result identifying another untagged device of that owner. For an iOS
+Simulator on the same Mac, create `mobile-same-device` in the lf home only if
+the Mac has one account.
+
+Every five seconds the listener checks status with `peers=false` so an account
+change closes active connections. Certificate renewal runs every six hours.
+After failure the manager retries from completion at 5, 10, 20 and then 30
+seconds. Status reads the manager's last result. Disabling cancels the pending
+bind, retry or listener.
 
 Another Machine reaches this server over SSH: `lf server connect` checks
 `LF_EXPECTED_MACHINE_ID`, starts the server when none is running
@@ -427,10 +441,14 @@ case names one operation, including distinct claim/unassign and pin/unpin writes
 | `graph.run` | `lf graph <name>` (`lf -b`, detached; `task.run` keeps the Task spelling) | write; `engine::graph::run` (the Process carrying the Graph) |
 | `graph.run.get` | `lf graph show <id>` | read |
 | `session.history.get` | `lf session history show <session-id>` | read; rendered history |
+| `machine.status` | `lf machine status <id> --json` | live identity-checked connection or ended rental, up to four concurrent probes |
 | `machine.self`, `.list`, `.doctor` | `lf machine self`, `lf machine list`, `lf machine doctor` (`lf doctor`) | read |
 | `work.resolve` | `lf open <url> --link`; a `work` noun would shadow the builtin `work` skill | read |
 | `config.catalog`, `.settings`, `.get`, `.explain` | `lf config catalog`, `lf config settings`, `lf config get`, `lf config explain` | `engine::config` |
 | `config.set`, `.unset` | `lf config set`, `lf config unset` (`lf set`, `lf unset`) | `engine::config` |
+| `config.scope` | `lf config scope --json` | read or subscribe to Global, a checkout or a Wave |
+| `config.preview`, `config.edit` | Desktop Settings | preview or apply a checked file edit |
+| `config.promote` | Desktop Settings | preview, confirm, resume, dismiss or undo a declaration move |
 | `config.theme` | none; the Machine's `theme:`, read by Desktop and the phone | `engine::config` |
 | `pr.publish`, `.open`, `.submit`, `.arm`, `.abandon`, `.reconcile`, `.request_review` | `lf pr publish`, `lf pr open`, `lf pr submit`, `lf pr arm`, `lf pr abandon`, `lf pr reconcile`, `lf pr request-review` | write; `engine::pr::publish`, `open`, `submit`, `arm`, `abandon`, `reconcile`, `request_review` |
 | `pr.land` | `lf pr land` (`lf land`) | write; `engine::pr::land` (detached; the Process carrying the landing) |
@@ -468,8 +486,19 @@ the phone's `view.select` Task list and its creation destinations all read it.
   {value}`, `config.unset` and `config.explain` take `{destination, key}`, where
   a destination names an owner (`personal_global`, `shared_repo {repo}`,
   …), never a file plus a scope. `config.theme {value}` reads or sets the
-  serving Machine's `theme:`. A failed or uncertain save is never replayed; setting values are
-  omitted from request telemetry.
+  serving Machine's `theme:`. The reply includes the entries for a checked
+  edit and Undo. `config.scope {directory, wave, target}` reads or subscribes
+  to effective values and the authored slots in applicable files.
+  A null directory selects Global. A target selects general work, a Skill or
+  an authored Graph step. Each editable slot names its key and includes the
+  YAML path components and values to pass as `expected` to `config.preview`
+  or `config.edit`. The first renders the patch. The second checks the
+  entries under the file lock and returns the before and after entries.
+  `config.promote` takes the source destination, key, inspected Wave and
+  action. Confirm takes the reviewed patches, projected result and receipt.
+  A changed result returns a fresh preview. Resume finishes an interrupted
+  two-file move if the declarations still match. Dismiss clears the pending
+  move and keeps both files as they are. Request telemetry omits setting values.
 - A read uses the existing `Read` shape and answers with the JSON the command
   prints, serialized once. A command that prints bare text
   (`config repository --path`) answers a JSON string. Every shared read is
@@ -766,7 +795,10 @@ line in `logs/lf.log`; the tool goes on and the next boundary asks again.
 
 The launch carries its capability as `LF_PROVIDER_CONTEXT` when the server
 records its boundaries and as `LF_BARE_STEER` when no one does. For chats and
-batches, tool and prompt hooks run only `--moment steer`, which reports nothing. A chat idle at its prompt reads a steer when its person next types.
+batches, tool and prompt hooks run only `--moment steer`, which reports
+nothing. A chat idle at its prompt reads a steer when its person next types.
+When the server can wake a work session, its start hook leaves waiting steers
+for the server to deliver as a turn.
 
 Every tool hook first compares files and starts `lf` only when a steer may be
 waiting. Saving a steer touches one marker under `steers/` inside the write:
@@ -812,11 +844,16 @@ that lapses for the next boundary:
   A turn already running takes the message as a steer. OpenCode's TUI shows
   the answer but not the message that caused it.
 
-When a conversation reopens without an initial prompt, it waits for input.
-The first boundary that names a new inbox or socket records its provider as
-idle and sends what was saved while it was closed: an OpenCode plugin names
-its socket as it loads, a Pi extension at `session_start`. Claude's start hook
-reads those steers into its context instead, and starts no turn.
+A reopened work session takes steers saved while it was closed as a turn
+before anyone types. Without a steer or an opening prompt, it waits for input.
+The new provider process's first boundary records it idle
+(`record_first_boundary`). That boundary, or a later one naming a new inbox
+or socket, lets the server deliver waiting steers. Claude reports its start.
+Codex runs its start hook inside a turn, so lf reports the start once the
+app-server holds the conversation. If Codex has an opening prompt, lf reports
+the prompt before starting its turn. OpenCode names its socket when the plugin
+loads, and Pi names its socket at `session_start`. The next boundary claims
+any steers the server could not deliver.
 
 A server that restarts reads the same conversations again. An unreachable
 Claude inbox or extension socket leaves its news unclaimed. After a failed

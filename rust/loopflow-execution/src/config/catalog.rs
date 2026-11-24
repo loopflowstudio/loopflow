@@ -88,6 +88,9 @@ pub struct Definition {
     pub portability: Portability,
     pub lifecycle: Lifecycle,
     pub description: &'static str,
+    /// What an unset value means when the catalogue default is null and
+    /// something outside the files decides (`~/src`, Git's user.name).
+    pub unset: Option<&'static str>,
 }
 
 /// What one [`Definition`] prints: its serialization and its schema.
@@ -103,6 +106,7 @@ struct DefinitionRow {
     portability: Portability,
     lifecycle: Lifecycle,
     description: &'static str,
+    unset: Option<&'static str>,
 }
 
 impl Serialize for Definition {
@@ -118,6 +122,7 @@ impl Serialize for Definition {
             portability: self.portability,
             lifecycle: self.lifecycle,
             description: self.description,
+            unset: self.unset,
         }
         .serialize(serializer)
     }
@@ -154,9 +159,12 @@ impl Definition {
     }
 
     pub fn accepts(&self, path: &[&str]) -> bool {
-        let schema = (self.schema)().to_value();
         let fields = &path[self.key.split('.').count()..];
-        if self.key == "planning" && !fields.is_empty() {
+        if fields.is_empty() {
+            return true;
+        }
+        let schema = (self.schema)().to_value();
+        if self.key == "planning" {
             // Validation here receives the released, internally tagged path.
             return fields == ["provider"]
                 || ["linear", "asana", "git"]
@@ -206,7 +214,9 @@ fn schema_path(root: &serde_json::Value, node: &serde_json::Value, path: &[&str]
 }
 
 macro_rules! definitions {
-    ($(#[$struct_attribute:meta])* $name:ident, $table:ident, $prefix:literal, {$( $(#[$extra_attribute:meta])* $extra:ident: $extra_type:ty = $extra_default:expr;)*}; $( $(#[$attribute:meta])* $key:ident: $ty:ty = $default:literal, $scope:ident, $combine:ident, $portable:ident, $lifecycle:ident, $category:ident, $description:literal;)*) => {
+    (@unset) => { None };
+    (@unset $unset:literal) => { Some($unset) };
+    ($(#[$struct_attribute:meta])* $name:ident, $table:ident, $prefix:literal, {$( $(#[$extra_attribute:meta])* $extra:ident: $extra_type:ty = $extra_default:expr;)*}; $( $(#[$attribute:meta])* $key:ident: $ty:ty = $default:literal, $scope:ident, $combine:ident, $portable:ident, $lifecycle:ident, $category:ident, $description:literal $(, unset $unset:literal)?;)*) => {
         /// Typed effective preferences. Authored declarations retain omission separately.
         #[derive(Debug, Clone, Serialize, Deserialize)]
         #[serde(default, deny_unknown_fields)]
@@ -228,6 +238,7 @@ macro_rules! definitions {
             category: Category::$category,
             applicability: Applicability::$scope, combination: Combination::$combine,
             portability: Portability::$portable, lifecycle: Lifecycle::$lifecycle, description: $description,
+            unset: definitions!(@unset $($unset)?),
         }),*];
     };
 }
@@ -246,13 +257,13 @@ definitions! {
 definitions! {
     #[derive(schemars::JsonSchema)]
     ClaudeConfig, CLAUDE_DEFINITIONS, "claude.", {};
-    model: Option<String> = "null", Launch, Replace, Portable, NextLaunch, Agents, "Starting model for bare claude; explicit harness:model selections win, and unset inherits Claude configuration";
+    model: Option<String> = "null", Launch, Replace, Portable, NextLaunch, Agents, "Starting model for bare claude; explicit harness:model selections win, and unset inherits Claude configuration", unset "Claude's own setting";
 }
 
 definitions! {
     #[derive(schemars::JsonSchema)]
     CodexConfig, CODEX_DEFINITIONS, "codex.", {};
-    service_tier: Option<super::CodexServiceTier> = "null", Launch, Replace, Portable, NextLaunch, Agents, "Codex launch tier: default (standard) or priority (fast); unset inherits provider configuration";
+    service_tier: Option<super::CodexServiceTier> = "null", Launch, Replace, Portable, NextLaunch, Agents, "Codex launch tier: default (standard) or priority (fast); unset inherits provider configuration", unset "Codex's own setting";
 }
 
 definitions! {
@@ -288,6 +299,13 @@ pub struct DiffRestGroup {
     pub rest: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum LandMethod {
+    Gh,
+    Local,
+}
+
 definitions! {
     Config, DEFINITIONS, "", {
         skills: BTreeMap<String, Value> = BTreeMap::new();
@@ -295,12 +313,12 @@ definitions! {
         #[serde(skip)] setting_layers: Option<Vec<ConfigDeclarations>> = None;
         #[serde(skip)] context_budget_sources: BTreeMap<BudgetKey, String> = BTreeMap::new();
     };
-    agent: Option<String> = "null", Launch, Replace, Portable, NextLaunch, Agents, "Harness[:model] choice; every choice precedes every fallback";
-    default_agent: Option<String> = "null", Launch, Replace, Portable, NextLaunch, Agents, "Harness[:model] tried first when no applicable agent choice exists; the rest of agents stays behind it";
+    agent: Option<String> = "null", Launch, Replace, Portable, NextLaunch, Agents, "Harness[:model] choice; every choice precedes every fallback", unset "Use starting preference";
+    default_agent: Option<String> = "null", Launch, Replace, Portable, NextLaunch, Agents, "Harness[:model] tried first when no applicable agent choice exists; the rest of agents stays behind it", unset "First in fallback order";
     agents: Vec<String> = "[]", Launch, Replace, Portable, NextLaunch, Agents, "Ordered harness[:model] entries Loopflow may pick; headless work refused by a usage limit moves to the next";
     context: ContextConfig = "{}", Launch, Merge, Portable, NextLaunch, Agents, "Files and other inputs supplied to the agent";
     yolo: bool = "true", Launch, Replace, Portable, NextLaunch, Agents, "Agents act without asking permission; false keeps the vendor's own prompts in conversations you attend. Unattended runs never ask. Pi keeps its own tool policy";
-    chrome: Option<bool> = "null", Launch, Replace, HostLocal, NextLaunch, Agents, "Claude Chrome integration; unset leaves Claude's own setting; Codex, OpenCode, Pi and Antigravity have no equivalent";
+    chrome: Option<bool> = "null", Launch, Replace, HostLocal, NextLaunch, Agents, "Claude Chrome integration; unset leaves Claude's own setting; Codex, OpenCode, Pi and Antigravity have no equivalent", unset "Claude's own setting";
     codex: CodexConfig = "{}", Launch, Merge, Portable, NextLaunch, Agents, "Codex launch preferences; omitted values inherit provider configuration";
     claude: ClaudeConfig = "{}", Launch, Merge, Portable, NextLaunch, Agents, "Claude launch preferences; omitted values inherit provider configuration";
     isolate: bool = "false", Launch, Replace, Portable, Inactive, Agents, "Ignored: every launch runs in the provider's shared home; kept readable for the released lf until Task e1f359";
@@ -308,7 +326,7 @@ definitions! {
     summary_tokens: usize = "5000", Launch, Replace, Portable, Inactive, Agents, "Parsed summary budget; no runtime consumer";
     #[serde(alias = "workflow")]
     graph: Option<String> = "null", General, Replace, Portable, NextLaunch, Agents, "Graph new Tasks take up";
-    auto: Option<super::AutoDefault> = "null", General, Replace, Portable, NextLaunch, Agents, "on: a Task turns auto on as it takes up its Graph, unless someone set it first";
+    auto: Option<super::AutoDefault> = "null", General, Replace, Portable, NextLaunch, Agents, "on: a Task turns auto on as it takes up its Graph, unless someone set it first", unset "Off";
     supported_harnesses: Vec<String> = "[]", General, AppendReset, Portable, NextRead, Agents, "Harnesses offered by model selection";
     automation: AutomationConfig = "{retries: 1}", General, Merge, Portable, NextRead, Agents, "Automatic retry count";
     pools: BTreeMap<String, placement::PoolDeclaration> = "{}", Personal, Merge, HostLocal, NextLaunch, Machines, "Local pools accepting new work; held work stays";
@@ -317,21 +335,21 @@ definitions! {
     machine: placement::Placement = "{}", PersonalScoped, Merge, Portable, NextLaunch, Machines, "Preferred durable Machine IDs or local capacity; existing Task assignments survive";
     machines: BTreeMap<String, placement::MachineDeclaration> = "{}", Personal, Merge, Portable, NextRead, Machines, "Aliases for durable Machine identities";
     connections: HashMap<loopflow_model::durable::MachineId, String> = "{}", Personal, Merge, HostLocal, NextRead, Machines, "This host's connection address for each durable Machine ID";
-    hub: Option<loopflow_model::durable::MachineId> = "null", Personal, Replace, HostLocal, NextRead, Machines, "The Machine holding the plan of every repository without Linear or Asana; unset keeps it here";
+    hub: Option<loopflow_model::durable::MachineId> = "null", Personal, Replace, HostLocal, NextRead, Machines, "The Machine holding the plan of every repository without Linear or Asana; unset keeps it here", unset "This Machine";
     auth_browsers: BTreeMap<String, placement::AuthBrowsers> = "{}", Personal, Merge, HostLocal, DomainAction, Accounts, "Ordered local browser profiles for authentication; discovered browser identities stay local";
-    repo_root: Option<PathBuf> = "null", Personal, Replace, HostLocal, NextRead, Desktop, "Local repository discovery directory";
+    repo_root: Option<PathBuf> = "null", Personal, Replace, HostLocal, NextRead, Desktop, "Local repository discovery directory", unset "~/src";
     theme: Option<String> = "null", Personal, Replace, ReferencedAssets, NextRead, Desktop, "Appearance theme or light:name,dark:name pair";
     portfolio: Option<crate::portfolio::Selection> = "null", Personal, Replace, HostLocal, NextRead, Desktop, "Repository navigation selection";
     diff_hidden: Vec<String> = "[scratch/]", Repository, AppendReset, Portable, NextRead, Desktop, "Path patterns a Task's Diff leaves out; every layer adds, [] clears lower ones";
     diff_groups: Vec<DiffGroup> = r#"[{title: Docs, paths: ["*.md", "*.mdx", "*.rst", "*.txt", "*.adoc", /docs/]}, {title: Data model, paths: [/migrations/, "*.sql", schema, /models/, "*.proto", dto]}, {rest: Everything else}, {title: Tests, paths: [/test/, tests/, /__tests__/, /spec/, /fixtures/, /test_, _test., .test., .spec., tests.]}, {title: Generated and lock files, paths: ["*.lock", "*.snap", "*.pbxproj", "-lock.json", .lock.json, .min., /generated/, /__generated__/, /__snapshots__/, /vendor/]}]"#, Repository, Replace, Portable, NextRead, Desktop, "Ordered headings for a Task's Diff; a file goes to the first group a path pattern matches, and to rest when none does";
     planning: Option<TrackerConfig> = "null", Repository, Replace, Portable, DomainAction, Planning, "Repository tracker and its settings";
     release: ReleaseConfig = "{targets: {}}", Repository, Merge, ReferencedAssets, DomainAction, Release, "Repository release targets";
-    land: String = "gh", Repository, Replace, Portable, DomainAction, Release, "Landing strategy: gh or local";
-    merge_method: Option<MergeMethod> = "null", Repository, Replace, Portable, DomainAction, Release, "Preferred allowed merge method";
+    land: LandMethod = "gh", Repository, Replace, Portable, DomainAction, Release, "Landing strategy: gh or local";
+    merge_method: Option<MergeMethod> = "null", Repository, Replace, Portable, DomainAction, Release, "Preferred allowed merge method", unset "Squash when GitHub allows it";
     pr: bool = "false", Repository, Replace, Portable, DomainAction, Release, "Create a pull request after pushing";
-    user: UserConfig = "{}", Personal, Merge, Portable, NextRead, Loopflow, "Display name; never an ownership credential";
+    user: UserConfig = "{}", Personal, Merge, Portable, NextRead, Loopflow, "Display name; never an ownership credential", unset "Git's user.name";
     session: SessionConfig = "{}", Personal, Merge, HostLocal, NextRead, Loopflow, "Terminal and detached Session lifetime";
-    stream: Option<String> = "null", Personal, Replace, Portable, DomainAction, Loopflow, "Installation release stream";
+    stream: Option<String> = "null", Personal, Replace, Portable, DomainAction, Loopflow, "Installation release stream", unset "stable";
     logs: LogConfig = "{linear_requests: false}", Personal, Merge, HostLocal, NextRead, Loopflow, "Local diagnostic logging";
 }
 

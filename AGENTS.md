@@ -451,14 +451,33 @@ gate or CI; it never blocks an earlier step. Real failures still get fixed.
 Scratch keeps one line per check: command, result, and who runs it later;
 once gate clears scratch, the PR body keeps them.
 
+A served subscription suppresses identical readings. After a write, use a
+checkpoint on the same subscription when the next edit needs the saved value.
+A separate read can show an intermediate value that Undo restores before the
+subscription sends a frame.
+
 Swift async process fixtures install `terminationHandler` before `run()` and
 await its completion. Don't call blocking `waitUntilExit()` on a cooperative
 executor; it can stay in Foundation's run loop after the child has exited.
 
+Swift fixtures modeling an installed Machine can run `lf desktop portfolio --json`
+in the fixture home before starting `LocalServerFixture`. This finishes first-open
+SQLite migrations before server readiness or view timing is measured.
+
 Headless Swift view tests inspect production leaf views directly when a parent
 needs `@Environment` Observation objects, which ViewInspector can't inject.
 Keep those views internal for `@testable` access. Mounted terminal frame checks
-stay in `.requiresDisplay` suites.
+stay in `.requiresDisplay` suites. Ghostty calls `io_write_cb` on its IO thread.
+Mark the callback `@Sendable` when installing it from a main-actor fixture and
+synchronize access to the bytes it collects.
+
+Headless keyboard tests can focus a terminal in a deferred window before
+attaching its Ghostty surface. Post AppKit events from a nested run loop:
+`NSApp.postEvent` stops the current loop and can end Swift Testing early.
+
+Swift fixtures that exercise the Desktop Session relay open the prepared Session's
+`open_argv`. A bare interactive chat can print the provider's prompt without
+ever reporting relay readiness to the pane.
 
 # Review Ritual
 

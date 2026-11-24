@@ -572,6 +572,51 @@ mod tests {
         messages
     }
 
+    /// A Codex app-server that answers one client's `turn/start`: the request
+    /// it took.
+    fn codex_app_server(endpoint: &Path) -> std::thread::JoinHandle<serde_json::Value> {
+        use futures_util::{SinkExt, StreamExt};
+        use tokio_tungstenite::tungstenite::Message;
+        let listener = UnixListener::bind(endpoint).unwrap();
+        listener.set_nonblocking(true).unwrap();
+        std::thread::spawn(move || {
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap()
+                .block_on(async move {
+                    let listener = tokio::net::UnixListener::from_std(listener).unwrap();
+                    let (stream, _) = listener.accept().await.unwrap();
+                    let mut socket = tokio_tungstenite::accept_async(stream).await.unwrap();
+                    async fn receive(
+                        socket: &mut tokio_tungstenite::WebSocketStream<tokio::net::UnixStream>,
+                    ) -> serde_json::Value {
+                        loop {
+                            if let Message::Text(text) = socket.next().await.unwrap().unwrap() {
+                                return serde_json::from_str(&text).unwrap();
+                            }
+                        }
+                    }
+                    let initialize = receive(&mut socket).await;
+                    let answer = serde_json::json!({"id":initialize["id"],"result":{}});
+                    socket
+                        .send(Message::Text(answer.to_string().into()))
+                        .await
+                        .unwrap();
+                    assert_eq!(receive(&mut socket).await["method"], "initialized");
+                    let start = receive(&mut socket).await;
+                    let answer =
+                        serde_json::json!({"id":start["id"],"result":{"turn":{"id":"woken"}}});
+                    socket
+                        .send(Message::Text(answer.to_string().into()))
+                        .await
+                        .unwrap();
+                    let _ = socket.next().await;
+                    start
+                })
+        })
+    }
+
     #[test]
     fn an_idle_opencode_or_pi_work_session_starts_a_turn_on_its_direction_once() {
         for (provider, thread) in [("opencode", "native"), ("pi", "/pi/session.jsonl")] {
@@ -604,6 +649,64 @@ mod tests {
             assert!(text.contains("and the eu region"));
             assert!(!text.contains("staging bucket"), "{text}");
         }
+    }
+
+    /// Codex runs no hook before its first turn: the launch reports a
+    /// reopened conversation's start, and the wake runs the waiting steer as
+    /// a turn on its app-server before anyone types.
+    #[test]
+    fn a_reopened_codex_work_session_starts_a_turn_on_its_waiting_steer() {
+        let session = "wake-codex";
+        let fixture = fixture(session);
+        let endpoint = fixture.home.path().join("codex.sock");
+        let report = |moment, event: &str| {
+            super::super::boundary::answer(
+                &fixture.store,
+                &SessionBoundary {
+                    moment,
+                    delivery: fixture.delivery.clone(),
+                    adapter: Some(fixture.adapter.clone()),
+                    callback: serde_json::json!({"hook_event_name":event,"session_id":"native","source":"resume"}),
+                    gap: None,
+                    printed: Vec::new(),
+                    inbox: None,
+                },
+            )
+            .unwrap()
+            .1
+        };
+        // The Codex before it was quit mid-turn.
+        report(BoundaryMoment::Tool, "UserPromptSubmit");
+        {
+            let conn = fixture.store.conn.lock().unwrap();
+            conn.execute("UPDATE session_activity SET agent_process_id='earlier'", [])
+                .unwrap();
+            conn.execute(
+                "UPDATE agent_sessions SET provider='codex',agent_endpoint=?2 WHERE id=?1",
+                rusqlite::params![session, endpoint.to_string_lossy()],
+            )
+            .unwrap();
+        }
+        fixture
+            .store
+            .save_session_steer(session, "Fixture author", "use the other table")
+            .unwrap();
+        let provider = codex_app_server(&endpoint);
+        let Some(super::super::boundary::After::Reachable(woken)) =
+            report(BoundaryMoment::Start, "SessionStart")
+        else {
+            panic!("a reopened Codex start leaves no wake");
+        };
+        after_turn(&fixture.store, &woken);
+        let start = provider.join().unwrap();
+        assert_eq!(start["method"], "turn/start");
+        assert_eq!(start["params"]["threadId"], "native");
+        let output = start["params"]["toolOutput"]["output"].to_string();
+        assert!(output.contains("use the other table"), "{output}");
+        assert_eq!(
+            fixture.store.session_steers(session, 0, 8).unwrap().pending,
+            0
+        );
     }
 
     #[test]

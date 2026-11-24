@@ -67,6 +67,8 @@ The native macOS app reads the same local store as `lf`; it keeps no copy of its
   Every pane zooms and hides on hover; the header's `Show…` menu restores
   hidden parts.
 - **⌘K:** jump to any Wave, Task, Session, or Graph.
+- **⌘,:** [Settings](#settings) for appearance, shortcuts, phone access,
+  Machines, and scoped configuration files.
 
 Save and open Dashboards from the CLI too:
 
@@ -326,6 +328,67 @@ fatal: not a git repository (or any of the parent directories): .git
 The message is selectable, so it can be pasted into a conversation. A state gets a button only for something Desktop can do from
 there; one with no next step has none. In a dashboard tile the same state is
 one line: its title and its button.
+
+### Settings
+
+Press **⌘,** to open Settings. Search for a pane, label, configuration key,
+alias or description. Select a result with ↑/↓ and Return to reveal the
+control. A switch in the results edits the destination shown beside it.
+
+**General**, **Appearance**, **Shortcuts**, **Agents**, **Machines**, and
+**Mobile** hold personal preferences. Use **Machines** to check connections
+and set the plan hub. **Open ~/.lf/config.yaml** opens the global file for
+settings such as Machine pools and SSH forwarding.
+
+**Project & Wave Config** holds agent overrides, Context, Git & Release, and
+Machine placement. It opens on the active checkout or the first repository
+in your portfolio. Use **Choose Checkout…** to select another directory.
+**Applies to** selects a checkout or Wave. **Save in** selects your file or
+the shared file. Saving the first setting creates the file. **Open file…**
+opens the current settings document in its associated app. If shared Wave
+settings come from `GOAL.md`, Open shows the goal and **First change saves to**
+shows the path to `config.yaml`. Once an edit creates the YAML file, Open shows it.
+A dot beside the pane means the selected file declares a setting. Switching to
+a personal pane keeps the checkout and destination ready for your return.
+
+Expand **Skill or Graph step** to see launch settings for that target.
+**Inspect general work** returns to all settings. A step needs an `id:` before you can save its
+preferences. Git & Release applies to the repository. While viewing a Wave,
+**Inspect repository settings** returns to its checkout. Opening a search result
+selects general work or the checkout when the setting requires it.
+
+**In effect** appears when the selected file declares a setting or another
+source supplies a value beyond the built-in default. For example, open
+**Project & Wave Config** on a checkout where the shared file sets
+`context.diff: true` and your file sets it to `false`. Choose **Shared
+repository settings**. The switch shows **On**. **In effect** still shows
+**Off · My repository settings**. Expand it to see the candidates and paths.
+
+- **Reset** removes a simple control’s declaration immediately. Clearing a text
+  or number field also resets it. YAML editors preview removal with **Reset…**.
+  For additional documents, **Save empty list** clears inherited entries. Reset lets them
+  apply again.
+- **Move to Shared Repository…** appears when the shared slot is empty. From
+  a private Wave you can move to your repository settings. Review the YAML
+  changes and the projected result before confirming. If either file changes
+  the preview, review it again. **Finish interrupted move…** completes a
+  partial move. If the declarations have diverged, **Dismiss pending move**
+  keeps the current contents of both files.
+- Switches and pickers save immediately. Text fields save on Return or focus
+  loss. Escape discards the text. YAML editors have **Apply** and **Cancel**.
+  **Undo** or **⌘Z** restores a saved edit even after switching destinations.
+  If the declaration changed on disk, use **Refresh** to review it before
+  retrying. A rejected edit leaves its field editable. An unavailable scope
+  keeps the last reading visible and pauses edits. If the local server
+  restarts, Settings reconnects automatically and enables edits when fresh
+  values arrive.
+  Settings and the CLI share the same [configuration files](config.md).
+
+**Appearance** selects themes or opens the color editor. **Shortcuts** shows
+the keyboard reference. **Mobile** shows a green dot and pairing code when
+[phone access](server.md#phone-access) is ready. While **Machines** is open,
+it checks up to four registered identities at once and distinguishes
+connection errors from ended rentals.
 
 ## Script Desktop
 

@@ -58,3 +58,17 @@ With the screen locked, the `LOOPFLOW_UI_TEST_MODE=live` snapshot in
 [desktop](desktop.md) shows the sidebar groups and the Task bar. Rebuilding
 `lf` while the private server runs makes Desktop answer "another executable
 still answers": restart the server on the new binary first.
+
+To select a Task in the live-mode Dev bundle, open `loopflow://<repo name>/task/<id>`
+with `open -g -b <bundle id>` a few seconds after launch. `lf open --task <id> --link`
+prints a title line before the URL, so don't pass its output to `open`.
+
+# Stopping the private home
+
+Any branch `lf` command against the home registers a launchd job,
+`com.loopflow.server.<socket hash>` (plist at `$LF_HOME/server.plist`), so a
+killed `lf server run` comes back. The server's recovery also restarts killed
+primaries, and their hooks restart the server. Run `launchctl bootout
+gui/$UID/com.loopflow.server.<hash>`. Then check each PID's `LF_HOME` with
+`ps eww` and `kill -STOP` the holder, the server and every
+`claude --name <id>` together before sending TERM and CONT.

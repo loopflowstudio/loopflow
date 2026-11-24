@@ -25,9 +25,6 @@ pub(super) async fn receive(cmd: &MachineCredentialCommand) -> anyhow::Result<()
             human_session::restart_provider(&store.sqlite, &session)?;
             println!("{}", session.id);
         }
-        MachineCredentialCommand::Inspect { provider, login } => {
-            println!("{}", credentials::inspect(*provider, login).await?);
-        }
         MachineCredentialCommand::Receive => {
             let mut bytes = Vec::new();
             std::io::stdin()

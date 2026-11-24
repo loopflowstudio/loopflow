@@ -27,6 +27,7 @@ fn code(max: u32) -> OnDemand {
         max_machines: max,
         max_usd_per_hour: usd("0.40"),
         hours: 4.0,
+        logins: Vec::new(),
     }
 }
 

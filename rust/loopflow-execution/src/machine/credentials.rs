@@ -42,11 +42,10 @@ enum Credential {
 const LINEAR_ACCESS_HOURS: f64 = 24.0;
 const _: () = assert!(loopflow_storage::rental::MAX_HOURS <= LINEAR_ACCESS_HOURS);
 
-pub async fn connect(
+pub(crate) async fn connect(
     machine: &Machine,
     provider: Provider,
-    email: Option<&str>,
-    chrome_profile: Option<&str>,
+    approver: Option<&crate::config::placement::Approver>,
     batch: bool,
 ) -> Result<()> {
     let store = crate::provider_auth::operations::local_store().await?;
@@ -55,10 +54,7 @@ pub async fn connect(
         Provider::GitHub => {
             let token = gh_token()?;
             let login = github_login(token.expose_secret()).await?;
-            if email.is_some_and(|expected| !expected.eq_ignore_ascii_case(&login)) {
-                bail!("GitHub login does not match the requested account");
-            }
-            if remote_has(machine, provider, &login)? {
+            if remote_has(machine, provider, &login).await? {
                 return Ok(());
             }
             Credential::Github {
@@ -72,7 +68,7 @@ pub async fn connect(
                 .await?
                 .ok_or_else(|| anyhow!("Linear is not connected on this laptop"))?;
             let login = linear_login(&current.access_token).await?;
-            if remote_has(machine, provider, &login)? {
+            if remote_has(machine, provider, &login).await? {
                 return Ok(());
             }
             let renewed = crate::ops::linear::renewed_planning_token(provider).await?;
@@ -95,19 +91,10 @@ pub async fn connect(
                 .to_string();
             let oauth = active["value"]["type"] == "oauth";
             let account_email = active["value"]["metadata"]["email"].as_str();
-            match (email, account_email) {
-                (Some(_), None) => bail!(
-                    "OpenCode's active login is an API key, which names no email; connect without one"
-                ),
-                (Some(expected), Some(actual)) if !expected.eq_ignore_ascii_case(actual) => {
-                    bail!("OpenCode login does not match the requested account")
-                }
-                _ => {}
-            }
             if !oauth {
                 zen_check(opencode_token(active)).await?;
             }
-            if remote_has(machine, provider, &login)? {
+            if remote_has(machine, provider, &login).await? {
                 return Ok(());
             }
             require_foreground(batch)?;
@@ -117,12 +104,8 @@ pub async fn connect(
                 let staging = tempfile::Builder::new()
                     .prefix("lf-machine-login-")
                     .tempdir()?;
-                crate::provider_auth::operations::fresh_opencode_login(
-                    &store,
-                    chrome_profile,
-                    staging.path(),
-                )
-                .await?;
+                crate::provider_auth::operations::fresh_opencode_login(approver, staging.path())
+                    .await?;
                 let fresh = opencode_active(&opencode_export(Some(staging.path()), "laptop")?)
                     .cloned()
                     .ok_or_else(|| {
@@ -141,13 +124,13 @@ pub async fn connect(
             };
             Credential::OpenCode { login, entry }
         }
-        _ => bail!("machine login supports github, opencode and linear"),
+        _ => unreachable!("login::require_reach admits only these"),
     };
     send(machine, &credential)?;
-    eprintln!(
-        "Connected {} on {}{verified}",
-        provider.display_name(),
-        machine_name(machine)
+    println!(
+        "{}: {} signed in{verified}",
+        crate::machine::login::name(machine),
+        provider.display_name()
     );
     Ok(())
 }
@@ -179,12 +162,8 @@ fn connecting(machine: &Machine, provider: Provider, login: &str) {
     eprintln!(
         "Connecting {} {login} on {}",
         provider.display_name(),
-        machine_name(machine)
+        crate::machine::login::name(machine)
     );
-}
-
-fn machine_name(machine: &Machine) -> &str {
-    machine.label.as_deref().unwrap_or(&machine.route)
 }
 
 fn foreground(batch: bool) -> bool {
@@ -194,24 +173,39 @@ fn foreground(batch: bool) -> bool {
     !batch && std::io::stdin().is_terminal() && foreground
 }
 
-fn require_foreground(batch: bool) -> Result<()> {
+pub(crate) fn require_foreground(batch: bool) -> Result<()> {
     if !foreground(batch) {
-        bail!("a missing machine login needs a foreground terminal without --batch; run `lf machine connect <machine> <provider> [email]` there first");
+        bail!("a missing machine login needs a foreground terminal without --batch; run `lf machine login <provider> <machine>` there first");
     }
     Ok(())
 }
 
-fn remote_has(machine: &Machine, provider: Provider, login: &str) -> Result<bool> {
-    remote_inspect(machine, &[provider.as_str(), login])
+/// Whether `machine` already reads signed in to `provider` as `login`; says so
+/// when it does, since nothing is sent.
+async fn remote_has(machine: &Machine, provider: Provider, login: &str) -> Result<bool> {
+    let has = crate::machine::login::logins(machine)
+        .await?
+        .into_iter()
+        .any(|row| {
+            row.provider == provider
+                && row.state == crate::machine::login::LoginState::SignedIn
+                && row.account.as_deref() == Some(login)
+        });
+    if has {
+        println!(
+            "{}: {} already signed in as {login}",
+            crate::machine::login::name(machine),
+            provider.display_name()
+        );
+    }
+    Ok(has)
 }
 
-fn remote_inspect(machine: &Machine, args: &[&str]) -> Result<bool> {
-    let args = [&["machine", "credentials", "inspect"], args].concat();
-    let output = remote_command(machine, &args, None)?;
-    serde_json::from_slice(&output).context("remote credential inspection returned invalid JSON")
-}
-
-fn remote_command(machine: &Machine, args: &[&str], input: Option<&[u8]>) -> Result<Vec<u8>> {
+pub(crate) fn remote_command(
+    machine: &Machine,
+    args: &[&str],
+    input: Option<&[u8]>,
+) -> Result<Vec<u8>> {
     let script = format!(
         "{}; export {}={}; exec lf {}",
         crate::machine::ssh::remote_path(),
@@ -245,12 +239,16 @@ fn remote_command(machine: &Machine, args: &[&str], input: Option<&[u8]>) -> Res
         let stderr = String::from_utf8_lossy(&output.stderr);
         let reason = stderr
             .lines()
-            .find_map(|line| line.strip_prefix("Error: "))
+            // `Error:` from lf, `error:` from Clap when the remote lf is older.
+            .find_map(|line| {
+                line.strip_prefix("Error: ")
+                    .or(line.strip_prefix("error: "))
+            })
             .map(|line| format!(": {}", line.trim()))
             .unwrap_or_else(|| crate::os_process::exit_reason(&stderr));
         bail!(
             "machine credential command failed on {}{}",
-            machine_name(machine),
+            crate::machine::login::name(machine),
             if reason.is_empty() {
                 format!(" ({})", output.status)
             } else {
@@ -259,11 +257,6 @@ fn remote_command(machine: &Machine, args: &[&str], input: Option<&[u8]>) -> Res
         );
     }
     Ok(output.stdout)
-}
-
-pub async fn inspect(provider: Provider, login: &str) -> Result<bool> {
-    let store = crate::provider_auth::operations::local_store().await?;
-    installed(&store, provider, login).await
 }
 
 pub async fn receive(bytes: &[u8]) -> Result<()> {
@@ -279,21 +272,9 @@ pub async fn receive(bytes: &[u8]) -> Result<()> {
 async fn installed(store: &SharedStore, provider: Provider, login: &str) -> Result<bool> {
     match provider {
         Provider::GitHub => {
-            let directory = std::env::var_os("GH_CONFIG_DIR")
-                .map(std::path::PathBuf::from)
-                .unwrap_or_else(|| {
-                    dirs::home_dir()
-                        .expect("OS user has a home")
-                        .join(".config/gh")
-                });
-            let path = directory.join("hosts.yml");
-            let content = match fs::read_to_string(path) {
-                Ok(content) => content,
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
-                Err(error) => return Err(error.into()),
+            let Some(config) = gh_hosts()? else {
+                return Ok(false);
             };
-            let config: serde_yaml_ng::Value = serde_yaml_ng::from_str(&content)
-                .map_err(|_| anyhow!("invalid GitHub credential file"))?;
             let github = &config["github.com"];
             Ok(github["users"][login]["oauth_token"]
                 .as_str()
@@ -333,6 +314,39 @@ async fn installed(store: &SharedStore, provider: Provider, login: &str) -> Resu
     }
 }
 
+/// gh's hosts file on this Machine, if it has one.
+fn gh_hosts() -> Result<Option<serde_yaml_ng::Value>> {
+    let directory = std::env::var_os("GH_CONFIG_DIR")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| {
+            dirs::home_dir()
+                .expect("OS user has a home")
+                .join(".config/gh")
+        });
+    let content = match fs::read_to_string(directory.join("hosts.yml")) {
+        Ok(content) => content,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error.into()),
+    };
+    serde_yaml_ng::from_str(&content)
+        .map(Some)
+        .map_err(|_| anyhow!("invalid GitHub credential file"))
+}
+
+/// The GitHub account gh is signed in as on this Machine.
+pub(crate) fn github_user() -> Result<Option<String>> {
+    Ok(gh_hosts()?.and_then(|config| config["github.com"]["user"].as_str().map(str::to_string)))
+}
+
+/// The OpenCode account active on this Machine, as a transfer names it; none
+/// when OpenCode 2 is missing or has no active login.
+pub(crate) fn opencode_login() -> Option<String> {
+    let entries = opencode_export(None, "machine").ok()?;
+    opencode_active(&entries)
+        .and_then(opencode_identity)
+        .map(str::to_string)
+}
+
 async fn install(store: &SharedStore, credential: Credential) -> Result<()> {
     match credential {
         Credential::Github { login, token } => {
@@ -361,7 +375,7 @@ async fn install(store: &SharedStore, credential: Credential) -> Result<()> {
                 .stderr(Stdio::null())
                 .spawn()
                 .map_err(|error| match error.kind() {
-                    std::io::ErrorKind::NotFound => anyhow!("GitHub CLI (gh) is not installed on this machine; install it (https://cli.github.com) and run `lf machine connect` again"),
+                    std::io::ErrorKind::NotFound => anyhow!("GitHub CLI (gh) is not installed on this machine; install it (https://cli.github.com) and run `lf machine login github` again"),
                     _ => error.into(),
                 })?;
             child

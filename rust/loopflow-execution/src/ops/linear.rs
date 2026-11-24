@@ -285,7 +285,7 @@ async fn planning_token(provider: Provider, renew: bool) -> OpsResult<ProviderTo
 
 fn missing_credential(provider: Provider) -> OpsError {
     OpsError::Message(format!(
-        "No {} credential found. Run `doppler run -- lf account connect {provider}`.",
+        "No {} credential found. Run `doppler run -- lf machine login {provider}`.",
         provider.display_name()
     ))
 }
@@ -422,7 +422,7 @@ async fn resolve_planning_token_from_store(
                     return Ok(access);
                 }
                 return Err(if reason.requires_reconnect() {
-                    OpsError::Message(format!("{} refresh failed: {reason}. Run `doppler run -- lf account connect {provider}` to reconnect.", provider.display_name()))
+                    OpsError::Message(format!("{} refresh failed: {reason}. Run `doppler run -- lf machine login {provider}` to reconnect.", provider.display_name()))
                 } else {
                     credential_retry(
                         provider,

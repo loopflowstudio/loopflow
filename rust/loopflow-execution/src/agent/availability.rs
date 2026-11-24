@@ -1,8 +1,6 @@
 //! Launch choices on the Machine that runs the provider. Read each client's
 //! status once per selection, including when several models share a harness.
 use std::collections::BTreeMap;
-use std::process::Command;
-use std::time::Duration;
 
 use loopflow_harness::HarnessKind;
 
@@ -95,33 +93,8 @@ fn unavailable(kind: HarnessKind) -> Option<String> {
     if !crate::harness::launcher(kind).installed() {
         return Some(super::missing_agent_message(kind));
     }
-    let (token, args) = match kind {
-        HarnessKind::Claude => ("CLAUDE_CODE_OAUTH_TOKEN", ["auth", "status"]),
-        HarnessKind::Codex => ("CODEX_ACCESS_TOKEN", ["login", "status"]),
-        _ => return None,
-    };
-    if std::env::var_os(token).is_some_and(|value| !value.is_empty()) {
-        return None;
-    }
-    // Let the client inspect its own file, keyring, or configured auth
-    // backend. It sees the same ambient API-key policy as a launch.
-    let mut command = Command::new(kind.as_str());
-    command.args(args);
-    for key in crate::provider_auth::api_key_env_names() {
-        command.env_remove(key);
-    }
-    match crate::os_process::bounded_output(&mut command, Duration::from_secs(5)) {
-        Ok(status) if status.status.success() => None,
-        Ok(_) => Some(format!(
-            "{} has no usable login on this Machine; {}",
-            kind.as_str(),
-            kind.harness().sign_in_advice()
-        )),
-        Err(error) => Some(format!(
-            "could not check {} login on this Machine: {error}",
-            kind.as_str()
-        )),
-    }
+    crate::machine::login::missing_login(kind.as_str(), &BTreeMap::new())
+        .map(|reason| format!("{reason}; {}", super::_sign_in_advice(kind)))
 }
 
 #[cfg(test)]

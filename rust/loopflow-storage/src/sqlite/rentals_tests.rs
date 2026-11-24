@@ -23,6 +23,7 @@ fn modal_admission_prices_peak_in_both_modes() {
         max_machines: 3,
         max_usd_per_hour: usd("1"),
         hours: 4.0,
+        logins: Vec::new(),
     };
     for (setting, mode) in [
         (None, ModalSizing::Burst),

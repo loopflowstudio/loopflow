@@ -276,7 +276,7 @@ extension ConfigurationDefinition {
         case "ondemands": "On-demand Machines"
         case "forward.env": "Forward environment variables"
         case "forward.files": "Forward files"
-        case "auth_browsers": "Account browser profiles"
+        case "approvers": "Sign-in approvers"
         case "portfolio": "Portfolio selection"
         case "supported_harnesses": "Available harnesses"
         case "isolate": "Isolated launches"

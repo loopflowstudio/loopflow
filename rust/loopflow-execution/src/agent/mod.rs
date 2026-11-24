@@ -339,12 +339,33 @@ fn _record_stop(provider: &str, reason: &str, advice: &str) {
     );
 }
 
-/// The provider revoked the login: no model of it can go on until someone
-/// signs in again.
+/// A provider whose client says it has no login is refused before its agent
+/// starts, as a revoked login would be after.
+fn _run_signed_in(
+    launch: &AgentConfig,
+    process: &ProcessConfig,
+    kind: crate::harness::LaunchKind,
+    retry: bool,
+) -> Result<AgentProcessResult, CoreError> {
+    let provider = launch.agent.harness.as_str();
+    if let Some(missing) = crate::machine::login::missing_login(provider, &launch.env) {
+        return Ok(AgentProcessResult {
+            exit_code: 1,
+            stderr: missing,
+            failure: Some(AgentFailure::CredentialInvalidated),
+            ..Default::default()
+        });
+    }
+    _run_harness_once(launch, process, kind, retry)
+}
+
+/// What signs this Machine in again: `lf machine login` for a provider it
+/// knows, else the harness's own client.
 fn _sign_in_advice(kind: loopflow_harness::HarnessKind) -> String {
-    let provider = kind.as_str();
-    let sign_in = kind.harness().sign_in_advice();
-    format!("The {provider} login was revoked; sign in again on this Machine: {sign_in}")
+    match kind.as_str().parse::<crate::provider_auth::Provider>() {
+        Ok(provider) => crate::machine::login::sign_in_advice(provider),
+        Err(_) => kind.harness().sign_in_advice().to_owned(),
+    }
 }
 
 /// `rungs` is the whole order the step could walk; it stops after the last.
@@ -752,7 +773,7 @@ fn run_admitted_agent(
         &launch,
         &process,
         &TRANSIENT_RETRY_DELAYS,
-        |attempt, retry| _run_harness_once(attempt, &process, kind, retry),
+        |attempt, retry| _run_signed_in(attempt, &process, kind, retry),
         _sleep_wall_clock,
     );
     if let Err(error) = crate::ops::planning_sync::check_directory(&directory) {
@@ -845,7 +866,11 @@ fn _run_with_retries(
                         _limit_stop_advice(provider, launch, &rungs)
                     };
                     _record_stop(provider, &reason, &advice);
-                    result.stderr = format!("{reason}\n{advice}");
+                    result.stderr = if revoked {
+                        format!("{}; {advice}", reason.trim_end_matches('.'))
+                    } else {
+                        format!("{reason}\n{advice}")
+                    };
                     return Ok(result);
                 }
             }
@@ -2044,7 +2069,7 @@ mod tests {
         assert!(
             result
                 .stderr
-                .ends_with("The claude login was revoked; sign in again on this Machine: run `claude`, then /login"),
+                .ends_with("Please log in again; run `lf machine login claude`"),
             "{}",
             result.stderr
         );

@@ -2271,7 +2271,7 @@ fn a_restart_without_a_usable_login_leaves_the_running_provider_alone() {
         let fixture = LiveSessionFixture::new().await;
         let bin = tempfile::tempdir().unwrap();
         let codex = bin.path().join("codex");
-        std::fs::write(&codex, "#!/bin/sh\nexit 1\n").unwrap();
+        std::fs::write(&codex, "#!/bin/sh\necho 'Not logged in' >&2\nexit 1\n").unwrap();
         std::fs::set_permissions(&codex, std::os::unix::fs::PermissionsExt::from_mode(0o755))
             .unwrap();
         let _path = crate::test_ambient::EnvGuard::clear(&["PATH", "CODEX_ACCESS_TOKEN"]);
@@ -2284,7 +2284,7 @@ fn a_restart_without_a_usable_login_leaves_the_running_provider_alone() {
             .unwrap_err()
             .to_string();
         assert!(
-            refused.contains("was not restarted: codex has no usable login"),
+            refused.contains("was not restarted: This Machine has no Codex login"),
             "{refused}"
         );
         assert!(

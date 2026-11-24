@@ -125,8 +125,8 @@ fn inspection_is_identical_across_spellings_and_has_no_launch_side_effects() {
             vec!["install", "advance-switch", "--help"],
         ],
         vec![
-            vec!["help", "account", "connect"],
-            vec!["account", "connect", "--help"],
+            vec!["help", "machine", "login"],
+            vec!["machine", "login", "--help"],
         ],
         vec![
             vec!["help", "paired"],
@@ -146,12 +146,12 @@ fn inspection_is_identical_across_spellings_and_has_no_launch_side_effects() {
     let unknown = run(
         repo.path(),
         home.path(),
-        &["help", "account", "absent-child"],
+        &["help", "machine", "absent-child"],
     );
     let unknown_flag = run(
         repo.path(),
         home.path(),
-        &["account", "absent-child", "--help"],
+        &["machine", "absent-child", "--help"],
     );
     assert_eq!(unknown.status.code(), Some(2));
     assert_eq!(unknown_flag.status.code(), Some(2));
@@ -306,22 +306,6 @@ fn removed_options_and_aliases_report_usage_errors_without_effects() {
         &["wt", "list", "--full"],
         &["wave", "status", "--no-sync"],
         &["wt", "list", "--format", "json"],
-        &["account", "status"],
-        &["account", "--verify"],
-        &["account", "route", "show"],
-        &["account", "route", "--default", "--repo", "a/b"],
-        &[
-            "account",
-            "route",
-            "set",
-            "claude",
-            "a",
-            "--default",
-            "--repo",
-            "a/b",
-        ],
-        &["account", "--json", "connect", "codex", "work@example.com"],
-        &["account", "route", "--json", "set", "codex", "work@"],
         &["wt", "rm", "unused"],
         &["-M", "unused", "skill", "solo"],
         &["-C", "skill", "solo"],
@@ -517,8 +501,8 @@ fn shorthand_stops_at_leaf_and_passthrough_boundaries() {
     let normalized =
         |args: &[&str]| normalize_args(args.iter().map(|arg| arg.to_string()).collect()).unwrap();
     assert_eq!(
-        normalized(&["lf", "account", "connec"]),
-        ["lf", "account", "connect"]
+        normalized(&["lf", "machine", "logo"]),
+        ["lf", "machine", "logout"]
     );
     assert_eq!(
         normalized(&["lf", "land", "--wait-and-fix"]),
@@ -536,41 +520,6 @@ fn shorthand_stops_at_leaf_and_passthrough_boundaries() {
     assert!(
         matches!(parsed.command, Some(Commands::Graph { cmd: GraphCommand::External(args) }) if args == ["list"])
     );
-}
-
-#[test]
-fn help_for_a_provider_stops_at_the_provider_as_execution_does() {
-    let normalized =
-        |args: &[&str]| normalize_args(args.iter().map(|arg| arg.to_string()).collect()).unwrap();
-    assert_eq!(
-        normalized(&["lf", "account", "linear", "--json"]),
-        ["lf", "account", "linear", "--json"]
-    );
-    assert_eq!(
-        normalized(&["lf", "account", "linear", "use", "a@example.com"]),
-        ["lf", "account", "linear", "use", "a@example.com"]
-    );
-    let tree = loopflow::lf::navigation::command_tree();
-    let help = normalized(&["lf", "account", "linear", "--help"]);
-    assert_eq!(help, ["lf", "help", "account", "linear"]);
-    let (_, canonical) = loopflow::lf::navigation::resolve_path(&tree, &help[2..]).unwrap();
-    assert_eq!(canonical, ["account"]);
-
-    let verb = normalized(&["lf", "account", "linear", "use", "--help"]);
-    let error = loopflow::lf::navigation::resolve_path(&tree, &verb[2..]).unwrap_err();
-    assert!(
-        error
-            .to_string()
-            .contains("unknown command: lf account linear use"),
-        "{error}"
-    );
-    for path in [
-        ["account", "linear", "use"],
-        ["account", "linear", "nosuch"],
-    ] {
-        let path = path.map(String::from);
-        assert!(loopflow::lf::navigation::resolve_path(&tree, &path).is_err());
-    }
 }
 
 #[test]
@@ -798,10 +747,10 @@ fn git_commands_sit_at_the_root_not_under_task() {
 }
 
 #[test]
-fn account_has_one_owner_without_predecessor_aliases() {
+fn sign_in_has_one_owner_without_predecessor_aliases() {
     let repo = fixture();
     let home = tempfile::tempdir().unwrap();
-    for retired in ["auth", "identity", "id"] {
+    for retired in ["auth", "identity", "id", "account"] {
         let output = run(repo.path(), home.path(), &["help", retired, "status"]);
         assert_eq!(output.status.code(), Some(2), "{retired}");
         assert!(output.stdout.is_empty());
@@ -809,10 +758,10 @@ fn account_has_one_owner_without_predecessor_aliases() {
     let help = String::from_utf8(success(run(
         repo.path(),
         home.path(),
-        &["account", "--help"],
+        &["machine", "logins", "--help"],
     )))
     .unwrap();
-    assert!(help.contains("lf account"));
+    assert!(help.contains("lf machine logins"));
     assert!(help.contains("--json"));
     assert!(!home.path().join(".lf").exists());
 }
@@ -903,13 +852,15 @@ fn installation_configuration_and_app_commands_have_distinct_owners() {
         machine_commands,
         [
             "add",
-            "connect",
             "credentials",
             "doctor",
             "end",
             "forward",
             "hub",
             "list",
+            "login",
+            "logins",
+            "logout",
             "ondemand",
             "pool",
             "prune",

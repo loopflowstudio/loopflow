@@ -154,10 +154,12 @@ import os
 import subprocess
 import sys
 
-if sys.argv[1:] == ['auth', 'status']:
-    sys.exit(0)
 if '--version' in sys.argv:
     print('fixture')
+    sys.exit(0)
+# The launch's login probe is not a launch.
+if sys.argv[1:3] == ['auth', 'status']:
+    print(json.dumps({'loggedIn': True}))
     sys.exit(0)
 with open(os.path.join(os.environ['LF_HOME'], 'launches.jsonl'), 'a') as launches:
     launches.write(json.dumps({'args': sys.argv[1:], 'claude_home': os.environ.get('CLAUDE_CONFIG_DIR')}) + '\n')
@@ -1263,7 +1265,7 @@ fn configuration_table_keeps_defaults_and_candidate_details_opt_in() {
     let home = tempfile::tempdir().unwrap();
     fs::write(
         home.path().join("config.yaml"),
-        "default_agent: codex\nmachine: workstation\nauth_browsers: {linear: {default: [Work]}}\ntheme: light\nuser:\n  name: Test User\n",
+        "default_agent: codex\nmachine: workstation\napprovers: {linear: {chrome: Work}}\ntheme: light\nuser:\n  name: Test User\n",
     )
     .unwrap();
     repo.create_file(".lf/skills/config-table-proof.md", "Inspect settings.\n");
@@ -1299,7 +1301,7 @@ fn configuration_table_keeps_defaults_and_candidate_details_opt_in() {
     let machines = &table[positions[1]..positions[2]];
     assert!(machines.contains("machine.tasks") && machines.contains("workstation"));
     let accounts = &table[positions[2]..positions[3]];
-    assert!(accounts.contains("auth_browsers") && accounts.contains("Work"));
+    assert!(accounts.contains("approvers") && accounts.contains("Work"));
     assert!(table.contains("SETTING") && table.contains("VALUE") && table.contains("FROM"));
     assert!(
         table.contains("claude") && table.contains("Shared project · skill config-table-proof")
@@ -1498,7 +1500,11 @@ fn a_machine_uses_each_skills_first_signed_in_agent() {
             fs::write(home.path().join("claude-login"), "").unwrap();
         }
         let claude = r#"#!/bin/sh
-if [ "$*" = "auth status" ]; then test -f "$LF_HOME/claude-login"; exit $?; fi
+if [ "$1 $2" = "auth status" ]; then
+    if [ -f "$LF_HOME/claude-login" ]; then echo '{"loggedIn":true}'; exit 0; fi
+    echo '{"loggedIn":false}'
+    exit 1
+fi
 exec /usr/bin/python3 "$LF_HOME/claude.py" "$@"
 "#;
         let _env = support::EnvGuard::with_home(

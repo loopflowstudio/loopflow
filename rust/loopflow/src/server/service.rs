@@ -1391,12 +1391,10 @@ async fn operate(
                 measured,
                 move || {
                     let _held = reservation;
-                    loopflow_execution::provider_auth::operations::served(|| {
-                        Ok(serde_json::to_value(match origin {
-                            Origin::Local => change.run()?,
-                            Origin::Machine(sender) => change.run_here(&sender)?,
-                        })?)
-                    })
+                    Ok(serde_json::to_value(match origin {
+                        Origin::Local => change.run()?,
+                        Origin::Machine(sender) => change.run_here(&sender)?,
+                    })?)
                 },
             )
             .await;

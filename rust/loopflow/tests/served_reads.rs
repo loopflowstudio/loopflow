@@ -1147,7 +1147,6 @@ fn server_operations_match_their_lf_commands() {
         | Read::SessionRetention
         | Read::MachineDoctor
         | Read::RepoCi { .. }
-        | Read::AccountList { .. }
         | Read::SkillList { .. }
         | Read::PrChecks { .. }
         | Read::PrReviews { .. }
@@ -1524,8 +1523,6 @@ fn server_operations_match_their_lf_commands() {
         | Write::CheckoutCommit { .. }
         | Write::CheckoutSync { .. }
         | Write::CheckoutCreate { .. }
-        | Write::AccountDisconnect { .. }
-        | Write::AccountConnect { .. }
 
 
 
@@ -2722,23 +2719,6 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
             }
             spelled.push("--json".into());
             (path(directory), spelled)
-        }
-        Write::AccountDisconnect { provider } => {
-            ("/".into(), words(&["account", "disconnect", provider]))
-        }
-        Write::AccountConnect {
-            provider,
-            chrome_profile,
-            api_key,
-        } => {
-            let mut spelled = words(&["account", "connect", provider]);
-            if let Some(profile) = chrome_profile {
-                spelled.extend(words(&["--chrome-profile", profile]));
-            }
-            if *api_key {
-                spelled.push("--api-key".into());
-            }
-            ("/".into(), spelled)
         }
         Write::GraphRun {
             directory,

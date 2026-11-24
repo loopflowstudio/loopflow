@@ -654,20 +654,6 @@ writes! {
         &loopflow_execution::engine::Diagnostics,
     )?,
 
-    /// `lf account disconnect <provider>`: disconnect a service.
-    #[serde(rename = "account.disconnect")]
-    AccountDisconnect { provider: String } => loopflow_execution::engine::account::Account;
-    { provider } => loopflow_execution::engine::account::disconnect(provider)?,
-
-    /// `lf account connect <provider>`: connect a service.
-    #[serde(rename = "account.connect")]
-    AccountConnect {
-        provider: String,
-        chrome_profile: Option<String>,
-        api_key: bool,
-    } => loopflow_execution::engine::account::Account;
-    { provider, chrome_profile, api_key } => loopflow_execution::engine::account::connect(provider, chrome_profile.as_deref(), *api_key)?,
-
     /// `lf -b [--agent <agent>] graph <name> [message]`, started detached: the
     /// Process carrying the Graph.
     #[serde(rename = "graph.run")]
@@ -1175,8 +1161,6 @@ macro_rules! directory_of {
             | Write::DesktopDashboardSlots { directory, .. }
             | Write::DesktopDashboardMove { directory, .. } => Some(directory),
             Write::DesktopPortfolioSet { .. }
-            | Write::AccountDisconnect { .. }
-            | Write::AccountConnect { .. }
             | Write::ConfigSet { .. }
             | Write::ConfigPromote { .. }
             | Write::ConfigPreview { .. }
@@ -1404,7 +1388,9 @@ impl Remote {
         let secrets = match launching {
             true => {
                 let mut forwarded = loopflow_execution::machine::forward::read(change.directory())?;
-                let secrets = forwarded.take_secrets();
+                let mut secrets = forwarded.take_secrets();
+                // Sign-in advice a launch there prints names it as this Machine does.
+                secrets.carry_launcher_name(machine.name());
                 let mut notices = Vec::new();
                 loopflow_execution::machine::forward::deliver(&machine, &forwarded, &mut notices)?;
                 for line in String::from_utf8_lossy(&notices).lines() {
@@ -1630,8 +1616,6 @@ mod tests {
             r#"{"kind":"checkout.commit","directory":"/r","message":"Tidy","push":false,"no_add":false,"paths":[],"agent":null}"#,
             r#"{"kind":"checkout.sync","directory":"/r","onto":null,"preview":true,"manual":false,"continue":false,"abort":false,"adopt":false}"#,
             r#"{"kind":"checkout.create","directory":"/r","name":"spike","preview":false,"persistent":false,"stack":false}"#,
-            r#"{"kind":"account.disconnect","provider":"linear"}"#,
-            r#"{"kind":"account.connect","provider":"linear","chrome_profile":"Profile 1","api_key":false}"#,
             r#"{"kind":"graph.run","directory":"/r","name":"code","message":null,"agent":null}"#,
             r#"{"kind":"skill.run","directory":"/r","name":"debug","message":"the failing test","agent":"claude"}"#,
             r#"{"kind":"pr.publish","directory":"/r","title":null,"body":null,"agent":null}"#,

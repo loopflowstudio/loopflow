@@ -336,7 +336,7 @@ definitions! {
     machines: BTreeMap<String, placement::MachineDeclaration> = "{}", Personal, Merge, Portable, NextRead, Machines, "Aliases for durable Machine identities";
     connections: HashMap<loopflow_model::durable::MachineId, String> = "{}", Personal, Merge, HostLocal, NextRead, Machines, "This host's connection address for each durable Machine ID";
     hub: Option<loopflow_model::durable::MachineId> = "null", Personal, Replace, HostLocal, NextRead, Machines, "The Machine holding the plan of every repository without Linear or Asana; unset keeps it here", unset "This Machine";
-    auth_browsers: BTreeMap<String, placement::AuthBrowsers> = "{}", Personal, Merge, HostLocal, DomainAction, Accounts, "Ordered local browser profiles for authentication; discovered browser identities stay local";
+    approvers: BTreeMap<String, placement::Approver> = "{}", Personal, Merge, HostLocal, DomainAction, Accounts, "Where `lf machine login` sends each provider's approval page: a Chrome profile or a command; unset opens the default browser";
     repo_root: Option<PathBuf> = "null", Personal, Replace, HostLocal, NextRead, Desktop, "Local repository discovery directory", unset "~/src";
     theme: Option<String> = "null", Personal, Replace, ReferencedAssets, NextRead, Desktop, "Appearance theme or light:name,dark:name pair";
     portfolio: Option<crate::portfolio::Selection> = "null", Personal, Replace, HostLocal, NextRead, Desktop, "Repository navigation selection";

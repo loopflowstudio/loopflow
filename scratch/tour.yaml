@@ -1,5 +1,23 @@
-at: 6701b8a0df9fe2f875074745106cf49861384d75
+at: cb41b9ef0e8c50459f826d9d25cbff1caff114c4
 first:
+  - path: docs/orchestration.md
+    why: Pass sizing and the deciding step's prompt
+  - path: rust/loopflow-definitions/src/builtins/task/skill/kickoff.md
+    why: Group related work when planning
+  - path: rust/loopflow-definitions/src/builtins/task/skill/implement.md
+    why: Build through the next review or decision
+  - path: rust/loopflow-definitions/src/builtins/task/skill/realign.md
+    why: Regroup the work after each pass
+  - path: rust/loopflow-definitions/src/builtins/task/skill/loop-or-next.md
+    why: What restarting the loop costs
+  - path: rust/loopflow-execution/src/graph/output.rs
+    why: Decision criteria for any final skill
+  - path: rust/loopflow-execution/src/graph/instructions.rs
+    why: Equivalent guidance for a conversational Graph
+  - path: rust/loopflow/src/lf/commands/graph.rs
+    why: Count repeated steps from the return target
+  - path: rust/loopflow/tests/session_lifecycle_tests.rs
+    why: Prompts the provider received across three passes
   - path: docs/ops.md
     why: Commit and push behavior from the command line
   - path: rust/loopflow/src/lf/mod.rs
@@ -8,10 +26,12 @@ first:
     why: Push decision shared by whole and selected commits
   - path: rust/loopflow/tests/commit_tests.rs
     why: Remote heads and receipts across local checkpoints
-  - path: docs/orchestration.md
-    why: Planned loop guidance for the next pass
   - path: rust/loopflow-execution/src/harness/README.md
     why: Planned Task conversation wakeups
 hide:
+  - path: tests/goldens/builtin_implement.md
+    why: Generated from the implement skill
+  - path: tests/goldens/builtin_realign.md
+    why: Generated from the realign skill
   - path: tests/fixtures/dto/server_schema.json
     why: Generated command spelling matches server describe

@@ -1,0 +1,17 @@
+at: 6701b8a0df9fe2f875074745106cf49861384d75
+first:
+  - path: docs/ops.md
+    why: Commit and push behavior from the command line
+  - path: rust/loopflow/src/lf/mod.rs
+    why: Branch default and local opt-out in help
+  - path: rust/loopflow-execution/src/engine/checkout.rs
+    why: Push decision shared by whole and selected commits
+  - path: rust/loopflow/tests/commit_tests.rs
+    why: Remote heads and receipts across local checkpoints
+  - path: docs/orchestration.md
+    why: Planned loop guidance for the next pass
+  - path: rust/loopflow-execution/src/harness/README.md
+    why: Planned Task conversation wakeups
+hide:
+  - path: tests/fixtures/dto/server_schema.json
+    why: Generated command spelling matches server describe

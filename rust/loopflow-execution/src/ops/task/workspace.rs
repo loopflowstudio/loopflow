@@ -131,10 +131,13 @@ impl TaskFilesWatch {
     }
 
     fn follow_record(&mut self) -> Result<()> {
+        // The record names a checkout before Git makes it; its CheckoutReady
+        // event is the next planning write, which reads it again.
         let checkout = self
             .store
             .task_checkout(&self.current.task_id)?
-            .map(|checkout| checkout.worktree);
+            .map(|checkout| checkout.worktree)
+            .filter(|worktree| worktree.join(".git").exists());
         if checkout == self.current.checkout {
             return Ok(());
         }

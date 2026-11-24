@@ -207,6 +207,8 @@ Build thinly end to end in four slices; each slice runs and proves itself before
 
 ## Remaining before merge
 
+- QA (2026-11-24, second run, `scratch/qa.html`): after a Task and its Session move, Desktop's Session pane says "Session location unavailable" (strip still names the old checkout) until a deliberate visit; `WorkspacePanesView._terminal` compares the pane's saved location with a record the unscoped local Session list no longer has. Desktop's *Open here* help for a remote Session says `lf resume <id>`.
+
 - Gate: the four acceptance commands below, then CI.
 - `server::subscriptions::` passes alone and under nextest but its tests collide on shared fixture state in one `cargo test` process. Give each test its own fixture home (or hold `env_lock`) so the module passes under both runners.
 

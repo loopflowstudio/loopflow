@@ -37,6 +37,26 @@ under a short `/tmp/lf-qa-*` path. The pieces that worked:
   `task.get` subscription across a move (laptop checkout, null, mini's).
 - mini's served reads answer from its Git observation: an edit shows in
   `changes`/`diff` a few seconds later, not at once.
+- Detach from a bridged viewer is `Ctrl+]`; typing `quit` to the stand-in
+  makes it exit, which prints the owner's leave line. Both must name `lf open
+  …`, never `lf resume <id>`.
+- A PTY driver in Python must not be named `pty.py` (it shadows the stdlib
+  module); run it with `python3 -I`.
+- `task_checkouts` names mini's checkout ~100 ms before Git makes it: sample
+  the row and `[ -d … ]` in a loop during `lf --machine mini task checkout`
+  to see the window a files watch must survive.
+
+# Moving a Task with a Session, for Desktop
+
+A Task whose Graph never ran opens on the Task's own **Not started** page, so
+the panes need a Session: on the laptop, `lf set --global default_agent
+claude` (and on mini), a laptop `bin/claude` stand-in, `lf task checkout`,
+then `lf session resume --task <id> --prepare --json`. The move then refuses
+until the thread has a transcript; write one line to
+`<laptop>/.claude/projects/<checkout with / and . as ->/<thread>.jsonl` for
+the `/tmp/…` and `/private/tmp/…` spellings (thread id is in the refusal).
+A dirty laptop checkout gets committed and pushed by the move; `git stash`
+the stale edit around the move to keep it local.
 
 # Desktop with the screen locked
 
@@ -53,7 +73,10 @@ LF_DESKTOP=<bundle id> lf --task <id> desktop do files path=notes.txt
 LF_DESKTOP=<bundle id> lf --task <id> desktop do details page=diff
 ```
 
-and `snap` through the hook. Files shows `mini <checkout>` above the file;
+and `snap` through the hook. A wrapper that runs the CLI under `env -i` must pass `LF_DESKTOP` through, or
+`desktop do` addresses `com.loopflow.mac` and fails. `desktop focus -p
+session` is the visit that attaches a moved Session's pane; before it the
+pane can say "Session location unavailable". Files shows `mini <checkout>` above the file;
 the sidebar row of a moved Task must not show the stale copy's "Blocked · Task
 has uncommitted work". A Task whose Graph never ran shows the Task's own
 **Not started** page; use a Task with a Session for the panes. The hook cannot

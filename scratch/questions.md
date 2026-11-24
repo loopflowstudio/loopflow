@@ -59,3 +59,6 @@
 - With `--agent`, an exact remote Session (`--session`) always continues instead of attaching: the routed overview carries no provider. Same-harness continuation of a running Session is a takeover, as local `lf resume -a` is.
 - A `task.files.watch` stream that ends without an error (server gone) is treated like a failure on Desktop: error shown, resubscribe with backoff. A nonexistent Task therefore retries every 30 s while its Files is open.
 - Desktop `newShell` falls back to `WorkspaceIdentity(machineId: owner, worktree: "")`; shell tabs read only `machineId` from their location.
+
+- QA (second run): `TaskFilesWatch` treats a recorded checkout without `.git` as not yet arrived. Mini records `task_checkouts` before Git makes the directory, and the watch published "mini is unavailable: No such file or directory" in that window. Passed over reordering the checkout write (the early row reserves the path for recovery).
+- QA: the owner's leave line ("Continue with: lf resume <id>") is terminal output, so the viewer rewrites output bytes again, not only Return and Hint text; compress had dropped that and `open_remote_workspace` only checks the detach line.

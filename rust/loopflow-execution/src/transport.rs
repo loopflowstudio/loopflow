@@ -1749,12 +1749,33 @@ impl ReturnCommand {
         }
     }
 
-    /// Only lf's own lines are rewritten; provider output passes untouched.
     fn rewrite(returns: Option<&Self>, text: &str) -> String {
         returns.map_or_else(
             || text.to_owned(),
             |returns| text.replace(&returns.owner, &returns.here),
         )
+    }
+
+    /// The owner's native client prints its leave line ("Continue with: lf
+    /// resume <id>") into the terminal as one write, so it arrives in one chunk.
+    fn rewrite_bytes<'a>(returns: Option<&Self>, bytes: &'a [u8]) -> std::borrow::Cow<'a, [u8]> {
+        let Some(returns) = returns else {
+            return std::borrow::Cow::Borrowed(bytes);
+        };
+        let from = returns.owner.as_bytes();
+        let find = |rest: &[u8]| rest.windows(from.len()).position(|window| window == from);
+        if find(bytes).is_none() {
+            return std::borrow::Cow::Borrowed(bytes);
+        }
+        let mut out = Vec::with_capacity(bytes.len());
+        let mut rest = bytes;
+        while let Some(at) = find(rest) {
+            out.extend_from_slice(&rest[..at]);
+            out.extend_from_slice(returns.here.as_bytes());
+            rest = &rest[at + from.len()..];
+        }
+        out.extend_from_slice(rest);
+        std::borrow::Cow::Owned(out)
     }
 }
 
@@ -2098,6 +2119,7 @@ fn view(
                 for piece in pieces {
                     let event = match piece {
                         wire::Piece::Bytes(bytes) => {
+                            let bytes = ReturnCommand::rewrite_bytes(returns, &bytes);
                             write_output(&mut terminal, stream, &bytes)?;
                             continue;
                         }
@@ -2777,6 +2799,18 @@ mod tests {
         Replay, Sizing, Viewer, CONTROL_ENV, HELD_ENV, LIMIT, PARENT_ENV,
     };
     use loopflow_model::id::TerminalId;
+
+    /// A remote Session's leave line names the command that works on this Machine.
+    #[test]
+    fn a_remote_leave_line_names_this_machines_command() {
+        let returns = super::ReturnCommand::for_session("abc", "lf open --task t1".into());
+        let line = "\r\nLeft “t1”. Continue with: lf resume abc\r\n".as_bytes();
+        assert_eq!(
+            &*super::ReturnCommand::rewrite_bytes(Some(&returns), line),
+            "\r\nLeft “t1”. Continue with: lf open --task t1\r\n".as_bytes()
+        );
+        assert_eq!(&*super::ReturnCommand::rewrite_bytes(None, line), line);
+    }
 
     /// A start that gets no PTY names the shortage, not the OS error alone.
     #[test]

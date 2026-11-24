@@ -50,3 +50,9 @@
   for the same link. They share the existing repository lifecycle lock through
   local registration and binding, then release it before inventory refresh.
 - Compress after slice 7 uses a missing inventory for a skipped refresh. A successful refresh always supplies the linked Project, including when it has zero issues.
+- QA run 7: a Task that never reached the tracker and stays in a removed
+  Wave's Project the tracker does not hold (a completed Task; removal moves
+  open ones out) gets no tracker actions: they retire on removal or on a
+  reclaim that releases the link, and none are queued later. The other
+  choice was a team issue with no Project, which an import could then read
+  back as a move out of the removed Wave.

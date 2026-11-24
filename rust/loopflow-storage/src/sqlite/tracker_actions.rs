@@ -533,6 +533,35 @@ pub(crate) fn retire_wave_in(conn: &Connection, wave: &WaveId) -> StoreResult<()
          FROM moved WHERE tracker_actions.seq=moved.seq",
         [wave],
     )?;
+    let project: Option<String> = conn
+        .query_row("SELECT id FROM projects WHERE wave_id=?1", [wave], |row| {
+            row.get(0)
+        })
+        .optional()?;
+    match project {
+        Some(project) => retire_stranded_tasks_in(conn, &project),
+        None => Ok(()),
+    }
+}
+
+/// Holds for a Task `t` the tracker can never create: it has no issue and
+/// stays in a removed Wave's Project the tracker does not hold.
+const STRANDED_TASK: &str = "t.external_issue_id IS NULL AND EXISTS(
+    SELECT 1 FROM projects p JOIN waves w ON w.id=p.wave_id
+    WHERE p.id=t.project_id AND p.external_project_id IS NULL AND w.retired_at IS NOT NULL)";
+
+/// Retire the unsent actions of `project`'s stranded Tasks: the completed
+/// Tasks a removed Wave keeps, once its Project is not (or no longer) the
+/// tracker's. They stay readable here.
+pub(crate) fn retire_stranded_tasks_in(conn: &Connection, project: &str) -> StoreResult<()> {
+    conn.execute(
+        &format!(
+            "UPDATE tracker_actions SET phase='retired', error='its Wave was removed'
+             WHERE phase='queued' AND task_id IN
+                 (SELECT t.id FROM tasks t WHERE t.project_id=?1 AND {STRANDED_TASK})"
+        ),
+        [project],
+    )?;
     Ok(())
 }
 
@@ -1000,7 +1029,7 @@ pub(crate) fn attach_in(
 /// with no live `create`. A Project is made here unless another Machine
 /// stamped its Wave.
 fn uncreated(conn: &Connection, repo: &str) -> StoreResult<Vec<ActionOwner>> {
-    let mut query = conn.prepare_cached(
+    let mut query = conn.prepare_cached(&format!(
         "SELECT 'project',p.id FROM projects p JOIN waves w ON w.id=p.wave_id
          WHERE w.repo=?1 AND w.retired_at IS NULL AND p.external_project_id IS NULL
          AND NOT EXISTS(SELECT 1 FROM plan_stamps s WHERE s.owner_id=p.id AND s.field='project_wave'
@@ -1010,8 +1039,9 @@ fn uncreated(conn: &Connection, repo: &str) -> StoreResult<Vec<ActionOwner>> {
          SELECT 'task',t.id FROM tasks t JOIN repository_plans r ON r.id=t.repository_id
          WHERE r.repo=?1 AND t.external_issue_id IS NULL AND t.planning_deleted_at IS NULL
          AND EXISTS(SELECT 1 FROM task_creation_intents c WHERE c.task_id=t.id)
+         AND NOT ({STRANDED_TASK})
          AND NOT EXISTS(SELECT 1 FROM tracker_actions e WHERE e.task_id=t.id AND e.kind='create' AND e.phase!='retired')",
-    )?;
+    ))?;
     let rows = query.query_map([repo], |row| {
         Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
     })?;
@@ -1586,6 +1616,58 @@ mod tests {
             .clone();
         assert_eq!(project, json!(kept_project.as_str()));
         assert!(creation.value.as_array().unwrap().contains(&future_field));
+    }
+
+    #[test]
+    fn a_task_left_in_a_removed_waves_project_is_not_created_in_the_tracker() {
+        let (_dir, store) = store();
+        let removed = |slug: &str| {
+            let wave = crate::work::wave::Wave::new(
+                loopflow_model::id::WaveId::new(),
+                slug.into(),
+                "/repo".into(),
+            );
+            crate::test_fixture::wave(&store, &wave);
+            store.seed_project(wave.id()).unwrap();
+            let kept = task(&store, false);
+            store.move_task(&kept, None, Some(wave.id())).unwrap();
+            (wave, kept)
+        };
+        let creates = |task: &TaskId| {
+            store
+                .tracker_actions_for(&ActionOwner::Task(task.clone()))
+                .unwrap()
+                .into_iter()
+                .filter(|action| action.kind == ActionKind::Create)
+                .map(|action| action.phase)
+                .collect::<Vec<_>>()
+        };
+        // Removed after its creates queued: they retire, and later passes
+        // queue none again.
+        let (queued, before) = removed("queued");
+        store
+            .enqueue_tracker_creations("/repo", TrackerKind::Linear)
+            .unwrap();
+        store
+            .retire_waves(std::slice::from_ref(queued.id()), "removed")
+            .unwrap();
+        // Removed before the tracker was connected: nothing is queued.
+        let (earlier, after) = removed("earlier");
+        store
+            .retire_waves(std::slice::from_ref(earlier.id()), "removed")
+            .unwrap();
+        assert_eq!(
+            store
+                .enqueue_tracker_creations("/repo", TrackerKind::Linear)
+                .unwrap(),
+            0
+        );
+        assert_eq!(creates(&before), vec![ActionPhase::Retired]);
+        assert!(creates(&after).is_empty());
+        assert!(store
+            .unconfirmed_tracker_actions("/repo")
+            .unwrap()
+            .is_empty());
     }
 
     #[test]

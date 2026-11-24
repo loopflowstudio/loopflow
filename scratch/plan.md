@@ -384,6 +384,14 @@ Checks on 2026-11-23: 35 focused Rust tests passed across storage, execution
 and CLI, including the released schema upgrades. Formatting, Clippy with
 warnings denied, and the rendered architecture page check passed.
 
+QA after slice 7 (`scratch/qa.html`, seventh run): a completed Task left in
+a removed Wave's Project the tracker does not hold kept a queued `create`
+that failed every pass, and `uncreated` queued one again. Such a Task now
+gets no tracker actions, on removal, on a reclaim that releases the link, and
+later (`tracker_actions::tests::a_task_left_in_a_removed_waves_project_is_not_created_in_the_tracker`). The released-store seed in
+`provider_columns_preserve_released_observations_and_local_execution` has its
+`initiative_ids` back; an Initiative sweep had taken it out.
+
 ## Remains
 
 1. Gate: Swift DTO and desktop suites (`scripts/test_desktop.sh`), full matrix

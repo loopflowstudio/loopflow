@@ -218,3 +218,16 @@ credential then fails to read, so every tracker action stays queued and
 credential before it touches the Wave: no Wave, commit or queued action is
 left. To see what a failed connect leaves, compare `lf wave list` and
 `lf repo tracker` before and after, and read `tracker_actions` from a copy.
+
+There is no Linear stand-in for a release `lf`: `LINEAR_BASE_URL` is a
+constant, and reqwest verifies TLS with the macOS platform verifier, so a
+local HTTPS proxy needs a keychain trust change (a prompt). A successful
+connect or reclaim is reached only by execution's simulated-Linear tests
+(`ops::linear::task_planning_tests::connect_*`).
+
+What a removal leaves for the tracker shows offline: complete a Task in a
+Wave, `lf wave remove` it, run any save (`lf task create 'x'`), then `lf repo
+tracker`. A completed Task left in a removed, unlinked Wave's Project has no
+open actions (retired "its Wave was removed"); with the link written by hand,
+its `create` stays queued for the linked Linear Project. Do it once with the
+team set before the Wave, once with it set after the removal.

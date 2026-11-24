@@ -110,11 +110,18 @@ pub fn link_wave_project_in(
                 [own.as_str()],
             )?;
         }
-        // The live-owner check above leaves only a retired owner to release.
-        tx.execute(
-            "UPDATE projects SET external_project_id=NULL WHERE external_project_id=?1",
-            [&project.id],
-        )?;
+        // The live-owner check above leaves only a retired owner to release;
+        // its Tasks that never reached the tracker now never will.
+        let released = tx
+            .prepare(
+                "UPDATE projects SET external_project_id=NULL WHERE external_project_id=?1
+                 RETURNING id",
+            )?
+            .query_map([&project.id], |row| row.get::<_, String>(0))?
+            .collect::<Result<Vec<_>, _>>()?;
+        for released in released {
+            tracker_actions::retire_stranded_tasks_in(&tx, &released)?;
+        }
         tx.execute(
             "UPDATE tracker_actions SET phase='retired',error='linked to an existing tracker Project'
              WHERE project_id=?1 AND phase IN ('queued','conflicted')",
@@ -793,6 +800,20 @@ mod tests {
         assert!(error.to_string().contains("wave/billing"));
         observe(&done);
         let task = store.task_by_issue(&done.id).unwrap().unwrap().id;
+        // Done here before its issue was sent: the reclaim leaves it nowhere to go.
+        let unsent = loopflow_model::durable::TaskId::new();
+        store
+            .create_task(&crate::work::task::NewTask {
+                parent_task_id: None,
+                repository_id: crate::test_fixture::repository(&store, "/repo"),
+                id: unsent.clone(),
+                project_id: Some(old.id.clone()),
+                title: "Unsent".into(),
+                description: String::new(),
+                due_date: None,
+            })
+            .unwrap();
+        store.enqueue_tracker_creations("/repo", Linear).unwrap();
 
         store
             .retire_waves(std::slice::from_ref(&old.wave_id), "removed")
@@ -810,6 +831,13 @@ mod tests {
             .tracker_id
             .is_none());
         assert_eq!(store.task(&task).unwrap().unwrap().project_id, Some(old.id));
+        assert!(store
+            .unconfirmed_tracker_actions("/repo")
+            .unwrap()
+            .iter()
+            .all(
+                |action| action.owner != super::tracker_actions::ActionOwner::Task(unsent.clone())
+            ));
         assert_eq!(
             store.task_tracker_state(&task).unwrap().state,
             crate::PlanningState::Available

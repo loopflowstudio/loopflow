@@ -2357,7 +2357,7 @@ mod tests {
         .unwrap();
         conn.execute_batch(r#"
             INSERT INTO pm_projects(repo,provider,id,observed_at,body,archived,membership_unresolved,task_order_json)
-            VALUES('/repo','linear','foreign',17,'{"revision":"2026-10-10T12:00:00Z","description":"Foreign prose","team_ids":["foreign"]}',1,1,'["not-local"]'),
+            VALUES('/repo','linear','foreign',17,'{"revision":"2026-10-10T12:00:00Z","description":"Foreign prose","initiative_ids":["other","disputed"],"team_ids":["foreign"]}',1,1,'["not-local"]'),
                   ('/repo','linear','partial',19,'{"initiative_ids":["initiative"]}',0,0,NULL);
             INSERT INTO pm_items(repo,provider,id,identifier,project_id,observed_at,body,needs_refresh)
             VALUES('/repo','linear','unmapped','OTHER-1','foreign',23,'{"project_id":"contradictory","team_id":"foreign","completed_at":null,"due_date":"2026-10-17"}',1),

@@ -177,9 +177,12 @@ public struct WorkViewPlan: Codable, Equatable, Sendable {
         public let location: Location?
         public let argv: [String]?
         public let unavailable: [String]
+        /// How many direct children of a Task are open; nil for anything but a Task.
+        public let openChildren: Int?
         enum CodingKeys: String, CodingKey {
             case work, title, states, identifier, location, argv, unavailable
             case primarySession = "primary_session"
+            case openChildren = "open_children"
         }
     }
     public let dashboardID: String?
@@ -429,5 +432,22 @@ public enum ChangeComparison: Codable, Hashable, Sendable {
         case .pullRequest(let number, _, let head):
             try c.encode(Kind.pullRequest, forKey: .kind); try c.encode(number, forKey: .number); try c.encode(head, forKey: .head)
         }
+    }
+}
+
+extension WorkViewPlan.Content {
+    // Required nullable keys decode with `decode(T?.self)`: synthesized decoding
+    // would accept a frame that omits them.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        work = try c.decode(WorkWorkspaceKey.self, forKey: .work)
+        title = try c.decode(String.self, forKey: .title)
+        states = try c.decode([WorkSelectionState].self, forKey: .states)
+        identifier = try c.decode(String?.self, forKey: .identifier)
+        primarySession = try c.decode(String?.self, forKey: .primarySession)
+        location = try c.decode(WorkViewPlan.Location?.self, forKey: .location)
+        argv = try c.decode([String]?.self, forKey: .argv)
+        unavailable = try c.decode([String].self, forKey: .unavailable)
+        openChildren = try c.decode(Int?.self, forKey: .openChildren)
     }
 }

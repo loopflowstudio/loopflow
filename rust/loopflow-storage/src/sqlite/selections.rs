@@ -347,6 +347,7 @@ fn plan_in(
             location: None,
             argv: None,
             unavailable: Vec::new(),
+            open_children: None,
         };
         if facts.is_none() {
             content
@@ -357,6 +358,7 @@ fn plan_in(
             let task = super::children::task_on(conn, &task_id)?.ok_or(StoreError::NotFound)?;
             content.identifier = Some(task.identifier);
             content.title = task.title;
+            content.open_children = Some(super::children::open_task_child_count(conn, &task_id)?);
             let primary = super::sessions::primary_session_in(
                 conn,
                 &crate::session::PrimaryScope::Task(task_id.clone()),

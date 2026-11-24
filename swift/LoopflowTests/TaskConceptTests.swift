@@ -94,7 +94,7 @@ struct TaskConceptTests {
                 WorkViewPlan.Content(
                     work: .init(repository: task.task.repositoryId, kind: .task, id: task.id), title: task.task.name,
                     states: Array(task.selectionStates), identifier: task.task.identifier, primarySession: nil,
-                    location: nil, argv: nil, unavailable: [])
+                    location: nil, argv: nil, unavailable: [], openChildren: nil)
             }
             let repository = try #require(phase.tasks.first?.task.repositoryId)
             model.applyTaskList(fixtureViewPlan(owner: .init(repository: repository, kind: .repository, id: repository),

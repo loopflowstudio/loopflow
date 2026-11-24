@@ -86,7 +86,7 @@ extension WorkModel {
     func applyStartedFixture(_ tasks: [(id: String, states: [WorkSelectionState])], wave: String? = nil, repository: String = "repo") {
         let members = tasks.map {
             WorkViewPlan.Content(work: .init(repository: repository, kind: .task, id: $0.id), title: $0.id,
-                states: [.open] + $0.states, identifier: nil, primarySession: nil, location: nil, argv: nil, unavailable: [])
+                states: [.open] + $0.states, identifier: nil, primarySession: nil, location: nil, argv: nil, unavailable: [], openChildren: nil)
         }
         applyTaskList(fixtureViewPlan(owner: .init(repository: repository, kind: .repository, id: repository), members: members),
                       wave: wave, reason: "")
@@ -99,5 +99,5 @@ extension WorkModel {
 
 func fixtureViewContent(work: WorkWorkspaceKey, title: String) -> WorkViewPlan.Content {
     WorkViewPlan.Content(work: work, title: title,
-        states: [.open], identifier: nil, primarySession: nil, location: nil, argv: nil, unavailable: [])
+        states: [.open], identifier: nil, primarySession: nil, location: nil, argv: nil, unavailable: [], openChildren: nil)
 }

@@ -70,7 +70,7 @@ struct PendingChangesTests {
         json["projection"] = ["visible": members, "suppressed": []]
         json["contents"] = members.enumerated().map { index, member in
             ["work": member["work"]!, "title": "Task \(index + 1)", "states": states, "identifier": "LOO-\(index + 1)",
-             "primary_session": NSNull(), "location": NSNull(), "argv": NSNull(), "unavailable": [], "face": NSNull(),
+             "primary_session": NSNull(), "location": NSNull(), "argv": NSNull(), "unavailable": [], "open_children": 0, "face": NSNull(),
              "pane_revision": NSNull()]
         }
         let value = try JSONDecoder().decode(WorkViewPlan.self, from: JSONSerialization.data(withJSONObject: json))

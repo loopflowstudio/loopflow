@@ -8,8 +8,8 @@ import Testing
     @Test func theDialogNamesWhereChildrenMoveAndWhatAbandoningDoes() throws {
         let parent = try roadmapTask(condition: "clear", reason: "Merged · 2 children open")
         let id = parent.task.identifier
-        #expect(TaskCompleteConfirmation.title(parent, openChildren: 1) == "Complete \(id)? 1 child is open")
-        #expect(TaskCompleteConfirmation.title(parent, openChildren: 3) == "Complete \(id)? 3 children are open")
+        #expect(TaskChildPolicy.question(issue: id, openChildren: 1) == "Complete \(id)? 1 child is open")
+        #expect(TaskChildPolicy.question(issue: id, openChildren: 3) == "Complete \(id)? 3 children are open")
         #expect(TaskCompleteConfirmation.moveLabel(to: parent) == "Complete & Move Children to \(id)")
         #expect(TaskCompleteConfirmation.moveLabel(to: nil) == "Complete & Move Children to Top Level")
 

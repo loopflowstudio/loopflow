@@ -15966,6 +15966,15 @@
             }
           ]
         },
+        "open_children": {
+          "description": "How many direct children of a Task are open, so a client can ask what\nhappens to them before completing it; `None` for anything but a Task.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
         "primary_session": {
           "type": [
             "string",
@@ -16000,7 +16009,8 @@
         "primary_session",
         "location",
         "argv",
-        "unavailable"
+        "unavailable",
+        "open_children"
       ],
       "type": "object"
     },

@@ -342,12 +342,6 @@ struct TaskCompleteConfirmation: ViewModifier {
             ?? "Complete & Move Children to Top Level"
     }
 
-    static func title(_ task: RoadmapTask, openChildren: Int) -> String {
-        openChildren == 1
-            ? "Complete \(task.task.identifier)? 1 child is open"
-            : "Complete \(task.task.identifier)? \(openChildren) children are open"
-    }
-
     static func message(descendants: [RoadmapTask], destination: RoadmapTask?) -> String {
         let done = descendants.filter { $0.pr?.phase == .merged }.map(\.task.identifier)
         let abandoned = descendants.filter { $0.pr?.phase != .merged }.map(\.task.identifier)
@@ -368,7 +362,7 @@ struct TaskCompleteConfirmation: ViewModifier {
         let destination = completing.flatMap { model.rehomeDestination(of: $0) }
         let allMerged = descendants.allSatisfy { $0.pr?.phase == .merged }
         let title = completing.map {
-            Self.title($0, openChildren: model.openChildCount($0))
+            TaskChildPolicy.question(issue: $0.task.identifier, openChildren: model.openChildCount($0))
         } ?? "Complete Task?"
         content.confirmationDialog(
             title,

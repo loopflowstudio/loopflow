@@ -290,6 +290,13 @@ public enum TaskChildPolicy: String, Equatable, Sendable {
     case rehome
     /// Merged descendants are done; the rest are abandoned.
     case abandon
+
+    /// What Desktop and the phone ask before completing a parent: `Complete LOO-12? 3 children are open`.
+    public static func question(issue: String, openChildren: Int) -> String {
+        openChildren == 1
+            ? "Complete \(issue)? 1 child is open"
+            : "Complete \(issue)? \(openChildren) children are open"
+    }
 }
 
 /// A write Loopflow makes inside the app, encoded as its Rust `Write`: what

@@ -76,7 +76,9 @@ Concept review pass 2 ([Concept Review](concept-review.html)) found three reader
 - `session_record::history_record_dir` resolves a collected input's capture under `machines/<origin>/runs`; `context_usage::step_context` and `lf session history show` (instructions, manifest) use it. Copied turn contexts come from `copied_input_turn_context` and `--weekly` silences from `copied_input_silences`, both on `machine_record_session`. Silences without evidence times are skipped locally and on copies (the fixture's hand-written silence had none).
 - `CopiedSession.start_failure` is read from the copied row; `lf session list` prints `  could not start: <why>` under an unfinished copied Session.
 - Tests: the offline loss fixture now asserts local `repo` on every scoped row, a gap-free `--context` step for the copied input (first/peak request tokens 13), and the `could not start` line under `from mini`; it passed. Swift `TelemetryCodebaseTests` passed. `documented_commands::` and `cargo clippy --all-targets -- -D warnings` passed.
-- Not covered: `lf session history show --final` for a copied input still reads local `session_events`.
+- Not covered: `lf session history show --final` for a copied input still reads local `session_events` (`transcript::answer::input_final_answer_for_people`). The transcript by ID, usage, search and `--context` read the copy; left for gate review to keep or file.
+
+**Next:** every §1–§4.2 area is built with offline coverage. What remains is the gate and live demo below.
 
 ## Gate and demo
 

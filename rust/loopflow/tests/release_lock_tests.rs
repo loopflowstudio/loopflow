@@ -9,7 +9,8 @@ use std::time::{Duration, Instant};
 
 use loopflow_execution::git::{current_branch, worktree_remove};
 use loopflow_execution::ops::{
-    commit_workflow, release_publish, release_tag, CommitOptions, NullProgress, OpsError,
+    commit_workflow, release_publish, release_tag, CommitOptions, CommitPush, NullProgress,
+    OpsError,
 };
 use loopflow_execution::work::task::{
     GithubPr, PrMergeMode, PrMergeRequest, PrPresentation, PrPublication,
@@ -1715,12 +1716,9 @@ NOTES
             &checkout,
             &CommitOptions {
                 add: compensation,
-                push: true,
-                create_draft_pr: false,
-                task: "commit".to_string(),
-                sources: Vec::new(),
-                message: Some("retry prepared Task head".to_string()),
-                agent: None,
+                push: CommitPush::Always,
+                message: Some("retry prepared Task head"),
+                ..CommitOptions::for_task("commit")
             },
             &NullProgress,
             &|_| {},

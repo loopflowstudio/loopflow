@@ -5,8 +5,9 @@ action_style: procedural
 ---
 Decide whether the Graph should advance, iterate, or stop because progress is blocked.
 
-A step with its own judgment decides better than this one: name it on the loop
-with `step:`. This is the decider for a loop that names none.
+The last skill in a loop decides. Use a skill with its own review criteria
+there when it can judge the work. Each `iterate` starts every step in the
+loop afresh, so name a substantial next pass and the result you expect.
 
 Read what the last pass set out to do, what changed or was learned, and the
 open findings; open the files they point to. A process exiting is not the work

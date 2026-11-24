@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{launch, Error, ErrorCode, Result};
 use crate::git::worktrees::PlacementStrategy;
-use crate::ops::{Progress, SyncPlan};
+use crate::ops::{commit_workflow, CommitOptions, CommitPush, OpsError, Progress, SyncPlan};
 use loopflow_model::id::LfProcessId;
 
 /// What `checkout.commit` left.
@@ -127,7 +127,7 @@ impl SyncInput<'_> {
 }
 
 /// `checkout.commit`: commit the checkout containing `directory`, as `lf
-/// commit [-m <message>] [-p] [--no-add] [<path>…]` does. With `paths`, only
+/// commit [-m <message>] [--no-push] [--no-add] [<path>…]` does. With `paths`, only
 /// those, through an index of their own; `message` is required then. Without
 /// a message the configured agent writes one.
 pub fn commit(
@@ -140,29 +140,32 @@ pub fn commit(
     progress: &impl Progress,
 ) -> Result<Committed> {
     let repo = repo_root(directory)?;
-    let committed = if paths.is_empty() {
-        crate::ops::commit_workflow(
-            &repo,
-            &crate::ops::CommitOptions {
-                add: !no_add,
-                push,
-                message: message.map(str::to_owned),
-                agent: agent.map(str::to_owned),
-                ..crate::ops::CommitOptions::for_task("commit")
+    let result = commit_workflow(
+        &repo,
+        &CommitOptions {
+            add: !no_add,
+            push: if push {
+                CommitPush::OffDefaultBranch
+            } else {
+                CommitPush::Local
             },
-            progress,
-            &|_| {},
-        )
-        .map_err(outcome_unknown)?
-    } else {
-        crate::ops::commit_selected(&repo, paths, message).map_err(outcome_unknown)?;
-        true
-    };
+            paths,
+            message,
+            agent,
+            ..CommitOptions::for_task("commit")
+        },
+        progress,
+        &|_| {},
+    )
+    .map_err(|error| match error {
+        OpsError::PushFailed(_) => Error::new(ErrorCode::Unavailable, error.to_string()),
+        error => outcome_unknown(error),
+    })?;
     Ok(Committed {
         branch: crate::git::current_branch(&repo).map_err(outcome_unknown)?,
         head: crate::git::rev_parse(&repo, "HEAD").map_err(outcome_unknown)?,
-        committed,
-        pushed: push && paths.is_empty(),
+        committed: result.committed,
+        pushed: result.pushed,
     })
 }
 

@@ -2740,7 +2740,7 @@ async fn task_preparation_stacks_without_moving_a_published_parents_merge_reques
         note.contains("leaves out 1 local FIX-1 commit not on origin"),
         "{note}"
     );
-    assert!(note.contains("lf commit -p"), "{note}");
+    assert!(note.contains("`lf commit`"), "{note}");
     assert_eq!(
         crate::git::rev_parse(repo.bare_path(), &parent.task.branch).unwrap(),
         published_tip
@@ -3023,7 +3023,7 @@ async fn task_preparation_stacks_on_origin_when_the_parent_branch_diverged() {
     assert_eq!(
         note.as_deref(),
         Some(format!(
-            "this Task bases on origin/{} and leaves out 1 local FIX-1 commit not on origin; run `lf commit -p` in FIX-1's checkout to include them",
+            "this Task bases on origin/{} and leaves out 1 local FIX-1 commit not on origin; run `lf commit` in FIX-1's checkout to include them",
             parent.task.branch
         ).as_str())
     );

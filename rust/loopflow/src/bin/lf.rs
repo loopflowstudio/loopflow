@@ -3142,7 +3142,7 @@ fn execute_command(
         }),
         Some(Commands::Commit {
             message,
-            push,
+            no_push,
             no_add,
             paths,
             json,
@@ -3150,7 +3150,7 @@ fn execute_command(
         }) => in_repo_runtime(args, |_| {
             loopflow::lf::commands::ops::run_commit(
                 message.as_deref(),
-                *push,
+                !*no_push,
                 *no_add,
                 paths,
                 cli.agent.as_deref(),

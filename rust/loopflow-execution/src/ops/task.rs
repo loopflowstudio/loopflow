@@ -1811,7 +1811,7 @@ impl StackParentBranch {
                 "{pushes} {identifier}'s branch {branch} to origin"
             )),
             Self::LeftOut { left_out } => Some(format!(
-                "this Task bases on origin/{branch} and leaves out {left_out} local {identifier} commit{} not on origin; run `lf commit -p` in {identifier}'s checkout to include them",
+                "this Task bases on origin/{branch} and leaves out {left_out} local {identifier} commit{} not on origin; run `lf commit` in {identifier}'s checkout to include them",
                 if *left_out == 1 { "" } else { "s" }
             )),
         }

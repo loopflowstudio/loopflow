@@ -1,4 +1,4 @@
-at: 6eb8ef4bbb02d0fe42742cb6635226862d4d5f05
+at: d1d96fa54ac718bd26bb5174b8db91e89f0958f8
 first:
   - path: docs/orchestration.md
     why: Pass sizing and the outer review loop
@@ -22,6 +22,8 @@ first:
     why: Read the last settled Task position
   - path: rust/loopflow-execution/src/harness/task_updates.rs
     why: Deliver newly settled outcomes and errors
+  - path: rust/loopflow-execution/src/ops/task_execution.rs
+    why: Show the Graph error after a successful step
   - path: rust/loopflow-execution/src/ops/commit.rs
     why: One push decision for whole and selected commits
   - path: rust/loopflow-execution/src/engine/checkout.rs
@@ -30,6 +32,8 @@ first:
     why: Provider prompts across three passes
   - path: rust/loopflow/src/server/wake.rs
     why: Idle inbox delivery after settlement
+  - path: rust/loopflow/tests/work/task_graph_launch_tests.rs
+    why: Read the blocked decision and resume at verification
   - path: rust/loopflow/tests/commit_tests.rs
     why: Remote heads, local checkpoints and retry receipts
 hide:

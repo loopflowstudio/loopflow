@@ -444,7 +444,9 @@ fn observe_order<'a>(
 
 // A detail read follows the stored link. A Wave refresh supplies its Wave ID in ?4.
 const ACCEPTED_WAVE_PROJECTS: &str = "
-    SELECT p.*, w.id AS wave_id FROM tracker_projects p
+    SELECT p.id, p.observed_at, p.revision, p.slug, p.name, p.summary, p.status,
+        p.team_ids, p.description_revision, p.description, w.id AS wave_id
+    FROM tracker_projects p
     LEFT JOIN projects l ON l.external_project_id=p.id
     JOIN waves w ON w.id=COALESCE(?4,l.wave_id) AND w.repo=p.repo AND w.retired_at IS NULL
     WHERE p.repo=?1 AND p.tracker=?2 AND p.archived=0";
@@ -847,6 +849,80 @@ mod tests {
             store.task_by_issue(&arriving.id).unwrap().unwrap().wave_id,
             Some(next.wave_id)
         );
+    }
+
+    #[test]
+    fn a_second_project_a_released_writer_adds_never_becomes_the_waves() {
+        use crate::planning_sync::TrackerKind::Linear;
+
+        let dir = tempfile::tempdir().unwrap();
+        let store = crate::test_fixture::open(&dir.path().join("db")).unwrap();
+        let own = crate::test_fixture::project(&store, "/repo", "billing");
+        // A released build makes a Project per chapter; this one is older.
+        let chapter = loopflow_model::durable::ProjectId::new();
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "INSERT INTO projects(id,wave_id,created_at,updated_at,description,project_name,project_slug)
+                 VALUES(?1,?2,0,0,'','billing — Chapter 2','billing-2')",
+                params![chapter.as_str(), own.wave_id],
+            )
+            .unwrap();
+
+        let wave_project = || store.project_of_wave(&own.wave_id).unwrap().unwrap().id;
+        assert_eq!(wave_project(), own.id);
+        assert_eq!(store.wave_project(&own.wave_id).unwrap(), own.id);
+        let task = loopflow_model::durable::TaskId::new();
+        let repository = crate::test_fixture::repository(&store, "/repo");
+        {
+            let mut conn = store.conn.lock().unwrap();
+            let tx = conn.transaction().unwrap();
+            crate::sqlite::children::create_task_in(
+                &tx,
+                &crate::work::task::NewTask {
+                    parent_task_id: None,
+                    repository_id: repository,
+                    id: task.clone(),
+                    project_id: None,
+                    title: "Local".into(),
+                    description: String::new(),
+                    due_date: None,
+                },
+                Some(&own.wave_id),
+            )
+            .unwrap();
+            tx.commit().unwrap();
+        }
+        assert_eq!(
+            store.task(&task).unwrap().unwrap().project_id,
+            Some(own.id.clone())
+        );
+
+        let snapshot = inventory();
+        super::link_wave_project_in(&store, &own.wave_id, &snapshot.project, 1, Linear).unwrap();
+        assert_eq!(
+            store
+                .project_by_tracker_id(&snapshot.project.id)
+                .unwrap()
+                .unwrap()
+                .id,
+            own.id
+        );
+        let issue = &snapshot.items[0];
+        super::accept_linear_issue_in(&store, "/repo", issue, Some(&snapshot.project), 2, Linear)
+            .unwrap();
+        assert_eq!(
+            store.task_by_issue(&issue.id).unwrap().unwrap().project_id,
+            Some(own.id.clone())
+        );
+        assert!(store
+            .project(&chapter)
+            .unwrap()
+            .unwrap()
+            .tracker_id
+            .is_none());
     }
 
     #[test]

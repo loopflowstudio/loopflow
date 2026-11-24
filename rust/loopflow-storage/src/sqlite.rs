@@ -1431,18 +1431,11 @@ impl SqliteStore {
                 ),
             )?;
             // A Wave's Project is named for it; a linked one's new name goes to the tracker.
-            let project: Option<String> = tx
-                .query_row(
-                    "SELECT id FROM projects WHERE wave_id=?1",
-                    [&update.wave_id],
-                    |row| row.get(0),
-                )
-                .optional()?;
-            if let Some(project) = project {
+            if let Some(project) = children::held_wave_project_in(&tx, &update.wave_id)? {
                 planning_write::local(
                     &tx,
                     &crate::work::edit::WorkEdit::for_target(
-                        &project,
+                        project.as_str(),
                         &[
                             crate::work::edit::WorkValue::ProjectSlug(Some(name.into())),
                             crate::work::edit::WorkValue::ProjectName(Some(name.into())),

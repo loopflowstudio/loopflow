@@ -1359,11 +1359,10 @@ impl SqliteStore {
     /// The Wave's Project record, once one has been made.
     pub fn project_of_wave(&self, wave: &WaveId) -> StoreResult<Option<Project>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let project = conn
-            .prepare_cached(&format!("{PROJECT_COLUMNS} WHERE wave_id=?1"))?
-            .query_row(params![wave], map_project_row)
-            .optional()?;
-        Ok(project)
+        match held_wave_project_in(&conn, wave)? {
+            Some(id) => Ok(Some(project_in(&conn, &id)?)),
+            None => Ok(None),
+        }
     }
 
     pub fn list_projects(&self) -> StoreResult<Vec<Project>> {
@@ -2438,13 +2437,19 @@ pub(crate) fn wave_project_in(conn: &Connection, wave: &WaveId) -> StoreResult<P
     Ok(id)
 }
 
+/// The Wave's Project, once one is made. A released writer can still add a
+/// second Project to a Wave until the unique index on `projects.wave_id`
+/// ships; the Wave's own record (`ProjectId::for_wave`) wins, else the oldest.
 pub(crate) fn held_wave_project_in(
     conn: &Connection,
     wave: &WaveId,
 ) -> StoreResult<Option<ProjectId>> {
     Ok(conn
-        .prepare_cached("SELECT id FROM projects WHERE wave_id=?1")?
-        .query_row([wave], |row| {
+        .prepare_cached(
+            "SELECT id FROM projects WHERE wave_id=?1
+             ORDER BY id=?2 DESC, created_at, id LIMIT 1",
+        )?
+        .query_row(params![wave, ProjectId::for_wave(wave).as_str()], |row| {
             Ok(ProjectId::from_raw(row.get::<_, String>(0)?))
         })
         .optional()?)
@@ -2818,13 +2823,6 @@ mod local_planning_tests {
             .unwrap();
         let moved = store.task(&task.id).unwrap().unwrap();
         assert_eq!((moved.wave_id, moved.project_id), (None, None));
-
-        // A second Project for a Wave is refused by the schema.
-        let second = store.conn.lock().unwrap().execute(
-            "INSERT INTO projects(id,wave_id,created_at,updated_at,description) VALUES(?1,?2,1,1,'')",
-            params![ProjectId::new().as_str(), billing.id()],
-        );
-        assert!(second.is_err());
     }
 
     #[test]

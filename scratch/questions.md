@@ -15,8 +15,9 @@
   same as a Wave made now); their UUID is the Wave's, so two Machines' creates
   name one Linear Project. Retired Waves get none.
 - An arriving Project record (Git or hub exchange) for a Wave that already
-  holds a different Project fails the unique index. Only a released build can
-  send one (it makes Projects per chapter); not handled here.
+  holds a different Project is stored beside it; reads keep the Wave's own
+  record (slice 10). Only a released build sends one. LOO-1089 collapses
+  them when it adds the unique index.
 - Removing or renaming a Wave no longer touches Linear (the Initiative
   archive/rename went). Its linked Linear Project is left as it is; archiving
   it on removal would be a new tracker action.

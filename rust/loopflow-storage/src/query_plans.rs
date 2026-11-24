@@ -89,7 +89,7 @@ const MEASURED: &str = "DELETE FROM sqlite_stat1 WHERE tbl IN (
          ('processes','processes_unfinished','768 2 1'),
          ('processes','processes_unrecorded_ancestry','0 0'),
          ('processes','sqlite_autoindex_processes_1','169394 1'),
-         ('projects','projects_wave','63 1'),
+         ('projects','idx_projects_wave','63 3 1'),
          ('projects','idx_projects_wave_updated','63 3 2'),
          ('projects','sqlite_autoindex_projects_1','63 1'),
          ('projects','sqlite_autoindex_projects_2','63 2'),

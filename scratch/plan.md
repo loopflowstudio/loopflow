@@ -21,7 +21,7 @@ real records with a name, summary and status that start and end.
 ## The model
 
 - A Wave has exactly one Project, made with the Wave. A Project belongs to
-  exactly one Wave. `projects.wave_id` is unique and not null in the branch schema. The release-staging conflict is recorded below.
+  exactly one Wave. `projects.wave_id` is not null; its unique index waits for LOO-1089 (slice 10).
 - A Task in a Wave is in that Wave's Project. A Task in no Wave has no
   Project. A Task's Wave is read through its Project, as on main:
   `tasks.wave_id`, the `task_wave` plan field, its writer rule, its DTO and
@@ -46,8 +46,8 @@ real records with a name, summary and status that start and end.
   (`wave_project_in`). Its id is `ProjectId::for_wave`, the Wave's UUID, so
   Machines making it separately make one record, and its Linear `create`
   carries that UUID.
-- Migration collapses and fills as below, then `projects_wave` (unique)
-  replaces `idx_projects_wave`; `tracker_wave_projects.position` leaving.
+- Migration collapses and fills as below; `tracker_wave_projects.position`
+  leaving. `idx_projects_wave` stays plain (slice 10).
 - Linear import binds the first tracker Project it meets in the Wave's
   Initiative to the Wave's unbound Project (unless the Project's own `create`
   is out and this is not it); once bound, others are skipped, so the unique
@@ -483,24 +483,22 @@ chapter to clear updates that column.
 
 ## Remains
 
-1. Next slice: stage the unique index. `uv run python scripts/check_migrations.py`
-   still fails (2026-11-23): "unique index projects_wave on projects; an older
-   writer may violate it". A released writer can add another chapter Project.
-   Shape to build: `remove_chapters.sql` keeps the collapse and fill but
-   creates `projects_wave` as a plain (non-unique) index on `wave_id`
-   (replace `idx_projects_wave`; update `query_plans.rs` `MEASURED` row if
-   needed). `project_of_wave` and the import binding read one Project
-   deterministically when a released writer has added another (the Wave's
-   `ProjectId::for_wave` record first, else oldest), and a Task joining its
-   Wave goes to that one. A contract migration, filed as its own Task with
-   `-- expand: remove_chapters`, repeats the collapse and adds the unique
-   index after `STAGING_DAYS`. Done when `check_migrations.py` passes and a
-   test seeds a second Project on a Wave after migration and shows reads,
-   Task create and import still use the first.
-2. Gate: Swift DTO and desktop suites (`scripts/test_desktop.sh`), full matrix
+1. Gate: Swift DTO and desktop suites (`scripts/test_desktop.sh`), full matrix
    in CI, and check the `oauth_tests` contention failure on the base.
-3. Open, not this Task: a queued create's field snapshot (`scratch/concept-review.html`
+2. Open, not this Task: a queued create's field snapshot (`scratch/concept-review.html`
    discussion of create snapshots).
+
+## Slice 10 (staging the one-Project index, 2026-11-23)
+
+Built: `remove_chapters.sql` no longer adds a unique index; main's
+`idx_projects_wave(wave_id, created_at)` stays. `held_wave_project_in` is the
+one read of a Wave's Project (`project_of_wave`, `wave_project`, Task create,
+import binding, link, rename, `retire_wave_in`): the `ProjectId::for_wave`
+record first, else the oldest. LOO-1089 adds the unique index with
+`-- expand: remove_chapters` after `STAGING_DAYS`. Also named the columns of
+`ACCEPTED_WAVE_PROJECTS` (`SELECT p.*` failed the runtime-SQL check).
+`uv run python scripts/check_migrations.py`: passes.
+Test: `linear_events::tests::a_second_project_a_released_writer_adds_never_becomes_the_waves`.
 
 ## Slice 6 (human-review answer, 2026-11-23)
 

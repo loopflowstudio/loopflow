@@ -101,8 +101,9 @@ SELECT 'proj_'||CASE WHEN length(w.id)=36 AND replace(w.id,'-','') NOT GLOB '*[^
     w.id,w.created_at,w.created_at,'',w.name,w.name,'started'
 FROM waves w
 WHERE w.retired_at IS NULL AND NOT EXISTS(SELECT 1 FROM projects p WHERE p.wave_id=w.id);
-DROP INDEX idx_projects_wave;
-CREATE UNIQUE INDEX projects_wave ON projects(wave_id);
+-- A released writer can still add a Project to a Wave, so `wave_id` is not
+-- unique yet; a contract migration makes it unique once those
+-- writers have exited. Readers pick the Wave's own record, else the oldest.
 -- A Wave's tracker Project is the one its Project links
 -- (`projects.external_project_id`); no Initiative decides it, and nothing
 -- orders a Wave's Projects. A queued attachment of a Project to an

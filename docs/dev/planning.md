@@ -415,8 +415,11 @@ $ lf task create --wave product --title "Fix the parser"
 $ lf wave plan product --json            # project: status started
 ```
 
-A Wave is exactly one Project: the `projects` row with its `wave_id`, which a
-unique index keeps to one. Registering a new Wave (`commit_wave_bootstrap`, `upsert_wave_prepared`) makes it,
+A Wave is exactly one Project: the `projects` row with its `wave_id`. Until
+released builds that make a Project per chapter have exited, one can still add
+a second; every read of a Wave's Project (`held_wave_project_in`) takes the
+Wave's own record, else the oldest, and a unique index follows in a contract
+migration. Registering a new Wave (`commit_wave_bootstrap`, `upsert_wave_prepared`) makes it,
 named for the Wave and `started`; its id is `ProjectId::for_wave`, the Wave's
 own UUID, so Machines that make it separately make the same record. A Wave
 that arrived without one (from a released build) gets it when its first Task

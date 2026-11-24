@@ -538,13 +538,8 @@ pub(crate) fn retire_wave_in(conn: &Connection, wave: &WaveId) -> StoreResult<()
          FROM moved WHERE tracker_actions.seq=moved.seq",
         [wave],
     )?;
-    let project: Option<String> = conn
-        .query_row("SELECT id FROM projects WHERE wave_id=?1", [wave], |row| {
-            row.get(0)
-        })
-        .optional()?;
-    match project {
-        Some(project) => retire_stranded_tasks_in(conn, &project),
+    match crate::sqlite::children::held_wave_project_in(conn, wave)? {
+        Some(project) => retire_stranded_tasks_in(conn, project.as_str()),
         None => Ok(()),
     }
 }

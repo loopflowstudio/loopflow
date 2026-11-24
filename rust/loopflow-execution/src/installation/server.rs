@@ -9,7 +9,13 @@ use std::path::Path;
 use std::process::Command;
 use std::time::{Duration, Instant};
 
+#[cfg(target_os = "linux")]
+mod linux;
+
 pub fn ensure() -> Result<crate::machine::client::Status> {
+    let home = crate::store::lf_home_dir();
+    fs::create_dir_all(&home).with_context(|| format!("create Machine home {}", home.display()))?;
+    let home = home.canonicalize()?;
     let lock = fs::OpenOptions::new()
         .create(true)
         .truncate(false)
@@ -33,7 +39,6 @@ pub fn ensure() -> Result<crate::machine::client::Status> {
     if installed(&before) {
         return Ok(before);
     }
-    let home = crate::store::lf_home_dir().canonicalize()?;
     let executable = crate::os_process::resolve_lf_binary()?;
     register(&home, &executable, before.listening)?;
     let deadline = Instant::now() + Duration::from_secs(10);
@@ -194,9 +199,24 @@ fn register_bundled(replace: bool) -> Result<()> {
 #[cfg(target_os = "linux")]
 fn register(home: &Path, executable: &Path, replace: bool) -> Result<()> {
     let directory = crate::installation::account_home()?.join(".config/systemd/user");
-    fs::create_dir_all(&directory)?;
     let unit = format!("{}.service", label(home, "server"));
     let legacy = format!("{}.service", label(home, "machine"));
+    if !linux::user_manager()? {
+        // Our units install into default.target.wants. A missing bus cannot
+        // answer is-enabled, but its enablement and mask are still on disk.
+        for name in [&unit, &legacy] {
+            let path = directory.join(name);
+            if path.symlink_metadata().is_ok() {
+                anyhow::ensure!(
+                    directory.join("default.target.wants").join(name).exists()
+                        && path.canonicalize()? != Path::new("/dev/null"),
+                    "Loopflow server is disabled; enable {name} with systemctl --user"
+                );
+            }
+        }
+        return linux::start_detached(home, executable, replace);
+    }
+    fs::create_dir_all(&directory)?;
     // An existing disabled or masked unit is a person's choice, not first use.
     for name in [&unit, &legacy] {
         if directory.join(name).symlink_metadata().is_ok() {

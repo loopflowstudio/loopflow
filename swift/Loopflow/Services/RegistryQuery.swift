@@ -323,7 +323,7 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
     case sessionMove(directory: String, on: String?, agent: String)
     case waveCreate(directory: String, wave: String, objective: String?)
     case waveSync(directory: String, wave: String)
-    case wavePlanBind(directory: String, wave: String, project: String)
+    case wavePlanBind(directory: String, wave: String, project: String, replace: Bool)
     case wavePlanConnect(directory: String, wave: String?, all: Bool, teamKey: String?, teamName: String?)
     /// Without `apply`, the plan: nothing moves.
     case wavePlanReteam(directory: String, apply: Bool)
@@ -428,7 +428,7 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
                 + argument("--on", on) + ["--json"]
         case .waveCreate(_, let wave, let objective): return ["wave", "create", wave] + argument("--objective", objective) + ["--json"]
         case .waveSync(_, let wave): return ["wave", "sync", wave, "--json"]
-        case .wavePlanBind(_, let wave, let project): return ["wave", "plan", "bind", wave, project, "--json"]
+        case .wavePlanBind(_, let wave, let project, let replace): return ["wave", "plan", "bind", wave, project, "--json"] + (replace ? ["--replace"] : [])
         case .wavePlanConnect(_, let wave, let all, let teamKey, let teamName):
             return ["wave", "plan", "connect"] + [wave].compactMap { $0 } + (all ? ["--all"] : [])
                 + argument("--team-key", teamKey) + argument("--team-name", teamName) + ["--json"]
@@ -610,8 +610,8 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
             TaggedFields("wave.create", ["directory": directory, "wave": wave, "objective": objective])
         case .waveSync(let directory, let wave):
             TaggedFields("wave.sync", ["directory": directory, "wave": wave])
-        case .wavePlanBind(let directory, let wave, let project):
-            TaggedFields("wave.plan.bind", ["directory": directory, "wave": wave, "project": project])
+        case .wavePlanBind(let directory, let wave, let project, let replace):
+            TaggedFields("wave.plan.bind", ["directory": directory, "wave": wave, "project": project, "replace": replace])
         case .wavePlanConnect(let directory, let wave, let all, let teamKey, let teamName):
             TaggedFields("wave.plan.connect", ["directory": directory, "wave": wave, "all": all,
                                                    "team_key": teamKey, "team_name": teamName])
@@ -1577,15 +1577,33 @@ public struct WaveDetailSnapshot: Decodable, Sendable {
     }
 }
 
+public struct SessionOrigin: Decodable, Sendable, Hashable {
+    public let machineId: String
+    public let label: String?
+    public var name: String { label ?? machineId }
+
+    enum CodingKeys: String, CodingKey {
+        case machineId = "machine_id", label
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        machineId = try c.decode(String.self, forKey: .machineId)
+        label = try c.decode(String?.self, forKey: .label)
+    }
+}
+
 /// Read-only history beneath a conversation's captured input; not a resumable Run.
 public struct SessionHistory: Decodable, Sendable, Identifiable, Hashable {
     public var id: String {
-        if let captured { return "\(sessionId):\(captured)" }
+        let source = origin.map { "\($0.machineId):" } ?? ""
+        if let captured { return "\(source)\(sessionId):\(captured)" }
         if case .nativeTurn(let thread, let turn, _, _) = providers.first?.reference {
-            return "\(sessionId):\(thread.rawValue):\(turn)"
+            return "\(source)\(sessionId):\(thread.rawValue):\(turn)"
         }
-        return sessionId
+        return source + sessionId
     }
+    public let origin: SessionOrigin?
     public let sessionId: String
     public let captured: Int?
     public let artifactKey: String?
@@ -1612,6 +1630,35 @@ public struct SessionHistory: Decodable, Sendable, Identifiable, Hashable {
     public let model: String?
     public let surface: String
 
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        origin = try c.decode(SessionOrigin?.self, forKey: .origin)
+        sessionId = try c.decode(String.self, forKey: .sessionId)
+        captured = try c.decodeIfPresent(Int.self, forKey: .captured)
+        artifactKey = try c.decodeIfPresent(String.self, forKey: .artifactKey)
+        callerArtifactKey = try c.decodeIfPresent(String.self, forKey: .callerArtifactKey)
+        taskPrId = try c.decodeIfPresent(String.self, forKey: .taskPrId)
+        repo = try c.decodeIfPresent(String.self, forKey: .repo)
+        worktree = try c.decodeIfPresent(String.self, forKey: .worktree)
+        taskId = try c.decodeIfPresent(String.self, forKey: .taskId)
+        waveId = try c.decodeIfPresent(String.self, forKey: .waveId)
+        taskIdentifier = try c.decodeIfPresent(String.self, forKey: .taskIdentifier)
+        workSource = try c.decodeIfPresent(String.self, forKey: .workSource)
+        waveName = try c.decodeIfPresent(String.self, forKey: .waveName)
+        skill = try c.decodeIfPresent(String.self, forKey: .skill)
+        skillVersion = try c.decodeIfPresent(String.self, forKey: .skillVersion)
+        observedAt = try c.decode(Int.self, forKey: .observedAt)
+        firstProviderAttemptAt = try c.decodeIfPresent(Int.self, forKey: .firstProviderAttemptAt)
+        recordedOutcome = try c.decodeIfPresent(String.self, forKey: .recordedOutcome)
+        recordedAt = try c.decodeIfPresent(Int.self, forKey: .recordedAt)
+        providers = try c.decode([ProviderHistory].self, forKey: .providers)
+        usage = try c.decode(SessionUsage.self, forKey: .usage)
+        evidenceGaps = try c.decode(Int.self, forKey: .evidenceGaps)
+        harness = try c.decode(String.self, forKey: .harness)
+        model = try c.decodeIfPresent(String.self, forKey: .model)
+        surface = try c.decode(String.self, forKey: .surface)
+    }
+
     public var status: String {
         if !providers.isEmpty {
             return providers.map { record in
@@ -1634,7 +1681,7 @@ public struct SessionHistory: Decodable, Sendable, Identifiable, Hashable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case repo, worktree, skill, providers, usage, harness, model, surface
+        case origin, repo, worktree, skill, providers, usage, harness, model, surface
         case captured
         case sessionId = "session_id", artifactKey = "artifact_key", callerArtifactKey = "caller_artifact_key"
         case taskPrId = "task_pr_id", taskId = "task_id", waveId = "wave_id"

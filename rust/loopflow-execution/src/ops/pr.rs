@@ -13,7 +13,7 @@ use crate::git::{current_branch, get_default_branch, rev_parse};
 use crate::graph::load_skill;
 
 use crate::ops::checkout::{checkout_base, CheckoutBase};
-use crate::ops::commit::{commit_workflow, message_launch, CommitOptions, MessageAgent};
+use crate::ops::commit::{commit_workflow, message_launch, CommitOptions};
 use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::progress::Progress;
 use crate::ops::task::{StackParentPr, StackedSync};
@@ -541,7 +541,7 @@ pub fn generate_pr_copy(
 
     progress.status("Generating PR title/body...");
 
-    let launch = message_launch(repo, &skill, MessageAgent::Chosen(agent_override), prompt)?;
+    let launch = message_launch(repo, &skill, agent_override, prompt)?;
     let process = ProcessConfig {
         stream: false,
         ..Default::default()

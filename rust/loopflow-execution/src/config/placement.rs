@@ -180,6 +180,7 @@ impl Default for OnDemandDeclaration {
                 disk_gb: 20,
                 gpu: None,
                 spot: false,
+                modal_sizing: None,
             },
             max_machines: 0,
             max_usd_per_hour: loopflow_storage::rental::Usd::ZERO,

@@ -38,6 +38,7 @@ use crate::build_info;
 use loopflow_execution::store::migrations;
 
 mod published;
+pub(crate) use published::rental_cli;
 pub use published::{adopt, install, schedule, Stream};
 
 /// The candidate binary's identity. The process running `lf install` *is* the

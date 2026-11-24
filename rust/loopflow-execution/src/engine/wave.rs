@@ -13,11 +13,18 @@ use loopflow_storage::work::project::Project;
 /// `wave.plan.bind`: bind the existing tracker Project `project` as the
 /// Wave's shared current selection, as `lf wave plan bind <wave>
 /// <project>` does, and return the Project as stored.
-pub fn planning_bind(directory: &Path, wave: &str, project: &str) -> Result<Project> {
+pub fn planning_bind(
+    directory: &Path,
+    wave: &str,
+    project: &str,
+    replace: bool,
+) -> Result<Project> {
     let repo = repo_root(directory)?;
     tokio::runtime::Runtime::new()
         .map_err(written)?
-        .block_on(crate::ops::project::bind_project(&repo, wave, project))
+        .block_on(crate::ops::project::bind_project(
+            &repo, wave, project, replace,
+        ))
         .map_err(written)
 }
 

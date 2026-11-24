@@ -903,7 +903,6 @@ pub struct TaskListArgs {
 pub fn list_tasks(repo: &Path, query: &TaskListArgs, json: bool) -> Result<()> {
     let runtime = tokio::runtime::Runtime::new()?;
     runtime.block_on(async {
-        loopflow_execution::ops::plan_carriers::before_first_read(repo).await;
         let store = loopflow_execution::store::read_existing_registry()?.map(std::sync::Arc::new);
         let tasks = match &store {
             Some(store) => open_tasks(store, repo, query).await?,
@@ -980,7 +979,7 @@ fn peer_status(repo: &Path, task: &Task) -> super::read::Read {
     }
 }
 
-fn owner_detail(peer: &TaskPeer, repo: &Path, task: &Task) -> Result<TaskDetail> {
+pub(super) fn owner_detail(peer: &TaskPeer, repo: &Path, task: &Task) -> Result<TaskDetail> {
     let mut connection = peer.connect(repo, task, Some(TaskPeer::deadline()))?;
     let answer = connection.request(crate::server::wire::Operation::Read(peer_status(
         repo, task,
@@ -2371,7 +2370,6 @@ async fn snapshot_task_detail(
         task.worktree.as_deref().unwrap_or(repo),
         repo,
         wave,
-        None,
     )
     .ok()
     .map(|agent| agent.harness.as_str().to_owned());
@@ -4346,14 +4344,7 @@ mod tests {
                 "initiative_ids":["initiative"], "team_ids":["team"]
             }], "items":[]})).unwrap(),
         }, None).await.unwrap();
-        loopflow_storage::sqlite::project_selection::write_project_binding(
-            &store.sqlite,
-            wave.id(),
-            None,
-            "999bdbdd-c045-41a6-8ffc-a97c4a40b0b3",
-            &loopflow_execution::store::PlanningLocks::new(tempfile::tempfile().unwrap()),
-        )
-        .unwrap();
+        // The Initiative's sole In Progress Project binds when its inventory arrives.
         let super::Evidence::Ok { items, .. } = super::project_planning(&store, &wave).await else {
             panic!("Project plan unavailable");
         };

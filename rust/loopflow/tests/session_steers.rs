@@ -900,6 +900,7 @@ fn stopped_claude_conversation(home: &std::path::Path) -> String {
         &provider,
         r#"#!/bin/sh
 if [ "$1" = --version ]; then echo '2.1.302'; exit; fi
+if [ "$1 $2" = "auth status" ]; then echo '{"loggedIn":true}'; exit 0; fi
 { cat; printf '\n--launch--\n'; } >> "$LF_HOME/first-input"
 "#,
     )

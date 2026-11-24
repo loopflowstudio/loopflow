@@ -12,7 +12,7 @@ pub(crate) async fn accept_linear_inventory(
     store: &Store,
     wave: WaveId,
     initiative: String,
-    projects: Vec<loopflow_storage::planning::TrackerProject>,
+    projects: loopflow_storage::planning::InitiativeProjects,
     issues: Vec<loopflow_storage::planning::TrackerItem>,
     observed_at: i64,
     locks: Option<Arc<PlanningLocks>>,

@@ -6,6 +6,7 @@ use anyhow::{anyhow, Context};
 use loopflow_model::durable::{Machine, MachineId};
 use loopflow_storage::rental::{self, GiveBack, Holdings, Rental, RentalState, Resolution};
 use loopflow_storage::sqlite::SqliteStore;
+use std::io::{BufReader, Seek};
 use std::process::{Command, Stdio};
 use time::OffsetDateTime;
 
@@ -76,6 +77,12 @@ fn refresh(
     api: &Sandboxes,
     rental: &Rental,
 ) -> anyhow::Result<Option<Rental>> {
+    // Background settlement may have ended it since the caller read it; its
+    // recorded cost stands.
+    let rental = &sqlite.rental(&rental.id)?;
+    if !rental.state.is_live() {
+        return Ok(None);
+    }
     let id = match &rental.provider_id {
         // Requested or unconfirmed: only the name can find it. A sandbox whose
         // create never answered has no route, so it is given back unused.
@@ -112,6 +119,35 @@ fn refresh(
     }
     sqlite.set_rental_cost(&rental.id, rental.cost_until(now()))?;
     Ok(Some(sqlite.rental(&rental.id)?))
+}
+
+/// `lf machine end`: settle a sandbox its provider already ended, without
+/// asking it over SSH; give back one that still runs.
+///
+/// # Errors
+/// When the provider or the store cannot be read, or a live sandbox holds the
+/// only copy of unpushed work and `force` is not set.
+pub fn end(
+    sqlite: &SqliteStore,
+    api: &Sandboxes,
+    rental: &Rental,
+    machine: &Machine,
+    force: bool,
+) -> anyhow::Result<()> {
+    if let Some(running) = refresh(sqlite, api, rental)? {
+        return give_back(sqlite, api, &running, machine, true, force);
+    }
+    let label = machine.label.as_deref().unwrap_or(machine.id.as_str());
+    let settled = sqlite.rental(&rental.id)?;
+    if settled.state.is_live() {
+        println!("{label} is still {}; nothing was ended", settled.state);
+    } else {
+        println!(
+            "{label} was already gone ({}; {})",
+            settled.state, settled.cost
+        );
+    }
+    Ok(())
 }
 
 pub fn give_back(
@@ -155,12 +191,13 @@ pub fn give_back(
             }
         }
         GiveBack::End => {
-            let copied = match end_rental(sqlite, api, rental, || copy_up(sqlite, rental, machine))?
-            {
+            let copied = match end_rental(sqlite, api, rental, || {
+                copy_up(sqlite, rental, machine, true)
+            })? {
                 Ended::Copied(counts) => Some(counts),
                 Ended::Uncopied(error) if !force => {
                     let message = format!(
-                        "{label} stays: its Session and Process records could not be copied ({error:#}); \
+                        "{label} stays: its Session records could not be copied ({error:#}); \
                          `lf machine end {label} --force` deletes it without them"
                     );
                     return if explicit {
@@ -171,7 +208,7 @@ pub fn give_back(
                     };
                 }
                 Ended::Uncopied(error) => {
-                    eprintln!("Discarded on {label}: Session and Process records ({error:#})");
+                    eprintln!("Discarded on {label}: Session records ({error:#})");
                     delete_sandbox(sqlite, api, rental)?;
                     None
                 }
@@ -181,11 +218,9 @@ pub fn give_back(
             }
             let ended = sqlite.rental(&rental.id)?;
             println!(
-                "Gave back {label}{}{}",
-                ended
-                    .cost_usd
-                    .map_or_else(String::new, |cost| format!(" after {cost}")),
-                copied.map_or_else(String::new, |counts| format!("; {counts} copied here"))
+                "Returned {label} ({}{})",
+                copied.map_or_else(String::new, |counts| format!("{counts} copied; ")),
+                ended.cost
             );
             Ok(())
         }
@@ -247,15 +282,46 @@ fn mark_ended(sqlite: &SqliteStore, rental: &Rental) -> anyhow::Result<()> {
 }
 
 /// Pull the machine's records since its rental began (`lf history export`).
-fn copy_up(sqlite: &SqliteStore, rental: &Rental, machine: &Machine) -> anyhow::Result<CopyCounts> {
+fn copy_up(
+    sqlite: &SqliteStore,
+    rental: &Rental,
+    machine: &Machine,
+    final_copy: bool,
+) -> anyhow::Result<CopyCounts> {
+    let home = crate::store::lf_home_dir();
+    let root = crate::machine_records::copies_home(&home, &machine.id);
+    std::fs::create_dir_all(&root)?;
+    let lock = std::fs::File::options()
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(root.join("collection.lock"))?;
+    fs2::FileExt::lock_exclusive(&lock)?;
+    // On give-back revisit even closed Sessions: a provider or capture file can
+    // finish writing after its Session's last database change.
+    let after = if final_copy {
+        None
+    } else {
+        sqlite.copied_cursor(&machine.id)?
+    };
     // An hour early absorbs clock skew between the laptop and the sandbox.
     let since = (rental.created_at - time::Duration::hours(1))
         .format(&time::format_description::well_known::Rfc3339)?;
-    let script = format!(
-        "{}; lf history export --since {}",
-        crate::machine::ssh::remote_path(),
-        crate::machine::ssh::sh_quote(&since)
-    );
+    let mut args = vec![
+        "lf".into(),
+        "session".into(),
+        "history".into(),
+        "export".into(),
+        "--since".into(),
+        since,
+    ];
+    if let Some(after) = after {
+        args.extend(["--after".into(), serde_json::to_string(&after)?]);
+    }
+    let script = crate::machine::ssh::build_preamble(&args, &[]);
+    // A disconnected SSH may leave valid-looking JSON lines. Only import a
+    // successful command; spool stdout so the rental's size does not set RAM.
+    let mut spool = tempfile::tempfile()?;
     let output = Command::new("ssh")
         .args(crate::machine_route::bounded_ssh_args(
             &machine.route,
@@ -263,6 +329,8 @@ fn copy_up(sqlite: &SqliteStore, rental: &Rental, machine: &Machine) -> anyhow::
         )?)
         .arg(script)
         .stdin(Stdio::null())
+        .stdout(spool.try_clone()?)
+        .stderr(Stdio::piped())
         .output()
         .context("could not run ssh")?;
     if !output.status.success() {
@@ -271,12 +339,8 @@ fn copy_up(sqlite: &SqliteStore, rental: &Rental, machine: &Machine) -> anyhow::
             String::from_utf8_lossy(&output.stderr).trim(),
         ));
     }
-    crate::machine_records::import(
-        sqlite,
-        &crate::store::lf_home_dir(),
-        &machine.id,
-        output.stdout.as_slice(),
-    )
+    spool.rewind()?;
+    crate::machine_records::import(sqlite, &home, &machine.id, BufReader::new(spool))
 }
 
 /// After a run forwarded to `machine` returns: if it is a live rental, give
@@ -302,6 +366,16 @@ pub fn settle(machine: &MachineId) {
     }
 }
 
+/// SSH collection can run even when the server has no provider API credentials.
+fn collect_running(sqlite: &SqliteStore, rental: &Rental) -> anyhow::Result<()> {
+    if let Some(id) = &rental.machine_id {
+        if let Some(machine) = crate::store::machines::machine_by_id(sqlite, id)? {
+            copy_up(sqlite, rental, &machine, false)?;
+        }
+    }
+    Ok(())
+}
+
 /// The server recovery pass's give-back. A rental whose provider this process
 /// cannot reach is reported only once its soft deadline passes; its provider
 /// deletes it at the hard deadline either way.
@@ -314,6 +388,9 @@ pub fn check() -> anyhow::Result<()> {
     let sqlite = &store.sqlite;
     let mut due = Vec::new();
     for rental in live_rentals(sqlite)? {
+        if let Err(error) = collect_running(sqlite, &rental) {
+            tracing::warn!(rental=%rental.id, "rental history collection: {error:#}");
+        }
         let api = match Sandboxes::from_env(rental.provider) {
             Ok(api) => api,
             Err(error) => {
@@ -390,12 +467,12 @@ mod tests {
     use std::cell::RefCell;
     use std::rc::Rc;
 
-    use super::{end_rental, read_holdings, reconcile, refresh, Ended};
+    use super::{end, end_rental, read_holdings, reconcile, refresh, Ended};
     use crate::machine_records::CopyCounts;
     use crate::rental::sandbox::Sandboxes;
     use loopflow_model::durable::MachineId;
     use loopflow_storage::rental::{
-        Hardware, OnDemand, Provider, Rental, RentalState, Usd, BOOT_SECONDS,
+        Hardware, OnDemand, Provider, Rental, RentalCost, RentalState, Usd, BOOT_SECONDS,
     };
     use loopflow_storage::sqlite::SqliteStore;
 
@@ -416,6 +493,7 @@ mod tests {
                     disk_gb: 10,
                     gpu: None,
                     spot: false,
+                    modal_sizing: None,
                 },
                 max_machines: 1,
                 max_usd_per_hour: Usd::parse("0.40").unwrap(),
@@ -534,6 +612,97 @@ mod tests {
         assert!(refresh(&store, &api, &rental).unwrap().is_none());
         assert!(deleted(&log));
         assert_eq!(store.rental(&rental.id).unwrap().state, RentalState::Ended);
+    }
+
+    /// A provider whose `get` answers `reply`, logging each operation.
+    fn answering(reply: &'static str) -> (Sandboxes, Log) {
+        let log: Log = Rc::default();
+        let kept = log.clone();
+        let api = Sandboxes::with_call(
+            Provider::Daytona,
+            Box::new(move |op, _| {
+                kept.borrow_mut().push(op.to_string());
+                Ok(if op == "get" { reply } else { "null" }.as_bytes().to_vec())
+            }),
+        );
+        (api, log)
+    }
+
+    fn machine(store: &SqliteStore, rental: &Rental) -> loopflow_model::durable::Machine {
+        let id = rental.machine_id.as_ref().unwrap();
+        crate::store::machines::machine_by_id(store, id)
+            .unwrap()
+            .unwrap()
+    }
+
+    #[test]
+    fn ending_a_sandbox_its_provider_already_ended_settles_without_ssh_or_force() {
+        let _env = crate::journal::test_env_lock();
+        let dir = tempfile::tempdir().unwrap();
+        let _home =
+            crate::config::environment::EnvVarGuard::set("LF_HOME", dir.path().to_str().unwrap());
+        // Its route is unroutable: asking it over SSH would refuse without `--force`.
+        let (store, rental, _, _) = running(dir.path());
+        let task = crate::store::rental_lifecycle_tests::open_task(&store);
+        crate::store::ownership::claim_task(&store, &task).unwrap();
+        crate::store::ownership::move_claim(&store, &task, rental.machine_id.as_ref().unwrap())
+            .unwrap();
+        let (api, log) = answering("null");
+
+        end(&store, &api, &rental, &machine(&store, &rental), false).unwrap();
+
+        assert_eq!(*log.borrow(), ["get"]);
+        let settled = store.rental(&rental.id).unwrap();
+        assert_eq!(settled.state, RentalState::Ended);
+        assert!(settled.ended_at.is_some());
+        let local = crate::store::machines::local_machine(&store).unwrap().id;
+        let owner = crate::store::ownership::task_ownership(&store, &task)
+            .unwrap()
+            .owner
+            .unwrap();
+        assert_eq!(owner.machine.id, Some(local));
+    }
+
+    #[test]
+    fn ending_after_background_settlement_keeps_what_it_recorded() {
+        let dir = tempfile::tempdir().unwrap();
+        let (store, rental, _, _) = running(dir.path());
+        // The server's pass settled it between the command's read and its refresh.
+        store
+            .set_rental_cost(&rental.id, Usd::parse("0.17").unwrap())
+            .unwrap();
+        crate::store::ownership::set_rental_state(&store, &rental.id, RentalState::Ended).unwrap();
+        let (api, log) = answering("null");
+
+        end(&store, &api, &rental, &machine(&store, &rental), false).unwrap();
+
+        assert!(log.borrow().is_empty(), "the provider was asked again");
+        let settled = store.rental(&rental.id).unwrap();
+        assert_eq!(settled.state, RentalState::Ended);
+        assert_eq!(
+            settled.cost,
+            RentalCost::CostUsd(Some(Usd::parse("0.17").unwrap()))
+        );
+    }
+
+    #[test]
+    fn ending_a_running_sandbox_ssh_cannot_reach_still_asks_for_force() {
+        let dir = tempfile::tempdir().unwrap();
+        let (store, rental, _, _) = booting(dir.path());
+        let id = MachineId::new();
+        // Nothing listens on port 1: SSH fails at once.
+        crate::store::machines::add_machine(&store, &id, "ssh://lf@127.0.0.1:1", "code-1").unwrap();
+        let rental = store.attach_rental(&rental.id, &id).unwrap();
+        let (api, log) = answering(r#"{"id": "sb-1", "gone": false, "route": null}"#);
+
+        let error = end(&store, &api, &rental, &machine(&store, &rental), false).unwrap_err();
+
+        assert!(format!("{error:#}").contains("--force"), "{error:#}");
+        assert!(!deleted(&log));
+        assert_eq!(
+            store.rental(&rental.id).unwrap().state,
+            RentalState::Running
+        );
     }
 
     #[test]

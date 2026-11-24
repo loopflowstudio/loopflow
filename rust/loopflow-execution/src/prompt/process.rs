@@ -95,7 +95,11 @@ fn prepare_prompt(
     };
     let effective = crate::config::settings::resolve(config, resolved_skill.as_ref())?;
     let config = &effective.config;
-    let (agent, fallback_agents) = config.resolve_agents()?;
+    let (agent, fallback_agents) = if persist {
+        crate::agent::MachineAgents::default().for_prompt(config, surface)?
+    } else {
+        config.resolve_agents()?
+    };
     let mut docs = config.context.docs.clone();
     docs.extend(requested_docs);
     let diff_files = source_overrides

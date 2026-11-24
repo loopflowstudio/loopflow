@@ -438,8 +438,8 @@ lf wave create product --json
 ```
 
 Validate one existing Project and select its accepted local record on the Wave's
-SQLite row (`waves.current_project_id`). Repeating the same binding preserves it;
-a different existing binding is left unchanged. Setup preserves tracker status,
+SQLite row (`waves.current_project_id`). Repeating the same binding keeps it.
+Use `--replace` to switch an existing selection. Setup preserves tracker status,
 content and identity, including a Backlog Project. It does not
 activate the Project. Operation routing and status select this exact ID; the JSON
 Project summary carries a required `current` boolean for Desktop. Status and
@@ -490,7 +490,7 @@ its terminal outcome and error. Swift retains command transport feedback only.
 ```bash
 lf wave edit-project product --name "2026-10 — customer work"
 lf wave update-project --wave product --file scratch/product-project.json
-lf wave plan bind product <Project UUID>     # select another existing Project
+lf wave plan bind product <Project UUID> --replace
 ```
 
 `update-project` replaces the current Project's KRs and metric targets with the

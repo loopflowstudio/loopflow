@@ -4,7 +4,7 @@ use std::process::Command;
 use serde::Deserialize;
 
 use crate::agent::{run_agent, AgentConfig, ProcessConfig};
-use crate::config::load_config_or_default;
+use crate::config::load_config;
 use crate::git::{
     commit, current_branch, git_stdout, git_stdout_inheriting, has_staged_changes, is_clean, push,
     push_with_upstream, stage_all,
@@ -166,7 +166,7 @@ pub fn commit_workflow(
         message.to_string()
     } else {
         progress.status("Generating commit message...");
-        match generate_commit_message(repo, MessageAgent::Chosen(options.agent)) {
+        match generate_commit_message(repo, options.agent) {
             Ok(message) => message.text(),
             Err(error) => {
                 progress.error(&error.to_string());
@@ -198,8 +198,8 @@ impl CommitMessage {
 /// Commit what a skill left as `lf <step>: <what changed>` with a body, and
 /// push the branch unless it is the default branch, including commits the
 /// skill made itself. The `commit-message` skill writes the message on its
-/// own configured agents, and on `agent` (the run's `-a`) only when it has
-/// none; without an answer the title is `lf <step>: checkpoint`.
+/// own configured agents unless this command names one. Without an answer
+/// the title is `lf <step>: checkpoint`.
 ///
 /// # Errors
 /// Returns the Git failure when staging, committing or pushing fails.
@@ -213,7 +213,7 @@ pub fn commit_step(
     // The index can change while the agent writes. commit_workflow reads it again.
     let written = if has_staged_changes(repo, &|_| {})? {
         progress.status("Writing the commit message...");
-        generate_commit_message(repo, MessageAgent::Fallback(agent))
+        generate_commit_message(repo, agent)
             .inspect_err(|error| progress.error(&error.to_string()))
             .ok()
     } else {
@@ -263,18 +263,7 @@ fn step_commit_message(step: &str, written: Option<&CommitMessage>) -> String {
 /// A hung provider must not hold the Graph or the skill run that asked.
 const COMMIT_MESSAGE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
 
-/// Where an agent named on the command line stands against the message
-/// skill's own preference.
-#[derive(Debug, Clone, Copy)]
-pub(crate) enum MessageAgent<'a> {
-    /// `-a`: the person chose the agent for this message.
-    Chosen(Option<&'a str>),
-    /// A step commit: the run's agent writes the message only when the skill
-    /// resolves none of its own.
-    Fallback(Option<&'a str>),
-}
-
-fn generate_commit_message(repo: &Path, agent: MessageAgent<'_>) -> OpsResult<CommitMessage> {
+fn generate_commit_message(repo: &Path, agent: Option<&str>) -> OpsResult<CommitMessage> {
     let skill = load_skill("commit-message", repo)
         .map_err(|err| OpsError::Message(format!("commit-message skill not found: {err}")))?;
     let template = skill
@@ -320,21 +309,15 @@ fn generate_commit_message(repo: &Path, agent: MessageAgent<'_>) -> OpsResult<Co
 pub(crate) fn message_launch(
     repo: &Path,
     skill: &crate::graph::Skill,
-    agent: MessageAgent<'_>,
+    agent: Option<&str>,
     prompt: String,
 ) -> OpsResult<AgentConfig> {
-    let config = load_config_or_default(Some(repo));
-    let mut config = crate::config::settings::resolve(&config, Some(skill))
-        .map(|resolved| resolved.config)
-        .unwrap_or(config);
-    match agent {
-        MessageAgent::Chosen(Some(agent)) => config.agent = Some(agent.to_owned()),
-        MessageAgent::Fallback(Some(agent)) if config.agent().is_err() => {
-            config.agent = Some(agent.to_owned())
-        }
-        MessageAgent::Chosen(None) | MessageAgent::Fallback(_) => {}
+    let config = load_config(Some(repo))?.unwrap_or_default();
+    let mut config = crate::config::settings::resolve(&config, Some(skill))?.config;
+    if let Some(agent) = agent {
+        config.agent = Some(agent.to_owned());
     }
-    let (agent, fallback_agents) = config.resolve_agents()?;
+    let (agent, fallback_agents) = crate::agent::MachineAgents::default().choose(&config)?;
     Ok(AgentConfig {
         chrome: config.chrome,
         codex_service_tier: config.codex.service_tier,

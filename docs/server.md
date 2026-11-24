@@ -104,6 +104,6 @@ running. When the approved account returns, the saved QR address works again.
 Retries start after five seconds and back off to once every 30 seconds.
 
 Local server access and SSH Machines work independently of phone access.
-Keep the local Unix socket private.
+Local-only access uses the private Unix socket without opening a network port.
 
 Next: [Surfaces](surfaces.md) · [Connection troubleshooting](troubleshooting.md#desktop-cannot-connect).

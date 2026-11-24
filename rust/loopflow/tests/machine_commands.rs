@@ -488,6 +488,38 @@ fn a_refusing_approver_leaves_the_machine_signed_out() {
 }
 
 #[test]
+fn modal_ondemand_list_records_the_sizing_mode_before_any_rental() {
+    let fixture = Machines::new();
+    for (name, flags) in [("burst", &[][..]), ("reserved", &["--reserved"][..])] {
+        let mut args = vec![
+            "ondemand",
+            "add",
+            name,
+            "--provider",
+            "modal",
+            "--vcpus",
+            "8",
+            "--memory-gb",
+            "16",
+            "--max",
+            "1",
+            "--max-usd-per-hour",
+            "1.00",
+        ];
+        args.extend_from_slice(flags);
+        assert_success(&fixture.run(&args));
+    }
+
+    let listings = fixture.json(&["ondemand", "list", "--json"]);
+    let listings = listings.as_array().unwrap();
+    assert_eq!(listings.len(), 2);
+    for listing in listings {
+        assert_eq!(listing["hardware"]["modal_sizing"], listing["name"]);
+        assert!(listing["rentals"].as_array().unwrap().is_empty());
+    }
+}
+
+#[test]
 fn remote_file_input_reaches_the_command_without_replacing_the_transport_script() {
     let fixture = Machines::new();
     fixture.json(&["machine", "add", "mini", "--json"]);
@@ -4733,6 +4765,59 @@ fn entry_input(record: &Path) -> (Value, Value) {
 }
 
 #[test]
+fn a_placed_task_retries_on_its_owner_after_the_launch_connection_breaks() {
+    let fixture = preview_machines();
+    let plan = SharedPlan::cloned(&fixture);
+    let task = plan.local_task();
+    plan.to_remote();
+    assert_success(&fixture.run(&["pool", "add", "lab"]));
+    assert_success(&fixture.run(&["machine", "add", "mini", "--pool", "lab"]));
+    let ssh = fixture.root.path().join("bin/ssh");
+    let working = fs::read_to_string(&ssh).unwrap();
+    executable(&ssh, "#!/bin/sh\nexit 88\n");
+    let run = |placement: &[&str]| {
+        let mut args = vec!["task", "run", task.as_str()];
+        args.extend(placement);
+        fixture
+            .command(&args)
+            .current_dir(&plan.local_path)
+            .stdin(Stdio::null())
+            .output()
+            .unwrap()
+    };
+    assert!(!run(&["--pool", "lab"]).status.success());
+    let owner = loopflow_execution::store::ownership::task_ownership(&plan.local, &task).unwrap();
+    assert_eq!(owner.log.len(), 1);
+    let mini = loopflow_execution::store::machines::local_machine(&plan.remote)
+        .unwrap()
+        .id;
+    assert_eq!(owner.log[0].machine_id.as_ref(), Some(&mini));
+
+    let unreachable = run(&["--rent", "modal"]);
+    assert!(!unreachable.status.success());
+    assert!(
+        String::from_utf8_lossy(&unreachable.stderr).contains("could not read"),
+        "{unreachable:?}"
+    );
+
+    executable(&ssh, &working);
+    let record = fixture.root.path().join("entry");
+    fs::create_dir(&record).unwrap();
+    let mut detail: Value =
+        serde_json::from_str(include_str!("../../../tests/fixtures/dto/task_detail.json")).unwrap();
+    detail["task"]["id"] = task.to_string().into();
+    answering_entry(&fixture, &record, &detail);
+    assert_success(&run(&["--rent", "modal"]));
+    let (_, request) = entry_input(&record);
+    assert_eq!(request["operation"]["kind"], "task.status");
+    assert_eq!(request["operation"]["issue"], task.as_str());
+    assert_eq!(
+        loopflow_execution::store::ownership::task_ownership(&plan.local, &task).unwrap(),
+        owner
+    );
+}
+
+#[test]
 fn a_hold_for_a_task_mini_runs_is_answered_by_minis_server() {
     let fixture = preview_machines();
     let (plan, task) = task_on_mini(&fixture);
@@ -5746,4 +5831,529 @@ read -r answer < /dev/tty
 
     assert_success(&moved);
     assert!(shown.contains(&notice), "{notice:?} missing from:\n{shown}");
+}
+
+#[test]
+fn ending_a_rental_its_provider_terminated_settles_and_leaves_the_default_listings() {
+    use loopflow_execution::rental::{RentalId, RentalState};
+    use loopflow_execution::store::{machines, open_sqlite};
+    use serde_json::json;
+
+    let fixture = preview_machines();
+    let root = fixture.root.path();
+    assert_success(&fixture.run(&[
+        "ondemand",
+        "add",
+        "modal",
+        "--provider",
+        "modal",
+        "--vcpus",
+        "2",
+        "--memory-gb",
+        "4",
+        "--max",
+        "1",
+        "--max-usd-per-hour",
+        "1.00",
+    ]));
+    let local = open_sqlite(&root.join("local/loopflow.db")).unwrap();
+    let pod = open_sqlite(&root.join("remote/store/loopflow.db")).unwrap();
+    let origin = machines::local_machine(&pod).unwrap().id;
+    drop(pod);
+    let rental = RentalId::new();
+    let created = chrono::Utc::now().timestamp() - 3600;
+    local
+        .conn
+        .lock()
+        .unwrap()
+        .execute(
+            "INSERT INTO rentals(id,ondemand,provider,provider_name,provider_id,by_hand,hardware,
+            usd_per_hour,cap_usd,deadline,state,created_at,machine_id)
+         VALUES(?1,'modal','modal',?1,'sb-fixture',1,
+            '{\"vcpus\":2,\"memory_gb\":4,\"disk_gb\":8,\"spot\":false,\"modal_sizing\":\"burst\"}',
+            '0.24','1.00',?3,'running',?4,?2)",
+            rusqlite::params![
+                rental.as_str(),
+                origin.as_str(),
+                created + 4 * 3600,
+                created
+            ],
+        )
+        .unwrap();
+
+    // Modal terminated the sandbox: SSH reaches nothing and the provider knows no such sandbox.
+    fs::rename(root.join("remote"), root.join("unreachable")).unwrap();
+    executable(
+        &root.join("bin/uv"),
+        "#!/bin/sh\ncat >/dev/null\nprintf 'null\\n'\n",
+    );
+    let ended = fixture
+        .command(&["machine", "end", "mini"])
+        .env("MODAL_TOKEN_ID", "fixture")
+        .output()
+        .unwrap();
+    assert_success(&ended);
+    let said = String::from_utf8_lossy(&ended.stdout);
+    assert!(
+        said.contains("mini was already gone (ended; ceiling estimate $0.24"),
+        "{said}"
+    );
+    assert_eq!(local.rental(&rental).unwrap().state, RentalState::Ended);
+
+    // The default listings leave its dead route out; its label still resolves.
+    assert_eq!(fixture.json(&["machine", "list", "--json"]), json!([]));
+    assert_eq!(fixture.json(&["machine", "status", "--json"]), json!([]));
+    let listed = fixture.command(&["machine", "list"]).output().unwrap();
+    assert_success(&listed);
+    assert_eq!(String::from_utf8_lossy(&listed.stdout), "No Machines.\n");
+    assert_eq!(
+        fixture.json(&["machine", "list", "mini", "--json"])[0]["label"],
+        "mini"
+    );
+    assert_eq!(
+        fixture.json(&["machine", "status", "mini", "--json"])[0]["state"],
+        "ended_rental"
+    );
+    let ondemands = fixture.json(&["ondemand", "list", "--json"]);
+    let rentals = &ondemands[0]["rentals"];
+    assert_eq!(rentals[0]["machine"], "mini", "{ondemands}");
+    assert_eq!(rentals[0]["state"], "ended");
+}
+
+#[test]
+fn a_lost_rentals_transcript_and_usage_survive_on_its_collecting_machine() {
+    use loopflow_execution::rental::{recovery, RentalId, RentalState};
+    use loopflow_execution::store::{machines, open_sqlite};
+    use serde_json::json;
+
+    let fixture = preview_machines();
+    let root = fixture.root.path();
+    let remote = root.join("remote");
+    let local = open_sqlite(&root.join("local/loopflow.db")).unwrap();
+    let pod = open_sqlite(&remote.join("store/loopflow.db")).unwrap();
+    let origin = machines::local_machine(&pod).unwrap().id;
+    let rental = RentalId::new();
+    local
+        .conn
+        .lock()
+        .unwrap()
+        .execute(
+            "INSERT INTO rentals(id,ondemand,provider,provider_name,provider_id,by_hand,hardware,
+            usd_per_hour,cap_usd,deadline,state,created_at,machine_id)
+         VALUES(?1,'modal','modal',?1,'sb-fixture',1,
+            '{\"vcpus\":2,\"memory_gb\":4,\"disk_gb\":8,\"spot\":false}',
+            '0.24','1.00',4000000000,'running',1,?2)",
+            [rental.as_str(), origin.as_str()],
+        )
+        .unwrap();
+
+    let id = "ee47b779adc741ca89d6c3ae288cc68c";
+    let thread = "0199a213-81c0-4800-8aa1-bbab2a035a01";
+    let started = chrono::Utc::now().timestamp() - 3600;
+    let session = pod.test_session_at(id, "64f34281b74d4594ac53ec251cb05619", started - 5);
+    pod.conn
+        .lock()
+        .unwrap()
+        .execute(
+            "UPDATE agent_sessions SET provider='claude',provider_thread=?2,
+                start_failure='Waiting for a harness: codex has no usable login' WHERE id=?1",
+            [id, thread],
+        )
+        .unwrap();
+    let request = r#"Count the marbles in "jar A""#;
+    let project = remote.join(".claude/projects/-fixture");
+    fs::create_dir_all(&project).unwrap();
+    let transcript = project.join(format!("{thread}.jsonl"));
+    fs::write(
+        &transcript,
+        json!({"type":"user","userType":"external","uuid":"first-turn",
+        "timestamp":"2026-10-16T10:00:00Z","message":{"role":"user","content":request}})
+        .to_string(),
+    )
+    .unwrap();
+    let repo = loopflow_test_support::TestRepo::new();
+    let local_repo = repo.path().canonicalize().unwrap();
+    let task_id = SharedPlan::create_task(&local, &local_repo);
+    let local_repo = local_repo.to_str().unwrap().to_owned();
+    let task = local.task(&task_id).unwrap().unwrap();
+    let project = local
+        .project(task.project_id.as_ref().unwrap())
+        .unwrap()
+        .unwrap();
+    pod.record_turn_start(id, &thread.into(), "first-turn", started);
+    let turn_origin = loopflow_storage::session::SessionTurnOrigin {
+        session_id: id.into(),
+        lf_process_id: loopflow_model::id::LfProcessId::new(),
+        agent_process_id: loopflow_model::id::AgentProcessId::new(),
+        captured_event: None,
+        task_id: Some(task_id.to_string()),
+        wave_id: None,
+        project_id: None,
+        repository: None,
+        skill: None,
+        provider: Some("claude".into()),
+        graph: None,
+        step: None,
+    };
+    pod.record_session_turn_origin(&thread.into(), "first-turn", &turn_origin);
+    // The Session's captured input ran two more turns, one before it joined the Task.
+    let input = session.artifact_key.clone().unwrap();
+    let captured = pod.captured_sequence(&input).unwrap().unwrap();
+    for (turn, at, task, input_tokens, output_tokens) in [
+        ("unscoped-turn", started + 10, None, 13, 4),
+        (
+            "captured-turn",
+            started + 20,
+            Some(task_id.to_string()),
+            11,
+            2,
+        ),
+    ] {
+        pod.record_turn_start(id, &thread.into(), turn, at);
+        pod.record_session_turn_origin(
+            &thread.into(),
+            turn,
+            &loopflow_storage::session::SessionTurnOrigin {
+                lf_process_id: loopflow_model::id::LfProcessId::new(),
+                agent_process_id: loopflow_model::id::AgentProcessId::new(),
+                captured_event: Some(captured),
+                task_id: task,
+                ..turn_origin.clone()
+            },
+        );
+        pod.record_turn_completion(
+            id,
+            &thread.into(),
+            turn,
+            at + 1,
+            &json!({"status":"completed","context":{"first_request_tokens":input_tokens,
+                "peak_request_tokens":input_tokens,"tool_results":0,"tool_output_tokens":0,
+                "compactions":0,"compaction_tokens":null}}),
+        );
+        assert!(pod.record_turn_usage(
+            id,
+            &thread.into(),
+            turn,
+            at + 1,
+            &json!({"final":true,"usage":{"input_tokens":input_tokens,"output_tokens":output_tokens}})
+        ));
+    }
+    pod.retain_session_observation(
+        &session,
+        &loopflow_storage::session::SessionObservation {
+            artifact_key: session.artifact_key.clone().unwrap(),
+            source: "silence:sample".into(),
+            observed_at: started + 1,
+            task_id: None,
+            wave_id: None,
+            payload: json!({"source":"silence","detail":"waiting for the count"}),
+        },
+    )
+    .unwrap();
+
+    // The rental assembled the input's context; collection copies its capture.
+    let capture =
+        loopflow_execution::session_record::record_dir(&remote.join("store"), &input).unwrap();
+    fs::create_dir_all(&capture).unwrap();
+    fs::write(
+        capture.join("context.json"),
+        json!({"context":{"system":null,"task":{"assets":[]},"decisions":[]}}).to_string(),
+    )
+    .unwrap();
+
+    let _env = support::ambient::EnvGuard::clear(&["PATH", "MODAL_TOKEN_ID"]);
+    std::env::set_var(
+        "PATH",
+        format!("{}:/usr/bin:/bin", root.join("bin").display()),
+    );
+    let (server, _) = served(&fixture);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    let first = loop {
+        if let Some(cursor) = local.copied_cursor(&origin).unwrap() {
+            break cursor;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the server did not collect its running rental"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    };
+    drop(server);
+    let ssh = root.join("bin/ssh");
+    let relay = fs::read_to_string(&ssh).unwrap();
+    // SSH delivers valid lines, then loses the connection before confirming the export.
+    executable(
+        &ssh,
+        &format!("{}\nexit 255\n", relay.replace("exec env -i", "env -i")),
+    );
+    assert!(pod.record_turn_usage(
+        id,
+        &thread.into(),
+        "first-turn",
+        started + 2,
+        &json!({
+            "final":true,"usage":{"input_tokens":31,"output_tokens":7,"cost_usd":0.25}
+        })
+    ));
+    recovery::check().unwrap();
+    assert_eq!(local.copied_cursor(&origin).unwrap(), Some(first));
+    // The first turn's late usage did not arrive; the input's turns did.
+    assert_eq!(
+        local
+            .saved_copied_history(id)
+            .unwrap()
+            .unwrap()
+            .usage
+            .input_tokens,
+        Some(24)
+    );
+    executable(&ssh, &relay);
+    recovery::check().unwrap();
+    let latest = local.copied_cursor(&origin).unwrap().unwrap();
+    assert!(latest.history > first.history);
+
+    // Nothing on the origin can answer these reads, including after a server restart.
+    let lost = root.join("unreachable");
+    fs::rename(&remote, &lost).unwrap();
+    let (server, socket) = served(&fixture);
+    let history = fixture.json(&["session", "history", "show", id, "--json"]);
+    assert_eq!(history["session"]["origin"], origin.as_str());
+    assert_eq!(history["turns"].as_array().unwrap().len(), 3);
+    assert!(history["events"]
+        .to_string()
+        .contains("waiting for the count"));
+    let text = fixture.run(&["session", "history", "show", id, "--transcript"]);
+    assert_success(&text);
+    assert!(String::from_utf8_lossy(&text.stdout).contains("Count the marbles"));
+    let search = |options: &[&str]| {
+        let mut args = vec!["session", "history", "search", "MARBLES", "--json"];
+        args.extend_from_slice(options);
+        fixture.json(&args)["hits"].clone()
+    };
+    for scope in [
+        ["--since", "1d"],
+        ["--task", task.identifier.as_str()],
+        ["--project", project.slug.as_str()],
+        ["--wave", "owners"],
+    ] {
+        let hits = search(&scope);
+        assert_eq!(hits.as_array().unwrap().len(), 1, "{scope:?}: {hits}");
+        assert_eq!(hits[0]["session_id"], id);
+        assert_eq!(hits[0]["snippet"], request);
+        assert_eq!(
+            hits[0]["origin"],
+            json!({"machine_id":origin, "label":"mini"})
+        );
+    }
+    for scope in [
+        ["--task", "MISSING-123"],
+        ["--wave", "unrelated"],
+        ["--project", "unrelated"],
+        ["--since", "2099-01-01T00:00:00Z"],
+        ["--limit", "0"],
+    ] {
+        assert_eq!(search(&scope), json!([]), "{scope:?}");
+    }
+    assert_eq!(
+        search(&["--task", &task.identifier, "--since", "30m"]),
+        json!([]),
+        "collecting an hour-old input now must not move it into the last half hour"
+    );
+    let result = fixture.run(&["session", "history", "search", r#""JAR A""#]);
+    assert_success(&result);
+    assert!(String::from_utf8_lossy(&result.stdout).contains("from mini"));
+    let scoped_usage = |scope: &[&str]| {
+        let mut args = vec!["session", "usage", "--json"];
+        args.extend_from_slice(scope);
+        fixture.json(&args)
+    };
+    // Work scopes count only the input's turns that ran for the Task.
+    for (scope, input_usage) in [
+        (["--task", task.identifier.as_str()], (11, 2)),
+        (["--wave", "owners"], (11, 2)),
+        (["--project", project.slug.as_str()], (11, 2)),
+        (["--days", "1"], (24, 6)),
+    ] {
+        let rows = scoped_usage(&scope);
+        let rows: Vec<_> = rows
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|row| row["session_id"] == id)
+            .collect();
+        assert_eq!(rows.len(), 2, "{scope:?}: {rows:?}");
+        let (turn, captured_input) = (rows[0], rows[1]);
+        for row in &rows {
+            assert_eq!(row["origin"], json!({"machine_id":origin, "label":"mini"}));
+        }
+        assert_eq!(turn["artifact_key"], Value::Null);
+        assert_eq!(turn["task_identifier"], task.identifier);
+        assert_eq!(turn["observed_at"], started);
+        assert_eq!(turn["usage"]["input_tokens"], 31);
+        assert_eq!(turn["usage"]["output_tokens"], 7);
+        assert_eq!(turn["usage"]["cost_usd"], 0.25);
+        assert_eq!(captured_input["artifact_key"], input);
+        assert_eq!(captured_input["observed_at"], started - 5);
+        // The Task lives here, so its rows name this Machine's checkout.
+        for row in &rows {
+            assert_eq!(row["repo"], local_repo, "{scope:?} {row}");
+        }
+        assert_eq!(
+            captured_input["usage"]["input_tokens"], input_usage.0,
+            "{scope:?}"
+        );
+        assert_eq!(
+            captured_input["usage"]["output_tokens"], input_usage.1,
+            "{scope:?}"
+        );
+        assert_eq!(captured_input["usage"]["cost_usd"], Value::Null);
+    }
+    let mut connection =
+        loopflow_execution::machine::client::Connection::open_at(Path::new(&socket)).unwrap();
+    let desktop = connection
+        .request(loopflow::server::wire::Operation::Read(
+            loopflow::lf::commands::read::Read::SessionUsage {
+                days: 0,
+                wave: None,
+                project: None,
+                task: Some(task.identifier.clone()),
+            },
+        ))
+        .unwrap()
+        .result;
+    assert_eq!(
+        desktop,
+        scoped_usage(&["--days", "0", "--task", &task.identifier])
+    );
+    // The copied capture and turn contexts explain the step with nothing missing.
+    let context = scoped_usage(&["--context", "--task", &task.identifier]);
+    let step = context["steps"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|step| step["input"] == input)
+        .unwrap_or_else(|| panic!("{context}"));
+    assert_eq!(step["gaps"], json!([]), "{step}");
+    assert_eq!(step["first_request_tokens"], 13);
+    assert_eq!(step["peak_request_tokens"], 13);
+    // The Session's own history view reads the same copied step.
+    let shown = fixture.json(&["session", "history", "show", id, "--context", "--json"]);
+    assert_eq!(shown, *step);
+    // Why the rental could not start it outlives the rental.
+    let listed = fixture.run(&["session", "list"]);
+    assert_success(&listed);
+    let listed = String::from_utf8_lossy(&listed.stdout);
+    assert!(
+        listed.contains("from mini\n  could not start: codex has no usable login\n"),
+        "{listed}"
+    );
+    let human = fixture.run(&["session", "usage", "--task", &task.identifier]);
+    assert_success(&human);
+    assert!(String::from_utf8_lossy(&human.stdout).contains("from mini"));
+    let weekly = scoped_usage(&["--weekly", "--task", &task.identifier]);
+    let weekly_input: i64 = weekly["weeks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|week| week["total"]["input_tokens"].as_i64().unwrap())
+        .sum();
+    assert_eq!(weekly_input, 42);
+    let usage = || fixture.json(&["session", "usage", "--session", id, "--json"]);
+    let before = usage();
+    assert_eq!(before["origin_machine_id"], origin.as_str());
+    assert!(before["collected_at"].is_number());
+    assert_eq!(before["usage"]["input_tokens"], 55);
+    assert_eq!(before["usage"]["output_tokens"], 13);
+    assert_eq!(before["usage"]["cost_usd"], 0.25);
+    assert_eq!(local.rental(&rental).unwrap().state, RentalState::Running);
+    drop(server);
+
+    // Restore the route to exercise ordinary give-back on the same records.
+    fs::rename(lost, &remote).unwrap();
+    recovery::check().unwrap();
+    // The provider still runs it until the give-back deletes it.
+    executable(
+        &root.join("bin/uv"),
+        "#!/bin/sh\ncat >/dev/null\nfor op; do :; done\n\
+         [ \"$op\" = get ] && echo '{\"id\":\"sb-fixture\",\"gone\":false,\"route\":null}' || echo null\n",
+    );
+    let ended = fixture
+        .command(&["machine", "end", "mini"])
+        .env("MODAL_TOKEN_ID", "fixture")
+        .output()
+        .unwrap();
+    assert_success(&ended);
+    assert!(String::from_utf8_lossy(&ended.stdout).contains("Returned mini"));
+    assert_eq!(local.rental(&rental).unwrap().state, RentalState::Ended);
+    assert_eq!(usage()["usage"], before["usage"]);
+    let transcript = fixture.json(&["session", "history", "show", id, "--transcript", "--json"]);
+    assert_eq!(transcript["turns"].as_array().unwrap().len(), 1);
+    assert_eq!(transcript["origin_machine_id"], origin.as_str());
+
+    // Continuing the provider thread locally re-observes the first turn's
+    // transcript. Its dispatch, Work and usage were recorded on the rental.
+    local.test_session(id, "14208d263a454517a4e9eb974ed4dc93");
+    local.record_turn_start(id, &thread.into(), "first-turn", started);
+    let second = started + 120;
+    local.record_turn_start(id, &thread.into(), "second-turn", second);
+    local.record_session_turn_origin(
+        &thread.into(),
+        "second-turn",
+        &loopflow_storage::session::SessionTurnOrigin {
+            lf_process_id: loopflow_model::id::LfProcessId::new(),
+            agent_process_id: loopflow_model::id::AgentProcessId::new(),
+            ..turn_origin
+        },
+    );
+    local.record_turn_completion(
+        id,
+        &thread.into(),
+        "second-turn",
+        second + 1,
+        &json!({"status":"completed"}),
+    );
+    assert!(local.record_turn_usage(
+        id,
+        &thread.into(),
+        "second-turn",
+        second + 1,
+        &json!({"final":true,"usage":{"input_tokens":5,"output_tokens":3}})
+    ));
+    let combined = scoped_usage(&["--task", &task.identifier]);
+    let rows = combined.as_array().unwrap();
+    assert_eq!(rows.len(), 3, "{combined}");
+    assert_eq!(rows[0]["origin"], Value::Null);
+    assert_eq!(rows[0]["usage"]["input_tokens"], 5);
+    assert_eq!(rows[0]["usage"]["cost_usd"], Value::Null);
+    assert_eq!(rows[1]["origin"]["machine_id"], origin.as_str());
+    assert_eq!(rows[1]["usage"]["input_tokens"], 31);
+    assert_eq!(rows[2]["origin"]["machine_id"], origin.as_str());
+    assert_eq!(rows[2]["artifact_key"], input);
+    assert_eq!(rows[2]["usage"]["input_tokens"], 11);
+    let mixed = usage();
+    assert!(mixed["origin_machine_id"].is_null());
+    assert_eq!(mixed["origins"].as_array().unwrap().len(), 2);
+    assert_eq!(mixed["usage"]["streams"], 4);
+    assert_eq!(mixed["usage"]["input_tokens"], 60);
+    assert_eq!(mixed["usage"]["output_tokens"], 16);
+    assert_eq!(mixed["usage"]["cost_usd"], 0.25);
+    let recent = |since| {
+        loopflow_execution::store::sessions::recent_conversation_history(
+            &local,
+            None,
+            None,
+            Some(&task.identifier),
+            since,
+            1,
+        )
+        .unwrap()
+    };
+    let (rows, truncated) = recent(started);
+    assert!(truncated);
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].origin.as_ref().unwrap().machine_id, origin);
+    let (rows, truncated) = recent(second);
+    assert!(!truncated);
+    assert_eq!(rows.len(), 1);
+    assert!(rows[0].origin.is_none());
 }

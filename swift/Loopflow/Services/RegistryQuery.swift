@@ -1170,8 +1170,8 @@ public struct RegistryQuery: Sendable {
         return try Self.decode(TaskFileSave.self, from: stdout)
     }
 
-    /// One bounded page, ordered by stable Session identity.
-    /// One page of Sessions; naming a Task reads its Sessions wherever it runs.
+    /// One bounded page, ordered by stable Session identity; naming a Task
+    /// reads its Sessions wherever it runs.
     public func sessionPage(includingHeadless: Bool = false, after: String? = nil,
                             cwd: String? = nil, task: String? = nil) async throws -> SessionPage {
         try await serve(

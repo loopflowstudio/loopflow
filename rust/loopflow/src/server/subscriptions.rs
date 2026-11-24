@@ -547,13 +547,7 @@ impl Producer {
     }
 
     async fn peer_unavailable(&self, failure: anyhow::Error, generation: u64) -> Result<()> {
-        let frame = loopflow_execution::read_stream::SubscriptionFrame::<Value> {
-            answers: None,
-            unavailable: Some(failure.to_string()),
-            body: None,
-            work: None,
-            read_at: None,
-        };
+        let frame = own_frame(Some(failure.to_string()), None)?;
         let room = Materializing::reserve().await?;
         // Keep checkpoints answered by the lost stream. A newer checkpoint
         // needs a reading from the next attempt.
@@ -564,12 +558,7 @@ impl Producer {
             .as_ref()
             .map_or(generation, |reading| reading.generation.max(generation));
         self.latest.send_modify(|latest| latest.ready = true);
-        self.publish(
-            Some(serde_json::to_value(frame)?),
-            Vec::new(),
-            generation,
-            room,
-        )
+        self.publish(Some(frame), Vec::new(), generation, room)
     }
 
     async fn peer(
@@ -640,8 +629,12 @@ impl Producer {
                 Some(paths) => loopflow_execution::engine::select::select(&body, paths),
                 None => body,
             };
-            let frame = serde_json::json!({"answers":null, "body":body, "unavailable":null, "work":null, "read_at":null});
-            self.publish(Some(frame), Vec::new(), generation, room)?;
+            self.publish(
+                Some(own_frame(None, Some(&body))?),
+                Vec::new(),
+                generation,
+                room,
+            )?;
             self.wake.notified().await;
         }
     }
@@ -812,6 +805,19 @@ impl Producer {
         }
         Ok(())
     }
+}
+
+/// A reading this server makes itself rather than from a store subscription.
+fn own_frame(unavailable: Option<String>, body: Option<&Value>) -> Result<Value> {
+    Ok(serde_json::to_value(
+        loopflow_execution::read_stream::SubscriptionFrame {
+            answers: None,
+            unavailable,
+            body,
+            work: None,
+            read_at: None,
+        },
+    )?)
 }
 
 #[cfg(test)]

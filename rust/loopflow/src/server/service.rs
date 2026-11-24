@@ -822,16 +822,10 @@ pub(super) async fn session<C: Carrier>(
                             machine: None,
                         };
                         // Repeating `request` starts nothing, so a lost pipe retries once.
-                        let answer = tokio::task::spawn_blocking(move || {
-                            peers.terminal(&machine, None, &operation, Some(request))
-                        })
-                        .await
-                        .map_err(unavailable)
-                        .and_then(|answer| answer.map_err(unavailable));
-                        match answer {
-                            Ok(started) => response(id, started.result),
-                            Err(refusal) => ServerMessage::error(Some(id), refusal),
-                        }
+                        answered(
+                            id,
+                            ask_there(peers, machine, None, operation, Some(request)).await,
+                        )
                     }
                     Ok(None) => {
                         let start = tokio::task::spawn_blocking(move || {
@@ -1218,16 +1212,10 @@ async fn task_shell(
             ServerOperation::TaskShellStart { shell_id, .. } => Some(format!("shell-{shell_id}")),
             _ => None,
         };
-        let answer = tokio::task::spawn_blocking(move || {
-            peers.terminal(&machine, Some(sender), &shell, repeat)
-        })
-        .await
-        .map_err(unavailable)
-        .and_then(|answer| answer.map_err(unavailable));
-        return match answer {
-            Ok(answer) => response(id, answer.result),
-            Err(refusal) => ServerMessage::error(Some(id), refusal),
-        };
+        return answered(
+            id,
+            ask_there(peers, machine, Some(sender), shell, repeat).await,
+        );
     }
     // What the shell here answered; an attach is answered with a ticket.
     enum Shell {
@@ -1306,6 +1294,28 @@ fn response(id: String, result: serde_json::Value) -> ServerMessage {
     }
 }
 
+fn answered(id: String, answer: Result<serde_json::Value, Error>) -> ServerMessage {
+    match answer {
+        Ok(result) => response(id, result),
+        Err(refusal) => ServerMessage::error(Some(id), refusal),
+    }
+}
+
+/// `operation`'s answer from `machine`'s server.
+async fn ask_there(
+    peers: Arc<PeerPool>,
+    machine: loopflow_model::durable::Machine,
+    sender: Option<Sender>,
+    operation: ServerOperation,
+    request_id: Option<String>,
+) -> Result<serde_json::Value, Error> {
+    tokio::task::spawn_blocking(move || peers.terminal(&machine, sender, &operation, request_id))
+        .await
+        .map_err(unavailable)?
+        .map(|answer| answer.result)
+        .map_err(unavailable)
+}
+
 /// The other Machine that runs `session`'s terminal, for a local client: the
 /// Task's owner when the client names one, else the Machine it names, else
 /// where this Machine's records say the Session went. A peer's request runs here.
@@ -1337,15 +1347,9 @@ async fn attach_there(
     tickets: &Tickets,
     admission: &Admission,
 ) -> ServerMessage {
-    let there = machine.clone();
-    let answer =
-        tokio::task::spawn_blocking(move || peers.terminal(&there, sender, &operation, None))
-            .await
-            .map_err(unavailable)
-            .and_then(|answer| answer.map_err(unavailable))
-            .and_then(|answer| {
-                serde_json::from_value::<SessionAttached>(answer.result).map_err(unavailable)
-            });
+    let answer = ask_there(peers, machine.clone(), sender, operation, None)
+        .await
+        .and_then(|result| serde_json::from_value::<SessionAttached>(result).map_err(unavailable));
     let issued = match answer {
         Ok(issued) => issued,
         Err(refusal) => return ServerMessage::error(Some(id), refusal),

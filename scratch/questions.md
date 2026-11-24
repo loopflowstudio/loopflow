@@ -10,10 +10,9 @@
 - `lf task status --json` gives `task.wave` as the leaf name (`refunds`),
   `lf task show` gives `execution.wave` as the path (`billing/refunds`).
   The installed build does the same; not changed here.
-- Migration-made Projects are ordinary local Projects. In a connected
-  repository the drain gives each a Linear `create` on the next export (the
-  same as a Wave made now); their UUID is the Wave's, so two Machines' creates
-  name one Linear Project. Retired Waves get none.
+- Migration-made Projects are ordinary local Projects, unbound in a
+  connected repository until sync, connect or a Task sent into them makes
+  them in the tracker. Retired Waves get none.
 - An arriving Project record (Git or hub exchange) for a Wave that already
   holds a different Project is stored beside it; reads keep the Wave's own
   record (slice 10). Only a released build sends one. LOO-1089 collapses
@@ -69,22 +68,6 @@
 - A sent membership edit keeps its former external destination in its saved
   baseline until the next send. Finding the issue there confirms the original
   move. Retrying from its observed source sends it to the kept Project.
-- QA run 8: a released Wave whose kept Project arrived from another Machine
-  over Git (the migration keeps the newest started one) and whose dropped
-  Project was this Machine's, with its `create` queued, loses that create.
-  `uncreated` skips Projects another Machine stamped, so nothing queues one:
-  this Machine's translated Task creates name a Project with no external ID,
-  which `remote_project` cannot resolve. The other Machine creates it in
-  Linear, but a tracker repository has no Git exchange to tell this Machine.
-  Open choices: let `uncreated` create any unbound Project (both creates
-  carry its UUID), or have the migration keep a Project this Machine will
-  create. Released lf had the same gap for Tasks it put in another Machine's
-  Project; the migration widens it to Tasks it moves there.
-- Concept review after slices 8–10 left the QA run 8 gap open; the answer
-  "(b)" closed it in slice 11: any Machine creates an unbound Project.
-- Slice 11: two Machines creating the same Asana Project at the same moment
-  can still make two Asana projects (the footer read and the POST are not
-  atomic). Linear's client id rules that out there.
 - Sync onto main (#1973) brought `leaving_guard.rs`, which denies every
   member this branch marked leaving. Plan records still read and write
   `projects.planning_initiatives` (`WorkValue::ProjectInitiatives`, kept for

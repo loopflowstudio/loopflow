@@ -168,11 +168,12 @@ written empty, the ignored Wave `linear:` key) and fixtures that test them.
 ## Migration decisions (`remove_chapters.sql`, built in slice 1)
 
 - A live Wave with no Project gets one, named for the Wave (36 such Waves in
-  the real store, 2026-11-22). It is an ordinary local Project: in a connected
-  repository the drain queues a Linear `create` on the next export, using the
-  Wave's UUID so two Machines name one Linear Project. (QA run 5 confirmed this
-  on the real store: `spend` and dormant `engbot` queue creates; retiring dead
-  Waves before upgrading avoids creating them.)
+  the real store, 2026-11-22). It is an ordinary local Project, unbound in a
+  connected repository until `lf wave sync`, `lf wave plan connect` or the
+  first Task sent into it makes it in the tracker (slice 12). Project creates
+  released lf queued are retired. (QA run 5, real store: `spend` and dormant
+  `engbot` are such Waves; retiring dead Waves before upgrading avoids
+  creating them.)
 - A Wave with several Projects keeps one: the newest started open one, else
   the newest. Its other Projects are deleted, with their `project_changes`
   and unsent `tracker_actions` retired; their Tasks move to the kept Project
@@ -181,8 +182,7 @@ written empty, the ignored Wave `linear:` key) and fixtures that test them.
   just dont matter".) Real store, 2026-11-22: `coverage` 8 Projects,
   `infrastructure` 7, `product` 6, `academy` 6, `experiments` 5; 1,071 of
   1,548 Tasks have a Project.
-- Then `projects.wave_id` gets its unique index. If a table rebuild is
-  needed for it, keep every column (additive under the staging rule).
+- No unique index on `projects.wave_id` here; LOO-1089 adds it (slice 10).
 - Released `lf` still reads `projects` and `tracker_wave_projects`; keep both
   readable, unwritten where they go.
 
@@ -481,19 +481,6 @@ every send ran canonical identity triggers even for an unchanged payload
 (319 µs versus 122 µs per single-row update). Only a resend with a former
 chapter to clear updates that column.
 
-## Remains
-
-1. Gate: Swift DTO and desktop suites (`scripts/test_desktop.sh`), full matrix
-   in CI, and check the `oauth_tests` contention failure on the base.
-2. Open, not this Task: a queued create's field snapshot (`scratch/concept-review.html`
-   discussion of create snapshots).
-
-Concept review after slice 11 (`scratch/concept-review.html`): product and
-code concepts line up everywhere, multi-Machine Project creation included. Left:
-the staged index (LOO-1089), the Asana race (Remains 3), and the LOO-995 title,
-which still says "optional tracker link"; the PR title is right. Nothing in the
-plan changes before gate.
-
 ## Slice 10 (staging the one-Project index, 2026-11-23)
 
 Built: `remove_chapters.sql` no longer adds a unique index; main's
@@ -634,3 +621,18 @@ not here; the gate's sync brings it.
 Two choices differ from the slice text; see `scratch/questions.md`:
 tracker down leaves the Wave recorded with its Project unbound (rerunning
 `lf wave create` makes it), and a Task sent into an unbound Project creates it.
+
+## Remains
+
+1. Gate: sync main, Swift DTO and desktop suites (`scripts/test_desktop.sh`),
+   the full matrix in CI, and the `oauth_tests::…sqlite_contention…` failure
+   checked on the base. `check_migrations.py` passes since the base merge
+   (2026-11-24).
+2. Review the two slice 12 choices that differ from the slice text
+   (`scratch/questions.md`): tracker down leaves the Wave recorded unbound,
+   and a drain creates an unbound Project a Task is sent into.
+3. Reviewer's look: Asana's footer search stays as the synchronous create's
+   lost-reply recovery (a retried `lf wave sync` after a lost reply would
+   otherwise make a second Asana project). It was slice 11's cross-Machine
+   path; if gate review finds it unneeded, delete it.
+4. Not this Task: a queued Task create's field snapshot ("3 sure": stays).

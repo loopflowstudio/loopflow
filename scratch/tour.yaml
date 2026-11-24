@@ -1,4 +1,4 @@
-at: bb5a8de6c33071768ab87594016a45bc3cc7e7ce
+at: be25d7ddcb3824cf523761ecd4707e5de4a22d0e
 first:
   - path: docs/surfaces.md
     why: Follow a Working Task through a prompt and drop.
@@ -6,8 +6,10 @@ first:
     why: Defines row fields and before-or-after drops.
   - path: rust/loopflow-storage/src/sqlite/selections.rs
     why: Reads shared Task order and commits competing drags.
+  - path: swift/LoopflowMac/WorkProjection.swift
+    why: Owns sidebar scope and the selected Task’s status group.
   - path: swift/LoopflowMac/WorkModel.swift
-    why: Filters rows and holds the open Task’s slot.
+    why: Groups visible Tasks and releases the group on navigation.
   - path: swift/LoopflowMac/Views/WorkNavigator.swift
     why: Renders and navigates the same visible rows.
   - path: swift/Loopflow/Services/PendingChanges.swift

@@ -3,18 +3,18 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>LOO-1083 concept review (post-build, pass 4): remote Task workspaces at HEAD</title>
+<title>LOO-1083 concept review (post-build, pass 5): remote Task workspaces at HEAD</title>
 <style>
   :root {
     --bg: #fbfaf7; --fg: #1d1c1a; --muted: #6b665e; --line: #e2ddd3; --card: #ffffff;
     --yes: #1f7a4d; --yes-bg: #e5f4ec; --no: #a3361f; --no-bg: #fbe9e4;
-    --new: #2954a3; --new-bg: #e6eefb; --code: #f1ede5; --built: #4b4740; --built-bg: #ece8df;
+    --note: #8a5a10; --note-bg: #fbf3e1; --code: #f1ede5; --built: #4b4740; --built-bg: #ece8df;
   }
   @media (prefers-color-scheme: dark) {
     :root {
       --bg: #161513; --fg: #ebe8e2; --muted: #a39d92; --line: #34312c; --card: #1e1d1a;
       --yes: #6fd3a0; --yes-bg: #183327; --no: #f19a83; --no-bg: #3a1f18;
-      --new: #8fb3f5; --new-bg: #1a2742; --code: #262420; --built: #c7c1b6; --built-bg: #2a2824;
+      --note: #e5b967; --note-bg: #332712; --code: #262420; --built: #c7c1b6; --built-bg: #2a2824;
     }
   }
   * { box-sizing: border-box; }
@@ -31,16 +31,15 @@
   tr:last-child td { border-bottom: 0; }
   .yes { color: var(--yes); background: var(--yes-bg); font-weight: 600; padding: 1px 7px; border-radius: 10px; white-space: nowrap; }
   .no { color: var(--no); background: var(--no-bg); font-weight: 600; padding: 1px 7px; border-radius: 10px; white-space: nowrap; }
-  .new { color: var(--new); background: var(--new-bg); font-weight: 600; padding: 1px 7px; border-radius: 10px; white-space: nowrap; }
+  .note { color: var(--note); background: var(--note-bg); font-weight: 600; padding: 1px 7px; border-radius: 10px; white-space: nowrap; }
   .built { color: var(--built); background: var(--built-bg); font-weight: 600; padding: 1px 7px; border-radius: 10px; white-space: nowrap; }
   .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
   @media (max-width: 780px) { .cols { grid-template-columns: 1fr; } }
   .card { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; }
-  .card.proposed { border-color: var(--new); }
   .card h3 { margin-top: 0; }
   .flow { font: 13px/1.6 ui-monospace, "SF Mono", Menlo, monospace; white-space: pre; overflow-x: auto; background: var(--code); padding: 10px 12px; border-radius: 6px; }
-  .callout { border-left: 4px solid var(--no); background: var(--no-bg); padding: 12px 16px; border-radius: 0 8px 8px 0; margin: 16px 0; }
-  .callout.info { border-left-color: var(--yes); background: var(--yes-bg); }
+  .callout { border-left: 4px solid var(--yes); background: var(--yes-bg); padding: 12px 16px; border-radius: 0 8px 8px 0; margin: 16px 0; }
+  .callout.note-box { border-left-color: var(--note); background: var(--note-bg); }
   ol.q > li { margin: 14px 0; }
   ol.q ol { list-style: lower-alpha; margin-top: 6px; }
 </style>
@@ -48,252 +47,179 @@
 <body>
 <main>
 
-<h1>Remote Task workspaces: post-build concept review (pass 4)</h1>
-<p class="lede">LOO-1083 review at <code>HEAD</code> (<code>92a63266e7</code>) against base <code>62a368e5cc</code>, 2026-11-24.
-Area taken: <b>opening, watching, acting on, and recovering a Task's workspace (Files, Changes, Diff, Save, Shell, Session, and Task actions) when another Machine owns it</b> across CLI, Desktop, Mobile, and <code>lf server</code>.
-Slices 1–7 and four QA passes are committed; this review evaluates the whole built area as it stands at <code>HEAD</code>.</p>
+<h1>Remote Task workspaces: post-build concept review (pass 5)</h1>
+<p class="lede">LOO-1083 full review at <code>HEAD</code> (<code>f042ba20bb</code>) against base <code>62a368e5cc</code>, 2026-11-24.
+Area taken: <b>opening, watching, editing, acting on, and recovering a Task's workspace (Files, Changes, Diff, Save, Shell, Session, and Task actions) when another Machine owns it</b> across CLI, Desktop, Mobile, and <code>lf server</code>.
+Slices 1–8 and five QA runs are committed. Outcome: <b>nothing to change in the model or plan</b> — ready for gate.</p>
 
-<p><span class="built">built at HEAD</span> marks behavior committed at <code>92a63266e7</code>.
-<span class="new">proposed</span> marks Slice 8 in <code>scratch/plan.md</code>, closing the last two cross-Machine boundary leaks before gate.</p>
+<p><span class="built">built at HEAD</span> marks behavior committed at <code>f042ba20bb</code>. There are no unbuilt proposals remaining in <code>scratch/plan.md</code>.</p>
 
-<div class="callout info">
-  <b>What holds at HEAD (Slices 1–7 + QA7 fixes):</b>
-  <code>lf server</code> is the single cross-Machine router (<code>PeerPool</code>, protocol rev 10, portable Task selectors).
-  <code>task.files.watch</code> follows the Task record before its checkout exists (waiting for <code>.git</code>) and recovers across moves and server restarts.
-  <code>session.resume</code> and <code>session.new</code> route by Task ahead of <code>moved_session</code>, localize remote <code>SessionRecord</code>s (<code>task_ids[0]</code>, <code>work.id</code>, <code>workspace.task_id</code>, <code>open_argv</code>, <code>action.help</code>, <code>outlook.command</code>, <code>status_line</code>), and <code>lf session list --task</code> routes to the owner.
-  CLI <code>lf open --task</code> / <code>--machine</code> honors <code>-a &lt;harness&gt;</code> through <code>session.resume</code> and <code>session.continue</code> and rewrites detach/leave lines to <code>lf open …</code>.
-  Desktop Files, Changes, Diff, Save, Shell, and Session follow owner transitions, keep drafts by <code>(Task, path, base revision)</code>, keep running shells on their starting Machine, show remote standing via <code>ownerStanding</code>, and omit duplicate Browser strip context.
-  Mobile exposes Session, Files, Changes, and Shell over the existing single pairing.
+<div class="callout">
+  <b>Verdict: the product's concepts and the code's concepts line up across the area.</b>
+  The Task is the single address; local <code>lf server</code> is the single cross-Machine router (protocol rev 10, pooled SSH peer connections, portable Task selectors); one server boundary (<code>Read::localize_peer_reading</code> + <code>ssh::localize_remote_session</code>) translates peer-private IDs, repo paths, owner labels, and commands back into this Machine's view; Desktop's duplicate client-side SSH/location stack is gone; and Mobile exposes Session, Files, Changes, and Shell over the existing single pairing.
 </div>
 
-<h2>Two concrete interactions where HEAD still breaks the model</h2>
+<h2>The model as built: one concrete journey (normal, failure, move, recovery)</h2>
+<p>A Task <code>LOO-7</code> is owned by <code>mini</code> (whose local repo is <code>/workspace/app</code> and whose tracker-backed local UUID may differ from <code>laptop</code>'s <code>task_laptop</code>). A stale checkout from an earlier run still sits on <code>laptop</code>.</p>
 
-<h3>1. Peer-local paths &amp; UUIDs leak out of routed Task readings (breaking Mobile Run/Auto and Desktop completed-Task retention)</h3>
-<p>A Task runs on <code>mini</code> (whose repo path is <code>/workspace/manabot</code> and whose tracker-backed local Task UUID is <code>task_peer</code>; on <code>laptop</code> the repo is <code>/Users/jack/src/manabot</code> and the Task UUID is <code>task_laptop</code>). The person opens it on the paired iPhone and taps <b>Run</b> or <b>Auto on</b>, or opens a mini-run Task in Desktop.</p>
 <div class="cols">
   <div class="card">
-    <h3><span class="built">built at HEAD</span> Only <code>session.list</code> is localized</h3>
-    <div class="flow">mini answers task.get / task.status / task.detail:
-  row.task.repo       = "/workspace/manabot"  (mini's path!)
-  row.task.id         = "task_peer"           (mini's UUID!)
-  row.runtime.work_id = "task_peer"
-  row.reference.workspace.machine_label = mini's own name
-  detail.current_session = unlocalized SessionRecord (lf resume …)
-
-subscriptions.rs patches ONLY task.files.watch's machine_label
-outside Read::localize_peer_reading().
-
-What breaks:
-1. Mobile TaskWorkspaceView.swift:178 reads row.task.repo from task.get
-   → sends task.run { directory: "/workspace/manabot", issue: "MTG-421" }
-   → laptop's Write::Remote::new runs Selection::capture("/workspace/manabot")
-     and forward::read("/workspace/manabot") → doppler current_dir ENOENT!
-     Repo config, participant name, and forward.env secrets fail on laptop.
-2. Desktop WorkModel.taskRecords (WorkModel.swift:3179-3180) checks
-   row.id == id &amp;&amp; repoIdentity(row.task.repo) == repoIdentity(repoPath)
-   → rejects subscribedTaskRow when a remote Task leaves the plan.
-3. Desktop opens a Task only mini ran: openSelectedWorkspace() runs
-   openWarmConversations() while subscribedTaskRow is .loading (awaitsStart=true),
-   then .task arrives (WorkModel.swift:1790) and updates subscribedTaskRow
-   WITHOUT calling openWarmConversations()!</div>
+    <h3><span class="built">built at HEAD</span> Normal path &amp; single localization boundary</h3>
+    <div class="flow">CLI / Desktop / paired iPhone
+  └─ address: Task ID only (or --machine + --session for remote-only Session)
+       ↓
+local lf server (single router, rev 10)
+  ├─ task_execution_route → mini (PeerPool, 4 idle SSH pipes, 60 s eviction)
+  ├─ translates issue → route.peer_selector (tracker key / id)
+  ├─ peer runs on mini in mini's repo checkout; never falls back to laptop
+  ├─ Read::localize_peer_reading (one boundary for reads + subscriptions):
+  │    • task.get / status / detail → laptop task_id, laptop repo, "mini" label,
+  │      localized current_session; keeps workspace.worktree = mini's checkout
+  │    • task.files.watch → laptop task_id, "mini" label, nullable checkout/rev
+  │    • session.list → task_ids[0], work.id, workspace.task_id, lf open argv
+  │    • creation.get → localized task_id &amp; session.new receipt open_argv
+  └─ terminal tickets (session.attach/continue, task.shell.*):
+       local Purpose::RemoteTerminal bridges Unix socket &amp; TLS WebSocket
+       directly to mini's held terminal; ReturnCommand rewrites detach/leave
+       lines to this Machine's `lf open …`.</div>
   </div>
-  <div class="card proposed">
-    <h3><span class="new">proposed</span> One localization boundary for every peer reading</h3>
-    <div class="flow">Read::localize_peer_reading(body, machine, route) owns ALL peer readings
-(both one-shot read_with and peer subscriptions; delete subscriptions.rs's
-separate labels_owner patch):
-  • task.get / task.status:
-      /task/id, /row/task/id, /row/runtime/work_id → route.task_id
-      /task/repo, /row/task/repo → local repository_path(&amp;route.repository_id)
-      /row/reference/workspace/machine_label → machine.label
-      (keeps /row/reference/workspace/worktree as mini's checkout path!)
-  • task.detail:
-      /task/id, /task/repo → local; /current_session → localize_remote_session
-  • task.files.watch:
-      /machine_label → machine.label; /task_id → route.task_id
-  • session.list: localize_remote_sessions (already in place)
-
-Write::Remote::new (matching read.rs::peer_of):
-  • resolves local_dir = repository_path(&amp;repository).unwrap_or(change.directory())
-    before Selection::capture(&amp;local_dir) and forward::read(&amp;local_dir)
-
-Desktop WorkModel.swift:1790:
-  • calls openWarmConversations() when subscribedTaskRow changes</div>
-  </div>
-</div>
-
-<h3>2. Reset session loses its reply on a remote Task (infinite 5 s recovery loop)</h3>
-<p>The person clicks <b>Reset session</b> (<code>plus.bubble</code>) on a Task owned by <code>mini</code>. <code>session.new</code> runs on <code>mini</code> and writes <code>mini</code>'s <code>creation_receipts</code>, then SSH drops or the laptop server restarts before the reply reaches Desktop.</p>
-<div class="cols">
   <div class="card">
-    <h3><span class="built">built at HEAD</span> <code>creation.get</code> &amp; inspector stay local</h3>
-    <div class="flow">Desktop ~/.lf/submissions/&lt;id&gt;.json holds:
-  { kind: "session.new", request_id, id, task: "task_laptop", … }
+    <h3><span class="built">built at HEAD</span> Failure, move, and recovery</h3>
+    <div class="flow">1. Unstarted Task (no checkout on mini yet):
+   • task.files / changes / diff / file → not_found { reason: "not_started" }
+   • task.files.watch stays open with { checkout: null, revision: null },
+     waits for .git, and wakes on store_revisions when checkout appears.
+   • CLI / Desktop / Mobile show Not started (never empty diff or local shell).
 
-Every 5 seconds, CreationRecovery.refresh() runs:
-  1. CreationSubmissions.reconcile asks laptop: creation.get { request_id }
-  2. Laptop checks ONLY laptop's creation_receipts → returns null
-  3. reconcile resends session.new → routed to mini → mini deduplicates
-     and returns the new SessionRecord → reconcile discards the reply
-  4. reconcile asks laptop creation.get AGAIN → STILL null
-  5. throws "The Machine has no receipt for creation &lt;id&gt;"
-  → permanent error Notice + SSH resend every 5 s forever!
+2. mini unreachable / SSH drops:
+   • One-shot &amp; subscriptions emit unavailable naming "mini" + ssh check.
+   • Subscriptions retry every 5 s or immediately on planning revision change.
+   • Zero local checkout / local shell fallback.
 
-Even if creation.get returned mini's receipt:
-  • session.new writes task_id: null in creation_receipts
-  • RecoveredCreationInspector falls into local-only session.history.get
-    → "Session not found", never calling presented() to retire the file!</div>
-  </div>
-  <div class="card proposed">
-    <h3><span class="new">proposed</span> Route <code>creation.get</code> by <code>task</code> (rev 10, zero migration)</h3>
-    <div class="flow">Read::CreationGet { request_id, task: Option&lt;String&gt; } (still rev 10):
-  • CLI: lf server receipt &lt;request-id&gt; [--task &lt;task&gt;] --json
-  • Read::workspace_task_mut matches CreationGet { task: Some(issue), .. }
-    → routes to the Task's owner through the exact same PeerPool path
+3. Task moves (laptop ↔ mini):
+   • task.get / task.status / task.files.watch re-route under the same sub ID.
+   • Desktop follows owner: retires old Session viewer, re-opens moved Session,
+     relocates TaskFilesStore. Running ShellTabs stay labelled on starting
+     Machine; Close passes --started-on.
+   • Unsaved draft keyed by (Task, path, base revision): saves on new owner if
+     base revision matches; otherwise held whole as external conflict (arrive).
 
-CreationSubmissions (CreationJournal.swift):
-  • extracts optional "task" from record.payload and passes it to lookup
-    → Desktop calls .creationGet(requestID: id, task: task)
-  • lost reply → mini returns Complete receipt (no infinite resend!)
-  • mini crashed at milestone='stopping' → mini returns Inspect (no resend!)
-  • mini unreachable → unavailable naming mini (no resend!)
-
-CreationRecovery (CreationSubmissions.swift):
-  • Resource.task = receipt.taskId ?? (payload?["task"] as? String)
-  • RecoveredCreationInspector reads routed .taskGet, shows the Task &amp;
-    new Session, and calls presented() to retire the saved submission.</div>
+4. Reset session loses reply mid-flight:
+   • Desktop CreationSubmissions saved payload's task → creation.get { task }
+     routes to mini, recovers Complete/Inspect receipt (localized open_argv),
+     and RecoveredCreationInspector reads routed task.get to retire the file.</div>
   </div>
 </div>
 
 <h2>Do the product's concepts and the code's line up?</h2>
 <table>
-  <tr><th>What a person knows</th><th>Code behind it at <code>HEAD</code> (<code>92a63266e7</code>)</th><th></th><th>Assessment</th></tr>
+  <tr><th>What a person knows</th><th>Code behind it at <code>HEAD</code> (<code>f042ba20bb</code>)</th><th></th><th>Assessment</th></tr>
   <tr>
     <td><b>Task</b>: one outcome, opened by name</td>
-    <td><code>task_execution_route</code> + <code>peer_selector</code> (tracker key / identifier / local ID)</td>
+    <td><code>task_execution_route</code> + <code>peer_selector</code> (tracker key / identifier / local ID) + <code>work_route::peer_task_id</code> (indexed lookup, 6.1 µs on 10k Tasks)</td>
     <td><span class="yes">yes</span></td>
     <td><span class="built">built at HEAD</span> Tracker-backed and trackerless peers resolve without local UUID coupling.</td>
   </tr>
   <tr>
-    <td><b>The Task's Machine</b>: one router</td>
-    <td><code>lf server</code> (<code>PeerPool</code>, <code>Read::peer_route</code>, <code>Write::remote</code>, <code>task_shell</code>, <code>terminal_machine</code>); stale local checkouts dropped from <code>RoadmapTask</code> &amp; <code>TaskSnapshot</code></td>
+    <td><b>The Task's Machine</b>: one router, no client-side SSH</td>
+    <td><code>lf server</code> (<code>PeerPool</code>, <code>Read::peer_route</code>, <code>Write::remote</code>, <code>task_shell</code>, <code>terminal_machine</code>); stale local checkouts dropped from <code>RoadmapTask</code> &amp; <code>TaskSnapshot</code>; Desktop's <code>onMachine</code>/<code>pinTaskLocation</code>/<code>LocalLineObservation</code>/placement guard deleted</td>
     <td><span class="yes">yes</span></td>
-    <td><span class="built">built at HEAD</span> No <code>expected_owner</code>, no <code>conflict</code>, no Desktop SSH fanout.</td>
+    <td><span class="built">built at HEAD</span> No <code>expected_owner</code>, no <code>conflict</code>, no second opinion in clients.</td>
   </tr>
   <tr>
-    <td><b>Routed Task readings &amp; launched writes</b> (this Machine's view of a remote Task)</td>
-    <td><code>localize_peer_reading</code> handles only <code>session.list</code>; <code>subscriptions.rs</code> patches <code>task.files.watch</code> separately; <code>task.get</code>/<code>task.status</code>/<code>task.detail</code> leak peer <code>repo</code>, <code>task_id</code>, <code>machine_label</code>, and unlocalized <code>current_session</code>; <code>Write::Remote::new</code> reads <code>Selection</code> &amp; <code>forward</code> from caller <code>directory</code> instead of local <code>repository_path</code>; Desktop <code>subscribedTaskRow</code> update omits <code>openWarmConversations()</code></td>
-    <td><span class="no">no</span></td>
-    <td><b>Biggest mismatch</b> (above). Peer-private coordinates cross the server boundary into Desktop and Mobile. <span class="new">proposed</span>: Slice 8A &amp; 8C.</td>
+    <td><b>This Machine's view of a remote Task</b> (readings &amp; launched writes)</td>
+    <td><code>Read::localize_peer_reading</code> owns <code>task.get</code>, <code>task.status</code>, <code>task.detail</code> (incl. <code>current_session</code>), <code>task.files.watch</code>, <code>session.list</code>, and <code>creation.get</code> across both one-shot reads and peer subscriptions (special-case patch in <code>subscriptions.rs</code> deleted); <code>Write::Remote::new</code> resolves local <code>repository_path</code> before <code>Selection::capture</code> / <code>forward::read</code></td>
+    <td><span class="yes">yes</span></td>
+    <td><span class="built">built at HEAD</span> Verified in Slice 8 QA: laptop's Task ID, repo path, <code>mini</code> owner label, and <code>lf open</code> commands appear across every served reading; <code>workspace.worktree</code> stays mini's checkout.</td>
   </tr>
   <tr>
-    <td><b>Files, Changes, Diff &amp; Save</b> (including live watch)</td>
-    <td>Routed <code>task.files/file/changes/diff/save</code> + Task-scoped <code>task.files.watch</code> (nullable checkout/revision, waits for <code>.git</code>); Desktop <code>TaskFilesStore</code> follows via <code>onChange</code>, reconnects, keeps drafts by <code>(Task, path, base revision)</code>; Diff chip names remote Machine</td>
+    <td><b>Files, Changes, Diff &amp; Save</b> (including live watch &amp; drafts)</td>
+    <td>Routed <code>task.files/file/changes/diff/save</code> (CLI &amp; server) + Task-scoped <code>task.files.watch</code> (nullable checkout/revision, waits for <code>.git</code>); Desktop <code>TaskFilesStore</code> follows via <code>relocate</code>/<code>observeServedFiles</code>, holds drafts by <code>(Task, path, base revision)</code> with <code>arrive</code> conflict preservation; Diff chip names remote Machine; <code>lf task watch-files</code> deleted</td>
     <td><span class="yes">yes</span></td>
     <td><span class="built">built at HEAD</span> Works across unstarted, move, outage, two windows, and local server restart on CLI, Desktop, and Mobile.</td>
   </tr>
   <tr>
     <td><b>Shell in the Task</b></td>
-    <td><code>task.shell.start/attach/close</code> over bridged tickets; Desktop <code>newShell</code> opens via <code>location ?? owner</code>; running shells stay labelled on their starting Machine across moves (Close passes <code>--started-on</code>); Mobile <code>mobile-&lt;task&gt;</code></td>
+    <td><code>task.shell.start/attach/close</code> over bridged <code>Purpose::RemoteTerminal</code> tickets; Desktop <code>newShell</code> resolves <code>location ?? owner</code>; running shells keep their starting Machine and Close passes <code>--started-on</code>; Mobile <code>mobile-&lt;task&gt;</code> shell</td>
     <td><span class="yes">yes</span></td>
-    <td><span class="built">built at HEAD</span> Opens before any conversation; no local Mac fallback.</td>
+    <td><span class="built">built at HEAD</span> Opens before any conversation; no local Mac shell fallback.</td>
   </tr>
   <tr>
     <td><b>Session actions &amp; records</b> (Open, Refresh, Switch agent, New conversation, Reset, <code>lf session list --task</code>)</td>
-    <td><code>Write::remote_session</code> routes both <code>session.resume</code> and <code>session.new</code> Task-first; <code>localize_remote_session</code> rewrites <code>task_ids[0]</code>, <code>work.id</code>, <code>workspace.task_id</code>, <code>open_argv</code>, and help; <code>lf session list --task</code> routes to owner; Desktop <b>New conversation</b> runs in routed shell</td>
+    <td><code>Write::remote_session</code> routes <code>session.resume</code> and <code>session.new { task }</code> Task-first ahead of <code>moved_session</code>; <code>localize_remote_session</code> rewrites <code>task_ids[0]</code>, <code>work.id</code>, <code>workspace.task_id</code>, <code>open_argv</code>, <code>action.help</code>, <code>outlook.command</code>, <code>status_line</code>; Desktop auto-follows owner transitions (<code>WorkModel.follow</code> + <code>openWarmConversations</code> on <code>subscribedTaskRow</code>), runs remote <b>New conversation</b> in a routed shell, and omits Browser strip context</td>
     <td><span class="yes">yes</span></td>
-    <td><span class="built">built at HEAD</span> Verified in Slice 7 QA; remote Browser strip omits duplicate context.</td>
+    <td><span class="built">built at HEAD</span> Verified in Slices 6–8 QA, including live typing into a mini-only Task's Session in Desktop.</td>
   </tr>
   <tr>
-    <td><b>Creation recovery for Reset session</b> (lost reply or mid-reset crash)</td>
-    <td><code>Write::SessionNew</code> writes <code>creation_receipts</code> on the peer, while <code>Read::CreationGet</code> reads only the local store and <code>RecoveredCreationInspector</code> calls local-only <code>session.history.get</code></td>
-    <td><span class="no">no</span></td>
-    <td>Infinite 5 s error + resend loop after a lost remote Reset reply (open in QA7). <span class="new">proposed</span>: Slice 8B.</td>
+    <td><b>Reset session creation recovery</b></td>
+    <td><code>Read::CreationGet { request_id, task }</code> routes to the Task's owner and localizes <code>task_id</code> + <code>session.new</code> receipt <code>result</code>; <code>CreationSubmissions</code> passes saved payload's <code>task</code>; <code>CreationRecovery</code> falls back <code>Resource.task</code> to payload's <code>task</code> so inspector reads routed <code>task.get</code></td>
+    <td><span class="yes">yes</span></td>
+    <td><span class="built">built at HEAD</span> Verified in Slice 8 QA: lost reply recovers mini's receipt with laptop's <code>lf open</code> command and opens cleanly.</td>
   </tr>
   <tr>
     <td><b>CLI <code>lf open</code> &amp; harness switching</b></td>
-    <td><code>lf open --task</code> / <code>--machine</code> (both flag orders) → <code>SessionResume</code> + <code>SessionAttach</code> / <code>SessionContinue { agent }</code>; <code>ReturnCommand</code> rewrites detach and leave lines to <code>lf open …</code></td>
+    <td><code>lf open --task</code> / <code>--task --session</code> / <code>--machine --session</code> (both flag orders) always present locally; honors <code>-a &lt;harness&gt;</code> through <code>session.resume</code> and <code>session.continue { agent }</code>; <code>ReturnCommand</code> rewrites detach and leave lines to <code>lf open …</code></td>
     <td><span class="yes">yes</span></td>
-    <td><span class="built">built at HEAD</span> Works without remote <code>default_agent</code>; farewell commands work on the calling Machine.</td>
+    <td><span class="built">built at HEAD</span> Works even without remote <code>default_agent</code>; farewell commands work on the calling Machine.</td>
   </tr>
   <tr>
-    <td><b>Unreachable Machine</b></td>
-    <td><code>unavailable { resource: "machine", machine_id, machine_label, machine_name }</code>; single <code>ssh</code> hint; Desktop Retry &amp; Mobile Try again</td>
+    <td><b>Unreachable Machine &amp; Not started</b></td>
+    <td><code>not_found { reason: "not_started" }</code> vs <code>unavailable { resource: "machine", machine_id, machine_label, machine_name }</code> with single <code>ssh</code> check hint; Desktop Retry &amp; Mobile Try again</td>
     <td><span class="yes">yes</span></td>
-    <td><span class="built">built at HEAD</span> Consistent across one-shot requests and subscriptions.</td>
+    <td><span class="built">built at HEAD</span> Consistent across one-shot requests and subscriptions, with zero silent local fallback.</td>
   </tr>
   <tr>
     <td><b>Mobile workspace</b> (Session, Files, Changes, Shell)</td>
-    <td>Single Tailscale pairing; <code>TaskWorkspaceView</code> + <code>TaskFilesTree</code> (single watch stream) + <code>TerminalLink</code></td>
+    <td>Single Tailscale pairing; <code>TaskWorkspaceView</code> + <code>TaskFilesTree</code> (single watch stream) + <code>TaskChangesView</code> + <code>TerminalLink</code>; Task menu actions read localized <code>row.task.repo</code></td>
     <td><span class="yes">yes</span></td>
-    <td><span class="built">built at HEAD</span> Viewers hold; Task menu actions (<code>task.run</code>/<code>auto</code>) become reliable once <code>task.get</code> localizes <code>row.task.repo</code> and <code>Write::Remote::new</code> reads local <code>repository_path</code> (Slice 8A).</td>
+    <td><span class="built">built at HEAD</span> All four viewers and Task menu actions route cleanly through the paired server.</td>
   </tr>
 </table>
 
-<h2>The biggest mismatch: the server boundary localizes Sessions, but not Task readings or creation receipts</h2>
-<div class="callout">
-  Slices 6 and 7 established the right rule for <code>SessionRecord</code>s: the local server translates peer-private IDs and commands at one boundary so clients never see another Machine's internal coordinates.
-  At <code>HEAD</code>, that rule stopped short of <code>task.get</code>, <code>task.status</code>, <code>task.detail</code>, <code>task.files.watch</code>, and <code>creation.get</code>.
-  Result: Mobile sends mini's filesystem path back to laptop's <code>Write::Remote::new</code> (breaking Doppler/config forwarding on <code>task.run</code>), Desktop discards <code>subscribedTaskRow</code> once a remote Task leaves the plan and misses warm-opening when mini's standing arrives, and a lost reply to remote <b>Reset session</b> loops forever every 5 seconds.
-</div>
-
+<h2>Before vs after (base <code>62a368e5cc</code> → <code>HEAD</code> <code>f042ba20bb</code>)</h2>
 <div class="cols">
   <div class="card">
-    <h3>Before (<code>HEAD</code> at <code>92a63266e7</code>)</h3>
+    <h3>Before (at base <code>62a368e5cc</code>)</h3>
     <ul>
-      <li><code>localize_peer_reading</code> handles only <code>session.list</code>; <code>subscriptions.rs</code> patches <code>task.files.watch</code> separately</li>
-      <li><code>task.get</code> / <code>task.status</code> / <code>task.detail</code> leak peer <code>repo</code> path, peer Task UUID, peer's own <code>machine_label</code>, and unlocalized <code>current_session</code></li>
-      <li><code>Write::Remote::new</code> reads <code>Selection::capture</code> &amp; <code>forward::read</code> from caller's <code>change.directory()</code> instead of local <code>repository_path(&amp;repository)</code></li>
-      <li><code>WorkModel</code> updates <code>subscribedTaskRow</code> on <code>.task</code> without calling <code>openWarmConversations()</code></li>
-      <li><code>creation.get</code> is local-only → remote Reset recovery loops every 5 s with "The Machine has no receipt", and <code>RecoveredCreationInspector</code> calls local-only <code>session.history.get</code></li>
-      <li><code>WorkNavigationTests/retainedRepositoryConversation</code> fails because its mock answers <code>other</code>'s Task resume after <code>taskLocation</code> deletion</li>
+      <li>Desktop ran its own client-side SSH subprocess stack (<code>RegistryQuery.onMachine</code>, <code>pinTaskLocation</code>, <code>LocalLineObservation</code>) and rejected remote Sessions with MTG-421's placement guard or opened local Mac shells.</li>
+      <li>Stale local <code>task_checkouts</code> leaked into <code>RoadmapTask</code> and <code>TaskSnapshot</code> after a Task moved elsewhere.</li>
+      <li>No server peer pool, no routed terminal tickets, no <code>task.shell.*</code>, no server-routed <code>task.files.watch</code>.</li>
+      <li>Mobile had no remote Files tree or Shell viewer.</li>
+      <li><code>lf open --task</code> attached to stale local checkouts, dropped <code>--task</code> when <code>--session</code> was passed, and had no <code>--machine</code> selector for remote-only Sessions.</li>
     </ul>
   </div>
-  <div class="card proposed">
-    <h3><span class="new">proposed</span> After (Slice 8, still rev 10, zero migration)</h3>
+  <div class="card">
+    <h3><span class="built">built at HEAD</span> After (Slices 1–8)</h3>
     <ul>
-      <li><code>localize_peer_reading</code> is the single owner for <code>task.get</code>, <code>task.status</code>, <code>task.detail</code>, <code>task.files.watch</code>, and <code>session.list</code> (mutating only present keys; keeping <code>workspace.worktree</code> as the owner's checkout path)</li>
-      <li><code>Write::Remote::new</code> captures <code>Selection</code> and <code>forward</code> from local <code>repository_path(&amp;repository)</code> (falling back to <code>change.directory()</code>), matching <code>read.rs::peer_of</code></li>
-      <li><code>WorkModel</code> calls <code>openWarmConversations()</code> when <code>subscribedTaskRow</code> changes</li>
-      <li><code>Read::CreationGet { request_id, task: Option&lt;String&gt; }</code> routes by <code>task</code> via <code>workspace_task_mut</code>; <code>CreationSubmissions</code> passes payload's <code>task</code>; <code>CreationRecovery</code> falls back <code>Resource.task</code> to payload's <code>task</code> so the inspector reads routed <code>task.get</code> and retires the submission</li>
-      <li><code>WorkNavigationTests/retainedRepositoryConversation</code> mock answers only <code>--repo</code></li>
+      <li>One router (<code>lf server</code>, rev 10) with pooled peer SSH pipes, portable Task selectors, and one peer-reading localization boundary.</li>
+      <li>Desktop's client-side SSH routing and location guard are deleted; Files, Changes, Diff, Save, Shell, Session, Reset, and New conversation all route by Task and follow moves.</li>
+      <li>Mobile exposes Session, Files (including unchanged files), Changes, and Shell over the existing single Tailscale pairing.</li>
+      <li><code>lf open</code> always presents locally, supports <code>--task</code>, <code>--task --session</code>, <code>--machine --session</code> (both flag orders), and <code>-a &lt;harness&gt;</code>, and prints calling-Machine <code>lf open</code> return commands.</li>
+      <li>Unstarted Tasks show <b>Not started</b>; unreachable owners name the Machine with retry; zero local fallback.</li>
     </ul>
   </div>
 </div>
 
-<h3>Counterexamples tried</h3>
-<table>
-  <tr><th>Case</th><th>Proposed behavior</th><th>Holds?</th></tr>
-  <tr><td>Mobile taps <b>Run</b> or <b>Auto on</b> on a Task owned by <code>mini</code> (where mini's repo is <code>/workspace/manabot</code> and laptop's is <code>/Users/jack/src/manabot</code> with Doppler <code>forward.env</code>)</td><td>Routed <code>task.get</code> localizes <code>row.task.repo</code> to laptop's path, AND <code>Write::Remote::new</code> resolves <code>repository_path(&amp;repository)</code> locally; <code>Selection::capture</code> and <code>forward::read</code> run in laptop's checkout and forward Doppler secrets cleanly.</td><td><span class="yes">yes</span></td></tr>
-  <tr><td>Remote Task completes on <code>mini</code> and leaves laptop's open plan while open in Desktop</td><td>Localized <code>subscribedTaskRow</code> carries laptop's <code>task.id</code>, <code>runtime.work_id</code>, and <code>task.repo</code>, so <code>WorkModel.taskRecords(id:)</code> retains it and keeps the completed Task view alive.</td><td><span class="yes">yes</span></td></tr>
-  <tr><td>Remote Task open in Desktop whose checkout is <code>/mini/wt</code>; peer calls itself <code>Mac-mini</code>, laptop registered it as <code>mini</code></td><td><code>row.reference.workspace.worktree</code> stays <code>/mini/wt</code> (real checkout on owner); <code>row.reference.workspace.machine_label</code> and <code>task.files.watch.machine_label</code> both say <code>mini</code>.</td><td><span class="yes">yes</span></td></tr>
-  <tr><td>Desktop opens a Task only <code>mini</code> has ever run; <code>.task</code> frame arrives after <code>select()</code></td><td>Updating <code>subscribedTaskRow</code> calls <code>openWarmConversations()</code>, clearing <code>workspace.awaitsStart</code> and opening the remote Session without waiting for an unrelated planning frame.</td><td><span class="yes">yes</span></td></tr>
-  <tr><td>Remote <b>Reset session</b> loses its reply, OR <code>mini</code> crashes mid-reset at <code>milestone = 'stopping'</code>, OR <code>mini</code> is temporarily unreachable</td><td><code>creation.get { request_id, task }</code> routes to <code>mini</code>: returns <code>Complete</code> (stops loop, inspector reads routed <code>task.get</code> and retires file), <code>Inspect</code> (no resend), or <code>unavailable</code> naming <code>mini</code> (no resend, retries when back).</td><td><span class="yes">yes</span></td></tr>
-  <tr><td>Remote <b>Reset session</b> loses its reply AND the Task moves <code>mini → laptop</code> before the 5 s recovery tick</td><td><code>creation.get</code> asks the new owner (<code>laptop</code>), gets <code>null</code>, and resends <code>session.new</code> there (recording a receipt on the new owner or refusing <code>not_found</code>; no infinite loop). Avoiding a second reset after a move would require a new local receipt-to-Machine SQLite table; see Open question 1.</td><td><span class="yes">yes</span> (bounded; documented trade-off)</td></tr>
-  <tr><td>Selected JSON read (<code>select: ["row.lifecycle"]</code>) on routed <code>task.get</code></td><td><code>localize_peer_reading</code> mutates only keys already present in the JSON object; omitted fields stay omitted.</td><td><span class="yes">yes</span></td></tr>
-</table>
+<h2>Minor non-conceptual leftovers noted (not a redesign)</h2>
+<div class="callout note-box">
+  None of these break the model or require another architecture pass; listed plainly so nothing is hidden at gate or PR review:
+  <ul>
+    <li><b>Bare CLI <code>lf task status &lt;id&gt; --json</code> / <code>--subscribe</code></b> (<code>waves.rs::print_remote_task_status</code>) opens a one-shot peer connection directly without calling <code>Read::localize_peer_reading</code> (human output is unaffected; served <code>task.status</code> is localized).</li>
+    <li><b><code>lf server receipt &lt;id&gt; --task nope</code></b> returns <code>null</code> instead of reporting an unknown Task because <code>CreationGet::read_here</code> ignores <code>task</code> when <code>remote_task</code> finds no local Task.</li>
+    <li><b><code>graph_processes[].entry.repo</code></b> in routed Task readings carries the peer's repo path; no surface reads it.</li>
+    <li><b><code>docs/surfaces.md</code> move-table row</b> still says "Shells and Sessions already open stay on mini" while Desktop now auto-follows moved Sessions to the new owner (Slice 6B).</li>
+    <li><b>Cold-restart draft reconciliation after a move</b> (<code>SessionsView.swift::loadPaneIntent</code>) calls <code>reconcile</code> rather than <code>arrive</code> if the Task moved while Desktop was closed; live moves call <code>arrive</code> and preserve conflicting drafts whole.</li>
+    <li><b>Separate scope (by design):</b> sidebar listing reads local SQLite only (no list/board SSH fanout); remote <code>lf session list --task</code> carries only <code>--task</code>, <code>--headless</code>, and paging; <code>desktop_shells</code> table/CLI naming stays as-is while wire says <code>task.shell.*</code>.</li>
+  </ul>
+</div>
 
-<h3>What follows across layers (Slice 8)</h3>
-<table>
-  <tr><th>Layer</th><th>Change</th></tr>
-  <tr><td>Rust server &amp; routing (Slice 8A)</td><td>Expand <code>Read::localize_peer_reading</code> (in <code>read.rs</code> / <code>ssh.rs</code>) to localize <code>TaskGet</code>, <code>TaskStatus</code>, <code>TaskDetail</code>, <code>TaskFilesWatch</code>, and <code>SessionList</code> (only touching present keys); delete the special-case <code>labels_owner</code> patch from <code>subscriptions.rs</code>. In <code>Write::Remote::new</code>, resolve local <code>work_route::repository_path(&amp;repository)</code> before calling <code>Selection::capture</code> and <code>forward::read</code>.</td></tr>
-  <tr><td>Creation recovery (Slice 8B, still rev 10)</td><td>Add required-nullable <code>task: Option&lt;String&gt;</code> to <code>Read::CreationGet</code> (and <code>--task</code> on <code>lf server receipt</code>), wire it into <code>Read::workspace_task_mut</code>, and regenerate <code>server_schema.json</code>. Update Swift <code>ServedRead.creationGet(requestID:task:)</code>, <code>CreationSubmissions</code> (extract optional <code>task</code> from saved payload for <code>lookup</code>), and <code>CreationRecovery</code> (<code>Resource.task = receipt.taskId ?? payload["task"]</code>).</td></tr>
-  <tr><td>Desktop &amp; test hygiene (Slice 8C)</td><td>Call <code>openWarmConversations()</code> when <code>subscribedTaskRow</code> updates in <code>WorkModel.swift:1790</code>. Fix <code>WorkNavigationTests/retainedRepositoryConversation</code>'s mock to answer only <code>--repo</code>. Add unit &amp; integration tests for localized <code>task.get</code>/<code>task.detail</code>/<code>task.files.watch</code>, routed <code>creation.get</code>, and <code>Write::Remote::new</code> local repo lookup.</td></tr>
-</table>
-
-<h3>Outside this review (separate scope)</h3>
-<ul>
-  <li><b>Sidebar listing a Task only <code>mini</code> has run as Backlog:</b> intentional operational boundary (no list/board SSH fanout; <code>plan.list</code> / <code>desktop.view.list</code> / <code>view.select</code> read local SQLite only).</li>
-  <li><b><code>lf session list --task</code> extra flags (<code>--on</code>, <code>--available</code>, <code>--search</code>, <code>--primary</code>) on remote Tasks:</b> served <code>session.list</code> carries only <code>--task</code>, <code>--headless</code>, and paging; adding filter flags to the protocol is separate scope.</li>
-  <li><b>Git observation lag on peer reads &amp; skewed peer binary 10 s timeout:</b> general server observation / peer-handshake diagnostics outside LOO-1083.</li>
-</ul>
-
-<h2>Open questions</h2>
+<h2>Open product choices (built for review)</h2>
+<p>Every choice below is <span class="built">built at HEAD</span> and reversible before release; answer with e.g. <code>2b</code> if you want any of them changed.</p>
 <ol class="q">
   <li>Recovering a remote <b>Reset session</b> (<code>session.new</code>) whose reply was lost:
     <ol>
-      <li>route <code>creation.get</code> by the saved payload's <code>task</code> selector (still rev 10, zero SQLite migration; handles lost reply, mid-reset crash, and peer outage) <span class="new">proposed for Slice 8</span></li>
-      <li>add a new local SQLite table mapping <code>request_id → machine_id</code> so recovery still targets the original peer even if the Task moved during the 5 s outage</li>
+      <li>route <code>creation.get</code> by the saved payload's <code>task</code> selector (rev 10, zero SQLite migration; handles lost reply, mid-reset crash, and peer outage) <span class="built">built at HEAD</span></li>
+      <li>add a local SQLite table mapping <code>request_id → machine_id</code> so recovery still targets the original peer even if the Task moved during the 5 s outage</li>
     </ol>
   </li>
   <li>When a Task moves to another Machine while open in Desktop, its Session pane:

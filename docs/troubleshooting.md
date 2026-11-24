@@ -52,15 +52,14 @@ Dirty files under a live Graph are ongoing progress. An idle Task Graph does not
 prove helper Sessions are idle, and a finished launcher does not prove its
 interactive Session closed: check Sessions separately.
 
-`lf task interrupt <ID>` stops a running Graph: an agent step and its build
-jobs end at once, an operation finishes and nothing follows, and the run exits
-130. With nothing live it records nothing and says so.
+`lf task interrupt <ID>` stops a running Graph. An agent step and jobs in its
+worker’s OS session exit. A command already in progress finishes, then the run
+exits 130. If nothing is running, interrupt reports that.
 
-`lf task pause <ID>` stops the Graph, its build jobs, and the Task's primary
-conversation, and holds off runs, wakes, and recovery until
-[`lf task unpause <ID>`](work.md#pause-a-task). If status still reads `Pausing`
-after a cut-short stop, repeat `lf task pause <ID>` to finish stopping the
-remaining processes.
+`lf task pause <ID>` also closes the Task's primary conversation and holds off
+runs, wakes, and recovery until you unpause. If status still reads `Pausing`
+after an interrupted cleanup, repeat the pause command. See
+[Pause a Task](work.md#pause-a-task).
 
 If the Task's worktree never finished being created, status keeps the Task and
 names the exact path and branch to restore before launching.

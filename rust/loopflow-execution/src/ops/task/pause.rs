@@ -14,8 +14,15 @@ use crate::harness::agent_process;
 use crate::ops::OpsResult;
 use crate::store::ownership::{task_execution_route, task_pause_route, TaskRoute};
 
-pub(crate) fn admission(task: &TaskId) -> OpsResult<File> {
+fn admission(task: &TaskId) -> OpsResult<File> {
     lock(&format!("admit-{task}"))
+}
+
+/// Hold through placement or provider registration so pause sees the admitted work.
+pub(crate) fn admit_launch(store: &SqliteStore, task: &TaskId) -> OpsResult<File> {
+    let lock = admission(task)?;
+    store.require_task_unpaused(task).map_err(task_error)?;
+    Ok(lock)
 }
 
 fn lock(name: &str) -> OpsResult<File> {
@@ -90,28 +97,26 @@ pub fn pause(issue: &str) -> OpsResult<String> {
     })
 }
 
+fn stop_primary(store: &SqliteStore, task: &TaskId) -> anyhow::Result<()> {
+    if let Some(primary) = store.primary_session(&PrimaryScope::Task(task.clone()))? {
+        agent_process::stop_session_agent(
+            store,
+            primary.id.as_str(),
+            Departure::Paused { task: task.clone() },
+        )?;
+    }
+    Ok(())
+}
+
 fn finish(
     sqlite: &SqliteStore,
     task: &Task,
     sessions: &[StoppingSession],
 ) -> OpsResult<Option<String>> {
-    let stop_primary = || -> anyhow::Result<()> {
-        if let Some(primary) = sqlite.primary_session(&PrimaryScope::Task(task.id.clone()))? {
-            agent_process::stop_session_agent(
-                sqlite,
-                primary.id.as_str(),
-                Departure::Paused {
-                    task: task.id.clone(),
-                },
-            )?;
-        }
-        Ok(())
-    };
-    let mut failures: Vec<_> = stop_primary()
-        .err()
-        .into_iter()
-        .map(|error| format!("conversation: {error}"))
-        .collect();
+    let mut failures = Vec::new();
+    if let Err(error) = stop_primary(sqlite, &task.id) {
+        failures.push(format!("conversation: {error}"));
+    }
     // Give the Graph a chance to record the interrupted turn and close
     // its own provider. A retry still owns the saved jobs after a crash.
     let deadline = Instant::now() + Duration::from_secs(2);
@@ -139,12 +144,11 @@ fn finish(
 }
 
 /// A caller may have died after the jobs exited but before marking the hold settled.
-fn finish_if_jobs_exited(
-    store: &SqliteStore,
-    task: &Task,
-    jobs: &[StoppingSession],
-) -> OpsResult<()> {
-    for session in jobs {
+fn finish_if_jobs_exited(store: &SqliteStore, task: &Task) -> OpsResult<()> {
+    let Some(jobs) = store.stopping_processes(&task.id).map_err(task_error)? else {
+        return Ok(());
+    };
+    for session in &jobs {
         if let Some(live) = crate::os_process::remaining_worker_jobs(session)
             .map_err(task_error)?
             .first()
@@ -155,7 +159,7 @@ fn finish_if_jobs_exited(
             )));
         }
     }
-    finish(store, task, jobs)?;
+    finish(store, task, &[])?;
     Ok(())
 }
 
@@ -173,9 +177,7 @@ pub(crate) fn before_unassign(store: &SqliteStore, task: &Task) -> OpsResult<()>
                 err.into()
             }
         })?;
-        if let Some(jobs) = store.stopping_processes(&task.id).map_err(task_error)? {
-            finish_if_jobs_exited(store, task, &jobs)?;
-        }
+        finish_if_jobs_exited(store, task)?;
     }
     Ok(())
 }
@@ -183,13 +185,7 @@ pub(crate) fn before_unassign(store: &SqliteStore, task: &Task) -> OpsResult<()>
 pub fn unpause(issue: &str) -> OpsResult<()> {
     block_on_task(async {
         let (store, task, _cleanup) = resolve(issue, task_execution_route).await?;
-        if let Some(jobs) = store
-            .sqlite
-            .stopping_processes(&task.id)
-            .map_err(task_error)?
-        {
-            finish_if_jobs_exited(&store.sqlite, &task, &jobs)?;
-        }
+        finish_if_jobs_exited(&store.sqlite, &task)?;
         let _admission = admission(&task.id)?;
         if let Some(run) = draining(&store.sqlite, &task.id)? {
             return Err(task_error(format!(

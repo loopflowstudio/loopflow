@@ -82,6 +82,12 @@ Next: gate. Every implement item has a passing check; what remains is the two re
 - A private zsh startup file registered the tool SID before the command ran. With the same configuration, explicitly selecting `/bin/sh` left build 39733 in the exited shell’s SID 39720 without a registration. A PreToolUse prefix can displace a configured command rewrite. [Codex hook ordering](https://github.com/openai/codex/blob/rust-v0.171.0/codex-rs/hooks/src/events/pre_tool_use.rs#L156-L172).
 - `cargo nextest run -p loopflow --lib -E 'test(pause_after_run_admission) | test(pause_during_land)'` passed both tests on macOS. An admitted carrier meets pause before its Graph child executes. During a real local merge the pause receipt says the run is finishing, status names the command, and unpause refuses until the operation exits. Git merges the feature and the Graph skips its next step. `cargo fmt` and `cargo clippy --all-targets -- -D warnings` passed.
 
+## Checks after simplifying pause
+
+- `cargo nextest run` with `LOOPFLOW_TEST_LF="$PWD/target/debug/lf"` passed 13 focused macOS checks, including stopping one of two builds, crash recovery, competing PID ownership, wire fixtures, and documented commands. Five CLI fixtures had timed out building the executable inside the test deadline before using the prepared binary.
+- `scripts/test_desktop.sh --skip-build --filter 'PendingChangesTests|everyStateRustSendsDecodes|pausedTaskShowsInItsOwnListAndOpensOnUnpause'` passed 19 tests after building the Swift package with tests.
+- `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, and the architecture and Swift module checks passed. Gate and CI cover the other harnesses and Linux.
+
 ## Checks for Mac and iPhone pause controls
 
 - `scripts/test_desktop.sh --skip-build --filter 'pausedTaskShowsInItsOwnListAndOpensOnUnpause|pausedTaskOffersUnpauseAfterCleanupAndKeepsAutoOffAvailable|boardPickerAndProjectionKeepServerOrderAndMembership|desktopInspectionRetainsUnavailableWorkAndExactPanes'` passed four tests after the Swift build. A paused row stayed out of Working, opened without entering the warm conversation set, and the Workflow bar’s Unpause button issued plain unpause.

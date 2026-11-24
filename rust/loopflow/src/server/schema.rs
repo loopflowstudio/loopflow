@@ -75,9 +75,8 @@ fn add_examples(schema: &mut Value) {
 
 /// Recorded requests, embedded so `describe` needs no source tree. Each
 /// names its operation; a test fails when a request fixture is missing here.
-const REQUESTS: &[&str] = &[
+pub(super) const REQUESTS: &[&str] = &[
     include_str!("../../../loopflow-execution/tests/fixtures/dto/server/performance_write.json"),
-    include_str!("../../../loopflow-execution/tests/fixtures/dto/server/performance_read.json"),
     include_str!("../../../loopflow-execution/tests/fixtures/dto/server/performance_read.json"),
     include_str!("../../../loopflow-execution/tests/fixtures/dto/server/account_connect.json"),
     include_str!("../../../loopflow-execution/tests/fixtures/dto/server/account_disconnect.json"),

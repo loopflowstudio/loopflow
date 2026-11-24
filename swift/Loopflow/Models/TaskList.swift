@@ -1,8 +1,6 @@
 import Foundation
 
-/// Which Tasks a list shows, as a view expression the server resolves. Desktop's
-/// sidebar and the phone ask for the same `started` list: Working Tasks, each
-/// carrying its states.
+/// The Task list Desktop and iPhone request from the Machine.
 public enum TaskList: String, CaseIterable, Identifiable, Sendable {
     case started, available, busy, paused, backlog, done
 

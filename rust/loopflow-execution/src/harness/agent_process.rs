@@ -9,7 +9,9 @@ use crate::store::ProcessIdentityEvidence;
 use crate::harness::LaunchKind;
 use crate::store::{StoreError, StoreResult};
 use anyhow::{anyhow, Result};
-use loopflow_storage::sqlite::SqliteStore;
+use loopflow_model::durable::TaskId;
+use loopflow_storage::process::AgentProcessState;
+use loopflow_storage::sqlite::{task_pause::StoppingSession, SqliteStore};
 use std::collections::{HashMap, HashSet};
 
 use crate::harness::Recording;
@@ -46,10 +48,7 @@ fn admit_task_provider(owner: &Recording, kind: LaunchKind) -> Result<Option<std
         },
         _ => None,
     };
-    let Some(id) = task else { return Ok(None) };
-    let lock = pause::admission(&id)?;
-    store.require_task_unpaused(&id)?;
-    Ok(Some(lock))
+    Ok(task.map(|id| pause::admit_launch(store, &id)).transpose()?)
 }
 
 /// One headless launch sequence for every harness. Keep the attachment fence
@@ -319,11 +318,10 @@ pub(crate) fn stop_session_agent(
     let Some(attachment) = store.session_attachment(session)? else {
         return Ok(());
     };
-    let agent = store
-        .agent_processes()?
-        .into_iter()
-        .find(|agent| agent.id == attachment.agent_process_id);
-    let Some(agent) = agent else {
+    let Some(agent) = store
+        .agent_state(&attachment.agent_process_id)?
+        .filter(|agent| agent.ended_at.is_none())
+    else {
         return Ok(());
     };
     // Already-dead providers have no observed interruption outcome. Preserve that
@@ -427,10 +425,9 @@ pub(crate) fn close_session_agent_process(store: &SqliteStore, session: &str) ->
     let Some(attachment) = store.session_attachment(session)? else {
         return Ok(false);
     };
-    let agents = store.agent_processes()?;
-    let Some(agent) = agents
-        .iter()
-        .find(|agent| agent.id == attachment.agent_process_id)
+    let Some(agent) = store
+        .agent_state(&attachment.agent_process_id)?
+        .filter(|agent| agent.ended_at.is_none())
     else {
         return Ok(false);
     };
@@ -453,7 +450,7 @@ pub(crate) fn close_session_agent_process(store: &SqliteStore, session: &str) ->
         }
         ProcessIdentityEvidence::Live => {}
     }
-    validate_worker_close(store, agent, &agents, pid, started)?;
+    validate_worker_close(store, &agent, pid, started)?;
     close_agent_process(pid, started)
         .map_err(|error| StoreError::InvalidAuthority(error.to_string()))?;
     Ok(true)
@@ -461,14 +458,11 @@ pub(crate) fn close_session_agent_process(store: &SqliteStore, session: &str) ->
 
 fn validate_worker_close(
     store: &SqliteStore,
-    agent: &loopflow_storage::process::AgentProcessState,
-    agents: &[loopflow_storage::process::AgentProcessState],
+    agent: &AgentProcessState,
     pid: u32,
     started: i64,
 ) -> StoreResult<()> {
-    if agents.iter().any(|other| {
-        other.id != agent.id && other.pid == Some(pid) && other.os_started_at == Some(started)
-    }) {
+    if store.agent_shares_identity(&agent.id, pid, started)? {
         return Err(StoreError::InvalidAuthority(
             "AgentProcess OS identity has multiple owners".into(),
         ));
@@ -489,22 +483,14 @@ fn validate_worker_close(
 
 pub(crate) fn capture_worker_jobs(
     store: &SqliteStore,
-    task: &loopflow_model::durable::TaskId,
-) -> Result<Vec<loopflow_storage::sqlite::task_pause::StoppingSession>> {
-    let workers = store.task_worker_agents(task)?;
-    if workers.is_empty() {
-        return Ok(Vec::new());
-    }
-    let agents = store.agent_processes()?;
+    task: &TaskId,
+) -> Result<Vec<StoppingSession>> {
     let mut sessions = Vec::new();
-    for agent in agents
-        .iter()
-        .filter(|a| !a.interactive && workers.contains(&a.id))
-    {
+    for agent in store.task_worker_agents(task)? {
         let Some((pid, birth)) = agent.pid.zip(agent.os_started_at) else {
             continue;
         };
-        let Some(_fence) = store.begin_agent_settlement(agent)? else {
+        let Some(_fence) = store.begin_agent_settlement(&agent)? else {
             continue;
         };
         if OsProcess::session_id(pid)? != Some(pid) {
@@ -517,8 +503,8 @@ pub(crate) fn capture_worker_jobs(
         {
             continue;
         }
-        validate_worker_close(store, agent, &agents, pid, birth)?;
-        sessions.push(loopflow_storage::sqlite::task_pause::StoppingSession {
+        validate_worker_close(store, &agent, pid, birth)?;
+        sessions.push(StoppingSession {
             session: pid,
             members: members.into_iter().map(|p| (p.pid, p.started_at)).collect(),
         });

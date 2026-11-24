@@ -1,11 +1,10 @@
 //! A pause belongs to the Task on the Machine running it. The interrupt and
 //! the identities needed to finish a cut-short stop commit together.
 use loopflow_model::durable::TaskId;
-use loopflow_model::id::AgentProcessId;
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use serde::{Deserialize, Serialize};
 
-use super::{children, durable, sessions::SESSION_GRAPH, SqliteStore};
+use super::{children, durable, SqliteStore};
 use crate::execution::TaskState;
 use crate::process::Starter;
 use crate::rows::now_unix;
@@ -134,19 +133,6 @@ impl SqliteStore {
         }
         tx.commit()?;
         Ok(())
-    }
-
-    /// Only providers launched for a step of this Task's Graph own build jobs.
-    pub fn task_worker_agents(&self, task: &TaskId) -> StoreResult<Vec<AgentProcessId>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut query = conn.prepare(&format!(
-            "SELECT s.agent_process_id FROM agent_sessions s INDEXED BY agent_sessions_unended_agent
-             WHERE s.agent_process_id IS NOT NULL AND s.agent_ended_at IS NULL
-             AND s.agent_started_at IS NOT NULL AND s.completed_at IS NULL
-             AND (SELECT g.task_id FROM graph_processes g WHERE g.lf_process_id={SESSION_GRAPH})=?1"
-        ))?;
-        let rows = query.query_map([task.as_str()], |row| row.get(0))?;
-        Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
 
     pub fn begin_task_pause(

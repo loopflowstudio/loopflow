@@ -104,8 +104,8 @@ impl TaskState {
         matches!(self, Self::Done | Self::Abandoned)
     }
 
-    /// Has a checkout and is still open and unheld.
-    pub fn is_started(&self) -> bool {
+    /// Started, open, and free to continue.
+    pub fn is_working(&self) -> bool {
         matches!(self, Self::Idle | Self::Active | Self::Moving)
     }
 

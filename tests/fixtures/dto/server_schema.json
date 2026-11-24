@@ -4184,12 +4184,6 @@
               "query": {
                 "kind": "machine.self"
               }
-            },
-            {
-              "kind": "performance.read",
-              "query": {
-                "kind": "machine.self"
-              }
             }
           ],
           "properties": {

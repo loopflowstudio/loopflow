@@ -5,8 +5,11 @@ use std::time::{Duration, Instant};
 use fs2::FileExt;
 use rusqlite::{params, OptionalExtension, TransactionBehavior};
 
-use crate::process::{AgentProcess, AttachingLf, LfProcess, ProcessEntry, SessionAttachment};
+use crate::process::{
+    AgentProcess, AgentProcessState, AttachingLf, LfProcess, ProcessEntry, SessionAttachment,
+};
 use crate::{StoreError, StoreResult};
+use loopflow_model::durable::TaskId;
 use loopflow_model::id::{AgentProcessId, AgentSessionId, AttachmentToken, LfProcessId};
 
 use super::{SessionCaller, SqliteStore};
@@ -254,7 +257,7 @@ impl SessionTransfer<'_> {
 #[derive(Debug)]
 pub struct AgentProcessSettlement<'a> {
     store: &'a SqliteStore,
-    expected: crate::process::AgentProcessState,
+    expected: AgentProcessState,
     _dispatch: File,
 }
 
@@ -292,19 +295,17 @@ pub(super) const PROCESS_SELECT: &str =
     e.caller_agent_process_id,e.command,e.repo,e.cwd,
     e.started_at,e.completed_at,e.outcome,e.exit_code,e.signal,e.error,e.pid,e.kind,e.agent_session_id,e.os_started_at FROM processes e";
 
-/// Every Session's agent that has not ended, as `read_agent_state` reads it.
-const SESSION_AGENTS: &str = "SELECT s.agent_process_id,s.id,s.agent_started_at,s.agent_ended_at,
+/// Current agent columns in the order `read_agent_state` reads them.
+const AGENT_STATE: &str = "SELECT s.agent_process_id,s.id,s.agent_started_at,s.agent_ended_at,
     s.agent_pid,s.agent_os_started_at,
     s.agent_launcher_lf_process_id,s.attached_lf_process_id,s.attachment_token,
     s.attached_pid,s.attached_os_started_at,s.provider,COALESCE(s.agent_interactive,s.interactive),
     (s.agent_spawn_state IS 'reserved' AND s.agent_pid IS NULL)
-    FROM agent_sessions s WHERE s.agent_process_id IS NOT NULL AND s.agent_ended_at IS NULL
-    ORDER BY s.agent_process_id";
+    FROM agent_sessions s";
+const UNENDED_AGENT: &str = "s.agent_process_id IS NOT NULL AND s.agent_ended_at IS NULL";
 
-fn read_agent_state(
-    row: &rusqlite::Row<'_>,
-) -> rusqlite::Result<crate::process::AgentProcessState> {
-    Ok(crate::process::AgentProcessState {
+fn read_agent_state(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentProcessState> {
+    Ok(AgentProcessState {
         id: row.get(0)?,
         session_id: row.get(1)?,
         started_at: row.get(2)?,
@@ -1140,9 +1141,11 @@ impl SqliteStore {
     }
 
     /// Every Session's agent that has not ended, attached or released.
-    pub fn agent_processes(&self) -> StoreResult<Vec<crate::process::AgentProcessState>> {
+    pub fn agent_processes(&self) -> StoreResult<Vec<AgentProcessState>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut query = conn.prepare(SESSION_AGENTS)?;
+        let mut query = conn.prepare(&format!(
+            "{AGENT_STATE} WHERE {UNENDED_AGENT} ORDER BY s.agent_process_id"
+        ))?;
         let rows = query
             .query_map([], read_agent_state)?
             .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -1150,27 +1153,51 @@ impl SqliteStore {
     }
 
     /// The agent `id`, ended or not, while it is its Session's current one.
-    pub fn agent_state(
-        &self,
-        id: &AgentProcessId,
-    ) -> StoreResult<Option<crate::process::AgentProcessState>> {
+    pub fn agent_state(&self, id: &AgentProcessId) -> StoreResult<Option<AgentProcessState>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         Ok(conn
             .query_row(
-                &SESSION_AGENTS
-                    .replace("s.agent_ended_at IS NULL", "s.agent_process_id=?1")
-                    .replace(" ORDER BY s.agent_process_id", ""),
+                &format!("{AGENT_STATE} WHERE s.agent_process_id=?1"),
                 [id],
                 read_agent_state,
             )
             .optional()?)
     }
 
+    /// Headless providers launched for a step of this Task's Graph.
+    pub fn task_worker_agents(&self, task: &TaskId) -> StoreResult<Vec<AgentProcessState>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut query = conn.prepare(&format!(
+            "{AGENT_STATE} INDEXED BY agent_sessions_unended_agent WHERE {UNENDED_AGENT}
+             AND s.agent_started_at IS NOT NULL AND s.completed_at IS NULL
+             AND NOT COALESCE(s.agent_interactive,s.interactive)
+             AND (SELECT g.task_id FROM graph_processes g WHERE g.lf_process_id={})=?1",
+            super::sessions::SESSION_GRAPH
+        ))?;
+        let rows = query.query_map([task.as_str()], read_agent_state)?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    /// Another unended agent claiming the same OS identity rules out signaling it.
+    pub fn agent_shares_identity(
+        &self,
+        agent: &AgentProcessId,
+        pid: u32,
+        birth: i64,
+    ) -> StoreResult<bool> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn.query_row(
+            &format!("SELECT EXISTS(SELECT 1 FROM agent_sessions s INDEXED BY agent_sessions_unended_agent
+                      WHERE {UNENDED_AGENT} AND s.agent_pid=?2 AND s.agent_os_started_at=?3 AND s.agent_process_id!=?1)"),
+            params![agent, pid, birth], |row| row.get(0),
+        )?)
+    }
+
     /// Acquire the Session fence and compare the complete saved process image.
     /// The returned claim keeps takeover excluded through external termination.
     pub fn begin_agent_settlement(
         &self,
-        expected: &crate::process::AgentProcessState,
+        expected: &AgentProcessState,
     ) -> StoreResult<Option<AgentProcessSettlement<'_>>> {
         let dispatch = self.lock_session_attachment(&expected.session_id)?;
         let matches: bool = {

@@ -2244,13 +2244,7 @@ fn interrupt_worker_build(pause: bool) {
     if pause {
         // The interrupt is recorded, but its provider cannot close until
         // the attachment fence opens. Start pause inside that interval.
-        let workers = store.task_worker_agents(id).unwrap();
-        let worker = store
-            .agent_processes()
-            .unwrap()
-            .into_iter()
-            .find(|agent| workers.contains(&agent.id))
-            .unwrap();
+        let worker = store.task_worker_agents(id).unwrap().pop().unwrap();
         let fence = store.begin_agent_settlement(&worker).unwrap().unwrap();
         let before = interrupt_rows(home);
         task.ok(&["task", "interrupt", "INF-123"]);

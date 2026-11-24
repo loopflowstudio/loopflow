@@ -734,12 +734,7 @@ pub fn task_place(
     let source = remote::source_for_task(issue)?;
     let (mut task, _admission) =
         prepare_task_with(repo, issue, options, None, source, |store, task| {
-            let lock = pause::admission(&task.id)?;
-            store
-                .sqlite
-                .require_task_unpaused(&task.id)
-                .map_err(task_error)?;
-            Ok(lock)
+            pause::admit_launch(&store.sqlite, &task.id)
         })?;
     block_on_task(async {
         let store = task_store().await?;

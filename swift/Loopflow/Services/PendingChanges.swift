@@ -281,21 +281,22 @@ public final class PendingChanges {
                 if let wave, wave != target { gone.formUnion(matches) }
             case .reopen:
                 contents.updateStates(of: matches) { states in
-                    states.subtracting([.done]).union([.open, Self.started(states) ? .working : .backlog])
+                    states.inSection(Self.started(states) ? .working : .backlog).union([.open])
                 }
             case .pause:
                 contents.updateStates(of: matches) {
-                    $0.subtracting([.working, .backlog, .moving, .active, .idle, .busy, .available, .blocked]).union([.paused])
+                    $0.inSection(.paused).subtracting([.moving, .active, .idle, .busy, .available, .blocked])
                 }
             case .unpause(_, let owned):
-                contents.updateStates(of: matches) { $0.subtracting([.paused]).union([.idle, owned ? .working : .backlog]) }
+                contents.updateStates(of: matches) { $0.inSection(owned ? .working : .backlog).union([.idle]) }
             case .claim:
                 contents.updateStates(of: matches) { states in
-                    Self.started(states) ? states.subtracting([.backlog]).union([.working]) : states
+                    Self.started(states) ? states.inSection(.working) : states
                 }
             case .unassign:
-                contents.updateStates(of: matches) {
-                    $0.contains(.paused) ? $0.subtracting([.paused]).union([.backlog, .idle]) : $0.subtracting([.working]).union([.backlog])
+                contents.updateStates(of: matches) { states in
+                    let backlog = states.inSection(.backlog)
+                    return states.contains(.paused) ? backlog.union([.idle]) : backlog
                 }
             case .renameSession:
                 break
@@ -321,7 +322,6 @@ public final class PendingChanges {
                 tasks.append(moved)
             }
             guard let index = tasks.firstIndex(where: { $0.task.identifier == issue }) else { continue }
-            let started = tasks[index].lifecycle != .unstarted
             switch change.command {
             case .complete:
                 tasks[index].lifecycle = .done
@@ -341,7 +341,7 @@ public final class PendingChanges {
                 tasks[index].section = owned ? .working : .backlog
             case .claim(_, let owner):
                 if let owner { tasks[index].runtime?.owner = owner }
-                if started && tasks[index].lifecycle != .paused { tasks[index].section = .working }
+                if tasks[index].lifecycle.isWorking { tasks[index].section = .working }
             case .unassign:
                 if tasks[index].lifecycle == .paused { tasks[index].lifecycle = .idle }
                 tasks[index].runtime?.owner = nil
@@ -389,26 +389,18 @@ private struct WeakNoticeCenter {
     weak var center: NoticeCenter?
 }
 
-extension [WorkViewPlan.Content] {
-    /// The section a change moves a Task to replaces its old one; a covering
-    /// reading's own states replace these.
-    fileprivate mutating func updateStates(of members: Set<WorkWorkspaceKey>,
-                                           _ update: (Set<WorkSelectionState>) -> Set<WorkSelectionState>) {
-        let sections: Set<WorkSelectionState> = [.backlog, .working, .paused, .done]
-        for index in indices where members.contains(self[index].work) {
-            let current = Set(self[index].states)
-            let next = update(current)
-            let section = next.subtracting(current).intersection(sections)
-            let kept = section.isEmpty ? next : next.subtracting(sections.subtracting(section))
-            self[index].states = WorkSelectionState.allOrdered.filter(kept.contains)
-        }
+private extension Set<WorkSelectionState> {
+    func inSection(_ section: WorkSelectionState) -> Self {
+        subtracting([.backlog, .working, .paused, .done]).union([section])
     }
 }
 
-extension WorkSelectionState {
-    /// Declaration order, so patched states keep a stable order.
-    fileprivate static let allOrdered: [WorkSelectionState] = [
-        .open, .available, .busy, .blocked, .unstarted, .idle, .active, .moving,
-        .backlog, .working, .paused, .done, .auto,
-    ]
+private extension [WorkViewPlan.Content] {
+    mutating func updateStates(of members: Set<WorkWorkspaceKey>,
+                               _ update: (Set<WorkSelectionState>) -> Set<WorkSelectionState>) {
+        for index in indices where members.contains(self[index].work) {
+            let next = update(Set(self[index].states))
+            self[index].states = WorkSelectionState.allCases.filter(next.contains)
+        }
+    }
 }

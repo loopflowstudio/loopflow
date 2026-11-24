@@ -129,7 +129,7 @@ final class WorkModel {
         set { selectionReadings[repositoryReadingKey(repoPath ?? "")] = newValue }
     }
 
-    /// The sidebar's started Tasks for the Wave it was read for: the list the phone shows.
+    /// The sidebar reading and the list expression it answers.
     private var taskListReadings: [RepositoryReadingKey: (expression: String, reading: Reading<WorkViewPlan>)] = [:] {
         didSet {
             reported(WorkPart.taskList.rawValue, "Tasks", from: oldValue.mapValues(\.reading),
@@ -146,12 +146,12 @@ final class WorkModel {
         let kept = previous?.expression == expression ? previous?.reading : nil
         let next: Reading<WorkViewPlan> = plan.map { .available($0, readAt: readAt) }
             ?? (kept?.failed(reason) ?? .unavailable(lastGood: nil, reason: reason))
-        guard previous?.expression != expression || previous?.reading != next else { return }
+        guard kept != next else { return }
         taskListReadings[key] = (expression, next)
         endLaunchWhenCurrent()
     }
 
-    /// The started list, once it answers for the sidebar's current scope.
+    /// The list once it answers for the sidebar's current scope.
     var taskListReading: Reading<WorkViewPlan> {
         let wave: String? = if case .wave(let id) = navigation.sidebarScope { id } else { nil }
         guard let entry = taskListReadings[repositoryReadingKey(repoPath ?? "")], entry.expression == navigation.sidebarFilter.list.expression(wave: wave) else { return .loading }
@@ -1419,8 +1419,7 @@ final class WorkModel {
         return "\(prefix)-\(repo.normalizedFilePath)-\(wave ?? "")"
     }
 
-    /// The sidebar's first frame: the started list saved for `repo` under the
-    /// scope its navigation opens with.
+    /// Restore the list for the filter and Wave the sidebar opens with.
     private func restoreTaskList(repo: String, saved: SavedReadings) {
         let wave: String? = if case .wave(let id) = navigationByRepo[repo]?.sidebarScope { id } else { nil }
         let list = navigationByRepo[repo]?.sidebarFilter.list ?? .started
@@ -2189,8 +2188,6 @@ final class WorkModel {
         }
     }
 
-    /// Planning rows bridge the first list read, including when planning refreshes before the list.
-    /// The started list as last read, else as saved at the last launch; empty before either.
     private var sidebarTaskRows: [(id: String, states: [WorkSelectionState])] { taskRows(taskList) }
 
     /// The repository or Wave's Working Tasks from the started list, or a

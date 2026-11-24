@@ -1,47 +1,47 @@
-at: 4d8a3ff88ce6f8874ea1921e4298c1ad3f9e9bfc
+at: ea43960a9f9e96dc2a1c935d1cbb9b26f913dcbc
 first:
   - path: docs/work.md
-    why: What pausing and unpausing do
+    why: Pause and resume from the saved step
   - path: scratch/plan.md
-    why: Codex probe, worker ownership, and remaining work
+    why: Codex probes and move timing limits
   - path: rust/loopflow-storage/src/sqlite/task_pause.rs
-    why: The hold and the worker identities it protects
+    why: Commit the hold, interrupt, and recorded jobs together
   - path: rust/loopflow/src/lf/commands/write.rs
-    why: Send pause and unpause to the execution Machine
+    why: Route both writes to the execution Machine
   - path: rust/loopflow-execution/src/ops/task/pause.rs
-    why: Stop a Task and finish interrupted cleanup
+    why: Serialize launches, stop work, and retry cleanup
+  - path: rust/loopflow-storage/src/sqlite/processes.rs
+    why: Find the Task’s workers and competing identity claims
+  - path: rust/loopflow-execution/src/harness/agent_process.rs
+    why: Capture worker sessions under their attachment locks
+  - path: rust/loopflow-execution/src/os_process.rs
+    why: Stop verified jobs after their launching shell exits
   - path: rust/loopflow-execution/src/harness/native_exit.rs
-    why: Distinguish a departure from a personal quit
-  - path: rust/loopflow-execution/src/ops/recovery.rs
-    why: Decide when a primary conversation comes back
+    why: Distinguish pause from a personal quit
   - path: rust/loopflow-storage/src/sqlite/steers.rs
-    why: Leave steers unread while their target is paused
-  - path: rust/loopflow-storage/src/sqlite/task_moves.rs
-    why: When the sender can still include a pause
-  - path: rust/loopflow-execution/src/store/ownership.rs
-    why: Route pause while the checkout is leaving
+    why: Keep incoming steers queued
   - path: rust/loopflow-execution/src/ops/human_session/moves.rs
-    why: Carry the pause across Machines and acknowledge retries
+    why: Carry a hold across Machines once
   - path: rust/loopflow-execution/src/task_graph.rs
-    why: Name the held step from its saved cursor
+    why: Name the held step
   - path: rust/loopflow-execution/src/ops/task_run.rs
-    why: Explain when execution can resume
-  - path: rust/loopflow/src/lf/commands/waves.rs
-    why: Project the hold into board and status
+    why: Explain when Unpause becomes available
   - path: swift/Loopflow/Design/TaskActions.swift
-    why: Choose Pause or Unpause and explain when cleanup must finish
+    why: Choose actions on Mac and iPhone
   - path: swift/Loopflow/Services/PendingChanges.swift
-    why: Move rows immediately and restore them if the Machine refuses
+    why: Update both lists while a write settles
   - path: swift/LoopflowMac/WorkModel.swift
-    why: Read the selected section and leave paused conversations closed
+    why: Read the selected list and keep paused conversations closed
   - path: swift/LoopflowiOS/TaskWorkspaceView.swift
-    why: Read a paused conversation and unpause from the phone
-  - path: swift/LoopflowTests/TaskConceptTests.swift
-    why: Select a paused Task and click Unpause in the Mac workflow bar
-  - path: rust/loopflow/tests/machine_commands.rs
-    why: Pause during the push and inspect both Machines
+    why: Show saved history on iPhone
   - path: rust/loopflow/tests/work/task_graph_launch_tests.rs
-    why: Pause during admission, land, interrupt, and builds
+    why: Stop one build while its neighbor continues
+  - path: rust/loopflow/tests/machine_commands.rs
+    why: Exercise pause during a two-Machine move
+  - path: swift/LoopflowTests/TaskConceptTests.swift
+    why: Open and unpause a Task on Mac
+  - path: rust/loopflow/src/server/schema.rs
+    why: Embedded requests drive examples and wire round trips
 hide:
   - path: tests/fixtures/dto/server_schema.json
     why: Generated from the Rust protocol and request fixtures

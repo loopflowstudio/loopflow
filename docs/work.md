@@ -71,14 +71,7 @@ claims and runs. To jump into the conversation directly, run
 
 ### Pause a Task
 
-Pause a started Task to stop its worker, build jobs, and conversation without
-giving up ownership or losing your place:
-
-```bash
-lf task pause LOO-12
-lf task list --state paused
-lf task unpause LOO-12 --run
-```
+Pause an open, started Task to keep its checkout, claim, and Graph step for later.
 
 ```text
 $ lf task pause LOO-12
@@ -87,49 +80,31 @@ LOO-12 paused
 $ lf task status LOO-12
 LOO-12  paused
   Graph code: Paused at build. `lf task unpause` resumes it.
-
-$ lf task unpause LOO-12 --run
-LOO-12 unpaused
-LOO-12 · code from implement running as Graph run lf_94c
-  follow: lf task status LOO-12
 ```
 
-The pause receipt names the Task. If a Graph command is still finishing, the
-receipt says `pausing` and names the run. Status shows the step.
+The worker and builds in its OS session stop. Other Tasks can keep compiling.
+Codex tool shells can create their own OS sessions, and builds in those sessions
+can survive pause. A Graph command already in progress, such as `lf land`,
+finishes at its current step. The pause receipt names the finishing run.
+If cleanup was interrupted, repeat `lf task pause LOO-12` before unpausing.
 
-- **What stops.** The running Graph, its worker, and build processes in the
-  worker’s OS session (such as `cargo` or `rustc`) exit. Codex tool shells can
-  start a separate OS session. Builds in that session can survive a pause.
-  Other Tasks' builds, shared caches, and your own shells stay untouched. If a
-  mutating operation such as `lf land` is already running, it finishes and
-  nothing starts after it
-  (`Pausing at deliver (pr-land is finishing).`).
-- **What stays.** Your ownership on this Machine, uncommitted files, branch, PR,
-  Graph step, `auto` setting, and the primary conversation's thread ID, history,
-  and queued steers. The primary conversation process closes so it holds no CPU
-  or memory; open terminals display the unpause command.
-- **What stays quiet.** While paused, the Task moves out of Working into
-  **Paused** (`lf wave show`, Desktop, and iPhone). `lf task run`,
-  `lf task auto on`, `lf resume --task`, server recovery after a restart,
-  `wave-operate`, and incoming steers or Linear/Asana comments all leave it
-  quiet (steers and comments queue until you unpause).
-- **Resuming.** `lf task unpause LOO-12` lifts the hold. An owned Task returns
-  to Working, and an unassigned Task returns to Backlog. The server can bring
-  back a conversation closed by pause. A conversation you quit stays closed.
-  The Graph stays at its saved step. Add `--run` to continue from that step.
-  Unpause refuses while a stopping process or draining operation is still live
-  and names it; repeat `lf task pause LOO-12` to retry cleanup if an earlier
-  stop was cut short.
-- **Lifecycle.** Only open, started Tasks can be paused (`unstarted` backlog,
-  `done`, and `abandoned` Tasks are refused). `lf task unassign` refuses while
-  processes are still stopping, then clears the pause and returns the Task to
-  Backlog. `lf task complete`, `lf task abandon`, and `lf task reopen` also
-  clear the pause. `lf task move LOO-12 --machine mini` carries the pause to the
-  destination Machine so it arrives quiet. You can still pause on the source
-  while the move is pushing the checkout.
+The primary conversation closes and its terminal shows the unpause command.
+The Task keeps its branch, dirty files, PR, auto setting, conversation history,
+and queued steers. Runs, Auto-Ship, resume, incoming comments, and server
+restarts all respect the hold.
 
-Use `lf task interrupt LOO-12` instead when you only want to stop the running
-Graph while staying in Working with the conversation open.
+Find it in **Paused** on Mac and iPhone, in `lf wave show`, or with
+`lf task list --state paused`. Plain `lf task unpause LOO-12` lifts the hold
+and lets the server reopen the conversation unless you had quit it.
+An owned Task returns to Working and an unassigned Task returns to Backlog.
+To run from the saved step immediately, use `lf task unpause LOO-12 --run`.
+
+Unassign clears the hold once cleanup settles. Complete, abandon, and reopen
+also clear it. A move carries the hold to the destination, including a pause
+issued while the source is pushing the checkout. A pause issued after the
+payload was sent can need a retry when the checkout arrives.
+
+Use `lf task interrupt LOO-12` to stop a run and keep its conversation open.
 
 ## See where everything stands
 

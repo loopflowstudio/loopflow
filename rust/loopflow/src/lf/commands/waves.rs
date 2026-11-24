@@ -22,7 +22,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::lf::commands::session::SessionFacts;
 use crate::lf::commands::session_history::format_tokens;
-use crate::lf::commands::task_row::{TaskDetail, TaskGraphRow, TaskNames, TaskRow, TaskThread};
+use crate::lf::commands::task_row::{
+    TaskDetail, TaskGraphRow, TaskNames, TaskReading, TaskRow, TaskThread,
+};
 use loopflow_execution::durable::{TaskSection, TaskState};
 use loopflow_execution::ops::task_execution::{TaskExecutionSnapshot, TaskExecutionState};
 use loopflow_execution::output::Colors;
@@ -502,6 +504,10 @@ pub struct RoadmapTask {
     pub section: TaskSection,
     /// Whether its owner is you; `false` when nobody owns it.
     pub owned_by_you: bool,
+    /// The Machine that runs it when another Machine than this one owns it;
+    /// `null` when this Machine owns it or nobody does.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub runs_on: Option<loopflow_model::durable::TaskRunsOn>,
     /// The graph step the Task stands at; `None` while a run carries it.
     /// Carried to `lf task status`'s `TaskRow`, not on the wire.
     #[serde(skip)]
@@ -906,16 +912,15 @@ pub fn list_tasks(repo: &Path, query: &TaskListArgs, json: bool) -> Result<()> {
             println!("{}", serde_json::to_string(&tasks)?);
         } else if let Some(store) = &store {
             // Without a store there are no Tasks to print.
-            let local = loopflow_execution::store::machines::local_machine(&store.sqlite)?.id;
             for (task, depth, _) in task_hierarchy(&tasks) {
                 let id = loopflow_model::durable::TaskId::from_raw(task.task.id.clone());
-                let ownership =
-                    loopflow_execution::store::ownership::task_ownership(&store.sqlite, &id)?;
                 let mut owner = owner_text(task.runtime.as_ref()).to_string();
                 // A move that has not arrived reads as that, as in `lf task status`.
                 let place = loopflow_execution::ops::task_ownership::move_line(&store.sqlite, &id)?
                     .or_else(|| {
-                        loopflow_execution::ops::task_ownership::runs_elsewhere(&ownership, &local)
+                        task.runs_on
+                            .as_ref()
+                            .map(loopflow_execution::ops::task_ownership::runs_elsewhere)
                     });
                 if let Some(place) = place {
                     owner = format!("{owner} · {place}");
@@ -967,87 +972,202 @@ pub fn subscribe_task_status(
     })
 }
 
-/// A connection to the server of the Machine that runs the Task `issue`
-/// names, and the `task.status` read to send it; `None` when it runs here or
-/// a move from here has not arrived, whose progress only this Machine knows.
-fn task_machine(repo: &Path, issue: &str) -> Result<Option<TaskMachine>> {
+/// How long `lf task status` waits for the server of the Machine that runs
+/// the Task before reading it here.
+const OWNER_READ: std::time::Duration = std::time::Duration::from_secs(15);
+
+/// Where `lf task status` reads the Task `issue` names.
+enum TaskPlace {
+    /// This Machine: it runs the Task, nobody owns it on a Machine registered
+    /// here, or a move from here has not arrived, whose progress only this
+    /// Machine knows.
+    Here,
+    /// The server of the registered Machine that runs it.
+    Owner(Box<TaskMachine>),
+    /// Here, because the registered Machine that runs it did not answer.
+    Unanswered(String),
+}
+
+fn task_place(repo: &Path, issue: &str, until: Option<std::time::Instant>) -> Result<TaskPlace> {
     use loopflow_execution::machine::wire::{Secrets, Selection, Sender};
     let Some(route) = loopflow_execution::machine::task::remote_ownership_writer(issue)? else {
-        return Ok(None);
+        return Ok(TaskPlace::Here);
     };
-    let machine = super::write::find_machine(route.machine_id.as_str())?;
+    let store = loopflow_execution::store::read_existing_registry()?
+        .ok_or_else(|| anyhow!("no Loopflow store exists on this Machine"))?;
+    let Some(machine) = loopflow_execution::store::machines::machines(&store.sqlite)?
+        .into_iter()
+        .find(|machine| machine.id == route.machine_id)
+    else {
+        // The reading here says the Machine is not registered.
+        return Ok(TaskPlace::Here);
+    };
+    let local = loopflow_execution::store::machines::local_machine(&store.sqlite)?.id;
+    let runs_on =
+        loopflow_execution::store::ownership::task_ownership(&store.sqlite, &route.task_id)?
+            .runs_on(&local);
     let sender = Sender {
         repository: route.repository_id,
         selection: Selection::capture(repo, None)?,
         secrets: Secrets::default(),
     };
     let connection =
-        loopflow_execution::machine::client::Connection::open_on(&machine, sender, None)?;
-    let read = super::read::Read::TaskStatus {
-        directory: repo.to_owned(),
-        issue: route.task_id.to_string(),
-    };
-    Ok(Some(TaskMachine {
+        match loopflow_execution::machine::client::Connection::open_on(&machine, sender, until) {
+            Ok(connection) => connection,
+            Err(error) => return Ok(TaskPlace::Unanswered(format!("{error:#}"))),
+        };
+    Ok(TaskPlace::Owner(Box::new(TaskMachine {
         name: machine.name(),
         connection,
-        read,
-    }))
+        read: super::read::Read::TaskStatus {
+            directory: repo.to_owned(),
+            issue: route.task_id.to_string(),
+        },
+        runs_on,
+    })))
 }
 
 struct TaskMachine {
     name: String,
     connection: loopflow_execution::machine::client::Connection,
     read: super::read::Read,
+    /// Where it runs as this Machine names it; the owner's own reading says
+    /// it runs there.
+    runs_on: Option<loopflow_model::durable::TaskRunsOn>,
 }
 
 impl TaskMachine {
-    fn status(mut self) -> Result<serde_json::Value> {
+    fn detail(mut self) -> Result<TaskDetail> {
         let answer = self
             .connection
             .request(crate::server::wire::Operation::Read(self.read))?;
-        Ok(answer.result)
+        let mut detail: TaskDetail = serde_json::from_value(answer.result)?;
+        detail.reading = TaskReading::Owner;
+        detail.task.runs_on = self.runs_on;
+        Ok(detail)
     }
 }
 
-/// `task.status` for a Task another Machine runs, as that Machine's server
-/// reads it; `None` when it runs here.
-pub(crate) fn remote_task_detail(repo: &Path, issue: &str) -> Result<Option<serde_json::Value>> {
-    task_machine(repo, issue)?
-        .map(TaskMachine::status)
-        .transpose()
+/// `task.status` for a Task another Machine runs: that Machine's server's
+/// reading, or this Machine's when that server does not answer within
+/// [`OWNER_READ`]; `None` when it is read here.
+pub(crate) fn remote_task_detail(repo: &Path, issue: &str) -> Result<Option<TaskDetail>> {
+    let until = std::time::Instant::now() + OWNER_READ;
+    let reason = match task_place(repo, issue, Some(until))? {
+        TaskPlace::Here => return Ok(None),
+        TaskPlace::Owner(machine) => match machine.detail() {
+            Ok(detail) => return Ok(Some(detail)),
+            Err(error) => format!("{error:#}"),
+        },
+        TaskPlace::Unanswered(reason) => reason,
+    };
+    let mut detail = read_task_detail(repo, issue)?;
+    detail.unobserved(reason);
+    Ok(Some(detail))
+}
+
+/// What `lf task status` still prints here after asking where the Task runs.
+pub enum RemoteStatus {
+    /// The Machine that runs it answered, or `--json` printed the reading.
+    Printed,
+    /// It is read here.
+    Here,
+    /// It runs on a registered Machine that did not answer, for this reason.
+    Unanswered(String),
 }
 
 /// `lf task status <issue>` (`--json`, `--subscribe`) for a Task another
-/// Machine runs, from that Machine's server. `false` when it runs here.
+/// Machine runs, from that Machine's server.
 pub fn print_remote_task_status(
     repo: &Path,
     issue: &str,
     json: bool,
     subscribe: bool,
-) -> Result<bool> {
-    let Some(machine) = task_machine(repo, issue)? else {
-        return Ok(false);
-    };
+) -> Result<RemoteStatus> {
     if subscribe {
-        print_remote_readings(machine)?;
-    } else if json {
+        return match task_place(repo, issue, None)? {
+            TaskPlace::Here => Ok(RemoteStatus::Here),
+            TaskPlace::Owner(machine) => {
+                print_remote_readings(*machine)?;
+                Ok(RemoteStatus::Printed)
+            }
+            TaskPlace::Unanswered(reason) => Err(anyhow!("{reason}")),
+        };
+    }
+    if json {
+        let Some(detail) = remote_task_detail(repo, issue)? else {
+            return Ok(RemoteStatus::Here);
+        };
         println!(
             "{}",
             serde_json::to_string_pretty(&loopflow_execution::read_stream::selected_answer(
-                &machine.status()?
+                &detail
             )?)?
         );
-    } else {
-        let name = machine.name.clone();
-        print_remote_detail(&name, &serde_json::from_value(machine.status()?)?)?;
+        return Ok(RemoteStatus::Printed);
     }
-    Ok(true)
+    let until = std::time::Instant::now() + OWNER_READ;
+    let machine = match task_place(repo, issue, Some(until))? {
+        TaskPlace::Here => return Ok(RemoteStatus::Here),
+        TaskPlace::Unanswered(reason) => return Ok(RemoteStatus::Unanswered(reason)),
+        TaskPlace::Owner(machine) => machine,
+    };
+    let name = machine.name.clone();
+    match machine.detail() {
+        Ok(detail) => {
+            print_remote_detail(&name, &detail)?;
+            Ok(RemoteStatus::Printed)
+        }
+        Err(error) => Ok(RemoteStatus::Unanswered(format!("{error:#}"))),
+    }
+}
+
+/// `lf task status`'s line for a Task another Machine runs that this Machine
+/// reads itself: where it runs and why it was not read there. `None` when it
+/// runs here or nobody owns it.
+pub fn unobserved_line(
+    ownership: &loopflow_model::durable::TaskOwnership,
+    unanswered: Option<String>,
+) -> Result<Option<String>> {
+    let Some(store) = loopflow_execution::store::read_existing_registry()? else {
+        return Ok(None);
+    };
+    let local = loopflow_execution::store::machines::local_machine(&store.sqlite)?.id;
+    let Some(runs_on) = ownership.runs_on(&local) else {
+        return Ok(None);
+    };
+    let reason = match unanswered {
+        Some(reason) => reason,
+        None => unasked(&store.sqlite, &runs_on)?,
+    };
+    Ok(Some(super::task_row::unobserved_reason(&runs_on, &reason)))
+}
+
+/// Why this Machine read a Task `runs_on` runs without asking that Machine.
+fn unasked(
+    store: &loopflow_storage::sqlite::SqliteStore,
+    runs_on: &loopflow_model::durable::TaskRunsOn,
+) -> Result<String> {
+    let name = runs_on.machine.name();
+    let registered = loopflow_execution::store::machines::machines(store)?
+        .iter()
+        .any(|machine| Some(&machine.id) == runs_on.machine.id.as_ref());
+    Ok(match registered {
+        true => format!("this reading does not ask {name}"),
+        false => format!("{name} is not registered here"),
+    })
 }
 
 fn print_remote_detail(machine: &str, detail: &TaskDetail) -> Result<()> {
     let task = &detail.task;
     println!("{} · {}", task.title, task.identifier);
-    println!("Runs on {machine}; read from its server.");
+    match &task.runs_on {
+        Some(runs_on) => println!(
+            "{}; read from its server.",
+            loopflow_execution::ops::task_ownership::runs_elsewhere(runs_on)
+        ),
+        None => println!("Runs on {machine}; read from its server."),
+    }
     println!(
         "State: {}{} · {}",
         serde_json::to_value(task.state)?
@@ -1428,7 +1548,8 @@ pub(crate) async fn task_detail(
         }
     }
     let summary = store.sqlite.task_summary(&task.id)?;
-    Ok(TaskDetail {
+    let mut detail = TaskDetail {
+        reading: TaskReading::Here,
         summary,
         parent,
         children,
@@ -1449,7 +1570,18 @@ pub(crate) async fn task_detail(
             .map(TaskGraphRow::of)
             .collect(),
         comments: status.comments.map(TaskThread::from),
-    })
+    };
+    // A Task another Machine runs is read here only when that Machine is not
+    // asked; a move from here that has not arrived is this Machine's to read.
+    if let Some(runs_on) = detail
+        .task
+        .runs_on
+        .clone()
+        .filter(|_| detail.task.state != TaskState::Moving)
+    {
+        detail.unobserved(unasked(&store.sqlite, &runs_on)?);
+    }
+    Ok(detail)
 }
 
 /// The Task's conversation, as `lf session list` reads it; `None` before it
@@ -2252,7 +2384,9 @@ async fn snapshot_task_detail(
         .completion_pending
         .get(&task.id)
         .map(|reason| loopflow_execution::ops::task::completion_pending_text(task, reason));
-    let owner = facts.owners.get(&task.id).cloned();
+    let ownership = facts.ownership.get(&task.id);
+    let owner = ownership.and_then(|ownership| ownership.owner.clone());
+    let runs_on = ownership.and_then(|ownership| ownership.runs_on(&shared.local_machine));
     let wave = task
         .wave_id
         .as_ref()
@@ -2313,10 +2447,27 @@ async fn snapshot_task_detail(
         pr.as_ref().map(TaskPr::phase),
         at_end,
     );
+    // An open Task another Machine runs moves there; this Machine's execution
+    // records are what it left behind.
+    let elsewhere = runs_on.as_ref().filter(|_| {
+        !matches!(
+            status,
+            TaskState::Done | TaskState::Abandoned | TaskState::Moving
+        )
+    });
     let conducting = finished
-        .filter(|_| open_children > 0 && execution.state != TaskExecutionState::Running)
+        .filter(|_| {
+            elsewhere.is_none()
+                && open_children > 0
+                && execution.state != TaskExecutionState::Running
+        })
         .map(|finished| finished.reason(open_children));
-    let next_move = if let Some(reason) = conducting.clone() {
+    let next_move = if let Some(runs_on) = elsewhere {
+        NextMove {
+            owner: NextMoveOwner::Task,
+            reason: loopflow_execution::ops::task_ownership::runs_elsewhere(runs_on),
+        }
+    } else if let Some(reason) = conducting.clone() {
         NextMove {
             owner: NextMoveOwner::Task,
             reason,
@@ -2471,6 +2622,7 @@ async fn snapshot_task_detail(
         }),
         section,
         owned_by_you,
+        runs_on,
         step: facts.steps.get(&task.id).cloned(),
         finished,
         conducting,

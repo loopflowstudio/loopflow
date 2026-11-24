@@ -108,7 +108,7 @@ fn work_in(
     let task_states = super::task_details::states_in(conn, &ids_json)?;
     let auto_on = super::task_details::auto_on_in(conn, &ids_json)?;
     let published = super::task_started::published_in(conn, &ids)?;
-    let owners = super::task_ownership::owners_in(conn, &ids)?;
+    let owners = super::task_ownership::ownerships_in(conn, &ids)?;
     let mut task_work = Vec::with_capacity(tasks.len());
     for task in tasks {
         let state = *task_states

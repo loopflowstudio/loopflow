@@ -666,7 +666,7 @@ impl Read {
     pub fn read(&self) -> anyhow::Result<serde_json::Value> {
         if let Self::TaskStatus { directory, issue } = self {
             if let Some(detail) = super::waves::remote_task_detail(directory, issue)? {
-                return Ok(detail);
+                return value(&detail);
             }
         }
         self.read_here()

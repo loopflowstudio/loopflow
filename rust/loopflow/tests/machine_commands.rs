@@ -4566,10 +4566,11 @@ exec env -i HOME='{remote}' PATH=/usr/bin:/bin bash -c "$remote_command"
         String::from_utf8(output.stdout).unwrap()
     };
 
-    let json: Value = serde_json::from_str(&status(&["--json", "--select", "task.title"])).unwrap();
+    let json: Value =
+        serde_json::from_str(&status(&["--json", "--select", "task.title,reading"])).unwrap();
     assert_eq!(
         json,
-        serde_json::json!({"task": {"title": "Renamed on mini"}})
+        serde_json::json!({"task": {"title": "Renamed on mini"}, "reading": {"kind": "owner"}})
     );
     let human = status(&[]);
     assert!(human.starts_with("Renamed on mini · "), "{human}");
@@ -4587,6 +4588,88 @@ exec env -i HOME='{remote}' PATH=/usr/bin:/bin bash -c "$remote_command"
     assert_eq!(
         plan.local.task(&task).unwrap().unwrap().title,
         "Ownership demo"
+    );
+}
+
+/// A Task mini runs, read on a laptop that cannot ask mini, says where it
+/// runs and why mini was not read, and offers nothing to run here.
+#[test]
+fn a_status_read_mini_cannot_answer_says_where_the_task_runs_and_why() {
+    let fixture = preview_machines();
+    let (plan, task) = task_on_mini(&fixture);
+    let owner = plan.remote.saved_local_machine().unwrap().id;
+    let flags = fixture.root.path().join("flags");
+    hub_ssh(&fixture, &flags);
+    fs::write(flags.join("down"), "").unwrap();
+    let run = |argv: &[&str]| {
+        let output = fixture
+            .command(argv)
+            .current_dir(&plan.local_path)
+            .stdin(Stdio::null())
+            .output()
+            .unwrap();
+        assert_success(&output);
+        String::from_utf8(output.stdout).unwrap()
+    };
+    let status = || -> Value {
+        serde_json::from_str(&run(&["task", "status", task.as_str(), "--json"])).unwrap()
+    };
+
+    let offline = status();
+    assert_eq!(offline["reading"]["kind"], "unobserved", "{offline}");
+    assert!(
+        offline["reading"]["reason"]
+            .as_str()
+            .unwrap()
+            .contains("unreachable"),
+        "{offline}"
+    );
+    assert_eq!(offline["task"]["runs_on"]["machine"]["id"], owner.as_str());
+    assert_eq!(offline["task"]["next"], Value::Null, "{offline}");
+    assert_eq!(offline["graph"], Value::Null, "{offline}");
+    let reason = offline["task"]["reason"].as_str().unwrap();
+    assert!(reason.starts_with("Runs on mini since "), "{reason}");
+    assert!(
+        reason.ends_with(", so its Graph and Sessions are not read here"),
+        "{reason}"
+    );
+    let human = run(&["task", "status", task.as_str()]);
+    assert!(
+        human.contains("so its Graph and Sessions are not read here"),
+        "{human}"
+    );
+
+    // A sibling that never registered mini reads the same way, without SSH.
+    fs::remove_file(flags.join("down")).unwrap();
+    assert_success(&fixture.run(&["machine", "remove", "mini"]));
+    let sibling = status();
+    assert_eq!(
+        sibling["reading"]["reason"],
+        format!("{} is not registered here", owner.as_str()),
+        "{sibling}"
+    );
+    assert_eq!(sibling["task"]["runs_on"]["machine"]["id"], owner.as_str());
+    assert_eq!(sibling["task"]["next"], Value::Null);
+
+    let tasks: Value = serde_json::from_str(&run(&["task", "list", "--json"])).unwrap();
+    let listed = tasks
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["task"]["id"] == task.as_str())
+        .unwrap();
+    assert_eq!(listed["runs_on"]["machine"]["id"], owner.as_str());
+    assert!(
+        listed["next_move"]["reason"]
+            .as_str()
+            .unwrap()
+            .starts_with(&format!("Runs on {} since ", owner.as_str())),
+        "{listed}"
+    );
+    let list = run(&["task", "list"]);
+    assert!(
+        list.contains(&format!("Runs on {} since ", owner.as_str())),
+        "{list}"
     );
 }
 
@@ -4726,7 +4809,8 @@ fn a_served_status_for_a_task_mini_runs_is_minis_answer() {
 
     let fixture = preview_machines();
     let (plan, task) = task_on_mini(&fixture);
-    let answer = serde_json::json!({"task": {"title": "Renamed on mini"}});
+    let answer: Value =
+        serde_json::from_str(include_str!("../../../tests/fixtures/dto/task_detail.json")).unwrap();
     let record = fixture.root.path().join("entry");
     fs::create_dir_all(&record).unwrap();
     answering_entry(&fixture, &record, &answer);
@@ -4745,7 +4829,15 @@ fn a_served_status_for_a_task_mini_runs_is_minis_answer() {
         .result;
     drop(server);
 
-    assert_eq!(read, answer);
+    // Mini's reading, saying it is mini's and where the Task runs as the laptop names it.
+    let mut expected = answer;
+    expected["reading"] = serde_json::json!({"kind": "owner"});
+    expected["task"]["runs_on"] = read["task"]["runs_on"].clone();
+    assert_eq!(read, expected);
+    assert_eq!(
+        read["task"]["runs_on"]["machine"]["label"], "mini",
+        "{read}"
+    );
     let (_, request) = entry_input(&record);
     assert_eq!(request["operation"]["kind"], "task.status");
     assert_eq!(request["sender"]["repository"], plan.repository.as_str());

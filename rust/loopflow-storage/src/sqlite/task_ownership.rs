@@ -106,21 +106,29 @@ fn logs_in(
     Ok(logs)
 }
 
-/// Each listed Task's current owner as this Machine reads it, with Machine
-/// labels as best known here; Tasks without an owner are absent.
-pub(super) fn owners_in(
+/// Each listed Task's ownership as this Machine reads it, with Machine
+/// labels as written; Tasks without an owner are absent.
+pub(super) fn ownerships_in(
     conn: &Connection,
     tasks: &[TaskId],
-) -> StoreResult<HashMap<TaskId, TaskOwner>> {
+) -> StoreResult<HashMap<TaskId, TaskOwnership>> {
     let local = local_machine_in(conn)?;
-    let mut owners = HashMap::new();
-    for (task, rows) in logs_in(conn, tasks)? {
-        let Some(owner) = read_log(&rows, &local).owner else {
+    let mut owned = HashMap::new();
+    for (task, log) in logs_in(conn, tasks)? {
+        let reading = read_log(&log, &local);
+        if reading.owner.is_none() {
             continue;
-        };
-        owners.insert(task, owner);
+        }
+        owned.insert(
+            task,
+            TaskOwnership {
+                owner: reading.owner,
+                superseded_by: reading.superseded_by,
+                log,
+            },
+        );
     }
-    Ok(owners)
+    Ok(owned)
 }
 
 /// Who holds a Task after an entry, with the Machine label as written.

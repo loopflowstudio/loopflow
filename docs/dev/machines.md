@@ -440,7 +440,8 @@ status read go straight to mini's server:
 $ lf steer MTG-321 "also check bar"
 mini · Saved 0199a2f1; MTG-321's worker reads it at its next boundary
 $ lf task status MTG-321
-MTG-321  Runs on mini since Nov 12 10:42
+Check the parser · MTG-321
+Runs on mini since Nov 12 10:42; read from its server.
 …
 ```
 
@@ -455,6 +456,7 @@ A rented sandbox has no route to its siblings. On `modal-2`, steering a Task
 $ lf steer MTG-419 "stop refactoring foo"
 Queued 0199a2f4 in Linear for modal-3; modal-3 is not registered here. modal-3 reads it when it next syncs
 $ lf task status MTG-419
+…
 MTG-419  Runs on modal-3 since Nov 23 09:05; modal-3 is not registered here, so its Graph and Sessions are not read here
 ```
 
@@ -473,11 +475,12 @@ rather than saving it a second time; `lf task status` shows whether it landed.
 
 Status and lists never offer `lf task run` for a Task another Machine runs:
 `task.next` is `null`. `lf task list` names the Machine from the ownership log
-and dials no one:
+and dials no one. A Machine your preferences don't name shows the public name
+its claim carried, else its id:
 
 ```console
 $ lf task list
-MTG-419 · Jack · Runs on modal-3 since Nov 23 09:05
+MTG-419 · Jack · Runs on modal-3 since Nov 23 09:05 · Stop refactoring foo
 ```
 
 | `--json` field | Says |

@@ -216,14 +216,36 @@ copies every watermark and marks the released table leaving.
 - `dto_fixtures::task_steer_receipt_requires_its_delivery_and_nullable_machine`, `planning_scope_checks::tests::scope_migration_keeps_attempts_and_watermarks`, `owned_tracker_checks_deliver_a_late_comment_to_worker_and_primary_once` and `served_reads::server_operations_match_their_lf_commands` passed; `cargo clippy --all-targets -- -D warnings` passed.
 - What the served-reads flake taught: since slice 1b the server makes an owned plan exchange at startup. `register_task_fixture` registered the raw `/var/folders` tempdir while `lf` registers Git's `/private/var` root, so one repository had two `plan_carriers` rows and the server re-sent from 0 during reads. The test now registers the canonical path and carries the plan once before the server starts.
 
-### Slice 3: Honest cross-Machine status and lists (`runs_on` + `reading`) (next)
-- Add `runs_on: Option<TaskRunsOn { machine: MachineRef, since }>` to `TaskRow` and `RoadmapTask`, computed once in `snapshot_task_detail` from `owner_elsewhere` (independent of `declared_machines`); `runs_elsewhere` becomes its `Display`. Add `reading: TaskReading` (`here | owner | unobserved { reason }`) to `TaskDetail`.
-- In `snapshot_task_detail`, an open Task with `runs_on` set takes `reason` "Runs on <machine> since <when>" and `next: None` before `next_move_for_task` runs; `task_detail` appends the unobserved reason. Lists and status share this.
-- Update `waves.rs` (`task_machine`, `remote_task_detail`, `print_remote_task_status`, `task_detail`, `list_tasks`) and `bin/lf.rs` (`TaskCommand::Status` text output):
-  - Query registered remote owners over SSH with a 15 s deadline; tag live replies `reading: owner`.
-  - On unregistered peer or SSH/server failure, return `reading: unobserved { reason }` (keeping terminal `done`/`abandoned` intact).
-  - Text printers read `runs_on`/`reason` from the record; delete their own `runs_elsewhere`/`runs_elsewhere_here` calls (`waves.rs:918`, `bin/lf.rs:1205`) and `runs_elsewhere_here` itself if nothing else calls it. `moving_here` stays as the move-in-flight line.
-- Update `tests/fixtures/dto/task_detail.json`, `roadmap_snapshot.json` (+ Swift mirror), `server_schema.json`, `dto_fixtures.rs`, `served_reads.rs`, and `machine_commands.rs` (reachable remote, unregistered sibling sandbox, unreachable registered peer, `lf task list --json` on the sibling).
+### Slice 3: Honest cross-Machine status and lists (`runs_on` + `reading`) (implemented)
+
+`TaskOwnership::runs_on(local)` (model) is the one predicate; `TaskRunsOn
+{ machine: MachineRef, since }` rides on `RoadmapTask` and `TaskRow`, read from
+`TaskDetailFacts.ownership` (storage now returns each owned Task's whole
+ownership, labeled once in `store::ownership::task_detail_facts`).
+`ops::task_ownership::runs_elsewhere(&TaskRunsOn)` is the sentence;
+`runs_elsewhere_here` is gone. In `snapshot_task_detail` an open, not-moving
+Task with `runs_on` takes `next_move.reason` "Runs on … since …", no conducting
+reason, and `TaskRow.next == null`.
+
+`TaskDetail.reading` is `here | owner | unobserved { reason }`.
+`waves::task_place` decides: unregistered owner → read here, and `task_detail`
+itself marks it unobserved ("<name> is not registered here"); registered →
+`Connection::open_on` with a 15 s deadline (subscriptions open without one).
+An open or request failure falls back to the local reading with the error as
+reason (`TaskDetail::unobserved` rewrites `task.reason`, nulls `graph`).
+A live reply is tagged `owner` and gets the caller's `runs_on`. Text status
+prints `waves::unobserved_line` (same sentence as `task.reason`); the remote
+text header prints `runs_on`.
+
+Machine name: preferences' name, else the public name the claim carried, else
+the id (existing labeling; the open question resolves to this, docs say so).
+
+- `dto_fixtures::task_detail_requires_where_it_runs_and_whose_reading_it_is`, fixtures gain `runs_on: null`/`reading`, `server_schema.json` regenerated.
+- `machine_commands::a_status_read_mini_cannot_answer_says_where_the_task_runs_and_why`: offline registered peer, then unregistered sibling (status, `task list --json`, text list).
+- `machine_commands::a_served_status_for_a_task_mini_runs_is_minis_answer` now answers a full `TaskDetail` and checks `reading: owner` and `runs_on`.
+- Ran: the three `machine_commands::a_status_read…`/`a_served_status…` tests and `dto_fixtures::` (all pass), `cargo fmt`, `cargo clippy --all-targets -- -D warnings`. Gate runs `served_reads`, `binary(lf)` and `test(machine_commands::)`.
+- Gate risk: `a_status_read_for_a_task_mini_runs_shows_a_rename_made_there` once read the local copy when it ran beside ~50 fixtures; alone and with its two neighbours it passed. The 15 s deadline is what changed, so a stand-in SSH round trip slower than 15 s falls back to `unobserved`. Its assertion now selects `reading`, so a repeat prints the reason.
+- Swift decodes `RoadmapTask` with synthesized `Decodable` and ignores `runs_on`; no Swift field until a view reads it.
 
 ## Done when
 
@@ -240,4 +262,3 @@ Derived from the Wave KRs (*"advance work without getting blocked by Loopflow's 
 - `docs/work.md` — "Steer work in flight": `lf steer` receipt line and `--json` `delivery` fields.
 - `docs/dev/machines.md` — steer joins the forwarded writes (with its fallback exception); new section "Steer and read a Task another Machine runs"; `lf task list` example drops the trailing next-move text for a remote Task.
 
-Open question: on `modal-2`, which name does `runs_on.machine` print for an unregistered `modal-3`, its public name from the ownership entry or its Machine id? The docs assume the public name (`Runs on modal-3`); the existing machines.md text says a Machine unknown to the caller's preferences shows its id.

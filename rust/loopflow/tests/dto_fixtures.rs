@@ -395,6 +395,39 @@ fn task_detail_says_each_fact_once() {
 }
 
 #[test]
+fn task_detail_requires_where_it_runs_and_whose_reading_it_is() {
+    use loopflow::lf::commands::task_row::{TaskDetail, TaskReading};
+    let wire: serde_json::Value =
+        serde_json::from_str(include_str!("../../../tests/fixtures/dto/task_detail.json")).unwrap();
+    let mut missing = wire.clone();
+    missing.as_object_mut().unwrap().remove("reading");
+    assert!(serde_json::from_value::<TaskDetail>(missing).is_err());
+    let mut missing = wire.clone();
+    missing["task"].as_object_mut().unwrap().remove("runs_on");
+    assert!(serde_json::from_value::<TaskDetail>(missing).is_err());
+
+    let mut elsewhere = wire;
+    elsewhere["task"]["runs_on"] = serde_json::json!({
+        "machine": {"id": "home_0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b", "label": "modal-3"},
+        "since": 1_763_900_000
+    });
+    elsewhere["reading"] =
+        serde_json::json!({"kind": "unobserved", "reason": "modal-3 is not registered here"});
+    let detail: TaskDetail = serde_json::from_value(elsewhere.clone()).unwrap();
+    assert_eq!(
+        detail.reading,
+        TaskReading::Unobserved {
+            reason: "modal-3 is not registered here".into()
+        }
+    );
+    assert_eq!(
+        detail.task.runs_on.as_ref().unwrap().machine.name(),
+        "modal-3"
+    );
+    assert_eq!(serde_json::to_value(&detail).unwrap(), elsewhere);
+}
+
+#[test]
 fn task_status_preserves_canonical_work_and_tracker_state() {
     use loopflow::lf::commands::waves::DesktopTaskPane;
     let json = include_str!("../../../tests/fixtures/dto/task_status.json");

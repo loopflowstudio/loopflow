@@ -8611,6 +8611,17 @@
         "run_control": {
           "$ref": "#/$defs/TaskRunControl"
         },
+        "runs_on": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TaskRunsOn"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The Machine that runs it when another Machine than this one owns it;\n`null` when this Machine owns it or nobody does."
+        },
         "runtime": {
           "anyOf": [
             {
@@ -8652,7 +8663,8 @@
         "run_control",
         "pr",
         "section",
-        "owned_by_you"
+        "owned_by_you",
+        "runs_on"
       ],
       "type": "object"
     },
@@ -14267,7 +14279,7 @@
           "type": "string"
         },
         "next": {
-          "description": "The command that moves it on; `null` while it moves by itself or is closed.",
+          "description": "The command that moves it on; `null` while it moves by itself, runs on\nanother Machine or is closed.",
           "type": [
             "string",
             "null"
@@ -14302,6 +14314,17 @@
           "description": "Why it is in that state, or what it waits on.",
           "type": "string"
         },
+        "runs_on": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TaskRunsOn"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The Machine that runs it when another Machine than this one owns it;\n`null` when this Machine owns it or nobody does."
+        },
         "state": {
           "$ref": "#/$defs/TaskState"
         },
@@ -14327,7 +14350,8 @@
         "reason",
         "graph",
         "pr",
-        "next"
+        "next",
+        "runs_on"
       ],
       "type": "object"
     },
@@ -14467,6 +14491,25 @@
       },
       "required": [
         "unavailable"
+      ],
+      "type": "object"
+    },
+    "TaskRunsOn": {
+      "description": "The Machine that runs a Task another Machine owns, and since when: the\nlatest ownership entry naming it. Wire type; no defaults.",
+      "properties": {
+        "machine": {
+          "$ref": "#/$defs/MachineRef",
+          "description": "Named as this Machine's preferences name it, else as the claim\npublished it, else by its id."
+        },
+        "since": {
+          "description": "Unix seconds.",
+          "format": "int64",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "machine",
+        "since"
       ],
       "type": "object"
     },

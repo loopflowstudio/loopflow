@@ -1115,14 +1115,18 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
         } => {
             let status = loopflow_execution::ops::task::task_status(repo, issue.as_deref())?;
             // A Task another Machine runs is read where it runs.
+            let mut unanswered = None;
             if let Some(task) = &status.task {
-                if loopflow::lf::commands::waves::print_remote_task_status(
+                use loopflow::lf::commands::waves::RemoteStatus;
+                match loopflow::lf::commands::waves::print_remote_task_status(
                     repo,
                     &task.identifier,
                     *json,
                     *subscribe,
                 )? {
-                    return Ok(());
+                    RemoteStatus::Printed => return Ok(()),
+                    RemoteStatus::Here => {}
+                    RemoteStatus::Unanswered(reason) => unanswered = Some(reason),
                 }
             }
             if *subscribe {
@@ -1201,11 +1205,9 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
                             &task.id,
                             &task.identifier,
                         )?
-                        .or(
-                            loopflow_execution::ops::task_ownership::runs_elsewhere_here(
-                                ownership,
-                            )?,
-                        )
+                        .or(loopflow::lf::commands::waves::unobserved_line(
+                            ownership, unanswered,
+                        )?)
                         .map(|line| format!("{}  {line}", task.identifier))
                     }
                     _ => None,

@@ -13,7 +13,7 @@ struct AppAppearanceTests {
     @Test("The window modifier follows preview, Cancel and Apply", arguments: ThemeFixture.allCases)
     func windowModifier(theme: ThemeFixture) async throws {
         try await withThemeServer { location, paths in
-            let appearance = await AppearanceStore.loaded(paths: paths, systemDark: false, location: location)
+            let appearance = try await AppearanceStore.loaded(paths: paths, systemDark: false, location: location)
             let applied: AppearanceMode = theme == .dark ? .light : .dark
             await appearance.applyMode(applied)
             let root = Text("Work").modifier(AppAppearance(appearance: appearance))
@@ -35,7 +35,7 @@ struct AppAppearanceTests {
             try theme.preview(in: appearance)
             await appearance.apply()
             try inspectAppearance()
-            let restored = await AppearanceStore.loaded(paths: paths, systemDark: true, location: location)
+            let restored = try await AppearanceStore.loaded(paths: paths, systemDark: true, location: location)
             #expect(restored.effectiveTheme.id == appearance.effectiveTheme.id)
         }
     }
@@ -45,13 +45,15 @@ struct AppAppearanceTests {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("theme-server-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
-        let server = LocalServerFixture(try BuiltLf(home: root))
+        let lf = try BuiltLf(home: root)
+        _ = try await lf.run(["desktop", "portfolio", "--json"])
+        let server = LocalServerFixture(lf)
         let gone = Mutex(false)
         let location = ServerLocation(startsServer: true) { _ in
             if gone.withLock({ $0 }) { throw RegistryQueryError("Loopflow's server isn't running.") }
             return try await server.status()
         }
-        let appearance = await AppearanceStore.loaded(paths: .temporary(root: root), systemDark: false, location: location)
+        let appearance = try await AppearanceStore.loaded(paths: .temporary(root: root), systemDark: false, location: location)
         await appearance.applyMode(.dark)
         gone.withLock { $0 = true }
         await server.stop()
@@ -83,7 +85,7 @@ struct NativeAppAppearanceTests {
         try await withThemeServer { location, _ in
             _ = NSApplication.shared
             var observed: (ColorScheme, Color)?
-            let appearance = await AppearanceStore.loaded(paths: .temporary(), systemDark: system == .dark, location: location)
+            let appearance = try await AppearanceStore.loaded(paths: .temporary(), systemDark: system == .dark, location: location)
             await appearance.applyMode(AppearanceMode(rawValue: mode)!)
             let view = AppearanceProbe { observed = ($0, $1) }
                 .modifier(AppAppearance(appearance: appearance))

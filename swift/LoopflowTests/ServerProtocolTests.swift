@@ -223,10 +223,6 @@ struct ServerProtocolTests {
         let destination = JSONValue.object(["kind": .string("personal_global")])
         let operations: [(ConfigOperation, String)] = [
             (.configCatalog, #"{"kind":"config.catalog"}"#),
-            (.configGet(destination: destination, key: "theme"),
-             #"{"kind":"config.get","destination":{"kind":"personal_global"},"key":"theme"}"#),
-            (.configExplain(destination: destination, key: "theme"),
-             #"{"kind":"config.explain","destination":{"kind":"personal_global"},"key":"theme"}"#),
             (.configUnset(destination: destination, key: "theme"),
              #"{"kind":"config.unset","destination":{"kind":"personal_global"},"key":"theme"}"#),
             (.configTheme(value: nil), #"{"kind":"config.theme","value":null}"#),

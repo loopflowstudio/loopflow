@@ -89,6 +89,10 @@ lf server mobile --off      # close phone connections
 ```
 
 A phone signed into the same Tailscale account can attach to running Sessions.
+In Desktop, open **Settings → Mobile** (**⌘,**) to toggle phone access, check
+readiness, or scan the pairing QR code with your phone. The green sidebar dot
+and pairing code follow the same status while Settings is open.
+
 Setup requires a user-owned, untagged Machine with MagicDNS and HTTPS
 certificates enabled. For a custom daemon socket, set `TS_SOCKET` for the
 setup command and for an `lf server run` you start yourself. Service

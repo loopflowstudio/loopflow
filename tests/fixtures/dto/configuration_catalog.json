@@ -16,6 +16,47 @@
     "portability": "referenced_assets",
     "lifecycle": "next_read",
     "description": "Appearance theme or light:name,dark:name pair",
-    "category": "Desktop"
+    "category": "Desktop",
+    "unset": null
+  },
+  {
+    "key": "agent",
+    "shorthands": [],
+    "category": "Agents and context",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "Nullable_string",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "default": "null",
+    "applicability": "launch",
+    "combination": "replace",
+    "portability": "portable",
+    "lifecycle": "next_launch",
+    "description": "Harness[:model] choice; every choice precedes every fallback",
+    "unset": "Use starting preference"
+  },
+  {
+    "key": "default_agent",
+    "shorthands": [],
+    "category": "Agents and context",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "Nullable_string",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "default": "null",
+    "applicability": "launch",
+    "combination": "replace",
+    "portability": "portable",
+    "lifecycle": "next_launch",
+    "description": "Harness[:model] tried first when no applicable agent choice exists; the rest of agents stays behind it",
+    "unset": "First in fallback order"
   }
 ]

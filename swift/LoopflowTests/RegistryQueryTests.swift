@@ -62,7 +62,7 @@ struct RegistryQueryTests {
                 continuation.yield(Data("{\"answers\":null,\"unavailable\":null,\"body\":\(body),\"read_at\":{\"planning\":7}}".utf8))
                 continuation.finish()
             }
-            return LineSubscription(lines: lines, send: { _ in }, cancel: {}, unreadable: { nil })
+            return LineSubscription(lines: lines, checkpoint: { _ in }, cancel: {}, unreadable: { nil })
         }) { _, _ in throw RegistryQueryError("Unexpected one-shot read") }
         let subscription = try await query.onMachine("peer", repository: "plan").subscribeTask(task: "task")
         var iterator = subscription.lines.makeAsyncIterator()

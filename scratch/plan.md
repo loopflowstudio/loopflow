@@ -59,7 +59,7 @@ Live QA steered a stopped repository Session without Codex login. A held termina
 
 ### 4.1 Remaining · Settle a lost rental before SSH and omit ended routes by default
 
-Live QA saw `lf machine end` suggest `--force` before background settlement caught up, and saw the ended route in `lf machine list`. Reuse the provider refresh and settlement in `rust/loopflow-execution/src/rental/recovery.rs` in the explicit end command before checking SSH holdings. A gone sandbox settles and releases held Tasks with its ceiling estimate. Keep the existing unpushed-work check for a live sandbox, including one whose SSH is unreachable. Cover the race with background settlement.
+Live QA saw `lf machine end` suggest `--force` before background settlement caught up, and saw the ended route in `lf machine list`. Reuse the provider refresh and settlement in `rust/loopflow-execution/src/rental/recovery.rs` (`refresh`, `settle`) in the explicit end command (`rust/loopflow/src/lf/commands/rental.rs::end`) before checking SSH holdings. A gone sandbox settles and releases held Tasks with its ceiling estimate. Keep the existing unpushed-work check for a live sandbox, including one whose SSH is unreachable. Cover the race with background settlement.
 
 Use the recorded rental state to omit ended rentals from default `lf machine list` and unlabeled CLI `lf machine status` in `rust/loopflow/src/lf/commands/machine.rs`. Explicit label lookup and `lf ondemand list` still resolve them, and copied history still uses their Machine labels. Main’s Desktop Machines settings reports an ended state via its own status read. [Live QA](qa.html)
 

@@ -17,3 +17,12 @@ is told not to run git. Don't name it `note`: `lf -b note '<text>'` fails with
 (`.lf/graphs/<name>.yaml` with `- <skill>` twice) checks the Graph path in
 under a minute; `lf process show <graph>` lists each step commit as a second
 row under the skill's label.
+
+A loop Graph shows the decision prompt: `- loop:` over a skill that appends a
+line to `count.txt` and a decider skill that reads it ("done at 3 lines"), run
+with `lf -a claude:haiku graph <name> --batch` in a branch checkout with a bare
+origin, takes about two minutes for three passes. Each decider's opening turn
+in `~/.claude/projects/<cwd>/*.jsonl` carries `Decision pass N. Iterating
+repeats 2 steps, back to <first step>.` and the loop criteria. Manual
+`lf commit` on that branch pushes; point `origin` at a missing path to see a
+push failure keep the commit.

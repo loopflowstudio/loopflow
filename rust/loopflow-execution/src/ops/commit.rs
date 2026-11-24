@@ -124,7 +124,8 @@ pub fn commit_workflow(
         };
         if pushed {
             progress.status("Pushing...");
-            push_with_upstream_if_needed(repo, inherit_git)?;
+            push_with_upstream_if_needed(repo, inherit_git)
+                .map_err(|error| OpsError::PushFailed(error.to_string().trim_end().to_string()))?;
         }
         Ok(CommitResult { committed, pushed })
     };

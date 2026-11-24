@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{launch, Error, ErrorCode, Result};
 use crate::git::worktrees::PlacementStrategy;
-use crate::ops::{commit_workflow, CommitOptions, CommitPush, Progress, SyncPlan};
+use crate::ops::{commit_workflow, CommitOptions, CommitPush, OpsError, Progress, SyncPlan};
 use loopflow_model::id::LfProcessId;
 
 /// What `checkout.commit` left.
@@ -157,7 +157,10 @@ pub fn commit(
         progress,
         &|_| {},
     )
-    .map_err(outcome_unknown)?;
+    .map_err(|error| match error {
+        OpsError::PushFailed(_) => Error::new(ErrorCode::Unavailable, error.to_string()),
+        error => outcome_unknown(error),
+    })?;
     Ok(Committed {
         branch: crate::git::current_branch(&repo).map_err(outcome_unknown)?,
         head: crate::git::rev_parse(&repo, "HEAD").map_err(outcome_unknown)?,

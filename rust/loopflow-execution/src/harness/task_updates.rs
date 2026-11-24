@@ -507,8 +507,10 @@ mod tests {
         assert_eq!(updates.len(), 1, "only the new comment");
         assert!(deliver(&store).contains("new comment from jack: PR:"));
         assert!(quiet(&store));
-        finish_run(&store, &run, "succeeded");
+        // A run arrives at its last step before it records its outcome.
         store.arrive_task_graph(&task, &run, "end").unwrap();
+        assert!(quiet(&store), "arrived but unsettled");
+        finish_run(&store, &run, "succeeded");
         let updates = pending(&store, "reader");
         assert_eq!(updates.len(), 1);
         assert!(updates[0].contains("At end (Task completion is separate)"));

@@ -31,6 +31,8 @@ Field case behind this: five `manabot` `coverage-working` Tasks (MTG-418..422) r
 
 **Compression checks.** The focused nextest run passed all 39 tests, including `documented_commands`, Task wakeups, Graph loop and router prompts, manual commits and merge revocation before push. A second run of `manual_commit_pushes_branch_checkpoints_unless_kept_local` passed with a staged edit reverted in the working tree. Restaging it published the existing checkpoint at the same SHA.
 
+**QA (2026-11-23).** Real runs on a private Machine with Claude Haiku: manual commits, a three-pass loop Graph, and a Task's idle conversation hearing a command Graph settle (`scratch/qa.html`). Two fixes: a failed push says the commit stays local and prints git's error once (`OpsError::PushFailed`, served `unavailable`); the Task position waits for every run's outcome, so the arrival at `end` no longer wakes the conversation with an empty update a second before the real one.
+
 ## Remaining
 
 Gate runs branch CI.

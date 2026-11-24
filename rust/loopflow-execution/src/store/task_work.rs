@@ -51,6 +51,8 @@ pub fn task_overview(
 }
 
 /// Task conversations keep their last settled position while a run advances.
+/// A run arrives at its last step before it records its outcome, so the
+/// position waits for every run to settle.
 pub(crate) fn settled_task_progress(
     store: &SqliteStore,
     task: &TaskId,
@@ -60,6 +62,14 @@ pub(crate) fn settled_task_progress(
     let Some(row) = row else {
         return Ok((None, runs));
     };
+    let unsettled = runs.iter().any(|graph| {
+        crate::process::os_process::observed_result(&graph.run)
+            .outcome()
+            .is_none()
+    });
+    if unsettled {
+        return Ok((previous_position.cloned(), runs));
+    }
     let position = match row.run {
         None => Some(TaskGraphPosition::At { step: row.step }),
         Some((_, carrier)) if carrier_may_run(&carrier) => previous_position.cloned(),

@@ -15,6 +15,7 @@
           "repo": "/project"
         },
         "path": "/project/.lf/config.local.yaml",
+        "read_path": "/project/.lf/config.local.yaml",
         "slots": {
           "context.diff": {
             "declared": {
@@ -43,6 +44,7 @@
           "repo": "/project"
         },
         "path": "/project/.lf/config.yaml",
+        "read_path": "/project/.lf/config.yaml",
         "slots": {
           "context.diff": {
             "declared": {

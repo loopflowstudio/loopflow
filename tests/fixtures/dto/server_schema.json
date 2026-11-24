@@ -9188,6 +9188,11 @@
           "$ref": "#/$defs/Destination"
         },
         "path": {
+          "description": "Destination for checked edits.",
+          "type": "string"
+        },
+        "read_path": {
+          "description": "Document supplying these slots, or the destination when no document exists.",
           "type": "string"
         },
         "slots": {
@@ -9201,6 +9206,7 @@
       "required": [
         "destination",
         "path",
+        "read_path",
         "slots"
       ],
       "type": "object"

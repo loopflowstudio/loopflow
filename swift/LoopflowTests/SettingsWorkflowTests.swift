@@ -84,6 +84,65 @@ struct SettingsWorkflowTests {
         #expect(defaults.object(forKey: "taskFilesAutosave") == nil)
     }
 
+    private func waitFor(_ condition: () -> Bool, sourceLocation: SourceLocation = #_sourceLocation) async throws {
+        let deadline = ContinuousClock.now + .seconds(10)
+        while !condition() {
+            try #require(ContinuousClock.now < deadline, sourceLocation: sourceLocation)
+            try await Task.sleep(for: .milliseconds(20))
+        }
+    }
+
+    @Test(arguments: [false, true])
+    func openWaveSettingsFollowsTheDocumentThroughItsFirstChange(external: Bool) async throws {
+        try await withThemeServer { location, paths in
+            let repo = paths.config.deletingLastPathComponent().appending(path: "project").resolvingSymlinksInPath()
+            let wave = repo.appending(path: ".lf/wave/scan")
+            try FileManager.default.createDirectory(at: wave, withIntermediateDirectories: true)
+            let goal = wave.appending(path: "GOAL.md")
+            let yaml = wave.appending(path: "config.yaml")
+            let original = "---\nid: 6155f18a-1b7f-418c-9af3-8d6fa5ce4989\nagent: codex\n---\nKeep scanning.\n"
+            try Data(original.utf8).write(to: goal)
+            let model = ScopedSettingsModel(location: location)
+            model.select(checkout: repo.path, wave: "scan")
+            let notices = NoticeCenter()
+            let pane = ScopedSettings(model: model, pane: .project, checkouts: [repo.path], waves: [], notices: notices)
+            async let _: Void = model.observe()
+            try await waitFor { model.file != nil }
+            let mine = try #require(model.file)
+            #expect(mine.owner == .personalWave)
+            #expect(throws: RegistryQueryError.self) { try mine.prepareForOpening() }
+
+            model.destination = .sharedWave
+            let shared = try #require(model.file)
+            let agent = try #require(shared.declaration("agent"))
+            #expect(try shared.prepareForOpening().path == goal.path)
+            _ = try pane.inspect().find(text: goal.path)
+            _ = try pane.inspect().find(text: "First change saves to")
+            _ = try pane.inspect().find(text: yaml.path)
+            #expect(await model.apply(.set("codex"), to: agent, notices: notices, manager: nil))
+            #expect(try model.file?.prepareForOpening().path == goal.path)
+            #expect(!FileManager.default.fileExists(atPath: yaml.path))
+
+            if external {
+                // Even identical preferences now come from the YAML document.
+                try Data("agent: codex\n".utf8).write(to: yaml)
+            } else {
+                #expect(await model.apply(.set("claude"), to: agent, notices: notices, manager: nil))
+            }
+            try await waitFor { model.file?.readPath == yaml.path }
+            #expect(try model.file?.prepareForOpening().path == yaml.path)
+            #expect(model.file?.declaration("agent")?.id == agent.id)
+            #expect(throws: (any Error).self) { try pane.inspect().find(text: "First change saves to") }
+            if !external {
+                #expect(try String(contentsOf: yaml, encoding: .utf8).contains("agent: claude"))
+                try #require(notices.current?.action).perform()
+                try await waitFor { model.file?.slots["agent"]?.entries == agent.slot.entries }
+                #expect(try model.file?.prepareForOpening().path == yaml.path)
+            }
+            #expect(try String(contentsOf: goal, encoding: .utf8) == original)
+        }
+    }
+
     @Test func personalAndProjectSettingsRecoverAfterServerRestart() async throws {
         let root = URL(fileURLWithPath: "/tmp/lf-reconnect-\(UUID().uuidString.prefix(8))").resolvingSymlinksInPath()
         let repo = root.appending(path: "project")
@@ -104,13 +163,6 @@ struct SettingsWorkflowTests {
         project.select(checkout: repo.path)
         project.destination = .sharedRepository
 
-        func waitFor(_ condition: () -> Bool, sourceLocation: SourceLocation = #_sourceLocation) async throws {
-            let deadline = ContinuousClock.now + .seconds(10)
-            while !condition() {
-                try #require(ContinuousClock.now < deadline, sourceLocation: sourceLocation)
-                try await Task.sleep(for: .milliseconds(20))
-            }
-        }
         do {
             async let _: Void = personal.observe()
             async let _: Void = project.observe()

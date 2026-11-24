@@ -159,8 +159,14 @@ struct ConfigurationScope: Codable {
     struct File: Codable, Identifiable {
         let destination: JSONValue
         let path: String
+        let readPath: String
         let slots: [String: Slot]
         var id: JSONValue { destination }
+
+        private enum CodingKeys: String, CodingKey {
+            case destination, path, slots
+            case readPath = "read_path"
+        }
 
         func declaration(_ key: String) -> SettingDeclaration? {
             guard let slot = slots[key] else { return nil }
@@ -172,8 +178,8 @@ struct ConfigurationScope: Codable {
         }
 
         func prepareForOpening() throws -> URL {
-            let url = URL(fileURLWithPath: path)
-            if !FileManager.default.fileExists(atPath: path) {
+            let url = URL(fileURLWithPath: readPath)
+            if !FileManager.default.fileExists(atPath: readPath) {
                 // The scoped writer also installs the Git exclusion for a private checkout file.
                 guard owner == .personalGlobal else {
                     throw RegistryQueryError("Save a setting here to create \(path).")
@@ -252,7 +258,7 @@ struct ConfigurationScope: Codable {
         if path == "builtin" { return "Default" }
         return files.first { file in
             if file.owner == .personalWave { return path.hasPrefix(file.path + "#waves.") }
-            return file.path == path
+            return file.readPath == path
         }?.owner?.title ?? path
     }
 }

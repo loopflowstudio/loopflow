@@ -6,7 +6,6 @@ use std::path::{Path, PathBuf};
 use anyhow::{ensure, Context, Result};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use serde_yaml_ng::Value;
 use sha2::{Digest, Sha256};
 
 use crate::config::files::{self, edit, Destination, ResolvedDestination};
@@ -143,16 +142,11 @@ fn journal(source: &Destination, key: &str) -> PathBuf {
         .join(format!("{}.json", hex::encode(id)))
 }
 
-struct Document {
-    original: String,
-    value: Value,
-}
-
 struct Move<'a> {
     source: &'a ResolvedDestination,
     receiving: &'a ResolvedDestination,
     key: &'a str,
-    documents: BTreeMap<PathBuf, Document>,
+    documents: BTreeMap<PathBuf, edit::Document>,
 }
 
 impl<'a> Move<'a> {
@@ -166,8 +160,7 @@ impl<'a> Move<'a> {
             if let std::collections::btree_map::Entry::Vacant(entry) =
                 documents.entry(address.path.clone())
             {
-                let (original, value) = edit::read_document(address)?;
-                entry.insert(Document { original, value });
+                entry.insert(edit::Document::read(address)?);
             }
         }
         Ok(Self {

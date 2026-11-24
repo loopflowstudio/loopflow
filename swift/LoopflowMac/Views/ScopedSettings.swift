@@ -72,13 +72,18 @@ struct ScopedSettings: View {
                 if let file = model.file {
                     Section {
                         if pane == .project {
-                            Text(file.path).font(Typography.mono).foregroundStyle(.secondary).textSelection(.enabled)
+                            Text(file.readPath).font(Typography.mono).foregroundStyle(.secondary).textSelection(.enabled)
                         }
                         Button(pane == .project ? "Open file…" : "Open ~/.lf/config.yaml") {
                             openFile(file)
                         }
-                        .help(file.path)
+                        .help(file.readPath)
                         .settingsRow(highlightedFileKey, highlighted: highlightedKey)
+                        if file.readPath != file.path {
+                            LabeledContent("First change saves to") {
+                                Text(file.path).font(Typography.mono).textSelection(.enabled)
+                            }
+                        }
                     }
                 }
             } else if model.reading.isLoading { ProgressView("Loading settings") }
@@ -96,7 +101,7 @@ struct ScopedSettings: View {
     private func openFile(_ file: ConfigurationScope.File) {
         do {
             let url = try file.prepareForOpening()
-            if !NSWorkspace.shared.open(url) { throw RegistryQueryError("Could not open \(file.path)") }
+            if !NSWorkspace.shared.open(url) { throw RegistryQueryError("Could not open \(url.path)") }
         } catch { notices.post(Notice(error.localizedDescription)) }
     }
 

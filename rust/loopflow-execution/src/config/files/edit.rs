@@ -1,5 +1,7 @@
 //! A checked edit carries the authored YAML entries its writer can change.
 //! Paths stay in components, including literal keys containing dots.
+use std::path::PathBuf;
+
 use anyhow::{ensure, Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_yaml_ng::Value;
@@ -330,17 +332,29 @@ pub fn preview(original: &str, after: &str) -> String {
         .join("\n")
 }
 
-pub fn read_document(destination: &ResolvedDestination) -> Result<(String, Value)> {
-    let path = &destination.path;
-    let text = super::settings_text(path, destination.root())?;
-    let document =
-        parse_document(&text, path).with_context(|| format!("Read {}", path.display()))?;
-    Ok((text, document))
+#[derive(Debug)]
+pub(crate) struct Document {
+    pub read_path: PathBuf,
+    pub original: String,
+    pub value: Value,
+}
+
+impl Document {
+    pub fn read(destination: &ResolvedDestination) -> Result<Self> {
+        let (read_path, original) = super::settings_source(&destination.path, destination.root())?;
+        let value = parse_document(&original, &read_path)
+            .with_context(|| format!("Read {}", read_path.display()))?;
+        Ok(Self {
+            read_path,
+            original,
+            value,
+        })
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{read_document, Change, Setting};
+    use super::{Change, Document, Setting};
     use crate::config::files::Destination;
     use crate::engine::config::{get, set, unset};
 
@@ -397,7 +411,9 @@ mod tests {
         )
         .unwrap();
         let diff = Setting::catalogued(&address, "context.diff");
-        let before = diff.entries(&read_document(&address).unwrap().1).unwrap();
+        let before = diff
+            .entries(&Document::read(&address).unwrap().value)
+            .unwrap();
         let reset = diff.apply(&before, &Change::Reset).unwrap();
         assert!(reset.after.is_empty());
         std::fs::write(path, "context:\n  docs: [guide.md] # changed externally\n").unwrap();
@@ -409,7 +425,8 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            diff.entries(&read_document(&address).unwrap().1).unwrap(),
+            diff.entries(&Document::read(&address).unwrap().value)
+                .unwrap(),
             before
         );
         assert_eq!(get(&shared, "context.diff").unwrap().value, true);

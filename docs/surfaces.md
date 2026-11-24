@@ -316,7 +316,9 @@ Machine placement. It opens on the active checkout or the first repository
 in your portfolio. Use **Choose Checkout…** to select another directory.
 **Applies to** selects a checkout or Wave. **Save in** selects your file or
 the shared file. Saving the first setting creates the file. **Open file…**
-opens it in its associated app.
+opens the current settings document in its associated app. If shared Wave
+settings come from `GOAL.md`, Open shows the goal and **First change saves to**
+shows the path to `config.yaml`. Once an edit creates the YAML file, Open shows it.
 A dot beside the pane means the selected file declares a setting. Switching to
 a personal pane keeps the checkout and destination ready for your return.
 

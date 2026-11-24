@@ -43,11 +43,11 @@ pub fn preview_edit(
 ) -> Result<String> {
     let address = destination.resolve()?;
     validate_edit(&address, key)?;
-    let (text, mut document) = edit::read_document(&address)?;
-    edit::Setting::catalogued(&address, key).prepare(&mut document, expected, change)?;
+    let mut document = edit::Document::read(&address)?;
+    edit::Setting::catalogued(&address, key).prepare(&mut document.value, expected, change)?;
     Ok(edit::preview(
-        &text,
-        &crate::config::files::edited_text(&text, &document)?,
+        &document.original,
+        &crate::config::files::edited_text(&document.original, &document.value)?,
     ))
 }
 

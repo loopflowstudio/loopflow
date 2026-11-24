@@ -23,7 +23,10 @@ pub struct Scope {
 #[derive(Debug, Serialize, serde::Deserialize, schemars::JsonSchema)]
 pub struct ScopeFile {
     pub destination: Destination,
+    /// Destination for checked edits.
     pub path: PathBuf,
+    /// Document supplying these slots, or the destination when no document exists.
+    pub read_path: PathBuf,
     /// Includes absent slots. Omitted keys do not apply at this destination.
     pub slots: BTreeMap<String, Slot>,
 }
@@ -147,13 +150,13 @@ pub fn scope(directory: Option<&Path>, wave: Option<&str>, target: &ScopeTarget)
         let mut files = Vec::new();
         for destination in destinations(repository.as_deref(), wave)? {
             let address = destination.resolve()?;
-            let (raw, normalized) = match documents.entry(address.path.clone()) {
+            let (read_path, raw, normalized) = match documents.entry(address.path.clone()) {
                 std::collections::btree_map::Entry::Occupied(entry) => entry.into_mut(),
                 std::collections::btree_map::Entry::Vacant(entry) => {
-                    let (_, raw) = edit::read_document(&address)?;
-                    let mut normalized = raw.clone();
+                    let document = edit::Document::read(&address)?;
+                    let mut normalized = document.value.clone();
                     crate::config::normalize_preferences(&mut normalized);
-                    entry.insert((raw, normalized))
+                    entry.insert((document.read_path, document.value, normalized))
                 }
             };
             let mut slots = BTreeMap::new();
@@ -192,6 +195,7 @@ pub fn scope(directory: Option<&Path>, wave: Option<&str>, target: &ScopeTarget)
             files.push(ScopeFile {
                 destination,
                 path: address.path,
+                read_path: read_path.clone(),
                 slots,
             });
         }

@@ -70,7 +70,7 @@ struct ConfigurationSettingsTests {
 
     @Test func destinationKindsMatchTheRustFiles() throws {
         let files = try JSONDecoder().decode([JSONValue].self, from: loadFixtureData("configuration_destinations.json"))
-        let owners = files.map { ConfigurationScope.File(destination: $0, path: "", slots: [:]).owner }
+        let owners = files.map { ConfigurationScope.File(destination: $0, path: "", readPath: "", slots: [:]).owner }
         #expect(owners == [.personalGlobal, .personalRepository, .sharedRepository, .personalWave, .sharedWave])
     }
 }

@@ -55,6 +55,8 @@ During a build, `lf task pause INF-123` stops the worker, every subprocess in th
 - On macOS the focused checks covered refusal, paused conversations, Working counts, group order and keyboard navigation. On an iOS 26.2 Simulator the three pause tests passed, including opening the live terminal from Working and restoring the held row when unpause was refused.
 - Rust checks covered Paused taking precedence over auto, a running Graph crossing review into Shipping, selected and undecided XOR paths, and a served pause on another Machine. The DTO, schema, documented-command and golden-prompt checks passed. So did `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, the architecture check and the Swift module check.
 
+- QA with real Claude workers (`scratch/qa.html`): pausing one of two live builds left the primary conversation running and the neighbor building; the sidebar snapshot showed Active / Shipping / Paused; a steer reached the paused Task's open conversation. Fixed: `task_operate` gained a `paused` disposition after the primary called a paused Task idle and offered `lf task run`. Open: after unpause the stopped run reads "process exited with status 130 … launch fresh work" (same as after `lf task interrupt`).
+
 ## Remaining, in order
 
 1. **Demo the Working groups** (next step): pause one of two owned Tasks with the other in auto; Mac sidebar shows Active / Shipping / Paused, the paused Task's Session stays open, verify runs on its own after deliver.

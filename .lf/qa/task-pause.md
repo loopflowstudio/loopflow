@@ -38,3 +38,23 @@ under Shipping. Both count toward Working on Mac and iPhone.
 
 The served answer to `task.pause` can read `pausing (Graph run … is finishing)`
 while the CLI waits and prints `paused`. Read `lf task status` a moment later.
+
+# Working groups and the open conversation
+
+Don't name a repository Graph `qa`: the builtin `build` Graph's `- qa` step
+resolves to it, and `lf graph show code` fails with "loop at concept-review
+returns across interactive step …". Call it `hold` (`- interactive: demo`,
+then `- compile`). Then one Task run to `demo` reads Active, one run on to
+`compile` and paused reads Paused, and one with `lf task auto on` reads
+Shipping in `lf task list`.
+
+Each primary `claude --name <id>` first stops on Claude's "Adding a new
+directory" dialog for the main checkout, so a steer stays undelivered. Answer
+it with `lf resume --task <id>` in a PTY: wait about 6 s, send `ESC [ B`,
+then Enter, and disconnect. The first turn then reads the steer as direction
+on record (`lf session steers <session> --json` shows `delivered_at`).
+
+With the screen locked, the `LOOPFLOW_UI_TEST_MODE=live` snapshot in
+[desktop](desktop.md) shows the sidebar groups and the Task bar. Rebuilding
+`lf` while the private server runs makes Desktop answer "another executable
+still answers": restart the server on the new binary first.

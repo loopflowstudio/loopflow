@@ -1,47 +1,31 @@
-<!doctype html>
-<meta charset="utf-8">
-<title>QA · LOO-1078 lf task pause</title>
-<style>
-body{font:15px/1.5 -apple-system,system-ui,sans-serif;max-width:900px;margin:2em auto;padding:0 1em;color:#222}
-pre{background:#f5f5f2;padding:.8em;overflow:auto;font-size:12.5px}
-h2{margin-top:2em}.ok{color:#1a7f37}.fix{color:#9a6700}.open{color:#b42318}
-td,th{padding:.3em .6em;vertical-align:top;border-bottom:1px solid #ddd;text-align:left}
-</style>
-<h1>QA: <code>lf task pause</code></h1>
-<p>The branch <code>lf</code> ran on a private Machine (<code>LF_HOME=/tmp/lfqp/home</code>, foreground <code>lf server run</code>). It used a disposable Git repository with a local bare origin. Two Tasks each ran a real Claude worker, and each worker ran a real <code>cargo build</code> of a crate whose <code>build.rs</code> sleeps for 240 s.</p>
-
+<!doctype html><meta charset="utf-8"><title>QA · LOO-1078 Working groups</title>
+<style>body{font:15px/1.5 -apple-system,system-ui,sans-serif;max-width:960px;margin:2em auto;padding:0 1em;color:#222}
+pre{background:#f5f5f2;padding:.8em;overflow:auto;font-size:12.5px}td,th{padding:.3em .6em;vertical-align:top;border-bottom:1px solid #ddd;text-align:left}
+img{max-width:100%;border:1px solid #ddd}.ok{color:#1a7f37}.fix{color:#9a6700}.open{color:#b42318}</style>
+<h1>QA: pause keeps the conversation, Working groups, automatic verify</h1>
+<p>The branch <code>lf</code> (e5efb733f) ran on a private Machine (<code>LF_HOME=/tmp/lfqp2/home</code>) with a disposable repository and bare origin. Real Claude workers ran a real <code>cargo build</code> whose <code>build.rs</code> sleeps 240 s. Graph <code>hold</code>: <code>- interactive: demo</code>, <code>- compile</code>.</p>
 <h2>Scenarios</h2>
-<table>
-<tr><th>Scenario</th><th>What happened</th></tr>
-<tr><td>Pause an unstarted Task</td><td class="ok">Refused: <code>Error: invalid data: Task has not started; nothing to pause</code></td></tr>
-<tr><td>Two builds side by side; pause one</td><td class="ok">The pause returned in 2.3 s. The target's worker <code>claude -p</code>, its <code>zsh -c</code>, <code>cargo build</code>, <code>build-script-build</code> and the primary <code>claude --name 6ad693</code> were all gone. All five of the neighbor's processes were still running, and its build finished and reached <code>demo</code>.</td></tr>
-<tr><td>What pause leaves</td><td class="ok">The owner, worktree, untracked <code>Cargo.lock</code>, <code>target/</code> and branch were unchanged. <code>lf task list --state paused</code> listed only the target. Status showed <code>Paused at compile. `lf task unpause` resumes it.</code>, <code>Conversation: paused; `lf task unpause 6ad693` resumes it</code> and <code>action: no_action (Task is paused)</code>.</td></tr>
-<tr><td><code>task run</code> / <code>task auto on</code> while paused</td><td class="fix">Both were refused, but the message named the stored key: <code>run `lf task unpause lf-6ad693fd6c99467f8355db5351ea1fba`</code>. <b>Fixed:</b> it now reads <code>run `lf task unpause 6ad693` to resume it</code>. The "still stopping" refusal named the raw <code>task_…</code> ID and was fixed the same way.</td></tr>
-<tr><td>Status <code>latest Graph:</code> line</td><td class="fix">The line read <code>compile: process exited with status 130. Inspect its history and effects, then launch fresh work</code>, in the Blocked state, directly under "Paused at compile". <b>Fixed:</b> it now reads <code>compile stopped when the Task was paused</code> in the Idle state. A Graph that finished before the pause keeps <code>Graph qa finished; nothing further is launched</code>.</td></tr>
-<tr><td>Comment while paused</td><td class="ok"><code>lf comment 6ad693 'please keep going'</code> saved the steer and launched nothing. It had no delivery row until unpause, then went to the new worker's Session.</td></tr>
-<tr><td>Restart the Machine server while paused</td><td class="ok">Nothing relaunched for the paused Task, and its state stayed <code>paused</code>.</td></tr>
-<tr><td><code>lf task unpause 6ad693 --run</code></td><td class="ok">The command printed <code>6ad693 unpaused</code> and then the run receipt. A new worker ran <code>cargo</code> in the same checkout, and the primary conversation started again under the same Session (capture key <code>855cc19a…</code>).</td></tr>
-<tr><td>Pause at the interactive stop (<code>demo</code>)</td><td class="ok">The primary closed and status showed <code>Paused at demo.</code> A second pause was a no-op. <code>--json</code> pause printed <code>"e9b525 paused"</code> and unpause printed <code>null</code>. After plain unpause the primary came back and the Task was waiting at <code>demo</code> again.</td></tr>
-<tr><td>Served <code>task.pause</code>/<code>task.unpause</code> over the socket</td><td class="ok">Pause answered <code>"e9b525 paused"</code>. Repeating it gave the same answer. Unpause with <code>run:false</code> answered <code>null</code>. An unknown Task returned <code>not_found</code>. Pausing a running Task answered <code>6ad693 pausing (Graph run … is finishing)</code>, and status read paused a moment later.</td></tr>
-<tr><td>Unassign while paused</td><td class="ok">The Task became unowned and was off the paused list.</td></tr>
+<table><tr><th>Scenario</th><th>What happened</th></tr>
+<tr><td>Builtin <code>code</code> Graph</td><td class=ok><code>lf graph show code</code> ends <code>ship-review [interactive]</code>, reflect, gate, <code>cmd: land --wait-and-fix</code>, <code>verify</code>. Verify has no interactive mark.</td></tr>
+<tr><td>Three Tasks, one in auto</td><td class=ok>Two at <code>demo</code> read <code>Active</code>; the auto Task read <code>Shipping</code> while its build ran.</td></tr>
+<tr><td>Pause one of two live builds</td><td class=ok><code>lf task pause 87e2ce</code> took 1.8 s. Its worker, zsh, cargo and build-script-build were gone; its primary <code>claude --name 87e2ce</code> (PID 3780) kept running. The auto Task's five processes kept running and it finished. <code>lf task list</code>: Shipping / Active / Paused; JSON <code>section: working</code>, <code>working_group: paused</code>.</td></tr>
+<tr><td>Run, auto on while paused</td><td class=ok>Both refused: <code>Task is paused; run `lf task unpause 87e2ce` to resume it</code>.</td></tr>
+<tr><td>Steer to the paused Task's open conversation</td><td class=ok><code>lf comment</code> delivered to the primary (<code>delivered_at</code> set, no worker started). Same result for the unpaused control Task. The first try stalled on Claude's folder-trust dialog in both, a fixture problem now in <code>.lf/qa/task-pause.md</code>.</td></tr>
+<tr><td>What the conversation says about a paused Task</td><td class=fix>The primary's first turn called it <b>idle</b>, said exit 130 was a Ctrl-C, and offered <code>lf task run 87e2ce</code>, which is refused. Fixed: <code>task_operate</code> has a <b>paused</b> disposition naming <code>lf task unpause</code>. After the rebuild, <code>lf -b task-session</code> answered "is <b>paused</b> … Run <code>lf task unpause 87e2ce</code> … <code>lf task run</code> is refused while the Task is paused."</td></tr>
+<tr><td>Plain unpause</td><td class=ok><code>87e2ce unpaused</code>. Nothing is left ahead of <code>compile</code>, so it moved to Shipping. Status: "Stopped at compile. `lf task run` starts it again."</td></tr>
+<tr><td>Pause at an interactive step</td><td class=ok><code>lf task pause ddb912</code> at <code>demo</code> moved it to Paused; its primary stayed alive.</td></tr>
+<tr><td>Mac sidebar (screen locked, live snapshot mode, isolated Dev bundle)</td><td class=ok>Active, Shipping and Paused groups. The selected paused Task's bar reads "Paused at demo. `lf task unpause` resumes it." with Unpause; its Session pane is mounted.</td></tr>
 </table>
-
-<h2>Checks</h2>
-<ul>
-<li><code>cargo test -p loopflow-storage --lib completing_reopening_and_abandoning_a_task_clear_its_hold</code>: passed. It now asserts the refusal names the short identifier.</li>
-<li><code>task_graph_launch_tests::pause_stops_owned_build_and_keeps_claim</code>: now asserts the paused <code>latest Graph:</code> line. The result is in the final report.</li>
-</ul>
-
+<p><img src="qa-shots/snap2.png" alt="Mac sidebar with Active, Shipping and Paused groups and the paused Task selected"></p>
 <h2>Not reached</h2>
 <ul>
-<li>Mac and iPhone Paused views: no Dev bundle or Simulator walkthrough ran in this headless pass. Headless Swift and iOS Simulator tests from implement cover them. A visual check is still open.</li>
-<li>A Codex worker whose tool runs in its own OS session, and Linux. These are known gaps in the plan, left for gate and CI.</li>
-<li>A pause during a two-Machine move. It was not repeated live because the fixtures in <code>machine_commands.rs</code> cover it.</li>
+<li>Terminal content in the Session pane and clicking Unpause: the screen was locked (idle 82 min), and Ghostty draws nothing while it is locked.</li>
+<li>Automatic verify after a real merge: no GitHub stand-in run. Checked as Graph shape only.</li>
+<li>iPhone: covered by Simulator tests from implement, not walked through here.</li>
 </ul>
-
-<h2>Still wrong (worst first)</h2>
-<ol>
-<li>Every refusal is prefixed <code>Error: invalid data:</code>, for example <code>invalid data: Task has not started; nothing to pause</code>. This comes from <code>StoreError::InvalidData</code> and is not limited to pause.</li>
-<li>After unassign, a Task at <code>demo</code> reads <code>active</code> with <code>Conversation: died … (no exit recorded)</code>. The same happens without pause, so it is older behavior.</li>
-<li>Status still shows <code>Planning: unstarted</code> for a started git-planning Task. This is also older behavior.</li>
-</ol>
+<h2>Still wrong, worst first</h2>
+<ul>
+<li class=open>After unpause, the stopped run reads as a failure: the sidebar shows <i>Available · compile: process exited with status 130. Inspect its history and effects, then launch fresh work</i> under Shipping, and <code>action: no_action</code>. <code>lf task interrupt</code> produces the same wording, so it predates this change. The hold-time sentence ("stopped when the Task was paused") goes away when the hold row is removed.</li>
+<li class=open>A Task whose Graph finished while on auto (<code>180aad</code>) left the Working list as done. That is expected for this two-step Graph, but its primary conversation was still running.</li>
+<li class=open>Refusals still start with <code>Error: invalid data:</code> (older behavior).</li>
+</ul>

@@ -66,6 +66,8 @@ liveness is not permission. A run listed in status is not a live process: its
 
 Finish with one, and what showed it:
 
+- **paused** — held by `lf task pause`: its saved step, and
+  `lf task unpause <issue>` to lift the hold. `lf task run` is refused.
 - **moving** — a live Graph run, left alone.
 - **acted** — you continued, repaired or delivered it, and reread status.
 - **available** — a review, demo, choice or merge click someone can take up,

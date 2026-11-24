@@ -386,3 +386,50 @@ Tracker: linear. 3 open · 0 lost.
 <li>Served tracker failures still append "; inspect the affected work before retrying" (now right after a period: "to make it.;") next to a message that says exactly what to rerun.</li>
 <li>Desktop shows no line for an unbound Project; the hint is CLI-only.</li>
 </ol>
+
+<h2>Twelfth run, 2026-11-24: slice 14 (sync refreshes, connect makes)</h2>
+<p>Branch <code>lf</code> (debug build of 32d58fa4dc, then this run's migration fix) on a private home under <code>/tmp/lf-qa-995/s14</code>: three fresh repositories with local bare origins (Linear team <code>QA</code>, Asana team <code>1209</code>, none), no tracker login, no <code>LF_*</code>, stdin closed. The returning home was written by the installed <code>lf</code> 0.16.0 (62a368e5c). No display: <code>screencapture</code> answers "could not create image from display", so Desktop got its headless view suites.</p>
+<table>
+<tr><th>Scenario</th><th>Result</th></tr>
+<tr><td><code>lf wave create billing</code> (Linear, no login)</td><td>Exit 1, "… Run `lf wave plan connect billing` to make it." Wave recorded, Project unbound; <code>lf wave status</code> prints the sentence under the Project line.</td></tr>
+<tr><td><code>lf wave sync billing</code> offline</td><td>Exit 0 (it failed with the credential error before this slice). Prints the same status; <code>tracker_actions</code> gains nothing.</td></tr>
+<tr><td>Task into the unbound Wave, then <code>lf wave plan connect billing</code></td><td>Task saved locally, its create queued. Connect fails at the credential; the Project stays unbound.</td></tr>
+<tr><td>Desktop's path: served <code>wave.sync</code>, <code>wave.plan</code>, <code>plan.list</code></td><td>Each carries <code>project.value.unbound</code> = "not in Linear yet; `lf wave plan connect billing` makes it"; nothing in <code>lf.log</code> about a Project create.</td></tr>
+<tr><td>Asana repository</td><td>Create error and sentence name <code>lf wave create ops</code>; sync exits 0; a second create (the advised retry) fails the same way and makes no second commit.</td></tr>
+<tr><td>No tracker</td><td>No sentence; <code>"unbound": null</code>. Setting a Linear team afterwards brings the sentence in on the next status.</td></tr>
+<tr><td>Rename, child Wave, removal</td><td><code>lf wave rename billing payments</code>: sentence names <code>payments</code>. <code>payments/refunds</code>: names the full path. Removed Wave drops out of the list.</td></tr>
+<tr><td>Returning user: installed <code>lf</code> made Wave <code>engbot</code> and a Task with a team set (Project create and Task create queued)</td><td>Branch's first command retires the Project create; <code>lf wave sync engbot</code> makes nothing, status shows the sentence. Before the fix the retire reason still said "… plan connect or sync".</td></tr>
+</table>
+<h3>Transcript</h3>
+<pre>$ lf wave create billing
+Error: wave/billing has no tracker Project yet: No Linear credential found. Run `doppler run -- lf machine login linear`. Run `lf wave plan connect billing` to make it.
+$ lf wave sync billing; echo $?
+  Project   billing (local) · started
+    not in Linear yet; `lf wave plan connect billing` makes it
+0
+$ lf wave plan connect billing
+Error: No Linear credential found. Run `doppler run -- lf machine login linear`.; inspect the affected work before retrying
+$ (asana) lf wave status ops
+  Project   ops (local) · started
+    not in Asana yet; `lf wave create ops` makes it
+$ (upgraded home) tracker_actions
+  create  retired  project  Wave Projects are created by lf wave create or lf wave plan connect
+  create  queued   task     No Linear credential found. …</pre>
+<h3>Fixed</h3>
+<ul>
+<li><code>remove_chapters.sql</code>: the retire reason and its comment said sync makes the Project; now "lf wave create or lf wave plan connect".</li>
+<li>New view test <code>WaveDetailReadingTests</code> "an unbound Project says under its name which command makes it in the tracker": <code>WaveProjectView</code> prints <code>unbound</code> and a linked Project prints none.</li>
+<li><code>.lf/qa/tracker.md</code>: the unbound paragraph and the upgrade's retire reason described slice 12 (sync makes it).</li>
+</ul>
+<h3>Checks</h3>
+<ul>
+<li><code>scripts/test_desktop.sh --filter 'WaveDetailReadingTests|DTOFixtureTests|RegistryQueryTests'</code>: 78 pass (me).</li>
+<li>Full matrix: CI at gate.</li>
+</ul>
+<h3>Not reached</h3>
+<p>A successful connect or create and the binding it records: no Linear or Asana login on a private home, and it would make real Projects. Desktop's mounted Wave pane: no display.</p>
+<h3>Still wrong, worst first</h3>
+<ol>
+<li>A failed <code>lf wave plan connect</code> on the CLI also appends "; inspect the affected work before retrying" (".;"), though it wrote nothing (already in <code>scratch/questions.md</code>).</li>
+<li><code>lf wave status</code> prints <code>machine      unplaced</code> with wider padding than the lines around it.</li>
+</ol>

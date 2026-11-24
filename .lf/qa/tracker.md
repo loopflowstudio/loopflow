@@ -173,24 +173,28 @@ home reaches the other on `lf task sync <id>`.
 A Wave's queued tracker actions are rows in `tracker_actions` (`kind`,
 `phase`, `project_id`, `task_id`, `value_json`, `error`); with a Linear team
 set and no login, Task actions stay `queued`. Nothing queues a Project
-`create`: `lf wave create`, `lf wave plan connect <wave>` and `lf wave sync`
-make the Project in the tracker before they return. With no login, `lf wave
-create x` exits 1 with "wave/x has no tracker Project yet: No Linear
-credential found… Run `lf wave create x` again", yet the Wave is recorded
-and committed, its Project unbound. `lf wave status x` then prints "not in
-Linear yet; `lf wave sync x` makes it" under the Project line (also for a
-Wave made before the team was set, or upgraded). Rename and removal of an
-unbound Wave leave no Project rows in `tracker_actions`. Served
-`wave.create` returns the same message as `outcome_unknown` with "; inspect
-the affected work before retrying" appended. Asana (`repo.tracker.asana.team
-"'1209'"`) behaves the same with "No Asana credential found". Copy
-`loopflow.db` to read it: `?mode=ro` on a live private home fails to open.
+`create`: `lf wave create` and `lf wave plan connect <wave>` make the Project
+in the tracker before they return; `lf wave sync` (and served `wave.sync`,
+Desktop's five-minute clock) never makes one and succeeds with no login. With
+no login, `lf wave create x` exits 1 with "wave/x has no tracker Project yet:
+No Linear credential found… Run `lf wave plan connect x` to make it", yet the
+Wave is recorded and committed, its Project unbound. `lf wave status x` then
+prints "not in Linear yet; `lf wave plan connect x` makes it" under the
+Project line (also for a Wave made before the team was set, renamed, or
+upgraded); the same sentence is `project.value.unbound` in `--json`,
+`wave.sync`, `wave.plan` and `plan.list`, null with no tracker. In an Asana
+repository (`repo.tracker.asana.team "'1209'"`) both name `lf wave create x`,
+since connect is Linear's; a second create makes no second commit. Rename
+and removal of an unbound Wave leave no Project rows in `tracker_actions`.
+Served `wave.create` returns the same message as `outcome_unknown` with ";
+inspect the affected work before retrying" appended. Copy `loopflow.db` to
+read it: `?mode=ro` on a live private home fails to open.
 
 For the upgrade, write a home with the installed `lf` (team set, a Wave and
-a Task: `lf repo tracker` lists the Wave's `create` and the Task's), copy
-it, then run any branch command: the Project create is `retired` ("Wave
-Projects are created by lf wave create, plan connect or sync") and only the
-Task's remains open.
+a Task: `lf repo tracker` lists the Wave's `create` and the Task's), then run
+any branch command on it: the Project create is `retired` ("Wave Projects
+are created by lf wave create or lf wave plan connect") and only the Task's
+remains open. The installed `lf` at v0.16.0 opens fine under the branch.
 
 Without a Linear login no command links a Wave's Project. To see what a
 linked one does (status line, its URL, a rename's `project_name` action),

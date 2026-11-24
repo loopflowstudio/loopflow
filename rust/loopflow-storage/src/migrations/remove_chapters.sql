@@ -135,8 +135,8 @@ WHEN NEW.repo IS NOT OLD.repo OR NEW.tracker IS NOT OLD.tracker OR
 BEGIN
     UPDATE store_revisions SET revision=revision+1 WHERE domain='planning';
 END;
--- A Wave's tracker Project is created by the command that makes, connects or
--- syncs the Wave, never queued: a Project create not yet confirmed retires,
--- and that command makes or finds the Project under the same id.
-UPDATE tracker_actions SET phase='retired',error='Wave Projects are created by lf wave create, plan connect or sync'
+-- A Wave's tracker Project is created by the command that makes or connects
+-- the Wave, never queued: a Project create not yet confirmed retires, and that
+-- command makes or finds the Project under the same id.
+UPDATE tracker_actions SET phase='retired',error='Wave Projects are created by lf wave create or lf wave plan connect'
 WHERE project_id IS NOT NULL AND kind='create' AND phase IN ('queued','sent','conflicted');

@@ -56,6 +56,28 @@ struct WaveDetailReadingTests {
         #expect(try header.find(text: "current").string() == "current")
     }
 
+    @Test("an unbound Project says under its name which command makes it in the tracker")
+    @MainActor
+    func unboundProjectNamesItsMaker() throws {
+        let sentence = "not in Linear yet; `lf wave plan connect current` makes it"
+        let unbound = try #require(try planningWave { wave in
+            var reading = wave["project"] as! [String: Any]
+            var project = reading["value"] as! [String: Any]
+            project["tracker_id"] = NSNull()
+            project["url"] = NSNull()
+            project["unbound"] = sentence
+            reading["value"] = project
+            wave["project"] = reading
+        }.workMap.project.present)
+        let view = try WaveProjectView(project: unbound, repo: "/repo").inspect()
+        #expect(try view.find(text: sentence).string() == sentence)
+
+        let linked = try #require(try planningWave().workMap.project.present)
+        #expect(throws: (any Error).self) {
+            try WaveProjectView(project: linked, repo: "/repo").inspect().find(text: sentence)
+        }
+    }
+
     /// `wave-1` of the planning fixture, after `edit` reshapes its wire entry.
     private func planningWave(_ edit: (inout [String: Any]) -> Void = { _ in }) throws -> WaveRoadmap {
         var wire = try #require(JSONSerialization.jsonObject(with: loadFixtureData("roadmap_snapshot.json")) as? [String: Any])

@@ -1490,14 +1490,10 @@ mod tests {
         );
         crate::test_fixture::wave(&store, &wave);
         let here = store.seed_project(wave.id()).unwrap().id;
-        // The released lf made Projects before fields were stamped, and
-        // another Machine's Project arrives with its own stamps.
-        let (older, theirs, removed) = (
-            loopflow_model::id::WaveId::new(),
+        let (theirs, removed) = (
             loopflow_model::id::WaveId::new(),
             loopflow_model::id::WaveId::new(),
         );
-        let unstamped = loopflow_model::durable::ProjectId::new();
         // A removed Wave's Project is never made in a tracker connected later.
         let retired = loopflow_model::durable::ProjectId::new();
         store
@@ -1505,11 +1501,12 @@ mod tests {
             .lock()
             .unwrap()
             .execute_batch(&format!(
-                "INSERT INTO waves(id,name,repo,created_at,retired_at) VALUES('{older}','older','/repo',1,NULL),('{theirs}','theirs','/repo',1,NULL),('{removed}','removed','/repo',1,2);
+                "INSERT INTO waves(id,name,repo,created_at,retired_at) VALUES('{theirs}','theirs','/repo',1,NULL),('{removed}','removed','/repo',1,2);
                  INSERT INTO projects(id,wave_id,created_at,updated_at,description,project_name,project_slug)
-                 VALUES('{unstamped}','{older}',1,1,'','Earlier','earlier'),('{retired}','{removed}',1,1,'','Removed','removed')"
+                 VALUES('{retired}','{removed}',1,1,'','Removed','removed')"
             ))
             .unwrap();
+        // Another Machine made this Project's record; this one creates it too.
         let elsewhere = loopflow_model::durable::ProjectId::new();
         crate::test_fixture::arrive(
             &store,
@@ -1528,7 +1525,7 @@ mod tests {
             store
                 .enqueue_tracker_creations("/repo", TrackerKind::Linear)
                 .unwrap(),
-            3
+            2
         );
         let mut created: Vec<_> = store
             .unconfirmed_tracker_actions("/repo")
@@ -1537,11 +1534,7 @@ mod tests {
             .map(|action| action.owner)
             .collect();
         created.sort_by_key(|owner| format!("{owner:?}"));
-        let mut expected = vec![
-            ActionOwner::Project(here),
-            ActionOwner::Project(unstamped),
-            ActionOwner::Project(elsewhere),
-        ];
+        let mut expected = vec![ActionOwner::Project(here), ActionOwner::Project(elsewhere)];
         expected.sort_by_key(|owner| format!("{owner:?}"));
         assert_eq!(created, expected);
     }

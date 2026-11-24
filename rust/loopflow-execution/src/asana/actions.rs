@@ -144,41 +144,36 @@ impl AsanaClient {
         action: &TrackerAction,
     ) -> OpsResult<Sent> {
         let id = creation_id(project.as_str())?;
+        let mirrored = mirrored_project(&id, &repository_scope(repo)?, None, action)?;
         // Asana takes no caller id, so another Machine's create of this
         // Project shows only as a team project whose footer names it.
-        match self.project_revision(&id).await {
-            Ok(Some(revision)) => {
-                let mirrored = mirrored_project(&id, &repository_scope(repo)?, revision, action)?;
-                accept_mirror(store, project, &mirrored).await?;
-                return Ok(Sent::Acknowledged {
-                    revision: mirrored.revision,
-                    remote_id: Some(id),
-                });
+        let revision = match self.project_revision(&id).await {
+            Ok(Some(revision)) => revision,
+            Ok(None) => {
+                let footer = format!("{IDENTITY_LABEL} {id}");
+                let summary = mirrored.summary.trim();
+                let notes = if summary.is_empty() {
+                    footer
+                } else {
+                    format!("{summary}\n\n{footer}")
+                };
+                let created: super::Project = match self
+                    .send(
+                        Method::POST,
+                        &format!("/teams/{}/projects", self.team),
+                        Some(json!({"name": mirrored.name, "html_notes": rich_text::to_html(&notes)})),
+                    )
+                    .await
+                {
+                    Ok(created) => created,
+                    Err(error) => return Ok(Sent::failed(TrackerError::from(error))),
+                };
+                created.modified_at
             }
-            Ok(None) => {}
             Err(error) => return Ok(Sent::Rejected(error.to_string())),
-        }
-        let mirrored = mirrored_project(&id, &repository_scope(repo)?, None, action)?;
-        let footer = format!("{IDENTITY_LABEL} {id}");
-        let summary = mirrored.summary.trim();
-        let notes = if summary.is_empty() {
-            footer
-        } else {
-            format!("{summary}\n\n{footer}")
-        };
-        let created: super::Project = match self
-            .send(
-                Method::POST,
-                &format!("/teams/{}/projects", self.team),
-                Some(json!({"name": mirrored.name, "html_notes": rich_text::to_html(&notes)})),
-            )
-            .await
-        {
-            Ok(created) => created,
-            Err(error) => return Ok(Sent::failed(TrackerError::from(error))),
         };
         let mirrored = TrackerProject {
-            revision: created.modified_at,
+            revision,
             ..mirrored
         };
         accept_mirror(store, project, &mirrored).await?;

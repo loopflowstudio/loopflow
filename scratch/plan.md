@@ -556,3 +556,8 @@ execution `a_wave_project_another_machine_created_in_linear_is_bound_not_duplica
 and `…_mirrored_in_asana_is_bound_not_duplicated` model the other Machine's
 create already in the tracker (one store each, not two Machines). All pass.
 Gate: clippy, `documented_commands::` (docs/dev/reference.md row edited).
+
+Compress after slice 11: Asana's Project create has one accept path for a
+found or a newly made team project; the unbound-Project test dropped its
+unstamped case (stamps are no longer read). Storage `tracker_actions::tests::`
+(13) and execution `asana_planning_tests::` (9) pass; clippy clean.

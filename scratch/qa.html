@@ -1,168 +1,78 @@
-<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><title>LOO-957 QA: lf machine login</title>
+<!doctype html><meta charset="utf-8"><title>LOO-957 QA: forwarded-token Claude, Codex sign-in on the target</title>
 <style>
 body{font:15px/1.5 -apple-system,system-ui,sans-serif;max-width:920px;margin:2rem auto;padding:0 1rem;color:#1d1d1f}
 h1{font-size:1.5rem}h2{font-size:1.15rem;margin-top:2rem;border-bottom:1px solid #ddd;padding-bottom:.2rem}
 pre{background:#f5f5f7;padding:.7rem .9rem;border-radius:6px;overflow-x:auto;font-size:12.5px;line-height:1.4}
-.fixed{color:#0a7d32;font-weight:600}.bad{color:#b3261e;font-weight:600}.ok{color:#0a7d32}
+.fixed{color:#0a7d32;font-weight:600}.bad{color:#b3261e;font-weight:600}
 table{border-collapse:collapse;width:100%}td,th{border:1px solid #ddd;padding:.35rem .5rem;text-align:left;vertical-align:top}
-</style></head><body>
-<h1>LOO-957 QA, second pass: providers that sign in here only</h1>
-<p>Branch build <code>0.16.0+b0567072f</code> (plus the fix below), 2026-11-17, private homes here and on
-<code>mini-heart</code> as in <code>.lf/qa/machine-logins.md</code>; an <code>ssh</code> wrapper logged every call.</p>
-<table><tr><th>Scenario</th><th>Saw</th></tr>
-<tr><td><code>lf machine login asana|notion|doppler mini</code>, <code>doppler --refused</code>, <code>notion mini-heart nosuch</code></td>
-<td class="ok">Each: <code>Error: Asana signs in on each Machine itself; run `lf machine login asana` there</code>, exit 1, <b>0 ssh calls</b>.</td></tr>
-<tr><td><code>lf machine login claude mini</code> (approver declines)</td><td class="ok">Still reaches mini (2 ssh calls), approver got the URL, declined cleanly; no <code>claude auth login</code> left on mini.</td></tr>
-<tr><td><code>lf machine login asana</code> here, command approver declining</td><td class="ok">Approver got the real Asana authorize URL (PKCE, localhost:19222); error names this Machine; nothing left listening on 19222. From <code>/tmp</code> it fails earlier: Asana's client comes from this checkout's Doppler project.</td></tr>
-<tr><td><code>lf machine login doppler</code> here, already signed in to the doppler CLI</td>
-<td><span class="bad">before:</span> <code>Approve Doppler in your browser.</code> and <code>open ""</code> (a command approver would get an empty <code>LF_APPROVE_URL</code>).<br>
-<span class="fixed">after:</span> <code>Connecting local Doppler... / Jacks-MacBook-Pro-2: Doppler signed in</code>, nothing opened. Fixed in <code>provider_auth/operations.rs::sign_in</code>: a finished flow with no page skips the approver. Same bug on main's <code>lf account connect</code>.</td></tr>
-<tr><td><code>lf ondemand add … --logins</code> with doppler / asana / notion,codex</td><td class="ok">Refused with the same message; no template written. <code>claude,github,linear,opencode</code> saved and listed (<code>signs in claude, github, linear, opencodezen</code>).</td></tr>
-<tr><td><code>lf machine logout asana mini</code></td><td>Reaches mini and runs its own logout (<code>mini: Asana signed out</code>). Logging out remotely stays allowed while logging in remotely is refused; left as is.</td></tr>
-<tr><td>Launch check, here and on mini</td><td class="ok"><code>This Machine has no Codex login; run `lf machine login codex`</code> / <code>mini has no Codex login; run `lf machine login codex mini`</code>.</td></tr>
-</table>
-<p><b>Works:</b> the reach set gates login, <code>--refused</code> and <code>ondemand add</code> before any SSH. <b>Not reached:</b> rental prepare's default list (no rental rented); a real approval (needs a person). <b>Still rough, worst first:</b>
-the <code>ondemand add</code> refusal says “run … there” for a Machine that doesn't exist yet; <code>lf set</code> prints its effect variant (<code>saved; DomainAction</code>), also on released lf.</p>
-<hr>
-<h1>LOO-957 QA, first pass: <code>lf machine login / logins / logout</code></h1>
-<p>Branch build <code>0.16.0+83eb33cd6</code> plus the fixes below, run 2026-11-17 against the real
-<code>claude</code> 2.1.326 and <code>codex</code> 0.169.0 here and the real <code>claude</code> 2.1.311 and
-<code>codex</code> 0.165.0 on <code>mini-heart</code> over the tailnet. Every home was private
-(<code>LF_HOME</code>, <code>CLAUDE_CONFIG_DIR</code>, <code>CODEX_HOME</code>; on mini under <code>~/lf-qa-957</code>),
-so no real login was approved, replaced or signed out. Route set-up: <code>.lf/qa/machine-logins.md</code>.</p>
+</style>
+<h1>LOO-957 QA after the rescope</h1>
+<p>Branch build 0.16.0+be3eff384 plus the two fixes below, 2026-11-23. Real <code>claude</code> 2.1.326 and
+<code>codex</code> here, real <code>claude</code> 2.1.311 and <code>codex</code> 0.165.0 on mini-heart over the tailnet.
+Private <code>LF_HOME</code>/<code>CLAUDE_CONFIG_DIR</code>/<code>CODEX_HOME</code> on both ends (mini: <code>~/lf-qa-957</code>),
+an <code>ssh</code> wrapper logging every call, a stand-in <code>open</code>. Route: <code>.lf/qa/machine-logins.md</code>.</p>
 
-<h2>1. Fresh arrival: <code>lf machine add</code>, <code>lf machine logins</code></h2>
-<pre>$ lf machine add mini-heart --label mini
-mini  mini-heart  home_b9301d2f94c1820104bc0540566582b7
-$ lf machine logins mini
+<h2>1. Seeing a Machine's logins</h2>
+<pre>$ lf machine logins mini                 # nothing forwarded
 claude       signed out
 codex        signed out
 github       signed in    jacklionheart
-opencodezen  signed out
-...</pre>
-<p class="ok">Works. Here: 1.3 s warm (8.7 s on the very first call, which creates the store). Mini: 1.4–1.7 s.</p>
+...
+$ lf set --global forward.env '[CLAUDE_CODE_OAUTH_TOKEN]'
+$ lf machine logins mini                 # token NOT in this Machine's env or Doppler
+before: claude       forwarded    CLAUDE_CODE_OAUTH_TOKEN
+after:  claude       signed out
+$ doppler run -- lf machine logins mini  # token here
+claude       forwarded    CLAUDE_CODE_OAUTH_TOKEN</pre>
+<p class="fixed">Fixed: the row said <code>forwarded</code> whenever <code>forward.env</code> named the token, while every launch from here
+then stopped with <code>forward.env names CLAUDE_CODE_OAUTH_TOKEN, which has no value on this Machine</code>. The overlay now reads
+<code>forward::read</code> (the same value a launch reads) in <code>login::logins</code>. Fixture
+<code>a_command_approver_signs_machines_in_to_codex_without_a_terminal</code> checks both. <code>docs/subscriptions.md</code> says so.</p>
 
-<h2>2. Released <code>lf</code> on the other end</h2>
-<pre>lf versions differ: remote 0.16.0+e66b21801, local 0.16.0+83eb33cd6. Update the remote with `ssh -- 'mini-heart' 'lf install'`
-<span class="bad">before:</span> Error: machine credential command failed on mini: For more information, try '--help'.
-<span class="fixed">after:</span>  Error: machine credential command failed on mini: unrecognized subcommand 'logins'</pre>
-<p><span class="fixed">Fixed</span> in <code>credentials::remote_command</code>: it took Clap's last line; it now also reads Clap's <code>error:</code> line.</p>
+<h2>2. Claude toward another Machine: refused before SSH</h2>
+<table><tr><th>Command</th><th>Saw</th></tr>
+<tr><td><code>lf machine login claude mini</code>, <code>… mini nosuch</code></td><td><code>Error: Claude reaches mini as a forwarded token: run `claude setup-token`, store it with `doppler secrets set CLAUDE_CODE_OAUTH_TOKEN`, and add CLAUDE_CODE_OAUTH_TOKEN to `forward.env`</code>, exit 1, 0 ssh calls</td></tr>
+<tr><td><code>lf machine login claude --refused</code></td><td>Same, “reaches other Machines”, 0 ssh calls</td></tr>
+<tr><td><code>lf ondemand add qa957 … --logins claude,codex</code></td><td>Same, “reaches a rental”; nothing written. <code>--logins codex,github</code> saved in the template.</td></tr>
+<tr><td><code>lf machine logout claude mini</code></td><td><code>mini: Claude signed out</code> (runs Claude's logout there; kept as designed)</td></tr></table>
 
-<h2>3. Claude on mini, approver declines</h2>
-<pre>$ lf set --global approvers.claude.command approve-refuse
-$ lf machine login claude mini
-declined by QA
-Error: the approver for Claude exited with exit status: 1; mini was not signed in
-mini$ ps -axo pid,etime,command | grep '[c]laude auth login'
-<span class="bad">before:</span> 87231 03:28 claude auth login     # listening on 127.0.0.1:49599, under one sshd-session
-<span class="fixed">after:</span>  (none)</pre>
-<p><span class="bad">Worst finding.</span> Every declined, failed or interrupted sign-in left <code>claude auth login</code>
-running on the target: killing the local <code>ssh</code> of a PTY-less exchange signals nothing remote, and Claude ignores
-stdin EOF while it waits for its localhost callback. The plan's “the remote login dies with it” was untrue.
-<span class="fixed">Fixed:</span> the login runs under <code>TIED_TO_STDIN</code> (<code>machine/login.rs</code>), a <code>sh</code>
-wrapper that feeds it stdin through a FIFO and kills it at stdin's EOF; lf keeps stdin open until the login exits and
-closes it first when it kills. Same wrapper here and over SSH. Checked after decline, a malformed code, a wrong code
-and Ctrl-C, for Claude and Codex: nothing left on either Machine.</p>
-
-<h2>4. Claude, a malformed code</h2>
-<pre>$ lf set --global approvers.claude.command approve-wrong-code   # prints not-a-real-code-QA957
-$ lf machine login claude mini
-<span class="bad">before:</span> (hung; killed after 3.5 min. lf would wait the full 15-minute deadline)
-<span class="fixed">after:</span>  Error: Claude's login on mini failed: Invalid code. Please make sure the full code was copied.   (5.5 s incl. SSH)
-here:   Error: Claude's login on Jacks-MacBook-Pro-2 failed: That doesn't look like the full code. Copy all of it, including the # in the middle.</pre>
-<p>Real Claude answers a malformed code on stderr (2.1.326: “That doesn't look like the full code. Copy all of it,
-including the # in the middle.”) and waits for another paste. <span class="fixed">Fixed:</span> after the code,
-a Claude login still running a second after its first stderr line is ended as rejected, reported without the code. (A first try killed it at the first line; the slice 1 fixture, whose fake prints two error lines, caught that.)</p>
-
-<h2>5. A person at the terminal (PTY), default browser</h2>
-<pre>$ lf machine login claude mini
-Approve Claude for mini in your browser, then paste the code it shows:
-> wrongcode#QA957
-Error: Claude's login on mini failed: Login failed: That code wasn't accepted. It may be incomplete, expired, already used, or from an earlier sign-in attempt. Sign in again to get a new code.
-
-$ lf machine login claude mini
-Approve Claude for mini in your browser, then paste the code it shows:
-> ^C                                    # exit 130; nothing left on mini
-
+<h2>3. Codex on mini, approver declines</h2>
+<pre>$ lf set --global approvers.codex.command approve-refuse
 $ lf machine login codex mini
-Approve Codex for mini in your browser with code O1DR-ES1LJ
-^C                                      # exit 130; nothing left on mini</pre>
-<p class="ok">The page opened was the plain URL (stand-in <code>open</code>).</p>
+Error: the approver for Codex exited with exit status: 1; mini was not signed in
+approver saw: LF_APPROVE_PROVIDER=codex LF_APPROVE_MACHINE=mini LF_APPROVE_URL=https://auth.openai.com/codex/device LF_APPROVE_CODE=ZU80-PBMHR
+$ lf machine login codex --refused       # selects mini (codex signed out); same decline
+mini$ ps … | grep '[c]odex login'        # nothing, after each; also after killing lf mid-wait</pre>
 
-<h2>6. Claude here: the URL the browser gets</h2>
-<pre>claude auth login, stdout, in Rex (TERM_PROGRAM=rex):
-visit: \x1b]8;;https://claude.com/cai/oauth/authorize?…state=…\x07https://claude.com/cai/oauth/aut…\x1b]8;;\x07
-<span class="bad">before:</span> approver/open got  https://…state=2LzR…kE\x1b]8;;\x07     (BEL, the URL twice, the OSC tail)
-<span class="fixed">after:</span>  approver/open got  https://…state=jtnz…rAM</pre>
-<p><span class="fixed">Fixed:</span> <code>strip_ansi</code> removed only CSI; it now also removes OSC sequences. The unit test
-carries the exact 2.1.326 shape. Over SSH (no <code>TERM</code>) mini's client printed a plain URL, which is why slice 1's
-probe and fixture never saw it.</p>
-
-<h2>7. Codex device code, here and on mini</h2>
-<pre>codex|Jacks-MacBook-Pro-2|https://auth.openai.com/codex/device|O1DJ-RMBI6
-codex|mini|https://auth.openai.com/codex/device|O1DM-NWSM4
-Error: the approver for Codex exited with exit status: 1; mini was not signed in</pre>
-<p class="ok">Real codes are 4+5 characters; the parser takes them. No <code>codex login</code> left polling.</p>
-
-<h2>8. The launch check</h2>
-<pre>$ lf -b -a codex : 'say hi'                       # here, signed out
+<h2>4. Launch check</h2>
+<pre>$ doppler run -- lf --machine mini -b -a codex : 'say hi'
 Error: agent stopped after provider credential invalidated.
-This Machine has no Codex login; run `lf machine login codex`          (1.6 s)
-$ lf -b -a claude : 'say hi'
-This Machine has no Claude login; run `lf machine login claude`        (1.8 s)
-$ lf --machine mini -b -a codex : 'say hi'
-mini has no Codex login; run `lf machine login codex mini`             (2.8 s)</pre>
-<p class="ok">Stops before any agent starts, names the command. With <code>agents: [claude, codex]</code> a bare
-<code>lf -b</code> stops at Claude: only a Graph step walks the order (existing rule, not this change).</p>
+mini has no Codex login; run `lf machine login codex mini`
+$ doppler run -- lf --machine mini -b -a claude : 'Reply with exactly: QA957 OK'
+You've reached your Fable limit. Switch to another model to continue.
+claude: provider usage limit; continuing on claude:opus
+QA957 OK                                  # 10.3 s, 6 ssh calls; ~/.lf/forward on mini left empty</pre>
+<p>A real Claude launch on mini with the Doppler setup token forwarded: works. Outside <code>doppler run</code> both launches stop
+first at <code>forward.env names CLAUDE_CODE_OAUTH_TOKEN, which has no value on this Machine</code> (main's rule, Codex launches too).</p>
 
-<h2>9. <code>logins</code> after refusals, <code>--refused</code>, <code>logout</code>, errors</h2>
-<pre>$ lf machine logins mini
-claude       signed out
-codex        signed out     refused Nov 17 13:37
-$ lf machine login codex --refused
-Error: the approver for Codex exited with exit status: 1; mini was not signed in      # selected mini only
-$ lf machine logout claude mini        → mini: Claude signed out
-$ lf machine logout codex              → Jacks-MacBook-Pro-2: Codex signed out
-$ lf machine login chatgpt mini        → invalid value 'chatgpt' for '&lt;PROVIDER&gt;': unsupported provider: chatgpt
-$ lf machine login codex nosuch        → machine "nosuch" is not added; run `lf machine add nosuch` first
-$ lf machine login codex mini --refused → the argument '[MACHINES]...' cannot be used with '--refused'
-mini unreachable (every command)       → machine "mini-heart": unreachable: run `ssh -o ControlPath=none -- 'mini-heart'` …</pre>
+<h2>5. Claude here, a person at the terminal (PTY)</h2>
+<pre>$ lf machine login claude
+Opening browser to sign in…
+If the browser didn't open, visit: https://claude.ai/oauth/authorize?…
+Paste code here if prompted > ^C
+before: Error: Claude's login exited with exit status: 130
+after:  Error: Claude's login was interrupted; Jacks-MacBook-Pro-2 was not signed in</pre>
+<p>Claude's own page went to <code>open</code> (localhost callback). <span class="fixed">Fixed</span> the Ctrl-C message in <code>login::claude_here</code>;
+other failures now also say the Machine was not signed in.</p>
 
-<h2>10. A service on mini already signed in</h2>
-<pre>$ lf machine login github mini
-<span class="bad">before:</span> (nothing; exit 0)
-<span class="fixed">after:</span>  mini: GitHub already signed in as jacklionheart</pre>
-<p><span class="fixed">Fixed:</span> the pre-check now says why nothing was sent, and a service sign-in ends with
-<code>&lt;Machine&gt;: GitHub signed in</code> on stdout, like Claude and Codex (it was “Connected GitHub on mini” on
-stderr, and “Connected local GitHub” here). mini's real <code>gh</code> <code>hosts.yml</code> was byte-identical before and after.</p>
-
-<h2>Tests</h2>
-<pre id="tests">cargo test -p loopflow-execution --lib machine::login   → ok (1 passed)
-cargo test -p loopflow --test integration -- machine_commands:: auth_tests::   → 59 passed, 1 failed (claude_login_runs_on_the_machine…: the first fail-fast)
-cargo test -p loopflow --test integration -- machine_commands::claude_login     → ok (2 passed, after the grace)
-cargo test -p loopflow --test session_launch_contract -- signed_out forwarded_secrets → ok (2 passed)
-cargo clippy -p loopflow-execution --all-targets -- -D warnings                → clean
-Swift ServerProtocolTests → CI</pre>
-
-<h2>Where it stands</h2>
-<p><b>Works now:</b> sign-in to the approval page for both clients, here and on a real remote Machine; decline, wrong
-code, malformed code and Ctrl-C all fail fast and leave nothing running; <code>logins</code>, <code>logout</code>,
-<code>--refused</code> selection, the launch check here and remote, skew and unreachable errors.</p>
-<p><b>Not reached:</b> a completed sign-in. Approving Claude's page or Codex's device code needs a person's account in
-their browser; mini's real logins were deliberately left alone. Still open for a person at gate:
-<code>lf machine login claude mini</code> and <code>lf machine login codex mini</code> for real (and whether device code
-login is enabled for the ChatGPT plan). Rental prepare's sign-in loop (no rental reached prepare here). Desktop: no view
-used the deleted account routes.</p>
-<p><b>Still rough, worst first:</b></p>
+<h2>What works, what wasn't reached, what's rough</h2>
+<p><b>Works:</b> Claude by forwarded token end to end on mini; Claude refused toward other Machines with no SSH; Codex device login reaches
+the approver with the real page and code, and leaves nothing on mini when declined or killed; launch check names the fixing command; local Claude login hands over to the client.</p>
+<p><b>Not reached:</b> a real Codex approval (needs a person's ChatGPT account; device code beta); rental <code>place</code>'s no-agent-login stop and prepare's sign-in loop (renting costs money and no fixture reaches rent).</p>
+<p><b>Rough, worst first:</b></p>
 <ol>
-<li>The launch stop reads “agent stopped after provider credential invalidated.” for a Machine that was never signed in;
-the next line is right.</li>
-<li><code>--refused</code> skips this Machine even when it reads refused (recorded in <code>scratch/questions.md</code>).</li>
-<li><code>logins</code> shows <code>opencodezen</code> while <code>login --help</code> says <code>opencode</code> (both parse);
-a refusal with no account sits one column right of the account column.</li>
-<li><code>lf machine remove</code> left the old <code>connections:</code> entry in <code>config.yaml</code>;
-<code>lf set</code> prints <code>saved; DomainAction</code> (released lf too: <code>saved; NextLaunch</code>). Both predate this branch.</li>
-<li><span class="fixed">Fixed:</span> <code>lf machine logins --help</code> and <code>logout --help</code> showed no text for their positionals.</li>
+<li><code>forward.env</code> naming the Claude token makes every launch from a checkout without that Doppler secret fail, Codex launches included, and <code>lf machine logins</code> now shows Claude <code>signed out</code> there with no hint why. A <code>forwarded (no value here)</code> state would say it; left alone.</li>
+<li><code>Error: agent stopped after provider credential invalidated.</code> above the useful line reads as internal.</li>
+<li><code>lf set</code> prints its effect variant (<code>saved; NextLaunch</code>, <code>DomainAction</code>); also on released lf.</li>
+<li>On mini, launches warn twice per run about <code>/Users/jack/.lf/config.yaml:1: skipping stream</code>: mini's real config read beside the private home.</li>
 </ol>
-</body></html>

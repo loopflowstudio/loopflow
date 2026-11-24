@@ -325,19 +325,20 @@ touch '{remote}/codex-approved' '{local}/codex-approved'
         "forward.env",
         "[CLAUDE_CODE_OAUTH_TOKEN]",
     ]));
-    let after = login_states(&fixture, &["machine", "logins", "mini", "--json"]);
-    assert_eq!(
-        after[0],
-        (
-            "claude".into(),
-            "forwarded".into(),
-            Value::from("CLAUDE_CODE_OAUTH_TOKEN")
-        )
-    );
-    assert_eq!(
-        after[1],
-        ("codex".into(), "signed_in".into(), Value::from("ChatGPT"))
-    );
+    // Named without a value here, nothing would reach a launch.
+    let unset = login_states(&fixture, &["machine", "logins", "mini", "--json"]);
+    assert_eq!(unset[0].1, before[0].1);
+    let output = fixture
+        .command(&["machine", "logins", "mini", "--json"])
+        .env("CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-oat01-fixture")
+        .output()
+        .unwrap();
+    assert_success(&output);
+    let after: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(after[0]["state"], "forwarded");
+    assert_eq!(after[0]["account"], "CLAUDE_CODE_OAUTH_TOKEN");
+    assert_eq!(after[1]["state"], "signed_in");
+    assert_eq!(after[1]["account"], "ChatGPT");
 
     // With no Machine named, the same login runs here.
     assert_eq!(

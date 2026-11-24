@@ -89,10 +89,13 @@ fn claude_here(machine: &Machine) -> Result<()> {
             std::io::ErrorKind::NotFound => not_installed(Provider::Claude, &name(machine)),
             _ => anyhow::Error::from(error).context("start Claude's login"),
         })?;
-    if !status.success() {
-        bail!("Claude's login exited with {status}");
-    }
     let name = name(machine);
+    match status.code() {
+        Some(0) => {}
+        // Claude's own answer to Ctrl-C.
+        Some(130) => bail!("Claude's login was interrupted; {name} was not signed in"),
+        _ => bail!("Claude's login exited with {status}; {name} was not signed in"),
+    }
     match confirm(machine, Provider::Claude, LoginState::SignedIn, "login")? {
         Some(account) => println!("{name}: Claude signed in as {account}"),
         None => println!("{name}: Claude signed in"),
@@ -292,7 +295,7 @@ impl LoginState {
 /// Every provider's login on `machine`. Another Machine answers with its own
 /// `lf machine logins --json`, so its clients and store are the ones asked;
 /// its Claude row reads `forwarded` when this Machine's `forward.env` names
-/// `CLAUDE_CODE_OAUTH_TOKEN`.
+/// `CLAUDE_CODE_OAUTH_TOKEN` and this Machine has its value.
 pub async fn logins(machine: &Machine) -> Result<Vec<LoginRow>> {
     if !here(machine) {
         let output = crate::machine::credentials::remote_command(
@@ -302,12 +305,9 @@ pub async fn logins(machine: &Machine) -> Result<Vec<LoginRow>> {
         )?;
         let mut rows: Vec<LoginRow> = serde_json::from_slice(&output)
             .with_context(|| format!("{}'s logins were unreadable", name(machine)))?;
-        let forwards_claude = crate::config::load_config(None)?
-            .unwrap_or_default()
-            .forward
-            .env
-            .iter()
-            .any(|name| name == CLAUDE_TOKEN_ENV);
+        // Only a token this Machine can supply reaches a launch from here.
+        let forwards_claude = crate::machine::forward::read(&std::env::current_dir()?)
+            .is_ok_and(|forwarded| forwarded.carries_env(CLAUDE_TOKEN_ENV));
         if forwards_claude {
             for row in rows
                 .iter_mut()

@@ -105,7 +105,8 @@ lf machine logout codex mini
 `lf machine logins [<machine>] [--json]` asks the Machine's own clients
 (`claude auth status`, `codex login status`) and shows `unknown` when one can't
 answer. On another Machine, Claude reads `forwarded` when your `forward.env`
-names `CLAUDE_CODE_OAUTH_TOKEN`. Each row also shows the provider's last
+names `CLAUDE_CODE_OAUTH_TOKEN` and this Machine has its value (exported or in
+Doppler). Each row also shows the provider's last
 refusal there, login missing or usage limit, and when. `lf machine logout` runs
 each provider's own logout.
 

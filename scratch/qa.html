@@ -346,3 +346,43 @@ $ lf wave status billing | grep -A1 Project     # made before the team was set
 <li>Served tracker failures read <code>outcome_unknown</code> "inspect the affected work before retrying" next to a message that says exactly what to rerun.</li>
 <li>Desktop shows no line for an unbound Project; the hint is CLI-only.</li>
 </ol>
+
+<h2>Eleventh run, 2026-11-24: slice 13 (an unbound Project keeps its order)</h2>
+<p>Branch <code>lf</code> (debug build of 5d03840e1a) on a private home under <code>/tmp/lfq13</code>, a fresh repository with a local bare origin and a Linear team in <code>.lf/config.yaml</code>, no Linear login, no <code>LF_*</code>, stdin closed. No real tracker Project was made.</p>
+<table>
+<tr><th>Scenario</th><th>Result</th></tr>
+<tr><td><code>lf wave create ledger</code> offline</td><td>Exit 1; the retry now names <code>lf wave sync ledger</code>, the verb <code>lf wave status</code> prints. Wave recorded, Project unbound.</td></tr>
+<tr><td>Nested <code>lf wave create ledger/refunds</code></td><td>Same, naming <code>lf wave sync ledger/refunds</code>.</td></tr>
+<tr><td>Three Tasks into the unbound Project, then <code>lf task edit 936406 --rank 0</code></td><td>Edit succeeds; <code>lf task list --wave ledger</code> reads Gamma, Alpha, Beta. <code>tracker_actions</code> holds the three Task creates and no Order: the order waits in the store for the binding, as slice 13 built.</td></tr>
+<tr><td><code>lf wave sync ledger</code> offline</td><td>Exit 1, credential error; local order unchanged, nothing new queued.</td></tr>
+<tr><td>Desktop's path: served <code>wave.create</code> on the private server</td><td><code>outcome_unknown</code>, "… Run `lf wave sync payouts` to make it.; inspect the affected work before retrying".</td></tr>
+</table>
+<h3>Transcript</h3>
+<pre>$ lf wave create ledger
+Error: wave/ledger has no tracker Project yet: No Linear credential found. Run `doppler run -- lf machine login linear`. Run `lf wave sync ledger` to make it.
+$ lf task edit 936406 --rank 0
+task_936406f616de45b4b28e802d93205d37: updated
+create · queued · No Linear credential found. Run `doppler run -- lf machine login linear`.
+$ lf task list --wave ledger
+936406 · — · Gamma
+2a874e · — · Alpha
+4abb78 · — · Beta
+$ lf repo tracker
+Tracker: linear. 3 open · 0 lost.
+  2a874e            create · queued · No Linear credential found. …
+  4abb78            create · queued · …
+  936406            create · queued · …</pre>
+<h3>Fixed</h3>
+<p>Nothing; the reachable path behaved as built.</p>
+<h3>Checks (where the real path stops)</h3>
+<ul>
+<li>Storage <code>linear_events::</code> 10 pass after the compress, including <code>binding_an_unbound_project_queues_the_order_its_tasks_took</code>.</li>
+<li><code>local_planning::task_creation_and_edits_save_offline_in_both_connection_modes</code> passes.</li>
+</ul>
+<h3>Not reached</h3>
+<p>The binding itself (create, sync, connect or the drain giving the Project its tracker id) and the Order reaching Linear: no Linear or Asana login on this Machine (none in Doppler either), and it would make real Projects in a shared workspace. The upgrade home was not rebuilt; slice 13 changes no migration. Desktop UI not opened.</p>
+<h3>Still wrong, worst first</h3>
+<ol>
+<li>Served tracker failures still append "; inspect the affected work before retrying" (now right after a period: "to make it.;") next to a message that says exactly what to rerun.</li>
+<li>Desktop shows no line for an unbound Project; the hint is CLI-only.</li>
+</ol>

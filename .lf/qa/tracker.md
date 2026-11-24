@@ -30,7 +30,11 @@ That skew is #1957's, not a vocabulary rename's; compare against an `lf`
 built from main for mirror-table checks.
 
 The `sqlite3` CLI here refuses `-readonly` on a WAL store (error 14); read with
-Python: `sqlite3.connect("file:…/loopflow.db?mode=ro", uri=True)`.
+Python: `sqlite3.connect("file:…/loopflow.db?mode=ro", uri=True)`. With no `lf`
+running there may be no `loopflow.db-shm`, and `mode=ro` then fails with
+"unable to open database file"; a plain `sqlite3.connect(path)` works then.
+Queued tracker work is the `tracker_actions` table (`kind`, `phase`, `error`,
+`project_id`, `task_id`).
 
 A second Machine is a second `HOME`/`LF_HOME` pair on a fresh clone of the
 same bare origin: its first `lf task list` fetches and shows the other

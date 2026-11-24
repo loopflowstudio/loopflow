@@ -362,7 +362,7 @@ def _exercise(fixture: dict, env: dict, server: ThreadingHTTPServer, mode: str) 
             # step resolve the lost write replies using their retained identities.
             with server.lock:
                 requests = server.state["requests"]
-            attempted = db.execute("SELECT max(attempted_at) FROM linear_team_checks").fetchone()[0]
+            attempted = db.execute("SELECT max(attempted_at) FROM planning_scope_checks").fetchone()[0]
             _await(lambda: time.time() >= attempted + 11, "team freshness never expired")
             with server.lock:
                 assert server.state["requests"] == requests, "idle agent polled Linear"

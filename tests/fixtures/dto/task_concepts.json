@@ -347,6 +347,7 @@
         "run_control": {
           "unavailable": "Task FIX-2 worktree /repo/fix-2 is missing; restore that exact path on branch \"fix-2\" before `lf task run FIX-2`; Task identity and PR history are unchanged"
         },
+        "runs_on": null,
         "runtime": {
           "completion_pending": null,
           "owner": {
@@ -440,6 +441,7 @@
         "run_control": {
           "unavailable": null
         },
+        "runs_on": null,
         "runtime": {
           "completion_pending": null,
           "owner": {
@@ -533,6 +535,7 @@
         "run_control": {
           "unavailable": "Linear Task is canceled"
         },
+        "runs_on": null,
         "runtime": {
           "completion_pending": null,
           "owner": null,
@@ -616,6 +619,7 @@
         "run_control": {
           "unavailable": "Task is complete"
         },
+        "runs_on": null,
         "runtime": {
           "completion_pending": null,
           "owner": {
@@ -1014,6 +1018,7 @@
         "run_control": {
           "unavailable": "Task FIX-1 worktree /repo/fix-1 is missing; restore that exact path on branch \"\" before `lf task run FIX-1`; Task identity and PR history are unchanged"
         },
+        "runs_on": null,
         "runtime": {
           "completion_pending": null,
           "owner": {
@@ -1126,6 +1131,7 @@
         "run_control": {
           "unavailable": "Task FIX-2 worktree /repo/fix-2 is missing; restore that exact path on branch \"fix-2\" before `lf task run FIX-2`; Task identity and PR history are unchanged"
         },
+        "runs_on": null,
         "runtime": {
           "completion_pending": null,
           "owner": {
@@ -1220,6 +1226,7 @@
         "run_control": {
           "unavailable": "Linear Task is canceled"
         },
+        "runs_on": null,
         "runtime": {
           "completion_pending": null,
           "owner": null,
@@ -1303,6 +1310,7 @@
         "run_control": {
           "unavailable": "Task is complete"
         },
+        "runs_on": null,
         "runtime": {
           "completion_pending": null,
           "owner": {
@@ -1710,6 +1718,7 @@
         "run_control": {
           "unavailable": "Task FIX-1 worktree /repo/fix-1 is missing; restore that exact path on branch \"\" before `lf task run FIX-1`; Task identity and PR history are unchanged"
         },
+        "runs_on": null,
         "runtime": {
           "completion_pending": null,
           "owner": {
@@ -1822,6 +1831,7 @@
         "run_control": {
           "unavailable": "Task FIX-2 worktree /repo/fix-2 is missing; restore that exact path on branch \"fix-2\" before `lf task run FIX-2`; Task identity and PR history are unchanged"
         },
+        "runs_on": null,
         "runtime": {
           "completion_pending": null,
           "owner": {
@@ -1916,6 +1926,7 @@
         "run_control": {
           "unavailable": "Linear Task is canceled"
         },
+        "runs_on": null,
         "runtime": {
           "completion_pending": null,
           "owner": null,
@@ -1999,6 +2010,7 @@
         "run_control": {
           "unavailable": "Task is complete"
         },
+        "runs_on": null,
         "runtime": {
           "completion_pending": null,
           "owner": {
@@ -2406,6 +2418,7 @@
         "run_control": {
           "unavailable": "Task FIX-1 worktree /repo/fix-1 is missing; restore that exact path on branch \"\" before `lf task run FIX-1`; Task identity and PR history are unchanged"
         },
+        "runs_on": null,
         "runtime": {
           "completion_pending": null,
           "owner": {
@@ -2518,6 +2531,7 @@
         "run_control": {
           "unavailable": "Task FIX-2 worktree /repo/fix-2 is missing; restore that exact path on branch \"fix-2\" before `lf task run FIX-2`; Task identity and PR history are unchanged"
         },
+        "runs_on": null,
         "runtime": {
           "completion_pending": null,
           "owner": null,
@@ -2603,6 +2617,7 @@
         "run_control": {
           "unavailable": "Linear Task is canceled"
         },
+        "runs_on": null,
         "runtime": {
           "completion_pending": null,
           "owner": null,
@@ -2686,6 +2701,7 @@
         "run_control": {
           "unavailable": "Task is complete"
         },
+        "runs_on": null,
         "runtime": {
           "completion_pending": null,
           "owner": {
@@ -3104,6 +3120,7 @@
         "run_control": {
           "unavailable": "Task FIX-2 worktree /repo/fix-2 is missing; restore that exact path on branch \"fix-2\" before `lf task run FIX-2`; Task identity and PR history are unchanged"
         },
+        "runs_on": null,
         "runtime": {
           "completion_pending": null,
           "owner": {
@@ -3208,6 +3225,7 @@
         "run_control": {
           "unavailable": "Task FIX-1 worktree /repo/fix-1 is missing; restore that exact path on branch \"\" before `lf task run FIX-1`; Task identity and PR history are unchanged"
         },
+        "runs_on": null,
         "runtime": {
           "completion_pending": null,
           "owner": {
@@ -3301,6 +3319,7 @@
         "run_control": {
           "unavailable": "Linear Task is canceled"
         },
+        "runs_on": null,
         "runtime": {
           "completion_pending": null,
           "owner": null,
@@ -3384,6 +3403,7 @@
         "run_control": {
           "unavailable": "Task is complete"
         },
+        "runs_on": null,
         "runtime": {
           "completion_pending": null,
           "owner": {

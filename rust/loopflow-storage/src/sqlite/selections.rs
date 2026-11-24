@@ -96,9 +96,9 @@ fn work_in(
                 id: task.id.to_string(),
             },
             states: task_selection_states(
-                task.lifecycle,
-                task.owned,
-                published.contains(&task.id),
+                task.lifecycle.observed_here(task.runs_elsewhere),
+                task.section(),
+                task.owned || published.contains(&task.id),
                 auto_on.contains(&task.id),
                 activity,
             ),
@@ -141,11 +141,16 @@ struct SelectionTask {
     wave_id: Option<WaveId>,
     lifecycle: TaskState,
     owned: bool,
+    runs_elsewhere: bool,
 }
 
 impl SelectionTask {
+    fn section(&self) -> TaskSection {
+        TaskSection::of(self.lifecycle, self.owned, self.runs_elsewhere)
+    }
+
     fn working(&self) -> bool {
-        TaskSection::of(self.lifecycle, self.owned) == TaskSection::Working
+        self.section() == TaskSection::Working
     }
 }
 
@@ -174,12 +179,15 @@ fn ordered_tasks_in(
             wave_id: row.get(2)?,
             lifecycle: runtime.lifecycle(row.get::<_, Option<String>>(3)?.as_deref()),
             owned: false,
+            runs_elsewhere: false,
         });
     }
     let ids: Vec<_> = rows.iter().map(|row| row.id.clone()).collect();
-    let owners = super::task_ownership::owners_in(conn, &ids)?;
+    let (local, owners) = super::task_ownership::ownerships_in(conn, &ids)?;
     rows.retain_mut(|row| {
-        row.owned = owners.contains_key(&row.id);
+        let ownership = owners.get(&row.id);
+        row.owned = ownership.is_some();
+        row.runs_elsewhere = ownership.is_some_and(|claim| claim.runs_on(&local).is_some());
         include(row)
     });
     let starts = start_times_in(
@@ -274,27 +282,28 @@ fn start_times_in<'a>(
 /// The same lifecycle, section, auto setting and activity set for roadmap rows
 /// and selections.
 pub fn task_selection_states(
-    lifecycle: TaskState,
-    owned: bool,
-    published: bool,
+    state: Option<TaskState>,
+    section: TaskSection,
+    claimed_or_published: bool,
     auto: bool,
     activity: Option<&TaskActivity>,
 ) -> BTreeSet<SelectionState> {
     let mut states = activity.map_or_else(BTreeSet::new, |activity| activity.states.clone());
-    if (owned || published) && !lifecycle.is_terminal() {
+    let open = matches!(section, TaskSection::Backlog | TaskSection::Working);
+    if claimed_or_published && open {
         states.insert(SelectionState::Open);
     }
-    if auto && !lifecycle.is_terminal() {
+    if auto && open {
         states.insert(SelectionState::Auto);
     }
-    states.insert(match lifecycle {
+    states.extend(state.map(|state| match state {
         TaskState::Unstarted => SelectionState::Unstarted,
         TaskState::Idle => SelectionState::Idle,
         TaskState::Active => SelectionState::Active,
         TaskState::Moving => SelectionState::Moving,
         TaskState::Done | TaskState::Abandoned => SelectionState::Done,
-    });
-    states.insert(match TaskSection::of(lifecycle, owned) {
+    }));
+    states.insert(match section {
         TaskSection::Backlog => SelectionState::Backlog,
         TaskSection::Working => SelectionState::Working,
         TaskSection::Done | TaskSection::Abandoned => SelectionState::Done,
@@ -972,7 +981,10 @@ impl SqliteStore {
 
 #[cfg(test)]
 mod tests {
-    use super::task_order_in;
+    use super::{task_order_in, task_selection_states};
+    use crate::execution::{TaskSection, TaskState};
+    use crate::work::selection::SelectionState;
+    use std::collections::BTreeSet;
 
     #[test]
     fn a_task_order_changed_after_preparation_keeps_the_new_order() {
@@ -986,5 +998,30 @@ mod tests {
             task_order_in(&store.conn.lock().unwrap(), &repo).unwrap(),
             order
         );
+    }
+
+    #[test]
+    fn task_selection_states_show_only_observed_runtime_states() {
+        use SelectionState::{Auto, Open, Working};
+        for state in [TaskState::Unstarted, TaskState::Idle, TaskState::Active] {
+            let states = task_selection_states(
+                state.observed_here(true),
+                TaskSection::Working,
+                true,
+                true,
+                None,
+            );
+            assert_eq!(states, BTreeSet::from([Open, Working, Auto]));
+        }
+        for (state, expected) in [
+            (TaskState::Moving, SelectionState::Moving),
+            (TaskState::Done, SelectionState::Done),
+            (TaskState::Abandoned, SelectionState::Done),
+        ] {
+            let section = TaskSection::of(state, true, true);
+            let states =
+                task_selection_states(state.observed_here(true), section, true, true, None);
+            assert!(states.contains(&expected));
+        }
     }
 }

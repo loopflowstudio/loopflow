@@ -184,6 +184,9 @@ pub(super) async fn run() -> Result<()> {
     let (remote_control, remote_requests) = mpsc::channel(8);
     super::maintenance::start();
     super::maintenance::start_plan_exchange();
+    tokio::spawn(loopflow_execution::ops::tracker_events::watch_owned_work(
+        None,
+    ));
     // Held terminals keep running in their holders whether or not this server
     // can host them; without a registry their views wait for the next server.
     let terminals = match Registry::open(&executable_sha256) {

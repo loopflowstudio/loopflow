@@ -70,7 +70,7 @@ fn run_command(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Result
 /// `lf steer`: save `message` for a Session or a Task named by `target`, or
 /// with none for the Wave or repository the invocation selected. A target
 /// that names no Session is a Task. `--json` prints what the server answers:
-/// `task.steer` the Task's thread with the entry, `session.steer` the steer.
+/// `task.steer` the Task's delivery receipt, `session.steer` the steer.
 pub fn steer(
     cli: &crate::lf::Cli,
     target: Option<&str>,
@@ -99,20 +99,10 @@ pub fn steer(
             let unknown = || format!("{issue} names no Session and no Task");
             let repo = super::mutation::selected_task_repository(cli, &directory, Some(issue))
                 .with_context(unknown)?;
-            let thread = runtime.block_on(async {
-                let (store, task) =
-                    loopflow_execution::ops::task::resolve_saved_task(&repo, wave, issue)
-                        .await
-                        .with_context(unknown)?;
-                let scope = SteerScope::Task { issue, wave };
-                let steer =
-                    loopflow_execution::engine::session::steer(&store, &repo, scope, message)
-                        .await?;
-                anyhow::Ok((steer, store.task_comments(&task.id)?))
-            })?;
+            let receipt = super::write::steer_task(&repo, issue, wave, message, None)?;
             match json {
-                true => println!("{}", serde_json::to_string(&thread.1)?),
-                false => println!("Saved {}", thread.0.id),
+                true => println!("{}", serde_json::to_string(&receipt)?),
+                false => println!("{}", receipt.delivery.sentence),
             }
             return Ok(());
         }
@@ -131,30 +121,11 @@ pub fn steer(
         (false, Some(session)) => println!(
             "Saved {}; {}",
             steer.id,
-            steer_reader(&store.sqlite, session)?
+            loopflow_execution::engine::session::steer_reader(&store.sqlite, session)?
         ),
         (false, None) => println!("Saved {}", steer.id),
     }
     Ok(())
-}
-
-/// Who reads a steer saved for `session`, with no turn of its own to run it.
-fn steer_reader(
-    sqlite: &loopflow_execution::store::sqlite::SqliteStore,
-    session: &loopflow_execution::session::LfSession,
-) -> anyhow::Result<String> {
-    let id = &session.id;
-    Ok(
-        if loopflow_execution::ops::human_session::agent_running(sqlite, session)? {
-            format!("{id} reads it at its next boundary")
-        } else if session.interactive {
-            format!("the Machine server starts {id} to read it")
-        } else if session.graph_lf_process_id.is_some() {
-            format!("{id} is a finished worker; nothing reads it until its Graph continues it")
-        } else {
-            format!("{id} is a finished batch; nothing reads it")
-        },
-    )
 }
 
 /// `lf -b steer SESSION TEXT`: a Session whose agent is stopped reads its
@@ -788,12 +759,10 @@ async fn list(
             let mut line = format!(
                 "{}  {:<7} {}  {}",
                 session.id,
-                match session.state {
-                    _ if session.availability.is_some() => "available",
-                    SessionState::Unknown => "unknown",
-                    SessionState::Active => "active",
-                    SessionState::Detached => "detached",
-                    SessionState::Closed => "closed",
+                if session.availability.is_some() {
+                    "available"
+                } else {
+                    session.state.label()
                 },
                 place,
                 match &session.account {

@@ -100,6 +100,11 @@ impl TaskState {
         matches!(self, Self::Done | Self::Abandoned)
     }
 
+    /// State this Machine can report from its own records and the shared plan.
+    pub fn observed_here(self, runs_elsewhere: bool) -> Option<Self> {
+        (!runs_elsewhere || self.is_terminal() || self == Self::Moving).then_some(self)
+    }
+
     /// Has a checkout and is still open and unheld.
     pub fn is_started(&self) -> bool {
         matches!(self, Self::Idle | Self::Active | Self::Moving)
@@ -131,18 +136,20 @@ impl TaskState {
 pub enum TaskSection {
     /// Waiting for someone to pick it up: unstarted, or started and unassigned.
     Backlog,
-    /// Someone's idle, active or moving Task.
+    /// Someone's idle, active or moving Task, or a Task owned on another Machine.
     Working,
     Done,
     Abandoned,
 }
 
 impl TaskSection {
-    /// The Task's effective lifecycle and whether someone holds its claim.
-    pub fn of(lifecycle: TaskState, owned: bool) -> Self {
+    /// A remote claim gives the Task a place in Working even when this Machine
+    /// has no execution record. Pass the lifecycle including planning withdrawal.
+    pub fn of(lifecycle: TaskState, owned: bool, runs_elsewhere: bool) -> Self {
         match lifecycle {
             TaskState::Done => Self::Done,
             TaskState::Abandoned => Self::Abandoned,
+            _ if runs_elsewhere => Self::Working,
             TaskState::Unstarted => Self::Backlog,
             _ if !owned => Self::Backlog,
             TaskState::Idle | TaskState::Active | TaskState::Moving => Self::Working,
@@ -244,26 +251,24 @@ mod tests {
             assert_eq!(TaskState::Unstarted.lifecycle(Some(planning)), terminal);
             for runtime in [TaskState::Idle, TaskState::Active, TaskState::Moving] {
                 assert_eq!(runtime.lifecycle(Some(planning)), runtime);
+                assert_eq!(
+                    TaskSection::of(runtime.lifecycle(Some(planning)), false, false),
+                    TaskSection::Backlog
+                );
             }
         }
     }
 
     #[test]
     fn task_sections_put_unassigned_and_withdrawn_tasks_where_the_board_does() {
-        for lifecycle in [TaskState::Idle, TaskState::Active, TaskState::Moving] {
-            assert_eq!(TaskSection::of(lifecycle, true), TaskSection::Working);
-            assert_eq!(TaskSection::of(lifecycle, false), TaskSection::Backlog);
-        }
-        for owned in [true, false] {
-            assert_eq!(
-                TaskSection::of(TaskState::Unstarted, owned),
-                TaskSection::Backlog
-            );
-            assert_eq!(TaskSection::of(TaskState::Done, owned), TaskSection::Done);
-            assert_eq!(
-                TaskSection::of(TaskState::Abandoned, owned),
-                TaskSection::Abandoned
-            );
-        }
+        let of = TaskSection::of;
+        assert_eq!(of(TaskState::Idle, true, false), TaskSection::Working);
+        assert_eq!(of(TaskState::Moving, true, false), TaskSection::Working);
+        assert_eq!(of(TaskState::Idle, false, false), TaskSection::Backlog);
+        assert_eq!(of(TaskState::Moving, false, false), TaskSection::Backlog);
+        assert_eq!(of(TaskState::Unstarted, true, false), TaskSection::Backlog);
+        assert_eq!(of(TaskState::Unstarted, true, true), TaskSection::Working);
+        assert_eq!(of(TaskState::Done, false, false), TaskSection::Done);
+        assert_eq!(of(TaskState::Abandoned, true, true), TaskSection::Abandoned);
     }
 }

@@ -51,6 +51,56 @@ fn commit_stages_and_commits() {
 }
 
 #[test]
+fn manual_commit_pushes_branch_checkpoints_unless_kept_local() {
+    let _env = EnvGuard::new(&[]);
+    let repo = TestRepo::new();
+    let commit = |args: &[&str]| -> loopflow_execution::engine::checkout::Committed {
+        let output = Command::new(loopflow_test_support::lf_binary())
+            .current_dir(repo.path())
+            .args(["commit", "--json"])
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{output:?}");
+        serde_json::from_slice(&output.stdout).unwrap()
+    };
+
+    let remote_main = repo.bare_head_sha();
+    repo.create_file("main.txt", "local change");
+    assert!(!commit(&["-m", "Default branch checkpoint"]).pushed);
+    assert_ne!(repo.head_sha(), remote_main);
+    assert_eq!(repo.bare_head_sha(), remote_main);
+
+    repo.create_branch("topic");
+    let remote_topic = || git_output(repo.bare_path(), &["rev-parse", "refs/heads/topic"]);
+    repo.create_file("topic.txt", "first change");
+    assert!(commit(&["-m", "Publish branch"]).pushed);
+    assert_eq!(remote_topic().trim(), repo.head_sha());
+
+    let published = repo.head_sha();
+    repo.create_file("later.txt", "staged separately");
+    repo.stage_all();
+    repo.create_file("topic.txt", "second change");
+    assert!(!commit(&["--no-push", "-m", "Local revision", "topic.txt"]).pushed);
+    assert_ne!(repo.head_sha(), published);
+    assert_eq!(remote_topic().trim(), published);
+
+    repo.create_file("topic.txt", "final change");
+    assert!(commit(&["-m", "Publish selected revision", "topic.txt"]).pushed);
+    assert_eq!(remote_topic().trim(), repo.head_sha());
+    assert_eq!(
+        git_output(repo.path(), &["diff", "--cached", "--name-only"]),
+        "later.txt\n"
+    );
+
+    commit(&["--no-push", "-m", "Keep the staged change local"]);
+    assert_ne!(remote_topic().trim(), repo.head_sha());
+    let retry = commit(&[]);
+    assert!(retry.pushed && !retry.committed);
+    assert_eq!(remote_topic().trim(), repo.head_sha());
+}
+
+#[test]
 fn commit_with_push() {
     let _env = EnvGuard::new(&[]);
     let repo = TestRepo::new();

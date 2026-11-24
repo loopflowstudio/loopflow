@@ -77,7 +77,7 @@ was requested for an earlier head, stacking turns Auto off before pushing.
 The same clean head keeps its merge request.
 When the published parent is ahead of origin, or origin's branch has diverged,
 the child bases on `origin/<branch>` and the stack line counts the local commits
-it leaves out. Run `lf commit -p` in the parent's checkout to include them. The
+it leaves out. Run `lf commit` in the parent's checkout to include them. The
 child can start and publish before the parent publishes or merges.
 It records its fork point and targets the parent's branch. Stacking fails when
 the parent is not a Task, has no placed branch, has already merged, or the push
@@ -99,7 +99,7 @@ The child retains its Task, PR, branch and Session identity and its own design.
 ## Commit and publish
 
 ```bash
-lf commit -m "parser: accept nested groups" # local checkpoint
+lf commit --no-push -m "parser: accept nested groups" # local checkpoint
 lf pr open                             # prepare a draft and open its page
 lf pr publish                          # ready for review
 lf pr arm                              # request auto-merge and return

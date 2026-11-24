@@ -115,7 +115,7 @@ fn task_delivery_works_on_an_ordinary_branch_without_registration() {
         String::from_utf8(run(&["pr"])).unwrap().trim(),
         "No open PR for the current branch."
     );
-    run(&["commit", "-m", "Record local work"]);
+    run(&["commit", "--no-push", "-m", "Record local work"]);
     let committed = repo.head_sha();
     assert_ne!(before, committed);
     assert!(!state.exists(), "commit published a PR");

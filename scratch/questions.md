@@ -15,3 +15,5 @@ Headless kickoff + concept-review — reversible product choices taken in `scrat
 
 Superseded by steers (2026-11-23): items 1 and 2 (the cap and its held stop) are dropped — guidance only, aim for no more than 5 passes. See the top of `scratch/plan.md`.
 Item 4 (scratch-only commit skip) is dropped too.
+
+Manual commits apply the branch push default to selected paths too. The independent index still limits the commit to the named files. A clean checkout can push an earlier local checkpoint on the next `lf commit`.

@@ -231,7 +231,7 @@ pub fn step_commit_pending(repo: &Path) -> bool {
     !is_clean(repo).unwrap_or(true) || unpushed().unwrap_or(false)
 }
 
-fn off_default_branch(repo: &Path) -> OpsResult<bool> {
+pub(crate) fn off_default_branch(repo: &Path) -> OpsResult<bool> {
     let default_branch = crate::git::get_default_branch(repo)?;
     Ok(current_branch(repo)?.is_some_and(|branch| branch != default_branch))
 }

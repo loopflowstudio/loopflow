@@ -11,6 +11,18 @@ Jack Heart, exact words:
 
 Still in scope: quiet `task-session` during running steps (settled-run `error` in the update stays useful for failed runs), pass-sizing skill text, pass number in the decision prompt.
 
+### Implementation order after the manual commit steer
+
+Jack Heart: "-p should be default" and "change it to you have to pass someting to not push. just put it in this one."
+
+1. Built and tested: manual `lf commit` pushes branch checkpoints, including selected paths. The default branch and detached HEAD keep the commit local. `--no-push` opts out. The existing served `push` boolean carries that choice through Desktop and the CLI.
+2. Build the substantial-pass guidance and the decider's pass count, repeated span and return target together. Check the prompt through a running loop and refresh the builtin goldens.
+3. Suppress healthy running-step updates to a Task's own conversation and include the error in the settled update. Check the wakeup through the Task session.
+
+In a disposable repository, the branch CLI kept both a commit on the advertised `trunk` default and a detached-HEAD commit local. `lf help commit` showed `--no-push`, both old flags exited with a parser error, and `lf server describe --json` matched the schema fixture byte for byte.
+
+`cargo test -p loopflow --test integration commit_tests::manual_commit_pushes_branch_checkpoints_unless_kept_local -- --exact` passed. A separate CLI run with an unavailable remote retained the commit and pushed the same SHA on retry.
+
 ### Docs written (write-docs)
 
 - `docs/orchestration.md` — Loops section (pass sizing as guidelines, decision-prompt line `Decision pass 3. Iterating repeats 3 steps, back to implement.`, outer-review-loop example).

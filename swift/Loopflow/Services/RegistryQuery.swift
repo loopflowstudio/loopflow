@@ -443,7 +443,7 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
             return ["repo", "release", "run"] + [version].compactMap { $0 } + argument("--target", target) + ["--json"]
         case .checkoutCommit(_, let message, let push, let noAdd, let paths, let agent):
             var argv = argument("--agent", agent) + ["commit"] + argument("--message", message)
-            argv += Self.flags([("--push", push), ("--no-add", noAdd)])
+            argv += Self.flags([("--no-push", !push), ("--no-add", noAdd)])
             return argv + paths + ["--json"]
         case .checkoutSync(_, let onto, let preview, let manual, let continueSync, let abort, let adopt):
             var argv = ["sync"] + argument(nil, onto)

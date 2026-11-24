@@ -3,7 +3,7 @@ pub mod branch_prune;
 pub mod checkout;
 pub mod child;
 pub mod ci;
-mod commit;
+pub(crate) mod commit;
 pub mod context;
 mod error;
 pub(crate) mod git_operation;

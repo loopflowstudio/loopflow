@@ -87,13 +87,18 @@ carrying a green check from an older head). Customize it with
 ## Checkouts and stacked PRs
 
 ```bash
-lf commit -m "retry budget" -p      # commit and push; trailing paths commit only those files
+lf commit -m "retry budget"         # commit and push the branch
+lf commit --no-push -m "draft"      # keep the commit local
 lf sync --plan                      # preview what sync would do without touching git
 lf sync                             # merge main (or stack parent) into this branch
 lf sync LOO-12                      # stack this Task on LOO-12 and merge its branch
 lf wt create spike                  # create a sibling worktree
 lf wt prune --branches --dry-run    # preview cleanup of merged PRs and finished Tasks
 ```
+
+The default branch and detached HEAD keep commits local. Pass paths after the
+message to commit only those files. On a clean checkout, `lf commit` pushes
+existing branch commits too.
 
 Automatic sync checkpoints staged and unstaged edits before merging while
 leaving generated `.lf/tmp/` telemetry local. Resolve merge conflicts normally,
@@ -139,7 +144,7 @@ Synced onto origin/jack/loo-12-retry-budget.
   untouched and prints the command to reconcile either side.
 - If the parent has unpublished local commits, stacking bases on
   `origin/<branch>` and reports how many local commits were left out; run
-  `lf commit -p` in the parent checkout to include them.
+  `lf commit` in the parent checkout to include them.
 
 ## Releases
 

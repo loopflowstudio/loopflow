@@ -127,7 +127,7 @@ impl SyncInput<'_> {
 }
 
 /// `checkout.commit`: commit the checkout containing `directory`, as `lf
-/// commit [-m <message>] [-p] [--no-add] [<path>…]` does. With `paths`, only
+/// commit [-m <message>] [--no-push] [--no-add] [<path>…]` does. With `paths`, only
 /// those, through an index of their own; `message` is required then. Without
 /// a message the configured agent writes one.
 pub fn commit(
@@ -145,7 +145,6 @@ pub fn commit(
             &repo,
             &crate::ops::CommitOptions {
                 add: !no_add,
-                push,
                 message: message.map(str::to_owned),
                 agent: agent.map(str::to_owned),
                 ..crate::ops::CommitOptions::for_task("commit")
@@ -158,11 +157,20 @@ pub fn commit(
         crate::ops::commit_selected(&repo, paths, message).map_err(outcome_unknown)?;
         true
     };
+    // A clean checkout can still have commits to publish after a local checkpoint.
+    let pushed = push
+        && (committed || crate::git::is_clean(&repo).map_err(outcome_unknown)?)
+        && crate::ops::commit::off_default_branch(&repo).map_err(outcome_unknown)?;
+    if pushed {
+        progress.status("Pushing...");
+        crate::ops::commit::push_with_upstream_if_needed(&repo, &|_| {})
+            .map_err(outcome_unknown)?;
+    }
     Ok(Committed {
         branch: crate::git::current_branch(&repo).map_err(outcome_unknown)?,
         head: crate::git::rev_parse(&repo, "HEAD").map_err(outcome_unknown)?,
         committed,
-        pushed: push && paths.is_empty(),
+        pushed,
     })
 }
 

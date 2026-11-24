@@ -148,7 +148,8 @@ written empty, the ignored Wave `linear:` key) and fixtures that test them.
   Projects are a Wave's: an import attributes an issue to the Wave whose
   Project it is in, and a Linear Project linked to no Wave is not imported.
   The "held until moved back" rule for a Project moved between Initiatives
-  goes. Asana: the same with an Asana project.
+  goes. With an Asana Team configured, the Wave’s Project mirrors to an
+  Asana team project. Named connect here selects Linear.
 - Every Wave, top-level included, is one Linear Project; no Wave links an
   Initiative now. Jack Heart, 2026-11-22, asked whether a long-running Wave
   keeps its Initiative link: "One Project only". Initiative links (Wave
@@ -392,9 +393,81 @@ later (`tracker_actions::tests::a_task_left_in_a_removed_waves_project_is_not_cr
 `provider_columns_preserve_released_observations_and_local_execution` has its
 `initiative_ids` back; an Initiative sweep had taken it out.
 
+## Decision pass 3 — remaining Wave–Project recovery work
+
+Slice 7 delivered live ownership on reconnect, retirement of stale Project
+edits, and readable completed history. Two independent failures still break
+the promise that saved Wave work can reach the configured tracker. The
+current walkthrough and both review choices are in `scratch/concept-review.html`.
+
+### First slice — keep pending Task delivery usable through upgrade
+
+Use the released-schema fixture in
+`rust/loopflow-storage/src/sqlite/children.rs`
+(`the_migration_leaves_every_live_wave_one_project_with_its_tasks`). Seed a
+Task create queued under a Project the migration will discard. On a private
+Machine initialized with the installed app's lf, executing the branch's
+`remove_chapters.sql` left the Task on the kept Project and the queued
+create referencing the deleted ID. The foreign-key check was clean.
+`linear/actions.rs` and `asana/actions.rs` both resolve that ID through
+`ops/tracker.rs::remote_project`.
+
+- Use the dropped-to-kept map in `remove_chapters.sql` while both records
+  are known. Translate pending Task creation destinations in the serialized
+  fields. Keep the owner, action ID, ordering and other fields. Check
+  outstanding Task membership edits too, including an edit moving to a
+  different Wave. Translate the intended destination wherever a retry can
+  send it. Do not enqueue membership changes for already delivered Tasks
+  solely because a local chapter disappeared.
+- A sent request can already have landed. Keep its identity and the
+  information needed to compare the original remote result. For an uncertain
+  create, resolve by the Task's existing tracker identity, and use the
+  translated destination if it must be created. For a sent move or an
+  answerable conflict, distinguish an observation of the former external
+  Project from the kept Project and from no Project. Never rewrite a recorded
+  observation as though the tracker had moved an issue.
+- Show an upgrade followed by delivery using the existing simulated tracker.
+  The unsent Task appears once in the kept Project. A lost reply for an
+  already-created issue produces no duplicate or unsolicited move. A pending
+  move to a surviving destination still reaches it. Additional unrecognized
+  fields in a queued create survive translation.
+
+### Next slice — make the advertised Wave sync retry work
+
+A private checkout with a Linear Team and no login had a queued Project
+create for `billing`. After clearing its recorded error as a probe,
+`lf wave sync billing` exited 0, suggested connect, and left the error
+empty. In an Asana-only repository with a seeded linked Project, the
+same command exited 1 asking for a Linear Team. Both paths run through
+`rust/loopflow/src/lf/commands/ops/mod.rs::refresh_status`.
+
+- Route the shared refresh by the configured transport. Without a tracker,
+  retain the repository carrier refresh. With Linear or Asana, resolve
+  the selected Wave and run the existing bounded exchange, giving its
+  stored Project ID priority in the drain. Reuse the delta-before-inventory
+  ordering in `ops/planning_sync.rs` and `ops/tracker_events.rs`. After
+  delivery, read the link again. Only linked Linear Waves have a Linear
+  inventory to fetch. Use Asana's existing repository exchange for Asana.
+- Show the resulting Wave status. A still-pending Project shows its action
+  and available failure reason. A retry should not ask someone to connect
+  a Wave already waiting for its configured tracker. Keep the singular
+  Project DTO usable through the bare CLI, served mutation and Desktop.
+- Exercise the shared command with the existing provider fixtures. Start
+  offline, restore access, sync twice with older queued work ahead of this
+  Project, and assert one remote Project with the original local identity.
+  Cover an Asana link without Linear configuration and the carrier-only path.
+
+Choices made for review: keep pending creates in their Wave on upgrade,
+and use explicit sync to attempt delivery. A Project-less Team issue would
+lose membership. Making connect the only retry would contradict its receipt.
+Changing the snapshot semantics of all tracker creates is a separate outcome.
+
 ## Remains
 
-1. Gate: Swift DTO and desktop suites (`scripts/test_desktop.sh`), full matrix
+1. Implement the two recovery slices above, starting with the released-store
+   queue fixture. Neither fix has been built in this review.
+
+2. Gate: Swift DTO and desktop suites (`scripts/test_desktop.sh`), full matrix
    in CI, and check the `oauth_tests` contention failure on the base.
-2. Open, not this Task: a queued create's field snapshot (`scratch/concept-review.html`
-   question 4).
+3. Open, not this Task: a queued create's field snapshot (`scratch/concept-review.html`
+   discussion of create snapshots).

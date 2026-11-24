@@ -56,3 +56,9 @@
   reclaim that releases the link, and none are queued later. The other
   choice was a team issue with no Project, which an import could then read
   back as a move out of the removed Wave.
+- Decision pass 3 chose to translate an unsent Task's old chapter destination
+  to its Wave's kept Project during upgrade. A Team issue could come back
+  from the tracker outside the Wave.
+- Decision pass 3 chose to have explicit Wave sync attempt a pending Project
+  create using the configured tracker. The connect receipt already directs
+  people there after a deferred send.

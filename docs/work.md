@@ -55,7 +55,7 @@ context without changing its Graph position or completion state.
 lf steer LOO-12 "keep the retry budget at 3"   # delivered at the next step or turn
 lf task status LOO-12 --json                   # thread: your steers, teammates' comments, agent reports
 lf task interrupt LOO-12                       # stop its running Graph; stay in Working
-lf task pause LOO-12                           # stop work and conversation; keep ownership
+lf task pause LOO-12                           # hold the Graph and keep the conversation open
 lf task unpause LOO-12 --run                   # lift pause and continue from the interrupted step
 lf task unassign LOO-12                        # release ownership; stops CI repair
 ```
@@ -97,20 +97,19 @@ LOO-12  paused
   Graph code: Paused at build. `lf task unpause` resumes it.
 ```
 
-The worker and builds in its OS session stop. Other Tasks can keep compiling.
-Codex tool shells can create their own OS sessions, and builds in those sessions
-can survive pause. A Graph command already in progress, such as `lf land`,
+The worker and any subprocesses in its OS session stop. Other Tasks keep running.
+Codex tool shells can create their own OS sessions, and processes in those
+sessions can survive pause. A Graph command already in progress, such as `lf land`,
 finishes at its current step. The pause receipt names the finishing run.
 If cleanup was interrupted, repeat `lf task pause LOO-12` before unpausing.
 
-The primary conversation closes and its terminal shows the unpause command.
-The Task keeps its branch, dirty files, PR, auto setting, conversation history,
-and queued steers. Runs, Auto-Ship, resume, incoming comments, and server
-restarts all respect the hold.
+The primary conversation stays open. You can talk to it, send steers, or
+attach with `lf resume --task LOO-12`. The Task keeps its branch, dirty files,
+PR, and auto setting. New Graph runs, Auto-Ship, and worker retries wait for
+unpause, including after a Machine restart.
 
 Find it in **Paused** on Mac and iPhone, in `lf wave show`, or with
-`lf task list --state paused`. Plain `lf task unpause LOO-12` lifts the hold
-and lets the server reopen the conversation unless you had quit it.
+`lf task list --state paused`. Plain `lf task unpause LOO-12` lifts the hold.
 An owned Task returns to Working and an unassigned Task returns to Backlog.
 To run from the saved step immediately, use `lf task unpause LOO-12 --run`.
 
@@ -119,7 +118,7 @@ also clear it. A move carries the hold to the destination, including a pause
 issued while the source is pushing the checkout. A pause issued after the
 payload was sent can need a retry when the checkout arrives.
 
-Use `lf task interrupt LOO-12` to stop a run and keep its conversation open.
+Use `lf task interrupt LOO-12` to stop the current run and allow another to start.
 
 ## See where everything stands
 

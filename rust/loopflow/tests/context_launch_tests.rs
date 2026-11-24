@@ -1405,6 +1405,12 @@ fn a_killed_task_conversation_comes_back_once_and_a_quit_one_stays_quit() {
         "{conversation}"
     );
 
+    // Pausing its Graph still lets the server recover this conversation.
+    succeed(
+        claude_launch(home.path(), &script)
+            .current_dir(repo.path())
+            .args(["task", "pause", id]),
+    );
     // A finished turn resets the count; then the server stops, the holder
     // dies with it, and the next server starts the conversation once. The
     // crash took the transcript too: it goes on in a fresh thread.

@@ -2486,82 +2486,6 @@ print(build.pid)",
 }
 
 #[test]
-fn pause_keeps_a_queued_steer_for_the_next_start() {
-    let task = holding_task();
-    task.ok(&["task", "claim", "INF-123"]);
-    task.ok(&["task", "checkout", "INF-123", "-a", "claude"]);
-    let sqlite = &task.registered.store.sqlite;
-    wait_for("primary provider ready before pause", || {
-        task.home.path().join("ready").exists()
-    });
-    let primary = sqlite
-        .task_primary(&task.registered.task.id)
-        .unwrap()
-        .unwrap();
-    // Give the stand-in a saved Claude turn for the server to resume.
-    let thread = "b57fe04a-93f3-4c24-b921-29671f7a9c91";
-    support::record_native(
-        task.home.path(),
-        &primary.id,
-        primary.input_key().unwrap(),
-        thread,
-    );
-    let transcripts = task.home.path().join(".claude/projects/fixture");
-    fs::create_dir_all(&transcripts).unwrap();
-    fs::write(
-        transcripts.join(format!("{thread}.jsonl")),
-        r#"{"type":"user","userType":"external","message":{"content":"Review the staged changes"}}"#,
-    )
-    .unwrap();
-    task.ok(&["task", "pause", "INF-123"]);
-
-    task.ok(&["steer", "INF-123", "Keep the staged changes"]);
-    assert!(sqlite.take_steers_to_start(&primary.id).unwrap().is_empty());
-    let queue = sqlite.session_steers(&primary.id, 0, 32).unwrap();
-    let steer = queue
-        .items
-        .iter()
-        .find(|s| s.steer.text.contains("Keep the staged changes"))
-        .unwrap();
-    assert_eq!(steer.delivered_at, None);
-    // Wait for the server to consider this publication before checking its effect.
-    let db = rusqlite::Connection::open(&task.registered.database).unwrap();
-    wait_for("the steer wake reading", || {
-        db.query_row(
-            "SELECT seq>=?1 FROM steer_wake_reading WHERE id=1",
-            [steer.steer.sequence],
-            |r| r.get(0),
-        )
-        .unwrap()
-    });
-    let status = task.run(&["task", "status", "INF-123", "--json"]);
-    assert!(status.status.success(), "{status:?}");
-    let status: serde_json::Value = serde_json::from_slice(&status.stdout).unwrap();
-    let session = status["sessions"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|s| s["id"] == primary.id.as_str())
-        .unwrap();
-    assert_eq!(session["outlook"]["command"], "lf task unpause INF-123");
-    assert_eq!(
-        session["status_line"],
-        "paused; `lf task unpause INF-123` resumes it"
-    );
-
-    task.ok(&["task", "unpause", "INF-123"]);
-    wait_for("resumed conversation took the queued steer", || {
-        sqlite
-            .session_steers(&primary.id, 0, 32)
-            .unwrap()
-            .items
-            .iter()
-            .any(|row| row.steer.id == steer.steer.id && row.delivered_at.is_some())
-    });
-    fs::write(task.home.path().join("release"), "").unwrap();
-}
-
-#[test]
 fn pause_leaves_a_previously_quit_primary_quit_after_unpause() {
     let task = holding_task();
     fs::write(task.home.path().join("release"), "").unwrap();
@@ -2600,7 +2524,7 @@ fn pause_leaves_a_previously_quit_primary_quit_after_unpause() {
 }
 
 #[test]
-fn pause_stops_owned_build_and_keeps_claim() {
+fn pause_stops_the_worker_and_keeps_its_task_conversation_open() {
     use loopflow_execution::process::OsProcess;
     use loopflow_storage::session::PrimaryScope;
 
@@ -2710,7 +2634,14 @@ if (home / 'hold-turn').exists():
     let graph = sqlite.task_graph_record(id).unwrap().unwrap();
     assert!(graph.run_start.is_some());
 
+    let work = loopflow_model::durable::WorkRef::Task(id.clone());
+    let turn_interrupt = sqlite.latest_interrupt_id(&work).unwrap();
     task.ok(&["task", "pause", "INF-123"]);
+    assert_eq!(
+        sqlite.latest_interrupt_id(&work).unwrap(),
+        turn_interrupt,
+        "an independent turn on the Task received an interrupt"
+    );
     assert!(!living(&owned));
     assert_eq!(task.ran(first).code, Some(130));
     assert!(
@@ -2735,7 +2666,7 @@ if (home / 'hold-turn').exists():
     assert_eq!(primary().id, before.id);
     assert!(OsProcess::read(pid)
         .unwrap()
-        .is_none_or(|p| !p.matches_start(pid, birth)));
+        .is_some_and(|p| p.matches_start(pid, birth)));
     assert_eq!(
         sqlite.session_thread(before.id.as_str()).unwrap(),
         Some(thread)
@@ -2749,7 +2680,7 @@ if (home / 'hold-turn').exists():
         assert!(refusal(task.run(&args)).contains("unpause"));
     }
     assert!(!sqlite.local_task_runs().unwrap().contains(id));
-    assert!(!sqlite
+    assert!(sqlite
         .task_conversations_here()
         .unwrap()
         .iter()
@@ -2778,11 +2709,7 @@ if (home / 'hold-turn').exists():
         &std::env::var("PATH").unwrap(),
     );
     assert_eq!(task.state(), "paused");
-    assert!(!sqlite
-        .task_conversations_here()
-        .unwrap()
-        .iter()
-        .any(|c| &c.task == id));
+    assert!(!sqlite.local_task_runs().unwrap().contains(id));
     task.task_run_ok(&["task", "unpause", "INF-123", "--run", "-a", "claude"]);
     assert_eq!(task.graph()["position"], at("review"));
 }

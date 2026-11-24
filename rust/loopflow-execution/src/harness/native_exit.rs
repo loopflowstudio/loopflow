@@ -155,7 +155,7 @@ pub fn settle(exit: &NativeExit, status: ExitStatus) -> Settled {
             .filter(|_| !matches!(settled.code, 0 | 130));
         let recorded = (|| {
             // A departure succeeded for the launcher. Its zero does not mean
-            // the person quit the provider that pause or move stopped.
+            // the person quit the provider that moved.
             if !settled.moved {
                 store.record_agent_exit_code(
                     &attachment.agent_process_id,

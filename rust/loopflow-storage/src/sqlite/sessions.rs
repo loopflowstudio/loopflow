@@ -490,8 +490,7 @@ fn summary_query(page: &str, by_id: bool, now: i64) -> String {
         a.starts_since_turn,a.last_started_at,a.start_failure,
         EXISTS(SELECT 1 FROM task_checkouts pc WHERE pc.task_id=t.id AND {here}),
         a.agent_pid IS NULL AND a.agent_ended_at IS NULL
-         AND EXISTS(SELECT 1 FROM held_terminals t WHERE t.id=a.held_terminal_id AND t.ended_at IS NULL),
-        ({paused_primary})
+         AND EXISTS(SELECT 1 FROM held_terminals t WHERE t.id=a.held_terminal_id AND t.ended_at IS NULL)
         FROM page s JOIN agent_sessions a ON a.id=s.id
         LEFT JOIN session_events captured ON captured.seq=s.current_capture
         LEFT JOIN graph_process_steps gs ON gs.lf_process_id=captured.lf_process_id
@@ -501,7 +500,6 @@ fn summary_query(page: &str, by_id: bool, now: i64) -> String {
         ORDER BY {order}",
         scope = primary_scope_sql("a"),
         task_state = super::durable::task_state_sql("t"),
-        paused_primary = super::task_pause::paused_primary_sql("a.id"),
         here = super::session_recovery::task_conversation_here_sql("a", "t", "pc"))
 }
 
@@ -599,7 +597,6 @@ fn read_summary(
                 .filter(|_| live),
             agent_process_id,
             task_terminal: row.get(26)?,
-            paused_task: row.get::<_, Option<String>>(47)?.map(TaskId::from_raw),
             in_task_checkout: row.get(45)?,
             launching: row.get(46)?,
             captured: row.get(15)?,

@@ -50,14 +50,12 @@ struct MobileTask: Hashable {
     let identifier: String?
     let title: String
     let primarySession: String?
-    let paused: Bool
 
     init(_ row: WorkViewPlan.Content) {
         id = row.work.id
         identifier = row.identifier
         title = row.title
         primarySession = row.primarySession
-        paused = row.states.contains(.paused)
     }
 
     init(_ created: TaskCreated) {
@@ -65,7 +63,6 @@ struct MobileTask: Hashable {
         identifier = created.receipt.task.identifier
         title = created.receipt.task.title
         primarySession = created.session?.id ?? created.receipt.sessionId
-        paused = created.row.lifecycle == .paused
     }
 }
 

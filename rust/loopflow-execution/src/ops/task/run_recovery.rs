@@ -57,7 +57,6 @@ impl DiedRun {
     ) -> ServerStart {
         let facts = DownConversation {
             here,
-            paused: false,
             exit_code: None,
             starts_since_turn: self.restarts.count,
             last_started_at: self.restarts.at,

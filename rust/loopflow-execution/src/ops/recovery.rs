@@ -77,7 +77,6 @@ pub fn launch_failure(conversation: &TaskConversation) -> Option<String> {
 pub struct DownConversation {
     /// It is an open Task's conversation in the Task's checkout here.
     pub here: bool,
-    pub paused: bool,
     /// Its last agent's exit; `None` when nobody saw one.
     pub exit_code: Option<i32>,
     pub starts_since_turn: u32,
@@ -96,8 +95,6 @@ pub enum ServerStart {
 /// Why the server leaves a conversation that is down to a person.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Left {
-    /// Its Task holds execution until unpause.
-    Paused,
     /// The person quit it.
     Quit,
     /// It was started [`CONVERSATION_STARTS`] times without finishing a turn.
@@ -118,9 +115,7 @@ pub fn server_start(
     claimed_here: impl FnOnce() -> bool,
     server_runs: impl FnOnce() -> bool,
 ) -> ServerStart {
-    let left = if conversation.paused {
-        Left::Paused
-    } else if loopflow_storage::session::quit_by_person(conversation.exit_code) {
+    let left = if loopflow_storage::session::quit_by_person(conversation.exit_code) {
         Left::Quit
     } else if conversation.starts_since_turn >= CONVERSATION_STARTS {
         Left::OutOfStarts
@@ -182,7 +177,6 @@ pub fn due_task_conversations(
         }
         let facts = DownConversation {
             here: true,
-            paused: false, // The selection excludes held Tasks.
             exit_code: conversation.exit_code,
             starts_since_turn: conversation.starts_since_turn,
             last_started_at: conversation.last_started_at,

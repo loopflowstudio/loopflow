@@ -81,16 +81,15 @@ lf --wave parser steer "tokenizer first"              # every Session on the Wav
 lf --repo . steer "hold merges"                       # every Session in the repository
 lf session steers SESSION --json                      # pending vs. delivered
 lf task interrupt INF-123                             # stop its running Graph; stay in Working
-lf task pause INF-123                                 # stop Graph, builds, and conversation; hold until unpause
+lf task pause INF-123                                 # hold the Graph and keep its conversation open
 lf task unpause INF-123 --run                         # lift pause and continue from the interrupted step
 ```
 
 Running Sessions read steers after their next tool call; idle work sessions
 wake automatically. A steer naming a stopped interactive Session starts it in
 a held terminal. A Task steer also starts its stopped primary conversation,
-except while the Task is [paused](work.md#pause-a-task): a paused Task queues
-steers and refuses `lf task run`, `lf task auto on`, and `lf resume` until
-`lf task unpause INF-123`.
+including while the Graph is [paused](work.md#pause-a-task). A paused Task
+refuses `lf task run` and `lf task auto on` until `lf task unpause INF-123`.
 Use `lf -b steer SESSION TEXT` to run a stopped conversation’s turn here. Use `lf task report` for progress notes so they are not
 delivered back as steers.
 

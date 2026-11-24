@@ -157,21 +157,9 @@ struct TaskWorkspaceView: View {
         .disabled(disabled)
     }
 
-    private var paused: Bool {
-        if case .value(let reading) = reading, let row = reading.row { return row.lifecycle == .paused }
-        return task.paused
-    }
-
     @ViewBuilder private var content: some View {
         if let session = task.primarySession ?? begun {
-            Group {
-                if paused {
-                    PausedSessionHistory(query: client.query, session: session).id(session)
-                } else {
-                    SessionView(client: client, task: task, session: session, draft: $draft) { showsChanges = true }
-                }
-            }
-                .navigationTitle(task.title)
+            SessionView(client: client, task: task, session: session, draft: $draft) { showsChanges = true }
                 .toolbar {
                     ToolbarItem(placement: .topBarTrailing) {
                         Button("Changes", systemImage: "plusminus") { showsChanges = true }
@@ -204,31 +192,6 @@ struct TaskWorkspaceView: View {
             .background(theme.palette.background)
             .navigationTitle(task.title)
             .navigationBarTitleDisplayMode(.inline)
-        }
-    }
-}
-
-/// The primary conversation's saved history while its provider is closed.
-private struct PausedSessionHistory: View {
-    let query: RegistryQuery
-    let session: String
-    @State private var history = Loaded<String>.loading
-
-    var body: some View {
-        Group {
-            switch history {
-            case .loading: ProgressView()
-            case .value(let text):
-                ScrollView {
-                    Text(verbatim: text).textSelection(.enabled).font(Typography.text)
-                        .frame(maxWidth: .infinity, alignment: .leading).padding()
-                }
-            case .failed(let reason): StateView("History unavailable", sentence: reason)
-            }
-        }
-        .task {
-            do { history = .value(try await query.sessionHistoryText(id: session)) }
-            catch { history = .failed(machineConnectionMessage(error)) }
         }
     }
 }

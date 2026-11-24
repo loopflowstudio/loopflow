@@ -259,6 +259,17 @@ impl SqliteStore {
         Ok(id)
     }
 
+    /// Pause stops Graphs. An explicit interrupt also reaches standalone Task turns.
+    pub fn task_graph_stopped_since(&self, task: &TaskId, cursor: i64) -> StoreResult<bool> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM task_events WHERE task_id=?1 AND id>?2
+             AND json_extract(kind_json, '$.kind') IN ('interrupt','paused'))",
+            params![task.as_str(), cursor],
+            |row| row.get(0),
+        )?)
+    }
+
     /// The id of the newest interrupt request on the Work, or 0 when there is
     /// none. A run stamps this at launch and re-reads it; a higher value means a
     /// new interrupt to act on.

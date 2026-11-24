@@ -2525,7 +2525,7 @@ using lf open's ordinary host selection. Preview and --quote open nothing."
         #[command(subcommand)]
         cmd: AutoCommand,
     },
-    /// Stop the Task's work and conversation while keeping its checkout and claim
+    /// Hold the Task’s Graph at its current step and keep its conversation open
     Pause {
         issue: String,
         #[arg(long)]

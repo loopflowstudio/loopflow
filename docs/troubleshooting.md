@@ -11,7 +11,7 @@ A crash, a reboot or a closed terminal loses less than it looks like.
 |---|---|---|
 | Conversations (interactive & headless) | `~/.lf/loopflow.db`, `~/.lf/history.db`, and native provider transcripts | `lf resume --task <ID>` or `lf resume <SESSION>` |
 | Task worktree, branch, PR, and thread | Beside your repo and on GitHub/tracker | `lf task run <ID>` |
-| Task work sessions and runs | Auto-restarted by the server unless you quit, interrupted, or paused them | `lf task status <ID>` |
+| Task work sessions and runs | The server restarts conversations after crashes. Interrupted or paused runs stay stopped. | `lf task status <ID>` |
 | Stopped Graph runs | Recorded as history with per-step exit codes | `lf task runs <ID>` · `lf graph show <RUN_ID>` |
 | Uncommitted files | In the worktree (`lf wt prune` saves unpushed work to `refs/lf/pruned/…` first) | `lf wt list` |
 
@@ -33,7 +33,7 @@ lf graph list --runs --state current         # live Graph runs
 | Task is waiting for your input | `lf resume --task <ID>` |
 | Run is heading the wrong way | `lf steer <ID> "address the latest feedback"` |
 | Need to stop it right now | `lf task interrupt <ID>` |
-| Need to stop work and conversation, keeping ownership | `lf task pause <ID>` (`lf task unpause <ID> --run` to resume) |
+| Need to hold the Graph and keep talking to the Task | `lf task pause <ID>` (`lf task unpause <ID> --run` to resume) |
 | Stopped at a failed step, ready to retry | `lf task run <ID>` |
 | Need to redo an earlier step | `lf task run <ID> --from <step>` |
 
@@ -56,8 +56,8 @@ interactive Session closed: check Sessions separately.
 worker’s OS session exit. A command already in progress finishes, then the run
 exits 130. If nothing is running, interrupt reports that.
 
-`lf task pause <ID>` also closes the Task's primary conversation and holds off
-runs, wakes, and recovery until you unpause. If status still reads `Pausing`
+`lf task pause <ID>` holds off new Graph runs and worker recovery until you
+unpause. The conversation stays available. If status still reads `Pausing`
 after an interrupted cleanup, repeat the pause command. See
 [Pause a Task](work.md#pause-a-task).
 

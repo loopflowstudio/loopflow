@@ -588,8 +588,7 @@ fn session_ending(
             status_line: Some(status_line),
         };
     }
-    let paused = session.paused_task.as_ref();
-    if session.launching && paused.is_none() {
+    if session.launching {
         // Between the old agent's end and the new one's pid.
         return SessionEnding {
             ended,
@@ -603,16 +602,9 @@ fn session_ending(
             status_line: Some("starting".to_string()),
         };
     }
-    let command = if let Some(task) = paused {
-        format!(
-            "lf task unpause {}",
-            session.task_identifier.as_deref().unwrap_or(task.as_str())
-        )
-    } else {
-        match (&session.task_identifier, task_primary) {
-            (Some(task), true) => format!("lf resume --task {task}"),
-            _ => format!("lf resume {}", session.id),
-        }
+    let command = match (&session.task_identifier, task_primary) {
+        (Some(task), true) => format!("lf resume --task {task}"),
+        _ => format!("lf resume {}", session.id),
     };
     let failure = session.start_failure.as_deref().filter(|_| conversation);
     // One that never had an agent has no liveness to read: it is not Closed.
@@ -629,7 +621,7 @@ fn session_ending(
         None if never_ran => "not started".to_string(),
         None => "closed".to_string(),
     };
-    if paused.is_none() && ended.is_none() && failure.is_none() && !(never_ran && conversation) {
+    if ended.is_none() && failure.is_none() && !(never_ran && conversation) {
         // Nothing says why it is down: a recorded agent this Machine cannot
         // check, or one that went with no end recorded.
         let status_line = match state {
@@ -645,7 +637,6 @@ fn session_ending(
     }
     let facts = crate::ops::recovery::DownConversation {
         here: conversation && session.in_task_checkout,
-        paused: paused.is_some(),
         exit_code: end.and_then(|end| end.exit_code),
         starts_since_turn: attempts,
         last_started_at: session.last_started_at,
@@ -675,12 +666,6 @@ fn session_ending(
         ServerStart::Left(_) => None,
     };
     let (kind, at, reason, mut line) = match (verdict, failure.filter(|_| never_ran)) {
-        (ServerStart::Left(Left::Paused), _) => (
-            SessionOutlookKind::WaitingForYou,
-            None,
-            left_reason(Left::Paused, attempts, true),
-            "paused".to_string(),
-        ),
         (ServerStart::Left(Left::Quit), _) => (
             SessionOutlookKind::Quit,
             None,
@@ -723,8 +708,7 @@ fn session_ending(
     // The server brings it up, or its command does.
     let command = matches!(verdict, ServerStart::Left(_)).then_some(command);
     if let Some(command) = &command {
-        let action = if paused.is_some() { "resumes" } else { "opens" };
-        line.push_str(&format!("; `{command}` {action} it"));
+        line.push_str(&format!("; `{command}` opens it"));
     }
     SessionEnding {
         ended,
@@ -765,7 +749,6 @@ pub(crate) fn left_reason(
 ) -> Option<String> {
     use crate::ops::recovery::Left;
     match left {
-        Left::Paused => Some("Task is paused".into()),
         Left::OutOfStarts => Some(format!("started {starts} times")),
         Left::Elsewhere if of_task => Some("its Task is not checked out here".to_string()),
         // Not a Task's: nothing here ever starts it.
@@ -1202,13 +1185,6 @@ pub async fn open(
             .await?
             .ok_or_else(|| session_not_found(session_id))?,
     };
-    if resume {
-        if let Some(crate::session::PrimaryScope::Task(id)) =
-            store.sqlite.primary_scope(&target.id)?
-        {
-            store.sqlite.require_task_unpaused(&id)?;
-        }
-    }
     if let Some(refusal) = run_refusal(&store.sqlite, &target)? {
         bail!(refusal);
     }

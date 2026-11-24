@@ -1140,8 +1140,9 @@ async fn try_start_task_run(
         step: label,
         interrupt_cursor: store
             .sqlite
-            .latest_interrupt_id(&loopflow_model::durable::WorkRef::Task(task.id.clone()))
-            .map_err(task_error)?,
+            .latest_task_event(&task.id)
+            .map_err(task_error)?
+            .map_or(0, |event| event.id),
         merges,
         stands_in: interactive.filter(|_| auto_on).map(str::to_owned),
     }))

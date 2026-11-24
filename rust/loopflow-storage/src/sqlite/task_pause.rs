@@ -1,4 +1,4 @@
-//! A pause belongs to the Task on the Machine running it. The interrupt and
+//! A pause belongs to the Task on the Machine running it. The Graph stop and
 //! the identities needed to finish a cut-short stop commit together.
 use loopflow_model::durable::TaskId;
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
@@ -23,14 +23,6 @@ pub struct PauseCleanup {
 pub struct StoppingSession {
     pub session: u32,
     pub members: Vec<(u32, i64)>,
-}
-
-/// The Task holding this primary conversation, if it is paused.
-pub(super) fn paused_primary_sql(session: &str) -> String {
-    format!(
-        "SELECT h.task_id FROM task_primary_sessions tp
-             JOIN task_pauses h ON h.task_id=tp.task_id WHERE tp.session_id={session}"
-    )
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -167,7 +159,7 @@ impl SqliteStore {
         }
         tx.execute("INSERT INTO task_pauses(task_id,paused_at,paused_by,stopping_sessions) VALUES(?1,?2,?3,?4)",
             params![task.as_str(), now_unix(), serde_json::to_string(by)?, serde_json::to_string(&sessions)?])?;
-        children::insert_task_event_in(&tx, task, &TaskEventKind::Interrupt)?;
+        children::insert_task_event_in(&tx, task, &TaskEventKind::Paused)?;
         tx.commit()?;
         Ok(sessions)
     }

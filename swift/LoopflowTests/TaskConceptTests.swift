@@ -47,7 +47,7 @@ struct TaskConceptTests {
         return try #require((phases[0]["tasks"] as? [[String: Any]])?.first { $0["lifecycle"] as? String == "active" })
     }
 
-    @Test func pausedTaskShowsInItsOwnListAndOpensOnUnpause() throws {
+    @Test func pausedTaskKeepsItsConversationWarm() throws {
         var wire = try activeTaskWire()
         wire["lifecycle"] = "paused"
         wire["section"] = "paused"
@@ -74,11 +74,11 @@ struct TaskConceptTests {
         let board = BacklogList(tasks: [row], truncated: false, wave: nil, waveNames: [:], state: BacklogState())
         #expect(board.all.isEmpty && board.paused.map(\.id) == [row.id])
         #expect(model.startedTaskCount(.repository) == 0)
-        #expect(!row.opensConversationAutomatically)
+        #expect(row.opensConversationAutomatically)
         let registry = SessionsWorkspaceRegistry(localMachineId: "local")
         model.bindWorkspaces(registry, repository: key.repository)
         registry.open(key, title: row.task.name, location: .init(machineId: "local", worktree: "/tmp/task"))
-        #expect(registry.selectedWork == key && !registry.warmWork.contains(key))
+        #expect(registry.selectedWork == key && registry.warmWork.contains(key))
         let view = try TaskWorkflowBar(model: model, task: row, work: .available(
             TaskOverview(sessions: [], graphProcesses: [], graph: nil))).inspect()
         let action = try view.find(viewWithAccessibilityIdentifier: "task-workflow-pause").button()

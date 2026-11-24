@@ -132,6 +132,20 @@ final class TaskFeedTests: XCTestCase {
         XCTAssertEqual(identifiers(feed), ["LOO-1", "LOO-2", "LOO-3"])
     }
 
+    func testOpeningAPausedTaskShowsItsSessionTerminal() async throws {
+        let id = "HOME_\(UUID().uuidString.lowercased())"
+        let server = try HeldServer(machineID: id, paused: true)
+        let client = client(server, machineID: id)
+        let feed = TaskFeed(client: client, notices: NoticeCenter())
+        defer { feed.forget() }
+        feed.filter = .paused
+        await feed.start()
+        try await until { feed.loaded }
+        let row = try XCTUnwrap(feed.shownRepositories.first?.tasks.first)
+        let workspace = TaskWorkspaceView(client: client, feed: feed, task: MobileTask(row), draft: .constant(""))
+        XCTAssertNoThrow(try workspace.inspect().find(SessionView.self))
+    }
+
     func testTaskRowShowsItsCurrentGraphStep() async throws {
         let id = "HOME_\(UUID().uuidString.lowercased())"
         let server = try HeldServer(machineID: id)

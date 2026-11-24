@@ -236,7 +236,6 @@ final class WorkModel {
     func bindWorkspaces(_ registry: SessionsWorkspaceRegistry, repository: String) {
         guard workspaceRegistry !== registry else { return }
         workspaceRegistry = registry
-        registry.taskIsPaused = { [weak self] id in self?.task(id: id)?.task.lifecycle == .paused }
         let retainedRepository = registry.keys.first?.repository
         workspaceRepository = retainedRepository ?? repository
         reconcileSelectionRepository()

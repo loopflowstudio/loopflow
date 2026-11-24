@@ -303,7 +303,7 @@ impl SqliteStore {
         session: Option<&str>,
     ) -> StoreResult<Vec<IdleCandidate>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut statement = conn.prepare(&format!(
+        let mut statement = conn.prepare(
             "SELECT s.id,s.agent_process_id,a.capability,s.provider_thread,s.cwd,
                 CASE WHEN s.provider='codex' THEN s.agent_endpoint END,s.agent_inbox,
                 s.agent_pid,s.agent_os_started_at,s.agent_socket
@@ -314,9 +314,8 @@ impl SqliteStore {
                AND act.yielded=1 AND s.interactive=1 AND s.provider_thread IS NOT NULL
                AND (s.provider='codex' AND s.agent_endpoint IS NOT NULL OR s.agent_inbox IS NOT NULL
                     OR s.agent_socket IS NOT NULL)
-               AND (?1 IS NULL OR s.id=?1) AND NOT EXISTS({})",
-            super::task_pause::paused_primary_sql("s.id")
-        ))?;
+               AND (?1 IS NULL OR s.id=?1)",
+        )?;
         let rows = statement.query_map([session], |row| {
             // The query keeps only reachable conversations: with no endpoint
             // or socket, the Claude key is there.
@@ -529,10 +528,9 @@ fn unread() -> String {
 /// for these, and its start takes its unread steers when one exists.
 fn naming() -> String {
     format!(
-        "{} AND NOT EXISTS({}) AND (p.session_id=?1 OR p.source NOT LIKE 'update:%'
+        "{} AND (p.session_id=?1 OR p.source NOT LIKE 'update:%'
             AND p.task_id IN (SELECT task_id FROM task_primary_sessions WHERE session_id=?1))",
-        unread(),
-        super::task_pause::paused_primary_sql("?1")
+        unread()
     )
 }
 
@@ -798,11 +796,7 @@ impl SqliteStore {
             ));
         }
         let steers = tx
-            .prepare(&format!(
-                "{} AND NOT EXISTS({}) ORDER BY p.seq LIMIT 8",
-                unread(),
-                super::task_pause::paused_primary_sql("?1")
-            ))?
+            .prepare(&format!("{} ORDER BY p.seq LIMIT 8", unread()))?
             .query_map([&adapter.session], read_steer)?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         for steer in &steers {
@@ -848,18 +842,14 @@ impl SqliteStore {
     pub fn take_steers_to_start(&self, session: &str) -> StoreResult<Vec<Steer>> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         // Nearly every start has none; asking takes no write lock.
-        let named = |conn: &Connection| -> rusqlite::Result<bool> {
+        let named: bool =
             conn.query_row(&format!("SELECT EXISTS({})", naming()), [session], |row| {
                 row.get(0)
-            })
-        };
-        if !named(&conn)? {
+            })?;
+        if !named {
             return Ok(Vec::new());
         }
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        if !named(&tx)? {
-            return Ok(Vec::new());
-        }
         let steers = take_unread_in(&tx, session)?;
         tx.commit()?;
         Ok(steers)

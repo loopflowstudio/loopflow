@@ -34,21 +34,15 @@ fn record_identity(
     }
 }
 
-/// A pause captures any admitted worker and primary provider before it
-/// publishes the interrupt. Later launches observe the hold before exec.
-fn admit_task_provider(owner: &Recording, kind: LaunchKind) -> Result<Option<std::fs::File>> {
-    use crate::ops::task::pause;
-    use crate::session::PrimaryScope;
-    let store = &owner.store;
-    let task = match kind {
-        LaunchKind::Worker => store.session(&owner.session)?.and_then(|s| s.task_id),
-        LaunchKind::WorkSession => match store.primary_scope(&owner.session)? {
-            Some(PrimaryScope::Task(id)) => Some(id),
-            _ => None,
-        },
-        _ => None,
-    };
-    Ok(task.map(|id| pause::admit_launch(store, &id)).transpose()?)
+/// Hold worker admission until its OS identity has been recorded for pause.
+fn admit_worker(owner: &Recording, kind: LaunchKind) -> Result<Option<std::fs::File>> {
+    if kind != LaunchKind::Worker {
+        return Ok(None);
+    }
+    let task = owner.store.session(&owner.session)?.and_then(|s| s.task_id);
+    Ok(task
+        .map(|id| crate::ops::task::pause::admit_launch(&owner.store, &id))
+        .transpose()?)
 }
 
 /// One headless launch sequence for every harness. Keep the attachment fence
@@ -72,7 +66,7 @@ pub fn spawn(
             .get_program()
             .to_string_lossy()
             .into_owned();
-        let _admission = admit_task_provider(owner, kind)?;
+        let _admission = admit_worker(owner, kind)?;
         Ok(store.with_session_attachment(session, attachment, || {
             store.record_agent_process_launch(session, attachment, command.as_std(), false)?;
             let spawned = crate::os_process::spawn_agent_process(
@@ -107,7 +101,7 @@ pub(crate) fn spawn_native(
     crate::agent_input_timing::record("provider_spawn_begin", session);
     context_environment(&mut command, owner, kind)?;
     let cwd = command.get_current_dir().map(std::path::Path::to_path_buf);
-    let _admission = admit_task_provider(owner, kind)?;
+    let _admission = admit_worker(owner, kind)?;
     let child = store
         .with_session_attachment(session, attachment, || {
             store.record_agent_process_launch(session, attachment, &command, true)?;
@@ -231,7 +225,7 @@ pub(crate) fn exec_native(
         Ok(None) => return std::io::Error::other("AgentProcess birth unavailable before exec"),
         Err(error) => return error,
     };
-    let _admission = match admit_task_provider(owner, kind) {
+    let _admission = match admit_worker(owner, kind) {
         Ok(lock) => lock,
         Err(error) => return std::io::Error::other(error.to_string()),
     };
@@ -305,7 +299,7 @@ pub(crate) fn stop_native(
     .map_err(Into::into)
 }
 
-/// Moving or pausing a Session stops its provider under the takeover fence.
+/// Moving a Session stops its provider under the takeover fence.
 /// A native provider shares the terminal's group, so signal only its exact PID.
 /// Headless providers retain the existing descendant/group stop policy.
 /// `departure` says where the conversation goes, for the terminal it leaves.

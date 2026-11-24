@@ -308,7 +308,7 @@ public struct RoadmapTask: Decodable, Sendable, Identifiable, Hashable {
     /// Working Tasks open their conversation without being asked, owned or not:
     /// opening claims nothing. Unstarted and finished Tasks open one only when a
     /// person asks, or when Desktop already shows its Session.
-    public var opensConversationAutomatically: Bool { lifecycle.isWorking }
+    public var opensConversationAutomatically: Bool { lifecycle.isWorking || lifecycle == .paused }
 }
 
 public enum WorkNextMoveOwner: String, Decodable, Sendable, Hashable {

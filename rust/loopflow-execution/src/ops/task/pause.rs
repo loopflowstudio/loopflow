@@ -4,8 +4,6 @@ use std::time::{Duration, Instant};
 
 use fs2::FileExt;
 use loopflow_model::durable::TaskId;
-use loopflow_storage::process::Departure;
-use loopflow_storage::session::PrimaryScope;
 use loopflow_storage::sqlite::{task_pause::StoppingSession, SqliteStore};
 use loopflow_storage::work::task::Task;
 
@@ -98,26 +96,12 @@ pub fn pause(issue: &str) -> OpsResult<String> {
     })
 }
 
-fn stop_primary(store: &SqliteStore, task: &TaskId) -> anyhow::Result<()> {
-    if let Some(primary) = store.primary_session(&PrimaryScope::Task(task.clone()))? {
-        agent_process::stop_session_agent(
-            store,
-            primary.id.as_str(),
-            Departure::Paused { task: task.clone() },
-        )?;
-    }
-    Ok(())
-}
-
 fn finish(
     sqlite: &SqliteStore,
     task: &Task,
     sessions: &[StoppingSession],
 ) -> OpsResult<Option<String>> {
     let mut failures = Vec::new();
-    if let Err(error) = stop_primary(sqlite, &task.id) {
-        failures.push(format!("conversation: {error}"));
-    }
     // Give the Graph a chance to record the interrupted turn and close
     // its own provider. A retry still owns the saved jobs after a crash.
     let deadline = Instant::now() + Duration::from_secs(2);

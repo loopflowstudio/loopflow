@@ -71,9 +71,8 @@ the filter is empty, **Clear search** when the search matches nothing.
 
 ## Task
 
-Opening a paused Task shows its saved Session history. Opening a working Task
-fits its conversation’s terminal to the phone. Above
-it, one sentence says where the Task stands:
+Opening a Task with a conversation fits its terminal to the phone, even while
+the Graph is paused. Above it, one sentence says where the Task stands:
 
 ```text
 build is running implement. You are next needed at ship-review.

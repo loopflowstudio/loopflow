@@ -13860,6 +13860,19 @@
           "type": "object"
         },
         {
+          "description": "Hold Graph execution at its current step.",
+          "properties": {
+            "kind": {
+              "const": "paused",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
           "properties": {
             "base_commit": {
               "type": "string"

@@ -3574,7 +3574,7 @@ mod tests {
         use loopflow_execution::store::selections;
         use loopflow_model::durable::{RepositoryId, TaskId};
         use loopflow_model::program_status::{Records, Report, State};
-        use loopflow_storage::sqlite::selections::TaskOrderEdit;
+        use loopflow_storage::sqlite::selections::TaskDrop;
         use loopflow_storage::work::selection::{Selection, SelectionState};
         let directory = tempfile::tempdir().unwrap();
         let database = directory.path().join("registry.db");
@@ -3778,10 +3778,10 @@ mod tests {
         check_order(&read(&store, "hand_back").await, [other, active]);
         check_filters(&[active], &[]);
 
-        selections::edit_task_order(
+        selections::reorder_working_task(
             &store.sqlite,
             &repo,
-            TaskOrderEdit::Move {
+            TaskDrop {
                 task: active,
                 target: other,
                 side: None,
@@ -3840,29 +3840,12 @@ mod tests {
                 [active]
             );
         }
-        // The snapshot promotes an available or blocked conversation once. A prompt
-        // makes it busy without moving it until the next explicit sort.
-        assert_eq!(
-            selections::edit_task_order(&store.sqlite, &repo, TaskOrderEdit::SortByStatus).unwrap(),
-            [active, other]
-        );
         report_states(6, &[State::Working]);
-        check_order(&read(&store, "busy_after_sort").await, [active, other]);
-        assert_eq!(
-            selections::edit_task_order(&store.sqlite, &repo, TaskOrderEdit::SortByStatus).unwrap(),
-            [other, active]
-        );
+        check_order(&read(&store, "busy_after_drag").await, [active, other]);
         report_states(7, &[State::Done]);
-        assert_eq!(
-            selections::edit_task_order(&store.sqlite, &repo, TaskOrderEdit::SortByStatus).unwrap(),
-            [active, other]
-        );
+        check_filters(&[active], &[]);
         report_states(8, &[State::Working, State::Idle]);
         check_filters(&[active], &[active]);
-        assert_eq!(
-            selections::edit_task_order(&store.sqlite, &repo, TaskOrderEdit::SortByStatus).unwrap(),
-            [other, active]
-        );
         report_states(9, &[State::Working, State::Error]);
         check_filters(&[], &[active]);
         let errors = selections::view_plan(&store.sqlite, &repo, Some("state:error")).unwrap();
@@ -3871,10 +3854,6 @@ mod tests {
             .resolution
             .attention
             .contains(&errors.resolution.members[0].work));
-        assert_eq!(
-            selections::edit_task_order(&store.sqlite, &repo, TaskOrderEdit::SortByStatus).unwrap(),
-            [active, other]
-        );
         report_states(10, &[State::Blocked, State::Working]);
         // A conflicting planning label never withdraws started execution.
         db.execute(

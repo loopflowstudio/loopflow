@@ -1,4 +1,4 @@
-# LOO-1063 · Start-Time Stack + One-Shot Status Sort (B1)
+# LOO-1063 · Start-Time Stack and sidebar status toggle
 
 ## Direction & exact words
 
@@ -6,15 +6,41 @@
 - Jack Heart (after Round 1 of [Explore](explore.html)): “ok i think  i like b.  i think we could do something liek what rex does with a button that sorts by terminal status, or alternatively we could sort by what step theyre at” / “i think we need something like moving auto to the bottom, or being able to 'close' certain tasks, but auto has to be smart enough to know like if its moving towards the end, that coutn even if its not explicitly auto”
 - Jack Heart (after Round 2 of [Explore](explore.html)): “lets add b1” / “but also show the current step in the leftp ane, just not sort by it now”
 - Jack Heart (on OSC 7501 `done` + New Task modal `?` font boxes): “done makes the task seem done but i dont tink thats what it means” / “isnt done then also available” / “yes, file it in, along with your other points” / “sorry, i meant to do both here”
+- Jack Heart (during live `/demo`, [demo-notes.md](demo-notes.md)): “whqt is that arrows button” / “well, it needs a on/off state, and maybe an on-hover” / “1a” (toggle view: On shows status-sorted sidebar without overwriting saved drags; Off restores Start-Time Stack / drag order) / “build it and return when ready”
 
 Latest exploration page: [Explore Round 2](explore.html).
 Latest concept review: [Built B1 concept review](concept-review.html).
+Latest demo notes: [Demo notes](demo-notes.md).
 
-## Remaining work (from B1 concept review at `1e3b4007ce`)
+## Sidebar toggle from the demo
 
-All three slices are built. The unlocked Desktop walkthrough remains for gate.
+Implemented the window-local status toggle in the repository sidebar and ⌘K.
+Turning it on groups the current reading by Blocked, Error, Available, Idle
+and Busy. The open Task keeps its visible slot. Inside each group the other
+rows keep their saved order. Turning it off returns to that order and enables
+sidebar dragging. The grid and phone continue to use the shared Machine order.
 
-### Slice 1 (built at `820bcdc384`) — Shared status for Task rows and Sort by status
+The one-shot CLI command, served write, storage sort and pending-sort preview
+are gone. The remaining Machine write places a dragged Task relative to its
+target. The toggle can be used while disconnected.
+
+Focused checks on 2026-11-23:
+- Desktop passed `statusToggleRestoresSavedOrderWithoutChangingTheGrid`,
+  `statusToggleKeepsTheOpenTaskInItsSlotUntilNavigation` and
+  `workingDragsPreviewImmediatelyAndRetryInOrder` with WindowServer denied.
+  The button tap, accessible On/Off value and both tooltips ran headless.
+- Rust passed the shared Task concepts, concurrent Task order commit and
+  new-arrival/drag tests. The regenerated server schema removes `desktop.sort`.
+- `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings` passed.
+
+Next at gate: exercise the hover highlight in an unlocked Desktop window,
+then follow the walkthrough below.
+
+## Earlier implementation and verification
+
+The following runs exercised the earlier one-shot sort before the demo changed it.
+
+### Slice 1### Slice 1 (built at `820bcdc384`) — Shared status for Task rows and Sort by status
 
 Sort saves Blocked, Error, Available, Idle, Busy, newest first within each group.
 A Task with both Busy and Available sorts as Busy and matches both filters.
@@ -130,8 +156,9 @@ uv run python scripts/test_ios.py -only-testing:LoopflowiOSTests/TaskFeedTests
 
 In Loopflow Dev, select the lower of two Working rows while its conversation
 is Available and send a prompt. Watch the status change and hand back in place.
-Click **Sort by status**, open the first waiting row and send another prompt.
-Watch its Graph step advance in place. Start a new Task and jump to it with ⌘1.
+Turn on **Sort by status**, open the first waiting row and send another prompt.
+Check its slot while it turns Busy, then select another row to release it.
+Use ⌘K to turn sorting off. Start a new Task and jump to it with ⌘1.
 Switch to the Wave and compare relative order. Return to the repository, drag
 the lower row up, and refresh. In an unlocked window, exercise a grid drop and
 ⌘1–9, ⌃Tab and the ⌘K sidebar filters.

@@ -221,7 +221,7 @@ struct PendingChangesTests {
         #expect(changes.apply(to: [rows[3]], readAt: at(4), wave: "other").isEmpty)
     }
 
-    @Test func statusSortSupersedesOnlyEarlierDragsOfItsWorkingList() async throws {
+    @Test func workingDragsPreviewImmediatelyAndRetryInOrder() async throws {
         let changes = changes()
         let initial = fixtureWorkingPlan(["a", "b", "c"])
         func drag(_ source: String, before target: String, machine: String) -> Task<Void, Never> {
@@ -237,32 +237,14 @@ struct PendingChangesTests {
         await machine.fail(URLError(.networkConnectionLost))
         let other = drag("b", before: "a", machine: "two")
         #expect(order("one") == ["c", "a", "b"])
-        let sort = changes.make(.sortWorkingTasks(machine: "one", repository: initial.repository),
-            subject: "Working Tasks", verb: "sorted", write: .desktopSort(directory: "/repo"), notices: notices, show: nil)
-        #expect(order("one") == ["a", "b", "c"])
         #expect(order("two") == ["b", "a", "c"])
-        let last = drag("c", before: "b", machine: "one")
-        #expect(order("one") == ["a", "c", "b"])
+        let last = drag("b", before: "c", machine: "one")
+        #expect(order("one") == ["b", "c", "a"])
         let ids = changes.changes.map(\.requestID)
-        for revision in 5...8 { await machine.answer(at(Int64(revision))) }
-        for write in [first, other, sort, last] { await write.value }
-        #expect(machine.sent.filter { $0 != ids[1] } == [ids[0], ids[0], ids[2], ids[3]])
-        #expect(order("one") == ["a", "c", "b"])
-    }
-
-    @Test func refusedStatusSortKeepsItsNoticeThroughAFailedRead() async {
-        let changes = changes()
-        var reread = false
-        let sort = changes.make(.sortWorkingTasks(machine: nil, repository: repo), subject: "Working Tasks", verb: "sorted",
-            write: .desktopSort(directory: "/repo"), notices: notices, show: nil) {
-            reread = true
-            #expect(changes.changes.isEmpty)
-            notices.read("tasks", "Tasks", from: nil, to: "Read unavailable", link: changes.link)
-        }
-        await machine.fail(ServerError(code: "conflict", message: "Order changed", data: .null, revisions: at(5)))
-        await sort.value
-        #expect(reread)
-        #expect(notices.current?.text == "Working Tasks couldn't be sorted: Order changed")
+        for revision in 5...7 { await machine.answer(at(Int64(revision))) }
+        for write in [first, other, last] { await write.value }
+        #expect(machine.sent.filter { $0 != ids[1] } == [ids[0], ids[0], ids[2]])
+        #expect(order("one") == ["b", "c", "a"])
     }
 
     @Test(arguments: [nil, URLError.networkConnectionLost, .notConnectedToInternet, .cannotConnectToHost,

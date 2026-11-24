@@ -2,9 +2,7 @@
 use crate::store::session_projection::Reading;
 use crate::store::{StoreError, StoreResult};
 use loopflow_model::durable::RepositoryId;
-use loopflow_storage::sqlite::selections::{
-    repository_default, TaskOrderEdit, TaskSelectionReading,
-};
+use loopflow_storage::sqlite::selections::{repository_default, TaskDrop, TaskSelectionReading};
 use loopflow_storage::sqlite::sessions::{SessionProjection, SessionProjectionInputs};
 use loopflow_storage::sqlite::SqliteStore;
 use loopflow_storage::work::selection::{
@@ -258,10 +256,10 @@ pub fn save_dashboard(
     store.commit_dashboard(repository, expected_revision, saved)
 }
 
-pub fn edit_task_order(
+pub fn reorder_working_task(
     store: &SqliteStore,
     repository: &RepositoryId,
-    edit: TaskOrderEdit<'_>,
+    edit: TaskDrop<'_>,
 ) -> StoreResult<Vec<String>> {
     for _ in 0..3 {
         let reading = Reading::acquire(store, loopflow_storage::rows::now_unix(), None)?;

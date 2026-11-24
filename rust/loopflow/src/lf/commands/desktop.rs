@@ -2,7 +2,7 @@
 use anyhow::{bail, Context, Result};
 use clap::ValueEnum;
 use loopflow_execution::store::selections;
-use loopflow_storage::sqlite::selections::TaskOrderEdit;
+use loopflow_storage::sqlite::selections::TaskDrop;
 use loopflow_storage::work::selection::{
     move_into_place, DropSide, SelectionError, WorkWorkspaceKey, WorkWorkspaceKind,
 };
@@ -977,21 +977,6 @@ pub fn saved_layout(
     )?)
 }
 
-pub(crate) fn sort_working_tasks(
-    selected: Option<&loopflow_model::durable::RepositoryId>,
-    directory: &Path,
-) -> Result<Vec<String>> {
-    let store = loopflow_execution::store::open_sqlite(
-        &loopflow_execution::store::database_path_from_env()?,
-    )?;
-    let repository = repository_in(selected, directory, &store)?;
-    Ok(selections::edit_task_order(
-        &store,
-        &repository,
-        TaskOrderEdit::SortByStatus,
-    )?)
-}
-
 /// `lf desktop dashboard <verb>`: save the
 /// arrangement in `selected` or the repository containing `directory`,
 /// reading a layout or slots from `input`, and return what the command
@@ -1383,9 +1368,7 @@ fn dispatch(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result
             json,
             cmd: None,
         } => return view_plan(cli, expression.as_deref(), false, *json || cli.json),
-        DesktopCommand::Sort
-        | DesktopCommand::Dashboard { .. }
-        | DesktopCommand::Portfolio { .. } => {
+        DesktopCommand::Dashboard { .. } | DesktopCommand::Portfolio { .. } => {
             unreachable!("shared mutation dispatch precedes this command")
         }
         _ => {}
@@ -1826,7 +1809,6 @@ impl Verb {
             | DesktopCommand::View { .. }
             | DesktopCommand::Dashboard { .. }
             | DesktopCommand::Portfolio { .. }
-            | DesktopCommand::Sort
             | DesktopCommand::Layout { .. } => unreachable!("saved intent is not a live verb"),
         };
         Ok(Self { kind, target })
@@ -2023,7 +2005,6 @@ pub fn runs_without_desktop(command: &crate::lf::DesktopCommand) -> bool {
             | DesktopCommand::View { .. }
             | DesktopCommand::Dashboard { .. }
             | DesktopCommand::Portfolio { .. }
-            | DesktopCommand::Sort
             | DesktopCommand::Layout { .. }
     )
 }
@@ -2099,10 +2080,10 @@ fn edit_tiles(
                 )
                 .into());
             }
-            return selections::edit_task_order(
+            return selections::reorder_working_task(
                 &store,
                 repository,
-                TaskOrderEdit::Move {
+                TaskDrop {
                     task: &member.id,
                     target: &to.id,
                     side: *side,
@@ -3530,7 +3511,7 @@ pub(super) fn is_saved_mutation(command: &crate::lf::DesktopCommand) -> bool {
     use crate::lf::DesktopCommand;
     matches!(
         command,
-        DesktopCommand::Sort | DesktopCommand::Dashboard { .. } | DesktopCommand::Portfolio { .. }
+        DesktopCommand::Dashboard { .. } | DesktopCommand::Portfolio { .. }
     )
 }
 

@@ -218,9 +218,9 @@ them. Nothing here needs WindowServer focus.
   PNG: a 1280 pt window is 2560 px. The hook posts the mouse-up to the queue
   before sending the mouse-down; sent the other way a segmented control spins
   in `trackMouse` and the app hangs. Don't `activate` or `makeKey` in the
-  hook: every later click goes dead. The first click after a launch is often
-  swallowed; send it twice and look. Row clicks never select (use a link);
-  test a button against what it writes (`grep desktop.sort lf.log`).
+  hook: every later click goes dead. The first click after launch can be
+  swallowed. Check `lf desktop state --json` for the expected row order before
+  clicking the status toggle again. Use a link to select a Task.
 - Clicks land only in a window whose `lf desktop state` reading is
   `current`. Locked, a launch may mount no window until a
   `loopflow://<repo>/task/<id>` link arrives, and with a saved
@@ -229,8 +229,7 @@ them. Nothing here needs WindowServer focus.
   Quit the app, move `workspace.json` aside, relaunch and open the link: the
   window reaches `current` and the sidebar buttons answer. Otherwise drive
   through `lf desktop do <action>` (`new-task` opens the New Task sheet) and
-  the CLI command behind the button (`lf desktop sort`, `lf desktop dashboard
-  move`), and report the click itself as not reached.
+  the CLI command behind the button (`lf desktop dashboard move`), and report the click itself as not reached.
 - Stand-in `claude` markers `error` and `blocked` that print
   `\x1b]7501;id=turn:state=error\x1b\\` (or `blocked`) give rows Error and
   Blocked beside the Busy and Available described below.

@@ -177,12 +177,7 @@ fn working_task_drop_keeps_its_side_after_another_window_reorders() {
             .resolution
             .task_ids()
     };
-    let status_sort = || Write::DesktopSort {
-        directory: repo.path().to_owned(),
-    };
     let [a, b, c]: [String; 3] = working().try_into().unwrap();
-    // All three are idle, so the status snapshot uses their original start order.
-    assert_eq!(server_write(status_sort()), serde_json::json!([a, b, c]));
     let move_tile = |member: &str, target: &str, side| Write::DesktopDashboardMove {
         directory: repo.path().to_owned(),
         board: "working-tasks".into(),
@@ -1452,7 +1447,6 @@ fn server_operations_match_their_lf_commands() {
         | Write::DesktopDashboardHide { .. }
         | Write::DesktopDashboardShow { .. }
         | Write::DesktopDashboardSlots { .. }
-        | Write::DesktopSort { .. }
         | Write::DesktopDashboardMove { .. }
         // configuration_edits_use_the_server_without_work_processes covers settings.
         | Write::ConfigSet { .. }
@@ -2967,7 +2961,6 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
                 &format!("--revision={revision}"),
             ]),
         ),
-        Write::DesktopSort { directory } => (path(directory), words(&["desktop", "sort"])),
         Write::DesktopDashboardMove {
             directory,
             board,

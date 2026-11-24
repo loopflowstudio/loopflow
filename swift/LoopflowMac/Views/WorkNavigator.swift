@@ -72,17 +72,12 @@ struct WorkNavigator: View {
                 // Read once: each read re-filters the plan and every Task's Sessions.
                 let rows = model.sidebarRows
                 let scope = model.navigation.sidebarScope
-                let dragOrder = scope == .repository ? rows.map(\.work.id) : []
+                let dragOrder = scope == .repository && !model.navigation.sidebarSortByStatus ? rows.map(\.work.id) : []
                 VStack(alignment: .leading, spacing: Spacing.xs) {
                     HStack {
                         NewTaskRow(model: model)
                         if scope == .repository {
-                            Button { model.sortWorkingTasksByStatus() } label: {
-                                Label("Sort by status", systemImage: "arrow.up.arrow.down").labelStyle(.iconOnly)
-                            }
-                            .buttonStyle(.plain)
-                            .help("Sort by status")
-                            .disabled(!model.canSortWorkingTasks)
+                            SidebarStatusToggle(isOn: model.navigation.sidebarSortByStatus, toggle: model.toggleSidebarSortByStatus)
                         }
                     }
                     if case .dashboard = scope {
@@ -617,6 +612,33 @@ private struct SidebarResponderCapture: NSViewRepresentable {
         weak var view: NSView?
         var monitor: Any?
         init(memory: SidebarResponderMemory) { self.memory = memory }
+    }
+}
+
+struct SidebarStatusToggle: View {
+    let isOn: Bool
+    let toggle: () -> Void
+    @Environment(\.palette) private var palette
+    @State private var hovering = false
+
+    private var fill: Color {
+        if isOn { return palette.accent.opacity(hovering ? 0.28 : 0.16) }
+        return hovering ? palette.actionHover : .clear
+    }
+
+    var body: some View {
+        Button(action: toggle) {
+            Label("Sort by status", systemImage: "arrow.up.arrow.down")
+                .labelStyle(.iconOnly)
+                .padding(Spacing.sm)
+                .foregroundStyle(isOn ? palette.accent : palette.textSecondary)
+                .background(fill, in: RoundedRectangle(cornerRadius: CornerRadius.control))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .help(isOn ? "Sorted by status. Click to restore saved order." : "Sort by status: Blocked, Error, Available, Idle, Busy.")
+        .accessibilityValue(isOn ? "On" : "Off")
     }
 }
 

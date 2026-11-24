@@ -234,65 +234,33 @@ impl TaskOrder {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub enum TaskOrderEdit<'a> {
-    Move {
-        task: &'a str,
-        target: &'a str,
-        side: Option<DropSide>,
-    },
-    SortByStatus,
+pub struct TaskDrop<'a> {
+    pub task: &'a str,
+    pub target: &'a str,
+    pub side: Option<DropSide>,
 }
 
-impl TaskOrderEdit<'_> {
+impl TaskDrop<'_> {
     fn apply(self, tasks: Vec<SelectionTask>, saved: &[String]) -> StoreResult<Vec<String>> {
+        let saved = TaskOrder::from_ids(saved.iter().cloned());
         let mut working: Vec<_> = tasks
             .into_iter()
-            .filter_map(|task| Some((task.started_at?, task.work)))
+            .filter_map(|task| {
+                let id = task.work.key.id;
+                Some((saved.working_position(&id, task.started_at?), id))
+            })
             .collect();
-        match self {
-            Self::Move { task, target, side } => {
-                let saved = TaskOrder::from_ids(saved.iter().cloned());
-                working.sort_by_cached_key(|(at, row)| {
-                    (saved.working_position(&row.key.id, *at), row.key.id.clone())
-                });
-                let position = |id: &str| {
-                    working
-                        .iter()
-                        .position(|(_, row)| row.key.id == id)
-                        .ok_or_else(|| SelectionError::NotWorking(id.to_owned()))
-                };
-                let from = position(task)?;
-                let to = position(target)?;
-                move_into_place(&mut working, from, to, side);
-            }
-            Self::SortByStatus => working.sort_by_cached_key(|(at, row)| {
-                (status_bucket(&row.states), Reverse(*at), row.key.id.clone())
-            }),
-        }
-        Ok(working.into_iter().map(|(_, row)| row.key.id).collect())
-    }
-}
-
-#[derive(PartialEq, Eq, PartialOrd, Ord)]
-enum StatusBucket {
-    Blocked,
-    Error,
-    Available,
-    Idle,
-    Busy,
-}
-
-fn status_bucket(states: &BTreeSet<SelectionState>) -> StatusBucket {
-    if states.contains(&SelectionState::Blocked) {
-        StatusBucket::Blocked
-    } else if states.contains(&SelectionState::Error) {
-        StatusBucket::Error
-    } else if states.contains(&SelectionState::Busy) {
-        StatusBucket::Busy
-    } else if states.contains(&SelectionState::Available) {
-        StatusBucket::Available
-    } else {
-        StatusBucket::Idle
+        working.sort_unstable();
+        let position = |id: &str| {
+            working
+                .iter()
+                .position(|(_, task)| task == id)
+                .ok_or_else(|| SelectionError::NotWorking(id.to_owned()))
+        };
+        let from = position(self.task)?;
+        let to = position(self.target)?;
+        move_into_place(&mut working, from, to, self.side);
+        Ok(working.into_iter().map(|(_, id)| id).collect())
     }
 }
 
@@ -936,7 +904,7 @@ impl SqliteStore {
         repository: &RepositoryId,
         inputs: &SessionProjectionInputs,
         projection: &SessionProjection,
-        edit: TaskOrderEdit<'_>,
+        edit: TaskDrop<'_>,
     ) -> StoreResult<Option<(Vec<String>, Vec<String>)>> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let Some(snapshot) = inputs.pin(&mut conn)? else {
@@ -985,58 +953,5 @@ impl SqliteStore {
             ));
         }
         Ok(())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{SelectionTask, TaskOrderEdit};
-    use crate::work::selection::{
-        SelectionState, SelectionWork, WorkWorkspaceKey, WorkWorkspaceKind,
-    };
-
-    #[test]
-    fn status_sort_groups_by_row_status_then_newest_start() {
-        use SelectionState::{Available, Blocked, Busy, Error};
-        let rows: &[(&str, &[SelectionState])] = &[
-            ("error", &[Error]),
-            ("busy", &[Busy]),
-            ("idle", &[]),
-            ("available", &[Available]),
-            ("blocked", &[Busy, Error, Blocked]),
-            ("busy-and-available", &[Busy, Available]),
-            ("busy-and-error", &[Busy, Error]),
-        ];
-        let tasks = rows
-            .iter()
-            .enumerate()
-            .map(|(at, &(id, states))| SelectionTask {
-                started_at: Some(at as i64),
-                rank: 0,
-                work: SelectionWork {
-                    key: WorkWorkspaceKey {
-                        repository: "repo".into(),
-                        kind: WorkWorkspaceKind::Task,
-                        id: id.into(),
-                    },
-                    name: id.into(),
-                    parent_wave: None,
-                    states: states.iter().copied().collect(),
-                    activity_known: true,
-                },
-            })
-            .collect();
-        assert_eq!(
-            TaskOrderEdit::SortByStatus.apply(tasks, &[]).unwrap(),
-            [
-                "blocked",
-                "busy-and-error",
-                "error",
-                "available",
-                "idle",
-                "busy-and-available",
-                "busy"
-            ]
-        );
     }
 }

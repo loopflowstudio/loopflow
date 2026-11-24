@@ -2,7 +2,7 @@ use crate::process::attachment;
 use crate::store::selections;
 
 use loopflow_model::durable::RepositoryId;
-use loopflow_storage::sqlite::selections::TaskOrderEdit;
+use loopflow_storage::sqlite::selections::TaskDrop;
 use loopflow_storage::sqlite::SqliteStore;
 use loopflow_storage::work::selection::{
     Arrangement, ArrangementMode, DashboardId, Selection, SelectionError, SelectionExpression,
@@ -282,10 +282,10 @@ fn one_task_order_reorders_working_tasks_and_every_plan_and_arrivals_prepend() {
         [one, two]
     );
     assert_eq!(
-        selections::edit_task_order(
+        selections::reorder_working_task(
             &store,
             &repo,
-            TaskOrderEdit::Move {
+            TaskDrop {
                 task: two,
                 target: one,
                 side: None
@@ -326,24 +326,20 @@ fn one_task_order_reorders_working_tasks_and_every_plan_and_arrivals_prepend() {
             .task_ids(),
         [three, two, one]
     );
-    // Sorting idle Tasks ignores their saved slots and planning ranks.
-    assert_eq!(
-        selections::edit_task_order(&store, &repo, TaskOrderEdit::SortByStatus).unwrap(),
-        [three, one, two]
-    );
-
     let revisions = store.revisions().unwrap();
     // A done Task is not a Working Tasks member, as either side of a drop; the
     // refusal names it and nothing is written.
     let done = "task_44444444444444444444444444444444";
     for (task, to) in [(done, one), (one, done)] {
-        let edit = TaskOrderEdit::Move {
+        let edit = TaskDrop {
             task,
             target: to,
             side: None,
         };
-        assert!(matches!(selections::edit_task_order(&store, &repo, edit),
-            Err(crate::store::StoreError::Selection(SelectionError::NotWorking(id))) if id == done));
+        assert!(
+            matches!(selections::reorder_working_task(&store, &repo, edit),
+            Err(crate::store::StoreError::Selection(SelectionError::NotWorking(id))) if id == done)
+        );
     }
     assert_eq!(store.revisions().unwrap(), revisions);
     assert_eq!(
@@ -351,7 +347,7 @@ fn one_task_order_reorders_working_tasks_and_every_plan_and_arrivals_prepend() {
             .unwrap()
             .resolution
             .task_ids(),
-        [three, one, two]
+        [three, two, one]
     );
 }
 
@@ -1229,6 +1225,9 @@ fn a_dashboard_changed_after_preparation_rejects_the_prepared_write() {
 #[test]
 fn a_task_order_changed_after_preparation_keeps_the_new_order() {
     let (_dir, store, repo) = fixture();
+    store.conn.lock().unwrap().execute(
+        "INSERT INTO task_checkouts(task_id,worktree) SELECT id,'/repo/fix-1' FROM tasks WHERE issue_identifier='FIX-1'", [],
+    ).unwrap();
     let reading = crate::store::session_projection::Reading::acquire(&store, 500, None).unwrap();
     let prepare = || {
         store
@@ -1236,7 +1235,11 @@ fn a_task_order_changed_after_preparation_keeps_the_new_order() {
                 &repo,
                 &reading.inputs,
                 &reading.values,
-                TaskOrderEdit::SortByStatus,
+                TaskDrop {
+                    task: "task_22222222222222222222222222222222",
+                    target: "task_11111111111111111111111111111111",
+                    side: None,
+                },
             )
             .unwrap()
             .unwrap()

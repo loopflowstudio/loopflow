@@ -1021,11 +1021,6 @@ writes! {
         &mut slots.as_bytes(),
     )?,
 
-    /// `lf desktop sort` saves the current status order of this repository's Working Tasks.
-    #[serde(rename = "desktop.sort")]
-    DesktopSort { directory: PathBuf } => Vec<String>;
-    { .. } => super::desktop::sort_working_tasks(None, directory)?,
-
     /// `lf desktop dashboard move <board>/<member> --destination <destination>`:
     /// move to the target's slot, or place the member on its chosen side with `--side before|after`.
     #[serde(rename = "desktop.dashboard.move")]
@@ -1142,7 +1137,6 @@ macro_rules! directory_of {
             | Write::DesktopDashboardHide { directory, .. }
             | Write::DesktopDashboardShow { directory, .. }
             | Write::DesktopDashboardSlots { directory, .. }
-            | Write::DesktopSort { directory }
             | Write::DesktopDashboardMove { directory, .. } => Some(directory),
             Write::DesktopPortfolioSet { .. }
             | Write::AccountDisconnect { .. }

@@ -234,12 +234,17 @@ final class WorkNavigation {
     /// Each Wave view's backlog selection, filter, search and draft; it outlives entering a Task.
     var backlogs: [Board: BacklogState] = [:]
     var showsSlotHints = false
+    var sidebarSortByStatus = false
+    var selectedSidebarSlot: Int?
     var sidebarFilter: SidebarFilter = .working {
         willSet {
             if newValue != sidebarFilter { Perf.begin(Perf.hierarchyInteraction, "filter", id: "outline:\(newValue.rawValue)", liveSessions: liveSessionCount, owner: performanceOwner) }
         }
         didSet {
-            if oldValue != sidebarFilter { Perf.acknowledged(Perf.hierarchyInteraction, id: "outline:\(sidebarFilter.rawValue)", owner: performanceOwner) }
+            if oldValue != sidebarFilter {
+                selectedSidebarSlot = nil
+                Perf.acknowledged(Perf.hierarchyInteraction, id: "outline:\(sidebarFilter.rawValue)", owner: performanceOwner)
+            }
         }
     }
     var sidebarFocusRequested = false

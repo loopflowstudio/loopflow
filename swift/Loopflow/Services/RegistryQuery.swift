@@ -365,7 +365,6 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
     case desktopDashboardHide(directory: String, id: String, member: String)
     case desktopDashboardShow(directory: String, id: String, member: String)
     case desktopDashboardSlots(directory: String, id: String, revision: Int64, slots: String)
-    case desktopSort(directory: String)
     case desktopDashboardMove(directory: String, board: String, member: String, destination: String, side: DropSide?)
 
     /// The equivalent `lf` command, without its `--cwd`.
@@ -468,7 +467,6 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
             return ["desktop", "dashboard", "show", "query:\(id)/\(member)"]
         case .desktopDashboardSlots(_, let id, let revision, _):
             return ["desktop", "dashboard", "slots", "query:" + id, "--revision=\(revision)"]
-        case .desktopSort: return ["desktop", "sort"]
         case .desktopDashboardMove(_, let board, let member, let destination, let side):
             return ["desktop", "dashboard", "move", "\(board)/\(member)", "--destination", destination]
                 + argument("--side", side?.rawValue)
@@ -693,7 +691,6 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
             TaggedFields("desktop.dashboard.show", ["directory": directory, "id": id, "member": member])
         case .desktopDashboardSlots(let directory, let id, let revision, let slots):
             TaggedFields("desktop.dashboard.slots", ["directory": directory, "id": id, "revision": revision, "slots": slots])
-        case .desktopSort(let directory): TaggedFields("desktop.sort", ["directory": directory])
         case .desktopDashboardMove(let directory, let board, let member, let destination, let side):
             TaggedFields("desktop.dashboard.move", ["directory": directory, "board": board, "member": member,
                                        "destination": destination, "side": side])

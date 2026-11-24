@@ -71,7 +71,6 @@ claims and runs. To jump into the conversation directly, run
 
 ```bash
 lf wave show                                   # each Wave's plan and Tasks in shared order
-lf desktop sort                                # save the Working Task order by conversation status
 lf task status LOO-12                          # state, Graph step, PR, Sessions, and Graph runs
 lf task changes LOO-12                         # diff summary so far
 lf task wait LOO-13                            # block until done or abandoned

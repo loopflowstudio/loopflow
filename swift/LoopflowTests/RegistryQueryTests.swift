@@ -120,9 +120,6 @@ struct RegistryQueryTests {
         func object(_ json: String) throws -> NSDictionary {
             try #require(JSONSerialization.jsonObject(with: Data(json.utf8)) as? NSDictionary)
         }
-        let sort = ServedWrite.desktopSort(directory: "/r")
-        #expect(try object(sort) == object(#"{"kind":"desktop.sort","directory":"/r"}"#))
-        #expect(sort.argv == ["desktop", "sort"] && sort.cwd == "/r")
         let move = ServedWrite.taskMove(directory: "/r", issue: "FIX-1", wave: nil, machine: nil)
         #expect(try object(move) == object(#"{"kind":"task.move","directory":"/r","issue":"FIX-1","wave":null,"machine":null}"#))
         #expect(move.argv == ["task", "move", "FIX-1", "--no-wave", "--json"])

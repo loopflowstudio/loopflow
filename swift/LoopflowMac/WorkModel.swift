@@ -146,6 +146,9 @@ final class WorkModel {
         let next: Reading<WorkViewPlan> = plan.map { .available($0, readAt: readAt) }
             ?? (kept?.failed(reason) ?? .unavailable(lastGood: nil, reason: reason))
         guard previous?.wave != wave || previous?.reading != next else { return }
+        if navigation.selectedSidebarSlot == nil, navigation.sidebarSortByStatus {
+            navigation.selectedSidebarSlot = sidebarSlot(for: selection)
+        }
         taskListReadings[key] = (wave, next)
         endLaunchWhenCurrent()
     }
@@ -2187,6 +2190,16 @@ final class WorkModel {
         let work: WorkWorkspaceKey
         let states: [WorkSelectionState]
         let graphStep: String?
+
+        var statusOrder: Int {
+            switch states.programState {
+            case .blocked: 0
+            case .error: 1
+            case .idle: 2
+            case .working: 4
+            default: 3
+            }
+        }
     }
 
     private func taskRows(_ plan: WorkViewPlan?) -> [SidebarTaskRow] {
@@ -2209,13 +2222,35 @@ final class WorkModel {
         case .repository, .wave: rows = taskRows(taskList).filter { $0.states.contains(.working) }
         case .dashboard(let id): rows = taskRows(dashboard(id))
         }
-        return rows.filter { row in
+        let visible = rows.filter { row in
             switch navigation.sidebarFilter {
             case .working: true
             case .available: row.states.contains(.available)
             case .busy: row.states.contains(.busy)
             }
         }
+        guard navigation.sidebarScope == .repository, navigation.sidebarSortByStatus else { return visible }
+        // Swift's stable sort retains the underlying drag order within each group.
+        var sorted = visible.sorted { $0.statusOrder < $1.statusOrder }
+        if let slot = navigation.selectedSidebarSlot, let selection, selection.kind == .task {
+            let id = resolvedTaskID(selection.id)
+            if let index = sorted.firstIndex(where: { $0.id == id }), slot != index {
+                let row = sorted.remove(at: index)
+                sorted.insert(row, at: min(slot, sorted.count))
+            }
+        }
+        return sorted
+    }
+
+    func toggleSidebarSortByStatus() {
+        navigation.selectedSidebarSlot = navigation.sidebarSortByStatus ? nil : sidebarSlot(for: selection)
+        navigation.sidebarSortByStatus.toggle()
+    }
+
+    private func sidebarSlot(for work: WorkReference?) -> Int? {
+        guard navigation.sidebarScope == .repository, let work, work.kind == .task else { return nil }
+        let id = resolvedTaskID(work.id)
+        return sidebarRows.firstIndex { $0.id == id }
     }
 
     /// A Wave or repository row's count: its Working Tasks.
@@ -3334,6 +3369,9 @@ final class WorkModel {
         selectionOpening = nil
         guard navigation.destination != .work(selection) else { return }
         workActivityGeneration &+= 1
+        if navigation.sidebarSortByStatus {
+            navigation.selectedSidebarSlot = sidebarSlot(for: selection)
+        }
         navigation.selectedTaskEvidence = selection.flatMap { $0.kind == .task ? task(id: $0.id) : nil }
         navigation.selection = selection
         cache?.saveSelection(selection, repo: repoPath ?? "")
@@ -3452,6 +3490,7 @@ extension WorkModel {
             dismissTaskLink()
             viewOpening = nil
             selectionOpening = nil
+            navigation.selectedSidebarSlot = nil
             navigation.destination = destination
             navigation.palette = nil
             navigation.selectedSessionId = nil
@@ -3596,33 +3635,15 @@ extension WorkModel {
         } catch { navigation.notices.post(Notice(error.localizedDescription)) }
     }
 
-    var canSortWorkingTasks: Bool { repoPath != nil && pendingChanges.acceptsChanges }
-
-    @discardableResult
-    func sortWorkingTasksByStatus() -> Task<Void, Never> {
-        guard let repoPath else { return Task {} }
-        guard pendingChanges.acceptsChanges else {
-            navigation.notices.post(Notice(PendingChanges.awayText))
-            return Task {}
-        }
-        let repository = taskListReading.value?.repository ?? selectionPlans.value?.first?.repository ?? repoPath
-        return editWorkingOrder(.sortWorkingTasks(machine: observingMachineId, repository: repository),
-            subject: "Working Tasks", verb: "sorted", write: .desktopSort(directory: repoPath))
-    }
-
     /// Both drop surfaces place the Task on the side chosen in the displayed order.
     @discardableResult
     func reorderWorkingTask(_ member: WorkWorkspaceKey, to target: String, side: DropSide?) -> Task<Void, Never> {
         guard member.id != target, let repoPath else { return Task {} }
-        return editWorkingOrder(.reorder(machine: observingMachineId, member: member, target: target, side: side),
-            subject: taskPresentation(id: member.id).identifier ?? member.id, verb: "reordered",
-            write: .desktopDashboardMove(directory: repoPath, board: "working-tasks", member: member.selector,
-                                         destination: "task:" + target, side: side))
-    }
-
-    private func editWorkingOrder(_ command: PendingCommand, subject: String, verb: String, write: ServedWrite) -> Task<Void, Never> {
-        let scope = repositoryReadingKey(write.cwd)
-        let task = pendingChanges.make(command, subject: subject, verb: verb, write: write,
+        let scope = repositoryReadingKey(repoPath)
+        let write = ServedWrite.desktopDashboardMove(directory: repoPath, board: "working-tasks", member: member.selector,
+                                                     destination: "task:" + target, side: side)
+        let task = pendingChanges.make(.reorder(machine: observingMachineId, member: member, target: target, side: side),
+                                       subject: taskPresentation(id: member.id).identifier ?? member.id, verb: "reordered", write: write,
                                        notices: navigation.notices, show: nil) { [self] in
             try await refreshWorkingOrder(in: scope)
         }

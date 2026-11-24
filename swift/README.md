@@ -93,7 +93,9 @@ yourself, call `/usr/bin/log`, since zsh's builtin `log` shadows it:
 Working Tasks lists owned, started, unfinished Tasks on any Machine this store
 records. Drag a row in the repository sidebar or Working Tasks grid to change
 its place. The [sidebar guide](../docs/surfaces.md#working-tasks-in-the-sidebar)
-describes the shared order and drop feedback.
+describes the shared order and drop feedback. Turn on **Sort by status** in the
+repository sidebar or ⌘K to group that window’s rows. The open Task keeps its
+place through status changes. Turn it off to restore your order and drag again.
 
 Click a Wave to see its Working Tasks and subwaves. Its backlog holds the open
 work nobody is running. **‹ Repo** returns to Working Tasks. Unstarted Tasks

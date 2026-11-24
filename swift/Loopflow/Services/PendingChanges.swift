@@ -21,30 +21,26 @@ public enum PendingCommand: Equatable, Sendable {
     /// The side chosen in the displayed order. A source missing from the grid
     /// has no preview, but the Machine can still resolve its drop.
     case reorder(machine: String?, member: WorkWorkspaceKey, target: String, side: DropSide?)
-    case sortWorkingTasks(machine: String?, repository: String)
     case renameSession(session: String, title: String)
 
     public var task: String? {
         switch self {
         case .complete(let task), .abandon(let task), .reopen(let task), .claim(let task, _), .unassign(let task),
              .move(let task, _): task
-        case .renameSession, .reorder, .sortWorkingTasks: nil
+        case .renameSession, .reorder: nil
         }
     }
 }
 
 private struct WorkingTaskOrder: Hashable {
     let machine: String?
-    let directory: String
+    let repository: String
 }
 
 private extension PendingCommand {
-    func workingOrder(in write: ServedWrite) -> WorkingTaskOrder? {
-        switch self {
-        case .sortWorkingTasks(let machine, _), .reorder(let machine, _, _, _):
-            .init(machine: machine, directory: write.cwd)
-        default: nil
-        }
+    var workingOrder: WorkingTaskOrder? {
+        guard case let .reorder(machine, member, _, _) = self else { return nil }
+        return WorkingTaskOrder(machine: machine, repository: member.repository)
     }
 }
 
@@ -78,7 +74,7 @@ public final class PendingChanges {
     /// Whether change controls are enabled: not while the Machine is away.
     public var acceptsChanges: Bool { link != .away }
 
-    // Drags and sorts of one list reach the Machine in click order, even across a lost link.
+    // Drags of one list reach the Machine in click order, even across a lost link.
     @ObservationIgnored private var orderWrites: [WorkingTaskOrder: (id: String, task: Task<Void, Never>)] = [:]
     @ObservationIgnored private let send: Send
     @ObservationIgnored private let describe: ((any Error) -> String)?
@@ -106,7 +102,7 @@ public final class PendingChanges {
                      answered: @escaping @MainActor () async throws -> Void = {}) -> Task<Void, Never> {
         let requestID = UUID().uuidString
         changes.append(Change(requestID: requestID, command: command, answer: nil))
-        let order = command.workingOrder(in: write)
+        let order = command.workingOrder
         let previous = order.flatMap { orderWrites[$0]?.task }
         let task = Task {
             await previous?.value
@@ -270,13 +266,7 @@ public final class PendingChanges {
     /// The repository's Working members in drop order until this reading covers the write.
     public func workingOrder(_ plan: WorkViewPlan?, machine: String?, readAt: Revisions?) -> WorkViewPlan? {
         guard var plan, !changes.isEmpty else { return plan }
-        let patches = patches(at: readAt)
-        let lastSort = patches.lastIndex { change in
-            guard case .sortWorkingTasks(let origin, let repo) = change.command else { return false }
-            return origin == machine && (repo == plan.repository || repo == plan.repositoryPath)
-        }
-        let afterSort = lastSort.map { $0 + 1 } ?? patches.startIndex
-        for change in patches[afterSort...] {
+        for change in patches(at: readAt) {
             guard case .reorder(let origin, let member, let target, let side?) = change.command,
                   origin == machine, member.repository == plan.repository else { continue }
             let members = plan.resolution.members
@@ -317,7 +307,7 @@ public final class PendingChanges {
                 }
             case .unassign:
                 contents.updateStates(of: matches) { $0.subtracting([.working]).union([.backlog]) }
-            case .renameSession, .reorder, .sortWorkingTasks:
+            case .renameSession, .reorder:
                 break
             }
             contents.removeAll { gone.contains($0.work) }
@@ -362,7 +352,7 @@ public final class PendingChanges {
             case .move(_, let target):
                 tasks[index].task.waveId = target
                 if let wave, wave != target { tasks.remove(at: index) }
-            case .renameSession, .reorder, .sortWorkingTasks:
+            case .renameSession, .reorder:
                 break
             }
         }

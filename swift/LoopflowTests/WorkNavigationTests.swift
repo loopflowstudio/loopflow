@@ -253,49 +253,54 @@ struct WorkNavigationTests {
         }
     }
 
-    @Test func sortRetriesAfterALostReplyAndUpdatesBothLists() async throws {
-        let machine = HeldMachine()
-        let sorted = fixtureWorkingPlan(["b", "a"])
-        let json = String(decoding: try JSONEncoder().encode(sorted), as: UTF8.self)
-        let query = RegistryQuery(change: { write, id in
-            guard case .desktopSort(directory: "/repo") = write else { throw RegistryQueryError("Unexpected write") }
-            return try await machine.send(write, id)
-        }) { args, _ in
-            guard args.starts(with: ["desktop", "view", "show"]) else { throw RegistryQueryError("Unexpected read") }
-            return json
+    @Test func statusToggleRestoresSavedOrderWithoutChangingTheGrid() throws {
+        let model = WorkModel(query: RegistryQuery { _, _ in
+            Issue.record("Toggling the sidebar contacted the Machine")
+            throw RegistryQueryError("Unexpected command")
+        }, repoPath: "/repo")
+        let saved = fixtureStartedPlan([
+            ("busy", [.working, .available, .busy]), ("idle", [.working]), ("z", [.working, .available]),
+            ("error", [.working, .error, .busy]), ("a", [.working, .available]), ("blocked", [.working, .blocked, .error]),
+        ])
+        model.applySelectionPlans([saved], reason: "")
+        model.applyTaskList(saved, wave: nil, reason: "")
+        let stack = saved.resolution.members.map(\.work.id)
+        let sidebar = WorkNavigator(model: model, onOpenSession: { _ in })
+        for isOn in [false, true] {
+            let button = try sidebar.inspect().find(SidebarStatusToggle.self).find(ViewType.Button.self)
+            #expect(try button.accessibilityValue().string() == (isOn ? "On" : "Off"))
+            #expect(try button.help().string().contains(isOn ? "restore saved order" : "Blocked, Error, Available, Idle, Busy"))
+            let action = try #require(model.searchDestinations("Sort by status").first)
+            #expect(action.id == .sortWorkingTasks && action.detail.hasPrefix(isOn ? "On" : "Off"))
+            #expect(model.sidebarTaskIDs == (isOn ? ["blocked", "error", "z", "a", "idle", "busy"] : stack))
+            #expect(model.workingTaskIDs == stack)
+            try button.tap()
         }
-        let model = WorkModel(query: query, repoPath: "/repo")
-        let initial = fixtureWorkingPlan(["a", "b"])
-        model.applySelectionPlans([initial], reason: "")
-        model.applyTaskList(initial, wave: nil, reason: "")
-        let write = model.sortWorkingTasksByStatus()
-        await machine.fail(URLError(.networkConnectionLost))
-        await machine.nextSend()
-        #expect(machine.sent.count == 2 && Set(machine.sent).count == 1)
-        #expect(model.sidebarTaskIDs == ["a", "b"])
-        await machine.answer(nil)
-        await write.value
-        #expect(model.sidebarTaskIDs == ["b", "a"])
-        #expect(model.workingTaskIDs == model.sidebarTaskIDs)
+        #expect(model.sidebarTaskIDs == stack)
+        #expect(model.pendingChanges.changes.isEmpty)
     }
 
-    @Test func sortIsDisabledWhileTheMachineIsAway() async throws {
-        let model = WorkModel(query: RegistryQuery { _, _ in
-            Issue.record("Sort sent a command while the Machine was away")
-            throw RegistryQueryError("Machine away")
-        }, repoPath: "/repo")
-        let changes = model.pendingChanges
-        changes.linkLost()
-        await withCheckedContinuation { continuation in
-            withObservationTracking { _ = changes.link } onChange: { continuation.resume() }
+    @Test func statusToggleKeepsTheOpenTaskInItsSlotUntilNavigation() {
+        let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("Unexpected command") }, repoPath: "/repo")
+        func report(_ state: WorkSelectionState, other: WorkSelectionState = .available) {
+            model.applyStartedFixture([("idle", [.working]), ("open", [.working, state]), ("other", [.working, other])])
         }
-        let sidebar = WorkNavigator(model: model, onOpenSession: { _ in })
-        #expect(try sidebar.inspect().find(button: "Sort by status").isDisabled())
-        await model.sortWorkingTasksByStatus().value
-        #expect(changes.changes.isEmpty)
-        #expect(model.navigation.notices.current?.text == PendingChanges.awayText)
-        changes.linkReturned()
-        #expect(try !sidebar.inspect().find(button: "Sort by status").isDisabled())
+        report(.available)
+        model.selectSidebarTask(slot: 1)
+        model.toggleSidebarSortByStatus()
+        #expect(model.sidebarTaskIDs == ["other", "open", "idle"])
+        model.select(nil)
+        model.selectSidebarTask(slot: 0)
+        #expect(model.selection == .task(id: "open"))
+        report(.busy, other: .busy)
+        #expect(model.sidebarTaskIDs == ["open", "idle", "other"])
+        report(.busy)
+        #expect(model.sidebarTaskIDs == ["open", "other", "idle"])
+        model.cycleSidebarTask(1)
+        #expect(model.selection == .task(id: "other"))
+        #expect(model.sidebarTaskIDs == ["idle", "other", "open"])
+        model.select(nil)
+        #expect(model.sidebarTaskIDs == ["other", "idle", "open"])
     }
 
     private func dropModel(machine: HeldMachine, feed: WorkFeed, side: DropSide) -> WorkModel {

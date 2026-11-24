@@ -18971,30 +18971,6 @@
         },
         {
           "additionalProperties": false,
-          "description": "`lf desktop sort` saves the current status order of this repository's Working Tasks.",
-          "properties": {
-            "directory": {
-              "type": "string"
-            },
-            "kind": {
-              "const": "desktop.sort",
-              "type": "string"
-            }
-          },
-          "required": [
-            "kind",
-            "directory"
-          ],
-          "type": "object",
-          "x-result": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          }
-        },
-        {
-          "additionalProperties": false,
           "description": "`lf desktop dashboard move <board>/<member> --destination <destination>`:\nmove to the target's slot, or place the member on its chosen side with `--side before|after`.",
           "properties": {
             "board": {

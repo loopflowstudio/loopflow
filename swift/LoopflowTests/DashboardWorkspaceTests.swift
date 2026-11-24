@@ -100,26 +100,6 @@ struct DashboardWorkspaceTests {
         #expect(model.sidebarTaskIDs == model.workingTaskIDs)
     }
 
-    @Test func sortByStatusUpdatesTheSidebarAndGrid() async throws {
-        let initial = fixtureWorkingPlan(["a", "b"])
-        let sorted = String(decoding: try JSONEncoder().encode(fixtureWorkingPlan(["b", "a"])), as: UTF8.self)
-        let query = RegistryQuery { args, _ in
-            switch args {
-            case ["desktop", "sort"]: return #"["b","a"]"#
-            case ["desktop", "view", "show", "--json"], ["desktop", "view", "show", "kind:task state:working", "--json"]: return sorted
-            default: throw RegistryQueryError("Unexpected command \(args)")
-            }
-        }
-        let model = WorkModel(query: query, repoPath: "/repo")
-        model.applySelectionPlans([initial], reason: "")
-        model.applyTaskList(initial, wave: nil, reason: "")
-        #expect(model.searchDestinations("Sort by status").first?.id == .sortWorkingTasks)
-        await model.sortWorkingTasksByStatus().value
-        #expect(model.navigation.notices.current == nil)
-        #expect(model.sidebarTaskIDs == ["b", "a"])
-        #expect(model.workingTaskIDs == model.sidebarTaskIDs)
-    }
-
     @Test func workingTasksOpensOnlyTheTasksItsGridShows() throws {
         var json = try #require(JSONSerialization.jsonObject(with: loadFixtureData("view_plan.json")) as? [String: Any])
         json["dashboard_id"] = NSNull()

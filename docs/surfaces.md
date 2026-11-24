@@ -103,18 +103,16 @@ with canonical Task ID breaking ties. New arrivals appear above rows you’ve
 arranged. Sidebar and phone rows show the current Graph step beside the status
 while a Task is at a step.
 
-Choose **Sort by status** in the repository sidebar or from **⌘K**, or run
-`lf desktop sort`. This puts Blocked Tasks first, followed by Error, Available,
-Idle and Busy. A Task with both busy and available conversations sorts as Busy.
-Each group starts with its newest Task. The order stays put as
-conversations change status.
+Turn on **Sort by status** in the repository sidebar or from **⌘K** to group
+rows by Blocked, Error, Available, Idle and Busy. A Task with both busy and
+available conversations sorts as Busy. Each group keeps its saved order.
+As statuses change, the open Task holds its slot until you leave it.
+Turn the toggle off to return to the shared order and drag sidebar rows again.
+The Working Tasks grid always uses the shared order.
 
 A drop shows immediately. If another window has already reordered the list,
 the Task still lands on the side of the target you chose. A refused drop
-restores the last confirmed order in both lists. A Notice explains a refused
-drop or sort, even if the next read fails.
-Sort takes its order from the Machine. A drag made after Sort still shows
-immediately and saves after the sort.
+restores the last confirmed order in both lists and shows a Notice.
 
 In **⌘K → Sidebar shows**, choose **Working tasks**, **Available**, or **Busy**.
 The filter keeps the list's order. A Task with both available and busy

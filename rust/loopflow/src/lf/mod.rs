@@ -781,8 +781,6 @@ pub enum DesktopCommand {
         #[arg(long, global = true, id = "portfolio_json")]
         json: bool,
     },
-    /// Sort this repository’s Working Tasks once by status (Blocked, Error, Available, Idle, Busy)
-    Sort,
     /// Read a saved Dashboard (its arrangement and slots) as JSON; `lf desktop dashboard slots` replaces the slots
     Layout {
         /// query:ID
@@ -1279,7 +1277,6 @@ impl DesktopCommand {
             // Navigation, panes and Dashboard arrangement are not Work; their
             // saves still persist, without a Process.
             | Self::Layout { .. }
-            | Self::Sort
             | Self::Back { .. }
             | Self::Forward { .. }
             | Self::Goto { .. }

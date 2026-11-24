@@ -1093,7 +1093,7 @@ fn membership_wire_ids_are_derived_from_their_captures() {
     current.push(ConcreteStep::Xor(ConcreteXor {
         router: Skill::named("route"),
         sources: Vec::new(),
-        paths: std::collections::HashMap::from([
+        paths: std::collections::BTreeMap::from([
             (
                 "fix".into(),
                 ConcretePath {

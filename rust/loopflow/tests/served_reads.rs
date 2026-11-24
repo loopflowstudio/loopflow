@@ -2644,8 +2644,8 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
             if let Some(message) = message {
                 spelled.extend(words(&["--message", message]));
             }
-            if *push {
-                spelled.push("--push".into());
+            if !*push {
+                spelled.push("--no-push".into());
             }
             if *no_add {
                 spelled.push("--no-add".into());

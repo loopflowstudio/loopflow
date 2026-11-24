@@ -18541,7 +18541,7 @@
         },
         {
           "additionalProperties": false,
-          "description": "`lf [-a <agent>] commit [-m <message>] [-p] [--no-add] [<path>…] --json`.",
+          "description": "`lf [-a <agent>] commit [-m <message>] [--no-push] [--no-add] [<path>…] --json`.",
           "examples": [
             {
               "agent": null,

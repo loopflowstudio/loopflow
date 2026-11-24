@@ -123,21 +123,17 @@ Mix Skills and mechanical `cmd:` steps:
 
 ### Loops (`loop:`)
 
-A `loop:` block repeats as long as its final step says `iterate`. The built-in
-`plan` and `build` Graphs compose two nested loops:
+A `loop:` block repeats when its final step returns `iterate`. The built-in
+`build` Graph puts implementation in an inner loop so the outer loop reviews
+the whole change.
 
 ```yaml
-# plan (builtin)
-- kickoff              # plan the change, answering key risks
-- concept-review       # pressure-test the premise before writing code
-- write-docs           # update actual user docs before implementation
-
 # build (builtin)
 - loop:
     - loop:
-        - implement        # build one reviewable chunk
+        - implement        # build one substantial pass of the plan
         - cmd: sync
-        - realign          # decides: next chunk (iterate) or move on (advance)
+        - realign          # decides: next pass (iterate) or move on (advance)
     - compress             # simplify what the branch touched
     - qa                   # exercise the real change end to end
     - concept-review       # decides: ship whole change or loop back
@@ -145,8 +141,28 @@ A `loop:` block repeats as long as its final step says `iterate`. The built-in
 ```
 
 Any Skill can be the deciding step of a loop: it returns `advance`, `iterate`
-(with direction), or `blocked` (with a question). There is no arbitrary pass
-limit; loops continue while useful work remains.
+(with direction), or `blocked` (with a question).
+
+During a Graph run, each `iterate` launches the loop’s Skills again in fresh conversations.
+For work that needs several passes, `kickoff` groups it into 2–4 substantial
+end-to-end passes, aiming for no more than 5. After each pass, `realign`
+regroups what remains. Within a pass, `implement` keeps building while the
+next item is the same kind of work. It pauses when the next item needs a
+decision or review, or when what it learned could change the plan.
+Aim for one diff a person can review in a sitting. Around 2,000 lines of
+non-test change is a soft ceiling.
+
+The deciding step sees which pass it is on and how many steps the loop
+repeats, including the decision itself.
+
+```text
+Decision pass 3. Iterating repeats 3 steps, back to implement.
+```
+
+It keeps iterating past 5 when real work is left, and returns `blocked` when
+passes shrink into small increments that no longer converge. `lf task status`
+shows the reason the decider gave. If the step succeeds and the Graph then
+fails, status shows the Graph error.
 
 ### Docs-first (`write-docs`) and QA playbooks (`.lf/qa/`)
 

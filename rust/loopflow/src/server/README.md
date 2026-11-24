@@ -784,7 +784,7 @@ steers (`task_updates::write`) and claims the Session's unread steers
 1. The hook inserts the row with `claimed_at`, for up to eight steers, oldest
    first. A hook running beside it finds them claimed.
 2. It prints them ahead of the block, with what changed on the Session's
-   Tasks since its last update (Graph runs and steps, its Graph position,
+   Tasks since its last update (settled Graph runs, interactive and end stops,
    comments from anyone else). The Session's first read records the baseline
    and prints no update.
 3. It stamps `delivered_at`.

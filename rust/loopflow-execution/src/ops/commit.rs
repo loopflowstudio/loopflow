@@ -6,8 +6,8 @@ use serde::Deserialize;
 use crate::agent::{run_agent, AgentConfig, ProcessConfig};
 use crate::config::load_config;
 use crate::git::{
-    commit, current_branch, git_stdout, git_stdout_inheriting, is_clean, push, push_with_upstream,
-    stage_all,
+    commit, current_branch, git_stdout, git_stdout_inheriting, has_staged_changes, is_clean, push,
+    push_with_upstream, stage_all,
 };
 use crate::graph::load_skill;
 
@@ -15,25 +15,30 @@ use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::progress::Progress;
 use crate::prompt::change::{Change, ChangeRange};
 
-#[derive(Debug, Clone)]
-pub struct CommitOptions {
-    pub add: bool,
-    pub push: bool,
-    pub create_draft_pr: bool,
-    pub task: String,
-    pub sources: Vec<String>,
-    pub message: Option<String>,
-    pub agent: Option<String>,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CommitPush {
+    Local,
+    OffDefaultBranch,
+    Always,
 }
 
-impl CommitOptions {
-    pub fn for_task(task: impl Into<String>) -> Self {
+#[derive(Debug, Clone)]
+pub struct CommitOptions<'a> {
+    pub add: bool,
+    pub push: CommitPush,
+    pub paths: &'a [String],
+    pub task: &'a str,
+    pub message: Option<&'a str>,
+    pub agent: Option<&'a str>,
+}
+
+impl<'a> CommitOptions<'a> {
+    pub fn for_task(task: &'a str) -> Self {
         Self {
             add: false,
-            push: false,
-            create_draft_pr: false,
-            task: task.into(),
-            sources: Vec::new(),
+            push: CommitPush::Local,
+            paths: &[],
+            task,
             message: None,
             agent: None,
         }
@@ -43,6 +48,15 @@ impl CommitOptions {
 /// Commit an explicit document selection using an independent index. The real
 /// index retains unrelated staged work, and scratch remains on disk.
 pub fn commit_selected(repo: &Path, paths: &[String], message: Option<&str>) -> OpsResult<()> {
+    commit_selected_with(repo, paths, message, &|_| {})
+}
+
+fn commit_selected_with(
+    repo: &Path,
+    paths: &[String],
+    message: Option<&str>,
+    inherit_git: &impl Fn(&mut Command),
+) -> OpsResult<()> {
     let message =
         message.ok_or_else(|| OpsError::Message("selected-path commits require -m".into()))?;
     let _mutation = crate::ops::task::lock_task_pr_mutation(repo)?;
@@ -50,6 +64,7 @@ pub fn commit_selected(repo: &Path, paths: &[String], message: Option<&str>) -> 
     let directory = tempfile::tempdir()?;
     let index = directory.path().join("index");
     let inherit_index = |command: &mut Command| {
+        inherit_git(command);
         command.env("GIT_INDEX_FILE", &index);
     };
     let run = |args: &[&str]| git_stdout_inheriting(repo, args, &inherit_index);
@@ -63,7 +78,7 @@ pub fn commit_selected(repo: &Path, paths: &[String], message: Option<&str>) -> 
         args.extend(selected.iter().map(String::as_str));
         run(&args)?;
     }
-    if run(&["diff", "--cached", "--name-only"])?.trim().is_empty() {
+    if !has_staged_changes(repo, &inherit_index)? {
         return Err(OpsError::Message(
             "Nothing selected to commit; edit the selected files or select changed paths.".into(),
         ));
@@ -71,7 +86,7 @@ pub fn commit_selected(repo: &Path, paths: &[String], message: Option<&str>) -> 
     commit(repo, message, &inherit_index)?;
     let mut reset = vec!["reset", "-q", "HEAD", "--"];
     reset.extend(selected.iter().map(String::as_str));
-    git_stdout(repo, &reset).map_err(|error| {
+    git_stdout_inheriting(repo, &reset, inherit_git).map_err(|error| {
         OpsError::Message(format!("commit saved; index refresh failed: {error}"))
     })?;
     Ok(())
@@ -88,78 +103,81 @@ pub(crate) fn restart_landed_persistent(repo: &Path) -> OpsResult<()> {
     Ok(())
 }
 
-/// Run the ordinary commit path, carrying caller-owned capabilities into Git mutations.
-/// Agent generation, draft PR creation and Task merge revocation have separate launch owners.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CommitResult {
+    pub committed: bool,
+    pub pushed: bool,
+}
+
+/// Commit the selection or the worktree, then push an eligible checkpoint.
 pub fn commit_workflow(
     repo: &Path,
-    options: &CommitOptions,
+    options: &CommitOptions<'_>,
     progress: &impl Progress,
     inherit_git: &impl Fn(&mut Command),
-) -> OpsResult<bool> {
-    restart_landed_persistent(repo)?;
-    if is_clean(repo)? {
-        progress.status("Nothing to commit");
-        if options.push {
+) -> OpsResult<CommitResult> {
+    let finish = |committed| -> OpsResult<CommitResult> {
+        let pushed = match options.push {
+            CommitPush::Local => false,
+            CommitPush::OffDefaultBranch => off_default_branch(repo)?,
+            CommitPush::Always => true,
+        };
+        if pushed {
             progress.status("Pushing...");
-            push_with_upstream_if_needed(repo, inherit_git)?;
-            if options.create_draft_pr {
-                ensure_draft_pr(repo, progress)?;
-            }
+            push_with_upstream_if_needed(repo, inherit_git)
+                .map_err(|error| OpsError::PushFailed(error.to_string().trim_end().to_string()))?;
         }
-        return Ok(false);
+        Ok(CommitResult { committed, pushed })
+    };
+    if !options.paths.is_empty() {
+        commit_selected_with(repo, options.paths, options.message, inherit_git)?;
+        return finish(true);
     }
 
+    restart_landed_persistent(repo)?;
     if options.add {
+        if is_clean(repo)? {
+            progress.status("Nothing to commit");
+            return finish(false);
+        }
         progress.status("Staging changes...");
         stage_all(repo, inherit_git)?;
     }
 
-    if git_stdout(repo, &["diff", "--cached", "--name-only"])?
-        .trim()
-        .is_empty()
-    {
+    if !has_staged_changes(repo, inherit_git)? {
+        // Staging a working-tree reversal can restore HEAD's tree. A clean
+        // checkout can still have a local checkpoint to publish.
+        if is_clean(repo)? {
+            progress.status("Nothing to commit");
+            return finish(false);
+        }
         progress.status("Nothing staged to commit");
-        return Ok(false);
+        return Ok(CommitResult {
+            committed: false,
+            pushed: false,
+        });
     }
 
     let message = if let Some(message) = options
         .message
-        .as_deref()
         .map(str::trim)
         .filter(|message| !message.is_empty())
     {
         message.to_string()
     } else {
         progress.status("Generating commit message...");
-        match generate_commit_message(repo, options.agent.as_deref()) {
+        match generate_commit_message(repo, options.agent) {
             Ok(message) => message.text(),
             Err(error) => {
                 progress.error(&error.to_string());
-                format_commit_message(&options.task, &options.sources)
+                format!("lf {}", options.task)
             }
         }
     };
 
     progress.status("Committing...");
     commit(repo, &message, inherit_git)?;
-
-    if options.push {
-        progress.status("Pushing...");
-        push_with_upstream_if_needed(repo, inherit_git)?;
-        if options.create_draft_pr {
-            ensure_draft_pr(repo, progress)?;
-        }
-    }
-
-    Ok(true)
-}
-
-fn format_commit_message(task: &str, sources: &[String]) -> String {
-    if sources.is_empty() {
-        format!("lf {task}")
-    } else {
-        format!("lf {} {task}", sources.join(" "))
-    }
+    finish(true)
 }
 
 #[derive(Debug, Deserialize)]
@@ -192,10 +210,8 @@ pub fn commit_step(
     progress: &impl Progress,
 ) -> OpsResult<bool> {
     stage_all(repo, &|_| {})?;
-    let staged = !git_stdout(repo, &["diff", "--cached", "--name-only"])?
-        .trim()
-        .is_empty();
-    let written = if staged {
+    // The index can change while the agent writes. commit_workflow reads it again.
+    let written = if has_staged_changes(repo, &|_| {})? {
         progress.status("Writing the commit message...");
         generate_commit_message(repo, agent)
             .inspect_err(|error| progress.error(&error.to_string()))
@@ -206,13 +222,14 @@ pub fn commit_step(
     commit_workflow(
         repo,
         &CommitOptions {
-            push: off_default_branch(repo)?,
-            message: Some(step_commit_message(step, written.as_ref())),
+            push: CommitPush::OffDefaultBranch,
+            message: Some(&step_commit_message(step, written.as_ref())),
             ..CommitOptions::for_task(step)
         },
         progress,
         &|_| {},
     )
+    .map(|result| result.committed)
 }
 
 /// Whether a finished skill step left work for [`commit_step`]: edits to
@@ -334,34 +351,6 @@ fn parse_commit_message(raw: &str) -> Option<CommitMessage> {
         return None;
     }
     serde_json::from_str::<CommitMessage>(&trimmed[start..=end]).ok()
-}
-
-fn ensure_draft_pr(repo: &Path, progress: &impl Progress) -> OpsResult<()> {
-    if !crate::ops::pr::gh_available() {
-        return Ok(());
-    }
-
-    if crate::ops::pr::pr_exists_for_current_branch(repo)? {
-        return Ok(());
-    }
-
-    progress.status("Creating draft PR...");
-    let output = std::process::Command::new("gh")
-        .arg("pr")
-        .arg("create")
-        .arg("--draft")
-        .arg("--fill")
-        .current_dir(repo)
-        .output()?;
-    if output.status.success() {
-        return Ok(());
-    }
-
-    progress.error(&format!(
-        "Draft PR creation failed: {}",
-        String::from_utf8_lossy(&output.stderr).trim()
-    ));
-    Ok(())
 }
 
 pub(crate) fn push_with_upstream_if_needed(

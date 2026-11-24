@@ -2229,7 +2229,8 @@ async fn snapshot_task_detail(
     let runtime = snapshot_task_runtime(&execution, task, status, pending, owner, provider);
     let reference = task_reference(
         facts.issue_urls.get(&task.id).cloned(),
-        Some(task),
+        task,
+        runtime.owner.as_ref(),
         &shared.machines,
         &shared.local_machine,
     );
@@ -2649,38 +2650,43 @@ fn derive_task_condition(
     }
 }
 
-/// A Task's workspace is its checkout on this Machine, if it has one.
+/// A checkout left here after a move is absent from the Task's workspace.
 fn task_reference(
     issue_url: Option<String>,
-    task: Option<&Task>,
+    task: &Task,
+    owner: Option<&loopflow_model::durable::TaskOwner>,
     machines: &[loopflow_model::durable::Machine],
     local_machine: &loopflow_model::durable::MachineId,
 ) -> TaskReferenceSnapshot {
-    let workspace = task.and_then(|task| {
-        let task_worktree = task.worktree.as_ref()?;
-        let branch = Some(task.branch.clone());
-        // A removed checkout has no root to resolve.
-        let worktree = if loopflow_execution::observe::is_dir(task_worktree) {
-            loopflow_execution::git::worktree_root(task_worktree)
-                .ok()
-                .and_then(|root| root.canonicalize().ok())
-                .unwrap_or_else(|| task_worktree.clone())
-        } else {
-            task_worktree.clone()
-        };
-        Some(TaskWorktreeSnapshot {
-            machine_label: machines
-                .iter()
-                .find(|machine| &machine.id == local_machine)
-                .and_then(|machine| machine.label.clone()),
-            machine_id: Some(local_machine.clone()),
-            slug: task.workspace_slug.clone(),
-            branch,
-            base_commit: task.base_commit.clone(),
-            worktree: worktree.display().to_string(),
-            local_exists: loopflow_execution::observe::try_exists(&worktree).ok(),
-        })
-    });
+    let remote = owner.and_then(|owner| owner.machine_elsewhere(local_machine));
+    let workspace = task
+        .worktree
+        .as_ref()
+        .filter(|_| remote.is_none())
+        .map(|task_worktree| {
+            let branch = Some(task.branch.clone());
+            // A removed checkout has no root to resolve.
+            let worktree = if loopflow_execution::observe::is_dir(task_worktree) {
+                loopflow_execution::git::worktree_root(task_worktree)
+                    .ok()
+                    .and_then(|root| root.canonicalize().ok())
+                    .unwrap_or_else(|| task_worktree.clone())
+            } else {
+                task_worktree.clone()
+            };
+            TaskWorktreeSnapshot {
+                machine_label: machines
+                    .iter()
+                    .find(|machine| &machine.id == local_machine)
+                    .and_then(|machine| machine.label.clone()),
+                machine_id: Some(local_machine.clone()),
+                slug: task.workspace_slug.clone(),
+                branch,
+                base_commit: task.base_commit.clone(),
+                worktree: worktree.display().to_string(),
+                local_exists: loopflow_execution::observe::try_exists(&worktree).ok(),
+            }
+        });
     TaskReferenceSnapshot {
         issue_url,
         workspace,
@@ -3867,6 +3873,22 @@ mod tests {
         );
         assert_eq!(workspace.worktree, "/local/checkout");
         assert_eq!(workspace.local_exists, Some(false));
+
+        db.execute(
+            "INSERT INTO task_ownership(id,task_id,kind,machine_id,at,ordered_at,writer_machine_id,written_here)
+             VALUES('own_55555555555555555555555555555555',?1,'claim',?2,1,1000,?2,0)",
+            [task.id.as_str(), peer.as_str()],
+        )
+        .unwrap();
+        let reads = super::DetailReads::read(&store, &[&task], &shared).unwrap();
+        let detail = super::snapshot_task_detail(&store, &task, false, &reads)
+            .await
+            .unwrap();
+        assert_eq!(
+            detail.runtime.unwrap().owner.unwrap().machine.id,
+            Some(peer)
+        );
+        assert!(detail.reference.workspace.is_none());
     }
 
     #[tokio::test]

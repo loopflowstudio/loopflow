@@ -4420,9 +4420,47 @@ fn server_routed_task_workspace() {
         .unwrap();
     assert_eq!(absent.code, ErrorCode::NotFound);
     assert_eq!(
-        absent.data.unwrap(),
-        serde_json::json!({"reason":"not_started","task_id":peer_task})
+        absent.data.as_ref().unwrap(),
+        &serde_json::json!({"reason":"not_started","task_id":peer_task})
     );
+
+    let refused = client
+        .subscribe(
+            Read::TaskFilesWatch {
+                issue: task.to_string(),
+            },
+            None,
+        )
+        .unwrap_err()
+        .downcast::<Error>()
+        .unwrap();
+    assert_eq!(refused.code, ErrorCode::NotFound);
+    assert_eq!(refused.data, absent.data);
+
+    let board = client
+        .request(Read::PlanList {
+            directory: plan.local_path.clone(),
+            wave: None,
+            task: Some(task.to_string()),
+            all: false,
+        })
+        .unwrap()
+        .result;
+    let row = &board["tasks"]["items"][0];
+    assert_eq!(row["task"]["id"], task.as_str(), "{board}");
+    assert_eq!(row["runtime"]["owner"]["machine"]["id"], mini.id.as_str());
+    assert_eq!(row["reference"].get("workspace"), Some(&Value::Null));
+    let waited = client
+        .request(Read::TaskWait {
+            issue: task.to_string(),
+            until: loopflow_execution::ops::task::TaskWaitUntil::Terminal,
+        })
+        .unwrap()
+        .result;
+    assert_eq!(waited["task"]["task_id"], task.as_str());
+    for field in ["machine_id", "worktree", "branch", "base_commit"] {
+        assert_eq!(waited["task"].get(field), Some(&Value::Null), "{field}");
+    }
 
     checkout(&peer, peer_task.as_str(), &plan.remote_path);
     fs::write(plan.remote_path.join(file), "from mini\n").unwrap();
@@ -4646,10 +4684,10 @@ fn server_routed_task_workspace() {
                 Some(vec!["row.reference.workspace.machine_id".into()]),
             )
             .unwrap();
-        let owner =
+        let workspace_machine =
             |frame: Value| frame["body"]["row"]["reference"]["workspace"]["machine_id"].clone();
         assert_eq!(
-            owner(available_reading(&mut watches, &pane_id)),
+            workspace_machine(available_reading(&mut watches, &pane_id)),
             mini.id.as_str()
         );
         let files_id = watches
@@ -4693,9 +4731,12 @@ fn server_routed_task_workspace() {
 
         loopflow_execution::store::ownership::move_claim(&other.remote, &other_task, &laptop.id)
             .unwrap();
+        // Mini has released the checkout. The laptop still subscribes there
+        // until its plan learns the move.
+        assert!(workspace_machine(available_reading(&mut watches, &pane_id)).is_null());
         other.to_local();
         assert_eq!(
-            owner(available_reading(&mut watches, &pane_id)),
+            workspace_machine(available_reading(&mut watches, &pane_id)),
             laptop.id.as_str()
         );
         let mut frame = available_reading(&mut watches, &files_id);
@@ -4719,18 +4760,31 @@ fn server_routed_task_workspace() {
         fs::write(&offline, "").unwrap();
         loopflow_execution::store::ownership::move_claim(&other.local, &other_task, &mini.id)
             .unwrap();
-        let mut frame = watches.reading(&files_id).unwrap().unwrap();
-        while frame["body"]["machine_id"] == laptop.id.as_str() {
-            frame = watches.reading(&files_id).unwrap().unwrap();
+        for id in [&pane_id, &files_id] {
+            // Drain readings from before the move until each stream has tried mini.
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+            loop {
+                let frame = watches
+                    .reading(id)
+                    .unwrap()
+                    .expect("subscription stays open");
+                if let Some(reason) = frame["unavailable"].as_str() {
+                    assert!(
+                        reason.contains("mini") && frame["body"].is_null(),
+                        "{frame}"
+                    );
+                    break;
+                }
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "missing peer outage: {frame}"
+                );
+            }
         }
-        assert!(frame["body"].is_null(), "{frame}");
-        assert!(
-            frame["unavailable"].as_str().unwrap().contains("mini"),
-            "{frame}"
-        );
+        other.to_remote();
         fs::remove_file(&offline).unwrap();
         assert_eq!(
-            owner(available_reading(&mut watches, &pane_id)),
+            workspace_machine(available_reading(&mut watches, &pane_id)),
             mini.id.as_str()
         );
         let frame = available_reading(&mut watches, &files_id);

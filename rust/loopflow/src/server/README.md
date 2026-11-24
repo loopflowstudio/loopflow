@@ -207,20 +207,24 @@ connection and close it on exit.
 A routed subscription (`task.get`, `task.status`, `task.files.watch`) belongs
 to the Task, not the Machine. The server watches `task_ownership` beside the
 peer stream; when the owner changes it drops the stream and subscribes on the
-new owner (or reads locally) under the same `id`. The next reading's
-`reference.workspace.machine_id` names the new Machine, and `task.files.watch`
+new owner (or reads locally) under the same `id`. A source that has already
+recorded the move can publish a null workspace while the claim reaches the
+subscriber’s Machine. The destination reading's `reference.workspace.machine_id`
+names the new Machine, and `task.files.watch`
 sends a fresh file revision. Its body carries `task_id`, `machine_id`,
 `checkout` and an opaque `revision`. Refresh the tree when that revision
 changes. File events can coalesce while a client is busy. A checkpoint
 returns the current revision. If the peer connection fails, a reading carries
 the reason in `unavailable` and a null body. The same subscription tries the
 current owner again after five seconds or when the planning revision changes.
+A peer refusal such as `not_found` with reason `not_started` ends the
+subscription with that error.
 A draft carries its base revision, and
 `task.save`'s revision check is the only write guard after a move.
 
-On a Machine that does not own a Task, `task.get`'s `reference.workspace` is
-null and `runtime.owner` names the owner: a leftover local checkout is history,
-never the workspace. The owner's routed `task.get` carries the real one.
+When a peer owns a Task, the local plan row has a null `reference.workspace`
+and `runtime.owner` names the peer. Opening the Task with `task.get` returns
+the checkout from the owning Machine.
 
 Two errors name what went wrong:
 

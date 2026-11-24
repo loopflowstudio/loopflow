@@ -2796,13 +2796,19 @@ pub async fn read_task_status(
     registered_task_status(store, task).await
 }
 
-pub async fn registered_task_status(store: &SharedStore, task: Task) -> OpsResult<TaskStatus> {
+pub async fn registered_task_status(store: &SharedStore, mut task: Task) -> OpsResult<TaskStatus> {
     let tracker_state = store
         .sqlite
         .task_tracker_state(&task.id)
         .map_err(task_error)?;
     let (overview, graph_processes) =
         crate::store::task_work::task_overview(&store.sqlite, &task.id).map_err(task_error)?;
+    let ownership =
+        crate::store::ownership::task_ownership(&store.sqlite, &task.id).map_err(task_error)?;
+    let local = store.local_machine().await.map_err(task_error)?.id;
+    if ownership.owner_elsewhere(&local).is_some() {
+        task.worktree = None;
+    }
     let mut result = TaskStatus {
         sync: Some(store.task_tracker_sync(&task.id).map_err(task_error)?),
         project: match &task.project_id {
@@ -2812,10 +2818,8 @@ pub async fn registered_task_status(store: &SharedStore, task: Task) -> OpsResul
         tracker_state,
         planning_error: None,
         planning_stale: false,
-        execution: Some(read_task_snapshot(store, task.clone()).await?),
-        ownership: Some(
-            crate::store::ownership::task_ownership(&store.sqlite, &task.id).map_err(task_error)?,
-        ),
+        execution: Some(snapshot::snapshot_here(store, task.clone(), local).await?),
+        ownership: Some(ownership),
         overview: Some(overview),
         graph_processes,
         comments: Some(store.task_comments(&task.id).map_err(task_error)?),

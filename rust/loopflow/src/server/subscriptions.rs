@@ -14,7 +14,7 @@ use super::outbox::{Materializing, Outbox, Retained};
 use super::service::{deliver, lock, reading_checkpoint, unavailable};
 use super::wire::{ServerMessage, SubscriptionEvent, MAX_BULK};
 use crate::lf::commands::read::Read;
-use loopflow_execution::engine::Error;
+use loopflow_execution::engine::{Error, ErrorCode};
 use loopflow_execution::machine::{client, wire::Sender};
 use loopflow_execution::read_stream::Subscription;
 use loopflow_model::durable::Machine;
@@ -528,7 +528,9 @@ impl Producer {
                     }
                     result = &mut active => {
                         let failure = match result {
-                            Err(failure) if route.is_some() => failure,
+                            Err(failure) if route.is_some()
+                                && Error::refused(&failure, ErrorCode::Unavailable).code
+                                    == ErrorCode::Unavailable => failure,
                             other => return other,
                         };
                         self.peer_unavailable(failure, generation).await?;

@@ -168,7 +168,30 @@ final class SessionsWorkspace {
     var title: String
     var location: WorkspaceIdentity?
     /// The Machine this Mac's plan says runs the Task, known before any checkout is read.
-    var owner: String?
+    private(set) var owner: String?
+    /// The Task has not started: nothing runs anywhere for warm opening to find.
+    var awaitsStart = false
+
+    /// The plan names `next` as the Task's Machine. A move away from the
+    /// Machine it named before retires what that Machine's checkout held: the
+    /// Session pane's location and viewer, and the Browser's location, which
+    /// the next preparation and Files reading supply from the new owner. The
+    /// caller retires the old viewer through its Sessions store. Shell tabs
+    /// keep the Machine that started them. Returns whether it moved.
+    @discardableResult
+    func follow(owner next: String?) -> Bool {
+        let next = next.map { StructuredIdentity.prefixed($0, "home_") }
+        defer { owner = next }
+        guard let previous = owner, let next, previous != next else { return false }
+        if let location, location.machineId != next { self.location = nil }
+        if case .session(let id?, let place?)? = multiplexer.sessionPane?.content, place.machineId != next {
+            multiplexer.updateSessionLocation(id, location: nil)
+        }
+        if case .browser(_, _, _, let place?)? = multiplexer.browserPane?.content, place.machineId != next {
+            multiplexer.clearBrowserLocation()
+        }
+        return true
+    }
     var presentation = WorkNavigation.WorkspacePresentation()
     var localMachineId: String?
 
@@ -613,7 +636,11 @@ final class SessionsWorkspaceRegistry {
             if let existing {
                 guard existing.state == .pending else { continue }
             } else {
-                guard workspace.location != nil else { continue }
+                // A started Task another Machine runs opens there through the
+                // server once shown; prefetching stays with checkouts read here.
+                let shown = key == selectedWork || visibleWork.contains(key)
+                guard workspace.location != nil || (shown && workspace.owner != nil && !workspace.awaitsStart)
+                else { continue }
                 // Opening creates a missing conversation, so a tile of a Task that
                 // is not working waits for a click; a visited Task opens.
                 guard id != nil || workspace.opensConversationAutomatically || key == selectedWork
@@ -698,9 +725,18 @@ final class SessionsWorkspaceRegistry {
         loadWarmIntent(repository: repository)
         let path = WaveOrigin.resolve(repoPath)
         let root = WorkWorkspaceKey(repository: repository, kind: .repository, id: repository)
-        return workspace(for: root, title: URL(fileURLWithPath: path).lastPathComponent,
+        let store = workspace(for: root, title: URL(fileURLWithPath: path).lastPathComponent,
             location: localMachineId.map { WorkspaceIdentity(machineId: $0, worktree: path) })
             .sessionStore(repoPath: path, query: query)
+        store.onPrepared = { [weak self] record in self?.locate(record) }
+        return store
+    }
+
+    /// Every pane showing `record`'s Session follows it to where it runs now.
+    func locate(_ record: SessionRecord) {
+        for workspace in workspaces.values {
+            workspace.multiplexer.updateSessionLocation(record.id, location: record.workspace?.identity)
+        }
     }
 
     func refreshMachine(query: RegistryQuery) async {
@@ -1051,6 +1087,9 @@ final class SessionsStore {
     let work: WorkReference?
     /// This Mac, once the workspace registry has read it.
     var localMachineId: String?
+    /// A preparation answered where its Session runs now; a moved Session keeps
+    /// its ID, so every pane showing it follows the record.
+    var onPrepared: ((SessionRecord) -> Void)?
 
     /// A terminal starts in the Session's checkout when it is on this Mac; a
     /// viewer of another Machine's Session starts in the repository here.
@@ -1155,6 +1194,7 @@ final class SessionsStore {
             guard let latest = _index(id), sessions[latest].launchId == generation else { return }
             if case .opening = sessions[latest].state {
                 sessions[latest].adoptPreparation(surface)
+                onPrepared?(surface)
                 startTerminal(id)
             }
         } catch {
@@ -1164,6 +1204,7 @@ final class SessionsStore {
     }
 
     func adoptPreparation(_ record: SessionRecord) {
+        onPrepared?(record)
         guard let index = _index(record.id) else { return }
         if sessions[index].state != .pending, attachment(record.id) == .failed { release(record.id) }
         guard localTerminal(for: record) == nil else { return }
@@ -1245,6 +1286,7 @@ final class SessionsStore {
         guard let current = _index(id) else { throw RegistryQueryError("Session is unavailable.") }
         if let terminal = localTerminal(for: previous.record) { surfaces.release(terminal) }
         sessions[current].record = prepared
+        onPrepared?(prepared)
         sessions[current].agentOverride = agent
         sessions[current].launchId = UUID()
         sessions[current].state = .prepared
@@ -1262,6 +1304,7 @@ final class SessionsStore {
         guard let current = _index(id) else { throw RegistryQueryError("Session is unavailable.") }
         if let terminal = localTerminal(for: previous.record) { surfaces.release(terminal) }
         sessions[current].record = restarted
+        onPrepared?(restarted)
         CreationRecovery.shared.awaitingPresentation(requestID, of: .session(restarted.id))
         sessions[current].launchId = UUID()
         sessions[current].state = .prepared
@@ -1478,7 +1521,7 @@ struct SessionsContentView: View {
     }
     private var taskIdentity: WorkspaceIdentity? {
         if let task = fileTask {
-            return navigation.preparedTaskWorktrees[task.task.id] ?? task.task.reference.workspace?.identity
+            return model.taskWorkspaceIdentity(task.task)
         }
         return selectedWorkspace?.taskId == nil ? nil : selectedWorkspace?.identity
     }
@@ -1663,7 +1706,7 @@ struct SessionsContentView: View {
 
     private func workspacePanel(_ key: WorkWorkspaceKey) -> some View {
         let task = key.kind == .task ? model.task(id: key.id) : nil
-        let location = task.flatMap { navigation.preparedTaskWorktrees[$0.task.id] ?? $0.task.reference.workspace?.identity }
+        let location = task.flatMap { model.taskWorkspaceIdentity($0.task) }
         let entry = workspaces.workspace(for: key, title: title(for: key),
             location: key.kind == .task ? location : rootIdentity)
         let active = currentKey == key
@@ -1818,6 +1861,19 @@ struct SessionsContentView: View {
         let key = key(for: .task(id: taskId))
         let entry = workspaces.workspace(for: key, title: found.task.task.name, location: found.task.reference.workspace?.identity)
         let issue = found.task.task.identifier
+        if let owner = found.task.runtime?.owner?.machine.id.map({ StructuredIdentity.prefixed($0, "home_") }),
+           owner != StructuredIdentity.prefixed(machineId, "home_") {
+            // The server starts the shell where the Task runs, and that
+            // Machine's own `lf` opens the conversation; nothing checks out here.
+            entry.presentation.content = .terminals
+            entry.visit()
+            if let pane = entry.multiplexer.newShell(command: TaskConversationLaunch(task: issue).arguments(lf: "lf"),
+                    location: WorkspaceIdentity(machineId: owner, worktree: "")),
+               let tab = pane.content.selectedShell {
+                Perf.retarget(.newConversation, from: taskId, to: tab.id, owner: origin.performanceOwner)
+            }
+            return
+        }
         let checkout: WorkspaceIdentity
         if let workspace = found.task.reference.workspace, workspace.localExists == true, let identity = workspace.identity {
             checkout = identity

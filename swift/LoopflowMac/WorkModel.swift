@@ -278,8 +278,8 @@ final class WorkModel {
                 workspace.conversationError = nil
             }
             workspace.opensConversationAutomatically = task.opensConversationAutomatically
+            follow(task, in: workspace, store: store)
             workspace.location = taskWorkspaceIdentity(task)
-            workspace.owner = task.runtime?.owner?.machine.id
             registry.updateCompletion(key, completed: task.isCompleted)
         }
         for key in warm {
@@ -315,7 +315,18 @@ final class WorkModel {
               roadmap.failure == nil, sessions.failure == nil else { return false }
         guard workspace.key.kind == .task else { return workspaceRegistry?.localMachineId != nil && repoPath != nil }
         guard let task = task(id: workspace.key.id)?.task else { return false }
-        return task.opensConversationAutomatically && taskWorkspaceIdentity(task) != nil
+        return task.opensConversationAutomatically
+            && (taskWorkspaceIdentity(task) != nil || (!task.awaitsStart && task.runtime?.owner != nil))
+    }
+
+    /// The Task's workspace follows its owner. A move clears the checkout this
+    /// Mac prepared and retires the old Machine's viewer, so the next opening
+    /// prepares the conversation where the Task runs now.
+    private func follow(_ task: RoadmapTask, in workspace: SessionsWorkspace, store: SessionsStore) {
+        workspace.awaitsStart = task.awaitsStart
+        guard workspace.follow(owner: task.runtime?.owner?.machine.id) else { return }
+        navigation.preparedTaskWorktrees[task.id] = nil
+        if let id = workspace.multiplexer.sessionPane?.sessionId { store.release(id) }
     }
 
     /// A repository whose plan was read and holds nothing, with no conversation
@@ -328,8 +339,14 @@ final class WorkModel {
             && !workspace.multiplexer.layout.allPanes.contains { $0.sessionId != nil }
     }
 
-    private func taskWorkspaceIdentity(_ task: RoadmapTask) -> WorkspaceIdentity? {
-        navigation.preparedTaskWorktrees[task.id] ?? task.reference.workspace?.identity
+    /// Where the Task's checkout is: one this Mac prepared while the Task runs
+    /// here, else the plan's. A checkout on a Machine the Task has left is not it.
+    func taskWorkspaceIdentity(_ task: RoadmapTask) -> WorkspaceIdentity? {
+        let owner = task.runtime?.owner?.machine.id.map { StructuredIdentity.prefixed($0, "home_") }
+        if let prepared = navigation.preparedTaskWorktrees[task.id], owner == nil || prepared.machineId == owner {
+            return prepared
+        }
+        return task.reference.workspace?.identity
     }
 
     /// The repository and every Wave open beside the Task bound; fresh working
@@ -803,8 +820,8 @@ final class WorkModel {
             switch key.kind {
             case .task:
                 if let task = task(id: key.id)?.task {
+                    follow(task, in: workspace, store: store)
                     if workspace.location == nil { workspace.location = taskWorkspaceIdentity(task) }
-                    workspace.owner = task.runtime?.owner?.machine.id
                 }
             case .wave, .repository: break
             }

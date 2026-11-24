@@ -485,7 +485,7 @@ struct SessionPaneView: View {
             }
             if case .shell = pane.content { shellTabs }
             if case .browser = pane.content { browserTabs }
-            if workspace.key.kind != .task || pane.content.location != workspace.location {
+            if showsContext {
                 Text(programHeading.context)
                     .font(Typography.mono).foregroundStyle(theme.palette.textSecondary)
                     .lineLimit(1).truncationMode(.middle)
@@ -986,6 +986,15 @@ struct SessionPaneView: View {
         case .shell: "Shell"
         case .browser: pane.content.selectedBrowserTab?.title ?? "Browser"
         }
+    }
+
+    /// A pane placed apart from its Task names where it is. A Task's Browser
+    /// before this Mac knows the checkout says nothing: Files names its own
+    /// Machine and checkout, and a recorded place may be one the Task left.
+    private var showsContext: Bool {
+        guard workspace.key.kind == .task else { return true }
+        if case .browser = pane.content, workspace.location == nil { return false }
+        return pane.content.location != workspace.location
     }
 
     private var programHeading: PaneProgramHeading {

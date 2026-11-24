@@ -32,7 +32,7 @@ struct RemoteTaskWorkspaceTests {
             // A shell opens from the plan's owner before any conversation says where the Task runs.
             let workspace = SessionsWorkspace(key: WorkWorkspaceKey(repository: world.repo.path, kind: .task, id: task),
                 title: "Remote work", location: nil, localMachineId: world.laptopID)
-            workspace.owner = world.miniID
+            workspace.follow(owner: world.miniID)
             _ = workspace.sessionStore(repoPath: world.repo.path, query: query)
             let shell = try #require(try workspace.newShell(command: [], focus: false)?.content.selectedShell)
             #expect(shell.location?.machineId == StructuredIdentity.prefixed(world.miniID, "home_"))
@@ -78,6 +78,10 @@ struct RemoteTaskWorkspaceTests {
             let session = try await world.mini.run(["session", "resume", "--prepare", "--json", "-a", "claude"], cwd: checkout)
             let id = try JSONDecoder().decode(SessionRecord.self, from: Data(session.utf8)).id
             let record = try await query.prepareSession(id: id, work: WorkReference(kind: .task, id: task))
+            // Every command the record names runs on the laptop, never mini's `lf resume`.
+            let printed = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
+            #expect(!printed.contains("lf resume"), "\(printed)")
+            #expect(record.openArgv.dropFirst().first == "open", "\(record.openArgv)")
             let viewer = try world.laptop.startTerminal(record.openArgv)
             try await viewer.waitFor("provider on mini in \(checkout.path)")
             viewer.send("hello\r")
@@ -134,6 +138,15 @@ struct RemoteTaskWorkspaceTests {
             }
             #expect(files.documents.values.filter(\.dirty).count == 2)
 
+            // Desktop holds the Task open on the laptop, Files placed in its checkout.
+            let registry = SessionsWorkspaceRegistry(localMachineId: world.laptopID)
+            let store = registry.sessionStore(repository: world.repo.path, repoPath: world.repo.path, query: query)
+            let onLaptop = WorkspaceIdentity(machineId: world.laptopID, worktree: checkout)
+            let workspace = registry.workspace(for: WorkWorkspaceKey(repository: world.repo.path, kind: .task, id: task),
+                title: "Moving work", location: onLaptop)
+            #expect(!workspace.follow(owner: world.laptopID))
+            workspace.multiplexer.showBrowser(.files, location: onLaptop, focus: false)
+
             // A shell started on the laptop before the move keeps running there.
             let marker = world.root.appendingPathComponent("old-shell.pid")
             world.laptopShells.append((task, "old"))
@@ -151,6 +164,24 @@ struct RemoteTaskWorkspaceTests {
             files.relocate(machine: world.miniID, label: "mini", cwd: moved.path)
             #expect(files.machineName == "mini")
             #expect(kill(oldShell, 0) == 0, "moving the Task leaves the laptop's shell running")
+
+            // The Session pane showed the conversation on the laptop; it keeps its ID on mini.
+            let resumed = try await world.mini.run(["session", "resume", "--prepare", "--json", "-a", "claude"], cwd: moved)
+            let session = try JSONDecoder().decode(SessionRecord.self, from: Data(resumed.utf8)).id
+            workspace.multiplexer.reveal(sessionId: session, location: onLaptop)
+            // Desktop's plan names mini: the panes let go of the laptop checkout.
+            #expect(workspace.follow(owner: world.miniID))
+            #expect(workspace.location == nil)
+            #expect(workspace.multiplexer.sessionPane?.content.location == nil)
+            #expect(workspace.multiplexer.browserPane?.content.location == nil)
+            // Preparing it through the laptop's server places the same pane on mini.
+            let record = try await query.prepareSession(id: session, work: WorkReference(kind: .task, id: task))
+            store.reconcile([record])
+            store.adoptPreparation(record)
+            let place = try #require(workspace.multiplexer.sessionPane?.content.location)
+            #expect(place.machineId == StructuredIdentity.prefixed(world.miniID, "home_"))
+            #expect(place.worktree == moved.path)
+            #expect(record.action.map { !$0.help.contains("lf resume") } != false)
 
             // Files re-reads its documents on mini. A draft whose file there is at
             // another revision stays whole beside it; it is never merged into it.

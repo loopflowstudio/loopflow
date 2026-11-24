@@ -255,6 +255,16 @@ public final class MultiplexerStore {
         return layout.pane(for: pane.id)
     }
 
+    /// The Task left the Machine the browser was placed on; its tabs stay and
+    /// its next reading names the new one. Renews the occurrence, as any new
+    /// owner location does.
+    public func clearBrowserLocation() {
+        guard let pane = browserPane,
+              case .browser(let taskId, let tabs, let selected, _?) = pane.content else { return }
+        layout = layout.replacingBrowser(of: pane.id,
+            with: .browser(taskId: taskId, tabs: tabs, selected: selected, location: nil), retainingOccurrence: false)
+    }
+
     /// Close a browser tab, keeping it for Undo; the last one leaving hides the browser pane.
     /// Returns the close this one replaced, whose retained views the caller frees.
     @discardableResult

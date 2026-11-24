@@ -53,6 +53,9 @@ Jack Heart: “we need some way to capture session history / usage data for anal
 
 ## 3. Run on available harnesses and refresh forwarded logins
 
+Jack Heart: “my config.yaml should more or less be copied over, crtainly all the skill routing”
+
+- During rental provisioning, install the caller’s portable personal configuration on disk through the existing profile projection and retention writer. Include all skill routes, agents, default agent and `yolo`. Keep host-local connections, on-demands and forwarding rules on the source Machine. Verify the first direct SSH shell can read those routes before a forwarded launch. Then update one route and verify background Graph steps and primary Sessions read the new value without a retention conflict.
 - **Retain the first forwarded profile on a dev rental.** On modal-2 through modal-6, the install wrote `stream: dev` before profile delivery. Retention recorded a conflict with `applied: null`; `lf config show` reported `agent: Not selected`. In `config/remote.rs` and the setting catalog, compare the incoming portable settings with the corresponding local keys. Keep the bootstrap stream and independent edits. Exercise first delivery with just the stream present, with matching portable values, and with a conflicting personal edit.
 - **Machine-aware harness resolution and quiescent recovery (`ops/recovery.rs`, `server/recovery.rs`, session/graph launch):**
   - Resolve the named skill on the execution Machine before stamping a primary Session’s provider or starting a Graph worker, using existing launcher availability and native login checks.

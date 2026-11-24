@@ -345,7 +345,8 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut statement = conn.prepare(
             "SELECT r.origin_machine_id, r.key,
-                    json_extract(r.row,'$.title'), json_extract(r.row,'$.completed_at')
+                    json_extract(r.row,'$.title'), json_extract(r.row,'$.completed_at'),
+                    json_extract(r.row,'$.start_failure')
              FROM machine_records r
              WHERE r.kind='session'
                AND (?1 IS NULL OR json_extract(r.row,'$.task_id')=?1)
@@ -366,6 +367,7 @@ impl SqliteStore {
                     id: row.get(1)?,
                     title: row.get::<_, Option<String>>(2)?.unwrap_or_default(),
                     completed_at: row.get(3)?,
+                    start_failure: row.get(4)?,
                 })
             },
         )?;
@@ -427,6 +429,52 @@ impl SqliteStore {
             |row| row.get::<_, String>(0),
         )?;
         rows.map(|row| Ok(serde_json::from_str(&row?)?)).collect()
+    }
+
+    /// The context of each ended native turn one copied input started, in
+    /// ending order, as `input_turn_context` reads a local one.
+    pub fn copied_input_turn_context(
+        &self,
+        origin: &MachineId,
+        session: &str,
+        captured: i64,
+    ) -> StoreResult<Vec<Option<crate::session::TurnContext>>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut statement = conn.prepare(&format!(
+            "SELECT row FROM ({COLLECTED_TURNS}) WHERE origin_machine_id=?1 AND session_id=?2
+                AND json_extract(row,'$.captured_event')=?3
+                AND json_extract(row,'$.ended_at') IS NOT NULL
+             ORDER BY json_extract(row,'$.ended_at'), json_extract(row,'$.id')"
+        ))?;
+        let rows = statement.query_map(params![origin.as_str(), session, captured], |row| {
+            row.get::<_, String>(0)
+        })?;
+        rows.map(|row| Ok(serde_json::from_str::<crate::session::Turn>(&row?)?.context))
+            .collect()
+    }
+
+    /// Each silence the origin's recorder observed in one copied input, as
+    /// `input_silences` reads a local one.
+    pub fn copied_input_silences(
+        &self,
+        origin: &MachineId,
+        session: &str,
+        captured: i64,
+    ) -> StoreResult<Vec<(i64, i64)>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut statement = conn.prepare(
+            "SELECT json_extract(json_extract(row,'$.payload'),'$.evidence.since'),
+                    json_extract(json_extract(row,'$.payload'),'$.evidence.observed_at')
+             FROM machine_records
+             WHERE origin_machine_id=?1 AND kind='history' AND json_extract(row,'$.session_id')=?2
+               AND json_extract(row,'$.captured_event')=?3 AND json_extract(row,'$.kind')='silence'
+               AND json_extract(json_extract(row,'$.payload'),'$.evidence.observed_at') IS NOT NULL
+             ORDER BY json_extract(row,'$.seq')",
+        )?;
+        let rows = statement.query_map(params![origin.as_str(), session, captured], |row| {
+            Ok((row.get(0)?, row.get(1)?))
+        })?;
+        Ok(rows.collect::<Result<_, _>>()?)
     }
 
     /// Machines holding a copy of the Session, and their last completed collection.
@@ -517,6 +565,7 @@ impl SqliteStore {
                 id: session.to_string(),
                 title: text("title").unwrap_or_default(),
                 completed_at: row["completed_at"].as_i64(),
+                start_failure: text("start_failure"),
             },
             task_id: text("task_id"),
             cwd: text("cwd"),

@@ -85,6 +85,8 @@ pub struct CopiedSession {
     pub id: String,
     pub title: String,
     pub completed_at: Option<i64>,
+    /// Why the origin's last start of it failed, if it did.
+    pub start_failure: Option<String>,
 }
 
 impl CopiedSession {

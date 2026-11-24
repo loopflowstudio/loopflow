@@ -322,7 +322,7 @@ impl SqliteStore {
             "SELECT json_extract(e.payload,'$.evidence.since'),json_extract(e.payload,'$.evidence.observed_at')
              FROM session_events c
              JOIN history.session_history e ON c.seq=e.captured_event AND c.kind='captured' AND c.receipt_key=?1
-             WHERE e.kind='silence'
+             WHERE e.kind='silence' AND json_extract(e.payload,'$.evidence.observed_at') IS NOT NULL
              ORDER BY CAST(substr(e.receipt_key,length(?1)+10) AS INTEGER),e.seq",
         )?;
         let rows = query.query_map([input], |row| Ok((row.get(0)?, row.get(1)?)))?;

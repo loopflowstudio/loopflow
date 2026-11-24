@@ -641,6 +641,16 @@ fn resolve_capture(key: &str) -> StoreResult<(PathBuf, crate::session::LfSession
 
 // Session captures retain their published on-disk layout; the directory name
 // does not make Run an owner. SQLite selects captures by artifact key.
+/// Where an input's capture lives here: a collected input's is the copy of
+/// its origin's.
+pub fn history_record_dir(lf_home: &Path, history: &SessionHistory) -> Option<PathBuf> {
+    let home = match &history.origin {
+        Some(origin) => crate::machine_records::copies_home(lf_home, &origin.machine_id),
+        None => lf_home.to_path_buf(),
+    };
+    record_dir(&home, history.artifact_key.as_deref()?)
+}
+
 pub fn record_dir(lf_home: &Path, artifact_key: &str) -> Option<PathBuf> {
     parse_artifact_key(artifact_key).ok()?;
     let prefix = artifact_key

@@ -829,6 +829,16 @@ async fn list(
                 session.title,
                 session.origin_name()
             );
+            if let Some(failure) = session
+                .start_failure
+                .as_deref()
+                .filter(|_| session.completed_at.is_none())
+            {
+                let reason = failure
+                    .strip_prefix(loopflow_execution::ops::recovery::WAITING_FOR_HARNESS)
+                    .unwrap_or(failure);
+                println!("  could not start: {reason}");
+            }
         }
     }
     Ok(())

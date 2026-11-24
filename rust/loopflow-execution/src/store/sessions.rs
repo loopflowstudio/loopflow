@@ -342,11 +342,28 @@ fn conversation_inputs(
         .collect::<StoreResult<Vec<_>>>()?;
     if histories.iter().any(|history| history.origin.is_some()) {
         let labels = super::machines::origin_labels(store)?;
-        for origin in histories
-            .iter_mut()
-            .filter_map(|history| history.origin.as_mut())
-        {
+        for history in &mut histories {
+            let Some(origin) = history.origin.as_mut() else {
+                continue;
+            };
             origin.label = labels.get(&origin.machine_id).cloned();
+            // The origin's `repo` is a path there; Work kept here names this
+            // Machine's checkout so reports group it with local runs. An
+            // input's turns can carry Work the Session joined later.
+            let work = std::iter::once((history.task_id.as_ref(), history.wave_id.as_ref()))
+                .chain(
+                    history
+                        .providers
+                        .iter()
+                        .map(|turn| (turn.task_id.as_ref(), turn.wave_id.as_ref())),
+                )
+                .filter(|(task, wave)| task.is_some() || wave.is_some());
+            for (task, wave) in work {
+                if let Some(repo) = store.work_repository_path(task, wave)? {
+                    history.repo = Some(repo);
+                    break;
+                }
+            }
         }
     }
     Ok((histories, pending.truncated))

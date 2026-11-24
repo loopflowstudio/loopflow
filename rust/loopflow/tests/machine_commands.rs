@@ -5205,7 +5205,8 @@ fn a_lost_rentals_transcript_and_usage_survive_on_its_collecting_machine() {
         .lock()
         .unwrap()
         .execute(
-            "UPDATE agent_sessions SET provider='claude',provider_thread=?2 WHERE id=?1",
+            "UPDATE agent_sessions SET provider='claude',provider_thread=?2,
+                start_failure='Waiting for a harness: codex has no usable login' WHERE id=?1",
             [id, thread],
         )
         .unwrap();
@@ -5221,7 +5222,9 @@ fn a_lost_rentals_transcript_and_usage_survive_on_its_collecting_machine() {
     )
     .unwrap();
     let repo = loopflow_test_support::TestRepo::new();
-    let task_id = SharedPlan::create_task(&local, &repo.path().canonicalize().unwrap());
+    let local_repo = repo.path().canonicalize().unwrap();
+    let task_id = SharedPlan::create_task(&local, &local_repo);
+    let local_repo = local_repo.to_str().unwrap().to_owned();
     let task = local.task(&task_id).unwrap().unwrap();
     let project = local
         .project(task.project_id.as_ref().unwrap())
@@ -5273,7 +5276,9 @@ fn a_lost_rentals_transcript_and_usage_survive_on_its_collecting_machine() {
             &thread.into(),
             turn,
             at + 1,
-            &json!({"status":"completed"}),
+            &json!({"status":"completed","context":{"first_request_tokens":input_tokens,
+                "peak_request_tokens":input_tokens,"tool_results":0,"tool_output_tokens":0,
+                "compactions":0,"compaction_tokens":null}}),
         );
         assert!(pod.record_turn_usage(
             id,
@@ -5293,6 +5298,16 @@ fn a_lost_rentals_transcript_and_usage_survive_on_its_collecting_machine() {
             wave_id: None,
             payload: json!({"source":"silence","detail":"waiting for the count"}),
         },
+    )
+    .unwrap();
+
+    // The rental assembled the input's context; collection copies its capture.
+    let capture =
+        loopflow_execution::session_record::record_dir(&remote.join("store"), &input).unwrap();
+    fs::create_dir_all(&capture).unwrap();
+    fs::write(
+        capture.join("context.json"),
+        json!({"context":{"system":null,"task":{"assets":[]},"decisions":[]}}).to_string(),
     )
     .unwrap();
 
@@ -5429,6 +5444,10 @@ fn a_lost_rentals_transcript_and_usage_survive_on_its_collecting_machine() {
         assert_eq!(turn["usage"]["cost_usd"], 0.25);
         assert_eq!(captured_input["artifact_key"], input);
         assert_eq!(captured_input["observed_at"], started - 5);
+        // The Task lives here, so its rows name this Machine's checkout.
+        for row in &rows {
+            assert_eq!(row["repo"], local_repo, "{scope:?} {row}");
+        }
         assert_eq!(
             captured_input["usage"]["input_tokens"], input_usage.0,
             "{scope:?}"
@@ -5455,6 +5474,25 @@ fn a_lost_rentals_transcript_and_usage_survive_on_its_collecting_machine() {
     assert_eq!(
         desktop,
         scoped_usage(&["--days", "0", "--task", &task.identifier])
+    );
+    // The copied capture and turn contexts explain the step with nothing missing.
+    let context = scoped_usage(&["--context", "--task", &task.identifier]);
+    let step = context["steps"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|step| step["input"] == input)
+        .unwrap_or_else(|| panic!("{context}"));
+    assert_eq!(step["gaps"], json!([]), "{step}");
+    assert_eq!(step["first_request_tokens"], 13);
+    assert_eq!(step["peak_request_tokens"], 13);
+    // Why the rental could not start it outlives the rental.
+    let listed = fixture.run(&["session", "list"]);
+    assert_success(&listed);
+    let listed = String::from_utf8_lossy(&listed.stdout);
+    assert!(
+        listed.contains("from mini\n  could not start: codex has no usable login\n"),
+        "{listed}"
     );
     let human = fixture.run(&["session", "usage", "--task", &task.identifier]);
     assert_success(&human);

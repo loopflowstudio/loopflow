@@ -375,7 +375,7 @@ is not an error.
 - `machine/forward.rs` `read`: a `forward.env` name equal to
   `login::CLAUDE_TOKEN_ENV` with no value here (env or Doppler) is left out of
   `Forwarded.env`; every other name stays required (main's rule).
-- `login::sign_in_advice(Claude)` on another Machine: "give this Machine
+- `login::sign_in_advice(Claude)` on another Machine: "launch where CLAUDE_CODE_OAUTH_TOKEN has a value …" (was "give this Machine
   CLAUDE_CODE_OAUTH_TOKEN (`doppler secrets set …`, or run under
   `doppler run`) and name it in `forward.env`" — the target cannot tell which
   half is missing.

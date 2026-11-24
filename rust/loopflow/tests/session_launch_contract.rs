@@ -945,9 +945,9 @@ fn a_signed_out_machine_refuses_the_launch_with_the_command_that_signs_it_in() {
     assert!(!output.status.success(), "{stderr}");
     assert!(
         stderr.contains(
-            "fixture has no Claude login; give this Machine CLAUDE_CODE_OAUTH_TOKEN \
+            "fixture has no Claude login; launch where CLAUDE_CODE_OAUTH_TOKEN has a value \
              (`doppler secrets set CLAUDE_CODE_OAUTH_TOKEN`, or run under `doppler run`) \
-             and name it in `forward.env` (`lf set --global forward.env`)"
+             and `forward.env` names it (`lf set --global forward.env`)"
         ),
         "{stderr}"
     );

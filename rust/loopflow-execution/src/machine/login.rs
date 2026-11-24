@@ -445,8 +445,8 @@ fn launcher_name() -> Option<String> {
 pub fn sign_in_advice(provider: Provider) -> String {
     match (launcher_name(), provider) {
         (Some(_), Provider::Claude) => format!(
-            "give this Machine {CLAUDE_TOKEN_ENV} (`doppler secrets set {CLAUDE_TOKEN_ENV}`, \
-             or run under `doppler run`) and name it in `forward.env` \
+            "launch where {CLAUDE_TOKEN_ENV} has a value (`doppler secrets set {CLAUDE_TOKEN_ENV}`, \
+             or run under `doppler run`) and `forward.env` names it \
              (`lf set --global forward.env`)"
         ),
         (Some(name), provider) => format!("run `lf machine login {} {name}`", provider.as_str()),

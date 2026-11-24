@@ -12,9 +12,17 @@ Claude here is plain `claude auth login` on lf's terminal: drive it with
 `pty.fork()` and send `\x03`. Claude on another Machine is the forwarded
 token: run the launch under `doppler run --` from this checkout (its project
 holds `CLAUDE_CODE_OAUTH_TOKEN`), with `lf set --global forward.env
-'[CLAUDE_CODE_OAUTH_TOKEN]'` in the private home. Outside `doppler run` the
-value is missing and every launch, Codex too, stops at `forward.env names …`.
+'[CLAUDE_CODE_OAUTH_TOKEN]'` in the private home. From a repository outside
+this checkout, pass the checkout's Doppler scope explicitly: `doppler run
+--project "$(doppler configure get project --plain)" --config …` (read both
+in the checkout first). Outside `doppler run` the token is left out: Codex
+launches run and Claude reads signed out (`… has no value here` in `logins`).
 A real `lf --machine mini -b -a claude : '…'` answers in about 10 s.
+
+`--refused` reads `agent_limit_recoveries`, which only a Graph step writes; a
+bare `lf -b` refusal leaves no row, so `logins` shows `refused: null`.
+mini's non-login shell has no `claude` on `PATH`; lf's own launch preamble
+finds `~/.local/bin/claude`, plain `ssh mini-heart claude` does not.
 
 Here: unset `LF_*`, private `LF_HOME`, and `CLAUDE_CONFIG_DIR`/`CODEX_HOME`
 under it, so both read signed out and the person's logins stay untouched.

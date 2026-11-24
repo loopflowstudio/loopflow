@@ -118,7 +118,7 @@ and with none left stops before an agent starts:
 
 ```
 mini has no Codex login; run `lf machine login codex mini`
-mini has no Claude login; give this Machine CLAUDE_CODE_OAUTH_TOKEN (`doppler secrets set CLAUDE_CODE_OAUTH_TOKEN`, or run under `doppler run`) and name it in `forward.env` (`lf set --global forward.env`)
+mini has no Claude login; launch where CLAUDE_CODE_OAUTH_TOKEN has a value (`doppler secrets set CLAUDE_CODE_OAUTH_TOKEN`, or run under `doppler run`) and `forward.env` names it (`lf set --global forward.env`)
 ```
 
 An unknown answer launches anyway. To sign Codex in again wherever it is

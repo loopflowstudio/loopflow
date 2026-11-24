@@ -2265,7 +2265,6 @@ async fn snapshot_task_detail(
         task.worktree.as_deref().unwrap_or(repo),
         repo,
         wave,
-        None,
     )
     .ok()
     .map(|agent| agent.harness.as_str().to_owned());

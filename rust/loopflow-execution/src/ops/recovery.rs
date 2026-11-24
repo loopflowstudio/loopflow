@@ -61,13 +61,32 @@ pub fn record_start(
     store.record_persons_start(session, at)
 }
 
-/// Why starting `conversation` would fail before any provider runs: its
-/// agent's CLI is not on this Machine's `PATH`. `None` when it can start.
-pub fn launch_failure(conversation: &TaskConversation) -> Option<String> {
-    let provider = conversation.provider.as_deref()?;
-    let installed = loopflow_harness::HarnessKind::parse(provider)
-        .is_some_and(|kind| crate::harness::launcher(kind).installed());
-    (!installed).then(|| format!("{provider} is not installed on this Machine's PATH"))
+/// A prerequisite leaves the provider stopped until a later reading finds it
+/// ready. The prefix distinguishes it from a failed terminal start on disk.
+pub const WAITING_FOR_HARNESS: &str = "Waiting for a harness: ";
+
+pub fn launch_failure(
+    store: &SqliteStore,
+    conversation: &TaskConversation,
+    machine: &mut crate::agent::MachineAgents,
+) -> anyhow::Result<Option<String>> {
+    let reason = match conversation.provider.as_deref() {
+        Some(provider) => match loopflow_harness::HarnessKind::parse(provider) {
+            Some(kind) => machine.failure(kind).map(str::to_owned),
+            None => Some(format!("unknown harness {provider}")),
+        },
+        None => {
+            let Some(session) = store.session(&conversation.session)? else {
+                return Ok(None);
+            };
+            match crate::session::pending_agent(store, &session, machine) {
+                Ok(agent) => machine.failure(agent.harness).map(str::to_owned),
+                Err(error) if error.is::<crate::error::LoadError>() => Some(error.to_string()),
+                Err(error) => return Err(error),
+            }
+        }
+    };
+    Ok(reason.map(|reason| format!("{WAITING_FOR_HARNESS}{reason}")))
 }
 
 /// What decides whether this Machine's server starts a conversation that is

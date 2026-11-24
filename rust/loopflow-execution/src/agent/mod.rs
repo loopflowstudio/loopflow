@@ -3,6 +3,9 @@
 //! This module handles building commands and spawning subprocesses for each
 //! supported coding agent. Output can be captured or streamed.
 
+mod availability;
+pub use availability::MachineAgents;
+
 mod session;
 pub use session::resolve_session_config;
 
@@ -1180,96 +1183,9 @@ fn _not_installed(kind: loopflow_harness::HarnessKind) -> String {
     format!("'{}' is not installed", kind.as_str())
 }
 
-/// Put a headless launch on the first agent of its order whose CLI is
-/// installed, and take the missing ones out of the order. A Graph step passes
-/// over a missing first choice and records the move where a limit move is
-/// recorded; a chat or batch has no order to move through. With none
-/// installed, the error is the first choice's install hint. Call it before the
-/// launch opens its conversation, so a refused launch leaves no agent behind.
-///
-/// # Errors
-///
-/// [`missing_agent_message`] for the first choice when no agent the launch may
-/// use is installed.
-pub fn start_on_installed_agent(
-    launch: &mut AgentConfig,
-    process: &ProcessConfig,
-) -> Result<(), String> {
-    let first = _pass_over_missing_agents(launch, process, |kind| {
-        crate::harness::launcher(kind).installed()
-    })
-    .map_err(missing_agent_message)?;
-    if first != launch.agent {
-        let reason = _not_installed(first.harness);
-        _record_agent_move(&first, "not installed", &reason, &launch.agent);
-    }
-    Ok(())
-}
-
-/// Returns the agent the launch asked for first; `launch.agent` is where it starts.
-fn _pass_over_missing_agents(
-    launch: &mut AgentConfig,
-    process: &ProcessConfig,
-    is_installed: impl Fn(loopflow_harness::HarnessKind) -> bool,
-) -> Result<Agent, loopflow_harness::HarnessKind> {
-    let first = launch.agent.clone();
-    let order = if process.wait_for_capacity {
-        _agent_order(launch)
-    } else {
-        vec![first.clone()]
-    };
-    let start = order
-        .into_iter()
-        .find(|rung| is_installed(rung.harness))
-        .ok_or(first.harness)?;
-    launch.agent = start;
-    // The order stays as written: a list keeps being a list, minus what is missing.
-    launch
-        .fallback_agents
-        .retain(|agent| is_installed(agent.harness));
-    Ok(first)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn only_a_graph_step_passes_over_an_agent_that_is_not_installed() {
-        use loopflow_harness::HarnessKind;
-        let agent = |text: &str| Agent::parse(text).unwrap();
-        let launch = AgentConfig {
-            agent: agent("opencode:opencode/fixture"),
-            fallback_agents: vec![agent("pi:fixture/model"), agent("codex"), agent("claude")],
-            ..Default::default()
-        };
-        let step = ProcessConfig {
-            wait_for_capacity: true,
-            ..Default::default()
-        };
-        let installed =
-            |kind: HarnessKind| matches!(kind, HarnessKind::Codex | HarnessKind::Claude);
-
-        let mut moved = launch.clone();
-        let first = _pass_over_missing_agents(&mut moved, &step, installed).unwrap();
-        assert_eq!(first, launch.agent);
-        assert_eq!(moved.agent, agent("codex"));
-        assert_eq!(_agent_order(&moved), [agent("codex"), agent("claude")]);
-
-        // Nothing installed in the order: the first choice is the one named.
-        let mut pinned = launch.clone();
-        assert_eq!(
-            _pass_over_missing_agents(&mut pinned, &step, |_| false),
-            Err(HarnessKind::OpenCode)
-        );
-
-        // A chat or batch stays on its choice.
-        let mut batch = launch.clone();
-        assert_eq!(
-            _pass_over_missing_agents(&mut batch, &ProcessConfig::default(), installed),
-            Err(HarnessKind::OpenCode)
-        );
-    }
 
     fn default_launch() -> AgentConfig {
         AgentConfig {

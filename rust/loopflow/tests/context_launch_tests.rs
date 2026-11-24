@@ -929,7 +929,11 @@ fn install_claude_fixture(home: &Path, script: &str) {
     let bin = home.join("bin");
     fs::create_dir_all(&bin).unwrap();
     let provider = bin.join("claude");
-    fs::write(&provider, format!("#!/bin/sh\n{script}\n")).unwrap();
+    fs::write(
+        &provider,
+        format!("#!/bin/sh\n[ \"$*\" = \"auth status\" ] && exit 0\n{script}\n"),
+    )
+    .unwrap();
     fs::set_permissions(&provider, fs::Permissions::from_mode(0o755)).unwrap();
 }
 
@@ -1491,7 +1495,7 @@ fn a_task_conversation_whose_agent_is_not_installed_says_why_it_did_not_start() 
     succeed(
         claude_launch(home.path(), "exit 0")
             .current_dir(repo.path())
-            .args(["set", "--global", "default_agent", "claude"]),
+            .args(["set", "--global", "agent", "claude"]),
     );
     let created: serde_json::Value = serde_json::from_str(&succeed(
         claude_launch(home.path(), "exit 0")
@@ -1531,7 +1535,9 @@ fn a_task_conversation_whose_agent_is_not_installed_says_why_it_did_not_start() 
         );
         std::thread::sleep(std::time::Duration::from_millis(200));
     };
-    assert_eq!(failure, "claude is not installed on this Machine's PATH");
+    assert!(failure.contains("'claude' is not installed"), "{failure}");
+    let starts: u32 = rusqlite::Connection::open(&db).unwrap().query_row("SELECT starts_since_turn FROM agent_sessions WHERE id=(SELECT session_id FROM task_primary_sessions WHERE task_id=?1)", [id], |row| row.get(0)).unwrap();
+    assert_eq!(starts, 0);
     assert_eq!(open_task_conversations(&db, id), 0);
     // It never ran, so it reads as that, never as a death.
     let status = succeed(
@@ -1540,9 +1546,7 @@ fn a_task_conversation_whose_agent_is_not_installed_says_why_it_did_not_start() 
             .args(["task", "status", id]),
     );
     assert!(
-        status.contains(
-            "Conversation: could not start: claude is not installed on this Machine's PATH"
-        ),
+        status.contains("Conversation: could not start: 'claude' is not installed"),
         "{status}"
     );
 }

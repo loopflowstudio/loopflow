@@ -141,7 +141,7 @@ pub fn claude_stand_in(script: &str) -> String {
         .split_once('\n')
         .expect("a stand-in script starts with its shebang line");
     format!(
-        "{shebang}\n{}\n{body}",
+        "{shebang}\nimport sys\nif sys.argv[1:] == ['auth', 'status']: sys.exit(0)\n{}\n{body}",
         include_str!("claude_transcript.py")
     )
 }
@@ -301,6 +301,7 @@ pub fn codex_socket_script(script: &str) -> String {
         .replace('\'', r#"'"'"'"#);
     format!(
         r#"#!/bin/sh
+if [ "$*" = "login status" ]; then exit 0; fi
 if [ -z "$LF_TEST_CODEX_STDIO" ]; then
     case "$*" in
         *--listen*) exec python3 '{bridge}' "$0" "$@" ;;
@@ -348,6 +349,7 @@ while read -r line; do :; done
 pub fn answering_claude_script(answer: &str, received: &Path) -> String {
     r#"#!/usr/bin/python3
 import json, sys
+if sys.argv[1:] == ['auth', 'status']: sys.exit(0)
 if '--version' in sys.argv:
     print('fixture')
     sys.exit(0)

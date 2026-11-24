@@ -94,11 +94,12 @@ agent attaches, or after 3 seconds, most recently updated Task first. Sessions
 and carriers share one backoff: the first start after a death is immediate,
 later ones wait 1 minute doubling to 30, and after 5 starts without a finished
 turn or step the Session and the Task run show the command that continues. A
-start that fails records its reason on the Session
-(`agent_sessions.start_failure`, for example `claude is not installed on this
-Machine's PATH`), cleared by the next start that succeeds, and retries on the
-same backoff. A first start that succeeds after failed ones clears their
-count too: nothing started again. A start under way (the agent is attached to
+failed terminal start records its reason in `agent_sessions.start_failure`
+and retries on that backoff. The server checks the recorded harness before
+counting a start. A missing executable or native login leaves the attempt
+count alone. The server rechecks blocked conversations on its periodic pass
+and starts them when their harness is ready. A successful first start clears
+the count of earlier failed attempts. A start under way (the agent is attached to
 its open held terminal and has no pid yet, `SessionSummary.launching`) reads
 `starting`, not `unknown`. A Session's `ended {at, exit_code}` and `start {attempts,
 last_started_at}` carry these facts, and its `outlook {kind, at, reason,

@@ -58,7 +58,9 @@ lf set --global skill.commit-message.default_agent claude:haiku
 ```
 
 Using `default_agent` keeps your `agents` failover list behind it if Haiku is
-unavailable. Run the same commit helper manually with `lf commit --step implement`.
+unavailable. A Graph’s `-a` selects its workers. Its automatic commit uses
+the `commit-message` route on that Machine. Run the same helper manually
+with `lf commit --step implement`.
 
 Both writers get every changed path, its line counts (or a binary marker),
 and a command to read one file’s patch. Patches under 15,000 tokens appear

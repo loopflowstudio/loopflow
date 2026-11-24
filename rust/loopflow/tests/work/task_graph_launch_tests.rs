@@ -899,6 +899,8 @@ import os
 import shutil
 import sys
 
+if sys.argv[1:] == ['auth', 'status']:
+    sys.exit(0)
 if '--version' in sys.argv:
     print('fixture')
     sys.exit(0)
@@ -2363,10 +2365,11 @@ fn a_step_that_cannot_launch_is_not_started_again() {
         })
         .unwrap();
     assert!(
-        recorded.starts_with(&format!(
-            "'opencode' is not installed{}codex",
-            loopflow_execution::ops::task_execution::MOVED_TO
-        )),
+        recorded.starts_with("'opencode' is not installed")
+            && recorded.ends_with(&format!(
+                "{}codex",
+                loopflow_execution::ops::task_execution::MOVED_TO
+            )),
         "{recorded}"
     );
 }

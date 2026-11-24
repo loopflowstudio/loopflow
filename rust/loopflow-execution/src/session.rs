@@ -6,10 +6,20 @@ pub fn conversation(
     cwd: &std::path::Path,
     skill: &str,
     title: String,
+    wave: Option<&str>,
 ) -> anyhow::Result<LfSession> {
     let skill = crate::graph::load_skill(skill, cwd)?;
-    let wave = crate::work::wave::context::resolve_ambient_wave_name();
-    let agent = crate::ops::task::resolve_task_agent(cwd, cwd, wave.as_deref(), Some(&skill))?;
+    let agent = match conversation_agent(
+        cwd,
+        wave,
+        &skill,
+        &mut crate::agent::MachineAgents::default(),
+    ) {
+        Ok(agent) => Some(agent),
+        // A Task can acquire its checkout before a login reaches the Machine.
+        Err(crate::error::LoadError::HarnessUnavailable(_)) => None,
+        Err(error) => return Err(error.into()),
+    };
     Ok(LfSession {
         captured: None,
         id: uuid::Uuid::new_v4().simple().to_string().into(),
@@ -18,8 +28,10 @@ pub fn conversation(
         input_published: false,
         cwd: cwd.to_path_buf(),
         skill: Some(skill.name),
-        provider: Some(agent.harness.as_str().to_owned()),
-        model: agent.model,
+        provider: agent
+            .as_ref()
+            .map(|agent| agent.harness.as_str().to_owned()),
+        model: agent.and_then(|agent| agent.model),
         node: None,
         iterations: None,
         task_id: None,
@@ -35,6 +47,42 @@ pub fn conversation(
         completed_at: None,
         created_at: loopflow_storage::rows::now_unix(),
     })
+}
+
+fn conversation_agent(
+    cwd: &std::path::Path,
+    wave: Option<&str>,
+    skill: &crate::graph::Skill,
+    machine: &mut crate::agent::MachineAgents,
+) -> Result<crate::config::Agent, crate::error::LoadError> {
+    let shared = crate::config::resolved_for_task(cwd, cwd, wave)?;
+    let resolved = crate::config::settings::resolve(&shared.config, Some(skill))?;
+    Ok(machine.resolve(&resolved.config)?.0)
+}
+
+/// Choose the first provider for a conversation prepared without a usable login.
+pub(crate) fn pending_agent(
+    store: &loopflow_storage::sqlite::SqliteStore,
+    session: &LfSession,
+    machine: &mut crate::agent::MachineAgents,
+) -> anyhow::Result<crate::config::Agent> {
+    let name = session
+        .skill
+        .as_deref()
+        .ok_or_else(|| anyhow::anyhow!("Session {} has no skill or provider", session.id))?;
+    let skill = crate::graph::load_skill(name, &session.cwd)?;
+    let wave = session
+        .wave_id
+        .as_ref()
+        .map(|id| store.get_wave(id))
+        .transpose()?
+        .flatten();
+    Ok(conversation_agent(
+        &session.cwd,
+        wave.as_ref().map(|wave| wave.slug()),
+        &skill,
+        machine,
+    )?)
 }
 
 #[cfg(test)]

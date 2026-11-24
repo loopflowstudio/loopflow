@@ -626,6 +626,21 @@ fn session_ending(
             status_line: Some(status_line),
         };
     }
+    if let Some(reason) =
+        failure.and_then(|failure| failure.strip_prefix(crate::ops::recovery::WAITING_FOR_HARNESS))
+    {
+        return SessionEnding {
+            ended,
+            start,
+            outlook: Some(SessionOutlook {
+                kind: SessionOutlookKind::CouldNotStart,
+                at: None,
+                reason: Some(reason.to_owned()),
+                command: None,
+            }),
+            status_line: Some(format!("could not start: {reason}")),
+        };
+    }
     let facts = crate::ops::recovery::DownConversation {
         here: conversation && session.in_task_checkout,
         exit_code: end.and_then(|end| end.exit_code),
@@ -1730,7 +1745,15 @@ async fn finish_thread_creation(
 /// selected moves the Session to it.
 pub async fn append_input(store: &SharedStore, mut next: LfSession) -> Result<LfSession> {
     let replaced = next.captured;
-    if let Some(agent) = handoff_agent(&next) {
+    if next.provider.is_none() && replaced.is_none() {
+        let agent = crate::session::pending_agent(
+            &store.sqlite,
+            &next,
+            &mut crate::agent::MachineAgents::default(),
+        )?;
+        next.provider = Some(agent.harness.as_str().to_owned());
+        next.model = agent.model;
+    } else if let Some(agent) = handoff_agent(&next) {
         switch_agent(&mut next, &agent);
     }
     next.artifact_key = Some(crate::session_record::new_artifact_key());

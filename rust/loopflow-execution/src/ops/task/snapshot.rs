@@ -138,7 +138,6 @@ pub(super) async fn read_task_snapshot(store: &SharedStore, task: Task) -> OpsRe
         task.worktree.as_deref().unwrap_or(&repo),
         &repo,
         wave.as_ref().map(|w| w.slug()),
-        None,
     );
     let provider = agent.ok().map(|agent| agent.harness.as_str().to_owned());
     // A Task's worktree is its checkout on this Machine.

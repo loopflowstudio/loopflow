@@ -51,6 +51,11 @@ with a plain log of the work so far. See
 | Configured harness missing or unsigned-in on this Machine | Falls back to the first usable configured fallback, then a usable installed native harness; explicit `-a` and established threads keep their harness |
 | No usable harness or login on this Machine | Reports which executables or logins are missing and stops recovery until inputs change (no backoff retry loop) |
 
+Before selecting a new conversation or worker, Loopflow checks the executable
+for each candidate. For Claude and Codex it also checks the native client's
+login status or the presence of a forwarded login token. Other clients handle
+their model-specific authentication when they start.
+
 Each retry after a wait restarts at the first entry of `agents` using whatever
 native login is active on the Machine, so renewing usage or signing in picks up
 automatically. `lf task status <ID>` shows the wait and next retry time.

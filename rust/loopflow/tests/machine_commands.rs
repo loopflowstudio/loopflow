@@ -1,5 +1,8 @@
 //! Public commands with isolated stores and a simulated SSH endpoint.
 use crate::support;
+#[allow(dead_code)] // The transport suite also drives the daemon's failure controls.
+#[path = "support/tailscale.rs"]
+mod tailscale;
 use std::fs;
 use std::io::Write;
 use std::os::fd::FromRawFd;
@@ -23,7 +26,7 @@ impl Machines {
     }
 
     fn uninitialized() -> Self {
-        let root = tempfile::tempdir().unwrap();
+        let root = tempfile::tempdir_in("/tmp").unwrap();
         let home = root.path().join("local");
         let remote = root.path().join("remote");
         fs::create_dir_all(&home).unwrap();
@@ -2271,11 +2274,21 @@ fn place(
 
 /// A Claude conversation in `cwd`, admitted the way connecting admits it.
 fn claude_conversation(fixture: &Machines, cwd: &Path, conversation: &str) -> String {
-    let project = fixture
-        .root
-        .path()
-        .join("local/.claude/projects")
-        .join(claude_project(cwd));
+    import_claude_conversation(
+        &fixture.root.path().join("local"),
+        cwd,
+        conversation,
+        fixture.command(&[]),
+    )
+}
+
+fn import_claude_conversation(
+    home: &Path,
+    cwd: &Path,
+    conversation: &str,
+    mut lf: Command,
+) -> String {
+    let project = home.join(".claude/projects").join(claude_project(cwd));
     fs::create_dir_all(&project).unwrap();
     fs::write(
         project.join(format!("{conversation}.jsonl")),
@@ -2285,8 +2298,8 @@ fn claude_conversation(fixture: &Machines, cwd: &Path, conversation: &str) -> St
         ),
     )
     .unwrap();
-    let admitted = fixture
-        .command(&["session", "resume", conversation, "--prepare", "--json"])
+    let admitted = lf
+        .args(["session", "resume", conversation, "--prepare", "--json"])
         .current_dir(cwd)
         .output()
         .unwrap();
@@ -4148,7 +4161,16 @@ impl Drop for Child {
 /// The laptop's server, ready, and its socket.
 fn served(fixture: &Machines) -> (Child, String) {
     use std::time::{Duration, Instant};
-    let server = Child(fixture.command(&["server", "run"]).spawn().unwrap());
+    let server = Child(
+        fixture
+            .command(&["server", "run"])
+            .env(
+                "TS_SOCKET",
+                fixture.root.path().join("local/tailscaled.sock"),
+            )
+            .spawn()
+            .unwrap(),
+    );
     let deadline = Instant::now() + Duration::from_secs(20);
     loop {
         let output = fixture.run(&["server", "status"]);
@@ -4185,22 +4207,145 @@ fn bridged_terminal(socket: &Path, ticket: &str, expected: &str) {
     }
     let answer: Value = serde_json::from_slice(&answer).unwrap();
     assert_eq!(answer["type"], "bridged", "{answer}");
-    let request = serde_json::json!({"kind":"attach","rows":24,"cols":400,"id":1}).to_string();
-    let mut frame = vec![0x11];
-    frame.extend((request.len() as u32).to_be_bytes());
-    frame.extend(request.as_bytes());
-    stream.write_all(&frame).unwrap();
+    stream.write_all(&viewer_attach()).unwrap();
+    terminal_shows(expected, |buffer| stream.read_exact(buffer));
+}
+
+fn viewer_attach() -> Vec<u8> {
+    use loopflow_execution::transport::wire::{frame, Tag};
+    let request = serde_json::json!({"kind":"attach","rows":24,"cols":400,"id":1});
+    frame(Tag::Request, &serde_json::to_vec(&request).unwrap())
+}
+
+fn terminal_shows(expected: &str, mut read_exact: impl FnMut(&mut [u8]) -> std::io::Result<()>) {
+    use loopflow_execution::transport::wire::Tag;
     let mut shown = String::new();
-    // Snapshot (0x02) and output (0x03) carry what the terminal shows.
     while !shown.contains(expected) {
         let mut header = [0; 5];
-        stream.read_exact(&mut header).unwrap();
+        read_exact(&mut header)
+            .unwrap_or_else(|error| panic!("waiting for {expected}: {error}; saw {shown}"));
         let mut payload = vec![0; u32::from_be_bytes(header[1..].try_into().unwrap()) as usize];
-        stream.read_exact(&mut payload).unwrap();
-        if matches!(header[0], 0x02 | 0x03) {
+        read_exact(&mut payload).unwrap();
+        if header[0] == Tag::Snapshot as u8 || header[0] == Tag::Out as u8 {
             shown.push_str(&String::from_utf8_lossy(&payload));
         }
+        assert_ne!(
+            header[0],
+            Tag::Close as u8,
+            "closed before {expected}: {shown}"
+        );
     }
+}
+
+struct PairedPhone {
+    _daemon: tailscale::Daemon,
+    pem: String,
+    port: u16,
+    control: tailscale::PhoneSocket,
+}
+
+impl PairedPhone {
+    fn pair(
+        fixture: &Machines,
+        client: &mut loopflow_execution::machine::client::Connection,
+    ) -> Self {
+        use loopflow::server::wire::{Hello, ServerOperation, MIN_REVISION, REVISION};
+        let cert = rcgen::generate_simple_self_signed(vec!["fixture.tail.ts.net".into()]).unwrap();
+        let pem = cert.cert.pem();
+        let daemon = tailscale::Daemon::start(
+            &fixture.root.path().join("local"),
+            &tailscale::status(1),
+            format!("{}{pem}", cert.signing_key.serialize_pem()),
+        );
+        let answer = client
+            .request(ServerOperation::MobileConfigure {
+                configuration: Some(tailscale::approval(0)),
+            })
+            .unwrap()
+            .result;
+        let port = reqwest::Url::parse(answer["configuration"]["endpoint"].as_str().unwrap())
+            .unwrap()
+            .port()
+            .unwrap();
+        let mut control = tailscale::connect(port, &pem, "/v1/machine").unwrap();
+        Self::send(
+            &mut control,
+            loopflow::server::wire::ClientMessage::Hello(Hello {
+                revision: REVISION,
+                min_revision: MIN_REVISION,
+                client: loopflow_execution::machine::client::identity("mobile", "phone"),
+            }),
+        );
+        assert_eq!(tailscale::text(&mut control)["type"], "welcome");
+        Self {
+            _daemon: daemon,
+            pem,
+            port,
+            control,
+        }
+    }
+
+    fn send(socket: &mut tailscale::PhoneSocket, request: loopflow::server::wire::ClientMessage) {
+        use tokio_tungstenite::tungstenite::Message;
+        socket
+            .send(Message::text(serde_json::to_string(&request).unwrap()))
+            .unwrap();
+    }
+
+    fn request(&mut self, operation: loopflow::server::wire::ServerOperation) -> Value {
+        use loopflow::server::wire::{ClientMessage, Operation};
+        Self::send(
+            &mut self.control,
+            ClientMessage::Request {
+                id: "phone".into(),
+                operation: Operation::Server(operation),
+                sender: None,
+                select: None,
+                request_id: None,
+            },
+        );
+        let mut answer = tailscale::text(&mut self.control);
+        assert_eq!(answer["type"], "response", "{answer}");
+        answer["result"].take()
+    }
+
+    fn attach(
+        &mut self,
+        operation: loopflow::server::wire::ServerOperation,
+        terminal: &Value,
+    ) -> tailscale::PhoneSocket {
+        use tokio_tungstenite::tungstenite::Message;
+        let issued = self.request(operation);
+        assert_eq!(&issued["terminal_id"], terminal);
+        let mut socket = tailscale::connect(self.port, &self.pem, "/v1/ticket").unwrap();
+        Self::send(
+            &mut socket,
+            loopflow::server::wire::ClientMessage::Attach {
+                ticket: issued["ticket"].as_str().unwrap().into(),
+            },
+        );
+        let bridge = tailscale::text(&mut socket);
+        assert_eq!(bridge["type"], "bridged", "{bridge}");
+        assert_eq!(&bridge["terminal_id"], terminal);
+        socket.send(Message::binary(viewer_attach())).unwrap();
+        socket
+    }
+}
+
+fn phone_terminal_shows(mut socket: tailscale::PhoneSocket, expected: &str) {
+    use tokio_tungstenite::tungstenite::Message;
+    // A WebSocket message can hold any part of a viewer frame.
+    let mut bytes = std::iter::from_fn(|| match socket.read().unwrap() {
+        Message::Binary(chunk) => Some(chunk),
+        other => panic!("expected terminal bytes: {other:?}"),
+    })
+    .flatten();
+    terminal_shows(expected, |buffer| {
+        for byte in buffer {
+            *byte = bytes.next().unwrap();
+        }
+        Ok(())
+    });
 }
 
 fn available_reading(
@@ -4306,11 +4451,15 @@ fn server_routed_task_workspace() {
         "inspect",
         "succeeded",
     );
-    let session = "session_aabbccddeeff00112233445566778899";
-    plan.remote.test_session(
-        session,
-        &loopflow_storage::session_record::new_artifact_key(),
+    let remote = fixture.root.path().join("remote");
+    let thread = "0199a213-81c0-7800-8aa1-bbab2a035a65";
+    let session = import_claude_conversation(
+        &remote,
+        &plan.remote_path,
+        thread,
+        mini_command(&fixture, &[]),
     );
+    let session = session.as_str();
     peer.execute(
         "UPDATE agent_sessions SET cwd=?2,repo=?2,task_id=?3,wave_id=?4 WHERE id=?1",
         rusqlite::params![
@@ -4590,47 +4739,60 @@ fn server_routed_task_workspace() {
             other.remote_path.to_str().unwrap()
         );
     }
-    // Mini holds the Session's terminal. The laptop has no record of it, so
-    // the attach names the Task; the laptop's ticket bridges through to mini.
-    let mini_socket: Value = serde_json::from_slice(
-        &mini_command(&fixture, &["server", "status"])
-            .output()
-            .unwrap()
-            .stdout,
+    // Only mini has this provider thread. It prints its cwd only when lf resumes it.
+    fs::write(
+        remote.join(".claude.json"),
+        r#"{"projects":{"/":{"hasTrustDialogAccepted":true}}}"#,
     )
     .unwrap();
-    let held = Connection::open_at(Path::new(mini_socket["socket"].as_str().unwrap()))
-        .unwrap()
-        .request(loopflow::server::wire::ServerOperation::SessionStart {
-            session: Some(session.into()),
-            request: uuid::Uuid::new_v4().to_string(),
-            argv: [
-                "/bin/sh",
-                "-c",
-                "printf 'on mini: %s\\n' \"$(pwd -P)\"; exec cat",
-            ]
-            .map(str::to_owned)
-            .to_vec(),
-            cwd: plan.remote_path.clone(),
-            env: vec![("PATH".into(), "/usr/bin:/bin".into())],
-            rows: 24,
-            cols: 400,
-            placement: None,
-        })
-        .unwrap()
-        .result["terminal_id"]
-        .clone();
-    let mut attach = |task: Option<String>| {
-        client.request(loopflow::server::wire::ServerOperation::SessionAttach {
-            session: session.into(),
-            terminal_id: None,
-            task,
-            machine: None,
-        })
+    executable(
+        &remote.join(".local/bin/claude"),
+        &format!(
+            r#"#!/bin/bash
+if [ "$1" = --version ]; then echo '2.1.302'; exit; fi
+while [ "$#" -ge 2 ]; do
+    if [ "$1" = --resume ] && [ "$2" = "{thread}" ]; then
+        printf 'on mini: %s\n' "$(pwd -P)"
+        if read -r -t 60 answer < /dev/tty; then
+            printf 'received %s on mini: %s\n' "$answer" "$(pwd -P)"
+        fi
+        exit
+    fi
+    shift
+done
+exit 1
+"#
+        ),
+    );
+    let _ended = EndRecorded(vec![remote.join("store")]);
+    let resume = loopflow::server::wire::ServerOperation::SessionContinue {
+        session: session.into(),
+        task: Some(task.to_string()),
+        machine: None,
+        request: "resume-on-mini".into(),
+        rows: 24,
+        cols: 400,
     };
-    let unrouted = attach(None).unwrap_err().downcast::<Error>().unwrap();
+    let mut phone = PairedPhone::pair(&fixture, &mut client);
+    let held = client.request(&resume).unwrap().result["terminal_id"].clone();
+    assert!(held.is_string());
+    assert_eq!(phone.request(resume)["terminal_id"], held);
+    let attach = |task| loopflow::server::wire::ServerOperation::SessionAttach {
+        session: session.into(),
+        terminal_id: None,
+        task,
+        machine: None,
+    };
+    let unrouted = client
+        .request(attach(None))
+        .unwrap_err()
+        .downcast::<Error>()
+        .unwrap();
     assert_eq!(unrouted.code, ErrorCode::NotFound, "{unrouted:?}");
-    let issued = attach(Some(task.to_string())).unwrap().result;
+    let issued = client
+        .request(attach(Some(task.to_string())))
+        .unwrap()
+        .result;
     assert_eq!(issued["terminal_id"], held);
     let expected = format!(
         "on mini: {}",
@@ -4641,6 +4803,16 @@ fn server_routed_task_workspace() {
         issued["ticket"].as_str().unwrap(),
         &expected,
     );
+
+    let mut viewer = phone.attach(attach(Some(task.to_string())), &held);
+    use loopflow_execution::transport::wire::{frame, Tag};
+    viewer
+        .send(tokio_tungstenite::tungstenite::Message::binary(frame(
+            Tag::Input,
+            b"hello\r",
+        )))
+        .unwrap();
+    phone_terminal_shows(viewer, &format!("received hello {expected}"));
 
     // A Task shell starts in mini's checkout, once, and attaches the same way.
     use loopflow::server::wire::ServerOperation::{
@@ -4668,13 +4840,18 @@ fn server_routed_task_workspace() {
     };
     let issued = client.request(shell_attach()).unwrap().result;
     assert_eq!(issued["terminal_id"], started["terminal_id"]);
+    let expected = format!(
+        "shell on mini: {}",
+        plan.remote_path.canonicalize().unwrap().display()
+    );
     bridged_terminal(
         Path::new(&socket),
         issued["ticket"].as_str().unwrap(),
-        &format!(
-            "shell on mini: {}",
-            plan.remote_path.canonicalize().unwrap().display()
-        ),
+        &expected,
+    );
+    phone_terminal_shows(
+        phone.attach(shell_attach(), &started["terminal_id"]),
+        &expected,
     );
     client
         .request(TaskShellClose {

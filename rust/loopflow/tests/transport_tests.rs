@@ -2798,10 +2798,7 @@ fn mobile_host(fixture: &Fixture, status: &Value, pem: String) -> tailscale::Dae
 
 #[test]
 fn server_mobile_changes_preserve_local_connections_and_saved_disable() {
-    use tokio_rustls::rustls::{
-        self,
-        pki_types::{pem::PemObject, CertificateDer, ServerName},
-    };
+    use tailscale::text;
     use tokio_tungstenite::tungstenite::Message;
     let fixture = Fixture::new();
     let certificate =
@@ -2857,34 +2854,7 @@ fn server_mobile_changes_preserve_local_connections_and_saved_disable() {
         .unwrap()
         .port()
         .unwrap();
-    let connect = |path: &str| {
-        let mut roots = rustls::RootCertStore::empty();
-        roots
-            .add(CertificateDer::from_pem_slice(pem.as_bytes()).unwrap())
-            .unwrap();
-        let config = rustls::ClientConfig::builder()
-            .with_root_certificates(roots)
-            .with_no_client_auth();
-        let client = rustls::ClientConnection::new(
-            std::sync::Arc::new(config),
-            ServerName::try_from("fixture.tail.ts.net").unwrap(),
-        )
-        .unwrap();
-        let socket = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
-        socket
-            .set_read_timeout(Some(Duration::from_secs(15)))
-            .unwrap();
-        let tls = rustls::StreamOwned::new(client, socket);
-        tokio_tungstenite::tungstenite::client(format!("wss://fixture.tail.ts.net{path}"), tls)
-            .map_err(|error| error.to_string())
-    };
-    // One text frame per message: hello, then a subscription on the same connection.
-    let text = |reader: &mut tokio_tungstenite::tungstenite::WebSocket<_>| -> Value {
-        match reader.read().unwrap() {
-            Message::Text(text) => serde_json::from_str(text.as_str()).unwrap(),
-            other => panic!("expected a text frame: {other:?}"),
-        }
-    };
+    let connect = |path: &str| tailscale::connect(port, &pem, path);
     let remote_watch = |reader: &mut tokio_tungstenite::tungstenite::WebSocket<_>| {
         reader
             .send(Message::Text(
@@ -2921,7 +2891,7 @@ fn server_mobile_changes_preserve_local_connections_and_saved_disable() {
             Ok(_) => {}
         }
     };
-    let (mut reader, _) = connect("/v1/machine").unwrap();
+    let mut reader = connect("/v1/machine").unwrap();
     remote_watch(&mut reader);
     assert_eq!(service.configure_remote(config.clone()), config);
     service.configure_remote(Value::Null);
@@ -2938,7 +2908,7 @@ fn server_mobile_changes_preserve_local_connections_and_saved_disable() {
         "Setup must not restart the local service"
     );
     service.configure_remote(config.clone());
-    let (mut reader, _) = connect("/v1/machine").unwrap();
+    let mut reader = connect("/v1/machine").unwrap();
     remote_watch(&mut reader);
     daemon.wait_for("/localapi/v0/status?peers=false");
     daemon.wait_for("/localapi/v0/status?peers=false");
@@ -2968,7 +2938,7 @@ fn server_mobile_changes_preserve_local_connections_and_saved_disable() {
     // The original saved approval recovers automatically; the caller does not
     // need to turn access on again after a transient Tailscale outage.
     service.wait_for_mobile("recovery on the approved account", |s| s["ready"] == true);
-    let (mut recovered, _) = connect("/v1/machine").unwrap();
+    let mut recovered = connect("/v1/machine").unwrap();
     remote_watch(&mut recovered);
     replacement
         .status

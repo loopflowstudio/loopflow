@@ -121,3 +121,8 @@ Choices made headless for review; the plan says what each passed over.
   and the launch check falls back. Passed over: keeping main's stop for it, a
   new `LoginState`, forwarding without `forward.env`. Open (page question 3):
   whether `lf machine logout claude <machine>` should refuse like login.
+- Concept review (2026-11-23, at 7a0119e430): `lf machine logout claude
+  <machine>` stays: it signs out that Machine's own Claude login, as logout
+  does per Machine for every provider (Asana and Doppler run `lf machine
+  logout` there). Passed over: refusing it like login, which would leave no lf
+  way to clear a hand-made login there.

@@ -413,6 +413,10 @@ Implementation is complete. Left for gate and after:
   mini with the Doppler token forwarded.
 - Open in `scratch/questions.md`: whether a usage-limit refusal should count
   for `--refused`.
+- `lf machine logout claude <machine>` stays as built (concept review
+  2026-11-23, made for review): logout acts on that Machine's own Claude
+  login, as logout does for every provider; it does not stop forwarded
+  launches, which `forward.env` controls.
 
 ## Done when
 
@@ -428,8 +432,8 @@ Headless, fixture SSH target with fake clients:
 `lf machine logins fixture --json` shows codex signed in and, with
 `forward.env: [CLAUDE_CODE_OAUTH_TOKEN]`, claude `forwarded`; with the fake
 clients signed out, `lf --machine fixture -a codex …` names `lf machine login
-codex fixture` and `-a claude` names `give this Machine CLAUDE_CODE_OAUTH_TOKEN …`, both
-before any agent starts; with the token forwarded, the Claude launch runs.
+codex fixture` and `-a claude` names `launch where CLAUDE_CODE_OAUTH_TOKEN has a value …`,
+both before any agent starts; with the token forwarded, the Claude launch runs.
 By a person at gate: `lf machine login codex mini` for real, and a Claude
 launch on mini with the Doppler token forwarded.
 

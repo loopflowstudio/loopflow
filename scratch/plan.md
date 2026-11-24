@@ -667,7 +667,11 @@ queued-create fallback; `lf wave create` offline names `lf wave sync <wave>`.
 `local_planning` binds the Project directly (its `lf` runs have no fake
 Linear) and checks the queued Order; sending an Order is covered where it was.
 The `tracker_actions` upgrade test now expects slice 12's retired Project
-create.
+create. After the #2039 merge (2026-11-24): storage `linear_events::` (10)
+and `local_planning::task_creation_and_edits_save_offline_in_both_connection_modes`
+pass. The local_planning test calls `accept_linear_project_in` in place of
+`lf wave sync` and checks the queued Order, not its arrival in Linear; the
+Order's send is covered by the existing order tests.
 
 ## Remains
 

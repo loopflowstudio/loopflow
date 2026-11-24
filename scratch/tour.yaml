@@ -1,23 +1,29 @@
-at: 3a9b149dc1f2f6a6a38aff3f4ed9d9b8fe006f14
+at: ce7adf260d5f23ec9b1ee52a317bc18c61e9c670
 first:
   - path: rust/loopflow/src/server/README.md
-    why: How clients address another Machine’s Task
+    why: How clients open and follow a remote Task
   - path: scratch/plan.md
-    why: Implemented reads and remaining workspace work
+    why: Implemented behavior and remaining workspace work
   - path: rust/loopflow-storage/src/sqlite/repositories.rs
-    why: The ownership route carries the portable Task selector
+    why: Ownership routes carry portable Task selectors
   - path: rust/loopflow-storage/src/sqlite/children.rs
-    why: Indexed selector lookup on the receiving Machine
-  - path: rust/loopflow-execution/src/machine/client.rs
-    why: Each request carries its sender through the SSH connection
-  - path: rust/loopflow/src/server/peers.rs
-    why: Idle connections, route changes, and one reconnect
+    why: Indexed Task lookup in the sender’s repository
   - path: rust/loopflow/src/lf/commands/read.rs
-    why: Which reads follow Task ownership
-  - path: rust/loopflow/src/server/service.rs
-    why: Served reads share connections across clients
+    why: Which reads follow ownership and how peers address them
+  - path: rust/loopflow-execution/src/ops/task/workspace.rs
+    why: Filesystem events invalidate the checkout’s file tree
+  - path: rust/loopflow-execution/src/machine/client.rs
+    why: Request identity and disconnect outcomes across Machines
+  - path: rust/loopflow/src/server/peers.rs
+    why: Pooled requests and dedicated subscription connections
+  - path: rust/loopflow/src/server/subscriptions.rs
+    why: Change readers when ownership moves, retaining subscribers and checkpoints
   - path: rust/loopflow/src/lf/commands/write.rs
-    why: The owning Machine checks revisions before saving
+    why: The owner checks the file revision before saving
+  - path: rust/loopflow/src/server/service.rs
+    why: Peer placement and request IDs for both client transports
   - path: rust/loopflow/tests/machine_commands.rs
-    why: Two Machines report checkout paths and count requests
-hide: []
+    why: Follow a Task between two live servers
+hide:
+  - path: tests/fixtures/dto/server_schema.json
+    why: Generated from the protocol types

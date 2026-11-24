@@ -13,6 +13,40 @@ array index could pull Busy above Available and that the toggle was missing
 from Wave sidebars. `be25d7ddcb` replaced the index with a status group and
 extended sorting to Wave sidebars. Both were implementation choices for B1.
 
+The [concept review at `5317225dbe`](concept-review.html) confirmed 8 of 9
+product-to-code pairings align and found split ownership of `heldStatusGroup`
+between `WorkNavigation` and `WorkModel`, plus two stale status sentences in
+[swift/README.md](../swift/README.md).
+
+## Next slice (concept-review fix)
+
+Make the open-Task status-group hold hold one invariant across `WorkNavigation`
+and `WorkModel`:
+
+1. **`swift/LoopflowMac/WorkProjection.swift`:** move `selection: WorkReference?`
+   onto `WorkNavigation.Destination` and clear `heldStatusGroup = nil` in
+   `destination.didSet` whenever `selection?.kind != .task || !sidebarScope.isWorkingList || selection != oldValue.selection`.
+   Same-Task `.work` ↔ `.entered` transitions keep the hold; any Task switch
+   (including `owner.selection =` in `commitSessionBinding` and
+   `createTaskFromSession`) releases the previous Task immediately.
+2. **`swift/LoopflowMac/WorkModel.swift`:**
+   - In `applyTaskList`, call `if previous?.wave == wave { holdSelectedStatusGroup() }`
+     before replacing `taskListReadings[key]`, then keep the post-update
+     `holdSelectedStatusGroup()` for cold-start first readings. Switching
+     `sidebarFilter` still releases the old hold immediately, and sending a
+     prompt afterward captures the open Task’s pre-turn group instead of
+     dropping it to Busy.
+   - In `sidebarRows`, apply `held` only when `held.taskID` matches the
+     resolved selected Task ID, so an unselected row can never appear held.
+3. **`swift/LoopflowTests/WorkNavigationTests.swift`:** add tests covering
+   (a) switching `sidebarFilter` back to `.working` then turning the open Task
+   `Busy` keeps it in its pre-turn group, and (b) assigning
+   `navigation.selection` directly to another Task immediately releases the
+   previous Task’s held group.
+4. **`swift/README.md`:** update lines 153 and 302 so the Busy-over-Available
+   row label and `Finished` (pane) / `Available` (row) wording match
+   [docs/surfaces.md](../docs/surfaces.md) and the built code.
+
 ## Built
 
 - Working Tasks with no saved position appear first, newest started first. The

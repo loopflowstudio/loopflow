@@ -45,10 +45,10 @@
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--paper); color: var(--ink); font: 1rem/1.55 system-ui, sans-serif; }
 main { width: min(72rem, calc(100% - 2.5rem)); margin: 3rem auto 4.5rem; }
-header { max-width: 60rem; }
+header { max-width: 62rem; }
 h1, h2 { font-family: ui-serif, Georgia, serif; line-height: 1.12; }
-h1 { font-size: clamp(2.1rem, 5vw, 3.5rem); margin: .3rem 0 .85rem; letter-spacing: -.04em; }
-h2 { font-size: clamp(1.5rem, 2.8vw, 1.95rem); margin: 0 0 .8rem; letter-spacing: -.02em; }
+h1 { font-size: clamp(2.1rem, 5vw, 3.4rem); margin: .3rem 0 .85rem; letter-spacing: -.04em; }
+h2 { font-size: clamp(1.45rem, 2.8vw, 1.9rem); margin: 0 0 .8rem; letter-spacing: -.02em; }
 h3 { margin: 0; font-size: 1rem; }
 p { margin: .5rem 0; }
 section { margin-top: 2.4rem; }
@@ -116,7 +116,6 @@ code { overflow-wrap: anywhere; font-size: .88em; }
   font-size: .78rem;
 }
 .sort-btn.on { background: var(--tint); border-color: var(--accent); color: var(--accent); font-weight: 600; }
-.sort-btn.missing { border-style: dashed; color: var(--warn); }
 .rows { padding: .45rem; margin: 0; list-style: none; }
 .rows li {
   display: grid;
@@ -182,64 +181,62 @@ kbd { color: var(--muted); font-size: .78rem; font-family: ui-monospace, monospa
 <body>
 <main>
 <header>
-  <p class="reference">LOO-1063 · Concept review of built branch at <code>14f44821e8</code> against base <code>250e266b4a</code></p>
+  <p class="reference">LOO-1063 · Concept review of built branch at <code>5317225dbe</code> against base <code>250e266b4a</code></p>
   <h1>Working Task order, sidebar status toggle, and row status</h1>
-  <p><strong>Area reviewed:</strong> Working Task ordering, the window-local sidebar <strong>Sort by status</strong> toggle and open-Task hold, row status &amp; Graph step display, Desktop drag recovery, OSC 7501 <code>done</code>/<code>error</code> handling, and packaged New Task fonts across Desktop, CLI, and iOS — widened to the whole sidebar and Working-order model after the demo pivot from one-shot sort to toggle.</p>
+  <p><strong>Area reviewed:</strong> Working Task ordering, the Mac sidebar <strong>Sort by status</strong> toggle and open-Task status-group hold, row status vocabulary and Graph step display, Desktop drag persistence and recovery, OSC 7501 <code>done</code>/<code>error</code> handling, and packaged New Task fonts across Storage, Execution, CLI/Server, Mac Desktop, and iOS — reviewed end to end against base <code>250e266b4a</code> after <code>be25d7ddcb</code>–<code>5317225dbe</code> replaced integer slot pinning with <code>StatusGroup</code> and enabled Wave sidebar sorting.</p>
 </header>
 
 <section class="callout" aria-labelledby="biggest-mismatch">
-  <h2 id="biggest-mismatch">Biggest mismatch: pinning an array index instead of latching status</h2>
-  <p><span class="badge badge-warn">Mismatch · Built at 14f44821e8</span> The demo pivot replaced the destructive one-shot sort with a clean window-local toggle and deleted the entire server/CLI/storage sort path. Seven of nine product-to-code pairings now line up cleanly. Two pairings in the new Mac sidebar toggle do not:</p>
+  <h2 id="biggest-mismatch">Biggest mismatch: <code>heldStatusGroup</code> has split ownership across <code>WorkNavigation</code> and <code>WorkModel</code></h2>
+  <p><span class="badge badge-warn">Mismatch · Built at 5317225dbe</span> Both mismatches from the <a href="plan.md"><code>14f44821e8</code> review</a> (integer slot pinning and repository-only Wave sorting) are fixed, and <strong>8 of 9</strong> product-to-code pairings now line up cleanly. One pairing — holding the open Task’s status group while <strong>Sort by status</strong> is On — still has no single owner in code:</p>
   <ol>
-    <li><strong>Open-Task hold is modeled as an array index (<code>WorkNavigation.selectedSidebarSlot: Int?</code>) instead of a latched status group.</strong>
-      <br>Splicing the open Task back into a saved integer slot fights every row above it:
-      <ul>
-        <li><em>Switching from a latched Busy Task to the next Available Task inverts status order:</em> <code>setSelection</code> reads the clicked row’s slot while the previous row is still pinned at slot 0, so releasing the old row slides an <strong>Idle</strong> row into slot 0 <em>above</em> the <strong>Available</strong> row you just opened (literally asserted in <a href="../swift/LoopflowTests/WorkNavigationTests.swift#L298-L301">WorkNavigationTests.swift:298–301</a>).</li>
-        <li><em>An unrelated Task leaving or changing above the open Task pulls Busy above Available:</em> if <code>[0: Blocked, 1: Available (open), 2: Busy]</code> has slot <code>1</code> pinned and <code>Blocked</code> completes, <code>sidebarRows</code> removes <code>Available</code> from index <code>0</code> and splices it at index <code>1</code> → <code>[0: Busy, 1: Available]</code>.</li>
-        <li><em>Turning Sort by status On while a Busy Task is open at slot 0</em> keeps that Busy Task glued to slot 0 above Blocked and Available rows.</li>
-      </ul>
-    </li>
-    <li><strong>Sort by status is still restricted to <code>sidebarScope == .repository</code> — a leftover from the deleted one-shot <code>task_orders</code> write.</strong>
-      <br>Both Repository and Wave sidebars list Working Tasks from <code>taskList</code>. Because the toggle is now a local view sort that writes nothing, hiding the button and silently suspending sorting whenever a Wave is selected (while <code>sidebarSortByStatus</code> remains <code>true</code> in memory) forces a distinction with no reason behind it.</li>
+    <li><strong>Changing <code>sidebarFilter</code> clears <code>heldStatusGroup</code> without capturing the open Task’s group before its next turn.</strong>
+      <br><code>WorkNavigation.sidebarFilter.didSet</code> sets <code>heldStatusGroup = nil</code>, and nothing calls <code>holdSelectedStatusGroup()</code> until the next <code>applyTaskList</code> arrives. Because <code>applyTaskList</code> calls <code>holdSelectedStatusGroup()</code> <em>after</em> overwriting <code>taskListReadings[key]</code>, switching filters (e.g. <strong>Working tasks → Available → Working tasks</strong>, or clicking <strong>Show working Tasks</strong>) leaves <code>heldStatusGroup == nil</code>; pressing Enter in the open Task then latches <code>.busy</code> and <strong>drops the open Task straight to the bottom</strong>.</li>
+    <li><strong>Direct <code>selection</code> writes leave an unselected Task pinned in its old status group.</strong>
+      <br><code>commitSessionBinding</code> (<a href="../swift/LoopflowMac/WorkModel.swift#L3087">WorkModel.swift:3087</a>) and <code>createTaskFromSession</code> (<a href="../swift/LoopflowMac/WorkModel.swift#L3110">WorkModel.swift:3110</a>) assign <code>owner.selection = .task(...)</code> directly, bypassing <code>setSelection</code>. <code>WorkNavigation.destination.didSet</code> (<a href="../swift/LoopflowMac/WorkProjection.swift#L356-L362">WorkProjection.swift:356–362</a>) only clears <code>heldStatusGroup</code> when <code>selection?.kind != .task || !sidebarScope.isWorkingList</code>, and <code>sidebarRows</code> (<a href="../swift/LoopflowMac/WorkModel.swift#L2226-L2231">WorkModel.swift:2226–2231</a>) applies <code>held</code> without checking whether <code>held.taskID</code> is still selected — so the previous Busy Task remains pinned in <strong>Available</strong> after selection moved to another Task.</li>
   </ol>
+  <p><em>Doc consistency note:</em> two sentences in <a href="../swift/README.md#L153">swift/README.md:153</a> (“its board badge shows Available”) and <a href="../swift/README.md#L302">swift/README.md:302</a> (“Done for a reported result”) still carry the pre-LOO-1063 labels instead of Busy-over-Available and Finished/Available.</p>
 </section>
 
 <section class="callout proposal" aria-labelledby="recommendation">
-  <h2 id="recommendation">Recommendation: latch the open Task’s status bucket across Working scopes</h2>
+  <h2 id="recommendation">Recommendation: one invariant for the held status group</h2>
   <p><span class="badge badge-proposed">Proposed for next implement pass</span></p>
   <ul>
-    <li><strong>Replace <code>selectedSidebarSlot: Int?</code> with <code>sidebarStatusLatch: SidebarStatusLatch?</code> (<code>taskID</code> + <code>statusOrder</code>).</strong>
-      <br>When Sort by status is On, the open Task sorts using its latched <code>statusOrder</code> instead of its live <code>statusOrder</code> until you navigate to a different Task, switch filter, or toggle sorting Off. Sending a prompt (<code>Available → Busy</code>) still keeps the open Task in the Available group instead of dropping it to the bottom; leaving it releases it immediately; every other row stays in strict <code>Blocked → Error → Available → Idle → Busy</code> order, and an unrelated Task completing above never pushes Busy above Available. Re-selecting the already-open Task (e.g. pressing ⌘1 on it) keeps its existing latch.</li>
-    <li><strong>Enable Sort by status for every Working sidebar scope (<code>.repository</code> and <code>.wave</code>), not only <code>.repository</code>.</strong>
-      <br>One helper (<code>isWorkingSidebarScope</code>) drives <code>sidebarRows</code>, <code>WorkNavigator</code>’s toggle button, and <code>⌘K</code>’s action. Saved Dashboards (<code>.dashboard</code>) keep their own arrangement order. Drag-to-reorder stays repository-only (when sorting is Off), because dragging mutates the repository’s shared <code>task_orders</code>.</li>
+    <li><strong>Clear on any selection change in <code>WorkNavigation.destination.didSet</code>.</strong>
+      <br>Move the <code>selection: WorkReference?</code> switch onto <code>WorkNavigation.Destination</code> and clear <code>heldStatusGroup = nil</code> whenever <code>selection?.kind != .task || !sidebarScope.isWorkingList || selection != oldValue.selection</code>. Re-entering the same Task (<code>.work(.task(id)) ↔ .entered(from:, work: .task(id))</code>) keeps <code>selection == oldValue.selection</code> and keeps the hold; switching Tasks through any path clears the old Task immediately.</li>
+    <li><strong>Capture the open Task’s pre-turn group before replacing <code>taskListReadings</code>.</strong>
+      <br>In <code>WorkModel.applyTaskList</code>, call <code>if previous?.wave == wave { holdSelectedStatusGroup() }</code> <em>before</em> overwriting <code>taskListReadings[key]</code>, then keep the post-update <code>holdSelectedStatusGroup()</code> for cold-start first readings. After any filter switch, the open Task’s current live group is captured right before a turn changes it, so pressing Enter never drops it to the bottom.</li>
+    <li><strong>Guard <code>sidebarRows</code> on the active selection.</strong>
+      <br>Only apply <code>held</code> in <code>WorkModel.sidebarRows</code> when <code>held.taskID</code> matches the currently selected Task ID, so an unselected row can never appear held.</li>
+    <li><strong>Align the two stale sentences in <code>swift/README.md</code></strong> (lines 153 and 302) with <a href="../docs/surfaces.md#L108-L117">docs/surfaces.md</a> and the built behavior.</li>
   </ul>
   <p class="reference">
-    <a href="../swift/LoopflowMac/WorkProjection.swift#L237-L249">WorkProjection.swift</a> ·
-    <a href="../swift/LoopflowMac/WorkModel.swift#L141-L155">applyTaskList</a> ·
-    <a href="../swift/LoopflowMac/WorkModel.swift#L2232-L2256">sidebarRows &amp; toggle</a> ·
-    <a href="../swift/LoopflowMac/WorkModel.swift#L3369-L3381">setSelection</a> ·
-    <a href="../swift/LoopflowMac/Views/WorkNavigator.swift#L70-L78">WorkNavigator</a> ·
-    <a href="../swift/LoopflowMac/Views/WorkPalette.swift#L22-L26">WorkPalette</a>
+    <a href="../swift/LoopflowMac/WorkProjection.swift#L244-L270">WorkProjection (StatusGroup &amp; filter)</a> ·
+    <a href="../swift/LoopflowMac/WorkProjection.swift#L356-L372">WorkProjection (destination &amp; selection)</a> ·
+    <a href="../swift/LoopflowMac/WorkModel.swift#L141-L152">WorkModel.applyTaskList</a> ·
+    <a href="../swift/LoopflowMac/WorkModel.swift#L2223-L2249">WorkModel.sidebarRows &amp; hold</a> ·
+    <a href="../swift/LoopflowMac/WorkModel.swift#L3087">commitSessionBinding</a> ·
+    <a href="../swift/LoopflowMac/WorkModel.swift#L3110">createTaskFromSession</a>
   </p>
 </section>
 
 <section class="trace" aria-labelledby="trace-title">
-  <h2 id="trace-title">Walk the interactions: Built now vs Proposed</h2>
-  <p>Switch scenarios to compare <span class="badge badge-built">Built · 14f44821e8</span> against <span class="badge badge-proposed">Proposed</span>.</p>
+  <h2 id="trace-title">Walk the interactions: Built at 5317225dbe vs Proposed</h2>
+  <p>Switch scenarios to compare <span class="badge badge-built">Built · 5317225dbe</span> against <span class="badge badge-proposed">Proposed</span>.</p>
 
   <div class="steps" role="group" aria-label="Interaction scenario">
-    <button type="button" data-scene="switch" aria-pressed="true">1 · Leave latched Busy for Available (⌃Tab / click)</button>
-    <button type="button" data-scene="above" aria-pressed="false">2 · Row above open Task completes</button>
-    <button type="button" data-scene="toggle" aria-pressed="false">3 · Turn Sort On while Busy is at slot 0</button>
-    <button type="button" data-scene="wave" aria-pressed="false">4 · Click a Wave while Sort is On</button>
-    <button type="button" data-scene="turn" aria-pressed="false">5 · Send a prompt in open Available Task</button>
+    <button type="button" data-scene="filter-turn" aria-pressed="true">1 · Switch filter back to Working, then press Enter</button>
+    <button type="button" data-scene="bind-session" aria-pressed="false">2 · Promote/bind Session to another Task</button>
+    <button type="button" data-scene="reselect" aria-pressed="false">3 · Re-select held Task (⌘1 / tile zoom)</button>
+    <button type="button" data-scene="cold-start" aria-pressed="false">4 · Cold start restores selection before first reading</button>
+    <button type="button" data-scene="wave-toggle" aria-pressed="false">5 · Wave sidebar toggle &amp; Saved Dashboard</button>
   </div>
 
   <div class="comparison">
     <article class="sidebar">
       <header>
         <h3>Built now</h3>
-        <span class="badge badge-built">Built · 14f44821e8</span>
+        <span class="badge badge-built">Built · 5317225dbe</span>
       </header>
       <div class="sidebar-bar" id="built-bar"></div>
       <ol class="rows" id="built-rows" aria-label="Built behavior"></ol>
@@ -256,7 +253,7 @@ kbd { color: var(--muted); font-size: .78rem; font-family: ui-monospace, monospa
     </article>
   </div>
   <p id="observation" role="status"></p>
-  <noscript><p>1) Leaving latched Busy at slot 0 for Available at slot 1: Built pins Available at slot 1 and pushes Idle to slot 0 above Available; Proposed releases Busy to the bottom and puts Available at slot 0 above Idle. 2) Blocked row above open Available completes: Built keeps Available pinned at slot 1 and pulls Busy to slot 0 above it; Proposed keeps Available at slot 0 above Busy. 3) Turning Sort On with Busy open at slot 0: Built pins Busy at slot 0 above Blocked and Available; Proposed sorts Blocked and Available to the top and latches Busy at its bucket. 4) Clicking a Wave while Sort is On: Built hides the toggle and silently unsorts the Wave list; Proposed keeps the toggle visible and sorts the Wave's Working Tasks. 5) Sending a prompt in an open Available Task: both keep the open Task in place instead of dropping it to the bottom.</p></noscript>
+  <noscript><p>1) After switching sidebarFilter back to Working and pressing Enter in open Available Task LOO-104: Built leaves heldStatusGroup nil until applyTaskList installs Busy, dropping LOO-104 to slot 3; Proposed holds LOO-104 at Available before overwriting taskListReadings, keeping it at slot 1. 2) Binding or creating a Task from a Session writes owner.selection directly: Built leaves the previous Busy Task stuck in Available above the newly selected Task; Proposed clears heldStatusGroup on any selection change and guards sidebarRows on the selected Task. 3–5) Re-selecting the same Task, cold start first reading, and Wave/Dashboard scopes all preserve the expected behavior in both.</p></noscript>
 </section>
 
 <section aria-labelledby="pairs">
@@ -267,13 +264,13 @@ kbd { color: var(--muted); font-size: .78rem; font-family: ui-monospace, monospa
         <th scope="col">Product concept</th>
         <th scope="col">Code concept</th>
         <th scope="col">Aligns?</th>
-        <th scope="col">Notes (at <code>14f44821e8</code>)</th>
+        <th scope="col">Notes (at <code>5317225dbe</code>)</th>
       </tr>
     </thead>
     <tbody>
       <tr>
         <th scope="row">Working membership</th>
-        <td><code>TaskSection::of</code> → <code>SelectionState::Working</code> / <code>Backlog</code> / <code>Done</code>.</td>
+        <td><code>TaskSection::of(lifecycle, owned)</code> → <code>SelectionState::Working</code> / <code>Backlog</code> / <code>Done</code>.</td>
         <td><span class="fit yes">Yes</span></td>
         <td>One predicate feeds roadmap, selections, sidebar, Wave views, CLI, and iOS.</td>
       </tr>
@@ -281,49 +278,49 @@ kbd { color: var(--muted); font-size: .78rem; font-family: ui-monospace, monospa
         <th scope="row">Default order: Start-Time Stack, steady across turns</th>
         <td><code>ordered_tasks_in</code> + <code>TaskOrder</code> / <code>TaskPosition</code> (<code>New(Reverse(started_at)) &lt; Saved(pos) &lt; Planning(rank)</code>) + <code>start_times_in</code>.</td>
         <td><span class="fit yes">Yes</span></td>
-        <td>Shared by views, drops, roadmap, CLI, and phone. Decoupled from Backlog <code>planning_rank</code> and conversation activity; handoffs keep original start time.</td>
+        <td>Shared by views, drops, roadmap, CLI, and phone; reads ordering fields directly without scanning every Task identifier. Handoffs keep original start time; activity never reorders.</td>
       </tr>
       <tr>
         <th scope="row">Drag a Working Task above or below another</th>
         <td><code>TaskOrderDrag.side</code> → <code>DropSide</code> → <code>PendingCommand.reorder</code> → <code>orderWrites</code> → <code>desktop.dashboard.move</code> → <code>SqliteStore::reorder_working_task</code> CAS loop.</td>
         <td><span class="fit yes">Yes</span></td>
-        <td>Immediate preview, side-aware across concurrent reorders, click-ordered across blips, atomic refusal with <code>NoticeCenter.reread(keeping:)</code>.</td>
+        <td>Immediate preview, side-aware across concurrent reorders, click-ordered across blips, atomic refusal with <code>NoticeCenter.reread(keeping:)</code> and named absent Task.</td>
       </tr>
       <tr>
         <th scope="row">Non-destructive “Sort by status” toggle (offline-capable)</th>
-        <td><code>WorkNavigation.sidebarSortByStatus</code> + <code>SidebarStatusToggle</code> + <code>WorkModel.sidebarRows</code> + <code>⌘K</code> <code>.sortWorkingTasks</code>.</td>
+        <td><code>WorkNavigation.sidebarSortByStatus</code> + <code>SidebarStatusToggle</code> + <code>WorkModel.sidebarRows</code> (one-pass <code>Dictionary(grouping:)</code>) + <code>⌘K</code> <code>.sortWorkingTasks</code>.</td>
         <td><span class="fit yes">Yes</span></td>
-        <td>One-shot CLI/server/storage sort deleted cleanly. Toggle has On/Off accent state, hover fill, tooltips, accessible value, never mutates <code>task_orders</code>, leaves grid and phone on shared order, works offline.</td>
-      </tr>
-      <tr>
-        <th scope="row">Open Task doesn’t drop to the bottom when you type while Sort is On</th>
-        <td><code>WorkNavigation.selectedSidebarSlot: Int?</code> splicing selection back into a captured integer index.</td>
-        <td><span class="fit no">No</span></td>
-        <td><strong>Code concept does not match experience.</strong> An integer index pushes Idle above Available on navigation and pulls Busy above Available when a row above completes. <span class="badge badge-proposed">Proposed</span> Latch the open Task’s <code>statusOrder</code> bucket instead.</td>
+        <td>Toggle has On/Off accent fill, hover treatment, tooltips, accessible value, never writes <code>task_orders</code>, keeps grid and phone on shared order, works offline.</td>
       </tr>
       <tr>
         <th scope="row">Working sidebar scope for Sort by status</th>
-        <td><code>scope == .repository</code> guard in <code>WorkNavigator</code>, <code>WorkModel.sidebarRows</code>, and <code>WorkPalette</code>.</td>
+        <td><code>WorkNavigation.SidebarScope.isWorkingList</code> driving <code>sidebarRows</code>, <code>WorkNavigator</code>, and <code>WorkPalette</code>; <code>canReorderSidebar</code> for drags.</td>
+        <td><span class="fit yes">Yes</span></td>
+        <td>Fixed in <code>be25d7ddcb</code>. Repository and Wave sidebars share the toggle for that repository; saved Dashboards keep their arrangement; drags stay repository-only when sorting is Off.</td>
+      </tr>
+      <tr>
+        <th scope="row">Open Task stays in its status group across turns while Sort is On</th>
+        <td><code>WorkNavigation.heldStatusGroup: (taskID, StatusGroup)?</code> split across <code>WorkNavigation</code> <code>didSet</code>s and <code>WorkModel</code>.</td>
         <td><span class="fit no">No</span></td>
-        <td><strong>Leftover from deleted one-shot write.</strong> Wave sidebars show Working Tasks from the same <code>taskList</code>, yet clicking a Wave hides the toggle and silently unsorts while leaving <code>sidebarSortByStatus == true</code>. <span class="badge badge-proposed">Proposed</span> Apply to <code>.repository</code> and <code>.wave</code>; keep <code>.dashboard</code> on its own arrangement.</td>
+        <td><strong>Group concept is right; ownership is split.</strong> Changing <code>sidebarFilter</code> clears the hold without re-capturing before the next turn, so Enter drops the open Task to Busy. Direct <code>owner.selection =</code> writes bypass <code>setSelection</code> and leave an unselected Task held. <span class="badge badge-proposed">Proposed</span> Clear on any selection change, hold pre-update in <code>applyTaskList</code>, and guard <code>sidebarRows</code> on the selected Task.</td>
       </tr>
       <tr>
         <th scope="row">Row status vocabulary &amp; priority</th>
-        <td><code>SelectionState::Error</code>, <code>ProgramStatusState.summaryOrder</code>, <code>Array&lt;WorkSelectionState&gt;.programState</code>, <code>SidebarTaskRow.statusOrder</code>.</td>
+        <td><code>SelectionState::Error</code>, <code>ProgramStatusState.summaryOrder</code>, <code>Array&lt;WorkSelectionState&gt;.programState</code>, <code>WorkNavigation.StatusGroup</code>, <code>SessionProgramStatus</code>.</td>
         <td><span class="fit yes">Yes</span></td>
-        <td><code>Blocked → Error → Available → Idle → Busy</code> matches every row label; dual-state <code>Busy+Available</code> prints and sorts as <strong>Busy</strong> while matching both filters.</td>
+        <td><code>Blocked → Error → Available → Idle → Busy</code> matches every row label; dual-state <code>Busy+Available</code> prints and sorts as <strong>Busy</strong> while matching both filters. Two stale lines in <code>swift/README.md</code> need alignment.</td>
       </tr>
       <tr>
         <th scope="row">Current Graph step on Mac &amp; phone rows</th>
-        <td><code>fill_task_contents_in</code> resolves live <code>run_start</code> cursor or parked step (stripping <code>START</code>/<code>END</code>) into <code>ViewContent.graph_step</code> (optional on read for older servers); Mac and iOS pass to <code>TaskRow</code>.</td>
+        <td><code>fill_task_contents_in</code> resolves live <code>run_start</code> cursor or parked step (stripping <code>START</code>/<code>END</code>) into <code>ViewContent.graph_step</code> (<code>decodeIfPresent</code> on read for older servers); Mac and iOS pass to <code>TaskRow</code>.</td>
         <td><span class="fit yes">Yes</span></td>
-        <td>Batched once per snapshot across all plans; compatible with installed older servers.</td>
+        <td>Batched once per snapshot across all plans; compatible with older servers; Dashboard tiles omit it because their workflow sentence already prints below the row.</td>
       </tr>
       <tr>
         <th scope="row">Finished turn reads Available, clears on typing; New Task uses packaged fonts</th>
         <td><code>available_sql</code> + <code>SessionProgramStatus</code> + <code>acknowledge_results</code> / <code>ProgramStatusReducer.interaction</code>; <code>scripts/app_bundle.py</code> + <code>AppFontRegistration</code>.</td>
         <td><span class="fit yes">Yes</span></td>
-        <td>Terminal pane keeps <code>Finished</code>; Task row reads <code>Available</code>; typing clears <code>done</code>/<code>error</code> in Ghostty and held terminals; packaged fonts resolve cleanly across Dev/QA/Release.</td>
+        <td>Terminal pane keeps <code>Finished</code>; Task row reads <code>Available</code>; typing clears <code>done</code>/<code>error</code> in Ghostty and held terminals; packaged fonts resolve across Dev/QA/Release with same-size fallback.</td>
       </tr>
     </tbody>
   </table>
@@ -333,44 +330,36 @@ kbd { color: var(--muted); font-size: .78rem; font-family: ui-monospace, monospa
   <h2 id="survives">Failure, recovery &amp; counterexamples checked (with proposal)</h2>
   <dl class="scenarios">
     <div>
-      <dt>Send a prompt in open Available Task (Sort On)</dt>
-      <dd>Task latches at <code>Available</code> (bucket 2). Turning <code>Busy</code> keeps effective bucket 2, so it stays in its saved-order spot within Available instead of dropping to the bottom.</dd>
+      <dt>Switch sidebar filter (Working → Available → Working), then press Enter</dt>
+      <dd>Filter switch clears the old hold immediately. Before <code>applyTaskList</code> installs the new <code>Busy</code> reading for the same Wave, pre-update <code>holdSelectedStatusGroup()</code> captures the open Task’s <code>Available</code> group, so pressing Enter keeps it in Available.</dd>
     </div>
     <div>
-      <dt>Press ⌘1 on the already-open Task after it turned Busy (Sort On)</dt>
-      <dd><code>setSelection</code> checks whether the resolved Task ID changed before replacing the latch; re-selecting the already-open Task keeps its existing latch instead of dropping it to Busy.</dd>
+      <dt>Click “Show working Tasks” when open Task was outside filter</dt>
+      <dd>Switching back to Working shows the open Task in its live group; on its next turn, pre-update hold captures that live group before the new status lands.</dd>
     </div>
     <div>
-      <dt>Click or ⌃Tab from latched Busy Task to Available Task (Sort On)</dt>
-      <dd>Old Task unlatches and drops to Busy (4); newly selected Task latches at its own actual bucket (2). Every row is in strict <code>Blocked → Error → Available → Idle → Busy</code> order.</dd>
+      <dt>Promote or bind a Session to a Task while another Task is held</dt>
+      <dd><code>destination.didSet</code> sees <code>selection != oldValue.selection</code> and clears the previous Task’s hold immediately; <code>sidebarRows</code> also verifies <code>held.taskID == selectedID</code>.</dd>
     </div>
     <div>
-      <dt>A Blocked Task above the open Available Task completes or turns Busy</dt>
-      <dd>Open Task stays at bucket 2 (Available) and smoothly moves up to slot 0. No Idle or Busy row ever jumps above it.</dd>
+      <dt>Re-select the already-open Task (⌘1 or tile zoom)</dt>
+      <dd><code>.work(.task(id)) ↔ .entered(from:, work: .task(id))</code> keeps <code>selection == oldValue.selection</code>, so the existing hold stays intact.</dd>
     </div>
     <div>
-      <dt>New Task arrives or cold start restores selection before <code>taskList</code> loads</dt>
-      <dd><code>applyTaskList</code> updates the reading first, then latches the selected Task’s initial bucket if the latch doesn’t yet match it, so the first turn never drops it.</dd>
+      <dt>Cold start restores selection before first <code>taskList</code> frame</dt>
+      <dd>Pre-update hold is a no-op on empty <code>previous</code>; post-update <code>holdSelectedStatusGroup()</code> captures the first reading’s group.</dd>
     </div>
     <div>
-      <dt>Switch sidebar filter (Working ↔ Available ↔ Busy) while Sort is On</dt>
-      <dd><code>sidebarFilter.didSet</code> clears the latch so a Task latched at Available doesn’t float above earlier Busy rows inside the Busy filter.</dd>
+      <dt>Switch Repository ↔ Wave while Sort is On</dt>
+      <dd>Clicking Repository or a Wave changes <code>selection</code> to non-task (clearing the hold); pre-update hold in <code>applyTaskList</code> is skipped when <code>previous?.wave != wave</code>, so a Wave list never inherits a Repository hold.</dd>
     </div>
     <div>
-      <dt>Switch from Repository to a Wave while Sort is On</dt>
-      <dd>Selecting the Wave clears the Task latch; the toggle stays visible and On, sorting that Wave’s Working Tasks by status. Dragging remains repository-only (when Sort is Off).</dd>
+      <dt>Open Busy Task turns Available, then filter switches to Available</dt>
+      <dd><code>sidebarFilter.didSet</code> clears the old Busy hold immediately, so the row renders at its live Available position inside the Available filter.</dd>
     </div>
     <div>
-      <dt>Task blocked only by Graph/git condition with no program report</dt>
-      <dd><em>Boundary kept:</em> <code>TaskCondition::Blocked</code> is computed in roadmap snapshots, not SQLite selection reads; <code>SelectionState::Blocked</code> reflects program reports only.</dd>
-    </div>
-    <div>
-      <dt>Task leaves Working and re-enters before any drag</dt>
-      <dd><em>Boundary kept:</em> <code>task_orders</code> prunes non-working IDs on the next drag, so reclaiming before any drag restores its prior saved slot rather than prepending.</dd>
-    </div>
-    <div>
-      <dt>Machine goes offline (&gt;10 s) or blips during drag</dt>
-      <dd>Sort toggle works locally while offline without contacting the Machine. Drags serialize in <code>PendingChanges</code> per repository and retry in click order; refused drops restore confirmed order while keeping their Notice.</dd>
+      <dt>Machine goes offline (&gt;10 s) or refuses a drag</dt>
+      <dd>Sort toggle works locally while offline. Drags serialize per repository in <code>PendingChanges</code>; refused drops restore confirmed order in sidebar and grid while keeping their Notice.</dd>
     </div>
   </dl>
 </section>
@@ -382,34 +371,27 @@ kbd { color: var(--muted); font-size: .78rem; font-family: ui-monospace, monospa
     <ul>
       <li><strong>Sorting by Graph step (B2)</strong>, <strong>smart “heading to the end” Auto sink (B3)</strong>, and <strong>manual Close / Park (B4)</strong> — tracked in <a href="explore.html">explore.html</a> and <a href="questions.md">questions.md</a>.</li>
       <li><strong>LOO-937 Project-rank ownership</strong> — separate from Machine-local Working order.</li>
-      <li><strong>Surfacing <code>TaskCondition::Blocked</code> in selection queries</strong> — requires caching or computing git/PR/checkout conditions inside the SQLite selection reader.</li>
-      <li><strong>Returning Desktop launch stuck on saved planning (“Updating…”)</strong> — workspace-restore bug seen in QA rounds 4–5 (<a href="qa.html">qa.html</a>, <a href="questions.md">questions.md</a>), unrelated to Working order.</li>
-      <li><strong><code>config scope --json</code> canonical path mismatch on <code>main</code></strong> — <code>/private/var/folders</code> vs <code>/var/folders</code> in <code>server_operations_match_their_lf_commands</code> (<a href="questions.md">questions.md</a>).</li>
+      <li><strong>Surfacing <code>TaskCondition::Blocked</code> in selection queries</strong> — requires computing or caching git/PR/checkout conditions inside the SQLite selection reader.</li>
+      <li><strong>Returning locked-screen Desktop launch stuck on saved planning (“Updating…”)</strong> and Wave-to-grid SwiftUI layout stall — recorded in <a href="qa.html">qa.html</a> and <a href="questions.md">questions.md</a>, unrelated to Working order.</li>
+      <li><strong><code>config scope --json</code> canonical path mismatch on <code>main</code></strong> — <code>/private/var/folders</code> vs <code>/var/folders</code> in <code>server_operations_match_their_lf_commands</code> (<a href="plan.md">plan.md</a>).</li>
     </ul>
   </div>
 </section>
 
 <section aria-labelledby="questions">
   <h2 id="questions">Choices recorded for review</h2>
-  <p>Option <strong>a</strong> is what this review puts into <a href="plan.md">plan.md</a> for the next pass. All choices are reversible; reply with e.g. <code>1b</code> to change any one.</p>
+  <p>Option <strong>a</strong> is what this review puts into <a href="plan.md">plan.md</a> for the next implement pass. All choices are reversible; reply with e.g. <code>1b</code> to change any one.</p>
   <ol class="choices">
-    <li>While <strong>Sort by status</strong> is On, how should the open Task stay steady across turns?
+    <li>After changing the sidebar filter while <strong>Sort by status</strong> is On, should the still-open Task keep its new live group when you next press Enter?
       <ol type="a">
-        <li><strong>Latch the open Task’s status bucket until you switch away (recommended).</strong> Sending a prompt (<code>Available → Busy</code>) keeps it in the Available group without ever pulling Idle or Busy rows above Available on navigation or completion.</li>
-        <li>Keep pinning an integer slot index (<code>selectedSidebarSlot</code>) as built, accepting that Idle/Busy rows can slide above Available rows when another row changes or releases.</li>
-        <li>Don’t latch at all while Sort by status is On: rows always reflect live status order immediately (since Start-Time Stack is already the default steady mode).</li>
+        <li><strong>Yes — release the old hold on filter switch, and capture the open Task’s current live group before its next turn updates the list (recommended).</strong> Switching filters immediately reflects live status, and pressing Enter afterward still never drops the open Task to the bottom.</li>
+        <li>Keep the current behavior where switching filters leaves the open Task unheld until its next turn lands, allowing that first prompt to drop it to Busy.</li>
       </ol>
     </li>
-    <li>Should <strong>Sort by status</strong> also work when the sidebar is scoped to a Wave?
+    <li>Should switching selection via Session binding / “Create Task from this conversation” release any held status group immediately?
       <ol type="a">
-        <li><strong>Yes — work in both Repository and Wave Working sidebars (recommended).</strong> Saved Dashboards keep their own arrangement; drag-to-reorder stays repository-only when sorting is Off.</li>
-        <li>Keep Sort by status repository-only and hide the button on Wave sidebars (as built).</li>
-      </ol>
-    </li>
-    <li>When you turn <strong>Sort by status</strong> On while a Busy Task is open at slot 0, should it sort down to Busy right away?
-      <ol type="a">
-        <li><strong>Yes — sort every row cleanly on toggle-on, then latch the open Task at its new bucket (recommended).</strong> Clicking “Sort by status” immediately brings Blocked, Error, and Available tasks to slot 0, and keeps the open Task from jumping if its status changes afterward.</li>
-        <li>Hold the open Busy Task at slot 0 even when first turning Sort by status On.</li>
+        <li><strong>Yes — clear <code>heldStatusGroup</code> on any selection change and require <code>held.taskID</code> to match the selected Task in <code>sidebarRows</code> (recommended).</strong> An unselected Task can never remain pinned in an outdated status group.</li>
+        <li>Keep clearing only on non-task destinations and <code>setSelection</code> calls.</li>
       </ol>
     </li>
   </ol>
@@ -417,90 +399,92 @@ kbd { color: var(--muted); font-size: .78rem; font-family: ui-monospace, monospa
 </main>
 <script>
 const scenes = {
-  switch: {
-    barBuilt: ['Repository · Sort by status', '<span class="sort-btn on">⇅ On</span>'],
-    barProposed: ['Repository · Sort by status', '<span class="sort-btn on">⇅ On</span>'],
+  'filter-turn': {
+    barBuilt: ['Repository · Switched Available → Working, then pressed Enter', '<span class="sort-btn on">⇅ On</span>'],
+    barProposed: ['Repository · Switched Available → Working, then pressed Enter', '<span class="sort-btn on">⇅ On</span>'],
     built: [
-      { key: '⌘1', id: 'LOO-105', title: 'Idle task (slid into slot 0!)', status: 'Idle', cls: 'st-idle', step: 'plan', pill: 'above Available', bad: true, mismatch: true },
-      { key: '⌘2', id: 'LOO-104', title: 'Other task (you just clicked / ⌃Tab)', status: 'Available', cls: 'st-available', step: 'implement', pill: 'pinned slot 1', selected: true },
-      { key: '⌘3', id: 'LOO-102', title: 'Previous open task (released)', status: 'Busy', cls: 'st-busy', step: 'implement' }
-    ],
-    proposed: [
-      { key: '⌘1', id: 'LOO-104', title: 'Other task (you just clicked / ⌃Tab)', status: 'Available', cls: 'st-available', step: 'implement', pill: 'latched: Available', selected: true },
-      { key: '⌘2', id: 'LOO-105', title: 'Idle task', status: 'Idle', cls: 'st-idle', step: 'plan' },
-      { key: '⌘3', id: 'LOO-102', title: 'Previous open task (released)', status: 'Busy', cls: 'st-busy', step: 'implement' }
-    ],
-    builtNotice: 'Before the click, LOO-102 (Busy) was pinned at slot 0, so LOO-104 sat at slot 1. Clicking LOO-104 pinned slot 1 and pushed Idle above Available.',
-    proposedNotice: 'LOO-102 unlatches to Busy (bottom); LOO-104 latches at its own bucket (Available) at slot 0. Strict status order holds.',
-    observation: 'This exact inversion is currently asserted in WorkNavigationTests.swift:301 (["idle", "other", "open"]). Latching status bucket instead of integer slot fixes it directly.'
-  },
-  above: {
-    barBuilt: ['Repository · Sort by status (Blocked row completed)', '<span class="sort-btn on">⇅ On</span>'],
-    barProposed: ['Repository · Sort by status (Blocked row completed)', '<span class="sort-btn on">⇅ On</span>'],
-    built: [
-      { key: '⌘1', id: 'LOO-106', title: 'Background run (pulled to slot 0!)', status: 'Busy', cls: 'st-busy', step: 'gate', pill: 'above Available', bad: true, mismatch: true },
-      { key: '⌘2', id: 'LOO-104', title: 'Open task (unchanged)', status: 'Available', cls: 'st-available', step: 'implement', pill: 'pinned slot 1', selected: true }
-    ],
-    proposed: [
-      { key: '⌘1', id: 'LOO-104', title: 'Open task (unchanged)', status: 'Available', cls: 'st-available', step: 'implement', pill: 'latched: Available', selected: true },
-      { key: '⌘2', id: 'LOO-106', title: 'Background run', status: 'Busy', cls: 'st-busy', step: 'gate' }
-    ],
-    builtNotice: 'LOO-104 was at slot 1 behind a Blocked row. When the Blocked row completed, slot 1 stayed pinned and pulled Busy into slot 0 above Available.',
-    proposedNotice: 'LOO-104 stays in the Available bucket and moves smoothly to slot 0 when the Blocked row leaves. Busy stays below Available.',
-    observation: 'The same inversion happens if the Blocked row above turns Busy instead of completing: an integer slot traps lower-priority rows above the selection.'
-  },
-  toggle: {
-    barBuilt: ['Repository · Just clicked Sort by status', '<span class="sort-btn on">⇅ On</span>'],
-    barProposed: ['Repository · Just clicked Sort by status', '<span class="sort-btn on">⇅ On</span>'],
-    built: [
-      { key: '⌘1', id: 'LOO-102', title: 'Open task (was slot 0 in stack)', status: 'Busy', cls: 'st-busy', step: 'implement', pill: 'glued to slot 0', bad: true, mismatch: true },
-      { key: '⌘2', id: 'LOO-101', title: 'Approve schema change', status: 'Blocked', cls: 'st-blocked', step: 'plan' },
-      { key: '⌘3', id: 'LOO-104', title: 'Refactor parser', status: 'Available', cls: 'st-available', step: 'implement' }
+      { key: '⌘1', id: 'LOO-101', title: 'Approve schema change', status: 'Blocked', cls: 'st-blocked', step: 'plan' },
+      { key: '⌘2', id: 'LOO-105', title: 'Other waiting task', status: 'Available', cls: 'st-available', step: 'implement' },
+      { key: '⌘3', id: 'LOO-106', title: 'Quiet draft task', status: 'Idle', cls: 'st-idle', step: 'plan' },
+      { key: '⌘4', id: 'LOO-104', title: 'Open task (dropped on Enter!)', status: 'Busy', cls: 'st-busy', step: 'implement', pill: 'latched Busy', bad: true, mismatch: true }
     ],
     proposed: [
       { key: '⌘1', id: 'LOO-101', title: 'Approve schema change', status: 'Blocked', cls: 'st-blocked', step: 'plan' },
-      { key: '⌘2', id: 'LOO-104', title: 'Refactor parser', status: 'Available', cls: 'st-available', step: 'implement' },
-      { key: '⌘3', id: 'LOO-102', title: 'Open task (sorted, then latched)', status: 'Busy', cls: 'st-busy', step: 'implement', pill: 'latched: Busy', selected: true }
+      { key: '⌘2', id: 'LOO-104', title: 'Open task (stayed in Available)', status: 'Busy', cls: 'st-busy', step: 'implement', pill: 'held: Available', selected: true },
+      { key: '⌘3', id: 'LOO-105', title: 'Other waiting task', status: 'Available', cls: 'st-available', step: 'implement' },
+      { key: '⌘4', id: 'LOO-106', title: 'Quiet draft task', status: 'Idle', cls: 'st-idle', step: 'plan' }
     ],
-    builtNotice: 'Clicking Sort by status pinned the open Busy task at slot 0 above Blocked and Available.',
-    proposedNotice: 'Clicking Sort by status brings Blocked and Available to the top immediately, and latches LOO-102 at Busy so it stays steady while you read it.',
-    observation: 'When you ask to sort by status, urgent rows belong at slot 0 right away.'
+    builtNotice: 'Switching sidebarFilter set heldStatusGroup = nil. On Enter, applyTaskList overwrote taskListReadings with Busy first, then latched Busy — dropping LOO-104 to the bottom.',
+    proposedNotice: 'Before applyTaskList replaces taskListReadings for the same Wave, holdSelectedStatusGroup() captures LOO-104’s Available group, so Enter keeps it in Available.',
+    observation: 'The same drop happens if you click “Show working Tasks” after filtering to Busy and then send a prompt in the open Available Task.'
   },
-  wave: {
-    barBuilt: ['Wave: desktop (toggle hidden, unsorts silently)', '<span class="sort-btn missing">toggle gone</span>'],
-    barProposed: ['Wave: desktop (Working Tasks)', '<span class="sort-btn on">⇅ On</span>'],
+  'bind-session': {
+    barBuilt: ['Repository · Created/bound Task LOO-108 from Session', '<span class="sort-btn on">⇅ On</span>'],
+    barProposed: ['Repository · Created/bound Task LOO-108 from Session', '<span class="sort-btn on">⇅ On</span>'],
     built: [
-      { key: '⌘1', id: 'LOO-106', title: 'Newest Wave task', status: 'Busy', cls: 'st-busy', step: 'gate', pill: 'stack order', bad: true, mismatch: true },
-      { key: '⌘2', id: 'LOO-101', title: 'Blocked Wave task', status: 'Blocked', cls: 'st-blocked', step: 'plan' },
-      { key: '⌘3', id: 'LOO-104', title: 'Waiting Wave task', status: 'Available', cls: 'st-available', step: 'implement' }
+      { key: '⌘1', id: 'LOO-104', title: 'Previous task (unselected, still pinned!)', status: 'Busy', cls: 'st-busy', step: 'implement', pill: 'stale hold', bad: true, mismatch: true },
+      { key: '⌘2', id: 'LOO-108', title: 'Newly bound task (selected)', status: 'Available', cls: 'st-available', step: 'plan', selected: true },
+      { key: '⌘3', id: 'LOO-106', title: 'Quiet draft task', status: 'Idle', cls: 'st-idle', step: 'plan' }
+    ],
+    proposed: [
+      { key: '⌘1', id: 'LOO-108', title: 'Newly bound task (selected)', status: 'Available', cls: 'st-available', step: 'plan', pill: 'live: Available', selected: true },
+      { key: '⌘2', id: 'LOO-106', title: 'Quiet draft task', status: 'Idle', cls: 'st-idle', step: 'plan' },
+      { key: '⌘3', id: 'LOO-104', title: 'Previous task (released to Busy)', status: 'Busy', cls: 'st-busy', step: 'implement' }
+    ],
+    builtNotice: 'owner.selection = .task(...) bypassed setSelection. destination.didSet kept heldStatusGroup because selection was still a Task, and sidebarRows did not check selection.',
+    proposedNotice: 'destination.didSet clears heldStatusGroup whenever selection != oldValue.selection, and sidebarRows only applies a hold to the selected Task.',
+    observation: 'No matter how selection changes, an unselected Task can never remain pinned in a stale status group.'
+  },
+  reselect: {
+    barBuilt: ['Repository · Pressed ⌘1 on held open Task', '<span class="sort-btn on">⇅ On</span>'],
+    barProposed: ['Repository · Pressed ⌘1 on held open Task', '<span class="sort-btn on">⇅ On</span>'],
+    built: [
+      { key: '⌘1', id: 'LOO-104', title: 'Open task (zoomed from grid)', status: 'Busy', cls: 'st-busy', step: 'implement', pill: 'held: Available', selected: true },
+      { key: '⌘2', id: 'LOO-105', title: 'Other waiting task', status: 'Available', cls: 'st-available', step: 'implement' },
+      { key: '⌘3', id: 'LOO-106', title: 'Quiet draft task', status: 'Idle', cls: 'st-idle', step: 'plan' }
+    ],
+    proposed: [
+      { key: '⌘1', id: 'LOO-104', title: 'Open task (zoomed from grid)', status: 'Busy', cls: 'st-busy', step: 'implement', pill: 'held: Available', selected: true },
+      { key: '⌘2', id: 'LOO-105', title: 'Other waiting task', status: 'Available', cls: 'st-available', step: 'implement' },
+      { key: '⌘3', id: 'LOO-106', title: 'Quiet draft task', status: 'Idle', cls: 'st-idle', step: 'plan' }
+    ],
+    builtNotice: 'Both keep LOO-104’s Available hold across repeated ⌘1 presses and .work ↔ .entered transitions.',
+    proposedNotice: 'Destination.selection returns the same .task("LOO-104") for .work and .entered, so selection == oldValue.selection preserves the hold.',
+    observation: 'Already covered by openTaskKeepsItsStatusGroupUntilAnotherTaskIsSelected in WorkNavigationTests.'
+  },
+  'cold-start': {
+    barBuilt: ['Repository · First taskList reading arrives', '<span class="sort-btn on">⇅ On</span>'],
+    barProposed: ['Repository · First taskList reading arrives', '<span class="sort-btn on">⇅ On</span>'],
+    built: [
+      { key: '⌘1', id: 'LOO-101', title: 'Approve schema change', status: 'Blocked', cls: 'st-blocked', step: 'plan' },
+      { key: '⌘2', id: 'LOO-104', title: 'Restored open task', status: 'Available', cls: 'st-available', step: 'implement', pill: 'held: Available', selected: true },
+      { key: '⌘3', id: 'LOO-106', title: 'Background run', status: 'Busy', cls: 'st-busy', step: 'gate' }
+    ],
+    proposed: [
+      { key: '⌘1', id: 'LOO-101', title: 'Approve schema change', status: 'Blocked', cls: 'st-blocked', step: 'plan' },
+      { key: '⌘2', id: 'LOO-104', title: 'Restored open task', status: 'Available', cls: 'st-available', step: 'implement', pill: 'held: Available', selected: true },
+      { key: '⌘3', id: 'LOO-106', title: 'Background run', status: 'Busy', cls: 'st-busy', step: 'gate' }
+    ],
+    builtNotice: 'Post-update holdSelectedStatusGroup() latches LOO-104 on its first reading.',
+    proposedNotice: 'Pre-update hold is a no-op with no previous reading; post-update holdSelectedStatusGroup() latches LOO-104 on its first reading.',
+    observation: 'When LOO-101 completes above it, LOO-104 moves smoothly to ⌘1 without pulling Busy above Available.'
+  },
+  'wave-toggle': {
+    barBuilt: ['Wave: desktop · Working Tasks', '<span class="sort-btn on">⇅ On</span>'],
+    barProposed: ['Wave: desktop · Working Tasks', '<span class="sort-btn on">⇅ On</span>'],
+    built: [
+      { key: '⌘1', id: 'LOO-101', title: 'Blocked Wave task', status: 'Blocked', cls: 'st-blocked', step: 'plan' },
+      { key: '⌘2', id: 'LOO-104', title: 'Waiting Wave task', status: 'Available', cls: 'st-available', step: 'implement' },
+      { key: '⌘3', id: 'LOO-106', title: 'Newest Wave task', status: 'Busy', cls: 'st-busy', step: 'gate' }
     ],
     proposed: [
       { key: '⌘1', id: 'LOO-101', title: 'Blocked Wave task', status: 'Blocked', cls: 'st-blocked', step: 'plan' },
       { key: '⌘2', id: 'LOO-104', title: 'Waiting Wave task', status: 'Available', cls: 'st-available', step: 'implement' },
       { key: '⌘3', id: 'LOO-106', title: 'Newest Wave task', status: 'Busy', cls: 'st-busy', step: 'gate' }
     ],
-    builtNotice: 'Clicking a Wave hides the Sort button and reverts to stack order even though sidebarSortByStatus stays true until you click back to Repository.',
-    proposedNotice: 'Wave sidebars show Working Tasks from the same taskList. Keeping the local toggle active in Wave scopes removes a stale one-shot-write restriction.',
-    observation: 'Saved Dashboards still keep their own arrangement, and drag-to-reorder remains repository-only (when sorting is Off).'
-  },
-  turn: {
-    barBuilt: ['Repository · Sent prompt in LOO-104', '<span class="sort-btn on">⇅ On</span>'],
-    barProposed: ['Repository · Sent prompt in LOO-104', '<span class="sort-btn on">⇅ On</span>'],
-    built: [
-      { key: '⌘1', id: 'LOO-101', title: 'Approve schema change', status: 'Blocked', cls: 'st-blocked', step: 'plan' },
-      { key: '⌘2', id: 'LOO-104', title: 'Refactor parser (just turned Busy)', status: 'Busy', cls: 'st-busy', step: 'implement', pill: 'pinned slot 1', selected: true },
-      { key: '⌘3', id: 'LOO-105', title: 'Draft notes', status: 'Idle', cls: 'st-idle', step: 'plan' },
-      { key: '⌘4', id: 'LOO-106', title: 'Run test matrix', status: 'Busy', cls: 'st-busy', step: 'gate' }
-    ],
-    proposed: [
-      { key: '⌘1', id: 'LOO-101', title: 'Approve schema change', status: 'Blocked', cls: 'st-blocked', step: 'plan' },
-      { key: '⌘2', id: 'LOO-104', title: 'Refactor parser (just turned Busy)', status: 'Busy', cls: 'st-busy', step: 'implement', pill: 'latched: Available', selected: true },
-      { key: '⌘3', id: 'LOO-105', title: 'Draft notes', status: 'Idle', cls: 'st-idle', step: 'plan' },
-      { key: '⌘4', id: 'LOO-106', title: 'Run test matrix', status: 'Busy', cls: 'st-busy', step: 'gate' }
-    ],
-    builtNotice: 'Both keep LOO-104 in place when you press Enter.',
-    proposedNotice: 'LOO-104 keeps its Available bucket while open, so pressing Enter never drops it to the bottom.',
-    observation: 'The core promise from the brief and demo is preserved, without the index-pinning bugs in scenarios 1–3.'
+    builtNotice: 'Wave sidebars share the repository toggle; saved Dashboards keep their own arrangement and hide the toggle.',
+    proposedNotice: 'Unchanged — Wave sidebar sorting and saved Dashboard isolation already align cleanly.',
+    observation: 'Verified in WorkNavigationTests and private Machine QA round 6.'
   }
 };
 
@@ -557,7 +541,7 @@ for (const btn of buttons) {
     show(btn.dataset.scene);
   });
 }
-show('switch');
+show('filter-turn');
 </script>
 </body>
 </html>

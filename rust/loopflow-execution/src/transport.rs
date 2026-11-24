@@ -1749,24 +1749,12 @@ impl ReturnCommand {
         }
     }
 
-    fn rewrite<'a>(&self, bytes: &'a [u8]) -> std::borrow::Cow<'a, [u8]> {
-        let from = self.owner.as_bytes();
-        if from.is_empty() || !bytes.windows(from.len()).any(|window| window == from) {
-            return std::borrow::Cow::Borrowed(bytes);
-        }
-        let mut out = Vec::with_capacity(bytes.len());
-        let mut rest = bytes;
-        while let Some(at) = rest.windows(from.len()).position(|window| window == from) {
-            out.extend_from_slice(&rest[..at]);
-            out.extend_from_slice(self.here.as_bytes());
-            rest = &rest[at + from.len()..];
-        }
-        out.extend_from_slice(rest);
-        std::borrow::Cow::Owned(out)
-    }
-
-    fn rewrite_text(&self, text: &str) -> String {
-        text.replace(&self.owner, &self.here)
+    /// Only lf's own lines are rewritten; provider output passes untouched.
+    fn rewrite(returns: Option<&Self>, text: &str) -> String {
+        returns.map_or_else(
+            || text.to_owned(),
+            |returns| text.replace(&returns.owner, &returns.here),
+        )
     }
 }
 
@@ -2110,10 +2098,6 @@ fn view(
                 for piece in pieces {
                     let event = match piece {
                         wire::Piece::Bytes(bytes) => {
-                            let bytes = match returns {
-                                Some(returns) => returns.rewrite(&bytes),
-                                None => std::borrow::Cow::Borrowed(&bytes[..]),
-                            };
                             write_output(&mut terminal, stream, &bytes)?;
                             continue;
                         }
@@ -2141,8 +2125,6 @@ fn view(
                             return Ok(());
                         }
                         Event::Return { detach } => {
-                            let detach = returns
-                                .map_or(detach.clone(), |returns| returns.rewrite_text(&detach));
                             // The agent may have exited with its final output and
                             // status still buffered. A readiness write cannot discard them.
                             let acknowledged = send(
@@ -2153,7 +2135,8 @@ fn view(
                             )
                             .inspect_err(|error| tracing::debug!(%error, "viewer readiness was not delivered"))
                             .is_ok();
-                            returning = Some(detach);
+                            // The terminal matches its own text; only the shown line is rewritten.
+                            returning = Some(ReturnCommand::rewrite(returns, &detach));
                             // A tab launch succeeds only when this view is attached
                             // and its Session's native client is ready.
                             if attached && acknowledged {
@@ -2181,8 +2164,7 @@ fn view(
                             }
                         }
                         Event::Hint { text } => {
-                            let text =
-                                returns.map_or(text.clone(), |returns| returns.rewrite_text(&text));
+                            let text = ReturnCommand::rewrite(returns, &text);
                             if let Some(terminal) = &mut terminal {
                                 output.drew();
                                 terminal.write(2, format!("\r\n{text}\r\n").as_bytes())?;

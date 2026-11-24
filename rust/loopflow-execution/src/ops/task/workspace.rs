@@ -1,5 +1,5 @@
 //! File observation in a retained Task checkout; never prepares or starts work.
-use std::collections::{BTreeSet, HashSet};
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -12,14 +12,14 @@ use loopflow_model::durable::{MachineId, TaskId};
 use loopflow_storage::sqlite::SqliteStore;
 
 fn watch_checkout(
-    expected: &Path,
+    checkout: &Path,
     mut changed: impl FnMut(notify::Result<Vec<String>>) + Send + 'static,
 ) -> Result<notify::RecommendedWatcher> {
-    let metadata = crate::git::absolute_git_dir(expected)?;
+    let metadata = crate::git::absolute_git_dir(checkout)?;
     // Watchers report either the watched spelling or the resolved one.
     let roots = EventRoots {
-        checkout: vec![expected.to_path_buf(), expected.canonicalize()?],
-        metadata: vec![metadata.clone(), metadata.canonicalize()?],
+        checkout: [checkout.to_path_buf(), checkout.canonicalize()?],
+        metadata: [metadata.clone(), metadata.canonicalize()?],
     };
     let mut watcher =
         notify::recommended_watcher(move |event: notify::Result<notify::Event>| match event {
@@ -37,8 +37,8 @@ fn watch_checkout(
             }
             Err(error) => changed(Err(error)),
         })?;
-    watcher.watch(expected, RecursiveMode::Recursive)?;
-    if !metadata.starts_with(expected) {
+    watcher.watch(checkout, RecursiveMode::Recursive)?;
+    if !metadata.starts_with(checkout) {
         watcher.watch(&metadata, RecursiveMode::Recursive)?;
     }
     Ok(watcher)
@@ -59,7 +59,6 @@ pub struct TaskFilesRevision {
 /// Follows one Task's recorded checkout: it opens a directory watcher when the
 /// checkout appears and replaces it when the record changes.
 pub struct TaskFilesWatch {
-    issue: String,
     store: SqliteStore,
     wake: Arc<dyn Fn() + Send + Sync>,
     watching: Option<CheckoutWatch>,
@@ -69,7 +68,6 @@ pub struct TaskFilesWatch {
 impl std::fmt::Debug for TaskFilesWatch {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("TaskFilesWatch")
-            .field("issue", &self.issue)
             .field("current", &self.current)
             .finish_non_exhaustive()
     }
@@ -101,8 +99,7 @@ impl TaskFilesWatch {
                 )
             })?;
         let machine = crate::store::machines::local_machine(&store)?;
-        let mut watch = Self {
-            issue: issue.to_owned(),
+        Ok(Self {
             store,
             wake: Arc::new(wake),
             watching: None,
@@ -113,9 +110,7 @@ impl TaskFilesWatch {
                 checkout: None,
                 revision: None,
             },
-        };
-        watch.follow_record()?;
-        Ok(watch)
+        })
     }
 
     /// The current reading. A changed checkout record replaces the watcher.
@@ -129,9 +124,7 @@ impl TaskFilesWatch {
             return Err(error.into());
         }
         let checkout = self.current.checkout.as_deref().expect("watched checkout");
-        if !batch.paths.is_empty()
-            && !relevant_paths(checkout, batch.paths, &mut watching.ignore_failed).is_empty()
-        {
+        if invalidates_tree(checkout, &batch.paths, &mut watching.ignore_failed) {
             self.current.revision = Some(uuid::Uuid::new_v4().to_string());
         }
         Ok(&self.current)
@@ -145,12 +138,11 @@ impl TaskFilesWatch {
         if checkout == self.current.checkout {
             return Ok(());
         }
-        self.watching = None;
-        self.current.revision = None;
-        if let Some(path) = &checkout {
-            self.watching = Some(self.watch(path)?);
-            self.current.revision = Some(uuid::Uuid::new_v4().to_string());
-        }
+        self.watching = checkout
+            .as_deref()
+            .map(|path| self.watch(path))
+            .transpose()?;
+        self.current.revision = checkout.as_ref().map(|_| uuid::Uuid::new_v4().to_string());
         self.current.checkout = checkout;
         Ok(())
     }
@@ -184,8 +176,8 @@ impl TaskFilesWatch {
 }
 
 struct EventRoots {
-    checkout: Vec<PathBuf>,
-    metadata: Vec<PathBuf>,
+    checkout: [PathBuf; 2],
+    metadata: [PathBuf; 2],
 }
 
 impl EventRoots {
@@ -211,36 +203,34 @@ impl EventRoots {
     }
 }
 
-/// Drop git-ignored paths. Metadata and rescans pass; the reader judges them.
-/// When git cannot judge, every path stays relevant.
-fn relevant_paths(root: &Path, batch: BTreeSet<String>, ignore_failed: &mut bool) -> Vec<String> {
-    if batch.contains("") {
-        return vec![String::new()];
+/// Rescans and Git metadata always invalidate the tree. Other changes matter
+/// only if at least one path is visible, or Git cannot tell.
+fn invalidates_tree(root: &Path, paths: &BTreeSet<String>, ignore_failed: &mut bool) -> bool {
+    if paths.is_empty() {
+        return false;
     }
-    let candidates = batch
+    if paths
         .iter()
-        .filter(|path| *path != ".git" && !path.starts_with(".git/"))
-        .map(String::as_str);
-    let ignored = match crate::git::ignored_paths(root, candidates) {
-        Ok(ignored) => ignored,
+        .any(|p| p.is_empty() || p == ".git" || p.starts_with(".git/"))
+    {
+        return true;
+    }
+    match crate::git::ignored_paths(root, paths.iter().map(String::as_str)) {
+        Ok(ignored) => paths.iter().any(|path| !ignored.contains(path)),
         Err(error) => {
             if !std::mem::replace(ignore_failed, true) {
                 tracing::warn!("file observation keeps ignored paths: {error}");
             }
-            HashSet::new()
+            true
         }
-    };
-    batch
-        .into_iter()
-        .filter(|path| !ignored.contains(path))
-        .collect()
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeSet;
 
-    use super::relevant_paths;
+    use super::invalidates_tree;
 
     #[test]
     fn ignored_build_output_never_invalidates_the_tree() {
@@ -255,20 +245,14 @@ mod tests {
         };
         git(&["init", "-q"]);
         std::fs::write(repo.path().join(".gitignore"), "target/\n").unwrap();
-        let batch: BTreeSet<String> = ["target/out", "note.txt", ".git/index"]
-            .map(String::from)
-            .into();
-        let mut ignore_failed = false;
-        assert_eq!(
-            relevant_paths(repo.path(), batch, &mut ignore_failed),
-            [".git/index", "note.txt"]
-        );
-        assert!(!ignore_failed);
-        // A rescan is never filtered.
-        let rescan: BTreeSet<String> = ["", "target/out"].map(String::from).into();
-        assert_eq!(
-            relevant_paths(repo.path(), rescan, &mut ignore_failed),
-            [""]
-        );
+        let changed = |paths: &[&str]| {
+            let paths: BTreeSet<_> = paths.iter().map(|p| p.to_string()).collect();
+            invalidates_tree(repo.path(), &paths, &mut false)
+        };
+        assert!(!changed(&[]));
+        assert!(!changed(&["target/out"]));
+        assert!(changed(&["target/out", "note.txt"]));
+        assert!(changed(&["target/out", ".git/index"]));
+        assert!(changed(&["target/out", ""]));
     }
 }

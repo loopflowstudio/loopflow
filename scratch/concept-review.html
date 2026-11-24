@@ -19,8 +19,8 @@
     --no-fg: #a40e26;
     --out-bg: #fff8c5;
     --out-fg: #7d4e00;
-    --existing-bg: #eaeef2;
-    --existing-fg: #424a53;
+    --built-bg: #eaeef2;
+    --built-fg: #424a53;
     --proposed-bg: #ddf4ff;
     --proposed-fg: #0550ae;
     --code-bg: #f1f3f6;
@@ -45,8 +45,8 @@
       --no-fg: #ff7b72;
       --out-bg: #34270a;
       --out-fg: #e3b341;
-      --existing-bg: #262c36;
-      --existing-fg: #b1bac4;
+      --built-bg: #262c36;
+      --built-fg: #b1bac4;
       --proposed-bg: #122d4a;
       --proposed-fg: #79c0ff;
       --code-bg: #1c2128;
@@ -75,9 +75,9 @@
   h2 { margin: 2.25rem 0 0.75rem; font-size: 19px; line-height: 1.3; }
   h3 { margin: 1.25rem 0 0.4rem; font-size: 15px; line-height: 1.35; }
   p { margin: 0.5rem 0 0.85rem; }
-  .lead { font-size: 16px; color: var(--muted); max-width: 78ch; }
+  .lead { font-size: 16px; color: var(--muted); max-width: 80ch; }
   .status-strip {
-    display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.9rem;
+    display: flex; flex-wrap: wrap; gap: 0.55rem 0.9rem; margin-top: 0.9rem;
     font-size: 13px; color: var(--muted);
   }
   .badge {
@@ -87,7 +87,7 @@
   .badge-yes { background: var(--yes-bg); color: var(--yes-fg); }
   .badge-no { background: var(--no-bg); color: var(--no-fg); }
   .badge-out { background: var(--out-bg); color: var(--out-fg); }
-  .badge-existing { background: var(--existing-bg); color: var(--existing-fg); }
+  .badge-built { background: var(--built-bg); color: var(--built-fg); }
   .badge-proposed { background: var(--proposed-bg); color: var(--proposed-fg); }
 
   table {
@@ -135,9 +135,7 @@
     margin-bottom: 0.6rem; font-weight: 700; font-size: 14px;
   }
 
-  .flow {
-    display: flex; flex-direction: column; gap: 0.45rem; font-size: 13.5px;
-  }
+  .flow { display: flex; flex-direction: column; gap: 0.45rem; font-size: 13.5px; }
   .step {
     padding: 0.5rem 0.7rem; border-radius: 6px; border: 1px solid var(--border);
     background: var(--bg);
@@ -145,7 +143,31 @@
   .step.bad { border-color: var(--no-fg); background: color-mix(in srgb, var(--no-bg) 45%, var(--bg)); }
   .step.good { border-color: var(--yes-fg); background: color-mix(in srgb, var(--yes-bg) 35%, var(--bg)); }
 
-  /* UI dialog mocks */
+  /* UI mocks */
+  .bar {
+    display: flex; align-items: center; justify-content: space-between; gap: 0.6rem;
+    padding: 0.65rem 0.85rem; border-radius: 8px; border: 1px solid var(--border);
+    background: var(--bg); font-size: 13px; margin-bottom: 0.6rem;
+  }
+  .bar-meta { color: var(--muted); font-size: 12.5px; }
+  .pill-btn {
+    padding: 4px 10px; border-radius: 6px; font-weight: 600; font-size: 12.5px;
+    border: 1px solid var(--border); background: var(--primary-bg); color: var(--primary-fg);
+    border-color: transparent;
+  }
+  .pill-btn.disabled {
+    background: var(--surface-strong); color: var(--muted); border-color: var(--border);
+    opacity: 0.75;
+  }
+  .warn-line {
+    font-size: 12.5px; padding: 0.45rem 0.65rem; border-radius: 6px;
+    background: var(--no-bg); color: var(--no-fg); margin-bottom: 0.5rem;
+  }
+  .ok-line {
+    font-size: 12.5px; padding: 0.45rem 0.65rem; border-radius: 6px;
+    background: var(--yes-bg); color: var(--yes-fg); margin-bottom: 0.5rem;
+  }
+
   .dialog {
     background: var(--bg); border: 1px solid var(--border); border-radius: 12px;
     padding: 1rem 1.1rem; box-shadow: var(--shadow);
@@ -183,178 +205,206 @@
 <body>
 <main>
   <header>
-    <div class="eyebrow">Concept Review · LOO-1094</div>
+    <div class="eyebrow">Concept Review (Post-Build) · LOO-1094 · HEAD 4f0a3df9</div>
     <h1>Ending &amp; Reopening Parent Tasks</h1>
     <p class="lead">
-      <strong>Area reviewed:</strong> ending and reopening a Task when it has open children — covering
-      <code>complete</code>, pending completion at Graph <code>end</code>, live-work guards,
-      <code>reopen</code> of abandoned Tasks, and how CLI, Desktop, and iOS present and execute them.
-      Widened beyond the <code>--children</code> flag because parent completion currently shares one
-      state machine with Graph-end completion and one blocker check with checkout deletion.
+      <strong>Area reviewed:</strong> ending and reopening Tasks when children exist — covering
+      explicit parent completion (<code>--children rehome|abandon</code>), pending Graph-end
+      completion, live-work guards, Desktop and iOS completion dialogs, and the full lifecycle of
+      reopening an abandoned Task (status, Desktop controls, checkout, next run, and completion).
+      Reviewed against <code>origin/main</code> with the entire branch in place.
     </p>
     <div class="status-strip">
-      <span><span class="badge badge-existing">Committed on HEAD</span> <code>reopen_task</code> allows reopening abandoned Tasks</span>
-      <span><span class="badge badge-proposed">Revised in scratch/plan.md</span> Explicit completion, live guard, rehome, CLI/Desktop/iOS</span>
+      <span><span class="badge badge-built">Built on HEAD</span> Immediate parent completion, live-work guard, Desktop &amp; iOS dialogs, initial reopen</span>
+      <span><span class="badge badge-proposed">Proposed for next pass</span> Clean abandoned-Task reopen (PR archival + dead checkout clear), conflict mapping, running row indicator, deleted-ancestor stop</span>
     </div>
   </header>
 
-  <h2>Do product concepts and code concepts line up?</h2>
+  <h2>Do product concepts and code concepts line up on HEAD?</h2>
   <table>
     <thead>
       <tr>
-        <th style="width:24%">Product concept</th>
-        <th style="width:30%">Code concept (HEAD + kickoff plan)</th>
+        <th style="width:23%">Product concept</th>
+        <th style="width:31%">Code concept on HEAD (<code>4f0a3df9</code>)</th>
         <th style="width:9%">Match?</th>
-        <th>What is wrong</th>
+        <th>What is right or wrong</th>
       </tr>
     </thead>
     <tbody>
       <tr class="biggest">
-        <td><strong>Complete a parent Task now</strong><br><span class="small">Immediate decision with <code>rehome</code> or <code>abandon</code>; refusal changes nothing</span></td>
-        <td>Stored as a pending <code>tasks.completion_request</code> via 3 <code>TaskEventKind</code> variants (<code>CompletionRequested</code>, <code>FamilyCompletionRequested</code>, proposed <code>RehomingCompletionRequested</code>)</td>
+        <td><strong>Reopen an abandoned Task</strong><br><span class="small">Brings it back to life: ready to run in Desktop/CLI, or complete if no PR is needed</span></td>
+        <td><code>reopen_task</code> clears <code>tasks.abandoned_at</code>, but leaves the closed PR as <code>historical = 0</code> (<code>active_task_pr</code>) and leaves the deleted <code>task_checkouts</code> row; QA patched <code>restore_task_checkout</code> for published PRs only</td>
         <td><span class="badge badge-no">No</span></td>
-        <td><strong>Biggest mismatch.</strong> Two different lifecycles under one mechanism. Writing <code>completion_request</code> before checking guards leaves a failed <code>--children abandon</code> armed in SQLite so background reconciliation silently abandons children later — contradicting "refuses, writing nothing" and forcing a new event kind + version-skew workaround.</td>
+        <td><strong>Biggest mismatch.</strong> Two states conflated: an open Task whose PR closed externally vs. an abandoned Task explicitly reopened. Leaving the dead PR and deleted checkout live disables Desktop's <strong>Run</strong> / <strong>Auto-Ship</strong> / <strong>Start from…</strong> buttons (missing-worktree blocker), makes <code>lf task status</code> say <em>"PR closed without merge; reopen the same PR or abandon the Task"</em> (<code>no_action</code>), blocks <code>lf task complete</code> on the dead PR, and fails <code>lf task run</code> on unpublished abandoned checkouts.</td>
       </tr>
       <tr>
-        <td><strong>Graph reached <code>end</code></strong><br><span class="small">Waits for PR merge; stays open if children remain</span></td>
-        <td><code>tasks.completion_request</code> + <code>TaskEventKind::CompletionRequested</code>; clears itself (<code>WaitingForChildren</code>) when children are open</td>
+        <td><strong>Complete a parent Task now</strong><br><span class="small">Immediate decision (<code>rehome</code> or <code>abandon</code>); refusal writes nothing and answers <code>conflict</code></span></td>
+        <td><code>complete_task_now</code> runs in one <code>IMMEDIATE</code> tx; pre-flight checks use <code>OpsError::Refused(Error::conflict)</code>, but <code>complete_task_now</code> errors map via <code>task_error</code></td>
+        <td><span class="badge badge-no">No</span></td>
+        <td>The immediate-transaction model is built and clean (<code>request_family_completion</code> is gone). One seam remains: if <code>complete_task_now</code> itself refuses (e.g. a child was filed between pre-check and tx), <code>map_err(task_error)</code> turns it into <code>outcome_unknown</code> (<em>"It may have happened"</em>) instead of <code>conflict</code>.</td>
+      </tr>
+      <tr>
+        <td><strong>Open work shown before deciding</strong><br><span class="small">Every open descendant and whether it is actively running</span></td>
+        <td><code>open_children_refusal</code> prints the indented descendant tree, but drops <code>descendant.state</code> (<code>Moving</code>) whenever a PR string is present</td>
+        <td><span class="badge badge-no">No</span></td>
+        <td>Indented grandchildren are built and aligned. Missing one cue (QA finding #4): a child with an open PR and a running Graph prints <code>#101 open</code> without <code>running</code>, hiding that <code>--children abandon</code> will refuse until the person tries it.</td>
+      </tr>
+      <tr>
+        <td><strong>Move children up (rehome)</strong><br><span class="small">Direct open children move to the nearest open visible ancestor, or top-level</span></td>
+        <td>Rust <code>rehome_destination_in</code> walks <em>through</em> deleted ancestors; Desktop <code>WorkModel.rehomeDestination</code> stops at deleted ancestors (not in <code>RoadmapSnapshot</code>)</td>
+        <td><span class="badge badge-no">No</span></td>
+        <td>A deleted Task already breaks the visible hierarchy in <code>lf wave show</code> and Desktop. Walking through a deleted row makes Rust teleport children under an invisible grandparent while Desktop's button says <em>Move Children to Top Level</em>. Stopping at deleted rows aligns both with zero new DTO fields.</td>
+      </tr>
+      <tr>
+        <td><strong>Graph reached <code>end</code></strong><br><span class="small">Waits for PR merge; stays open while children exist</span></td>
+        <td><code>tasks.completion_request</code> + <code>TaskEventKind::CompletionRequested</code>; clears itself (<code>WaitingForChildren</code>) when open children exist</td>
         <td><span class="badge badge-yes">Yes</span></td>
-        <td>Clean once decoupled from parent completion: <code>family: bool</code> and <code>request_family_completion</code> disappear.</td>
+        <td>Built on HEAD. Decoupled from parent completion; never settles children in the background.</td>
       </tr>
       <tr>
-        <td><strong>Live work blocking <code>--children abandon</code></strong><br><span class="small">Running Graph, headless run, or active turn — not an idle conversation parked at <code>ship-review</code></span></td>
-        <td>Kickoff plan calls <code>task_execution_blockers</code>, which treats every live <code>agent_sessions</code> process (including idle held conversations) as a blocker</td>
-        <td><span class="badge badge-no">No</span></td>
-        <td>One predicate used for two different jobs (deleting a directory vs. abandoning a Task whose idle conversations <code>close_conversations</code> shuts down). Every started child parked at <code>ship-review</code> would refuse <code>--children abandon</code> with no <code>lf task interrupt</code> way to clear it.</td>
-      </tr>
-      <tr>
-        <td><strong>Open work shown before deciding</strong><br><span class="small">Every open descendant that <code>abandon</code> would settle</span></td>
-        <td>CLI refusal lists direct children only (calling <code>TaskRow::standing()</code> from the wrong crate); Desktop reads <code>openDescendants</code>; iOS adds <code>open_children: u32</code> on polymorphic <code>ViewContent</code></td>
-        <td><span class="badge badge-no">No</span></td>
-        <td>CLI refusal would hide an unmerged grandchild under a merged child, letting <code>--children abandon</code> surprise-abandon it. Also <code>TaskRow</code> lives in <code>loopflow</code>, not <code>loopflow-execution</code>, and <code>ViewContent</code> is shared by Waves and Tasks (should be <code>Option&lt;u32&gt;</code> in <code>sqlite/selections.rs</code>).</td>
-      </tr>
-      <tr>
-        <td><strong>Move children up (rehome)</strong><br><span class="small">Direct open children move to the nearest open ancestor, or top-level</span></td>
-        <td>Kickoff plan writes <code>Edit::TaskParent(parent.parent_task_id)</code> verbatim</td>
-        <td><span class="badge badge-no">No</span></td>
-        <td>Copying <code>parent_task_id</code> blindly can rehome open children under an already-done, abandoned, or deleted grandparent. Walking up to the nearest open ancestor (else top-level) gives one rule for refusal hints, SQLite writes, CLI output, and Desktop button labels.</td>
-      </tr>
-      <tr>
-        <td><strong>Desktop &amp; iOS Complete UX</strong><br><span class="small">Natural two-choice dialog; never defaults to abandoning</span></td>
-        <td>Desktop defaults to Move even when every open descendant is already merged; message only describes abandon; iOS swipe has no child count yet</td>
-        <td><span class="badge badge-no">No</span></td>
-        <td>When every open descendant already merged, <code>Complete &amp; Finish Children</code> abandons nothing and is the natural default; when any descendant is unmerged, <code>Move Children</code> is default and <code>Abandon Children</code> is destructive.</td>
-      </tr>
-      <tr>
-        <td><strong>Reopen an abandoned Task</strong><br><span class="small">Restores <code>started</code>/<code>unstarted</code>, clears auto, revokes cleanup</span></td>
-        <td><code>reopen_task</code> clears <code>abandoned_at</code> / <code>abandon_reason</code> / <code>completion_request</code>, sets state, clears <code>task_auto</code>; <code>cancel_task_retirement</code> trigger deletes retirement row</td>
+        <td><strong>Live work blocking <code>--children abandon</code></strong><br><span class="small">Running Graph, headless run, or active turn — not an idle conversation at <code>ship-review</code></span></td>
+        <td><code>live_abandon_blockers</code> walks the open descendant tree, checks <code>unresolved_work</code>, and excludes idle held terminals (<code>terminal_retention == None</code>)</td>
         <td><span class="badge badge-yes">Yes</span></td>
-        <td>Already committed on HEAD. Confirmed <code>task_summaries</code> is historical ("when it last ended") and never read by <code>TaskState</code> or the board — no divergence from done-reopen.</td>
+        <td>Built on HEAD. Names each blocked child and <code>lf task interrupt &lt;id&gt;</code>; idle conversations close cleanly.</td>
+      </tr>
+      <tr>
+        <td><strong>Desktop &amp; iOS Complete UX</strong><br><span class="small">One natural two-choice dialog; never defaults to abandoning</span></td>
+        <td>Desktop <code>TaskCompleteConfirmation</code> (Move-first when unmerged exist, Finish-first when all merged); iOS <code>TaskFeed.complete</code> checks <code>ViewContent.open_children</code> before writing</td>
+        <td><span class="badge badge-yes">Yes</span></td>
+        <td>Built on HEAD and verified on iPhone SE Simulator. Shared title helper <code>TaskChildPolicy.question</code> keeps both surfaces consistent.</td>
       </tr>
       <tr>
         <td><strong>Abandon a parent Task</strong><br><span class="small"><code>lf task abandon LOO-12</code></span></td>
         <td>Cancels only <code>LOO-12</code>; open children remain open and surface top-level via <code>task_hierarchy</code></td>
         <td><span class="badge badge-out">Outside</span></td>
-        <td>Safe today (never cascades abandonment to children). Asymmetric with <code>complete</code>, noted below as a separate outcome if parent-abandon rehoming is ever wanted.</td>
+        <td>Safe today (never cascades abandonment). Adding <code>--children</code> to <code>abandon</code> is a separate outcome.</td>
       </tr>
     </tbody>
   </table>
 
-  <h2>Biggest mismatch: parent completion inside the pending request lifecycle</h2>
+  <h2>Biggest mismatch: reopening an abandoned Task leaves its dead PR and deleted checkout live</h2>
   <div class="callout">
-    <div class="callout-title">Counterexample that breaks the kickoff plan</div>
+    <div class="callout-title">Counterexample on current HEAD</div>
     <p>
-      <code>LOO-12</code> has open child <code>LOO-15</code> running a Graph. Someone runs
-      <code>lf task complete LOO-12 --children abandon</code>. Under the kickoff plan,
-      <code>request_family_completion</code> writes <code>FamilyCompletionRequested</code> into
-      <code>tasks.completion_request</code> <em>before</em> the live guard runs, then records the
-      blocker in <code>completion_error</code>. The person sees the error and leaves <code>LOO-15</code>
-      alone to finish. Later, <code>LOO-15</code> parks at <code>ship-review</code> and background
-      reconciliation runs on <code>LOO-12</code> — settling the armed request and
-      <strong>silently abandoning <code>LOO-15</code></strong>. The same trap hits when
-      <code>LOO-12</code>'s own PR is unmerged and a brand-new child is filed before merge.
+      <code>LOO-12</code> is completed with <code>--children abandon</code>. Child <code>LOO-15</code>
+      had open PR <code>#1981</code> and checkout <code>/worktrees/loo-15</code>; abandoning closes
+      <code>#1981</code>, marks <code>task_prs.abandoned_at</code>, and deletes the worktree and branch.
+      Now the person clicks <strong>Reopen Task</strong> in Desktop (or runs <code>lf task reopen LOO-15</code>).
+      Because <code>reopen_task</code> leaves <code>#1981</code> as <code>historical = 0</code> and leaves the
+      deleted <code>task_checkouts</code> row behind:
+    </p>
+    <p style="margin-bottom:0">
+      1. <strong>Desktop disables Run, Auto-Ship, and Start from…</strong> with <em>"Task LOO-15 worktree … is missing; restore that exact path before lf task run LOO-15"</em>.<br>
+      2. <strong><code>lf task status LOO-15</code></strong> says <em>"PR closed without merge; reopen the same PR or abandon the Task"</em> (<code>recommended: no_action</code>).<br>
+      3. <strong><code>lf task complete LOO-15</code></strong> refuses because dead PR <code>#1981</code> is still its active PR (and on a leaf arms a pending completion that can never settle).<br>
+      4. <strong><code>lf task run</code></strong> only survived QA via a published-PR-only workaround in <code>restore_task_checkout</code> — an abandoned checkout without a published PR still fails.
     </p>
   </div>
 
   <div class="grid-2">
     <div class="card">
       <div class="card-head">
-        <span>Before (HEAD + kickoff plan)</span>
-        <span class="badge badge-existing">Superseded</span>
+        <span>Current HEAD (<code>4f0a3df9</code>)</span>
+        <span class="badge badge-built">Built</span>
       </div>
+      <div class="bar">
+        <div>
+          <strong>LOO-15 · Retry budget</strong>
+          <div class="bar-meta">PR #1981 closed · worktree missing</div>
+        </div>
+        <span class="pill-btn disabled">Run</span>
+      </div>
+      <div class="warn-line">PR closed without merge; reopen the same PR or abandon the Task</div>
+      <div class="warn-line">Task LOO-15 worktree /worktrees/loo-15 is missing; restore that exact path before `lf task run LOO-15`</div>
       <div class="flow">
-        <div class="step"><code>lf task complete LOO-12 --children abandon</code></div>
-        <div class="step bad">1. Writes <code>tasks.completion_request</code> = <code>FamilyCompletionRequested</code> (or new <code>RehomingCompletionRequested</code>)</div>
-        <div class="step bad">2. <code>settle_completion</code> hits live guard or unmerged PR → writes <code>completion_error</code>, leaves request armed</div>
-        <div class="step bad">3. Later <code>reconcile_delivered_task</code> sees armed request → silently abandons or rehomes children nobody asked to touch again</div>
+        <div class="step bad"><code>task_prs</code>: closed PR #1981 still <code>historical = 0</code> (active)</div>
+        <div class="step bad"><code>task_checkouts</code>: row still points at deleted <code>/worktrees/loo-15</code></div>
+        <div class="step bad"><code>restore_task_checkout</code>: special-cases <code>pr.abandoned_at.is_some()</code> to bypass missing-branch guard</div>
       </div>
     </div>
     <div class="card">
       <div class="card-head">
-        <span>After (revised plan)</span>
+        <span>Proposed (next pass)</span>
         <span class="badge badge-proposed">Proposed</span>
       </div>
+      <div class="bar">
+        <div>
+          <strong>LOO-15 · Retry budget</strong>
+          <div class="bar-meta">Reopened · ready for a fresh checkout</div>
+        </div>
+        <span class="pill-btn">Run</span>
+      </div>
+      <div class="ok-line">run the next work with `lf task run`</div>
       <div class="flow">
-        <div class="step"><code>lf task complete LOO-12 --children abandon</code></div>
-        <div class="step good">1. Check state, PR merge, open children, and live work (<code>unresolved_work</code> minus idle held conversations) — <strong>zero writes on refusal</strong></div>
-        <div class="step good">2. Single <code>IMMEDIATE</code> transaction: <code>complete_task_now</code> re-checks invariants, marks <code>LOO-12</code> done, settles or rehomes children, clears any stale Graph-end request</div>
-        <div class="step good">3. <code>tasks.completion_request</code> stays leaf / Graph-end only — zero new event kinds, zero version skew with released <code>lf</code></div>
+        <div class="step good"><code>reopen_task</code> (when abandoned): archives closed PR to <code>historical = 1</code> (already allowed by trigger <code>task_pr_history_no_mark</code>)</div>
+        <div class="step good"><code>task_reopen</code>: deletes stale <code>task_checkouts</code> row when abandoning already deleted both the worktree and local branch (preserves both if cleanup failed)</div>
+        <div class="step good"><code>restore_task_checkout</code> &amp; <code>finish_task_checkout</code>: check the current checkout epoch (since latest <code>CheckoutInitializing</code>); delete QA's published-PR-only workaround</div>
       </div>
     </div>
   </div>
 
-  <h2>What people see — Before vs. After</h2>
+  <h3>Counterexample checks on the proposal</h3>
+  <div class="grid-2">
+    <div class="card">
+      <div class="card-head"><span>What must survive</span><span class="badge badge-yes">Verified</span></div>
+      <p class="small">
+        <strong>1. Cleanup failed before reopen:</strong> if the worktree directory or local branch
+        still exists on disk, <code>task_reopen</code> keeps <code>task_checkouts</code> intact so
+        uncommitted work and local commits are preserved.<br><br>
+        <strong>2. Open Task whose PR closed on GitHub:</strong> <code>reopen_task</code> was never
+        called, so <code>historical</code> stays <code>0</code> and status still warns <em>"PR closed
+        without merge; reopen the same PR or abandon the Task"</em>.<br><br>
+        <strong>3. Reopening a Done Task:</strong> <code>abandoned == false</code>, so its merged PR
+        stays visible until a new pass submits PR #2.<br><br>
+        <strong>4. Next PR sequence:</strong> <code>next_task_pr</code> reads all rows in
+        <code>task_prs</code> (including <code>historical = 1</code>), so the next submit gets
+        <code>sequence = 2</code> cleanly.
+      </p>
+    </div>
+    <div class="card">
+      <div class="card-head"><span>Three smaller fixes in the same pass</span><span class="badge badge-proposed">Proposed</span></div>
+      <p class="small">
+        <strong>1. Refusal tree shows <code>running</code>:</strong>
+        <code>open_children_refusal</code> prints <code>#1981 open, running</code> (not just
+        <code>#1981 open</code>) when a child's Graph is moving.<br><br>
+        <strong>2. Raced <code>complete_task_now</code> answers <code>conflict</code>:</strong>
+        map <code>StoreError::InvalidData</code> / <code>InvalidAuthority</code> to
+        <code>OpsError::Refused(Error::conflict)</code> instead of <code>outcome_unknown</code>.<br><br>
+        <strong>3. Rehome stops at deleted ancestors:</strong>
+        <code>rehome_destination_in</code> stops when an ancestor has
+        <code>planning_deleted_at IS NOT NULL</code>, matching <code>task_hierarchy</code> and
+        Desktop's <code>WorkModel.rehomeDestination</code>.
+      </p>
+    </div>
+  </div>
 
-  <h3>1. CLI: refusal with grandchildren &amp; live-work guard</h3>
+  <h2>What is already built and committed on HEAD</h2>
   <div class="grid-2">
     <div class="card">
       <div class="card-head">
-        <span>Current HEAD</span>
-        <span class="badge badge-existing">Existing</span>
-      </div>
-<pre><code>$ lf task complete LOO-12
-LOO-12 done
-  LOO-14 done: #1980 merged
-    LOO-17 abandoned: no merged PR
-  LOO-15 abandoned: #1981 open, at ship-review
-  LOO-16 abandoned: no merged PR
-# Silently closed LOO-15's PR and deleted its branch;
-# LOO-15 could not be reopened.</code></pre>
-    </div>
-    <div class="card">
-      <div class="card-head">
-        <span>Revised plan</span>
-        <span class="badge badge-proposed">Proposed</span>
+        <span>CLI refusal &amp; settlement</span>
+        <span class="badge badge-built">Built</span>
       </div>
 <pre><code>$ lf task complete LOO-12
 Error: LOO-12 has 3 open children; say what happens to them:
-  LOO-14  Log each retry        #1980 merged
-    LOO-17  Retry metrics       unstarted
-  LOO-15  Retry budget          #1981 open, at ship-review
-  LOO-16  Backoff docs          unstarted
+  LOO-14    Log each retry  #1980 merged
+    LOO-17  Retry metrics   unstarted
+  LOO-15    Retry budget    #1981 open, running   # ← "running" added next pass
+  LOO-16    Backoff docs    unstarted
   lf task complete LOO-12 --children rehome    # direct children move up to LOO-10 and stay open
-  lf task complete LOO-12 --children abandon   # merged descendants done, the rest abandoned
-
-# If LOO-15 has a running Graph or active turn:
-$ lf task complete LOO-12 --children abandon
-Error: LOO-15 is running: Graph code …; stop it or use --children rehome
-# Writes nothing. Once LOO-15 parks idle at ship-review,
-# --children abandon succeeds (its idle conversation closes cleanly).</code></pre>
+  lf task complete LOO-12 --children abandon   # merged descendants done, the rest abandoned</code></pre>
     </div>
-  </div>
-
-  <h3>2. Desktop confirmation dialog</h3>
-  <div class="grid-2">
     <div class="card">
       <div class="card-head">
-        <span>Unmerged descendants present</span>
-        <span class="badge badge-proposed">Proposed</span>
+        <span>Desktop &amp; iOS dialogs</span>
+        <span class="badge badge-built">Built</span>
       </div>
       <div class="dialog">
         <div class="dialog-title">Complete LOO-12? 3 children are open</div>
         <div class="dialog-msg">
-          <p><strong>Move:</strong> direct open children (LOO-14, LOO-15, LOO-16) move up to LOO-10 and stay open.</p>
-          <p><strong>Abandon:</strong> marked done (PR merged): LOO-14. Abandoned (PRs closed, branches deleted): LOO-15, LOO-16, LOO-17.</p>
+          <p>Move keeps its children open under LOO-10.</p>
+          <p>Finishing marks merged children done: LOO-14.</p>
+          <p>Abandoning closes PRs and deletes branches for LOO-15, LOO-16, LOO-17; each can be reopened later.</p>
         </div>
         <div class="btn-stack">
           <div class="btn primary">Complete &amp; Move Children to LOO-10</div>
@@ -362,105 +412,62 @@ Error: LOO-15 is running: Graph code …; stop it or use --children rehome
           <div class="btn cancel">Cancel</div>
         </div>
       </div>
-    </div>
-    <div class="card">
-      <div class="card-head">
-        <span>Every open descendant already merged</span>
-        <span class="badge badge-proposed">Proposed</span>
-      </div>
-      <div class="dialog">
-        <div class="dialog-title">Complete LOO-12? 2 children are open</div>
-        <div class="dialog-msg">
-          <p><strong>Finish:</strong> marked done (PR merged): LOO-14, LOO-15.</p>
-          <p><strong>Move:</strong> direct open children move up to LOO-10 and stay open.</p>
-        </div>
-        <div class="btn-stack">
-          <div class="btn primary">Complete &amp; Finish Children</div>
-          <div class="btn">Complete &amp; Move Children to LOO-10</div>
-          <div class="btn cancel">Cancel</div>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <h3>3. iOS swipe-to-complete on a parent Task</h3>
-  <div class="grid-2">
-    <div class="card">
-      <div class="card-head">
-        <span>Current HEAD</span>
-        <span class="badge badge-existing">Existing</span>
-      </div>
-      <p class="small">
-        Swipe "Complete" removes the row immediately and sends <code>task.complete</code> with no
-        confirmation — silently abandoning all unmerged children.
+      <p class="small" style="margin-top:0.55rem;margin-bottom:0">
+        When all open descendants are already merged, Desktop makes <strong>Complete &amp; Finish Children</strong>
+        the default non-destructive button with <strong>Move Children</strong> second. iOS asks
+        <strong>Move Children Up</strong> vs. <strong>Abandon Children</strong> before removing the row.
       </p>
-    </div>
-    <div class="card">
-      <div class="card-head">
-        <span>Revised plan (<code>ViewContent.open_children: Option&lt;u32&gt;</code>)</span>
-        <span class="badge badge-proposed">Proposed</span>
-      </div>
-      <div class="dialog">
-        <div class="dialog-title">Complete LOO-12? 3 children are open</div>
-        <div class="dialog-msg">
-          <p>Move children up to keep them open, or abandon open children (merged ones are marked done).</p>
-        </div>
-        <div class="btn-stack">
-          <div class="btn primary">Move Children Up</div>
-          <div class="btn danger">Abandon Children</div>
-          <div class="btn cancel">Cancel</div>
-        </div>
-      </div>
     </div>
   </div>
 
   <h2>Outside this work</h2>
   <div class="callout info">
     <p>
-      <strong>Abandoning a parent Task (<code>lf task abandon LOO-12</code>):</strong> today this
-      cancels only <code>LOO-12</code> and leaves open children linked (they appear top-level in
-      <code>lf wave show</code>). It never silently abandons children. Adding <code>--children</code>
-      to <code>abandon</code> is a separate outcome (storage + CLI + Desktop abandon dialog).
+      <strong>Abandoning a parent Task (<code>lf task abandon LOO-12</code>):</strong> cancels only
+      <code>LOO-12</code> and leaves open children linked and open (surfaced top-level). Adding
+      <code>--children</code> to <code>abandon</code> is a separate outcome.
+    </p>
+    <p>
+      <strong>iOS reopen / abandoned Task filter:</strong> iOS has no Reopen swipe or Abandoned list today.
     </p>
     <p style="margin-bottom:0">
-      <strong>iOS reopen / abandoned Task filter:</strong> iOS currently lists Started, Ready,
-      Working, Backlog, and Done, with no Reopen swipe or Abandoned view. Adding that is separate
-      iOS work.
+      <strong>Pre-existing issues seen in QA:</strong> single-line <code>NoticeView</code> truncation
+      on iPhone SE, and <code>lf task interrupt</code> not stopping a running <code>cmd:</code> step.
     </p>
   </div>
 
   <h2>Choices made for review</h2>
   <p class="small">
-    All choices below are written into <code>scratch/plan.md</code> and reversible in code. Reply
-    with a number and letter (e.g. "2b") to change any of them.
+    All choices below are reversible in code and written into <code>scratch/plan.md</code>. Reply
+    with a number and letter (e.g. "1b") to change any of them.
   </p>
   <ol class="questions">
     <li>
-      <div class="q-head">If completing a parent fails (unmerged PR or a running child), should Loopflow remember the request and finish later, or refuse cleanly with nothing saved?</div>
+      <div class="q-head">After you reopen an abandoned Task (whose PR was closed and branch deleted when it was abandoned), what should its status and next run look like?</div>
       <ul class="opts">
-        <li class="chosen"><span class="opt-key">1a (chosen)</span> <strong>Refuse cleanly, save nothing.</strong> You fix the blocker or re-run when ready; a child can never be abandoned in the background after you got an error.</li>
-        <li><span class="opt-key">1b</span> <strong>Save the request and auto-settle later.</strong> Once the parent's PR merges or the child stops running, Loopflow completes the parent and applies your earlier choice automatically.</li>
+        <li class="chosen"><span class="opt-key">1a (chosen, next pass)</span> <strong>Fresh start on the same Task.</strong> The closed PR moves to history, Desktop's Run button is immediately active, <code>lf task status</code> recommends running it, <code>lf task complete</code> works if no PR is needed, and <code>lf task run</code> creates a new checkout from current <code>main</code> (unless its old checkout or local branch still survived on disk, which is kept).</li>
+        <li><span class="opt-key">1b</span> <strong>Keep the closed PR front and center.</strong> Status continues warning that the old PR was closed without merging until a new PR is opened, and Desktop blocks Run until the old checkout path is manually restored.</li>
+      </ul>
+    </li>
+    <li>
+      <div class="q-head">When moving children up with <code>--children rehome</code> and the grandparent Task was deleted (while a great-grandparent above it is still open), where should the children land?</div>
+      <ul class="opts">
+        <li class="chosen"><span class="opt-key">2a (chosen, next pass)</span> <strong>Top-level Tasks.</strong> Deleting the grandparent already detached this parent into a top-level Task in every view, so its children stay top-level rather than jumping under an ancestor nobody saw it attached to. (Closed — done or abandoned — grandparents are still skipped to reach an open great-grandparent.)</li>
+        <li><span class="opt-key">2b</span> <strong>Under the open great-grandparent.</strong> Walk past deleted Tasks just like closed ones (requires sending the destination from Rust to Desktop so the dialog button names the same Task).</li>
       </ul>
     </li>
     <li>
       <div class="q-head">When a child is parked idle at <code>ship-review</code> (no Graph running, just its open conversation waiting for you), should <code>--children abandon</code> allow abandoning it?</div>
       <ul class="opts">
-        <li class="chosen"><span class="opt-key">2a (chosen)</span> <strong>Allow it and close the idle conversation.</strong> Only block when a Graph is actively running, a headless run is live, or the conversation is mid-turn.</li>
-        <li><span class="opt-key">2b</span> <strong>Block whenever any conversation window is open.</strong> You must manually close each child's conversation before <code>--children abandon</code> will proceed.</li>
+        <li class="chosen"><span class="opt-key">3a (chosen, built)</span> <strong>Allow it and close the idle conversation.</strong> Only block when a Graph is actively running, a headless run is live, or the conversation is mid-turn.</li>
+        <li><span class="opt-key">3b</span> <strong>Block whenever any conversation window is open.</strong> You must manually close each child's conversation before <code>--children abandon</code> proceeds.</li>
       </ul>
     </li>
     <li>
       <div class="q-head">In Desktop, when every open child already has a merged PR (so nothing would be abandoned), which button should be the default?</div>
       <ul class="opts">
-        <li class="chosen"><span class="opt-key">3a (chosen)</span> <strong>Complete &amp; Finish Children</strong> first (marks the merged children done), with <strong>Move Children</strong> second. When any child is unmerged, <strong>Move Children</strong> is default and <strong>Abandon Children</strong> is destructive.</li>
-        <li><span class="opt-key">3b</span> <strong>Complete &amp; Move Children</strong> is always the default button, even when every open child is already merged.</li>
-      </ul>
-    </li>
-    <li>
-      <div class="q-head">When moving children up with <code>--children rehome</code> and the grandparent Task is already done, abandoned, or deleted, where should the children land?</div>
-      <ul class="opts">
-        <li class="chosen"><span class="opt-key">4a (chosen)</span> <strong>Nearest open ancestor, else top-level.</strong> Open children never get moved under an already-closed parent.</li>
-        <li><span class="opt-key">4b</span> <strong>Direct grandparent as stored, even if closed.</strong> Keeps the exact link chain regardless of whether the grandparent is still open.</li>
+        <li class="chosen"><span class="opt-key">4a (chosen, built)</span> <strong>Complete &amp; Finish Children</strong> first (marks merged children done), with <strong>Move Children</strong> second. When any child is unmerged, <strong>Move Children</strong> is default and <strong>Abandon Children</strong> is destructive.</li>
+        <li><span class="opt-key">4b</span> <strong>Complete &amp; Move Children</strong> is always the default button, even when every open child is already merged.</li>
       </ul>
     </li>
   </ol>

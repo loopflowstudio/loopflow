@@ -5,20 +5,22 @@
 Completing a parent never abandons work by surprise. `lf task complete LOO-12`
 on a Task with open children refuses, writes nothing, and lists the open
 descendant tree (indented so grandchildren that `--children abandon` would
-settle are never hidden):
+settle are never hidden, and marking actively running descendants so the person
+can see blockers before choosing):
 
 ```text
 $ lf task complete LOO-12
 Error: LOO-12 has 3 open children; say what happens to them:
   LOO-14    Log each retry  #1980 merged
     LOO-17  Retry metrics   unstarted
-  LOO-15    Retry budget    #1981 open, at ship-review
+  LOO-15    Retry budget    #1981 open, running
   LOO-16    Backoff docs    unstarted
   lf task complete LOO-12 --children rehome    # direct children move up to LOO-10 and stay open
   lf task complete LOO-12 --children abandon   # merged descendants done, the rest abandoned
 ```
 
-(`to LOO-10` names the nearest open ancestor; with none, "direct children
+(`to LOO-10` names the nearest open ancestor along the visible parent chain;
+with none — or once a deleted ancestor breaks the chain — "direct children
 become top-level Tasks".)
 
 ```text
@@ -35,11 +37,19 @@ LOO-12 done
   LOO-16 abandoned: no merged PR
 ```
 
-`--children abandon` refuses, writing nothing, while any descendant it would
-abandon has live work (a running Graph, headless run, or active turn — not an
-idle Task conversation parked at an interactive step), and names each blocker.
-`lf task reopen LOO-15` works on an abandoned Task. Desktop and iOS ask the
-same question in one dialog.
+`--children abandon` refuses, writing nothing (and answering `conflict` over
+the server), while any descendant it would abandon has live work (a running
+Graph, headless run, or active turn — not an idle Task conversation parked at
+an interactive step), and names each blocker and `lf task interrupt <child>`.
+Desktop and iOS ask the same question in one dialog.
+
+`lf task reopen LOO-15` (and Desktop's **Reopen Task**) brings an abandoned
+Task cleanly back to life: its closed PR from the abandoned attempt becomes
+history, any dead checkout record whose worktree and local branch were deleted
+on abandon is cleared, `lf task status` recommends `run` (not "PR closed
+without merge"), Desktop's **Run** / **Start** / **Auto-Ship** controls are
+immediately enabled, `lf task run` places a fresh checkout from current main,
+and `lf task complete` works if no new PR is needed.
 
 Steer from Jack Heart, word for word: "Bare `lf task complete` should refuse
 when open children exist unless an explicit `--children` option (`rehome` or
@@ -49,8 +59,7 @@ rehoming and abandoning is natural rather than awkward."
 
 ## Concepts and source of truth
 
-Two distinct actions were previously fused into one `completion_request`
-mechanism:
+Three distinct lifecycles must stay separate in storage and execution:
 
 1. **Pending completion (`tasks.completion_request` + `TaskEventKind::CompletionRequested`) — leaf / Graph-end only.**
    A Graph reaching `end` (or a bare `lf task complete` on a leaf Task whose PR
@@ -64,329 +73,247 @@ mechanism:
    Never arms a deferred child policy. Preconditions (PR merged or absent,
    explicit `--children` when open children exist, no live execution blocking
    `--children abandon`) are checked before writing; a refusal writes nothing
-   to SQLite. Once preconditions hold, completion and child settlement run in
-   one immediate SQLite transaction, clearing any stale `completion_request`
-   and recording `--reason` on `TaskEventKind::Completed { summary }`.
-
-Why this beats storing `ChildPolicy` on `completion_request`:
-- A refused `--children abandon` (live child or unmerged parent PR) cannot
-  leave a pending abandon request armed in SQLite that background
-  reconciliation later fires silently once the child stops or the PR merges.
-- No new `TaskEventKind` variant is needed — zero version skew with released
-  `lf`. `TaskEventKind::FamilyCompletionRequested` becomes a read-only
-  historical variant with no writers (same as `FollowUp`).
-- `ChildPolicy { Rehome, Abandon }` is one `clap::ValueEnum` + serde +
-  `JsonSchema` enum in `loopflow-storage` (`sqlite/children.rs`, beside
-  `ChildOutcome`), shared by Clap, `Write::TaskComplete`, and storage.
+   to SQLite and answers `ErrorCode::Conflict` (`OpsError::Refused`). Once
+   preconditions hold, completion and child settlement run in one immediate
+   SQLite transaction, clearing any stale `completion_request` and recording
+   `--reason` on `TaskEventKind::Completed { summary }`.
+3. **Reopening an abandoned Task vs. an externally closed PR — two separate states.**
+   - While a Task is **open** and someone closes its PR on GitHub without
+     merging, that closed PR stays its current PR (`task_prs.historical = 0`,
+     `abandoned_at IS NOT NULL`). `lf task status` and Desktop rightly warn
+     `"PR closed without merge; reopen the same PR or abandon the Task"`.
+   - When a Task itself was **abandoned** (closing its PR and deleting its
+     checkout/branch) and someone runs **`lf task reopen`**, that closed PR and
+     deleted checkout belong to the **previous, abandoned attempt**, not the
+     reopened Task's active delivery:
+     - `reopen_task` archives any abandoned current PR (`UPDATE task_prs SET historical=1 WHERE task_id=?1 AND historical=0 AND abandoned_at IS NOT NULL` — already permitted by the `task_pr_history_no_mark` trigger). Its row stays in `task_prs` history (`sequence = 1`), `active_task_pr` becomes `None`, and the next `lf pr submit` allocates `sequence = 2`. Reopening a **done** Task leaves its merged PR untouched (`historical = 0`).
+     - `task_reopen` (holding `retirement::lock`) checks whether abandoning
+       actually removed the Task's checkout and branch (`!worktree.exists()`
+       and `!branch_exists(&repo, &task.branch)`). If both are gone, `reopen_task`
+       deletes the stale `task_checkouts` row in the same transaction (after
+       computing `has_prior_work`). If cleanup had failed and either the
+       worktree or local branch still exists on disk, `task_checkouts` stays
+       intact so no local commits are lost.
+     - Because the stale `task_checkouts` row is gone when the checkout was
+       deleted, `task_worktree_blocker_after` returns `None`, Desktop's **Run**
+       / **Start** / **Auto-Ship** buttons enable immediately, and the next
+       `lf task run` takes the normal `task.worktree.is_none()` placement path
+       (creating a fresh checkout from current `origin/main` on the Task's
+       branch).
+     - `restore_task_checkout` and `finish_task_checkout` judge whether the
+       **current checkout epoch** finished initializing (checking whether
+       `CheckoutReady` or `PrStarted` occurred *after* the latest
+       `CheckoutInitializing`), rather than scanning all historical events from
+       `id > 0`. This lets a reopened Task initialize a fresh checkout cleanly
+       while keeping the missing-branch refusal intact for any active checkout,
+       and deletes the published-PR-only `let abandoned = pr...` workaround in
+       `restore_task_checkout`.
 
 ## Design
 
 ### Storage (`rust/loopflow-storage/src/sqlite/children.rs`)
 
-- Add `ChildPolicy { Rehome, Abandon }` (`#[serde(rename_all = "snake_case")]`,
-  `#[derive(clap::ValueEnum, schemars::JsonSchema, ...)]`) and add
-  `ChildOutcome::Rehomed` to `ChildOutcome`.
-- Add `CompletedTask` / update `ChildCompletion` so rehomed children carry their
-  updated `Task` (with the new `parent_task_id`) and `rehome_destination`
-  identifier is available for text output.
-- Helper `rehome_destination(conn, parent: &TaskId) -> StoreResult<Option<Task>>`:
-  walks `parent_task_id` upward from `parent`'s own parent and returns the
-  nearest open (non-deleted, non-terminal) ancestor, or `None` for top-level.
-  Never rehomes open children under a closed, abandoned, or deleted grandparent.
-  Shared by refusal text, `rehome_children`, and completion output.
-- Helper `open_descendant_tree(conn, parent: &TaskId) -> StoreResult<Vec<OpenDescendant>>`:
-  walks open descendants recursively in filing order, returning each
-  descendant's `Task`, active `TaskPr`, parked `task_graphs.step`, and its own
-  open children. Used by both bare-complete refusal formatting and the
-  `--children abandon` live guard.
-- Add immediate completion entry point `complete_task_now(&self, task: &Task, note: Option<&str>, children: Option<ChildPolicy>) -> StoreResult<ImmediateCompletion>`:
-  inside one `TransactionBehavior::Immediate` transaction:
-  - Validate task & project.
-  - `Done` → no-op (`vec![]`).
-  - `Abandoned` → `Err(InvalidData("Task ... is abandoned and cannot be completed"))`.
-  - Active PR not merged → `Err(InvalidAuthority("Task requires a verified merge"))`.
-  - `children.is_none()` and `open_task_child_count(&tx, &task.id)? > 0` →
-    return a refusal variant/error without committing (closes the race where a
-    child was filed after pre-check).
-  - `record_task_completion(&tx, &task.id, note)` clears `completion_request`
-    and `completion_error`, sets `planning_state = 'completed'`, records
-    `TaskEventKind::Completed { summary }` (carrying `note` when present), and
-    writes `task_summaries` (`Done`).
-  - Match `children`:
-    - `None` (0 open children) → `vec![]`.
-    - `Some(ChildPolicy::Abandon)` → `complete_children(&tx, &task.id)` as today
-      (recursive: merged → `Done`, unmerged → `Abandoned`).
-    - `Some(ChildPolicy::Rehome)` → `rehome_children(&tx, &task.id)`: resolves
-      `dest = rehome_destination(&tx, &task.id)?`, updates each direct open
-      child with `Edit::TaskParent(dest.as_ref().map(|t| t.id.as_str().into()))`
-      via `planning_write::local` (queueing tracker parent actions in the same
-      transaction). Closed children keep their link as history. Returns
-      `ChildOutcome::Rehomed` with `children: []` (their own subtrees come
-      along untouched).
-- Simplify pending completion (`request_completion_in`, `complete_task(&self, task, request)`):
-  - Delete `request_family_completion` and `family: bool`.
-  - `completion_request` checks only `t.completion_request` and
-    `t.planning_state IS 'completed'`.
-  - `complete_task(&self, task, request)` is Graph-end / leaf-pending only:
-    whenever `open_task_child_count(&tx, &task.id)? > 0`, it clears
-    `completion_request` and returns `CompletionSettlement::WaitingForChildren`.
-  - Mark `TaskEventKind::FamilyCompletionRequested` as historical (no current
-    writers) in `rust/loopflow-storage/src/work/task/mod.rs`.
-- `reopen_task` (already updated on this branch): clears `abandoned_at`,
-  `abandon_reason`, `completion_request`, `completion_error`; transitions
-  `canceled` → `started`/`unstarted`; clears `task_auto`. Verified:
-  `cancel_task_retirement` trigger revokes any pending abandonment retirement
-  in the same write, and `task_summaries` is historical ("when it last ended",
-  not read by `TaskState` or the board, unchanged on done-reopen too).
+Built on `HEAD`:
+- `ChildPolicy { Rehome, Abandon }`, `ChildOutcome::Rehomed`, `OpenDescendant`,
+  `ParentCompletion`, `complete_task_now`, `open_descendants`,
+  `rehome_destination`, `rehome_children`.
+- `request_family_completion` and `family: bool` removed; pending completion
+  always returns `WaitingForChildren` when children are open;
+  `TaskEventKind::FamilyCompletionRequested` marked historical-only.
 
-### Execution (`rust/loopflow-execution/src/ops/task.rs`)
+Remaining fixes for the next pass:
+- **`reopen_task(&self, id: &TaskId, note: Option<&str>, clear_abandoned_checkout: bool) -> StoreResult<Task>`**
+  (or keep `reopen_task(&self, id, note)` defaulting `clear_abandoned_checkout = false` and add `reopen_task_with_checkout_clear` / update callers — updating the 4 internal callers directly is cleaner and keeps one API):
+  Inside the `IMMEDIATE` transaction, when `abandoned` is true:
+  1. Compute `target = if has_prior_work(&tx, id)? { "started" } else { "unstarted" }` **before** modifying `task_checkouts`.
+  2. Archive any abandoned active PR:
+     ```sql
+     UPDATE task_prs SET historical=1
+     WHERE task_id=?1 AND historical=0 AND abandoned_at IS NOT NULL
+     ```
+  3. When `clear_abandoned_checkout` is true, delete the stale checkout row:
+     ```sql
+     DELETE FROM task_checkouts WHERE task_id=?1
+     ```
+     (Triggers `cancel_task_retirement_checkout_delete` and advances
+     `store_revisions` automatically.)
+  4. Clear `abandoned_at`, `abandon_reason`, `completion_request`,
+     `completion_error`; set `planning_state` via `task_state::decide_in`;
+     delete `task_auto`; record the reopened progress event.
+  5. When reopening a **done** Task (`abandoned == false`), neither `task_prs`
+     nor `task_checkouts` is touched.
+- **`rehome_destination_in`**: stop walking upward if an ancestor row is
+  soft-deleted (`planning_deleted_at IS NOT NULL`) and return `Ok(None)`. A
+  deleted Task already breaks the visible tree in `task_hierarchy` and Desktop,
+  so rehoming never teleports children under an invisible grandparent, and Rust
+  matches Desktop's ancestor walk.
 
-- `task_complete(repo, issue, note, children: Option<ChildPolicy>) -> OpsResult<TaskCompletion>`:
-  1. Resolve task; if already `Done`, return `TaskCompletion` with empty
-     children. If `Abandoned`, return `"An abandoned Task cannot be completed"`
-     writing nothing.
-  2. Reconcile cached PR observation (`reconcile_task_pr_observation`).
-  3. Check active PR refusal (`task_completion_refusal`):
-     - If unmerged PR AND `children.is_none()` AND `open_task_child_count == 0`
-       (leaf Task): preserve existing pending-request path
-       (`request_task_completion` + `settle_completion`) so Graph steps like
-       `- cmd: task complete <ID>` remain retryable without replaying.
-     - If unmerged PR AND (`children.is_some()` OR `open_task_child_count > 0`):
-       return the unmerged-PR error immediately, **writing nothing** (no armed
-       child policy, and no two-step goose chase asking for `--children` before
-       saying the PR isn't merged).
-  4. If `children.is_none()` and `open_task_child_count > 0`: format the
-     open-descendant tree refusal (indented per level, naming each descendant's
-     identifier, title, and standing from its PR/step/state — formatted in
-     `loopflow-execution` without depending on `loopflow::TaskRow` — plus both
-     exact `--children rehome` / `--children abandon` commands naming
-     `rehome_destination`) and return `Err`, **writing nothing**.
-  5. If `children == Some(ChildPolicy::Abandon)`: run the live-child guard
-     before touching SQLite. Walk the full open descendant tree (including
-     descendants of merged children, since `complete_children` recurses through
-     both done and abandoned children). For every descendant whose active PR is
-     not merged, check `live_abandon_blockers(&store.sqlite, &descendant.id)`:
-     - Start from `crate::ops::task_execution::unresolved_work(&store.sqlite, &work)`
-       (filters out caller's own work and dead OS processes).
-     - Exclude an idle held interactive conversation (`OpenWork::Session { held_terminal: Some(t), .. }`
-       when `store.sqlite.terminal_retention(t)?.is_none()`), because
-       `retirement::close_conversations` cleanly closes idle held conversations
-       on abandonment; a running Graph, headless run, or active turn in a held
-       terminal (`terminal_retention` is `Some(_)`) **is** a blocker.
-     - Any blockers across any unmerged descendant → return error naming each
-       blocked descendant and blocker (`"LOO-15 is running: <blocker>; stop it or use --children rehome"`), **writing nothing**.
-  6. Call `store.complete_task_now(&task, note, children)` (handles any late
-     child-creation race cleanly inside the `IMMEDIATE` transaction).
-  7. Run post-commit follow-ups:
-     - `ChildOutcome::Rehomed` → `sync_completion` (tracker parent update) only.
-     - `ChildOutcome::Done` → `finish_completion`.
-     - `ChildOutcome::Abandoned` → `retirement::close_conversations`,
-       `sync_completion`, `lifecycle::cleanup_abandoned`.
-     - Parent → `finish_completion`.
-- `task_reopen`: unchanged apart from dropping any "abandoned" refusal text.
+### Execution (`rust/loopflow-execution/src/ops/task.rs`, `task_run.rs`, `error.rs`, `engine/mod.rs`)
 
-### CLI and wire (`rust/loopflow/src/lf/`)
+Built on `HEAD`:
+- `task_complete(repo, issue, note, children)` with pre-flight checks,
+  `open_children_refusal`, `live_abandon_blockers`, `settle_children`,
+  `OpsError::Refused(Error::conflict(...))` wired into `Error::written`.
 
-- `TaskCommand::Complete { issue, children: Option<ChildPolicy>, reason, json }`:
-  `--children <rehome|abandon>`, `after_help` explaining refusal when children
-  are open, what `rehome` and `abandon` do, and the live-work guard.
-- `TaskCommand::Reopen`: help updated to state it works on done and abandoned
-  Tasks.
-- `write.rs`: `Write::TaskComplete { directory, issue, #[serde(deserialize_with = "Option::deserialize")] children: Option<ChildPolicy> }`;
-  update `rust/loopflow/src/server/schema.rs:495`,
-  `tests/fixtures/dto/server_schema.json`, and any other DTO fixture carrying
-  `task.complete`.
-- `mutation.rs::write_child_completions`: print `moved up to LOO-10` /
-  `moved to top level` for `ChildOutcome::Rehomed` (using the rehome
-  destination resolved on `TaskCompletion`, not a stale pre-edit `parent_task_id`).
+Remaining fixes for the next pass:
+- **`task_reopen` (`ops/task.rs`)**:
+  Under `retirement::lock(&task.id)`, determine `clear_abandoned_checkout`:
+  true iff the Task is currently abandoned (`task_work_status == Abandoned`)
+  AND `task.worktree` is `Some(path)` where `!path.exists()` AND either
+  `task.branch.is_empty()` or `!crate::git::worktrees::branch_exists(&repo, &task.branch)?`.
+  Pass `clear_abandoned_checkout` into `store.sqlite.reopen_task(...)`.
+- **`restore_task_checkout` & `finish_task_checkout` (`ops/task.rs`)**:
+  - Replace the full-history `.any(|e| CheckoutReady | PrStarted)` scan in both
+    functions with a shared helper `current_checkout_ready(events: &[TaskEvent]) -> bool`
+    that scans `events` in reverse and returns `true` if `CheckoutReady` or
+    `PrStarted` appears after the latest `CheckoutInitializing` (and `false` if
+    `CheckoutInitializing` appears first or none exists).
+  - Delete the QA workaround (`let abandoned = pr.as_ref().is_some_and(|pr| pr.abandoned_at.is_some());`
+    and its `if !abandoned` branches) in `restore_task_checkout`. When an
+    abandoned Task's checkout & branch were deleted, `reopen_task` already
+    cleared `task_checkouts`, so `prepare_task` runs the normal placement path
+    and creates a fresh checkout from current `origin/main`. When a retained
+    local branch or worktree survived abandonment, `restore_task_checkout`
+    restores it cleanly.
+- **`complete_task_now` error mapping in `task_complete` (`ops/task.rs:190`)**:
+  Map `StoreError::InvalidData(msg) | StoreError::InvalidAuthority(msg)` from
+  `complete_task_now` to `refused(msg)` (`OpsError::Refused(Error::conflict(msg))`),
+  so raced refusals (e.g., a child filed between pre-check and transaction)
+  still answer `conflict`, never `outcome_unknown`.
+- **`open_children_refusal` (`ops/task.rs:221-241`)**:
+  Include `"running"` in `standing` whenever `descendant.state == TaskState::Moving`
+  (e.g. `#1981 open, running`, or `running` when there is no PR), so running
+  children that will block `--children abandon` are visible in the bare refusal.
+- **Abandoned refusal copy**:
+  - `rust/loopflow-execution/src/ops/task_run.rs:23`: change
+    `"Task is abandoned; recover it before running a Graph"` to
+    `"Task is abandoned; reopen it before running a Graph"`.
+  - `rust/loopflow-execution/src/ops/task.rs:1356` (`validate_preparation_status`):
+    change `"Task {} is abandoned; inspect its retained history with `lf task status {}`"` to
+    `"Task {} is abandoned; `lf task reopen {}` reopens it without moving its Graph"`
+    (matching `WorkStatus::Done`).
 
-### Desktop (`swift/LoopflowMac/`)
+### CLI, wire, Desktop, iOS, and docs
 
-- `ServedWrite.taskComplete(directory:issue:children:)` and `TaskChildPolicy`
-  enum (`rehome`, `abandon`) in `swift/Loopflow/Services/RegistryQuery.swift`.
-- Menu item (`TaskWorkView.swift`): reads `Complete Task…` when children are
-  open (was `Complete Task & Settle Children…`), with updated help text.
-- `TaskCompleteConfirmation` (`TaskWorkView.swift`):
-  - Title: `Complete LOO-12? 3 children are open` (or `1 child is open`),
-    counting direct open children like the CLI refusal; the message names
-    which descendants Finish marks done.
-  - Resolve rehome destination by walking `parentId` up to the nearest open
-    ancestor in `model` (`Complete & Move Children to LOO-10`); if none is open
-    (or `parentId == nil`), `Complete & Move Children to Top Level`. Matches
-    Rust's `rehome_destination`.
-  - Buttons:
-    - When at least one open descendant would be abandoned:
-      1. `Complete & Move Children to LOO-10` (or `… to Top Level`), default,
-         non-destructive → `children: .rehome`.
-      2. `Complete & Abandon Children`, `.destructive` → `children: .abandon`.
-      3. Cancel.
-    - When every open descendant already has a merged PR (`abandoned.isEmpty`):
-      1. `Complete & Finish Children`, default, non-destructive →
-         `children: .abandon` (marks all merged descendants done, abandons 0).
-      2. `Complete & Move Children to LOO-10` (or `… to Top Level`),
-         non-destructive → `children: .rehome`.
-      3. Cancel.
-  - Message: explains both choices briefly — where direct children move under
-    Move, and which descendants are marked done vs. abandoned under Abandon
-    (minus "cannot be reopened").
-- `WorkModel.completeTask(_:children:)` and `completeTaskFromInput(_:children:)`
-  pass the policy (`nil` for direct leaf completion).
-- Reopen already appears for abandoned Tasks (`isCompleted` = `lifecycle.isTerminal`)
-  and now succeeds.
-
-### iOS (`swift/LoopflowiOS/TaskListView.swift` & `ViewContent`)
-
-- Add `#[serde(deserialize_with = "Option::deserialize")] pub open_children: Option<u32>`
-  to `ViewContent` (`rust/loopflow-storage/src/work/selection.rs`), matching the
-  existing Task-only optional fields (`identifier`, `primary_session`,
-  `location`): `None` for Waves/Repositories/unavailable items, `Some(count)`
-  for Tasks.
-- Populate in `rust/loopflow-storage/src/sqlite/selections.rs` using
-  `super::children::open_task_child_count(conn, &task_id)?` (indexed by
-  `tasks_parent`). Update unit test literal in
-  `rust/loopflow/src/lf/commands/open/workspace.rs`, Swift
-  `WorkViewPlan.Content` (`openChildren: Int?`, explicit `decode(Int?.self, forKey: .openChildren)`),
-  and DTO fixtures (`tests/fixtures/dto/view_plan.json`,
-  `subscribe_frames.json`, `server_schema.json`).
-- `TaskListView.swift`:
-  - Swipe on a leaf (`(task.openChildren ?? 0) == 0`): completes immediately
-    with `children: nil` as today.
-  - Swipe on a parent (`(task.openChildren ?? 0) > 0`): the row stays; a
-    `confirmationDialog` asks `Complete LOO-12? 3 children are open` with
-    message `"Move children up to keep them open, or abandon open children (merged ones are marked done)."`
-    and buttons `Move Children Up` (`.rehome`), `Abandon Children` (`.destructive`,
-    `.abandon`), and Cancel.
-  - A refusal (live child, unmerged PR, raced new child) returns via `Notice`.
-
-### Docs
-
-Updated in place for review:
-- `docs/work.md` (`## File follow-ups from a Task`, `## Finish`, `## Reference`)
-- `docs/surfaces.md` (`### Changes show at once`, `### The backlog`)
-- `swift/LoopflowiOS/README.md` (`## Tasks`)
+Built on `HEAD`:
+- CLI `--children <rehome|abandon>`, `after_help`, `TaskCommand::Reopen` help,
+  rehome text output (`moved up to LOO-10` / `moved to top level`).
+- Wire `Write::TaskComplete { directory, issue, children }` and
+  `ViewContent.open_children: Option<u32>`, Swift `TaskChildPolicy`,
+  `ServedWrite.taskComplete`, `WorkViewPlan.Content`, DTO fixtures.
+- Desktop `TaskCompleteConfirmation` (safe-first button ordering for both
+  all-merged and unmerged cases), `WorkModel.rehomeDestination`, `TaskActionItems`.
+- iOS `TaskFeed.complete` + `confirmationDialog` before writing.
+- Docs: `docs/work.md`, `docs/surfaces.md`, `swift/LoopflowiOS/README.md`.
+  Note: update the one sentence in `docs/work.md` (`"starts again from the Task's base"`)
+  to `"starts a fresh checkout from main"` if `prepare_task` places fresh from
+  `origin/main` when the abandoned checkout was deleted.
 
 ## What goes
 
-- `request_family_completion`, `family: bool` in `completion_request` /
-  `request_completion`, and all writers of `TaskEventKind::FamilyCompletionRequested`.
-- The silent-abandon default of bare `lf task complete` and `task.complete`
-  with `children: null`.
-- `reopen_task`'s abandoned refusal (already removed in this checkout).
-- Desktop strings `Complete Task & Settle Children…`, `Complete & Settle
-  Children`, and "cannot be reopened".
-- Tests asserting abandoned Tasks refuse reopen, or that bare complete settles
-  children: rewritten to the new behavior, not kept.
+Already removed on `HEAD`:
+- `request_family_completion`, `family: bool`, writers of `FamilyCompletionRequested`.
+- Silent-abandon default of bare `lf task complete` / `task.complete` with `children: null`.
+- `reopen_task`'s abandoned refusal and Desktop's "cannot be reopened" / "Settle Children" copy.
+
+Removed in this pass:
+- The `let abandoned = pr.as_ref().is_some_and(...)` workaround in
+  `restore_task_checkout` (`ops/task.rs:1416-1449`) — replaced by archiving the
+  abandoned PR and clearing the deleted `task_checkouts` row in `reopen_task`
+  plus epoch-scoped `current_checkout_ready`.
 
 Survives: Graph-end `CompletionRequested` waiting for children (and leaf
 `- cmd: task complete` pending on unmerged PR); recursive abandon semantics;
-`--json` `children` shape (plus `rehomed` outcome).
+`--json` `children` shape; `"PR closed without merge; reopen the same PR or abandon the Task"`
+for an **open** Task whose PR was closed externally on GitHub; preserved
+checkouts/branches when `cleanup_abandoned` failed before reopen.
 
 ## Acceptance check (gate)
 
-Storage/execution fixture, headless: open grandparent G → parent P → children A
-(merged PR, with unmerged grandchild A1), B (open PR, idle held conversation at
-`ship-review`, plus separate test with live Graph / active turn), C (unstarted).
+All existing checks on `HEAD` pass, plus the reopened-abandoned lifecycle checks:
 
-1. `task_complete(P, None)` → error listing A, A1 (indented), B, C and
-   suggesting `--children rehome` (naming G) / `--children abandon`; P open;
-   no `completion_request` or event written.
-2. `task_complete(P, Some(Abandon))` while B has a live Graph (or active turn) →
-   error naming B's blocker; P, A, A1, B, C unchanged and **no
-   `completion_request` armed**.
-3. `task_complete(P, Some(Abandon))` while B has only an idle held conversation
-   at `ship-review` → succeeds: P done, A done, A1/B/C abandoned (idle
-   conversation closed, not treated as a blocker).
-4. `task_complete(P, Some(Rehome))` → P done; A, B, C open with
-   `parent_task_id = G` (and with closed/deleted G → `parent_task_id = None`);
-   A1 still under A; tracker parent action queued for each direct child.
-5. `task_complete(P, Some(Abandon))` or `Some(Rehome)` while P's own PR is
-   unmerged → error, P open, **no `completion_request` armed**.
-6. `task_reopen` on an abandoned Task → `started`, `abandoned_at` NULL, auto
-   off, pending retirement cleared.
-
-Plus: `lf task complete --help` shows `--children`; DTO fixture tests (Rust and
-Swift) pass for `task.complete` and `ViewContent`; Desktop view test covers
-both dialog button sets (unmerged present vs. all merged).
+1. **Bare refusal + running indicator:** `task_complete(P, None)` refuses with
+   `ErrorCode::Conflict`, writes nothing, lists indented descendants, and marks
+   a child with an open PR AND a running Graph as `#101 open, running`.
+2. **Live-work guard:** `task_complete(P, Some(Abandon))` refuses (`conflict`),
+   writes nothing when a descendant has a live Graph or active turn, and
+   succeeds when a descendant has only an idle held conversation at `ship-review`.
+3. **Rehome across closed & deleted ancestors:** `task_complete(P, Some(Rehome))`
+   skips closed ancestors to reach an open grandparent, stops at a deleted
+   ancestor (landing top-level, matching Desktop), keeps closed children linked,
+   and queues tracker parent updates.
+4. **Raced `complete_task_now` refusal:** returns `OpsError::Refused(Error::conflict(...))`,
+   never `OutcomeUnknown`.
+5. **Reopen abandoned Task end-to-end (published PR + deleted checkout/branch):**
+   - Abandon `LOO-15` (PR `#7` closed with `abandoned_at`, worktree & branch deleted).
+   - `lf task reopen LOO-15`:
+     - PR `#7` is marked `historical = 1` (still in `task_prs`, `active_task_pr` is `None`).
+     - Stale `task_checkouts` row is deleted (`task.worktree` is `None`).
+     - `lf task status LOO-15` and Desktop `RoadmapTask`: `actions.recommended == Some(Run)`
+       (NOT `"PR closed without merge"`), `run_control.unavailable == None`
+       (Desktop Run/Start/Auto-Ship enabled, NO missing-worktree blocker).
+     - `lf task complete LOO-15` succeeds (no dead-PR refusal) — test separately.
+     - `lf task run LOO-15` (or `lf task checkout LOO-15`) creates a fresh
+       checkout from current `origin/main` and writes a new `CheckoutReady`
+       event (no lingering `CheckoutInitializing` blocker).
+     - Subsequent `lf pr submit` creates `sequence = 2` PR cleanly.
+6. **Reopen abandoned Task with retained worktree or local branch:**
+   - When `cleanup_abandoned` failed and the worktree (or local branch) still
+     exists on disk, `task_reopen` archives any abandoned PR (`historical = 1`)
+     but **keeps** `task_checkouts` intact so local commits are preserved.
+7. **Open Task with externally closed PR (regression check):**
+   - Without `task_reopen`, an open Task whose PR has `abandoned_at != None`
+     still reports `"PR closed without merge; reopen the same PR or abandon the Task"`.
+8. **Swift & DTO checks:** `TaskCompleteConfirmationTests`, `TaskFeedTests`,
+   `ServerProtocolTests`, `WorkSelectionTests`, and full Rust suites in CI.
 
 ## Demo
 
 `lf task create` a parent with two children (one with `lf task run` detached),
-then `lf task complete <parent>`: refusal lists both; `--children abandon`
-names the running one without leaving a pending completion; `--children rehome`
-finishes the parent and `lf wave show` lists both children top-level. In
-Desktop, right-click the parent → `Complete Task…` → the two-choice dialog.
+then `lf task complete <parent>`: refusal lists both (marking the running one
+`running`); `--children abandon` names the running one and `lf task interrupt`
+without writing; `--children rehome` finishes the parent and `lf wave show`
+lists both children top-level. Abandon a started child, `lf task reopen` it,
+confirm `lf task status` recommends `run` (not "PR closed without merge") and
+`lf task run` starts fresh from main. In Desktop, right-click the parent →
+`Complete Task…` → the two-choice dialog, and reopen an abandoned Task → **Run**
+is immediately clickable.
 
 ## Status
 
-Built (pass 1 and the Desktop half of pass 2):
-- Storage: `ChildPolicy`, `ChildOutcome::Rehomed`, `OpenDescendant`,
-  `ParentCompletion`, `complete_task_now`, `rehome_destination`,
-  `open_descendants`; `request_family_completion` and the `family` flag gone;
-  pending completion always waits for children; `CompletionSettlement::Settled`
-  carries nothing.
-- Execution: `task_complete(repo, issue, note, children)`, open-tree refusal
-  (counts direct children, lists the whole tree), `live_abandon_blockers`,
-  `settle_children`. `--reason` lands on `Completed { summary }`.
-- CLI `--children`, `task.complete.children` on the wire, schema fixture,
-  rehome text output.
-- Desktop: `TaskChildPolicy`, `ServedWrite.taskComplete(children:)`, dialog
-  with both button layouts, `WorkModel.rehomeDestination`.
-- Tests: `session_cli_tests::a_merged_parent_stays_open_until_it_is_completed_with_its_children`
-  (refusal writes nothing, abandon, reopen abandoned, rehome past a closed
-  ancestor, top-level rehome, unmerged parent arms nothing);
-  `ops::task::tests::abandoning_children_waits_for_live_work_but_not_an_idle_conversation`;
-  Swift `TaskCompleteConfirmationTests`, `ServerProtocolTests.taskCompletionNamesWhatHappensToOpenChildren`.
+Built on `HEAD` (`4f0a3df928`):
+- Storage/execution/CLI/Desktop/iOS/docs for explicit parent completion
+  (`ChildPolicy`, `complete_task_now`, `rehome_children`, `open_descendants`,
+  `live_abandon_blockers`, `OpsError::Refused`, `ViewContent.open_children`,
+  Desktop `TaskCompleteConfirmation`, iOS swipe confirmation dialog, initial
+  `reopen_task` unblocking).
+- Verified in QA (`scratch/qa.html`) on a private Machine + iPhone SE Simulator.
 
-Learned: tracker parent actions for rehome come from `planning_write::local`,
-the same path as `lf task update --parent`; no separate queueing needed. A
-Task with no tracker object queues none, so the CLI fixture cannot see one.
-
-Built (pass 3, iOS):
-- `ViewContent.open_children` (direct open children, `None` for non-Tasks),
-  filled in `selections.rs`; Swift `WorkViewPlan.Content.openChildren` with
-  explicit `decode(T?.self)` and `encode` of every nullable key (synthesized
-  encoding dropped nil keys, which broke the round-trip test once a decode
-  required them). DTO fixtures and `server_schema.json` regenerated.
-- `TaskFeed.complete`: a swipe on a parent sets `completing` and writes
-  nothing; the list's `confirmationDialog` sends `.rehome` / `.abandon`.
-  `TaskChildPolicy.question` is the one title for Desktop and the phone.
-- Tests: `cli_discovery::desktop_query_plan_reads_backlog_without_execution_or_desktop`
-  (`open_children == Some(1)` with one open and one done child),
-  `TaskFeedTests.testASwipedParentStaysUntilAskedWhatHappensToItsChildren`,
-  `testASwipedLeafSendsNoChildren`; macOS Swift suites for the DTO pass.
-
-Learned: one Rust-owned count is enough for the phone; its dialog names no
-destination, so carrying the rehome destination on `ViewContent` would only
-serve Desktop, which reads `RoadmapTask`, not view plans. Left as an open
-question in `scratch/questions.md`.
-
-QA (private Machine + iPhone SE Simulator, `scratch/qa.html`): CLI, served
-write and phone paths work end to end. Fixed in QA: aligned refusal tree; the
-live-work refusal leads with the running child and `lf task interrupt <id>`;
-completion refusals answer `conflict`, not `outcome_unknown`; a reopened
-abandoned Task checks out again from its base instead of failing on its
-deleted branch. Desktop's mounted dialog was not reached (menus only).
-
-Remaining: gate. Desktop's `rehomeDestination` still cannot see deleted
-ancestors (says "Top Level" where Rust continues to an open ancestor above a
-deleted one).
+Remaining (concept-review pass → implement → gate):
+1. Fix reopened-abandoned Task lifecycle cleanly: archive abandoned PR
+   (`historical = 1`), clear dead `task_checkouts` when worktree & branch are
+   gone on disk, scope `restore_task_checkout`/`finish_task_checkout` to the
+   current checkout epoch (`CheckoutInitializing`), delete QA's `restore_task_checkout`
+   workaround, update abandoned refusal copy (`task_run.rs`, `validate_preparation_status`)
+   and `docs/work.md` reopen wording.
+2. Map `complete_task_now` refusal errors (`InvalidData`/`InvalidAuthority`) to
+   `OpsError::Refused(Error::conflict(...))`.
+3. Show `running` alongside PR in `open_children_refusal` when `state == Moving`.
+4. Stop `rehome_destination_in` at deleted ancestors (`planning_deleted_at IS NOT NULL`).
+5. Add tests covering 1–7 above (including Desktop `RoadmapTask` / `task_run_control`
+   and `task_actions` after reopening an abandoned Task) and run gate.
 
 ## Passes
 
-1. **Storage + execution + CLI + docs** (validates the core model first:
-   immediate `complete_task_now` without `completion_request`, `rehome_children`
-   through `planning_write::local` queueing tracker parent actions in-tx, and
-   `live_abandon_blockers` distinguishing active Graphs/turns from idle held
-   conversations). Policy enum, `rehome_destination`, descendant refusal, live
-   guard, rehome, reopen tests, CLI flag, wire `children`, fixtures, tests 1–6,
-   docs.
-2. **Desktop** (built): `ServedWrite` field, Desktop dialog (both all-merged and
-   unmerged layouts).
-3. **iOS** (built): `ViewContent.open_children` in `selections.rs` + Swift +
-   fixtures, iOS confirmation dialog, view tests.
-4. **Gate**: Swift `TaskCompleteConfirmationTests`, `TaskFeedTests`,
-   `ServerProtocolTests` and the full Rust suites in CI; the acceptance check
-   above; the demo.
+1. **Storage + execution + CLI + docs** (built).
+2. **Desktop** (built).
+3. **iOS** (built).
+4. **Concept-review alignment pass (next `implement` pass):** reopened-abandoned
+   PR archival + dead checkout clearing + checkout-epoch check, `complete_task_now`
+   conflict mapping, `running` standing in refusal tree, deleted-ancestor stop
+   in `rehome_destination_in`, tests, and doc line update.
+5. **Gate**: Swift `TaskCompleteConfirmationTests`, `TaskFeedTests`,
+   `ServerProtocolTests` and the full Rust suites in CI; acceptance check; demo.
 
 ## Exclusions
 
@@ -398,3 +325,5 @@ deleted one).
 - No iOS reopen / abandoned list UI (not present on iOS today).
 - Reopen does not restore closed PRs or deleted branches; the next run opens a
   new PR, as reopen of a done Task does today.
+- Phone `NoticeView` single-line truncation and `lf task interrupt` on `cmd:`
+  steps are separate pre-existing issues outside this Task.

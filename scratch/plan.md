@@ -354,9 +354,45 @@ reaches others by forwarded token.
 Tests: `machine_commands::services_that_sign_in_here_only_never_reach_another_machine`,
 `rental::tests::a_rental_signs_in_once_to_each_provider_that_reaches_it_github_first`.
 
+## Next: Claude's token fails like a login (concept review, 2026-11-23)
+
+QA (`scratch/qa.html`, "rough, worst first" 1): with `forward.env:
+[CLAUDE_CODE_OAUTH_TOKEN]` set as the docs say, any launch from a shell
+without the value (no `doppler run`) stops at `forward::read`'s "forward.env
+names CLAUDE_CODE_OAUTH_TOKEN, which has no value on this Machine", Codex
+launches included, and `lf machine logins mini` shows Claude `signed out`
+with no reason. The token is Claude's login on other Machines; a missing login
+means "Claude signed out there", which the launch check already handles per
+provider. **Made for review:** a missing value for `login::CLAUDE_TOKEN_ENV`
+is not an error.
+
+- `machine/forward.rs` `read`: a `forward.env` name equal to
+  `login::CLAUDE_TOKEN_ENV` with no value here (env or Doppler) is left out of
+  `Forwarded.env`; every other name stays required (main's rule).
+- `login::sign_in_advice(Claude)` on another Machine: "give this Machine
+  CLAUDE_CODE_OAUTH_TOKEN (`doppler secrets set …`, or run under
+  `doppler run`) and name it in `forward.env`" — the target cannot tell which
+  half is missing.
+- `login::logins` remote: when `forward.env` names the token but `read` left
+  it out, keep the target's row and set `account` to
+  `CLAUDE_CODE_OAUTH_TOKEN has no value here`. No new `LoginState`.
+- Rental `place`: unchanged code; it now reaches its own "no agent login"
+  stop instead of `read`'s error.
+- Tests: `forward.rs` unit test (named Claude token, no value → `Ok`, not
+  carried; another missing name still errors); extend
+  `session_launch_contract::a_signed_out_machine_refuses_the_launch_with_the_command_that_signs_it_in`
+  so a Codex launch with the token named and unset runs, and a Claude one is
+  refused with the new advice; the `a_command_approver_…` fixture checks the
+  `has no value here` row. Docs: `docs/subscriptions.md` "Per-run secrets"
+  and the forwarded-row sentence say a missing token reads as Claude signed out.
+
+Passed over: a new `forwarded`-without-value state; forwarding the token
+without a `forward.env` entry (drops the opt-in for third-party rentals);
+making every missing `forward.env` value optional.
+
 ## Remaining (gate)
 
-Implementation is complete, rescope included. Left for gate and after:
+Implementation is complete apart from the section above. Left for gate and after:
 
 - Gate's headless acceptance fixture (below); its parts exist as
   `machine_commands::a_command_approver_signs_machines_in_to_codex_without_a_terminal`

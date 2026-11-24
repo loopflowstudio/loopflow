@@ -2,82 +2,99 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>LOO-957 concept review, as built (pass 2)</title>
+<title>LOO-957 concept review: signing Machines in (as built, after the rescope)</title>
 <style>
-  :root { --bg:#fbfaf7; --fg:#1d1d1b; --muted:#5d5b55; --line:#dedad1; --card:#fff;
-          --yes:#1f7a45; --no:#b3261e; --prop:#2456a6; --propbg:#eaf0fb; --oldbg:#f6ecea; }
-  @media (prefers-color-scheme: dark) {
-    :root { --bg:#161614; --fg:#e9e6df; --muted:#a29e95; --line:#34322d; --card:#1f1e1b;
-            --yes:#5fc28a; --no:#f08a80; --prop:#8fb2f0; --propbg:#1c2638; --oldbg:#33201d; }
-  }
-  body { background:var(--bg); color:var(--fg); font:16px/1.55 ui-sans-serif, -apple-system, "Segoe UI", sans-serif;
-         max-width:980px; margin:2.5rem auto; padding:0 1.25rem; }
-  h1 { font-size:1.7rem; margin-bottom:.2rem } h2 { margin-top:2.4rem; border-bottom:1px solid var(--line); padding-bottom:.3rem }
-  p.lede { color:var(--muted); margin-top:0 }
-  code { font:0.88em ui-monospace, SFMono-Regular, Menlo, monospace; }
-  pre { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:.8rem 1rem; overflow-x:auto; font-size:.86rem; line-height:1.45 }
-  table { border-collapse:collapse; width:100%; margin:.8rem 0; font-size:.93rem }
-  th, td { border-bottom:1px solid var(--line); padding:.45rem .5rem; text-align:left; vertical-align:top }
-  .yes { color:var(--yes); font-weight:700 } .no { color:var(--no); font-weight:700 }
-  .prop { border-left:4px solid var(--prop); background:var(--propbg); padding:.6rem 1rem; border-radius:0 8px 8px 0; margin:.8rem 0 }
-  .old  { border-left:4px solid var(--no); background:var(--oldbg); padding:.6rem 1rem; border-radius:0 8px 8px 0; margin:.8rem 0 }
-  .tag { display:inline-block; font-size:.8rem; padding:0 .45rem; border-radius:4px; border:1px solid currentColor }
-  .tag.p { color:var(--prop) } .tag.e { color:var(--muted) }
-  .cols { display:grid; grid-template-columns:1fr 1fr; gap:1rem } @media (max-width:760px){ .cols{grid-template-columns:1fr} }
-  ol.q > li { margin-bottom:.9rem } ol.q ol { list-style:lower-alpha; margin-top:.3rem }
+:root{--bg:#fff;--fg:#1d1d1f;--muted:#6e6e73;--line:#d9d9de;--code:#f4f4f6;--yes:#0a7d32;--no:#b3261e;--new:#7a4cc2;--newbg:#f4effc}
+@media (prefers-color-scheme:dark){:root{--bg:#161618;--fg:#ececf0;--muted:#a0a0a8;--line:#38383d;--code:#232327;--yes:#4cc777;--no:#ff7b72;--new:#c8a6ff;--newbg:#251e33}}
+body{background:var(--bg);color:var(--fg);font:15px/1.55 -apple-system,system-ui,sans-serif;max-width:960px;margin:2rem auto;padding:0 1.2rem}
+h1{font-size:1.45rem;margin-bottom:.3rem}h2{font-size:1.12rem;margin-top:2.2rem;border-bottom:1px solid var(--line);padding-bottom:.2rem}
+p.lede{color:var(--muted);margin-top:0}
+code,pre{font:12.5px/1.45 ui-monospace,Menlo,monospace}code{background:var(--code);padding:0 .25em;border-radius:3px}
+pre{background:var(--code);padding:.7rem .9rem;border-radius:6px;overflow-x:auto}
+table{border-collapse:collapse;width:100%;margin:.6rem 0}td,th{border:1px solid var(--line);padding:.4rem .55rem;text-align:left;vertical-align:top}
+th{font-weight:600}
+.yes{color:var(--yes);font-weight:700}.no{color:var(--no);font-weight:700}
+.proposed{border-left:4px solid var(--new);background:var(--newbg);padding:.6rem .9rem;border-radius:0 6px 6px 0;margin:.8rem 0}
+.proposed b.tag{color:var(--new)}
+.cols{display:grid;grid-template-columns:1fr 1fr;gap:1rem}@media (max-width:760px){.cols{grid-template-columns:1fr}}
+.cols>div{border:1px solid var(--line);border-radius:6px;padding:.4rem .9rem}
+.cols h3{font-size:.98rem;margin:.4rem 0}
+ol.q>li{margin:.6rem 0}ol.q ol{list-style:lower-alpha;margin-top:.2rem}
 </style>
 </head>
 <body>
-<h1>Signing Machines in, as built: do the concepts line up?</h1>
-<p class="lede">LOO-957 with the whole change in it (HEAD <code>6777c85270</code>, against <code>main</code>): four slices, the reach set from the first as-built review, its compress and QA.
-Area taken: everything a person touches to get any Machine signed in to any provider: <code>lf machine login / logout / logins</code>,
-<code>approvers.&lt;provider&gt;</code>, <code>ondemands.&lt;name&gt;.logins</code> and rental prepare, the launch check, and <code>--refused</code>.
-<span class="tag e">existing</span> is on this branch; nothing here is <span class="tag p">proposed</span>: this pass changes no plan.</p>
+<h1>Signing Machines in, as built</h1>
+<p class="lede">Area: how a Machine (this one, an owned one, a rental) comes to be signed in to Claude, Codex and the services, how a person sees that, and what a launch does when it isn't. Taken whole because the rescope changed Claude's half from a sign-in into a forwarded secret, and that seam is where the concepts now disagree. Reviewed at <code>bf28572dc3</code> against base <code>250e266b4a</code>, with the QA run of 2026-11-23 (<code>scratch/qa.html</code>).</p>
 
-<h2>The interaction, walked once</h2>
-<p>A rental from a template with no <code>--logins</code>. This Machine is signed in to Claude, GitHub, Linear and Doppler.</p>
-<ol>
-<li><code>lf --rent code -a claude implement</code>. Prepare reads <code>lf machine logins</code> here, keeps what reaches another Machine (<code>rental::sign_in_order</code>): GitHub, Claude, Linear. Doppler is skipped, not failed.</li>
-<li>GitHub transfers first (the clone needs it), Claude asks for a paste, Linear renews and sends. The step launches; <code>_run_signed_in</code> probes Claude on the rental and finds it signed in.</li>
-<li><b>Failure:</b> the Claude login was revoked later. The next launch there reads signed out before the agent starts and stops with <code>&lt;rental&gt; has no Claude login; run `lf machine login claude &lt;rental&gt;`</code>, named as the launching side calls it.</li>
-<li><b>Recovery:</b> that command, or <code>lf machine login claude --refused</code> for every Machine in the same state. Nothing is recorded; the probe and the refusal rows say who needs it.</li>
-</ol>
-<p>The edge from the first as-built review: <code>lf machine login asana mini</code> now refuses before any SSH with "Asana signs in on each Machine itself; run `lf machine login asana` there", and <code>lf ondemand add --logins asana</code> refuses at add, not at rent.</p>
+<h2>One interaction, walked</h2>
+<p>A person following <code>docs/subscriptions.md</code> runs <code>claude setup-token</code>, <code>doppler secrets set CLAUDE_CODE_OAUTH_TOKEN</code>, <code>lf set --global forward.env '[CLAUDE_CODE_OAUTH_TOKEN]'</code>. Later, in another checkout or a shell without <code>doppler run</code>, they launch on Codex:</p>
+<pre>$ lf --machine mini -b -a codex : 'say hi'
+Error: forward.env names CLAUDE_CODE_OAUTH_TOKEN, which has no value on this Machine: export it, …
+$ lf machine logins mini
+claude   signed out
+codex    signed in   ChatGPT</pre>
+<p>Codex is signed in on mini and the run never asked for Claude, yet it stops. The logins table says Claude is signed out on mini, which is the target's own reading and not the reason. QA recorded both as the worst rough edge and left them.</p>
+<p>The cause is a naming one. To the person, the token is <em>Claude's login on other Machines</em>: the docs, <code>lf machine login claude mini</code>'s refusal and the <code>forwarded</code> row all say so. To the code it is one more <code>forward.env</code> entry, a per-run secret, and <code>forward::read</code> treats every named secret as required. A missing login should mean "Claude signed out there": the launch check skips Claude's models and moves to the next provider. A missing required secret means "this config is broken, stop everything".</p>
 
-<h2>Product concepts against code concepts</h2>
+<h2>Do the concepts line up?</h2>
 <table>
-<tr><th>What a person knows</th><th>What the code has</th><th>Line up?</th><th>Note</th></tr>
-<tr><td>Sign Machine M in to P</td><td><code>login::login</code>: Claude/Codex run their client on M; services here <code>operations::connect</code>; elsewhere <code>credentials::connect</code></td><td class="yes">yes</td><td>One verb over two mechanisms; the person's outcome is the same.</td></tr>
-<tr><td>Which providers can reach another Machine</td><td><code>login::reaches_other_machines</code>, read by the command (<code>require_reach</code>), prepare's default and <code>ondemand add</code></td><td class="yes">yes</td><td>Was <span class="no">no</span> in the first as-built review (three places, three answers). Help text names the three that stay here. <code>credentials::connect</code>'s catch-all is <code>unreachable!</code>, held by its callers.</td></tr>
-<tr><td>Sign out</td><td><code>login::logout</code>: client logout, else the target's own <code>lf machine logout</code></td><td class="yes">yes</td><td>Asks the target, which answers for all eight.</td></tr>
-<tr><td>What M is signed in to</td><td><code>lf machine logins [--json]</code> → <code>Vec&lt;LoginRow&gt;</code>; elsewhere, M's own <code>logins --json</code></td><td class="yes">yes</td><td>One reader; also the service transfers' pre-check. <code>credentials inspect</code> is gone.</td></tr>
-<tr><td>Who approves</td><td><code>Approver</code> (<code>Chrome</code> / <code>Command</code>), <code>login::send</code></td><td class="yes">yes</td><td>Home in <code>config::placement</code> reads oddly; cosmetic.</td></tr>
-<tr><td>Which providers a rental gets</td><td><code>OnDemandDeclaration.logins</code>; unset → signed in here ∩ reaches</td><td class="yes">yes</td><td>The list is what prepare signs in, explicit or derived.</td></tr>
-<tr><td>"M has no Codex login; run …"</td><td><code>_run_signed_in</code> → <code>CredentialInvalidated</code>; name from <code>LF_MACHINE_NAME</code></td><td class="yes">yes</td><td>Fail-open on unknown; measured inside the 0.5 s bound.</td></tr>
-<tr><td>Retry the refused Machines</td><td><code>--refused</code>: probe signed out, or <code>unanswered_refusal</code></td><td class="yes">yes</td><td>Derived. Open: whether a usage-limit refusal counts.</td></tr>
+<tr><th>What a person knows / does</th><th>In the code</th><th></th><th>Where it is wrong</th></tr>
+<tr><td>Sign a Machine in: <code>lf machine login &lt;provider&gt; [&lt;machine&gt;…]</code></td><td><code>login::login</code>, one dispatch per provider</td><td class="yes">yes</td><td></td></tr>
+<tr><td>Which providers can reach another Machine</td><td><code>login::reaches_other_machines</code> + <code>require_reach</code></td><td class="yes">yes</td><td>One predicate; Claude's refusal names the token path.</td></tr>
+<tr><td>Who approves (a browser profile or a command)</td><td><code>approvers: BTreeMap&lt;Provider, Approver&gt;</code></td><td class="yes">yes</td><td>A leftover <code>approvers.claude</code> does nothing, silently. Small.</td></tr>
+<tr><td>What a Machine is signed in to: <code>lf machine logins</code></td><td><code>LoginRow{provider,state,account,refused}</code>; target answers, sender overlays <code>forwarded</code></td><td class="yes">yes</td><td>The overlay is right to live on the sender: only it knows what a launch from here carries.</td></tr>
+<tr><td><strong>Claude's login on another Machine</strong></td><td>a <code>forward.env</code> entry, read by <code>forward::read</code> as a required secret; <code>login::CLAUDE_TOKEN_ENV</code> names it</td><td class="no">no</td><td><strong>One name for two ideas.</strong> <code>forward.env</code> holds required per-run secrets and, for this one variable, a login. Its absence stops every launch, every provider, before the login check could treat it as "Claude signed out". <code>logins</code> shows the target's <code>signed out</code> with no reason.</td></tr>
+<tr><td>A launch with no login: refused, next provider, fixing command</td><td><code>missing_login</code> → <code>AgentFailure::CredentialInvalidated</code> → <code>sign_in_advice</code></td><td class="yes">yes</td><td>Prints <code>agent stopped after provider credential invalidated.</code> above the useful line: the variant name reaches the person. Small, larger than this work (release tooling matches the string).</td></tr>
+<tr><td>Retry the failed ones: <code>--refused</code></td><td>derived from probe + <code>unanswered_refusal</code></td><td class="yes">yes</td><td>Open: whether a usage-limit refusal should count.</td></tr>
+<tr><td>Sign out: <code>lf machine logout &lt;provider&gt; [&lt;machine&gt;]</code></td><td>each provider's own logout</td><td class="no">no</td><td>For Claude on another Machine, logout acts on a login lf never made and launches never use (the forwarded token overrides it). The inverse of "forward the token" is "stop forwarding it", which is <code>forward.env</code>. Kept as built; question 3.</td></tr>
+<tr><td>Which logins a rental gets</td><td><code>ondemands.&lt;name&gt;.logins</code>; <code>place</code> stops when neither Codex nor the forwarded token</td><td class="yes">yes</td><td>Inherits the mismatch above: the stop reads <code>forward::read</code>, so a missing token errors out with the generic message instead of reaching the "no agent login" stop.</td></tr>
 </table>
 
-<h2>Biggest mismatch: none left in this area</h2>
+<h2>The recommendation</h2>
 <div class="cols">
-<div class="old"><b>Before (first as-built review)</b><br>"Every provider" meant eight in the parser and prepare's default, five in the dispatch, and the true set lived in a stale <code>bail!</code> string. A default rental died before cloning when this Machine had Doppler.</div>
-<div class="prop" style="border-left-color:var(--yes)"><b>Now</b><br>One predicate, one refusal at the command, one filter in prepare, one check at <code>ondemand add</code>. The stale string is gone. Test: <code>machine_commands::services_that_sign_in_here_only_never_reach_another_machine</code>, <code>rental::tests::a_rental_signs_in_once_to_each_provider_that_reaches_it_github_first</code>.</div>
+<div><h3>Before (built)</h3>
+<pre>forward.env: [CLAUDE_CODE_OAUTH_TOKEN]
+# token not in this shell
+lf --machine mini -a codex …
+  Error: forward.env names
+  CLAUDE_CODE_OAUTH_TOKEN, which has
+  no value on this Machine
+lf machine logins mini
+  claude  signed out</pre></div>
+<div><h3>After (proposed)</h3>
+<pre>forward.env: [CLAUDE_CODE_OAUTH_TOKEN]
+# token not in this shell
+lf --machine mini -a codex …
+  (runs on Codex)
+lf --machine mini -a claude …
+  mini has no Claude login; give this
+  Machine CLAUDE_CODE_OAUTH_TOKEN
+  (doppler run, or doppler secrets set)
+  → continues on Codex if the order has it
+lf machine logins mini
+  claude  signed out  CLAUDE_CODE_OAUTH_TOKEN has no value here</pre></div>
 </div>
+<div class="proposed"><b class="tag">Proposed, choice made for review.</b> Claude's token is a login, so it fails like one. <code>forward::read</code> leaves out <code>login::CLAUDE_TOKEN_ENV</code> when it has no value here instead of erroring; every other <code>forward.env</code> name stays required. The target's launch check then reads Claude signed out and does what it already does for Codex: skip, fall back, or stop with advice. The advice for Claude names giving this Machine the value, since <code>forward.env</code> may already name it. <code>logins</code> keeps the target's row and says why in the account column. Rental <code>place</code> reaches its own "no agent login" stop. No new state, no new type; <code>forward.rs</code> gains one exemption and loses a failure mode for every launch path (<code>ssh.rs</code>, <code>write.rs</code>, <code>rental.rs</code>).
+<br><br>Passed over: (a) a <code>forwarded, no value here</code> state in <code>LoginState</code>, which adds a wire value for what the account column can say; (b) forwarding the token whenever it is in this Machine's env with no <code>forward.env</code> entry, which drops the opt-in that keeps a person's token off third-party rentals they didn't choose; (c) making every missing <code>forward.env</code> value optional, which turns main's deliberate rule for real per-run secrets into silent omissions.</div>
 
-<h2>Smaller, not for this change</h2>
+<p>Counterexample tested: someone who wants Claude and forgot <code>doppler run</code>. Today they get a stop naming the variable. After, a Claude launch on mini is refused before its agent starts with a line naming the variable, and continues on Codex only if their order includes it, with the fallback line printed. Nothing runs on Claude without a login, and the fixing command is still on screen.</p>
+
+<h2>Larger than this work</h2>
 <ul>
-<li>Headless <code>--rent</code> with no command approver fails prepare on Claude's paste (and gives the rental back) even when the step runs on Codex. Recorded behavior; a headless renter sets a command approver or <code>--logins</code>. A check before renting would save the minutes of rental; it is a new precondition, so it is left out.</li>
-<li>Codex with no approver in a batch run opens this Machine's browser and waits up to 15 minutes for a person who may not be there.</li>
-<li>Rental prepare's sign-in loop has no end-to-end fixture; the PR says so.</li>
+<li>The <code>CredentialInvalidated</code> wording above the advice. <code>ops/release.rs</code> and <code>release_tests.rs</code> match the string, so it is its own change.</li>
+<li><code>lf set</code> printing its effect variant (<code>saved; NextLaunch</code>), seen in QA; also on released lf.</li>
 </ul>
 
 <h2>Questions</h2>
 <ol class="q">
+<li>When <code>forward.env</code> names <code>CLAUDE_CODE_OAUTH_TOKEN</code> and this shell lacks it, should launches
+  <ol><li>treat Claude as signed out there and go on (proposed, in the plan)</li><li>keep stopping every launch, as main's rule does</li><li>treat every missing <code>forward.env</code> value as optional</li></ol></li>
+<li>Should <code>lf machine logins mini</code>, in that case, show
+  <ol><li>the target's row with "CLAUDE_CODE_OAUTH_TOKEN has no value here" (proposed)</li><li>a new <code>forwarded</code>-without-value state</li></ol></li>
+<li><code>lf machine logout claude mini</code> runs <code>claude auth logout</code> there, though launches from here use the forwarded token. Keep it, refuse it like login (naming <code>forward.env</code>), or
+  <ol><li>keep (as built)</li><li>refuse like login</li></ol></li>
 <li>Should a usage-limit refusal count for <code>--refused</code>?
-<ol><li>yes, as built</li><li>no, only signed-out and missing-login refusals</li></ol></li>
-<li>Should <code>--refused</code> include this Machine?
-<ol><li>no, as built: <code>lf machine login codex</code> is right there</li><li>yes</li></ol></li>
-<li>Headless rental with Claude and no command approver:
-<ol><li>fail at prepare and give the rental back, as built</li><li>skip Claude when the step's agent is not Claude</li><li>refuse before renting</li></ol></li>
+  <ol><li>yes (as built: any refusal counts)</li><li>no, only signed-out or revoked</li></ol></li>
 </ol>
 </body>
 </html>

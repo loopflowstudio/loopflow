@@ -115,3 +115,9 @@ Choices made headless for review; the plan says what each passed over.
 - Sync onto main: main dropped Notion; it is gone from logins, docs and tests.
   Revoked-login advice is `lf machine login <provider>` for a provider lf signs
   in, else the harness's own (`agy`, Pi).
+- Concept review (2026-11-23, as built after rescope): a `forward.env`
+  `CLAUDE_CODE_OAUTH_TOKEN` with no value here is left out of the forward
+  instead of stopping every launch; Claude then reads signed out on the target
+  and the launch check falls back. Passed over: keeping main's stop for it, a
+  new `LoginState`, forwarding without `forward.env`. Open (page question 3):
+  whether `lf machine logout claude <machine>` should refuse like login.

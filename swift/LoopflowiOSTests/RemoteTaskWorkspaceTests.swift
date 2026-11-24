@@ -240,9 +240,11 @@ private final class TwoMachines {
         }
     }
 
-    /// Start mini's server, register mini, then start the laptop's; their first opens migrate each store.
+    /// Migrate both stores, start mini's server, register mini, then start the laptop's.
+    /// A server's readiness is measured on a migrated store, never on its first open.
     func serve() async throws {
         struct Identity: Decodable { let id: String }
+        for lf in [mini, laptop] { _ = try await lf.run(["desktop", "portfolio", "--json"]) }
         try await miniServer.start()
         miniID = try await laptop.json(["machine", "add", "mini", "--json"], as: Identity.self).id
         laptopID = try await laptop.json(["machine", "id", "--json"], as: Identity.self).id

@@ -91,16 +91,19 @@ struct TaskFilesTests {
         try await eventually { document.text == "local\nPEER\n" }
         #expect(document.dirty)
         #expect(document.editor.selectedRange().location == 2)
-        // The Task moves: the same store watches and reads there, its draft kept.
+        // The Task moves: the same store watches and reads there. Mini's file is
+        // at another revision, so the draft stays whole beside it, unmerged.
         peer.move(to: "mini", checkout: "/mini/checkout", content: "one\nMINI\n")
-        try await eventually { document.text == "local\nMINI\n" }
+        try await eventually { document.external?.content == "one\nMINI\n" }
+        #expect(document.text == "local\nPEER\n")
+        #expect(!document.canSave)
         #expect(store.machine == "mini")
         #expect(store.cwd == "/mini/checkout")
         #expect(store.document("note.txt") === document)
         // An outage names the Machine and keeps the draft.
         peer.unavailable("mini did not answer; run `ssh mini lf server status`")
         try await eventually { store.error?.contains("mini did not answer") == true }
-        #expect(document.text == "local\nMINI\n")
+        #expect(document.text == "local\nPEER\n")
         #expect(document.dirty)
         // No read ever named a Machine or a checkout path; the server routes by Task.
         let reads = peer.reads
@@ -132,7 +135,8 @@ struct TaskFilesTests {
         try await eventually { peer.watching }
         peer.refuse(ServerError(code: "not_found", message: "Task remote-task is not started",
             data: .object(["reason": .string("not_started"), "task_id": .string("remote-task")])))
-        try await eventually { store.error == "Not started" }
+        try await eventually { store.notStarted }
+        #expect(store.error == nil)
     }
 
     @Test func chooserFiltersScratchAndParentChangesAndPreservesDrafts() async throws {

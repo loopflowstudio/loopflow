@@ -289,10 +289,28 @@ final class SessionsWorkspace {
         guard let terminal = tab.terminal else { return }
         surfaces.release(terminal)
         disconnectedShells.remove(tab.id)
+        notStartedShells.remove(tab.id)
     }
 
     // Exiting an attachment does not establish that its remote execution ended.
     var disconnectedShells: Set<String> = []
+    /// Ended shell tabs whose Task has no checkout on its Machine: **Not started**.
+    var notStartedShells: Set<String> = []
+
+    /// An ended attachment can be the server refusing a Task with no checkout;
+    /// ask it in its typed form rather than reading the terminal's text.
+    private func checkStarted(_ tabId: String) {
+        guard key.kind == .task else { return }
+        let query = retainedStore?.query ?? RegistryQueryLocal.shared
+        Task { [weak self, issue = key.id] in
+            do {
+                _ = try await query.taskFiles(issue: issue, directory: "")
+                self?.notStartedShells.remove(tabId)
+            } catch let refusal as ServerError where refusal.notStarted {
+                self?.notStartedShells.insert(tabId)
+            } catch {}
+        }
+    }
     var shellScreens: [String: String] = [:]
 
     /// Whether this Task's terminals are shown. An open LF viewer retains its
@@ -338,10 +356,10 @@ final class SessionsWorkspace {
 
     /// The Task's one Files store. It reads by Task through the server, so the
     /// Machine is only where it watches; drafts restore whatever their location.
-    func files(issue: String, cwd: String, machine: String? = nil,
+    func files(issue: String, cwd: String, machine: String? = nil, machineLabel: String? = nil,
                query: RegistryQuery = RegistryQueryLocal.shared) -> TaskFilesStore {
         if let files = taskFiles { return files }
-        let files = TaskFilesStore(issue: issue, cwd: cwd, machine: machine, query: query)
+        let files = TaskFilesStore(issue: issue, cwd: cwd, machine: machine, machineLabel: machineLabel, query: query)
         files.measurementRepository = measurementRepository
         taskFiles = files
         files.restoreDrafts(unavailableDrafts)
@@ -369,11 +387,12 @@ final class SessionsWorkspace {
         }
         let cwd = (place?.machineId == machine ? place?.worktree : nil) ?? ""
         let remote = machine == localMachineId ? nil : machine
+        let label = owner == machine ? task?.runtime?.owner?.machine.label : nil
         if let retained = taskFiles {
-            retained.relocate(machine: remote, cwd: cwd.isEmpty ? retained.cwd : cwd)
+            retained.relocate(machine: remote, label: label, cwd: cwd.isEmpty ? retained.cwd : cwd)
             return retained
         }
-        return files(issue: task?.runtime?.workId ?? taskId, cwd: cwd, machine: remote, query: query)
+        return files(issue: task?.runtime?.workId ?? taskId, cwd: cwd, machine: remote, machineLabel: label, query: query)
     }
     let surfaces: GhosttySurfacePool
     let pages = BrowserPages()
@@ -413,6 +432,7 @@ final class SessionsWorkspace {
                     guard let self, self.multiplexer.shell(tabId)?.terminal == terminal else { return }
                     self.disconnectedShells.insert(tabId)
                     if let output = notification.userInfo?["output"] as? String { self.shellScreens[tabId] = output }
+                    self.checkStarted(tabId)
                 }
             }
     }

@@ -107,7 +107,7 @@ struct TaskFilesView: View {
         let checkout = URL(fileURLWithPath: store.cwd).lastPathComponent
         let directory = store.selection.map { ($0 as NSString).deletingLastPathComponent } ?? ""
         return HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
-            Text(store.machine ?? "This Mac").font(Typography.meta).fixedSize()
+            Text(store.machineName ?? "This Mac").font(Typography.meta).fixedSize()
             Text(checkout + (directory.isEmpty ? "" : "/" + directory)).font(Typography.mono)
                 .lineLimit(1).truncationMode(.head)
         }
@@ -340,7 +340,10 @@ struct TaskFilesView: View {
     private var documentPane: some View {
         VStack(spacing: 0) {
             if let error = store.error {
-                FailureLine("Latest read failed.", machine: error).padding(Spacing.sm)
+                FailureLine("Latest read failed.", machine: error) {
+                    Button("Retry") { Task { await store.retry() } }
+                        .accessibilityIdentifier("files-retry")
+                }.padding(Spacing.sm)
             }
             if let reason = store.selectedDocument?.readOnlyReason {
                 Text(reason).font(Typography.meta).padding(Spacing.sm)

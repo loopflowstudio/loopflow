@@ -89,6 +89,14 @@ final class TaskFileDocument: NSObject, NSTextViewDelegate, @preconcurrency NSTe
         onEdit?()
     }
 
+    /// The file where the Task runs now, after a move. A draft on another
+    /// revision stays whole beside it, never merged: only a save at the
+    /// draft's base revision may write it there.
+    func arrive(_ next: TaskFileSnapshot) async {
+        guard dirty, next.revision != snapshot?.revision else { return await reconcile(next) }
+        external = next
+    }
+
     private func applyIncoming(_ value: String, edits: [TaskTextEdit]? = nil) {
         guard value != text else { return }
         let edits = edits ?? TaskTextEdit.between(text, value)
@@ -505,7 +513,9 @@ final class TaskFilesStore {
         do {
             let page = try await query.taskFiles(issue: issue, directory: directory, cursor: read.cursor)
             tree.receive(page, for: directory, more: more)
+            notStarted = false
         } catch {
+            if let refusal = error as? ServerError, refusal.notStarted { notStarted = true }
             tree.fail(directory, reason: error.localizedDescription)
         }
     }
@@ -590,6 +600,12 @@ final class TaskFilesStore {
     private(set) var cwd: String
     /// That Machine when it is not this one; nil while it is this Mac.
     private(set) var machine: String?
+    /// What the Files header calls that Machine: its label when the plan names
+    /// one, else its ID.
+    var machineName: String? { machine.map { machineLabel ?? $0 } }
+    @ObservationIgnored private var machineLabel: String?
+    /// Documents to read where the Task has moved, before their next ordinary read.
+    @ObservationIgnored private var arriving: Set<String> = []
     let query: RegistryQuery
     private(set) var tabs: [WorkFileTab] = []
     var selection: String? {
@@ -659,6 +675,9 @@ final class TaskFilesStore {
     /// Files' Diff mode: the selected file through the review stream.
     private(set) var fileReview: FileReview?
     private(set) var error: String?
+    /// The Task has no checkout on its Machine yet: Files and Changes say
+    /// **Not started** until a read finds one.
+    private(set) var notStarted = false
     private var refreshGeneration = 0
     private var fileGeneration = 0
     private var diffGeneration = 0
@@ -697,8 +716,10 @@ final class TaskFilesStore {
 
     /// The Task's reading names another Machine or checkout: watch that one and
     /// re-read everything open there. Documents and their drafts stay.
-    func relocate(machine: String?, cwd: String) {
+    func relocate(machine: String?, label: String? = nil, cwd: String) {
+        if machine == self.machine, let label { machineLabel = label }
         guard machine != self.machine || cwd != self.cwd else { return }
+        machineLabel = label
         let observing = observation != nil || servedObservation != nil
         observation = nil
         servedObservation?.cancel()
@@ -706,6 +727,7 @@ final class TaskFilesStore {
         servedRevision = nil
         self.machine = machine
         self.cwd = cwd
+        arriving = Set(documents.keys)
         if observing { observeFiles() }
         invalidate([""])
     }
@@ -725,7 +747,12 @@ final class TaskFilesStore {
                         continue
                     }
                     self.error = nil
+                    self.notStarted = false
                     if revision.machineID != self.machine || revision.checkout != self.cwd {
+                        if revision.machineID != self.machine {
+                            self.machineLabel = nil
+                            self.arriving = Set(self.documents.keys)
+                        }
                         self.machine = revision.machineID
                         self.cwd = revision.checkout
                     } else if revision.revision == self.servedRevision {
@@ -737,7 +764,7 @@ final class TaskFilesStore {
                     if !first { self.invalidate([""]) }
                 }
             } catch let refusal as ServerError where refusal.notStarted {
-                self?.error = "Not started"
+                self?.notStarted = true
             } catch {
                 if let self, !Task.isCancelled {
                     self.invalidation?.cancel()
@@ -801,7 +828,11 @@ final class TaskFilesStore {
                         self.invalidate([path])
                         return
                     }
-                    await document.reconcile(next)
+                    if self.arriving.remove(path) != nil {
+                        await document.arrive(next)
+                    } else {
+                        await document.reconcile(next)
+                    }
                     if Self.isScratchPage(path), next.state == .text { self.follow(path) }
                 } catch is CancellationError {
                     return
@@ -870,10 +901,12 @@ final class TaskFilesStore {
         }
     }
 
-    init(issue: String, cwd: String, machine: String? = nil, query: RegistryQuery = RegistryQueryLocal.shared) {
+    init(issue: String, cwd: String, machine: String? = nil, machineLabel: String? = nil,
+         query: RegistryQuery = RegistryQueryLocal.shared) {
         self.issue = issue
         self.cwd = cwd
         self.machine = machine
+        self.machineLabel = machineLabel
         self.query = query
         autosave = UserDefaults.standard.savesTaskFilesAutomatically
         savedPreference = autosave
@@ -909,6 +942,18 @@ final class TaskFilesStore {
         await refreshChanges()
     }
 
+    /// Try the Machine again after an outage or before a checkout existed:
+    /// watch, re-read the open directories, the selected file and the comparison.
+    func retry() async {
+        error = nil
+        observeFiles()
+        await refreshChanges()
+        for directory in Set(tree.listings.keys).union([""]).sorted() {
+            await readDirectory(directory, more: false)
+        }
+        await loadFile()
+    }
+
     func refreshChanges() async {
         refreshGeneration += 1
         let generation = refreshGeneration
@@ -919,6 +964,7 @@ final class TaskFilesStore {
             let changes = try await query.taskChanges(issue: issue, base: target.base, head: target.head)
             guard !Task.isCancelled, generation == refreshGeneration, comparison == target else { return }
             self.changes = changes
+            notStarted = false
             // A step's own read holds only its commits; the steps come from the whole Task's.
             if step == nil { steps = ReviewStep.steps(changes.commits) }
             if selection == nil, let first = changes.scratch.first ?? changes.files.first?.path {
@@ -930,6 +976,7 @@ final class TaskFilesStore {
             guard !Task.isCancelled, generation == refreshGeneration else { return }
             changes = nil
             fileReview = nil
+            if let refusal = error as? ServerError, refusal.notStarted { notStarted = true }
             changesError = error.localizedDescription
         }
     }

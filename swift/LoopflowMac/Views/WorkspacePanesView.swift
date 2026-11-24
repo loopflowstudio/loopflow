@@ -801,7 +801,12 @@ struct SessionPaneView: View {
                 if !showsStrip { shellTabs.padding(PaneGeometry.inset) }
                 if let tab = pane.content.selectedShell,
                           tab.location != nil, let terminal = tab.terminal {
-                    if workspace.disconnectedShells.contains(tab.id) {
+                    if workspace.notStartedShells.contains(tab.id) {
+                        EmptyState(title: "Not started", sentence: "This Task has no checkout on its Machine yet.") {
+                            Button("Reconnect") { workspace.reconnectShell(tab) }
+                            Button("New Shell") { do { try workspace.newShell() } catch { paneFailed(error) } }
+                        }
+                    } else if workspace.disconnectedShells.contains(tab.id) {
                         VStack {
                             if let screen = workspace.shellScreens[tab.id] {
                                 ScrollView { Text(screen).font(Typography.mono).textSelection(.enabled) }
@@ -841,6 +846,10 @@ struct SessionPaneView: View {
                 case .files, .changes:
                     let task = model.task(id: taskId)?.task
                     switch Result(catching: { try workspace.files(for: pane.content, task: task, query: sessions.query) }) {
+                    case .success(let files) where files.notStarted:
+                        EmptyState(title: "Not started", sentence: "This Task has no checkout on its Machine yet.") {
+                            Button("Retry") { Task { await files.retry() } }
+                        }
                     case .success(let files):
                         TaskFilesView(store: files, checkoutBase: task?.reference.workspace?.baseCommit, task: task,
                             graph: task.flatMap { model.taskWork[$0.id].value?.graph }, isFocused: isFocused, addToConversation: conversationInput())

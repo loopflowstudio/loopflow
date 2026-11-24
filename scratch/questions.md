@@ -1,5 +1,7 @@
 # Choices made for review
 
+- **Resolve copied `SessionHistory.repo` to this Machine’s `repository_plans.repo` when the row’s Task or Wave lives here, and keep Desktop Telemetry’s local codebase picker strictly on `origin == nil` rows.** Passed over keeping raw Linux sandbox paths in `SessionHistory.repo` for local Tasks (which duplicated repos in Desktop Telemetry, hid Modal runs when the Mac repo was selected, and broke `loadCodebase`) or adding a separate repo-matching DTO field. `worktree` stays the origin’s path; bare Modal runs fall back to the origin’s `repo` string without entering the local codebase picker or vanishing from the usage table.
+- **Honor `SessionHistory.origin` in `context_usage::step_context` (and `--weekly` silences) so copied `context.json` and `Turn.context` feed `lf session usage --context` and Desktop `TaskHistoryView`.** Passed over leaving `--context` local-only and reporting bogus missing-capture gaps for collected Modal steps whose captures were already copied to `machines/<origin>/runs`.
 - A repeated native turn uses its recorded dispatch for Work attribution. Equivalent readings prefer the local Machine, then Machine ID order. A mixed-Machine Session drill lists its origins separately.
 
 - A copied captured input enters the window by its capture, manifest or turn times, not by a terminal receipt or agent end alone, and it ends by its launcher's process rather than its latest turn's. A copied input with no turns that started before the window and ended inside it is left out of `--include-finished` reads.

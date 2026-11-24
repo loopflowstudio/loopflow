@@ -352,7 +352,7 @@ pub(crate) async fn team_current(store: &Store, repository: &str) -> bool {
     };
     store
         .sqlite
-        .linear_team_current(
+        .scope_current(
             &scope,
             OffsetDateTime::now_utc().unix_timestamp(),
             crate::linear::delta_fresh_secs(),

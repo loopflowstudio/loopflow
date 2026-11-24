@@ -1516,7 +1516,8 @@ mod tests {
             runtime.block_on(async {
                 let conn = rusqlite::Connection::open(&fixture.database).unwrap();
                 for index in 0..2 {
-                    conn.execute("DELETE FROM linear_team_checks", []).unwrap();
+                    conn.execute("DELETE FROM planning_scope_checks", [])
+                        .unwrap();
                     conn.execute(
                         "UPDATE tasks SET issue_title='Old title' WHERE id=?1",
                         [task.id.as_str()],

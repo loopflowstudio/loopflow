@@ -161,6 +161,7 @@ mod tests {
         "github_people",
         // Refresh attempts and watermarks do not change displayed Work.
         "linear_team_checks",
+        "planning_scope_checks",
         "machines",
         // Copies from rented Machines are read by explicit CLI listings only.
         "machine_records",

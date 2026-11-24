@@ -376,6 +376,7 @@ Make the choice; don't leave it as a question.
 - Fixtures that change process environment share `loopflow_test_support::env_lock`.
 - macOS SMAppService fixtures register temporary bundles with LaunchServices and launch bundle-owned update code through it. An external test runner writing a registered app can fail App Management; it does not model an app update. Cleanup unregisters the unique service job and LaunchServices entry.
 - `store::opening::open_ephemeral` applies every migration; don't replay one with `apply_migration_for_test`.
+- `register_task_fixture` registers the path it is given; `lf` registers Git's canonical root. On macOS pass `repo.path().canonicalize()`, or `/var/folders` and `/private/var` become two repositories with two plan carriers.
 - Fake `gh` scripts route `api graphql` calls by query name; renaming a query means grepping `rust/loopflow/tests/` for the old name.
 - Tests that redirect process-wide stdout/stderr run in isolated child processes.
 - Lifetime tests start a held terminal beside a `MachineServer` and view it from a PTY; a `--json` viewer on a pipe dies with its stdin and hides retirement bugs. With `RUST_LOG` set, diagnostics go to stderr, not `logs/lf.log`.

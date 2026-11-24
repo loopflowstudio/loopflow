@@ -1417,15 +1417,16 @@ if os.path.exists(os.path.join(flags, "down")):
 child = subprocess.Popen(["bash", "-c", sys.argv[-1]], cwd=remote,
     env={{"HOME": remote, "PATH": "/usr/bin:/bin"}},
     stdin=subprocess.PIPE, stdout=subprocess.PIPE)
-drop = os.path.join(flags, "drop-apply")
-applying = threading.Event()
+drops = {{b'"plan.apply"': "drop-apply", b'"task.steer"': "drop-steer"}}
+dropping = []
 def up():
     while True:
         line = sys.stdin.buffer.readline()
         if not line:
             break
-        if os.path.exists(drop) and b'"plan.apply"' in line:
-            applying.set()
+        for operation, flag in drops.items():
+            if operation in line and os.path.exists(os.path.join(flags, flag)):
+                dropping.append(os.path.join(flags, flag))
         child.stdin.write(line)
         child.stdin.flush()
     child.stdin.close()
@@ -1434,8 +1435,8 @@ while True:
     line = child.stdout.readline()
     if not line:
         break
-    if applying.is_set():
-        os.remove(drop)
+    if dropping:
+        os.remove(dropping[0])
         child.kill()
         os._exit(255)
     sys.stdout.buffer.write(line)
@@ -4587,6 +4588,132 @@ exec env -i HOME='{remote}' PATH=/usr/bin:/bin bash -c "$remote_command"
         plan.local.task(&task).unwrap().unwrap().title,
         "Ownership demo"
     );
+}
+
+#[test]
+fn cross_machine_steer_reaches_the_owner_and_never_replays_a_lost_reply() {
+    use loopflow::lf::commands::write::Write;
+    use loopflow::server::wire::Operation;
+    use loopflow_execution::{
+        engine::{Error, ErrorCode},
+        machine::client::Connection,
+    };
+    let fixture = preview_machines();
+    let (plan, task) = task_on_mini(&fixture);
+    let _mini = served_mini(&fixture);
+    let flags = fixture.root.path().join("flags");
+    hub_ssh(&fixture, &flags);
+    let send = |message: &str| {
+        fixture
+            .command(&["steer", task.as_str(), message, "--json"])
+            .current_dir(&plan.local_path)
+            .output()
+            .unwrap()
+    };
+    let output = send("Use the existing parser");
+    assert_success(&output);
+    let receipt: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(receipt["delivery"]["reached"], "owner");
+    assert_eq!(receipt["delivery"]["runs_on"]["label"], "mini");
+    assert!(receipt["delivery"]["sentence"]
+        .as_str()
+        .unwrap()
+        .contains("nothing reads it"));
+    assert!(plan
+        .remote
+        .task_steers(&task)
+        .unwrap()
+        .iter()
+        .any(|s| s.id.as_str() == receipt["steer_id"].as_str().unwrap()));
+    let (_server, socket) = served(&fixture);
+    fs::write(flags.join("drop-steer"), "").unwrap();
+    let error = Connection::open_at(Path::new(&socket))
+        .unwrap()
+        .request(Operation::Write(Write::TaskSteer {
+            directory: plan.local_path.clone(),
+            issue: task.to_string(),
+            message: "Keep the saved parser".into(),
+        }))
+        .unwrap_err()
+        .downcast::<Error>()
+        .unwrap();
+    assert_eq!(error.code, ErrorCode::OutcomeUnknown, "{error}");
+    assert_eq!(
+        plan.remote
+            .task_steers(&task)
+            .unwrap()
+            .iter()
+            .filter(|s| s.text.contains("Keep the saved parser"))
+            .count(),
+        1
+    );
+    assert!(!plan
+        .local
+        .task_steers(&task)
+        .unwrap()
+        .iter()
+        .any(|s| s.text.contains("parser")));
+}
+
+#[test]
+fn cross_machine_steer_returns_the_carrier_acknowledgement_or_here() {
+    use loopflow::lf::commands::write::Write;
+    use loopflow::server::wire::Operation;
+    use loopflow_execution::machine::client::Connection;
+    let fixture = preview_machines();
+    let (plan, task) = task_on_mini(&fixture);
+    let owner = plan.remote.saved_local_machine().unwrap().id;
+    let (_server, socket) = served(&fixture);
+    let flags = fixture.root.path().join("flags");
+    hub_ssh(&fixture, &flags);
+    fs::write(flags.join("down"), "").unwrap();
+    let receipt = Connection::open_at(Path::new(&socket))
+        .unwrap()
+        .request(Operation::Write(Write::TaskSteer {
+            directory: plan.local_path.clone(),
+            issue: task.to_string(),
+            message: "Check the fallback".into(),
+        }))
+        .unwrap()
+        .result;
+    assert_eq!(receipt["delivery"]["reached"], "tracker", "{receipt}");
+    assert_eq!(receipt["delivery"]["runs_on"]["id"], owner.as_str());
+    assert!(
+        receipt["delivery"]["sentence"]
+            .as_str()
+            .unwrap()
+            .contains("unreachable"),
+        "{receipt}"
+    );
+    assert_success(&fixture.run(&["machine", "remove", "mini"]));
+    let steer = |message: &str| {
+        let output = fixture
+            .command(&["steer", task.as_str(), message, "--json"])
+            .current_dir(&plan.local_path)
+            .output()
+            .unwrap();
+        assert_success(&output);
+        serde_json::from_slice::<Value>(&output.stdout).unwrap()
+    };
+    let receipt = steer("Sent by a sibling");
+    assert_eq!(receipt["delivery"]["reached"], "tracker", "{receipt}");
+    assert_eq!(receipt["delivery"]["runs_on"]["id"], owner.as_str());
+    assert!(receipt["delivery"]["sentence"]
+        .as_str()
+        .unwrap()
+        .contains("not registered here"));
+    git(
+        &plan.local_path,
+        &["remote", "set-url", "origin", "/absent/steer.git"],
+    );
+    let receipt = steer("Keep for later");
+    assert_eq!(receipt["delivery"]["reached"], "here", "{receipt}");
+    assert!(plan
+        .local
+        .task_steers(&task)
+        .unwrap()
+        .iter()
+        .any(|s| s.id.as_str() == receipt["steer_id"].as_str().unwrap()));
 }
 
 /// A served `task.status` for a Task mini runs, asked on the laptop's socket,

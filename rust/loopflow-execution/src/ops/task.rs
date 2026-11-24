@@ -3417,6 +3417,18 @@ pub fn append_task_comment(
     message: &str,
     steer: bool,
 ) -> OpsResult<String> {
+    append_task_comment_as(store, task, message, steer, || {
+        crate::config::participant_name().map_err(task_error)
+    })
+}
+
+pub(crate) fn append_task_comment_as(
+    store: &Store,
+    task: &Task,
+    message: &str,
+    steer: bool,
+    participant: impl FnOnce() -> OpsResult<Option<String>>,
+) -> OpsResult<String> {
     validate_task_comment_input(message)?;
     let id = uuid::Uuid::new_v4().to_string();
     let capture = crate::session_record::inherited_capture_key().map_err(task_error)?;
@@ -3431,7 +3443,7 @@ pub fn append_task_comment(
             loopflow_model::comment::TaskCommentAuthor::Integration,
         )
     } else {
-        let name = crate::config::participant_name().map_err(task_error)?;
+        let name = participant()?;
         let requester = name
             .as_ref()
             .map(|name| {

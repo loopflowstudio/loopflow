@@ -11,7 +11,7 @@ fn saved_check(
 ) -> StoreResult<Option<(i64, Option<String>)>> {
     Ok(conn
         .query_row(
-            "SELECT attempted_at,synced_through FROM linear_team_checks WHERE team_id=?1",
+            "SELECT attempted_at,synced_through FROM planning_scope_checks WHERE scope=?1",
             [scope],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
@@ -82,22 +82,22 @@ impl SqliteStore {
             return Ok(None);
         }
         tx.execute(
-            "INSERT INTO linear_team_checks(team_id,attempted_at) VALUES(?1,?2)
-             ON CONFLICT(team_id) DO UPDATE SET attempted_at=excluded.attempted_at",
+            "INSERT INTO planning_scope_checks(scope,attempted_at) VALUES(?1,?2)
+             ON CONFLICT(scope) DO UPDATE SET attempted_at=excluded.attempted_at",
             params![scope, now],
         )?;
         tx.commit()?;
         Ok(Some(saved.and_then(|(_, through)| through)))
     }
 
-    /// Whether the team's last finished delta read Linear within `fresh_for`
-    /// seconds of `now`, so its local state answers reads in place of Linear.
-    pub fn linear_team_current(&self, team: &str, now: i64, fresh_for: i64) -> StoreResult<bool> {
+    /// Whether the scope's last finished delta is within `fresh_for`
+    /// seconds of `now`.
+    pub fn scope_current(&self, scope: &str, now: i64, fresh_for: i64) -> StoreResult<bool> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let through: Option<String> = conn
             .query_row(
-                "SELECT synced_through FROM linear_team_checks WHERE team_id=?1",
-                [team],
+                "SELECT synced_through FROM planning_scope_checks WHERE scope=?1",
+                [scope],
                 |row| row.get(0),
             )
             .optional()?
@@ -116,7 +116,7 @@ impl SqliteStore {
     pub fn finish_scope_check(&self, scope: &str, through: &str) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
-            "UPDATE linear_team_checks SET synced_through=?2 WHERE team_id=?1",
+            "UPDATE planning_scope_checks SET synced_through=?2 WHERE scope=?1",
             params![scope, through],
         )?;
         Ok(())
@@ -137,18 +137,44 @@ mod tests {
             Some(None)
         );
         // Begun but unfinished: nothing local answers yet.
-        assert!(!store.linear_team_current("team", start, 10).unwrap());
+        assert!(!store.scope_current("team", start, 10).unwrap());
         store
             .finish_scope_check("team", "2026-10-29T00:00:00Z")
             .unwrap();
-        assert!(store.linear_team_current("team", start + 9, 10).unwrap());
-        assert!(!store.linear_team_current("team", start + 10, 10).unwrap());
+        assert!(store.scope_current("team", start + 9, 10).unwrap());
+        assert!(!store.scope_current("team", start + 10, 10).unwrap());
         // A tighter budget stretches the window over the same delta.
-        assert!(store.linear_team_current("team", start + 90, 100).unwrap());
+        assert!(store.scope_current("team", start + 90, 100).unwrap());
         assert_eq!(
             store.begin_scope_check("team", start + 90, 100).unwrap(),
             None
         );
+    }
+
+    #[test]
+    fn scope_migration_keeps_attempts_and_watermarks() {
+        use crate::migration_runner::{apply_before_migration, migration_section_sql};
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        apply_before_migration(
+            &crate::test_fixture::observers(),
+            &crate::test_fixture::build(),
+            &conn,
+            "planning_scope_checks",
+        );
+        conn.execute_batch(
+            "INSERT INTO linear_team_checks(team_id,attempted_at,synced_through) VALUES
+            ('team',10,'through'),('asana:team/project',20,'gid:through'),('plan:/repo',30,NULL)",
+        )
+        .unwrap();
+        conn.execute_batch(&migration_section_sql("planning_scope_checks"))
+            .unwrap();
+        for (scope, old) in [
+            ("team", (10, Some("through".to_owned()))),
+            ("asana:team/project", (20, Some("gid:through".to_owned()))),
+            ("plan:/repo", (30, None)),
+        ] {
+            assert_eq!(super::saved_check(&conn, scope).unwrap(), Some(old));
+        }
     }
 
     #[test]

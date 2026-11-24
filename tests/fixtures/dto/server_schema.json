@@ -11439,7 +11439,42 @@
       ],
       "type": "object"
     },
+    "SteerDelivery": {
+      "properties": {
+        "reached": {
+          "$ref": "#/$defs/SteerReached"
+        },
+        "runs_on": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MachineRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sentence": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "reached",
+        "runs_on",
+        "sentence"
+      ],
+      "type": "object"
+    },
     "SteerId": {
+      "type": "string"
+    },
+    "SteerReached": {
+      "description": "Where the steer has been saved so far.",
+      "enum": [
+        "owner",
+        "tracker",
+        "here"
+      ],
       "type": "string"
     },
     "StepContext": {
@@ -14807,6 +14842,25 @@
         }
       ]
     },
+    "TaskSteerReceipt": {
+      "properties": {
+        "delivery": {
+          "$ref": "#/$defs/SteerDelivery"
+        },
+        "identifier": {
+          "type": "string"
+        },
+        "steer_id": {
+          "$ref": "#/$defs/SteerId"
+        }
+      },
+      "required": [
+        "identifier",
+        "steer_id",
+        "delivery"
+      ],
+      "type": "object"
+    },
     "TaskSummary": {
       "properties": {
         "assignee": {
@@ -16933,7 +16987,7 @@
           ],
           "type": "object",
           "x-result": {
-            "$ref": "#/$defs/TaskComments"
+            "$ref": "#/$defs/TaskSteerReceipt"
           }
         },
         {

@@ -7,6 +7,26 @@ const ROADMAP: &str = include_str!("../../../tests/fixtures/dto/roadmap_snapshot
 const METRIC_PORTFOLIO: &str = include_str!("../../../tests/fixtures/dto/metric_portfolio.json");
 
 #[test]
+fn task_steer_receipt_requires_its_delivery_and_nullable_machine() {
+    use loopflow_execution::engine::task::TaskSteerReceipt;
+    let wire: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../tests/fixtures/dto/task_steer_receipt.json"
+    ))
+    .unwrap();
+    assert_eq!(
+        serde_json::to_value(serde_json::from_value::<TaskSteerReceipt>(wire.clone()).unwrap())
+            .unwrap(),
+        wire
+    );
+    let mut missing = wire;
+    missing["delivery"]
+        .as_object_mut()
+        .unwrap()
+        .remove("runs_on");
+    assert!(serde_json::from_value::<TaskSteerReceipt>(missing).is_err());
+}
+
+#[test]
 fn roadmap_requires_shared_lifecycle_and_selection_states() {
     use loopflow::lf::commands::waves::RoadmapTask;
     let wire: serde_json::Value = serde_json::from_str(include_str!(

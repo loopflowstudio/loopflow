@@ -438,7 +438,7 @@ status read go straight to mini's server:
 
 ```console
 $ lf steer MTG-321 "also check bar"
-Saved 0199a2f1 on mini; MTG-321's worker reads it at its next boundary
+mini · Saved 0199a2f1; MTG-321's worker reads it at its next boundary
 $ lf task status MTG-321
 MTG-321  Runs on mini since Nov 12 10:42
 …
@@ -453,7 +453,7 @@ A rented sandbox has no route to its siblings. On `modal-2`, steering a Task
 
 ```console
 $ lf steer MTG-419 "stop refactoring foo"
-Queued 0199a2f4 in Linear for modal-3; modal-3 is not registered here and reads it when it next syncs
+Queued 0199a2f4 in Linear for modal-3; modal-3 is not registered here. modal-3 reads it when it next syncs
 $ lf task status MTG-419
 MTG-419  Runs on modal-3 since Nov 23 09:05; modal-3 is not registered here, so its Graph and Sessions are not read here
 ```

@@ -850,7 +850,8 @@ fn linear_on_demand_shares_checks_and_excludes_finished_tasks() {
         runtime.block_on(async {
             seed_finished_tasks(fixture, repo, &state).await;
             let conn = rusqlite::Connection::open(&fixture.database).unwrap();
-            conn.execute("DELETE FROM linear_team_checks", []).unwrap();
+            conn.execute("DELETE FROM planning_scope_checks", [])
+                .unwrap();
             state.lock().await.requests = 0;
             let results = futures_util::future::join_all((0..4).map(|_| {
                 crate::ops::tracker_events::check_repository(&fixture.store, repo.to_str().unwrap())
@@ -894,11 +895,30 @@ async fn steer_from_sibling(selector: &str, text: &str) {
     LINEAR_TEST_CONTEXT
         .scope(sibling.context(&url), async {
             super::refresh_wave(&repo, "product").await.unwrap();
-            let thread =
-                crate::ops::task::task_comment_async(&repo, None, selector, Some(text), true)
-                    .await
-                    .unwrap();
-            assert!(thread.pending_sync.is_empty());
+            let (store, task) = crate::ops::task::resolve_saved_task(&repo, None, selector)
+                .await
+                .unwrap();
+            let owner = loopflow_model::durable::MachineRef {
+                id: Some(loopflow_model::durable::MachineId::new()),
+                label: Some("owner".into()),
+            };
+            let receipt = crate::engine::task::steer(
+                &store,
+                &task,
+                text,
+                None,
+                Some((owner, "owner is not registered here".into())),
+            )
+            .await
+            .unwrap();
+            assert_eq!(
+                receipt.delivery.reached,
+                crate::engine::task::SteerReached::Tracker
+            );
+            assert!(
+                receipt.delivery.sentence.contains("in Linear"),
+                "{receipt:?}"
+            );
         })
         .await;
 }
@@ -926,8 +946,8 @@ fn owned_tracker_checks_deliver_a_late_comment_to_worker_and_primary_once() {
             .unwrap();
             let previous_check = || {
                 conn.execute(
-                    "INSERT OR REPLACE INTO linear_team_checks
-                    (team_id,attempted_at,synced_through) VALUES('team-1',0,?1)",
+                    "INSERT OR REPLACE INTO planning_scope_checks
+                    (scope,attempted_at,synced_through) VALUES('team-1',0,?1)",
                     [&through],
                 )
                 .unwrap();
@@ -971,7 +991,7 @@ fn owned_tracker_checks_deliver_a_late_comment_to_worker_and_primary_once() {
             check_owned_work(store, None).await.unwrap();
             // A staggered Graph tick shares the server's next deadline.
             conn.execute(
-                "UPDATE linear_team_checks SET attempted_at=attempted_at-10",
+                "UPDATE planning_scope_checks SET attempted_at=attempted_at-10",
                 [],
             )
             .unwrap();
@@ -1019,11 +1039,11 @@ fn linear_on_demand_acquires_comment_only_changes_and_completion() {
     with_planning_task(|runtime, fixture, repo, task, state| {
         runtime.block_on(async {
             let conn = rusqlite::Connection::open(&fixture.database).unwrap();
-            conn.execute("DELETE FROM linear_team_checks", []).unwrap();
+            conn.execute("DELETE FROM planning_scope_checks", []).unwrap();
             crate::ops::tracker_events::check_repository(&fixture.store, repo.to_str().unwrap()).await.unwrap();
             let timestamp = time::OffsetDateTime::now_utc().format(&time::format_description::well_known::Rfc3339).unwrap();
             state.lock().await.comments.push(json!({"id":"new-direction","body":"Keep the saved identity", "createdAt":timestamp,"updatedAt":timestamp,"user":{"id":"person-1","displayName":"Jack Heart","name":"Jack Heart"}}));
-            conn.execute("UPDATE linear_team_checks SET attempted_at=0", []).unwrap();
+            conn.execute("UPDATE planning_scope_checks SET attempted_at=0", []).unwrap();
             crate::ops::tracker_events::check_repository(&fixture.store, repo.to_str().unwrap()).await.unwrap();
             assert!(fixture.store.task_steers(&task.id).await.unwrap().iter().any(|steer| steer.text.contains("Keep the saved identity")));
             {
@@ -1031,7 +1051,7 @@ fn linear_on_demand_acquires_comment_only_changes_and_completion() {
                 provider.issues[0]["state"]["type"] = json!("completed");
                 mark_issue_updated(&mut provider.issues[0]);
             }
-            conn.execute("UPDATE linear_team_checks SET attempted_at=0", []).unwrap();
+            conn.execute("UPDATE planning_scope_checks SET attempted_at=0", []).unwrap();
             crate::ops::tracker_events::check_repository(&fixture.store, repo.to_str().unwrap()).await.unwrap();
             assert!(fixture.store.task_state(&task.id).await.unwrap().is_terminal());
         });
@@ -1043,16 +1063,19 @@ fn linear_on_demand_failure_throttles_attempts_without_losing_changes() {
     with_planning_task(|runtime, fixture, repo, task, state| {
         runtime.block_on(async {
             let conn = rusqlite::Connection::open(&fixture.database).unwrap();
-            conn.execute("DELETE FROM linear_team_checks", []).unwrap();
+            conn.execute("DELETE FROM planning_scope_checks", [])
+                .unwrap();
             crate::ops::tracker_events::check_repository(&fixture.store, repo.to_str().unwrap())
                 .await
                 .unwrap();
             let through: String = conn
-                .query_row("SELECT synced_through FROM linear_team_checks", [], |row| {
-                    row.get(0)
-                })
+                .query_row(
+                    "SELECT synced_through FROM planning_scope_checks",
+                    [],
+                    |row| row.get(0),
+                )
                 .unwrap();
-            conn.execute("UPDATE linear_team_checks SET attempted_at=0", [])
+            conn.execute("UPDATE planning_scope_checks SET attempted_at=0", [])
                 .unwrap();
             state.lock().await.field_outage = true;
             assert!(crate::ops::tracker_events::check_repository(
@@ -1070,9 +1093,11 @@ fn linear_on_demand_failure_throttles_attempts_without_losing_changes() {
             .unwrap());
             assert_eq!(state.lock().await.requests, requests);
             assert_eq!(
-                conn.query_row("SELECT synced_through FROM linear_team_checks", [], |row| {
-                    row.get::<_, String>(0)
-                })
+                conn.query_row(
+                    "SELECT synced_through FROM planning_scope_checks",
+                    [],
+                    |row| { row.get::<_, String>(0) }
+                )
                 .unwrap(),
                 through
             );
@@ -1082,7 +1107,7 @@ fn linear_on_demand_failure_throttles_attempts_without_losing_changes() {
                 provider.issues[0]["title"] = json!("Retained through the outage");
                 mark_issue_updated(&mut provider.issues[0]);
             }
-            conn.execute("UPDATE linear_team_checks SET attempted_at=0", [])
+            conn.execute("UPDATE planning_scope_checks SET attempted_at=0", [])
                 .unwrap();
             crate::ops::tracker_events::check_repository(&fixture.store, repo.to_str().unwrap())
                 .await
@@ -1114,7 +1139,7 @@ fn linear_on_demand_adopts_new_open_issues_without_allocating_execution() {
             state.lock().await.issues.push(issue);
             rusqlite::Connection::open(&fixture.database)
                 .unwrap()
-                .execute("DELETE FROM linear_team_checks", [])
+                .execute("DELETE FROM planning_scope_checks", [])
                 .unwrap();
             crate::ops::tracker_events::check_repository(&fixture.store, repo.to_str().unwrap())
                 .await

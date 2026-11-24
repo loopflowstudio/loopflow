@@ -197,15 +197,26 @@ without a local claim.
 - With 10,000 saved scopes, SQLite used the `linear_team_checks` primary-key index for admission. The median fresh lookup took 0.0026 ms over 21 batches of 1,000 lookups.
 - Branch CLI build, six focused execution tests, the hub-only server test, four documented-command checks, `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings` passed. CI covers the full matrix.
 
-### Slice 2: Honest `lf steer <task>` routing and `TaskSteerReceipt` (next)
-- Rename `linear_team_checks` (and `linear_team_current`, `team_id`) for what it now holds: Linear teams, `asana:<team>/<project>` and `plan:<repo>` scopes. This Task's migration does the rename and carries a `-- leaving:` mark if the column goes. Asana and carrier rows are written to the table already (`rust/loopflow-storage/src/sqlite/linear_team_checks.rs`).
-- Define `TaskSteerReceipt { identifier, steer_id, delivery }` and `SteerDelivery { reached: SteerReached (owner | tracker | here), runs_on: Option<MachineRef>, sentence }` with strict required/nullable wire fields and the single Rust-authored `sentence`.
-- Generalize `steer_reader` (`commands/session.rs:142`) from one Session to a Task (its live workers, its conversation, or nothing) and move it beside `engine::session::steer`, so Session and Task steers word their reader the same way and the owner's server can author it.
-- Wire `Write::TaskSteer` into `Write::remote()` (bounded 15 s SSH timeout) with pre-admission fallback to local save + synchronous tracker/carrier sync for remote-owned Tasks (no fallback on `OutcomeUnknown`).
-- Share that exact path from CLI `lf steer <task>` (`commands/session.rs`) so CLI and served `task.steer` return identical `TaskSteerReceipt` JSON and CLI prints `delivery.sentence`.
-- Update `tests/fixtures/dto/task_steer_receipt.json`, `server_schema.json`, `dto_fixtures.rs`, and `served_reads.rs`, and add cross-Machine steer tests (direct reachable, unreachable registered fallback, unregistered sibling sandbox, `reached: here` when tracker offline, `OutcomeUnknown` no-double-write).
+### Slice 2: Honest `lf steer <task>` routing and `TaskSteerReceipt` (implemented)
 
-### Slice 3: Honest cross-Machine status and lists (`runs_on` + `reading`)
+`lf steer <task>` and served `task.steer` share one path and return the same
+`TaskSteerReceipt { identifier, steer_id, delivery }`. A Task owned elsewhere
+goes to its owner's server over SSH (15 s). Before admission fails (owner not
+registered, SSH or server down) the steer is saved here, the tracker or carrier
+sync runs synchronously, and `reached` says whether it got there (`tracker`) or
+not (`here`). Once the owner admits the request, a lost reply is
+`OutcomeUnknown` and nothing writes it a second time. The reader sentence is
+written once beside `engine::session::steer` for both Session and Task steers.
+
+`linear_team_checks` is now `planning_scope_checks(scope, …)`. The migration
+copies every watermark and marks the released table leaving.
+
+- `machine_commands::cross_machine_steer_reaches_the_owner_and_never_replays_a_lost_reply`: owner reached directly; a dropped SSH reply after the owner saved leaves one steer in each store.
+- `machine_commands::cross_machine_steer_returns_the_carrier_acknowledgement_or_here`: registered-but-offline owner and unregistered owner both get `tracker` with `runs_on`; a failed Git push gets `here`.
+- `dto_fixtures::task_steer_receipt_requires_its_delivery_and_nullable_machine`, `planning_scope_checks::tests::scope_migration_keeps_attempts_and_watermarks`, `owned_tracker_checks_deliver_a_late_comment_to_worker_and_primary_once` and `served_reads::server_operations_match_their_lf_commands` passed; `cargo clippy --all-targets -- -D warnings` passed.
+- What the served-reads flake taught: since slice 1b the server makes an owned plan exchange at startup. `register_task_fixture` registered the raw `/var/folders` tempdir while `lf` registers Git's `/private/var` root, so one repository had two `plan_carriers` rows and the server re-sent from 0 during reads. The test now registers the canonical path and carries the plan once before the server starts.
+
+### Slice 3: Honest cross-Machine status and lists (`runs_on` + `reading`) (next)
 - Add `runs_on: Option<TaskRunsOn { machine: MachineRef, since }>` to `TaskRow` and `RoadmapTask`, computed once in `snapshot_task_detail` from `owner_elsewhere` (independent of `declared_machines`); `runs_elsewhere` becomes its `Display`. Add `reading: TaskReading` (`here | owner | unobserved { reason }`) to `TaskDetail`.
 - In `snapshot_task_detail`, an open Task with `runs_on` set takes `reason` "Runs on <machine> since <when>" and `next: None` before `next_move_for_task` runs; `task_detail` appends the unobserved reason. Lists and status share this.
 - Update `waves.rs` (`task_machine`, `remote_task_detail`, `print_remote_task_status`, `task_detail`, `list_tasks`) and `bin/lf.rs` (`TaskCommand::Status` text output):

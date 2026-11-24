@@ -1,19 +1,31 @@
-at: 430273499406db01f551443404b2adcdff94263c
+at: dc028f2d421948c0461a92224ec5116197ef2a15
 first:
   - path: docs/dev/machines.md
     why: How a steer reaches the owning Machine
   - path: scratch/plan.md
-    why: Verified Linear delivery and remaining carriers
+    why: Two-home results and remaining receipt work
   - path: rust/loopflow-storage/src/sqlite/linear_team_checks.rs
-    why: Indexed issue filters and saved poll times
+    why: Shared poll attempts and tracker watermarks
   - path: rust/loopflow-execution/src/ops/tracker_events.rs
-    why: Which teams to poll and when
+    why: Select owned repositories and schedule their reads
+  - path: rust/loopflow-execution/src/ops/tracker.rs
+    why: Identify each repository’s tracker feed
+  - path: rust/loopflow-execution/src/asana/mod.rs
+    why: Bind the watermark to the resolved project
   - path: rust/loopflow-execution/src/linear/team_changes.rs
-    why: Read late comments across the previous watermark
+    why: Recover late comments across the previous watermark
+  - path: rust/loopflow-execution/src/ops/plan_carriers.rs
+    why: Share bounded hub and Git exchanges
+  - path: rust/loopflow-execution/src/ops/plan_git.rs
+    why: Keep unclaimed repositories receiving new plans
   - path: rust/loopflow/src/server/service.rs
-    why: Start the Machine watcher
+    why: Start the owner’s poller
   - path: rust/loopflow/src/lf/commands/graph.rs
-    why: Keep polling during a running agent step
+    why: Continue polling while a worker runs
+  - path: rust/loopflow-execution/src/ops/linear/asana_planning_tests.rs
+    why: Two projects share a team without losing direction
   - path: rust/loopflow-execution/src/ops/linear/task_planning_tests.rs
     why: A sibling steer reaches worker and primary
+  - path: rust/loopflow/tests/machine_commands.rs
+    why: The quiet owner receives a hub-only steer
 hide: []

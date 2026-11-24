@@ -306,7 +306,11 @@ pub fn recent_conversation_history(
 }
 
 pub fn input_history(store: &SqliteStore, selector: &str) -> StoreResult<SessionHistory> {
-    let selected = store.resolve_history_input(selector)?;
+    // A copied input's key resolves only among copies, which select it whole.
+    let selected = match store.resolve_history_input(selector) {
+        Err(StoreError::NotFound) => selector.to_owned(),
+        selected => selected?,
+    };
     let input = store
         .session(&selected)?
         .and_then(|session| session.artifact_key)

@@ -41,6 +41,13 @@ Session on the rental with the forwarded login. With the caller's
 sandbox, terminate it behind lf's back:
 `uv run --with modal python -I -c "import modal; modal.Sandbox.from_id('<provider_id>').terminate()"`;
 `poll()` returning 137 confirms it is gone.
+Run `lf --machine modal-1 steer <id> …` from a directory outside any
+repository: from inside a caller repository the rental resolves that
+repository and refuses ("repository plan … has no local checkout").
+A copied Session's own views (`lf session history show <id> --context`,
+`--instructions`, `--input <key>`) read its capture under
+`machines/<origin>/runs`; `--final` has no copy to read.
+
 `terminate()` returns before the sandbox is gone: `poll()` reads `None` at once
 and 137 a few seconds later. `lf machine end <label>` run in those seconds
 already settles it without `--force`.

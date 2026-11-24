@@ -9,6 +9,91 @@ table{border-collapse:collapse;width:100%}td,th{border:1px solid #ddd;padding:.3
 </style></head><body>
 <h1>LOO-1081 QA — a branch build on a real Modal sandbox</h1>
 
+<h2>Run 3 · 2026-11-24, HEAD 2b4f49516 — reading collected history where it was copied (§4.2), live</h2>
+<p>Fresh private caller home <code>/tmp/lf-qa3</code> (personal <code>config.yaml</code> without <code>machines:</code>/<code>connections:</code>; its Modal declaration has no recorded sizing), branch debug <code>lf</code>, the same revision cross-built for Linux (6m07s) in <code>LF_RENT_LINUX_BIN</code>, caller server running. One Modal sandbox capped at $0.60; ceiling estimate $0.038.</p>
+
+<h3>Rent, a batch turn, a start that cannot happen: <span class="ok">works</span></h3>
+<pre>$ lf ondemand rent modal --max-usd 0.6 --json                 # 33s
+Renting 8 vCPU 16 GB burst on modal at $0.95184/h ceiling until 01:06
+{…"modal_sizing":"burst"…,"state":"running"…}
+$ lf --machine modal-1 -b commit-message 'Reply with exactly: QA-1081 run 3 marker'
+QA-1081 run 3 marker                                          # 8.7s
+# on the rental: lf session resume --prepare --json -a codex   (codex installed, no login)
+$ cd ~/src/qa1081-norepo; lf --machine modal-1 steer 4e855e55… 'say pong'
+Saved ee2fa2be…; the Machine server starts 4e855e55… to read it
+rental $ lf session list
+4e855e55…  unknown Repository  qa3
+  could not start: codex has no usable login on this Machine; run `codex login`; `lf resume 4e855e55…` opens it</pre>
+<p>The rental's own list prints the line now; run 2 could only check it locally.</p>
+
+<h3>The reason reaches the caller: <span class="ok">fixed</span> (run 2's worst finding)</h3>
+<pre>$ lf session list --all                                       # copied 20s after the steer
+4e855e55…  unknown qa3  from modal-1
+  could not start: codex has no usable login on this Machine; run `codex login`
+session_f373c9b7…  closed  Reply with exactly  from modal-1</pre>
+
+<h3>Abrupt loss: <span class="ok">works</span></h3>
+<pre>$ modal.Sandbox.from_id('sb-01M86ARQ…').terminate()   poll → None, 6s later 137
+$ lf machine end modal-1                                      # 2.7s, no --force
+modal-1 was already gone (ended; ceiling estimate $0.038073)
+$ lf machine list
+No Machines.
+$ lf ondemand list
+  modal-1 · ended 00:31 · 8 vCPU 16 GB burst · $0.95184/h ceiling · ceiling estimate $0.038073 · by hand · 2 sessions copied</pre>
+
+<h3>Usage, <code>--context</code> and <code>--weekly</code> after the loss: <span class="ok">works</span></h3>
+<pre>$ lf session usage --days 1
+Nov 24 00:29  lf  -  commit-message  2  148  11,853  -  1/1  0  04932792 from modal-1
+$ lf session usage --days 1 --context
+Nov 24 00:29  commit-message  1,356  0  0  0  0  125  19,074  0  -  1,481  20,555  04932792
+$ lf session usage --weekly
+-   1   20,555   148   139:1   20,555   0.0   0
+$ lf session history search 'run 3 marker'
+session_f373c9b7… · from modal-1 · 2026-11-24 08:29 UTC · QA-1081 run 3 marker</pre>
+<p>No gaps: the instructions and carried tokens come from the copied capture under <code>machines/home_a4cc…/runs</code>.</p>
+
+<h3>The Session's own history views: <span class="bug">refused, fixed</span></h3>
+<p>The same input that <code>usage --context</code> explained could not be opened by its Session:</p>
+<pre>$ lf session history show session_f373c9b7… --context
+Error: The copy of session_f373c9b7… from modal-1 has history and transcript views
+$ lf session history show session_f373c9b7… --input 0493 --context
+Error: The copy of session_f373c9b7… reads by Session</pre>
+<p>Fix: <code>history.rs::render</code> sends a copy's <code>--context</code>, <code>--instructions</code> and <code>--input</code> to the input views, picking the copied capture key from its events. <code>input_history</code> passes a key that only copies hold through, and the history query gains one arm for a single copied input (<code>machine_record_capture_key</code>, previously closed to <code>?7</code>). <code>--final</code> now says what it can't do and where to look:</p>
+<pre>$ lf session history show session_f373c9b7… --context
+  instructions 1,356 · other 125 · carried 19,074 · assembled 1,481 · first/peak request 20,555
+$ lf session history show session_f373c9b7… --instructions
+included  LOOPFLOW.md — default launcher guidance
+included  Headless surface — Headless conversation surface
+included  commit-message — selected skill: commit-message
+$ lf session history show session_f373c9b7… --input 0493
+Session session_f373c9b7… · input 0493279297ca… · Status: completed · Agent: claude:haiku · Evidence gaps: 0 …
+$ lf session history show session_f373c9b7… --final
+Error: The copy of session_f373c9b7… from modal-1 keeps no final answer here; `--transcript` shows how it ended</pre>
+<p>The offline loss fixture now asserts <code>show --context --json</code> equals the usage step; it passed, as did <code>store::query_plan_lifecycle_tests::</code>, <code>store::sessions</code>, fmt and clippy.</p>
+
+<h3>What Desktop reads: <span class="ok">as designed</span></h3>
+<pre>served session.usage {days:1} (desktop hello, revision 9)
+session_f373c9b7…  repo=/home/lf  worktree=/home/lf  origin={label: modal-1, machine_id: home_a4cc…}</pre>
+<p>A bare rental run keeps the origin's <code>repo</code> with <code>origin</code> set, so <code>localCodebases</code> leaves it out and <code>shown(in:)</code> keeps it.</p>
+
+<h3>What works now</h3>
+<p>A burst rent of HEAD in 33s; a batch turn; a failed start recorded on the rental and shown in both lists; live collection; loss settled without <code>--force</code>; usage, <code>--context</code>, <code>--weekly</code>, search, transcript and the Session's own context and instruction views read from the copy.</p>
+
+<h3>Not reached</h3>
+<table><tr><th>Scenario</th><th>Why</th></tr>
+<tr><td>A copied row's <code>repo</code> resolving to this Machine's checkout for a local Task</td><td>The rental refuses <code>-b --task</code> for a Task owned here ("Task is owned on Machine …; `lf task move`"), and a move needs a disposable GitHub/Linear repository. Covered by the offline loss fixture. Gate runs the Linear-backed rental.</td></tr>
+<tr><td>Desktop Telemetry and Task History on screen</td><td>No Dev app run; the served read above and Swift <code>TelemetryCodebaseTests</code> cover the data.</td></tr>
+<tr><td>Linear-backed <code>lf task run --rent modal</code>, packaged Linux install, live <code>forward --session</code> restart, idle billing</td><td>Same as runs 1–2.</td></tr></table>
+
+<h3>Still wrong, worst first</h3>
+<ol>
+<li><code>lf --machine modal-1 steer &lt;id&gt;</code> from inside a caller repository fails on the rental: <code>repository plan repo_3de3… has no local checkout</code>. The Session ID alone names the target. Cross-Machine steering is LOO-1084's.</li>
+<li>A copied input's summary (<code>show --input</code>) prints "no provider conversation recorded" and "Replay: available" from local rows, though <code>--transcript</code> on the Session has the conversation.</li>
+<li><code>--final</code> on a copy has nothing to read; the copied turns carry final messages that could answer it.</li>
+<li><code>lf session usage</code> shows a bare rental run's repository as <code>lf</code> (basename of <code>/home/lf</code>), which reads like the lf repository.</li>
+<li>From run 2: <code>lf session resume --prepare -a codex</code> warns "--agent has no effect" and records codex; cost <code>-</code> for subscription Claude turns.</li>
+</ol>
+
 <h2>Run 2 · 2026-11-23, HEAD 005970f20 — the two fixes since run 1, live</h2>
 <p>Fresh private caller home (copy of the personal <code>config.yaml</code> without <code>machines:</code>), branch debug <code>lf</code>, the same
 revision cross-built for Linux in <code>LF_RENT_LINUX_BIN</code>, caller server running. One Modal sandbox capped at $0.60; ceiling estimate $0.073.</p>

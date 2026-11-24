@@ -5486,6 +5486,9 @@ fn a_lost_rentals_transcript_and_usage_survive_on_its_collecting_machine() {
     assert_eq!(step["gaps"], json!([]), "{step}");
     assert_eq!(step["first_request_tokens"], 13);
     assert_eq!(step["peak_request_tokens"], 13);
+    // The Session's own history view reads the same copied step.
+    let shown = fixture.json(&["session", "history", "show", id, "--context", "--json"]);
+    assert_eq!(shown, *step);
     // Why the rental could not start it outlives the rental.
     let listed = fixture.run(&["session", "list"]);
     assert_success(&listed);

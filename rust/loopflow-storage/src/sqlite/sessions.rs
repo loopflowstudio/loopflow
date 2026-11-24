@@ -1280,12 +1280,14 @@ impl SqliteStore {
                 UNION SELECT id FROM history.turns
                     WHERE ?7 IS NULL AND task_id=?3 AND captured_event IS NULL),
             copies AS NOT MATERIALIZED ({}),
-            -- Copied rows that start or end an input in the window, or name the Task.
+            -- Copied rows that start or end an input in the window, name the Task, or are the input.
             copied_window(record_id) AS (
                 SELECT record_id FROM machine_record_inputs WHERE ?13 AND ?4 IS NULL AND ?3 IS NULL AND started>=?5
                 UNION SELECT rowid FROM machine_records INDEXED BY machine_record_turn_end WHERE kind='turn' AND ?13 AND ?4 IS NULL AND ?3 IS NULL AND ?6
                     AND ?5>0 AND json_extract(row,'$.ended_at')>=?5
-                UNION SELECT record_id FROM machine_record_inputs WHERE ?13 AND ?4 IS NULL AND task_id=?3),
+                UNION SELECT record_id FROM machine_record_inputs WHERE ?13 AND ?4 IS NULL AND task_id=?3
+                UNION SELECT rowid FROM machine_records INDEXED BY machine_record_capture_key
+                    WHERE kind='session_event' AND json_extract(row,'$.kind')='captured' AND json_extract(row,'$.receipt_key')=?7),
             -- A copied capture, found from itself, its manifest or its turns.
             -- The local input keeps its copies out; among copies the lowest origin wins.
             copied_captures AS MATERIALIZED (
@@ -1297,7 +1299,7 @@ impl SqliteStore {
                             ELSE json_extract(r.row,'$.captured_event') END AS TEXT) AS key
                     FROM copied_window w CROSS JOIN machine_records r ON r.rowid=w.record_id) k
                 CROSS JOIN machine_records cap ON cap.origin_machine_id=k.origin AND cap.kind='session_event' AND cap.key=k.key
-                WHERE ?7 IS NULL AND json_extract(cap.row,'$.kind')='captured'
+                WHERE json_extract(cap.row,'$.kind')='captured'
                   AND NOT EXISTS (SELECT 1 FROM session_events l WHERE l.kind='captured' AND l.receipt_key=json_extract(cap.row,'$.receipt_key'))
                   AND cap.origin_machine_id=(SELECT o.origin_machine_id FROM machine_records o
                       WHERE o.kind='session_event' AND json_extract(o.row,'$.kind')='captured'

@@ -287,20 +287,36 @@ pub(crate) fn render(
     }
     let copied = loopflow_execution::store::machines::copied_history(&store.sqlite, id)?
         .with_context(|| format!("Session {id} was not found"))?;
-    anyhow::ensure!(input.is_none(), "The copy of {id} reads by Session");
-    match view {
-        SessionView::Transcript => super::history_transcript::copied(&store.sqlite, &copied, json),
-        SessionView::Summary if json => Ok(format!("{}\n", serde_json::to_string(&copied)?)),
-        SessionView::Summary => Ok(format!(
+    let origin = copied.session.origin_name();
+    match (view, input) {
+        (SessionView::Final, _) => anyhow::bail!(
+            "The copy of {id} from {origin} keeps no final answer here; `--transcript` shows how it ended"
+        ),
+        (SessionView::Transcript, _) => {
+            super::history_transcript::copied(&store.sqlite, &copied, json)
+        }
+        (SessionView::Summary, None) if json => {
+            Ok(format!("{}\n", serde_json::to_string(&copied)?))
+        }
+        (SessionView::Summary, None) => Ok(format!(
             "{}\n",
             loopflow_execution::machine_records::render(
                 &copied,
                 &loopflow_execution::store::lf_home_dir()
             )
         )),
-        _ => anyhow::bail!(
-            "The copy of {id} from {} has history and transcript views",
-            copied.session.origin_name()
-        ),
+        // An input's own views read its copied capture.
+        (SessionView::Summary | SessionView::Context | SessionView::Instructions, input) => {
+            let mut captures = copied
+                .events
+                .iter()
+                .filter_map(|event| event.artifact_key.as_deref())
+                .filter(|key| input.is_none_or(|input| key.starts_with(input)));
+            let key = captures.next_back().with_context(|| match input {
+                Some(_) => format!("Input does not belong to Session {id}"),
+                None => format!("The copy of {id} from {origin} recorded no input"),
+            })?;
+            super::session_history::render(key, view, json)
+        }
     }
 }

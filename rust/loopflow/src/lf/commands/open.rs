@@ -767,9 +767,12 @@ fn available_target(
         exact.as_ref().map(|_| session.cwd.clone()),
     )?;
     if exact.is_some() {
+        // A generated title already names its Task.
         resolved.label = match &resolved.task {
-            Some(task) => format!("{} · {}", session.title, task.identifier),
-            None => session.title.clone(),
+            Some(task) if !session.title.contains(&task.identifier) => {
+                format!("{} · {}", session.title, task.identifier)
+            }
+            _ => session.title.clone(),
         };
     }
     Ok(resolved)

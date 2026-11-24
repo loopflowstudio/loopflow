@@ -724,7 +724,9 @@ pub(super) fn complete_primary_session_in(
 }
 
 /// A Task's primary when it has one, else `session`: chosen when it is
-/// already one of the Task's conversations, admitted as new otherwise.
+/// already one of the Task's conversations, admitted as new otherwise. A
+/// conversation that began before its checkout became the Task's takes the
+/// Task now, by the rule a new Session would.
 pub(super) fn admit_task_primary_in(
     conn: &Connection,
     task: &TaskId,
@@ -732,10 +734,17 @@ pub(super) fn admit_task_primary_in(
     caller_process: Option<&loopflow_model::id::LfProcessId>,
 ) -> StoreResult<LfSession> {
     let scope = PrimaryScope::Task(task.clone());
-    if primary_session_in(conn, &scope)?.is_none()
-        && session_in(conn, session.id.as_str())?.is_some()
-    {
-        choose_task_primary_in(conn, task, session.id.as_str())?;
+    if primary_session_in(conn, &scope)?.is_none() {
+        if let Some(current) = session_in(conn, session.id.as_str())? {
+            if current.task_id.is_none()
+                && super::task_work::starting_task_in(conn, None, Some(&current.cwd), None)?
+                    .as_ref()
+                    == Some(task)
+            {
+                bind_session_in(conn, &current, task)?;
+            }
+            choose_task_primary_in(conn, task, session.id.as_str())?;
+        }
     }
     ensure_primary_session_in(conn, &scope, session.clone(), caller_process)
 }

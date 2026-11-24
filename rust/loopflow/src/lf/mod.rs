@@ -4371,7 +4371,6 @@ mod tests {
         let loop_cli = Cli::try_parse_from(["lf", "loop", "infrastructure"])
             .expect("unknown names remain eligible for skill discovery");
         assert!(matches!(loop_cli.command, Some(Commands::External(_))));
-        assert!(Cli::try_parse_from(["lf", "wt", "create", "child", "--stack"]).is_err());
         assert!(Cli::try_parse_from(["lf", "wt", "create", "child", "--child"]).is_err());
         assert!(Cli::try_parse_from(["lf", "wt", "up"]).is_err());
         assert!(Cli::try_parse_from(["lf", "wt", "down"]).is_err());

@@ -955,10 +955,11 @@ fn available_conversations_need_no_question_and_are_never_taken_over() {
         .iter()
         .find(|link| link["target"]["session"] == secondary.as_str())
         .unwrap();
-    assert_eq!(side["label"], "Side question");
+    // A conversation begun in the Task's checkout is the Task's.
+    assert_eq!(side["label"], "INF-123 Side question");
     assert_eq!(
         side["fallback_argv"],
-        serde_json::json!(["lf", "open", "--session", secondary])
+        serde_json::json!(["lf", "open", format!("{task_url}?session={secondary}")])
     );
 }
 

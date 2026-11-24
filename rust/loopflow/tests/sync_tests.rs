@@ -1112,7 +1112,15 @@ esac
 fn a_stacked_checkout_publishes_onto_its_unpushed_base_and_follows_main_once_it_merges() {
     let home = tempfile::TempDir::new().unwrap();
     let repo = TestRepo::new();
-    let _env = EnvGuard::with_lf_home(&[("gh", GH_STACKED_CHECKOUT)], home.path());
+    let open = "#!/bin/sh\nexit 0\n";
+    let _env = EnvGuard::with_lf_home(
+        &[
+            ("gh", GH_STACKED_CHECKOUT),
+            ("open", open),
+            ("xdg-open", open),
+        ],
+        home.path(),
+    );
     let parent_path = repo.create_named_worktree("parent");
     commit_file(&parent_path, "parent.txt", "parent work\n");
     let output = lf(
@@ -1147,7 +1155,15 @@ fn a_stacked_checkout_publishes_onto_its_unpushed_base_and_follows_main_once_it_
 fn syncing_a_stacked_checkout_to_main_detaches_its_sync_and_pr_base() {
     let home = tempfile::tempdir().unwrap();
     let repo = TestRepo::new();
-    let _env = EnvGuard::with_lf_home(&[("gh", GH_STACKED_CHECKOUT)], home.path());
+    let open = "#!/bin/sh\nexit 0\n";
+    let _env = EnvGuard::with_lf_home(
+        &[
+            ("gh", GH_STACKED_CHECKOUT),
+            ("open", open),
+            ("xdg-open", open),
+        ],
+        home.path(),
+    );
     let parent = repo.create_named_worktree("parent");
     let output = lf(
         &parent,

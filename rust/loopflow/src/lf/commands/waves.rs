@@ -3657,11 +3657,12 @@ mod tests {
             .iter()
             .any(|s| s == "busy" || s == "available"));
         let sessions = initial["sessions"].as_array().unwrap();
-        for id in ["bound", "checkout", "unknown"] {
+        for id in ["bound", "checkout"] {
             let session = sessions.iter().find(|s| s["id"] == id).unwrap();
             assert_eq!(session["task_ids"], serde_json::json!([active]));
         }
-        for id in ["repository", "wave"] {
+        // Membership is the recorded Task; a directory inside a checkout adds none.
+        for id in ["unknown", "repository", "wave"] {
             assert_eq!(
                 sessions.iter().find(|s| s["id"] == id).unwrap()["task_ids"],
                 serde_json::json!([])

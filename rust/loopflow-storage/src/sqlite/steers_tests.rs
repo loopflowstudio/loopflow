@@ -433,17 +433,29 @@ fn scopes_graph_downward_and_each_session_reads_for_itself() {
 
 #[test]
 fn a_session_anywhere_inside_a_task_checkout_gets_its_steers() {
-    let (_home, store, _adapter) = fixture();
+    let (home, store, _adapter) = fixture();
+    let work = home.path().join("work");
+    for dir in ["task/.git", "task/rust/src", "task-other/.git"] {
+        std::fs::create_dir_all(work.join(dir)).unwrap();
+    }
+    for checkout in ["task", "task-other"] {
+        std::fs::write(
+            work.join(checkout).join(".git/HEAD"),
+            "ref: refs/heads/main\n",
+        )
+        .unwrap();
+    }
     store
         .conn
         .lock()
         .unwrap()
-        .execute_batch(
+        .execute_batch(&format!(
             "INSERT INTO repository_plans(id,repo,selected) VALUES('repo_00000000000040008000000000000001','/repo',1);
             INSERT INTO tasks(repository_id,id,issue_identifier,created_at)
             VALUES('repo_00000000000040008000000000000001','task','T-1',1);
-            INSERT INTO task_checkouts(task_id,worktree) VALUES('task','/work/task');",
-        )
+            INSERT INTO task_checkouts(task_id,worktree) VALUES('task','{}');",
+            work.join("task").display()
+        ))
         .unwrap();
     save_in(
         &store.conn.lock().unwrap(),
@@ -458,17 +470,17 @@ fn a_session_anywhere_inside_a_task_checkout_gets_its_steers() {
     let pending = |cwd: &str| {
         let mut session = crate::test_fixture::unpublished_conversation(None, None, 1);
         session.work_source = None;
-        session.cwd = cwd.into();
+        session.cwd = work.join(cwd);
         let session = store.create_session_prepared(session, None).unwrap();
         store
             .session_steers(session.id.as_str(), 0, 32)
             .unwrap()
             .pending
     };
-    assert_eq!(pending("/work/task/rust/src/"), 1);
-    assert_eq!(pending("/work/task"), 1);
-    assert_eq!(pending("/work/task-other"), 0);
-    assert_eq!(pending("/work"), 0);
+    assert_eq!(pending("task/rust/src/"), 1);
+    assert_eq!(pending("task"), 1);
+    assert_eq!(pending("task-other"), 0);
+    assert_eq!(pending(""), 0);
 }
 
 #[test]
@@ -774,7 +786,7 @@ fn task_with_primary(store: &SqliteStore, primary: &str, worker: &str) {
             VALUES('repo_00000000000040008000000000000001','task','T-1',1);
             INSERT INTO task_checkouts(task_id,worktree) VALUES('task','/task');
             INSERT INTO task_primary_sessions(task_id,session_id) VALUES('task','{primary}');
-            UPDATE agent_sessions SET cwd='/task',interactive=1 WHERE id IN ('{primary}','{worker}');"
+            UPDATE agent_sessions SET cwd='/task',task_id='task',interactive=1 WHERE id IN ('{primary}','{worker}');"
         ))
         .unwrap();
 }
@@ -971,7 +983,7 @@ fn a_task_steer_the_conversation_read_still_reaches_the_next_worker() {
             .lock()
             .unwrap()
             .execute(
-                "UPDATE agent_sessions SET cwd='/task',interactive=?2,
+                "UPDATE agent_sessions SET cwd='/task',task_id='task',interactive=?2,
                  created_at=(SELECT MAX(created_at)+1 FROM steers) WHERE id=?1",
                 params![session, interactive],
             )

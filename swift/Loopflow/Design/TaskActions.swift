@@ -14,13 +14,6 @@ public struct TaskActions: Equatable {
     public enum Pause: String, Equatable, Sendable {
         case pause = "Pause"
         case unpause = "Unpause"
-
-        public func write(directory: String, issue: String) -> ServedWrite {
-            switch self {
-            case .pause: .taskPause(directory: directory, issue: issue)
-            case .unpause: .taskUnpause(directory: directory, issue: issue, run: false)
-            }
-        }
     }
 
     public let pause: Pause?

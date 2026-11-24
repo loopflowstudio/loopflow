@@ -215,7 +215,7 @@ fn task_graph_row(
     let Some((graph, step, start, carrier, stopping)) = conn
         .query_row(
             "SELECT graph,step,run_start,lf_process_id,run_pid,run_os_started_at,run_died_at,
-                    (SELECT stopping_processes IS NOT NULL FROM task_pauses WHERE task_id=?1)
+                    (SELECT stopping_sessions IS NOT NULL FROM task_pauses WHERE task_id=?1)
              FROM task_graphs WHERE task_id=?1",
             [task.as_str()],
             |row| {
@@ -567,13 +567,13 @@ fn member_graphs(tx: &rusqlite::Connection, task: &TaskId) -> StoreResult<Vec<Me
     } else {
         super::durable::task_wave_in(tx, task)?
     };
-    graphs
+    Ok(graphs
         .into_iter()
         .map(|graph| {
-            let entry = super::graph_inventory::entry_of(&graph, Some(task.clone()), wave.clone())?;
-            Ok((graph, entry))
+            let entry = super::graph_inventory::entry_of(&graph, Some(task.clone()), wave.clone());
+            (graph, entry)
         })
-        .collect()
+        .collect())
 }
 
 impl SqliteStore {

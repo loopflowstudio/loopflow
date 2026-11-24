@@ -10,6 +10,7 @@ use std::time::{Duration, Instant};
 use anyhow::{anyhow, Result};
 
 use crate::process::OsProcess;
+use loopflow_storage::sqlite::task_pause::StoppingSession;
 
 pub const DISCORD_TOKEN_ENV: &str = "LF_DISCORD_TOKEN";
 
@@ -505,35 +506,30 @@ pub(crate) fn terminate_worker_jobs(pid: u32, started: i64) -> Result<()> {
     stop_worker_members(pid, members)
 }
 
-pub(crate) fn settle_worker_jobs(
-    saved: &loopflow_storage::sqlite::task_pause::StoppingSession,
-) -> Result<()> {
-    stop_worker_members(saved.session, remaining_worker_jobs(saved)?)
+pub(crate) fn settle_worker_session(saved: &StoppingSession) -> Result<()> {
+    stop_worker_members(saved.session, remaining_session_members(saved)?)
 }
 
-pub(crate) fn remaining_worker_jobs(
-    saved: &loopflow_storage::sqlite::task_pause::StoppingSession,
-) -> Result<Vec<OsProcess>> {
+pub(crate) fn remaining_session_members(saved: &StoppingSession) -> Result<Vec<OsProcess>> {
     let members = OsProcess::session(saved.session)?;
-    if members.is_empty() {
+    let recorded: HashMap<_, _> = saved.members.iter().copied().collect();
+    if members.is_empty() || members.iter().any(|p| known_member(&recorded, p)) {
+        return Ok(members);
+    }
+    // A different leader proves that the kernel recycled the session.
+    if members.iter().any(|p| p.pid == saved.session) {
         return Ok(Vec::new());
     }
-    if !members.iter().any(|p| {
-        saved
-            .members
-            .iter()
-            .any(|&(pid, start)| p.matches_start(pid, start))
-    }) {
-        // A different leader proves that the kernel recycled the session.
-        if members.iter().any(|p| p.pid == saved.session) {
-            return Ok(Vec::new());
-        }
-        anyhow::bail!(
-            "cannot confirm ownership of the remaining jobs in OS session {}",
-            saved.session
-        );
-    }
-    Ok(members)
+    anyhow::bail!(
+        "cannot confirm ownership of the remaining jobs in OS session {}",
+        saved.session
+    )
+}
+
+fn known_member(births: &HashMap<u32, i64>, member: &OsProcess) -> bool {
+    births
+        .get(&member.pid)
+        .is_some_and(|birth| member.matches_start(member.pid, *birth))
 }
 
 fn stop_worker_members(session: u32, members: Vec<OsProcess>) -> Result<()> {
@@ -563,10 +559,7 @@ fn terminate_session_jobs(
         let mut signaled = HashMap::new();
         loop {
             for member in &members {
-                if !signaled
-                    .get(&member.pid)
-                    .is_some_and(|birth| member.matches_start(member.pid, *birth))
-                {
+                if !known_member(&signaled, member) {
                     signal_session_job(session, member, signal)?;
                     signaled.insert(member.pid, member.started_at);
                 }
@@ -576,11 +569,7 @@ fn terminate_session_jobs(
                 return Ok(());
             }
             // At least one member must still pin the original session ID.
-            if !survivors.iter().any(|p| {
-                signaled
-                    .get(&p.pid)
-                    .is_some_and(|birth| p.matches_start(p.pid, *birth))
-            }) {
+            if !survivors.iter().any(|p| known_member(&signaled, p)) {
                 return Err(std::io::Error::other(format!(
                     "cannot establish ownership of remaining jobs in OS session {session}: {}",
                     OsProcess::describe(&survivors)

@@ -90,9 +90,14 @@ public final class PendingChanges {
     public func setPause(_ action: TaskActions.Pause, row: RoadmapTask, directory: String, notices: NoticeCenter,
                          show: Notice.Action?, answered: @escaping @MainActor () async -> Void) {
         let issue = row.task.identifier
-        let command: PendingCommand = action == .pause ? .pause(task: issue) : .unpause(task: issue, owned: row.runtime?.owner != nil)
-        make(command, subject: issue, verb: action == .pause ? "paused" : "unpaused",
-             write: action.write(directory: directory, issue: issue), notices: notices, show: show, answered: answered)
+        let change: (command: PendingCommand, write: ServedWrite, verb: String) = switch action {
+        case .pause:
+            (.pause(task: issue), .taskPause(directory: directory, issue: issue), "paused")
+        case .unpause:
+            (.unpause(task: issue, owned: row.runtime?.owner != nil), .taskUnpause(directory: directory, issue: issue, run: false), "unpaused")
+        }
+        make(change.command, subject: issue, verb: change.verb, write: change.write,
+             notices: notices, show: show, answered: answered)
     }
 
     /// Show `command` on every list now and send `write` under its request ID,

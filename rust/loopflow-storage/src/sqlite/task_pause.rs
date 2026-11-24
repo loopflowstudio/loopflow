@@ -41,7 +41,7 @@ pub struct TaskPause {
 
 pub(super) fn require_settled_in(conn: &Connection, task: &TaskId) -> StoreResult<()> {
     let pending: bool = conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM task_pauses WHERE task_id=?1 AND stopping_processes IS NOT NULL)",
+        "SELECT EXISTS(SELECT 1 FROM task_pauses WHERE task_id=?1 AND stopping_sessions IS NOT NULL)",
         [task.as_str()], |row| row.get(0))?;
     if pending {
         let issue = children::short_task_id(conn, task)?.unwrap_or_else(|| task.to_string());
@@ -74,14 +74,16 @@ pub(super) fn require_unpaused_in(conn: &Connection, task: &TaskId) -> StoreResu
     Ok(())
 }
 
-fn stopping_processes_in(
+fn stopping_sessions_in(
     conn: &Connection,
     task: &TaskId,
 ) -> StoreResult<Option<Vec<StoppingSession>>> {
-    let jobs: Option<String> = conn.query_row(
-        "SELECT stopping_processes FROM task_pauses WHERE task_id=?1 AND stopping_processes IS NOT NULL",
+    let sessions: Option<String> = conn.query_row(
+        "SELECT stopping_sessions FROM task_pauses WHERE task_id=?1 AND stopping_sessions IS NOT NULL",
         [task.as_str()], |r| r.get(0)).optional()?;
-    Ok(jobs.map(|json| serde_json::from_str(&json)).transpose()?)
+    Ok(sessions
+        .map(|json| serde_json::from_str(&json))
+        .transpose()?)
 }
 
 fn settle_carrier(conn: &Connection, task: &TaskId) -> StoreResult<()> {
@@ -98,8 +100,8 @@ impl SqliteStore {
         require_unpaused_in(&self.conn.lock().expect("store mutex poisoned"), task)
     }
 
-    pub fn stopping_processes(&self, task: &TaskId) -> StoreResult<Option<Vec<StoppingSession>>> {
-        stopping_processes_in(&self.conn.lock().expect("store mutex poisoned"), task)
+    pub fn stopping_sessions(&self, task: &TaskId) -> StoreResult<Option<Vec<StoppingSession>>> {
+        stopping_sessions_in(&self.conn.lock().expect("store mutex poisoned"), task)
     }
 
     /// The portable part of a pause. Process identities belong to the source Machine.
@@ -143,7 +145,7 @@ impl SqliteStore {
         &self,
         task: &TaskId,
         by: &Starter,
-        jobs: Vec<StoppingSession>,
+        sessions: Vec<StoppingSession>,
     ) -> StoreResult<Vec<StoppingSession>> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -159,15 +161,15 @@ impl SqliteStore {
                 ))
             }
             TaskState::Paused => {
-                return Ok(stopping_processes_in(&tx, task)?.unwrap_or_default());
+                return Ok(stopping_sessions_in(&tx, task)?.unwrap_or_default());
             }
             _ => {}
         }
-        tx.execute("INSERT INTO task_pauses(task_id,paused_at,paused_by,stopping_processes) VALUES(?1,?2,?3,?4)",
-            params![task.as_str(), now_unix(), serde_json::to_string(by)?, serde_json::to_string(&jobs)?])?;
+        tx.execute("INSERT INTO task_pauses(task_id,paused_at,paused_by,stopping_sessions) VALUES(?1,?2,?3,?4)",
+            params![task.as_str(), now_unix(), serde_json::to_string(by)?, serde_json::to_string(&sessions)?])?;
         children::insert_task_event_in(&tx, task, &TaskEventKind::Interrupt)?;
         tx.commit()?;
-        Ok(jobs)
+        Ok(sessions)
     }
 
     pub fn settle_task_pause(&self, task: &TaskId, draining: bool) -> StoreResult<()> {
@@ -180,7 +182,7 @@ impl SqliteStore {
                     WHERE retry_at IS NOT NULL AND lf_process_id IN (
                       SELECT gs.lf_process_id FROM graph_processes g JOIN graph_process_steps gs ON gs.graph_lf_process_id=g.lf_process_id WHERE g.task_id=?1)",
                     params![task.as_str(), now_unix()])?;
-        tx.execute("UPDATE task_pauses SET stopping_processes=NULL WHERE task_id=?1 AND stopping_processes IS NOT NULL", [task.as_str()])?;
+        tx.execute("UPDATE task_pauses SET stopping_sessions=NULL WHERE task_id=?1 AND stopping_sessions IS NOT NULL", [task.as_str()])?;
         tx.commit()?;
         Ok(())
     }

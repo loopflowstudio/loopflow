@@ -27,3 +27,5 @@ Leave separate-session Codex jobs outside signal authority until the spawn can i
 A source-side pause during a move belongs to the sender until it records the sent payload. After that, pause routes to the destination. Exercise the transfer with the private two-Machine fixture in `machine_commands.rs` and pause from the source's pre-push hook.
 
 Use the existing live-agent index for both worker selection and duplicate PID/birth checks. With 10,000 Tasks and 100 live agents, both query plans used that index, and worker selection looked up captures, Graph steps, and Graphs by primary key.
+
+Use the existing batched latest-Graph read for a single Task status or interrupt. Only the board constructs the full Graph detail it returns.

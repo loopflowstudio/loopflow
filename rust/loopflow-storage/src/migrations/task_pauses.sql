@@ -2,7 +2,7 @@ CREATE TABLE task_pauses (
     task_id TEXT PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,
     paused_at INTEGER NOT NULL,
     paused_by TEXT NOT NULL CHECK (json_valid(paused_by)),
-    stopping_processes TEXT CHECK (stopping_processes IS NULL OR json_valid(stopping_processes))
+    stopping_sessions TEXT CHECK (stopping_sessions IS NULL OR json_valid(stopping_sessions))
 ) STRICT;
 
 CREATE TRIGGER store_revision_task_pauses_insert AFTER INSERT ON task_pauses

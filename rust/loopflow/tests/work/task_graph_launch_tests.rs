@@ -2635,7 +2635,7 @@ if (home / 'hold-turn').exists():
             os.setpgrp()
             def on_term(*_):
                 with sqlite3.connect(home / 'loopflow.db') as db:
-                    rows = db.execute('SELECT stopping_processes FROM task_pauses WHERE stopping_processes IS NOT NULL')
+                    rows = db.execute('SELECT stopping_sessions FROM task_pauses WHERE stopping_sessions IS NOT NULL')
                     if any(pid == os.getpid() for row, in rows for group in json.loads(row)
                            for pid, birth in group['members']):
                         Path('pause-observed').touch()
@@ -3936,6 +3936,11 @@ fn auto_off_sticks_through_a_headless_relaunch() {
         "{text}"
     );
     assert!(text.contains("action: no_action"), "{text}");
+    task.ok(&["task", "pause", "INF-123"]);
+    let held = task.text_status();
+    assert!(held.contains("Paused at pr land."), "{held}");
+    assert!(!held.contains("auto on INF-123` lands it"), "{held}");
+    task.ok(&["task", "unpause", "INF-123"]);
     // Standing at the landing step, a plain relaunch waits there again.
     let waiting = task.task_run(&["task", "run", "INF-123"]);
     assert!(waiting.success(), "{}", waiting.text);

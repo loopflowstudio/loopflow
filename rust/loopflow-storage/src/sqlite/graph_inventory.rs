@@ -147,7 +147,7 @@ pub(super) fn entry_in(
             .transpose()
             .map_err(invalid)?,
     };
-    entry_of(graph, task, wave)
+    Ok(entry_of(graph, task, wave))
 }
 
 /// The Graph's inventory entry once its Task and Wave are known.
@@ -155,9 +155,9 @@ pub fn entry_of(
     graph: &GraphExecution,
     task_id: Option<TaskId>,
     wave_id: Option<WaveId>,
-) -> StoreResult<GraphProcessInventoryEntry> {
+) -> GraphProcessInventoryEntry {
     let run = &graph.run;
-    Ok(GraphProcessInventoryEntry {
+    GraphProcessInventoryEntry {
         summary: GraphProcessSummary {
             id: run.id.to_string(),
             name: graph.name.clone(),
@@ -171,7 +171,7 @@ pub fn entry_of(
         },
         repo: graph.repo.clone(),
         ended_at: run.ended_at,
-    })
+    }
 }
 
 /// Facts read together for Graph execution: each step's latest captured input,
@@ -184,8 +184,6 @@ pub struct GraphExecutionFacts {
     pub inputs: HashMap<LfProcessId, (String, String, i64)>,
     pub unanswered_questions: HashMap<LfProcessId, String>,
     pub limit_recoveries: HashMap<LfProcessId, AgentLimitRecovery>,
-    /// Selected Tasks held by `lf task pause`.
-    pub paused: HashSet<TaskId>,
 }
 
 /// The Graph a Task took up and never ran: it stands at `start`, no run
@@ -673,16 +671,8 @@ impl SqliteStore {
             .query_map([&ids], |row| row.get::<_, String>(0))?
             .map(|id| TaskId::parse(&id?).map_err(invalid))
             .collect::<StoreResult<_>>()?;
-        let mut holds = conn.prepare(
-            "SELECT task_id FROM task_pauses WHERE task_id IN (SELECT value FROM json_each(?1))",
-        )?;
-        let paused = holds
-            .query_map([&ids], |row| row.get::<_, String>(0))?
-            .map(|id| TaskId::parse(&id?).map_err(invalid))
-            .collect::<StoreResult<_>>()?;
         Ok(GraphExecutionFacts {
             open_graphs,
-            paused,
             unrun,
             tasks_with_carrier_records,
             inputs,

@@ -3525,7 +3525,7 @@ pub fn task_interrupt(issue: &str) -> OpsResult<TaskControlResult> {
             .map_err(|error| task_error(format!("failed to resolve task: {error}")))?
             .ok_or_else(|| task_error(format!("no Task exists for {issue:?}")))?;
         let work = loopflow_model::durable::WorkRef::Task(task.id.clone());
-        let receipt = match live_execution(&store, &task).await? {
+        let receipt = match live_execution(&store.sqlite, &task)? {
             Some(target) => {
                 store.append_interrupt(&work).await.map_err(task_error)?;
                 super::child::WorkControlReceipt::Interrupt { work, target }
@@ -3545,31 +3545,28 @@ pub fn task_interrupt(issue: &str) -> OpsResult<TaskControlResult> {
 /// Graph while its own process lives, otherwise another open Process in its
 /// work, such as a Task run between Graph attempts or a Task Session. Unknown
 /// liveness counts as live.
-async fn live_execution(store: &SharedStore, task: &Task) -> OpsResult<Option<String>> {
+fn live_execution(store: &SqliteStore, task: &Task) -> OpsResult<Option<String>> {
     use crate::ops::task_execution::TaskExecutionState;
     use crate::store::ProcessIdentityEvidence;
     let graph = store
-        .sqlite
-        .task_graphs(&task.id)
+        .latest_task_graphs(&[&task.id])
         .map_err(task_error)?
-        .pop()
+        .remove(&task.id)
         .filter(|graph| {
             crate::process::RecordedProcess::from(&graph.run).evidence()
                 != ProcessIdentityEvidence::Dead
         });
     if let Some(graph) = graph {
-        let name = graph.name.clone();
         let facts = store
-            .sqlite
             .graph_execution_facts([&graph], &[&task.id])
             .map_err(task_error)?;
-        let (execution, _) = crate::ops::task_execution::execution_of_latest_graph(
-            &store.sqlite,
+        let execution = crate::ops::task_execution::execution_of_latest_graph(
+            store,
             task,
+            store.task_state(&task.id).map_err(task_error)?,
             Some(&graph),
             &facts,
         )
-        .await
         .map_err(task_error)?;
         let step = execution.step.unwrap_or_default();
         let position = match execution.state {
@@ -3581,11 +3578,11 @@ async fn live_execution(store: &SharedStore, task: &Task) -> OpsResult<Option<St
             TaskExecutionState::Idle | TaskExecutionState::Blocked => None,
         };
         if let Some(position) = position {
-            return Ok(Some(format!("stopped Graph {name} {position}")));
+            return Ok(Some(format!("stopped Graph {} {position}", graph.name)));
         }
     }
-    let work = store.sqlite.task_open_work(&task.id).map_err(task_error)?;
-    let open = crate::ops::task_execution::unresolved_work(&store.sqlite, &work)?;
+    let work = store.task_open_work(&task.id).map_err(task_error)?;
+    let open = crate::ops::task_execution::unresolved_work(store, &work)?;
     Ok(open.first().map(|(work, evidence)| {
         let unknown = match evidence {
             ProcessIdentityEvidence::Unknown => " (liveness unknown)",

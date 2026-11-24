@@ -84,9 +84,10 @@ pub fn pause(issue: &str) -> OpsResult<String> {
         let sessions = {
             let _admission = admission(&task.id)?;
             let by = auto::caller(&store, &task)?;
-            let jobs = agent_process::capture_worker_jobs(sqlite, &task.id).map_err(task_error)?;
+            let sessions =
+                agent_process::capture_worker_sessions(sqlite, &task.id).map_err(task_error)?;
             sqlite
-                .begin_task_pause(&task.id, &by, jobs)
+                .begin_task_pause(&task.id, &by, sessions)
                 .map_err(task_error)?
         };
         let finishing = finish(sqlite, &task, &sessions)?;
@@ -124,7 +125,7 @@ fn finish(
         std::thread::sleep(Duration::from_millis(50));
     }
     for session in sessions {
-        if let Err(error) = crate::os_process::settle_worker_jobs(session) {
+        if let Err(error) = crate::os_process::settle_worker_session(session) {
             failures.push(format!("worker OS session {}: {error}", session.session));
         }
     }
@@ -145,11 +146,11 @@ fn finish(
 
 /// A caller may have died after the jobs exited but before marking the hold settled.
 fn finish_if_jobs_exited(store: &SqliteStore, task: &Task) -> OpsResult<()> {
-    let Some(jobs) = store.stopping_processes(&task.id).map_err(task_error)? else {
+    let Some(sessions) = store.stopping_sessions(&task.id).map_err(task_error)? else {
         return Ok(());
     };
-    for session in &jobs {
-        if let Some(live) = crate::os_process::remaining_worker_jobs(session)
+    for session in &sessions {
+        if let Some(live) = crate::os_process::remaining_session_members(session)
             .map_err(task_error)?
             .first()
         {
@@ -165,7 +166,7 @@ fn finish_if_jobs_exited(store: &SqliteStore, task: &Task) -> OpsResult<()> {
 
 pub(crate) fn before_unassign(store: &SqliteStore, task: &Task) -> OpsResult<()> {
     if store
-        .stopping_processes(&task.id)
+        .stopping_sessions(&task.id)
         .map_err(task_error)?
         .is_some()
     {

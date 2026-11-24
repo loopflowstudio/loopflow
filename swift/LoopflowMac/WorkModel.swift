@@ -1936,16 +1936,16 @@ final class WorkModel {
         let list = workScope.taskList
         taskListGeneration &+= 1
         let generation = taskListGeneration
-        do {
-            let plan = try await query.viewPlan(expression: list.expression(wave: wave), repoPath: repo)
-            guard generation == taskListGeneration, repoPath == repo,
-                  repositoryReadingKey(repo) == key, workScope.taskListWave == wave, workScope.taskList == list else { return }
-            applyTaskList(plan, wave: wave, list: list, reason: "")
-        } catch {
-            guard generation == taskListGeneration, repoPath == repo,
-                  repositoryReadingKey(repo) == key, workScope.taskListWave == wave, workScope.taskList == list else { return }
-            applyTaskList(nil, wave: wave, list: list, reason: error.localizedDescription)
+        let plan: WorkViewPlan?
+        var reason = ""
+        do { plan = try await query.viewPlan(expression: list.expression(wave: wave), repoPath: repo) }
+        catch {
+            plan = nil
+            reason = error.localizedDescription
         }
+        guard generation == taskListGeneration, repoPath == repo, repositoryReadingKey(repo) == key,
+              workScope.taskListWave == wave, workScope.taskList == list else { return }
+        applyTaskList(plan, wave: wave, list: list, reason: reason)
     }
 
     private func refreshRepositoryPlan() async {

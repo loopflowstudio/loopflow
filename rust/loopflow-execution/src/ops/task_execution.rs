@@ -6,16 +6,14 @@ use std::collections::HashSet;
 
 use serde::{Deserialize, Serialize};
 
-use crate::durable::GraphProcessDetail;
-use crate::session::GraphProcessSummaryState;
+use crate::durable::TaskState;
 use crate::session_record::activity::{self, Activity};
-use crate::store::ProcessIdentityEvidence;
-use crate::store::{SharedStore, StoreResult};
+use crate::store::{ProcessIdentityEvidence, StoreResult};
 use loopflow_model::durable::TaskId;
 use loopflow_model::id::{LfProcessId, LfSessionId};
-use loopflow_storage::graph_process::GraphExecution;
+use loopflow_storage::graph_process::{ExecutionResult, GraphExecution};
 use loopflow_storage::sqlite::{
-    entry_of, AgentLimitRecovery, GraphExecutionFacts, OpenWork, SqliteStore, UnrunGraph,
+    AgentLimitRecovery, GraphExecutionFacts, OpenWork, SqliteStore, UnrunGraph,
 };
 use loopflow_storage::work::task::Task;
 
@@ -64,40 +62,33 @@ pub struct RunDied {
     pub at: Option<String>,
 }
 
-pub async fn task_execution(
-    store: &SharedStore,
-    task: &Task,
-) -> StoreResult<TaskExecutionSnapshot> {
-    let graph = store.sqlite.task_graphs(&task.id)?.pop();
-    let facts = store.sqlite.graph_execution_facts(&graph, &[&task.id])?;
-    Ok(
-        execution_of_latest_graph(&store.sqlite, task, graph.as_ref(), &facts)
-            .await?
-            .0,
-    )
-}
-
-/// Execution and the Graph record of a Task whose latest Graph is already
-/// read, from facts read once for every Graph of the reading.
-pub async fn execution_of_latest_graph(
+pub fn task_execution(
     sqlite: &SqliteStore,
     task: &Task,
+    status: TaskState,
+) -> StoreResult<TaskExecutionSnapshot> {
+    let graph = sqlite.latest_task_graphs(&[&task.id])?.remove(&task.id);
+    let facts = sqlite.graph_execution_facts(&graph, &[&task.id])?;
+    execution_of_latest_graph(sqlite, task, status, graph.as_ref(), &facts)
+}
+
+/// Execution of a Task whose latest Graph is already
+/// read, from facts read once for every Graph of the reading.
+pub fn execution_of_latest_graph(
+    sqlite: &SqliteStore,
+    task: &Task,
+    status: TaskState,
     graph: Option<&GraphExecution>,
     facts: &GraphExecutionFacts,
-) -> StoreResult<(TaskExecutionSnapshot, Option<GraphProcessDetail>)> {
+) -> StoreResult<TaskExecutionSnapshot> {
     let Some(graph) = graph else {
-        return Ok((
-            open_graph_execution_from_facts(&task.id, facts)
-                .unwrap_or_else(|| unrun_execution(&task.identifier, facts.unrun.get(&task.id))),
-            None,
-        ));
+        return Ok(open_graph_execution_from_facts(&task.id, facts)
+            .unwrap_or_else(|| unrun_execution(&task.identifier, facts.unrun.get(&task.id))));
     };
-    let entry = entry_of(graph, Some(task.id.clone()), task.wave_id.clone())?;
     let step = graph.latest().map(|step| &step.run);
     let input = step.and_then(|step| facts.inputs.get(&step.id));
     let mut snapshot = project_execution(
         graph,
-        entry.summary.state,
         crate::process::RecordedProcess::from(&graph.run).evidence(),
         step.map_or(ProcessIdentityEvidence::Dead, |step| {
             crate::process::os_process::step_evidence(step, &graph.run)
@@ -173,19 +164,17 @@ pub async fn execution_of_latest_graph(
             snapshot.outlook = Some(outlook);
         }
     }
-    // A step that pause stopped is held on purpose; nothing is blocked or
-    // owed a fresh launch. A finished Graph stopped nothing.
-    if let (true, Some(label)) = (facts.paused.contains(&task.id), &snapshot.step) {
-        if matches!(
-            snapshot.state,
-            TaskExecutionState::Idle | TaskExecutionState::Blocked | TaskExecutionState::Waiting
-        ) {
+    // Keep a live run visible while it drains. A finished Graph has no step.
+    if status == TaskState::Paused && matches!(
+        snapshot.state, TaskExecutionState::Idle | TaskExecutionState::Blocked | TaskExecutionState::Waiting
+    ) {
+        if let Some(label) = &snapshot.step {
             snapshot.reason = format!("{label} stopped when the Task was paused");
             snapshot.state = TaskExecutionState::Idle;
             snapshot.outlook = None;
         }
     }
-    Ok((snapshot, Some(graph.detail(entry))))
+    Ok(snapshot)
 }
 
 /// A Task with no Graph history: starting the Graph it took up, stopped
@@ -324,11 +313,10 @@ fn apply_limit_recovery(
 /// latest step ended says why it stopped.
 fn project_execution(
     graph: &GraphExecution,
-    state: GraphProcessSummaryState,
     graph_process: ProcessIdentityEvidence,
     step: ProcessIdentityEvidence,
 ) -> TaskExecutionSnapshot {
-    if state == GraphProcessSummaryState::Completed {
+    if graph.run.result() == ExecutionResult::Succeeded {
         return TaskExecutionSnapshot {
             state: TaskExecutionState::Idle,
             reason: format!("Graph {} finished; nothing further is launched", graph.name),
@@ -494,8 +482,7 @@ mod tests {
     use super::{
         apply_limit_recovery, project_execution, TaskExecutionSnapshot, TaskExecutionState,
     };
-    use crate::session::GraphProcessSummaryState;
-    use crate::store::ProcessIdentityEvidence::{Dead, Live, Unknown};
+        use crate::store::ProcessIdentityEvidence::{Dead, Live, Unknown};
     use loopflow_storage::sqlite::AgentLimitRecovery;
 
     fn snapshot(state: TaskExecutionState) -> TaskExecutionSnapshot {
@@ -596,43 +583,35 @@ mod tests {
     fn a_graph_runs_while_its_processes_do_and_blocks_on_a_failed_step() {
         let directory = tempfile::tempdir().unwrap();
         let store = crate::store::open_sqlite(&directory.path().join("loopflow.db")).unwrap();
-        let graph = |outcome| {
+        let graph = |step, outcome| {
             let graph_process =
-                store.test_graph("feature", "/repo", &[("implement", outcome)], None);
+                store.test_graph("feature", "/repo", &[("implement", step)], outcome);
             store
                 .graph_process(graph_process.as_str())
                 .unwrap()
                 .unwrap()
                 .0
         };
-        let state = |graph, graph_process, step| {
-            project_execution(
-                graph,
-                GraphProcessSummaryState::Current,
-                graph_process,
-                step,
-            )
-        };
-        let running = graph(None);
+        let running = graph(None, None);
         assert_eq!(
-            state(&running, Live, Live).state,
+            project_execution(&running, Live, Live).state,
             TaskExecutionState::Running
         );
         assert_eq!(
-            state(&running, Live, Dead).state,
+            project_execution(&running, Live, Dead).state,
             TaskExecutionState::Starting
         );
         assert_eq!(
-            state(&running, Unknown, Dead).state,
+            project_execution(&running, Unknown, Dead).state,
             TaskExecutionState::Unknown
         );
         // A Graph process that died is history: nothing is running or resumable.
-        let succeeded = graph(Some("succeeded"));
-        let stopped = state(&succeeded, Dead, Dead);
+        let succeeded = graph(Some("succeeded"), None);
+        let stopped = project_execution(&succeeded, Dead, Dead);
         assert_eq!(stopped.state, TaskExecutionState::Idle);
         assert_eq!(stopped.step.as_deref(), Some("implement"));
-        let failed = graph(Some("failed"));
-        let failed = state(&failed, Dead, Dead);
+        let failed = graph(Some("failed"), None);
+        let failed = project_execution(&failed, Dead, Dead);
         assert_eq!(failed.state, TaskExecutionState::Blocked);
         assert!(
             failed.reason.contains("launch fresh work"),
@@ -640,7 +619,7 @@ mod tests {
             failed.reason
         );
         let finished =
-            project_execution(&succeeded, GraphProcessSummaryState::Completed, Dead, Dead);
+            project_execution(&graph(Some("succeeded"), Some("succeeded")), Dead, Dead);
         assert!(finished.step.is_none());
     }
 }

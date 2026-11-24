@@ -1,11 +1,13 @@
-at: d577dc1968f2eb433bc3895b06f98a955448e39d
+at: 15b1fa1c68c5e67cc792c3905bd00cdefce12b9b
 first:
   - path: docs/work.md
     why: Pause and resume from the saved step
   - path: scratch/plan.md
     why: Codex probes and move timing limits
+  - path: rust/loopflow-storage/src/migrations/task_pauses.sql
+    why: Store one hold and its stopping sessions per Task
   - path: rust/loopflow-storage/src/sqlite/task_pause.rs
-    why: Commit the hold, interrupt, and recorded jobs together
+    why: Commit the hold, captured sessions and interrupt together
   - path: rust/loopflow/src/lf/commands/write.rs
     why: Route both writes to the execution Machine
   - path: rust/loopflow-execution/src/ops/task/pause.rs
@@ -24,6 +26,8 @@ first:
     why: Carry a hold across Machines once
   - path: rust/loopflow-execution/src/task_graph.rs
     why: Name the held step
+  - path: rust/loopflow-execution/src/ops/task_execution.rs
+    why: Describe the latest Graph using the Task’s state
   - path: rust/loopflow-execution/src/ops/task_run.rs
     why: Explain when Unpause becomes available
   - path: swift/Loopflow/Design/TaskActions.swift

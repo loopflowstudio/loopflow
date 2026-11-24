@@ -887,7 +887,7 @@ pub struct TaskListArgs {
     pub wave: Option<String>,
     /// Project ID, provider ID, slug or name.
     pub project: Option<String>,
-    /// An open `TaskState` label: unstarted, idle, active or moving.
+    /// Filter by an open `TaskState`.
     pub state: Option<String>,
 }
 
@@ -2236,18 +2236,19 @@ async fn snapshot_task_detail(
     let pr = facts.active_prs.get(&task.id).cloned();
     let active = pr.as_ref().filter(|pr| pr.is_active());
     let observed_at = now();
-    let (execution, graph_record) =
-        loopflow_execution::ops::task_execution::execution_of_latest_graph(
-            &store.sqlite,
-            task,
-            reads.graphs.get(&task.id),
-            &reads.execution,
-        )
-        .await?;
     let status = *facts
         .states
         .get(&task.id)
         .ok_or_else(|| anyhow!("Task {} has no state", task.id))?;
+    let graph = reads.graphs.get(&task.id);
+    let execution =
+        loopflow_execution::ops::task_execution::execution_of_latest_graph(
+            &store.sqlite,
+            task,
+            status,
+            graph,
+            &reads.execution,
+        )?;
     let pending = facts
         .completion_pending
         .get(&task.id)
@@ -2478,7 +2479,9 @@ async fn snapshot_task_detail(
         actions,
         graph_name: Some(graph_name),
         graph_source,
-        latest_graph_process: graph_record,
+        latest_graph_process: graph.map(|graph| {
+            graph.detail(loopflow_storage::sqlite::entry_of(graph, Some(task.id.clone()), task.wave_id.clone()))
+        }),
         execution: Some(execution),
         run_control,
         pr: pr.as_ref().map(|pr| {

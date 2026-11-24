@@ -44,13 +44,15 @@ pub(super) async fn read_task_snapshot(store: &SharedStore, task: Task) -> OpsRe
         .map_err(|error| task_error(format!("failed to read latest task event: {error}")))?;
     let pr = store.active_task_pr(&task.id).await.map_err(task_error)?;
     let active = pr.as_ref().filter(|pr| pr.is_active());
-    let mut execution = crate::ops::task_execution::task_execution(store, &task)
-        .await
+    let status = store.task_state(&task.id).await.map_err(task_error)?;
+    let mut execution = crate::ops::task_execution::task_execution(&store.sqlite, &task, status)
         .map_err(task_error)?;
     let work_set =
         crate::store::task_work::task_work(&store.sqlite, &task.id).map_err(task_error)?;
     let auto = store.sqlite.task_auto(&task.id).map_err(task_error)?;
-    if execution.state == crate::ops::task_execution::TaskExecutionState::Idle {
+    if status != crate::durable::TaskState::Paused
+        && execution.state == crate::ops::task_execution::TaskExecutionState::Idle
+    {
         if let Some(wait) = work_set
             .graph
             .as_ref()
@@ -60,7 +62,6 @@ pub(super) async fn read_task_snapshot(store: &SharedStore, task: Task) -> OpsRe
             execution.reason = wait;
         }
     }
-    let status = store.task_state(&task.id).await.map_err(task_error)?;
     let parent_pr = match task.parent_pr_id.as_ref() {
         Some(parent_id) => store
             .get_task_pr(parent_id)

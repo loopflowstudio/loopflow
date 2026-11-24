@@ -481,7 +481,7 @@ fn validate_worker_close(
     Ok(())
 }
 
-pub(crate) fn capture_worker_jobs(
+pub(crate) fn capture_worker_sessions(
     store: &SqliteStore,
     task: &TaskId,
 ) -> Result<Vec<StoppingSession>> {

@@ -61,8 +61,8 @@ impl SqliteStore {
         } else {
             keyed(
                 &snapshot,
-                "SELECT task_id,json_extract(stopping_processes,'$[0].session') FROM task_pauses
-                 WHERE task_id IN (SELECT value FROM json_each(?1)) AND stopping_processes IS NOT NULL",
+                "SELECT task_id,json_extract(stopping_sessions,'$[0].session') FROM task_pauses
+                 WHERE task_id IN (SELECT value FROM json_each(?1)) AND stopping_sessions IS NOT NULL",
                 &ids_json(paused),
                 |row| Ok((TaskId::from_raw(row.get::<_, String>(0)?), PauseCleanup { worker_session: row.get(1)? })),
             )?

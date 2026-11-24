@@ -1,0 +1,400 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Ship Review · LOO-1078 · lf task pause (PR #2036)</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #faf8f5;
+    --surface: #fffdf9;
+    --surface-muted: #f3eee7;
+    --border: #e6dfd6;
+    --border-strong: #d6ccc0;
+    --text: #2a2624;
+    --text-2: #5f5752;
+    --text-3: #6e6762;
+    --accent: #722f37;
+    --accent-bg: rgba(114,47,55,0.09);
+    --ok: #2f6c42;
+    --ok-bg: rgba(47,108,66,0.10);
+    --warn: #85560c;
+    --warn-bg: rgba(133,86,12,0.10);
+    --info: #24579e;
+    --info-bg: rgba(36,87,158,0.10);
+    --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+    --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #232528;
+      --surface: #2c2e32;
+      --surface-muted: #34363a;
+      --border: #434549;
+      --border-strong: #5a5d62;
+      --text: #f5f1ea;
+      --text-2: #c9c6c1;
+      --text-3: #9e9b97;
+      --accent: #eba8ac;
+      --accent-bg: rgba(235,168,172,0.12);
+      --ok: #8cc594;
+      --ok-bg: rgba(140,197,148,0.13);
+      --warn: #e8c594;
+      --warn-bg: rgba(232,197,148,0.13);
+      --info: #9bafc8;
+      --info-bg: rgba(155,175,200,0.15);
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 14.5px/1.58 var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+  main {
+    max-width: 860px;
+    margin: 0 auto;
+    padding: 36px 20px 84px;
+  }
+  .meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 14px;
+    font-size: 12.5px;
+    color: var(--text-2);
+    margin-bottom: 10px;
+  }
+  .meta a { color: var(--accent); text-decoration: none; }
+  .meta a:hover { text-decoration: underline; }
+  h1 { font-size: 26px; line-height: 1.2; letter-spacing: -0.02em; margin: 0 0 8px; }
+  h2 {
+    font-size: 18px;
+    line-height: 1.3;
+    margin: 34px 0 12px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--border);
+  }
+  h3 { font-size: 14.5px; margin: 16px 0 6px; }
+  p { margin: 0 0 12px; }
+  code {
+    font: 12.5px/1.4 var(--font-mono);
+    background: var(--surface-muted);
+    padding: 1px 5px;
+    border-radius: 4px;
+  }
+  pre {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    padding: 12px 14px;
+    overflow-x: auto;
+    margin: 10px 0 16px;
+    font: 12.5px/1.5 var(--font-mono);
+    color: var(--text);
+  }
+  .dim { color: var(--text-2); }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px 16px;
+    margin: 12px 0;
+  }
+  .card.callout { border-left: 3px solid var(--accent); }
+  .grid-2 {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 12px;
+    margin: 12px 0 16px;
+  }
+  .tag {
+    display: inline-block;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    padding: 2px 7px;
+    border-radius: 4px;
+    vertical-align: middle;
+  }
+  .t-fix { background: var(--ok-bg); color: var(--ok); }
+  .t-task { background: var(--info-bg); color: var(--info); }
+  .t-drop { background: var(--surface-muted); color: var(--text-2); }
+  .t-warn { background: var(--warn-bg); color: var(--warn); }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 10px 0 16px;
+    font-size: 13.5px;
+  }
+  th, td {
+    text-align: left;
+    vertical-align: top;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border);
+  }
+  th { color: var(--text-2); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.03em; }
+
+  .finding {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 13px 15px;
+    margin: 10px 0;
+  }
+  .finding-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 6px;
+  }
+  .finding p:last-child { margin-bottom: 0; }
+
+  .questions {
+    background: var(--surface);
+    border: 1px solid var(--border-strong);
+    border-radius: 8px;
+    padding: 18px 20px;
+    margin-top: 24px;
+  }
+  .questions ol { margin: 10px 0 0; padding-left: 20px; }
+  .questions li { margin-bottom: 14px; }
+  .questions li:last-child { margin-bottom: 0; }
+  .opts { display: grid; gap: 4px; margin-top: 5px; font-size: 13.5px; color: var(--text-2); }
+  .opts b { color: var(--text); font-family: var(--font-mono); font-size: 12px; }
+</style>
+</head>
+<body>
+<main>
+  <div class="meta">
+    <span><strong>LOO-1078</strong> · Ship Review</span>
+    <span><a href="https://github.com/loopflowstudio/loopflow/pull/2036">PR #2036</a> (open, mergeable, +4724 / −547 across 142 files)</span>
+    <span>Branch <code>jack-heart/aa0dad-lf-task-pause</code></span>
+    <span><span class="tag t-warn">21 uncommitted files in worktree</span></span>
+  </div>
+
+  <h1>Pause a Task without giving it up</h1>
+  <p class="dim">Built through 7 implementation passes, compressed, QA'd on a private Machine against two concurrent <code>cargo build</code>s, and concept-reviewed. Gate and full CI run in <code>deliver</code> once you decide the items below.</p>
+
+  <!-- 1. WHAT SHIPS -->
+  <h2>1. What ships</h2>
+  <p>You can now pause any started Task to stop its worker, its Rust builds, and its primary conversation while keeping ownership, branch, dirty files, PR, Graph step, and conversation history.</p>
+
+  <h3>CLI — real output from the private-Machine QA run</h3>
+<pre>$ lf task pause 6ad693
+6ad693 paused
+
+<span class="dim"># Worker (claude -p), zsh -c, cargo build, build-script-build, and primary session
+# all exited in 2.3 s. Neighbor Task's concurrent cargo build finished uninterrupted.</span>
+
+$ lf task list --state paused
+6ad693  paused  …
+
+$ lf task status 6ad693
+6ad693  paused
+  Graph compile: Paused at compile. `lf task unpause` resumes it.
+  latest Graph:  compile stopped when the Task was paused
+  Conversation:  paused; `lf task unpause 6ad693` resumes it
+  action:        no_action (Task is paused)
+
+<span class="dim"># Comments and server restarts leave it quiet:</span>
+$ lf comment 6ad693 'please keep going'
+<span class="dim"># Saved as steer; zero launches; delivered once unpaused.</span>
+
+<span class="dim"># Pick it back up in the same checkout and thread:</span>
+$ lf task unpause 6ad693 --run
+6ad693 unpaused
+6ad693 · compile running as Graph run …
+
+<span class="dim"># Or lift the hold without launching a Graph (reopens primary conversation):</span>
+$ lf task unpause 6ad693</pre>
+
+  <h3>Mac &amp; iPhone — what changed in Swift</h3>
+  <div class="grid-2">
+    <div class="card">
+      <strong>Discoverable Paused section</strong>
+      <p class="dim" style="margin:6px 0 0">Mac's sidebar gains a <strong>Paused</strong> filter alongside Working/Backlog, and the Wave board groups paused Tasks in their own section outside Working (so active counts and operator passes stay accurate). iPhone filters <code>state:paused</code> under <strong>Paused</strong>.</p>
+    </div>
+    <div class="card">
+      <strong>Pause / Unpause controls &amp; quiet open</strong>
+      <p class="dim" style="margin:6px 0 0"><code>TaskWorkflowBar</code> adds a <strong>Pause</strong> button on working Tasks and promotes <strong>Unpause</strong> (accent) when paused, while keeping <strong>Stop Auto-Ship</strong> clickable if armed. Opening a paused Task shows saved conversation history without launching a provider.</p>
+    </div>
+  </div>
+
+<pre><span class="dim">// swift/LoopflowMac/Views/TaskWorkView.swift (what ships in PR #2036)</span>
+if let pause = actions.pause {
+    let refusal = model.changeRefusal
+        ?? model.pendingChanges.pauseRequest(for: task.task.identifier)
+        ?? actions.pauseRefusal
+    Button(pause.rawValue) { model.setPause(pause, task: task) }
+        .buttonStyle(LoopflowButtonStyle(pause == .unpause ? .accent : .neutral))
+        .fixedSize()
+        .disabled(refusal != nil)
+        .help(refusal ?? "lf task \(pause.rawValue.lowercased()) \(task.task.identifier)")
+        .accessibilityIdentifier("task-workflow-pause")
+}</pre>
+
+  <div class="card">
+    <strong>Under the hood (why builds actually die)</strong>
+    <p class="dim" style="margin:6px 0 0">Every headless worker now runs in its own OS session (<code>setsid</code>). On <code>pause</code>, <code>interrupt</code>, or <code>move</code>, Loopflow captures the worker's live session members <em>before</em> signaling, persists them in <code>task_pauses.stopping_sessions</code> with the interrupt event in one transaction, then stops the session (including reparented jobs whose launching shell already exited). A crashed pause can be retried; <code>unpause</code> and <code>unassign</code> refuse while anything is still stopping.</p>
+  </div>
+
+  <!-- 2. HOW TO TRY IT -->
+  <h2>2. How to try it</h2>
+  <p>An isolated demo repository is staged at <code>/tmp/lf-demo-1078/repo</code> with a slow <code>cargo build</code> crate (<code>build.rs</code> sleeps 600s) and a private Machine home at <code>/tmp/lf-demo-1078/home</code>. Once the branch build finishes, run:</p>
+<pre><span class="dim"># Point a shell at the isolated demo Machine and branch lf binary:</span>
+export LF_HOME=/tmp/lf-demo-1078/home
+export LF_BIN=/Users/jack/src/loopflow.aa0dad-lf-task-pause/target/debug/lf
+
+<span class="dim"># Inspect running builds, pause one, verify its cargo exits while the neighbor keeps going:</span>
+$LF_BIN task list
+$LF_BIN task pause &lt;ID&gt;
+$LF_BIN task list --state paused
+$LF_BIN task status &lt;ID&gt;
+$LF_BIN task unpause &lt;ID&gt; --run</pre>
+  <p class="dim">The Desktop live demo launches <code>Loopflow Dev.app</code> against that same <code>LF_HOME</code> so you can click <strong>Pause</strong> / <strong>Unpause</strong> and check the sidebar's <strong>Paused</strong> filter without touching your real <code>~/.lf</code>.</p>
+
+  <!-- 3. WHAT IS LIKELIEST TO SURPRISE YOU -->
+  <h2>3. What is likeliest to surprise you</h2>
+  <table>
+    <thead>
+      <tr><th style="width:28%">Choice made</th><th style="width:38%">Behavior you will see</th><th>What was passed over</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>Pause started Tasks only</strong></td>
+        <td><code>lf task pause</code> refuses <code>unstarted</code> Backlog items (<code>Task has not started; nothing to pause</code>) and closed Tasks.</td>
+        <td>Pausing unstarted items — broke Linear withdrawal, <code>awaitsStart</code>, and put Pause on Backlog cards.</td>
+      </tr>
+      <tr>
+        <td><strong>Explicit <code>unpause</code> required</strong></td>
+        <td><code>lf task run</code>, <code>auto on</code>, <code>resume</code>, steers, Linear comments, server restarts, and <code>wave-operate</code> all refuse or stay quiet until <code>lf task unpause</code> (or <code>unpause --run</code>).</td>
+        <td>Auto-unpausing on <code>task run</code> — parent-Task agents, cron <code>wave-operate</code>, or steer wakes would silently undo a pause.</td>
+      </tr>
+      <tr>
+        <td><strong>Primary conversation closes &amp; auto-restores</strong></td>
+        <td>Pause closes the primary provider via <code>Departure::Paused</code> (terminal shows the unpause command). Plain <code>unpause</code> lets server recovery bring it back on the same thread — unless you had already quit it beforehand, in which case it stays quit.</td>
+        <td>Leaving the primary running (keeps RAM/CPU warm) or marking it quit (forces manual <code>lf resume</code> after clicking Unpause).</td>
+      </tr>
+      <tr>
+        <td><strong>Auto-Ship setting stays remembered</strong></td>
+        <td>Pausing leaves <code>task_auto</code> intact. While paused, <strong>Stop Auto-Ship</strong> stays clickable to disarm it, while arming <strong>Auto-Ship</strong> is refused.</td>
+        <td>Silently clearing <code>task_auto</code> on pause.</td>
+      </tr>
+      <tr>
+        <td><strong>Unassign / Complete / Abandon / Reopen clear the hold</strong></td>
+        <td>Unassigning a settled paused Task returns it to Backlog unpaused; unassign refuses while builds are still stopping so a live build is never dropped to Backlog.</td>
+        <td>Keeping a paused mark on an unassigned Backlog Task.</td>
+      </tr>
+      <tr>
+        <td><strong>In-flight operations drain</strong></td>
+        <td>Pausing during <code>lf land</code> lets the merge step finish, starts nothing after it, and disables Unpause (<code>Pausing at deliver (land is finishing)</code>) until it exits.</td>
+        <td>SIGKILLing a live Git/PR merge mid-flight.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <!-- 4. FINDINGS LEFT OUTSIDE THE PR -->
+  <h2>4. Findings &amp; what was left outside PR #2036</h2>
+
+  <div class="finding">
+    <div class="finding-head">
+      <strong>F1 · 21 uncommitted files in the worktree (<code>stopping_processes</code> → <code>stopping_sessions</code>)</strong>
+      <span class="tag t-fix">Proposal: Fix here</span>
+    </div>
+    <p class="dim">Post-build <code>concept-review</code> flagged that <code>task_pauses.stopping_processes</code> stored sessions, not bare processes, and recommended renaming it while the draft migration is unmerged. The rename is already applied across 21 files in the working tree (<code>+158 / −189</code>) but wasn't committed before <code>pr-publish</code>. Commit, test, and push into PR #2036 before <code>deliver</code>.</p>
+  </div>
+
+  <div class="finding">
+    <div class="finding-head">
+      <strong>F2 · Codex 0.171.0 tool shells spawn in a separate OS session with <code>osPid: null</code></strong>
+      <span class="tag t-drop">Proposal: Drop for this PR (documented)</span>
+    </div>
+    <p class="dim">Probed live on Codex 0.171.0: its tool shell ran in a separate OS session from the provider, and <code>thread/backgroundTerminals/list</code> returned <code>osPid: null</code>. A zsh startup hook misses explicit <code>/bin/sh</code>, and a <code>PreToolUse</code> prefix can displace configured command rewrites. Claude and single-session workers stop reparented builds cleanly; the Codex gap is documented in <code>docs/work.md</code>. Wait for upstream Codex PID reporting or file a dedicated follow-up Task if you want a wrapper.</p>
+  </div>
+
+  <div class="finding">
+    <div class="finding-head">
+      <strong>F3 · Top-right Desktop/iOS Task bar redesign (<code>scratch/explore.html</code> Round 5: V4a / V4b / V4c)</strong>
+      <span class="tag t-task">Proposal: Its own Task</span>
+    </div>
+    <p class="dim">PR #2036 puts <strong>Pause</strong>/<strong>Unpause</strong> directly beside <strong>Auto-Ship</strong> in the existing <code>TaskWorkflowBar</code>. Redesigning the whole bar around a unified step-named status pill (<code>Running · implement</code> / <code>Paused at implement</code>), physical <code>Auto</code> switch, and first-class <code>Complete</code> with 0px click jump is a clean standalone UI Task once <code>LOO-1078</code> lands.</p>
+  </div>
+
+  <div class="finding">
+    <div class="finding-head">
+      <strong>F4 · Post-send move window (after source sends payload, before destination creates checkout)</strong>
+      <span class="tag t-drop">Proposal: Drop (documented retry)</span>
+    </div>
+    <p class="dim">Pausing during the source push is covered and carries the hold to the destination. A pause issued in the narrow window <em>after</em> the payload is sent but <em>before</em> the destination checkout exists is refused by the destination and succeeds on retry once arrival finishes. Documented in <code>docs/work.md</code>.</p>
+  </div>
+
+  <div class="finding">
+    <div class="finding-head">
+      <strong>F5 · Pre-existing rough edges seen in QA (outside Pause)</strong>
+      <span class="tag t-drop">Proposal: Drop from this PR</span>
+    </div>
+    <p class="dim">Three older behaviors noticed in <code>scratch/qa.html</code>: refusals print <code>Error: invalid data:</code> (from <code>StoreError::InvalidData</code>), started git-planning Tasks show <code>Planning: unstarted</code>, and unassigning at an interactive stop shows <code>active</code> + <code>died (no exit recorded)</code>.</p>
+  </div>
+
+  <div class="finding">
+    <div class="finding-head">
+      <strong>F6 · Live Mac &amp; iPhone visual check + LOO-937 sync + 5-harness/Linux CI</strong>
+      <span class="tag t-fix">Proposal: Verify here &amp; in deliver</span>
+    </div>
+    <p class="dim">Headless Swift and iOS Simulator tests passed, and the isolated Desktop demo is building now for a live feel check. <strong>LOO-937</strong> (PR #1973, <code>task_facts_once.sql</code>) is in <code>land --wait-and-fix</code>; syncing with <code>main</code> in <code>deliver</code> will reconcile any overlap if it merges first. Gate &amp; CI run the 5-harness matrix and Linux session enumeration.</p>
+  </div>
+
+  <!-- 5. NUMBERED QUESTIONS -->
+  <section class="questions">
+    <h2 style="margin-top:0;border:none;padding:0">5. Decisions needed</h2>
+    <p class="dim" style="font-size:13px">Reply with codes like <code>1a, 2a, 3a, 4a, 5a</code> — or say what you want changed after trying the demo.</p>
+    <ol>
+      <li>
+        <strong>Uncommitted 21-file <code>stopping_sessions</code> rename (F1):</strong>
+        <div class="opts">
+          <span><b>1a</b> Commit it into PR #2036 after verifying tests, then proceed</span>
+          <span><b>1b</b> Revert the uncommitted rename and ship commit <code>15b1fa1c68</code> as published</span>
+        </div>
+      </li>
+      <li>
+        <strong>Codex 0.171.0 separate-session builds (F2):</strong>
+        <div class="opts">
+          <span><b>2a</b> Accept and keep documented for this PR</span>
+          <span><b>2b</b> File a separate follow-up Task to investigate a Codex tool wrapper / upstream PID hook</span>
+          <span><b>2c</b> Go back to <code>implement</code> and add a <code>PreToolUse</code> wrapper in this PR</span>
+        </div>
+      </li>
+      <li>
+        <strong>Top-right Desktop/iOS Task bar redesign from <code>scratch/explore.html</code> (F3):</strong>
+        <div class="opts">
+          <span><b>3a</b> File a dedicated follow-up Task (and pick <code>V4a</code>, <code>V4b</code>, or <code>V4c</code> for its brief)</span>
+          <span><b>3b</b> Fold the bar redesign into <code>LOO-1078</code> before delivering</span>
+          <span><b>3c</b> Drop for now — keep the Pause/Unpause button as built in PR #2036</span>
+        </div>
+      </li>
+      <li>
+        <strong>Post-send move window (F4):</strong>
+        <div class="opts">
+          <span><b>4a</b> Accept the documented retry on arrival</span>
+          <span><b>4b</b> File a follow-up Task to queue pause on the source and forward on arrival</span>
+        </div>
+      </li>
+      <li>
+        <strong>Next step for <code>LOO-1078</code> once you've tried the demo:</strong>
+        <div class="opts">
+          <span><b>5a</b> Send to <code>deliver</code> (<code>lf task run LOO-1078</code> → <code>reflect</code> → <code>gate</code> → <code>land</code>)</span>
+          <span><b>5b</b> Go back to <code>implement</code> with changes from the demo / decisions above</span>
+        </div>
+      </li>
+    </ol>
+  </section>
+</main>
+</body>
+</html>

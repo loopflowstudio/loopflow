@@ -36,14 +36,31 @@ fn container_connects_share_one_server_and_restart_it_after_exit() {
     let launcher = write_tool("launch", &format!(
         "#!/bin/sh\n[ \"$*\" != \"server run\" ] || echo $$ >> \"$LF_HOME/starts\"\nexec '{binary}' \"$@\"\n"
     ));
-    let connect = || {
-        let mut child = Command::new(binary)
+    let lf = || {
+        let mut command = Command::new(binary);
+        command
             .env_clear()
             .env("HOME", home.path())
             .env("LF_HOME", &machine)
             .env("LF_BIN", &launcher)
             .env("PATH", format!("{}:/usr/bin:/bin", home.path().display()))
-            .current_dir(home.path())
+            .current_dir(home.path());
+        command
+    };
+    // A first server waits out first-open migrations before it answers, which
+    // a debug build can take longer than the readiness deadline to finish.
+    let migrated = lf()
+        .args(["desktop", "portfolio", "--json"])
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    assert!(
+        migrated.status.success(),
+        "{}",
+        String::from_utf8_lossy(&migrated.stderr)
+    );
+    let connect = || {
+        let mut child = lf()
             .args(["server", "connect"])
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())

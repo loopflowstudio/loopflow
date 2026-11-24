@@ -1503,6 +1503,32 @@ pub fn run_refusal(store: &SqliteStore, session: &LfSession) -> Result<Option<St
     )))
 }
 
+/// Restart just the recorded provider, continuing through the same held-terminal
+/// resume path used after a provider exits on its own.
+pub fn restart_provider(store: &SqliteStore, session: &LfSession) -> Result<()> {
+    let _launch = lock_session_process(&session.id)?;
+    if let Some(owner) = moves::other_machine(store, &session.id)? {
+        bail!("Session {} is on {owner}", session.id);
+    }
+    if let Some(reason) = run_refusal(store, session)? {
+        bail!(reason);
+    }
+    crate::harness::agent_process::require_server()?;
+    let mut server = crate::machine::client::Connection::open()?;
+    crate::harness::agent_process::stop_session_agent(
+        store,
+        &session.id,
+        crate::process::Departure::Terminal { to: None },
+    )?;
+    server.request(crate::machine::wire::ServerOperation::SessionContinue {
+        session: session.id.clone(),
+        request: uuid::Uuid::new_v4().to_string(),
+        rows: 0,
+        cols: 0,
+    })?;
+    Ok(())
+}
+
 /// The terminal this process runs in, named for the one a move leaves.
 fn departure_here() -> crate::process::Departure {
     let to = if crate::session_record::current_terminal_id().is_some() {

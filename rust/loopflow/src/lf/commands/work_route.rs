@@ -5,7 +5,7 @@ use crate::lf::{Cli, Commands, SessionCommand, TaskCommand};
 use anyhow::{anyhow, Result};
 use loopflow_execution::durable::TaskExecutionRoute;
 use loopflow_execution::machine::task::{read_registry, resolve_task_id};
-use loopflow_execution::ops::human_session::moves::conversation_task;
+use loopflow_execution::ops::human_session::moves::other_machine;
 use loopflow_model::durable::{MachineId, RepositoryId, RepositoryIdentity, TaskId};
 use loopflow_storage::sqlite::SqliteStore;
 
@@ -381,16 +381,7 @@ fn moved_session(cli: &Cli, args: &[String]) -> Result<Option<Forward>> {
         return Ok(None);
     };
     let id = loopflow_model::id::canonical_session(id);
-    let machine = match conversation_task(&store, &id)? {
-        Some(task) => {
-            let runs_on =
-                loopflow_execution::store::ownership::task_execution_route(&store, &task)?
-                    .machine_id;
-            (runs_on != loopflow_execution::store::machines::local_machine(&store)?.id)
-                .then_some(runs_on)
-        }
-        None => store.session_moved_to(&id)?,
-    };
+    let machine = other_machine(&store, &id)?;
     Ok(machine.map(|machine| Forward {
         machine,
         args: args[1..].to_vec(),

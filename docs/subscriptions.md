@@ -95,7 +95,8 @@ lf set --global forward.files '[~/.codex/auth.json]'
   lf machine forward modal-1 --session session_…  # refresh files, then restart that Session only
   ```
 
-  Each file is replaced atomically via a private temporary file over SSH stdin.
+  The refresh reads only `forward.files`. Each file is replaced atomically
+  via a private temporary file over SSH stdin. Ordinary launches carry `forward.env`.
   Passing `--task` or `--session` restarts only that Session's provider on its
   owning Machine after delivery completes, preserving the Session and its
   continuation; unrelated Sessions keep running, and a delivery failure

@@ -19,3 +19,5 @@
 - A first delivery that disagrees on a setting records a conflict for the file and identifies the settings it did save in `applied`. For example, a rental keeps its edited `yolo` while accepting the caller’s agent and skill routes. The installation stream belongs to each Machine.
 
 - Claude and Codex answer login readiness through their native status commands or a forwarded native token. The other clients own their model-specific authentication at launch. Recovery rechecks blocked conversations on its existing periodic pass. A primary prepared before a login arrives keeps its Session ID and binds its first agent when it takes its first input.
+
+- Credential refresh reads only `forward.files`. The restarted provider uses its owning Machine’s environment. Per-launch `forward.env` stays with the ordinary launch.

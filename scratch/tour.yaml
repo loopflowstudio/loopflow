@@ -12,6 +12,18 @@ first:
     why: Read a collected Session’s transcript, origin and token totals
   - path: scratch/plan.md
     why: Built behavior, Linux trials and remaining work
+  - path: rust/loopflow/src/lf/commands/machine.rs
+    why: Refresh credentials and select the conversation to resume
+  - path: rust/loopflow-execution/src/machine/forward.rs
+    why: Send configured files on the registered SSH connection
+  - path: rust/loopflow-execution/src/machine/forward.sh
+    why: Publish complete files with private staging and atomic replacement
+  - path: rust/loopflow/src/lf/commands/machine_credentials.rs
+    why: Resolve the primary or exact Session on its Machine
+  - path: rust/loopflow-execution/src/ops/human_session.rs
+    why: Resume the same Session through its Machine server
+  - path: rust/loopflow-execution/src/prompt/mod.rs
+    why: Select readable scratch notes in path order
   - path: rust/loopflow-execution/src/config/catalog.rs
     why: The installation stream belongs to its Machine
   - path: rust/loopflow-execution/src/config/remote.rs
@@ -60,6 +72,8 @@ first:
     why: Start and replace a detached Linux server
   - path: rust/loopflow-storage/src/sqlite/processes.rs
     why: Inspect live owners on the installed schema
+  - path: rust/loopflow/tests/context_launch_tests.rs
+    why: Rotate one blocked login while another provider keeps running
   - path: rust/loopflow/tests/settings_launch_tests.rs
     why: Exercise primary, worker and commit routes together
   - path: rust/loopflow/tests/served_reads.rs

@@ -1447,7 +1447,9 @@ impl MachineCommand {
             }
             Self::Credentials { cmd } => match cmd {
                 MachineCredentialCommand::Inspect { .. } => false,
-                MachineCredentialCommand::Receive => true,
+                MachineCredentialCommand::Receive | MachineCredentialCommand::Restart { .. } => {
+                    true
+                }
             },
             Self::Pool { cmd } => match cmd {
                 PoolCommand::List { .. } => false,
@@ -1465,6 +1467,7 @@ impl MachineCommand {
             },
             Self::Hub { machine, clear } => machine.is_some() || *clear,
             Self::Prune { .. }
+            | Self::Forward { .. }
             | Self::Connect { .. }
             | Self::Public { .. }
             | Self::Add { .. }
@@ -3053,6 +3056,16 @@ pub enum ConfigCommand {
 /// Name and connect to machines.
 #[derive(Debug, Subcommand)]
 pub enum MachineCommand {
+    /// Replace configured forward.files on the named Machine and optionally restart one conversation.
+    Forward {
+        label: String,
+        /// Restart this Task's primary Session after all files arrive
+        #[arg(long, conflicts_with = "session")]
+        task: Option<String>,
+        /// Restart this Session's provider after all files arrive
+        #[arg(long)]
+        session: Option<String>,
+    },
     /// Install a separate login on an added machine using this laptop's browser.
     Connect {
         target: String,
@@ -3232,6 +3245,14 @@ pub enum OndemandCommand {
 
 #[derive(Debug, Subcommand)]
 pub enum MachineCredentialCommand {
+    /// Resume the selected conversation with the newly delivered files.
+    #[command(hide = true)]
+    Restart {
+        /// Select the Task's primary Session
+        #[arg(long)]
+        task: bool,
+        id: String,
+    },
     /// Report whether this account is installed, without logging in.
     Inspect {
         provider: loopflow_execution::provider_auth::Provider,

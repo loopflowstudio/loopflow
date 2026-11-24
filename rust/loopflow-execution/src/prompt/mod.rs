@@ -932,21 +932,32 @@ fn gather_md_files_from(
     for entry in entries {
         let path = entry.path();
 
-        // Ambient context must not follow links into unrelated private files
-        // or recursive directory cycles. Explicit document requests are separate.
-        if entry.file_type()?.is_symlink() {
+        let name = entry.file_name();
+        let name = name.as_encoded_bytes();
+        let kind = entry.file_type()?;
+        // Skip AppleDouble sidecars and links out of the checkout or into a cycle.
+        if name.starts_with(b"._") || kind.is_symlink() {
             continue;
         }
 
-        if path.is_dir() {
+        if kind.is_dir() {
             gather_md_files_from(root, &path, docs, source)?;
-        } else if path.extension().map(|e| e == "md").unwrap_or(false) {
-            let content = fs::read_to_string(&path).map_err(|error| {
-                CoreError::IoError(format!(
-                    "cannot read context file {}: {error}",
-                    path.display()
-                ))
-            })?;
+        } else if path.extension().is_some_and(|ext| ext == "md") {
+            let content = match fs::read_to_string(&path) {
+                Ok(content) => content,
+                Err(error)
+                    if name.starts_with(b".")
+                        && error.kind() == std::io::ErrorKind::InvalidData =>
+                {
+                    continue
+                }
+                Err(error) => {
+                    return Err(CoreError::IoError(format!(
+                        "cannot read context file {}: {error}",
+                        path.display()
+                    )))
+                }
+            };
             docs.push(Document {
                 path: path
                     .strip_prefix(root.parent().unwrap_or(root))
@@ -2489,6 +2500,12 @@ mod tests {
         std::fs::write(repo.join("scratch/raw.log"), "not implicit context")
             .expect("write non-markdown evidence");
 
+        fs::write(repo.join("scratch/.notes.md"), "hidden note").unwrap();
+        fs::write(repo.join("scratch/._a.md"), "AppleDouble").unwrap();
+        fs::write(repo.join("scratch/nested/.binary.md"), [0xff]).unwrap();
+        fs::create_dir(repo.join("scratch/._metadata")).unwrap();
+        fs::write(repo.join("scratch/._metadata/ordinary.md"), "sidecar").unwrap();
+
         let components = gather_context(&GatherContextOpts {
             repo_root: repo.to_path_buf(),
             ..Default::default()
@@ -2504,11 +2521,21 @@ mod tests {
         assert_eq!(
             scratch,
             [
+                ("scratch/.notes.md", "hidden note"),
                 ("scratch/a.md", "a design"),
                 ("scratch/nested/b.md", "b evidence"),
                 ("scratch/z.md", "z research"),
             ]
         );
+    }
+
+    #[test]
+    fn invalid_utf8_in_an_ordinary_scratch_note_names_the_file() {
+        let repo = init_repo();
+        fs::create_dir(repo.path().join("scratch")).unwrap();
+        fs::write(repo.path().join("scratch/broken.md"), [0xff]).unwrap();
+        let error = gather_scratch_docs(repo.path()).unwrap_err();
+        assert!(error.to_string().contains("scratch/broken.md"), "{error}");
     }
 
     #[test]

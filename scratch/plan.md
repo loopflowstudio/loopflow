@@ -60,12 +60,10 @@ Jack Heart: “my config.yaml should more or less be copied over, crtainly all t
 - On a private CLI Machine with agy absent, two Task primaries chose `codex:gpt-6.2-sol` and `claude:haiku` as the stand-in native logins changed. The CLI integration fixture exercised separate models for `task-session`, `loop-or-next` and `commit-message`, including a Graph pinned with `-a codex:exact`. On the five original rentals, 99.5% of turns went to `gpt-6.2-astra`, including 246 commit-message Sessions and 399 task-session wakeups (72.7M cached input).
 - A third private CLI Task with neither login stayed at zero starts. After Codex signed in, the server bound the configured Codex model to the same Session on its periodic check. Five named nextest cases passed for model order, all three real launch paths, a missing executable, a missing login and quota fallback. The focused Graph startup and switched-thread resume fixtures passed too. `cargo clippy --all-targets -- -D warnings` passed. Gate runs live Modal.
 - The recovery read at 10,000 Tasks scanned 100 local checkouts and used primary-key lookups for the Task and Session. Reading all 100 rows averaged 860 µs over 200 warm runs.
-- **Next — explicit credential re-forwarding (`machine/forward.rs`, `commands/machine.rs`):**
-  - Ordinary remote launches keep destination-wins behavior in `machine/forward.rs::deliver`; per-launch `forward.env` stays ephemeral.
-  - Add `lf machine forward <label> [--task <id> | --session <id>]` to refresh configured `forward.files` on a live Machine. Read through the existing `forward` configuration and replace each complete file atomically via a unique private temporary file (`umask 077`) over SSH stdin.
-  - With `--session <id>` or `--task <id>` (resolving that Task’s primary Session on `<label>`), restart only that Session’s provider on its owner after delivery succeeds, retaining the Session and continuation. Failure before delivery completes starts nothing. Test with synthetic rotated values, a blocked login prompt, and an unrelated Session that keeps running.
-- **Skip AppleDouble and binary hidden Markdown (`prompt/mod.rs::gather_md_files_from`):**
-  - Skip macOS AppleDouble (`._*`) paths and unreadable-as-UTF-8 hidden `.md` dotfiles during recursive `scratch/` collection. Keep valid hidden notes, nested Markdown ordering, symlink refusal, and errors for ordinary unreadable `.md` files.
+- **Built — credential refresh.** `lf machine forward <label>` reads the configured home files and checks the registered Machine on the SSH connection that replaces them. A complete private staging file replaces each destination. Ordinary launches keep the destination's copy. The optional `--task` and `--session` selectors resume one provider with the Machine server's environment after all files arrive.
+- Restart uses the existing attachment fence and native Session resume. At 10,000 Sessions, SQLite used `agent_sessions_agent_process` for the selected provider. Its lookup averaged 7.2 µs across 1,000 warm reads. In the first run, including an already-ended agent in this lookup made native resume recurse through settlement. The lookup now selects only a current, unended agent.
+- The two-Machine CLI fixture `forwarding_a_rotated_login_resumes_only_the_selected_conversation` exercised both selectors. The blocked login resumed its original Claude thread with the synthetic rotated value. Its neighbour kept its PID and agent ID. A cut SSH stream kept the previous file, and a reader that held it open across a successful replacement still read the old bytes. A separate shell run interrupted by SIGHUP removed its temporary file. The ordinary launch fixture kept its own login, and `documented_commands` passed. Gate runs live Modal.
+- **Built — scratch Markdown collection.** Recursive prompt assembly skips AppleDouble entries and hidden Markdown with invalid UTF-8. The focused prompt tests kept a valid hidden note in order, refused symlinks and reported the path of an ordinary binary Markdown file.
 
 ## Gate and demo
 
@@ -75,14 +73,10 @@ LOO-1083 owns the server-routed CLI, Desktop and Mobile workspace. LOO-1084 owns
 
 ## Docs
 
-The docs written ahead of implementation (eb22482548) still describe `lf machine forward` and harness fallback. The Modal sizing, Linux package selection, container startup, Wave adoption and Project binding passages now match the code. Before gate, cut any passage whose slice did not ship. The first command still fails `documented_commands` until it ships.
+The remote login examples cover files-only refresh and optional provider restart. Per-launch environment values still travel with ordinary launches.
 
 Pages touched:
 
 - `docs/ops.md` (Modal burst vs. `--reserved` sizing, ceiling cost estimates, `lf machine forward`, container Linux without systemd/cron)
 - `docs/subscriptions.md` (Machine-aware harness fallback, quiescent recovery on missing executable/login, `lf machine forward <label> [--task | --session]`)
 - `docs/work.md` (read-only cold Wave acquisition on fresh clones, idempotent `lf wave plan connect`, and `lf wave plan bind --replace`)
-
-Open product question from writing the docs:
-
-- When `lf machine forward <label> --task <id>` or `--session <id>` restarts a Session's provider after refreshing `forward.files`, should that restart also pass current `forward.env` values (for example, a rotated `CLAUDE_CODE_OAUTH_TOKEN`) ephemerally into the restarted provider launch, or should `lf machine forward` refresh `forward.files` only?

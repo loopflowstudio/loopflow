@@ -1,4 +1,4 @@
-//! Name remote machines without transferring credentials or execution authority.
+//! Register Machines and manage their connections.
 
 use anyhow::{anyhow, Context};
 use serde::Serialize;
@@ -100,6 +100,30 @@ async fn listings(store: &Store, label: Option<&str>) -> anyhow::Result<Vec<Mach
 
 async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
     match cmd {
+        MachineCommand::Forward {
+            label,
+            task,
+            session,
+        } => {
+            let machine =
+                loopflow_execution::machine::connection::find_registered_machine(label).await?;
+            let count = loopflow_execution::machine::forward::refresh_files(
+                &std::env::current_dir()?,
+                &machine,
+            )?;
+            println!("Refreshed {count} files on {label}.");
+            if let Some(id) = task.as_ref().or(session.as_ref()) {
+                let mut args = vec!["machine".into(), "credentials".into(), "restart".into()];
+                if task.is_some() {
+                    args.push("--task".into());
+                }
+                args.extend(["--".into(), id.clone()]);
+                let reply =
+                    loopflow_execution::machine::ssh::request(&machine, &args, None).await?;
+                println!("Resuming {} on {label}.", String::from_utf8(reply)?.trim());
+            }
+            return Ok(());
+        }
         MachineCommand::Connect {
             target,
             provider,
@@ -336,7 +360,8 @@ async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
             store.remove_machine(label).await?;
             println!("Removed {label}");
         }
-        MachineCommand::Connect { .. }
+        MachineCommand::Forward { .. }
+        | MachineCommand::Connect { .. }
         | MachineCommand::Credentials { .. }
         | MachineCommand::Self_ { .. }
         | MachineCommand::Doctor { .. } => {

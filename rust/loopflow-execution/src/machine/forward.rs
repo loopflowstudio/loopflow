@@ -54,9 +54,16 @@ pub fn read(directory: &Path) -> Result<Forwarded> {
             })?;
         env.push((name, SecretString::new(value)));
     }
+    Ok(Forwarded {
+        env,
+        files: read_files(config.files)?,
+    })
+}
+
+fn read_files(entries: Vec<String>) -> Result<Vec<(PathBuf, Vec<u8>)>> {
     let home = dirs::home_dir().context("this user has no home directory")?;
     let mut files = Vec::new();
-    for entry in config.files {
+    for entry in entries {
         let relative = home_relative(&entry)?;
         let bytes = std::fs::read(home.join(&relative)).map_err(|error| {
             anyhow!(
@@ -66,7 +73,7 @@ pub fn read(directory: &Path) -> Result<Forwarded> {
         })?;
         files.push((relative, bytes));
     }
-    Ok(Forwarded { env, files })
+    Ok(files)
 }
 
 /// What Claude and Codex sign in with: a setup or access token in the
@@ -123,27 +130,64 @@ pub fn deliver(
     forwarded: &Forwarded,
     notices: &mut dyn Write,
 ) -> Result<Option<String>> {
+    transfer(machine, forwarded, FileDelivery::Keep, notices)
+}
+
+#[derive(Clone, Copy)]
+enum FileDelivery {
+    Keep,
+    Replace,
+}
+
+/// Explicit refresh reads only the named files, including when a launch token is unavailable.
+pub fn refresh_files(directory: &Path, machine: &Machine) -> Result<usize> {
+    let config = crate::config::load_config(Some(directory))?.unwrap_or_default();
+    let forwarded = Forwarded {
+        env: Vec::new(),
+        files: read_files(config.forward.files)?,
+    };
+    transfer(
+        machine,
+        &forwarded,
+        FileDelivery::Replace,
+        &mut std::io::sink(),
+    )?;
+    Ok(forwarded.files.len())
+}
+
+fn transfer(
+    machine: &Machine,
+    forwarded: &Forwarded,
+    delivery: FileDelivery,
+    notices: &mut dyn Write,
+) -> Result<Option<String>> {
     if forwarded.env.is_empty() && forwarded.files.is_empty() {
         return Ok(None);
     }
-    let mut script = vec![
-        "set -e".to_owned(),
-        "umask 077".to_owned(),
-        format!(
-            "[ ! -d \"$HOME/.lf/forward\" ] || find \"$HOME/.lf/forward\" -type f -mmin +{UNREAD_MINUTES} -exec rm -f {{}} +"
-        ),
-    ];
+    let mut script = vec!["set -e".to_owned(), "umask 077".to_owned()];
+    let mode = match delivery {
+        FileDelivery::Keep => {
+            script.push(format!(
+                "[ ! -d \"$HOME/.lf/forward\" ] || find \"$HOME/.lf/forward\" -type f -mmin +{UNREAD_MINUTES} -exec rm -f {{}} +"
+            ));
+            "keep"
+        }
+        FileDelivery::Replace => {
+            // Verify the registered identity on the connection that replaces the login.
+            script.push(crate::machine::ssh::remote_path());
+            script.push(format!(
+                "{}={} lf machine self </dev/null >/dev/null",
+                crate::machine::ssh::EXPECTED_MACHINE_ID_ENV,
+                sh_quote(machine.id.as_str())
+            ));
+            "replace"
+        }
+    };
+    script.push(include_str!("forward.sh").into());
     let mut input = Vec::new();
     for (relative, bytes) in &forwarded.files {
-        let path = remote_path(&relative.to_string_lossy());
-        let shown = sh_quote(&format!("~/{}", relative.display()));
-        let count = bytes.len();
-        script.push(format!(
-            "p={path}; t=\"$p.lf-forward\"; d=$(dirname \"$p\"); [ -d \"$d\" ] || mkdir -p \"$d\"; \
-             dd bs=1 count={count} of=\"$t\" 2>/dev/null; \
-             if [ -e \"$p\" ]; then cmp -s \"$t\" \"$p\" || echo kept {shown}; rm -f \"$t\"; \
-             else chmod 600 \"$t\"; mv \"$t\" \"$p\"; fi"
-        ));
+        let path = sh_quote(&relative.to_string_lossy());
+        script.push(format!("receive_file {path} {} {mode}", bytes.len()));
         input.extend_from_slice(bytes);
     }
     let env_file = (!forwarded.env.is_empty()).then(|| {

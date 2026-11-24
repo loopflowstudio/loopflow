@@ -1293,6 +1293,161 @@ fn next_task_conversation_agent(
     }
 }
 
+#[test]
+fn forwarding_a_rotated_login_resumes_only_the_selected_conversation() {
+    let repo = TestRepo::new();
+    let remote = tempfile::tempdir().unwrap();
+    let machine = remote.path().join("machine");
+    let bin = remote.path().join("bin");
+    let path = format!("{}:/usr/bin:/bin", bin.display());
+    let lf = env!("CARGO_BIN_EXE_lf");
+    install_claude_fixture(
+        remote.path(),
+        r#"
+previous=
+for arg in "$@"; do
+    case "$previous" in --resume|--session-id) thread=$arg; opening=$previous;; esac
+    previous=$arg
+done
+[ -n "$thread" ] || exit 1
+if [ "$(cat "$HOME/login" 2>/dev/null)" = rotated-fixture ]; then
+    status=ready
+else
+    status=blocked
+    echo "Sign in to continue"
+fi
+mkdir -p "$HOME/.claude/projects/fixture"
+echo '{}' > "$HOME/.claude/projects/fixture/$thread.jsonl"
+echo "$status $opening $thread" > "$HOME/started-$$"
+while [ -d "$HOME" ] && [ ! -f "$HOME/quit" ]; do sleep 0.1; done
+"#,
+    );
+    std::os::unix::fs::symlink(lf, bin.join("lf")).unwrap();
+    let _server = loopflow_test_support::MachineServer::start_with_path(lf, &machine, &path);
+    let _release = Release(machine.join("quit"));
+    let remote_cli = |args: &[&str]| {
+        succeed(
+            claude_command(remote.path())
+                .current_dir(repo.path())
+                .args(args),
+        )
+    };
+    remote_cli(&["set", "--global", "agent", "claude"]);
+    let db = machine.join("loopflow.db");
+    let task = |title| {
+        let created: serde_json::Value =
+            serde_json::from_str(&remote_cli(&["task", "create", "--title", title, "--json"]))
+                .unwrap();
+        let id = created["task"]["id"].as_str().unwrap();
+        remote_cli(&["checkout", id, "--json"]);
+        let agent = next_task_conversation_agent(&db, remote.path(), id, None);
+        (id.to_owned(), agent)
+    };
+    let (target, (first, pid, _)) = task("Needs a login");
+    let (other, unrelated) = task("Another conversation");
+    let opening = |pid| {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        loop {
+            let status =
+                fs::read_to_string(machine.join(format!("started-{pid}"))).unwrap_or_default();
+            if status.ends_with('\n') {
+                return status.trim().to_owned();
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "provider {pid} never read its login"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+    };
+    let blocked = opening(pid);
+    let thread = blocked.strip_prefix("blocked --session-id ").unwrap();
+    let local = tempfile::tempdir().unwrap();
+    let ssh = local.path().join("bin/ssh");
+    fs::create_dir_all(ssh.parent().unwrap()).unwrap();
+    fs::write(
+        &ssh,
+        format!(r#"#!/bin/sh
+for script do :; done
+cd '{home}' || exit 1
+if [ -f cut-input ]; then
+    head -c 3 | env -i HOME='{home}' LF_HOME='{home}' LF_BIN='{lf}' PATH='{path}' /bin/sh -c "$script"
+else
+    exec env -i HOME='{home}' LF_HOME='{home}' LF_BIN='{lf}' PATH='{path}' /bin/sh -c "$script"
+fi
+"#, home = machine.display()),
+    ).unwrap();
+    fs::set_permissions(ssh, fs::Permissions::from_mode(0o755)).unwrap();
+    let local_cli = |args: &[&str]| {
+        let mut command = claude_command(local.path());
+        command.current_dir(local.path()).args(args);
+        command
+    };
+    succeed(&mut local_cli(&["machine", "add", "sandbox"]));
+    succeed(&mut local_cli(&[
+        "set",
+        "--global",
+        "forward.env",
+        "[UNAVAILABLE_FIXTURE_TOKEN]",
+    ]));
+    succeed(&mut local_cli(&[
+        "set",
+        "--global",
+        "forward.files",
+        "[login]",
+    ]));
+    fs::write(local.path().join("login"), "rotated-fixture").unwrap();
+    let login = machine.join("login");
+    fs::write(&login, "old-fixture").unwrap();
+    fs::write(machine.join("cut-input"), "").unwrap();
+    let forward = ["machine", "forward", "sandbox", "--task", &target];
+    let failed = local_cli(&forward).output().unwrap();
+    assert!(!failed.status.success());
+    let error = String::from_utf8_lossy(&failed.stderr);
+    assert!(error.contains("incomplete forwarding"), "{error}");
+    assert_eq!(fs::read_to_string(&login).unwrap(), "old-fixture");
+    assert_eq!(task_conversation_agent(&db, &target).unwrap().0, first);
+    fs::remove_file(machine.join("cut-input")).unwrap();
+    // An existing reader keeps the complete old file when the new login arrives.
+    let previous = fs::File::open(&login).unwrap();
+    succeed(&mut local_cli(&["machine", "forward", "sandbox"]));
+    assert_eq!(std::io::read_to_string(previous).unwrap(), "old-fixture");
+    assert_eq!(fs::read_to_string(&login).unwrap(), "rotated-fixture");
+    assert_eq!(
+        fs::metadata(&login).unwrap().permissions().mode() & 0o777,
+        0o600
+    );
+    assert_eq!(task_conversation_agent(&db, &target).unwrap().0, first);
+    succeed(&mut local_cli(&forward));
+    let (second, pid, _) = next_task_conversation_agent(&db, remote.path(), &target, Some(&first));
+    assert_eq!(opening(pid), format!("ready --resume {thread}"));
+    let primary = || {
+        rusqlite::Connection::open(&db)
+            .unwrap()
+            .query_row(
+                "SELECT session_id FROM task_primary_sessions WHERE task_id=?1",
+                [&target],
+                |row| row.get::<_, String>(0),
+            )
+            .unwrap()
+    };
+    let session = primary();
+    succeed(&mut local_cli(&[
+        "machine",
+        "forward",
+        "sandbox",
+        "--session",
+        &session,
+    ]));
+    let (_, pid, _) = next_task_conversation_agent(&db, remote.path(), &target, Some(&second));
+    assert_eq!(opening(pid), format!("ready --resume {thread}"));
+    assert_eq!(primary(), session);
+    assert_eq!(
+        task_conversation_agent(&db, &other),
+        Some((unrelated.0, Some(unrelated.1), unrelated.2))
+    );
+}
+
 /// The `lf holder run` that `pid`, a provider in a held terminal, runs under.
 fn holder_of(mut pid: i64) -> i64 {
     loop {

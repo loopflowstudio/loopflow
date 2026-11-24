@@ -47,7 +47,8 @@ pub struct WaveAdded {
 }
 
 /// Register a Wave, seed its authored files on the main checkout, ensure its
-/// first Project and commit the files. Re-adding a live Wave changes nothing.
+/// first Project and commit the files. Re-adding a Wave whose files name it
+/// writes nothing to the checkout.
 pub async fn add(repo: &Path, name: &str, objective: Option<&str>) -> OpsResult<WaveAdded> {
     let main = crate::repository::discover(repo)
         .map_err(lifecycle_error)?
@@ -69,25 +70,28 @@ pub async fn add(repo: &Path, name: &str, objective: Option<&str>) -> OpsResult<
             .get_wave_at(&locator)
             .map_err(lifecycle_error)?;
     }
-    if let Some(wave) = existing {
+    // A Wave whose authored files already name it is adopted without writing
+    // to the checkout; any other Wave gets its files seeded below.
+    let adopted = existing
+        .as_ref()
+        .filter(|_| crate::work::wave::bootstrap::names_its_wave(&main, locator.slug()));
+    if let Some(wave) = adopted {
         let mut summary = Vec::new();
-        if let Err(error) = super::linear::acquire_wave_inventory(&store, &wave).await {
+        if let Err(error) = super::linear::acquire_wave_inventory(&store, wave).await {
             summary.push(error.to_string());
         }
-        let selected = store
-            .sqlite
-            .selected_project(wave.id())
-            .map_err(lifecycle_error)?;
         // A Linear Initiative chooses its own Project; any other Wave gets a first one.
-        let project = match selected {
-            None if super::linear::authored_initiative(&wave).is_none() => {
-                Some(ensure_first_project(&store, &wave).await?)
+        let project = if super::linear::authored_initiative(wave).is_none() {
+            Some(ensure_first_project(&store, wave).await?)
+        } else {
+            let selected = store
+                .sqlite
+                .selected_project(wave.id())
+                .map_err(lifecycle_error)?;
+            if selected.is_none() {
+                summary.push(super::project::unconfigured(&store, wave)?);
             }
-            None => {
-                summary.push(super::project::unconfigured(&store, &wave)?);
-                None
-            }
-            selected => selected,
+            selected
         };
         return Ok(WaveAdded {
             id: wave.id().clone(),
@@ -99,11 +103,14 @@ pub async fn add(repo: &Path, name: &str, objective: Option<&str>) -> OpsResult<
             summary,
         });
     }
+    let created = existing.is_none();
     let wave = crate::work::wave::ensure_wave_row(&store, &main, locator.slug())
         .await
         .map_err(lifecycle_error)?;
-    if let Some(objective) = objective.map(str::trim).filter(|text| !text.is_empty()) {
-        write_objective(&main, wave.slug(), objective)?;
+    if created {
+        if let Some(objective) = objective.map(str::trim).filter(|text| !text.is_empty()) {
+            write_objective(&main, wave.slug(), objective)?;
+        }
     }
     let project = ensure_first_project(&store, &wave).await?;
     let files = commit_authored(
@@ -120,7 +127,7 @@ pub async fn add(repo: &Path, name: &str, objective: Option<&str>) -> OpsResult<
     let mut added = WaveAdded {
         id: wave.id().clone(),
         name: wave.slug().to_string(),
-        created: true,
+        created,
         project: Some(project),
         main_checkout: main,
         files,

@@ -493,9 +493,17 @@ pub async fn refresh_wave(repo: &Path, wave: &str) -> OpsResult<()> {
     }
 }
 
-/// An older checkout can carry the files of a retired Wave at a reused address.
+/// The Linear Initiative a Wave's files bind; none where Asana plans the
+/// repository. An older checkout can carry the files of a retired Wave at a
+/// reused address.
 pub(super) fn authored_initiative(wave: &Wave) -> Option<String> {
-    let config = read_wave_config(Path::new(wave.repo()), wave.slug())?;
+    let repo = Path::new(wave.repo());
+    if super::tracker::queued_tracker(repo)
+        == Some(loopflow_storage::planning_sync::TrackerKind::Asana)
+    {
+        return None;
+    }
+    let config = read_wave_config(repo, wave.slug())?;
     if config.id.as_ref().is_some_and(|id| id != wave.id()) {
         return None;
     }

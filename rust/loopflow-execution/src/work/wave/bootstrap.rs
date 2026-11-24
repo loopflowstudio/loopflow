@@ -204,6 +204,19 @@ pub(crate) fn find_or_register(
     }
 }
 
+/// Whether `.lf/wave/<slug>` and each of its ancestors already carry their
+/// authored id, so adopting the Wave needs no file written on the checkout.
+pub(crate) fn names_its_wave(repo: &Path, slug: &str) -> bool {
+    let mut prefix = String::new();
+    slug.split('/').all(|part| {
+        if !prefix.is_empty() {
+            prefix.push('/');
+        }
+        prefix.push_str(part);
+        crate::work::wave::config::authored_wave_id(repo, &prefix).is_ok_and(|id| id.is_some())
+    })
+}
+
 /// Register every authored Wave directory under `<checkout>/.lf/wave/`, matching
 /// by `config.yaml` id first. A directory whose id names a removed Wave is left
 /// alone with its subtree, so a clone or a checkout behind the planning store

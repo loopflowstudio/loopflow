@@ -522,10 +522,11 @@ mod tests {
             [&id],
         )
         .unwrap();
-        let now = time::OffsetDateTime::now_utc().unix_timestamp();
+        // Linux derives start times from `now - etime`: read the clock per sample.
+        let now = || time::OffsetDateTime::now_utc().unix_timestamp();
         let inventory = || {
             let store = SqliteStore::open_read_only(&path, token_key::encryption_key).unwrap();
-            super::live_lf_processes(&store, now)
+            super::live_lf_processes(&store, now())
                 .unwrap()
                 .into_iter()
                 .find(|(process, _)| process.id == id)
@@ -538,7 +539,7 @@ mod tests {
         conn.execute("DROP INDEX agent_sessions_attached", [])
             .unwrap();
         let store = SqliteStore::open_read_only(&path, token_key::encryption_key).unwrap();
-        assert!(super::live_lf_processes(&store, now).is_err());
+        assert!(super::live_lf_processes(&store, now()).is_err());
     }
 
     #[test]

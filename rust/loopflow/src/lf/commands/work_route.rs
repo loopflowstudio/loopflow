@@ -151,7 +151,8 @@ fn launch_task(cli: &Cli) -> Option<&str> {
 }
 
 /// Bare `lf resume` in a Task's worktree acts on that Task, so it routes to
-/// its Machine exactly as `--task` does.
+/// its Machine exactly as `--task` does. A worktree nested inside the Task's
+/// checkout is not the Task's.
 fn worktree_task(cli: &Cli, directory: &Path) -> Result<Option<String>> {
     let bare = match &cli.command {
         Some(Commands::Session {
@@ -165,20 +166,9 @@ fn worktree_task(cli: &Cli, directory: &Path) -> Result<Option<String>> {
     let Some(store) = read_registry()? else {
         return Ok(None);
     };
-    let cwd = directory
-        .canonicalize()
-        .unwrap_or_else(|_| directory.to_path_buf());
     Ok(store
-        .task_checkouts()?
-        .into_iter()
-        .find(|checkout| {
-            let worktree = checkout
-                .worktree
-                .canonicalize()
-                .unwrap_or_else(|_| checkout.worktree.clone());
-            cwd.starts_with(worktree)
-        })
-        .map(|checkout| checkout.task_id.to_string()))
+        .task_checkout_owner(directory)?
+        .map(|task| task.to_string()))
 }
 
 /// A command `lf` sends to another Machine instead of running here.

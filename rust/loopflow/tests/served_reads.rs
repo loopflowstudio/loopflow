@@ -377,7 +377,7 @@ fn served_binding_moves_the_conversation_to_the_task_checkout() {
     });
     assert_eq!(bound["id"], session["id"]);
     assert_eq!(bound["cwd"], destination.to_str().unwrap());
-    assert_eq!(bound["task_primary"], true);
+    assert_eq!(bound["primary_scope"], "task");
     assert_eq!(processes(&home.path().join("loopflow.db")), before);
 }
 
@@ -469,7 +469,7 @@ fn served_session_adoption_matches_cli_without_new_execution() {
         assert_eq!(bound["id"], session["id"]);
         assert_eq!(bound["cwd"], session["cwd"]);
         assert_eq!(bound["agent_process_id"], session["agent_process_id"]);
-        assert_eq!(bound["task_primary"], true);
+        assert_eq!(bound["primary_scope"], "task");
         assert_eq!(bound["work"]["id"], first["id"]);
         assert_eq!(bound["task_ids"], serde_json::json!([first["id"]]));
         let connection = rusqlite::Connection::open(&database).unwrap();
@@ -919,7 +919,12 @@ fn screen_reads_are_compact_passive_and_match_cli() {
     )
     .unwrap();
     conn.execute(
-        "INSERT OR REPLACE INTO task_primary_sessions(session_id,task_id) VALUES(?1,?2)",
+        "INSERT OR REPLACE INTO task_primary_sessions(task_id,session_id) VALUES(?2,?1)",
+        rusqlite::params![session.id.as_str(), registered.task.id.as_str()],
+    )
+    .unwrap();
+    conn.execute(
+        "UPDATE agent_sessions SET task_id=?2,wave_id=(SELECT p.wave_id FROM tasks t LEFT JOIN projects p ON p.id=t.project_id WHERE t.id=?2) WHERE id=?1",
         rusqlite::params![session.id.as_str(), registered.task.id.as_str()],
     )
     .unwrap();
@@ -2881,6 +2886,7 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
             name,
             preview,
             persistent,
+            stack,
         } => {
             let mut spelled = words(&["wt", "create", name]);
             if *preview {
@@ -2888,6 +2894,9 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
             }
             if *persistent {
                 spelled.push("--persistent".into());
+            }
+            if *stack {
+                spelled.push("--stack".into());
             }
             spelled.push("--json".into());
             (path(directory), spelled)

@@ -41,7 +41,8 @@ pub struct TaskConversation {
 /// Session's summary asks it of one, so both read one definition.
 pub(super) fn task_conversation_here_sql(s: &str, t: &str, c: &str) -> String {
     format!(
-        "({open} AND {s}.completed_at IS NULL AND {s}.interactive=1
+        "({open} AND EXISTS(SELECT 1 FROM task_primary_sessions tp WHERE tp.session_id={s}.id AND tp.task_id={t}.id)
+          AND {s}.completed_at IS NULL AND {s}.interactive=1
           AND {s}.moved_to_machine_id IS NULL
           AND rtrim({s}.cwd,'/')=rtrim({c}.worktree,'/'))",
         open = super::durable::task_open_sql(t),

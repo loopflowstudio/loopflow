@@ -207,9 +207,8 @@ impl SessionTransfer<'_> {
              AND s.attached_lf_process_id IS NOT NULL
              AND CASE WHEN s.interactive=0 THEN ?3 IN ('completed','interrupted','failed')
              ELSE ?3 IN ('completed','interrupted') AND s.primary_scope IS NULL
-             AND s.wave_id IS NULL AND {} IS NULL AND NOT EXISTS({}) END",
-                super::sessions::SESSION_GRAPH,
-                super::task_work::session_tasks("s")
+             AND s.wave_id IS NULL AND {} IS NULL AND s.task_id IS NULL END",
+                super::sessions::SESSION_GRAPH
             ),
             params![session, now, outcome, departure.is_none()],
         )?;

@@ -174,10 +174,7 @@ pub fn conversation_task(store: &SqliteStore, session: &str) -> Result<Option<Ta
     if let Some(PrimaryScope::Task(task)) = store.primary_scope(session)? {
         return Ok(Some(task));
     }
-    Ok(match store.session_task_ids(session)?.as_slice() {
-        [task] => Some(task.clone()),
-        _ => None,
-    })
+    Ok(store.session_task(session)?)
 }
 
 /// Where the conversation runs if it moved or its Task runs elsewhere.

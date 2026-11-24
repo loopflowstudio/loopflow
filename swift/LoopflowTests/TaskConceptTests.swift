@@ -126,7 +126,7 @@ struct TaskConceptTests {
                 #expect(model.taskSessions(task.task.id).map(\.id) == expected)
             }
             let siblings = try #require(projection.breadcrumb(selection: nil, sessionId: "checkout")?.siblings)
-            #expect(Set(siblings.map(\.id)) == ["bound", "checkout", "unknown"])
+            #expect(Set(siblings.map(\.id)) == ["bound", "checkout"])
         }
     }
 
@@ -167,7 +167,7 @@ struct TaskConceptTests {
         let task = try JSONDecoder().decode(RoadmapTask.self, from: JSONSerialization.data(withJSONObject: row))
         let phase = try #require(self.phases().first)
         let projection = WorkProjection(roadmaps: [], inventory: [task], sessions: phase.sessions)
-        #expect(Set(projection.standaloneTasks[0].sessions.map(\.id)) == ["bound", "checkout", "unknown"])
+        #expect(Set(projection.standaloneTasks[0].sessions.map(\.id)) == ["bound", "checkout"])
         #expect(task.lifecycle == .active)
         #expect(!task.awaitsStart)
         #expect(!task.isCompleted)

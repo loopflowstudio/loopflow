@@ -57,6 +57,11 @@ impl std::fmt::Debug for MigrationObservers<'_> {
 // the order origin/main added them, then this checkout's unmerged ones.
 include!(concat!(env!("OUT_DIR"), "/migrations.rs"));
 
+#[cfg(test)]
+pub(crate) fn migration_sqls() -> impl Iterator<Item = &'static str> {
+    MIGRATIONS.iter().map(|migration| migration.sql)
+}
+
 /// The SQL of a migration named by its slug, or of the released batch whose
 /// `-- draft: <name>` section carries it.
 #[doc(hidden)]
@@ -397,12 +402,6 @@ pub(crate) fn validate_persisted_json(conn: &rusqlite::Connection) -> StoreResul
             "dashboards",
             "id",
             "slots_json",
-        )?);
-        failures.extend(validate_json_column::<Vec<String>>(
-            conn,
-            "task_orders",
-            "repository_id",
-            "task_ids_json",
         )?);
     }
     if conn.query_row(

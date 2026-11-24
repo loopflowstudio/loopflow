@@ -445,7 +445,7 @@ impl Workspace {
         .unwrap();
         {
             let conn = store.sqlite.conn.lock().unwrap();
-            conn.execute("INSERT INTO tasks(id,repository_id,issue_identifier,issue_title,issue_description,created_at,updated_at,workspace_slug,planning_completed,planning_completed_at) VALUES(?1,?2,?1,'Retire workspace','',1,1,?3,1,'2026-11-03T00:00:00Z')", params![id.as_str(),repository.as_str(),branch]).unwrap();
+            conn.execute("INSERT INTO tasks(id,repository_id,issue_identifier,issue_title,issue_description,created_at,updated_at,workspace_slug,planning_state,planning_completed_at) VALUES(?1,?2,?1,'Retire workspace','',1,1,?3,'completed','2026-11-03T00:00:00Z')", params![id.as_str(),repository.as_str(),branch]).unwrap();
             conn.execute("INSERT INTO task_checkouts(task_id,worktree,branch,base_commit) VALUES(?1,?2,?3,?4)", params![id.as_str(),checkout.to_str().unwrap(),branch,head]).unwrap();
             conn.execute("INSERT INTO task_prs(id,task_id,sequence,slug,branch,base_commit,publication_requested_at,github_number,github_url,github_head_sha,merge_commit,created_at,updated_at) VALUES(?1,?1,1,?3,?3,?2,1,1,'https://example.test/pull/1',?2,?2,1,1)", params![id.as_str(),head,branch]).unwrap();
         }
@@ -537,7 +537,7 @@ fn retirement_returning_viewer_and_reopen_cancel_closing_before_git_deletion() {
                 fixture
                     .sql()
                     .execute(
-                        "UPDATE tasks SET planning_completed=0 WHERE id=?1",
+                        "UPDATE tasks SET planning_state='started' WHERE id=?1",
                         [fixture.task.id.as_str()],
                     )
                     .unwrap();
@@ -671,8 +671,8 @@ fn conversation_cleanup_owns_grace_membership_and_work() {
     let conn = rusqlite::Connection::open(guard.home().join("loopflow.db")).unwrap();
     let repo = crate::repository::location::ensure_repository(&store, "/repo").unwrap();
     let task = TaskId::new();
-    conn.execute("INSERT INTO tasks(id,repository_id,issue_identifier,created_at,planning_completed,planning_completed_at)
-        VALUES(?1,?2,'CLOSE-1',1,1,'2000-01-01T00:00:00Z')", params![task.as_str(),repo.as_str()]).unwrap();
+    conn.execute("INSERT INTO tasks(id,repository_id,issue_identifier,created_at,planning_state,planning_completed_at)
+        VALUES(?1,?2,'CLOSE-1',1,'completed','2000-01-01T00:00:00Z')", params![task.as_str(),repo.as_str()]).unwrap();
     let terminal = held_terminal(&conn);
     let agent = store.test_lf_process();
     // A live agent is needed to exercise Task-wide work retention.
@@ -726,7 +726,7 @@ fn conversation_cleanup_owns_grace_membership_and_work() {
     .unwrap();
     assert_eq!(request(), Some(false));
     for change in [
-        "UPDATE tasks SET planning_completed=0",
+        "UPDATE tasks SET planning_state='started'",
         "UPDATE tasks SET planning_completed_at=strftime('%Y-%m-%dT%H:%M:%SZ','now')",
         "UPDATE agent_sessions SET primary_scope='repository'",
         "UPDATE agent_sessions SET primary_scope='wave'",
@@ -734,7 +734,7 @@ fn conversation_cleanup_owns_grace_membership_and_work() {
     ] {
         conn.execute_batch(change).unwrap();
         assert_eq!(request(), None, "{change}");
-        conn.execute_batch("UPDATE tasks SET planning_completed=1,planning_completed_at='2000-01-01T00:00:00Z'; UPDATE agent_sessions SET primary_scope=NULL;").unwrap();
+        conn.execute_batch("UPDATE tasks SET planning_state='completed',planning_completed_at='2000-01-01T00:00:00Z'; UPDATE agent_sessions SET primary_scope=NULL;").unwrap();
         conn.execute("UPDATE agent_sessions SET held_terminal_id=?1", [&terminal])
             .unwrap();
         assert_eq!(request(), Some(false));
@@ -756,7 +756,7 @@ fn conversation_cleanup_owns_grace_membership_and_work() {
     )
     .unwrap();
     assert_eq!(request(), Some(false));
-    // Work in another conversation holds the Task even through checkout membership.
+    // Work in another conversation of the Task holds it.
     let other = store.test_lf_process();
     let other_terminal = held_terminal(&conn);
     conn.execute("INSERT INTO task_checkouts(task_id,worktree) VALUES(?1,'/repo.task') ON CONFLICT(task_id) DO UPDATE SET worktree=excluded.worktree", [task.as_str()]).unwrap();
@@ -766,7 +766,7 @@ fn conversation_cleanup_owns_grace_membership_and_work() {
     )
     .unwrap();
     store.test_session("other", &crate::session_record::new_artifact_key());
-    conn.execute("UPDATE agent_sessions SET cwd='/repo.task/nested',interactive=1,held_terminal_id=?1,agent_process_id=?2 WHERE id='other'", params![other_terminal, other]).unwrap();
+    conn.execute("UPDATE agent_sessions SET cwd='/repo.task/nested',task_id=?3,wave_id=(SELECT p.wave_id FROM tasks t LEFT JOIN projects p ON p.id=t.project_id WHERE t.id=?3),interactive=1,held_terminal_id=?1,agent_process_id=?2 WHERE id='other'", params![other_terminal, other, task.as_str()]).unwrap();
     assert_eq!(request(), Some(false));
     conn.execute("INSERT INTO session_activity(session_id,agent_process_id,observed_at,open_tools,pending_input,yielded)
         VALUES('other',?1,1,0,1,1)", [&other]).unwrap();
@@ -824,7 +824,7 @@ fn abandoned_checkout_retries_after_live_work_exits_and_keeps_dirty_files() {
         fixture
             .sql()
             .execute(
-                "UPDATE tasks SET planning_completed=0,planning_completed_at=NULL,abandoned_at=1 WHERE id=?1",
+                "UPDATE tasks SET planning_state='started',planning_completed_at=NULL,abandoned_at=1 WHERE id=?1",
                 [fixture.task.id.as_str()],
             )
             .unwrap();

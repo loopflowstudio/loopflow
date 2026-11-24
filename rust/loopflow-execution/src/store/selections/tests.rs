@@ -1,7 +1,7 @@
 use crate::process::attachment;
 use crate::store::selections;
 
-use loopflow_model::durable::RepositoryId;
+use loopflow_model::durable::{RepositoryId, TaskId};
 use loopflow_storage::sqlite::SqliteStore;
 use loopflow_storage::work::selection::{
     Arrangement, ArrangementMode, DashboardId, Selection, SelectionExpression, SelectionId,
@@ -243,13 +243,48 @@ fn owned_unstarted_task_is_open_but_excluded_from_working_queries() {
 }
 
 #[test]
-fn one_task_order_reorders_working_tasks_and_every_plan_and_arrivals_append() {
-    let (_dir, store, repo) = fixture();
-    let (one, two, three) = (
+fn a_move_among_equal_ranks_lands_where_the_board_shows_its_target() {
+    let (_dir, store, _) = fixture();
+    let (one, two, three, four) = (
         "task_11111111111111111111111111111111",
         "task_22222222222222222222222222222222",
         "task_33333333333333333333333333333333",
+        "task_44444444444444444444444444444444",
     );
+    let id = |id: &str| TaskId::parse(id).unwrap();
+    // Older stores hold many Tasks at one rank, created in another order than
+    // their ids; the board breaks the tie by id.
+    store
+        .conn
+        .lock()
+        .unwrap()
+        .execute_batch(
+            "UPDATE tasks SET planning_rank=0, created_at=100-CAST(substr(issue_identifier,5) AS INTEGER)",
+        )
+        .unwrap();
+    assert_eq!(
+        store.reorder_task(&id(four), &id(one)).unwrap(),
+        [four, one, two, three]
+    );
+}
+
+#[test]
+fn a_task_move_changes_its_rank_in_every_plan_and_a_drop_in_another_project_joins_it() {
+    let (_dir, store, repo) = fixture();
+    let (one, two, three, four, five) = (
+        "task_11111111111111111111111111111111",
+        "task_22222222222222222222222222222222",
+        "task_33333333333333333333333333333333",
+        "task_44444444444444444444444444444444",
+        "task_55555555555555555555555555555555",
+    );
+    let id = |id: &str| TaskId::parse(id).unwrap();
+    let working = || {
+        selections::view_plan(&store, &repo, None)
+            .unwrap()
+            .resolution
+            .task_ids()
+    };
     // With a checkout, FIX-1 is idle and Working.
     store
         .conn
@@ -260,24 +295,14 @@ fn one_task_order_reorders_working_tasks_and_every_plan_and_arrivals_append() {
             [],
         )
         .unwrap();
+    assert_eq!(working(), [one, two]);
+    // The move is a rank edit: the whole Project's order comes back.
     assert_eq!(
-        selections::view_plan(&store, &repo, None)
-            .unwrap()
-            .resolution
-            .task_ids(),
-        [one, two]
+        store.reorder_task(&id(two), &id(one)).unwrap(),
+        [two, one, three, four]
     );
-    assert_eq!(
-        selections::reorder_task(&store, &repo, two, one).unwrap(),
-        [two, one]
-    );
-    assert_eq!(
-        selections::view_plan(&store, &repo, None)
-            .unwrap()
-            .resolution
-            .task_ids(),
-        [two, one]
-    );
+    assert_eq!(working(), [two, one]);
+    assert_eq!(store.task(&id(two)).unwrap().unwrap().rank, 0);
     let plans = selections::selection_plans(&store, &repo).unwrap();
     let wave = plans
         .iter()
@@ -296,32 +321,47 @@ fn one_task_order_reorders_working_tasks_and_every_plan_and_arrivals_append() {
             "INSERT INTO task_events(task_id,kind_json,created_at) VALUES('{three}','{{\"kind\":\"started\"}}',2); INSERT INTO task_ownership(id,task_id,kind,person,machine_id,at,ordered_at,writer_machine_id,written_here) VALUES('own_33333333333333333333333333333333','{three}','recorded',NULL,NULL,2,2000,(SELECT id FROM machines WHERE is_local=1),1); INSERT INTO task_checkouts(task_id,worktree) VALUES('{three}','/repo/fix-3');"
         ))
         .unwrap();
+    assert_eq!(working(), [two, one, three]);
     assert_eq!(
-        selections::view_plan(&store, &repo, None)
-            .unwrap()
-            .resolution
-            .task_ids(),
-        [two, one, three]
+        store.reorder_task(&id(three), &id(two)).unwrap(),
+        [three, two, one, four]
     );
-    assert_eq!(
-        selections::reorder_task(&store, &repo, three, two).unwrap(),
-        [three, two, one]
-    );
+    assert_eq!(working(), [three, two, one]);
 
-    let revisions = store.revisions().unwrap();
-    // A done Task is not a Working Tasks member; nothing is written.
-    assert!(
-        selections::reorder_task(&store, &repo, "task_44444444444444444444444444444444", one)
-            .is_err()
-    );
-    assert_eq!(store.revisions().unwrap(), revisions);
+    // A Project ranked first puts its Tasks first, whatever their own rank.
+    store
+        .conn
+        .lock()
+        .unwrap()
+        .execute_batch(&format!(
+            "UPDATE projects SET planning_rank=1;
+             INSERT INTO projects(id,wave_id,created_at,project_name,status,planning_rank) VALUES('proj_22222222222222222222222222222222','11111111-1111-1111-1111-111111111111',2,'First','started',0);
+             INSERT INTO tasks(repository_id,id,project_id,issue_identifier,issue_title,issue_description,workspace_slug,created_at,updated_at,planning_rank)
+             VALUES('repo_11111111111111111111111111111111','{five}','proj_22222222222222222222222222222222','FIX-5','Other','','',2,2,9);
+             INSERT INTO task_events(task_id,kind_json,created_at) VALUES('{five}','{{\"kind\":\"started\"}}',2);
+             INSERT INTO task_ownership(id,task_id,kind,person,machine_id,at,ordered_at,writer_machine_id,written_here) VALUES('own_55555555555555555555555555555555','{five}','recorded',NULL,NULL,2,2000,(SELECT id FROM machines WHERE is_local=1),1);
+             INSERT INTO task_checkouts(task_id,worktree) VALUES('{five}','/repo/fix-5');"
+        ))
+        .unwrap();
+    assert_eq!(working(), [five, three, two, one]);
+    // Dropped among another Project's Tasks, it joins that Project there.
     assert_eq!(
-        selections::view_plan(&store, &repo, None)
-            .unwrap()
-            .resolution
-            .task_ids(),
-        [three, two, one]
+        store.reorder_task(&id(five), &id(one)).unwrap(),
+        [three, two, five, one, four]
     );
+    assert_eq!(working(), [three, two, five, one]);
+    // Standalone Tasks follow even a Project at the largest supported rank.
+    store
+        .conn
+        .lock()
+        .unwrap()
+        .execute_batch(&format!(
+            "UPDATE projects SET planning_rank={};
+         UPDATE tasks SET project_id=NULL WHERE id='{five}';",
+            u32::MAX
+        ))
+        .unwrap();
+    assert_eq!(working(), [three, two, one, five]);
 }
 
 #[test]
@@ -1060,7 +1100,7 @@ fn nested_query_failure_retains_prior_members_but_confirmed_departure_prunes() {
         .lock()
         .unwrap()
         .execute(
-            "UPDATE tasks SET planning_completed=1 WHERE issue_identifier='FIX-2'",
+            "UPDATE tasks SET planning_state='completed' WHERE issue_identifier='FIX-2'",
             [],
         )
         .unwrap();
@@ -1104,29 +1144,6 @@ fn a_dashboard_changed_after_preparation_rejects_the_prepared_write() {
         .saved;
     assert_eq!(saved.name.as_deref(), Some("later"));
     assert_eq!(saved.revision, 2);
-}
-
-#[test]
-fn a_task_order_changed_after_preparation_keeps_the_new_order() {
-    let (_dir, store, repo) = fixture();
-    let reading = crate::store::session_projection::Reading::acquire(&store, 500, None).unwrap();
-    let (read, work) = store
-        .task_order_inputs(&repo, &reading.inputs, &reading.values)
-        .unwrap()
-        .unwrap();
-    let later: Vec<_> = work
-        .into_iter()
-        .filter(|item| item.key.kind == WorkWorkspaceKind::Task)
-        .map(|item| item.key.id)
-        .collect();
-    assert!(!later.is_empty());
-    assert!(store.commit_task_order(&repo, &read, &later).unwrap());
-    assert!(!store.commit_task_order(&repo, &read, &[]).unwrap());
-    let (retained, _) = store
-        .task_order_inputs(&repo, &reading.inputs, &reading.values)
-        .unwrap()
-        .unwrap();
-    assert_eq!(retained, later);
 }
 
 #[test]

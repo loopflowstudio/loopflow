@@ -23,16 +23,15 @@ impl SqliteStore {
 
 pub(super) fn task_begun_in(conn: &rusqlite::Connection, task: &TaskId) -> StoreResult<bool> {
     let begun: bool = conn.query_row(
-        // Checkout membership is preservation evidence even when a
-        // conversation has no explicit Task binding or ownership entry.
+        // A recorded conversation counts even when the Task has no owner.
         &format!(
             "SELECT EXISTS(SELECT 1 FROM task_ownership WHERE task_id=?1)
                  OR EXISTS(SELECT 1 FROM task_events WHERE task_id=?1
                     AND json_extract(kind_json,'$.kind')='started')
-                 OR EXISTS({})
+                 OR EXISTS(SELECT 1 FROM agent_sessions s WHERE {})
                  OR EXISTS(SELECT 1 FROM graph_processes g JOIN graph_process_steps gs
                     ON gs.graph_lf_process_id=g.lf_process_id WHERE g.task_id=?1)",
-            super::task_work::session_ids("?1"),
+            super::task_work::session_in_task("s", "?1"),
         ),
         [task.as_str()],
         |row| row.get(0),

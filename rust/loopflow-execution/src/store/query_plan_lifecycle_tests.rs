@@ -63,8 +63,8 @@ fn a_hook_reading_its_steers_and_task_updates_plans_by_index() {
         .lock()
         .unwrap()
         .execute(
-            "UPDATE agent_sessions SET cwd='/repo.task/src',interactive=1 WHERE id='hooked'",
-            [],
+            "UPDATE agent_sessions SET cwd='/repo.task/src',task_id=?1,interactive=1 WHERE id='hooked'",
+            [task.as_str()],
         )
         .unwrap();
     store

@@ -2650,37 +2650,13 @@ pub fn task_worktree_blocker_after(
     }))
 }
 
-pub(crate) async fn task_for_checkout(store: &SharedStore, repo: &Path) -> OpsResult<Option<Task>> {
-    match counted_task(&store.sqlite, repo)? {
+/// The Task whose checkout is the Git worktree holding `dir`. A worktree
+/// nested inside another Task's checkout has no owner until a Task adopts it.
+pub(crate) async fn checkout_owner(store: &SharedStore, dir: &Path) -> OpsResult<Option<Task>> {
+    match store.sqlite.task_checkout_owner(dir).map_err(task_error)? {
         Some(id) => store.get_task(&id).await.map_err(task_error),
         None => Ok(None),
     }
-}
-
-/// The Task a conversation run in `cwd` belongs to: the one whose checkout
-/// on this Machine holds it. A launch counts toward it, with usage rows; a
-/// raw conversation only lists under it. Both ask here, so whether a calling
-/// Session's Task should outrank its checkout's is decided by changing this
-/// function alone.
-pub(crate) fn counted_task(
-    store: &SqliteStore,
-    cwd: &Path,
-) -> OpsResult<Option<loopflow_model::durable::TaskId>> {
-    // Branch names are not checkout identity: another clone can use the same
-    // branch.
-    let Ok(root) = crate::git::worktree_root(cwd) else {
-        return Ok(None);
-    };
-    let mut id = None;
-    for checkout in store.task_checkouts().map_err(task_error)? {
-        if crate::git::worktree_root(&checkout.worktree).ok().as_ref() == Some(&root) {
-            if id.is_some() {
-                return Err(task_error("Multiple Tasks claim this checkout"));
-            }
-            id = Some(checkout.task_id);
-        }
-    }
-    Ok(id)
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
@@ -2711,7 +2687,7 @@ pub fn task_status(repo: &Path, issue: Option<&str>) -> OpsResult<TaskStatus> {
                 super::planning_sync::find_task(&store, &repo.to_string_lossy(), issue).await?
             }
             None => Some(
-                task_for_checkout(&store, repo)
+                checkout_owner(&store, repo)
                     .await?
                     .ok_or_else(|| task_error("this checkout has no Task"))?,
             ),
@@ -3538,9 +3514,8 @@ async fn live_execution(store: &SharedStore, task: &Task) -> OpsResult<Option<St
     use crate::store::ProcessIdentityEvidence;
     let graph = store
         .sqlite
-        .task_graphs(&task.id)
+        .latest_task_graph(&task.id)
         .map_err(task_error)?
-        .pop()
         .filter(|graph| {
             crate::process::RecordedProcess::from(&graph.run).evidence()
                 != ProcessIdentityEvidence::Dead

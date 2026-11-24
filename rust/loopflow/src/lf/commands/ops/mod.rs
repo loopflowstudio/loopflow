@@ -863,6 +863,7 @@ pub fn run_wt(cmd: &WtCommand) -> Result<()> {
             name,
             plan,
             persistent,
+            stack,
             json,
         } => {
             let repo_root = find_repo_root()?;
@@ -871,6 +872,7 @@ pub fn run_wt(cmd: &WtCommand) -> Result<()> {
                 name,
                 *plan,
                 *persistent,
+                *stack,
                 &CliProgress,
             )?;
             if *json {

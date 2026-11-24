@@ -32,7 +32,9 @@ pub struct TaskRow {
     /// The `id` of the Task this one was filed from; `null` for top-level work.
     #[serde(deserialize_with = "Option::deserialize")]
     pub parent_id: Option<String>,
-    pub state: TaskState,
+    /// `null` when live execution is on another Machine and was not read.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub state: Option<TaskState>,
     /// Why it is in that state, or what it waits on.
     pub reason: String,
     pub graph: Option<TaskRowGraph>,
@@ -108,7 +110,7 @@ pub enum TaskReading {
     /// The server of the Machine in `task.runs_on`.
     Owner,
     /// Neither: the Task runs on `task.runs_on`, and `reason` says why that
-    /// Machine was not read. Graph and Sessions are this Machine's own.
+    /// Machine was not read.
     Unobserved { reason: String },
 }
 
@@ -124,11 +126,13 @@ pub fn unobserved_reason(runs_on: &TaskRunsOn, reason: &str) -> String {
 impl TaskRow {
     /// Where the Task stands, in a few words: "idle at ship-review · #12 open".
     pub fn standing(&self) -> String {
-        let state = self.state.label();
-        let open = !matches!(self.state, TaskState::Done | TaskState::Abandoned);
-        let mut standing = match self.graph.as_ref().and_then(|graph| graph.step.as_deref()) {
-            Some(step) if open => format!("{state} at {step}"),
-            _ => state.to_owned(),
+        let open = self.state.is_none_or(|state| !state.is_terminal());
+        let mut standing = match self.state {
+            Some(state) => match self.graph.as_ref().and_then(|graph| graph.step.as_deref()) {
+                Some(step) if open => format!("{state} at {step}"),
+                _ => state.to_string(),
+            },
+            None => self.reason.clone(),
         };
         if let Some(pr) = self.pr.as_ref().filter(|_| open) {
             standing.push_str(&format!(" · #{} {}", pr.number, pr.phase.as_str()));
@@ -230,7 +234,10 @@ impl TaskNames {
     }
 
     pub(crate) fn row(&self, task: RoadmapTask) -> TaskRow {
-        let state = task.lifecycle;
+        let state = (task.runs_on.is_none()
+            || task.lifecycle.is_terminal()
+            || task.lifecycle == TaskState::Moving)
+            .then_some(task.lifecycle);
         let next = next_command(&task);
         let summary = task.task;
         TaskRow {
@@ -248,10 +255,13 @@ impl TaskNames {
             parent_id: summary.parent_id,
             state,
             reason: task.conducting.unwrap_or(task.next_move.reason),
-            graph: task.graph_name.map(|name| TaskRowGraph {
-                name,
-                step: task.step,
-            }),
+            graph: task
+                .graph_name
+                .filter(|_| state.is_some())
+                .map(|name| TaskRowGraph {
+                    name,
+                    step: task.step,
+                }),
             pr: task.pr.and_then(|pr| {
                 let github = pr.publication?.github?;
                 Some(TaskRowPr {

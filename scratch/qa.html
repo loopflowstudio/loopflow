@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LOO-1084 · Steering QA</title>
+<style>
+  :root { color-scheme: light dark; font: 16px/1.55 system-ui, sans-serif; }
+  body { max-width: 56rem; margin: 3rem auto; padding: 0 1.25rem 3rem; }
+  h1, h2 { line-height: 1.2; }
+  h2 { margin-top: 2rem; }
+  pre { padding: 1rem; background: color-mix(in srgb, CanvasText 8%, Canvas); overflow: auto; }
+  code { font-family: ui-monospace, monospace; }
+  li + li { margin-top: .35rem; }
+</style>
+<main>
+  <h1>LOO-1084 · Cross-Machine steering QA</h1>
+  <p>November 23, 2026. Three private Machine homes used separate clones of a
+    bare Git origin. The laptop reached <code>sandbox-b</code> over loopback
+    OpenSSH. The sibling had no registered route. Every server and command
+    used the branch CLI after the upgrade setup.</p>
+
+  <h2>First visit and upgrade</h2>
+  <p>The installed 0.16.0 CLI filed a Task in the owner's private store.
+    The branch server opened that store. The original Task still had its
+    title, its unstarted state and a local next command. The owner started
+    a second Task through <code>lf task create … --run --json</code>.
+    The Graph ran <code>help task</code> and stopped at <code>demo</code>.
+    Both fresh callers discovered the old Task, the new Task and the
+    latter's claim through their first <code>lf task list</code>.</p>
+  <pre><code>owner $ lf task status b4155c --json --select reading,task.state,task.next
+{"reading":{"kind":"here"},"task":{"state":"unstarted","next":"lf task run b4155c"}}
+
+laptop $ lf task status c7b753
+Runs on sandbox-b since Nov 23 20:39; read from its server.
+State: active · ready
+Graph: qa · demo</code></pre>
+
+  <h2>Live status and sibling status</h2>
+  <p>The first subscription returned the owner's live Graph with
+    <code>reading.kind: "here"</code> and an empty Machine reference.
+    The sibling's one-shot status returned <code>state: "unstarted"</code>
+    and its list put the Task in Backlog. The fix gives the subscription
+    the caller's Machine reference and marks the reading <code>owner</code>.
+    Unobserved status leaves open execution state empty and the shared
+    board projection puts the claimed Task in Working.</p>
+  <pre><code>laptop $ lf task status c7b753 --subscribe --json \
+  --select reading.kind,task.runs_on.machine.id,graph.sentence
+{"graph":{"sentence":"Waiting for you at demo."},"reading":{"kind":"owner"},
+ "task":{"runs_on":{"machine":{"id":"home_8800075332a30429db3e71e1237205f2"}}}}
+
+sibling $ lf task status c7b753 --json
+{"reading":{"kind":"unobserved","reason":"sandbox-b is not registered here"},
+ "task":{"state":null,"next":null,"runs_on":{"machine":{"label":"sandbox-b"},"since":1795495173}},
+ "graph":null,"sessions":[]}
+
+sibling $ lf task list --json
+{"section":"working","next_move":{"owner":"task","reason":"Runs on sandbox-b since Nov 23 20:39"}}</code></pre>
+  <p>Transcript excerpts use short Task identifiers and show selected fields. A missing Task id exited
+    1 with <code>this Task is not registered in Loopflow</code> and an
+    empty JSON output stream.</p>
+
+  <h2>Empty and populated lists</h2>
+  <p>A separate repository with no origin started with an empty JSON list.
+    The branch CLI filed 128 report Tasks with up to four creates in flight.
+    The next list returned all 128 once, all in Backlog with a null Machine
+    reference. That read took 0.52 s on the debug build.</p>
+
+  <h2>Direct and concurrent steering</h2>
+  <p>The laptop CLI and a <code>task.steer</code> request over the laptop's
+    Unix socket both returned <code>delivery.reached: "owner"</code>.
+    Each receipt id was already in the owner store when the call returned.
+    In the initial pass, one laptop SSH steer and one sibling Git steer
+    sent concurrently each produced one owner row.</p>
+  <pre><code>laptop $ lf steer c7b753 'Use the same parser on the SSH path.' --json
+{"steer_id":"96fe5377-082f-40f2-81cc-908f86785f95",
+ "delivery":{"reached":"owner","runs_on":{"label":"sandbox-b"}}}
+
+sibling $ lf steer c7b753 'Keep the sibling direction from Git.' --json
+{"delivery":{"reached":"tracker",
+ "sentence":"Queued 51b07e02-46f7-4f83-9ea5-9cd569ba0804 in Git for sandbox-b; sandbox-b is not registered here. sandbox-b reads it when it next syncs"}}
+
+Owner SQLite · one matching row 7.22 s after the sibling's receipt.</code></pre>
+
+  <h2>SSH outage, Git outage and recovery</h2>
+  <p>Closing the private SSH master and stopping the loopback daemon
+    made the registered destination refuse the connection. Status
+    returned <code>unobserved</code>, a null state and next command,
+    and the SSH error. Steering through the same route returned
+    <code>tracker</code>. Git exchanged the direction into the owner
+    store 27.48 s after the receipt without an owner-side command.</p>
+  <pre><code>laptop $ lf steer c7b753 'Use Git while SSH is down.' --json
+{"delivery":{"reached":"tracker","runs_on":{"label":"sandbox-b"}}}
+
+sibling $ lf steer c7b753 'Save this direction locally until Git returns.' --json
+{"delivery":{"reached":"here","sentence":"Saved … here for sandbox-b; sandbox-b is not registered here. Sync is pending."}}
+
+sibling $ lf task sync c7b753
+c7b753: nothing unsent</code></pre>
+  <p>The private origin path was invalid for the second steer. The owner
+    had zero copies before the origin was restored. After sync, the next
+    owner poll imported one copy in 28.35 s. Restarting the SSH daemon restored
+    <code>reading.kind: "owner"</code>. Suspending the SSH daemon before a
+    later handshake produced <code>Connection timed out during banner
+    exchange</code> and returned saved status after 11.36 s. Resuming
+    the daemon restored the owner's live Graph.</p>
+
+  <h2>Focused checks and teardown</h2>
+  <p>Nine Rust integration checks passed, covering CLI and served routing,
+    receipt and status wire types, the selected subscription, and a lost
+    reply after the owner saved the steer. The lost-reply fixture found
+    exactly one owner copy and zero local copies. The tracker-delivery
+    fixture passed for both the worker and the primary, and the storage
+    section test passed. Formatting and all-target Clippy passed.
+    The private SSH daemon, servers, holders and provider children stopped
+    at the end of the run.</p>
+
+  <h2>Open checks</h2>
+  <ol>
+    <li>The managed worker reported <code>Free usage limit reached</code>
+      before its first tool call on OpenCode 2.2.1 with
+      <code>deepseek-v4.1-flash-free</code> and OpenCode 2.0.32 with
+      <code>big-pickle</code>. Both models answered standalone probes.
+      The owner store and <code>lf session steers</code> showed the saved
+      directions awaiting a provider boundary. Live worker and Session receipt
+      remain open.</li>
+    <li>Live Linear, Asana, hosted sandbox and Desktop window checks remain
+      open. This run used Git and loopback SSH.</li>
+    <li>Direct debug CLI calls on the fixed build took 1.35–1.45 s end to end.
+      The owner's first request handler finished in 102 ms. Release
+      latency remains open.</li>
+  </ol>
+</main>
+</html>

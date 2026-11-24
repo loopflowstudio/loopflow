@@ -108,19 +108,21 @@ fn work_in(
     let task_states = super::task_details::states_in(conn, &ids_json)?;
     let auto_on = super::task_details::auto_on_in(conn, &ids_json)?;
     let published = super::task_started::published_in(conn, &ids)?;
-    let owners = super::task_ownership::ownerships_in(conn, &ids)?;
+    let (local, owners) = super::task_ownership::ownerships_in(conn, &ids)?;
     let mut task_work = Vec::with_capacity(tasks.len());
     for task in tasks {
         let state = *task_states
             .get(&task.id)
             .ok_or_else(|| invalid(format!("Task {} has no state", task.id)))?;
-        let owned = owners.contains_key(&task.id);
+        let ownership = owners.get(&task.id);
+        let owned = ownership.is_some();
+        let runs_elsewhere = ownership.is_some_and(|claim| claim.owner_elsewhere(&local).is_some());
+        let lifecycle = state.lifecycle(task.state.as_deref());
         let states = task_selection_states(
-            state,
-            owned,
-            published.contains(&task.id),
+            lifecycle,
+            TaskSection::of(lifecycle, owned, runs_elsewhere),
+            owned || published.contains(&task.id),
             auto_on.contains(&task.id),
-            task.state.as_deref(),
             reading.activity.get(&task.id),
         );
         let activity_known = reading
@@ -187,16 +189,14 @@ impl TaskOrder {
 /// The same lifecycle, section, auto setting and activity set for roadmap rows
 /// and selections.
 pub fn task_selection_states(
-    runtime: TaskState,
-    owned: bool,
-    published: bool,
+    state: TaskState,
+    section: TaskSection,
+    claimed_or_published: bool,
     auto: bool,
-    plan_state: Option<&str>,
     activity: Option<&TaskActivity>,
 ) -> BTreeSet<SelectionState> {
-    let state = runtime.lifecycle(plan_state);
     let mut states = activity.map_or_else(BTreeSet::new, |activity| activity.states.clone());
-    if (owned || published) && !state.is_terminal() {
+    if claimed_or_published && !state.is_terminal() {
         states.insert(SelectionState::Open);
     }
     if auto && !state.is_terminal() {
@@ -209,7 +209,7 @@ pub fn task_selection_states(
         TaskState::Moving => SelectionState::Moving,
         TaskState::Done | TaskState::Abandoned => SelectionState::Done,
     });
-    states.insert(match TaskSection::of(runtime, owned, plan_state) {
+    states.insert(match section {
         TaskSection::Backlog => SelectionState::Backlog,
         TaskSection::Working => SelectionState::Working,
         TaskSection::Done | TaskSection::Abandoned => SelectionState::Done,

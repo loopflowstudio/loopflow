@@ -4476,7 +4476,7 @@ exec env -i HOME='{remote}' PATH=/usr/bin:/bin bash -c "$remote_command"
                 task.as_str(),
                 "--subscribe",
                 "--select",
-                "task.id",
+                "task.id,task.runs_on.machine.id,reading.kind",
             ])
             .current_dir(&plan.local_path)
             .stdin(Stdio::null())
@@ -4490,9 +4490,13 @@ exec env -i HOME='{remote}' PATH=/usr/bin:/bin bash -c "$remote_command"
         .read_line(&mut line)
         .unwrap();
     let frame: Value = serde_json::from_str(&line).unwrap();
+    let owner = plan.remote.saved_local_machine().unwrap().id;
     assert_eq!(
         frame["body"],
-        serde_json::json!({"task": {"id": task.as_str()}}),
+        serde_json::json!({
+            "task": {"id": task.as_str(), "runs_on": {"machine": {"id": owner.as_str()}}},
+            "reading": {"kind": "owner"}
+        }),
         "{frame}"
     );
     // Its stdin is closed, so it ends after that first reading, as a local one does.
@@ -4625,6 +4629,7 @@ fn a_status_read_mini_cannot_answer_says_where_the_task_runs_and_why() {
         "{offline}"
     );
     assert_eq!(offline["task"]["runs_on"]["machine"]["id"], owner.as_str());
+    assert_eq!(offline["task"]["state"], Value::Null, "{offline}");
     assert_eq!(offline["task"]["next"], Value::Null, "{offline}");
     assert_eq!(offline["graph"], Value::Null, "{offline}");
     let reason = offline["task"]["reason"].as_str().unwrap();
@@ -4659,6 +4664,7 @@ fn a_status_read_mini_cannot_answer_says_where_the_task_runs_and_why() {
         .find(|row| row["task"]["id"] == task.as_str())
         .unwrap();
     assert_eq!(listed["runs_on"]["machine"]["id"], owner.as_str());
+    assert_eq!(listed["section"], "working", "{listed}");
     assert!(
         listed["next_move"]["reason"]
             .as_str()

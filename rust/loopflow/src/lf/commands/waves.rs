@@ -986,8 +986,10 @@ fn owner_detail(peer: &TaskPeer, repo: &Path, task: &Task) -> Result<TaskDetail>
         repo, task,
     )))?;
     let mut detail: TaskDetail = serde_json::from_value(answer.result)?;
-    detail.reading = TaskReading::Owner;
-    detail.task.runs_on = peer.runs_on();
+    if detail.reading == TaskReading::Here {
+        detail.reading = TaskReading::Owner;
+        detail.task.runs_on = peer.runs_on();
+    }
     Ok(detail)
 }
 
@@ -1019,7 +1021,11 @@ pub fn print_remote_task_status(
         if peer.registered.is_none() {
             return Ok(RemoteStatus::Here);
         }
-        print_remote_readings(peer.connect(repo, task, None)?, peer_status(repo, task))?;
+        print_remote_readings(
+            peer.connect(repo, task, None)?,
+            peer_status(repo, task),
+            &peer,
+        )?;
     } else {
         let detail = match owner_detail(&peer, repo, task) {
             Ok(detail) => detail,
@@ -1056,25 +1062,28 @@ fn unasked(store: &loopflow_storage::sqlite::SqliteStore, runs_on: &TaskRunsOn) 
 fn print_remote_detail(machine: &str, detail: &TaskDetail) -> Result<()> {
     let task = &detail.task;
     println!("{} · {}", task.title, task.identifier);
-    match &task.runs_on {
-        Some(runs_on) => println!(
-            "{}; read from its server.",
-            loopflow_execution::ops::task_ownership::runs_elsewhere(runs_on)
-        ),
-        None => println!("Runs on {machine}; read from its server."),
+    if detail.reading == TaskReading::Owner {
+        match &task.runs_on {
+            Some(runs_on) => println!(
+                "{}; read from its server.",
+                loopflow_execution::ops::task_ownership::runs_elsewhere(runs_on)
+            ),
+            None => println!("Runs on {machine}; read from its server."),
+        }
     }
-    println!(
-        "State: {}{} · {}",
-        serde_json::to_value(task.state)?
-            .as_str()
-            .expect("a Task state is a string"),
-        detail
-            .auto
-            .as_ref()
-            .map(crate::lf::commands::task_row::auto_phrase)
-            .unwrap_or_default(),
-        task.reason
-    );
+    if let Some(state) = task.state {
+        println!(
+            "State: {state}{} · {}",
+            detail
+                .auto
+                .as_ref()
+                .map(crate::lf::commands::task_row::auto_phrase)
+                .unwrap_or_default(),
+            task.reason
+        );
+    } else {
+        println!("{}", task.reason);
+    }
     if let Some(graph) = &task.graph {
         match &graph.step {
             Some(step) => println!("Graph: {} · {step}", graph.name),
@@ -1106,10 +1115,21 @@ fn print_remote_detail(machine: &str, detail: &TaskDetail) -> Result<()> {
 fn print_remote_readings(
     mut connection: loopflow_execution::machine::client::Connection,
     read: super::read::Read,
+    peer: &TaskPeer,
 ) -> Result<()> {
+    use loopflow_execution::{engine::select::select, read_stream};
     use std::io::Write as _;
     use std::sync::atomic::Ordering;
-    let id = connection.subscribe(read, loopflow_execution::read_stream::selected())?;
+    let selected = read_stream::selected();
+    // The peer can report an unobserved Task if its claim changes. Read the
+    // source of each frame before projecting the caller's view.
+    let peer_paths = selected.clone().map(|mut paths| {
+        paths.push("reading.kind".into());
+        paths
+    });
+    let id = connection.subscribe(read, peer_paths)?;
+    let owner = serde_json::to_value(TaskReading::Owner)?;
+    let runs_on = serde_json::to_value(peer.runs_on())?;
     // As here, the subscription ends when stdin closes, after its first
     // reading; closing this end of the pipe ends it on the other Machine too.
     let printed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -1125,7 +1145,19 @@ fn print_remote_readings(
         });
     }
     let mut stdout = std::io::stdout().lock();
-    while let Some(frame) = connection.reading(&id)? {
+    while let Some(mut frame) = connection.reading(&id)? {
+        let body = &mut frame["body"];
+        if body.is_object() {
+            if body["reading"]["kind"] == "here" {
+                body["reading"].clone_from(&owner);
+                if let Some(task) = body.get_mut("task") {
+                    task["runs_on"].clone_from(&runs_on);
+                }
+            }
+            if let Some(paths) = &selected {
+                *body = select(body, paths);
+            }
+        }
         serde_json::to_writer(&mut stdout, &frame)?;
         if stdout
             .write_all(b"\n")
@@ -1490,15 +1522,20 @@ async fn task_detail(
         .task
         .runs_on
         .as_ref()
-        .filter(|_| detail.task.state != TaskState::Moving || unanswered.is_some())
+        .filter(|_| detail.task.state != Some(TaskState::Moving) || unanswered.is_some())
     {
         let reason = match unanswered {
             Some(reason) => reason,
             None => unasked(&store.sqlite, runs_on)?,
         };
-        if !matches!(detail.task.state, TaskState::Done | TaskState::Abandoned) {
+        if detail.task.state.is_none_or(|state| !state.is_terminal()) {
             detail.task.reason = super::task_row::unobserved_reason(runs_on, &reason);
+            detail.task.state = None;
+            detail.task.graph = None;
             detail.graph = None;
+            detail.graph_processes.clear();
+            detail.sessions.clear();
+            detail.conversation = None;
         }
         detail.reading = TaskReading::Unobserved { reason };
     }
@@ -2488,11 +2525,8 @@ async fn snapshot_task_detail(
         .get(&task.id)
         .cloned()
         .ok_or_else(|| anyhow!("Task {} has no graph", task.id))?;
-    let section = TaskSection::of(
-        runtime.status,
-        runtime.owner.is_some(),
-        task.state.as_deref(),
-    );
+    let lifecycle = status.lifecycle(task.state.as_deref());
+    let section = TaskSection::of(lifecycle, runtime.owner.is_some(), runs_on.is_some());
     let owned_by_you = runtime.owner.as_ref().is_some_and(|holder| {
         reads
             .you
@@ -2515,13 +2549,12 @@ async fn snapshot_task_detail(
                 .ok_or_else(|| anyhow!("Task {} repository is unavailable", task.id))?,
         ),
         reference,
-        lifecycle: status.lifecycle(task.state.as_deref()),
+        lifecycle,
         selection_states: task_selection_states(
-            status,
-            runtime.owner.is_some(),
-            pr.as_ref().is_some_and(|pr| pr.publication.is_some()),
+            lifecycle,
+            section,
+            runtime.owner.is_some() || pr.as_ref().is_some_and(|pr| pr.publication.is_some()),
             facts.auto_on.contains(&task.id),
-            task.state.as_deref(),
             reads.selection_readings[&task.repository_id]
                 .activity
                 .get(&task.id),

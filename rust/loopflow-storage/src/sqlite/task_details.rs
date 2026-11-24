@@ -48,6 +48,7 @@ impl SqliteStore {
         let snapshot = conn.savepoint()?;
         let ids: Vec<TaskId> = tasks.iter().map(|task| task.id.clone()).collect();
         let json = ids_json(ids.iter().map(TaskId::as_str));
+        let (local, ownership) = super::task_ownership::ownerships_in(&snapshot, &ids)?;
         let facts = TaskDetailFacts {
             states: states_in(&snapshot, &json)?,
             open_children: keyed(
@@ -98,7 +99,7 @@ impl SqliteStore {
                 &json,
                 |row| Ok((TaskId::from_raw(row.get::<_, String>(0)?), row.get::<_, String>(1)?)),
             )?,
-            ownership: super::task_ownership::ownerships_in(&snapshot, &ids)?,
+            ownership,
             tracker_states: tracker_states_in(&snapshot, tasks, true)?,
             latest_events: keyed(
                 &snapshot,
@@ -129,7 +130,6 @@ impl SqliteStore {
             tracker_actions: super::planning_sync::task_tracker_actions_in(&snapshot, &ids)?,
             repository_paths: repository_paths_in(&snapshot)?,
         };
-        let local = super::task_ownership::local_machine_in(&snapshot)?;
         snapshot.commit()?;
         Ok((local, facts))
     }

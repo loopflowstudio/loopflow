@@ -749,7 +749,6 @@ pub fn location(
 #[cfg(test)]
 mod tests {
     use std::path::Path;
-    use std::time::{Duration, Instant};
 
     use super::{launch_task, repository_path, resolve, resolve_task, without_placement};
     use crate::lf::Cli;

@@ -14935,7 +14935,15 @@
           "description": "The Machine that runs it when another Machine than this one owns it;\n`null` when this Machine owns it or nobody does."
         },
         "state": {
-          "$ref": "#/$defs/TaskState"
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TaskState"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "`null` when live execution is on another Machine and was not read."
         },
         "title": {
           "type": "string"
@@ -15190,7 +15198,7 @@
         },
         {
           "const": "working",
-          "description": "Someone's idle, active or moving Task.",
+          "description": "Someone's idle, active or moving Task, or a Task owned on another Machine.",
           "type": "string"
         }
       ]

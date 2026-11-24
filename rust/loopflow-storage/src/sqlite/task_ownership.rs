@@ -111,7 +111,7 @@ fn logs_in(
 pub(super) fn ownerships_in(
     conn: &Connection,
     tasks: &[TaskId],
-) -> StoreResult<HashMap<TaskId, TaskOwnership>> {
+) -> StoreResult<(MachineId, HashMap<TaskId, TaskOwnership>)> {
     let local = local_machine_in(conn)?;
     let mut owned = HashMap::new();
     for (task, log) in logs_in(conn, tasks)? {
@@ -120,7 +120,7 @@ pub(super) fn ownerships_in(
             owned.insert(task, ownership);
         }
     }
-    Ok(owned)
+    Ok((local, owned))
 }
 
 /// Who holds a Task after an entry, with the Machine label as written.
@@ -279,7 +279,7 @@ pub(super) fn held_in(conn: &Connection, machine: &MachineId) -> StoreResult<Vec
         rows.collect::<Result<Vec<_>, _>>()?
     };
     let candidates: Vec<_> = candidates.into_iter().map(TaskId::from_raw).collect();
-    let mut ownerships = ownerships_in(conn, &candidates)?;
+    let (_, mut ownerships) = ownerships_in(conn, &candidates)?;
     let mut held = Vec::new();
     for task in candidates {
         let Some(ownership) = ownerships.remove(&task) else {

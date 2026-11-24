@@ -446,8 +446,8 @@ Runs on mini since Nov 12 10:42; read from its server.
 ```
 
 The rest is mini's own answer: its Graph, its Sessions, its sentence.
-`--json` says so with `reading.kind: "owner"` and `task.runs_on` naming mini.
-Each call waits at most 15 seconds for mini.
+`--json` and `--subscribe` say so with `reading.kind: "owner"` and
+`task.runs_on` naming mini. One-shot status waits at most 15 seconds for mini.
 
 A rented sandbox has no route to its siblings. On `modal-2`, steering a Task
 `modal-3` runs goes through the tracker instead:
@@ -473,15 +473,20 @@ Machine has saved (planning, comments, PR) with the same failure as its
 reason. If the connection drops after the steer was sent, `lf steer` fails
 rather than saving it a second time; `lf task status` shows whether it landed.
 
-When the owner cannot answer, status returns `task.next: null`. A live
-reply carries the owner’s own next move. `lf task list` reads the Machine
-name from the ownership log without contacting the owner. A Machine your preferences don't name shows the public name
-its claim carried, else its id:
+When the owner cannot answer, status returns `task.state: null` and
+`task.next: null` for open work. A live reply carries the owner’s own state
+and next move. `lf task list` puts work held on another Machine in Working
+and reads the Machine name from the ownership log without contacting the
+owner. A Machine your preferences don't name shows the public name its
+claim carried, else its id.
 
 ```console
 $ lf task list
 MTG-419 · Jack · Runs on modal-3 since Nov 23 09:05 · Stop refactoring foo
 ```
+
+List JSON carries the local lifecycle projection. Its `section` is the
+board placement, and `lf task status` reads the owner for live state.
 
 | `--json` field | Says |
 |---|---|

@@ -234,7 +234,10 @@ reason, and `TaskRow.next == null`.
 status resolve the same Task peer, including the preferred Machine of an
 unclaimed Task. Both send the tracker issue ID when one exists. A one-shot
 status waits up to 15 seconds for the peer, then reports the failure beside
-the saved planning. A subscription keeps its open connection.
+the saved planning. A subscription keeps its open connection and annotates
+the owner's frames with the caller's Machine reference before field selection.
+An unobserved open Task has a nullable `TaskRow.state`. The shared section
+places work held on another Machine in Working.
 
 Machine name: preferences' name, else the public name the claim carried, else
 the id (existing labeling; the open question resolves to this, docs say so).
@@ -252,11 +255,26 @@ the id (existing labeling; the open question resolves to this, docs say so).
 - `cargo test -p loopflow-execution -p loopflow-storage --lib` with the carrier, scope-check, and ownership filters passed 12 checks.
 - `cargo fmt --check` passed. The macOS linker warned about compact unwind table size while building the debug CLI.
 
+### QA checks
+
+- [Walkthrough and transcripts](qa.html): real loopback OpenSSH and a bare Git
+  origin, three private Machines, with one Task carried forward from installed
+  0.16.0. Direct CLI and served receipts reached the owner. Git delivered after
+  an SSH outage and retried a locally saved steer after Git returned.
+- The replay confirmed `reading.kind: owner` in a selected subscription,
+  a null state and next command for unobserved status, and Working on the
+  sibling list. A stalled SSH handshake returned saved status in 11.36 s.
+- Nine focused route and DTO tests, the tracker-delivery fixture, the
+  section test, formatting and all-target Clippy passed. OpenCode's free
+  limit stopped both managed-model attempts before the first tool call.
+  Live hosted trackers, provider delivery, Desktop appearance and release
+  latency remain open.
+
 ## Remaining
 
 Every slice is built. What is left belongs to gate and CI:
 
-- Publish so CI runs `served_reads`, `binary(lf)`, `test(machine_commands::)` and the Swift DTO/protocol tests (`DTOFixtureTests`, `ServerProtocolTests`); none ran here.
+- Publish so CI runs `served_reads`, `binary(lf)`, the full `test(machine_commands::)` and the Swift DTO/protocol tests (`DTOFixtureTests`, `ServerProtocolTests`).
 - Watch `a_status_read_for_a_task_mini_runs_shows_a_rename_made_there` under CI load (see Slice 3 gate risk). A repeat that prints a timeout reason means the stand-in SSH round trip exceeds 15 s; fix the fixture, not the deadline.
 
 ## Done when
@@ -265,7 +283,7 @@ Derived from the Wave KRs (*"advance work without getting blocked by Loopflow's 
 
 - An agent or person on a sibling sandbox with no SSH routes to peer sandboxes runs `lf steer <remote-task> "<direction>"`, sees an honest `Queued … in Linear for <machine>; …reads it when it next syncs` receipt (and matching JSON `delivery.reached: "tracker"`), and the running worker or interactive Session on the owning sandbox receives that direction automatically within 30 s without manual intervention.
 - An agent or person on a Machine that can SSH to the owning Machine runs `lf steer <remote-task> "<direction>"`, delivers it directly to the owning Machine's server in <1 s, and sees `Saved … on <machine>; <who reads it>` (falling back honestly to `tracker`/`here` if SSH cannot connect).
-- Running `lf task status <remote-task>` or `lf task list` (text or `--json`) from an unreachable sibling sandbox or when a registered peer is offline names the Machine it runs on (`runs_on`) and, for status, reports `reading.kind == "unobserved"`; `task.next == null` on both, never portraying a remote Task as locally idle or unstarted.
+- From an unreachable sibling sandbox or an offline registered peer, `lf task status <remote-task>` names the Machine and reports `reading.kind == "unobserved"` with null state and next command for open work. `lf task list` names the Machine and places the Task in Working.
 - Idle Machines with no owned open Tasks make zero background Linear requests, and active Machines stay within Linear's existing pacing and reserve limits.
 - `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, Rust DTO/server/remote/steer suites, and Swift DTO/protocol tests pass.
 

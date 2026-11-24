@@ -364,7 +364,7 @@ fn task_detail_says_each_fact_once() {
     let detail: TaskDetail = serde_json::from_str(json).unwrap();
     assert_eq!(
         detail.task.state,
-        loopflow_execution::durable::TaskState::Active
+        Some(loopflow_execution::durable::TaskState::Active)
     );
     assert_eq!(
         detail.task.graph.as_ref().unwrap().step.as_deref(),
@@ -405,8 +405,12 @@ fn task_detail_requires_where_it_runs_and_whose_reading_it_is() {
     let mut missing = wire.clone();
     missing["task"].as_object_mut().unwrap().remove("runs_on");
     assert!(serde_json::from_value::<TaskDetail>(missing).is_err());
+    let mut missing = wire.clone();
+    missing["task"].as_object_mut().unwrap().remove("state");
+    assert!(serde_json::from_value::<TaskDetail>(missing).is_err());
 
     let mut elsewhere = wire;
+    elsewhere["task"]["state"] = serde_json::Value::Null;
     elsewhere["task"]["runs_on"] = serde_json::json!({
         "machine": {"id": "home_0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b", "label": "modal-3"},
         "since": 1_763_900_000
@@ -414,6 +418,7 @@ fn task_detail_requires_where_it_runs_and_whose_reading_it_is() {
     elsewhere["reading"] =
         serde_json::json!({"kind": "unobserved", "reason": "modal-3 is not registered here"});
     let detail: TaskDetail = serde_json::from_value(elsewhere.clone()).unwrap();
+    assert!(detail.task.state.is_none());
     assert_eq!(
         detail.reading,
         TaskReading::Unobserved {

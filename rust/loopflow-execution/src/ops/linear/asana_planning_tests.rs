@@ -671,3 +671,52 @@ fn asana_wave_projects_become_team_projects_holding_their_tasks() {
         assert_eq!(local.project_id, saved.project_id);
     });
 }
+
+#[test]
+fn a_wave_project_another_machine_mirrored_in_asana_is_bound_not_duplicated() {
+    with_asana(|runtime, fixture, repo, state| {
+        let wave = fixture
+            .store
+            .sqlite
+            .list_waves(None)
+            .unwrap()
+            .into_iter()
+            .find(|wave| wave.slug() == "product")
+            .unwrap();
+        let project = fixture.store.sqlite.wave_project(wave.id()).unwrap();
+        let id = crate::ops::tracker::creation_id(project.as_str()).unwrap();
+        // Asana takes no caller id; the other Machine's project carries it in its footer.
+        runtime.block_on(state.lock()).projects.push(json!({
+            "gid": "1200000000000099", "name": "Product",
+            "html_notes": format!("<body>Loopflow ID: {id}</body>"),
+            "modified_at": "2026-10-19T11:00:00.000Z",
+        }));
+        let saved = crate::ops::task::task_create(
+            repo,
+            Some("product"),
+            Some("Filed on this Machine".into()),
+            None,
+            crate::ops::task::TaskAdoptionOptions::default(),
+            Default::default(),
+            None,
+        )
+        .unwrap();
+        let bound = runtime
+            .block_on(fixture.store.get_project(&project))
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            bound.tracker_id.as_ref().map(|id| id.as_str()),
+            Some(id.as_str())
+        );
+        let asana = runtime.block_on(state.lock());
+        // Only the repository's team project was made beside the existing one.
+        assert_eq!(asana.projects.len(), 2);
+        let task = &asana.tasks[saved.tracker_id.as_ref().unwrap().as_str()];
+        assert!(task["memberships"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|member| member["project"]["gid"] == "1200000000000099"));
+    });
+}

@@ -144,6 +144,20 @@ impl AsanaClient {
         action: &TrackerAction,
     ) -> OpsResult<Sent> {
         let id = creation_id(project.as_str())?;
+        // Asana takes no caller id, so another Machine's create of this
+        // Project shows only as a team project whose footer names it.
+        match self.project_revision(&id).await {
+            Ok(Some(revision)) => {
+                let mirrored = mirrored_project(&id, &repository_scope(repo)?, revision, action)?;
+                accept_mirror(store, project, &mirrored).await?;
+                return Ok(Sent::Acknowledged {
+                    revision: mirrored.revision,
+                    remote_id: Some(id),
+                });
+            }
+            Ok(None) => {}
+            Err(error) => return Ok(Sent::Rejected(error.to_string())),
+        }
         let mirrored = mirrored_project(&id, &repository_scope(repo)?, None, action)?;
         let footer = format!("{IDENTITY_LABEL} {id}");
         let summary = mirrored.summary.trim();

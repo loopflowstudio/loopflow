@@ -166,7 +166,12 @@ impl LinearClient {
             Ok(PlanningResponse::Task { .. }) => {
                 return Ok(Sent::Unknown("Project creation returned an issue".into()))
             }
-            Err(error) => return Ok(Sent::failed(error)),
+            // Another Machine may have created this Project under the same id,
+            // which Linear refuses to reuse: a Project holding it is this one.
+            Err(error) => match self.find_project(&id).await {
+                Ok(Some(found)) => found,
+                _ => return Ok(Sent::failed(error)),
+            },
         };
         accept_project(store, &wave, &project)?;
         Ok(Sent::Acknowledged {

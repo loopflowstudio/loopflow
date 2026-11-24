@@ -1023,15 +1023,14 @@ pub(crate) fn attach_in(
     Ok(())
 }
 
-/// Unbound Projects of live Waves, then Tasks, made on this Machine in `repo`
-/// with no live `create`. A Project is made here unless another Machine
-/// stamped its Wave.
+/// Unbound Projects of live Waves in `repo`, then Tasks made on this Machine,
+/// with no live `create`. Any Machine creates a Project, wherever its record
+/// was made: every create carries the Project's UUID, so a second create binds
+/// the tracker's existing Project instead of making another.
 fn uncreated(conn: &Connection, repo: &str) -> StoreResult<Vec<ActionOwner>> {
     let mut query = conn.prepare_cached(&format!(
         "SELECT 'project',p.id FROM projects p JOIN waves w ON w.id=p.wave_id
          WHERE w.repo=?1 AND w.retired_at IS NULL AND p.external_project_id IS NULL
-         AND NOT EXISTS(SELECT 1 FROM plan_stamps s WHERE s.owner_id=p.id AND s.field='project_wave'
-             AND s.machine_id!=(SELECT id FROM machines WHERE is_local=1))
          AND NOT EXISTS(SELECT 1 FROM tracker_actions e WHERE e.project_id=p.id AND e.kind='create' AND e.phase!='retired')
          UNION ALL
          SELECT 'task',t.id FROM tasks t JOIN repository_plans r ON r.id=t.repository_id
@@ -1482,7 +1481,7 @@ mod tests {
     }
 
     #[test]
-    fn a_project_made_here_is_created_in_the_tracker_and_one_from_another_machine_is_not() {
+    fn every_unbound_project_of_a_live_wave_is_created_in_the_tracker() {
         let (_dir, store) = store();
         let wave = crate::work::wave::Wave::new(
             loopflow_model::id::WaveId::new(),
@@ -1520,6 +1519,7 @@ mod tests {
                 &[
                     WorkValue::ProjectWave(theirs.to_string()),
                     WorkValue::ProjectName(Some("Theirs".into())),
+                    WorkValue::ProjectSlug(Some("theirs".into())),
                 ],
             ),
         )
@@ -1528,7 +1528,7 @@ mod tests {
             store
                 .enqueue_tracker_creations("/repo", TrackerKind::Linear)
                 .unwrap(),
-            2
+            3
         );
         let mut created: Vec<_> = store
             .unconfirmed_tracker_actions("/repo")
@@ -1537,7 +1537,11 @@ mod tests {
             .map(|action| action.owner)
             .collect();
         created.sort_by_key(|owner| format!("{owner:?}"));
-        let mut expected = vec![ActionOwner::Project(here), ActionOwner::Project(unstamped)];
+        let mut expected = vec![
+            ActionOwner::Project(here),
+            ActionOwner::Project(unstamped),
+            ActionOwner::Project(elsewhere),
+        ];
         expected.sort_by_key(|owner| format!("{owner:?}"));
         assert_eq!(created, expected);
     }

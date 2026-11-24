@@ -1267,3 +1267,48 @@ fn linear_on_demand_adopts_new_open_issues_without_allocating_execution() {
         });
     });
 }
+
+#[test]
+fn a_wave_project_another_machine_created_in_linear_is_bound_not_duplicated() {
+    with_export_plan(|runtime, fixture, repo, task, state| {
+        let project = task.project_id.clone().unwrap();
+        let id = crate::ops::tracker::creation_id(project.as_str()).unwrap();
+        // The other Machine's create landed under the Project's own UUID.
+        let mut theirs = planning_project(&id);
+        theirs["name"] = json!("Product");
+        runtime.block_on(state.lock()).extra_projects.push(theirs);
+        let wave = runtime
+            .block_on(fixture.store.get_wave(task.wave_id.as_ref().unwrap()))
+            .unwrap()
+            .unwrap();
+        let saved = crate::ops::task::task_create(
+            repo,
+            Some(wave.slug()),
+            Some("Filed on this Machine".into()),
+            None,
+            crate::ops::task::TaskAdoptionOptions::default(),
+            Default::default(),
+            None,
+        )
+        .unwrap();
+        let bound = runtime
+            .block_on(fixture.store.get_project(&project))
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            bound.tracker_id.as_ref().map(|id| id.as_str()),
+            Some(id.as_str())
+        );
+        let provider = runtime.block_on(state.lock());
+        assert_eq!(provider.extra_projects.len(), 1);
+        let issue = provider
+            .issues
+            .iter()
+            .find(|issue| {
+                Some(issue["id"].as_str().unwrap())
+                    == saved.tracker_id.as_ref().map(|id| id.as_str())
+            })
+            .expect("the Task reached Linear");
+        assert_eq!(issue["project"]["id"], id.as_str());
+    });
+}

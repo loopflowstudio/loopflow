@@ -80,9 +80,11 @@
   carry its UUID), or have the migration keep a Project this Machine will
   create. Released lf had the same gap for Tasks it put in another Machine's
   Project; the migration widens it to Tasks it moves there.
-- Concept review after slices 8–10 chose to leave the QA run 8 gap (a kept
-  Project from another Machine gets no create here) as released lf does and
-  name it in the PR body; page question 1.
+- Concept review after slices 8–10 left the QA run 8 gap open; the answer
+  "(b)" closed it in slice 11: any Machine creates an unbound Project.
+- Slice 11: two Machines creating the same Asana Project at the same moment
+  can still make two Asana projects (the footer read and the POST are not
+  atomic). Linear's client id rules that out there.
 - Sync onto main (#1973) brought `leaving_guard.rs`, which denies every
   member this branch marked leaving. Plan records still read and write
   `projects.planning_initiatives` (`WorkValue::ProjectInitiatives`, kept for

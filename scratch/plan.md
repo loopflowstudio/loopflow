@@ -531,3 +531,32 @@ Compress after slice 10: the stranded-Task retire is keyed by Wave, so
 removal covers every Project a released writer gave the Wave, as its other
 removal statements already did; reclaim passes the released Project's Wave.
 Storage removal/reclaim tests (5) pass; clippy clean.
+
+## Slice 11 (human-review answer, 2026-11-24)
+
+Jack Heart, on concept-review question 1 (who creates a Wave's Project in the
+tracker when another Machine made the record): "(b)" — fix it here. Any
+Machine creates an unbound Project of a live Wave:
+
+- `uncreated` drops the "stamped by another Machine" skip: every unbound
+  Project of a live Wave is a create candidate.
+- The Linear create carries the Project's UUID as its client `id`; a
+  duplicate-id reply is handled as a lost-reply lookup by that UUID and binds
+  the existing Linear Project.
+- Asana has no client id: search the footer identity before creating, bind a
+  match.
+- Tests: two Machines, one Project record; both drains bind one Linear
+  Project, and Tasks queued on either Machine reach it. Same for Asana.
+Question 2 (queued create snapshot): stays as built.
+
+Built in slice 11: `uncreated` queues a create for every unbound Project of a
+live Wave, whichever Machine stamped it. Linear already sent the Project's
+UUID as the create `id`; a refused create now looks that id up in the same
+send and binds what it finds, so a Task filed in the same command reaches it
+(the drain's lost-reply look would only bind on the next pass). Asana's create
+first reads the team's projects for one whose footer names the Project and
+binds it. Tests: storage `every_unbound_project_of_a_live_wave_is_created_in_the_tracker`;
+execution `a_wave_project_another_machine_created_in_linear_is_bound_not_duplicated`
+and `…_mirrored_in_asana_is_bound_not_duplicated` model the other Machine's
+create already in the tracker (one store each, not two Machines). All pass.
+Gate: clippy, `documented_commands::` (docs/dev/reference.md row edited).

@@ -294,9 +294,9 @@ public enum ConfigOperation: Encodable, Sendable {
     case configCatalog
     /// `value` is YAML.
     case configSet(destination: JSONValue, key: String, value: String)
-    case preview(destination: JSONValue, key: String, expected: [ConfigurationEntry], change: ConfigurationChange)
-    case edit(destination: JSONValue, key: String, expected: [ConfigurationEntry], change: ConfigurationChange)
-    case promote(destination: JSONValue, key: String, wave: String?, action: MoveAction)
+    case configPreview(destination: JSONValue, key: String, expected: [ConfigurationEntry], change: ConfigurationChange)
+    case configEdit(destination: JSONValue, key: String, expected: [ConfigurationEntry], change: ConfigurationChange)
+    case configPromote(destination: JSONValue, key: String, wave: String?, action: MoveAction)
     case configUnset(destination: JSONValue, key: String)
     /// The serving Machine's `theme:`: set to `value` (YAML), or read when nil.
     case configTheme(value: String?)
@@ -310,11 +310,11 @@ public enum ConfigOperation: Encodable, Sendable {
         case .configCatalog: TaggedFields("config.catalog")
         case .configSet(let destination, let key, let value):
             TaggedFields("config.set", ["destination": destination, "key": key, "value": value])
-        case .preview(let destination, let key, let expected, let change):
+        case .configPreview(let destination, let key, let expected, let change):
             TaggedFields("config.preview", ["destination": destination, "key": key, "expected": expected, "change": change])
-        case .edit(let destination, let key, let expected, let change):
+        case .configEdit(let destination, let key, let expected, let change):
             TaggedFields("config.edit", ["destination": destination, "key": key, "expected": expected, "change": change])
-        case .promote(let destination, let key, let wave, let action):
+        case .configPromote(let destination, let key, let wave, let action):
             TaggedFields("config.promote", ["destination": destination, "key": key, "wave": wave, "action": action])
         case .configUnset(let destination, let key):
             TaggedFields("config.unset", ["destination": destination, "key": key])

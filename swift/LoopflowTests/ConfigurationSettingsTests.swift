@@ -16,12 +16,12 @@ struct ConfigurationSettingsTests {
         #expect(try json(scope) == fixture["scope"])
         let mine = try #require(scope.files.first { $0.owner == .personalRepository })
         #expect(try json(ServedRead.configScope(directory: "/project", wave: nil, target: .general)) == fixture["read"])
-        #expect(try json(ConfigOperation.edit(destination: mine.destination, key: "context.diff", expected: try #require(mine.slots["context.diff"]).entries, change: .reset)) == fixture["write"])
-        #expect(try json(ConfigOperation.preview(destination: mine.destination, key: "context.diff", expected: try #require(mine.slots["context.diff"]).entries, change: .reset)) == fixture["preview"])
+        #expect(try json(ConfigOperation.configEdit(destination: mine.destination, key: "context.diff", expected: try #require(mine.slots["context.diff"]).entries, change: .reset)) == fixture["write"])
+        #expect(try json(ConfigOperation.configPreview(destination: mine.destination, key: "context.diff", expected: try #require(mine.slots["context.diff"]).entries, change: .reset)) == fixture["preview"])
         let result = try JSONDecoder().decode(MoveResult.self, from: JSONEncoder().encode(fixture["move_result"]))
         guard case .preview(let preview) = result else { Issue.record("Expected a move preview"); return }
-        #expect(try json(ConfigOperation.promote(destination: mine.destination, key: "context.diff", wave: nil, action: .confirm(preview))) == fixture["promote"])
-        #expect(try json(ConfigOperation.promote(destination: mine.destination, key: "context.diff", wave: nil, action: .dismiss)) == fixture["dismiss"])
+        #expect(try json(ConfigOperation.configPromote(destination: mine.destination, key: "context.diff", wave: nil, action: .confirm(preview))) == fixture["promote"])
+        #expect(try json(ConfigOperation.configPromote(destination: mine.destination, key: "context.diff", wave: nil, action: .dismiss)) == fixture["dismiss"])
         let dismissed = try JSONDecoder().decode(MoveResult.self, from: JSONEncoder().encode(fixture["dismissed"]))
         guard case .dismissed = dismissed else { Issue.record("Expected a dismissed move"); return }
         let receipt = try JSONDecoder().decode(ConfigurationEditReceipt.self, from: JSONEncoder().encode(fixture["receipt"]))

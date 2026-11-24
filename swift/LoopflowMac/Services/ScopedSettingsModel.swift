@@ -217,12 +217,12 @@ final class ScopedSettingsModel {
     }
 
     private func move(_ address: SettingDeclaration.ID, wave: String?, action: MoveAction) async throws -> MoveResult {
-        try await ServerClient.configuration(.promote(destination: address.destination, key: address.key, wave: wave, action: action),
+        try await ServerClient.configuration(.configPromote(destination: address.destination, key: address.key, wave: wave, action: action),
                                              location: location).decode()
     }
 
     func preview(_ change: ConfigurationChange, for declaration: SettingDeclaration) async throws -> String {
-        try await ServerClient.configuration(.preview(destination: declaration.destination, key: declaration.slot.key,
+        try await ServerClient.configuration(.configPreview(destination: declaration.destination, key: declaration.slot.key,
             expected: declaration.slot.entries, change: change), location: location).decode()
     }
 

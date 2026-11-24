@@ -31,29 +31,6 @@ public struct RegistryQueryError: LocalizedError, Sendable {
 /// wave); machine-wide reads such as `lf wave list` ignore it.
 public typealias RegistryRunner = @Sendable (_ lfArgs: [String], _ cwd: String?) async throws -> String
 
-public enum ConfigurationTarget: Encodable, Sendable, Hashable {
-    case general
-    case skill(String)
-    case step(graph: String, step: String)
-
-    public func encode(to encoder: Encoder) throws {
-        let fields: TaggedFields = switch self {
-        case .general: TaggedFields("general")
-        case .skill(let name): TaggedFields("skill", ["name": name])
-        case .step(let graph, let step): TaggedFields("step", ["graph": graph, "step": step])
-        }
-        try fields.encode(to: encoder, tag: "kind")
-    }
-
-    var arguments: [String] {
-        switch self {
-        case .general: []
-        case .skill(let name): ["--skill", name]
-        case .step(let graph, let step): ["--graph", graph, "--step", step]
-        }
-    }
-}
-
 /// A read Loopflow serves inside the app, encoded as its Rust `Read`: what
 /// `argv` prints in `cwd`, given `input` on stdin. A read whose command takes
 /// `--subscribe` is also served as that subscription.

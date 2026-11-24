@@ -87,3 +87,26 @@ public enum MoveAction: Encodable, Sendable {
         try fields.encode(to: encoder, tag: "kind")
     }
 }
+
+public enum ConfigurationTarget: Encodable, Sendable, Hashable {
+    case general
+    case skill(String)
+    case step(graph: String, step: String)
+
+    public func encode(to encoder: Encoder) throws {
+        let fields: TaggedFields = switch self {
+        case .general: TaggedFields("general")
+        case .skill(let name): TaggedFields("skill", ["name": name])
+        case .step(let graph, let step): TaggedFields("step", ["graph": graph, "step": step])
+        }
+        try fields.encode(to: encoder, tag: "kind")
+    }
+
+    var arguments: [String] {
+        switch self {
+        case .general: []
+        case .skill(let name): ["--skill", name]
+        case .step(let graph, let step): ["--graph", graph, "--step", step]
+        }
+    }
+}

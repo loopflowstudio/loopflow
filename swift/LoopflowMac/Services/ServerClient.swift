@@ -42,7 +42,7 @@ enum ServerClient {
 
     static func edit(_ change: ConfigurationChange, destination: JSONValue, key: String,
                      expected: [ConfigurationEntry], location: ServerLocation) async throws -> ConfigurationEditReceipt {
-        try await configuration(.edit(destination: destination, key: key, expected: expected, change: change),
+        try await configuration(.configEdit(destination: destination, key: key, expected: expected, change: change),
                                 location: location).decode()
     }
 

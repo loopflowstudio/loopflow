@@ -487,13 +487,11 @@ chapter to clear updates that column.
    in CI, and check the `oauth_tests` contention failure on the base.
 2. Open, not this Task: a queued create's field snapshot (`scratch/concept-review.html`
    discussion of create snapshots).
-3. Open, not this Task (concept review after slices 8–10): `uncreated` skips a
-   Project another Machine stamped, so after upgrade a kept Project from
-   another Machine gets no create here (QA run 8, `scratch/questions.md`).
-   Released lf has the same gap. Chosen for review: leave it as released lf
-   does; the fix is a drain change (any Machine creates an unbound Project by
-   its UUID; a duplicate-id reply becomes a lost-reply lookup; Asana searches
-   its footer identity first). Name the gap in the PR body.
+3. Name in the PR body: two Machines creating the same Asana Project at the
+   same moment can still make two (footer read and POST are not atomic);
+   Linear's client id rules it out (slice 11).
+4. Drop `.lf/run-slice11.log` (a Graph-run receipt) before landing — done in
+   the realign after slice 11.
 
 Concept review after slices 8–10 (`scratch/concept-review.html`): product and
 code concepts line up everywhere a person meets them; the unique index is

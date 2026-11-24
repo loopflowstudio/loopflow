@@ -1432,15 +1432,16 @@ if os.path.exists(os.path.join(flags, "down")):
 child = subprocess.Popen(["bash", "-c", sys.argv[-1]], cwd=remote,
     env={{"HOME": remote, "PATH": "/usr/bin:/bin"}},
     stdin=subprocess.PIPE, stdout=subprocess.PIPE)
-drop = os.path.join(flags, "drop-apply")
-applying = threading.Event()
+drops = {{b'"plan.apply"': "drop-apply", b'"task.steer"': "drop-steer"}}
+dropping = []
 def up():
     while True:
         line = sys.stdin.buffer.readline()
         if not line:
             break
-        if os.path.exists(drop) and b'"plan.apply"' in line:
-            applying.set()
+        for operation, flag in drops.items():
+            if operation in line and os.path.exists(os.path.join(flags, flag)):
+                dropping.append(os.path.join(flags, flag))
         child.stdin.write(line)
         child.stdin.flush()
     child.stdin.close()
@@ -1449,8 +1450,8 @@ while True:
     line = child.stdout.readline()
     if not line:
         break
-    if applying.is_set():
-        os.remove(drop)
+    if dropping:
+        os.remove(dropping[0])
         child.kill()
         os._exit(255)
     sys.stdout.buffer.write(line)
@@ -1521,6 +1522,55 @@ impl Home {
     fn store(&self) -> loopflow_execution::store::sqlite::SqliteStore {
         loopflow_execution::store::open_sqlite(&self.dir.join("loopflow.db")).unwrap()
     }
+}
+
+/// The only copy of the new comment is on the hub. The owner has no Git
+/// remote and nobody reads its plan or runs a Graph after its server starts.
+#[test]
+fn the_owner_server_picks_up_a_steer_from_its_hub() {
+    use loopflow_model::comment::{TaskComment, TaskCommentAuthor};
+    use loopflow_test_support::MachineServer;
+    use std::time::{Duration, Instant};
+
+    let fixture = preview_machines();
+    let plan = SharedPlan::new(&fixture);
+    git(&plan.local_path, &["remote", "remove", "origin"]);
+    let task = plan.local_task();
+    loopflow_execution::store::ownership::claim_task(&plan.local, &task).unwrap();
+    plan.to_remote();
+    let comment = TaskComment {
+        id: uuid::Uuid::new_v4().to_string(),
+        body: "Read this steer from the hub".into(),
+        author: TaskCommentAuthor::Person {
+            name: Some("Ada".into()),
+        },
+        created_at: Some("2026-11-22T12:00:00Z".into()),
+    };
+    plan.remote.append_task_comment(&task, &comment).unwrap();
+    assert_success(&fixture.run(&["machine", "hub", "mini"]));
+    let root = fixture.root.path();
+    let lf = env!("CARGO_BIN_EXE_lf");
+    let _hub = MachineServer::start(lf, &root.join("remote/store"));
+    let _owner = MachineServer::start_with_path(
+        lf,
+        &root.join("local"),
+        &format!("{}:/usr/bin:/bin", root.join("bin").display()),
+    );
+    let deadline = Instant::now() + Duration::from_secs(45);
+    loop {
+        let steers = plan.local.task_steers(&task).unwrap();
+        if steers.iter().any(|read| read.text.contains(&comment.body)) {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the hub's comment never reached its owner"
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    assert!(
+        loopflow_storage::steer_markers::task_marker(&root.join("local"), task.as_str()).is_file()
+    );
 }
 
 /// LOO-938's acceptance over the real carriers: three homes clone one bare
@@ -2406,7 +2456,10 @@ fn a_move_that_did_not_arrive_shows_in_status_and_the_same_command_delivers_it()
         .unwrap();
     let status = String::from_utf8_lossy(&status.stdout);
     assert!(
-        status.contains("Runs on mini; read from its server."),
+        status
+            .lines()
+            .any(|line| line.starts_with("Runs on mini since ")
+                && line.ends_with("; read from its server.")),
         "{status}"
     );
 }
@@ -2576,7 +2629,10 @@ fn claiming_back_a_task_whose_arrival_answer_was_lost_leaves_it_on_its_target() 
     assert_success(&status);
     let status = String::from_utf8_lossy(&status.stdout);
     assert!(
-        status.contains("Runs on mini; read from its server."),
+        status
+            .lines()
+            .any(|line| line.starts_with("Runs on mini since ")
+                && line.ends_with("; read from its server.")),
         "{status}"
     );
     assert!(!status.contains("Moving to mini"), "{status}");
@@ -3009,9 +3065,8 @@ fn the_laptop_says_where_a_moved_task_runs_and_prunes_its_checkout() {
     let _mini = served_mini(&fixture);
     let status = laptop(&["task", "status", task.as_str()]);
     assert!(
-        status.contains(&format!(
-            "· {identifier}\nRuns on mini; read from its server."
-        )),
+        status.contains(&format!("· {identifier}\nRuns on mini since "))
+            && status.contains("; read from its server."),
         "{status}"
     );
     let list = laptop(&["task", "list"]);
@@ -3711,9 +3766,8 @@ fn a_moved_task_comes_back_with_the_same_command() {
     );
     let there = on_mini(&["task", "status", task.as_str()]);
     assert!(
-        there.contains(&format!(
-            "· {identifier}\nRuns on laptop; read from its server."
-        )),
+        there.contains(&format!("· {identifier}\nRuns on laptop since "))
+            && there.contains("; read from its server."),
         "{there}"
     );
 }
@@ -3864,7 +3918,10 @@ fn resuming_a_task_conversation_on_mini_moves_its_task() {
     assert_success(&status);
     let status = String::from_utf8_lossy(&status.stdout);
     assert!(
-        status.contains("Runs on mini; read from its server."),
+        status
+            .lines()
+            .any(|line| line.starts_with("Runs on mini since ")
+                && line.ends_with("; read from its server.")),
         "{status}"
     );
     let arrived = plan.remote.session(&session).unwrap().unwrap();
@@ -5432,16 +5489,20 @@ fn served_mini(fixture: &Machines) -> Child {
 /// Mini's `lf server connect` stood in: it welcomes the connection, records
 /// the hello and the request it reads, and answers with `result`.
 fn answering_entry(fixture: &Machines, record: &Path, result: &Value) {
-    let welcome: Value = serde_json::from_str(include_str!(
-        "../../loopflow-execution/tests/fixtures/dto/server/welcome.json"
-    ))
-    .unwrap();
     let mut response: Value = serde_json::from_str(include_str!(
         "../../loopflow-execution/tests/fixtures/dto/server/response.json"
     ))
     .unwrap();
-    response["id"] = "@ID@".into();
     response["result"] = result.clone();
+    reply_from_mini(fixture, record, response);
+}
+
+fn reply_from_mini(fixture: &Machines, record: &Path, mut response: Value) {
+    let welcome: Value = serde_json::from_str(include_str!(
+        "../../loopflow-execution/tests/fixtures/dto/server/welcome.json"
+    ))
+    .unwrap();
+    response["id"] = "@ID@".into();
     let remote_lf = fixture.root.path().join("remote/.local/bin/lf");
     let working = fs::read_to_string(&remote_lf).unwrap();
     executable(
@@ -5552,7 +5613,7 @@ exec env -i HOME='{remote}' PATH=/usr/bin:/bin bash -c "$remote_command"
                 task.as_str(),
                 "--subscribe",
                 "--select",
-                "task.id",
+                "task.id,task.runs_on.machine.id,reading.kind",
             ])
             .current_dir(&plan.local_path)
             .stdin(Stdio::null())
@@ -5566,9 +5627,13 @@ exec env -i HOME='{remote}' PATH=/usr/bin:/bin bash -c "$remote_command"
         .read_line(&mut line)
         .unwrap();
     let frame: Value = serde_json::from_str(&line).unwrap();
+    let owner = plan.remote.saved_local_machine().unwrap().id;
     assert_eq!(
         frame["body"],
-        serde_json::json!({"task": {"id": task.as_str()}}),
+        serde_json::json!({
+            "task": {"id": task.as_str(), "runs_on": {"machine": {"id": owner.as_str()}}},
+            "reading": {"kind": "owner"}
+        }),
         "{frame}"
     );
     // Its stdin is closed, so it ends after that first reading, as a local one does.
@@ -5589,6 +5654,49 @@ exec env -i HOME='{remote}' PATH=/usr/bin:/bin bash -c "$remote_command"
         "{commands}"
     );
     assert!(!commands.contains("status"), "{commands}");
+}
+
+/// Wave placement chooses where a new run starts. Status and direction
+/// stay here until a Machine has claimed this Task.
+#[test]
+fn a_status_read_and_steer_for_unowned_work_ignore_wave_placement() {
+    let fixture = preview_machines();
+    let plan = SharedPlan::new(&fixture);
+    let task = plan.local_task();
+    let run = |args: &[&str]| {
+        let output = fixture
+            .command(args)
+            .current_dir(&plan.local_path)
+            .output()
+            .unwrap();
+        assert_success(&output);
+        output.stdout
+    };
+    run(&["--wave", "owners", "set", "machine", "mini"]);
+    let dialed = fixture.root.path().join("dialed");
+    executable(
+        &fixture.root.path().join("bin/ssh"),
+        &format!("#!/bin/sh\ntouch '{}'\nexit 255\n", dialed.display()),
+    );
+    let status: Value =
+        serde_json::from_slice(&run(&["task", "status", task.as_str(), "--json"])).unwrap();
+    assert_eq!(status["reading"]["kind"], "here");
+    assert_eq!(status["task"]["state"], "unstarted");
+    assert!(status["task"]["runs_on"].is_null());
+    let scoped: Value =
+        serde_json::from_slice(&run(&["--task", task.as_str(), "task", "status", "--json"]))
+            .unwrap();
+    assert_eq!(scoped["task"]["id"], status["task"]["id"]);
+    assert_eq!(scoped["reading"]["kind"], "here");
+    let receipt: Value =
+        serde_json::from_slice(&run(&["steer", task.as_str(), "Check timeout", "--json"])).unwrap();
+    assert_eq!(receipt["delivery"]["reached"], "owner");
+    assert!(receipt["delivery"]["runs_on"].is_null());
+    assert!(receipt["delivery"]["sentence"]
+        .as_str()
+        .unwrap()
+        .contains("nothing reads it"));
+    assert!(!dialed.exists());
 }
 
 /// A one-shot `lf task status` for a Task mini runs is mini's reading: a
@@ -5642,10 +5750,11 @@ exec env -i HOME='{remote}' PATH=/usr/bin:/bin bash -c "$remote_command"
         String::from_utf8(output.stdout).unwrap()
     };
 
-    let json: Value = serde_json::from_str(&status(&["--json", "--select", "task.title"])).unwrap();
+    let json: Value =
+        serde_json::from_str(&status(&["--json", "--select", "task.title,reading"])).unwrap();
     assert_eq!(
         json,
-        serde_json::json!({"task": {"title": "Renamed on mini"}})
+        serde_json::json!({"task": {"title": "Renamed on mini"}, "reading": {"kind": "owner"}})
     );
     let human = status(&[]);
     assert!(human.starts_with("Renamed on mini · "), "{human}");
@@ -5666,6 +5775,291 @@ exec env -i HOME='{remote}' PATH=/usr/bin:/bin bash -c "$remote_command"
     );
 }
 
+/// A Task mini runs, read on a laptop that cannot ask mini, says where it
+/// runs and why mini was not read, and offers nothing to run here.
+#[test]
+fn a_status_read_mini_cannot_answer_says_where_the_task_runs_and_why() {
+    let fixture = preview_machines();
+    let (plan, task) = task_on_mini(&fixture);
+    let owner = plan.remote.saved_local_machine().unwrap().id;
+    let flags = fixture.root.path().join("flags");
+    hub_ssh(&fixture, &flags);
+    fs::write(flags.join("down"), "").unwrap();
+    let run = |argv: &[&str]| {
+        let output = fixture
+            .command(argv)
+            .current_dir(&plan.local_path)
+            .stdin(Stdio::null())
+            .output()
+            .unwrap();
+        assert_success(&output);
+        String::from_utf8(output.stdout).unwrap()
+    };
+    let status = || -> Value {
+        serde_json::from_str(&run(&["task", "status", task.as_str(), "--json"])).unwrap()
+    };
+
+    let offline = status();
+    assert_eq!(offline["reading"]["kind"], "unobserved", "{offline}");
+    assert!(
+        offline["reading"]["reason"]
+            .as_str()
+            .unwrap()
+            .contains("unreachable"),
+        "{offline}"
+    );
+    assert_eq!(offline["task"]["runs_on"]["machine"]["id"], owner.as_str());
+    assert_eq!(offline["task"]["state"], Value::Null, "{offline}");
+    assert_eq!(offline["task"]["next"], Value::Null, "{offline}");
+    assert_eq!(offline["graph"], Value::Null, "{offline}");
+    let reason = offline["task"]["reason"].as_str().unwrap();
+    assert!(reason.starts_with("Runs on mini since "), "{reason}");
+    assert!(
+        reason.ends_with(", so its Graph and Sessions are not read here"),
+        "{reason}"
+    );
+    let human = run(&["task", "status", task.as_str()]);
+    assert!(
+        human.contains("so its Graph and Sessions are not read here"),
+        "{human}"
+    );
+
+    // A sibling that never registered mini reads the same way, without SSH.
+    fs::remove_file(flags.join("down")).unwrap();
+    assert_success(&fixture.run(&["machine", "remove", "mini"]));
+    let sibling = status();
+    assert_eq!(
+        sibling["reading"]["reason"],
+        format!("{} is not registered here", owner.as_str()),
+        "{sibling}"
+    );
+    assert_eq!(sibling["task"]["runs_on"]["machine"]["id"], owner.as_str());
+    assert_eq!(sibling["task"]["next"], Value::Null);
+
+    let tasks: Value = serde_json::from_str(&run(&["task", "list", "--json"])).unwrap();
+    let listed = tasks
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["task"]["id"] == task.as_str())
+        .unwrap();
+    assert_eq!(listed["runs_on"]["machine"]["id"], owner.as_str());
+    assert_eq!(listed["section"], "working", "{listed}");
+    assert!(
+        listed["next_move"]["reason"]
+            .as_str()
+            .unwrap()
+            .starts_with(&format!("Runs on {} since ", owner.as_str())),
+        "{listed}"
+    );
+    assert_eq!(listed["actions"]["recommended"], "no_action");
+    assert_eq!(listed["actions"]["reason"], listed["next_move"]["reason"]);
+    let states = listed["selection_states"].as_array().unwrap();
+    assert!(states.contains(&Value::from("working")));
+    assert!(!states.contains(&Value::from("unstarted")));
+    let unstarted: Vec<Value> =
+        serde_json::from_str(&run(&["task", "list", "--state", "unstarted", "--json"])).unwrap();
+    assert!(!unstarted
+        .iter()
+        .any(|row| row["task"]["id"] == task.as_str()));
+    let list = run(&["task", "list"]);
+    assert!(
+        list.contains(&format!("Runs on {} since ", owner.as_str())),
+        "{list}"
+    );
+
+    plan.local
+        .abandon(
+            &loopflow_model::durable::WorkRef::Task(task.clone()),
+            "Finished elsewhere",
+        )
+        .unwrap();
+    let terminal = status();
+    assert_eq!(terminal["reading"]["kind"], "unobserved", "{terminal}");
+    assert_eq!(terminal["task"]["state"], "abandoned", "{terminal}");
+    let human = run(&["task", "status", task.as_str()]);
+    assert!(
+        human.contains("abandoned") && !human.contains("Runs on "),
+        "{human}"
+    );
+}
+
+#[test]
+fn cross_machine_steer_reaches_the_owner_and_never_replays_a_lost_reply() {
+    use loopflow::lf::commands::write::Write;
+    use loopflow::server::wire::Operation;
+    use loopflow_execution::{
+        engine::{Error, ErrorCode},
+        machine::client::Connection,
+    };
+    let fixture = preview_machines();
+    let (plan, task) = task_on_mini(&fixture);
+    let _mini = served_mini(&fixture);
+    let flags = fixture.root.path().join("flags");
+    hub_ssh(&fixture, &flags);
+    let send = |message: &str| {
+        fixture
+            .command(&["steer", task.as_str(), message, "--json"])
+            .current_dir(&plan.local_path)
+            .output()
+            .unwrap()
+    };
+    let output = send("Use the existing parser");
+    assert_success(&output);
+    let receipt: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(receipt["delivery"]["reached"], "owner");
+    assert_eq!(receipt["delivery"]["runs_on"]["label"], "mini");
+    assert!(receipt["delivery"]["sentence"]
+        .as_str()
+        .unwrap()
+        .contains("nothing reads it"));
+    assert!(plan
+        .remote
+        .task_steers(&task)
+        .unwrap()
+        .iter()
+        .any(|s| s.id.as_str() == receipt["steer_id"].as_str().unwrap()));
+    let (_server, socket) = served(&fixture);
+    fs::write(flags.join("drop-steer"), "").unwrap();
+    let error = Connection::open_at(Path::new(&socket))
+        .unwrap()
+        .request(Operation::Write(Write::TaskSteer {
+            directory: plan.local_path.clone(),
+            issue: task.to_string(),
+            message: "Keep the saved parser".into(),
+        }))
+        .unwrap_err()
+        .downcast::<Error>()
+        .unwrap();
+    assert_eq!(error.code, ErrorCode::OutcomeUnknown, "{error}");
+    assert_eq!(
+        plan.remote
+            .task_steers(&task)
+            .unwrap()
+            .iter()
+            .filter(|s| s.text.contains("Keep the saved parser"))
+            .count(),
+        1
+    );
+    assert!(!plan
+        .local
+        .task_steers(&task)
+        .unwrap()
+        .iter()
+        .any(|s| s.text.contains("parser")));
+}
+
+#[test]
+fn cross_machine_steer_validates_before_ssh_and_keeps_the_owners_refusal() {
+    use loopflow::lf::commands::write::Write;
+    use loopflow::server::wire::Operation;
+    use loopflow_execution::{
+        engine::{Error, ErrorCode},
+        machine::client::Connection,
+    };
+
+    let fixture = preview_machines();
+    let (plan, task) = task_on_mini(&fixture);
+    let record = fixture.root.path().join("entry");
+    fs::create_dir_all(&record).unwrap();
+    let refusal: Value = serde_json::from_str(include_str!(
+        "../../loopflow-execution/tests/fixtures/dto/server/not_found.json"
+    ))
+    .unwrap();
+    reply_from_mini(&fixture, &record, refusal.clone());
+    let (_server, socket) = served(&fixture);
+    let send = |message: &str| {
+        Connection::open_at(Path::new(&socket))
+            .unwrap()
+            .request(Operation::Write(Write::TaskSteer {
+                directory: plan.local_path.clone(),
+                issue: task.to_string(),
+                message: message.into(),
+            }))
+            .unwrap_err()
+            .downcast::<Error>()
+            .unwrap()
+    };
+    let ssh = fixture.root.path().join("bin/ssh");
+    let original = fs::read_to_string(&ssh).unwrap();
+    let dialed = record.join("dialed");
+    executable(
+        &ssh,
+        &original.replacen(
+            "#!/bin/sh",
+            &format!("#!/bin/sh\ntouch '{}'", dialed.display()),
+            1,
+        ),
+    );
+    assert_eq!(send("   ").code, ErrorCode::Invalid);
+    assert!(!dialed.exists());
+    let error = send("Check the parser");
+    assert_eq!(error.code, ErrorCode::NotFound);
+    assert_eq!(error.data, Some(refusal["data"].clone()));
+    assert!(plan.local.task_steers(&task).unwrap().is_empty());
+}
+
+#[test]
+fn cross_machine_steer_returns_the_carrier_acknowledgement_or_here() {
+    use loopflow::lf::commands::write::Write;
+    use loopflow::server::wire::Operation;
+    use loopflow_execution::machine::client::Connection;
+    let fixture = preview_machines();
+    let (plan, task) = task_on_mini(&fixture);
+    let owner = plan.remote.saved_local_machine().unwrap().id;
+    let (_server, socket) = served(&fixture);
+    let flags = fixture.root.path().join("flags");
+    hub_ssh(&fixture, &flags);
+    fs::write(flags.join("down"), "").unwrap();
+    let receipt = Connection::open_at(Path::new(&socket))
+        .unwrap()
+        .request(Operation::Write(Write::TaskSteer {
+            directory: plan.local_path.clone(),
+            issue: task.to_string(),
+            message: "Check the fallback".into(),
+        }))
+        .unwrap()
+        .result;
+    assert_eq!(receipt["delivery"]["reached"], "shared", "{receipt}");
+    assert_eq!(receipt["delivery"]["runs_on"]["id"], owner.as_str());
+    assert!(
+        receipt["delivery"]["sentence"]
+            .as_str()
+            .unwrap()
+            .contains("unreachable"),
+        "{receipt}"
+    );
+    assert_success(&fixture.run(&["machine", "remove", "mini"]));
+    let steer = |message: &str| {
+        let output = fixture
+            .command(&["steer", task.as_str(), message, "--json"])
+            .current_dir(&plan.local_path)
+            .output()
+            .unwrap();
+        assert_success(&output);
+        serde_json::from_slice::<Value>(&output.stdout).unwrap()
+    };
+    let receipt = steer("Sent by a sibling");
+    assert_eq!(receipt["delivery"]["reached"], "shared", "{receipt}");
+    assert_eq!(receipt["delivery"]["runs_on"]["id"], owner.as_str());
+    assert!(receipt["delivery"]["sentence"]
+        .as_str()
+        .unwrap()
+        .contains("not registered here"));
+    git(
+        &plan.local_path,
+        &["remote", "set-url", "origin", "/absent/steer.git"],
+    );
+    let receipt = steer("Keep for later");
+    assert_eq!(receipt["delivery"]["reached"], "here", "{receipt}");
+    assert!(plan
+        .local
+        .task_steers(&task)
+        .unwrap()
+        .iter()
+        .any(|s| s.id.as_str() == receipt["steer_id"].as_str().unwrap()));
+}
+
 /// A served `task.status` for a Task mini runs, asked on the laptop's socket,
 /// is mini's answer.
 #[test]
@@ -5676,7 +6070,25 @@ fn a_served_status_for_a_task_mini_runs_is_minis_answer() {
 
     let fixture = preview_machines();
     let (plan, task) = task_on_mini(&fixture);
-    let answer = serde_json::json!({"task": {"title": "Renamed on mini"}});
+    // Status follows the claim even when the person asking cannot write ownership.
+    git(
+        &plan.local_path,
+        &["config", "user.email", "reader@example.test"],
+    );
+    let issue = "shared-tracker-issue";
+    rusqlite::Connection::open(fixture.root.path().join("local/loopflow.db"))
+        .unwrap()
+        .execute(
+            "UPDATE tasks SET external_issue_id=?1 WHERE id=?2",
+            [issue, task.as_str()],
+        )
+        .unwrap();
+    let mut answer: Value =
+        serde_json::from_str(include_str!("../../../tests/fixtures/dto/task_detail.json")).unwrap();
+    answer["parent"] = answer["task"].clone();
+    answer["parent"]["identifier"] = "LOO-1".into();
+    answer["children"] = serde_json::json!([answer["task"]]);
+    answer["children"][0]["identifier"] = "LOO-3".into();
     let record = fixture.root.path().join("entry");
     fs::create_dir_all(&record).unwrap();
     answering_entry(&fixture, &record, &answer);
@@ -5695,8 +6107,32 @@ fn a_served_status_for_a_task_mini_runs_is_minis_answer() {
         .result;
     drop(server);
 
-    assert_eq!(read, answer);
+    // Mini's reading, saying it is mini's and where the Task runs as the laptop names it.
+    let output = fixture
+        .command(&["task", "status", task.as_str()])
+        .current_dir(&plan.local_path)
+        .output()
+        .unwrap();
+    assert_success(&output);
+    let text = String::from_utf8(output.stdout).unwrap();
+    for line in [
+        "Waiting for you at demo.",
+        "manual  Checkout conversation  closed",
+        "parent: LOO-1",
+        "child: LOO-3  Route incoming mail  active at demo",
+    ] {
+        assert!(text.contains(line), "{text}");
+    }
+    let mut expected = answer;
+    expected["reading"] = serde_json::json!({"kind": "owner"});
+    expected["task"]["runs_on"] = read["task"]["runs_on"].clone();
+    assert_eq!(read, expected);
+    assert_eq!(
+        read["task"]["runs_on"]["machine"]["label"], "mini",
+        "{read}"
+    );
     let (_, request) = entry_input(&record);
+    assert_eq!(request["operation"]["issue"], issue);
     assert_eq!(request["operation"]["kind"], "task.status");
     assert_eq!(request["sender"]["repository"], plan.repository.as_str());
 }

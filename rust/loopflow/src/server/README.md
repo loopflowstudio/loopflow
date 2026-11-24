@@ -39,8 +39,9 @@ For a repository without Linear or Asana the service also reads the shared
 plan. A save, here or in the CLI, sends its own records at once
 (`plan_carriers::send`: the hub, and a Git push with no fetch, five seconds at
 most). The service reads and sends (`plan_carriers::sync`) after each command
-it answers that names a directory, and fetches every such repository's plan
-refs every 60 s, which is when another Machine's change arrives with no hub.
+it answers that names a directory. For repositories with open local claims,
+the service and running Graph steps share a hub and Git exchange every 30 s.
+The service fetches Git plan refs every 60 s for repositories without claims.
 [Without a tracker](../../../../docs/dev/planning.md#without-a-tracker-stamps-and-carriers) has the carriers.
 
 ## Recovery pass
@@ -476,7 +477,7 @@ case names one operation, including distinct claim/unassign and pin/unpin writes
 | `task.run` | `lf task run <issue>` | `engine::task` |
 | `task.auto.on` | `lf task auto on <issue>` | `engine::task` |
 | `task.auto.off` | `lf task auto off <issue>` | `engine::task` |
-| `task.steer` | `lf steer <issue> <message>` | `engine::task`; the thread entry the store saves as the Task's steer |
+| `task.steer` | `lf steer <issue> <message>` | `engine::task`; the saved steer ID and delivery receipt |
 | `task.report` | `lf task report <issue> <message>` | `engine::task` |
 | `task.interrupt` | `lf task interrupt <issue>` | `engine::task` |
 | `task.update` | `lf task update <issue>` | write |
@@ -627,8 +628,8 @@ the phone's `view.select` Task list and its creation destinations all read it.
   the run stands in at interactive steps only while auto is on, and
   otherwise stops before the next one. A null `agent` uses each step's
   configured harness. `lf task run <issue> --json` and `lf task auto on --json`
-  print the same value. `task.auto.off {directory, issue, reason}` turns auto off (`{issue, was_on}`); only `task.auto.on` turns it on, `task.steer` and `task.report {message}` save to the
-  thread and return it, and `task.interrupt` returns its receipt.
+  print the same value. `task.auto.off {directory, issue, reason}` turns auto off (`{issue, was_on}`); only `task.auto.on` turns it on. `task.report {message}` returns the updated thread. `task.steer`
+  returns the identifier, steer ID and delivery receipt. `task.interrupt` returns its receipt.
 - A write uses the shared `Write` shape. `Write::run` calls the shared Rust
   function its CLI handler calls and returns the typed value; the CLI prints
   that value with `--json` and renders it as text otherwise. Nothing parses

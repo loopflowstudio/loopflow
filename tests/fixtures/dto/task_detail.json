@@ -17,7 +17,11 @@
       "url": "https://github.com/loopflowstudio/loopflow/pull/1719",
       "phase": "open"
     },
-    "next": "lf task run LOO-2"
+    "next": "lf task run LOO-2",
+    "runs_on": null
+  },
+  "reading": {
+    "kind": "here"
   },
   "sessions": [
     {

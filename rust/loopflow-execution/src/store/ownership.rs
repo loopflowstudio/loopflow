@@ -307,17 +307,7 @@ pub fn task_ownership(
     let (local, mut value) = store.saved_task_ownership(task)?;
     let mut names = machine_names(store)?;
     names.insert(local, local_label());
-    for owner in [&mut value.owner, &mut value.superseded_by]
-        .into_iter()
-        .flatten()
-    {
-        label_owner(owner, &names);
-    }
-    for entry in &mut value.log {
-        if let Some(label) = entry.machine_id.as_ref().and_then(|id| names.get(id)) {
-            entry.machine_label = Some(label.clone());
-        }
-    }
+    label_ownership(&mut value, &names);
     Ok(value)
 }
 
@@ -328,10 +318,28 @@ pub fn task_detail_facts(
     let (local, mut facts) = store.saved_task_detail_facts(tasks)?;
     let mut names = machine_names(store)?;
     names.insert(local, local_label());
-    for owner in facts.owners.values_mut() {
-        label_owner(owner, &names);
+    for ownership in facts.ownership.values_mut() {
+        label_ownership(ownership, &names);
     }
     Ok(facts)
+}
+
+/// Each Machine the ownership names, as `names` names it here.
+fn label_ownership(
+    ownership: &mut loopflow_model::durable::TaskOwnership,
+    names: &HashMap<MachineId, String>,
+) {
+    for owner in [&mut ownership.owner, &mut ownership.superseded_by]
+        .into_iter()
+        .flatten()
+    {
+        label_owner(owner, names);
+    }
+    for entry in &mut ownership.log {
+        if let Some(label) = entry.machine_id.as_ref().and_then(|id| names.get(id)) {
+            entry.machine_label = Some(label.clone());
+        }
+    }
 }
 
 pub(crate) fn apply_tracker_event(

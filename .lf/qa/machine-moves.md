@@ -1,4 +1,57 @@
-Read when the change moves a Task between owned Machines.
+Read when the change moves, steers or reads a Task across Machines.
+
+# Cross-Machine steering and status over real SSH
+
+Use three private `HOME` and `LF_HOME` pairs with separate clones of one
+disposable bare origin. Commit `planning: {provider: git, personal: true}`
+and the QA graph before the first Start. Give each clone a Git identity.
+On the owner, run `lf server run`, give it a temporary public name with
+`lf machine public sandbox-b`, and create a Task with `--run --json`.
+Wait for the Graph to reach its interactive step. The two callers' first
+`lf task list` discovers the Task and its claim. Run `lf set --global
+default_agent claude` in each home first: with a stand-in `claude` on PATH,
+`lf task create --run` otherwise stops at "No agent selected". A caller with no
+`lf server run` learns later owner changes (a completion) only when a command
+exchanges; `lf task sync <id>` there does it at once. For the unowned case,
+`lf wave create placed`, `lf --wave placed set machine sandbox-b` and
+`lf task create '<words>' --wave placed` on the laptop.
+
+On macOS, stock `/usr/sbin/sshd -D -e -f <config>` can run as your user on
+a high port at `127.0.0.1`. Generate throwaway host and client keys with
+`ssh-keygen -t ed25519`. Point `HostKey` and `AuthorizedKeysFile` to those
+files. Use `StrictModes no`, `UsePAM no`, `PasswordAuthentication no`,
+`KbdInteractiveAuthentication no`, `DisableForwarding yes` and
+`AllowUsers <your login>`. Use a `ForceCommand` script to enter the owner's
+clone and run `/bin/sh -c "$SSH_ORIGINAL_COMMAND"` with its isolated
+`HOME`, `LF_HOME`, `LF_BIN` and `PATH`. Put a wrapper on the callers'
+PATH that executes `/usr/bin/ssh -F <private config> "$@"`. OpenSSH gets
+its default SSH config from the OS account even with a private `HOME`.
+The private config names the test `IdentityFile` and
+`UserKnownHostsFile`, with a `[127.0.0.1]:<port>` entry for the host key.
+
+Register `ssh://<login>@127.0.0.1:<port>` with `lf machine add` on the
+laptop. Leave the sibling without a route. Compare `lf task status <id>
+--json` and `lf task status <id> --subscribe --json --select
+reading.kind,task.runs_on.machine.id,graph.sentence` with stdin closed.
+Send directions with `lf steer <id> '<words>' --json` and the laptop's
+Unix socket `task.steer` request. Before reading the Task again on the owner,
+watch `steers` via a read-only SQLite connection. Git imports keep the
+comment's source and may generate a different steer id on the owner. Check
+one row per direction and the `steer_delivered` row per provider Session.
+
+For an offline peer, close only the test SSH master with `ssh -S <socket>
+-O exit <route>` and stop the test daemon by PID. A cached master otherwise
+keeps the route alive. The master socket lives in `/tmp/lf-ssh-<uid>-<hash>/`,
+where `<hash>` is the first 16 hex digits of SHA-256 of the caller's
+canonical `LF_HOME` (`/private/tmp/…` on macOS, not `/tmp/…`). Stopping the
+sshd listener leaves an open master serving reads, so a status that still says
+"read from its server" after the kill came through it. Break and restore the sibling's origin to check a steer saved
+locally. Run `lf task sync <id>` on the sibling to send it and watch the
+owner import it during its next background exchange.
+
+Stop the private servers, holders and their providers. Check the private
+`server.plist` for a launchd label and boot out that label if a provider
+hook or Setup registered it during the run.
 
 # Moving a Task between owned Machines
 

@@ -9117,6 +9117,17 @@
         "run_control": {
           "$ref": "#/$defs/TaskRunControl"
         },
+        "runs_on": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TaskRunsOn"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The Machine that runs it when another Machine than this one owns it;\n`null` when this Machine owns it or nobody does."
+        },
         "runtime": {
           "anyOf": [
             {
@@ -9158,7 +9169,8 @@
         "run_control",
         "pr",
         "section",
-        "owned_by_you"
+        "owned_by_you",
+        "runs_on"
       ],
       "type": "object"
     },
@@ -12247,7 +12259,42 @@
       ],
       "type": "object"
     },
+    "SteerDelivery": {
+      "properties": {
+        "reached": {
+          "$ref": "#/$defs/SteerReached"
+        },
+        "runs_on": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MachineRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sentence": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "reached",
+        "runs_on",
+        "sentence"
+      ],
+      "type": "object"
+    },
     "SteerId": {
+      "type": "string"
+    },
+    "SteerReached": {
+      "description": "Where the steer has been saved so far.",
+      "enum": [
+        "owner",
+        "shared",
+        "here"
+      ],
       "type": "string"
     },
     "StepContext": {
@@ -15077,7 +15124,7 @@
           "type": "string"
         },
         "next": {
-          "description": "The command that moves it on; `null` while it moves by itself or is closed.",
+          "description": "The command that moves it on; `null` while it moves by itself, runs on\nanother Machine or is closed.",
           "type": [
             "string",
             "null"
@@ -15112,8 +15159,27 @@
           "description": "Why it is in that state, or what it waits on.",
           "type": "string"
         },
+        "runs_on": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TaskRunsOn"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The Machine that runs it when another Machine than this one owns it;\n`null` when this Machine owns it or nobody does."
+        },
         "state": {
-          "$ref": "#/$defs/TaskState"
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TaskState"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "`null` when live execution is on another Machine and was not read."
         },
         "title": {
           "type": "string"
@@ -15137,7 +15203,8 @@
         "reason",
         "graph",
         "pr",
-        "next"
+        "next",
+        "runs_on"
       ],
       "type": "object"
     },
@@ -15280,6 +15347,25 @@
       ],
       "type": "object"
     },
+    "TaskRunsOn": {
+      "description": "The Machine that runs a Task another Machine owns, and since when: the\nlatest ownership entry naming it. Wire type; no defaults.",
+      "properties": {
+        "machine": {
+          "$ref": "#/$defs/MachineRef",
+          "description": "Named as this Machine's preferences name it, else as the claim\npublished it, else by its id."
+        },
+        "since": {
+          "description": "Unix seconds.",
+          "format": "int64",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "machine",
+        "since"
+      ],
+      "type": "object"
+    },
     "TaskRuntimeSnapshot": {
       "properties": {
         "completion_pending": {
@@ -15348,7 +15434,7 @@
         },
         {
           "const": "working",
-          "description": "Someone's idle, active or moving Task.",
+          "description": "Someone's idle, active or moving Task, or a Task owned on another Machine.",
           "type": "string"
         }
       ]
@@ -15651,6 +15737,25 @@
           "type": "string"
         }
       ]
+    },
+    "TaskSteerReceipt": {
+      "properties": {
+        "delivery": {
+          "$ref": "#/$defs/SteerDelivery"
+        },
+        "identifier": {
+          "type": "string"
+        },
+        "steer_id": {
+          "$ref": "#/$defs/SteerId"
+        }
+      },
+      "required": [
+        "identifier",
+        "steer_id",
+        "delivery"
+      ],
+      "type": "object"
     },
     "TaskSummary": {
       "properties": {
@@ -17808,7 +17913,7 @@
           ],
           "type": "object",
           "x-result": {
-            "$ref": "#/$defs/TaskComments"
+            "$ref": "#/$defs/TaskSteerReceipt"
           }
         },
         {

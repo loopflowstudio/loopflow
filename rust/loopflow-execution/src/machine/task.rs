@@ -229,16 +229,19 @@ pub fn remote_ownership_writer(
     let Some(route) = remote_task_in(&store, selector, directory)? else {
         return Ok(None);
     };
-    let Some(moving) = store.task_move_in_flight(&route.task_id)? else {
-        return Ok(Some(route));
+    Ok((!move_awaiting_arrival(&store, &route.task_id)?).then_some(route))
+}
+
+/// While an outgoing move is waiting to arrive, writes still belong here.
+pub fn move_awaiting_arrival(store: &SqliteStore, task: &TaskId) -> Result<bool> {
+    let Some(moving) = store.task_move_in_flight(task)? else {
+        return Ok(false);
     };
     let sent = matches!(
         moving.stage,
         loopflow_storage::sqlite::task_moves::MoveStage::Sent { .. }
     );
-    let arrived =
-        sent && crate::ops::session_move::arrived_on(&route.task_id, &moving.to_machine_id)?;
-    Ok(arrived.then_some(route))
+    Ok(!sent || !crate::ops::session_move::arrived_on(task, &moving.to_machine_id)?)
 }
 
 pub fn resolve_task_id(

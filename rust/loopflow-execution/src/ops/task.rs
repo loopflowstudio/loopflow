@@ -2760,16 +2760,15 @@ pub async fn read_task_status(
     repo: &Path,
     selector: &str,
 ) -> OpsResult<TaskStatus> {
-    let task = crate::store::children::resolve_task_id(
-        &store.sqlite,
-        selector,
-        Some(&repo.to_string_lossy()),
-    )
-    .and_then(|id| id.map(|id| store.sqlite.task(&id)).transpose())
-    .map_err(task_error)?
-    .flatten()
-    .ok_or_else(|| task_error(format!("Task {selector} is not registered")))?;
-    registered_task_status(store, task).await
+    registered_task_status(store, registered_task(&store.sqlite, repo, selector)?).await
+}
+
+pub fn registered_task(store: &SqliteStore, repo: &Path, selector: &str) -> OpsResult<Task> {
+    crate::store::children::resolve_task_id(store, selector, Some(&repo.to_string_lossy()))
+        .and_then(|id| id.map(|id| store.task(&id)).transpose())
+        .map_err(task_error)?
+        .flatten()
+        .ok_or_else(|| task_error(format!("Task {selector} is not registered")))
 }
 
 pub async fn registered_task_status(store: &SharedStore, mut task: Task) -> OpsResult<TaskStatus> {
@@ -3390,7 +3389,7 @@ pub fn task_comment(
     block_on_task(task_comment_async(repo, wave, issue, message, steer))
 }
 
-pub(crate) fn validate_task_comment_input(message: &str) -> OpsResult<()> {
+pub fn validate_task_comment_input(message: &str) -> OpsResult<()> {
     if message.trim().is_empty() {
         return Err(task_error("Task comment cannot be empty"));
     }
@@ -3402,6 +3401,18 @@ pub fn append_task_comment(
     task: &Task,
     message: &str,
     steer: bool,
+) -> OpsResult<String> {
+    append_task_comment_as(store, task, message, steer, || {
+        crate::config::participant_name().map_err(task_error)
+    })
+}
+
+pub(crate) fn append_task_comment_as(
+    store: &Store,
+    task: &Task,
+    message: &str,
+    steer: bool,
+    participant: impl FnOnce() -> OpsResult<Option<String>>,
 ) -> OpsResult<String> {
     validate_task_comment_input(message)?;
     let id = uuid::Uuid::new_v4().to_string();
@@ -3417,7 +3428,7 @@ pub fn append_task_comment(
             loopflow_model::comment::TaskCommentAuthor::Integration,
         )
     } else {
-        let name = crate::config::participant_name().map_err(task_error)?;
+        let name = participant()?;
         let requester = name
             .as_ref()
             .map(|name| {

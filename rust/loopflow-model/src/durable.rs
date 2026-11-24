@@ -291,6 +291,26 @@ impl TaskOwnership {
             .find(|entry| entry.machine_id.as_ref() == Some(machine))
             .map(|entry| entry.at)
     }
+
+    /// Where the Task runs when another Machine than `local` owns it.
+    pub fn runs_on(&self, local: &MachineId) -> Option<TaskRunsOn> {
+        let machine = self.owner_elsewhere(local)?;
+        Some(TaskRunsOn {
+            since: self.since(machine.id.as_ref()?)?,
+            machine: machine.clone(),
+        })
+    }
+}
+
+/// The Machine that runs a Task another Machine owns, and since when: the
+/// latest ownership entry naming it. Wire type; no defaults.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct TaskRunsOn {
+    /// Named as this Machine's preferences name it, else as the claim
+    /// published it, else by its id.
+    pub machine: MachineRef,
+    /// Unix seconds.
+    pub since: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]

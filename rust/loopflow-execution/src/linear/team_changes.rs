@@ -3,6 +3,7 @@ use std::collections::{btree_map::Entry, BTreeMap};
 
 use serde::Deserialize;
 use serde_json::json;
+use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 
 use super::{CommentNode, Connection, IssueNode, LinearClient, PageInfo, CHANGED_ISSUE_FIELDS};
 use super::{TrackerItem, TrackerProject};
@@ -46,7 +47,17 @@ impl LinearClient {
             "or":[{"id":{"in":live}}, {"state":{"type":{"nin":["completed","canceled"]}}}]});
         let mut revision = json!({"lte":through});
         if let Some(since) = since {
-            revision["gte"] = json!(since);
+            // A comment committed during the previous query can carry a
+            // timestamp just before its upper bound. Re-read the overlap;
+            // the store consumes each comment revision once.
+            let since = OffsetDateTime::parse(since, &Rfc3339).map_err(|error| {
+                LinearError::Message(format!("Invalid team watermark: {error}"))
+            })?;
+            let since =
+                (since.saturating_sub(time::Duration::seconds(30))).max(OffsetDateTime::UNIX_EPOCH);
+            revision["gte"] = json!(since
+                .format(&Rfc3339)
+                .map_err(|error| LinearError::Message(error.to_string()))?);
         }
         let comment_filter = json!({"issue":eligible,"updatedAt":revision});
         eligible["updatedAt"] = revision;

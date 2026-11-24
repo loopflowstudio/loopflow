@@ -6,7 +6,7 @@
 
 use std::path::{Path, PathBuf};
 
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 use loopflow_execution::engine::task;
@@ -25,7 +25,7 @@ pub(crate) enum TaskMoveResult {
 // constructs that variant before the server serializes it, so returning a
 // different Rust type is a compile error.
 macro_rules! writes {
-    (run($this:ident, $directory:ident, $task_repo:ident, $remote:ident, $environment:ident); $(
+    (run($this:ident, $directory:ident, $task_repo:ident, $remote:ident, $environment:ident, $origin:ident); $(
         $(#[$meta:meta])*
         $name:ident { $($(#[$field_meta:meta])* $field:ident: $input:ty),* $(,)? }
         => $output:ty;
@@ -66,12 +66,13 @@ macro_rules! writes {
                 {
                     *issue = super::work_route::peer_task_id(&sender.repository, issue)?;
                 }
-                let environment = sender.selection.environment(&sender.secrets)?;
-                self.execute(None, &environment)
+                self.execute(None, Some(sender))
             }
 
             /// `remote` is the Machine a Task or Session write goes to instead.
-            fn execute(&$this, $remote: Option<Remote>, $environment: &[(String, String)]) -> anyhow::Result<WriteResult> {
+            fn execute(&$this, $remote: Option<Remote>, $origin: Option<&Sender>) -> anyhow::Result<WriteResult> {
+                let environment = $origin.map(|sender| sender.selection.environment(&sender.secrets)).transpose()?.unwrap_or_default();
+                let $environment = environment.as_slice();
                 let $directory = $this.directory();
                 let $task_repo = |issue: &str| loopflow_execution::ops::task::task_repository($directory, Some(issue));
                 match $this {
@@ -86,7 +87,7 @@ macro_rules! writes {
 }
 
 writes! {
-    run(self, directory, task_repo, remote, environment);
+    run(self, directory, task_repo, remote, environment, origin);
     /// File or adopt a Task, with a durable request identity; optionally start it.
     #[serde(rename = "task.create")]
     TaskCreate {
@@ -275,8 +276,8 @@ writes! {
         directory: PathBuf,
         issue: String,
         message: String,
-    } => loopflow_model::comment::TaskComments;
-    { issue, message, .. } => task::steer(directory, issue, None, message)?,
+    } => task::TaskSteerReceipt;
+    { issue, message, .. } => steer_task(&task_repo(issue)?, issue, None, message, origin)?,
 
     /// `lf task report <issue> <message> --json`: progress for the Task's
     /// thread; an agent's carries its Session's provenance.
@@ -1209,15 +1210,15 @@ impl Write {
                     answer.result,
                 )?)))
             }
-            (_, remote) => self.execute(remote, &[]),
+            (_, remote) => self.execute(remote, None),
         }
     }
 
     /// The Machine a Task or Session write goes to when its Work runs
     /// elsewhere, with the write naming that Work exactly. `None` runs it here.
+    /// A steer handles its carrier fallback inside `steer_task` instead.
     fn remote(&self) -> anyhow::Result<Option<Remote>> {
         use loopflow_execution::machine::task::{remote_ownership_writer, remote_task};
-        // A run starts agents there, which carry what `forward` names.
         let (route, launching) = match self {
             Self::SessionResume { .. } | Self::SessionNew { .. } => return self.remote_session(),
             Self::TaskRun { issue, .. } | Self::TaskAutoOn { issue, .. } => {
@@ -1493,6 +1494,65 @@ impl Remote {
         loopflow_execution::machine::client::Connection::open_on(machine, sender, None)?
             .request(change)
     }
+}
+
+/// Resolve the Task once for the CLI or a served request. A Machine receiving
+/// a forwarded request can save or sync the steer, but never forwards it again.
+pub(super) fn steer_task(
+    repo: &Path,
+    issue: &str,
+    wave: Option<&str>,
+    message: &str,
+    sender: Option<&Sender>,
+) -> anyhow::Result<task::TaskSteerReceipt> {
+    use super::work_route::{peer_issue, TaskPeer};
+    use crate::server::wire::Operation;
+    use loopflow_execution::engine::{Error, ErrorCode};
+
+    loopflow_execution::ops::task::validate_task_comment_input(message)
+        .map_err(|error| Error::new(ErrorCode::Invalid, error.to_string()))?;
+    let rt = tokio::runtime::Runtime::new()?;
+    let (store, task) = rt
+        .block_on(loopflow_execution::ops::task::resolve_saved_task(
+            repo, wave, issue,
+        ))
+        .with_context(|| format!("resolving Task {issue}"))?;
+    let participant = match sender {
+        Some(sender) => sender.selection.participant.clone(),
+        None => loopflow_execution::config::participant_name_in(repo)?,
+    };
+    let save = |fallback| rt.block_on(task::steer(&store, &task, message, participant, fallback));
+    let Some(peer) = TaskPeer::resolve(&store.sqlite, &task.id)? else {
+        return save(None);
+    };
+    let name = peer.runs_on.machine.name();
+    let open = match sender {
+        None => peer.connect(repo, &task, Some(TaskPeer::deadline())),
+        Some(_) if peer.registered.is_none() => Err(anyhow!("{name} is not registered here")),
+        Some(_) => Err(anyhow!("{name} now runs the Task")),
+    };
+    let mut connection = match open {
+        Ok(connection) => connection,
+        Err(error) => {
+            return save(Some((peer.runs_on.machine, format!("{error:#}"))));
+        }
+    };
+
+    // Once transmitted, the owner may have saved it even if the reply is lost.
+    let change = Write::TaskSteer {
+        directory: repo.to_owned(),
+        issue: peer_issue(&task),
+        message: message.to_owned(),
+    };
+    let mut receipt: task::TaskSteerReceipt = connection
+        .request(Operation::Write(change))
+        .and_then(|answer| Ok(serde_json::from_value(answer.result)?))
+        .map_err(|error| Error::refused(&error, ErrorCode::OutcomeUnknown))?;
+    if receipt.delivery.reached == task::SteerReached::Owner {
+        receipt.delivery.sentence = format!("{name} · {}", receipt.delivery.sentence);
+        receipt.delivery.runs_on = Some(peer.runs_on.machine);
+    }
+    Ok(receipt)
 }
 
 /// `task.run` for `issue` from `directory`, where its Work lives.

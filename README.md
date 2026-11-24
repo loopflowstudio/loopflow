@@ -115,7 +115,7 @@ You want to do something; here's how through `lf`.
 |---|---|
 | run agents in parallel, each Task in its own worktree and branch | `lf task create "…" --run` |
 | run on Claude Code, Codex, OpenCode or Pi, per run or per Skill | `lf -a codex : "…"` |
-| sign any Machine in to Claude, Codex, GitHub or Linear, approved in your browser | `lf machine login claude mini` |
+| sign any Machine in to Codex, GitHub or Linear, approved in your browser | `lf machine login codex mini` |
 | open a Task conversation here (a sibling tab from an agent) | `lf open --task <ID>` |
 | keep work already in progress: a dirty checkout, another tool's worktree | `lf task create --worktree . --title "…"` |
 | land when checks pass, with CI failures repaired for you | `lf land --wait-and-fix` |

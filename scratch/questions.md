@@ -91,3 +91,10 @@ Choices made headless for review; the plan says what each passed over.
   sign this Machine in; naming no Machine is the way. One check at the command
   (`login::require_reach`), none inside `login::login`. Passed over:
   resolving first, which reaches SSH.
+- Rescope docs: `lf machine logins mini` overlays Claude as `forwarded`
+  from this Machine's `forward.env`, since the target's probe runs without the
+  per-run token and would read `signed out` for a Machine whose launches work.
+  Passed over: no overlay, with a sentence explaining the `signed out` row.
+- Rescope docs: Claude drops out of `approvers` entirely; local
+  `lf machine login claude` hands the terminal to `claude auth login`. Passed
+  over: keeping the paste-code relay for this Machine only.

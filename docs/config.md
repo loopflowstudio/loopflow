@@ -1041,14 +1041,14 @@ summaries:
 ```yaml
 # personal global configuration
 approvers:
-  claude: {chrome: Work}
-  codex: {command: "my-approver"}
+  codex: {chrome: Work}
+  github: {command: "my-approver"}
 ```
 
 `approvers.<provider>` says where `lf machine login` sends a provider's
 approval page: unset opens the default browser, `chrome` a Chrome profile,
-`command` a program that approves on its own. It applies to Claude, Codex,
-GitHub, Linear, Asana, Notion and OpenCode, and is personal to this Machine.
+`command` a program that approves on its own. It applies to Codex, GitHub,
+Linear, Asana, Notion and OpenCode, and is personal to this Machine.
 See [Choose who approves](subscriptions.md#choose-who-approves) for the
 command's environment. Loopflow honors `CLAUDE_CONFIG_DIR`, `CODEX_HOME` and
 native API-key configuration; see [Security](security.md) for Machine

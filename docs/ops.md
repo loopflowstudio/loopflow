@@ -339,7 +339,7 @@ access, and [Surfaces](surfaces.md) for app-owned Desktop automation.
 
 ```bash
 lf machine add mini                              # save an SSH destination; offers to install lf
-lf machine login claude mini                     # approve here; mini keeps its own login
+lf machine login codex mini                      # approve here; mini keeps its own login
 lf --machine mini task list                      # any command, run there
 lf task move LOO-12 --machine mini               # move a Task there with its Session; you stay its person
 lf --wave product set machine mini               # new Tasks in Wave `product` run there
@@ -363,10 +363,11 @@ lf machine end code-1                                # give a rented machine bac
 
 A rented machine is signed in as it is prepared, once per provider, to the
 template's `--logins` or every provider signed in here that reaches another
-Machine: Claude, Codex, GitHub, Linear and OpenCode. Asana, Notion and Doppler
-sign in on each Machine itself. With
-[approvers](subscriptions.md#choose-who-approves) set to a command, that needs
-no one present.
+Machine: Codex, GitHub, Linear and OpenCode. Claude arrives with each launch as
+the [forwarded](subscriptions.md#sign-in-on-any-machine)
+`CLAUDE_CODE_OAUTH_TOKEN`. Asana, Notion and Doppler sign in on each Machine
+itself. With [approvers](subscriptions.md#choose-who-approves) set to a
+command, that needs no one present.
 
 Rental providers read their keys from the environment (`doppler run -- lf …`):
 Daytona `DAYTONA_API_KEY`; Modal `MODAL_TOKEN_ID`/`MODAL_TOKEN_SECRET` or

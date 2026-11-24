@@ -84,21 +84,24 @@ configured publisher workflow and credentials.
 
 ```bash
 lf machine add mini
-lf machine login claude mini
+lf set --global forward.env '[CLAUDE_CODE_OAUTH_TOKEN]'
 lf machine login codex mini
 lf machine login github mini
 lf machine login linear mini
 lf --machine mini -a codex implement
 ```
 
-Claude and Codex sign in on the destination through their own login, run there
+Codex signs in on the destination through its own device login, run there
 over SSH with no terminal; only the approval page opens here
 ([Sign in on any Machine](subscriptions.md#sign-in-on-any-machine)). The login,
-and every refresh of it, stays on the destination. Claude's one-time code, the
-one secret sent, travels on SSH stdin and is useless without the verifier held
-by the destination's `claude` process. Loopflow does not choose a login, store
-a Claude or Codex token or refresh one. A Machine with no login is refused
-before launch with the command that signs it in.
+and every refresh of it, stays on the destination. Claude reaches the
+destination as the `claude setup-token` you keep in Doppler and name in
+`forward.env`: it travels on SSH stdin with each launch, is set for that run
+only, and is never written there. Anyone who can read that launch's
+environment on the destination can use the token until it expires; trust the
+destination OS user with it. Loopflow does not choose a login, store a Claude
+or Codex token or refresh one. A Machine with no login is refused before launch
+with what fixes it.
 
 Service credential transfer remains explicit. OpenSSH checks the known host key
 and Loopflow checks the saved Machine identity before transfer. Linear receives a

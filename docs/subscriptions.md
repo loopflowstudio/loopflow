@@ -83,34 +83,44 @@ another harness, use `lf -a codex resume <session-id>`.
 
 ## Sign in on any Machine
 
+Claude reaches other Machines as a token you forward; Codex signs in on each
+Machine.
+
 ```bash
-lf machine login claude mini
-#   Approve Claude for mini in Chrome (Work), then paste the code it shows:
-#   > ****
-#   mini: Claude signed in as jack@example.com (max)
+claude setup-token                                     # here: prints a long-lived token
+doppler secrets set CLAUDE_CODE_OAUTH_TOKEN > /dev/null  # paste it at the prompt
+lf set --global forward.env '[CLAUDE_CODE_OAUTH_TOKEN]'
+lf --machine mini -a claude implement
+
 lf machine login codex mini
 #   Approve Codex for mini in Chrome (Work) with code ABCD-1234
 #   mini: Codex signed in (ChatGPT)
 lf --machine mini -a codex implement
 ```
 
-`lf machine login <provider> [<machine>…]` runs the provider's own login on
-each named Machine, or on this one when none is named, and opens its approval
-page here. Claude runs `claude auth login`; you approve, and paste the code the
-page shows. Codex runs `codex login --device-auth`; you approve with the code
-it prints, within 15 minutes. Each Machine ends up with its own login, written
-and refreshed by the unmodified client. No credential crosses the network: the
-only thing sent is Claude's one-time code, which works only with a verifier
-that never leaves the target's `claude` process. Loopflow stores no Claude or
-Codex token.
+**Claude.** Every remote launch sets `CLAUDE_CODE_OAUTH_TOKEN` on the
+destination from this Machine's environment, else Doppler, and Claude signs in
+with it for that run ([per-run secrets](#per-run-secrets)). The destination
+keeps no Claude login of its own, and nothing is written there. The token is a
+`claude setup-token`: Claude mints it, and you renew it the same way when it
+expires. `lf machine login claude` with no Machine runs `claude auth login`
+here; naming another Machine refuses:
 
-Codex's device code login must be enabled in ChatGPT security settings. Running
-`lf machine login` again replaces that Machine's login with whichever account
-approves it.
+```
+Claude reaches mini as a forwarded token: run `claude setup-token`, store it with `doppler secrets set CLAUDE_CODE_OAUTH_TOKEN`, and add CLAUDE_CODE_OAUTH_TOKEN to `forward.env`
+```
+
+**Codex.** `lf machine login codex [<machine>…]` runs `codex login
+--device-auth` on each named Machine, or on this one when none is named, and
+opens its approval page here; you approve with the code it prints, within 15
+minutes. Each Machine ends up with its own login, written and refreshed by the
+unmodified client, and no credential crosses the network. Device code login
+must be enabled in ChatGPT security settings. Running `lf machine login codex`
+again replaces that Machine's login with whichever account approves it.
 
 ```bash
 lf machine logins mini
-#   claude    signed in    jack@example.com (max)
+#   claude    forwarded    CLAUDE_CODE_OAUTH_TOKEN
 #   codex     signed in    ChatGPT
 #   github    signed in    jack-heart
 #   linear    signed out
@@ -119,59 +129,67 @@ lf machine logout codex mini
 
 `lf machine logins [<machine>] [--json]` asks the Machine's own clients
 (`claude auth status`, `codex login status`) and shows `unknown` when one can't
-answer. It also shows each provider's last refusal there, login missing or
-usage limit, and when. `lf machine logout` runs each provider's own logout.
+answer. On another Machine, Claude reads `forwarded` when your `forward.env`
+names `CLAUDE_CODE_OAUTH_TOKEN`. Each row also shows the provider's last
+refusal there, login missing or usage limit, and when. `lf machine logout` runs
+each provider's own logout.
 
-Every launch, local or remote, asks the same clients first. A Machine with no
+Every launch, local or remote, asks the same clients first, with the launch's
+environment, so a forwarded token counts as signed in. A Machine with no
 login for a provider skips that provider, like a [revoked login](#when-a-provider-refuses-work),
 and with none left stops before an agent starts:
 
 ```
 mini has no Codex login; run `lf machine login codex mini`
+mini has no Claude login; forward CLAUDE_CODE_OAUTH_TOKEN (`lf set --global forward.env`)
 ```
 
-An unknown answer launches anyway. To sign in again wherever a provider is
-signed out, or refused a launch with none of that provider since:
+An unknown answer launches anyway. To sign Codex in again wherever it is
+signed out, or refused a launch with no Codex launch since:
 
 ```bash
-lf machine login claude --refused
+lf machine login codex --refused
 ```
 
 ### Choose who approves
 
 ```bash
-lf set --global approvers.claude.chrome Work
-lf set --global approvers.codex.command 'my-approver'
+lf set --global approvers.codex.chrome Work
+lf set --global approvers.github.command 'my-approver'
 ```
 
 | `approvers.<provider>` | What a sign-in does |
 | --- | --- |
 | unset | Opens the default browser |
 | `chrome: <profile>` | Opens that Chrome profile, by name or directory |
-| `command: <cmd>` | Runs the command with `LF_APPROVE_PROVIDER`, `LF_APPROVE_URL`, `LF_APPROVE_MACHINE` and, when the page asks for a device code (Codex, GitHub, OpenCode), `LF_APPROVE_CODE`; exit 0 means approved, and for Claude its first output line is the code |
+| `command: <cmd>` | Runs the command with `LF_APPROVE_PROVIDER`, `LF_APPROVE_URL`, `LF_APPROVE_MACHINE` and, when the page asks for a device code (Codex, GitHub, OpenCode), `LF_APPROVE_CODE`; exit 0 means approved |
 
-The setting covers every provider whose sign-in opens a page: Claude, Codex,
-GitHub, Linear, Asana, Notion and OpenCode. `--chrome-profile <profile>`
-overrides it for one run. The browser picks the account; Loopflow keeps no list
-of accounts. Pasting Claude's code needs a terminal; a command approver doesn't,
-so unattended sign-ins use one.
+The setting covers every sign-in `lf machine login` opens a page for: Codex,
+GitHub, Linear, Asana, Notion and OpenCode. Claude's own login here opens its
+page itself. `--chrome-profile <profile>` overrides the setting for one run.
+The browser picks the account; Loopflow keeps no list of accounts. A command
+approver needs no terminal, so unattended sign-ins use one.
 
 ### Rentals
 
 ```bash
 lf ondemand add code --provider daytona --vcpus 4 --memory-gb 8 --max 2 \
-  --max-usd-per-hour 0.40 --logins claude,github
+  --max-usd-per-hour 0.40 --logins codex,github
 lf task run LOO-570 --rent code
 ```
 
 A rented Machine is signed in as it is prepared, at most one approval per
 provider: to the template's `--logins`, or with none set, to every provider
-signed in here. With command approvers set, no one has to be there.
+signed in here that reaches another Machine (Codex, GitHub, Linear,
+OpenCode). With command approvers set, no one has to be there. Claude needs no
+sign-in at prepare: each launch on the rental carries the forwarded token. A
+rental with neither, no forwarded `CLAUDE_CODE_OAUTH_TOKEN` and no Codex to
+sign in, stops before anything is rented.
 
 ### Per-run secrets
 
 ```bash
-lf set --global forward.env '[OPENAI_API_KEY]'
+lf set --global forward.env '[CLAUDE_CODE_OAUTH_TOKEN, OPENAI_API_KEY]'
 lf set --global forward.files '[~/.config/tool/token]'
 ```
 
@@ -188,8 +206,8 @@ agent carry anything. A destination that already has a named file keeps its
 own, and the launch says so when its copy differs. A named variable with no
 value, or a named file missing here, stops the launch, and an on-demand rental,
 before anything is rented or sent. Loopflow does not read, choose among or
-refresh what it forwards. Sign Claude and Codex in with `lf machine login`, not
-by forwarding their login files.
+refresh what it forwards. Forward Claude's setup token, not its login files;
+sign Codex in with `lf machine login codex`, not by forwarding `auth.json`.
 
 Claude and Codex launches never see an exported `ANTHROPIC_API_KEY`,
 `OPENAI_API_KEY` or `CODEX_API_KEY`, so a key in your shell cannot move them

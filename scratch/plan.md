@@ -33,6 +33,26 @@ So:
   are unchanged.
 - Docs (`docs/subscriptions.md`, `docs/ops.md`, help text) say the same.
 
+Docs for the rescope (written first, 2026-11-23): `docs/subscriptions.md`
+("Sign in on any Machine", "Choose who approves", "Rentals", "Per-run
+secrets"), `docs/ops.md`, `docs/security.md`, `docs/dev/machines.md`,
+`docs/config.md` ("Sign-in approvers"), `README.md`. Settled there, for
+implement:
+- `approvers` no longer covers Claude; `lf machine login claude` here runs
+  `claude auth login` in the terminal with its own page (no paste relay).
+- `lf machine login claude <machine>` refuses with one message naming
+  `claude setup-token`, `doppler secrets set CLAUDE_CODE_OAUTH_TOKEN` and
+  `forward.env`; `claude` leaves `login::reaches_other_machines`, so
+  `--logins claude` and `--refused` for Claude are rejected too.
+- Launch refusal for Claude: `mini has no Claude login; forward
+  CLAUDE_CODE_OAUTH_TOKEN (`lf set --global forward.env`)`.
+- `lf machine logins <machine>` shows Claude as `forwarded
+  CLAUDE_CODE_OAUTH_TOKEN` when this Machine's `forward.env` names it (the
+  sending side overlays the row; the target's own probe can't see a per-run
+  token). New `state: forwarded` in the `--json` rows.
+- Rentals: prepare signs Claude in to nothing; the rental stops before renting
+  when it has neither a forwarded token nor Codex to sign in (main's check).
+
 ## Outcome
 
 `lf machine login <provider> [<machine>…]` is the one sign-in command, for this

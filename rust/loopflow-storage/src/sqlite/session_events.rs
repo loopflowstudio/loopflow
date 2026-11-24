@@ -614,7 +614,7 @@ impl SqliteStore {
         after: i64,
         limit: usize,
     ) -> StoreResult<Vec<SessionEvent>> {
-        self.read_history(session, after, limit, None, (None, None, None))
+        self.read_history(session, after, limit, None, (None, None, None), None)
     }
 
     /// Keep provenance and unknown evidence; transcript payloads belong to detail.
@@ -623,8 +623,9 @@ impl SqliteStore {
         session: &str,
         input: &str,
         scope: (Option<&str>, Option<&str>, Option<&str>),
+        origin: Option<&loopflow_model::durable::MachineId>,
     ) -> StoreResult<Vec<SessionEvent>> {
-        self.read_history(session, 0, 0, Some(input), scope)
+        self.read_history(session, 0, 0, Some(input), scope, origin)
     }
 
     /// The turns of `session` the scope selects: those `input` started, or
@@ -681,15 +682,29 @@ impl SqliteStore {
         limit: usize,
         input: Option<&str>,
         scope: (Option<&str>, Option<&str>, Option<&str>),
+        origin: Option<&loopflow_model::durable::MachineId>,
     ) -> StoreResult<Vec<SessionEvent>> {
         let task = scope.2.map(loopflow_model::id::TaskSelector::parse);
         let conn = self.conn.lock().expect("store mutex poisoned");
+        // A copy keeps its origin's rows in the shape `history.session_history` has.
+        let source = match origin {
+            None => "(SELECT * FROM history.session_history WHERE ?15 IS NULL)",
+            Some(_) => {
+                "(SELECT json_extract(row,'$.seq') AS seq,json_extract(row,'$.session_id') AS session_id,
+                    json_extract(row,'$.receipt_key') AS receipt_key,json_extract(row,'$.kind') AS kind,
+                    json_extract(row,'$.lf_process_id') AS lf_process_id,json_extract(row,'$.task_id') AS task_id,
+                    json_extract(row,'$.wave_id') AS wave_id,json_extract(row,'$.observed_at') AS observed_at,
+                    json_extract(row,'$.payload') AS payload
+                 FROM machine_records WHERE origin_machine_id=?15 AND kind='history'
+                    AND json_extract(row,'$.session_id')=?8)"
+            }
+        };
         // Observations answer to their own scope. Inputs are Session state in
         // the store and turns are in `history.turns`, not history.
-        let mut query = conn.prepare(
+        let mut query = conn.prepare(&format!(
             "SELECT e.seq,e.session_id,NULL,NULL,
                     NULL,e.lf_process_id,e.task_id,e.wave_id,e.observed_at,e.payload
-             FROM history.session_history e
+             FROM {source} e
              WHERE e.session_id=?8 AND e.seq>?2
              AND (?4 IS NULL OR substr(e.receipt_key,1,length(?4)+1)=?4||':')
              AND (e.kind IN ('manifest','runs','terminal') OR (
@@ -697,8 +712,8 @@ impl SqliteStore {
                  AND (?6 IS NULL OR e.task_id IN (SELECT t.id FROM projects p CROSS JOIN tasks t ON t.project_id=p.id
                          WHERE p.id=?10 OR p.project_slug=?6 OR p.external_project_id=?11))
                  AND (?7 IS NULL OR e.task_id IN (SELECT id FROM tasks WHERE id=?12 OR issue_identifier=?13 OR external_issue_id=?14))))
-             ORDER BY e.seq LIMIT ?3",
-        )?;
+             ORDER BY e.seq LIMIT ?3"
+        ))?;
         let rows = query.query_map(
             params![
                 session,
@@ -717,6 +732,7 @@ impl SqliteStore {
                 task.as_ref().map(|task| &task.id),
                 task.as_ref().map(|task| &task.label),
                 task.as_ref().map(|task| &task.external),
+                origin.map(|origin| origin.as_str()),
             ],
             |row| {
                 Ok((

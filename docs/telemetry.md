@@ -24,10 +24,12 @@ report tokens, plus Claude's running `total_cost_usd`; an Antigravity row
 counts the conversation lf started, not its subagents'), finished streams (`FINAL`),
 and any recording gaps (`GAPS`).
 
-When a rental disappears, a provider turn recorded without a captured input
-still appears under its original Work and date. The usage table and Desktop
-Task History show its Machine as `from modal-1`, for example. Captured rental
-inputs are currently available in the Session drill-down.
+When a rental disappears, its inputs and provider turns still appear under
+their original Work and date. An input counts the turns recorded for the
+selected Work, so a Task filter leaves out turns from before the Session joined
+the Task. The usage table and Desktop Task History show the Machine as
+`from modal-1`, for example. An input recorded on this Machine too is counted
+once, as this Machine's.
 
 `lf session usage --session <id> --json` totals the Session’s native turns
 across Machines. A turn observed again after a continuation counts once.

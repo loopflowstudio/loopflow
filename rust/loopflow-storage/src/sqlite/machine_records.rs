@@ -388,6 +388,47 @@ impl SqliteStore {
         rows.map(|row| Ok(serde_json::from_str(&row?)?)).collect()
     }
 
+    /// The native turns one copied input started that the Work scope selects,
+    /// attributed as `pending_inputs` attributes copied turns.
+    pub(super) fn copied_input_turns(
+        &self,
+        origin: &MachineId,
+        session: &str,
+        captured: i64,
+        scope: (Option<&str>, Option<&str>, Option<&str>),
+    ) -> StoreResult<Vec<crate::session::Turn>> {
+        let task = scope.2.map(loopflow_model::id::TaskSelector::parse);
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut statement = conn.prepare(&format!(
+            "SELECT row FROM ({COLLECTED_TURNS}) WHERE origin_machine_id=?1 AND session_id=?2
+                AND json_extract(row,'$.captured_event')=?3
+                AND (?4 IS NULL OR scope_wave IN (SELECT id FROM wave_addresses WHERE id=?7 OR slug=?4))
+                AND (?5 IS NULL OR project_id=?8 OR project_slug=?5 OR external_project_id=?9)
+                AND (?6 IS NULL OR task_id IN (SELECT id FROM tasks WHERE id=?10 OR issue_identifier=?11 OR external_issue_id=?12))
+             ORDER BY json_extract(row,'$.id')"
+        ))?;
+        let rows = statement.query_map(
+            params![
+                origin.as_str(),
+                session,
+                captured,
+                scope.0,
+                scope.1,
+                scope.2,
+                scope.0.map(loopflow_model::id::canonical_uuid),
+                scope
+                    .1
+                    .map(|project| loopflow_model::id::canonical_prefixed(project, "proj_")),
+                scope.1.map(loopflow_model::id::canonical_uuid),
+                task.as_ref().map(|task| &task.id),
+                task.as_ref().map(|task| &task.label),
+                task.as_ref().map(|task| &task.external),
+            ],
+            |row| row.get::<_, String>(0),
+        )?;
+        rows.map(|row| Ok(serde_json::from_str(&row?)?)).collect()
+    }
+
     /// Machines holding a copy of the Session, and their last completed collection.
     pub fn copied_session_origins(&self, session: &str) -> StoreResult<Vec<(MachineId, i64)>> {
         let conn = self.conn.lock().expect("store mutex poisoned");

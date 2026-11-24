@@ -5112,7 +5112,8 @@ fn a_lost_rentals_transcript_and_usage_survive_on_its_collecting_machine() {
 
     let id = "ee47b779adc741ca89d6c3ae288cc68c";
     let thread = "0199a213-81c0-4800-8aa1-bbab2a035a01";
-    let session = pod.test_session(id, "64f34281b74d4594ac53ec251cb05619");
+    let started = chrono::Utc::now().timestamp() - 3600;
+    let session = pod.test_session_at(id, "64f34281b74d4594ac53ec251cb05619", started - 5);
     pod.conn
         .lock()
         .unwrap()
@@ -5139,7 +5140,6 @@ fn a_lost_rentals_transcript_and_usage_survive_on_its_collecting_machine() {
         .project(task.project_id.as_ref().unwrap())
         .unwrap()
         .unwrap();
-    let started = chrono::Utc::now().timestamp() - 3600;
     pod.record_turn_start(id, &thread.into(), "first-turn", started);
     let turn_origin = loopflow_storage::session::SessionTurnOrigin {
         session_id: id.into(),
@@ -5156,6 +5156,46 @@ fn a_lost_rentals_transcript_and_usage_survive_on_its_collecting_machine() {
         step: None,
     };
     pod.record_session_turn_origin(&thread.into(), "first-turn", &turn_origin);
+    // The Session's captured input ran two more turns, one before it joined the Task.
+    let input = session.artifact_key.clone().unwrap();
+    let captured = pod.captured_sequence(&input).unwrap().unwrap();
+    for (turn, at, task, input_tokens, output_tokens) in [
+        ("unscoped-turn", started + 10, None, 13, 4),
+        (
+            "captured-turn",
+            started + 20,
+            Some(task_id.to_string()),
+            11,
+            2,
+        ),
+    ] {
+        pod.record_turn_start(id, &thread.into(), turn, at);
+        pod.record_session_turn_origin(
+            &thread.into(),
+            turn,
+            &loopflow_storage::session::SessionTurnOrigin {
+                lf_process_id: loopflow_model::id::LfProcessId::new(),
+                agent_process_id: loopflow_model::id::AgentProcessId::new(),
+                captured_event: Some(captured),
+                task_id: task,
+                ..turn_origin.clone()
+            },
+        );
+        pod.record_turn_completion(
+            id,
+            &thread.into(),
+            turn,
+            at + 1,
+            &json!({"status":"completed"}),
+        );
+        assert!(pod.record_turn_usage(
+            id,
+            &thread.into(),
+            turn,
+            at + 1,
+            &json!({"final":true,"usage":{"input_tokens":input_tokens,"output_tokens":output_tokens}})
+        ));
+    }
     pod.retain_session_observation(
         &session,
         &loopflow_storage::session::SessionObservation {
@@ -5205,6 +5245,7 @@ fn a_lost_rentals_transcript_and_usage_survive_on_its_collecting_machine() {
     ));
     recovery::check().unwrap();
     assert_eq!(local.copied_cursor(&origin).unwrap(), Some(first));
+    // The first turn's late usage did not arrive; the input's turns did.
     assert_eq!(
         local
             .saved_copied_history(id)
@@ -5212,7 +5253,7 @@ fn a_lost_rentals_transcript_and_usage_survive_on_its_collecting_machine() {
             .unwrap()
             .usage
             .input_tokens,
-        None
+        Some(24)
     );
     executable(&ssh, &relay);
     recovery::check().unwrap();
@@ -5225,7 +5266,7 @@ fn a_lost_rentals_transcript_and_usage_survive_on_its_collecting_machine() {
     let (server, socket) = served(&fixture);
     let history = fixture.json(&["session", "history", "show", id, "--json"]);
     assert_eq!(history["session"]["origin"], origin.as_str());
-    assert_eq!(history["turns"].as_array().unwrap().len(), 1);
+    assert_eq!(history["turns"].as_array().unwrap().len(), 3);
     assert!(history["events"]
         .to_string()
         .contains("waiting for the count"));
@@ -5274,11 +5315,12 @@ fn a_lost_rentals_transcript_and_usage_survive_on_its_collecting_machine() {
         args.extend_from_slice(scope);
         fixture.json(&args)
     };
-    for scope in [
-        ["--task", task.identifier.as_str()],
-        ["--wave", "owners"],
-        ["--project", project.slug.as_str()],
-        ["--days", "1"],
+    // Work scopes count only the input's turns that ran for the Task.
+    for (scope, input_usage) in [
+        (["--task", task.identifier.as_str()], (11, 2)),
+        (["--wave", "owners"], (11, 2)),
+        (["--project", project.slug.as_str()], (11, 2)),
+        (["--days", "1"], (24, 6)),
     ] {
         let rows = scoped_usage(&scope);
         let rows: Vec<_> = rows
@@ -5287,14 +5329,28 @@ fn a_lost_rentals_transcript_and_usage_survive_on_its_collecting_machine() {
             .iter()
             .filter(|row| row["session_id"] == id)
             .collect();
-        assert_eq!(rows.len(), 1, "{scope:?}: {rows:?}");
-        let row = rows[0];
-        assert_eq!(row["origin"], json!({"machine_id":origin, "label":"mini"}));
-        assert_eq!(row["task_identifier"], task.identifier);
-        assert_eq!(row["observed_at"], started);
-        assert_eq!(row["usage"]["input_tokens"], 31);
-        assert_eq!(row["usage"]["output_tokens"], 7);
-        assert_eq!(row["usage"]["cost_usd"], 0.25);
+        assert_eq!(rows.len(), 2, "{scope:?}: {rows:?}");
+        let (turn, captured_input) = (rows[0], rows[1]);
+        for row in &rows {
+            assert_eq!(row["origin"], json!({"machine_id":origin, "label":"mini"}));
+        }
+        assert_eq!(turn["artifact_key"], Value::Null);
+        assert_eq!(turn["task_identifier"], task.identifier);
+        assert_eq!(turn["observed_at"], started);
+        assert_eq!(turn["usage"]["input_tokens"], 31);
+        assert_eq!(turn["usage"]["output_tokens"], 7);
+        assert_eq!(turn["usage"]["cost_usd"], 0.25);
+        assert_eq!(captured_input["artifact_key"], input);
+        assert_eq!(captured_input["observed_at"], started - 5);
+        assert_eq!(
+            captured_input["usage"]["input_tokens"], input_usage.0,
+            "{scope:?}"
+        );
+        assert_eq!(
+            captured_input["usage"]["output_tokens"], input_usage.1,
+            "{scope:?}"
+        );
+        assert_eq!(captured_input["usage"]["cost_usd"], Value::Null);
     }
     let mut connection =
         loopflow_execution::machine::client::Connection::open_at(Path::new(&socket)).unwrap();
@@ -5323,13 +5379,13 @@ fn a_lost_rentals_transcript_and_usage_survive_on_its_collecting_machine() {
         .iter()
         .map(|week| week["total"]["input_tokens"].as_i64().unwrap())
         .sum();
-    assert_eq!(weekly_input, 31);
+    assert_eq!(weekly_input, 42);
     let usage = || fixture.json(&["session", "usage", "--session", id, "--json"]);
     let before = usage();
     assert_eq!(before["origin_machine_id"], origin.as_str());
     assert!(before["collected_at"].is_number());
-    assert_eq!(before["usage"]["input_tokens"], 31);
-    assert_eq!(before["usage"]["output_tokens"], 7);
+    assert_eq!(before["usage"]["input_tokens"], 55);
+    assert_eq!(before["usage"]["output_tokens"], 13);
     assert_eq!(before["usage"]["cost_usd"], 0.25);
     assert_eq!(local.rental(&rental).unwrap().state, RentalState::Running);
     drop(server);
@@ -5384,18 +5440,21 @@ fn a_lost_rentals_transcript_and_usage_survive_on_its_collecting_machine() {
     ));
     let combined = scoped_usage(&["--task", &task.identifier]);
     let rows = combined.as_array().unwrap();
-    assert_eq!(rows.len(), 2, "{combined}");
+    assert_eq!(rows.len(), 3, "{combined}");
     assert_eq!(rows[0]["origin"], Value::Null);
     assert_eq!(rows[0]["usage"]["input_tokens"], 5);
     assert_eq!(rows[0]["usage"]["cost_usd"], Value::Null);
     assert_eq!(rows[1]["origin"]["machine_id"], origin.as_str());
     assert_eq!(rows[1]["usage"]["input_tokens"], 31);
+    assert_eq!(rows[2]["origin"]["machine_id"], origin.as_str());
+    assert_eq!(rows[2]["artifact_key"], input);
+    assert_eq!(rows[2]["usage"]["input_tokens"], 11);
     let mixed = usage();
     assert!(mixed["origin_machine_id"].is_null());
     assert_eq!(mixed["origins"].as_array().unwrap().len(), 2);
-    assert_eq!(mixed["usage"]["streams"], 2);
-    assert_eq!(mixed["usage"]["input_tokens"], 36);
-    assert_eq!(mixed["usage"]["output_tokens"], 10);
+    assert_eq!(mixed["usage"]["streams"], 4);
+    assert_eq!(mixed["usage"]["input_tokens"], 60);
+    assert_eq!(mixed["usage"]["output_tokens"], 16);
     assert_eq!(mixed["usage"]["cost_usd"], 0.25);
     let recent = |since| {
         loopflow_execution::store::sessions::recent_conversation_history(

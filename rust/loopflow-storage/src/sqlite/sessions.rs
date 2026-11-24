@@ -798,8 +798,9 @@ pub struct PendingHistory {
 /// One selected input: a captured input, or a native turn no input captured.
 #[derive(Debug, Clone)]
 pub struct PendingInput {
-    /// Keep the selected origin row from this snapshot until the projection needs it.
-    copied_turn: Option<(loopflow_model::durable::MachineId, String)>,
+    /// The Machine whose copy holds this input. A copied native turn keeps
+    /// its row from this snapshot until the projection needs it.
+    copy: Option<(loopflow_model::durable::MachineId, Option<String>)>,
     pub session_id: String,
     input: Option<String>,
     caller: Option<String>,
@@ -828,7 +829,7 @@ pub struct PendingInput {
 
 impl PendingInput {
     pub fn origin(&self) -> Option<&loopflow_model::durable::MachineId> {
-        self.copied_turn.as_ref().map(|(origin, _)| origin)
+        self.copy.as_ref().map(|(origin, _)| origin)
     }
 }
 
@@ -1279,6 +1280,70 @@ impl SqliteStore {
                 UNION SELECT id FROM history.turns
                     WHERE ?7 IS NULL AND task_id=?3 AND captured_event IS NULL),
             copies AS NOT MATERIALIZED ({}),
+            -- Copied rows that start or end an input in the window, or name the Task.
+            copied_window(record_id) AS (
+                SELECT record_id FROM machine_record_inputs WHERE ?13 AND ?4 IS NULL AND ?3 IS NULL AND started>=?5
+                UNION SELECT rowid FROM machine_records INDEXED BY machine_record_turn_end WHERE kind='turn' AND ?13 AND ?4 IS NULL AND ?3 IS NULL AND ?6
+                    AND ?5>0 AND json_extract(row,'$.ended_at')>=?5
+                UNION SELECT record_id FROM machine_record_inputs WHERE ?13 AND ?4 IS NULL AND task_id=?3),
+            -- A copied capture, found from itself, its manifest or its turns.
+            -- The local input keeps its copies out; among copies the lowest origin wins.
+            copied_captures AS MATERIALIZED (
+                SELECT cap.rowid AS record_id,cap.origin_machine_id AS origin,
+                    json_extract(cap.row,'$.session_id') AS session_id,json_extract(cap.row,'$.seq') AS seq,
+                    json_extract(cap.row,'$.receipt_key') AS input_id,cap.row
+                FROM (SELECT DISTINCT r.origin_machine_id AS origin,
+                        CAST(CASE r.kind WHEN 'session_event' THEN json_extract(r.row,'$.seq')
+                            ELSE json_extract(r.row,'$.captured_event') END AS TEXT) AS key
+                    FROM copied_window w CROSS JOIN machine_records r ON r.rowid=w.record_id) k
+                CROSS JOIN machine_records cap ON cap.origin_machine_id=k.origin AND cap.kind='session_event' AND cap.key=k.key
+                WHERE ?7 IS NULL AND json_extract(cap.row,'$.kind')='captured'
+                  AND NOT EXISTS (SELECT 1 FROM session_events l WHERE l.kind='captured' AND l.receipt_key=json_extract(cap.row,'$.receipt_key'))
+                  AND cap.origin_machine_id=(SELECT o.origin_machine_id FROM machine_records o
+                      WHERE o.kind='session_event' AND json_extract(o.row,'$.kind')='captured'
+                        AND json_extract(o.row,'$.receipt_key')=json_extract(cap.row,'$.receipt_key')
+                      ORDER BY o.origin_machine_id LIMIT 1)),
+            -- Each copied input's turns and observations, read once.
+            copied_turns AS MATERIALIZED (
+                SELECT c.record_id,SUM(json_extract(t.row,'$.ended_at') IS NULL) AS open,
+                    MAX(json_extract(t.row,'$.ended_at')) AS last_end,
+                    MAX(MAX(coalesce(json_extract(t.row,'$.started_at'),0),coalesce(json_extract(t.row,'$.usage.observed_at'),0),
+                        coalesce(json_extract(t.row,'$.ended_at'),0))) AS latest
+                FROM copied_captures c CROSS JOIN machine_records t ON t.origin_machine_id=c.origin AND t.kind='turn'
+                    AND json_extract(t.row,'$.session_id')=c.session_id
+                WHERE json_extract(t.row,'$.captured_event')=c.seq GROUP BY c.record_id),
+            copied_observations AS MATERIALIZED (
+                SELECT c.record_id,MAX(json_extract(h.row,'$.observed_at')) AS latest
+                FROM copied_captures c CROSS JOIN machine_records h ON h.origin_machine_id=c.origin AND h.kind='history'
+                    AND json_extract(h.row,'$.session_id')=c.session_id
+                WHERE json_extract(h.row,'$.captured_event')=c.seq GROUP BY c.record_id),
+            -- The same reading as `inputs`, from the origin's copied Session, manifest,
+            -- terminal receipt and turns.
+            copied_inputs AS (
+                SELECT c.origin,c.seq AS captured,c.input_id,c.session_id,
+                    json_extract(json_extract(c.row,'$.payload'),'$.caller_key') AS caller_input_id,
+                    coalesce(json_extract(m.row,'$.observed_at'),json_extract(c.row,'$.observed_at')) AS started,
+                    CASE WHEN m.rowid IS NOT NULL THEN json_extract(m.row,'$.task_id') ELSE json_extract(c.row,'$.task_id') END AS task_id,
+                    CASE WHEN m.rowid IS NOT NULL THEN json_extract(m.row,'$.wave_id') ELSE json_extract(c.row,'$.wave_id') END AS wave_id,
+                    CASE WHEN json_extract(c.row,'$.lf_process_id') IS NOT NULL
+                        AND (json_extract(s.row,'$.agent_launcher_lf_process_id') IS NOT json_extract(c.row,'$.lf_process_id')
+                            OR json_extract(s.row,'$.agent_ended_at') IS NOT NULL)
+                    THEN CASE WHEN json_extract(s.row,'$.agent_launcher_lf_process_id') IS json_extract(c.row,'$.lf_process_id')
+                        THEN json_extract(s.row,'$.agent_ended_at') ELSE json_extract(s.row,'$.agent_started_at') END
+                    WHEN t.open>0 THEN NULL
+                    ELSE coalesce(json_extract(term.row,'$.observed_at'),t.last_end) END AS ended,
+                    MAX(json_extract(c.row,'$.observed_at'),coalesce(h.latest,0),coalesce(t.latest,0)) AS latest,
+                    c.record_id
+                FROM copied_captures c
+                LEFT JOIN copied_turns t ON t.record_id=c.record_id
+                LEFT JOIN copied_observations h ON h.record_id=c.record_id
+                LEFT JOIN machine_records s ON s.origin_machine_id=c.origin AND s.kind='session' AND s.key=c.session_id
+                LEFT JOIN machine_records m ON m.origin_machine_id=c.origin AND m.kind='history'
+                    AND m.key=json_array(c.session_id,c.input_id||':manifest.json')
+                LEFT JOIN machine_records term ON term.origin_machine_id=c.origin AND term.kind='history'
+                    AND term.key=json_array(c.session_id,c.input_id||':terminal.json')
+                WHERE m.rowid IS NOT NULL OR t.record_id IS NOT NULL
+                    OR (json_extract(s.row,'$.current_capture')=c.seq AND json_extract(s.row,'$.input_published')=1)),
             inputs AS (
                 SELECT i.seq AS captured,i.receipt_key AS input_id,i.session_id,json_extract(i.payload,'$.caller_key') AS caller_input_id,
                     COALESCE(m.observed_at,i.observed_at) AS started,
@@ -1333,8 +1398,7 @@ impl SqliteStore {
                 LEFT JOIN agent_sessions ts ON ts.id=t.session_id
                 WHERE ts.id IS NOT NULL AND t.captured_event IS NULL AND (?6 OR COALESCE(t.started_at,t.usage_at,t.ended_at)>=?5)
                     AND (NOT ?13 OR t.lf_process_id IS NOT NULL OR NOT EXISTS (SELECT 1 FROM copies c
-                        WHERE c.key=json_array(t.session_id,t.provider_thread,t.provider_turn)
-                          AND json_extract(c.row,'$.captured_event') IS NULL)))
+                        WHERE c.key=json_array(t.session_id,t.provider_thread,t.provider_turn))))
                 , scoped AS (
                 SELECT inputs.*,NULL AS copied_record
                 FROM inputs
@@ -1359,29 +1423,50 @@ impl SqliteStore {
                     json_extract(c.row,'$.ended_at'),json_extract(c.row,'$.thread'),json_extract(c.row,'$.turn'),
                     MAX(c.started,coalesce(json_extract(c.row,'$.ended_at'),0),
                         coalesce(json_extract(c.row,'$.usage.observed_at'),0)),c.record_id
-                FROM (
-                    SELECT record_id FROM machine_record_inputs WHERE ?13 AND ?4 IS NULL AND ?3 IS NULL AND started>=?5
-                    UNION SELECT rowid FROM machine_records INDEXED BY machine_record_turn_end WHERE kind='turn' AND ?13 AND ?4 IS NULL AND ?3 IS NULL AND ?6
-                        AND ?5>0 AND json_extract(row,'$.ended_at')>=?5
-                    UNION SELECT record_id FROM machine_record_inputs WHERE ?13 AND ?4 IS NULL AND task_id=?3
-                ) w CROSS JOIN copies c ON c.record_id=w.record_id
+                FROM copied_window w CROSS JOIN copies c ON c.record_id=w.record_id
                 WHERE ?7 IS NULL AND ?4 IS NULL AND c.kind='turn' AND json_extract(c.row,'$.captured_event') IS NULL
                   AND (c.started>=?5 OR (?6 AND json_extract(c.row,'$.ended_at')>=?5))
                   AND (?1 IS NULL OR c.scope_wave IN (SELECT id FROM wave_addresses WHERE id=?9 OR slug=?1))
-                  AND (?2 IS NULL OR c.project_id=?10 OR c.project_slug=?2 OR c.external_project_id=?11)),
+                  AND (?2 IS NULL OR c.project_id=?10 OR c.project_slug=?2 OR c.external_project_id=?11)
+                UNION ALL
+                SELECT captured,input_id,session_id,caller_input_id,started,task_id,wave_id,ended,NULL,NULL,latest,record_id
+                FROM copied_inputs ci
+                WHERE (started>=?5 OR (?6 AND ended>=?5))
+                AND (?1 IS NULL OR wave_id IN (SELECT id FROM wave_addresses WHERE id=?9 OR slug=?1)
+                    OR EXISTS (SELECT 1 FROM machine_record_inputs t WHERE t.origin_machine_id=ci.origin AND t.kind='turn'
+                        AND t.session_id=ci.session_id AND json_extract(t.row,'$.captured_event')=ci.captured
+                        AND t.scope_wave IN (SELECT id FROM wave_addresses WHERE id=?9 OR slug=?1)))
+                AND (?2 IS NULL OR task_id IN (SELECT t.id FROM projects p CROSS JOIN tasks t ON t.project_id=p.id
+                    WHERE p.id=?10 OR p.project_slug=?2 OR p.external_project_id=?11)
+                    OR EXISTS (SELECT 1 FROM machine_record_inputs t WHERE t.origin_machine_id=ci.origin AND t.kind='turn'
+                        AND t.session_id=ci.session_id AND json_extract(t.row,'$.captured_event')=ci.captured
+                        AND (t.project_id=?10 OR t.project_slug=?2 OR t.external_project_id=?11)))
+                AND (?3 IS NULL OR task_id=?3
+                    OR EXISTS (SELECT 1 FROM machine_record_inputs t WHERE t.origin_machine_id=ci.origin AND t.kind='turn'
+                        AND t.session_id=ci.session_id AND json_extract(t.row,'$.captured_event')=ci.captured
+                        AND t.task_id=?3))),
                 eligible AS MATERIALIZED (
                 SELECT scoped.*, SUM(ended IS NULL) OVER () AS unfinished,
                     ROW_NUMBER() OVER (PARTITION BY ended IS NULL ORDER BY started DESC,input_id DESC,session_id,thread,turn) AS ordinal,
                     COUNT(*) OVER () AS total FROM scoped)
                 SELECT eligible.session_id,eligible.input_id,eligible.caller_input_id,started,eligible.task_id,eligible.wave_id,
                     (SELECT slug FROM wave_addresses WHERE id=eligible.wave_id),
-                    s.current_capture,coalesce(s.cwd,''),s.repo,s.skill,s.provider,s.model,coalesce(s.interactive,0),
-                    total > MAX(?8,unfinished),COALESCE((SELECT json_extract(payload,'$.work_source') FROM session_events WHERE seq=eligible.captured),
-                        CASE WHEN eligible.captured=s.current_capture AND s.bound_at IS NULL THEN s.work_source END),
+                    coalesce(s.current_capture,json_extract(cs.row,'$.current_capture')),
+                    coalesce(s.cwd,json_extract(cs.row,'$.cwd'),''),coalesce(s.repo,json_extract(cs.row,'$.repo')),
+                    coalesce(s.skill,json_extract(cs.row,'$.skill')),coalesce(s.provider,json_extract(cs.row,'$.provider')),
+                    coalesce(s.model,json_extract(cs.row,'$.model')),coalesce(s.interactive,json_extract(cs.row,'$.interactive'),0),
+                    total > MAX(?8,unfinished),CASE WHEN copy.rowid IS NULL THEN COALESCE((SELECT json_extract(payload,'$.work_source') FROM session_events WHERE seq=eligible.captured),
+                        CASE WHEN eligible.captured=s.current_capture AND s.bound_at IS NULL THEN s.work_source END)
+                    WHEN copy.kind='session_event' THEN COALESCE(json_extract(json_extract(copy.row,'$.payload'),'$.work_source'),
+                        CASE WHEN eligible.captured=json_extract(cs.row,'$.current_capture') AND json_extract(cs.row,'$.bound_at') IS NULL
+                        THEN json_extract(cs.row,'$.work_source') END) END,
                     eligible.captured,eligible.thread,eligible.turn,eligible.latest,
-                    CASE WHEN eligible.captured=s.current_capture THEN s.skill_version END,copy.origin_machine_id,copy.row
+                    CASE WHEN eligible.captured=coalesce(s.current_capture,json_extract(cs.row,'$.current_capture'))
+                        THEN coalesce(s.skill_version,json_extract(cs.row,'$.skill_version')) END,
+                    copy.origin_machine_id,CASE WHEN copy.kind='turn' THEN copy.row END
                 FROM eligible LEFT JOIN agent_sessions s ON eligible.copied_record IS NULL AND s.id=eligible.session_id
                 LEFT JOIN machine_records copy ON copy.rowid=eligible.copied_record
+                LEFT JOIN machine_records cs ON cs.origin_machine_id=copy.origin_machine_id AND cs.kind='session' AND cs.key=eligible.session_id
                 WHERE (?8 IS NULL OR ended IS NULL OR ordinal<=MAX(?8-unfinished,0))
                 ORDER BY started DESC,eligible.input_id DESC,eligible.session_id,eligible.thread,eligible.turn",super::machine_records::COLLECTED_TURNS))?;
             // Names, slugs and capture locators keep their bytes; identities are canonical.
@@ -1416,10 +1501,15 @@ impl SqliteStore {
                     .transpose()?
                     .flatten();
                 inputs.push(PendingInput {
-                    copied_turn: row
+                    copy: row
                         .get::<_, Option<String>>(21)?
-                        .map(loopflow_model::durable::MachineId::from_raw)
-                        .zip(row.get(22)?),
+                        .map(|origin| -> rusqlite::Result<_> {
+                            Ok((
+                                loopflow_model::durable::MachineId::from_raw(origin),
+                                row.get(22)?,
+                            ))
+                        })
+                        .transpose()?,
                     session_id: row.get(0)?,
                     input: row.get(1)?,
                     caller: row.get(2)?,
@@ -1489,7 +1579,7 @@ impl SqliteStore {
             turn,
             skill_version,
             latest: _,
-            copied_turn,
+            copy,
         } = input.clone();
         let input = input
             .as_deref()
@@ -1527,12 +1617,19 @@ impl SqliteStore {
                 .map(|source| serde_json::from_value(serde_json::Value::String(source)))
                 .transpose()?,
         };
+        let origin = copy.as_ref().map(|(origin, _)| origin);
         let history = match input.as_deref() {
-            Some(input) => self.summary_for_input_matching(&session_id, input, scope)?,
+            Some(input) => self.summary_for_input_matching(&session_id, input, scope, origin)?,
             None => Vec::new(),
         };
-        let turns = match copied_turn {
-            Some((_, row)) => vec![serde_json::from_str(&row)?],
+        let turns = match &copy {
+            Some((_, Some(row))) => vec![serde_json::from_str(row)?],
+            Some((origin, None)) => self.copied_input_turns(
+                origin,
+                &session_id,
+                captured.ok_or_else(|| invalid("a copied input has no capture"))?,
+                scope,
+            )?,
             None => self.turns_matching(
                 &session_id,
                 input.as_deref(),
@@ -2313,6 +2410,11 @@ pub fn test_capture(conn: &Connection, session: &str, artifact: &str) {
 #[cfg(any(test, feature = "test-support"))]
 impl SqliteStore {
     pub fn test_session(&self, id: &str, artifact: &str) -> LfSession {
+        self.test_session_at(id, artifact, 1)
+    }
+
+    /// A Session whose input was captured at `created_at`.
+    pub fn test_session_at(&self, id: &str, artifact: &str, created_at: i64) -> LfSession {
         self.create_session_prepared(
             LfSession {
                 captured: None,
@@ -2337,7 +2439,7 @@ impl SqliteStore {
                 title_source: TitleSource::Human,
                 request: None,
                 completed_at: None,
-                created_at: 1,
+                created_at,
             },
             None,
         )

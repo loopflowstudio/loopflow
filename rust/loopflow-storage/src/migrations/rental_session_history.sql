@@ -49,16 +49,21 @@ CREATE VIEW machine_record_inputs AS
 CREATE INDEX machine_record_turn_end ON machine_records(json_extract(row,'$.ended_at'))
     WHERE kind='turn' AND json_extract(row,'$.ended_at') IS NOT NULL;
 
+-- One copied input per artifact key: the lowest origin wins when two hold it.
+CREATE INDEX machine_record_capture_key ON machine_records(json_extract(row,'$.receipt_key'))
+    WHERE kind='session_event' AND json_extract(row,'$.kind')='captured';
+
+-- Session history reads copied Sessions, captures, observations and turns.
 CREATE TRIGGER store_revision_machine_records_insert AFTER INSERT ON machine_records
-WHEN NEW.kind='turn' BEGIN
+WHEN NEW.kind IN ('session','session_event','history','turn') BEGIN
     UPDATE store_revisions SET revision=revision+1 WHERE domain='sessions';
 END;
 CREATE TRIGGER store_revision_machine_records_update AFTER UPDATE ON machine_records
-WHEN OLD.kind='turn' OR NEW.kind='turn' BEGIN
+WHEN OLD.kind IN ('session','session_event','history','turn') OR NEW.kind IN ('session','session_event','history','turn') BEGIN
     UPDATE store_revisions SET revision=revision+1 WHERE domain='sessions';
 END;
 CREATE TRIGGER store_revision_machine_records_delete AFTER DELETE ON machine_records
-WHEN OLD.kind='turn' BEGIN
+WHEN OLD.kind IN ('session','session_event','history','turn') BEGIN
     UPDATE store_revisions SET revision=revision+1 WHERE domain='sessions';
 END;
 

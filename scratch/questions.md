@@ -2,6 +2,8 @@
 
 - A repeated native turn uses its recorded dispatch for Work attribution. Equivalent readings prefer the local Machine, then Machine ID order. A mixed-Machine Session drill lists its origins separately.
 
+- A copied captured input enters the window by its capture, manifest or turn times, not by a terminal receipt or agent end alone, and it ends by its launcher's process rather than its latest turn's. A copied input with no turns that started before the window and ended inside it is left out of `--include-finished` reads.
+
 - Transcript search keeps the existing local hit order and spends the remaining `--limit` on copies. The time window selects Sessions by inputs on the origin, so collecting an old Session today does not make it recent.
 
 - **Unify collected rental records into `SessionHistory`, work-scoped `lf session usage`, and `lf session history search` (replacing the earlier local-only analytics split).** Passed over keeping work-scoped `lf session usage` (`--days`, `--task`, `--wave`, `--project`) and `lf session history search` local-only while exposing rental usage solely through a mutually-exclusive `lf session usage --session <id>` flag. Adding an explicit nullable `origin: Option<SessionOrigin>` (`{machine_id, label}`) to `SessionHistory` (Rust + Swift + DTO fixtures) lets CLI analytics, search, and Desktop’s Telemetry / Task History views include lost-sandbox work automatically without double-counting, while keeping `lf session usage --session <id>` for single-Session inspection.

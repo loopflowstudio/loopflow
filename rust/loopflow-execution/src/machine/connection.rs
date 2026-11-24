@@ -234,9 +234,11 @@ pub fn verify_identity(expected: &MachineId, reached: MachineId) -> anyhow::Resu
     Ok(())
 }
 
-/// This Machine's durable identity; a fresh home gets its store here.
+/// This Machine's durable identity.
 pub async fn local_machine() -> anyhow::Result<Machine> {
-    let store = crate::store::open_store(&crate::store::storage_config_from_env()?).await?;
+    let store = crate::store::open_existing_store()
+        .await?
+        .ok_or_else(|| anyhow!("machine commands need an initialized local store"))?;
     Ok(store.local_machine().await?)
 }
 

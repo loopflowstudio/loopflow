@@ -50,6 +50,13 @@ fn prune(json: bool) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// This Machine, for signing it in: a fresh home gets its store here.
+async fn this_machine() -> anyhow::Result<Machine> {
+    let config = loopflow_execution::store::storage_config_from_env()?;
+    let store = loopflow_execution::store::open_store(&config).await?;
+    Ok(store.local_machine().await?)
+}
+
 async fn existing_store() -> anyhow::Result<Store> {
     loopflow_execution::store::open_existing_store()
         .await?
@@ -145,7 +152,7 @@ async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
                 Some(target) => {
                     loopflow_execution::machine::connection::resolve_target(target, false).await?
                 }
-                None => local_machine().await?,
+                None => this_machine().await?,
             };
             return login::print_logins(&machine, *json).await;
         }
@@ -360,7 +367,7 @@ async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
 /// Each named Machine in turn, or this one; one Machine failing leaves the rest to try.
 async fn named_or_here(targets: &[String]) -> Vec<(String, anyhow::Result<Machine>)> {
     if targets.is_empty() {
-        return vec![("this Machine".to_string(), local_machine().await)];
+        return vec![("this Machine".to_string(), this_machine().await)];
     }
     let mut resolved = Vec::new();
     for target in targets {

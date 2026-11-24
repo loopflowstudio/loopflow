@@ -595,7 +595,13 @@ fn session_ending(
         (Some(task), true) => format!("lf resume --task {task}"),
         _ => format!("lf resume {}", session.id),
     };
-    let failure = session.start_failure.as_deref().filter(|_| conversation);
+    // Any stopped interactive Session's last start can fail: the recovery
+    // pass's, a steer's wakeup or a provider restart. A finished Task's
+    // conversation is not started again, so its last failure is history.
+    let failure = session
+        .start_failure
+        .as_deref()
+        .filter(|_| conversation || !task_primary);
     // One that never had an agent has no liveness to read: it is not Closed.
     let never_ran = session.agent_process_id.is_none() && ended.is_none();
     let ending = match end {
@@ -627,6 +633,13 @@ fn session_ending(
     if let Some(reason) =
         failure.and_then(|failure| failure.strip_prefix(crate::ops::recovery::WAITING_FOR_HARNESS))
     {
+        // The pass tries a Task's conversation again once the harness is
+        // ready; any other Session waits for its next steer or command.
+        let command = (!conversation).then_some(command);
+        let status_line = match &command {
+            Some(command) => format!("could not start: {reason}; `{command}` opens it"),
+            None => format!("could not start: {reason}"),
+        };
         return SessionEnding {
             ended,
             start,
@@ -634,9 +647,9 @@ fn session_ending(
                 kind: SessionOutlookKind::CouldNotStart,
                 at: None,
                 reason: Some(reason.to_owned()),
-                command: None,
+                command,
             }),
-            status_line: Some(format!("could not start: {reason}")),
+            status_line: Some(status_line),
         };
     }
     let facts = crate::ops::recovery::DownConversation {
@@ -694,7 +707,8 @@ fn session_ending(
                 (Some(left), Some(failure)) => {
                     Some(format!("{left}; last start failed: {failure}"))
                 }
-                (left, _) => left,
+                (None, Some(failure)) => Some(format!("last start failed: {failure}")),
+                (left, None) => left,
             };
             let line = format!("{ending}{}", printed(&reason));
             (SessionOutlookKind::WaitingForYou, None, reason, line)
@@ -1477,7 +1491,8 @@ pub fn run_refusal(store: &SqliteStore, session: &LfSession) -> Result<Option<St
 }
 
 /// Restart just the recorded provider, continuing through the same held-terminal
-/// resume path used after a provider exits on its own.
+/// resume path used after a provider exits on its own. A harness that could
+/// not start here leaves the running provider alone.
 pub fn restart_provider(store: &SqliteStore, session: &LfSession) -> Result<()> {
     let _launch = lock_session_process(&session.id)?;
     if let Some(owner) = moves::other_machine(store, &session.id)? {
@@ -1485,6 +1500,13 @@ pub fn restart_provider(store: &SqliteStore, session: &LfSession) -> Result<()> 
     }
     if let Some(reason) = run_refusal(store, session)? {
         bail!(reason);
+    }
+    let mut agents = crate::agent::MachineAgents::default();
+    if let Some(failure) = crate::ops::recovery::launch_failure(store, session, &mut agents)? {
+        let reason = failure
+            .strip_prefix(crate::ops::recovery::WAITING_FOR_HARNESS)
+            .unwrap_or(&failure);
+        bail!("Session {} was not restarted: {reason}", session.id);
     }
     crate::harness::agent_process::require_server()?;
     let mut server = crate::machine::client::Connection::open()?;

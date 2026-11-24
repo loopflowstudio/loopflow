@@ -95,7 +95,12 @@ impl Watcher {
             Ok(revision) if self.seen != Some(revision) => {
                 self.seen = Some(revision);
                 if let Some(terminals) = &self.terminals {
-                    start_stopped(store, |session, request| hold(terminals, session, request));
+                    let mut agents = loopflow_execution::agent::MachineAgents::default();
+                    start_stopped(
+                        store,
+                        |session| launch_failure(store, session, &mut agents),
+                        |session, request| hold(terminals, session, request),
+                    );
                 }
                 wake_idle(store, None);
             }
@@ -110,9 +115,14 @@ impl Watcher {
 
 /// Start each stopped Session the steers saved since the last reading name,
 /// once, with `start(session, request)`: the request is the first steer that
-/// named it. A start that fails is not retried; its steers wait, unread, for
-/// the Session's next start.
-fn start_stopped(store: &SqliteStore, mut start: impl FnMut(&LfSessionId, String) -> Result<()>) {
+/// named it. A Session whose harness cannot start here is not spawned; that,
+/// or a start that fails, is recorded as its `start_failure`, and its steers
+/// wait, unread, for its next start. A later steer tries again.
+fn start_stopped(
+    store: &SqliteStore,
+    mut readiness: impl FnMut(&LfSessionId) -> Result<Option<String>>,
+    mut start: impl FnMut(&LfSessionId, String) -> Result<()>,
+) {
     let wakes = match loopflow_execution::steer::sessions_to_start(store) {
         Ok(wakes) => wakes,
         Err(error) => {
@@ -121,12 +131,36 @@ fn start_stopped(store: &SqliteStore, mut start: impl FnMut(&LfSessionId, String
         }
     };
     for wake in wakes {
-        if let Err(error) = start(
-            &LfSessionId::from(wake.session.as_str()),
-            wake.steer.clone(),
-        ) {
-            tracing::warn!(session = wake.session, steer = wake.steer, error = %format!("{error:#}"), "stopped Session not started; its steers wait for its next start");
+        let session = LfSessionId::from(wake.session.as_str());
+        let ready = readiness(&session).unwrap_or_else(|error| {
+            // An unreadable harness check does not cost the steer its start.
+            tracing::warn!(%session, error = %format!("{error:#}"), "could not check this Session’s harness");
+            None
+        });
+        let failure = match ready {
+            Some(failure) => Some(failure),
+            None => start(&session, wake.steer.clone())
+                .err()
+                .map(|error| format!("{error:#}")),
+        };
+        if let Some(failure) = &failure {
+            tracing::warn!(%session, steer = wake.steer, %failure, "stopped Session not started; its steers wait for its next start");
         }
+        if let Err(error) = store.record_start_failure(&session, failure.as_deref()) {
+            tracing::warn!(%session, %error, "start failure unrecorded");
+        }
+    }
+}
+
+/// What would stop `session`'s provider starting here.
+fn launch_failure(
+    store: &SqliteStore,
+    session: &LfSessionId,
+    agents: &mut loopflow_execution::agent::MachineAgents,
+) -> Result<Option<String>> {
+    match store.session(session)? {
+        Some(session) => loopflow_execution::ops::recovery::launch_failure(store, &session, agents),
+        None => Ok(None),
     }
 }
 
@@ -917,10 +951,14 @@ mod tests {
         let fixture = fixture("wake-stopped");
         let started = |store: &SqliteStore| {
             let mut starts = Vec::new();
-            start_stopped(store, |session, request| {
-                starts.push((session.to_string(), request));
-                Ok(())
-            });
+            start_stopped(
+                store,
+                |_| Ok(None),
+                |session, request| {
+                    starts.push((session.to_string(), request));
+                    Ok(())
+                },
+            );
             starts
         };
         let running = fixture
@@ -965,5 +1003,76 @@ mod tests {
             3,
             "unread until the started conversation takes them"
         );
+    }
+
+    /// A steer naming a stopped Session whose harness has no login spawns
+    /// nothing, and `lf session list` says why. After a login, the next
+    /// steer starts it and the failure is gone.
+    #[test]
+    fn a_denied_wakeup_shows_its_start_failure_until_a_later_steer_starts_it() {
+        let fixture = fixture("wake-denied");
+        fixture
+            .store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE agent_sessions SET agent_ended_at=unixepoch(), agent_pid=NULL, agent_os_started_at=NULL WHERE agent_process_id=?1",
+                [&fixture.adapter.agent_process_id],
+            )
+            .unwrap();
+        let listed = || {
+            let shared = std::sync::Arc::new(loopflow_execution::store::Store {
+                sqlite: fixture.store.clone(),
+            });
+            loopflow_execution::ops::human_session::listed(&shared, "wake-denied")
+                .unwrap()
+                .unwrap()
+                .status_line
+                .unwrap()
+        };
+        let login = "codex has no usable login on this Machine; run `codex login`";
+        let mut starts = Vec::new();
+        let read = |ready: Option<&str>, starts: &mut Vec<String>| {
+            start_stopped(
+                &fixture.store,
+                |_| {
+                    Ok(ready.map(|reason| {
+                        format!(
+                            "{}{reason}",
+                            loopflow_execution::ops::recovery::WAITING_FOR_HARNESS
+                        )
+                    }))
+                },
+                |_, request| {
+                    starts.push(request);
+                    Ok(())
+                },
+            )
+        };
+
+        fixture
+            .store
+            .save_session_steer("wake-denied", "jack", "are you there?")
+            .unwrap();
+        read(Some(login), &mut starts);
+        assert!(starts.is_empty(), "an unavailable harness is not spawned");
+        let line = listed();
+        assert!(
+            line.starts_with(&format!("could not start: {login}")),
+            "{line}"
+        );
+
+        // The same steer is not read twice; a new one, after a login, starts it.
+        read(None, &mut starts);
+        assert!(starts.is_empty());
+        let next = fixture
+            .store
+            .save_session_steer("wake-denied", "jack", "logged in now")
+            .unwrap();
+        read(None, &mut starts);
+        assert_eq!(starts, [next.id.to_string()]);
+        let line = listed();
+        assert!(!line.contains("could not start"), "{line}");
     }
 }

@@ -8,6 +8,7 @@
 //! [`launch_failure`] what would stop one.
 
 use loopflow_model::id::LfSessionId;
+use loopflow_storage::session::LfSession;
 use loopflow_storage::sqlite::session_recovery::{TaskConversation, CONVERSATION_STARTS};
 use loopflow_storage::sqlite::SqliteStore;
 
@@ -65,26 +66,26 @@ pub fn record_start(
 /// ready. The prefix distinguishes it from a failed terminal start on disk.
 pub const WAITING_FOR_HARNESS: &str = "Waiting for a harness: ";
 
+/// What would stop `session`'s provider starting here: its recorded harness,
+/// or for one that never bound an agent, the harness its skill resolves to,
+/// missing or without a usable login. Every server start of a stopped
+/// interactive Session asks this before spawning: Task recovery, a steer's
+/// wakeup and a provider restart.
 pub fn launch_failure(
     store: &SqliteStore,
-    conversation: &TaskConversation,
+    session: &LfSession,
     machine: &mut crate::agent::MachineAgents,
 ) -> anyhow::Result<Option<String>> {
-    let reason = match conversation.provider.as_deref() {
+    let reason = match session.provider.as_deref() {
         Some(provider) => match loopflow_harness::HarnessKind::parse(provider) {
             Some(kind) => machine.failure(kind).map(str::to_owned),
             None => Some(format!("unknown harness {provider}")),
         },
-        None => {
-            let Some(session) = store.session(&conversation.session)? else {
-                return Ok(None);
-            };
-            match crate::session::pending_agent(store, &session, machine) {
-                Ok(agent) => machine.failure(agent.harness).map(str::to_owned),
-                Err(error) if error.is::<crate::error::LoadError>() => Some(error.to_string()),
-                Err(error) => return Err(error),
-            }
-        }
+        None => match crate::session::pending_agent(store, session, machine) {
+            Ok(agent) => machine.failure(agent.harness).map(str::to_owned),
+            Err(error) if error.is::<crate::error::LoadError>() => Some(error.to_string()),
+            Err(error) => return Err(error),
+        },
     };
     Ok(reason.map(|reason| format!("{WAITING_FOR_HARNESS}{reason}")))
 }

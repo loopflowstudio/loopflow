@@ -100,7 +100,8 @@ lf set --global forward.files '[~/.codex/auth.json]'
   Passing `--task` or `--session` restarts only that Session's provider on its
   owning Machine after delivery completes, preserving the Session and its
   continuation; unrelated Sessions keep running, and a delivery failure
-  restarts nothing.
+  restarts nothing. If the refreshed login still doesn't work there, the
+  command says why and the running provider keeps going.
 - **Claude:** forward `CLAUDE_CODE_OAUTH_TOKEN` from `claude setup-token`.
   Loopflow strips ambient `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, and
   `CODEX_API_KEY` from Claude/Codex launches so shell keys don't silently move

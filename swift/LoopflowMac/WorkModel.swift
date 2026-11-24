@@ -2225,9 +2225,7 @@ final class WorkModel {
     var sidebarRows: [SidebarTaskRow] {
         let rows = filteredSidebarRows
         guard navigation.sidebarScope.isWorkingList, navigation.sidebarSortByStatus else { return rows }
-        let held = navigation.heldStatusGroup.flatMap { held in
-            selection.map { resolvedTaskID($0.id) } == held.taskID ? held : nil
-        }
+        let held = navigation.heldStatusGroup
         // Grouping retains the shared Task order within each status.
         let groups = Dictionary(grouping: rows) { row in
             if let held, held.taskID == row.id { return held.group }

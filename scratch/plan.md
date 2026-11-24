@@ -24,7 +24,8 @@ between `WorkNavigation` and `WorkModel`, plus two stale status sentences in
 
 Gate. The held status group has one owner (`10df280f65`); merge `8742243abf`
 brought in `62a368e5cc` and `#1973`, with all 8 conflicts resolved toward
-LOO-1063's Working order. After the merge, `leaving_guard`, the 25
+LOO-1063's Working order. #1973's `SqliteStore::reorder_task` lost its Desktop and Wave callers in that
+resolution and was deleted; Project rank edits go through `edit_task`. After the merge, `leaving_guard`, the 25
 `store::selections::tests` and `task_concepts_share_lifecycle_activity_membership_and_order`
 passed; `WorkNavigationTests` passed before it. Gate runs
 `documented_commands::` for the `swift/README.md` edits.

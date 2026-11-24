@@ -56,8 +56,8 @@ pub async fn login(
 
 /// Whether `lf machine login` can sign another Machine in to `provider`:
 /// Codex runs its own login there, and GitHub, Linear and OpenCode send a
-/// credential. Claude arrives with each launch as a forwarded token; Asana,
-/// Notion and Doppler sign in on each Machine itself.
+/// credential. Claude arrives with each launch as a forwarded token; Asana
+/// and Doppler sign in on each Machine itself.
 pub fn reaches_other_machines(provider: Provider) -> bool {
     matches!(
         provider,
@@ -843,7 +843,7 @@ fn command(machine: &Machine, argv: &[&str]) -> Result<Command> {
     }
     let script = format!(
         "{}; BROWSER=true exec {}",
-        crate::machine::ssh::REMOTE_PATH,
+        crate::machine::ssh::remote_path(),
         argv.iter()
             .map(|arg| crate::machine::ssh::sh_quote(arg))
             .collect::<Vec<_>>()

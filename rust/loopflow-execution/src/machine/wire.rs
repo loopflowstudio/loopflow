@@ -140,6 +140,17 @@ pub struct Selection {
 #[derive(Clone, Default)]
 pub struct Secrets(pub Vec<(String, secrecy::SecretString)>);
 
+impl Secrets {
+    /// Tell the launch the name this Machine gives its destination, which
+    /// the sign-in advice printed there uses.
+    pub fn carry_launcher_name(&mut self, name: String) {
+        self.0.push((
+            crate::machine::login::MACHINE_NAME_ENV.into(),
+            secrecy::SecretString::new(name),
+        ));
+    }
+}
+
 impl std::fmt::Debug for Secrets {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_tuple("Secrets")

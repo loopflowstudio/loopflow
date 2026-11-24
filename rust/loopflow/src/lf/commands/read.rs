@@ -1019,7 +1019,6 @@ impl Read {
             | Self::SessionRetention
             | Self::MachineDoctor
             | Self::RepoCi { .. }
-            | Self::AccountList { .. }
             | Self::TaskWait { .. } => None,
         }
     }

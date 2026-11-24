@@ -107,3 +107,11 @@ Choices made headless for review; the plan says what each passed over.
   launch uses). Passed over: overlaying only a signed-out row.
 - Rescope implement: `lf machine logout claude mini` still runs
   `claude auth logout` there. Passed over: refusing it like login.
+- Sync onto main (2026-11-23): main replaced `forwarding_environment` with
+  `wire::Selection`, which has no target, so `LF_MACHINE_NAME` now rides in
+  the launch's `Secrets` (`Secrets::carry_launcher_name`) for server requests
+  and beside `LF_EXPECTED_MACHINE_ID` for `lf ssh`. Passed over: a
+  `Selection` field, which changes the wire schema and every `capture` caller.
+- Sync onto main: main dropped Notion; it is gone from logins, docs and tests.
+  Revoked-login advice is `lf machine login <provider>` for a provider lf signs
+  in, else the harness's own (`agy`, Pi).

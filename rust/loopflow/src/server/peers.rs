@@ -47,11 +47,12 @@ impl PeerPool {
         self.request(machine, Some(sender), read, None, ErrorCode::Unavailable)
     }
 
-    /// A Session's held terminal there, which runs in no repository. A named
-    /// request repeats once on a fresh pipe.
+    /// A held terminal there: a Session's, which needs no sender, or a Task
+    /// shell's. A named request repeats once on a fresh pipe.
     pub fn terminal(
         &self,
         machine: &Machine,
+        sender: Option<Sender>,
         operation: &ServerOperation,
         request_id: Option<String>,
     ) -> Result<Response> {
@@ -60,7 +61,7 @@ impl PeerPool {
         } else {
             ErrorCode::Unavailable
         };
-        self.request(machine, None, operation, request_id, disconnected)
+        self.request(machine, sender, operation, request_id, disconnected)
     }
 
     pub fn save(

@@ -52,14 +52,7 @@ pub fn run(args: &ShellRequest) -> Result<()> {
             expected.is_dir(),
             "The recorded Task checkout is unavailable"
         );
-        let argv = shell_command(id, initial, bootstrap.as_deref())?;
-        let launcher = crate::journal::current_lf_process_id();
-        if store.create_desktop_shell(
-            id,
-            &checkout.task_id,
-            &expected.to_string_lossy(),
-            launcher.as_ref(),
-        )? {
+        if let Some(argv) = record(&store, id, &checkout.task_id, expected, initial, bootstrap)? {
             // A shell is a plain terminal: nothing in it is managed.
             let terminal = crate::transport::start_held(&argv, expected, None, &|_| {})?;
             store.bind_desktop_shell(id, &terminal)?;
@@ -101,6 +94,140 @@ pub fn run(args: &ShellRequest) -> Result<()> {
                 "Shell ended. Create a new shell explicitly; its commands will not be replayed"
             )
         }
+    }
+}
+
+/// Record shell `id` for `task` in `checkout` and answer what to run, once:
+/// `None` when the receipt exists, so a repeat never replays startup.
+fn record(
+    store: &loopflow_storage::sqlite::SqliteStore,
+    id: &str,
+    task: &loopflow_model::durable::TaskId,
+    checkout: &Path,
+    initial: &[String],
+    bootstrap: &Option<String>,
+) -> Result<Option<Vec<String>>> {
+    let argv = shell_command(id, initial, bootstrap.as_deref())?;
+    let launcher = crate::journal::current_lf_process_id();
+    Ok(store
+        .create_desktop_shell(id, task, &checkout.to_string_lossy(), launcher.as_ref())?
+        .then_some(argv))
+}
+
+/// A Task shell this Machine's server holds, by `shell_id`.
+pub mod served {
+    use super::record;
+    use crate::engine::{Error, ErrorCode};
+    use crate::transport::registry::{Registry, Start};
+    use loopflow_model::id::TerminalId;
+    use serde_json::json;
+
+    fn refused(error: impl Into<anyhow::Error>) -> Error {
+        Error::refused(&error.into(), ErrorCode::Unavailable)
+    }
+
+    fn unknown(id: &str) -> Error {
+        Error::new(
+            ErrorCode::NotFound,
+            "Shell is unknown here; start a new shell",
+        )
+        .with(json!({ "shell_id": id }))
+    }
+
+    /// Start shell `id` in the Task's checkout here, or answer the terminal
+    /// an earlier start with the same `id` began. `env` is the server's.
+    #[allow(clippy::too_many_arguments)]
+    pub fn start(
+        terminals: &Registry,
+        issue: &str,
+        id: &str,
+        rows: u16,
+        cols: u16,
+        bootstrap: &Option<String>,
+        command: &[String],
+        env: Vec<(String, String)>,
+    ) -> Result<TerminalId, Error> {
+        let store = crate::journal::process_ledger().map_err(refused)?;
+        if store.desktop_shell(id).map_err(refused)?.is_none() {
+            let task = crate::store::children::resolve_task_id(&store, issue, None)
+                .map_err(refused)?
+                .ok_or_else(|| {
+                    Error::new(ErrorCode::NotFound, format!("Task {issue} is unknown"))
+                })?;
+            let checkout = store
+                .task_checkout(&task)
+                .map_err(refused)?
+                .ok_or_else(|| {
+                    Error::new(ErrorCode::NotFound, format!("Task {issue} is not started"))
+                        .with(json!({ "reason": "not_started", "task_id": task }))
+                })?;
+            let cwd = checkout.worktree;
+            if let Some(argv) =
+                record(&store, id, &task, &cwd, command, bootstrap).map_err(refused)?
+            {
+                let terminal = terminals
+                    .start(Start {
+                        session: None,
+                        request: format!("shell-{id}"),
+                        argv,
+                        cwd,
+                        env,
+                        rows,
+                        cols,
+                        placement: None,
+                    })
+                    // The shell may be running: repeating the start answers it.
+                    .map_err(|failure| {
+                        Error::new(ErrorCode::OutcomeUnknown, format!("{failure:#}"))
+                    })?;
+                store.bind_desktop_shell(id, &terminal).map_err(refused)?;
+                return Ok(terminal);
+            }
+        }
+        let receipt = store
+            .desktop_shell(id)
+            .map_err(refused)?
+            .ok_or_else(|| unknown(id))?;
+        receipt.terminal.ok_or_else(|| {
+            Error::new(
+                ErrorCode::OutcomeUnknown,
+                "Shell startup was not acknowledged; no replacement was started",
+            )
+            .with(json!({ "shell_id": id }))
+        })
+    }
+
+    /// The running terminal of shell `id`; never starts one.
+    pub fn running(id: &str) -> Result<TerminalId, Error> {
+        let store = crate::journal::process_ledger().map_err(refused)?;
+        let receipt = store
+            .desktop_shell(id)
+            .map_err(refused)?
+            .ok_or_else(|| unknown(id))?;
+        match receipt.terminal {
+            Some(terminal) if store.terminal_running(&terminal).map_err(refused)? => Ok(terminal),
+            terminal => Err(Error::new(
+                ErrorCode::NotFound,
+                "Shell ended; start a new shell. Its commands will not be replayed",
+            )
+            .with(json!({ "shell_id": id, "terminal_id": terminal }))),
+        }
+    }
+
+    /// Close shell `id` and end its terminal.
+    pub fn close(id: &str) -> Result<(), Error> {
+        let store = crate::journal::process_ledger().map_err(refused)?;
+        let receipt = store
+            .desktop_shell(id)
+            .map_err(refused)?
+            .ok_or_else(|| unknown(id))?;
+        store.close_desktop_shell(id).map_err(refused)?;
+        if let Some(terminal) = &receipt.terminal {
+            if store.terminal_running(terminal).map_err(refused)? {
+                crate::transport::close_notice(terminal, "Shell closed").map_err(refused)?;
+            }
+        }
+        Ok(())
     }
 }
 

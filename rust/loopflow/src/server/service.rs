@@ -823,7 +823,7 @@ pub(super) async fn session<C: Carrier>(
                         };
                         // Repeating `request` starts nothing, so a lost pipe retries once.
                         let answer = tokio::task::spawn_blocking(move || {
-                            peers.terminal(&machine, &operation, Some(request))
+                            peers.terminal(&machine, None, &operation, Some(request))
                         })
                         .await
                         .map_err(unavailable)
@@ -863,16 +863,15 @@ pub(super) async fn session<C: Carrier>(
                     }
                     Ok(Some(machine)) => {
                         let peers = peers.expect("only a local client's request is sent on");
-                        let message = attach_there(
-                            id,
-                            peers,
-                            machine,
+                        let operation = ServerOperation::SessionAttach {
                             session,
                             terminal_id,
-                            &tickets,
-                            &admission,
-                        )
-                        .await;
+                            task: None,
+                            machine: None,
+                        };
+                        let message =
+                            attach_there(id, peers, machine, None, operation, &tickets, &admission)
+                                .await;
                         send(lines, &message).await?;
                         continue;
                     }
@@ -905,6 +904,21 @@ pub(super) async fn session<C: Carrier>(
                         "terminal has ended; nothing was started and no input replayed",
                     ).with(serde_json::json!({ "terminal_id": wanted, "current_terminal_id": current }))),
                 };
+                send(lines, &message).await?;
+                continue;
+            }
+            Start::Request(
+                Operation::Server(
+                    shell @ (ServerOperation::TaskShellStart { .. }
+                    | ServerOperation::TaskShellAttach { .. }
+                    | ServerOperation::TaskShellClose { .. }),
+                ),
+                None,
+                _,
+            ) => {
+                let origin = origin.expect("a Task shell request carries its sender");
+                let message =
+                    task_shell(id, shell, origin, terminals.clone(), &tickets, &admission).await;
                 send(lines, &message).await?;
                 continue;
             }
@@ -1042,9 +1056,7 @@ async fn start_held(
     start: Result<loopflow_execution::transport::registry::Start, Error>,
 ) -> ServerMessage {
     let Some(terminals) = terminals else {
-        return ServerMessage::error(Some(id), Error::new(ErrorCode::Unavailable,
-            "this server hosts no held terminals; see logs/lf.log and restart it with lf server restart",
-        ).with(serde_json::json!({ "resource": "held_terminals" })));
+        return ServerMessage::error(Some(id), no_held_terminals());
     };
     let start = match start {
         Ok(start) => start,
@@ -1100,22 +1112,10 @@ pub(super) fn continuing(
     {
         return Err(Error::new(ErrorCode::Conflict, reason));
     }
-    let context = loopflow_execution::os_process::execution_context().map_err(unavailable)?;
-    // This exact Session owns its child, not the service's launcher.
-    let mut env: Vec<(String, String)> = std::env::vars()
-        .filter(|(name, _)| !name.starts_with("LF_"))
-        .collect();
-    env.push((
-        "LF_HOME".into(),
-        context.lf_home.to_string_lossy().into_owned(),
-    ));
-    env.push((
-        "LF_BIN".into(),
-        context.lf_bin.to_string_lossy().into_owned(),
-    ));
+    let (lf_bin, env) = held_env()?;
     Ok(loopflow_execution::transport::registry::Start {
         argv: vec![
-            context.lf_bin.to_string_lossy().into_owned(),
+            lf_bin.to_string_lossy().into_owned(),
             "session".into(),
             "resume".into(),
             "--".into(),
@@ -1129,6 +1129,152 @@ pub(super) fn continuing(
         cols,
         placement: None,
     })
+}
+
+/// A held child's environment: this server's, with its own `LF_HOME` and
+/// `LF_BIN`, and that `lf`. The child, not the service's launcher, owns what
+/// it starts.
+fn held_env() -> Result<(std::path::PathBuf, Vec<(String, String)>), Error> {
+    let context = loopflow_execution::os_process::execution_context().map_err(unavailable)?;
+    let mut env: Vec<(String, String)> = std::env::vars()
+        .filter(|(name, _)| !name.starts_with("LF_"))
+        .collect();
+    env.push((
+        "LF_HOME".into(),
+        context.lf_home.to_string_lossy().into_owned(),
+    ));
+    env.push((
+        "LF_BIN".into(),
+        context.lf_bin.to_string_lossy().into_owned(),
+    ));
+    Ok((context.lf_bin, env))
+}
+
+/// The Task a shell request names. Another Machine's request names it as
+/// that repository knows it here.
+fn shell_issue(shell: &mut ServerOperation) -> &mut String {
+    match shell {
+        ServerOperation::TaskShellStart { issue, .. }
+        | ServerOperation::TaskShellAttach { issue, .. }
+        | ServerOperation::TaskShellClose { issue, .. } => issue,
+        _ => unreachable!("only Task shell requests name a shell"),
+    }
+}
+
+/// A Task shell request, here or on the Machine that runs the Task.
+async fn task_shell(
+    id: String,
+    mut shell: ServerOperation,
+    origin: Origin,
+    terminals: Option<Arc<Registry>>,
+    tickets: &Tickets,
+    admission: &Admission,
+) -> ServerMessage {
+    let issue = shell_issue(&mut shell).clone();
+    let placing = origin.clone();
+    let placed = tokio::task::spawn_blocking(move || -> anyhow::Result<_> {
+        Ok(match placing {
+            Origin::Machine(sender) => (
+                crate::lf::commands::work_route::peer_task_id(&sender.repository, &issue)?,
+                None,
+            ),
+            Origin::Local(_) => {
+                match loopflow_execution::machine::task::remote_task(&issue, None)? {
+                    Some(route) => {
+                        let peer = crate::lf::commands::read::peer_of(&route)?;
+                        (route.peer_selector, Some(peer))
+                    }
+                    None => (issue, None),
+                }
+            }
+        })
+    })
+    .await
+    .map_err(unavailable)
+    .and_then(|placed| placed.map_err(unavailable));
+    let (task, there) = match placed {
+        Ok(placed) => placed,
+        Err(refusal) => return ServerMessage::error(Some(id), refusal),
+    };
+    *shell_issue(&mut shell) = task;
+    if let Some((machine, sender)) = there {
+        let Origin::Local(peers) = origin else {
+            unreachable!("only a local client's request is sent on")
+        };
+        if matches!(shell, ServerOperation::TaskShellAttach { .. }) {
+            return attach_there(id, peers, machine, Some(sender), shell, tickets, admission).await;
+        }
+        // A start repeats by its `shell_id`, so a lost pipe retries once.
+        let repeat = match &shell {
+            ServerOperation::TaskShellStart { shell_id, .. } => Some(format!("shell-{shell_id}")),
+            _ => None,
+        };
+        let answer = tokio::task::spawn_blocking(move || {
+            peers.terminal(&machine, Some(sender), &shell, repeat)
+        })
+        .await
+        .map_err(unavailable)
+        .and_then(|answer| answer.map_err(unavailable));
+        return match answer {
+            Ok(answer) => response(id, answer.result),
+            Err(refusal) => ServerMessage::error(Some(id), refusal),
+        };
+    }
+    // What the shell here answered; an attach is answered with a ticket.
+    enum Shell {
+        Started(loopflow_model::id::TerminalId),
+        Running(loopflow_model::id::TerminalId),
+        Closed,
+    }
+    let answer = tokio::task::spawn_blocking(move || -> Result<Shell, Error> {
+        use loopflow_execution::desktop::shells::served;
+        Ok(match shell {
+            ServerOperation::TaskShellStart {
+                issue,
+                shell_id,
+                rows,
+                cols,
+                bootstrap,
+                command,
+            } => {
+                let terminals = terminals.ok_or_else(no_held_terminals)?;
+                let (_, env) = held_env()?;
+                Shell::Started(served::start(
+                    &terminals, &issue, &shell_id, rows, cols, &bootstrap, &command, env,
+                )?)
+            }
+            ServerOperation::TaskShellAttach { shell_id, .. } => {
+                Shell::Running(served::running(&shell_id)?)
+            }
+            ServerOperation::TaskShellClose { shell_id, .. } => {
+                served::close(&shell_id)?;
+                Shell::Closed
+            }
+            _ => unreachable!("only Task shell requests reach here"),
+        })
+    })
+    .await
+    .map_err(unavailable)
+    .and_then(|answer| answer);
+    let result = match answer {
+        Ok(Shell::Started(terminal_id)) => serde_json::to_value(SessionStarted { terminal_id }),
+        Ok(Shell::Running(terminal_id)) => serde_json::to_value(SessionAttached {
+            ticket: tickets.issue(admission.clone(), Purpose::Terminal(terminal_id.clone())),
+            terminal_id,
+            expires_in_ms: TICKET_LIFETIME.as_millis() as u64,
+        }),
+        Ok(Shell::Closed) => Ok(serde_json::json!({})),
+        Err(refusal) => return ServerMessage::error(Some(id), refusal),
+    };
+    response(id, result.expect("a shell answer serializes"))
+}
+
+fn no_held_terminals() -> Error {
+    Error::new(
+        ErrorCode::Unavailable,
+        "this server hosts no held terminals; see logs/lf.log and restart it with lf server restart",
+    )
+    .with(serde_json::json!({ "resource": "held_terminals" }))
 }
 
 /// `{ticket}`: single use, bound to this connection's admission, expiring in
@@ -1177,25 +1323,20 @@ async fn attach_there(
     id: String,
     peers: Arc<PeerPool>,
     machine: loopflow_model::durable::Machine,
-    session: loopflow_model::id::LfSessionId,
-    terminal_id: Option<loopflow_model::id::TerminalId>,
+    sender: Option<Sender>,
+    operation: ServerOperation,
     tickets: &Tickets,
     admission: &Admission,
 ) -> ServerMessage {
-    let operation = ServerOperation::SessionAttach {
-        session,
-        terminal_id,
-        task: None,
-        machine: None,
-    };
     let there = machine.clone();
-    let answer = tokio::task::spawn_blocking(move || peers.terminal(&there, &operation, None))
-        .await
-        .map_err(unavailable)
-        .and_then(|answer| answer.map_err(unavailable))
-        .and_then(|answer| {
-            serde_json::from_value::<SessionAttached>(answer.result).map_err(unavailable)
-        });
+    let answer =
+        tokio::task::spawn_blocking(move || peers.terminal(&there, sender, &operation, None))
+            .await
+            .map_err(unavailable)
+            .and_then(|answer| answer.map_err(unavailable))
+            .and_then(|answer| {
+                serde_json::from_value::<SessionAttached>(answer.result).map_err(unavailable)
+            });
     let issued = match answer {
         Ok(issued) => issued,
         Err(refusal) => return ServerMessage::error(Some(id), refusal),
@@ -1725,9 +1866,12 @@ async fn served(
             ServerOperation::SessionAttach { .. }
             | ServerOperation::SessionStart { .. }
             | ServerOperation::SessionContinue { .. }
+            | ServerOperation::TaskShellStart { .. }
+            | ServerOperation::TaskShellAttach { .. }
+            | ServerOperation::TaskShellClose { .. }
             | ServerOperation::RequestUpload { .. },
         ) => {
-            unreachable!("the session dispatches attachment, starts and uploads")
+            unreachable!("the session dispatches terminals and uploads")
         }
         Operation::Server(ServerOperation::SessionBoundary(_)) => {
             unreachable!("request dispatches boundaries")

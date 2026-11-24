@@ -741,16 +741,10 @@ impl Read {
         &mut self,
         route: loopflow_execution::durable::TaskExecutionRoute,
     ) -> anyhow::Result<(Machine, Sender)> {
+        let (machine, sender) = peer_of(&route)?;
         *self
             .workspace_task_mut()
             .expect("only Task reads have peer routes") = route.peer_selector;
-        let machine = super::write::find_machine(route.machine_id.as_str())?;
-        let directory = super::work_route::repository_path(&route.repository_id)?;
-        let sender = Sender {
-            repository: route.repository_id,
-            selection: Selection::capture(&directory, None)?,
-            secrets: Secrets::default(),
-        };
         Ok((machine, sender))
     }
 
@@ -1199,6 +1193,20 @@ fn not_found(
 
 fn value(value: &impl Serialize) -> anyhow::Result<serde_json::Value> {
     Ok(serde_json::to_value(value)?)
+}
+
+/// The Machine a Task route names and the sender its repository sends as.
+pub(crate) fn peer_of(
+    route: &loopflow_execution::durable::TaskExecutionRoute,
+) -> anyhow::Result<(Machine, Sender)> {
+    let machine = super::write::find_machine(route.machine_id.as_str())?;
+    let directory = super::work_route::repository_path(&route.repository_id)?;
+    let sender = Sender {
+        repository: route.repository_id.clone(),
+        selection: Selection::capture(&directory, None)?,
+        secrets: Secrets::default(),
+    };
+    Ok((machine, sender))
 }
 
 #[cfg(test)]

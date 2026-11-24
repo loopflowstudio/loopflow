@@ -250,6 +250,32 @@ pub enum ServerOperation {
         #[serde(deserialize_with = "Option::deserialize")]
         machine: Option<loopflow_model::durable::MachineId>,
     },
+    /// Start a Task shell in the checkout of the Machine that runs the Task
+    /// and answer `{terminal_id}`. `shell_id` names it there: repeating it
+    /// answers the same terminal and starts nothing. `command` runs first
+    /// after login startup; `bootstrap` is Desktop's Ghostty startup JSON.
+    /// A Task with no checkout is `not_found {reason: "not_started"}`.
+    #[serde(rename = "task.shell.start")]
+    #[schemars(extend("x-result" = generator.subschema_for::<SessionStarted>()))]
+    TaskShellStart {
+        issue: String,
+        shell_id: String,
+        rows: u16,
+        cols: u16,
+        #[serde(deserialize_with = "Option::deserialize")]
+        bootstrap: Option<String>,
+        command: Vec<String>,
+    },
+    /// A ticket for a Task shell's running terminal, like `session.attach`.
+    /// It never starts one: an ended or unknown shell is `not_found`. A shell
+    /// is named only on the Machine that started it.
+    #[serde(rename = "task.shell.attach")]
+    #[schemars(extend("x-result" = generator.subschema_for::<SessionAttached>()))]
+    TaskShellAttach { issue: String, shell_id: String },
+    /// Close a Task shell and end its terminal; answers `{}`.
+    #[serde(rename = "task.shell.close")]
+    #[schemars(extend("x-result" = schemars::json_schema!({"type": "object", "additionalProperties": false})))]
+    TaskShellClose { issue: String, shell_id: String },
     /// Mobile access readiness; same-user local socket only.
     #[serde(rename = "mobile.status")]
     #[schemars(extend("x-result" = generator.subschema_for::<super::mobile::Status>()))]

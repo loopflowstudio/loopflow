@@ -4611,6 +4611,53 @@ fn server_routed_task_workspace() {
         &expected,
     );
 
+    // A Task shell starts in mini's checkout, once, and attaches the same way.
+    use loopflow::server::wire::ServerOperation::{
+        TaskShellAttach, TaskShellClose, TaskShellStart,
+    };
+    let start = TaskShellStart {
+        issue: task.to_string(),
+        shell_id: "laptop-shell".into(),
+        rows: 24,
+        cols: 400,
+        bootstrap: None,
+        command: [
+            "/bin/sh",
+            "-c",
+            "printf 'shell on mini: %s\\n' \"$(pwd -P)\"",
+        ]
+        .map(str::to_owned)
+        .to_vec(),
+    };
+    let started = client.request(&start).unwrap().result;
+    assert_eq!(client.request(&start).unwrap().result, started);
+    let shell_attach = || TaskShellAttach {
+        issue: task.to_string(),
+        shell_id: "laptop-shell".into(),
+    };
+    let issued = client.request(shell_attach()).unwrap().result;
+    assert_eq!(issued["terminal_id"], started["terminal_id"]);
+    bridged_terminal(
+        Path::new(&socket),
+        issued["ticket"].as_str().unwrap(),
+        &format!(
+            "shell on mini: {}",
+            plan.remote_path.canonicalize().unwrap().display()
+        ),
+    );
+    client
+        .request(TaskShellClose {
+            issue: task.to_string(),
+            shell_id: "laptop-shell".into(),
+        })
+        .unwrap();
+    let ended = client
+        .request(shell_attach())
+        .unwrap_err()
+        .downcast::<Error>()
+        .unwrap();
+    assert_eq!(ended.code, ErrorCode::NotFound, "{ended:?}");
+
     // Restart the peer under an idle pipe. The next read reconnects once.
     drop(server_on_mini);
     let restarted = served_mini(&fixture);

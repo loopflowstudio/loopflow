@@ -187,7 +187,7 @@ sends it there and answers with that Machine's result:
 | Routed | Stays local |
 | --- | --- |
 | `task.status`, `.get`, `.detail`, `.changes`, `.diff`, `.file`, `.files`, `.files.watch`, `.save`; `task.runs` and `session.list` with a `task` | `plan.list`, `desktop.view.list`, `view.select`, `wave.plan`, `session.list` without a `task` |
-| `session.start`, `.continue`, `.attach` with a `task`, a `machine`, or a Session this store records elsewhere | every inventory and board read |
+| `session.continue`, `.attach` with a `task`, a `machine`, or a Session this store records elsewhere | `session.start`, whose `argv`, `cwd` and `env` are the caller's |
 | `task.shell.start`, `.attach`, `.close` | |
 
 A request a peer sent is never sent on. The forwarded Task is named by its
@@ -456,7 +456,7 @@ case names one operation, including distinct claim/unassign and pin/unpin writes
 | `task.changes` | `lf task changes <issue>` | read |
 | `task.diff`, `task.file`, `task.files` | `lf task diff`, `lf task file`, `lf task files` | read |
 | `task.files.watch` | none; Desktop's Files pane | subscription; file tree revision after a change under the checkout or a Task move |
-| `task.shell.start`, `.attach`, `.close` | `lf desktop shell`, the phone's Shell | server; a Task shell by `shell_id`, held on the Machine that started it |
+| `task.shell.start`, `.attach`, `.close` | Desktop's and the phone's Shell, once they move onto it | server; a Task shell by `shell_id`, held on the Machine that started it |
 | `task.context` | `lf task context <issue>` | read |
 | `task.runs` | `lf task runs <issue>` | read |
 | `task.wait` | `lf task wait <issue> --until <state>` | `engine::task` |
@@ -691,11 +691,12 @@ its own owner process is restarted by `lf resume`, not attached
 ([transport README](../transport/README.md#conversations-an-earlier-build-started)).
 `lf session resume` and `server::client::attach` perform both ticket steps.
 
-`task.shell.attach {issue, shell_id, terminal_id}` answers the same ticket for
+`task.shell.attach {issue, shell_id}` answers the same ticket for
 a Task shell and never starts one; `task.shell.start {issue, shell_id, rows,
-cols, bootstrap, command}` starts `$SHELL` (or `command`) in the owner's
-checkout, idempotent by `shell_id`, and answers `{terminal_id}`. Desktop passes
-Ghostty's `bootstrap`; the phone passes null. A `shell_id` exists only on the
+cols, bootstrap, command}` runs `command` after login startup, then `$SHELL`,
+in the owner's checkout, idempotent by `shell_id`, and answers `{terminal_id}`;
+`task.shell.close` ends it. Desktop passes Ghostty's `bootstrap`; the phone
+passes null. A `shell_id` exists only on the
 Machine that started it, so after a move the new owner answers `not_found` and
 the client offers a new shell.
 

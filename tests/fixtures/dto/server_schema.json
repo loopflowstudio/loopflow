@@ -9630,6 +9630,110 @@
         },
         {
           "additionalProperties": false,
+          "description": "Start a Task shell in the checkout of the Machine that runs the Task\nand answer `{terminal_id}`. `shell_id` names it there: repeating it\nanswers the same terminal and starts nothing. `command` runs first\nafter login startup; `bootstrap` is Desktop's Ghostty startup JSON.\nA Task with no checkout is `not_found {reason: \"not_started\"}`.",
+          "properties": {
+            "bootstrap": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "cols": {
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "command": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "issue": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "task.shell.start",
+              "type": "string"
+            },
+            "rows": {
+              "format": "uint16",
+              "maximum": 65535,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "shell_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "issue",
+            "shell_id",
+            "rows",
+            "cols",
+            "bootstrap",
+            "command"
+          ],
+          "type": "object",
+          "x-result": {
+            "$ref": "#/$defs/SessionStarted"
+          }
+        },
+        {
+          "additionalProperties": false,
+          "description": "A ticket for a Task shell's running terminal, like `session.attach`.\nIt never starts one: an ended or unknown shell is `not_found`. A shell\nis named only on the Machine that started it.",
+          "properties": {
+            "issue": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "task.shell.attach",
+              "type": "string"
+            },
+            "shell_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "issue",
+            "shell_id"
+          ],
+          "type": "object",
+          "x-result": {
+            "$ref": "#/$defs/SessionAttached"
+          }
+        },
+        {
+          "additionalProperties": false,
+          "description": "Close a Task shell and end its terminal; answers `{}`.",
+          "properties": {
+            "issue": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "task.shell.close",
+              "type": "string"
+            },
+            "shell_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "issue",
+            "shell_id"
+          ],
+          "type": "object",
+          "x-result": {
+            "additionalProperties": false,
+            "type": "object"
+          }
+        },
+        {
+          "additionalProperties": false,
           "description": "Mobile access readiness; same-user local socket only.",
           "examples": [
             {

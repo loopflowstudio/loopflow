@@ -176,6 +176,8 @@ impl SessionOrigin {
 /// recorder completion is historical evidence, never native success or process exit.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, schemars::JsonSchema)]
 pub struct SessionHistory {
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub origin: Option<SessionOrigin>,
     pub session_id: loopflow_model::id::LfSessionId,
     pub captured: Option<i64>,
     pub artifact_key: Option<String>,

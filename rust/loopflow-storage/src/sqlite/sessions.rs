@@ -757,6 +757,13 @@ fn ensure_primary_session_in(
     Ok(session)
 }
 
+#[derive(Clone, Copy, Debug)]
+pub enum HistorySelection<'a> {
+    All,
+    Local,
+    Input(&'a str),
+}
+
 /// The inputs a history read selected, before their history is decoded.
 #[derive(Debug)]
 pub struct PendingHistory {
@@ -769,6 +776,8 @@ pub struct PendingHistory {
 /// One selected input: a captured input, or a native turn no input captured.
 #[derive(Debug, Clone)]
 pub struct PendingInput {
+    /// Keep the selected origin row from this snapshot until the projection needs it.
+    copied_turn: Option<(loopflow_model::durable::MachineId, String)>,
     pub session_id: String,
     input: Option<String>,
     caller: Option<String>,
@@ -793,6 +802,12 @@ pub struct PendingInput {
     /// decoded history reports is a row's `observed_at` or a payload time its
     /// writer also stored as that row's `observed_at`, so none is later.
     pub latest: i64,
+}
+
+impl PendingInput {
+    pub fn origin(&self) -> Option<&loopflow_model::durable::MachineId> {
+        self.copied_turn.as_ref().map(|(origin, _)| origin)
+    }
 }
 
 /// Saved evidence for one selected input, before application projection.
@@ -1158,7 +1173,7 @@ impl SqliteStore {
             task,
             None,
             (since, include_finished, None),
-            None,
+            HistorySelection::All,
         )
     }
 
@@ -1169,8 +1184,12 @@ impl SqliteStore {
         task: Option<&str>,
         caller: Option<&str>,
         window: (i64, bool, Option<usize>),
-        input: Option<&str>,
+        selection: HistorySelection<'_>,
     ) -> StoreResult<PendingHistory> {
+        let input = match selection {
+            HistorySelection::Input(input) => Some(input),
+            _ => None,
+        };
         let task_id = task
             .map(|selector| self.resolve_task_id(selector, None))
             .transpose()?
@@ -1193,7 +1212,7 @@ impl SqliteStore {
             // them, and `CROSS JOIN` keeps the window as the outer loop. A `+`
             // on an arm's output stops SQLite merging the UNION in index order,
             // which it would get by scanning the whole index instead of the range.
-            let mut query = conn.prepare("WITH windowed(seq) AS (
+            let mut query = conn.prepare(&format!("WITH windowed(seq) AS (
                 SELECT seq FROM session_events WHERE kind='captured' AND receipt_key=?7
                 UNION SELECT seq FROM session_events WHERE ?7 IS NULL AND task_id=?3 AND kind='captured'
                 UNION SELECT captured_event FROM history.session_history
@@ -1223,6 +1242,7 @@ impl SqliteStore {
                     WHERE ?7 IS NULL AND ?3 IS NULL AND ?5>0 AND ?6 AND exited.agent_ended_at>=?5 AND ran.captured_event IS NULL
                 UNION SELECT id FROM history.turns
                     WHERE ?7 IS NULL AND task_id=?3 AND captured_event IS NULL),
+            copies AS NOT MATERIALIZED ({}),
             inputs AS (
                 SELECT i.seq AS captured,i.receipt_key AS input_id,i.session_id,json_extract(i.payload,'$.caller_key') AS caller_input_id,
                     COALESCE(m.observed_at,i.observed_at) AS started,
@@ -1275,11 +1295,12 @@ impl SqliteStore {
                     MAX(COALESCE(t.started_at,0),COALESCE(t.usage_at,0),COALESCE(t.ended_at,0))
                 FROM turns CROSS JOIN history.turns t ON t.id=turns.id
                 LEFT JOIN agent_sessions ts ON ts.id=t.session_id
-                WHERE t.captured_event IS NULL AND (?6 OR COALESCE(t.started_at,t.usage_at,t.ended_at)>=?5))
-                , eligible AS MATERIALIZED (
-                SELECT captured,input_id,session_id,caller_input_id,started,task_id,wave_id,ended,thread,turn,latest, SUM(ended IS NULL) OVER () AS unfinished,
-                    ROW_NUMBER() OVER (PARTITION BY ended IS NULL ORDER BY started DESC,input_id DESC,session_id,thread,turn) AS ordinal,
-                    COUNT(*) OVER () AS total
+                WHERE ts.id IS NOT NULL AND t.captured_event IS NULL AND (?6 OR COALESCE(t.started_at,t.usage_at,t.ended_at)>=?5)
+                    AND (NOT ?13 OR t.lf_process_id IS NOT NULL OR NOT EXISTS (SELECT 1 FROM copies c
+                        WHERE c.key=json_array(t.session_id,t.provider_thread,t.provider_turn)
+                          AND json_extract(c.row,'$.captured_event') IS NULL)))
+                , scoped AS (
+                SELECT inputs.*,NULL AS copied_record
                 FROM inputs
                 WHERE (?1 IS NULL OR wave_id IN (SELECT id FROM wave_addresses WHERE id=?9 OR slug=?1)
                     OR EXISTS (SELECT 1 FROM history.turns origin WHERE origin.session_id=inputs.session_id
@@ -1296,17 +1317,37 @@ impl SqliteStore {
                         AND inputs.captured IS NOT NULL AND origin.captured_event=inputs.captured
                         AND origin.task_id=?3))
                 AND (?4 IS NULL OR caller_input_id=?4 OR caller_input_id IN (SELECT receipt_key FROM session_events WHERE kind='captured' AND session_id=?12))
-                AND (started>=?5 OR (?6 AND ended>=?5)))
+                AND (started>=?5 OR (?6 AND ended>=?5))
+                UNION ALL
+                SELECT NULL,NULL,c.session_id,NULL,c.started,c.task_id,c.wave_id,
+                    json_extract(c.row,'$.ended_at'),json_extract(c.row,'$.thread'),json_extract(c.row,'$.turn'),
+                    MAX(c.started,coalesce(json_extract(c.row,'$.ended_at'),0),
+                        coalesce(json_extract(c.row,'$.usage.observed_at'),0)),c.record_id
+                FROM (
+                    SELECT record_id FROM machine_record_inputs WHERE ?13 AND ?4 IS NULL AND ?3 IS NULL AND started>=?5
+                    UNION SELECT rowid FROM machine_records INDEXED BY machine_record_turn_end WHERE kind='turn' AND ?13 AND ?4 IS NULL AND ?3 IS NULL AND ?6
+                        AND ?5>0 AND json_extract(row,'$.ended_at')>=?5
+                    UNION SELECT record_id FROM machine_record_inputs WHERE ?13 AND ?4 IS NULL AND task_id=?3
+                ) w CROSS JOIN copies c ON c.record_id=w.record_id
+                WHERE ?7 IS NULL AND ?4 IS NULL AND c.kind='turn' AND json_extract(c.row,'$.captured_event') IS NULL
+                  AND (c.started>=?5 OR (?6 AND json_extract(c.row,'$.ended_at')>=?5))
+                  AND (?1 IS NULL OR c.scope_wave IN (SELECT id FROM wave_addresses WHERE id=?9 OR slug=?1))
+                  AND (?2 IS NULL OR c.project_id=?10 OR c.project_slug=?2 OR c.external_project_id=?11)),
+                eligible AS MATERIALIZED (
+                SELECT scoped.*, SUM(ended IS NULL) OVER () AS unfinished,
+                    ROW_NUMBER() OVER (PARTITION BY ended IS NULL ORDER BY started DESC,input_id DESC,session_id,thread,turn) AS ordinal,
+                    COUNT(*) OVER () AS total FROM scoped)
                 SELECT eligible.session_id,eligible.input_id,eligible.caller_input_id,started,eligible.task_id,eligible.wave_id,
                     (SELECT slug FROM wave_addresses WHERE id=eligible.wave_id),
-                    s.current_capture,s.cwd,s.repo,s.skill,s.provider,s.model,s.interactive,
+                    s.current_capture,coalesce(s.cwd,''),s.repo,s.skill,s.provider,s.model,coalesce(s.interactive,0),
                     total > MAX(?8,unfinished),COALESCE((SELECT json_extract(payload,'$.work_source') FROM session_events WHERE seq=eligible.captured),
                         CASE WHEN eligible.captured=s.current_capture AND s.bound_at IS NULL THEN s.work_source END),
                     eligible.captured,eligible.thread,eligible.turn,eligible.latest,
-                    CASE WHEN eligible.captured=s.current_capture THEN s.skill_version END
-                FROM eligible CROSS JOIN agent_sessions s ON s.id=eligible.session_id
+                    CASE WHEN eligible.captured=s.current_capture THEN s.skill_version END,copy.origin_machine_id,copy.row
+                FROM eligible LEFT JOIN agent_sessions s ON eligible.copied_record IS NULL AND s.id=eligible.session_id
+                LEFT JOIN machine_records copy ON copy.rowid=eligible.copied_record
                 WHERE (?8 IS NULL OR ended IS NULL OR ordinal<=MAX(?8-unfinished,0))
-                ORDER BY started DESC,eligible.input_id DESC,eligible.session_id,eligible.thread,eligible.turn")?;
+                ORDER BY started DESC,eligible.input_id DESC,eligible.session_id,eligible.thread,eligible.turn",super::machine_records::COLLECTED_TURNS))?;
             // Names, slugs and capture locators keep their bytes; identities are canonical.
             let mut rows = query.query(params![
                 wave,
@@ -1321,6 +1362,7 @@ impl SqliteStore {
                 project.map(|project| loopflow_model::id::canonical_prefixed(project, "proj_")),
                 project.map(loopflow_model::id::canonical_uuid),
                 caller.map(loopflow_model::id::canonical_session),
+                matches!(selection, HistorySelection::All),
             ])?;
             let mut inputs = Vec::new();
             let mut labels = std::collections::HashMap::new();
@@ -1338,6 +1380,10 @@ impl SqliteStore {
                     .transpose()?
                     .flatten();
                 inputs.push(PendingInput {
+                    copied_turn: row
+                        .get::<_, Option<String>>(21)?
+                        .map(loopflow_model::durable::MachineId::from_raw)
+                        .zip(row.get(22)?),
                     session_id: row.get(0)?,
                     input: row.get(1)?,
                     caller: row.get(2)?,
@@ -1407,6 +1453,7 @@ impl SqliteStore {
             turn,
             skill_version,
             latest: _,
+            copied_turn,
         } = input.clone();
         let input = input
             .as_deref()
@@ -1448,12 +1495,15 @@ impl SqliteStore {
             Some(input) => self.summary_for_input_matching(&session_id, input, scope)?,
             None => Vec::new(),
         };
-        let turns = self.turns_matching(
-            &session_id,
-            input.as_deref(),
-            (thread.as_ref(), turn.as_deref()),
-            scope,
-        )?;
+        let turns = match copied_turn {
+            Some((_, row)) => vec![serde_json::from_str(&row)?],
+            None => self.turns_matching(
+                &session_id,
+                input.as_deref(),
+                (thread.as_ref(), turn.as_deref()),
+                scope,
+            )?,
+        };
         Ok(HistoryInput {
             session,
             artifact_key: input,

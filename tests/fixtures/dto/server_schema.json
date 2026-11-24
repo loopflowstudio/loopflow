@@ -10766,6 +10766,16 @@
           "format": "int64",
           "type": "integer"
         },
+        "origin": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SessionOrigin"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "providers": {
           "items": {
             "$ref": "#/$defs/ProviderHistory"
@@ -10865,6 +10875,7 @@
         }
       },
       "required": [
+        "origin",
         "session_id",
         "captured",
         "artifact_key",
@@ -10899,6 +10910,25 @@
         "unknown"
       ],
       "type": "string"
+    },
+    "SessionOrigin": {
+      "description": "The Machine a collected Session was read from.",
+      "properties": {
+        "label": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "machine_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "machine_id",
+        "label"
+      ],
+      "type": "object"
     },
     "SessionOutlook": {
       "description": "Whether a conversation that is not running comes up, and what brings it.\nThe server works this out; no client does it again from `ended` and\n`start`.",

@@ -13,6 +13,18 @@ use loopflow_model::durable::{MachineId, RepositoryId, TaskId};
 
 use super::SqliteStore;
 
+/// Dispatch attribution survives transcript replay on a different Machine.
+/// For otherwise equivalent readings, prefer local, then stable Machine ID order.
+pub(super) const COLLECTED_TURNS: &str = "
+    SELECT c.* FROM machine_record_inputs c
+    LEFT JOIN history.turns t ON t.session_id=c.session_id
+        AND t.provider_thread=json_extract(c.row,'$.thread') AND t.provider_turn=json_extract(c.row,'$.turn')
+    WHERE c.kind='turn' AND (t.id IS NULL OR (t.lf_process_id IS NULL AND t.captured_event IS NULL
+        AND json_extract(c.row,'$.lf_process_id') IS NOT NULL))
+      AND c.origin_machine_id=(
+        SELECT other.origin_machine_id FROM machine_records other WHERE other.kind='turn' AND other.key=c.key
+        ORDER BY (json_extract(other.row,'$.lf_process_id') IS NOT NULL) DESC,other.origin_machine_id LIMIT 1)";
+
 /// A copy carries the columns its origin actually has, including generated history kinds.
 fn columns_in(conn: &Connection, table: &str) -> StoreResult<String> {
     let (schema, table) = table.split_once('.').unwrap_or(("main", table));
@@ -242,24 +254,17 @@ impl SqliteStore {
             .flatten();
         let task = task_id.as_ref().map(TaskId::as_str).or(task);
         let task_filter = if task.is_some() {
-            "AND json_extract(r.row,'$.task_id')=?7"
+            "AND task_id=?7"
         } else {
             "AND ?7 IS NULL"
         };
         let sql = format!(
             "WITH sessions AS (
-                SELECT DISTINCT r.origin_machine_id, json_extract(r.row,'$.session_id') AS session
-                FROM machine_records r
-                LEFT JOIN tasks t ON t.id=json_extract(r.row,'$.task_id')
-                LEFT JOIN projects p ON p.id=coalesce(json_extract(r.row,'$.project_id'),t.project_id)
-                WHERE CASE r.kind WHEN 'turn' THEN 1
-                    WHEN 'session_event' THEN json_extract(r.row,'$.kind')='captured'
-                    WHEN 'history' THEN json_extract(r.row,'$.kind')='manifest' END
-                  AND coalesce(json_extract(r.row,'$.started_at'),json_extract(r.row,'$.observed_at'),
-                      json_extract(r.row,'$.usage.observed_at'),json_extract(r.row,'$.ended_at'))>=?1 {task_filter}
-                  AND (?2 IS NULL OR coalesce(json_extract(r.row,'$.wave_id'),p.wave_id) IN
+                SELECT DISTINCT origin_machine_id, session_id AS session FROM machine_record_inputs
+                WHERE started>=?1 {task_filter}
+                  AND (?2 IS NULL OR scope_wave IN
                       (SELECT id FROM wave_addresses WHERE slug=?2 OR id=?3))
-                  AND (?4 IS NULL OR p.project_slug=?4 OR p.id=?5 OR p.external_project_id=?6)
+                  AND (?4 IS NULL OR project_slug=?4 OR project_id=?5 OR external_project_id=?6)
             )
             SELECT s.origin_machine_id, tr.row FROM sessions s CROSS JOIN machine_records tr
             WHERE tr.origin_machine_id=s.origin_machine_id AND tr.kind='transcript'
@@ -364,6 +369,37 @@ impl SqliteStore {
                 })
             },
         )?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
+    /// Read the additional native turns on one origin, in a Session drill-down.
+    pub fn collected_turns(
+        &self,
+        origin: &MachineId,
+        session: &str,
+    ) -> StoreResult<Vec<crate::session::Turn>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut statement = conn.prepare(&format!(
+            "SELECT row FROM ({COLLECTED_TURNS}) WHERE origin_machine_id=?1 AND session_id=?2"
+        ))?;
+        let rows = statement.query_map(params![origin.as_str(), session], |row| {
+            row.get::<_, String>(0)
+        })?;
+        rows.map(|row| Ok(serde_json::from_str(&row?)?)).collect()
+    }
+
+    /// Machines holding a copy of the Session, and their last completed collection.
+    pub fn copied_session_origins(&self, session: &str) -> StoreResult<Vec<(MachineId, i64)>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(
+            "SELECT s.origin_machine_id,coalesce(c.observed_at,s.observed_at) FROM machine_records s
+             LEFT JOIN machine_records c ON c.origin_machine_id=s.origin_machine_id
+                AND c.kind='checkpoint' AND c.key='export'
+             WHERE s.kind='session' AND s.key=?1 ORDER BY s.origin_machine_id",
+        )?;
+        let rows = stmt.query_map([session], |row| {
+            Ok((MachineId::from_raw(row.get::<_, String>(0)?), row.get(1)?))
+        })?;
         Ok(rows.collect::<Result<_, _>>()?)
     }
 

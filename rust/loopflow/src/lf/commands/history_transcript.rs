@@ -424,12 +424,13 @@ impl TranscriptSearch {
         if self.limit == 0 {
             return Ok(());
         }
-        let pending = store.pending_conversation_history(
+        let pending = store.pending_inputs(
             filter.wave,
             filter.project,
             filter.task,
-            self.results.since,
-            false,
+            None,
+            (self.results.since, false, None),
+            loopflow_storage::sqlite::sessions::HistorySelection::Local,
         )?;
         let sessions: BTreeSet<_> = pending
             .inputs

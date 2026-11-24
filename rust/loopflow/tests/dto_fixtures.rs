@@ -321,6 +321,7 @@ fn session_input_history_retains_distinct_native_results_and_unknown_process() {
         include_str!("../../../tests/fixtures/dto/session_history_summary.json"),
     )
     .unwrap();
+    assert_eq!(value.origin.as_ref().unwrap().name(), "mini");
     assert_eq!(value.providers.len(), 2);
     assert_eq!(value.providers[0].outcome.as_deref(), Some("failed"));
     assert!(value.providers[0].lf_process_id.is_none());
@@ -328,6 +329,12 @@ fn session_input_history_retains_distinct_native_results_and_unknown_process() {
     assert_eq!(value.providers[1].usage.input_tokens, Some(0));
     assert_eq!(value.status(), "failed → completed");
     let encoded = serde_json::to_value(&value).unwrap();
+    let mut missing = encoded.clone();
+    missing.as_object_mut().unwrap().remove("origin");
+    assert!(
+        serde_json::from_value::<loopflow::lf::commands::session_history::SessionHistory>(missing)
+            .is_err()
+    );
     assert!(encoded.get("subjects").is_none());
     assert!(encoded.get("outcome").is_none());
     assert_eq!(

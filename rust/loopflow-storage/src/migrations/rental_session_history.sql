@@ -28,6 +28,40 @@ CREATE INDEX machine_record_input_task ON machine_records(json_extract(row,'$.ta
         WHEN 'session_event' THEN json_extract(row,'$.kind')='captured'
         WHEN 'history' THEN json_extract(row,'$.kind')='manifest' END;
 
+-- Work and time belong to the input on its origin. Transcripts and usage
+-- share this selection even when a Task's Project is only known here.
+CREATE VIEW machine_record_inputs AS
+    SELECT r.rowid AS record_id, r.origin_machine_id, r.kind, r.key, r.row,
+        json_extract(r.row,'$.session_id') AS session_id,
+        json_extract(r.row,'$.task_id') AS task_id,
+        json_extract(r.row,'$.wave_id') AS wave_id,
+        coalesce(json_extract(r.row,'$.wave_id'),p.wave_id) AS scope_wave,
+        p.id AS project_id,p.project_slug,p.external_project_id,
+        coalesce(json_extract(r.row,'$.started_at'),json_extract(r.row,'$.observed_at'),
+            json_extract(r.row,'$.usage.observed_at'),json_extract(r.row,'$.ended_at')) AS started
+    FROM machine_records r
+    LEFT JOIN tasks t ON t.id=json_extract(r.row,'$.task_id')
+    LEFT JOIN projects p ON p.id=coalesce(json_extract(r.row,'$.project_id'),t.project_id)
+    WHERE CASE r.kind WHEN 'turn' THEN 1
+        WHEN 'session_event' THEN json_extract(r.row,'$.kind')='captured'
+        WHEN 'history' THEN json_extract(r.row,'$.kind')='manifest' END;
+
+CREATE INDEX machine_record_turn_end ON machine_records(json_extract(row,'$.ended_at'))
+    WHERE kind='turn' AND json_extract(row,'$.ended_at') IS NOT NULL;
+
+CREATE TRIGGER store_revision_machine_records_insert AFTER INSERT ON machine_records
+WHEN NEW.kind='turn' BEGIN
+    UPDATE store_revisions SET revision=revision+1 WHERE domain='sessions';
+END;
+CREATE TRIGGER store_revision_machine_records_update AFTER UPDATE ON machine_records
+WHEN OLD.kind='turn' OR NEW.kind='turn' BEGIN
+    UPDATE store_revisions SET revision=revision+1 WHERE domain='sessions';
+END;
+CREATE TRIGGER store_revision_machine_records_delete AFTER DELETE ON machine_records
+WHEN OLD.kind='turn' BEGIN
+    UPDATE store_revisions SET revision=revision+1 WHERE domain='sessions';
+END;
+
 -- One position per Session, regardless of how many times its state changed.
 CREATE TABLE session_export_changes (
     position INTEGER PRIMARY KEY,

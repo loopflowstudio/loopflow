@@ -1,6 +1,6 @@
 //! `lf history usage` — direct provider-authored usage from recorded Session inputs.
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use time::OffsetDateTime;
 
 use crate::lf::commands::WorkFilter;
@@ -19,33 +19,72 @@ pub(super) fn session(id: &str, json: bool) -> Result<()> {
         &loopflow_execution::store::database_path_from_env()?,
         loopflow_execution::store::token_key::encryption_key,
     )?;
-    let (origin, origin_name, collected_at, usage) = if store.session(id)?.is_some() {
-        (
-            loopflow_execution::store::machines::local_machine(&store)?.id,
+    let canonical = loopflow_model::id::canonical_session(id);
+    let id = canonical.as_str();
+    let _snapshot = store.read_snapshot()?;
+    let mut sources = Vec::new();
+    let mut turns = Vec::new();
+    if store.session(id)?.is_some() {
+        sources.push((
+            store.saved_local_machine()?.id,
             "this Machine".to_owned(),
             None,
-            loopflow_storage::session_record::reduce_usage(&store.session_turns(id)?),
-        )
-    } else {
-        let history = loopflow_execution::store::machines::copied_history(&store, id)?
-            .with_context(|| format!("Session {id} was not found"))?;
-        (
-            history.session.origin.clone(),
-            history.session.origin_name().to_owned(),
-            Some(history.copied_at),
-            history.usage,
-        )
-    };
+        ));
+        turns = store.session_turns(id)?;
+    }
+    let copies = store.copied_session_origins(id)?;
+    if !copies.is_empty() {
+        let labels = loopflow_execution::store::machines::origin_labels(&store)?;
+        let mut native: std::collections::BTreeMap<_, _> = turns
+            .into_iter()
+            .map(|turn| ((turn.thread.clone(), turn.turn.clone()), turn))
+            .collect();
+        for (origin, collected_at) in copies {
+            for turn in store.collected_turns(&origin, id)? {
+                native.insert((turn.thread.clone(), turn.turn.clone()), turn);
+            }
+            let name = labels
+                .get(&origin)
+                .cloned()
+                .unwrap_or_else(|| origin.to_string());
+            sources.push((origin, name, Some(collected_at)));
+        }
+        turns = native.into_values().collect();
+    }
+    anyhow::ensure!(!sources.is_empty(), "Session {id} was not found");
+    let usage = loopflow_storage::session_record::reduce_usage(&turns);
     if json {
-        println!(
-            "{}",
-            serde_json::json!({ "session_id":id, "origin_machine_id":origin,
-            "collected_at":collected_at, "usage":usage })
-        );
+        let single = (sources.len() == 1).then(|| &sources[0]);
+        let mut result = serde_json::json!({ "session_id":id,
+            "origin_machine_id":single.map(|(id,_,_)| id),
+            "collected_at":single.and_then(|(_,_,at)| *at), "usage":usage });
+        if sources.len() > 1 {
+            result["origins"] = sources
+                .iter()
+                .map(|(id, _, at)| {
+                    serde_json::json!({
+                        "machine_id":id, "collected_at":at
+                    })
+                })
+                .collect();
+        }
+        println!("{result}");
     } else {
-        println!("Session {id} · from {origin_name}");
-        if let Some(at) = collected_at {
-            println!("Collected {}", loopflow_execution::output::format_time(at));
+        println!(
+            "Session {id} · from {}",
+            sources
+                .iter()
+                .map(|(_, name, _)| name.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+        for (_, name, at) in &sources {
+            if let Some(at) = at {
+                println!(
+                    "Collected {} from {name}",
+                    loopflow_execution::output::format_time(*at)
+                );
+            }
         }
         println!(
             "Input {} · output {} · cache read {} · cost {}",
@@ -169,7 +208,7 @@ fn print_report(runs: &[SessionHistory], days: u32) {
     );
     for run in runs {
         println!(
-            "{time:<12}  {repo:<REPO_WIDTH$}  {work:<WORK_WIDTH$}  {run:<SESSION_WIDTH$}  {input:>NUM_WIDTH$}  {output:>NUM_WIDTH$}  {cache:>NUM_WIDTH$}  {cost:>9}  {finality:>9}  {gaps:>5}  {id}",
+            "{time:<12}  {repo:<REPO_WIDTH$}  {work:<WORK_WIDTH$}  {run:<SESSION_WIDTH$}  {input:>NUM_WIDTH$}  {output:>NUM_WIDTH$}  {cache:>NUM_WIDTH$}  {cost:>9}  {finality:>9}  {gaps:>5}  {id}{origin}",
             time = loopflow_execution::output::format_time(run.observed_at),
             repo = truncate(&display_repo(run.repo.as_deref()), REPO_WIDTH),
             work = truncate(&run.work_label(), WORK_WIDTH),
@@ -185,6 +224,7 @@ fn print_report(runs: &[SessionHistory], days: u32) {
             finality = format!("{}/{}", run.usage.final_streams, run.usage.streams),
             gaps = run.evidence_gaps,
             id = short_id(run.selector()),
+            origin = run.origin.as_ref().map(|origin| format!(" from {}", origin.name())).unwrap_or_default(),
         );
     }
 }

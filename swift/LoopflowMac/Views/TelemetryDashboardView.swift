@@ -347,7 +347,7 @@ private struct DirectSessionUsageList: View {
     }
 
     private func work(_ run: SessionHistory) -> String {
-        run.workLabel
+        [run.workLabel, run.origin.map { "from \($0.name)" }].compactMap { $0 }.joined(separator: " · ")
     }
 
     private func row(

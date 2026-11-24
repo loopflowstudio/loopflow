@@ -1,8 +1,8 @@
 # Telemetry
 
 Your agents have been working: launched by hand, running Tasks, landing PRs.
-Every run left a record on this machine. This page reads it back: what each
-conversation cost, what each command did, what is running right now, and
+This Machine keeps local records and the history it collected from rentals.
+Telemetry shows what each conversation cost, what each command did, what is running, and
 whether Loopflow's own records are sound. Desktop's Telemetry view shows the
 same records; it keeps no copy of its own.
 
@@ -24,9 +24,15 @@ report tokens, plus Claude's running `total_cost_usd`; an Antigravity row
 counts the conversation lf started, not its subagents'), finished streams (`FINAL`),
 and any recording gaps (`GAPS`).
 
-For one Session, `lf session usage --session <id> --json` gives its recorded
-turn totals and origin Machine. For a rental copy it also gives the last
-successful collection time. The work-scoped reports above cover local inputs.
+When a rental disappears, a provider turn recorded without a captured input
+still appears under its original Work and date. The usage table and Desktop
+Task History show its Machine as `from modal-1`, for example. Captured rental
+inputs are currently available in the Session drill-down.
+
+`lf session usage --session <id> --json` totals the Session’s native turns
+across Machines. A turn observed again after a continuation counts once.
+A single origin has an `origin_machine_id` and, for a copy, a collection time.
+A Session on several Machines lists each in `origins` with its collection time.
 
 For work sessions and workers, turn-end hooks ask the server to record each
 turn from the provider's transcript; at exit, the launching process catches any

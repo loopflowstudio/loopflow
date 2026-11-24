@@ -545,19 +545,13 @@ pub async fn acquire_authored_plan(repo: &Path, name: Option<&str>) -> OpsResult
         return Ok(());
     }
     let store = planning_store().await?;
-    let main = main.to_string();
-    crate::work::wave::bootstrap::register_authored_waves(&store.sqlite, &main)
-        .map_err(|error| OpsError::Message(error.to_string()))?;
-    if super::tracker::queued_tracker(Path::new(&main))
+    let waves = authored_waves(&store, &main.to_string())?;
+    if super::tracker::queued_tracker(main.as_path())
         != Some(loopflow_storage::planning_sync::TrackerKind::Linear)
     {
         return Ok(());
     }
-    for wave in store
-        .sqlite
-        .list_waves(Some(&main))
-        .map_err(|error| OpsError::Message(error.to_string()))?
-    {
+    for wave in waves {
         if name.is_some_and(|name| wave.slug() != name && wave.id().as_str() != name) {
             continue;
         }
@@ -991,22 +985,23 @@ pub(crate) fn singular_project_initiative(project: &TrackerProject) -> OpsResult
     }
 }
 
+/// Register the main checkout's authored Waves, then list them.
+fn authored_waves(store: &Store, main: &str) -> OpsResult<Vec<Wave>> {
+    crate::work::wave::bootstrap::register_authored_waves(&store.sqlite, main)
+        .map_err(|error| OpsError::Message(error.to_string()))?;
+    store
+        .sqlite
+        .list_waves(Some(main))
+        .map_err(|error| OpsError::Message(error.to_string()))
+}
+
 fn wave_for_initiative(store: &Store, repo: &Path, initiative_id: &str) -> OpsResult<Wave> {
     let main =
         crate::repository::discover(repo).map_err(|error| OpsError::Message(error.to_string()))?;
-    let main = main.to_string();
-    crate::work::wave::bootstrap::register_authored_waves(&store.sqlite, &main)
-        .map_err(|error| OpsError::Message(error.to_string()))?;
-    let waves = store
-        .sqlite
-        .list_waves(Some(&main))
-        .map_err(|error| OpsError::Message(error.to_string()))?;
-    let mut matches = Vec::new();
-    for wave in waves {
-        if authored_initiative(&wave).as_deref() == Some(initiative_id) {
-            matches.push(wave);
-        }
-    }
+    let matches: Vec<_> = authored_waves(store, &main.to_string())?
+        .into_iter()
+        .filter(|wave| authored_initiative(wave).as_deref() == Some(initiative_id))
+        .collect();
     match matches.as_slice() {
         [wave] => Ok(wave.clone()),
         [] => Err(OpsError::Message(format!(

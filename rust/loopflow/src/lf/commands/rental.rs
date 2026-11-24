@@ -635,73 +635,32 @@ pub fn place(
     let runtime = tokio::runtime::Runtime::new()?;
     let store = open_store(&runtime)?;
     let sqlite = &store.sqlite;
-    let task = if placement.quote {
-        None
-    } else {
-        let (_, task) = runtime.block_on(loopflow_execution::ops::task::resolve_saved_task(
-            repo, None, issue,
-        ))?;
-        let local = loopflow_execution::store::machines::local_machine(sqlite)?.id;
-        let ownership = loopflow_execution::store::ownership::task_ownership(sqlite, &task.id)?;
-        if let Some(owner) = ownership.owner_elsewhere(&local) {
-            let name = owner.name();
-            // Only the owner can tell whether an interrupted launch started its Graph.
-            let detail = super::waves::remote_task_detail(repo, task.id.as_str())
-                .with_context(|| format!("could not read {issue} on {name}"))?
-                .ok_or_else(|| {
-                    anyhow!("{issue} is owned on {name}; check its move before running it")
-                })?;
-            let detail: super::task_row::TaskDetail = serde_json::from_value(detail)?;
-            eprintln!("{issue} on {name}: {}", detail.task.standing());
-            return Ok(detail.task.state.is_terminal() || !detail.graph_processes.is_empty());
-        }
-        Some(task)
-    };
-    if let Some(pool) = placement.pool {
-        let record = loopflow_execution::store::rentals::pool(sqlite, pool)?
-            .ok_or_else(|| anyhow!("no pool {pool}; `lf machine pool add {pool}` creates it"))?;
-        let machines = loopflow_execution::store::machines::pool_machines(sqlite, pool)?;
-        match rental::free_machine(&record, &machines, now()) {
-            Ok(free) if placement.quote => {
-                println!(
-                    "would run on {} (pool {pool}, owned); runs nothing",
-                    free.label()
-                );
-                return Ok(true);
-            }
-            Ok(free) => {
-                hand_off(
-                    repo,
-                    task.as_ref()
-                        .expect("a placement resolves its Task")
-                        .id
-                        .as_str(),
-                    free.label(),
-                )?;
-                return Ok(false);
-            }
-            Err(refusal) if placement.rent.is_some() => eprintln!("{refusal}; renting instead"),
-            Err(refusal) => return Err(refusal.into()),
-        }
-    }
-    let name = placement.rent.expect("checked: a pool or an on-demand");
     if placement.quote {
-        let ondemand = require_ondemand(sqlite, name)?;
-        let live = sqlite.live_rentals(name)?;
-        let admission = rental::admit(&ondemand, live, None, None, now())?;
-        println!(
-            "would rent {} on {} at {}, ≤ {} until {}; runs nothing",
-            admission.hardware,
-            where_rented(ondemand.provider),
-            admission
-                .hardware
-                .format_hourly_rate(admission.usd_per_hour),
-            admission.cap_usd,
-            clock(admission.deadline)
-        );
+        quote(sqlite, placement)?;
         return Ok(true);
     }
-    let task = task.expect("a placement resolves its Task");
+    let (_, task) = runtime.block_on(loopflow_execution::ops::task::resolve_saved_task(
+        repo, None, issue,
+    ))?;
+    let local = loopflow_execution::store::machines::local_machine(sqlite)?.id;
+    let ownership = loopflow_execution::store::ownership::task_ownership(sqlite, &task.id)?;
+    if let Some(owner) = ownership.owner_elsewhere(&local) {
+        let name = owner.name();
+        // Only the owner can tell whether an interrupted launch started its Graph.
+        let detail = super::waves::remote_task_detail(repo, task.id.as_str())
+            .with_context(|| format!("could not read {issue} on {name}"))?
+            .ok_or_else(|| {
+                anyhow!("{issue} is owned on {name}; check its move before running it")
+            })?;
+        let detail: super::task_row::TaskDetail = serde_json::from_value(detail)?;
+        eprintln!("{issue} on {name}: {}", detail.task.standing());
+        return Ok(detail.task.state.is_terminal() || !detail.graph_processes.is_empty());
+    }
+    if let Some(label) = free_pool_machine(sqlite, placement)? {
+        hand_off(repo, task.id.as_str(), &label)?;
+        return Ok(false);
+    }
+    let name = placement.rent.expect("checked: a pool or an on-demand");
     // A rental that could not authenticate its launch is money for nothing.
     loopflow_execution::machine::forward::read_for_rental(repo)?;
     let (rental, machine) = rent(&runtime, sqlite, name, None, None, false)?;
@@ -724,6 +683,52 @@ pub fn place(
         return Err(error);
     }
     Ok(false)
+}
+
+/// A free owned Machine in the placement's pool. Without one, `None` when an
+/// on-demand can be rented instead.
+fn free_pool_machine(
+    sqlite: &SqliteStore,
+    placement: &Placement<'_>,
+) -> anyhow::Result<Option<String>> {
+    let Some(pool) = placement.pool else {
+        return Ok(None);
+    };
+    let record = loopflow_execution::store::rentals::pool(sqlite, pool)?
+        .ok_or_else(|| anyhow!("no pool {pool}; `lf machine pool add {pool}` creates it"))?;
+    let machines = loopflow_execution::store::machines::pool_machines(sqlite, pool)?;
+    match rental::free_machine(&record, &machines, now()) {
+        Ok(free) => Ok(Some(free.label().to_owned())),
+        Err(refusal) if placement.rent.is_some() => {
+            eprintln!("{refusal}; renting instead");
+            Ok(None)
+        }
+        Err(refusal) => Err(refusal.into()),
+    }
+}
+
+/// Say where the placement would run and what it would cost.
+fn quote(sqlite: &SqliteStore, placement: &Placement<'_>) -> anyhow::Result<()> {
+    if let Some(label) = free_pool_machine(sqlite, placement)? {
+        let pool = placement.pool.expect("a free pool Machine has a pool");
+        println!("would run on {label} (pool {pool}, owned); runs nothing");
+        return Ok(());
+    }
+    let name = placement.rent.expect("checked: a pool or an on-demand");
+    let ondemand = require_ondemand(sqlite, name)?;
+    let live = sqlite.live_rentals(name)?;
+    let admission = rental::admit(&ondemand, live, None, None, now())?;
+    println!(
+        "would rent {} on {} at {}, ≤ {} until {}; runs nothing",
+        admission.hardware,
+        where_rented(ondemand.provider),
+        admission
+            .hardware
+            .format_hourly_rate(admission.usd_per_hour),
+        admission.cap_usd,
+        clock(admission.deadline)
+    );
+    Ok(())
 }
 
 /// The value Git resolves for `key` in `repo`, when one is set.

@@ -1176,11 +1176,7 @@ fn _run_harness_once(
 /// What to tell someone whose agent CLI is missing.
 pub fn missing_agent_message(kind: loopflow_harness::HarnessKind) -> String {
     let hint = crate::harness::launcher(kind).capabilities().install_hint;
-    format!("{}. {hint}", _not_installed(kind))
-}
-
-fn _not_installed(kind: loopflow_harness::HarnessKind) -> String {
-    format!("'{}' is not installed", kind.as_str())
+    format!("'{}' is not installed. {hint}", kind.as_str())
 }
 
 #[cfg(test)]

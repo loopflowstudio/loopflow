@@ -1818,6 +1818,34 @@ fn a_run_that_ended_waiting_on_a_limit_starts_again_at_that_step_without_replayi
     assert!(steps[0].contains("late"), "{steps:?}");
 }
 
+#[test]
+fn pause_cancels_a_scheduled_limit_retry() {
+    let task = GraphTask::new();
+    let stopped = task.task_run(&["task", "run", "INF-123", "held"]);
+    assert!(!stopped.success(), "{}", stopped.text);
+
+    let store = &task.registered.store.sqlite;
+    let id = &task.registered.task.id;
+    let graph = store.task_graphs(id).unwrap().pop().unwrap();
+    let step = &graph.latest().unwrap().run.id;
+    let retry_at = loopflow_storage::rows::now_unix() + 3600;
+    store
+        .record_agent_limit_recovery(step, "claude", "five_hour", Some(retry_at), None)
+        .unwrap();
+    let scheduled = || {
+        store
+            .tasks_past_a_limit_wait(retry_at)
+            .unwrap()
+            .contains(id)
+    };
+    assert!(scheduled());
+
+    task.ok(&["task", "pause", "INF-123"]);
+    assert!(!scheduled());
+    task.ok(&["task", "unpause", "INF-123"]);
+    assert!(!scheduled());
+}
+
 /// An `lf` that records the restart the server would start, with the
 /// agent settings it saw, in place of running it. Returns it and its record.
 fn restart_recorder(bin: &Path) -> (PathBuf, PathBuf) {

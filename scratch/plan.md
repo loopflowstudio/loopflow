@@ -125,6 +125,7 @@ Next: gate. Every implement item has a passing check; what remains is the two re
 
 ## Checks for the pause CLI
 
+- On macOS, `pause_cancels_a_scheduled_limit_retry` passed. A stopped step had a retry due in one hour. The retry queue was empty for that Task immediately after CLI pause and after plain unpause. In the same run, `pause_stops_owned_build_and_keeps_claim` and `board_looks_up_each_hold_by_task_on_a_ten_thousand_task_machine` passed. Gate and CI own the remaining harness and Linux checks.
 - On the private macOS Machine, the target build observed its own PID in the committed pause record when TERM arrived. Its Graph exited 130. The neighbor remained alive and finished with exit 0. Restart and `unpause --run` reached the review step.
 - A private CLI checkout refused pause on an unstarted Task. After placement, two pauses left one hold, `task list --state paused` found it, `task run` named the unpause command, and plain unpause lifted the hold.
 - At 10,000 Tasks the admission and cleanup queries looked up the hold by its primary key. The worker query walked the partial live-agent index, with indexed Graph, capture and step lookups. Limit settlement used the Task's Graph and step indexes.

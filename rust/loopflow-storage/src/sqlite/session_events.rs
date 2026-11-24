@@ -2,7 +2,7 @@ use rusqlite::{params, OptionalExtension, TransactionBehavior};
 use serde_json::Value;
 
 use crate::session::{SessionEvent, SessionEventKind};
-use crate::session_record::ProviderSessionRef;
+use crate::session_record::{ProviderSessionRef, SessionHistory};
 use crate::{ProviderAccountId, StoreError, StoreResult};
 use loopflow_model::id::AgentSessionId;
 
@@ -329,9 +329,35 @@ impl SqliteStore {
         Ok(rows.collect::<Result<_, _>>()?)
     }
 
-    /// What filled the context of each provider turn one input started, in
-    /// order; `None` for a turn completed before turns retained it.
-    pub fn input_turn_context(
+    /// Each silence the recorder observed in one history row's input, as
+    /// `(since, until)`; a collected input's are its origin's copies.
+    pub fn history_silences(&self, history: &SessionHistory) -> StoreResult<Vec<(i64, i64)>> {
+        match (&history.artifact_key, &history.origin, history.captured) {
+            (Some(input), None, _) => self.input_silences(input),
+            (Some(_), Some(origin), Some(captured)) => {
+                self.copied_input_silences(&origin.machine_id, &history.session_id, captured)
+            }
+            _ => Ok(Vec::new()),
+        }
+    }
+
+    /// What filled the context of each ended provider turn one history row's
+    /// input started, in ending order; `None` for a turn completed before
+    /// turns retained it. A collected input's turns are its origin's copies.
+    pub fn history_turn_context(
+        &self,
+        history: &SessionHistory,
+    ) -> StoreResult<Vec<Option<crate::session::TurnContext>>> {
+        match (&history.artifact_key, &history.origin, history.captured) {
+            (Some(input), None, _) => self.input_turn_context(input),
+            (Some(_), Some(origin), Some(captured)) => {
+                self.copied_input_turn_context(&origin.machine_id, &history.session_id, captured)
+            }
+            _ => Ok(Vec::new()),
+        }
+    }
+
+    fn input_turn_context(
         &self,
         input: &str,
     ) -> StoreResult<Vec<Option<crate::session::TurnContext>>> {

@@ -433,7 +433,7 @@ impl SqliteStore {
 
     /// The context of each ended native turn one copied input started, in
     /// ending order, as `input_turn_context` reads a local one.
-    pub fn copied_input_turn_context(
+    pub(super) fn copied_input_turn_context(
         &self,
         origin: &MachineId,
         session: &str,
@@ -455,7 +455,7 @@ impl SqliteStore {
 
     /// Each silence the origin's recorder observed in one copied input, as
     /// `input_silences` reads a local one.
-    pub fn copied_input_silences(
+    pub(super) fn copied_input_silences(
         &self,
         origin: &MachineId,
         session: &str,

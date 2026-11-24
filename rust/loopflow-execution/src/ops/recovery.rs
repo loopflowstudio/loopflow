@@ -65,6 +65,11 @@ pub fn record_start(
 /// ready. The prefix distinguishes it from a failed terminal start on disk.
 pub const WAITING_FOR_HARNESS: &str = "Waiting for a harness: ";
 
+/// Why a recorded start failed, as a person reads it: without the prefix.
+pub fn start_failure_reason(failure: &str) -> &str {
+    failure.strip_prefix(WAITING_FOR_HARNESS).unwrap_or(failure)
+}
+
 /// What would stop `session`'s provider starting here: its recorded harness,
 /// or for one that never bound an agent, the harness its skill resolves to,
 /// missing or without a usable login. Every server start of a stopped

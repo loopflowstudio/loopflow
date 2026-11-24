@@ -1503,10 +1503,11 @@ pub fn restart_provider(store: &SqliteStore, session: &LfSession) -> Result<()> 
     }
     let mut agents = crate::agent::MachineAgents::default();
     if let Some(failure) = crate::ops::recovery::launch_failure(store, &session.id, &mut agents)? {
-        let reason = failure
-            .strip_prefix(crate::ops::recovery::WAITING_FOR_HARNESS)
-            .unwrap_or(&failure);
-        bail!("Session {} was not restarted: {reason}", session.id);
+        bail!(
+            "Session {} was not restarted: {}",
+            session.id,
+            crate::ops::recovery::start_failure_reason(&failure)
+        );
     }
     crate::harness::agent_process::require_server()?;
     let mut server = crate::machine::client::Connection::open()?;

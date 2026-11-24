@@ -183,7 +183,6 @@ fn sum(total: Option<u64>, value: Option<u64>) -> Option<u64> {
 /// Explain one recorded step from its capture and retained turns, flagged
 /// against current budgets.
 pub fn step_context(home: &Path, store: &SqliteStore, history: &SessionHistory) -> StepContext {
-    let input = history.artifact_key.as_deref();
     let mut measured = match crate::session_record::history_record_dir(home, history) {
         Some(dir) => read_capture(&dir),
         None => Measured {
@@ -191,21 +190,13 @@ pub fn step_context(home: &Path, store: &SqliteStore, history: &SessionHistory) 
             ..Measured::default()
         },
     };
-    // A collected input's turns are the copies of its origin's.
-    let origin = history.origin.as_ref().map(|origin| &origin.machine_id);
-    let turns = input.map(|input| match (origin, history.captured) {
-        (Some(origin), Some(captured)) => {
-            store.copied_input_turn_context(origin, &history.session_id, captured)
+    if history.artifact_key.is_some() {
+        match store.history_turn_context(history) {
+            Ok(turns) => measured.read_turns(turns),
+            Err(error) => measured
+                .gaps
+                .push(format!("provider turns are unreadable: {error}")),
         }
-        (Some(_), None) => Ok(Vec::new()),
-        (None, _) => store.input_turn_context(input),
-    });
-    match turns {
-        Some(Ok(turns)) => measured.read_turns(turns),
-        Some(Err(error)) => measured
-            .gaps
-            .push(format!("provider turns are unreadable: {error}")),
-        None => {}
     }
     let mut step = measured.into_step(history);
     if let Some(budgets) = budgets(history) {

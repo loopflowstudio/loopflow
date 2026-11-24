@@ -495,6 +495,7 @@ mod tests {
                 serde_json::to_value(Write::TaskComplete {
                     directory: "/".into(),
                     issue: "A".into(),
+                    children: None,
                 })
                 .unwrap(),
             ),

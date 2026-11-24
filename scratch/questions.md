@@ -19,3 +19,5 @@
 - A routed `session.attach` or `session.continue` waits for the peer inline, as `session.start` already waits for its holder, so other requests on that one control connection wait up to the SSH handshake (10 s). Moving terminal requests onto the request task set would end that.
 
 - A failed peer subscription retries after five seconds without a planning change. Any planning revision wakes it sooner so it can follow a move immediately. The SSH handshake keeps its existing deadline.
+
+- For the terminal label during a move, carry the Machine selected at attach time in the server receipt during the Desktop migration. `SessionAttached` currently carries only the ticket, terminal ID and expiry. Using the latest workspace reading for the label would let a move change the label on an existing terminal.

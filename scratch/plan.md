@@ -14,7 +14,7 @@ Derived from the Infrastructure Wave KRs: advancing and inspecting Tasks without
 **The Task is the address.** A person opens a Task; the Task is on one Machine; every view shows that Machine's checkout. No client holds a second opinion about where the Task is, so nothing needs comparing.
 
 - Clients name the Task (and, for a Session with no Task here, its Machine). Only the local `lf server` resolves ownership and routes. There is no `expected_owner` field, no `conflict` answer, and no client-side "location".
-- A subscription is to the Task, not to a Machine: when local `task_ownership` advances, the server drops the peer stream and opens one to the new owner; the destination reading carries the new `reference.workspace.machine_id`, and `task.files.watch` emits one whole-tree invalidation. The client notices the Machine changed from the reading itself.
+- A subscription follows the Task. When local `task_ownership` advances, the server reopens the stream on the destination under the same subscription ID. The source can report a null workspace before the subscriber learns the move. The destination reading carries `reference.workspace.machine_id`, and `task.files.watch` emits a whole-tree invalidation.
 - A draft belongs to `(Task, path, base revision)`. `task.save` already refuses when the file's content revision differs (`ops/task/file_save.rs`), which is the only guard a write needs: identical content on the new owner saves there; different content is a conflict that keeps the draft.
 - A terminal is a process on one Machine. Moving the Task neither kills nor retargets a Shell or Session already running; its pane names its Machine and ends on its own `0x07` close.
 
@@ -26,64 +26,31 @@ Passed over: the earlier `expected_owner` compare-and-swap on 14 operations with
 - **Checkout & execution state:** per-Machine `task_checkouts`, `agent_sessions`, `desktop_shells`, and held terminals (`transport::registry::Registry`) on the owning Machine. A stale `task_checkouts` row on a non-owning Machine is history only, never the active workspace.
 - **Cross-Machine router:** the local/paired `lf server` (`rust/loopflow/src/server/`). Every native client (Desktop over Unix socket, Mobile over Tailscale WebSocket, CLI relays/reads) talks to that one server; the server talks to peer Machines over pooled `ssh … lf server connect` connections.
 
-## Design and de-risked decisions
+## Server behavior in place
 
 ### 1. Pooled peer connections (`rust/loopflow-execution/src/machine/client.rs`, `rust/loopflow/src/server/peers.rs`)
 
-- **Before pooling:** `Connection::open_on` spawned a fresh `ssh … lf server connect` process and baked one repository's `Sender` into `Carrier::Ssh(Machine, Box<Sender>)`. Reusing a connection across repositories or operations (e.g., `task.file` vs `task.run` with secrets) requires per-request `Sender`.
-- **Mechanism:**
-  - `Connection::open_peer` opens the SSH control connection. `Connection::request_as` supplies the sender, request ID and disconnect outcome per request. One-shot CLI callers use `open_on` with a sender for the connection’s lifetime.
-  - `server/peers.rs::PeerPool` holds up to four idle connections per Machine and route. A new route retires the old pipes. Concurrent readers can open separate connections. SSH I/O and child cleanup run outside the pool locks.
-  - Idle eviction at 60s (matching OpenSSH `ControlPersist 60s`), pruned on checkout and on a 30s background timer in `server::run()`. Dropping a `Connection` drops `Pipe`, which kills and reaps its SSH child.
-  - **Reconnect on error/EOF:**
-    - For reads: if a reused (non-fresh) pooled connection fails with EOF, `BrokenPipe`, or `ConnectionReset`, drop it, open one fresh connection, and retry once. If the fresh connection fails, return `ErrorCode::Unavailable` naming `machine.name()` with structured data `{ resource: "machine", machine_id, machine_label, machine_name }`.
-    - For writes: if connection setup fails, return `unavailable` naming the Machine. If bytes were already written on the pipe without a `request_id`, evict the pipe and return `outcome_unknown` (never blindly replay). When a write carries a `request_id`, the peer's rev 7+ deduplication cache (`server/answers.rs`) makes one reconnect retry safe.
-  - Bare CLI commands outside `lf server` still use one-shot `Connection::open_on` so they leave no background SSH processes on exit.
+The server shares idle peer connections across repositories, passing a `Sender` on each request. It can retry a read once after a reused pipe disconnects. A write can use the same retry when the peer can deduplicate its request ID. An unnamed write sent before a disconnect returns `outcome_unknown`. Bare CLI requests still use one-shot connections.
 
 ### 2. Task-scoped read, write, and subscription routing (`commands/read.rs`, `commands/write.rs`, `server/subscriptions.rs`, `commands/waves.rs`)
 
-- **Cross-Machine Task addressing (finding):** On Linear-backed repos (such as `manabot`), two Machines can hold different local `task_id` UUIDs for the same issue (`MTG-421`), while sharing `identifier` and `tracker_id`. Today `waves.rs:988` forwards `route.task_id`, which fails to resolve on a fresh sandbox unless the peer happens to share that UUID.
-  - **Fix:** When forwarding a Task-scoped operation to a peer, resolve the Task's portable selector on the sender: prefer `tracker_id` (or `identifier` when `tracker_id` is absent) for Linear/Asana-backed Tasks, else `route.task_id` for trackerless plans. On the peer, `Origin::Machine` scopes `resolve_task_id` to the sender's `repository` checkout so identifiers are unambiguous.
-- **Routed `Read` variants (when `Origin::Local` and `remote_task(issue)` names another Machine):** File operations follow the execution route immediately after a move claim. Only status uses `remote_ownership_writer` so the source can report an unfinished move.
-  - `task.status` (replaces `waves::remote_task_detail`), `task.get`, `task.detail`, `task.changes`, `task.diff`, `task.file`, `task.files`, plus `task.runs` and `session.list` when `task: Some(issue)` is set.
-  - Unscoped `session.list { task: None }`, `plan.list`, `desktop.view.list`, `view.select`, and `wave.plan` stay local (inventories remain local; zero SSH fanout on list/board reads).
-- **Routed `Write` variants:**
-  - Add `Write::TaskSave` to `Write::remote()` (`launching: false` — sends no `forward.env` secrets and delivers no `forward.files`).
-- **Routed subscriptions (`task.get`, `task.status`, and `task.files.watch`):**
-  - **Finding:** Mobile (`TaskWorkspaceView.swift:64`) subscribes to `task.get`, and Desktop (`TaskWorkView.swift:501`) subscribes to `task.get` for remote Graph logs. Currently `Read::subscribe` only reads local SQLite. Meanwhile Desktop (`TaskFileDocument.swift:669`) spawns `lf --machine … task watch-files` via `RegistryQueryLocal.swift:30`.
-  - **Decision (made for review, see `scratch/questions.md`):** Forward `task.get` and `task.status` subscriptions to the owning Machine over a dedicated peer `Subscribe` connection when `Origin::Local` and another Machine owns the Task, and add a subscribed `Read::TaskFilesWatch { issue }` backed by `ops/task/workspace.rs`'s existing `notify` watcher so Desktop remote file invalidation also travels over the single server protocol (deleting `RegistryQueryLocal`'s `watchFiles` and `subscribeRead` SSH subprocesses). Watch local `task_ownership` revisions beside the peer stream; when ownership changes, re-route the same subscription to the new owner (or to the local reader when it is now local) and keep its `id`. `task.files.watch` emits one whole-tree invalidation on re-route.
-- **Absent and error typing:**
-  - **Finding:** `ops/task.rs:386` (`file_context`) returns an untyped `OpsError::Message("Task … is not checked out on this Machine")`, which `server/service.rs:1261` turns into `ErrorCode::Unavailable` — making an unstarted Task indistinguishable from an unreachable Machine!
-  - **Done (05968c2e1c):** `file_context` returns typed `engine::Error::new(ErrorCode::NotFound, format!("Task {issue} is not started")).with(json!({ "reason": "not_started", "task_id": task_id }))` when the Task exists on its owner but has no `task_checkouts` row.
-- **Protocol revision:** Rust and Swift both advertise 10/10. The generated schema and server fixtures carry the same range.
+- Linear and Asana peers can assign different local Task IDs to one issue. `work_route::peer_task_id` sends a tracker key or identifier, and the peer resolves it in the sender's repository. Trackerless peers use the Task ID.
+- Files and saves follow the execution route as soon as this Machine sees the claim. Status can still use the move writer to report an unfinished move. Unscoped inventories stay local.
+- `task.get`, `task.status` and `task.files.watch` follow ownership. A broken peer stream publishes its outage and retries after five seconds or a planning change. A refusal such as `not_found` with `reason: not_started` ends the subscription with that error.
+- The server, peers and Swift clients negotiate revision 10. Update each Machine that serves a workspace for the installed check.
 
 ### 3. Terminal ticket bridging and Task shells (`server/service.rs`, `server/ticket.rs`, `server/remote.rs`, `machine/wire.rs`, `desktop/shells.rs`)
 
-- **Finding 1 (Session ownership discovery):** A Session created natively on a Modal sandbox has no row in the laptop's `agent_sessions` table. If `session.attach` / `session.continue` carry only `session: LfSessionId`, the laptop server cannot tell which peer Machine owns it.
-  - **Fix (done):** Add required-nullable `task: Option<String>` and `machine: Option<MachineId>` to `SessionAttach` and `SessionContinue`. `SessionStart` stays local: its `argv`, `cwd` and `env` are the caller's (questions.md).
-  - Routing resolution when `Origin::Local`:
-    1. If `task` is `Some(issue)`: resolve `task_execution_route`. If another Machine owns it, route there.
-    2. Else if `machine` is `Some(m)` and `m != local_machine`: route to `m`.
-    3. Else check local `conversation_task(&store, &session)` -> `task_execution_route` and `session_moved_to(&store, &session)`. If another Machine owns it, route there.
-    4. Else run locally.
-- **Finding 2 (Task shells over the server):** Today `desktop/shells.rs` runs via `lf --machine <id> --repo-id <r> desktop shell <task> --checkout <path> --id <tab>` over SSH, and `session.attach` requires a `LfSessionId`, so Mobile has no Shell access and Desktop shells bypass the server.
-  - **Fix:** Add three `ServerOperation` variants mirroring `session.continue` + `session.attach`:
-    - `task.shell.start { issue, shell_id, rows, cols, bootstrap: Option<String>, command: Vec<String> }` -> `SessionStarted { terminal_id }`. Idempotent by `shell_id` via `desktop_shells`; forwards to owner when remote; returns `not_found { reason: "not_started" }` if no checkout exists on the owner; starts `$SHELL` (with optional Ghostty `bootstrap` JSON for Desktop, `null` for Mobile) in the owner's checkout inside `Registry`.
-    - `task.shell.attach { issue, shell_id }` -> `SessionAttached { ticket, terminal_id, expires_in_ms }`. A `shell_id` names one terminal. Never starts a shell; attaches to the existing held terminal or returns `not_found` (ended) / `unavailable` (holder waiting).
-    - `task.shell.close { issue, shell_id }` -> `{}` (closes shell on owner).
-  - A `shell_id` names a receipt on the Machine that started it. After a move, the new owner has no such receipt and answers `not_found` (ended); Desktop and Mobile offer **New shell**. No shell follows a Task to another Machine.
-  - `lf desktop shell` (invoked by Desktop's Ghostty terminal pane) and `lf session attach` route through the local server's `task.shell.*` / `session.attach` + ticket bridge rather than spawning `ssh` directly!
-- **Async terminal ticket bridging (`server/ticket.rs`, `server/service.rs`, `server/remote.rs`):**
-  - Add `Purpose::RemoteTerminal { machine: Machine, remote_ticket: String, terminal_id: TerminalId }` to `Tickets`. Single-use, admission-bound (`Admission::Local` or `Admission::Remote { node, user }`), spent on any foreign attempt, 60s wall-clock lifetime.
-  - When `session.attach` or `task.shell.attach` routes to peer `M`, the local server calls `M`'s `session.attach` / `task.shell.attach` over `PeerPool`, receives `remote_ticket`, issues a local `Purpose::RemoteTerminal` ticket bound to the caller's `Admission`, and returns `SessionAttached { ticket: local_ticket, terminal_id, expires_in_ms }`.
-  - On redemption (`service::ticketed`), spawn async `tokio::process::Command::new("ssh") … lf server connect` (`kill_on_drop(true)`), write `{"type":"attach","ticket":"<remote_ticket>"}\n`, read the single-line JSON answer (`bridged` or `error` — forwarding any peer error back to the client), send `ServerMessage::Bridged { terminal_id }`, and return a unified `TerminalStream` (`Local(UnixStream)` | `Remote(RemoteTerminal)` implementing `AsyncRead + AsyncWrite + Unpin + Send`) to BOTH `service::bridge` (Desktop Unix socket `copy_bidirectional`) and `remote::bridge` (Mobile WebSocket 64 KiB binary frames).
-  - Preserves viewer protocol framing, resize/input, heartbeats, and `0x07` close frames (`replaced`, `finished`, `retired`) verbatim.
+- A Session native to a peer can be absent from the laptop's `agent_sessions`. `session.attach` and `session.continue` accept a Task or an explicit Machine for that case. `session.start` uses the caller's local `argv`, `cwd` and `env`.
+- `task.shell.start`, `attach` and `close` run on the owner. Start reuses an existing `shell_id`, and attach opens the held terminal. The Machine that starts the shell keeps its receipt after a move.
+- A routed attach wraps the peer's ticket in a single-use ticket bound to the caller's admission. The local server redeems it and forwards terminal input, output, resize and close frames through the same bridge for the Unix socket and WebSocket.
 
 ### 4. Ownership-driven `RoadmapTask` / `TaskReferenceSnapshot` (`rust/loopflow/src/lf/commands/waves.rs`)
 
-- **Finding:** `waves.rs:2697` (`task_reference`) unconditionally stamps `local_machine` onto `TaskWorktreeSnapshot` whenever a local `task_checkouts` row exists — even when `task_ownership` / `task_execution_route` shows another Machine owns the Task. That caused Desktop to treat the stale Mac checkout as active, open a local Mac shell, and reject the remote Session with `"The conversation belongs to a different Machine or checkout; nothing was opened."` (`SessionsView.swift:719`).
 - The local plan row names the owner in `runtime.owner`. Its `reference.workspace` is null while a peer owns the Task, even if a local checkout still exists. A routed `task.get` returns the owning Machine’s row and checkout.
 - The same ownership rule applies to local Task snapshots and the Task record in status. The checkout row stays in storage.
+
+## Client work remaining
 
 ### 5. Desktop (`swift/LoopflowMac/WorkModel.swift`, `Views/SessionsView.swift`, `TaskFileDocument.swift`, `Views/TaskWorkView.swift`, `Views/WorkspacePanesView.swift`, `swift/Loopflow/Services/RegistryQuery.swift`)
 
@@ -92,17 +59,18 @@ Passed over: the earlier `expected_owner` compare-and-swap on 14 operations with
   - Every Task read (`task.get`, `task.detail`, `task.changes`, `task.diff`, `task.file`, `task.files`, `task.files.watch`), write (`task.save`, `session.resume`), and terminal (`session.attach`, `session.continue`, `task.shell.*`) goes through `RegistryQueryLocal.shared` -> `ServerClient` -> local `lf server`.
 - **No client-side location:**
   - Desktop sends the Task id; it never resolves, passes or compares an owner. Delete `SessionsWorkspace.location`, `confirmLocation`, `retainLocation` and the placement guard at `SessionsView.swift:716` with the rest of the location stack: the server attaches the Session wherever it runs.
-  - Panes label their Machine from what the server answered: Files/Changes from routed `task.get`'s `reference.workspace.machine_id`, terminals from the attach answer. When a reading names a different Machine than the pane last showed, Files and Changes reload; a Diff or file view with no draft reloads in place.
+  - Files and Changes reload on a new `reference.workspace.machine_id`; a Diff or clean file view reloads in place. A null workspace during claim propagation keeps the subscription and any draft. Use the owner and typed refusals to distinguish a move from an unstarted Task.
+  - Keep the terminal's Machine label when the workspace moves. `SessionAttached` in `machine/wire.rs` currently supplies the ticket, terminal ID and expiry. Carry the Machine chosen by the server through the attachment receipt during the Desktop migration so the pane can label the actual process even if ownership changes between readings. Mobile uses the same receipt.
   - Unsaved drafts stay keyed by `(Task, path, base revision)`. Saving after a move goes to the new owner; a revision mismatch shows the existing save conflict with both versions and keeps the draft.
-  - When a Task is unstarted (`not_found` with `reason == "not_started"`), render **Not started** (no empty diff, no local shell). When the owner is unreachable (`unavailable` with `resource == "machine"`), render an explicit error naming the Machine with **Retry**.
+  - Render **Not started** for `not_found` with `reason == "not_started"`. On peer outages, show the Machine named in the routed error or the subscription's `unavailable` reading and offer **Retry**.
   - For Task shells: `SessionsWorkspace.shellAttachment` runs local `lf desktop shell <issue> --id <tab.id> [--create --bootstrap <json>]` (no `--machine`, no `--checkout` local path assumptions), and `closePane` calls `task.shell.close` through `ServerClient` instead of spawning `lf --machine ... desktop shell --close`.
-  - For Task Sessions: `Write::SessionResume` returns a `SessionRecord` whose `open_argv` attaches via the local server (`lf session attach --session <id> --task <task>`), eliminating raw `ssh` argv from `prepared_remotely` for Desktop.
+  - For Task Sessions, give Desktop's `SessionRecord.open_argv` the local terminal attachment path from Slice 2. Remove the raw `ssh` argv that `prepared_remotely` builds for Desktop.
 
 ### 6. Mobile (`swift/LoopflowiOS/TaskWorkspaceView.swift`, `RemoteMobileClient.swift`, `SessionLink.swift`)
 
 - **Single pairing, four viewers:** Keep the existing single Tailscale pairing to the user's primary Machine server. All four viewers (**Session**, **Files**, **Changes**, **Shell**) talk to that paired server, which routes to the Task's owning Machine transparently.
 - **Finding (Mobile primary Session discovery on remote Tasks):** `TaskWorkspaceView.swift:87-106` calls `client.task(id:directory:)` (`desktop.view.get`) on the paired laptop, which reads local SQLite and returns `primarySession == nil` for a remote-Machine Task.
-  - **Fix:** Derive the remote Task's primary Session directly from the routed `task.get` subscription frame (`reading.work.sessions`, selecting the primary/open interactive Session, or expose `primary_session` on `DesktopTaskPane` / `TaskOverview`!) AND pass `task: task.id` on `session.attach` and `session.continue` in `RemoteMobileClient` so the paired server routes them to the owning Machine!
+  - Read the owner's primary Session selection through the routed Task reading and pass the Task ID to `session.attach` and `session.continue` in `RemoteMobileClient`. Share the primary selection with the CLI path where it fits.
 - **Files viewer (tree + unchanged files):**
   - Add `TaskFilesTreeView` inside `TaskWorkspaceView` (accessible from the Task workspace segmented control / toolbar alongside Session, Changes, and Shell).
   - Calls `client.query.taskFiles(issue: task.id, path: dir, ...)` to browse directories (with pagination via `next_cursor`) and opens any file (including **unchanged** files) in the existing `TaskFileView` (`client.query.taskFile(issue: task.id, path: path)`).
@@ -111,33 +79,14 @@ Passed over: the earlier `expected_owner` compare-and-swap on 14 operations with
   - Uses a stable per-Task mobile shell ID (e.g. `mobile-<task.id>`), calling `task.shell.attach` first and `task.shell.start` on explicit Start / first open (`bootstrap: nil`, `command: []`, `rows`/`cols` from `TerminalGeometry`), then connecting over `/v1/ticket` WebSocket with the bridged ticket!
 - **Absent and error states on Mobile:**
   - Unstarted Task (`not_found { reason: "not_started" }` or `reading.checkout == nil` on an unstarted Task): show **Not started** on Files, Changes, and Shell (never `"No changes yet"` or a local shell).
-  - Unreachable owner (`unavailable` with `resource == "machine"`): show explicit error naming the unreachable Machine + **Try again** (never an empty diff or local shell).
-  - Task moved: the routed `task.get` subscription names the new Machine when it receives its checkout; the workspace header updates and Files/Changes reload. A Shell from the old Machine answers ended and offers **New shell**.
+  - On peer outages, show the Machine named in the routed error or the subscription's `unavailable` reading and offer **Try again**.
+  - Task moved: the routed `task.get` subscription names the new Machine when it receives its checkout. Keep following through an intermediate null workspace. The workspace header updates and Files/Changes reload. Reattaching an old shell answers ended and offers **New shell**.
 
 ### 7. CLI `lf open` (`rust/loopflow/src/lf/commands/open.rs`, `commands/open/conversation.rs`, `lf/navigation.rs`, `bin/lf.rs`)
 
-- **Finding 1 (`--machine` hijacked `lf open`):** `navigation.rs:137` (`machine_invocation`) strips top-level `--machine <label>` and forwards ANY command to SSH unless the subcommand itself declares `--machine` AND it appears after the subcommand! Look at `navigation.rs:154-155`:
-  `let is_transport = matches!(name, "--machine" | "--forward-agent") && (path.is_empty() || flag(current, name).is_none());`
-  So `lf --machine modal-1 open --session sid --tab` currently SSHes into `modal-1` and runs `lf open` on a headless Linux container (which fails!).
-  - **Fix:**
-    1. Add `#[arg(long, id = "open_machine")] pub machine: Option<String>` to `OpenSelection` in `commands/open.rs` (distinct Clap `id` per `AGENTS.md` so it never leaks into root `Cli.machine`).
-    2. In `bin/lf.rs:1733` (or `navigation::machine_invocation`), special-case `Commands::Open`: `lf open` **never** forwards execution onto the remote Machine. When `--machine <label>` is given in *either* position (`lf open --machine <label> ...` or `lf --machine <label> open ...`), normalize it into `OpenSelection.machine` and run `lf open` locally! (Reject `--forward-agent` with `open` or forward it into the local attach command if needed.)
-- **Finding 2 (`resume_argv` dropped `--task` when `--session` was set):**
-  Look at `open.rs:191-198`:
-  ```rust
-  match (&self.session, &self.url.target) {
-      (Some(session), _) => argv.push(session.clone()),
-      (None, WorkTarget::Task(id)) => argv.extend(["--task".into(), id.clone()]),
-      ...
-  ```
-  When `lf open --task LOO-1083 --session session_abc --tab` runs on a remote Task, `resume_argv` emitted `lf session resume session_abc` WITHOUT `--task LOO-1083` or `--machine` — so the spawned tab looked up `session_abc` locally (not found!) or attached to a stale local checkout!
-  - **Fix:**
-    - Keep `--task <id>` (and `--repo-id <repository_id>` when remote) alongside `<session>` in `resume_argv` when `self.task` / `WorkTarget::Task` is set, AND when `self.execution_machine` (or explicit `--machine <label>`) names another Machine, pass `--machine <machine>` + `--session` / `<session>` (or `lf --machine <owner> [--repo-id <repo>] session resume <sid> [--task <id>]`) so the local tab ALWAYS attaches on the owning Machine — never falling back to a stale local checkout!
-    - For `lf open --machine <label> --session <sid> --tab` (remote-only Session with no local Task):
-      - Resolve `<label>` against registered Machines via `find_registered_machine(label)` (fail with retryable error if unknown/unreachable).
-      - Skip local `context::explain_in` lookup for `<sid>` (since `<sid>` does not exist in local SQLite!).
-      - Build `Resolved` with `execution_machine = Some(machine.id)`, `session = Some(sid)`, `label = format!("{label} · {sid}")`, and `resume_argv` attaching on `<machine>` locally (keeping `Attachment` receipt and retry semantics in `open/conversation.rs`).
-      - Verify `lf open --task <id> --tab` with a stale local checkout attaches on `execution_machine` (never local!) because `describe()` already sets `execution_machine = Some(owner)` from `task_location::explain` -> `task_execution_route`. Also fix `Resolved::cwd()` / `conversation_view()` so a stale local `session_cwd` or local `agent_sessions` row is never used when `execution_machine.is_some()`.
+- `navigation::machine_invocation` currently forwards the leading `--machine` form over SSH. Give `OpenSelection` a distinct Clap ID for `--machine`, normalize both flag positions, and run presentation locally. Keep `--machine` transport for commands other than `open`.
+- `Resolved::resume_argv` currently drops the Task when a Session is named. Preserve it through the local tab child and its retry command. For `--task` alone, resolve the primary through the owning Machine. For an exact Session on a Task, pass both selectors through the local server to attach or continue. Use the existing `Attachment` receipt to report the result.
+- For `--machine <label> --session <sid>`, resolve the registered Machine and pass its ID with the exact Session. The remote-only Session may be absent from local SQLite. Use a local directory for the presentation process and let the server resolve the terminal. A stale local checkout or Session record must never select the attachment. Preserve the Machine and Session on retry.
 
 ## Affected surfaces and consumers
 
@@ -167,7 +116,7 @@ After a move, an open shell continues on its original Machine. Reattaching by `s
 | State | Wire `code` & `data` | CLI (`lf open` / `lf task ...`) | Desktop | Mobile |
 | --- | --- | --- | --- | --- |
 | Task unstarted (no checkout on owner) | `not_found` `{ "reason": "not_started", "task_id": "…" }` | Explicit message: Task is not started | **Not started** in Files, Changes, Shell (never empty diff / local shell) | **Not started** in Files, Changes, Shell |
-| Owner Machine unreachable / SSH failed | `unavailable` `{ "resource": "machine", "machine_id": "…", "machine_label": "…", "machine_name": "…" }` | Retryable failure naming Machine + `ssh <route> lf server status` | Explicit error naming Machine + **Retry** | Explicit error naming Machine + **Try again** |
+| Owner Machine unreachable / SSH failed | One-shot `unavailable` error carries Machine data. A subscription reading carries the message in `unavailable` and a null body. | Retryable failure naming Machine + `ssh <route> lf server status` | Explicit error naming Machine + **Retry** | Explicit error naming Machine + **Try again** |
 | Task moved | none: subscriptions re-route; the destination reading's `reference.workspace.machine_id` names the new owner | Next command routes to the new owner | Header names the new Machine; Files/Changes reload; drafts save if the base revision still matches, else save conflict keeps them; old-Machine terminals keep running, labelled | Header updates; Files/Changes reload; old Shell answers ended → **New shell** |
 | Session/shell ended on owner | `not_found` `{ "terminal_id": "…", "exit_code": … }` | Reports ended; never auto-restarts on attach | Ended screen + explicit Start / New Shell | Ended state + Start / New Shell |
 | Holder slow to answer after restart | `unavailable` `{ "resource": "holder", "terminal_id": "…", "retry": true }` | Retries / reports waiting | Retries without starting a duplicate | Retries without starting a duplicate |
@@ -216,7 +165,7 @@ Build thinly end to end in four slices; each slice runs and proves itself before
    - `session.attach`/`session.continue` route by Task owner, then `machine`, then local Session records (`work_route::terminal_machine`). A routed attach asks the peer via `PeerPool::terminal`, issues `Purpose::RemoteTerminal`; redemption runs `ssh … lf server connect` and hands `TerminalStream::There` to both the Unix-socket and WebSocket bridges. Run (31.76 s): a Session held only on mini is `not_found` without `task` and with `task` bridges through the laptop socket showing `on mini: <mini checkout>`.
    - `task.shell.start/attach/close` route by Task owner over the same peer request and bridge; `desktop::shells::served` starts through `Registry::start` and shares the receipt step with `lf desktop shell`. Run: start on mini through the laptop, a repeated start reuses the terminal, bridge shows `shell on mini: <mini checkout>`, close, then attach answers `not_found`.
    - The re-route that once ended the files watch with “mini is unavailable: deadline has elapsed” now publishes a reading with a null body and the failure in `unavailable`. The file watch recovered under the same ID after a refused handshake during a move. An established watch also answered a checkpoint during a peer outage and delivered a new file revision after restart.
-   - The same fixture imported a saved provider thread on mini, continued it by Task from the laptop, and repeated the request from the paired phone. Both connections received the same terminal ID. Its Session and Task shell showed mini’s checkout over the Unix socket and TLS WebSocket. The provider answered “received hello on mini” to input from the phone. The focused test passed in 134.53 s. `cargo fmt` and `cargo clippy --all-targets -- -D warnings` passed.
+   - The same fixture imported a saved provider thread on mini, continued it by Task from the laptop, and repeated the request with the paired-phone fixture. Both connections received the same terminal ID. Its Session and Task shell showed mini’s checkout over the Unix socket and TLS WebSocket. The provider stand-in answered “received hello on mini” to input from the WebSocket. The focused test passed in 134.53 s. `cargo fmt` and `cargo clippy --all-targets -- -D warnings` passed.
 
    **Slice 1 complete.** A watch on mini’s unstarted Task ended with `not_found` and reason `not_started`. During a move, the laptop’s plan row kept mini as owner and had a null workspace despite a retained local checkout. Its Task wait snapshot had no checkout, branch or base commit. The pane and file watch both reported mini’s outage and recovered under their original IDs after the claim was exchanged and the peer returned. `machine_commands::server_routed_task_workspace` passed in 45.60 s.
 
@@ -227,15 +176,14 @@ Build thinly end to end in four slices; each slice runs and proves itself before
    **Next:** Slice 2. Migration of `lf desktop shell` and `prepared_remotely` stays with the Desktop consumers in Slice 3.
 
 2. **Slice 2: CLI `lf open` always local + remote Task/Session attachment.**
-   - Add `--machine` to `OpenSelection` (distinct Clap id), exempt `open` from remote SSH execution in `navigation.rs` / `bin/lf.rs` for both flag positions (`lf open --machine <label> ...` and `lf --machine <label> open ...`).
-   - Fix `open.rs::resume_argv` keeping `--task` + owner Machine/repo when `--session` is set, ignore stale local checkout when `execution_machine.is_some()`, and support remote-only Sessions (`lf open --machine <label> --session <sid> --tab`) with `Attachment` receipt and retryable unavailable errors.
-   - **Proves:** Integration test opening a remote Task (`--task <id> --tab` with a stale local checkout), a specific Session on a remote Task (`--task <id> --session <sid> --tab`), and a remote-only Session (`--machine <label> --session <sid> --tab` in both flag positions), all presenting locally and attaching on the peer.
+   - Follow §7 through `open.rs`, `open/conversation.rs`, `navigation.rs`, and `bin/lf.rs`. Resolve a Task's primary with the existing Session resolver on the owner. Use the local server's `session.attach` / `session.continue` bridge for the tab. The server routes by the Task selector or by the explicit Machine for a remote-only Session.
+   - **Proves:** `open_remote_workspace` opens a remote Task with a stale local checkout, its exact Session, and a remote-only Session in both `--machine` flag positions. Each tab presents locally and its attachment receipt comes from the peer terminal. Run `documented_commands` for the new examples.
 
 3. **Slice 3: Desktop migration + deletion of `RegistryQuery.onMachine` / `pinTaskLocation`.**
    - Switch Desktop Files, Changes, Diff, Save, Watch, Graph log, Shell, and Session onto local `ServerClient` routed operations addressed by Task id alone.
    - Delete the client location stack, including the placement guard at `SessionsView.swift:716`; reload Files/Changes when a reading names a new Machine; drafts stay keyed by `(Task, path, base revision)`.
    - Delete `RegistryQuery.onMachine`, `pinTaskLocation`, `remoteMachine`, `executionLocations`, and `RegistryQueryLocal`'s remote SSH subprocess runners; update `lf desktop shell` and `prepared_remotely` to attach through the local server ticket bridge.
-   - **Proves:** `RemoteTaskWorkspaceTests` on macOS exercising all four viewers (Files unchanged content, Changes uncommitted hunk + Save, Shell `hostname`/`pwd`, Session input acknowledgement) against distinguishable local vs remote server responses, plus disconnect/reopen, unstarted, unreachable, and a Task move (views follow; a draft at a stale base revision shows the save conflict and survives).
+   - **Proves:** `RemoteTaskWorkspaceTests` on macOS exercises all four viewers (unchanged Files, Changes with an uncommitted hunk and Save, Shell `hostname`/`pwd`, Session input acknowledgement), disconnect and reopen, unstarted and unreachable states, and a move through the intermediate null workspace. The old terminal keeps its Machine label. A draft with the same base revision saves on the new owner. A draft with a different base revision shows a save conflict and survives.
 
 4. **Slice 4: Mobile Files & Shell viewers + Docs + Gate.**
    - Expose Files (directory tree + unchanged file content via `task.files` / `task.file`) and Shell (via `task.shell.start` / `task.shell.attach` + `/v1/ticket` WebSocket) alongside Changes and Session in `TaskWorkspaceView.swift` / `RemoteMobileClient.swift`.

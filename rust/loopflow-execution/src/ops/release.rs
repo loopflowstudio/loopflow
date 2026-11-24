@@ -14,8 +14,7 @@ use serde::{Deserialize, Serialize};
 use crate::command::{run_command, CommandError};
 use crate::config::{load_config_or_default, Config, ReleaseCompletion, ReleaseTargetConfig};
 use crate::git::worktrees::{
-    branch_exists, create_named_worktree, list_porcelain, main_repo_root, worktree_path,
-    CreateWorktreeResult,
+    branch_exists, create_named_worktree, list_porcelain, main_repo_root, worktree_path, Worktree,
 };
 use crate::git::{
     acquire_worktree_lease, acquire_worktree_lease_wait, current_branch,
@@ -1249,7 +1248,7 @@ fn materialize_exact_source_worktree(
     revision: &str,
     lease: &WorktreeLease,
     lock: &ReleaseLock,
-) -> OpsResult<CreateWorktreeResult> {
+) -> OpsResult<Worktree> {
     let inherit = |command: &mut Command| {
         lock.inherit(command);
         lease.inherit(command);
@@ -1354,12 +1353,7 @@ fn materialize_exact_source_worktree(
                 &format!("worktree is dirty: {status}"),
             ));
         }
-        return Ok(CreateWorktreeResult {
-            path,
-            branch,
-            base_branch: None,
-            base_commit: Some(expected_commit),
-        });
+        return Ok(Worktree { path, branch });
     }
 
     if registered_at_path.is_none() && path.exists() && !publisher_path_is_empty(&path)? {

@@ -267,13 +267,25 @@ async fn task_checkout_machine_keeps_session_filters_beside_other_machines() {
             params![task.as_str(), repo.path().to_str().unwrap()],
         )
         .unwrap();
-        for (id, path, scope) in [
-            ("a-alias", alias.join("sub"), None),
-            ("b-subdir", repo.path().join("sub"), None),
-            ("c-repo", repo.path().to_path_buf(), Some("repository")),
-            ("d-orphan", other.path().to_path_buf(), None),
+        // Sessions started in the checkout recorded its Task, through an alias
+        // too; a Repository primary there keeps its own scope.
+        for (id, path, scope, task) in [
+            ("a-alias", alias.join("sub"), None, Some(task.as_str())),
+            (
+                "b-subdir",
+                repo.path().join("sub"),
+                None,
+                Some(task.as_str()),
+            ),
+            (
+                "c-repo",
+                repo.path().to_path_buf(),
+                Some("repository"),
+                None,
+            ),
+            ("d-orphan", other.path().to_path_buf(), None, None),
         ] {
-            conn.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,primary_scope,interactive) VALUES(?1,?1,'human',1,0,?2,?3,1)",params![id,path.to_str().unwrap(),scope]).unwrap();
+            conn.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,primary_scope,task_id,wave_id,interactive) VALUES(?1,?1,'human',1,0,?2,?3,?4,?5,1)",params![id,path.to_str().unwrap(),scope,task,task.and(Some(&wave))]).unwrap();
             loopflow_storage::sqlite::sessions::test_capture(
                 &conn,
                 id,
@@ -335,9 +347,10 @@ fn task_work_includes_checkout_binding_without_granting_ownership() {
             params![task.as_str()],
         )
         .unwrap();
+        // Sessions opened in the checkout recorded its Task when they began.
         for (id, cwd, bound, complete) in [
-            ("manual", "/missing/task%_/src", false, false),
-            ("conversation", "/missing/task%_", false, false),
+            ("manual", "/missing/task%_/src", true, false),
+            ("conversation", "/missing/task%_", true, false),
             ("history", "/elsewhere", true, true),
             ("sibling", "/missing/task%_-other", false, false),
             ("wildcard", "/missing/taskAB", false, false),
@@ -353,10 +366,11 @@ fn task_work_includes_checkout_binding_without_granting_ownership() {
             );
         }
     }
-    // A Graph is the Task's work when it ran in the checkout.
+    // A Graph is the Task's work when it ran in the checkout; the store
+    // cannot see Git below a path that is gone, so it runs at the root.
     let independent = store.test_graph(
         "independent",
-        "/missing/task%_/sub",
+        "/missing/task%_",
         &[("implement", None)],
         None,
     );
@@ -389,11 +403,8 @@ fn task_work_includes_checkout_binding_without_granting_ownership() {
         .map(|work| work.label())
         .collect();
     assert_eq!(open, [format!("Graph run {independent}")]);
-    assert_eq!(
-        store.session_task_ids("manual").unwrap(),
-        std::slice::from_ref(&task)
-    );
-    assert!(store.session_task_ids("sibling").unwrap().is_empty());
+    assert_eq!(store.session_task("manual").unwrap().as_ref(), Some(&task));
+    assert!(store.session_task("sibling").unwrap().is_none());
     let summaries = crate::store::session_projection::session_summaries(
         &store,
         &SessionFilter {
@@ -413,7 +424,7 @@ fn task_work_includes_checkout_binding_without_granting_ownership() {
     );
     assert!(summaries
         .iter()
-        .all(|session| session.task_ids == std::slice::from_ref(&task)));
+        .all(|session| session.member_task() == Some(&task)));
     let graphs = store
         .graph_inventory(
             &GraphProcessFilter {
@@ -439,8 +450,7 @@ fn task_work_includes_checkout_binding_without_granting_ownership() {
         .unwrap();
         conn.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,task_id,wave_id) VALUES('child-session','Child','human',1,0,'/missing/task%_/child',?1,?2)", params![child.as_str(), wave]).unwrap();
     }
-    // A Graph in a nested checkout started for the deepest Task, as its
-    // launch binds it; the enclosing Task keeps the nested Session.
+    // Work in a nested checkout belongs to that checkout's Task only.
     let child_graph = store.test_graph(
         "child",
         "/missing/task%_/child",
@@ -459,12 +469,11 @@ fn task_work_includes_checkout_binding_without_granting_ownership() {
     assert!(!enclosing.contains(&child_graph.to_string()));
     assert_eq!(graph_ids(&child), [child_graph.to_string()]);
     let work = crate::store::task_work::task_work(&store, &task).unwrap();
-    assert!(work
+    assert!(!work
         .sessions
         .iter()
         .any(|session| session.id == "child-session"));
-    let memberships = store.session_task_ids("child-session").unwrap();
-    assert!(memberships.contains(&task) && memberships.contains(&child));
+    assert_eq!(store.session_task("child-session").unwrap(), Some(child));
     {
         let conn = store.conn.lock().unwrap();
         conn.execute(
@@ -473,14 +482,14 @@ fn task_work_includes_checkout_binding_without_granting_ownership() {
         )
         .unwrap();
     }
-    // Without its checkout the Task keeps the Graphs started for it.
+    // Without its checkout the Task keeps the Sessions and Graphs started for it.
     let work = crate::store::task_work::task_work(&store, &task).unwrap();
     assert_eq!(
         work.sessions
             .iter()
             .map(|session| session.id.as_str())
             .collect::<Vec<_>>(),
-        ["history"]
+        ["conversation", "history", "manual"]
     );
     assert_eq!(graph_ids(&task), enclosing);
 

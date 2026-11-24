@@ -169,23 +169,35 @@ pub fn commit(
 /// `checkout.create`: a worktree for `name` beside the repository containing
 /// `directory`, following its layout, as `lf wt create <name>` does. With
 /// `preview`, the placement only. With `persistent`, a workspace kept after
-/// delivery.
+/// delivery. With `stack`, a new branch starts from the branch checked out in
+/// `directory` and records it as its base, so `lf sync` and `lf pr` follow it.
 pub fn create(
     directory: &Path,
     name: &str,
     preview: bool,
     persistent: bool,
+    stack: bool,
     progress: &impl Progress,
 ) -> Result<Checkout> {
     use crate::git::worktrees::{
-        create_from_placement_plan, ensure_agent_worktree, main_repo_root, plan_placement,
-        WorktreeSegment,
+        create_from_placement_plan, ensure_agent_worktree, main_repo_root, mark_persistent,
+        plan_placement, record_stacked_base, WorktreeSegment,
     };
     let repo = repo_root(directory)?;
     let main_repo = main_repo_root(&repo).map_err(outcome_unknown)?;
     let segment = WorktreeSegment::parse(name)
         .map_err(|error| Error::new(ErrorCode::Invalid, error.to_string()))?;
-    if persistent && !preview {
+    // On the default branch or a detached HEAD there is nothing to stack on.
+    let stacked_on = if stack {
+        crate::git::current_branch(&repo)
+            .map_err(outcome_unknown)?
+            .filter(|branch| {
+                crate::git::get_default_branch(&repo).is_ok_and(|default| *branch != default)
+            })
+    } else {
+        None
+    };
+    if persistent && stacked_on.is_none() && !preview {
         let workspace = ensure_agent_worktree(&main_repo, segment).map_err(outcome_unknown)?;
         return Ok(Checkout {
             path: workspace.path,
@@ -195,7 +207,14 @@ pub fn create(
             created: true,
         });
     }
-    let mut placement = plan_placement(&main_repo, segment.clone()).map_err(outcome_unknown)?;
+    let plan = |main_repo: &Path| {
+        let mut placement = plan_placement(main_repo, segment.clone()).map_err(outcome_unknown)?;
+        if let Some(base) = &stacked_on {
+            placement.base_ref.clone_from(base);
+        }
+        Ok::<_, Error>(placement)
+    };
+    let mut placement = plan(&main_repo)?;
     if preview {
         return Ok(Checkout {
             path: placement.worktree_path,
@@ -207,9 +226,16 @@ pub fn create(
     }
     if placement.strategy != PlacementStrategy::UseExistingWorktree {
         crate::ops::checkout::refresh_main(&main_repo, progress).map_err(outcome_unknown)?;
-        placement = plan_placement(&main_repo, segment).map_err(outcome_unknown)?;
+        placement = plan(&main_repo)?;
     }
     let result = create_from_placement_plan(&main_repo, &placement).map_err(outcome_unknown)?;
+    let stacked_on = stacked_on.filter(|_| placement.strategy == PlacementStrategy::Create);
+    if let Some(base) = &stacked_on {
+        record_stacked_base(&main_repo, &result.branch, base).map_err(outcome_unknown)?;
+    }
+    if persistent {
+        mark_persistent(&main_repo, &result.branch).map_err(outcome_unknown)?;
+    }
     crate::ops::telemetry::record_ops_metric(
         &repo,
         serde_json::json!({
@@ -223,7 +249,7 @@ pub fn create(
     Ok(Checkout {
         path: result.path,
         branch: result.branch,
-        base: result.base_branch,
+        base: stacked_on,
         strategy: Some(placement.strategy),
         created: true,
     })

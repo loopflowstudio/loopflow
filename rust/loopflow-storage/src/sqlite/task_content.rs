@@ -73,18 +73,7 @@ impl SqliteStore {
     ) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let current = validate_move(&tx, id, expected_project, destination)?;
-        if current.project_id.as_ref() == destination {
-            return Ok(());
-        }
-        super::planning_write::local(
-            &tx,
-            &crate::work::edit::WorkEdit::for_target(
-                id.as_str(),
-                &[Edit::TaskProject(destination.map(ToString::to_string))],
-            ),
-        )
-        .map(|_| ())?;
+        move_task_in(&tx, id, expected_project, destination)?;
         tx.commit()?;
         Ok(())
     }
@@ -152,6 +141,22 @@ impl SqliteStore {
         tx.commit()?;
         Ok(task)
     }
+
+    /// `id` takes `to`'s place, moving into `to`'s Project when it is in
+    /// another; returns that Project's order.
+    pub fn reorder_task(&self, id: &TaskId, to: &TaskId) -> StoreResult<Vec<String>> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let task = super::children::task_on(&tx, id)?.ok_or(StoreError::NotFound)?;
+        // The moved Task is the one that is missing; a missing place is a bad argument.
+        let target = super::children::task_on(&tx, to)?
+            .ok_or_else(|| StoreError::InvalidData(format!("{to} is no Task; nothing changed.")))?;
+        super::children::require_task_not_deleted(&tx, &task)?;
+        super::children::require_task_not_deleted(&tx, &target)?;
+        let order = super::planning_order::move_in(&tx, &task, &target)?;
+        tx.commit()?;
+        Ok(order)
+    }
 }
 
 fn validate_edit(
@@ -184,6 +189,27 @@ fn validate_edit(
     Ok(task)
 }
 
+/// Move the Task into `destination`, as one planning edit its tracker sends.
+pub(super) fn move_task_in(
+    conn: &rusqlite::Connection,
+    id: &TaskId,
+    expected_project: Option<&ProjectId>,
+    destination: Option<&ProjectId>,
+) -> StoreResult<()> {
+    let current = validate_move(conn, id, expected_project, destination)?;
+    if current.project_id.as_ref() == destination {
+        return Ok(());
+    }
+    super::planning_write::local(
+        conn,
+        &crate::work::edit::WorkEdit::for_target(
+            id.as_str(),
+            &[Edit::TaskProject(destination.map(ToString::to_string))],
+        ),
+    )
+    .map(|_| ())
+}
+
 fn validate_move(
     conn: &rusqlite::Connection,
     id: &TaskId,
@@ -200,8 +226,9 @@ fn validate_move(
             "Task membership changed before moving".into(),
         ));
     }
+    // A move names its Project, so any of the repository's Projects will do;
+    // only new work lands in the Wave's configured one.
     if let Some(destination) = destination {
-        super::durable::require_selected_project(conn, destination)?;
         let same_repo: bool = conn.query_row(
             "SELECT EXISTS(SELECT 1 FROM projects p JOIN waves w ON w.id=p.wave_id JOIN repository_plans r ON r.repo=w.repo WHERE p.id=?1 AND r.id=?2)",
             rusqlite::params![destination.as_str(), current.repository_id.as_str()], |row| row.get(0),

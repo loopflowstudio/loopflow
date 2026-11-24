@@ -563,3 +563,49 @@ Compress after slice 11: Asana's Project create has one accept path for a
 found or a newly made team project; the unbound-Project test dropped its
 unstamped case (stamps are no longer read). Storage `tracker_actions::tests::`
 (13) and execution `asana_planning_tests::` (9) pass; clippy clean.
+
+Concept review after slice 11, answers (Jack Heart, 2026-11-24): "1 sure"
+(LOO-995 renamed to the PR title); on the Asana race, "why would two macines
+both create te same asana project anyway, i dont get it"; "3 sure" (create
+snapshot stays as built).
+
+## Slice 12 (human-review direction, 2026-11-24) — supersedes slice 11's design
+
+Jack Heart: "why cant we just refer by id to the project", then "i think a
+wave should be attached to a project by id. createProjectForWave, and/or
+createWave(project=true) or wahtever, shouldl create the project, then attach
+it", then "it just happens on wahtever machines the user is issuing comamnds
+on (wahtevers running the server the desktop app connects to, or wherever lf
+is)".
+
+The model: in a repository with a tracker, a Wave's Project is created in
+the tracker by the command that makes or connects the Wave, on the Machine
+running that command, and the Wave records the tracker Project's id before
+the command returns. A Project never sits unbound waiting for some Machine's
+drain, so no other Machine ever creates it.
+
+- `lf wave create` (and Desktop's create, through the same served call) with
+  a tracker: create the tracker Project, then record the Wave and its Project
+  with `external_project_id` set. `lf wave plan connect <wave>` with no Linear
+  Project named does the same for an existing Wave.
+- Choice made for review: the tracker unreachable means the command fails
+  with the tracker's error and records nothing; run it again. Passed over:
+  recording the Wave unbound and queuing the create, which is the path this
+  slice deletes.
+- Delete the queued Project create: `uncreated` no longer yields Projects;
+  slice 11's duplicate-id lookup and Asana footer search for Projects go,
+  unless the synchronous create's own lost-reply recovery needs the Linear
+  one. Queued Task creates and field edits stay as they are.
+- An upgraded store's unbound Projects (Waves the migration gave a Project
+  in a tracker repository): created by the first `lf wave plan connect` or
+  `lf wave sync` of that Wave on whichever Machine runs it; say so in that
+  command's output and the upgrade note.
+- Tests: create a Wave with a stand-in tracker → its Project id is recorded
+  when the command returns; tracker down → command fails, no Wave recorded;
+  a second Machine's store receiving the Wave never sends a Project create.
+
+Jack Heart, during slice 12: "there doesnt need to be anything going across
+amchines ever basically". So slice 12 adds no cross-Machine handling: no
+second-Machine test, no create path that exists only because another
+Machine might hold the record. Delete such paths where slice 11 or earlier
+added them for Project creates.

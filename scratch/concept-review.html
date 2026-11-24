@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Concept Review · LOO-1081 Remote &amp; Modal Task Workspaces</title>
+<title>Concept Review · LOO-1081 Modal On-Demand Rentals (Post-Build)</title>
 <style>
   :root {
     --bg: #fafaf9;
@@ -25,9 +25,9 @@
     --warn: #a16207;
     --warn-bg: #fefce8;
     --warn-border: #fde68a;
-    --existing: #475569;
-    --existing-bg: #f1f5f9;
-    --existing-border: #cbd5e1;
+    --built: #0f766e;
+    --built-bg: #f0fdfa;
+    --built-border: #99f6e4;
     --proposed: #6d28d9;
     --proposed-bg: #f5f3ff;
     --proposed-border: #ddd6fe;
@@ -55,9 +55,9 @@
       --warn: #facc15;
       --warn-bg: #2e2005;
       --warn-border: #713f12;
-      --existing: #94a3b8;
-      --existing-bg: #1e293b;
-      --existing-border: #334155;
+      --built: #2dd4bf;
+      --built-bg: #042f2e;
+      --built-border: #115e59;
       --proposed: #c4b5fd;
       --proposed-bg: #2e1065;
       --proposed-border: #5b21b6;
@@ -114,7 +114,7 @@
   .lead {
     font-size: 16px;
     color: var(--text-muted);
-    max-width: 78ch;
+    max-width: 82ch;
   }
   .status-bar {
     display: flex;
@@ -136,7 +136,7 @@
     border: 1px solid transparent;
     white-space: nowrap;
   }
-  .badge.existing { color: var(--existing); background: var(--existing-bg); border-color: var(--existing-border); }
+  .badge.built { color: var(--built); background: var(--built-bg); border-color: var(--built-border); }
   .badge.proposed { color: var(--proposed); background: var(--proposed-bg); border-color: var(--proposed-border); }
   .badge.yes { color: var(--yes); background: var(--yes-bg); border-color: var(--yes-border); }
   .badge.no { color: var(--no); background: var(--no-bg); border-color: var(--no-border); }
@@ -159,7 +159,7 @@
     margin: 20px 0;
   }
   .callout.mismatch { border-left-color: var(--no); }
-  .callout.proposed-box { border-left-color: var(--proposed); }
+  .callout.outside { border-left-color: var(--warn); }
   .table-wrap {
     overflow-x: auto;
     border: 1px solid var(--border);
@@ -234,7 +234,6 @@
   .diagram .hi-no { color: var(--no); font-weight: 700; }
   .diagram .hi-yes { color: var(--yes); font-weight: 700; }
   .diagram .hi-prop { color: var(--proposed); font-weight: 700; }
-  .diagram .hi-muted { color: var(--text-muted); }
   ul.tight {
     margin: 8px 0 0;
     padding-left: 18px;
@@ -311,352 +310,276 @@
 <body>
 <main>
   <header>
-    <div class="eyebrow">Concept Review · Task LOO-1081 · Pre-Implementation</div>
+    <div class="eyebrow">Concept Review · Task LOO-1081 · Post-Build Audit</div>
     <h1>Do the product’s concepts and the code’s concepts line up?</h1>
     <p class="lead">
-      <strong>Area reviewed:</strong> Running a Task on a remote (including rented on-demand) Machine and working with it across CLI, Desktop, and Mobile — from rental sizing and provisioning, through Wave acquisition and ownership handoff, to agent execution and opening Files, Changes, Shell, and Session.
-      Widened to this whole area because LOO-1081’s twelve field failures on Modal trace back to four underlying concept splits in how Loopflow models remote Machines and Task ownership.
+      <strong>Area reviewed:</strong> Running a Linear-backed Task on a rented Modal Linux Machine — sizing and ceiling estimates, container bootstrap and detached server, cold Wave adoption and atomic placement, portable profile retention, Machine-aware harness selection and login refresh, abrupt-loss analytics collection, and rental settlement.
+      Reviewed as a whole across <code>2aa9964894..afdf8d0b45</code> (117 files) alongside live Modal QA (<code>scratch/qa.html</code>). Server-routed remote workspaces (<code>lf open --machine</code>, Desktop, Mobile) moved to <strong>LOO-1083</strong>; cross-Machine steering moved to <strong>LOO-1084</strong>.
     </p>
     <div class="status-bar">
-      <span class="badge accent">Base: 2656258ab</span>
-      <span class="badge existing">Existing = current HEAD code</span>
-      <span class="badge proposed">Proposed = revised scratch/plan.md (unbuilt)</span>
-      <span class="badge warn">Outcome: Plan revised before build</span>
+      <span class="badge built">Built at HEAD: afdf8d0b45 (§§1, 2, 2a, 3)</span>
+      <span class="badge proposed">Proposed next pass: scratch/plan.md §4</span>
+      <span class="badge warn">Outcome: Plan revised · 3 mismatches to fix in implement</span>
     </div>
   </header>
 
-  <h2>1. Product concepts vs. code concepts</h2>
-  <p>Each row pairs what a person understands and does with the actual types, records, and APIs behind it at <code>2656258ab</code>.</p>
+  <h2>1. Product concepts vs. code concepts at <code>HEAD</code></h2>
+  <p>Six parts of the built change line up cleanly; three remaining splits break the user model and showed up directly in live Modal QA.</p>
 
   <div class="table-wrap">
     <table>
       <thead>
         <tr>
           <th style="width: 22%;">Product concept</th>
-          <th style="width: 28%;">Code concept <span class="badge existing">Existing</span></th>
+          <th style="width: 29%;">Code concept at <code>HEAD</code></th>
           <th style="width: 9%;">Line up?</th>
-          <th style="width: 41%;">What is wrong / how the code diverges</th>
+          <th style="width: 40%;">Assessment</th>
         </tr>
       </thead>
       <tbody>
         <tr>
-          <td><strong>A Task’s workspace across Machines</strong><br>A Task lives on its owning Machine. Opening it on CLI, Desktop, or Mobile shows that Machine’s Files, Changes, Shell, and Session.</td>
+          <td><strong>Sandbox usage &amp; transcript analytics after loss</strong><br>Work that ran on Modal stays visible in <code>lf session usage</code> (by Task, Wave, Project, days), <code>lf session history search</code>, and Desktop telemetry/history views, tagged <code>from modal-1</code>.</td>
           <td>
-            <code>Write::remote()</code> + <code>Read::TaskStatus</code> route via <code>Connection::open_on</code>.<br>
-            <code>Read::TaskFiles/File/Changes/Diff/Get</code> and <code>service.rs</code> terminals run locally only.<br>
-            Desktop builds a parallel client stack: <code>WorkModel.taskWorkspaceIdentity</code> (reads local <code>task_checkouts</code>) + <code>RegistryQuery.onMachine</code> (spawns <code>lf --machine</code> CLI over SSH) + <code>pinTaskLocation</code> (2 extra SSH probes per call).
+            <span class="badge built">Built</span> <code>rental/recovery.rs</code> + <code>machine_records.rs</code> + <code>session_export_changes</code> collect <code>Session</code>, <code>SessionEvent</code>, <code>History</code>, <code>Turn</code>, <code>Transcript</code>, and captures into <code>machine_records</code>.<br>
+            <code>commands/usage.rs</code> (<code>--days/--task/--wave/--project</code>) and <code>history_transcript.rs::search</code> read local tables only; <code>usage --session &lt;id&gt;</code> is a separate mutually-exclusive JSON shape.
           </td>
           <td><span class="badge no">No</span></td>
           <td>
-            <span class="kind-tag">Two architectures for one job</span><br>
-            <strong>Biggest mismatch.</strong> The server routes writes and <code>task.status</code>, but not Task files/diffs/terminals. Desktop works around that with client-side SSH subprocesses and a cached local <code>workspace.location</code> — so a stale local checkout makes Desktop open a local Mac shell while <code>Write::SessionResume</code> returns Modal’s Session, tripping the placement error. The initial plan kept Desktop on the client workaround while adding server forwarding only for Mobile.
+            <span class="kind-tag">Biggest mismatch · Two analytics paths for one store</span><br>
+            Collection already captures durable <code>task_id</code>, <code>wave_id</code>, turns, transcripts, and captures, yet work-scoped <code>lf session usage</code>, <code>lf session history search</code>, and Desktop’s <code>TelemetryDashboardView</code> / <code>TaskHistoryView</code> ignore <code>machine_records</code> completely. A person with 5 Modal Tasks has to look up each Session UUID one by one with <code>lf session usage --session &lt;id&gt;</code>.
           </td>
         </tr>
         <tr>
-          <td><strong>Opening a conversation in a terminal</strong><br><code>lf open</code> opens a view <em>here</em> of a Task’s or remote Machine’s conversation.</td>
+          <td><strong>Starting a stopped Session when its harness/login is missing</strong><br>Any server-initiated start (Task recovery, <code>lf steer</code> waking a stopped Session, or <code>lf machine forward</code> restart) checks readiness and surfaces why it could not start.</td>
           <td>
-            <code>commands/open.rs::resume_argv</code> drops <code>--task</code> whenever <code>--session</code> is set.<br>
-            <code>bin/lf.rs</code> intercepts root <code>--machine &lt;label&gt;</code> and forwards the entire command to run remotely.
+            <span class="badge built">Built</span> <code>ops/recovery.rs::launch_failure</code> checks <code>&amp;TaskConversation</code> in <code>server/recovery.rs</code> only.<br>
+            <code>server/wake.rs::start_stopped</code> and <code>ops/human_session.rs::restart_provider</code> spawn <code>SessionContinue</code> with no readiness check.<br>
+            <code>ops/human_session.rs::session_ending</code> masks <code>start_failure</code> with <code>.filter(|_| conversation)</code>.
           </td>
           <td><span class="badge no">No</span></td>
           <td>
-            <span class="kind-tag">Two meanings for one flag + dropped owner</span><br>
-            <code>lf open --task MTG-421 --session &lt;id&gt; --tab</code> drops <code>--task</code>, so the new tab looks up the remote Session locally and fails. Meanwhile the original plan proposed <code>lf --machine &lt;label&gt; open --session &lt;id&gt; --tab</code>, which today tries to open a tab <em>inside</em> the headless Linux container.
+            <span class="kind-tag">One concept owned by one of three callers</span><br>
+            Observed in live QA #1: <code>lf steer</code> promises “the Machine server starts &lt;id&gt; to read it”, the held PTY exits with <code>codex has no usable login</code>, nothing records <code>start_failure</code>, and <code>lf session list</code> stays <code>unknown</code>. Likewise <code>lf machine forward --task/--session</code> prints “Resuming …” even when the refreshed login is unusable for that harness.
           </td>
         </tr>
         <tr>
-          <td><strong>Joining an authored Wave vs. creating a new Wave</strong><br>A fresh clone adopts existing <code>.lf/wave/</code> and binds its active Linear Project without inventing local Projects or committing to <code>main</code>.</td>
+          <td><strong>Giving back &amp; retiring a rented Machine</strong><br><code>lf machine end</code> settles an already-gone sandbox cleanly without demanding <code>--force</code>; ended rentals are history in <code>lf ondemand list</code> and <code>from modal-1</code> labels, not live Machines in <code>lf machine list</code>.</td>
           <td>
-            <code>ops/linear.rs::wave_for_initiative</code> reads only SQLite <code>waves</code>.<br>
-            <code>connect_async</code> calls <code>wave_lifecycle::add</code>, which runs <code>ensure_first_project</code> (creates local <code>tracker_id: null</code> Project) and commits to <code>main</code>.<br>
-            <code>write_repository_linear_config</code> rewrites <code>.lf/config.yaml</code> even when already bound.
+            <span class="badge built">Built</span> <code>rental/recovery.rs::reconcile</code> calls <code>refresh()</code> before <code>give_back()</code>.<br>
+            <code>commands/rental.rs::end</code> skips <code>refresh()</code> and calls <code>give_back()</code> directly.<br>
+            <code>commands/machine.rs::Status</code> checks <code>rental_for_machine</code>, while <code>listings</code> (<code>lf machine list</code>) lists every ended rental’s dead SSH route.
           </td>
           <td><span class="badge no">No</span></td>
           <td>
-            <span class="kind-tag">One code path for two ideas</span><br>
-            Cold adoption of an existing repository and authoring a brand-new Wave share <code>wave_lifecycle::add</code>. The initial plan separated them, but added a rental-only “carried selection” side channel that duplicates what the sole In Progress Linear Project + existing <code>lf wave plan bind</code> already own.
+            <span class="kind-tag">Split settlement + storage FK leaking into UI</span><br>
+            Observed in live QA #2 &amp; #3: <code>lf machine end modal-1</code> on a sandbox Modal already terminated fails SSH and demands <code>--force</code> to “discard” unpushed work on a dead box. Meanwhile <code>machines</code> keeps ended rows for <code>machine_records</code> foreign keys, and <code>lf machine list</code> exposes them as dead routes alongside live Machines.
           </td>
         </tr>
         <tr>
-          <td><strong>Handing a Task to a rented Machine</strong><br><code>lf task run &lt;ID&gt; --rent modal</code> places the Task directly on <code>modal-1</code>; a failed rent never claims it on the laptop.</td>
+          <td><strong>Modal burst compute &amp; ceiling estimates</strong><br><code>--vcpus</code>/<code>--memory-gb</code> set Modal’s burst ceiling above the <code>0.125</code> core / <code>128 MiB</code> floor unless <code>--reserved</code> pins floor = ceiling; uptime cost is labeled as a ceiling estimate.</td>
           <td>
-            <code>commands/rental.rs::hand_off</code> calls <code>OwnershipChange::Claim</code> (claiming for the local Mac), then calls <code>OwnershipChange::Move(label)</code>.
-          </td>
-          <td><span class="badge no">No</span></td>
-          <td>
-            <span class="kind-tag">One action split into two writes</span><br>
-            An unowned Task gets claimed by the laptop first and queued to Linear. If the move fails or the first marker arrives late, ownership lands on the laptop — causing <code>lf open --task</code> to attach locally.
-          </td>
-        </tr>
-        <tr>
-          <td><strong>Modal burst compute &amp; ceiling cost</strong><br><code>--vcpus</code>/<code>--memory-gb</code> set Modal’s burst ceiling; idle pays a tiny floor unless <code>--reserved</code> is set. Cost derived from uptime is a ceiling estimate, not an invoice.</td>
-          <td>
-            <code>Hardware</code> has no <code>reserved</code> flag; <code>sandbox.py</code> passes scalar <code>cpu</code> and <code>memory</code> (pinning floor = ceiling).<br>
-            <code>Rental.cost_until</code> multiplies uptime by peak hourly rate and stores/prints it as plain <code>cost_usd</code>.
-          </td>
-          <td><span class="badge no">No</span></td>
-          <td>
-            <span class="kind-tag">One number for floor and ceiling</span><br>
-            Idle Modal sandboxes paid 100% of peak compute ($0.95184/h each, ~$1.65 actual vs ~$1.78 fixed uptime math). Presenting ceiling math as plain <code>cost_usd</code> hides the difference between a worst-case budget cap and actual spend.
-          </td>
-        </tr>
-        <tr>
-          <td><strong>Provisioning a rented Linux Machine</strong><br>Renting yields a ready Machine on the caller’s <code>lf</code> build with Claude &amp; Codex and a working Loopflow server — even in containers without systemd or cron.</td>
-          <td>
-            <code>sandbox.py</code> omits Codex and <code>~/.local/bin</code> from <code>/etc/environment</code>.<br>
-            <code>rental.rs::attach</code> runs hardcoded <code>releases/latest</code> (<code>0.15.1</code>).<br>
-            <code>installation/server.rs::ensure</code> requires <code>systemctl --user</code>.<br>
-            <code>install/published.rs</code> fails the whole install when <code>crontab</code> is missing.<br>
-            <code>binaries::report_before_promote</code> runs post-migration <code>INDEXED BY agent_sessions_attached</code> on pre-migration stores.
-          </td>
-          <td><span class="badge no">No</span></td>
-          <td>
-            <span class="kind-tag">Hidden OS preconditions</span><br>
-            Four places refuse container Linux instead of adapting to it. Installing a binary and scheduling periodic updates are conflated into one exit code; server startup assumes a systemd user bus instead of falling back to detached <code>lf server run</code>.
-          </td>
-        </tr>
-        <tr>
-          <td><strong>Running a Task with available harnesses</strong><br>Personal laptop preferences yield to an installed, logged-in harness on a remote Machine (unless <code>-a</code> is explicit). Missing harnesses stop retrying and say why.</td>
-          <td>
-            Session preparation stamps personal <code>task-session: agy:...</code> without checking remote availability.<br>
-            <code>server/recovery.rs</code> + <code>ops/recovery.rs::launch_failure</code> retries <code>agy is not installed</code> 5 times on backoff.
-          </td>
-          <td><span class="badge no">No</span></td>
-          <td>
-            <span class="kind-tag">Permanent mismatch treated as transient crash</span><br>
-            Recovery already handles quota fallback in <code>limit_recovery</code>, but initial resolution ignores what is installed on the Machine and recovery crash-loops on a missing binary.
-          </td>
-        </tr>
-        <tr>
-          <td><strong>Refreshing rotated logins on a live Machine</strong><br>Push updated <code>forward.files</code> to a running Machine, optionally restarting a stuck Session.</td>
-          <td>
-            <code>machine/forward.rs::deliver</code> runs only during launches and always preserves an existing remote file (<code>kept</code>). No explicit sync command exists.
-          </td>
-          <td><span class="badge no">No</span></td>
-          <td>
-            <span class="kind-tag">Action with no owner in code</span><br>
-            Destination-wins on ordinary launches is right, but there is no deliberate way to overwrite rotated credentials on a live sandbox or unstick a Session parked at a login prompt.
-          </td>
-        </tr>
-        <tr>
-          <td><strong>Scratch Markdown context</strong><br><code>scratch/*.md</code> carries working notes; macOS AppleDouble <code>._*</code> sidecar files are filesystem metadata, not notes.</td>
-          <td>
-            <code>prompt/mod.rs::gather_md_files_from</code> reads every <code>*.md</code> as UTF-8 and aborts the entire Graph step on binary <code>scratch/._plan.md</code>.
-          </td>
-          <td><span class="badge no">No</span></td>
-          <td>
-            <span class="kind-tag">OS metadata treated as authored text</span><br>
-            A stray macOS resource-fork sidecar prevents any agent from starting.
-          </td>
-        </tr>
-        <tr>
-          <td><strong>Rental admission, deadlines &amp; safe return</strong><br>One create per admission, lookup by name on unknown reply, hard provider deadline, refuse deleting unpushed work unless <code>--force</code>.</td>
-          <td>
-            <code>loopflow-storage/src/rental.rs</code> (<code>RentalState</code>, <code>admit</code>, <code>give_back</code>) and <code>rental/recovery.rs</code> (<code>copy_up</code>, <code>delete_sandbox</code>).
+            <span class="badge built">Built</span> <code>Hardware.modal_sizing</code> (<code>Burst</code>/<code>Reserved</code>), <code>RentalCost::CeilingEstimateUsd</code> (<code>ceiling_estimate_usd</code>), tuple <code>cpu</code>/<code>memory</code> in <code>sandbox.py</code>.<br>
+            Minor: <code>OndemandCommand::Add</code> stores <code>None</code> for Modal burst instead of <code>Some(Burst)</code>.
           </td>
           <td><span class="badge yes">Yes</span></td>
           <td>
-            The core rental safety model already lines up cleanly — keep it intact and avoid adding parallel lifecycle states.
+            Lines up cleanly on admission, caps, timeouts, legacy rental compatibility, and real Modal cgroups. Small polish in §4.3: write <code>Some(Burst)</code> on new Modal <code>OnDemand</code> declarations so <code>lf ondemand list --json</code> matches <code>Rental.hardware</code>.
+          </td>
+        </tr>
+        <tr>
+          <td><strong>Container Linux as an ordinary Machine</strong><br>Caller resolves matching Linux <code>lf</code> (or rootless <code>LF_RENT_LINUX_BIN</code> wrapper); detached <code>lf server run</code> works without systemd; missing <code>crontab</code> doesn’t fail install.</td>
+          <td>
+            <span class="badge built">Built</span> <code>install/published.rs</code>, <code>installation/server/linux.rs</code> (<code>SO_PEERCRED</code> + <code>pidfd_open</code>), <code>commands/rental.rs</code> (rootless <code>~/.local/libexec/lf</code> + wrapper), <code>commands/binaries.rs</code>.
+          </td>
+          <td><span class="badge yes">Yes</span></td>
+          <td>
+            Cleanly drops systemd/cron/sudo preconditions while preserving disabled-unit checks, revision verification, and v0.15.1 store upgrade safety. Verified on live Modal and fresh Ubuntu 24.04 containers.
+          </td>
+        </tr>
+        <tr>
+          <td><strong>Cold Wave adoption vs. authoring &amp; atomic Task placement</strong><br>Fresh clones adopt <code>.lf/wave/</code> read-only and bind the sole In Progress Linear Project; <code>--rent</code> writes one ownership entry naming the target Machine after setup succeeds.</td>
+          <td>
+            <span class="badge built">Built</span> <code>work/wave/bootstrap.rs</code> (<code>register_only</code>), <code>ops/linear.rs</code> (<code>acquire_wave_inventory</code>), <code>sqlite/linear_events.rs</code>, <code>sqlite/project_selection.rs</code> (<code>--replace</code>), <code>sqlite/task_ownership.rs::move_in</code>.
+          </td>
+          <td><span class="badge yes">Yes</span></td>
+          <td>
+            Separates cold adoption from authoring with zero commits to <code>main</code>, zero stray local Projects, zero rental-only side channels, and single-entry atomic placement with idempotent retry.
+          </td>
+        </tr>
+        <tr>
+          <td><strong>Portable profile retention on fresh dev rentals</strong><br>Skill routes and portable preferences arrive before the first SSH shell without conflicting with <code>stream: dev</code>.</td>
+          <td>
+            <span class="badge built">Built</span> <code>config/catalog.rs</code> (<code>stream</code> is <code>HostLocal</code>), <code>config/remote.rs</code> (<code>provision</code>, per-declaration <code>retain_settings</code>), <code>lf install server --profile-stdin</code>.
+          </td>
+          <td><span class="badge yes">Yes</span></td>
+          <td>
+            Verified on live Modal: first direct SSH shell resolves all 38 forwarded skill routes while retaining <code>stream: dev</code>, and independent local edits stay local with visible conflicts.
+          </td>
+        </tr>
+        <tr>
+          <td><strong>Machine-aware harness fallback &amp; explicit file refresh</strong><br>Each skill picks the first installed, logged-in configured model on the execution Machine; <code>lf machine forward</code> atomically replaces <code>forward.files</code> and optionally restarts one Session.</td>
+          <td>
+            <span class="badge built">Built</span> <code>agent/availability.rs::MachineAgents</code>, <code>session.rs::pending_agent</code>, <code>ops/commit.rs</code>, <code>machine/forward.rs</code> + <code>forward.sh</code>, <code>commands/machine.rs::Forward</code>.
+          </td>
+          <td><span class="badge yes">Yes</span></td>
+          <td>
+            Verified on live Modal: <code>default</code> fell back from absent <code>agy</code> to <code>claude:opus</code> while <code>commit-message</code> ran on <code>claude:haiku</code>; atomic file refresh keeps ordinary launches destination-wins. (Restart readiness check joins Mismatch #2 above.)
+          </td>
+        </tr>
+        <tr>
+          <td><strong>Scratch Markdown context</strong><br>AppleDouble <code>._*</code> and binary dotfiles never abort a Graph step; readable hidden notes stay in order.</td>
+          <td>
+            <span class="badge built">Built</span> <code>prompt/mod.rs::gather_md_files_from</code> skips <code>._*</code> and non-UTF-8 hidden files, refuses symlinks, and names unreadable ordinary <code>.md</code> files.
+          </td>
+          <td><span class="badge yes">Yes</span></td>
+          <td>
+            Cleanly separates OS metadata from authored notes without masking real broken notes.
           </td>
         </tr>
       </tbody>
     </table>
   </div>
 
-  <h2>2. The biggest mismatch: two competing remote-workspace architectures</h2>
+  <h2>2. Biggest mismatch: collected sandbox analytics siloed outside <code>lf session usage</code> &amp; <code>search</code></h2>
   <div class="callout mismatch">
     <p>
-      <strong>What was wrong in both the code and the first draft of <code>scratch/plan.md</code>:</strong>
-      The Loopflow server already routes writes (<code>task.run</code>, <code>task.auto.*</code>, <code>session.resume</code>) and <code>task.status</code> to a Task’s owning Machine over <code>Connection::open_on</code>.
-      The original plan proposed extending that server forwarding (plus terminal ticket bridging) <em>for Mobile</em>, while keeping <em>Desktop</em> on its older client-side <code>RegistryQuery.onMachine</code> stack (which spawns <code>lf --machine</code> CLI subprocesses over SSH and wraps every call in two extra <code>ssh lf task location</code> probes).
-      Keeping both guarantees drift, extra SSH roundtrips, and split-brain failures like MTG-421 (remote Session + local Mac shell).
+      <strong>What is wrong at <code>HEAD</code> (<code>afdf8d0b45</code>):</strong>
+      Collection (<code>rental/recovery.rs</code> → <code>machine_records</code>) already captures every Session, event, history row, turn, provider transcript, and capture file from Modal while it runs and before give-back.
+      Yet <code>lf session usage --task/--wave/--days/--weekly</code>, <code>lf session history search</code>, and Desktop’s <code>TelemetryDashboardView</code> / <code>TaskHistoryView</code> read local tables only — so all Modal work disappears from analytics unless you look up each Session UUID individually via a mutually-exclusive <code>lf session usage --session &lt;id&gt;</code> flag with a bespoke JSON schema.
     </p>
   </div>
 
   <div class="compare">
     <div class="card before">
       <div class="card-head">
-        <h3>Before · Split client &amp; server routing</h3>
-        <span class="badge existing">Existing + Original Plan</span>
+        <h3>Before · Split local analytics vs. single-Session copy flag</h3>
+        <span class="badge built">Built at HEAD</span>
       </div>
-      <div class="diagram">Desktop (Mac)
- ├─ RoadmapTask.reference.workspace <span class="hi-no">(local task_checkouts!)</span>
- ├─ Session  ──► local server ──► Write::remote() ──► <span class="hi-yes">Modal</span>
- │               └─ returns Modal record ≠ Mac location <span class="hi-no">✗ FAIL</span>
- ├─ Shell    ──► lf --machine <span class="hi-no">stale Mac</span> desktop shell   <span class="hi-no">✗ LOCAL</span>
- └─ Files    ──► <span class="hi-no">RegistryQuery.onMachine</span> (CLI over SSH)
-                 └─ <span class="hi-no">pinTaskLocation</span>: 2× ssh task location / call
-
-Mobile (iPhone)
- ├─ Changes  ──► paired server ──► <span class="hi-no">read_here() on Mac</span>
- └─ Plan v1  ──► add server forwarding <span class="hi-no">for Mobile only</span>
-
-CLI (lf open)
- └─ --task X --session S ──► <span class="hi-no">drops --task</span> ──► local lookup ✗</div>
+      <div class="diagram">machine_records (Modal copies: Session, History, Turn, Transcript, Captures)
+ ├─ lf session list (text)           ──► <span class="hi-yes">shown (from modal-1)</span>
+ ├─ lf session history show &lt;id&gt;     ──► <span class="hi-yes">shown</span>
+ ├─ lf session usage --session &lt;id&gt;  ──► <span class="hi-no">bespoke JSON, conflicts w/ --task/--wave/--days</span>
+ ├─ lf session usage --task/--wave   ──► <span class="hi-no">0 rows (local session_history only!)</span>
+ ├─ lf session history search &lt;q&gt;    ──► <span class="hi-no">0 hits (local provider files only!)</span>
+ └─ Desktop Telemetry / TaskHistory  ──► <span class="hi-no">0 rows (reads [SessionHistory] local only!)</span></div>
       <ul class="tight">
-        <li>Desktop and Mobile use different transport mechanisms for the exact same Task operations.</li>
-        <li>Every remote file read in Desktop pays 3 SSH roundtrips (<code>location</code> + <code>read</code> + <code>location</code>).</li>
-        <li>A stale local worktree row overrides Task ownership in Desktop’s sidebar and shell launcher.</li>
+        <li>Running 5 Modal Tasks (200 Sessions) leaves <code>lf session usage --wave coverage</code> and <code>--days 7</code> blind to Modal.</li>
+        <li><code>lf session usage</code> has two incompatible JSON contracts under one command name.</li>
+        <li>Collected transcripts sitting in SQLite cannot be found by <code>lf session history search</code>.</li>
       </ul>
     </div>
 
     <div class="card after">
       <div class="card-head">
-        <h3>After · One server-side Task router</h3>
-        <span class="badge proposed">Proposed in Plan</span>
+        <h3>After · One <code>SessionHistory</code> &amp; search surface with origin</h3>
+        <span class="badge proposed">Proposed in Plan §4.1</span>
       </div>
-      <div class="diagram">Desktop (Mac) ──┐
-                ├──► Local / Paired Server (Unix / WS)
-Mobile (iPhone) ┘      │  checks Task owner in SQLite (µs)
-                       │  + optional expected_machine pin
-                       ▼  <span class="hi-prop">pooled Connection::open_on (SSH)</span>
-                     Owning Machine Server (<span class="hi-yes">Modal</span>)
-                       ├─ Read:  task.files / file / changes
-                       │         task.diff / get / detail / status
-                       ├─ Write: task.save / run / auto / resume
-                       └─ Term:  session.attach / continue / start
-                                 &amp; Task shell (bridged ticket)
+      <div class="diagram">agent_sessions + history.turns (local) ──┐
+                                         ├──► <span class="hi-prop">conversation_history()</span>
+machine_records (Modal copies) ──────────┘      │  SessionHistory { ..., origin: Option&lt;SessionOrigin&gt; }
+                                                ├─ lf session usage --days/--task/--wave/--project
+                                                ├─ lf session usage --session &lt;id&gt; (same turns/origin)
+                                                └─ Desktop TelemetryDashboard &amp; TaskHistoryView
 
-CLI (lf open)
- ├─ Always presents on calling Machine (never remote)
- ├─ --task X [--session S] ──► routes via Task owner
- └─ --machine M --session S ──► local tab, attaches on M</div>
+local provider files ────────────────────┐
+                                         ├──► <span class="hi-prop">lf session history search &lt;q&gt;</span>
+machine_records (kind='transcript') ─────┘      └─ hits tagged with origin (from modal-1)</div>
       <ul class="tight">
-        <li><strong>One router:</strong> Desktop and Mobile call the exact same server operations (<code>serve(.taskFiles/File/Changes/Diff)</code>, <code>write(.taskSave)</code>, terminal tickets).</li>
-        <li><strong>Deletes</strong> client-side <code>RegistryQuery.onMachine</code> CLI fanout and double-SSH <code>pinTaskLocation</code> for Task views.</li>
-        <li><strong>Safer moves:</strong> <code>RoadmapTask</code> reports actual ownership; server checks optional expected owner in SQLite and returns instant <code>conflict</code> on moves while Desktop preserves unsaved drafts at their original <code>(machine_id, checkout)</code>.</li>
-        <li><strong>Honest failures:</strong> unreachable owner → <code>unavailable</code> (never local fallback); unstarted Task → explicit “not started”.</li>
+        <li><strong>One analytics model:</strong> explicit nullable <code>origin: Option&lt;SessionOrigin&gt;</code> on <code>SessionHistory</code> (Rust + Swift + DTO fixtures) distinguishes local work (<code>null</code>) from collected rental work (<code>{machine_id, label}</code>).</li>
+        <li><strong>Zero double-counting:</strong> <code>import_records</code> forbids local origin; moved Sessions keep remote turns in <code>machine_records</code> and local turns in <code>history.turns</code>.</li>
+        <li><strong>Abrupt-loss safe:</strong> projects directly from <code>RecordKind::Session</code> + <code>RecordKind::Turn</code> even if a capture manifest never settled before termination.</li>
       </ul>
     </div>
   </div>
 
-  <h2>3. Three other structural alignments</h2>
+  <h2>3. Two other splits to unify in §4</h2>
   <div class="compare">
     <div class="card">
       <div class="card-head">
-        <h3>Wave adoption vs. Wave authoring</h3>
-        <span class="badge proposed">Simplified in Plan</span>
+        <h3>Session readiness across all server starts</h3>
+        <span class="badge proposed">Plan §4.2</span>
       </div>
       <p>
-        <span class="badge existing">Existing</span> <code>connect_async</code> calls <code>wave_lifecycle::add</code> → creates stray local <code>tracker_id: null</code> Project and commits normalized YAML to <code>main</code>.<br>
-        <span class="badge warn">Original plan</span> Separated adoption from authoring, but introduced a rental-only “carried selection” side channel.
+        <span class="badge built">HEAD</span> Only <code>server/recovery.rs</code> (for <code>TaskConversation</code>) calls <code>launch_failure</code> and records <code>start_failure</code>. <code>server/wake.rs::start_stopped</code> and <code>ops/human_session.rs::restart_provider</code> spawn doomed PTYs silently, and <code>session_ending</code> hides <code>start_failure</code> for non-Task Sessions.
       </p>
       <p>
-        <span class="badge proposed">Proposed</span> Cold acquisition is read-only on Git files and binds the <strong>sole In Progress Linear Project</strong> from a complete Initiative inventory (leaving ambiguous/offline Waves unconfigured with available choices). When a Wave genuinely has multiple In Progress Projects and the source Machine chose one, rental <code>prepare</code> runs the existing public <code>lf wave plan bind</code> command — zero hidden side-channel state. Explicit <code>--replace</code> (compare-and-replace) repairs previously misselected Waves without deleting history.
+        <span class="badge proposed">Proposed</span> Generalize <code>launch_failure</code> to any <code>&amp;LfSession</code>. Call it in <code>server/recovery.rs</code>, <code>server/wake.rs::start_stopped</code>, and <code>ops/human_session.rs::restart_provider</code>; record/clear <code>agent_sessions.start_failure</code> consistently and render <code>could not start: ...</code> for every Session that has one.
       </p>
     </div>
 
     <div class="card">
       <div class="card-head">
-        <h3>Atomic handoff &amp; container-ready Linux</h3>
-        <span class="badge proposed">Proposed</span>
+        <h3>Ended-rental settlement &amp; live Machine list</h3>
+        <span class="badge proposed">Plan §4.3</span>
       </div>
       <p>
-        <strong>Ownership:</strong> Replace <code>hand_off</code>’s two-step <code>Claim</code> (Mac) + <code>Move</code> (Modal) with one atomic ownership entry naming the target Machine, written only after remote repo bind &amp; server readiness.
+        <span class="badge built">HEAD</span> <code>commands/rental.rs::end</code> skips <code>refresh()</code>, so an already-dead sandbox fails SSH and demands <code>--force</code>. <code>commands/machine.rs::listings</code> prints dead <code>modal-1..N</code> SSH routes in <code>lf machine list</code>. <code>OndemandCommand::Add</code> leaves Modal burst <code>modal_sizing: None</code> in JSON.
       </p>
       <p>
-        <strong>Containers:</strong> Drop systemd &amp; cron preconditions — <code>installation/server.rs::ensure</code> falls back to detached <code>lf server run</code> under the same lock/socket check when no user bus exists; <code>lf install</code> reports unscheduled updates and returns 0 when <code>crontab</code> is absent; <code>binaries::report_before_promote</code> inspects pre-migration stores without forcing post-migration indexes.
-      </p>
-    </div>
-
-    <div class="card">
-      <div class="card-head">
-        <h3>Modal burst sizing, harness fallback &amp; login sync</h3>
-        <span class="badge proposed">Proposed</span>
-      </div>
-      <p>
-        <strong>Sizing:</strong> Add Modal-only <code>reserved: bool</code> to <code>Hardware</code> (default <code>false</code>: floor <code>0.125</code> core / <code>128 MiB</code>, ceiling <code>--vcpus/2</code> / <code>--memory-gb*1024</code>). Keep worst-case ceiling for admission/cap/timeout; label uptime-derived cost explicitly as a ceiling estimate in CLI and JSON.
-      </p>
-      <p>
-        <strong>Execution &amp; auth:</strong> Resolve skill/Session harness against remote availability + native login (keeping <code>-a</code> exact and established threads intact); make missing executable/login quiescent in <code>ops/recovery.rs</code>. Add <code>lf machine forward &lt;label&gt; [--task &lt;id&gt; | --session &lt;id&gt;]</code> for atomic overwrite + opt-in targeted restart.
+        <span class="badge proposed">Proposed</span> Run <code>refresh()</code> first in <code>lf machine end</code> (matching <code>reconcile</code>) so already-gone sandboxes settle cleanly without <code>--force</code>. Omit ended rentals from default <code>lf machine list</code> and <code>lf machine status</code> while keeping SQLite rows for <code>from &lt;label&gt;</code> attribution, explicit <code>&lt;label&gt;</code> queries, and <code>lf ondemand list</code>. Store <code>modal_sizing: Some(Burst)</code> on Modal <code>OnDemand</code> add.
       </p>
     </div>
   </div>
 
-  <h2>4. Concrete walkthrough: normal path, failure &amp; recovery</h2>
-  <p>Tracing the field scenario (<code>manabot</code>, Wave <code>coverage</code>, Project <code>rules</code>, Task <code>MTG-421</code>, with a stale local Mac checkout and binary <code>scratch/._plan.md</code>):</p>
-
+  <h2>4. Concrete walkthrough of the failure &amp; recovery paths (§4)</h2>
   <div class="walkthrough">
     <div class="step-card">
-      <div class="step-num">STEP 1 · RENT &amp; PROVISION</div>
-      <h3><code>lf task run MTG-421 --rent modal</code></h3>
-      <p>Quotes burst ceiling ($0.95184/h cap), creates Modal sandbox with <code>cpu=(0.125, 4)</code>, <code>memory=(128, 16384)</code>, transfers caller’s Linux <code>lf</code> build (no remote GitHub auth needed), promotes cleanly over any older store, verifies detached <code>lf server run</code> ready without systemd.</p>
+      <div class="step-num">PATH 1 · ABRUPT SANDBOX LOSS</div>
+      <h3>Modal terminates <code>modal-1</code> mid-Task</h3>
+      <p>Periodic SSH collection already imported turns and transcript into <code>machine_records</code>. Person runs <code>lf machine end modal-1</code> → <code>refresh()</code> sees <code>sandbox.gone</code> → settles <code>ended</code>, returns Tasks locally, prints ceiling estimate (no <code>--force</code>). <code>lf machine list</code> no longer shows dead <code>modal-1</code>. <code>lf session usage --task MTG-421</code> and <code>lf session history search</code> both show the Modal turns tagged <code>from modal-1</code>.</p>
     </div>
     <div class="step-card">
-      <div class="step-num">STEP 2 · ADOPT &amp; HAND OFF</div>
-      <h3>Clean <code>main</code>, one ownership entry</h3>
-      <p>Clones repo, binds <code>repo_id</code>, cold-acquires Wave <code>coverage</code> and sole In Progress Project <code>rules</code> (zero local stray Project, zero <code>main</code> commits). Writes <strong>one</strong> ownership entry naming <code>modal-1</code>. If setup failed earlier, sandbox is deleted and <code>MTG-421</code> stays unowned.</p>
+      <div class="step-num">PATH 2 · STEER WITH NO LOGIN</div>
+      <h3><code>lf --machine modal-1 steer &lt;id&gt; "..."</code></h3>
+      <p>Stopped repository Session uses <code>codex</code> with no login. <code>server/wake.rs::start_stopped</code> runs <code>launch_failure</code> → records <code>Waiting for a harness: codex has no usable login…</code> on <code>agent_sessions.start_failure</code> without spawning a doomed PTY. <code>lf session list</code> shows <code>could not start: codex has no usable login…</code> instead of silent <code>unknown</code>. After <code>lf machine forward modal-1</code> delivers valid auth and a new steer wakes it, <code>start_failure</code> clears.</p>
     </div>
     <div class="step-card">
-      <div class="step-num">STEP 3 · RUN &amp; ROTATE LOGIN</div>
-      <h3>Codex selected, <code>._plan.md</code> skipped</h3>
-      <p>Personal <code>agy</code> is absent on Modal → resolves installed, authed <code>codex</code> before stamping Session; skips binary <code>scratch/._plan.md</code>. Later when Codex auth expires: <code>lf machine forward modal-1 --task MTG-421</code> atomically refreshes <code>~/.codex/auth.json</code> and restarts only that Session.</p>
+      <div class="step-num">PATH 3 · BAD LOGIN REFRESH</div>
+      <h3><code>lf machine forward modal-1 --task MTG-421</code></h3>
+      <p>Files replace atomically over SSH stdin. On <code>modal-1</code>, <code>restart_provider</code> checks <code>launch_failure</code> before stopping the provider: if the refreshed file is still invalid or for the wrong harness, it records <code>start_failure</code> and returns the exact login error instead of printing “Resuming …” and dying silently in a PTY. With valid auth, it restarts the thread and clears <code>start_failure</code>.</p>
     </div>
-    <div class="step-card">
-      <div class="step-num">STEP 4 · OPEN ON CLI, DESKTOP, MOBILE</div>
-      <h3>All four views reach <code>modal-1</code></h3>
-      <p>Stale local Mac checkout exists with different bytes, yet <code>RoadmapTask</code> reports owner <code>modal-1</code>. Desktop &amp; Mobile both query the local/paired server → pooled <code>Connection::open_on</code> to <code>modal-1</code> serves Files, Changes, Diff, held Shell, and bridged Session. <code>lf open --task MTG-421 --tab</code> attaches cleanly in Rex.</p>
-    </div>
-    <div class="step-card">
-      <div class="step-num">STEP 5 · OWNER MOVES OR DROPS</div>
-      <h3>Honest failures, drafts preserved</h3>
-      <p>If <code>modal-1</code> disconnects, Files/Changes/Shell/Session report <code>modal-1</code> unavailable (never an empty diff or local Mac shell). If <code>MTG-421</code> moves to another Machine, expected-owner checks return <code>conflict</code>, stale panes invalidate, and unsaved drafts stay at their original checkout.</p>
-    </div>
-    <div class="step-card">
-      <div class="step-num">STEP 6 · GIVE BACK</div>
-      <h3><code>lf machine end modal-1</code></h3>
-      <p>Because <code>main</code> was never dirtied, normal <code>lf machine end modal-1</code> (no <code>--force</code>) copies up Session/Process records, terminates the sandbox, returns held Tasks locally, and prints cost labeled as a ceiling estimate.</p>
-    </div>
+  </div>
+
+  <div class="callout outside">
+    <h3>Outside LOO-1081 (separate outcomes)</h3>
+    <ul class="tight">
+      <li><strong>LOO-1083:</strong> Server-routed Task workspaces across CLI (<code>lf open --machine</code>), Desktop, and Mobile (replacing Desktop’s client-side <code>RegistryQuery.onMachine</code>).</li>
+      <li><strong>LOO-1084:</strong> Cross-Machine steering and status visibility.</li>
+      <li><strong>Subscription Claude cost estimation (QA #4):</strong> Claude OAuth subscription turns emit token counts with <code>cost_usd: null</code>; estimating synthetic dollar equivalents from model pricing is separate telemetry scope, not rental plumbing.</li>
+    </ul>
   </div>
 
   <h2>5. Choices made for review &amp; open questions</h2>
-  <p>None of these choices are irreversible once shipped, so the bold defaults are written into <code>scratch/plan.md</code> and highlighted below. Reply with a number and letter (e.g. <code>1b</code>, <code>3a</code>) to change any choice.</p>
+  <p>None of these choices are irreversible once shipped, so the bold defaults are written into <code>scratch/plan.md</code> §4 for the next <code>implement</code> pass. Reply with a number and letter (e.g. <code>1b</code>, <code>2a</code>) to override any choice.</p>
 
   <div class="question-list">
     <div class="question">
-      <div class="question-title">1. How should Desktop reach remote Task Files, Changes, Diff, Save, Shell, and Session?</div>
+      <div class="question-title">1. How should collected rental usage and transcripts appear in analytics commands?</div>
       <ul class="options">
-        <li class="chosen"><span class="opt-key">1a</span><span class="badge proposed">Chosen in plan</span> <strong>Unify Desktop and Mobile through server-side Task routing</strong> over pooled <code>Connection::open_on</code> (and delete Desktop’s client-side <code>RegistryQuery.onMachine</code> / double-SSH <code>pinTaskLocation</code> for Task views).</li>
-        <li><span class="opt-key">1b</span> Keep Desktop on client-side <code>RegistryQuery.onMachine</code> + <code>SessionsView.swift</code> owner resolution, and build server forwarding only for Mobile (original kickoff plan).</li>
+        <li class="chosen"><span class="opt-key">1a</span><span class="badge proposed">Chosen in plan §4.1</span> <strong>Unify into <code>SessionHistory</code>, work-scoped <code>lf session usage</code>, and <code>lf session history search</code></strong> with an explicit nullable <code>origin: Option&lt;SessionOrigin&gt;</code> (Rust + Swift + DTO fixtures), while keeping <code>lf session usage --session &lt;id&gt;</code> as single-Session drill-down.</li>
+        <li><span class="opt-key">1b</span> Keep work-scoped <code>lf session usage</code> and <code>lf session history search</code> strictly local-only and require <code>lf session usage --session &lt;id&gt;</code> per Session UUID (current <code>HEAD</code>).</li>
       </ul>
     </div>
 
     <div class="question">
-      <div class="question-title">2. How should a fresh rental bind a Wave’s active Linear Project when ambiguous?</div>
+      <div class="question-title">2. How should <code>lf machine list</code> treat ended rentals whose SQLite rows remain for history attribution?</div>
       <ul class="options">
-        <li class="chosen"><span class="opt-key">2a</span><span class="badge proposed">Chosen in plan</span> <strong>No rental-only side channel:</strong> cold acquisition binds the sole In Progress Linear Project on any fresh clone; when multiple In Progress Projects exist and the source Machine selected one, rental <code>prepare</code> calls the existing public <code>lf wave plan bind</code> command.</li>
-        <li><span class="opt-key">2b</span> Add a carried Wave Project selection carried across rental preparation and recovered on fresh clones before checking Linear.</li>
+        <li class="chosen"><span class="opt-key">2a</span><span class="badge proposed">Chosen in plan §4.3</span> <strong>Omit ended rentals from default <code>lf machine list</code> (and unlabeled <code>lf machine status</code>)</strong> while keeping the rows in SQLite for <code>from &lt;label&gt;</code> attribution, explicit <code>&lt;label&gt;</code> queries, and <code>lf ondemand list</code> rental history.</li>
+        <li><span class="opt-key">2b</span> Keep listing ended rentals in <code>lf machine list</code> with an explicit <code>(ended)</code> badge instead of omitting them.</li>
       </ul>
     </div>
 
     <div class="question">
-      <div class="question-title">3. What should Modal’s default burst floor be?</div>
+      <div class="question-title">3. Should <code>lf machine forward --task/--session</code> fail fast if the refreshed login is still unusable for that Session’s harness?</div>
       <ul class="options">
-        <li class="chosen"><span class="opt-key">3a</span><span class="badge proposed">Chosen in plan</span> <strong>Modal’s published minimum: <code>0.125</code> core and <code>128 MiB</code></strong> (bursting up to <code>--vcpus / 2</code> and <code>--memory-gb * 1024</code>; <code>--reserved</code> pins floor = ceiling).</li>
-        <li><span class="opt-key">3b</span> Higher idle floor of <code>0.25</code> core and <code>256–512 MiB</code> to leave extra resident headroom for <code>lf server</code> + sshd before bursting.</li>
-      </ul>
-    </div>
-
-    <div class="question">
-      <div class="question-title">4. How should <code>lf open</code> treat <code>--machine &lt;label&gt;</code> for a remote-only Session?</div>
-      <ul class="options">
-        <li class="chosen"><span class="opt-key">4a</span><span class="badge proposed">Chosen in plan</span> <strong><code>lf open</code> always presents on the calling Machine:</strong> both <code>lf open --machine &lt;label&gt; --session &lt;id&gt; --tab</code> and <code>lf --machine &lt;label&gt; open --session &lt;id&gt; --tab</code> open a local view attached to <code>&lt;label&gt;</code>.</li>
-        <li><span class="opt-key">4b</span> Keep root <code>lf --machine &lt;label&gt;</code> strictly “run remotely” and add a distinct subcommand flag (e.g. <code>lf open --session &lt;id&gt; --from &lt;label&gt;</code>) for remote-only Sessions.</li>
-      </ul>
-    </div>
-
-    <div class="question">
-      <div class="question-title">5. How should <code>lf machine forward &lt;label&gt;</code> target a stuck Session for restart?</div>
-      <ul class="options">
-        <li class="chosen"><span class="opt-key">5a</span><span class="badge proposed">Chosen in plan</span> <strong>Opt-in targeted restart by Task or Session:</strong> <code>lf machine forward &lt;label&gt; [--task &lt;id&gt; | --session &lt;id&gt;]</code> overwrites configured <code>forward.files</code> atomically and restarts only the named Session (or that Task’s primary Session) on <code>&lt;label&gt;</code>.</li>
-        <li><span class="opt-key">5b</span> Accept only <code>--session &lt;id&gt;</code> (requiring the remote Session ID).</li>
-        <li><span class="opt-key">5c</span> Restart every running Session of the rotated provider on <code>&lt;label&gt;</code> automatically after forwarding.</li>
+        <li class="chosen"><span class="opt-key">3a</span><span class="badge proposed">Chosen in plan §4.2</span> <strong>Yes — check <code>launch_failure</code> after file delivery before stopping/restarting:</strong> record <code>start_failure</code> and return an error if the harness still has no usable login, instead of printing “Resuming …” and exiting silently inside the held PTY.</li>
+        <li><span class="opt-key">3b</span> Always stop and respawn the provider blindly after file delivery, letting the held PTY report any auth error asynchronously.</li>
       </ul>
     </div>
   </div>
 
   <footer>
-    Generated by <code>lf concept-review</code> for LOO-1081 against base <code>2656258ab</code>. Companion plan: <code>scratch/plan.md</code> · Choices log: <code>scratch/questions.md</code>.
+    Rewritten by <code>lf concept-review</code> (post-build pass 1) for LOO-1081 against <code>2aa9964894..afdf8d0b45</code>. Companion plan: <code>scratch/plan.md</code> · Choices log: <code>scratch/questions.md</code> · Live QA: <code>scratch/qa.html</code>.
   </footer>
 </main>
 </body>

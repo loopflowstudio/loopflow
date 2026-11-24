@@ -1,4 +1,4 @@
-at: c525ae5c1f0d507e6200212a456cebfbb970667e
+at: 991e370deb0e56407cbbfd5f8b1193a5bfc2625e
 first:
   - path: docs/surfaces.md
     why: Follow a setting from search through Undo
@@ -9,9 +9,9 @@ first:
   - path: rust/loopflow-execution/src/config/catalog.rs
     why: Each setting’s schema, applicability and fallback
   - path: rust/loopflow-execution/src/engine/config/scope.rs
-    why: Effective values and editable declarations in one reading
+    why: Read paths, save destinations and editable slots
   - path: swift/LoopflowMac/Services/ConfigurationScope.swift
-    why: Bind an editor to its original declaration
+    why: Open the current document and address its declaration
   - path: swift/Loopflow/Models/ConfigurationEdit.swift
     why: Checked edits, move previews and receipts
   - path: swift/LoopflowMac/Views/SettingsWindow.swift
@@ -47,7 +47,7 @@ first:
   - path: swift/LoopflowTests/ContextSettingsWorkflowTests.swift
     why: Follow a checkout edit through an agent launch
   - path: swift/LoopflowTests/SettingsWorkflowTests.swift
-    why: Exercise search and writes after reconnect
+    why: Exercise Open, picker Reset, Undo and reconnect
   - path: swift/LoopflowTests/ThemeWorkflowTests.swift
     why: Exercise theme changes and checked Undo
 hide:

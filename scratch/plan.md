@@ -12,16 +12,19 @@ Reviewed the 760 × 592 pt Settings window on an unlocked display. All seven sid
 
 ## Remaining
 
-- Implement the two Settings interactions below, then repeat the focused view and scope checks.
 - Jack Heart's look at the second beauty pass ("then second lets take a pass to make it more beautiful") on the Dev build, via the tour skill (`scratch/tour.yaml`).
 - Gate: publish so CI runs the full suites on PR #2033 (current checks were skipped).
 
 ## Open the declaration and reset a picker
 
-1. **Open the existing Wave document.** Start with a shared Wave whose only file is `GOAL.md` with `agent: codex` in frontmatter. A fresh `config scope` reported that declaration as present, identified its selected candidate in the goal, and returned a missing `config.yaml` as the shared file path. Desktop's Open file… follows that missing path. The first slice is a scope-to-view test: opening leads to the goal without writing anything; after the first changed save it leads to the populated YAML file. A no-op keeps the goal active.
-   - In `rust/loopflow-execution/src/config/files.rs`, carry the existing `settings_source` result through the document read into `engine/config/scope.rs`. Keep `ScopeFile.path` as the save destination. Expose the actual read path on that file in the Rust/Swift DTO and update its round-trip and schema fixtures. Derive it from the selected document, independently of which candidate wins. An absent private file must never open another owner's file.
-   - In `swift/LoopflowMac/Services/ConfigurationScope.swift` and `Views/ScopedSettings.swift`, Open follows the read path; show the first-edit save path only when it differs. Update the file-opening passage in `docs/surfaces.md`. Keep the same declaration identity, expected entries, write lock, and Undo receipt through the transition. Check a no-op, a real first write and an externally created YAML file; keep the existing source-race tests.
-2. **Give a saved picker choice one Reset.** With shared `merge_method: squash` and private `merge_method: rebase`, the picker labels its selectable absent tag “Rebase (from My repository settings)”. Removing the private declaration produced `squash` from the shared file in a fresh CLI run. In `Views/ScopedSettingRow.swift`, render the sourced absence tag only while the slot is absent. Reset below the picker already performs the checked write. Cover the actual picker, Reset and Undo in `swift/LoopflowTests/SettingsWorkflowTests.swift`, including the inherited label after Reset. Keep explicit null selectable only when already present and keep the separate “In effect” reading for shadowed declarations.
+- **Open file…** uses the document that supplied the selected file’s slots. A private Machine run of the branch CLI returned `GOAL.md` initially and after saving the same `codex` value, then `config.yaml` after saving `claude`. The form shows **First change saves to** while the two paths differ.
+- **Reset** below a picker removes its saved choice. The source-labeled value appears once the slot is empty. Undo restores the checked declaration.
+
+Focused checks on this slice:
+
+- `scripts/test_desktop.sh --skip-build --filter 'openWaveSettingsFollowsTheDocumentThroughItsFirstChange|resettingASavedPickerChoiceRevealsItsSourceAndUndoRestoresIt|checkoutScopeAndCheckedEditShareTheRustWireShape'` passed all three tests, including both first-change cases.
+- `cargo test -p loopflow-execution -p loopflow --lib -- first_edit_rechecks_the_source_of_the_wave_settings checkout_scope_and_checked_edit_share_the_desktop_wire_shape the_checked_in_schema_is_what_describe_prints` passed all three tests.
+- `cargo clippy --all-targets -- -D warnings` passed. Gate runs the full suites.
 
 ## Settings observation
 

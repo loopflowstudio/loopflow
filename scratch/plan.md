@@ -727,6 +727,13 @@ names the maker (`lf wave plan connect <wave>`; Asana: `lf wave create
 Execution `task_planning_tests::`, `asana_planning_tests::`, `wave_lifecycle`
 pass; `local_planning::wave_sync_` (3) passes (2026-11-24).
 
+Concept review after slice 14 (`scratch/concept-review.html`): concepts and
+code line up. One naming mismatch left for review, not built: the retry for
+an unbound Project has two verbs by tracker (`make_project_command`), while
+`lf wave create <wave>` already makes it in either (page question 1b).
+`refresh_wave`'s doc comment "never makes a tracker Project" is loose: its
+drain makes one a queued Task names (question 2).
+
 ## Remains
 
 1. Gate: sync main, Swift DTO and desktop suites (`scripts/test_desktop.sh`),

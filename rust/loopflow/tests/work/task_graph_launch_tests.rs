@@ -3882,6 +3882,10 @@ fn auto_off_sticks_through_a_headless_relaunch() {
     task.ok(&["task", "pause", "INF-123"]);
     let held = task.text_status();
     assert!(held.contains("Paused at pr land."), "{held}");
+    assert!(
+        held.contains("latest Graph: Waiting at pr land while the Task is paused"),
+        "{held}"
+    );
     assert!(!held.contains("auto on INF-123` lands it"), "{held}");
     task.ok(&["task", "unpause", "INF-123"]);
     // Standing at the landing step, a plain relaunch waits there again.

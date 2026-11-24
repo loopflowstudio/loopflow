@@ -50,16 +50,19 @@ pub(super) async fn read_task_snapshot(store: &SharedStore, task: Task) -> OpsRe
     let work_set =
         crate::store::task_work::task_work(&store.sqlite, &task.id).map_err(task_error)?;
     let auto = store.sqlite.task_auto(&task.id).map_err(task_error)?;
-    if status != crate::durable::TaskState::Paused
-        && execution.state == crate::ops::task_execution::TaskExecutionState::Idle
-    {
-        if let Some(wait) = work_set
+    if execution.state == crate::ops::task_execution::TaskExecutionState::Idle {
+        if let Some((step, off)) = work_set
             .graph
             .as_ref()
-            .and_then(|graph| graph.waiting_to_land(auto.as_ref(), &task.identifier))
+            .and_then(|graph| graph.landing_stop(auto.as_ref()))
         {
-            execution.state = crate::ops::task_execution::TaskExecutionState::Waiting;
-            execution.reason = wait;
+            if status == crate::durable::TaskState::Paused {
+                execution.reason = format!("Waiting at {step} while the Task is paused");
+            } else {
+                execution.state = crate::ops::task_execution::TaskExecutionState::Waiting;
+                execution.reason =
+                    crate::ops::task::auto::landing_wait(step, off, &task.identifier);
+            }
         }
     }
     let parent_pr = match task.parent_pr_id.as_ref() {

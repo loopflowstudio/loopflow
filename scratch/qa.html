@@ -1,41 +1,46 @@
-<!doctype html><meta charset="utf-8"><title>QA · LOO-1078 pause and Working groups at 0bc27cc9cf</title>
-<style>body{font:15px/1.5 -apple-system,system-ui,sans-serif;max-width:960px;margin:2em auto;padding:0 1em;color:#222}
+<!doctype html>
+<meta charset="utf-8">
+<title>QA · LOO-1078 landing stops and paused conditions at 85eebde63c</title>
+<style>
+body{font:15px/1.5 -apple-system,system-ui,sans-serif;max-width:960px;margin:2em auto;padding:0 1em;color:#222}
 pre{background:#f5f5f2;padding:.8em;overflow:auto;font-size:12.5px}td,th{padding:.3em .6em;vertical-align:top;border-bottom:1px solid #ddd;text-align:left}
-img{max-width:100%;border:1px solid #ddd}.ok{color:#1a7f37}.fix{color:#9a6700}.open{color:#b42318}</style>
-<h1>QA: pause, Working groups and unpause after the compress commit</h1>
-<p>The branch <code>lf</code> at 0bc27cc9cf ran on the private Machine from the earlier walkthrough (<code>LF_HOME=/tmp/lfqp2/home</code>). Its three earlier Tasks served as returning data. Two new Tasks ran real Claude workers doing a real <code>cargo build</code> whose <code>build.rs</code> sleeps for 240 s. The repository Graph <code>hold</code> is <code>- interactive: demo</code>, <code>- compile</code>.</p>
+img{max-width:100%;border:1px solid #ddd}.ok{color:#1a7f37}.fix{color:#9a6700}.open{color:#b42318}
+</style>
+<h1>QA: landing stops, paused conditions and the one-pass group read</h1>
+<p>This run used the branch <code>lf</code> at 85eebde63c on the private Machine from the earlier walkthroughs (<code>LF_HOME=/tmp/lfqp2/home</code>), with its five Tasks as returning data. A new Task, a1fbda, ran the repository Graph <code>landing</code> (<code>- compile</code>, <code>- cmd: land</code>, <code>- cmd: help task</code>). Its compile step was a real Claude worker running a <code>cargo build</code>, and the crate's <code>build.rs</code> sleeps for 240 s. The run covered the three commits since the previous QA: paused conditions, Active while a manual landing is ahead, and reading Working groups in one pass.</p>
 
 <h2>Scenarios</h2>
-<table><tr><th>Scenario</th><th>What happened</th></tr>
-<tr><td>Returning Machine, server restarted on the new binary</td><td class=ok>Tasks were grouped as Active (032398, 87e2ce) and Paused (ddb912). 87e2ce had been unpaused at <code>compile</code> in the earlier run. It now reads Active, because its Graph has no landing step and auto is off, and its status says “compile was stopped. `lf task run` continues from it.” The earlier run's top open bug (“process exited with status 130 … launch fresh work”) is gone.</td></tr>
-<tr><td>Pause an unstarted Task</td><td class=ok>Refused: <code>Task has not started; nothing to pause</code>.</td></tr>
-<tr><td>Auto on a fresh Task</td><td class=ok><code>lf task auto on 4396bc</code>: the Task read Shipping at once and its build ran.</td></tr>
-<tr><td>Pause one of two live builds</td><td class=ok><code>lf task pause 3d0828</code> returned in 1.6 s. Its carrier, graph run, batch <code>lf</code>, <code>claude -p</code>, zsh, cargo and build-script-build (7 PIDs) were gone. Its primary <code>claude --name 3d0828</code> stayed. All five of 4396bc's processes kept running. The list showed Shipping / Active / Paused.</td></tr>
-<tr><td>Run, auto on, and pause again while held</td><td class=ok>Run and auto on were refused with <code>Task is paused; run `lf task unpause 3d0828` to lift the hold</code>. A second pause printed <code>paused</code>. Status read “Paused at compile. `lf task unpause --run` resumes it.” / “compile is stopped while the Task is paused” and <code>action: no_action</code>. <code>--state paused</code> listed both held Tasks.</td></tr>
-<tr><td>Machine server restart while held</td><td class=ok>After 15 s there was no carrier or graph process for 3d0828, and only 4396bc's build was running.</td></tr>
-<tr><td>Open conversation while held</td><td class=ok>The primary's first turn read the Task as <b>paused</b>, named <code>lf task unpause 3d0828 --run</code> and started nothing. <code>lf comment</code> was delivered (<code>pending: 0</code>) and the conversation answered “PAUSEDOK”. No Graph process started.</td></tr>
-<tr><td>Plain unpause</td><td class=ok><code>3d0828 unpaused</code>. No run started. The Task moved to Active with status “compile was stopped. `lf task run` continues from it.” and <code>action: run</code>. <code>lf task run</code> continued <code>hold from compile</code>.</td></tr>
-<tr><td>Pause the auto Task</td><td class=ok>4396bc moved from Shipping to Paused with <code>auto: on</code> kept, and its build was stopped. Plain unpause returned it to Shipping in the idle state.</td></tr>
-<tr><td>Builtin <code>code</code> Graph</td><td class=ok>It ends <code>ship-review [interactive]</code>, reflect, gate, <code>cmd: land --wait-and-fix</code>, <code>verify</code>. Verify is automatic.</td></tr>
-<tr><td>Mac sidebar (isolated Dev bundle at HEAD, screen locked, live snapshot mode)</td><td class=ok>The sidebar shows Active (3), Shipping (4396bc, Auto) and Paused (ddb912). With ddb912 selected, the bar reads “Paused at demo. `lf task unpause` lifts the hold.” with Unpause, and the Claude Session pane is mounted.</td></tr>
+<table>
+<tr><th>Scenario</th><th>What happened</th></tr>
+<tr><td>Returning Machine, server on the new binary</td><td class="ok">The list showed Shipping (4396bc), Paused (3d0828, ddb912) and Active (032398, 87e2ce), the same as the previous run.</td></tr>
+<tr><td>Running with land ahead, auto unset</td><td class="ok">The Task read Shipping. This is correct: when auto is unset, the run merges at <code>land</code>.</td></tr>
+<tr><td>Same run: auto off, on, off</td><td class="ok">It read Active, then Shipping, then Active. The single <code>build-script-build</code> process (PID 22718) kept running throughout.</td></tr>
+<tr><td>Pause the running build with uncommitted <code>notes.txt</code></td><td class="ok">The pause returned in 1.1 s. <code>build-script-build</code> was gone, and the primary <code>claude --name a1fbda</code> stayed. Its condition was <code>clear</code> with “Task is paused; run `lf task unpause a1fbda` to lift the hold”, <code>dirty: true</code> was kept, and the action was <code>no_action</code>.</td></tr>
+<tr><td>Pause and unpause 4396bc (Blocked · unsettled commits)</td><td class="ok">While paused, its condition was <code>clear</code>. After unpause it was back to <code>blocked</code> “Task has unsettled commits” under Shipping.</td></tr>
+<tr><td>Unpause a1fbda</td><td class="ok">The Task was Active, <code>blocked</code> “Task has uncommitted work”, and status read “Stopped at compile. `lf task run` starts it again.”</td></tr>
+<tr><td>Run to the landing stop with auto off</td><td class="ok">After the build it read “Waiting at land: auto is off (QA Person). `lf task auto on a1fbda` lands it.” and stayed Active.</td></tr>
+<tr><td>Pause at the landing stop</td><td class="fix">The Task moved to Paused and auto on was refused. Status also said <code>latest Graph: Graph landing finished; nothing further is launched</code> beside “Paused at land.” Fixed: it now reads “Waiting at land while the Task is paused”. Unpause restores the auto-off sentence.</td></tr>
+<tr><td>Mac sidebar (isolated Dev bundle at HEAD, screen locked, live snapshot)</td><td class="ok">The sidebar showed Active (2), Shipping (4396bc Blocked · Auto) and Paused (a1fbda, 3d0828, ddb912). The paused dirty a1fbda read “Paused”, not Blocked. The bar read “Paused at land. `lf task unpause` lifts the hold.” with Unpause, and the Claude pane was mounted.</td></tr>
 </table>
-<p><img src="qa-shots/groups-head.png" alt="Sidebar with Active, Shipping and Paused groups"></p>
-<p><img src="qa-shots/paused-selected-head.png" alt="Paused Task selected: Unpause in the workflow bar, Session pane mounted"></p>
+<p><img src="qa-shots/paused-dirty-at-land.png" alt="Sidebar with Active, Shipping and Paused groups; a1fbda selected, paused at land"></p>
 
 <h2>Fixed in this run</h2>
-<p>No code changes. The QA notes in <code>.lf/qa/task-pause.md</code> now describe how to select a Task in Dev and how to tear down a private home whose server launchd restarts.</p>
+<ul>
+<li>When a Task paused at a landing stop, status called the Graph finished. <code>TaskGraph::waiting_to_land</code> is now <code>landing_stop</code>, which returns the step and the off mark. The Task snapshot shows either the auto-off sentence or, while paused, “Waiting at &lt;step&gt; while the Task is paused”. <code>auto_off_sticks_through_a_headless_relaunch</code> asserts the paused sentence.</li>
+<li><code>.lf/qa/task-pause.md</code> now explains how to set up a landing stop, and why an unset auto reads Shipping.</li>
+</ul>
 
 <h2>Not reached</h2>
 <ul>
-<li>Clicking Unpause and terminal content in the Session pane. The screen was locked, and Ghostty draws nothing while it is locked.</li>
-<li>Automatic verify after a real merge. The Graph shape was checked, but no GitHub merge ran.</li>
-<li>iPhone. Simulator tests from implement cover it; there was no walkthrough here.</li>
+<li>Clicking Unpause, and the Session pane's terminal content. The screen was locked, and Ghostty draws nothing while it is locked.</li>
+<li>Portfolio Now with a paused dirty Task. The sidebar row shows the cleared condition. The Now view itself was not captured.</li>
+<li>A real merge followed by automatic verify. There is no GitHub remote. The landing run stopped at <code>land</code> with auto off and was not turned on.</li>
+<li>iPhone. This run made no Swift change.</li>
 </ul>
 
 <h2>Still worth a look, worst first</h2>
-<ul>
-<li class=open>After plain unpause, an auto Task sits idle in Shipping at its stopped step until someone runs <code>lf task run</code>. This follows the decision that plain unpause only lifts the hold, but a Shipping row with nothing moving can read as stuck. The Mac's Unpause button sends plain unpause.</li>
-<li class=open>In the run, 4396bc's auto-run demo step committed a note on an unpublished branch. The sidebar then showed it as <i>Blocked · Task has unsettled commits</i> under Shipping. That reason comes from the existing local-progress rule (<code>waves.rs</code>), not from pause.</li>
-<li class=open>The paused primary's <code>lf</code> on <code>PATH</code> (installed 0.16.0) failed on the Task with <code>unknown variant 'paused'</code>, so the agent fell back to the branch build. Installing the release fixes this skew. It is not a branch bug.</li>
-<li class=open>Refusals still begin with <code>Error: invalid data:</code>. This is older behavior.</li>
-</ul>
+<ol>
+<li>Paused rows for Tasks whose primary has no report show “Available · inferred” instead of “Paused” (3d0828, ddb912). The plan has the conversation's report take precedence. Here the report is only inferred, and it pushes the hold out of the row's status.</li>
+<li>For ddb912 and 032398, which stand at <code>demo</code>, status says “No Task Graph has run; independent Sessions may still be active”, even though a run took them there. This was already the case before this change.</li>
+<li>Refusals still begin with <code>Error: invalid data:</code>. This is older behavior.</li>
+</ol>

@@ -63,6 +63,17 @@ To select a Task in the live-mode Dev bundle, open `loopflow://<repo name>/task/
 with `open -g -b <bundle id>` a few seconds after launch. `lf open --task <id> --link`
 prints a title line before the URL, so don't pass its output to `open`.
 
+# A landing stop
+
+To see Active versus Shipping with a merge ahead, add a Graph `landing`
+(`- compile`, `- cmd: land`, `- cmd: help task`), push it, and start a Task
+with `lf task create '<words>' --run --graph landing` (`--graph` needs
+`--run`). With auto unset the running Task reads Shipping, which is correct
+because an unset auto merges. Only `lf task auto off` makes the landing a
+human stop, and the Task then reads Active. After compile, the Task waits at
+`land` and stays Active. A file written into the checkout shows the
+uncommitted-work condition after unpause.
+
 # Stopping the private home
 
 Any branch `lf` command against the home registers a launchd job,

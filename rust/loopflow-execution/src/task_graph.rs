@@ -648,17 +648,17 @@ impl TaskGraph {
         }
     }
 
-    /// Why the Task waits here and what lands it, when it stands at a step
-    /// that is neither `start`, `end` nor interactive: it stopped before
-    /// merging, which only an off does.
-    pub fn waiting_to_land(&self, auto: Option<&Auto>, issue: &str) -> Option<String> {
+    /// The merging step the Task waits at and the off that stopped it there,
+    /// when it stands at a step that is neither `start`, `end` nor
+    /// interactive: it stopped before merging, which only an off does.
+    pub fn landing_stop<'a>(&'a self, auto: Option<&'a Auto>) -> Option<(&'a str, &'a Auto)> {
         let off = auto.filter(|mark| mark.state == AutoState::Off)?;
         let TaskGraphPosition::At { step } = &self.position else {
             return None;
         };
         let ends = step == START || step == END;
         let interactive = self.interactive_steps.iter().any(|s| &s.name == step);
-        (!ends && !interactive).then(|| crate::ops::task::auto::landing_wait(step, off, issue))
+        (!ends && !interactive).then_some((step.as_str(), off))
     }
 }
 
@@ -786,17 +786,12 @@ pub(crate) mod tests {
             },
         };
         let off = mark(AutoState::Off);
-        assert_eq!(
-            at("land").waiting_to_land(Some(&off), "INF-1").as_deref(),
-            Some("Waiting at land: auto is off (Maya). `lf task auto on INF-1` lands it.")
-        );
-        assert_eq!(at("land").waiting_to_land(None, "INF-1"), None);
-        assert_eq!(
-            at("land").waiting_to_land(Some(&mark(AutoState::On)), "INF-1"),
-            None
-        );
-        assert_eq!(at("ship-review").waiting_to_land(Some(&off), "INF-1"), None);
-        assert_eq!(at("end").waiting_to_land(Some(&off), "INF-1"), None);
+        let on = mark(AutoState::On);
+        assert_eq!(at("land").landing_stop(Some(&off)), Some(("land", &off)));
+        assert_eq!(at("land").landing_stop(None), None);
+        assert_eq!(at("land").landing_stop(Some(&on)), None);
+        assert_eq!(at("ship-review").landing_stop(Some(&off)), None);
+        assert_eq!(at("end").landing_stop(Some(&off)), None);
     }
 
     #[test]

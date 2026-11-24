@@ -308,3 +308,41 @@ Tracker: linear. 2 open · 0 lost.
 <li>A failed Linear Project create now sends one more read (<code>find_project</code>) after every error, a rate limit included. That costs a request, not correctness: the original error is still what gets recorded.</li>
 <li>Carried over: a failed connect for a missing credential still says "inspect the affected work before retrying".</li>
 </ol>
+
+<h2>Tenth run, 2026-11-24: slice 12 (the command that makes a Wave makes its tracker Project)</h2>
+<p>Branch <code>lf</code> (debug build of b34f96d4d2 plus this run's fixes) on private homes under <code>/tmp/lfq12</code>, fresh repositories with a local bare origin, no <code>LF_*</code>, stdin closed. Installed <code>lf</code> for the upgrade home. No Linear or Asana login: no real tracker Project was made.</p>
+<table>
+<tr><th>Scenario</th><th>Result</th></tr>
+<tr><td>No tracker: <code>lf wave create billing</code></td><td class="ok">As before: committed, <code>Project billing (local) · started</code>.</td></tr>
+<tr><td>Linear team set, no login: <code>lf wave create ledger</code></td><td>Exit 1, "wave/ledger has no tracker Project yet: No Linear credential found…". The Wave is recorded and committed, its Project unbound; no Project row in <code>tracker_actions</code>. <span class="bad">The message had "..": fixed.</span> <span class="bad">Nothing anywhere said <code>billing</code> or <code>ledger</code> had no Linear Project (<code>lf repo tracker</code>: "Nothing open"): fixed in <code>lf wave status</code>.</span></td></tr>
+<tr><td>Rerun create, <code>lf wave sync ledger</code>, <code>lf wave plan connect ledger</code></td><td class="ok">Each exits 1 with the credential error; nothing new queued.</td></tr>
+<tr><td><code>lf task create --wave ledger …</code> into the unbound Project</td><td class="ok">Saved, "pending Linear sync"; the Task's <code>create</code> stays queued with the credential error. Whether the drain makes the Project first needs a login (execution tests cover it).</td></tr>
+<tr><td>Nested <code>lf wave create ledger/refunds</code></td><td class="ok">Same failure; Project <code>refunds</code>, hint names <code>ledger/refunds</code>.</td></tr>
+<tr><td>Asana team <code>'1209'</code></td><td class="ok">"No Asana credential found"; hint says "not in Asana yet".</td></tr>
+<tr><td>Rename <code>billing</code>→<code>payments</code>, remove <code>asana-w</code> (unbound)</td><td class="ok">Project renamed with the Wave; no Project actions left in <code>tracker_actions</code>.</td></tr>
+<tr><td>Desktop's path: served <code>wave.create</code> on the private server</td><td>Same message, code <code>outcome_unknown</code>, with "; inspect the affected work before retrying" appended (generic for served write errors; left, see questions).</td></tr>
+<tr><td>Upgrade: installed <code>lf</code> home with team, Wave <code>spend</code> and a Task, opened by the branch</td><td class="ok">Before: <code>spend create · queued</code> plus the Task. After: the Project create <code>retired</code> ("Wave Projects are created by lf wave create, plan connect or sync"), the Task's stays. <code>lf wave status spend</code> now says how to make it.</td></tr>
+</table>
+<h3>Transcript after the fixes</h3>
+<pre>$ lf wave create ledger/refunds
+Error: wave/ledger/refunds has no tracker Project yet: No Linear credential found. Run `doppler run -- lf machine login linear`. Run `lf wave create ledger/refunds` again to make it.
+$ lf wave status ledger/refunds | grep -A1 Project
+  Project   refunds (local) · started
+    not in Linear yet; `lf wave sync ledger/refunds` makes it
+$ lf wave status billing | grep -A1 Project     # made before the team was set
+  Project   billing (local) · started
+    not in Linear yet; `lf wave sync billing` makes it</pre>
+<h3>Fixed</h3>
+<ul>
+<li><code>lf wave status</code> and the roadmap print "not in &lt;tracker&gt; yet; `lf wave sync &lt;wave&gt;` makes it" for a live Wave whose Project has no tracker id in a connected repository (<code>waves.rs::print_project</code>).</li>
+<li>The create error no longer doubles the tracker error's period.</li>
+<li>Five <code>local_planning::</code> tests slice 12 broke (connected <code>wave add</code> now fails offline): fixtures get the team after the Wave; the two <code>wave_sync_*</code> tests of the deleted queued create are rewritten for the synchronous one. <code>local_planning::</code> 30/30, Wave CLI suites 41, <code>documented_commands::</code> 4 pass; clippy clean.</li>
+</ul>
+<h3>Not reached</h3>
+<p>A real tracker Project create, lost reply, and the drain making an unbound Project before a Task send: they need a Linear or Asana login and would make real Projects in a shared workspace. Desktop UI not opened.</p>
+<h3>Still wrong, worst first</h3>
+<ol>
+<li>An unbound Project's reorder is dropped, not held until the Project exists (plan Remains 0). The test that said "the reorder queues behind that creation" now asserts the drop.</li>
+<li>Served tracker failures read <code>outcome_unknown</code> "inspect the affected work before retrying" next to a message that says exactly what to rerun.</li>
+<li>Desktop shows no line for an unbound Project; the hint is CLI-only.</li>
+</ol>

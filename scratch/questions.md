@@ -88,3 +88,14 @@
 - Slice 12: `lf wave create a/b` makes the tracker Project for `a/b` only; a
   parent `a` registered on the way gets its own when synced or when a Task
   is sent into it.
+- QA after slice 12: a served write that fails on the tracker answers
+  `outcome_unknown` and appends "; inspect the affected work before
+  retrying" (`engine::Error::written`), so Desktop's `wave.create` shows that
+  after "Run `lf wave create x` again". Same for `wave.plan.connect`. Not
+  changed: every non-store write error takes that path.
+- `lf config set --shared repo.tracker…` prints "saved; DomainAction" on the
+  installed build too; not changed.
+- Desktop's Project rows showed a pending create's failure; with none queued
+  they show no sync line for an unbound Project (inferred, the app was not
+  opened this run). The CLI's "not in Linear yet" line is printed from `ProjectSummary.tracker_id`
+  and the repository's config, not carried on the wire.

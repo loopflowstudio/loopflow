@@ -967,12 +967,6 @@ fn a_wave_is_made_with_one_project_and_every_task_joins_it() {
     for connected in [false, true] {
         let repo = TestRepo::new();
         let home = tempfile::tempdir().unwrap();
-        if connected {
-            repo.create_file(
-                ".lf/config.yaml",
-                "planning:\n  provider: linear\n  team: fixture-team\n",
-            );
-        }
         let path = home.path().join("loopflow.db");
         let added = lf(
             repo.path(),
@@ -980,6 +974,13 @@ fn a_wave_is_made_with_one_project_and_every_task_joins_it() {
             &["wave", "add", "product", "--json"],
         );
         assert_eq!(added["created"], true);
+        // Linear arrives after the Wave, so its Project is not in Linear yet.
+        if connected {
+            repo.create_file(
+                ".lf/config.yaml",
+                "planning:\n  provider: linear\n  team: fixture-team\n",
+            );
+        }
         let store = loopflow_execution::store::open_sqlite(&path).unwrap();
         let wave = loopflow_model::id::WaveId::parse(added["id"].as_str().unwrap()).unwrap();
         let project = store.project_of_wave(&wave).unwrap().unwrap();
@@ -1051,6 +1052,11 @@ fn a_wave_is_made_with_one_project_and_every_task_joins_it() {
         )
         .unwrap();
         assert!(status.contains("· completed"), "{status}");
+        assert_eq!(
+            status.contains("not in Linear yet; `lf wave sync product` makes it"),
+            connected,
+            "{status}"
+        );
     }
 }
 
@@ -1346,7 +1352,8 @@ fn task_creation_and_edits_save_offline_in_both_connection_modes() {
                 loopflow_storage::sqlite::tracker_actions::ActionKind::Order,
             )
             .is_some(),
-            mapped || connected
+            // A Project not in the tracker yet keeps no order edit (see below).
+            mapped
         );
         let edited = store.task(&second).unwrap().unwrap();
         let revision = || {
@@ -1419,9 +1426,9 @@ fn task_creation_and_edits_save_offline_in_both_connection_modes() {
         );
         assert_eq!(sync.actions.is_empty(), !connected);
         if connected {
-            // An unbound Project is created in the tracker, and the reorder
-            // queues behind that creation.
-            assert!(sync.actions.iter().any(|a| a.change == "order"));
+            // A Project not in the tracker yet queues no reorder: the
+            // order edit is dropped, not held until the Project is made.
+            assert_eq!(sync.actions.iter().any(|a| a.change == "order"), mapped);
             assert_eq!(sync.actions.iter().any(|a| a.change == "create"), !mapped);
             assert!(sync.actions.iter().any(|a| a.change == "title"));
         }
@@ -1530,12 +1537,6 @@ fn moving_saves_membership_offline_and_retains_inbound_changes() {
     for (connected, mapped) in [(false, false), (false, true), (true, false), (true, true)] {
         let repo = TestRepo::new();
         let home = tempfile::tempdir().unwrap();
-        if connected {
-            repo.create_file(
-                ".lf/config.yaml",
-                "planning:\n  provider: linear\n  team: fixture-team\n",
-            );
-        }
         let path = home.path().join("loopflow.db");
         let store = loopflow_execution::store::open_sqlite(&path).unwrap();
         let canonical = loopflow_execution::repository::discover(repo.path()).unwrap();
@@ -1579,6 +1580,13 @@ fn moving_saves_membership_offline_and_retains_inbound_changes() {
                 observations.push(observed);
             }
             projects.push(project);
+        }
+        // Linear arrives after the Waves: an unmapped one's Project is not in Linear.
+        if connected {
+            repo.create_file(
+                ".lf/config.yaml",
+                "planning:\n  provider: linear\n  team: fixture-team\n",
+            );
         }
         let task = store
             .create_task(&NewTask {
@@ -1767,13 +1775,6 @@ fn wave_documents_and_graphs_follow_files() {
         let root = repo.path().join(".lf/wave/tools");
         std::fs::create_dir_all(root.join("parser")).unwrap();
         std::fs::create_dir_all(repo.path().join(".lf/graphs")).unwrap();
-        if connected {
-            std::fs::write(
-                repo.path().join(".lf/config.yaml"),
-                "planning:\n  provider: linear\n  team: fixture-team\n",
-            )
-            .unwrap();
-        }
         let goal = format!("---\nid: {wave_id}\n---\n## Objective\n\nKeep parsing.\n");
         std::fs::write(root.join("GOAL.md"), &goal).unwrap();
         std::fs::write(root.join("MEMORY.md"), "Inherited decisions.\n").unwrap();
@@ -1795,6 +1796,13 @@ fn wave_documents_and_graphs_follow_files() {
             &["wave", "add", "tools/parser", "--json"],
         );
         assert!(project["id"].is_string());
+        if connected {
+            std::fs::write(
+                repo.path().join(".lf/config.yaml"),
+                "planning:\n  provider: linear\n  team: fixture-team\n",
+            )
+            .unwrap();
+        }
         let task = lf(
             repo.path(),
             home.path(),
@@ -2131,124 +2139,100 @@ fn ordinary_task_creation_returns_resolvable_identifier_without_a_public_retry_t
 }
 
 #[test]
-fn wave_sync_offline_shows_the_pending_project_and_its_error() {
+fn wave_sync_offline_fails_with_the_tracker_error_and_queues_no_project() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
-    std::fs::create_dir_all(repo.path().join(".lf")).unwrap();
-    std::fs::write(
-        repo.path().join(".lf/config.yaml"),
-        "planning:\n  provider: linear\n  team: fixture-team\n",
-    )
-    .unwrap();
     lf(
         repo.path(),
         home.path(),
         &["wave", "add", "inbox", "--json"],
     );
-    lf(
-        repo.path(),
-        home.path(),
-        &[
-            "task",
-            "create",
-            "--wave",
-            "inbox",
-            "--title",
-            "Saved plan",
-            "--json",
-        ],
+    repo.create_file(
+        ".lf/config.yaml",
+        "planning:\n  provider: linear\n  team: fixture-team\n",
     );
+    let output = command(repo.path(), home.path(), &["wave", "sync", "inbox"])
+        .stdin(std::process::Stdio::null())
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("No Linear credential found"), "{stderr}");
     let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
-    db.execute(
-        "UPDATE tracker_actions SET error=NULL WHERE project_id IS NOT NULL",
-        [],
-    )
-    .unwrap();
-    let synced = lf(
+    let queued: i64 = db
+        .query_row(
+            "SELECT count(*) FROM tracker_actions WHERE project_id IS NOT NULL AND phase!='retired'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(queued, 0);
+    let status = lf(
         repo.path(),
         home.path(),
-        &["wave", "sync", "inbox", "--json"],
+        &["wave", "status", "inbox", "--json"],
     );
-    assert_eq!(synced["wave"]["name"], "inbox");
-    assert!(synced.to_string().contains("Saved plan"), "{synced}");
-    let Value::String(text) = lf(repo.path(), home.path(), &["wave", "sync", "inbox"]) else {
-        panic!("wave sync prints text");
-    };
-    let action = &synced["project"]["value"]["sync"]["actions"][0];
-    assert_eq!(action["phase"], "queued");
-    let reason = action["error"].as_str().unwrap();
-    assert!(!reason.is_empty());
-    assert!(text.contains(reason), "{text}");
-    assert!(!text.contains("wave plan connect"), "{text}");
+    assert!(
+        status["project"]["value"]["tracker_id"].is_null(),
+        "{status}"
+    );
 }
 
 #[test]
-fn wave_sync_retries_its_project_ahead_of_older_work() {
+fn wave_sync_makes_only_its_own_project() {
     use crate::lf::commands::write::Write;
     use loopflow_execution::test_support::planning_tasks::with_planning_task;
     use loopflow_execution::work::wave::Wave;
     use loopflow_model::id::WaveId;
-    use loopflow_storage::planning_sync::TrackerKind;
 
     with_planning_task(|runtime, fixture, repo, _, state| {
         let wave =
             |name: String| Wave::new(WaveId::new(), name, repo.to_string_lossy().into_owned());
-        for n in 0..40 {
+        for n in 0..3 {
             runtime
                 .block_on(fixture.store.create_wave(&wave(format!("older-{n}"))))
                 .unwrap();
         }
-        fixture
-            .store
-            .sqlite
-            .enqueue_tracker_creations(repo.to_str().unwrap(), TrackerKind::Linear)
-            .unwrap();
         let billing = wave("billing".into());
         runtime
             .block_on(fixture.store.create_wave(&billing))
             .unwrap();
         let sync = || {
-            serde_json::to_value(
-                Write::WaveSync {
-                    directory: repo.into(),
-                    wave: "billing".into(),
-                }
-                .run()
-                .unwrap(),
-            )
-            .unwrap()
+            Write::WaveSync {
+                directory: repo.into(),
+                wave: "billing".into(),
+            }
+            .run()
+            .map(|status| serde_json::to_value(status).unwrap())
         };
         runtime.block_on(state.lock()).field_outage = true;
-        let offline = sync();
-        let project = &offline["project"]["value"];
-        assert!(
-            project["sync"]["actions"][0]["error"].is_string(),
-            "{offline}"
-        );
-        let id = project["id"].as_str().unwrap();
+        assert!(sync().is_err());
         {
             let mut linear = runtime.block_on(state.lock());
             linear.field_outage = false;
             linear.export_mode = true;
         }
-        let external = uuid::Uuid::parse_str(id.strip_prefix("proj_").unwrap())
+        let id = runtime
+            .block_on(fixture.store.project_of_wave(billing.id()))
+            .unwrap()
+            .unwrap()
+            .id;
+        let external = uuid::Uuid::parse_str(id.as_str().strip_prefix("proj_").unwrap())
             .unwrap()
             .to_string();
         for _ in 0..2 {
-            let status = sync();
-            assert_eq!(status["project"]["value"]["id"], id);
+            let status = sync().unwrap();
+            assert_eq!(status["project"]["value"]["id"], id.as_str());
             assert_eq!(status["project"]["value"]["tracker_id"], external);
             assert!(fixture.wave_refresh_at(&billing).is_some());
         }
         let linear = runtime.block_on(state.lock());
-        assert_eq!(
-            linear
-                .extra_projects
-                .iter()
-                .filter(|p| p["name"] == "billing")
-                .count(),
-            1
-        );
+        let names: Vec<_> = linear
+            .extra_projects
+            .iter()
+            .map(|p| p["name"].as_str().unwrap().to_owned())
+            .collect();
+        assert_eq!(names, ["billing"]);
     });
 }
 

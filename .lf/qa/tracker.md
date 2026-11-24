@@ -168,25 +168,25 @@ home reaches the other on `lf task sync <id>`.
 
 A Wave's queued tracker actions are rows in `tracker_actions` (`kind`,
 `phase`, `project_id`, `task_id`, `value_json`, `error`); with a Linear team
-set and no login they stay `queued`, so a rename or removal shows its effect
-there and in `lf repo tracker`. Renaming an unlinked Wave queues one `name`
-action behind its Project's `create` (a second rename retires the first,
-"superseded by a later save"); removing it retires both ("its Wave was
-removed") and repoints a moved Task's queued `create` at its new Project.
-The store has no WAL: copy `loopflow.db` and read the copy.
+set and no login, Task actions stay `queued`. Nothing queues a Project
+`create`: `lf wave create`, `lf wave plan connect <wave>` and `lf wave sync`
+make the Project in the tracker before they return. With no login, `lf wave
+create x` exits 1 with "wave/x has no tracker Project yet: No Linear
+credential found… Run `lf wave create x` again", yet the Wave is recorded
+and committed, its Project unbound. `lf wave status x` then prints "not in
+Linear yet; `lf wave sync x` makes it" under the Project line (also for a
+Wave made before the team was set, or upgraded). Rename and removal of an
+unbound Wave leave no Project rows in `tracker_actions`. Served
+`wave.create` returns the same message as `outcome_unknown` with "; inspect
+the affected work before retrying" appended. Asana (`repo.tracker.asana.team
+"'1209'"`) behaves the same with "No Asana credential found". Copy
+`loopflow.db` to read it: `?mode=ro` on a live private home fails to open.
 
-To see which Projects a newly connected tracker makes, remove a Wave first
-(`lf wave remove`), then set `repo.tracker.linear.team` and an `origin`: `lf
-repo tracker` lists one `create` per live Wave and every Task, none for the
-removed Wave. With no Linear login every create and `lf wave plan connect`
-stop at "No Linear credential found"; without `origin`, connect stops at the
-origin error first.
-
-A repository with a Linear or Asana tracker has no Git plan exchange: after
-`git push`, `git -C <bare> for-each-ref refs/loopflow` is empty and a fresh
-clone on a second home lists nothing. Cross-Machine checks there need a real
-tracker login. With a team configured and an `origin`, every create waits on
-"No Linear credential found"; without `origin`, on the origin error.
+For the upgrade, write a home with the installed `lf` (team set, a Wave and
+a Task: `lf repo tracker` lists the Wave's `create` and the Task's), copy
+it, then run any branch command: the Project create is `retired` ("Wave
+Projects are created by lf wave create, plan connect or sync") and only the
+Task's remains open.
 
 Without a Linear login no command links a Wave's Project. To see what a
 linked one does (status line, its URL, a rename's `project_name` action),
@@ -245,13 +245,3 @@ Task `create` per Task. Copy the home (`cp -R`), then run any branch command
 on it. A Task record pushed the same way, with `task_project` naming the second
 Project, is how a released writer's Task in that Project arrives at a branch
 Machine.
-
-Which Machine creates a Wave's Project shows offline with two homes on one
-bare origin and no tracker yet: `lf wave create ledger` and a Task on the
-first, `lf task sync <id>`, clone on the second and `lf task list` (the Wave
-arrives). Then set `repo.tracker.linear.team` on one, commit, push, pull on
-the other, and save once on each. Each home's `tracker_actions` holds a
-Project `create` for the same `proj_<wave uuid>`, whichever home stamped
-`project_wave` (`plan_stamps`); Task creates only on the home that made the
-Task. What a second create does at Linear or Asana (bind, not duplicate) has
-no CLI stand-in; execution's `a_wave_project_another_machine_*` tests cover it.

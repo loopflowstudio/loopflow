@@ -565,8 +565,10 @@ makes the Project `refunds`, and in a repository with Linear or Asana makes it
 there too before it returns. Can't reach the tracker? The command fails; run it
 again. A Wave that arrived without one (from another checkout's files, or an
 upgrade) gets its tracker Project from `lf wave sync`, `lf wave plan connect`,
-or the first Task sent into it. A Task in a Wave is in its Project, and lists
-under that Wave only. A Task in no Wave is in no Project.
+or the first Task sent into it. Until then `lf wave status` says the Project
+is not in the tracker yet and names the `lf wave sync` that makes it. A Task
+in a Wave is in its Project, and lists under that Wave only. A Task in no
+Wave is in no Project.
 
 The Project has a name, a summary and a status, and `lf wave status` and
 `lf wave plan billing --json` show it. It starts and ends in the tracker:

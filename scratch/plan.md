@@ -628,8 +628,24 @@ the drain's comments name Tasks as the only queued creates. Execution
 `task_planning_tests::`, `asana_planning_tests::`, `ops::tracker` (55) pass;
 clippy clean.
 
+QA after slice 12 (`scratch/qa.html`, eighth run): `lf wave status` prints
+"not in Linear yet; `lf wave sync <wave>` makes it" under an unbound
+Project in a connected repository (before slice 12 the queued `create` and
+its error showed there; nothing did after). The create error lost its doubled
+period. Five `local_planning::` tests slice 12 broke now pass: connected
+fixtures get the team after `wave add`, and the two `wave_sync_*` tests
+became `wave_sync_offline_fails_with_the_tracker_error_and_queues_no_project`
+and `wave_sync_makes_only_its_own_project`.
+
 ## Remains
 
+0. Slice 12 regression: an unbound Project's reorder (`lf task edit --rank`)
+   is dropped. `tracker_actions::owner_tracker` finds no binding and no
+   queued Project `create`, so `enqueue` skips it; before, it queued behind
+   the create. `task_creation_and_edits_save_offline_in_both_connection_modes`
+   now asserts the drop. Choose: hold order edits for an unbound Project in a
+   connected repository (and send them after its Tasks exist), or accept that
+   the order starts from the Linear create order.
 1. Gate: sync main, Swift DTO and desktop suites (`scripts/test_desktop.sh`),
    the full matrix in CI, and the `oauth_tests::…sqlite_contention…` failure
    checked on the base. `check_migrations.py` passes since the base merge

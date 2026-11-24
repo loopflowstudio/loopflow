@@ -1,4 +1,4 @@
-at: 855d851020cca5096515bc7ac615f7540feacee6
+at: 5c520fcfe6d060603eb3f324173bd04d0357aed9
 first:
   - path: docs/work.md
     why: Pause and resume from the saved step
@@ -33,7 +33,7 @@ first:
   - path: rust/loopflow-execution/src/store/selections.rs
     why: Parse each captured Graph once per tile
   - path: rust/loopflow/src/lf/commands/waves.rs
-    why: Share roadmap membership with the CLI
+    why: Clear the condition while keeping failed execution visible
   - path: rust/loopflow-definitions/src/builtins/task/graph/code.yaml
     why: Keep ship-review interactive and verify automatic
   - path: rust/loopflow-definitions/src/builtins/task/skill/verify.md
@@ -42,8 +42,8 @@ first:
     why: Order sidebar rows and their keyboard shortcuts together
   - path: swift/LoopflowiOS/TaskListView.swift
     why: Group each repository’s Working Tasks on iPhone
-  - path: swift/Loopflow/Design/TaskRow.swift
-    why: Show the open conversation during a Graph hold
+  - path: swift/Loopflow/Models/WaveWorkMap.swift
+    why: Clear Portfolio Now as soon as pause takes effect
   - path: swift/LoopflowMac/Views/TaskWorkView.swift
     why: Use one pause action across Mac controls
   - path: swift/Loopflow/Services/PendingChanges.swift

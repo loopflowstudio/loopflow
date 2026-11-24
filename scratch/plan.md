@@ -68,26 +68,20 @@ During a build, `lf task pause INF-123` stops the worker, every subprocess in th
 
 ## Concept-review pass 2 (before the Working-groups demo)
 
-Three focused fixes to make the branch compile and close the last two concept leaks found at `279b71c8d1` (`scratch/concept-review.html`):
+The empty Cargo target is gone. The package checks with its declared binaries.
 
-1. **Remove the stray empty `rust/loopflow/src/main.rs` added in `279b71c8d1`.**
-   - Cargo auto-discovers `src/main.rs` as a third binary crate `loopflow`, which breaks `cargo check -p loopflow` (`error[E0601]: main function not found`). Delete it.
-2. **Treat `TaskState::Paused` as quiet (`TaskConditionState::Clear`) in one place.**
-   - In `rust/loopflow/src/lf/commands/waves.rs::derive_task_condition`, return `(TaskConditionState::Clear, next_move.reason.clone())` when `runtime` has `TaskState::Paused`. Today a paused mid-build Task reports `Blocked` ("Task has uncommitted work") or `Waiting` ("Task is paused…"), pulling every paused Task into Portfolio's **Now** list (`NowProjection.swift`) and forcing a Swift-only suppression in `TaskRow.swift:53`.
-   - In `swift/Loopflow/Models/WaveWorkMap.swift::RoadmapTask.need`, return `nil` when `lifecycle == .paused` so optimistic pause (`PendingChanges.swift`) also clears `need` immediately across `TaskRow`, Portfolio **Now**, accessibility, and `TaskBriefView`. Delete the duplicate `task.lifecycle == .paused ? nil : task.need` check in `swift/Loopflow/Design/TaskRow.swift:53`.
-   - Keep live conversation reports (`TaskRowStatus.program`) visible on paused rows, and keep pre-pause failures recorded in `execution.state` so they resurface in `condition` upon unpause.
-   - Add focused tests in `waves.rs` (`derive_task_condition` returns `Clear` for paused dirty/clean/failed Tasks and `Blocked` again once unpaused) and Swift (`NowProjection` excludes paused Tasks while `TaskRowStatus` still shows live conversation reports).
-3. **Treat a landing step as a human stop inside `needs_review` whenever `auto == AutoState::Off`.**
-   - In `rust/loopflow-execution/src/task_graph.rs::CapturedGraph::ships_before_review` and `needs_review`, pass `stop_at_landing = (auto == Some(AutoState::Off))` into `needs_review` so a landing step yields `stop_at_landing` instead of always `false`, and delete the separate `if auto == Some(AutoState::Off) && landing_stop(...)` branch.
-   - Running `gate` / `reflect` before `land` with `auto == off` then immediately classifies as **Active** (matching the stopped-at-`land` case), while `verify` and `end` after `land` stay **Shipping**. Add a unit test covering `gate` vs `verify` with `AutoState::Off`.
+Pause clears the shared Task condition. Dirty files and failed execution keep their details, and unpause exposes the reason again. The Swift model clears demand as soon as the lifecycle changes, so Portfolio Now and VoiceOver agree with the row while the pause is pending. The conversation can still report its own status.
+
+With auto off, a landing ahead counts as a human stop for both a running cursor and a parked step. The code Graph reads Active at gate and land, then Shipping at verify and end.
+
+On macOS, 12 focused Rust tests passed. The two-Machine CLI returned `clear` with the unpause command for a held Working Task. The selection reader moved a running row from Shipping to Active on auto off and back to Shipping at verify. Two headless Swift tests covered removing a dirty Task from Now before the next reading and keeping all five conversation reports visible.
 
 ## Remaining, in order
 
-1. **Apply concept-review pass 2 fixes** (above: delete `rust/loopflow/src/main.rs`, `derive_task_condition` paused → `Clear`, `needs_review` with `AutoState::Off`).
-2. **Demo the Working groups.** Pause one of two owned Tasks with the other in auto. Show Active / Shipping / Paused, the paused Task’s live conversation, plain unpause, and automatic verify after deliver.
-3. **Task bar (revision 4).** After the Working-groups demo, follow `scratch/explore.html` Round 5 V4 (and decide whether app Unpause sends `run: true` for mid-run / auto paused Tasks so Shipping rows resume moving on one click).
-4. **Named gaps for the PR.** Separate-session Codex 0.171.0 tool jobs can survive. A pause after a move’s payload is sent can require a retry on arrival.
-5. **Gate / CI.** Five-harness worker matrix, Linux session enumeration, lifeline/attachment/hosted-terminal suites.
+1. **Demo the Working groups.** Pause one of two owned Tasks with the other in auto. Show Active / Shipping / Paused, the paused Task’s live conversation, plain unpause, and automatic verify after deliver.
+2. **Task bar (revision 4).** After the Working-groups demo, follow `scratch/explore.html` Round 5 V4 and decide whether app Unpause sends `run: true` for mid-run / auto paused Tasks.
+3. **Named gaps for the PR.** Separate-session Codex 0.171.0 tool jobs can survive. A pause after a move’s payload is sent can require a retry on arrival.
+4. **Gate / CI.** Five-harness worker matrix, Linux session enumeration, lifeline/attachment/hosted-terminal suites.
 
 ## QA on a private Machine
 

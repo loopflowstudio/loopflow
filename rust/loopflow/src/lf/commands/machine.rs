@@ -10,6 +10,7 @@ use loopflow_execution::machine::connection::{
     find_machine, install_command, local_machine, probe, report_version, update_command,
     verify_identity, ConnectionFailure, FailureKind, INSTALL_COMMAND,
 };
+use loopflow_execution::machine::login;
 use loopflow_execution::machine::ssh::remote_path;
 use loopflow_execution::store::Store;
 use loopflow_model::durable::{DefaultScope, Machine, MachineDefault, MachineSetting};
@@ -107,7 +108,6 @@ async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
             api_key,
             refused,
         } => {
-            use loopflow_execution::machine::login;
             if *refused || !machines.is_empty() {
                 login::require_reach(*provider, machines.first().map(String::as_str))?;
             }
@@ -133,7 +133,6 @@ async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
             .await;
         }
         MachineCommand::Logout { provider, machines } => {
-            use loopflow_execution::machine::login;
             return each(
                 named_or_here(machines).await,
                 "signed out",
@@ -148,7 +147,7 @@ async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
                 }
                 None => local_machine().await?,
             };
-            return loopflow_execution::machine::login::print_logins(&machine, *json).await;
+            return login::print_logins(&machine, *json).await;
         }
         MachineCommand::Credentials { cmd } => {
             return super::machine_credentials::receive(cmd).await

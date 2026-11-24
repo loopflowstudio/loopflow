@@ -387,10 +387,11 @@ fn refused_signs_in_again_only_the_machines_that_signed_out_or_refused_a_launch(
     assert_eq!(refused(&fixture), "mini: Codex signed in (ChatGPT)");
 
     // Signed in, but the last Codex launch there was refused with none since.
+    // The refusal alone is what `logins` reads; its Graph step is left out.
     rusqlite::Connection::open(remote.join("store/loopflow.db"))
         .unwrap()
         .execute_batch(
-            "INSERT INTO processes(id,trace_id,started_at) VALUES('step','trace',1);
+            "PRAGMA foreign_keys=OFF;
              INSERT INTO agent_limit_recoveries(lf_process_id,provider,reason,updated_at)
              VALUES('step','codex','mini has no Codex login',1);",
         )

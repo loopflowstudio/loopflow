@@ -107,11 +107,7 @@ fn claude_here(machine: &Machine) -> Result<()> {
 /// Codex prints; Codex polls and writes its own login when it is approved.
 fn codex(machine: &Machine, approver: Option<&Approver>) -> Result<()> {
     let name = name(machine);
-    let mut login = Login::start(
-        machine,
-        Provider::Codex,
-        &["codex", "login", "--device-auth"],
-    )?;
+    let mut login = Login::start(machine)?;
     let url = login.next(url_in)?;
     let code = login.next(device_code_in)?;
     let page = Page {
@@ -315,7 +311,7 @@ pub async fn logins(machine: &Machine) -> Result<Vec<LoginRow>> {
                 if forwarded.carries_env(CLAUDE_TOKEN_ENV) {
                     row.state = LoginState::Forwarded;
                     row.account = Some(CLAUDE_TOKEN_ENV.to_string());
-                } else if forwarded.lacks_login(CLAUDE_TOKEN_ENV) {
+                } else if forwarded.lacks_claude_token() {
                     row.account = Some(format!("{CLAUDE_TOKEN_ENV} has no value here"));
                 }
             }
@@ -447,17 +443,14 @@ fn launcher_name() -> Option<String> {
 /// What signs this Machine in to `provider`, as whoever launched here would
 /// do it: Claude on another Machine is a forwarded token, the rest a sign-in.
 pub fn sign_in_advice(provider: Provider) -> String {
-    let provider = provider.as_str();
-    match launcher_name() {
-        Some(_) if provider == Provider::Claude.as_str() => {
-            format!(
-                "give this Machine {CLAUDE_TOKEN_ENV} (`doppler secrets set {CLAUDE_TOKEN_ENV}`, \
-                 or run under `doppler run`) and name it in `forward.env` \
-                 (`lf set --global forward.env`)"
-            )
-        }
-        Some(name) => format!("run `lf machine login {provider} {name}`"),
-        None => format!("run `lf machine login {provider}`"),
+    match (launcher_name(), provider) {
+        (Some(_), Provider::Claude) => format!(
+            "give this Machine {CLAUDE_TOKEN_ENV} (`doppler secrets set {CLAUDE_TOKEN_ENV}`, \
+             or run under `doppler run`) and name it in `forward.env` \
+             (`lf set --global forward.env`)"
+        ),
+        (Some(name), provider) => format!("run `lf machine login {} {name}`", provider.as_str()),
+        (None, provider) => format!("run `lf machine login {}`", provider.as_str()),
     }
 }
 
@@ -630,11 +623,10 @@ fn run_approver(command: &str, page: &Page) -> Result<()> {
 }
 
 // ---------------------------------------------------------------------------
-// One provider login process on the target
+// Codex's device login process on the target
 
 struct Login {
     child: Child,
-    provider: Provider,
     target: String,
     /// Each output line, and whether it came from stderr.
     lines: mpsc::Receiver<(bool, String)>,
@@ -644,17 +636,25 @@ struct Login {
 }
 
 impl Login {
-    fn start(machine: &Machine, provider: Provider, argv: &[&str]) -> Result<Self> {
+    fn start(machine: &Machine) -> Result<Self> {
         let target = name(machine);
-        let tied = [&["sh", "-c", TIED_TO_STDIN, "sh"], argv].concat();
+        let tied = [
+            "sh",
+            "-c",
+            TIED_TO_STDIN,
+            "sh",
+            "codex",
+            "login",
+            "--device-auth",
+        ];
         let mut child = command(machine, &tied)?
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
             .map_err(|error| match error.kind() {
-                std::io::ErrorKind::NotFound => not_installed(provider, &target),
-                _ => anyhow::Error::from(error).context("start the provider's login"),
+                std::io::ErrorKind::NotFound => not_installed(Provider::Codex, &target),
+                _ => anyhow::Error::from(error).context("start Codex's login"),
             })?;
         let (sender, lines) = mpsc::channel();
         for (stderr, stream) in [
@@ -667,7 +667,10 @@ impl Login {
             let sender = sender.clone();
             std::thread::spawn(move || {
                 for line in BufReader::new(stream).lines().map_while(Result::ok) {
-                    if sender.send((stderr, strip_ansi(&line))).is_err() {
+                    if sender
+                        .send((stderr, crate::provider_auth::strip_ansi_escape_codes(&line)))
+                        .is_err()
+                    {
                         break;
                     }
                 }
@@ -675,7 +678,6 @@ impl Login {
         }
         Ok(Self {
             child,
-            provider,
             target,
             lines,
             errors: Vec::new(),
@@ -699,11 +701,7 @@ impl Login {
                 }
                 Err(mpsc::RecvTimeoutError::Timeout) => {
                     self.kill();
-                    bail!(
-                        "{}'s login on {} printed no approval page",
-                        self.provider.display_name(),
-                        self.target
-                    );
+                    bail!("Codex's login on {} printed no approval page", self.target);
                 }
                 Err(mpsc::RecvTimeoutError::Disconnected) => return Err(self.exited()),
             }
@@ -730,8 +728,7 @@ impl Login {
             if self.started.elapsed().unwrap_or_default() > APPROVAL_DEADLINE {
                 self.kill();
                 bail!(
-                    "{} was not approved within 15 minutes; {} was not signed in",
-                    self.provider.display_name(),
+                    "Codex was not approved within 15 minutes; {} was not signed in",
                     self.target
                 );
             }
@@ -749,7 +746,7 @@ impl Login {
     fn failure(&self, exit: Option<i32>, code: &str) -> anyhow::Error {
         // `sh: codex: command not found` over SSH.
         if exit == Some(127) {
-            return not_installed(self.provider, &self.target);
+            return not_installed(Provider::Codex, &self.target);
         }
         // The last line that quotes neither the page nor the code.
         let reason = self
@@ -764,13 +761,9 @@ impl Login {
             })
             .map(|line| format!(": {line}"))
             .unwrap_or_default();
-        let hint = match self.provider {
-            Provider::Codex => "; device code login must be enabled in ChatGPT security settings",
-            _ => "",
-        };
         anyhow!(
-            "{}'s login on {} failed{reason}{hint}",
-            self.provider.display_name(),
+            "Codex's login on {} failed{reason}; device code login must be enabled in \
+             ChatGPT security settings",
             self.target
         )
     }
@@ -869,35 +862,5 @@ pub(crate) fn name(machine: &Machine) -> String {
         Some(label) => label.clone(),
         None if here(machine) => crate::store::ownership::local_label(),
         None => machine.route.clone(),
-    }
-}
-
-fn strip_ansi(line: &str) -> String {
-    static ANSI: once_cell::sync::Lazy<regex::Regex> = once_cell::sync::Lazy::new(|| {
-        // CSI styling, and OSC sequences such as an OSC 8 hyperlink around
-        // a URL: `ESC ] 8 ;; <url> BEL <text> ESC ] 8 ;; BEL`.
-        regex::Regex::new("\x1b\\[[0-9;?]*[ -/]*[@-~]|\x1b\\][^\x07\x1b]*(?:\x07|\x1b\\\\)")
-            .expect("valid ANSI pattern")
-    });
-    ANSI.replace_all(line, "").into_owned()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::strip_ansi;
-
-    #[test]
-    fn approval_urls_survive_colored_output() {
-        assert_eq!(
-            strip_ansi("\x1b[1mvisit:\x1b[0m https://claude.com/cai/oauth/authorize?a=1"),
-            "visit: https://claude.com/cai/oauth/authorize?a=1"
-        );
-        // Claude Code 2.1.326 in a terminal that supports hyperlinks.
-        assert_eq!(
-            strip_ansi(
-                "visit: \x1b]8;;https://claude.com/cai/oauth/authorize?a=1\x07https://claude.com/cai/oauth/authorize?a=1\x1b]8;;\x07"
-            ),
-            "visit: https://claude.com/cai/oauth/authorize?a=1"
-        );
     }
 }

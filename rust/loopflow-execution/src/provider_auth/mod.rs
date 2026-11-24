@@ -1600,7 +1600,7 @@ fn extract_url(line: &str) -> Option<String> {
     })
 }
 
-fn strip_ansi_escape_codes(line: &str) -> String {
+pub(crate) fn strip_ansi_escape_codes(line: &str) -> String {
     static OSC_RE: Lazy<Regex> =
         Lazy::new(|| Regex::new(r"\x1b\]([^\x07\x1b]*)(?:\x07|\x1b\\)").expect("OSC regex"));
     let decoded = OSC_RE.replace_all(line, |captures: &regex::Captures<'_>| {

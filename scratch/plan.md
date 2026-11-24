@@ -333,7 +333,7 @@ checks on both ends; LOO-913's fallback and wait rules.
    measured `claude auth status --json` 0.34–0.39 s, `codex login status`
    0.02–0.05 s); `--logins` lives on the `ondemands.<name>` config template;
    `AGENT_LOGIN_ENV`/`read_for_rental` deleted.
-4. `lf machine logout`, `--refused` (`SqliteStore::unanswered_refusal`),
+4. `lf machine logout`, `--refused` (`SqliteStore::unanswered_refusal`, which reads `agent_sessions.agent_started_at` since main dropped `processes`),
    `lf account` and its routes, fixtures and Swift calls deleted.
 5. Rescope: Claude by forwarded token (see top).
 
@@ -356,7 +356,7 @@ Tests: `machine_commands::services_that_sign_in_here_only_never_reach_another_ma
 
 ## Done: Claude's token fails like a login (concept review, 2026-11-23)
 
-Built as below (`Forwarded::lacks_login` carries the left-out name to
+Built as below (`Forwarded::lacks_claude_token` carries the left-out token to
 `logins`). Checks run: `machine::forward::` unit, `session_launch_contract`
 `a_signed_out_machine_refuses…`, `machine_commands::a_command_approver…`,
 `documented_commands::` — all pass. Clippy left to gate.

@@ -15,8 +15,8 @@ use crate::machine::ssh::sh_quote;
 pub struct Forwarded {
     env: Vec<(String, SecretString)>,
     files: Vec<(PathBuf, Vec<u8>)>,
-    /// Named logins this Machine has no value for, which launches go without.
-    missing_logins: Vec<String>,
+    /// `forward.env` names Claude's token but this Machine has no value for it.
+    lacks_claude_token: bool,
 }
 
 impl std::fmt::Debug for Forwarded {
@@ -30,7 +30,7 @@ impl std::fmt::Debug for Forwarded {
                 "files",
                 &self.files.iter().map(|(path, _)| path).collect::<Vec<_>>(),
             )
-            .field("missing_logins", &self.missing_logins)
+            .field("lacks_claude_token", &self.lacks_claude_token)
             .finish()
     }
 }
@@ -43,7 +43,7 @@ pub fn read(directory: &Path) -> Result<Forwarded> {
         .unwrap_or_default()
         .forward;
     let mut env = Vec::new();
-    let mut missing_logins = Vec::new();
+    let mut lacks_claude_token = false;
     for name in config.env {
         if !valid_name(&name) {
             bail!("forward.env entry {name:?} is not an environment variable name");
@@ -54,7 +54,7 @@ pub fn read(directory: &Path) -> Result<Forwarded> {
             .or_else(|| doppler_value(&name, directory));
         match value {
             Some(value) => env.push((name, SecretString::new(value))),
-            None if name == crate::machine::login::CLAUDE_TOKEN_ENV => missing_logins.push(name),
+            None if name == crate::machine::login::CLAUDE_TOKEN_ENV => lacks_claude_token = true,
             None => bail!(
                 "forward.env names {name}, which has no value on this Machine: export it, \
                  or store it with `doppler secrets set {name}`"
@@ -76,7 +76,7 @@ pub fn read(directory: &Path) -> Result<Forwarded> {
     Ok(Forwarded {
         env,
         files,
-        missing_logins,
+        lacks_claude_token,
     })
 }
 
@@ -92,9 +92,9 @@ impl Forwarded {
         self.env.iter().any(|(carried, _)| carried == name)
     }
 
-    /// Whether `forward.env` names login `name` but this Machine has no value.
-    pub fn lacks_login(&self, name: &str) -> bool {
-        self.missing_logins.iter().any(|missing| missing == name)
+    /// Whether `forward.env` names Claude's token but this Machine has no value.
+    pub fn lacks_claude_token(&self) -> bool {
+        self.lacks_claude_token
     }
 }
 
@@ -276,7 +276,7 @@ mod tests {
         std::fs::write(&config, "forward:\n  env: [CLAUDE_CODE_OAUTH_TOKEN]\n").unwrap();
         let forwarded = read(home.path()).unwrap();
         assert!(!forwarded.carries_env("CLAUDE_CODE_OAUTH_TOKEN"));
-        assert!(forwarded.lacks_login("CLAUDE_CODE_OAUTH_TOKEN"));
+        assert!(forwarded.lacks_claude_token());
 
         std::fs::write(
             &config,
@@ -293,6 +293,6 @@ mod tests {
         std::fs::write(&config, "forward:\n  env: [CLAUDE_CODE_OAUTH_TOKEN]\n").unwrap();
         let forwarded = read(home.path()).unwrap();
         assert!(forwarded.carries_env("CLAUDE_CODE_OAUTH_TOKEN"));
-        assert!(!forwarded.lacks_login("CLAUDE_CODE_OAUTH_TOKEN"));
+        assert!(!forwarded.lacks_claude_token());
     }
 }

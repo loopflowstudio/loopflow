@@ -176,7 +176,7 @@ pub fn run_ondemand(cmd: &OndemandCommand, batch: bool) -> anyhow::Result<()> {
             logins,
         } => {
             for provider in logins {
-                loopflow_execution::machine::login::require_reach(*provider, Some("a rental"))?;
+                login::require_reach(*provider, Some("a rental"))?;
             }
             let ondemand = OnDemand {
                 name: name.clone(),

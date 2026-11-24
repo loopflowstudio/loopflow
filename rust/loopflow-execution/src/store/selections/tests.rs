@@ -2,7 +2,6 @@ use crate::process::attachment;
 use crate::store::selections;
 
 use loopflow_model::durable::RepositoryId;
-use loopflow_storage::sqlite::selections::TaskDrop;
 use loopflow_storage::sqlite::SqliteStore;
 use loopflow_storage::work::selection::{
     Arrangement, ArrangementMode, DashboardId, Selection, SelectionError, SelectionExpression,
@@ -282,16 +281,7 @@ fn one_task_order_reorders_working_tasks_and_every_plan_and_arrivals_prepend() {
         [one, two]
     );
     assert_eq!(
-        selections::reorder_working_task(
-            &store,
-            &repo,
-            TaskDrop {
-                task: two,
-                target: one,
-                side: None
-            }
-        )
-        .unwrap(),
+        store.reorder_working_task(&repo, two, one, None).unwrap(),
         [two, one]
     );
     assert_eq!(
@@ -331,15 +321,8 @@ fn one_task_order_reorders_working_tasks_and_every_plan_and_arrivals_prepend() {
     // refusal names it and nothing is written.
     let done = "task_44444444444444444444444444444444";
     for (task, to) in [(done, one), (one, done)] {
-        let edit = TaskDrop {
-            task,
-            target: to,
-            side: None,
-        };
-        assert!(
-            matches!(selections::reorder_working_task(&store, &repo, edit),
-            Err(crate::store::StoreError::Selection(SelectionError::NotWorking(id))) if id == done)
-        );
+        assert!(matches!(store.reorder_working_task(&repo, task, to, None),
+            Err(crate::store::StoreError::Selection(SelectionError::NotWorking(id))) if id == done));
     }
     assert_eq!(store.revisions().unwrap(), revisions);
     assert_eq!(
@@ -1220,36 +1203,6 @@ fn a_dashboard_changed_after_preparation_rejects_the_prepared_write() {
         .saved;
     assert_eq!(saved.name.as_deref(), Some("later"));
     assert_eq!(saved.revision, 2);
-}
-
-#[test]
-fn a_task_order_changed_after_preparation_keeps_the_new_order() {
-    let (_dir, store, repo) = fixture();
-    store.conn.lock().unwrap().execute(
-        "INSERT INTO task_checkouts(task_id,worktree) SELECT id,'/repo/fix-1' FROM tasks WHERE issue_identifier='FIX-1'", [],
-    ).unwrap();
-    let reading = crate::store::session_projection::Reading::acquire(&store, 500, None).unwrap();
-    let prepare = || {
-        store
-            .prepare_task_order(
-                &repo,
-                &reading.inputs,
-                &reading.values,
-                TaskDrop {
-                    task: "task_22222222222222222222222222222222",
-                    target: "task_11111111111111111111111111111111",
-                    side: None,
-                },
-            )
-            .unwrap()
-            .unwrap()
-    };
-    let (read, later) = prepare();
-    assert!(!later.is_empty());
-    assert!(store.commit_task_order(&repo, &read, &later).unwrap());
-    assert!(!store.commit_task_order(&repo, &read, &[]).unwrap());
-    let (retained, _) = prepare();
-    assert_eq!(retained, later);
 }
 
 #[test]

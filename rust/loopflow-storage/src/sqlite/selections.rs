@@ -3,6 +3,7 @@ use super::sessions::{SessionProjection, SessionProjectionInputs};
 use super::task_work::{END, START};
 use super::SqliteStore;
 use crate::execution::{TaskSection, TaskState};
+use crate::work::task::Task;
 
 use crate::work::selection::{
     move_into_place, Arrangement, Dashboard, DashboardId, DashboardReading, DropSide, Selection,
@@ -11,7 +12,7 @@ use crate::work::selection::{
     WorkWorkspaceKind,
 };
 use crate::{StoreError, StoreResult};
-use loopflow_model::durable::{MachineId, RepositoryId};
+use loopflow_model::durable::{MachineId, RepositoryId, TaskId};
 use loopflow_model::id::LfSessionId;
 use loopflow_model::program_status::State;
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
@@ -76,10 +77,37 @@ fn work_in(
     projection: &SessionProjection,
 ) -> StoreResult<Vec<SelectionWork>> {
     let repo = repository_path_in(conn, repository)?;
-    let mut tasks = task_rows_in(conn, repository, &repo, projection)?;
-    let order = TaskOrder::from_ids(task_order_in(conn, repository)?);
-    tasks.sort_by_cached_key(|task| order.key(&task.work.key.id, task.rank, task.started_at));
-    let mut work: Vec<_> = tasks.into_iter().map(|task| task.work).collect();
+    let saved = task_order_in(conn, repository)?;
+    let tasks = ordered_tasks_in(conn, repository, &saved)?;
+    let ids: Vec<_> = tasks.iter().map(|row| row.task.id.clone()).collect();
+    let published = super::task_started::published_in(conn, &ids)?;
+    let auto_on = super::task_details::auto_on_in(
+        conn,
+        &super::children::ids_json(ids.iter().map(TaskId::as_str)),
+    )?;
+    let activity = task_activity_in(conn, &repo, projection)?;
+    let mut work = Vec::with_capacity(tasks.len());
+    for SelectionTask { task, state, owned } in tasks {
+        let activity = activity.get(&task.id);
+        work.push(SelectionWork {
+            key: WorkWorkspaceKey {
+                repository: repository.to_string(),
+                kind: WorkWorkspaceKind::Task,
+                id: task.id.to_string(),
+            },
+            states: task_selection_states(
+                state,
+                owned,
+                published.contains(&task.id),
+                auto_on.contains(&task.id),
+                task.state.as_deref(),
+                activity,
+            ),
+            parent_wave: task.wave_id,
+            name: task.identifier,
+            activity_known: activity.is_none_or(|activity| activity.known),
+        });
+    }
 
     let mut waves = super::waves_in(conn, Some(&repo))?;
     waves.sort_by(|a, b| (a.name(), a.id().as_str()).cmp(&(b.name(), b.id().as_str())));
@@ -109,67 +137,52 @@ fn work_in(
 }
 
 struct SelectionTask {
-    work: SelectionWork,
-    rank: u32,
-    /// Only Working Tasks participate in the start-time order.
-    started_at: Option<i64>,
+    task: Task,
+    state: TaskState,
+    owned: bool,
 }
 
-fn task_rows_in(
+impl SelectionTask {
+    fn working(&self) -> bool {
+        TaskSection::of(self.state, self.owned, self.task.state.as_deref()) == TaskSection::Working
+    }
+}
+
+// A drop and a view use the same order. Session activity only describes the rows.
+fn ordered_tasks_in(
     conn: &Connection,
     repository: &RepositoryId,
-    repo: &str,
-    projection: &SessionProjection,
+    saved: &[String],
 ) -> StoreResult<Vec<SelectionTask>> {
     let tasks = super::children::repository_tasks_in(conn, repository)?;
-    let activity = task_activity_in(conn, repo, projection)?;
-    // State, publication and ownership for every Task in a fixed number of
-    // statements: a query per Task costs thousands on a large repository.
     let ids: Vec<_> = tasks.iter().map(|task| task.id.clone()).collect();
-    let ids_json = super::children::ids_json(ids.iter().map(|id| id.as_str()));
-    let task_states = super::task_details::states_in(conn, &ids_json)?;
-    let auto_on = super::task_details::auto_on_in(conn, &ids_json)?;
-    let published = super::task_started::published_in(conn, &ids)?;
+    let states = super::task_details::states_in(
+        conn,
+        &super::children::ids_json(ids.iter().map(TaskId::as_str)),
+    )?;
     let owners = super::task_ownership::owners_in(conn, &ids)?;
     let mut rows = Vec::with_capacity(tasks.len());
     for task in tasks {
-        let state = *task_states
+        let state = *states
             .get(&task.id)
             .ok_or_else(|| invalid(format!("Task {} has no state", task.id)))?;
-        let activity = activity.get(&task.id);
-        let states = task_selection_states(
-            state,
-            owners.contains_key(&task.id),
-            published.contains(&task.id),
-            auto_on.contains(&task.id),
-            task.state.as_deref(),
-            activity,
-        );
         rows.push(SelectionTask {
-            rank: task.rank,
-            started_at: None,
-            work: SelectionWork {
-                key: WorkWorkspaceKey {
-                    repository: repository.to_string(),
-                    kind: WorkWorkspaceKind::Task,
-                    id: task.id.to_string(),
-                },
-                parent_wave: task.wave_id,
-                name: task.identifier,
-                states,
-                activity_known: activity.is_none_or(|activity| activity.known),
-            },
+            owned: owners.contains_key(&task.id),
+            task,
+            state,
         });
     }
     let starts = start_times_in(
         conn,
         rows.iter()
-            .filter(|row| row.work.states.contains(&SelectionState::Working))
-            .map(|row| row.work.key.id.as_str()),
+            .filter(|row| row.working())
+            .map(|row| row.task.id.as_str()),
     )?;
-    for task in &mut rows {
-        task.started_at = starts.get(&task.work.key.id).copied();
-    }
+    let order = TaskOrder::from_ids(saved.iter().cloned());
+    rows.sort_by_cached_key(|row| {
+        let id = row.task.id.as_str();
+        order.key(id, row.task.rank, starts.get(id).copied())
+    });
     Ok(rows)
 }
 
@@ -220,47 +233,13 @@ impl TaskOrder {
     pub fn key(&self, id: &str, rank: u32, started_at: Option<i64>) -> (TaskPosition, String) {
         let position = match started_at {
             None => TaskPosition::Planning(rank),
-            Some(at) => self.working_position(id, at),
+            Some(at) => self
+                .0
+                .get(id)
+                .copied()
+                .map_or(TaskPosition::New(Reverse(at)), TaskPosition::Saved),
         };
         (position, id.to_owned())
-    }
-
-    fn working_position(&self, id: &str, at: i64) -> TaskPosition {
-        self.0
-            .get(id)
-            .copied()
-            .map_or(TaskPosition::New(Reverse(at)), TaskPosition::Saved)
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct TaskDrop<'a> {
-    pub task: &'a str,
-    pub target: &'a str,
-    pub side: Option<DropSide>,
-}
-
-impl TaskDrop<'_> {
-    fn apply(self, tasks: Vec<SelectionTask>, saved: &[String]) -> StoreResult<Vec<String>> {
-        let saved = TaskOrder::from_ids(saved.iter().cloned());
-        let mut working: Vec<_> = tasks
-            .into_iter()
-            .filter_map(|task| {
-                let id = task.work.key.id;
-                Some((saved.working_position(&id, task.started_at?), id))
-            })
-            .collect();
-        working.sort_unstable();
-        let position = |id: &str| {
-            working
-                .iter()
-                .position(|(_, task)| task == id)
-                .ok_or_else(|| SelectionError::NotWorking(id.to_owned()))
-        };
-        let from = position(self.task)?;
-        let to = position(self.target)?;
-        move_into_place(&mut working, from, to, self.side);
-        Ok(working.into_iter().map(|(_, id)| id).collect())
     }
 }
 
@@ -372,11 +351,12 @@ fn task_activity_in(
 fn task_order_in(conn: &Connection, repository: &RepositoryId) -> StoreResult<Vec<String>> {
     let order: Option<String> = conn
         .query_row(
-            "SELECT task_ids_json FROM task_orders WHERE repository_id=?1",
+            "SELECT o.task_ids_json FROM repository_plans r LEFT JOIN task_orders o ON o.repository_id=r.id WHERE r.id=?1",
             [repository.as_str()],
             |row| row.get(0),
         )
-        .optional()?;
+        .optional()?
+        .ok_or(StoreError::NotFound)?;
     Ok(order
         .as_deref()
         .map(serde_json::from_str)
@@ -898,26 +878,53 @@ impl SqliteStore {
         start_times_in(&conn, ids)
     }
 
-    /// Prepare the edit from one reading. The saved IDs are checked again at commit.
-    pub fn prepare_task_order(
+    pub fn reorder_working_task(
         &self,
         repository: &RepositoryId,
-        inputs: &SessionProjectionInputs,
-        projection: &SessionProjection,
-        edit: TaskDrop<'_>,
-    ) -> StoreResult<Option<(Vec<String>, Vec<String>)>> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let Some(snapshot) = inputs.pin(&mut conn)? else {
-            return Ok(None);
-        };
-        let repo = repository_path_in(&snapshot, repository)?;
-        let saved = task_order_in(&snapshot, repository)?;
-        let tasks = task_rows_in(&snapshot, repository, &repo, projection)?;
-        let order = edit.apply(tasks, &saved)?;
-        Ok(Some((saved, order)))
+        task: &str,
+        target: &str,
+        side: Option<DropSide>,
+    ) -> StoreResult<Vec<String>> {
+        // Prepare outside the Machine's write lock. A competing drag needs a fresh order.
+        for _ in 0..3 {
+            let (saved, order) = self.prepare_task_order(repository, task, target, side)?;
+            if self.commit_task_order(repository, &saved, &order)? {
+                return Ok(order);
+            }
+        }
+        Err(StoreError::Stale(
+            "the Task order kept changing; read it again before reordering".into(),
+        ))
     }
 
-    pub fn commit_task_order(
+    fn prepare_task_order(
+        &self,
+        repository: &RepositoryId,
+        task: &str,
+        target: &str,
+        side: Option<DropSide>,
+    ) -> StoreResult<(Vec<String>, Vec<String>)> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let snapshot = conn.savepoint()?;
+        let saved = task_order_in(&snapshot, repository)?;
+        let mut order: Vec<_> = ordered_tasks_in(&snapshot, repository, &saved)?
+            .into_iter()
+            .filter(SelectionTask::working)
+            .map(|row| row.task.id.to_string())
+            .collect();
+        let position = |id: &str| {
+            order
+                .iter()
+                .position(|task| task == id)
+                .ok_or_else(|| SelectionError::NotWorking(id.to_owned()))
+        };
+        let from = position(task)?;
+        let to = position(target)?;
+        move_into_place(&mut order, from, to, side);
+        Ok((saved, order))
+    }
+
+    fn commit_task_order(
         &self,
         repository: &RepositoryId,
         read: &[String],
@@ -953,5 +960,24 @@ impl SqliteStore {
             ));
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::task_order_in;
+
+    #[test]
+    fn a_task_order_changed_after_preparation_keeps_the_new_order() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = crate::test_fixture::open(&dir.path().join("db")).unwrap();
+        let repo = crate::test_fixture::repository(&store, "/repo");
+        let order = ["b".to_owned(), "a".to_owned()];
+        assert!(store.commit_task_order(&repo, &[], &order).unwrap());
+        assert!(!store.commit_task_order(&repo, &[], &[]).unwrap());
+        assert_eq!(
+            task_order_in(&store.conn.lock().unwrap(), &repo).unwrap(),
+            order
+        );
     }
 }

@@ -45,12 +45,7 @@ struct WorkNavigator: View {
         }
     }
 
-    private var rowOrder: [WorkReference] {
-        model.sidebarTaskIDs.map { .task(id: $0) }
-            + model.visibleRoadmaps.map { .wave(id: $0.wave.id) }
-    }
-
-    private func moveFocus(_ direction: MoveCommandDirection) {
+    private func moveFocus(_ direction: MoveCommandDirection, in rowOrder: [WorkReference]) {
         guard direction == .up || direction == .down, !rowOrder.isEmpty else { return }
         let offset = direction == .down ? 1 : -1
         let current = focusedWork.flatMap { rowOrder.firstIndex(of: $0) }
@@ -59,6 +54,9 @@ struct WorkNavigator: View {
     }
 
     var body: some View {
+        let rows = model.sidebarRows
+        let ids = rows.map(\.id)
+        let rowOrder = ids.map { WorkReference.task(id: $0) } + model.visibleRoadmaps.map { .wave(id: $0.wave.id) }
         VStack(spacing: 0) {
             if let status = model.workStatus.progress {
                 WorkReadStatus(status: status)
@@ -69,8 +67,6 @@ struct WorkNavigator: View {
                 if let wave = model.sidebarWave { waveRow(wave) }
             }.padding([.horizontal, .top], Spacing.sm)
             WorkTaskList(navigation: model.navigation) {
-                // Read once: each read re-filters the plan and every Task's Sessions.
-                let rows = model.sidebarRows
                 let scope = model.navigation.sidebarScope
                 let dragOrder = scope == .repository && !model.navigation.sidebarSortByStatus ? rows.map(\.work.id) : []
                 VStack(alignment: .leading, spacing: Spacing.xs) {
@@ -88,7 +84,6 @@ struct WorkNavigator: View {
                             Text("\(rows.count)").font(Typography.meta).monospacedDigit()
                         }.foregroundStyle(palette.textTertiary).padding(Spacing.sm)
                     }
-                    // ⌘N counts the rows on screen; sidebar Task IDs are already unique.
                     ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
                         taskRow(row, dragOrder: dragOrder, slotHint: index < 9 ? "⌘\(index + 1)" : nil)
                     }
@@ -119,7 +114,7 @@ struct WorkNavigator: View {
         .foregroundStyle(palette.text).background(palette.surfaceMuted)
         .accessibilityIdentifier("work-navigator")
         .background(SidebarResponderCapture(memory: focusMemory))
-        .onMoveCommand(perform: moveFocus)
+        .onMoveCommand { moveFocus($0, in: rowOrder) }
         .onKeyPress(.home) { focusedWork = rowOrder.first; return .handled }
         .onKeyPress(.end) { focusedWork = rowOrder.last; return .handled }
         .onKeyPress("f", phases: .down) { key in
@@ -140,7 +135,7 @@ struct WorkNavigator: View {
             let source = model.showsSavedWork ? "saved" : "fresh"
             DispatchQueue.main.async { LaunchJournal.home.mark(.usable, ["source": source]) }
         }
-        .onChange(of: model.sidebarTaskIDs) { before, after in
+        .onChange(of: ids) { before, after in
             Perf.rowsChanged(from: before, to: after, owner: model.navigation.performanceOwner)
         }
         .onChange(of: model.navigation.sidebarFilter) { _, filter in

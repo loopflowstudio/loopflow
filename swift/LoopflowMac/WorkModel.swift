@@ -2148,19 +2148,15 @@ final class WorkModel {
         navigation.sidebarWaveID.flatMap { id in visibleRoadmaps.first { $0.wave.id == id } }
     }
 
-    /// The sidebar scope's members: its built-in plan's, or a Dashboard's visible ones in arrangement order.
-    private var sidebarMembers: [WorkMemberRef] {
-        switch navigation.sidebarScope {
-        case .repository: return builtInPlan(.repository)?.resolution.members ?? []
-        case .wave(let id): return builtInPlan(.wave(id))?.resolution.members ?? []
-        case .dashboard(let id): return dashboard(id)?.projection.visible ?? []
-        }
-    }
-
     /// Every Wave at the repository; a scoped Wave's child Waves; a Dashboard's Wave members.
     var sidebarWaves: [WaveRoadmap] {
-        guard navigation.sidebarScope != .repository else { return visibleRoadmaps }
-        return sidebarMembers.filter { $0.work.kind == .wave }
+        let members: [WorkMemberRef]
+        switch navigation.sidebarScope {
+        case .repository: return visibleRoadmaps
+        case .wave(let id): members = builtInPlan(.wave(id))?.resolution.members ?? []
+        case .dashboard(let id): members = dashboard(id)?.projection.visible ?? []
+        }
+        return members.filter { $0.work.kind == .wave }
             .compactMap { member in visibleRoadmaps.first { $0.wave.id == member.work.id } }
     }
 
@@ -2202,44 +2198,50 @@ final class WorkModel {
         }
     }
 
-    private func taskRows(_ plan: WorkViewPlan?) -> [SidebarTaskRow] {
+    var sidebarTaskIDs: [String] { sidebarRows.map(\.id) }
+
+    private var filteredSidebarRows: [SidebarTaskRow] {
+        let plan: WorkViewPlan?
+        var requiredStates: [WorkSelectionState]
+        switch navigation.sidebarScope {
+        case .repository, .wave:
+            plan = taskList
+            requiredStates = [.working]
+        case .dashboard(let id):
+            plan = dashboard(id)
+            requiredStates = []
+        }
         guard let plan else { return [] }
+        switch navigation.sidebarFilter {
+        case .working: break
+        case .available: requiredStates.append(.available)
+        case .busy: requiredStates.append(.busy)
+        }
         let contents = Dictionary(plan.contents.map { ($0.work, $0) }, uniquingKeysWith: { first, _ in first })
         var seen = Set<String>()
         return plan.taskTiles.compactMap { member in
             let id = resolvedTaskID(member.work.id)
             guard seen.insert(id).inserted else { return nil }
             let content = contents[member.work]
-            return SidebarTaskRow(id: id, work: member.work, states: content?.states ?? [], graphStep: content?.graphStep)
+            let states = content?.states ?? []
+            guard requiredStates.allSatisfy(states.contains) else { return nil }
+            return SidebarTaskRow(id: id, work: member.work, states: states, graphStep: content?.graphStep)
         }
     }
 
-    var sidebarTaskIDs: [String] { sidebarRows.map(\.id) }
-
     var sidebarRows: [SidebarTaskRow] {
-        let rows: [SidebarTaskRow]
-        switch navigation.sidebarScope {
-        case .repository, .wave: rows = taskRows(taskList).filter { $0.states.contains(.working) }
-        case .dashboard(let id): rows = taskRows(dashboard(id))
-        }
-        let visible = rows.filter { row in
-            switch navigation.sidebarFilter {
-            case .working: true
-            case .available: row.states.contains(.available)
-            case .busy: row.states.contains(.busy)
-            }
-        }
-        guard navigation.sidebarScope == .repository, navigation.sidebarSortByStatus else { return visible }
-        // Swift's stable sort retains the underlying drag order within each group.
-        var sorted = visible.sorted { $0.statusOrder < $1.statusOrder }
+        var rows = filteredSidebarRows
+        guard navigation.sidebarScope == .repository, navigation.sidebarSortByStatus else { return rows }
+        // Stable sorting keeps saved drag order within each status group.
+        rows.sort { $0.statusOrder < $1.statusOrder }
         if let slot = navigation.selectedSidebarSlot, let selection, selection.kind == .task {
             let id = resolvedTaskID(selection.id)
-            if let index = sorted.firstIndex(where: { $0.id == id }), slot != index {
-                let row = sorted.remove(at: index)
-                sorted.insert(row, at: min(slot, sorted.count))
+            if let index = rows.firstIndex(where: { $0.id == id }), slot != index {
+                let row = rows.remove(at: index)
+                rows.insert(row, at: min(slot, rows.count))
             }
         }
-        return sorted
+        return rows
     }
 
     func toggleSidebarSortByStatus() {

@@ -10,7 +10,7 @@
 - Keep PR #2025's immediate drag feedback, side-aware `DropSide` drops, and refusal recovery.
 
 - Turning sorting on with a Task already open holds its pre-toggle slot. A selection made while sorting holds the slot that was clicked. Switching filters starts a new slot in the visible list.
-- Drags for one Working list reach the Machine in click order across retries. Each drag previews immediately.
+- Drags for one Working list reach the Machine in click order across retries. Each drag previews immediately. Saving the drop uses the same ordered Task membership as the views and can finish while Session activity is unavailable.
 - Start time uses the first recorded claim, then the first recorded start event, then creation time. Later handoffs keep the Task’s original start time.
 - The status grouping uses the shared activity flags. A Task with no Blocked, Error, Busy or Available flag occupies the Idle group. Busy wins over Available when both are present.
 - The sidebar uses the Task’s saved Graph cursor while a run carries it, the same position used to resume that Task. A standalone Graph process in the checkout does not move the Task.

@@ -33,6 +33,11 @@ Focused checks on 2026-11-23:
   new-arrival/drag tests. The regenerated server schema removes `desktop.sort`.
 - `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings` passed.
 
+After simplification, four focused Rust tests passed for arrivals, stale writes,
+served drops and roadmap order. Eight headless Desktop tests passed for
+filtering, status grouping, navigation and drag recovery. `cargo fmt --check`
+passed.
+
 Next at gate: exercise the hover highlight in an unlocked Desktop window,
 then follow the walkthrough below.
 
@@ -90,6 +95,7 @@ then follow the walkthrough below.
 - `EXPLAIN QUERY PLAN` on a 10,011-Task store with 1,000 Graph rows showed
   indexed lookups for Tasks, primary Sessions, checkouts, Graphs and the local
   Machine.
+- On an in-memory copy with 10,012 Tasks and 103 saved orders, the saved-order lookup used the repository and Task order primary-key indexes.
 - Private QA rounds 1–4: [qa.html](qa.html).
 
 ## Docs

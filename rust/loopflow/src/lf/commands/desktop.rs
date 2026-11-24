@@ -2,7 +2,6 @@
 use anyhow::{bail, Context, Result};
 use clap::ValueEnum;
 use loopflow_execution::store::selections;
-use loopflow_storage::sqlite::selections::TaskDrop;
 use loopflow_storage::work::selection::{
     move_into_place, DropSide, SelectionError, WorkWorkspaceKey, WorkWorkspaceKind,
 };
@@ -2079,22 +2078,15 @@ fn edit_tiles(
                 )
                 .into());
             }
-            return selections::reorder_working_task(
-                &store,
-                repository,
-                TaskDrop {
-                    task: &member.id,
-                    target: &to.id,
-                    side: *side,
-                },
-            )
-            .map(DesktopTileRecord::Tasks)
-            .map_err(|error| match error {
-                StoreError::Selection(SelectionError::NotWorking(_)) => {
-                    DesktopError::Target(error.to_string()).into()
-                }
-                other => other.into(),
-            });
+            return store
+                .reorder_working_task(repository, &member.id, &to.id, *side)
+                .map(DesktopTileRecord::Tasks)
+                .map_err(|error| match error {
+                    StoreError::Selection(SelectionError::NotWorking(_)) => {
+                        DesktopError::Target(error.to_string()).into()
+                    }
+                    other => other.into(),
+                });
         }
         TileBoard::Dashboard(id) => id,
     };

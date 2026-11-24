@@ -3574,7 +3574,6 @@ mod tests {
         use loopflow_execution::store::selections;
         use loopflow_model::durable::{RepositoryId, TaskId};
         use loopflow_model::program_status::{Records, Report, State};
-        use loopflow_storage::sqlite::selections::TaskDrop;
         use loopflow_storage::work::selection::{Selection, SelectionState};
         let directory = tempfile::tempdir().unwrap();
         let database = directory.path().join("registry.db");
@@ -3778,16 +3777,10 @@ mod tests {
         check_order(&read(&store, "hand_back").await, [other, active]);
         check_filters(&[active], &[]);
 
-        selections::reorder_working_task(
-            &store.sqlite,
-            &repo,
-            TaskDrop {
-                task: active,
-                target: other,
-                side: None,
-            },
-        )
-        .unwrap();
+        store
+            .sqlite
+            .reorder_working_task(&repo, active, other, None)
+            .unwrap();
         check_order(&read(&store, "after_drag").await, [active, other]);
         report_states(4, &[State::Done, State::Working]);
         db.execute_batch(include_str!(

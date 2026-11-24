@@ -326,13 +326,13 @@ mod tests {
             )
             .unwrap();
             conn.execute(
-                "INSERT INTO task_primary_sessions(task_id,session_id) VALUES(?1,?2)",
-                params![task.as_str(), session.as_str()],
+                "UPDATE agent_sessions SET interactive=1,cwd=?2 WHERE id=?1",
+                params![session.as_str(), format!("{checkout}/")],
             )
             .unwrap();
             conn.execute(
-                "UPDATE agent_sessions SET interactive=1,cwd=?2 WHERE id=?1",
-                params![session.as_str(), format!("{checkout}/")],
+                "INSERT OR REPLACE INTO task_primary_sessions(task_id,session_id) VALUES(?1,?2)",
+                params![task.as_str(), session.as_str()],
             )
             .unwrap();
         }

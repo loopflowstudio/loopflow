@@ -78,13 +78,11 @@ pub(super) async fn resolve_managed_task(repo: &Path) -> OpsResult<ManagedTask> 
         }
         None => return Err(missing_task_registry()),
     };
-    let binding = crate::ops::resolve_execution_binding(&store, repo).await?;
-    let task = match binding.map(|binding| binding.work) {
-        Some(loopflow_model::durable::WorkRef::Task(id)) => {
-            store.get_task(&id).await.map_err(task_error)?
-        }
-        _ => None,
-    };
+    // A worktree nested inside a Task's checkout is no Task's: only the Task
+    // whose checkout it is, or one declared, delivers it.
+    let task = crate::ops::run::select_execution_work(&store, repo)
+        .await?
+        .and_then(|selected| selected.task);
     match task {
         Some(task) => Ok(ManagedTask::Managed {
             store,
@@ -619,7 +617,7 @@ pub(super) fn local_upstream_base(
 
 fn upstream_base(repo: &Path, default_branch: &str) -> OpsResult<String> {
     Ok(if default_branch == get_default_branch(repo)? {
-        crate::git::integration_base(repo)?
+        crate::git::default_branch_upstream(repo, default_branch)?
     } else if has_remote(repo)? {
         format!("origin/{default_branch}")
     } else {

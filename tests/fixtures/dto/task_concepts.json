@@ -37,7 +37,6 @@
         "task_ids": [
           "task_22222222222222222222222222222222"
         ],
-        "task_primary": false,
         "terminal_ids": [],
         "title": "Retained",
         "title_source": "human",
@@ -95,7 +94,6 @@
         "task_ids": [
           "task_22222222222222222222222222222222"
         ],
-        "task_primary": false,
         "terminal_ids": [],
         "title": "Retained",
         "title_source": "human",
@@ -151,7 +149,6 @@
         "raw": false,
         "state": "unknown",
         "task_ids": [],
-        "task_primary": false,
         "terminal_ids": [],
         "title": "Retained",
         "title_source": "human",
@@ -206,10 +203,7 @@
         "provider": null,
         "raw": false,
         "state": "unknown",
-        "task_ids": [
-          "task_22222222222222222222222222222222"
-        ],
-        "task_primary": false,
+        "task_ids": [],
         "terminal_ids": [],
         "title": "Retained",
         "title_source": "human",
@@ -265,7 +259,6 @@
         "raw": false,
         "state": "unknown",
         "task_ids": [],
-        "task_primary": false,
         "terminal_ids": [],
         "title": "Retained",
         "title_source": "human",
@@ -735,7 +728,6 @@
         "task_ids": [
           "task_22222222222222222222222222222222"
         ],
-        "task_primary": false,
         "terminal_ids": [],
         "title": "Retained",
         "title_source": "human",
@@ -793,7 +785,6 @@
         "task_ids": [
           "task_22222222222222222222222222222222"
         ],
-        "task_primary": false,
         "terminal_ids": [],
         "title": "Retained",
         "title_source": "human",
@@ -849,7 +840,6 @@
         "raw": false,
         "state": "unknown",
         "task_ids": [],
-        "task_primary": false,
         "terminal_ids": [],
         "title": "Retained",
         "title_source": "human",
@@ -904,10 +894,7 @@
         "provider": null,
         "raw": false,
         "state": "unknown",
-        "task_ids": [
-          "task_22222222222222222222222222222222"
-        ],
-        "task_primary": false,
+        "task_ids": [],
         "terminal_ids": [],
         "title": "Retained",
         "title_source": "human",
@@ -963,7 +950,6 @@
         "raw": false,
         "state": "unknown",
         "task_ids": [],
-        "task_primary": false,
         "terminal_ids": [],
         "title": "Retained",
         "title_source": "human",
@@ -1442,7 +1428,6 @@
         "task_ids": [
           "task_22222222222222222222222222222222"
         ],
-        "task_primary": false,
         "terminal_ids": [],
         "title": "Retained",
         "title_source": "human",
@@ -1500,7 +1485,6 @@
         "task_ids": [
           "task_22222222222222222222222222222222"
         ],
-        "task_primary": false,
         "terminal_ids": [],
         "title": "Retained",
         "title_source": "human",
@@ -1556,7 +1540,6 @@
         "raw": false,
         "state": "unknown",
         "task_ids": [],
-        "task_primary": false,
         "terminal_ids": [],
         "title": "Retained",
         "title_source": "human",
@@ -1611,10 +1594,7 @@
         "provider": null,
         "raw": false,
         "state": "unknown",
-        "task_ids": [
-          "task_22222222222222222222222222222222"
-        ],
-        "task_primary": false,
+        "task_ids": [],
         "terminal_ids": [],
         "title": "Retained",
         "title_source": "human",
@@ -1670,7 +1650,6 @@
         "raw": false,
         "state": "unknown",
         "task_ids": [],
-        "task_primary": false,
         "terminal_ids": [],
         "title": "Retained",
         "title_source": "human",
@@ -2140,7 +2119,6 @@
         "task_ids": [
           "task_22222222222222222222222222222222"
         ],
-        "task_primary": false,
         "terminal_ids": [],
         "title": "Retained",
         "title_source": "human",
@@ -2198,7 +2176,6 @@
         "task_ids": [
           "task_22222222222222222222222222222222"
         ],
-        "task_primary": false,
         "terminal_ids": [],
         "title": "Retained",
         "title_source": "human",
@@ -2254,7 +2231,6 @@
         "raw": false,
         "state": "unknown",
         "task_ids": [],
-        "task_primary": false,
         "terminal_ids": [],
         "title": "Retained",
         "title_source": "human",
@@ -2309,10 +2285,7 @@
         "provider": null,
         "raw": false,
         "state": "unknown",
-        "task_ids": [
-          "task_22222222222222222222222222222222"
-        ],
-        "task_primary": false,
+        "task_ids": [],
         "terminal_ids": [],
         "title": "Retained",
         "title_source": "human",
@@ -2368,7 +2341,6 @@
         "raw": false,
         "state": "unknown",
         "task_ids": [],
-        "task_primary": false,
         "terminal_ids": [],
         "title": "Retained",
         "title_source": "human",
@@ -2711,715 +2683,6 @@
             "unsettled": false
           },
           "observed_at": "2026-11-15T02:27:32.454977Z",
-          "reason": "Task is complete",
-          "state": "clear",
-          "unresolved_execution": false
-        },
-        "execution": {
-          "captured": null,
-          "died": null,
-          "outlook": null,
-          "reason": "No Task Graph has run; independent Sessions may still be active",
-          "state": "idle",
-          "step": null
-        },
-        "graph_name": "code",
-        "graph_source": "builtin",
-        "latest_graph_process": null,
-        "lifecycle": "done",
-        "next_move": {
-          "owner": "wave",
-          "reason": "done"
-        },
-        "pr": null,
-        "reference": {
-          "issue_url": null,
-          "workspace": null
-        },
-        "run_control": {
-          "unavailable": "Task is complete"
-        },
-        "runtime": {
-          "completion_pending": null,
-          "owner": {
-            "machine": {
-              "id": null,
-              "label": null
-            },
-            "person": null,
-            "person_id": null,
-            "person_key": null
-          },
-          "provider": "codex",
-          "reason": "done",
-          "status": "done",
-          "updated_at": "1970-01-01T00:00:01Z",
-          "work_id": "task_44444444444444444444444444444444"
-        },
-        "section": "done",
-        "owned_by_you": false,
-        "runs_on": null,
-        "selection_states": [
-          "done"
-        ],
-        "task": {
-          "tracker_state": {
-            "synced_at": null,
-            "state": "available"
-          },
-          "assignee": null,
-          "completed_at": null,
-          "description": "",
-          "due_date": null,
-          "id": "task_44444444444444444444444444444444",
-          "identifier": "FIX-4",
-          "tracker_id": null,
-          "parent_id": null,
-          "name": "Done",
-          "project_id": "proj_11111111111111111111111111111111",
-          "rank": 4,
-          "repo": "/repo",
-          "repo_id": "repo_11111111111111111111111111111111",
-          "state": "completed",
-          "sync": {
-            "actions": []
-          },
-          "wave_id": "11111111-1111-1111-1111-111111111111"
-        }
-      }
-    ]
-  },
-  {
-    "name": "active_planning_completed",
-    "sessions": [
-      {
-        "account": null,
-        "action": {
-          "label": "Take over",
-          "help": "Continue here; the client that has it ends, unsent text there is lost"
-        },
-        "agent_process_id": "aff7c43d-5479-436f-9dc1-9ca331c797a3",
-        "availability": "available",
-        "cwd": "/elsewhere",
-        "detail": "",
-        "graph_membership": {
-          "kind": "unknown",
-          "reason": "Graph membership was not recorded"
-        },
-        "id": "bound",
-        "interactive": true,
-        "model": null,
-        "open_argv": [
-          "/usr/bin/env",
-          "LF_BIN=/Users/jack/.lf-machine/install/gates/1/lf",
-          "LF_HOME=/Users/jack/.lf",
-          "/Users/jack/.lf-machine/install/gates/1/lf",
-          "session",
-          "resume",
-          "bound"
-        ],
-        "preview": null,
-        "primary_scope": null,
-        "program_status": {
-          "records": [
-            {
-              "app": null,
-              "id": "blocked",
-              "kind": null,
-              "msg": null,
-              "progress": null,
-              "state": "blocked",
-              "title": null
-            },
-            {
-              "app": null,
-              "id": "working",
-              "kind": null,
-              "msg": null,
-              "progress": null,
-              "state": "working",
-              "title": null
-            }
-          ],
-          "seen": true
-        },
-        "provider": null,
-        "raw": false,
-        "state": "active",
-        "task_ids": [
-          "task_22222222222222222222222222222222"
-        ],
-        "task_primary": false,
-        "terminal_ids": [],
-        "title": "Retained",
-        "title_source": "human",
-        "transition": null,
-        "turn": null,
-        "wave_id": "11111111-1111-1111-1111-111111111111",
-        "work": {
-          "id": "task_22222222222222222222222222222222",
-          "kind": "task"
-        },
-        "work_path": "Product / FIX-2",
-        "workspace": {
-          "machine_id": "home_ab0d76f1087a726425139e42407b223e",
-          "task_id": "task_22222222222222222222222222222222",
-          "unavailable": "Task checkout is unavailable",
-          "worktree": "/repo/fix-2"
-        },
-        "ended": null,
-        "start": null,
-        "outlook": null,
-        "status_line": "running"
-      },
-      {
-        "account": null,
-        "action": {
-          "label": "Try again",
-          "help": "The previous launch ended before the provider saved any history; this repeats its request"
-        },
-        "agent_process_id": null,
-        "availability": null,
-        "cwd": "/repo/fix-2/nested",
-        "detail": "",
-        "graph_membership": {
-          "kind": "unknown",
-          "reason": "Graph membership was not recorded"
-        },
-        "id": "checkout",
-        "interactive": true,
-        "model": null,
-        "open_argv": [
-          "/usr/bin/env",
-          "LF_BIN=/Users/jack/.lf-machine/install/gates/1/lf",
-          "LF_HOME=/Users/jack/.lf",
-          "/Users/jack/.lf-machine/install/gates/1/lf",
-          "session",
-          "resume",
-          "checkout"
-        ],
-        "preview": null,
-        "primary_scope": null,
-        "program_status": null,
-        "provider": null,
-        "raw": false,
-        "state": "unknown",
-        "task_ids": [
-          "task_22222222222222222222222222222222"
-        ],
-        "task_primary": false,
-        "terminal_ids": [],
-        "title": "Retained",
-        "title_source": "human",
-        "transition": null,
-        "turn": null,
-        "wave_id": "11111111-1111-1111-1111-111111111111",
-        "work": {
-          "id": "task_22222222222222222222222222222222",
-          "kind": "task"
-        },
-        "work_path": "Product / FIX-2",
-        "workspace": {
-          "machine_id": "home_ab0d76f1087a726425139e42407b223e",
-          "task_id": "task_22222222222222222222222222222222",
-          "unavailable": "Task checkout is unavailable",
-          "worktree": "/repo/fix-2"
-        },
-        "ended": null,
-        "start": null,
-        "outlook": null,
-        "status_line": "unknown"
-      },
-      {
-        "account": null,
-        "action": {
-          "label": "Try again",
-          "help": "The previous launch ended before the provider saved any history; this repeats its request"
-        },
-        "agent_process_id": null,
-        "availability": null,
-        "cwd": "/repo/fix-2",
-        "detail": "",
-        "graph_membership": {
-          "kind": "unknown",
-          "reason": "Graph membership was not recorded"
-        },
-        "id": "repository",
-        "interactive": true,
-        "model": null,
-        "open_argv": [
-          "/usr/bin/env",
-          "LF_BIN=/Users/jack/.lf-machine/install/gates/1/lf",
-          "LF_HOME=/Users/jack/.lf",
-          "/Users/jack/.lf-machine/install/gates/1/lf",
-          "session",
-          "resume",
-          "repository"
-        ],
-        "preview": null,
-        "primary_scope": "repository",
-        "program_status": null,
-        "provider": null,
-        "raw": false,
-        "state": "unknown",
-        "task_ids": [],
-        "task_primary": false,
-        "terminal_ids": [],
-        "title": "Retained",
-        "title_source": "human",
-        "transition": null,
-        "turn": null,
-        "wave_id": "11111111-1111-1111-1111-111111111111",
-        "work": {
-          "id": "task_22222222222222222222222222222222",
-          "kind": "task"
-        },
-        "work_path": "Product / FIX-2",
-        "workspace": {
-          "machine_id": "home_ab0d76f1087a726425139e42407b223e",
-          "task_id": null,
-          "unavailable": "Persistent checkout is unavailable",
-          "worktree": "/repo/fix-2"
-        },
-        "ended": null,
-        "start": null,
-        "outlook": null,
-        "status_line": "unknown"
-      },
-      {
-        "account": null,
-        "action": {
-          "label": "Try again",
-          "help": "The previous launch ended before the provider saved any history; this repeats its request"
-        },
-        "agent_process_id": null,
-        "availability": null,
-        "cwd": "/repo/fix-2",
-        "detail": "",
-        "graph_membership": {
-          "kind": "unknown",
-          "reason": "Graph membership was not recorded"
-        },
-        "id": "unknown",
-        "interactive": true,
-        "model": null,
-        "open_argv": [
-          "/usr/bin/env",
-          "LF_BIN=/Users/jack/.lf-machine/install/gates/1/lf",
-          "LF_HOME=/Users/jack/.lf",
-          "/Users/jack/.lf-machine/install/gates/1/lf",
-          "session",
-          "resume",
-          "unknown"
-        ],
-        "preview": null,
-        "primary_scope": null,
-        "program_status": null,
-        "provider": null,
-        "raw": false,
-        "state": "unknown",
-        "task_ids": [
-          "task_22222222222222222222222222222222"
-        ],
-        "task_primary": false,
-        "terminal_ids": [],
-        "title": "Retained",
-        "title_source": "human",
-        "transition": null,
-        "turn": null,
-        "wave_id": "11111111-1111-1111-1111-111111111111",
-        "work": {
-          "id": "11111111-1111-1111-1111-111111111111",
-          "kind": "wave"
-        },
-        "work_path": "Product",
-        "workspace": {
-          "machine_id": "home_ab0d76f1087a726425139e42407b223e",
-          "task_id": "task_22222222222222222222222222222222",
-          "unavailable": "Task checkout is unavailable",
-          "worktree": "/repo/fix-2"
-        },
-        "ended": null,
-        "start": null,
-        "outlook": null,
-        "status_line": "unknown"
-      },
-      {
-        "account": null,
-        "action": {
-          "label": "Try again",
-          "help": "The previous launch ended before the provider saved any history; this repeats its request"
-        },
-        "agent_process_id": null,
-        "availability": null,
-        "cwd": "/repo/fix-2",
-        "detail": "",
-        "graph_membership": {
-          "kind": "unknown",
-          "reason": "Graph membership was not recorded"
-        },
-        "id": "wave",
-        "interactive": true,
-        "model": null,
-        "open_argv": [
-          "/usr/bin/env",
-          "LF_BIN=/Users/jack/.lf-machine/install/gates/1/lf",
-          "LF_HOME=/Users/jack/.lf",
-          "/Users/jack/.lf-machine/install/gates/1/lf",
-          "session",
-          "resume",
-          "wave"
-        ],
-        "preview": null,
-        "primary_scope": "wave",
-        "program_status": null,
-        "provider": null,
-        "raw": false,
-        "state": "unknown",
-        "task_ids": [],
-        "task_primary": false,
-        "terminal_ids": [],
-        "title": "Retained",
-        "title_source": "human",
-        "transition": null,
-        "turn": null,
-        "wave_id": "11111111-1111-1111-1111-111111111111",
-        "work": {
-          "id": "task_22222222222222222222222222222222",
-          "kind": "task"
-        },
-        "work_path": "Product / FIX-2",
-        "workspace": {
-          "machine_id": "home_ab0d76f1087a726425139e42407b223e",
-          "task_id": null,
-          "unavailable": "Persistent checkout is unavailable",
-          "worktree": "/repo/fix-2"
-        },
-        "ended": null,
-        "start": null,
-        "outlook": null,
-        "status_line": "unknown"
-      }
-    ],
-    "tasks": [
-      {
-        "actions": {
-          "reason": "Task FIX-2 worktree /repo/fix-2 is missing; restore that exact path on branch \"fix-2\" before `lf task run FIX-2`; Task identity and PR history are unchanged",
-          "recommended": "no_action"
-        },
-        "condition": {
-          "evidence_age_secs": 1794709651,
-          "local_progress": {
-            "authored_commits": null,
-            "dirty": null,
-            "reason": "Task FIX-2 worktree /repo/fix-2 is missing; restore that exact path on branch \"fix-2\" before `lf task run FIX-2`; Task identity and PR history are unchanged",
-            "recovery_required": true,
-            "state": "missing",
-            "unsettled": true
-          },
-          "observed_at": "2026-11-15T02:27:32.775817Z",
-          "reason": "Task FIX-2 worktree /repo/fix-2 is missing; restore that exact path on branch \"fix-2\" before `lf task run FIX-2`; Task identity and PR history are unchanged",
-          "state": "blocked",
-          "unresolved_execution": true
-        },
-        "execution": {
-          "captured": null,
-          "died": null,
-          "outlook": null,
-          "reason": "No Task Graph has run; independent Sessions may still be active",
-          "state": "idle",
-          "step": null
-        },
-        "graph_name": "feature",
-        "graph_source": null,
-        "latest_graph_process": null,
-        "lifecycle": "active",
-        "next_move": {
-          "owner": "wave",
-          "reason": "ready"
-        },
-        "pr": {
-          "abandoned_at": null,
-          "base_commit": "base",
-          "branch": "fix-2",
-          "empty": null,
-          "id": "pr_22222222222222222222222222222222",
-          "merge_commit": null,
-          "phase": "working",
-          "publication": null,
-          "sequence": 1,
-          "slug": "fix-2"
-        },
-        "reference": {
-          "issue_url": null,
-          "workspace": {
-            "base_commit": "base",
-            "branch": "fix-2",
-            "local_exists": false,
-            "machine_id": "home_ab0d76f1087a726425139e42407b223e",
-            "machine_label": null,
-            "slug": "",
-            "worktree": "/repo/fix-2"
-          }
-        },
-        "run_control": {
-          "unavailable": "Task FIX-2 worktree /repo/fix-2 is missing; restore that exact path on branch \"fix-2\" before `lf task run FIX-2`; Task identity and PR history are unchanged"
-        },
-        "runtime": {
-          "completion_pending": null,
-          "owner": {
-            "machine": {
-              "id": null,
-              "label": null
-            },
-            "person": null,
-            "person_id": null,
-            "person_key": null
-          },
-          "provider": "codex",
-          "reason": "No Task Graph has run; independent Sessions may still be active",
-          "status": "active",
-          "updated_at": "1970-01-01T00:00:01Z",
-          "work_id": "task_22222222222222222222222222222222"
-        },
-        "section": "working",
-        "owned_by_you": false,
-        "runs_on": null,
-        "selection_states": [
-          "open",
-          "available",
-          "busy",
-          "blocked",
-          "active",
-          "working"
-        ],
-        "task": {
-          "tracker_state": {
-            "synced_at": null,
-            "state": "available"
-          },
-          "assignee": null,
-          "completed_at": null,
-          "description": "",
-          "due_date": null,
-          "id": "task_22222222222222222222222222222222",
-          "identifier": "FIX-2",
-          "tracker_id": null,
-          "parent_id": null,
-          "name": "Idle",
-          "project_id": "proj_11111111111111111111111111111111",
-          "rank": 2,
-          "repo": "/repo",
-          "repo_id": "repo_11111111111111111111111111111111",
-          "state": "completed",
-          "sync": {
-            "actions": []
-          },
-          "wave_id": "11111111-1111-1111-1111-111111111111"
-        }
-      },
-      {
-        "actions": {
-          "reason": "Task FIX-1 worktree /repo/fix-1 is missing; restore that exact path on branch \"\" before `lf task run FIX-1`; Task identity and PR history are unchanged",
-          "recommended": "no_action"
-        },
-        "condition": {
-          "evidence_age_secs": 1794709651,
-          "local_progress": {
-            "authored_commits": null,
-            "dirty": null,
-            "reason": "Task FIX-1 worktree /repo/fix-1 is missing; restore that exact path on branch \"\" before `lf task run FIX-1`; Task identity and PR history are unchanged",
-            "recovery_required": true,
-            "state": "missing",
-            "unsettled": true
-          },
-          "observed_at": "2026-11-15T02:27:32.769781Z",
-          "reason": "Task FIX-1 worktree /repo/fix-1 is missing; restore that exact path on branch \"\" before `lf task run FIX-1`; Task identity and PR history are unchanged",
-          "state": "blocked",
-          "unresolved_execution": true
-        },
-        "execution": {
-          "captured": null,
-          "died": null,
-          "outlook": null,
-          "reason": "No Task Graph has run; independent Sessions may still be active",
-          "state": "idle",
-          "step": null
-        },
-        "graph_name": "code",
-        "graph_source": "builtin",
-        "latest_graph_process": null,
-        "lifecycle": "idle",
-        "next_move": {
-          "owner": "wave",
-          "reason": "ready"
-        },
-        "pr": null,
-        "reference": {
-          "issue_url": null,
-          "workspace": {
-            "base_commit": "",
-            "branch": "",
-            "local_exists": false,
-            "machine_id": "home_ab0d76f1087a726425139e42407b223e",
-            "machine_label": null,
-            "slug": "",
-            "worktree": "/repo/fix-1"
-          }
-        },
-        "run_control": {
-          "unavailable": "Task FIX-1 worktree /repo/fix-1 is missing; restore that exact path on branch \"\" before `lf task run FIX-1`; Task identity and PR history are unchanged"
-        },
-        "runtime": {
-          "completion_pending": null,
-          "owner": {
-            "machine": {
-              "id": null,
-              "label": null
-            },
-            "person": null,
-            "person_id": null,
-            "person_key": null
-          },
-          "provider": "codex",
-          "reason": "No Task Graph has run; independent Sessions may still be active",
-          "status": "idle",
-          "updated_at": "1970-01-01T00:00:01Z",
-          "work_id": "task_11111111111111111111111111111111"
-        },
-        "section": "working",
-        "owned_by_you": false,
-        "runs_on": null,
-        "selection_states": [
-          "open",
-          "idle",
-          "working"
-        ],
-        "task": {
-          "tracker_state": {
-            "synced_at": null,
-            "state": "available"
-          },
-          "assignee": null,
-          "completed_at": null,
-          "description": "",
-          "due_date": null,
-          "id": "task_11111111111111111111111111111111",
-          "identifier": "FIX-1",
-          "tracker_id": null,
-          "parent_id": null,
-          "name": "Started, no checkout",
-          "project_id": "proj_11111111111111111111111111111111",
-          "rank": 1,
-          "repo": "/repo",
-          "repo_id": "repo_11111111111111111111111111111111",
-          "state": null,
-          "sync": {
-            "actions": []
-          },
-          "wave_id": "11111111-1111-1111-1111-111111111111"
-        }
-      },
-      {
-        "actions": {
-          "reason": "run the next work with `lf task run`; inspect earlier Graphs and independent Sessions first",
-          "recommended": "run"
-        },
-        "condition": {
-          "evidence_age_secs": 1794709651,
-          "local_progress": {
-            "authored_commits": null,
-            "dirty": null,
-            "reason": null,
-            "recovery_required": null,
-            "state": "not_applicable",
-            "unsettled": false
-          },
-          "observed_at": "2026-11-15T02:27:32.782384Z",
-          "reason": "ready",
-          "state": "waiting",
-          "unresolved_execution": false
-        },
-        "execution": {
-          "captured": null,
-          "died": null,
-          "outlook": null,
-          "reason": "No Task Graph has run; independent Sessions may still be active",
-          "state": "idle",
-          "step": null
-        },
-        "graph_name": "code",
-        "graph_source": "builtin",
-        "latest_graph_process": null,
-        "lifecycle": "abandoned",
-        "next_move": {
-          "owner": "wave",
-          "reason": "ready"
-        },
-        "pr": null,
-        "reference": {
-          "issue_url": null,
-          "workspace": null
-        },
-        "run_control": {
-          "unavailable": "Linear Task is canceled"
-        },
-        "runtime": {
-          "completion_pending": null,
-          "owner": null,
-          "provider": "codex",
-          "reason": "No Task Graph has run; independent Sessions may still be active",
-          "status": "unstarted",
-          "updated_at": "1970-01-01T00:00:01Z",
-          "work_id": "task_33333333333333333333333333333333"
-        },
-        "section": "abandoned",
-        "owned_by_you": false,
-        "runs_on": null,
-        "selection_states": [
-          "done"
-        ],
-        "task": {
-          "tracker_state": {
-            "synced_at": null,
-            "state": "available"
-          },
-          "assignee": null,
-          "completed_at": null,
-          "description": "",
-          "due_date": null,
-          "id": "task_33333333333333333333333333333333",
-          "identifier": "FIX-3",
-          "tracker_id": null,
-          "parent_id": null,
-          "name": "Backlog",
-          "project_id": "proj_11111111111111111111111111111111",
-          "rank": 3,
-          "repo": "/repo",
-          "repo_id": "repo_11111111111111111111111111111111",
-          "state": "canceled",
-          "sync": {
-            "actions": []
-          },
-          "wave_id": "11111111-1111-1111-1111-111111111111"
-        }
-      },
-      {
-        "actions": {
-          "reason": "Task is terminal",
-          "recommended": "no_action"
-        },
-        "condition": {
-          "evidence_age_secs": 1794709651,
-          "local_progress": {
-            "authored_commits": null,
-            "dirty": null,
-            "reason": null,
-            "recovery_required": null,
-            "state": "not_applicable",
-            "unsettled": false
-          },
-          "observed_at": "2026-11-15T02:27:32.786429Z",
           "reason": "Task is complete",
           "state": "clear",
           "unresolved_execution": false

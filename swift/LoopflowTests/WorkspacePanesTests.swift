@@ -14,7 +14,7 @@ struct WorkspacePanesTests {
     private func session(_ id: String, _ fields: [String: Any] = [:]) throws -> SessionRecord {
         var wire = try loadFixture("session.json")
         wire["id"] = id
-        wire["task_primary"] = true
+        wire["primary_scope"] = "task"
         wire["state"] = "unknown"
         wire["workspace"] = ["machine_id": location.machineId, "worktree": location.worktree,
                              "task_id": "task-a", "unavailable": NSNull()]

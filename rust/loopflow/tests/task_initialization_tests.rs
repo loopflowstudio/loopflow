@@ -443,7 +443,8 @@ fn missing_worktree_status_is_actionable_and_read_only() {
         let branch = "jack/missing-worktree";
         repo.create_branch(branch);
         let task = register_task_with_pr(home.path(), repo.path(), branch, &base);
-        (task, repo.path().to_path_buf(), branch.to_string())
+        let recorded = task.task.worktree.clone().expect("recorded checkout");
+        (task, recorded, branch.to_string())
     };
     assert!(!missing_path.exists(), "fixture worktree is absent");
     let runtime = tokio::runtime::Runtime::new().expect("missing Task runtime");

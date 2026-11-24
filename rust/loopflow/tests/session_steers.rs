@@ -823,13 +823,15 @@ fn public_commands_save_steers_without_launching_providers() {
     run(&["steer", task.task.id.as_str(), "TASK_DIRECTION"]);
     let conn = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
     conn.execute(
-        "INSERT INTO agent_sessions(id,title,title_source,created_at,cwd,input_published,repo)
-        VALUES('idle','Idle fixture','human',1,?1,1,?2)",
+        "INSERT INTO agent_sessions(id,title,title_source,created_at,cwd,input_published,repo,task_id,wave_id)
+        VALUES('idle','Idle fixture','human',1,?1,1,?2,?3,?4)",
         rusqlite::params![
             repo.path().to_str().unwrap(),
             loopflow_execution::repository::discover(repo.path())
                 .unwrap()
-                .to_string()
+                .to_string(),
+            task.task.id.as_str(),
+            task.task.wave_id.as_ref().unwrap().as_str()
         ],
     )
     .unwrap();

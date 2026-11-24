@@ -516,8 +516,8 @@ pub fn retirement() -> (
         let conn = store.conn.lock().unwrap();
         conn.execute(
             "INSERT INTO tasks(id,repository_id,issue_identifier,issue_title,issue_description,
-                 workspace_slug,created_at,updated_at,planning_completed,planning_completed_at)
-             VALUES(?1,?2,'PLAN-1','Plan','','plan',1,1,1,'done')",
+                 workspace_slug,created_at,updated_at,planning_state,planning_completed_at)
+             VALUES(?1,?2,'PLAN-1','Plan','','plan',1,1,'completed','done')",
             rusqlite::params![task.as_str(), repo.as_str()],
         )
         .unwrap();
@@ -527,9 +527,9 @@ pub fn retirement() -> (
         )
         .unwrap();
         conn.execute(
-            "UPDATE agent_sessions SET cwd='/repo.task/src',interactive=1,held_terminal_id=?1
+            "UPDATE agent_sessions SET cwd='/repo.task/src',task_id=?2,interactive=1,held_terminal_id=?1
              WHERE id='viewed'",
-            [&viewer],
+            rusqlite::params![viewer, task.as_str()],
         )
         .unwrap();
         conn.execute(

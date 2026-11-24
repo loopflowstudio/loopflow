@@ -42,7 +42,7 @@ struct WorkspacePerformanceTests {
                     "work": ["kind": "task", "id": "task-\(index)"],
                     "title": "Session \(index)", "detail": "fixture", "cwd": "/src/loopflow",
                     "wave_id": "wave-1", "state": "active",
-                    "work_path": NSNull(), "blocked": false, "title_source": "generated", "ended": NSNull(), "start": NSNull(), "outlook": NSNull(), "status_line": NSNull(), "task_primary": false,
+                    "work_path": NSNull(), "blocked": false, "title_source": "generated", "ended": NSNull(), "start": NSNull(), "outlook": NSNull(), "status_line": NSNull(),
                     "action": sessionActionFixture(state: "active"),
                     "graph_membership": ["kind": "independent"],
                     "task_ids": ["task-\(index)"], "agent_process_id": "44444444-4444-4444-8444-444444444444", "turn": NSNull(), "raw": false, "terminal_ids": [], "open_argv": ["must-not-launch"],

@@ -27,3 +27,9 @@
 - A remote tab launches the public `lf open --here` with its selectors. The tab resolves the Session at startup, so the tab command can be replayed and never contains a single-use ticket. For a Machine-only Session, the retry command and Work link carry the registered Machine ID even after a rename.
 
 - A routed continuation uses the peer Session’s harness. Revision 10 `session.continue` carries Session, request, geometry and routing selectors. Switching harnesses on a remote exact Session with `lf open -a` would need a continuation operation that carries the override.
+
+- A Desktop shell tab keeps the Machine from the reading it was opened in, and Close passes it as `--started-on`. `SessionAttached` gained no `machine`: the tab already names its Machine, and the receipt would only differ if ownership moved between the reading and the start. Mobile can add it in Slice 4 if it needs it.
+- `SessionsWorkspace.location` stays as the last known Machine and checkout (shell label, Files fallback). The plan listed it for deletion with the rest of the location stack; nothing compares or validates it now.
+- Restoring saved Work no longer hides terminals until a location probe confirms them (`requiresLocationValidation`): attaching goes through the server, which attaches wherever the Session runs.
+- An exact Session link to another Machine's Task is found in the Task-scoped `session.list` and must name the Task by this Mac's ID. Tracker-backed peers that gave the issue a different local Task ID fail that check ("was not found in Task"). Passed over skipping the check for remote records, which let an unrelated Session through.
+- Files for a Task this Mac's plan says another Machine owns opens before its Session, from `runtime.owner`, with an empty checkout path until the first `task.files.watch` reading names it.

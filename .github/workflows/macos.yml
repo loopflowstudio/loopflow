@@ -28,6 +28,8 @@ jobs:
       CARGO_PROFILE_TEST_DEBUG: "0"
       # --filter and --skip use this same expression, so every test runs once.
       SWIFT_TRANSPORT_TESTS: 'AppAppearanceTests|ThemeTests|ThemeWorkflowTests|LocalWaveAgentLauncherTests|ServerClientTests|WorkCLISubscriptionTests|WorkOpeningCLITests|PortfolioServiceTests|WorkObservationTransportTests'
+      # Two real servers joined by a stand-in ssh: about ninety seconds on a fast runner.
+      SWIFT_MACHINE_TESTS: 'RemoteTaskWorkspaceTests'
     steps:
       - uses: actions/checkout@v7
         with:
@@ -76,7 +78,7 @@ jobs:
           mkdir -p "$RUNNER_TEMP/swift-tests/models"
           swift --version > "$RUNNER_TEMP/swift-tests/toolchain.txt"
           /usr/bin/time -l scripts/test_desktop.sh --skip-build -Xswiftc -gnone \
-            --skip "$SWIFT_TRANSPORT_TESTS" \
+            --skip "$SWIFT_TRANSPORT_TESTS" --skip "$SWIFT_MACHINE_TESTS" \
             --event-stream-output-path "$RUNNER_TEMP/swift-tests/models/events.jsonl" \
             --event-stream-version 0 \
             2>&1 | tee "$RUNNER_TEMP/swift-tests/models/output.log"
@@ -94,10 +96,20 @@ jobs:
             --event-stream-version 0 \
             2>&1 | tee "$RUNNER_TEMP/swift-tests/transport/output.log"
         timeout-minutes: ${{ github.event_name == 'pull_request' && 6 || 20 }}
+      - name: Run headless two-Machine tests
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/swift-tests/machines"
+          /usr/bin/time -l scripts/test_desktop.sh --skip-build -Xswiftc -gnone \
+            --filter "$SWIFT_MACHINE_TESTS" \
+            --event-stream-output-path "$RUNNER_TEMP/swift-tests/machines/events.jsonl" \
+            --event-stream-version 0 \
+            2>&1 | tee "$RUNNER_TEMP/swift-tests/machines/output.log"
+        timeout-minutes: ${{ github.event_name == 'pull_request' && 6 || 20 }}
       - name: Name unfinished and slowest Swift tests
         if: failure()
         run: |
-          for group in models transport; do
+          for group in models transport machines; do
             echo "### $group" >> "$GITHUB_STEP_SUMMARY"
             python3 scripts/swift_test_report.py "$RUNNER_TEMP/swift-tests/$group/events.jsonl" >> "$GITHUB_STEP_SUMMARY"
           done

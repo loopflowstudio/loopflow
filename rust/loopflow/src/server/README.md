@@ -199,7 +199,7 @@ resolves it in its checkout of `sender.repository`. `task.save` sends no
 `peers.rs` keeps up to four idle `lf server connect` connections per Machine
 and route, closes them after 60 s idle, and opens a fresh one when the route
 changes. A read whose reused connection hits EOF or a reset retries once on a
-fresh one. A write retries only when it carries a `request_id`, which the
+fresh one. A save retries only when it carries a `request_id`, which the
 peer's answer cache makes safe; otherwise a write lost mid-flight is
 `outcome_unknown`. Bare CLI commands outside the server still open one
 connection and close it on exit.
@@ -209,8 +209,10 @@ to the Task, not the Machine. The server watches `task_ownership` beside the
 peer stream; when the owner changes it drops the stream and subscribes on the
 new owner (or reads locally) under the same `id`. The next reading's
 `reference.workspace.machine_id` names the new Machine, and `task.files.watch`
-sends one whole-tree invalidation. A client compares nothing; it notices the
-Machine changed from the reading. A draft carries its base revision, and
+sends a fresh file revision. Its body carries `task_id`, `machine_id`,
+`checkout` and an opaque `revision`. Refresh the tree when that revision
+changes. File events can coalesce while a client is busy. A checkpoint
+returns the current revision. A draft carries its base revision, and
 `task.save`'s revision check is the only write guard after a move.
 
 On a Machine that does not own a Task, `task.get`'s `reference.workspace` is
@@ -453,7 +455,7 @@ case names one operation, including distinct claim/unassign and pin/unpin writes
 | `task.list` (`closed: true`) | `lf task list --closed --wave <wave>` | read |
 | `task.changes` | `lf task changes <issue>` | read |
 | `task.diff`, `task.file`, `task.files` | `lf task diff`, `lf task file`, `lf task files` | read |
-| `task.files.watch` | none; Desktop's Files pane | subscription; one reading per change under the checkout, one whole-tree reading when the Task moves |
+| `task.files.watch` | none; Desktop's Files pane | subscription; file tree revision after a change under the checkout or a Task move |
 | `task.shell.start`, `.attach`, `.close` | `lf desktop shell`, the phone's Shell | server; a Task shell by `shell_id`, held on the Machine that started it |
 | `task.context` | `lf task context <issue>` | read |
 | `task.runs` | `lf task runs <issue>` | read |
@@ -561,7 +563,7 @@ the phone's `view.select` Task list and its creation destinations all read it.
   defaults, so a selected answer would not decode: it sends `null`, and gets
   a smaller payload only through a read with its own DTO.
 - `subscribe` takes a read with a subscription: `desktop.view.list`, `view.select`,
-  `session.list` without `limit`, `task.get`, `task.wait`, `session.history`,
+  `session.list` without `limit`, `task.get`, `task.status`, `task.files.watch`, `task.wait`, `session.history`,
   `plan.list` and `repo.tracker`. It answers
   a null `response`, then `reading {id,checkpoint,frame}` messages wrapping
   the existing complete `answers/unavailable/body` subscription frame. Typed

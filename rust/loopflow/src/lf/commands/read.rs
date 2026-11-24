@@ -177,6 +177,10 @@ pub enum Read {
         cursor: Option<String>,
         show_ignored: bool,
     },
+    /// Subscribe to changes in a Task checkout. A new revision invalidates the file tree.
+    #[serde(rename = "task.files.watch")]
+    #[schemars(extend("x-result" = generator.subschema_for::<loopflow_execution::ops::task::TaskFilesRevision>()))]
+    TaskFilesWatch { issue: String },
     /// `lf wave list --all`: every Wave on this Machine that is not removed.
     #[serde(rename = "wave.list")]
     #[schemars(extend("x-result" = generator.subschema_for::<Vec<crate::lf::commands::waves::WaveSnapshot>>()))]
@@ -480,6 +484,7 @@ impl Read {
                 }
                 argv
             }
+            Self::TaskFilesWatch { issue } => words(&["task", "watch-files", issue]),
             Self::WaveList => words(&["wave", "list", "--all", "--json"]),
             Self::MachineSelf => words(&["machine", "self", "--json"]),
             Self::DesktopPortfolio => words(&["desktop", "portfolio", "--json"]),
@@ -681,6 +686,13 @@ impl Read {
         self.read_here()
     }
 
+    pub(crate) fn follows_task(&self) -> bool {
+        matches!(
+            self,
+            Self::TaskGet { .. } | Self::TaskStatus { .. } | Self::TaskFilesWatch { .. }
+        )
+    }
+
     pub(crate) fn workspace_task_mut(&mut self) -> Option<&mut String> {
         match self {
             Self::TaskGet { issue, .. }
@@ -692,6 +704,7 @@ impl Read {
             | Self::TaskChanges { issue, .. }
             | Self::TaskDiff { issue, .. }
             | Self::TaskFile { issue, .. }
+            | Self::TaskFilesWatch { issue }
             | Self::TaskFiles { issue, .. }
             | Self::TaskStatus { issue, .. } => Some(issue),
             _ => None,
@@ -700,6 +713,15 @@ impl Read {
 
     /// Address the read as the owner's repository knows the Task.
     pub(super) fn peer(&mut self) -> anyhow::Result<Option<(Machine, Sender)>> {
+        let Some(route) = self.peer_route()? else {
+            return Ok(None);
+        };
+        self.address_peer(route).map(Some)
+    }
+
+    pub(crate) fn peer_route(
+        &mut self,
+    ) -> anyhow::Result<Option<loopflow_execution::durable::TaskExecutionRoute>> {
         use loopflow_execution::machine::task;
         let status = matches!(self, Self::TaskStatus { .. });
         let directory = self.directory_mut().cloned();
@@ -708,13 +730,20 @@ impl Read {
         };
         // While a move is in flight the source still reports its progress. File
         // operations always follow the execution route, even if that peer is down.
-        let route = if status {
-            task::remote_ownership_writer(issue, directory.as_deref())?
+        if status {
+            task::remote_ownership_writer(issue, directory.as_deref())
         } else {
-            task::remote_task(issue, directory.as_deref())?
-        };
-        let Some(route) = route else { return Ok(None) };
-        *issue = route.peer_selector;
+            task::remote_task(issue, directory.as_deref())
+        }
+    }
+
+    pub(crate) fn address_peer(
+        &mut self,
+        route: loopflow_execution::durable::TaskExecutionRoute,
+    ) -> anyhow::Result<(Machine, Sender)> {
+        *self
+            .workspace_task_mut()
+            .expect("only Task reads have peer routes") = route.peer_selector;
         let machine = super::write::find_machine(route.machine_id.as_str())?;
         let directory = super::work_route::repository_path(&route.repository_id)?;
         let sender = Sender {
@@ -722,7 +751,7 @@ impl Read {
             selection: Selection::capture(&directory, None)?,
             secrets: Secrets::default(),
         };
-        Ok(Some((machine, sender)))
+        Ok((machine, sender))
     }
 
     /// `read` on this Machine, never sent on: what a request another Machine
@@ -804,6 +833,9 @@ impl Read {
                 cursor,
                 show_ignored,
             } => value(&task_files(issue, path, cursor.as_deref(), *show_ignored)?),
+            Self::TaskFilesWatch { .. } => {
+                Err(invalid("task.files.watch requires a subscription").into())
+            }
             Self::WaveList => {
                 let waves = block_on(list_waves(true))??;
                 value(&waves.unwrap_or_default())
@@ -1017,6 +1049,7 @@ impl Read {
             | Self::TaskChanges { .. }
             | Self::TaskDiff { .. }
             | Self::TaskFile { .. }
+            | Self::TaskFilesWatch { .. }
             | Self::TaskFiles { .. }
             | Self::WaveList
             | Self::MachineSelf

@@ -53,12 +53,6 @@ macro_rules! writes {
         }
 
         impl Write {
-            /// Run the shared operation where its Work lives and keep its
-            /// declared result until serialization.
-            pub(crate) fn run(&self) -> anyhow::Result<WriteResult> {
-                self.execute(self.remote()?, &[])
-            }
-
             /// Run a write another Machine sent here, never sending it on: in
             /// this Machine's checkout of the sender's repository, a launch
             /// it starts running with the sender's selection and secrets.
@@ -328,13 +322,8 @@ writes! {
         content,
         ..
     } => {
-        match remote {
-            Some(owner) => owner.call()?,
-            None => {
-                let content = super::mutation::read_task_draft(&mut content.as_bytes())?;
-                loopflow_execution::ops::task::task_save(issue, path, revision, &content)?
-            }
-        }
+        let content = super::mutation::read_task_draft(&mut content.as_bytes())?;
+        loopflow_execution::ops::task::task_save(issue, path, revision, &content)?
     },
 
     /// `lf [--wave <wave>] steer [<id>] <message> --json`: a steer
@@ -1157,6 +1146,30 @@ macro_rules! directory_of {
 }
 
 impl Write {
+    pub(crate) fn run(&self) -> anyhow::Result<WriteResult> {
+        self.run_with(Remote::request)
+    }
+
+    pub(crate) fn run_with(
+        &self,
+        save: impl FnOnce(
+            &loopflow_model::durable::Machine,
+            Sender,
+            &Write,
+        ) -> anyhow::Result<loopflow_execution::machine::client::Response>,
+    ) -> anyhow::Result<WriteResult> {
+        let remote = self.remote()?;
+        match (self, remote) {
+            (Self::TaskSave { .. }, Some(remote)) => {
+                let answer = save(&remote.machine, remote.sender, &remote.change)?;
+                Ok(WriteResult::TaskSave(Box::new(serde_json::from_value(
+                    answer.result,
+                )?)))
+            }
+            (_, remote) => self.execute(remote, &[]),
+        }
+    }
+
     /// The Machine a Task or Session write goes to when its Work runs
     /// elsewhere, with the write naming that Work exactly. `None` runs it here.
     fn remote(&self) -> anyhow::Result<Option<Remote>> {
@@ -1167,9 +1180,10 @@ impl Write {
             Self::TaskRun { issue, .. } | Self::TaskAutoOn { issue, .. } => {
                 (remote_task(issue, None)?, true)
             }
-            Self::TaskSave { issue, .. } | Self::TaskAutoOff { issue, .. } => {
-                (remote_task(issue, None)?, false)
-            }
+            Self::TaskSave {
+                issue, directory, ..
+            } => (remote_task(issue, Some(directory))?, false),
+            Self::TaskAutoOff { issue, .. } => (remote_task(issue, None)?, false),
             Self::TaskClaim { issue, .. } | Self::TaskUnassign { issue, .. } => {
                 (remote_ownership_writer(issue, None)?, false)
             }
@@ -1401,14 +1415,17 @@ impl Remote {
 
     /// The answer of the destination's server; nothing runs here instead.
     pub(super) fn call<T: DeserializeOwned>(&self) -> anyhow::Result<T> {
-        let mut connection = loopflow_execution::machine::client::Connection::open_on(
-            &self.machine,
-            self.sender.clone(),
-            None,
-        )?;
-        let answer =
-            connection.request(crate::server::wire::Operation::Write(self.change.clone()))?;
+        let answer = Self::request(&self.machine, self.sender.clone(), &self.change)?;
         Ok(serde_json::from_value(answer.result)?)
+    }
+
+    fn request(
+        machine: &loopflow_model::durable::Machine,
+        sender: Sender,
+        change: &Write,
+    ) -> anyhow::Result<loopflow_execution::machine::client::Response> {
+        loopflow_execution::machine::client::Connection::open_on(machine, sender, None)?
+            .request(change)
     }
 }
 

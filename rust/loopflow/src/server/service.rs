@@ -870,7 +870,7 @@ pub(super) async fn session<C: Carrier>(
                 continue;
             }
             Start::Subscribe(query, select, resume) => {
-                // Only a sender's repository costs a store read.
+                let follow = matches!(origin, Origin::Local(_)) && query.follows_task();
                 let placed = match origin {
                     Origin::Machine(_) => tokio::task::spawn_blocking(move || origin.place(query))
                         .await
@@ -886,7 +886,7 @@ pub(super) async fn session<C: Carrier>(
                     }
                 };
                 let (member, delivery) =
-                    match subscriptions.join(&id, query.clone(), select.clone()) {
+                    match subscriptions.join(&id, query.clone(), select.clone(), follow) {
                         Ok(joined) => joined,
                         Err(failure) => {
                             send(lines, &ServerMessage::error(Some(id), unavailable(failure)))
@@ -1384,6 +1384,7 @@ async fn operate(
 ) -> Answer {
     let measured = matches!(&operation, Operation::Measured(_));
     let remembered = request_id
+        .clone()
         .filter(|_| operation.is_write())
         .map(|request_id| Remembered::new(request_id, &operation));
     let operation = match operation {
@@ -1404,7 +1405,9 @@ async fn operate(
                     let _held = reservation;
                     loopflow_execution::provider_auth::operations::served(|| {
                         Ok(serde_json::to_value(match origin {
-                            Origin::Local(_) => change.run()?,
+                            Origin::Local(peers) => change.run_with(|machine, sender, write| {
+                                peers.save(machine, sender, write, request_id)
+                            })?,
                             Origin::Machine(sender) => change.run_here(&sender)?,
                         })?)
                     })

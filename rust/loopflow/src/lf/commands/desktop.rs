@@ -663,7 +663,7 @@ pub(crate) fn subscribe_task_pane(
     transport: Transport,
 ) -> Result<Option<Subscription>> {
     let repo = loopflow_execution::ops::task::task_repository(directory, Some(issue))?;
-    let identifier = tokio::runtime::Runtime::new()?.block_on(async {
+    let task_id = tokio::runtime::Runtime::new()?.block_on(async {
         let store = loopflow_execution::store::read_existing_registry()?
             .map(std::sync::Arc::new)
             .context("no Loopflow store exists on this Machine")?;
@@ -672,10 +672,11 @@ pub(crate) fn subscribe_task_pane(
             status
                 .task
                 .context("only a registered Task can be subscribed")?
-                .identifier,
+                .id
+                .to_string(),
         )
     })?;
-    super::waves::subscribe_task_pane(&repo, identifier, transport)
+    super::waves::subscribe_task_pane(&repo, task_id, transport)
 }
 
 /// `lf desktop view list`: every plan a repository window shows, the default

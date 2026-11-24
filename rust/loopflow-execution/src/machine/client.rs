@@ -23,10 +23,10 @@ type ClientMessage = super::wire::ClientMessage;
 /// How long the server has to answer `status`, `hello`, `session.attach` or
 /// a ticket. A session's later waits are unbounded unless the caller sets its
 /// own limit.
-const HANDSHAKE: Duration = Duration::from_secs(10);
+pub const HANDSHAKE: Duration = Duration::from_secs(10);
 /// How long another Machine's server has to answer a request over SSH. A
 /// subscription's quiet stream is not bounded.
-const ANSWER: Duration = Duration::from_secs(120);
+pub const ANSWER: Duration = Duration::from_secs(120);
 
 /// `lf server status`: readiness observed without opening Work.
 #[derive(Debug, serde::Serialize)]
@@ -349,9 +349,13 @@ impl Connection {
         Ok(())
     }
 
-    /// One message the server moved to a ticketed connection.
-    fn fetch(&self, ticket: &str) -> Result<ServerMessage> {
-        let mut socket = redeem(&self.carrier, ticket)?;
+    /// Read one bulk message using a ticket from the named Machine.
+    pub fn fetch_peer(machine: Machine, ticket: &str) -> Result<ServerMessage> {
+        Self::fetch_from(&Carrier::Ssh(machine), ticket)
+    }
+
+    fn fetch_from(carrier: &Carrier, ticket: &str) -> Result<ServerMessage> {
+        let mut socket = redeem(carrier, ticket)?;
         let mut line = Vec::new();
         (&mut socket.reader)
             .take(MAX_BULK as u64 + 1)
@@ -405,7 +409,12 @@ impl Connection {
                 };
                 exchange.map_err(|failure| match failure {
                     RequestError::Disconnected(error) => {
-                        RequestError::Disconnected(name_failure(error))
+                        let error = if disconnected == ErrorCode::OutcomeUnknown {
+                            Error::refused(&error, ErrorCode::OutcomeUnknown).into()
+                        } else {
+                            name_failure(error)
+                        };
+                        RequestError::Disconnected(error)
                     }
                     RequestError::Failed(error) => RequestError::Failed(name_failure(error)),
                     refusal => refusal,
@@ -548,7 +557,7 @@ impl Connection {
                 )));
             };
             if let ServerMessage::Bulk { ticket, .. } = &message {
-                message = self.fetch(ticket)?;
+                message = Self::fetch_from(&self.carrier, ticket)?;
             }
             if matches(&message) {
                 return Ok(message);
@@ -558,7 +567,7 @@ impl Connection {
     }
 }
 
-fn identity(kind: &str, name: &str) -> ClientIdentity {
+pub fn identity(kind: &str, name: &str) -> ClientIdentity {
     ClientIdentity {
         kind: kind.into(),
         platform: std::env::consts::OS.into(),
@@ -679,9 +688,8 @@ fn left(until: Option<Instant>) -> Duration {
     })
 }
 
-/// A wait for another Machine's answer that `within` cut short. `code` says
-/// whether the work may have happened there.
-fn unavailable_on(machine: &Machine, error: anyhow::Error) -> anyhow::Error {
+/// Name the unreachable Machine while retaining a peer's typed refusal.
+pub fn unavailable_on(machine: &Machine, error: anyhow::Error) -> anyhow::Error {
     let refusal = Error::refused(&error, ErrorCode::Unavailable);
     if refusal.code != ErrorCode::Unavailable || refusal.data.is_some() {
         return error;

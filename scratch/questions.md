@@ -8,6 +8,8 @@
 - **Add `task` and `machine` selectors to `session.attach`, `session.continue`, and `session.start`.** A Session created natively on a remote Machine (e.g. a Modal sandbox) has no row in the laptop's `agent_sessions` table, so the local server cannot discover its owning Machine from `LfSessionId` alone. Passed over syncing remote `agent_sessions` into local SQLite (violates local-only inventory rules in `docs/dev/machines.md`).
 - **Keep `lf task location --peers` as a CLI diagnostic command while deleting Desktop's `onMachine` and `pinTaskLocation` Task-view routing.** Passed over deleting `lf task location` entirely, which is documented as a separate peer-observation diagnostic tool.
 
-- File operations follow the execution Machine during an unfinished move. `remote_ownership_writer` keeps reporting progress on the source when arrival is unconfirmed. Using it for files would expose the source checkout during a peer outage. Served reads now go through `server/peers.rs::PeerPool`; served writes (`task.save`) still open a one-shot connection until they move onto the pool with the incoming request ID.
+- File operations follow the execution Machine during an unfinished move. `remote_ownership_writer` keeps reporting progress on the source when arrival is unconfirmed. Using it for files would expose the source checkout during a peer outage. Served reads and saves share the peer pool.
 
 - A peer’s per-request refusal leaves the pipe available for the next read. Only a transport disconnect on a reused pipe earns a retry. The peer pool lives with the server and serves both client transports.
+
+- File watching returns an opaque whole-tree revision for each batch of relevant events. A slow subscriber can skip intermediate readings, so a reading containing only the last changed path could leave an earlier file stale. The CLI watcher keeps its path batches.

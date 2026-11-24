@@ -7027,6 +7027,27 @@
         },
         {
           "additionalProperties": false,
+          "description": "Subscribe to changes in a Task checkout. A new revision invalidates the file tree.",
+          "properties": {
+            "issue": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "task.files.watch",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "issue"
+          ],
+          "type": "object",
+          "x-result": {
+            "$ref": "#/$defs/TaskFilesRevision"
+          }
+        },
+        {
+          "additionalProperties": false,
           "description": "`lf wave list --all`: every Wave on this Machine that is not removed.",
           "properties": {
             "kind": {
@@ -13590,6 +13611,30 @@
         "missing"
       ],
       "type": "string"
+    },
+    "TaskFilesRevision": {
+      "description": "One checkout's file invalidation. Readers rescan on a new revision, including\nwhen multiple changes coalesce while their connection is busy.",
+      "properties": {
+        "checkout": {
+          "type": "string"
+        },
+        "machine_id": {
+          "type": "string"
+        },
+        "revision": {
+          "type": "string"
+        },
+        "task_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "task_id",
+        "machine_id",
+        "checkout",
+        "revision"
+      ],
+      "type": "object"
     },
     "TaskFollowUp": {
       "description": "Historical keep-open scope, retained for event decoding only.",

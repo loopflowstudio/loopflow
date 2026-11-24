@@ -896,6 +896,7 @@ fn server_operations_match_their_lf_commands() {
         | Read::TaskDiff { .. }
         | Read::TaskFile { .. }
         | Read::TaskFiles { .. }
+        | Read::TaskFilesWatch { .. }
         | Read::WaveList
         | Read::MachineSelf
         | Read::DesktopPortfolio

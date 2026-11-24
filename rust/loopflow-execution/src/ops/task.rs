@@ -4,7 +4,7 @@ pub use adoption::TaskAdoptionOptions;
 pub mod remote;
 pub use remote::TASK_SOURCE_ENV;
 mod workspace;
-pub use workspace::{watch_task_files, TaskFilesFrame};
+pub use workspace::{watch_task_files, TaskFilesFrame, TaskFilesRevision, TaskFilesWatch};
 mod planning_explain;
 pub use planning_explain::{
     explain_task_planning, TaskPlanningAction, TaskPlanningExplanation, TaskPlanningRequest,

@@ -4341,7 +4341,7 @@ fn server_routed_task_workspace() {
         .unwrap()
         .result;
     assert_eq!(detail["task"]["repo"], other.remote_path.to_str().unwrap());
-    assert_eq!(peer_client(), (connection_id, requests + 5));
+    assert_eq!(peer_client(), (connection_id.clone(), requests + 5));
 
     let save = |base: &Value| Write::TaskSave {
         directory: plan.local_path.clone(),
@@ -4354,7 +4354,15 @@ fn server_routed_task_workspace() {
     assert_eq!(conflict["published"], false);
     assert_eq!(conflict["file"]["content"], "from mini\n");
     assert_eq!(
-        client.request(save(&original)).unwrap().result["published"],
+        client
+            .request_as(
+                save(&original),
+                None,
+                Some("save-on-mini".into()),
+                ErrorCode::OutcomeUnknown
+            )
+            .unwrap()
+            .result["published"],
         true
     );
     assert_eq!(
@@ -4365,6 +4373,12 @@ fn server_routed_task_workspace() {
         fs::read_to_string(plan.local_path.join(file)).unwrap(),
         "old laptop copy"
     );
+    assert_eq!(peer_client(), (connection_id, requests + 7));
+    assert!(plan
+        .remote
+        .command_answer("save-on-mini")
+        .unwrap()
+        .is_some());
     let changes = client
         .request(Read::TaskChanges {
             issue: task.to_string(),
@@ -4403,6 +4417,109 @@ fn server_routed_task_workspace() {
         .unwrap()
         .result;
     assert!(preview["patch"].as_str().unwrap().contains("-from mini"));
+    // Subscribe once on the laptop. Mini's checkout changes without any
+    // laptop write, then the same streams follow the claim back home.
+    checkout(&local, other_task.as_str(), &other.local_path);
+    checkout(&peer, other_task.as_str(), &other.remote_path);
+    let laptop = loopflow_execution::store::machines::local_machine(&other.local).unwrap();
+    {
+        let mut watches = Connection::open_at(Path::new(&socket)).unwrap();
+        watches
+            .set_read_timeout(Some(std::time::Duration::from_secs(20)))
+            .unwrap();
+        let pane_id = watches
+            .subscribe(
+                Read::TaskGet {
+                    directory: other.local_path.clone(),
+                    issue: other_task.to_string(),
+                },
+                Some(vec!["row.reference.workspace.machine_id".into()]),
+            )
+            .unwrap();
+        let owner =
+            |frame: Value| frame["body"]["row"]["reference"]["workspace"]["machine_id"].clone();
+        assert_eq!(
+            owner(watches.reading(&pane_id).unwrap().unwrap()),
+            mini.id.as_str()
+        );
+        let files_id = watches
+            .subscribe(
+                Read::TaskFilesWatch {
+                    issue: other_task.to_string(),
+                },
+                None,
+            )
+            .unwrap();
+        let initial = watches.reading(&files_id).unwrap().unwrap();
+        assert_eq!(
+            initial["body"]["checkout"],
+            other.remote_path.to_str().unwrap()
+        );
+        fs::write(other.remote_path.join("from-mini.txt"), "hello").unwrap();
+        let modified = watches.reading(&files_id).unwrap().unwrap();
+        assert_ne!(modified["body"]["revision"], initial["body"]["revision"]);
+
+        let status_id = watches
+            .subscribe(
+                Read::TaskStatus {
+                    directory: other.local_path.clone(),
+                    issue: other_task.to_string(),
+                },
+                Some(vec!["task.title".into()]),
+            )
+            .unwrap();
+        let _ = watches.reading(&status_id).unwrap().unwrap();
+        peer.execute(
+            "UPDATE tasks SET issue_title='An edit on mini' WHERE id=?1",
+            [other_task.as_str()],
+        )
+        .unwrap();
+        assert_eq!(
+            watches.reading(&status_id).unwrap().unwrap()["body"]["task"]["title"],
+            "An edit on mini"
+        );
+        watches.checkpoint(&pane_id, 17).unwrap();
+        assert_eq!(watches.reading(&pane_id).unwrap().unwrap()["answers"], 17);
+
+        loopflow_execution::store::ownership::move_claim(&other.remote, &other_task, &laptop.id)
+            .unwrap();
+        other.to_local();
+        assert_eq!(
+            owner(watches.reading(&pane_id).unwrap().unwrap()),
+            laptop.id.as_str()
+        );
+        let mut frame = watches.reading(&files_id).unwrap().unwrap();
+        while frame["body"]["machine_id"] == mini.id.as_str() {
+            frame = watches.reading(&files_id).unwrap().unwrap();
+        }
+        assert_eq!(
+            frame["body"]["checkout"],
+            other.local_path.to_str().unwrap()
+        );
+        local
+            .execute(
+                "UPDATE tasks SET issue_title='An edit on laptop' WHERE id=?1",
+                [other_task.as_str()],
+            )
+            .unwrap();
+        while watches.reading(&status_id).unwrap().unwrap()["body"]["task"]["title"]
+            != "An edit on laptop"
+        {}
+        loopflow_execution::store::ownership::move_claim(&other.local, &other_task, &mini.id)
+            .unwrap();
+        assert_eq!(
+            owner(watches.reading(&pane_id).unwrap().unwrap()),
+            mini.id.as_str()
+        );
+        let mut frame = watches.reading(&files_id).unwrap().unwrap();
+        while frame["body"]["machine_id"] == laptop.id.as_str() {
+            frame = watches.reading(&files_id).unwrap().unwrap();
+        }
+        assert_eq!(
+            frame["body"]["checkout"],
+            other.remote_path.to_str().unwrap()
+        );
+    }
     // Restart the peer under an idle pipe. The next read reconnects once.
     drop(server_on_mini);
     let restarted = served_mini(&fixture);
@@ -4410,11 +4527,33 @@ fn server_routed_task_workspace() {
         client.request(&read_file).unwrap().result["content"],
         "edited on mini\n"
     );
+    drop(restarted);
+    let restarted = served_mini(&fixture);
+    let saved = client
+        .request_as(
+            save(&original),
+            None,
+            Some("save-after-restart".into()),
+            ErrorCode::OutcomeUnknown,
+        )
+        .unwrap();
+    assert_eq!(saved.result["published"], false);
+    assert!(plan
+        .remote
+        .command_answer("save-after-restart")
+        .unwrap()
+        .is_some());
     executable(
         &fixture.root.path().join("bin/ssh"),
         "#!/bin/sh\nexit 255\n",
     );
     drop(restarted);
+    let unknown = client
+        .request(save(&original))
+        .unwrap_err()
+        .downcast::<Error>()
+        .unwrap();
+    assert_eq!(unknown.code, ErrorCode::OutcomeUnknown);
     let offline = client
         .request(&read_file)
         .unwrap_err()

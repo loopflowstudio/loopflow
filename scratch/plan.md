@@ -22,7 +22,7 @@ Passed over: the earlier `expected_owner` compare-and-swap on 14 operations with
 
 ## Source of truth
 
-- **Task ownership:** the append-only `task_ownership` log, resolved via `task_execution_route` (`rust/loopflow-execution/src/store/ownership.rs`, `machine/task.rs::remote_ownership_writer`). Ownership alone selects the execution Machine.
+- **Task ownership:** the append-only `task_ownership` log, resolved via `task_execution_route` (`rust/loopflow-execution/src/store/ownership.rs`, `machine/task.rs::remote_task`). Ownership alone selects the execution Machine.
 - **Checkout & execution state:** per-Machine `task_checkouts`, `agent_sessions`, `desktop_shells`, and held terminals (`transport::registry::Registry`) on the owning Machine. A stale `task_checkouts` row on a non-owning Machine is history only, never the active workspace.
 - **Cross-Machine router:** the local/paired `lf server` (`rust/loopflow/src/server/`). Every native client (Desktop over Unix socket, Mobile over Tailscale WebSocket, CLI relays/reads) talks to that one server; the server talks to peer Machines over pooled `ssh … lf server connect` connections.
 
@@ -44,7 +44,7 @@ Passed over: the earlier `expected_owner` compare-and-swap on 14 operations with
 
 - **Cross-Machine Task addressing (finding):** On Linear-backed repos (such as `manabot`), two Machines can hold different local `task_id` UUIDs for the same issue (`MTG-421`), while sharing `identifier` and `tracker_id`. Today `waves.rs:988` forwards `route.task_id`, which fails to resolve on a fresh sandbox unless the peer happens to share that UUID.
   - **Fix:** When forwarding a Task-scoped operation to a peer, resolve the Task's portable selector on the sender: prefer `tracker_id` (or `identifier` when `tracker_id` is absent) for Linear/Asana-backed Tasks, else `route.task_id` for trackerless plans. On the peer, `Origin::Machine` scopes `resolve_task_id` to the sender's `repository` checkout so identifiers are unambiguous.
-- **Routed `Read` variants (when `Origin::Local` and `remote_ownership_writer(issue)` names another Machine):**
+- **Routed `Read` variants (when `Origin::Local` and `remote_task(issue)` names another Machine):** File operations follow the execution route immediately after a move claim. Only status uses `remote_ownership_writer` so the source can report an unfinished move.
   - `task.status` (replaces `waves::remote_task_detail`), `task.get`, `task.detail`, `task.changes`, `task.diff`, `task.file`, `task.files`, plus `task.runs` and `session.list` when `task: Some(issue)` is set.
   - Unscoped `session.list { task: None }`, `plan.list`, `desktop.view.list`, `view.select`, and `wave.plan` stay local (inventories remain local; zero SSH fanout on list/board reads).
 - **Routed `Write` variants:**
@@ -212,7 +212,13 @@ Describe the intended behavior; implementation must match them or change them.
 Build thinly end to end in four slices; each slice runs and proves itself before moving on, and deletes what it replaces as soon as it works:
 
 1. **Slice 1 (de-risks the hardest core): Server peer pool, routed Task reads/writes/subscriptions, and bridged terminal tickets (`Session` + `TaskShell`).**
-   - Build `PeerPool` (`server/peers.rs`, `machine/client.rs`), route `task.status`/`get`/`detail`/`changes`/`diff`/`file`/`files`/`runs`/`files.watch` + `task.save` + `session.attach`/`continue`/`start` + `task.shell.start`/`attach`/`close` with `not_started` and `unavailable` typing, re-route subscriptions when ownership advances, and implement async `Purpose::RemoteTerminal` bridging for both Unix socket and WebSocket (`service::bridge` + `remote::bridge`).
+   - The first end-to-end piece routes one-shot file browsing, content, changes, diff and revision-checked save over the laptop server. The existing status command uses the same peer connection setup. The route carries the portable selector from the same SQLite row as the Task ID. The receiving server resolves it in the sender's repository before reading or writing.
+   - A warm SQLite lookup of a tracker key across 10,000 synthetic Tasks in 100 repositories averaged 59.7 ms over 100 reads on this Machine. With indexed prefix and UUID predicates, the repository-scoped lookup averaged 6.1 µs. `EXPLAIN QUERY PLAN` changed from a Task index scan to point lookups and a primary-key range. These times cover selector SQL only.
+   - `cargo test -p loopflow --test integration machine_commands::server_routed_task_workspace` passed against two isolated servers. The test moves a Task with a draft open, checks the owner has no checkout, then browses and edits its files and cuts the SSH route.
+   - `cargo test -p loopflow-storage --lib query_plans::tests::task_workspace_selectors_resolve_by_index` passed with both query plans. The existing CLI regression `machine_commands::a_status_read_for_a_task_mini_runs_shows_a_rename_made_there` passed for human and JSON output.
+   - `cargo fmt` and `cargo clippy --all-targets -- -D warnings` passed. Gate runs the remaining Task acceptance checks as their slices land.
+   - Next, pool peer connections for the existing requests. Add one-shot `task.get`, `task.detail`, `task.runs` and Task-scoped `session.list`, then re-route `task.get`, `task.status` and `task.files.watch` subscriptions when ownership advances. File requests currently open one peer connection each.
+   - Route `session.attach`, `session.continue`, `session.start` and the three `task.shell` operations. Bridge terminal tickets over the Unix socket and WebSocket.
    - Fix `waves.rs::task_reference` and `ops/task/snapshot.rs` so stale local checkouts never masquerade as active when another Machine owns the Task.
    - Bump protocol to revision 10, regenerate `tests/fixtures/dto/server_schema.json`, update server fixtures and `ServerProtocol.swift` / `ServerProtocolTests.swift`.
    - **Proves:** A two-Machine Rust integration test (`machine_commands::server_routed_task_workspace`) with a stale local checkout (distinct file bytes) reads remote unchanged files, uncommitted diff, saves a remote file, starts + attaches a remote Task shell (`hostname` & `pwd`) and remote Session through the local server's Unix socket AND WebSocket carrier, reuses the pooled peer connection across reads, re-routes an open `task.get` subscription to the new owner when the Task moves (same `id`, next reading names the new Machine), saves a draft after the move only when its base revision matches, returns `not_found/not_started` before checkout, and `unavailable` naming the peer when unreachable.

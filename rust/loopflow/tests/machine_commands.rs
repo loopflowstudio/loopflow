@@ -4164,6 +4164,144 @@ fn served(fixture: &Machines) -> (Child, String) {
 }
 
 #[test]
+fn server_routed_task_workspace() {
+    use loopflow::lf::commands::{read::Read, write::Write};
+    use loopflow_execution::engine::{Error, ErrorCode};
+    use loopflow_execution::machine::client::Connection;
+
+    let fixture = preview_machines();
+    let plan = SharedPlan::new(&fixture);
+    // Both Machines imported the same tracker issue under their own Task ID.
+    let task = plan.local_task();
+    let peer_task = plan.task();
+    let mini = loopflow_execution::store::machines::local_machine(&plan.remote).unwrap();
+    loopflow_execution::store::ownership::claim_task(&plan.remote, &peer_task).unwrap();
+    loopflow_execution::store::ownership::claim_task(&plan.local, &task).unwrap();
+    let database = |path| rusqlite::Connection::open(fixture.root.path().join(path)).unwrap();
+    let local = database("local/loopflow.db");
+    let peer = database("remote/store/loopflow.db");
+    for (db, id) in [(&local, &task), (&peer, &peer_task)] {
+        db.execute(
+            "UPDATE tasks SET external_issue_id='shared-tracker-key', issue_identifier='WORK-42' WHERE id=?1",
+            [id.as_str()],
+        ).unwrap();
+    }
+    let checkout = |db: &rusqlite::Connection, id: &str, path: &Path| {
+        db.execute(
+            "INSERT INTO task_checkouts(task_id,worktree) VALUES(?1,?2)",
+            [id, path.to_str().unwrap()],
+        )
+        .unwrap();
+    };
+    checkout(&local, task.as_str(), &plan.local_path);
+    let file = "document.txt";
+    fs::write(plan.local_path.join(file), "old laptop copy").unwrap();
+    let _mini = served_mini(&fixture);
+    let (_server, socket) = served(&fixture);
+    let mut client = Connection::open_at(Path::new(&socket)).unwrap();
+    let read_file = Read::TaskFile {
+        issue: task.to_string(),
+        path: file.into(),
+        at: None,
+    };
+    let before_move = client.request(&read_file).unwrap().result;
+    assert_eq!(before_move["content"], "old laptop copy");
+    loopflow_execution::store::ownership::begin_task_move(&plan.local, &task, &mini.id).unwrap();
+    let absent = client
+        .request(&read_file)
+        .unwrap_err()
+        .downcast::<Error>()
+        .unwrap();
+    assert_eq!(absent.code, ErrorCode::NotFound);
+    assert_eq!(
+        absent.data.unwrap(),
+        serde_json::json!({"reason":"not_started","task_id":peer_task})
+    );
+
+    checkout(&peer, peer_task.as_str(), &plan.remote_path);
+    fs::write(plan.remote_path.join(file), "from mini\n").unwrap();
+    git(&plan.remote_path, &["add", file]);
+    git(&plan.remote_path, &["commit", "-qm", "File on mini"]);
+    let tree = client
+        .request(Read::TaskFiles {
+            issue: task.to_string(),
+            path: String::new(),
+            cursor: None,
+            show_ignored: false,
+        })
+        .unwrap()
+        .result;
+    assert!(tree["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|entry| entry["path"] == file));
+    let original = client.request(&read_file).unwrap().result;
+    assert_eq!(original["content"], "from mini\n");
+    let save = |base: &Value| Write::TaskSave {
+        directory: plan.local_path.clone(),
+        issue: task.to_string(),
+        path: file.into(),
+        revision: base["revision"].as_str().unwrap().into(),
+        content: "edited on mini\n".into(),
+    };
+    let conflict = client.request(save(&before_move)).unwrap().result;
+    assert_eq!(conflict["published"], false);
+    assert_eq!(conflict["file"]["content"], "from mini\n");
+    assert_eq!(
+        client.request(save(&original)).unwrap().result["published"],
+        true
+    );
+    assert_eq!(
+        fs::read_to_string(plan.remote_path.join(file)).unwrap(),
+        "edited on mini\n"
+    );
+    assert_eq!(
+        fs::read_to_string(plan.local_path.join(file)).unwrap(),
+        "old laptop copy"
+    );
+    let changes = client
+        .request(Read::TaskChanges {
+            issue: task.to_string(),
+            base: "head".into(),
+            head: None,
+        })
+        .unwrap()
+        .result;
+    assert!(changes["files"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|entry| entry["path"] == file));
+    let diff = client
+        .request(Read::TaskDiff {
+            issue: task.to_string(),
+            path: Some(file.into()),
+            base: "head".into(),
+            head: None,
+            draft: None,
+        })
+        .unwrap()
+        .result;
+    assert!(diff["patch"].as_str().unwrap().contains("+edited on mini"));
+
+    executable(
+        &fixture.root.path().join("bin/ssh"),
+        "#!/bin/sh\nexit 255\n",
+    );
+    let offline = client
+        .request(&read_file)
+        .unwrap_err()
+        .downcast::<Error>()
+        .unwrap();
+    assert_eq!(offline.code, ErrorCode::Unavailable);
+    let data = offline.data.unwrap();
+    assert_eq!(data["resource"], "machine");
+    assert_eq!(data["machine_label"], "mini");
+    assert!(offline.message.contains("mini"));
+}
+
+#[test]
 fn served_ownership_routes_to_its_writer_and_never_falls_back_locally() {
     use loopflow::lf::commands::write::Write as Mutation;
     use loopflow::server::wire::Operation;

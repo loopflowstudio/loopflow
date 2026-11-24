@@ -967,56 +967,6 @@ pub fn subscribe_task_status(
     })
 }
 
-/// A connection to the server of the Machine that runs the Task `issue`
-/// names, and the `task.status` read to send it; `None` when it runs here or
-/// a move from here has not arrived, whose progress only this Machine knows.
-fn task_machine(repo: &Path, issue: &str) -> Result<Option<TaskMachine>> {
-    use loopflow_execution::machine::wire::{Secrets, Selection, Sender};
-    let Some(route) = loopflow_execution::machine::task::remote_ownership_writer(issue)? else {
-        return Ok(None);
-    };
-    let machine = super::write::find_machine(route.machine_id.as_str())?;
-    let sender = Sender {
-        repository: route.repository_id,
-        selection: Selection::capture(repo, None)?,
-        secrets: Secrets::default(),
-    };
-    let connection =
-        loopflow_execution::machine::client::Connection::open_on(&machine, sender, None)?;
-    let read = super::read::Read::TaskStatus {
-        directory: repo.to_owned(),
-        issue: route.task_id.to_string(),
-    };
-    Ok(Some(TaskMachine {
-        name: machine.name(),
-        connection,
-        read,
-    }))
-}
-
-struct TaskMachine {
-    name: String,
-    connection: loopflow_execution::machine::client::Connection,
-    read: super::read::Read,
-}
-
-impl TaskMachine {
-    fn status(mut self) -> Result<serde_json::Value> {
-        let answer = self
-            .connection
-            .request(crate::server::wire::Operation::Read(self.read))?;
-        Ok(answer.result)
-    }
-}
-
-/// `task.status` for a Task another Machine runs, as that Machine's server
-/// reads it; `None` when it runs here.
-pub(crate) fn remote_task_detail(repo: &Path, issue: &str) -> Result<Option<serde_json::Value>> {
-    task_machine(repo, issue)?
-        .map(TaskMachine::status)
-        .transpose()
-}
-
 /// `lf task status <issue>` (`--json`, `--subscribe`) for a Task another
 /// Machine runs, from that Machine's server. `false` when it runs here.
 pub fn print_remote_task_status(
@@ -1025,21 +975,27 @@ pub fn print_remote_task_status(
     json: bool,
     subscribe: bool,
 ) -> Result<bool> {
-    let Some(machine) = task_machine(repo, issue)? else {
+    let mut read = super::read::Read::TaskStatus {
+        directory: repo.to_owned(),
+        issue: issue.into(),
+    };
+    let Some((machine, mut connection)) = read.peer()? else {
         return Ok(false);
     };
     if subscribe {
-        print_remote_readings(machine)?;
-    } else if json {
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&loopflow_execution::read_stream::selected_answer(
-                &machine.status()?
-            )?)?
-        );
+        print_remote_readings(connection, read)?;
     } else {
-        let name = machine.name.clone();
-        print_remote_detail(&name, &serde_json::from_value(machine.status()?)?)?;
+        let detail = connection.query(read)?.result;
+        if json {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&loopflow_execution::read_stream::selected_answer(
+                    &detail
+                )?)?
+            );
+        } else {
+            print_remote_detail(&machine.name(), &serde_json::from_value(detail)?)?;
+        }
     }
     Ok(true)
 }
@@ -1088,14 +1044,12 @@ fn print_remote_detail(machine: &str, detail: &TaskDetail) -> Result<()> {
 }
 
 /// The `--subscribe` readings of the Machine's server, one JSON line each.
-fn print_remote_readings(machine: TaskMachine) -> Result<()> {
+fn print_remote_readings(
+    mut connection: loopflow_execution::machine::client::Connection,
+    read: super::read::Read,
+) -> Result<()> {
     use std::io::Write as _;
     use std::sync::atomic::Ordering;
-    let TaskMachine {
-        mut connection,
-        read,
-        ..
-    } = machine;
     let id = connection.subscribe(read, loopflow_execution::read_stream::selected())?;
     // As here, the subscription ends when stdin closes, after its first
     // reading; closing this end of the pipe ends it on the other Machine too.

@@ -192,7 +192,8 @@ impl Connection {
             identity(super::wire::MACHINE_CLIENT, "lf"),
             // The entry may start the server first.
             left(until),
-        )?;
+        )
+        .map_err(|error| unavailable_on(machine, error))?;
         connection.until = until;
         connection.set_read_timeout(None)?;
         Ok(connection)
@@ -303,19 +304,39 @@ impl Connection {
 
     /// One request and its answer; other ids' messages wait in `pending`.
     pub fn request(&mut self, operation: impl serde::Serialize) -> Result<Response> {
-        let id = self.send(operation)?;
+        self.request_with(operation, ErrorCode::OutcomeUnknown)
+    }
+
+    /// A read has no effect to recover if the Machine loses the connection.
+    pub fn query(&mut self, operation: impl serde::Serialize) -> Result<Response> {
+        self.request_with(operation, ErrorCode::Unavailable)
+    }
+
+    fn request_with(
+        &mut self,
+        operation: impl serde::Serialize,
+        disconnected: ErrorCode,
+    ) -> Result<Response> {
+        let id = self.send(operation).map_err(|error| match &self.carrier {
+            Carrier::Ssh(machine, _) if disconnected == ErrorCode::Unavailable => {
+                unavailable_on(machine, error)
+            }
+            _ => error,
+        })?;
+        let matches = |message: &ServerMessage| answers(message, &id);
         let answer = match &self.carrier {
             Carrier::Ssh(machine, _) => {
                 let machine = machine.clone();
                 let within = left(self.until);
                 self.set_read_timeout(Some(within))?;
-                let answer = self.wait(|message| answers(message, &id)).map_err(|error| {
-                    unanswered(error, &machine, within, ErrorCode::OutcomeUnknown)
-                });
+                let answer = self.wait(disconnected, matches);
                 self.set_read_timeout(None)?;
-                answer?
+                answer.map_err(|error| match disconnected {
+                    ErrorCode::Unavailable => unavailable_on(&machine, error),
+                    code => unanswered(error, &machine, within, code),
+                })?
             }
-            Carrier::Socket(_) => self.wait(|message| answers(message, &id))?,
+            Carrier::Socket(_) => self.wait(disconnected, matches)?,
         };
         match answer {
             ServerMessage::Response {
@@ -351,7 +372,7 @@ impl Connection {
             resume: None,
             sender: self.carrier.sender(),
         })?;
-        match self.wait(|message| answers(message, &id))? {
+        match self.wait(ErrorCode::Unavailable, |message| answers(message, &id))? {
             ServerMessage::Response { .. } => Ok(id),
             ServerMessage::Error {
                 code,
@@ -381,7 +402,7 @@ impl Connection {
     /// its last; an error for it ends the subscription.
     pub fn reading(&mut self, id: &str) -> Result<Option<serde_json::Value>> {
         loop {
-            let message = self.wait(|message| {
+            let message = self.wait(ErrorCode::Unavailable, |message| {
                 matches!(message,
                     ServerMessage::Event { id: of, .. }
                     | ServerMessage::Reading { id: of, .. }
@@ -419,27 +440,30 @@ impl Connection {
         })
     }
 
-    /// The first message `matches`; a refusal among them is the error.
-    fn wait(&mut self, mut matches: impl FnMut(&ServerMessage) -> bool) -> Result<ServerMessage> {
+    /// The first matching frame, including a refusal from the peer.
+    fn wait(
+        &mut self,
+        disconnected: ErrorCode,
+        mut matches: impl FnMut(&ServerMessage) -> bool,
+    ) -> Result<ServerMessage> {
         if let Some(index) = self.pending.iter().position(&mut matches) {
-            return accepted(
-                self.pending
-                    .remove(index)
-                    .expect("position names a pending message"),
-            );
+            return Ok(self
+                .pending
+                .remove(index)
+                .expect("position names a pending message"));
         }
         loop {
             let Some(mut message) = self.socket.receive()? else {
                 return Err(self.socket.ended(
-                    "Loopflow server closed the connection; the outcome is unknown",
-                    ErrorCode::OutcomeUnknown,
+                    "Loopflow server closed the connection before answering",
+                    disconnected,
                 ));
             };
             if let ServerMessage::Bulk { ticket, .. } = &message {
                 message = self.fetch(ticket)?;
             }
             if matches(&message) {
-                return accepted(message);
+                return Ok(message);
             }
             self.pending.push_back(message);
         }
@@ -569,6 +593,29 @@ fn left(until: Option<Instant>) -> Duration {
 
 /// A wait for another Machine's answer that `within` cut short. `code` says
 /// whether the work may have happened there.
+fn unavailable_on(machine: &Machine, error: anyhow::Error) -> anyhow::Error {
+    let refusal = Error::refused(&error, ErrorCode::Unavailable);
+    if refusal.code != ErrorCode::Unavailable || refusal.data.is_some() {
+        return error;
+    }
+    Error::new(
+        ErrorCode::Unavailable,
+        format!(
+            "{} is unavailable: {}; check `ssh {} lf server status`",
+            machine.name(),
+            refusal.message,
+            machine.route,
+        ),
+    )
+    .with(serde_json::json!({
+        "resource": "machine",
+        "machine_id": machine.id,
+        "machine_label": machine.label,
+        "machine_name": machine.name(),
+    }))
+    .into()
+}
+
 fn unanswered(
     error: anyhow::Error,
     machine: &Machine,

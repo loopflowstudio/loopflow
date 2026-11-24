@@ -538,9 +538,16 @@ enum Origin {
 impl Origin {
     /// `read` where it runs: in the sender's repository here.
     fn place(&self, mut read: Read) -> Result<Read, Error> {
-        if let (Self::Machine(sender), Some(directory)) = (self, read.directory_mut()) {
-            *directory = crate::lf::commands::work_route::repository_path(&sender.repository)
-                .map_err(|error| Error::new(ErrorCode::NotFound, format!("{error:#}")))?;
+        if let Self::Machine(sender) = self {
+            if let Some(issue) = read.workspace_task_mut() {
+                *issue = crate::lf::commands::work_route::peer_task_id(&sender.repository, issue)
+                    .map_err(unavailable)?;
+            }
+            if let Some(directory) = read.directory_mut() {
+                *directory =
+                    crate::lf::commands::work_route::repository_path(&sender.repository)
+                        .map_err(|error| Error::new(ErrorCode::NotFound, format!("{error:#}")))?;
+            }
         }
         Ok(read)
     }

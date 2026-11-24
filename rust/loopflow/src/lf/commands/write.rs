@@ -66,6 +66,9 @@ macro_rules! writes {
                 if let Some(directory) = self.directory_mut() {
                     *directory = super::work_route::repository_path(&sender.repository)?;
                 }
+                if let Self::TaskSave { issue, .. } = &mut self {
+                    *issue = super::work_route::peer_task_id(&sender.repository, issue)?;
+                }
                 let environment = sender.selection.environment(&sender.secrets)?;
                 self.execute(None, &environment)
             }
@@ -325,8 +328,13 @@ writes! {
         content,
         ..
     } => {
-        let content = super::mutation::read_task_draft(&mut content.as_bytes())?;
-        loopflow_execution::ops::task::task_save(issue, path, revision, &content)?
+        match remote {
+            Some(owner) => owner.call()?,
+            None => {
+                let content = super::mutation::read_task_draft(&mut content.as_bytes())?;
+                loopflow_execution::ops::task::task_save(issue, path, revision, &content)?
+            }
+        }
     },
 
     /// `lf [--wave <wave>] steer [<id>] <message> --json`: a steer
@@ -1159,7 +1167,9 @@ impl Write {
             Self::TaskRun { issue, .. } | Self::TaskAutoOn { issue, .. } => {
                 (remote_task(issue)?, true)
             }
-            Self::TaskAutoOff { issue, .. } => (remote_task(issue)?, false),
+            Self::TaskSave { issue, .. } | Self::TaskAutoOff { issue, .. } => {
+                (remote_task(issue)?, false)
+            }
             Self::TaskClaim { issue, .. } | Self::TaskUnassign { issue, .. } => {
                 (remote_ownership_writer(issue)?, false)
             }
@@ -1180,7 +1190,9 @@ impl Write {
             _ => None,
         };
         let mut write = self.clone();
-        if let Self::TaskRun { issue, .. }
+        if let Self::TaskSave { issue, .. } = &mut write {
+            *issue = route.peer_selector;
+        } else if let Self::TaskRun { issue, .. }
         | Self::TaskAutoOn { issue, .. }
         | Self::TaskAutoOff { issue, .. }
         | Self::TaskClaim { issue, .. }

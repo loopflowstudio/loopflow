@@ -23,11 +23,13 @@ use super::usage;
 use super::waves::list as list_waves;
 use crate::lf::SessionListArgs;
 use loopflow_execution::engine::{Error, ErrorCode};
+use loopflow_execution::machine::client::Connection;
 use loopflow_execution::machine::connection::local_machine;
+use loopflow_execution::machine::wire::{Secrets, Selection, Sender};
 use loopflow_execution::ops::task::{task_changes, task_diff, task_file, task_files};
 use loopflow_execution::read_stream::{Subscription, Transport};
 use loopflow_execution::session::SessionFilter;
-use loopflow_model::durable::RepositoryId;
+use loopflow_model::durable::{Machine, RepositoryId};
 
 fn words(words: &[&str]) -> Vec<String> {
     words.iter().map(|word| word.to_string()).collect()
@@ -663,13 +665,49 @@ impl Read {
 
     /// What `lf <argv>` prints, as a JSON value, read on the caller's thread.
     /// A Task another Machine runs is read by that Machine's server.
-    pub fn read(&self) -> anyhow::Result<serde_json::Value> {
-        if let Self::TaskStatus { directory, issue } = self {
-            if let Some(detail) = super::waves::remote_task_detail(directory, issue)? {
-                return Ok(detail);
-            }
+    pub fn read(mut self) -> anyhow::Result<serde_json::Value> {
+        if let Some((_, mut connection)) = self.peer()? {
+            return Ok(connection.query(self)?.result);
         }
         self.read_here()
+    }
+
+    pub(crate) fn workspace_task_mut(&mut self) -> Option<&mut String> {
+        match self {
+            Self::TaskChanges { issue, .. }
+            | Self::TaskDiff { issue, .. }
+            | Self::TaskFile { issue, .. }
+            | Self::TaskFiles { issue, .. }
+            | Self::TaskStatus { issue, .. } => Some(issue),
+            _ => None,
+        }
+    }
+
+    /// Open the owner's server and address the read as its repository knows the Task.
+    pub(super) fn peer(&mut self) -> anyhow::Result<Option<(Machine, Connection)>> {
+        use loopflow_execution::machine::task;
+        let status = matches!(self, Self::TaskStatus { .. });
+        let Some(issue) = self.workspace_task_mut() else {
+            return Ok(None);
+        };
+        // While a move is in flight the source still reports its progress. File
+        // operations always follow the execution route, even if that peer is down.
+        let route = if status {
+            task::remote_ownership_writer(issue)?
+        } else {
+            task::remote_task(issue)?
+        };
+        let Some(route) = route else { return Ok(None) };
+        *issue = route.peer_selector;
+        let machine = super::write::find_machine(route.machine_id.as_str())?;
+        let directory = super::work_route::repository_path(&route.repository_id)?;
+        let sender = Sender {
+            repository: route.repository_id,
+            selection: Selection::capture(&directory, None)?,
+            secrets: Secrets::default(),
+        };
+        let connection = Connection::open_on(&machine, sender, None)?;
+        Ok(Some((machine, connection)))
     }
 
     /// `read` on this Machine, never sent on: what a request another Machine

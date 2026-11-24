@@ -6,6 +6,8 @@ pub type OpsResult<T> = Result<T, OpsError>;
 
 #[derive(Debug, Error)]
 pub enum OpsError {
+    #[error("{0}")]
+    Refused(#[from] crate::engine::Error),
     #[error(transparent)]
     Planning(#[from] crate::linear::LinearBindingError),
     /// A tracker request that failed in the tracker's terms (a rate limit).

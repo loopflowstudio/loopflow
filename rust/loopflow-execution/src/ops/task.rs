@@ -383,7 +383,13 @@ pub fn file_context(store: &SqliteStore, issue: &str) -> OpsResult<TaskCheckout>
     let checkout = store
         .task_checkout(&task_id)
         .map_err(|error| task_error(format!("cannot read Task checkout: {error}")))?
-        .ok_or_else(|| task_error(format!("Task {issue:?} is not checked out on this Machine")))?;
+        .ok_or_else(|| {
+            crate::engine::Error::new(
+                crate::engine::ErrorCode::NotFound,
+                format!("Task {issue} is not started"),
+            )
+            .with(serde_json::json!({"reason":"not_started", "task_id":task_id}))
+        })?;
     Ok(checkout)
 }
 

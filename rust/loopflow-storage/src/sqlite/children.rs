@@ -687,7 +687,17 @@ impl SqliteStore {
         issue: &str,
     ) -> StoreResult<Vec<(TaskId, String, Option<String>)>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        task_candidates_in(&conn, issue)
+        task_candidates_in(&conn, issue, None)
+    }
+
+    /// Resolve a selector sent by a peer in the shared repository.
+    pub fn repository_task_id(
+        &self,
+        repository: &RepositoryId,
+        issue: &str,
+    ) -> StoreResult<Option<TaskId>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        unique_task_id(issue, task_candidates_in(&conn, issue, Some(repository))?)
     }
 
     /// Resolve from one saved snapshot, retrying changed scope above SQL.
@@ -2074,15 +2084,17 @@ pub struct TaskRepositoryScope {
 fn task_candidates_in(
     conn: &Connection,
     issue: &str,
+    repository: Option<&RepositoryId>,
 ) -> StoreResult<Vec<(TaskId, String, Option<String>)>> {
     let selector = loopflow_model::id::TaskSelector::parse(issue);
     let mut statement = conn.prepare(
         "SELECT t.id, COALESCE(t.issue_title, t.issue_identifier, t.id), w.repo FROM tasks t
          JOIN repository_plans w ON w.id=t.repository_id
-         WHERE (t.id=?1 OR t.external_issue_id=?3 OR t.issue_identifier=?4
-            OR substr(t.id, 6, length(?2))=?2
+         WHERE (?5 IS NULL OR t.repository_id=?5)
+           AND (t.id=?1 OR t.external_issue_id=?3 OR t.issue_identifier=?4
+            OR (t.id >= 'task_'||?2 AND t.id < 'task_'||?2||'~')
             -- A Task created here is sent with its own uuid as the provider id.
-            OR substr(t.id,6)=replace(lower(?3),'-',''))
+            OR t.id='task_'||replace(lower(?3),'-',''))
          ORDER BY t.id",
     )?;
     let tasks = statement
@@ -2091,7 +2103,8 @@ fn task_candidates_in(
                 selector.id,
                 selector.local_prefix,
                 selector.external,
-                selector.label
+                selector.label,
+                repository.map(RepositoryId::as_str),
             ],
             |row| {
                 Ok((
@@ -2111,7 +2124,7 @@ pub(super) fn resolve_task_id_in(
     repositories: Option<&[String]>,
     expected: Option<&[(TaskId, String, Option<String>)]>,
 ) -> StoreResult<Option<TaskId>> {
-    let mut tasks = task_candidates_in(conn, issue)?;
+    let mut tasks = task_candidates_in(conn, issue, None)?;
     if expected.is_some_and(|expected| tasks != expected) {
         return Err(StoreError::Stale("Task identity candidates changed".into()));
     }
@@ -2122,6 +2135,13 @@ pub(super) fn resolve_task_id_in(
                 .is_some_and(|owner| repositories.contains(owner))
         });
     }
+    unique_task_id(issue, tasks)
+}
+
+fn unique_task_id(
+    issue: &str,
+    mut tasks: Vec<(TaskId, String, Option<String>)>,
+) -> StoreResult<Option<TaskId>> {
     if tasks.len() > 1 {
         let candidates = tasks
             .iter()

@@ -62,6 +62,21 @@ pub fn repository_path(id: &RepositoryId) -> Result<std::path::PathBuf> {
     Ok(path.into())
 }
 
+/// Translate a peer's portable Task selector to this repository's local Task ID.
+pub(crate) fn peer_task_id(repository: &RepositoryId, issue: &str) -> Result<String> {
+    let missing = || {
+        loopflow_execution::engine::Error::new(
+            loopflow_execution::engine::ErrorCode::NotFound,
+            format!("Task {issue} was not found in repository {repository}"),
+        )
+    };
+    let store = read_registry()?.ok_or_else(missing)?;
+    let id = store
+        .repository_task_id(repository, issue)?
+        .ok_or_else(missing)?;
+    Ok(id.to_string())
+}
+
 /// Resolve scoped selectors once, carrying exact IDs to downstream consumers.
 /// Routing reads existing records only: initialization and schema upgrades
 /// belong to the operation that takes up Work, and that command fetches

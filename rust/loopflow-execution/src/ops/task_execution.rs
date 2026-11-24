@@ -69,7 +69,7 @@ pub async fn task_execution(
     store: &SharedStore,
     task: &Task,
 ) -> StoreResult<TaskExecutionSnapshot> {
-    let graph = store.sqlite.task_graphs(&task.id)?.pop();
+    let graph = store.sqlite.latest_task_graph(&task.id)?;
     let facts = store.sqlite.graph_execution_facts(&graph, &[&task.id])?;
     Ok(
         execution_of_latest_graph(&store.sqlite, task, graph.as_ref(), &facts)
@@ -93,7 +93,7 @@ pub async fn execution_of_latest_graph(
             None,
         ));
     };
-    let entry = entry_of(graph, Some(task.id.clone()), task.wave_id.clone())?;
+    let entry = entry_of(graph, task.wave_id.clone());
     let step = graph.latest().map(|step| &step.run);
     let input = step.and_then(|step| facts.inputs.get(&step.id));
     let mut snapshot = project_execution(

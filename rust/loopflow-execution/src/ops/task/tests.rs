@@ -63,14 +63,17 @@ fn task_wait_condition_releases_terminal_tasks() {
     assert!(!read(TaskWaitUntil::Terminal).1);
     pr.publication = None;
     runtime.block_on(store.update_task_pr(&pr)).unwrap();
-    for field in ["planning_completed", "abandoned_at"] {
+    for (terminal, open) in [
+        ("planning_state='completed'", "planning_state='started'"),
+        ("abandoned_at=1", "abandoned_at=NULL"),
+    ] {
         store
             .sqlite
             .conn
             .lock()
             .unwrap()
             .execute(
-                &format!("UPDATE tasks SET {field}=1 WHERE id=?1"),
+                &format!("UPDATE tasks SET {terminal} WHERE id=?1"),
                 [fixture.task.id.as_str()],
             )
             .unwrap();
@@ -85,14 +88,7 @@ fn task_wait_condition_releases_terminal_tasks() {
             .lock()
             .unwrap()
             .execute(
-                &format!(
-                    "UPDATE tasks SET {field}={} WHERE id=?1",
-                    if field == "planning_completed" {
-                        "0"
-                    } else {
-                        "NULL"
-                    }
-                ),
+                &format!("UPDATE tasks SET {open} WHERE id=?1"),
                 [fixture.task.id.as_str()],
             )
             .unwrap();
@@ -182,7 +178,7 @@ fn task_decision_preserves_unknown_history_and_live_process_protection() {
                 time::OffsetDateTime::now_utc().unix_timestamp(),
             ),
             None,
-            Some(&repo.path().to_string_lossy()),
+            Some(&fixture.task.worktree.as_ref().unwrap().to_string_lossy()),
             None,
         )
         .unwrap();
@@ -192,7 +188,7 @@ fn task_decision_preserves_unknown_history_and_live_process_protection() {
     );
     let conn = rusqlite::Connection::open(&fixture.database_path).unwrap();
     conn.execute("UPDATE agent_sessions SET cwd=?1,task_id=?2,wave_id=?3,input_published=0,interactive=0 WHERE id=?4",
-            rusqlite::params![repo.path().to_str().unwrap(), fixture.task.id.as_str(), fixture.task.wave_id.as_ref().unwrap().as_str(), session.id]).unwrap();
+            rusqlite::params![fixture.task.worktree.as_ref().unwrap().to_str().unwrap(), fixture.task.id.as_str(), fixture.task.wave_id.as_ref().unwrap().as_str(), session.id]).unwrap();
     conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload) VALUES(?1,'captured',?2,1,'{}')",
             rusqlite::params![session.id, crate::session_record::new_artifact_key()]).unwrap();
     conn.execute(
@@ -269,7 +265,11 @@ fn task_decision_preserves_unknown_history_and_live_process_protection() {
             .unwrap(),
         WorkStatus::Done
     );
-    assert!(fixture.store.sqlite.graphs_at(repo.path()).unwrap()[0]
+    assert!(fixture
+        .store
+        .sqlite
+        .graphs_at(fixture.task.worktree.as_ref().unwrap())
+        .unwrap()[0]
         .run
         .ended_at
         .is_none());
@@ -501,13 +501,26 @@ fn adopting_a_checkout_with_a_running_graph_prevents_another_run() {
         &[("implement", None)],
         None,
     );
-    fixture.task.worktree = Some(adopted.path().into());
+    // The Task, with no checkout here, takes the one the Graph is running in.
     let conn = rusqlite::Connection::open(&fixture.database_path).unwrap();
     conn.execute(
-        "UPDATE task_checkouts SET worktree=?1 WHERE task_id=?2",
-        rusqlite::params![adopted.path().to_str().unwrap(), fixture.task.id.as_str()],
+        "DELETE FROM task_checkouts WHERE task_id=?1",
+        [fixture.task.id.as_str()],
     )
     .unwrap();
+    let pr = runtime
+        .block_on(fixture.store.active_task_pr(&fixture.task.id))
+        .unwrap()
+        .unwrap();
+    fixture.task = runtime
+        .block_on(fixture.store.place_task(
+            &fixture.task.id,
+            adopted.path(),
+            &fixture.task.workspace_slug,
+            &pr,
+            None,
+        ))
+        .unwrap();
 
     // Use this process's identity without launching a provider or a watcher.
     let live = rusqlite::params![
@@ -667,10 +680,13 @@ fn a_dead_graph_is_history_while_a_live_graph_process_retains_the_checkout() {
         .sqlite
         .test_session("stalled", &crate::session_record::new_artifact_key());
     conn.execute(
-        "UPDATE agent_sessions SET cwd=?1 WHERE id=?2",
+        "UPDATE agent_sessions SET cwd=?1,task_id=?3,
+            wave_id=(SELECT p.wave_id FROM tasks t LEFT JOIN projects p ON p.id=t.project_id WHERE t.id=?3)
+         WHERE id=?2",
         rusqlite::params![
             fixture.task.worktree.as_ref().unwrap().to_str().unwrap(),
-            session.id
+            session.id,
+            fixture.task.id.as_str()
         ],
     )
     .unwrap();
@@ -699,11 +715,14 @@ fn a_dead_graph_is_history_while_a_live_graph_process_retains_the_checkout() {
             .task_graphs(&fixture.task.id)
             .unwrap()
             .len(),
-        2
+        3
     );
 }
 
 async fn task_fixture_at(identifier: &str, repository: std::path::PathBuf) -> TaskFixture {
+    // lf records a checkout as Git names it, resolved through symlinks such
+    // as macOS's /var -> /private/var.
+    let repository = repository.canonicalize().unwrap_or(repository);
     let database = tempfile::tempdir().unwrap();
     let database_path = database.path().join("loopflow.db");
     let store = std::sync::Arc::new(
@@ -843,9 +862,13 @@ fn task_checkout_machine_survives_without_lifecycle_reconciliation() {
     let connection = rusqlite::Connection::open(&fixture.database_path).unwrap();
     connection
         .execute(
-            "INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd)
-             VALUES('checkout-session','Retained','human',1,0,?1)",
-            [repo.path().to_str().unwrap()],
+            "INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,task_id,wave_id)
+             VALUES('checkout-session','Retained','human',1,0,?1,?2,?3)",
+            rusqlite::params![
+                repo.path().to_str().unwrap(),
+                fixture.task.id.as_str(),
+                fixture.task.wave_id.as_ref().map(|wave| wave.as_str())
+            ],
         )
         .unwrap();
     assert_eq!(
@@ -1525,7 +1548,7 @@ async fn parent_run_cannot_override_task_worktree_resolution() {
     );
     std::env::remove_var("LF_RUN_DIR");
 
-    let resolved = super::task_for_checkout(&store, task.worktree.as_ref().unwrap())
+    let resolved = super::checkout_owner(&store, task.worktree.as_ref().unwrap())
         .await
         .unwrap()
         .unwrap();
@@ -1537,7 +1560,7 @@ async fn parent_run_cannot_override_task_worktree_resolution() {
 async fn checkout_resolution_reads_only_this_machines_checkouts() {
     let repo = loopflow_test_support::TestRepo::new();
     let fixture = task_fixture_at("LOCATION-1", repo.path().canonicalize().unwrap()).await;
-    let resolved = super::task_for_checkout(&fixture.store, repo.path())
+    let resolved = super::checkout_owner(&fixture.store, repo.path())
         .await
         .unwrap()
         .unwrap();
@@ -1548,7 +1571,7 @@ async fn checkout_resolution_reads_only_this_machines_checkouts() {
         [fixture.task.id.as_str()],
     )
     .unwrap();
-    assert!(super::task_for_checkout(&fixture.store, repo.path())
+    assert!(super::checkout_owner(&fixture.store, repo.path())
         .await
         .unwrap()
         .is_none());
@@ -2009,7 +2032,7 @@ fn deleted_task_status_requires_explicit_history_lookup() {
     // This is a reader proof, not a provider-deletion fixture.
     connection
         .execute(
-            "UPDATE tasks SET planning_completed=1,planning_state='completed' WHERE id=?1",
+            "UPDATE tasks SET planning_state='completed' WHERE id=?1",
             [fixture.task.id.as_str()],
         )
         .unwrap();
@@ -2059,7 +2082,7 @@ fn deleted_task_status_requires_explicit_history_lookup() {
     assert_eq!(
         connection
             .query_row(
-                "SELECT planning_completed FROM tasks WHERE id=?1",
+                "SELECT planning_state IS 'completed' FROM tasks WHERE id=?1",
                 [fixture.task.id.as_str()],
                 |row| row.get::<_, i64>(0)
             )

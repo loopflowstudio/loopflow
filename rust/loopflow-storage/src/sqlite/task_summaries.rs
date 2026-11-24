@@ -73,7 +73,7 @@ fn loop_passes(graphs: &[GraphExecution]) -> BTreeMap<String, u32> {
 
 /// Write the summary of a Task that just ended, replacing an earlier ending's.
 pub(super) fn write_in(conn: &Connection, task: &TaskId, ended: TaskEnd) -> StoreResult<()> {
-    let graphs = super::graph_inventory::graphs_in(conn, "g.task_id=?1", &[&task.as_str()])?;
+    let graphs = super::task_work::graphs_of_task(conn, task)?;
     let ended_at = crate::rows::now_unix();
     let started_at = match graphs.first() {
         Some(graph) => graph.run.started_at,

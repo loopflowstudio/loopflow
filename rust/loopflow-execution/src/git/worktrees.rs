@@ -67,7 +67,6 @@ pub enum PlacementError {
 pub struct WorktreeState {
     pub branch: Option<String>,
     pub path: PathBuf,
-    pub base_branch: Option<String>,
     pub merged: bool,
     pub squash_merged: bool,
     /// No commits beyond main and not merged — a brand new worktree.
@@ -233,17 +232,9 @@ pub struct WorktreePruneReport {
     pub failed: Vec<WorktreePruneFailure>,
 }
 
-#[derive(Debug, Clone, Serialize)]
-pub struct CreateWorktreeResult {
-    pub path: PathBuf,
-    pub branch: String,
-    pub base_branch: Option<String>,
-    pub base_commit: Option<String>,
-}
-
-/// One main agent's isolated execution checkout.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AgentWorktree {
+/// A named Git worktree and its checked-out branch.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct Worktree {
     pub path: PathBuf,
     pub branch: String,
 }
@@ -802,20 +793,14 @@ fn concurrently<T: Sync, R: Send>(items: &[T], work: impl Fn(&T) -> R + Sync) ->
     indexed.into_iter().map(|(_, result)| result).collect()
 }
 
-#[derive(Debug)]
-struct LocalBranch {
-    head: String,
-    upstream: Option<String>,
-}
-
-/// Head and configured upstream of every local branch, in one Git process.
-fn local_branches(repo: &Path) -> HashMap<String, LocalBranch> {
+/// Head of every local branch, in one Git process.
+pub(crate) fn branch_heads(repo: &Path) -> HashMap<String, String> {
     let output = Command::new("git")
         .arg("-C")
         .arg(repo)
         .args([
             "for-each-ref",
-            "--format=%(refname)%00%(objectname)%00%(upstream:short)%00%(upstream:track)",
+            "--format=%(refname)%00%(objectname)",
             "refs/heads",
         ])
         .output();
@@ -825,23 +810,10 @@ fn local_branches(repo: &Path) -> HashMap<String, LocalBranch> {
     String::from_utf8_lossy(&output.stdout)
         .lines()
         .filter_map(|line| {
-            let mut fields = line.split('\0');
-            let name = fields.next()?.strip_prefix("refs/heads/")?;
-            let head = fields.next()?;
-            let upstream = fields.next().unwrap_or_default();
-            let gone = fields.next() == Some("[gone]");
-            let upstream = (!upstream.is_empty() && !gone).then(|| {
-                upstream
-                    .strip_prefix("origin/")
-                    .unwrap_or(upstream)
-                    .to_string()
-            });
+            let (name, head) = line.split_once('\0')?;
             Some((
-                name.to_string(),
-                LocalBranch {
-                    head: head.to_string(),
-                    upstream,
-                },
+                name.strip_prefix("refs/heads/")?.to_string(),
+                head.to_string(),
             ))
         })
         .collect()
@@ -1043,13 +1015,6 @@ pub fn diff_shortstats(
             let stat = stats.get(heads.get(*branch)?)?;
             Some((branch.to_string(), stat.clone()))
         })
-        .collect()
-}
-
-pub(crate) fn branch_heads(repo: &Path) -> HashMap<String, String> {
-    local_branches(repo)
-        .into_iter()
-        .map(|(name, branch)| (name, branch.head))
         .collect()
 }
 
@@ -1298,7 +1263,7 @@ fn local_states(
     repo: &Path,
     default_branch: &str,
     items: Vec<(PathBuf, Option<String>)>,
-    branches: &HashMap<String, LocalBranch>,
+    branches: &HashMap<String, String>,
 ) -> Vec<WorktreeState> {
     let merge_target = format!("origin/{default_branch}");
     let (dirty, (within, squash_merged)) = thread::scope(|scope| {
@@ -1311,7 +1276,7 @@ fn local_states(
             .iter()
             .filter_map(|(_, branch)| branch.as_deref())
             .filter(|branch| *branch != default_branch && !within.contains(*branch))
-            .filter_map(|branch| branches.get(branch).map(|branch| branch.head.clone()))
+            .filter_map(|branch| branches.get(branch).cloned())
             .collect();
         let squash_merged = match CommitFacts::load(repo, &merge_target) {
             Some(mut facts) => {
@@ -1332,14 +1297,11 @@ fn local_states(
         .zip(dirty)
         .map(|((path, branch), dirty)| {
             let known = branch.as_deref().and_then(|branch| branches.get(branch));
-            let base_branch = known
-                .and_then(|branch| branch.upstream.clone())
-                .filter(|upstream| upstream != default_branch);
             let is_default = branch.as_deref() == Some(default_branch);
             let has_commits = is_default || branch.as_deref().is_some_and(|b| !within.contains(b));
             let squash_merged = !is_default
                 && has_commits
-                && known.is_some_and(|branch| squash_merged.contains(&branch.head));
+                && known.is_some_and(|head| squash_merged.contains(head));
             // "Fresh" means no net content delta against main yet.
             // This includes newly-rotated branches that were forked from a landed
             // branch (commit graph differs, but tree is identical to main).
@@ -1347,7 +1309,6 @@ fn local_states(
             WorktreeState {
                 branch,
                 path,
-                base_branch,
                 merged: false,
                 squash_merged,
                 fresh,
@@ -1377,13 +1338,13 @@ fn remote_facts(
     repo: &Path,
     default_branch: &str,
     items: &[(PathBuf, Option<String>)],
-    branches: &HashMap<String, LocalBranch>,
+    branches: &HashMap<String, String>,
 ) -> RemoteFacts {
     let branch_heads: Vec<(String, String)> = items
         .iter()
         .filter_map(|(_, branch)| branch.as_ref())
         .filter(|b| b.as_str() != default_branch)
-        .filter_map(|b| Some((b.clone(), branches.get(b)?.head.clone())))
+        .filter_map(|b| Some((b.clone(), branches.get(b)?.clone())))
         .collect();
     if branch_heads.is_empty() {
         return RemoteFacts {
@@ -1480,7 +1441,7 @@ pub fn list_worktrees_timed(repo: &Path) -> Result<Listing, GitError> {
     // together.
     let (default_branch, branches, items) = thread::scope(|scope| {
         let default_branch = scope.spawn(|| get_default_branch(repo));
-        let branches = scope.spawn(|| local_branches(repo));
+        let branches = scope.spawn(|| branch_heads(repo));
         let items = list_porcelain(repo);
         (
             default_branch.join().expect("listing worker panicked"),
@@ -1823,7 +1784,7 @@ pub fn create_named_worktree(
     name: &str,
     base: Option<&str>,
     inherit_creation: &impl Fn(&mut Command),
-) -> Result<CreateWorktreeResult, GitError> {
+) -> Result<Worktree, GitError> {
     let user = git_user(repo)?;
     let segment = WorktreeSegment::parse(name).map_err(|error| GitError::CommandFailed {
         command: "git worktree add".to_string(),
@@ -1863,11 +1824,9 @@ pub fn create_named_worktree(
             }
         };
         worktree_add_inheriting(repo, &worktree_path, &branch, mode, inherit_creation)?;
-        return Ok(CreateWorktreeResult {
+        return Ok(Worktree {
             path: worktree_path,
             branch,
-            base_branch: None,
-            base_commit: None,
         });
     }
 
@@ -1880,13 +1839,6 @@ pub fn create_named_worktree(
 
     let default_branch = get_default_branch(repo)?;
     let base_ref = base.unwrap_or(default_branch.as_str());
-    let base_branch = base.and_then(|value| (value != default_branch).then(|| value.to_string()));
-    let base_commit = if base_branch.is_some() {
-        rev_parse(repo, base_ref).ok()
-    } else {
-        None
-    };
-
     worktree_add_inheriting(
         repo,
         &worktree_path,
@@ -1896,11 +1848,9 @@ pub fn create_named_worktree(
         },
         inherit_creation,
     )?;
-    Ok(CreateWorktreeResult {
+    Ok(Worktree {
         path: worktree_path,
         branch,
-        base_branch,
-        base_commit,
     })
 }
 
@@ -1945,10 +1895,7 @@ pub(crate) fn plan_branch_placement(
     })
 }
 
-pub fn create_from_placement_plan(
-    repo: &Path,
-    plan: &PlacementPlan,
-) -> Result<CreateWorktreeResult, GitError> {
+pub fn create_from_placement_plan(repo: &Path, plan: &PlacementPlan) -> Result<Worktree, GitError> {
     apply_placement_plan(repo, plan, true)
 }
 
@@ -1956,7 +1903,7 @@ fn apply_placement_plan(
     repo: &Path,
     plan: &PlacementPlan,
     publish_upstream: bool,
-) -> Result<CreateWorktreeResult, GitError> {
+) -> Result<Worktree, GitError> {
     if plan.strategy != PlacementStrategy::UseExistingWorktree && plan.worktree_path.exists() {
         return Err(GitError::CommandFailed {
             command: "git worktree add".to_string(),
@@ -1996,11 +1943,9 @@ fn apply_placement_plan(
             }
         }
     }
-    Ok(CreateWorktreeResult {
+    Ok(Worktree {
         path: plan.worktree_path.clone(),
         branch: plan.branch.clone(),
-        base_branch: None,
-        base_commit: None,
     })
 }
 
@@ -2011,7 +1956,7 @@ fn apply_placement_plan(
 pub fn ensure_agent_worktree(
     main_repo: &Path,
     segment: WorktreeSegment,
-) -> Result<AgentWorktree, GitError> {
+) -> Result<Worktree, GitError> {
     let main_repo = main_repo_root(main_repo)?;
     let lock_path =
         git_common_dir(&main_repo)?.join(format!("persistent-{}.lock", segment.as_str()));
@@ -2030,54 +1975,82 @@ pub fn ensure_agent_worktree(
     if plan.strategy == PlacementStrategy::Create {
         plan.base_ref = agent_base_ref(&main_repo)?;
     }
-    let worktree = create_agent_worktree(&main_repo, &plan)?;
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(&main_repo)
-        .args([
-            "config",
-            &format!("branch.{}.loopflow-persistent", worktree.branch),
-            "true",
-        ])
-        .output()?;
-    if !output.status.success() {
-        return Err(GitError::CommandFailed {
-            command: "mark persistent worktree".into(),
-            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
-        });
-    }
+    let worktree = apply_placement_plan(&main_repo, &plan, false)?;
+    mark_persistent(&main_repo, &worktree.branch)?;
     Ok(worktree)
 }
 
 /// Persistent branches keep their checkout and local plans after delivery.
 pub fn is_persistent_worktree(repo: &Path) -> Result<bool, GitError> {
+    Ok(current_branch_config(repo, "loopflow-persistent", &["--bool"])?.as_deref() == Some("true"))
+}
+
+/// Keep `branch`'s checkout and local plans after delivery.
+pub fn mark_persistent(repo: &Path, branch: &str) -> Result<(), GitError> {
+    set_branch_config(repo, branch, "loopflow-persistent", "true")
+}
+
+/// The branch this checkout was stacked on by `lf wt create --stack`, while
+/// that branch still exists locally. A deleted base leaves the checkout
+/// following the default branch again.
+pub fn stacked_base(repo: &Path) -> Result<Option<String>, GitError> {
+    match current_branch_config(repo, "loopflow-base", &[])? {
+        Some(base) if branch_exists(repo, &base)? => Ok(Some(base)),
+        _ => Ok(None),
+    }
+}
+
+/// Record that `branch` builds on `base`, so [`stacked_base`] finds it.
+pub fn record_stacked_base(repo: &Path, branch: &str, base: &str) -> Result<(), GitError> {
+    set_branch_config(repo, branch, "loopflow-base", base)
+}
+
+pub(crate) fn clear_stacked_base(repo: &Path, branch: &str) -> Result<(), GitError> {
+    let key = format!("branch.{branch}.loopflow-base");
+    let args = ["config", "--unset-all", &key];
+    let output = super::run_git(repo, &args)?;
+    if output.status.code() == Some(5) {
+        return Ok(()); // The branch already follows the default.
+    }
+    super::successful_stdout(&args, output).map(|_| ())
+}
+
+/// `branch.<current>.<key>` from Git config; `None` when detached or unset.
+fn current_branch_config(
+    repo: &Path,
+    key: &str,
+    options: &[&str],
+) -> Result<Option<String>, GitError> {
     let Some(branch) = current_branch(repo)? else {
-        return Ok(false);
+        return Ok(None);
     };
     let output = Command::new("git")
         .arg("-C")
         .arg(repo)
-        .args([
-            "config",
-            "--bool",
-            "--get",
-            &format!("branch.{branch}.loopflow-persistent"),
-        ])
+        .arg("config")
+        .args(options)
+        .args(["--get", &format!("branch.{branch}.{key}")])
         .output()?;
     match output.status.code() {
-        Some(0) => Ok(output.stdout == b"true\n"),
-        Some(1) => Ok(false),
+        Some(0) => Ok(Some(
+            String::from_utf8_lossy(&output.stdout).trim().to_string(),
+        )),
+        Some(1) => Ok(None),
         _ => Err(GitError::CommandFailed {
-            command: "read persistent worktree configuration".into(),
+            command: format!("read branch.{branch}.{key}"),
             stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
         }),
     }
 }
 
+fn set_branch_config(repo: &Path, branch: &str, key: &str, value: &str) -> Result<(), GitError> {
+    git_stdout(repo, &["config", &format!("branch.{branch}.{key}"), value]).map(|_| ())
+}
+
 /// Move a bare/default `lf` session off canonical main while preserving both
 /// local commits and uncommitted files. A deliberate non-default checkout and
 /// an existing linked worktree are left alone.
-pub fn move_default_agent_to_worktree(repo: &Path) -> Result<Option<AgentWorktree>, GitError> {
+pub fn move_default_agent_to_worktree(repo: &Path) -> Result<Option<Worktree>, GitError> {
     let main_repo = main_repo_root(repo)?;
     let checkout = std::fs::canonicalize(repo).unwrap_or_else(|_| repo.to_path_buf());
     let canonical = std::fs::canonicalize(&main_repo).unwrap_or_else(|_| main_repo.clone());
@@ -2115,7 +2088,7 @@ pub fn move_default_agent_to_worktree(repo: &Path) -> Result<Option<AgentWorktre
     }
 
     let stashed = stash_including_untracked(&main_repo)?;
-    let worktree = match create_agent_worktree(&main_repo, &plan) {
+    let worktree = match apply_placement_plan(&main_repo, &plan, false) {
         Ok(worktree) => worktree,
         Err(error) => {
             if stashed {
@@ -2142,17 +2115,6 @@ pub fn move_default_agent_to_worktree(repo: &Path) -> Result<Option<AgentWorktre
     }
 
     Ok(Some(worktree))
-}
-
-fn create_agent_worktree(
-    main_repo: &Path,
-    plan: &PlacementPlan,
-) -> Result<AgentWorktree, GitError> {
-    let created = apply_placement_plan(main_repo, plan, false)?;
-    Ok(AgentWorktree {
-        path: created.path,
-        branch: created.branch,
-    })
 }
 
 fn agent_base_ref(main_repo: &Path) -> Result<String, GitError> {
@@ -2382,7 +2344,6 @@ mod tests {
             WorktreeState {
                 branch: Some("old".to_string()),
                 path: Path::new("/tmp/repo.old").to_path_buf(),
-                base_branch: None,
                 merged: false,
                 squash_merged: true,
                 fresh: true,
@@ -2393,7 +2354,6 @@ mod tests {
             WorktreeState {
                 branch: Some("new".to_string()),
                 path: Path::new("/tmp/repo.new").to_path_buf(),
-                base_branch: None,
                 merged: false,
                 squash_merged: true,
                 fresh: true,
@@ -2676,8 +2636,6 @@ mod tests {
         assert_eq!(flags(state(Some("active"))), (false, false, false, false));
         assert_eq!(flags(state(Some("landed"))), (true, true, false, true));
         assert_eq!(flags(state(None)), (false, true, false, false));
-        assert_eq!(state(Some("active")).base_branch.as_deref(), Some("active"));
-        assert_eq!(state(Some("untouched")).base_branch, None);
         assert!(listed
             .iter()
             .all(|state| !state.merged && state.pull_request.is_none()));
@@ -2820,6 +2778,27 @@ mod tests {
         );
         assert_eq!(recovered.branch, persistent.branch);
         assert!(super::is_clean(&repo).unwrap());
+    }
+
+    #[test]
+    fn persistence_uses_git_boolean_values() {
+        let repo = init_repo();
+        git(repo.path(), &["commit", "--allow-empty", "-m", "initial"]);
+        for (value, expected) in [("yes", true), ("off", false)] {
+            git(
+                repo.path(),
+                &["config", "branch.main.loopflow-persistent", value],
+            );
+            assert_eq!(
+                super::is_persistent_worktree(repo.path()).unwrap(),
+                expected
+            );
+        }
+        git(
+            repo.path(),
+            &["config", "branch.main.loopflow-persistent", "invalid"],
+        );
+        assert!(super::is_persistent_worktree(repo.path()).is_err());
     }
 
     #[test]

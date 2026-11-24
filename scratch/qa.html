@@ -200,6 +200,21 @@ Back in the repository                      still On there; toggle Off restores 
 </div>
 <p>Not reached, as in round 6: hover on the toggle, a system drag on the Working Tasks grid, and the physical ⌘1–9, ⌃Tab and ⌘K keys. The display was in use (HID idle 0 s). Teardown: the QA app quit, the private server, its holder and eleven stand-ins stopped by PID, and the hook bundle unregistered and deleted.</p>
 
+<h2>12 · The keeping mark on a copy of the real store (round 8, 4d4d6f7b3)</h2>
+<p>Branch <code>lf</code> at <code>4d4d6f7b3</code> against an <code>sqlite3 .backup</code> of the live <code>~/.lf/loopflow.db</code> (1,622 Tasks, 2 saved orders, last migration <code>task_facts_once</code>) in a private <code>LF_HOME</code>, then a fresh home. CLI only: this round changed migrations and scripts, not the app.</p>
+<pre>Step                                                   Saw
+lf task list on the copy (first open)                  migrated: planning_scope_checks, keep_task_orders applied; backup file written;
+                                                       both task_orders rows unchanged
+Working order in lf task list                          LOO-1094 LOO-1081 (unsaved, newest first) then the saved
+                                                       995 1067 1078 1063 957 1065 793 (done 1069, 937, 1066 dropped)
+lf desktop dashboard move working-tasks/task:&lt;1063&gt;   record rewritten; lf task list: … 1083 · LOO-1063 · LOO-995 · 1067 …
+  --destination task:&lt;995&gt; --side before
+Fresh home: lf task create                             keep_task_orders recorded; task_orders table present, empty
+scripts/due_removals.py                                exit 0; no line names task_orders (LOO-877 still lists its columns)
+scripts/schema_page.py --check                         exit 0; SCHEMA.md lists task_orders as a kept table
+scripts/check_migrations.py                            exit 0; "unmerged: keep_task_orders.sql"</pre>
+<p>The comment-only migration applies on the release path and on a fresh store. <code>siblings_in</code>&#8217;s Project filter (flagged in the compress commit) belongs to <code>planning_rank</code>; the Working tile record goes through <code>reorder_working_task</code>, so &#8220;The repository&#8217;s Working Task order&#8221; describes it correctly. No processes were left running.</p>
+
 <h2>Fixed during QA</h2>
 <p>Round 7: no product defects found.</p>
 <p>Round 6: no product defects found.</p>
@@ -209,6 +224,13 @@ Back in the repository                      still On there; toggle Off restores 
 <p>Round 3: no product defects found in this change.</p>
 <p>Round 2: a refused drop named the dragged Task even when the target was the one missing. <code>reorder_task</code> now returns the absent Task's ID. Served Desktop refusals (<code>DesktopError</code> Argument or Target) came back as <code>outcome_unknown</code> and now return <code>invalid</code> or <code>not_found</code>. <code>working_task_drop_keeps_its_side_after_another_window_reorders</code> checks the served refusal, and the store test checks both sides of the drop.</p>
 <p>Round 1: no product defects found. QA tooling: <code>.lf/qa/QAHook.swift</code> gained <code>drag</code>, and <code>.lf/qa/desktop.md</code> now covers live Busy/Available rows and the limits on drags.</p>
+
+<h2>Round 8 result</h2>
+<table>
+<tr><th>Works</th><td>At <code>4d4d6f7b3</code>: a copy of the live store migrates through <code>keep_task_orders</code>, keeps both saved orders, and reads and writes Working order as before. A fresh store gets the migration and the table. The removal scripts and schema page no longer schedule <code>task_orders</code>.</td></tr>
+<tr><th>Not reached</th><td>Hover, grid system drag, ⌘1–9, ⌃Tab and ⌘K, as in rounds 6 and 7. They need a key window on an idle display.</td></tr>
+<tr><th>Still open</th><td>Nothing new. Round 7&#8217;s and round 5&#8217;s items still apply.</td></tr>
+</table>
 
 <h2>Round 7 result</h2>
 <table>

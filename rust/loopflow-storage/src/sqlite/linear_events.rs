@@ -25,19 +25,19 @@ pub fn accept_linear_project_in(
     let repo: String = tx.query_row("SELECT repo FROM waves WHERE id=?1", [wave], |row| {
         row.get(0)
     })?;
-    let unbound: Option<String> = tx
-        .query_row(
-            "SELECT id FROM projects WHERE id=?1 AND external_project_id IS NULL",
-            [
-                sqlite::children::held_wave_project_in(&tx, wave)?
-                    .map(|own| own.as_str().to_owned()),
-            ],
-            |row| row.get(0),
-        )
-        .optional()?;
+    let unbound = match sqlite::children::held_wave_project_in(&tx, wave)? {
+        Some(own)
+            if sqlite::children::project_in(&tx, &own)?
+                .tracker_id
+                .is_none() =>
+        {
+            Some(own)
+        }
+        _ => None,
+    };
     accept_project(&tx, &repo, project, observed_at, Some(wave), tracker)?;
     if let Some(own) = unbound {
-        super::planning_order::send_local_order_in(&tx, &ProjectId::from_raw(own))?;
+        super::planning_order::send_local_order_in(&tx, &own)?;
     }
     tx.commit()?;
     Ok(())

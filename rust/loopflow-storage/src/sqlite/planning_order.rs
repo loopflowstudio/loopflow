@@ -39,15 +39,7 @@ fn place_in_order(
         let moved = order.remove(from);
         order.insert(to, moved);
         if let Some(project) = project {
-            let base = observed_order(conn, project)?.map(|value| json!({"value":value}));
-            tracker_actions::enqueue(
-                conn,
-                &ActionOwner::Project(project.clone()),
-                ActionKind::Order,
-                None,
-                &json!(order),
-                base.as_ref(),
-            )?;
+            enqueue_order(conn, project, &order)?;
         }
         apply_order(conn, &order, WriteOrigin::Local)?;
     }
@@ -64,9 +56,14 @@ pub(super) fn send_local_order_in(conn: &Connection, project: &ProjectId) -> Sto
         )?
         .query_map([project.as_str()], |row| row.get::<_, String>(0))?
         .collect::<Result<Vec<_>, _>>()?;
-    if order.len() < 2 {
-        return Ok(());
+    if order.len() > 1 {
+        enqueue_order(conn, project, &order)?;
     }
+    Ok(())
+}
+
+/// Queue `order` as `project`'s desired order, against the tracker's.
+fn enqueue_order(conn: &Connection, project: &ProjectId, order: &[String]) -> StoreResult<()> {
     let base = observed_order(conn, project)?.map(|value| json!({"value":value}));
     tracker_actions::enqueue(
         conn,

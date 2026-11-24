@@ -1353,7 +1353,7 @@ fn validate_preparation_status(task: &Task, status: WorkStatus) -> OpsResult<()>
             task.identifier, task.identifier
         ))),
         WorkStatus::Abandoned => Err(task_error(format!(
-            "Task {} is abandoned; inspect its retained history with `lf task status {}`",
+            "Task {} is abandoned; `lf task reopen {}` reopens it without moving its Graph",
             task.identifier, task.identifier
         ))),
         WorkStatus::Ready => Ok(()),
@@ -1418,33 +1418,19 @@ async fn restore_task_checkout(
             .await
             .map_err(task_error)?
             .filter(|pr| pr.github().is_some());
-        // Abandoning deletes the branch with its PR; a reopened Task starts
-        // again from its base when origin no longer has it.
-        let abandoned = pr.as_ref().is_some_and(|pr| pr.abandoned_at.is_some());
         if recovered.is_none() && !ref_exists(&repo, &remote)? && pr.is_some() {
-            if let Err(error) = fetch(&repo, "origin", &task.branch) {
-                if !abandoned {
-                    return Err(error.into());
-                }
-            }
+            fetch(&repo, "origin", &task.branch)?;
         }
         let base = if let Some(commit) = recovered {
             commit
         } else if ref_exists(&repo, &remote)? {
             remote
         } else {
-            let started = store
-                .task_events_after(&task.id, 0)
-                .await
+            if store
+                .sqlite
+                .task_checkout_ready(&task.id)
                 .map_err(task_error)?
-                .iter()
-                .any(|event| {
-                    matches!(
-                        &event.kind,
-                        TaskEventKind::CheckoutReady { .. } | TaskEventKind::PrStarted { .. }
-                    )
-                });
-            if started && !abandoned {
+            {
                 return Err(task_error(format!("Task branch {} is missing locally and remotely; its committed work cannot be recovered from the base alone; use --recover-from COMMIT only after locating its retained history", task.branch)));
             }
             task.base_commit.clone()
@@ -1468,13 +1454,17 @@ async fn restore_task_checkout(
     finish_task_checkout(store, task).await
 }
 
+fn checkout_path_exists(path: &Path) -> std::io::Result<bool> {
+    match path.symlink_metadata() {
+        Ok(_) => Ok(true),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error),
+    }
+}
+
 fn validate_checkout_restoration(task: &Task, repo: &Path) -> OpsResult<()> {
     let worktree = task.worktree()?;
-    if match worktree.symlink_metadata() {
-        Ok(_) => true,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
-        Err(error) => return Err(error.into()),
-    } {
+    if checkout_path_exists(worktree)? {
         return Err(task_error(format!(
             "Task checkout path {} is occupied; its contents were preserved",
             worktree.display()
@@ -1499,16 +1489,11 @@ fn validate_checkout_restoration(task: &Task, repo: &Path) -> OpsResult<()> {
 }
 
 async fn finish_task_checkout(store: &SharedStore, task: &Task) -> OpsResult<()> {
-    let events = store
-        .task_events_after(&task.id, 0)
-        .await
-        .map_err(task_error)?;
-    if !events.iter().any(|event| {
-        matches!(
-            &event.kind,
-            TaskEventKind::CheckoutReady { .. } | TaskEventKind::PrStarted { .. }
-        )
-    }) {
+    if !store
+        .sqlite
+        .task_checkout_ready(&task.id)
+        .map_err(task_error)?
+    {
         store
             .append_task_event(
                 &task.id,
@@ -1744,7 +1729,7 @@ async fn record_stack_parent(
     if let Some(pr) = parent.pr {
         return Ok((pr, note));
     }
-    let pr = delivery::next_task_pr(store, &parent.task).await?;
+    let pr = delivery::next_task_pr(store, &parent.task)?;
     if let Err(error) = store.insert_task_pr(&pr).await {
         // Another child may have recorded the parent first; stack on that row.
         let active = store
@@ -2853,13 +2838,24 @@ pub fn task_complete(
             }
             WorkStatus::Ready => {}
         }
-        reconcile_task_pr_observation(&store, &mut task, crate::ops::pr::PrReadFreshness::Cached)
-            .await?;
         let open = store
             .sqlite
             .open_task_child_count(&task.id)
             .map_err(task_error)?;
-        if let Some(refusal) = task_completion_refusal(&store, &task).await? {
+        if open > 0 && children.is_none() {
+            return Err(refused(open_children_refusal(&store, &task)?));
+        }
+        // Only an existing PR needs reconciliation or a checkout mutation lock.
+        let mut pr = store.active_task_pr(&task.id).await.map_err(task_error)?;
+        if pr.as_ref().is_some_and(|pr| pr.phase() != PrPhase::Merged) {
+            pr = reconcile_task_pr_observation(
+                &store,
+                &mut task,
+                crate::ops::pr::PrReadFreshness::Cached,
+            )
+            .await?;
+        }
+        if let Some(refusal) = completion_refusal(pr.as_ref(), &task.identifier) {
             if open > 0 || children.is_some() {
                 return Err(refused(refusal));
             }
@@ -2872,9 +2868,6 @@ pub fn task_complete(
                 settle_completion(&store, &mut task, request).await?;
             }
             return Ok(done(task));
-        }
-        if open > 0 && children.is_none() {
-            return Err(refused(open_children_refusal(&store, &task)?));
         }
         if children == Some(ChildPolicy::Abandon) {
             let blocked = live_abandon_blockers(&store, &task)?;
@@ -3058,17 +3051,7 @@ async fn settle_children(
         let result = match child.outcome {
             ChildOutcome::Done => finish_completion(store, &child.task).await,
             ChildOutcome::Rehomed => sync_completion(store, &child.task).await,
-            ChildOutcome::Abandoned => {
-                let close = retirement::close_conversations(&store.sqlite, &child.task.id);
-                let sync = sync_completion(store, &child.task).await;
-                let cleanup = match repository_for_task(store, &child.task) {
-                    Ok(repo) => lifecycle::cleanup_abandoned(&repo, store, &child.task, false)
-                        .await
-                        .map(drop),
-                    Err(error) => Err(error),
-                };
-                sync.and(close).and(cleanup)
-            }
+            ChildOutcome::Abandoned => lifecycle::finish_abandon(store, &child.task, false).await,
         };
         if let Err(error) = result {
             crate::journal::request::diagnostic(format_args!(
@@ -3082,17 +3065,31 @@ async fn settle_children(
 pub fn task_reopen(issue: &str, note: Option<&str>) -> OpsResult<Task> {
     block_on_task(async {
         let store = task_store().await?;
+        let unavailable = || task_error(format!("Task {issue} is unavailable"));
+        let id = store
+            .sqlite
+            .resolve_task_id(issue, None)
+            .map_err(task_error)?
+            .ok_or_else(unavailable)?;
+        let _retirement = retirement::lock(&id)?;
         let task = store
-            .get_task_by_issue(issue)
+            .get_task(&id)
             .await
             .map_err(task_error)?
-            .ok_or_else(|| task_error(format!("Task {issue} is unavailable")))?;
-        let _retirement = retirement::lock(&task.id)?;
+            .ok_or_else(unavailable)?;
+        let repo = repository_for_task(&store, &task)?;
+        let checkout_removed = match &task.worktree {
+            Some(path) if task_work_status(&store, &task).await? == WorkStatus::Abandoned => {
+                !checkout_path_exists(path)?
+                    && (task.branch.is_empty()
+                        || !crate::git::worktrees::branch_exists(&repo, &task.branch)?)
+            }
+            _ => false,
+        };
         let task = store
             .sqlite
-            .reopen_task(&task.id, note)
+            .reopen_task(&task.id, note, checkout_removed)
             .map_err(task_error)?;
-        let repo = repository_for_task(&store, &task)?;
         super::planning_sync::sync_after_save(
             &store,
             &repo.to_string_lossy(),

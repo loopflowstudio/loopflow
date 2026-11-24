@@ -2311,7 +2311,7 @@ using lf open's ordinary host selection. Preview and --quote open nothing."
         #[arg(long)]
         json: bool,
     },
-    /// Reopen a done or abandoned Task without moving its Graph or replacing the PR
+    /// Reopen a done or abandoned Task at its current Graph position
     Reopen {
         issue: String,
         #[arg(long)]

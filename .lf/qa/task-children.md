@@ -120,8 +120,8 @@ the tree; zsh does not split `${2:+--parent $2}`, so pass `--parent` literally.
   repository") and `pr close`, but does not close a PR when its head branch is
   deleted the way GitHub does: the state file keeps it `OPEN`, so a later
   `lf pr open` reuses that number instead of opening a new one.
-- Reopen, then `lf task run <child>`: the checkout comes back at the Task's
-  base (its old work is gone with the branch), and the Graph runs.
+- Reopen, then `lf task run <child>`: after abandonment deleted the checkout and
+  branch, the new checkout starts from current main and the Graph runs.
 - Refusals write nothing: diff `select … from tasks` and `count(*) from
   task_events` before and after.
 - Served `task.complete`: hello as `"kind":"desktop"` (a `machine` client must

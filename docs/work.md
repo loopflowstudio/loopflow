@@ -291,9 +291,10 @@ In Loopflow Desktop and on iOS, completing a parent with open children opens a
 confirmation dialog with the same choices ([Surfaces](surfaces.md#changes-show-at-once)).
 
 `lf task reopen` works on both done and abandoned Tasks. It restores the Task
-to `started` (or `unstarted` if it never ran) and turns auto off. Reopening
-does not restore closed PRs or deleted branches: when abandoning deleted the
-branch, the next `lf task run` starts again from the Task's base and the next
+to `started` (or `unstarted` if it never ran) and turns auto off. The abandoned
+attempt's closed PR stays in the Task's history. If its checkout
+and local branch were deleted, the next `lf task run` starts a fresh checkout
+from main. Any surviving checkout or local branch keeps its work. The next
 publish opens a new PR linked to the same issue.
 
 A done Task's conversation is still yours. `lf resume LOO-12` reopens it

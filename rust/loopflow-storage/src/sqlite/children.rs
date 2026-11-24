@@ -300,14 +300,16 @@ fn place_task_in(
     task.branch = pr.branch.clone();
     task.base_commit = pr.base_commit.clone();
     task.parent_pr_id = pr.parent_pr_id.clone();
-    validate_initial_task_pr(&task, pr)?;
+    validate_placement_pr(&task, pr)?;
     conn.execute(
         "UPDATE tasks SET workspace_slug=?2,updated_at=?3 WHERE id=?1",
         params![task_id.as_str(), workspace_slug, now_unix()],
     )?;
     write_task_checkout_in(conn, &task)?;
     if pr.publication.is_some() {
-        insert_task_pr(conn, pr)?;
+        let mut discovered = pr.clone();
+        discovered.sequence = next_task_pr_sequence_in(conn, task_id)?;
+        insert_task_pr(conn, &discovered)?;
     }
     seed_task_tracker_cursor(conn, &task)?;
     insert_task_event_in(
@@ -695,7 +697,12 @@ impl SqliteStore {
         Ok(settled)
     }
 
-    pub fn reopen_task(&self, id: &TaskId, note: Option<&str>) -> StoreResult<Task> {
+    pub fn reopen_task(
+        &self,
+        id: &TaskId,
+        note: Option<&str>,
+        checkout_removed: bool,
+    ) -> StoreResult<Task> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let task = task_on(&tx, id)?.ok_or(StoreError::NotFound)?;
@@ -718,6 +725,16 @@ impl SqliteStore {
             } else {
                 "unstarted"
             };
+            if abandoned {
+                tx.execute(
+                    "UPDATE task_prs SET historical=1
+                     WHERE task_id=?1 AND historical=0 AND abandoned_at IS NOT NULL",
+                    [id.as_str()],
+                )?;
+                if checkout_removed {
+                    tx.execute("DELETE FROM task_checkouts WHERE task_id=?1", [id.as_str()])?;
+                }
+            }
             super::task_state::decide_in(&tx, id, target)?;
             // Reopening clears auto: it ended with the Task.
             tx.execute("DELETE FROM task_auto WHERE task_id=?1", [id.as_str()])?;
@@ -1099,6 +1116,11 @@ impl SqliteStore {
         Ok(())
     }
 
+    pub fn next_task_pr_sequence(&self, task: &TaskId) -> StoreResult<u32> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        next_task_pr_sequence_in(&conn, task)
+    }
+
     pub fn task_prs(&self, task_id: &TaskId) -> StoreResult<Vec<TaskPr>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut statement = conn.prepare(&format!(
@@ -1318,6 +1340,19 @@ impl SqliteStore {
         let event = insert_task_event_in(&transaction, task_id, kind)?;
         transaction.commit()?;
         Ok(event)
+    }
+
+    /// Whether the latest checkout finished placement, including older PR-backed checkouts.
+    pub fn task_checkout_ready(&self, task: &TaskId) -> StoreResult<bool> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn.query_row(
+            "SELECT kind IN ('checkout_ready','pr_started') FROM
+                (SELECT json_extract(kind_json,'$.kind') AS kind FROM task_events
+                 WHERE task_id=?1 AND kind IN ('checkout_initializing','checkout_ready','pr_started')
+                 ORDER BY id DESC LIMIT 1)",
+            [task.as_str()],
+            |row| row.get(0),
+        ).optional()?.unwrap_or(false))
     }
 
     pub fn task_events_after(&self, task_id: &TaskId, cursor: i64) -> StoreResult<Vec<TaskEvent>> {
@@ -1579,11 +1614,11 @@ fn validate_task_pr(pr: &TaskPr) -> StoreResult<()> {
         .map_err(|error| StoreError::InvalidData(error.to_string()))
 }
 
-fn validate_initial_task_pr(task: &Task, pr: &TaskPr) -> StoreResult<()> {
+fn validate_placement_pr(task: &Task, pr: &TaskPr) -> StoreResult<()> {
     validate_task_pr(pr)?;
-    if pr.task_id != task.id || pr.sequence != 1 || !pr.is_active() {
+    if pr.task_id != task.id || !pr.is_active() {
         return Err(StoreError::InvalidData(
-            "Task requires its sequence-1 active PR".to_string(),
+            "Task placement requires its own active PR".to_string(),
         ));
     }
     Ok(())
@@ -2033,6 +2068,14 @@ fn ingest_linear_comment(
     } else {
         Ok(None)
     }
+}
+
+fn next_task_pr_sequence_in(conn: &Connection, task: &TaskId) -> StoreResult<u32> {
+    Ok(conn.query_row(
+        "SELECT COALESCE(MAX(sequence),0)+1 FROM task_prs WHERE task_id=?1",
+        [task.as_str()],
+        |row| row.get(0),
+    )?)
 }
 
 fn insert_task_pr(conn: &Connection, pr: &TaskPr) -> StoreResult<()> {

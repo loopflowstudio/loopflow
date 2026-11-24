@@ -449,9 +449,21 @@ pub fn branch_exists(repo: &Path, branch: &str) -> Result<bool, GitError> {
     let output = Command::new("git")
         .arg("-C")
         .arg(repo)
-        .args(["show-ref", "--verify", &format!("refs/heads/{branch}")])
+        .args([
+            "show-ref",
+            "--verify",
+            "--quiet",
+            &format!("refs/heads/{branch}"),
+        ])
         .output()?;
-    Ok(output.status.success())
+    match output.status.code() {
+        Some(0) => Ok(true),
+        Some(1) => Ok(false),
+        _ => Err(GitError::CommandFailed {
+            command: format!("git show-ref --verify refs/heads/{branch}"),
+            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+        }),
+    }
 }
 
 pub(crate) fn list_porcelain(repo: &Path) -> Result<Vec<(PathBuf, Option<String>)>, GitError> {

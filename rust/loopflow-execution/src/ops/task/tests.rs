@@ -1939,8 +1939,7 @@ async fn watched_landing_completes_task_only_from_merged_pr_evidence() {
 
     let current = store.active_task_pr(&task.id).await.unwrap().unwrap();
     let task = store.get_task(&task.id).await.unwrap().unwrap();
-    let mut next = super::delivery::task_pr_for_publication(&task);
-    next.sequence = current.sequence + 1;
+    let mut next = super::delivery::next_task_pr(&store, &task).unwrap();
     next.branch = "wrong-placement".into();
     assert!(store.insert_task_pr(&next).await.is_err());
     assert_eq!(store.active_task_pr(&task.id).await.unwrap(), Some(current));
@@ -1952,7 +1951,7 @@ async fn watched_landing_completes_task_only_from_merged_pr_evidence() {
     assert_eq!(store.work_status(&work).await.unwrap(), WorkStatus::Done);
     store
         .sqlite
-        .reopen_task(&task.id, Some("New delivery"))
+        .reopen_task(&task.id, Some("New delivery"), false)
         .unwrap();
     store
         .sqlite

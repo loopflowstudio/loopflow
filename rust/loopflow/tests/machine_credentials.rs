@@ -34,7 +34,7 @@ fn unadded_machine_is_rejected_before_any_local_credential_command() {
         fs::set_permissions(path, fs::Permissions::from_mode(0o700)).unwrap();
     }
     let output = command(home.path())
-        .args(["machine", "connect", "unadded", "github"])
+        .args(["machine", "login", "github", "unadded"])
         .output()
         .unwrap();
     assert!(!output.status.success());

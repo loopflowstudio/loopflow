@@ -3,7 +3,6 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use crate::profile::{AccessProfile, AuthBrowserBinding, ProfileId};
 use crate::provider_auth::Provider;
 use crate::work::wave::{Wave, WaveLocator};
 use loopflow_model::id::{AgentSessionId, WaveId};
@@ -500,60 +499,6 @@ impl Store {
         let provider = provider.map(str::to_string);
         run_sqlite(&self.sqlite, move |store| {
             account_labels::list_provider_accounts(&store, provider.as_deref())
-        })
-        .await
-    }
-
-    pub async fn upsert_access_profile(&self, profile: &AccessProfile) -> StoreResult<()> {
-        let profile = profile.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.upsert_access_profile(&profile)
-        })
-        .await
-    }
-
-    pub async fn get_access_profile(
-        &self,
-        profile_id: &ProfileId,
-    ) -> StoreResult<Option<AccessProfile>> {
-        let profile_id = profile_id.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.get_access_profile(&profile_id)
-        })
-        .await
-    }
-
-    pub async fn list_access_profiles(&self) -> StoreResult<Vec<AccessProfile>> {
-        run_sqlite(&self.sqlite, |store| store.list_access_profiles()).await
-    }
-
-    pub async fn set_auth_browser_profiles(
-        &self,
-        provider: Provider,
-        account_id: Option<&ProviderAccountId>,
-        profile_ids: &[ProfileId],
-    ) -> StoreResult<()> {
-        let account_id = account_id.cloned();
-        let profile_ids = profile_ids.to_vec();
-        run_sqlite(&self.sqlite, move |store| {
-            account_labels::set_auth_browser_profiles(
-                &store,
-                provider,
-                account_id.as_ref(),
-                &profile_ids,
-            )
-        })
-        .await
-    }
-
-    pub async fn list_auth_browser_profiles(
-        &self,
-        provider: Option<Provider>,
-        account_id: Option<&ProviderAccountId>,
-    ) -> StoreResult<Vec<AuthBrowserBinding>> {
-        let account_id = account_id.cloned();
-        run_sqlite(&self.sqlite, move |store| {
-            account_labels::list_auth_browser_profiles(&store, provider, account_id.as_ref())
         })
         .await
     }

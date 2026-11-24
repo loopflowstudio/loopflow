@@ -13,64 +13,6 @@
       ],
       "type": "object"
     },
-    "Account": {
-      "additionalProperties": false,
-      "properties": {
-        "provider": {
-          "$ref": "#/$defs/Provider"
-        }
-      },
-      "required": [
-        "provider"
-      ],
-      "type": "object"
-    },
-    "AccountReport": {
-      "additionalProperties": false,
-      "properties": {
-        "accounts": {
-          "items": {
-            "$ref": "#/$defs/AccountRow"
-          },
-          "type": "array"
-        }
-      },
-      "required": [
-        "accounts"
-      ],
-      "type": "object"
-    },
-    "AccountRow": {
-      "additionalProperties": false,
-      "properties": {
-        "expires_at": {
-          "format": "int64",
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
-        "login": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "provider": {
-          "$ref": "#/$defs/Provider"
-        },
-        "state": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "provider",
-        "login",
-        "state",
-        "expires_at"
-      ],
-      "type": "object"
-    },
     "Action": {
       "oneOf": [
         {
@@ -6746,18 +6688,6 @@
       ],
       "type": "object"
     },
-    "Provider": {
-      "enum": [
-        "github",
-        "claude",
-        "codex",
-        "opencodezen",
-        "linear",
-        "asana",
-        "doppler"
-      ],
-      "type": "string"
-    },
     "ProviderHistory": {
       "description": "An exact native turn, or an older provider observation with unknown native\nidentity. References identify evidence; they confer no process/settlement API.",
       "properties": {
@@ -8334,46 +8264,6 @@
               "unresolved": 0
             },
             "wave": "product"
-          }
-        },
-        {
-          "additionalProperties": false,
-          "description": "`lf account [<provider>] --json`: saved service authentication.",
-          "examples": [
-            {
-              "kind": "account.list",
-              "target": "linear"
-            }
-          ],
-          "properties": {
-            "kind": {
-              "const": "account.list",
-              "type": "string"
-            },
-            "target": {
-              "type": [
-                "string",
-                "null"
-              ]
-            }
-          },
-          "required": [
-            "kind",
-            "target"
-          ],
-          "type": "object",
-          "x-result": {
-            "$ref": "#/$defs/AccountReport"
-          },
-          "x-result-example": {
-            "accounts": [
-              {
-                "expires_at": 1794614400,
-                "login": "maya@example.com",
-                "provider": "linear",
-                "state": "active"
-              }
-            ]
           }
         },
         {
@@ -18839,76 +18729,6 @@
             "created": true,
             "path": "/Users/maya/src/loopflow.spike",
             "strategy": "create"
-          }
-        },
-        {
-          "additionalProperties": false,
-          "description": "`lf account disconnect <provider>`: disconnect a service.",
-          "examples": [
-            {
-              "kind": "account.disconnect",
-              "provider": "linear"
-            }
-          ],
-          "properties": {
-            "kind": {
-              "const": "account.disconnect",
-              "type": "string"
-            },
-            "provider": {
-              "type": "string"
-            }
-          },
-          "required": [
-            "kind",
-            "provider"
-          ],
-          "type": "object",
-          "x-result": {
-            "$ref": "#/$defs/Account"
-          },
-          "x-result-example": {
-            "provider": "linear"
-          }
-        },
-        {
-          "additionalProperties": false,
-          "description": "`lf account connect <provider>`: connect a service.",
-          "examples": [
-            {
-              "api_key": false,
-              "chrome_profile": "Profile 1",
-              "kind": "account.connect",
-              "provider": "linear"
-            }
-          ],
-          "properties": {
-            "api_key": {
-              "type": "boolean"
-            },
-            "chrome_profile": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "kind": {
-              "const": "account.connect",
-              "type": "string"
-            },
-            "provider": {
-              "type": "string"
-            }
-          },
-          "required": [
-            "kind",
-            "provider",
-            "chrome_profile",
-            "api_key"
-          ],
-          "type": "object",
-          "x-result": {
-            "$ref": "#/$defs/Account"
           }
         },
         {

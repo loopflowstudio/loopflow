@@ -292,37 +292,6 @@ fn export(conn: &Connection) -> Result<Export> {
             );
         }
     }
-    if table(conn, "auth_browser_bindings")? {
-        let mut query = conn.prepare("SELECT provider,account_id,profile_id FROM auth_browser_bindings ORDER BY provider,account_id,position")?;
-        let mut declarations: BTreeMap<String, super::placement::AuthBrowsers> = BTreeMap::new();
-        for row in query.query_map([], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, Option<String>>(1)?,
-                row.get::<_, String>(2)?,
-            ))
-        })? {
-            let (provider, account, profile) = row?;
-            let declaration = declarations.entry(provider).or_default();
-            match account {
-                Some(account) => declaration
-                    .accounts
-                    .entry(account)
-                    .or_default()
-                    .push(profile),
-                None => declaration.default.push(profile),
-            }
-        }
-        if !declarations.is_empty() {
-            put(
-                &mut exports,
-                home(conn)?.join("config.yaml"),
-                &[],
-                "auth_browsers",
-                serde_yaml_ng::to_value(declarations)?,
-            );
-        }
-    }
     let old_capacity: bool = conn.query_row(
         "SELECT EXISTS(SELECT 1 FROM pragma_table_info('ondemands') WHERE name='max_machines')",
         [],
@@ -364,6 +333,7 @@ fn export(conn: &Connection) -> Result<Export> {
                 max_usd_per_hour: loopflow_storage::rental::Usd::parse(&price)
                     .map_err(anyhow::Error::msg)?,
                 hours,
+                logins: Vec::new(),
             };
             super::settings::insert(
                 exports
@@ -694,9 +664,5 @@ mod tests {
         assert!(global.get("account").is_none());
         assert_eq!(global["pools"]["workers"]["off"], true);
         assert_eq!(global["ondemands"]["code"]["max_machines"], 3);
-        assert_eq!(
-            global["auth_browsers"]["codex"]["accounts"]["one"][0],
-            "Work"
-        );
     }
 }

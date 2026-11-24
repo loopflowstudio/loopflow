@@ -420,6 +420,7 @@ mod tests {
                 max_machines: 1,
                 max_usd_per_hour: Usd::parse("0.40").unwrap(),
                 hours: 4.0,
+                logins: Vec::new(),
             },
         )
         .unwrap();

@@ -334,6 +334,23 @@ impl SqliteStore {
         Ok(())
     }
 
+    /// `provider`'s last refusal here, its reason and when, if no agent of
+    /// that provider has launched since.
+    pub fn unanswered_refusal(&self, provider: &str) -> StoreResult<Option<(String, i64)>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn
+            .query_row(
+                "SELECT r.reason,r.updated_at FROM agent_limit_recoveries r
+                 WHERE r.provider=?1 AND NOT EXISTS(
+                     SELECT 1 FROM agent_sessions s
+                     WHERE s.provider=?1 AND s.agent_started_at>r.updated_at)
+                 ORDER BY r.updated_at DESC LIMIT 1",
+                [provider],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?)
+    }
+
     /// `step`'s wait is over: its launch is under way, or someone interrupted it.
     pub fn end_agent_limit_wait(&self, step: &LfProcessId) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
@@ -866,6 +883,47 @@ mod tests {
         wait(1, 100);
         assert_eq!(store.tasks_past_a_limit_wait(200).unwrap().len(), 1);
         assert!(store.tasks_past_a_limit_wait(200).unwrap().contains(&task));
+    }
+
+    /// A refusal stands until an agent of its provider launches again.
+    #[test]
+    fn a_refusal_stands_until_its_provider_launches_again() {
+        let home = tempfile::tempdir().unwrap();
+        let store = crate::test_fixture::open(&home.path().join("store.db")).unwrap();
+        let graph = store.test_graph("code", "/repo", &[("implement", None)], None);
+        let step = store
+            .graph_process(graph.as_str())
+            .unwrap()
+            .unwrap()
+            .0
+            .steps[0]
+            .run
+            .id
+            .clone();
+        store
+            .record_agent_limit_recovery(&step, "codex", "no login", None, None)
+            .unwrap();
+        let (reason, refused_at) = store.unanswered_refusal("codex").unwrap().unwrap();
+        assert_eq!(reason, "no login");
+        assert_eq!(store.unanswered_refusal("claude").unwrap(), None);
+        // Another provider's launch answers nothing; Codex's own does.
+        let launch = |id: &str, provider: &str| {
+            store
+                .conn
+                .lock()
+                .unwrap()
+                .execute(
+                    "INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,
+                        provider,agent_started_at)
+                     VALUES(?1,'Agent','human',1,0,'/repo',?2,?3)",
+                    rusqlite::params![id, provider, refused_at + 1],
+                )
+                .unwrap();
+        };
+        launch("claude-agent", "claude");
+        assert!(store.unanswered_refusal("codex").unwrap().is_some());
+        launch("codex-agent", "codex");
+        assert_eq!(store.unanswered_refusal("codex").unwrap(), None);
     }
 
     #[test]

@@ -139,7 +139,7 @@ lf resume                                  # return to this checkout's conversat
 | Mixing Claude, Codex, OpenCode, Pi, and Antigravity + automatic usage-limit failover | [Configuration](config.md#keep-going-when-a-provider-runs-out) · [Native authentication](subscriptions.md) |
 | Custom Skills (`extends: builtin`), Graphs, loops, `ship-review`, and `qa` | [Orchestration](orchestration.md) |
 | Auto-merge, CI repair (`lf land --wait-and-fix`), stacked PRs, and releases | [Ops](ops.md) |
-| Running on SSH machines, pools, or rented Daytona/Modal/RunPod/AWS boxes | [Machines](ops.md#machines) · [Remote forwarding](subscriptions.md#remote-machines-and-rentals) |
+| Running on SSH machines, pools, or rented Daytona/Modal/RunPod/AWS boxes | [Machines](ops.md#machines) · [Sign in on any Machine](subscriptions.md#sign-in-on-any-machine) |
 | Loopflow Desktop, Rex, cmux, Herdr, tmux, or building a custom UI | [Surfaces](surfaces.md) · [Workspaces](workspaces.md) |
 | Token cost, context budgets, transcripts, and `lf doctor` | [Telemetry](telemetry.md) |
 | Letting another AI agent orchestrate `lf` via `--json` | [The Agent API](agent-api.md) |

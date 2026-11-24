@@ -74,13 +74,21 @@ pub async fn add(repo: &Path, name: &str, objective: Option<&str>) -> OpsResult<
         if let Err(error) = super::linear::acquire_wave_inventory(&store, &wave).await {
             summary.push(error.to_string());
         }
-        let project = store
+        let selected = store
             .sqlite
             .selected_project(wave.id())
             .map_err(lifecycle_error)?;
-        if project.is_none() {
-            summary.push(super::project::unconfigured(&store, &wave)?);
-        }
+        // A Linear Initiative chooses its own Project; any other Wave gets a first one.
+        let project = match selected {
+            None if super::linear::authored_initiative(&wave).is_none() => {
+                Some(ensure_first_project(&store, &wave).await?)
+            }
+            None => {
+                summary.push(super::project::unconfigured(&store, &wave)?);
+                None
+            }
+            selected => selected,
+        };
         return Ok(WaveAdded {
             id: wave.id().clone(),
             name: wave.slug().to_owned(),

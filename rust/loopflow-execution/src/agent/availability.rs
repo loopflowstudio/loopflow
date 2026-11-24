@@ -27,7 +27,7 @@ impl MachineAgents {
         config: &Config,
         surface: crate::prompt::Surface,
     ) -> Result<(Agent, Vec<Agent>), LoadError> {
-        let (agent, rest) = self.resolve(config)?;
+        let (agent, rest) = self.choose(config)?;
         if surface == crate::prompt::Surface::Headless && crate::journal::graph_step() {
             // An explicit worker stays on its harness. Report a missing login
             // before admitting a worker that would just wait for sign-in.
@@ -44,18 +44,29 @@ impl MachineAgents {
         Ok((agent, rest))
     }
 
+    /// The agent a launch binds: the first usable one, else the configured
+    /// choice, whose client then says why it cannot start.
+    pub(crate) fn choose(&mut self, config: &Config) -> Result<(Agent, Vec<Agent>), LoadError> {
+        match self.resolve(config) {
+            Err(LoadError::HarnessUnavailable(_)) => config.resolve_agents(),
+            resolved => resolved,
+        }
+    }
+
     /// Keep a pinned agent exact. With preferences, start at the first
-    /// usable model and retain the configured quota fallbacks behind it.
+    /// usable model and retain the configured quota fallbacks behind it,
+    /// unchecked: a status probe runs the client, so only the start pays one.
     pub(crate) fn resolve(&mut self, config: &Config) -> Result<(Agent, Vec<Agent>), LoadError> {
         let (first, rest) = config.resolve_agents()?;
         if config.agent.is_some() {
             return Ok((first, rest));
         }
-        let mut usable = std::iter::once(first)
-            .chain(rest)
-            .filter(|agent| self.failure(agent.harness).is_none());
-        if let Some(start) = usable.next() {
-            return Ok((start, usable.collect()));
+        let mut order = std::iter::once(first).chain(rest);
+        if let Some(start) = order
+            .by_ref()
+            .find(|agent| self.failure(agent.harness).is_none())
+        {
+            return Ok((start, order.collect()));
         }
         // A Machine may have a native login outside the portable preferences.
         // This last resort is for initial selection only, never a quota move.

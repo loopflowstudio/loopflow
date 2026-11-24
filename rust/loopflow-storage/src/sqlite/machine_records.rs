@@ -16,7 +16,9 @@ use super::SqliteStore;
 /// Dispatch attribution survives transcript replay on a different Machine.
 /// For otherwise equivalent readings, prefer local, then stable Machine ID order.
 pub(super) const COLLECTED_TURNS: &str = "
-    SELECT c.* FROM machine_record_inputs c
+    SELECT c.record_id,c.origin_machine_id,c.kind,c.key,c.row,c.session_id,c.task_id,c.wave_id,
+        c.scope_wave,c.project_id,c.project_slug,c.external_project_id,c.started
+    FROM machine_record_inputs c
     LEFT JOIN history.turns t ON t.session_id=c.session_id
         AND t.provider_thread=json_extract(c.row,'$.thread') AND t.provider_turn=json_extract(c.row,'$.turn')
     WHERE c.kind='turn' AND (t.id IS NULL OR (t.lf_process_id IS NULL AND t.captured_event IS NULL

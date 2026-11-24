@@ -2275,7 +2275,7 @@ fn a_restart_without_a_usable_login_leaves_the_running_provider_alone() {
         std::fs::set_permissions(&codex, std::os::unix::fs::PermissionsExt::from_mode(0o755))
             .unwrap();
         let _path = crate::test_ambient::EnvGuard::clear(&["PATH", "CODEX_ACCESS_TOKEN"]);
-        std::env::set_var("PATH", bin.path());
+        std::env::set_var("PATH", format!("{}:/usr/bin:/bin", bin.path().display()));
 
         let session = fixture.codex_session("forward-refresh", None);
         let mut provider = fixture.run(&session);

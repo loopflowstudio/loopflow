@@ -1402,7 +1402,7 @@ impl SqliteStore {
                     AND (NOT ?13 OR t.lf_process_id IS NOT NULL OR NOT EXISTS (SELECT 1 FROM copies c
                         WHERE c.key=json_array(t.session_id,t.provider_thread,t.provider_turn))))
                 , scoped AS (
-                SELECT inputs.*,NULL AS copied_record
+                SELECT captured,input_id,session_id,caller_input_id,started,task_id,wave_id,ended,thread,turn,latest,NULL AS copied_record
                 FROM inputs
                 WHERE (?1 IS NULL OR wave_id IN (SELECT id FROM wave_addresses WHERE id=?9 OR slug=?1)
                     OR EXISTS (SELECT 1 FROM history.turns origin WHERE origin.session_id=inputs.session_id
@@ -1448,7 +1448,7 @@ impl SqliteStore {
                         AND t.session_id=ci.session_id AND json_extract(t.row,'$.captured_event')=ci.captured
                         AND t.task_id=?3))),
                 eligible AS MATERIALIZED (
-                SELECT scoped.*, SUM(ended IS NULL) OVER () AS unfinished,
+                SELECT captured,input_id,session_id,caller_input_id,started,task_id,wave_id,ended,thread,turn,latest,copied_record, SUM(ended IS NULL) OVER () AS unfinished,
                     ROW_NUMBER() OVER (PARTITION BY ended IS NULL ORDER BY started DESC,input_id DESC,session_id,thread,turn) AS ordinal,
                     COUNT(*) OVER () AS total FROM scoped)
                 SELECT eligible.session_id,eligible.input_id,eligible.caller_input_id,started,eligible.task_id,eligible.wave_id,

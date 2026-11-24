@@ -197,9 +197,11 @@ pub(crate) fn find_or_register(
     if !directory.join("GOAL.md").is_file() && !directory.join("config.yaml").is_file() {
         return store.get_wave_at(locator);
     }
-    let id = ensure_wave_inner(store, repo, name, true)?
-        .ok_or_else(|| invalid(format!("authored Wave {name} was moved or retired")))?;
-    store.get_wave(&id)
+    // A moved or retired Wave's leftover directory names no Wave here.
+    match ensure_wave_inner(store, repo, name, true)? {
+        Some(id) => store.get_wave(&id),
+        None => Ok(None),
+    }
 }
 
 /// Register every authored Wave directory under `<checkout>/.lf/wave/`, matching

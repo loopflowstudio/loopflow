@@ -714,7 +714,8 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         // A copy keeps its origin's rows in the shape `history.session_history` has.
         let source = match origin {
-            None => "(SELECT * FROM history.session_history WHERE ?15 IS NULL)",
+            None => "(SELECT seq,session_id,receipt_key,kind,lf_process_id,task_id,wave_id,observed_at,payload
+                 FROM history.session_history WHERE ?15 IS NULL)",
             Some(_) => {
                 "(SELECT json_extract(row,'$.seq') AS seq,json_extract(row,'$.session_id') AS session_id,
                     json_extract(row,'$.receipt_key') AS receipt_key,json_extract(row,'$.kind') AS kind,

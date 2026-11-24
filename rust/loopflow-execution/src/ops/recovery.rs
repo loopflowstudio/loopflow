@@ -89,11 +89,13 @@ pub fn launch_failure(
             Some(kind) => machine.failure(kind).map(str::to_owned),
             None => Some(format!("unknown harness {provider}")),
         },
-        None => match crate::session::pending_agent(store, &session, machine) {
-            Ok(agent) => machine.failure(agent.harness).map(str::to_owned),
-            Err(error) if error.is::<crate::error::LoadError>() => Some(error.to_string()),
-            Err(error) => return Err(error),
-        },
+        None => {
+            match crate::session::pending_agent(store, &session, |config| machine.resolve(config)) {
+                Ok(agent) => machine.failure(agent.harness).map(str::to_owned),
+                Err(error) if error.is::<crate::error::LoadError>() => Some(error.to_string()),
+                Err(error) => return Err(error),
+            }
+        }
     };
     Ok(reason.map(|reason| format!("{WAITING_FOR_HARNESS}{reason}")))
 }

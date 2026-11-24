@@ -9,12 +9,9 @@ pub fn conversation(
     wave: Option<&str>,
 ) -> anyhow::Result<LfSession> {
     let skill = crate::graph::load_skill(skill, cwd)?;
-    let agent = match conversation_agent(
-        cwd,
-        wave,
-        &skill,
-        &mut crate::agent::MachineAgents::default(),
-    ) {
+    let agent = match conversation_agent(cwd, wave, &skill, |config| {
+        crate::agent::MachineAgents::default().resolve(config)
+    }) {
         Ok(agent) => Some(agent),
         // A Task can acquire its checkout before a login reaches the Machine.
         Err(crate::error::LoadError::HarnessUnavailable(_)) => None,
@@ -53,18 +50,21 @@ fn conversation_agent(
     cwd: &std::path::Path,
     wave: Option<&str>,
     skill: &crate::graph::Skill,
-    machine: &mut crate::agent::MachineAgents,
+    select: impl FnOnce(&crate::config::Config) -> AgentChoice,
 ) -> Result<crate::config::Agent, crate::error::LoadError> {
     let shared = crate::config::resolved_for_task(cwd, cwd, wave)?;
     let resolved = crate::config::settings::resolve(&shared.config, Some(skill))?;
-    Ok(machine.resolve(&resolved.config)?.0)
+    Ok(select(&resolved.config)?.0)
 }
+
+type AgentChoice =
+    Result<(crate::config::Agent, Vec<crate::config::Agent>), crate::error::LoadError>;
 
 /// Choose the first provider for a conversation prepared without a usable login.
 pub(crate) fn pending_agent(
     store: &loopflow_storage::sqlite::SqliteStore,
     session: &LfSession,
-    machine: &mut crate::agent::MachineAgents,
+    select: impl FnOnce(&crate::config::Config) -> AgentChoice,
 ) -> anyhow::Result<crate::config::Agent> {
     let name = session
         .skill
@@ -81,7 +81,7 @@ pub(crate) fn pending_agent(
         &session.cwd,
         wave.as_ref().map(|wave| wave.slug()),
         &skill,
-        machine,
+        select,
     )?)
 }
 

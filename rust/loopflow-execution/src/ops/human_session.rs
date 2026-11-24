@@ -1768,11 +1768,9 @@ async fn finish_thread_creation(
 pub async fn append_input(store: &SharedStore, mut next: LfSession) -> Result<LfSession> {
     let replaced = next.captured;
     if next.provider.is_none() && replaced.is_none() {
-        let agent = crate::session::pending_agent(
-            &store.sqlite,
-            &next,
-            &mut crate::agent::MachineAgents::default(),
-        )?;
+        let agent = crate::session::pending_agent(&store.sqlite, &next, |config| {
+            crate::agent::MachineAgents::default().choose(config)
+        })?;
         next.provider = Some(agent.harness.as_str().to_owned());
         next.model = agent.model;
     } else if let Some(agent) = handoff_agent(&next) {

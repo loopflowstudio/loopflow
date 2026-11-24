@@ -317,7 +317,7 @@ pub(crate) fn message_launch(
     if let Some(agent) = agent {
         config.agent = Some(agent.to_owned());
     }
-    let (agent, fallback_agents) = crate::agent::MachineAgents::default().resolve(&config)?;
+    let (agent, fallback_agents) = crate::agent::MachineAgents::default().choose(&config)?;
     Ok(AgentConfig {
         chrome: config.chrome,
         codex_service_tier: config.codex.service_tier,

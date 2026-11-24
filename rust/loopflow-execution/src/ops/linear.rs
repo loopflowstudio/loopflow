@@ -494,7 +494,7 @@ pub async fn refresh_wave(repo: &Path, wave: &str) -> OpsResult<()> {
 }
 
 /// An older checkout can carry the files of a retired Wave at a reused address.
-fn authored_initiative(wave: &Wave) -> Option<String> {
+pub(super) fn authored_initiative(wave: &Wave) -> Option<String> {
     let config = read_wave_config(Path::new(wave.repo()), wave.slug())?;
     if config.id.as_ref().is_some_and(|id| id != wave.id()) {
         return None;

@@ -4218,14 +4218,7 @@ mod tests {
                 "initiative_ids":["initiative"], "team_ids":["team"]
             }], "items":[]})).unwrap(),
         }, None).await.unwrap();
-        loopflow_storage::sqlite::project_selection::write_project_binding(
-            &store.sqlite,
-            wave.id(),
-            None,
-            "999bdbdd-c045-41a6-8ffc-a97c4a40b0b3",
-            &loopflow_execution::store::PlanningLocks::new(tempfile::tempfile().unwrap()),
-        )
-        .unwrap();
+        // The Initiative's sole In Progress Project binds when its inventory arrives.
         let super::Evidence::Ok { items, .. } = super::project_planning(&store, &wave).await else {
             panic!("Project plan unavailable");
         };

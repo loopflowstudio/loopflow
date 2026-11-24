@@ -3012,6 +3012,8 @@ fn successful_final_graph_keeps_arrival_when_completion_fails_and_never_replays(
 /// LF_HOME, waits before answering.
 const STAND_IN_CLAUDE: &str = r#"#!/usr/bin/python3
 import json, os, sys, time
+if sys.argv[1:] == ['auth', 'status']:
+    sys.exit(0)
 if '--version' in sys.argv:
     print('fixture')
     sys.exit(0)

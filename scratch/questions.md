@@ -99,3 +99,6 @@
   they show no sync line for an unbound Project (inferred, the app was not
   opened this run). The CLI's "not in Linear yet" line is printed from `ProjectSummary.tracker_id`
   and the repository's config, not carried on the wire.
+- Concept review after slice 12 chose: binding an unbound Project queues its
+  Tasks' local order once (slice 13), and the create failure names `lf wave
+  sync` as the retry. Page questions 1–3.

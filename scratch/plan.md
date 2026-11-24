@@ -637,15 +637,32 @@ fixtures get the team after `wave add`, and the two `wave_sync_*` tests
 became `wave_sync_offline_fails_with_the_tracker_error_and_queues_no_project`
 and `wave_sync_makes_only_its_own_project`.
 
+## Slice 13 — an unbound Project keeps its order (concept review after slice 12)
+
+Chosen for review (`scratch/concept-review.html`, questions 1 and 2):
+
+- Binding sends the order. When a Wave's unbound Project gets its tracker id
+  (`linear_events::accept_linear_project_in`, whichever caller: create, sync,
+  connect, the drain's `create_named_projects`), queue one `Order` action with
+  the Project's current local order when it holds two or more Tasks. It waits
+  behind their creates as order edits already do. Asana retires it (no order
+  form), as today.
+- `tracker_actions::owner_tracker`: a Project owner's tracker is its binding;
+  the queued-`create` fallback goes for Projects (nothing queues one since
+  slice 12). Task owners keep it.
+- The create failure in `wave_lifecycle.rs` names `lf wave sync <wave>`, the
+  verb `lf wave status` prints. `drain::create_named_projects`'s comment names
+  the upgrade as its case, not another checkout.
+- Passed over: holding order edits on unbound Projects (storage would read
+  repository tracker config); accepting the tracker's creation order (a
+  reorder disappears silently).
+- Tests: `task_creation_and_edits_save_offline_in_both_connection_modes`
+  asserts the reorder reaches Linear after `lf wave sync` instead of asserting
+  the drop; a storage test that binding an unbound Project with two reordered
+  Tasks queues one `Order` and a one-Task Project queues none.
+
 ## Remains
 
-0. Slice 12 regression: an unbound Project's reorder (`lf task edit --rank`)
-   is dropped. `tracker_actions::owner_tracker` finds no binding and no
-   queued Project `create`, so `enqueue` skips it; before, it queued behind
-   the create. `task_creation_and_edits_save_offline_in_both_connection_modes`
-   now asserts the drop. Choose: hold order edits for an unbound Project in a
-   connected repository (and send them after its Tasks exist), or accept that
-   the order starts from the Linear create order.
 1. Gate: sync main, Swift DTO and desktop suites (`scripts/test_desktop.sh`),
    the full matrix in CI, and the `oauth_tests::…sqlite_contention…` failure
    checked on the base. `check_migrations.py` passes since the base merge

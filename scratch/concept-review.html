@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>LOO-995 concept review after slice 11</title>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>LOO-995 concept review after slice 12</title>
 <style>
 :root {
   --bg: #fbfaf7; --fg: #1d1c1a; --muted: #6b675f; --line: #e2ded5; --card: #ffffff;
@@ -60,58 +60,65 @@ ol.q ol { list-style: lower-alpha; margin-top: 4px; }
 ol.q ol li { margin: 3px 0; }
 .rec { font-weight: 600; color: var(--prop); }
 </style>
+<style>
+.yes{color:var(--yes);background:var(--yes-bg);padding:1px 7px;border-radius:5px;font-weight:600}
+.no{color:var(--no);background:var(--no-bg);padding:1px 7px;border-radius:5px;font-weight:600}
+.prop{border-left:4px solid var(--prop);background:var(--prop-bg);padding:10px 14px;border-radius:6px;margin:12px 0}
+.cols{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media (max-width:760px){.cols{grid-template-columns:1fr}}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 14px}
+</style>
 </head><body><main>
-<h1>One Wave, one Project, one tracker Project</h1>
-<p class="lede">LOO-995 · Concept review after slice 11 · 24 November 2026 · Branch a8dbab4b17 against 62a368e5cc</p>
-<p><strong>Area taken:</strong> the whole Wave–Project model with every slice in it: <code>lf wave create</code>, Task create and move, connect, upgrade of a released store, sync, rename, removal. I looked hardest at multi-Machine tracker delivery, the one row the last review marked <span class="mark no">no</span>. Slice 11 changed it.</p>
+<h1>Concept review after slice 12</h1>
+<p class="lede">Area: a Wave's one Project and how it becomes a tracker Project — <code>lf wave create</code>, <code>lf wave plan connect</code>, <code>lf wave sync</code>, the drain, and every edit that waits for a tracker binding. Taken because slice 12 moved Project creation out of the queue and into commands; everything that assumed "unbound means a create is queued" is in question.</p>
 
-<h2>Walk: two Machines, one Wave, an outage</h2>
-<pre><code># Machine A
-lf wave create ledger            # Project proj_&lt;wave uuid&gt; (local)
-lf task create --wave ledger 'x' # Task in ledger's Project
-# Machine B pulls; the Wave and its Project arrive over Git
-# repo.tracker.linear.team set, pushed, pulled on both
-# A and B each queue one Project create for proj_&lt;wave uuid&gt;
-# Linear down on A; B sends first: Linear Project id = wave uuid
-# A comes back: create refused (id taken) → look up by id → bind → x follows into it
-lf wave sync ledger              # on A: linked, x in the Project, no duplicate
-lf wave rename ledger journal    # Project name follows; linked → project_name action
-lf wave remove journal           # queued actions retire; completed Tasks stay readable</code></pre>
-<p>Every step names one Project. The tracker Project's identity is the Wave's UUID, on every Machine. Whichever Machine creates it first wins, and the others bind to it.</p>
+<h2>One interaction, with its failure</h2>
+<pre><code>$ lf wave create billing            # Linear unreachable
+error: wave/billing has no tracker Project yet: …. Run `lf wave create billing` again to make it.
+$ lf task create --wave billing a ; lf task create --wave billing b
+$ lf task edit b --rank 1           # b above a, locally
+$ lf wave status billing
+Project   billing (local) · started
+          not in Linear yet; `lf wave sync billing` makes it
+$ lf wave sync billing              # Linear back
+Made wave/billing's Project in Linear.
+                                    # a, b created in Linear in creation order: a, b
+                                    # next inventory read: order a, b — the rank edit is gone</code></pre>
+<p>Two things a person notices: the failure names one retry (<code>lf wave create</code>) and the status names another (<code>lf wave sync</code>) for the same state; and the reorder made while unbound is silently lost (plan Remains 0).</p>
 
-<h2>Do the product and code concepts line up?</h2>
+<h2>Do the concepts line up?</h2>
 <div class="table-wrap"><table>
-<tr><th>Fit</th><th>What a person knows or does</th><th>What owns it in the code</th></tr>
-<tr><td><span class="mark yes">yes</span></td><td>A Wave has one Project, made with it, offline too.</td><td><code>ProjectId::for_wave</code>; <code>held_wave_project_in</code> is the one read; the wire carries a singular <code>Reading&lt;ProjectSummary&gt;</code>.</td></tr>
-<tr><td><span class="mark yes">yes</span></td><td>A Task in a Wave is in its Project; moving Waves moves Projects.</td><td><code>tasks.project_id → projects.wave_id</code>. No <code>tasks.wave_id</code>, no climb.</td></tr>
-<tr><td><span class="mark yes">yes</span></td><td>Connect a Linear Project, or let the Wave's own be created.</td><td><code>lf wave plan connect</code>; the link is <code>projects.external_project_id</code>, nothing else.</td></tr>
-<tr><td><span class="mark yes">yes</span></td><td>Retry a failed send with <code>lf wave sync</code>.</td><td><code>refresh_status</code> routes by <code>queued_tracker</code> (slice 9).</td></tr>
-<tr><td><span class="mark yes">yes</span></td><td>Upgrade without losing queued work.</td><td><code>remove_chapters.sql</code> translates dropped destinations to the kept Project (slice 8).</td></tr>
-<tr><td><span class="mark yes">yes</span> <small>was no</small></td><td>Any Machine can bring a Wave's Project into the tracker.</td><td><code>uncreated</code> queues every unbound Project of a live Wave. Linear's refused create looks up its UUID and binds. Asana checks for a footer match before it POSTs (slice 11).</td></tr>
-<tr><td><span class="mark part">staged</span></td><td>"Exactly one" is a rule the store enforces.</td><td>Reads enforce it. The unique index waits for released writers to exit (LOO-1089).</td></tr>
-<tr><td><span class="mark part">race</span></td><td>Two Machines making one Asana Project at the same moment.</td><td>The footer read and the POST are not atomic, so this can make two Asana projects. Linear's client id rules it out. Named in the PR body (plan, Remains 3).</td></tr>
-<tr><td><span class="mark no">no</span></td><td>The Task's name: "a Project is a Wave's optional tracker link".</td><td>The branch builds "a Wave is exactly one Project", and PR #1997's title says so. Only the Task title (LOO-995) still says the superseded thing.</td></tr>
+<tr><th>What a person knows</th><th>In the code</th><th></th><th>What is wrong</th></tr>
+<tr><td>A Wave has one Project</td><td><code>projects.wave_id</code>, <code>held_wave_project_in</code>, <code>project_of_wave</code></td><td><span class="yes">yes</span></td><td>—</td></tr>
+<tr><td>A Task in a Wave is in its Project; moving Waves moves Projects</td><td><code>tasks.project_id</code>, <code>move_task_in</code></td><td><span class="yes">yes</span></td><td>—</td></tr>
+<tr><td>The Project is in Linear (or not yet)</td><td><code>projects.external_project_id</code>; "not in Linear yet" line from <code>ProjectSummary.tracker_id</code></td><td><span class="yes">yes</span></td><td>Unbound is now a visible, named state with one cause each: tracker down at create, upgrade.</td></tr>
+<tr><td>Making the Project in the tracker</td><td><code>tracker::create_wave_project</code> (create, connect, sync); <code>drain::create_named_projects</code> (before a Task send)</td><td><span class="yes">yes</span></td><td>One function, two callers in command and drain. The drain caller's comment still says "came from another checkout's files" — the upgrade is the case that remains.</td></tr>
+<tr><td>Retry after a failed create</td><td>create's error says <code>lf wave create</code>; status says <code>lf wave sync</code></td><td><span class="no">no</span></td><td>One state, two retry verbs. Both work; the person learns a distinction that isn't one.</td></tr>
+<tr><td>Reorder Tasks in a Wave</td><td><code>place_in_order</code> → <code>tracker_actions::enqueue(Project, Order)</code> → <code>owner_tracker</code></td><td><span class="no">no</span></td><td><code>owner_tracker</code> for a Project still falls back to "a queued <code>create</code>", which nothing writes since slice 12. Unbound ⇒ <code>None</code> ⇒ the edit is never queued, and the tracker's creation order later overwrites the local one. Dead fallback plus a lost edit.</td></tr>
+<tr><td>Rename / status of an unbound Project</td><td>edits dropped by the same <code>owner_tracker</code></td><td><span class="yes">yes</span></td><td>Harmless: the synchronous create sends the current name, summary and status.</td></tr>
 </table></div>
 
-<div class="callout">
-<p><strong>Biggest mismatch: the Task title, not the code.</strong> Since 2026-11-22 ("i think we should just have a wave = exactly 1 project for now"), a Project is not optional and not just a link. It is a local record, made with the Wave, and a tracker Project mirrors it. Anyone who reads LOO-995 in Linear sees the superseded model. The fix is a rename, with no code change.</p>
-</div>
-
+<h2>Biggest mismatch: an edit with no owner while unbound</h2>
 <div class="cols">
-<div class="panel"><h3>Existing</h3><p>LOO-995: "Remove chapters, KRs and metrics; a Project is a Wave’s optional tracker link"</p></div>
-<div class="panel proposed"><h3>Proposed <span class="tag prop">not done here</span></h3><p>"Remove chapters, KRs and metrics; a Wave is exactly one Project" (same as the PR title)</p></div>
+<div class="card"><h3>Before (slice 12 as built)</h3>
+<p>"Unbound" was designed as "a create is queued; everything else waits behind it." Slice 12 removed the queued create but kept the waiting rule in <code>owner_tracker</code>. Fields the create carries survive by accident; order, which the create does not carry, is dropped.</p></div>
+<div class="card prop"><h3>Proposed (slice 13)</h3>
+<p><b>Binding sends the order.</b> When a Wave's unbound Project gets its tracker id (<code>accept_linear_project_in</code>, any caller), queue one <code>Order</code> action with the Project's current local order if it holds two or more Tasks. It waits behind their creates as order edits already do. <code>owner_tracker</code>'s queued-<code>create</code> fallback for Project owners goes: a Project's tracker is its binding, nothing else.</p></div>
 </div>
+<p>Passed over: holding order edits on unbound Projects in a connected repository (storage would need the repository's tracker config, which it doesn't read), and accepting the loss (a reorder a person made disappears without a word). Asana has no order form and retires the action, as today.</p>
+<div class="prop"><b>Also:</b> the create failure names <code>lf wave sync &lt;wave&gt;</code>, the verb status already prints; the drain comment names the upgrade as its case.</div>
 
-<h2>Recommendation</h2>
-<p>Nothing in the concept needs to change before gate. Slice 11 turned the last <span class="mark no">no</span> into <span class="mark yes">yes</span>. What remains is a staged index (LOO-1089), a known Asana race, the open question of create snapshots, and the Task title. Advance to gate.</p>
+<h2>What stays</h2>
+<ul>
+<li>Tracker down at <code>lf wave create</code> records the Wave unbound and fails the command (questions.md). Rolling back store rows, seeded files and their commit is larger than the state it avoids, which upgrade already produces.</li>
+<li>A Task send into an unbound Project creates the Project first. Without it, upgraded Waves error on every pass until someone syncs.</li>
+<li>Asana footer search as the synchronous create's lost-reply recovery (Remains 3).</li>
+</ul>
 
-<h2>Questions for review</h2>
-<ol class="q">
-<li>The Task title.
-<ol><li>Rename LOO-995 to match the PR (chosen for review; not done, since it changes the tracker issue).</li><li>Leave it; the PR title is what lands.</li></ol></li>
-<li>The Asana simultaneous-create race.
-<ol><li>Name it in the PR body and leave it (chosen).</li><li>Have the import collapse two footer-matched Asana projects into one, as its own Task.</li></ol></li>
-<li>A queued create's field snapshot (open since slice 3).
-<ol><li>Stays as built (chosen).</li><li>Read fields at send time, in a tracker-drain redesign Task.</li></ol></li>
+<h2>Questions</h2>
+<ol>
+<li>Order made while a Project is unbound: (a) binding queues the local order once — chosen; (b) hold order edits until bound; (c) accept the tracker's creation order.</li>
+<li>Retry verb for an unbound Project: (a) <code>lf wave sync &lt;wave&gt;</code> everywhere — chosen; (b) keep <code>lf wave create</code> in the create error.</li>
+<li>Tracker down at <code>lf wave create</code>: (a) Wave recorded unbound, command fails — as built; (b) Wave recorded, command succeeds with a warning; (c) record nothing.</li>
 </ol>
 </main></body></html>

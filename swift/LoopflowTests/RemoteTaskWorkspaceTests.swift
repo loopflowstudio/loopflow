@@ -82,10 +82,11 @@ struct RemoteTaskWorkspaceTests {
             let printed = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
             #expect(!printed.contains("lf resume"), "\(printed)")
             #expect(record.openArgv.dropFirst().first == "open", "\(record.openArgv)")
+            // Mini's server may start the prepared conversation before the viewer
+            // attaches, so the provider's reply, not its first line, says where it runs.
             let viewer = try world.laptop.startTerminal(record.openArgv)
-            try await viewer.waitFor("provider on mini in \(checkout.path)")
             viewer.send("hello\r")
-            try await viewer.waitFor("mini received hello")
+            try await viewer.waitFor("mini received hello in \(checkout.path)")
             viewer.send("quit\r")
             _ = try await viewer.finish()
 
@@ -265,13 +266,12 @@ private final class TwoMachines {
             export LF_HOME=\(shellEscape(remote.appendingPathComponent("store").path)) LF_BIN=\(shellEscape(binary))
             exec \(shellEscape(binary)) "$@"
             """)
-        // Mini's provider: it names where it runs and answers each line typed into it.
+        // Mini's provider: it answers each line typed into it with where it runs.
         try Self.executable(remote.appendingPathComponent("bin/claude"), """
             #!/bin/bash
             if [ "$1" = --version ]; then echo '2.1.302'; exit; fi
-            printf 'provider on mini in %s\\n' "$PWD"
             while IFS= read -r -t 60 line < /dev/tty; do
-              printf 'mini received %s\\n' "$line"
+              printf 'mini received %s in %s\\n' "$line" "$PWD"
               [ "$line" = quit ] && exit 0
             done
             """)
@@ -376,7 +376,7 @@ private final class TerminalRun {
     var text: String { (try? String(contentsOf: output, encoding: .utf8)) ?? "" }
 
     func waitFor(_ expected: String, at location: SourceLocation = #_sourceLocation) async throws {
-        try await eventually("terminal shows \(expected)", at: location) { self.text.contains(expected) }
+        try await eventually("terminal shows \(expected)", at: location, showing: { self.text }) { self.text.contains(expected) }
     }
 
     func send(_ text: String) { input.fileHandleForWriting.write(Data(text.utf8)) }

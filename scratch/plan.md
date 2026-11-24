@@ -44,8 +44,8 @@ implement:
   `claude setup-token`, `doppler secrets set CLAUDE_CODE_OAUTH_TOKEN` and
   `forward.env`; `claude` leaves `login::reaches_other_machines`, so
   `--logins claude` and `--refused` for Claude are rejected too.
-- Launch refusal for Claude: `mini has no Claude login; forward
-  CLAUDE_CODE_OAUTH_TOKEN (`lf set --global forward.env`)`.
+- Launch refusal for Claude: superseded by "Done: Claude's token fails like
+  a login" below (advice names `doppler secrets set` and `forward.env`).
 - `lf machine logins <machine>` shows Claude as `forwarded
   CLAUDE_CODE_OAUTH_TOKEN` when this Machine's `forward.env` names it (the
   sending side overlays the row; the target's own probe can't see a per-run
@@ -428,7 +428,7 @@ Headless, fixture SSH target with fake clients:
 `lf machine logins fixture --json` shows codex signed in and, with
 `forward.env: [CLAUDE_CODE_OAUTH_TOKEN]`, claude `forwarded`; with the fake
 clients signed out, `lf --machine fixture -a codex …` names `lf machine login
-codex fixture` and `-a claude` names `forward CLAUDE_CODE_OAUTH_TOKEN`, both
+codex fixture` and `-a claude` names `give this Machine CLAUDE_CODE_OAUTH_TOKEN …`, both
 before any agent starts; with the token forwarded, the Claude launch runs.
 By a person at gate: `lf machine login codex mini` for real, and a Claude
 launch on mini with the Doppler token forwarded.

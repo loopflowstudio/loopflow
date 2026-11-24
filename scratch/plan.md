@@ -2,14 +2,20 @@
 
 > i think we need a 'paused' state / action for tasks -- stops the task worker - and ideally e.g. any rust compiling happening becasue of it - , maybe closes the tasks session for now as well, but oesnt unassign
 
-## Revision after demo & ship-review (build this next)
+## Revision after demo & ship-review
 
 Stacked on `LOO-1063` (Working sidebar order + status sort). Keep the `stopping_sessions` rename and the documented Codex 0.171.0 / post-send move limits; revise the implementation as follows:
 
-1. **Keep the Task Session open on pause (stop worker + session subprocesses only).**
+1. **Implemented in this slice — keep the Task Session open on pause.**
    - `lf task pause` stops only the Task's worker / Graph run, **any subprocesses in the worker's OS session** (describe generically in code/docs, not cargo-specific), and scheduled worker/limit retries.
    - Do **not** close the primary interactive Task Session on pause. Remove `Departure::Paused`, `Left::Paused`, primary-session teardown during pause, and Desktop's paused-conversation skip when opening/warming a Task.
    - While paused, the open Task Session keeps working normally (steers/messages reach the open conversation), while Graph runs (`lf task run`, `lf task auto on`, carrier recovery, limit recovery, `wave-operate`) stay held until explicit `lf task unpause`.
+   - Four focused Rust tests passed on macOS. In two simultaneous runs, the paused worker's subprocess exited, the neighboring run and the primary conversation survived, and unpause reached review. A crashed conversation restarted during the hold. An idle one received a steer and a child-Task update. Pausing during run admission stopped the first step.
+   - The server schema and four documented-command checks passed. The headless Mac test opened the paused Task and kept its conversation warm. The iOS 26.2 Simulator opened the Session terminal from the paused row.
+   - Two test fixtures still used the pre-stack APIs for Working-list drops and the iPhone feed. The updated refusal tests passed on Mac and iPhone.
+   - `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, and the architecture and Swift module checks passed. Gate and CI cover the wider suites.
+   - A Task-bound standalone turn also polls interrupt events. Pause now records a Graph stop in the same transaction as the hold. The Graph checks only events after its launch cursor. In SQLite with 10,000 Tasks and one million events, the poll used `idx_task_events_task (task_id=? AND id>?)` and took 3.06 µs with no new event.
+
 2. **Keep paused Tasks inside `TaskSection::Working`, with 3 sections in the left Working list.**
    - Owned paused Tasks remain in `TaskSection::Working` (not a separate `TaskSection::Paused` or separate Paused sidebar filter / Wave board section). Remove `TaskSection::Paused`, `TaskList.paused`, the Mac sidebar Paused filter, the Wave board / `lf wave show` `PAUSED` section, and the iPhone Paused filter. Keep `lf task list --state paused` filtering by `TaskState::Paused`.
    - On top of `LOO-1063`'s Working sidebar order and status-sort toggle, group owned Working Tasks in the left sidebar into **3 sections**:
@@ -69,7 +75,7 @@ The demo runs two Tasks building side by side. Pause one: its build and nested b
 4. **Dedicated `TaskSection::Paused` wired into `TaskList.paused` and Mac’s sidebar.** Passed over leaving paused Tasks in `Working` (inflates active count and operator passes) or omitting sidebar/phone lists (makes paused Tasks unreachable).
 5. **Share descendant-aware worker teardown across `pause`, `interrupt`, and `move`.** Passed over building descendant teardown only for `pause` (leaves `interrupt` and `move` leaking nested builds).
 
-## Build and gate
+## Build and gate before the demo
 
 The first increment exercises the existing `lf task interrupt` entry point. Headless workers now own an OS session. Their close path applies TERM and KILL to its live members, including jobs already reparented when the interrupt arrived. In the macOS probe the provider was PID 40971, the job was PID and PGID 40987, its parent was PID 1, and its SID was 40971.
 
@@ -88,7 +94,7 @@ Remaining:
 - **Pause after a move's payload is sent but before the destination has a checkout.** The destination refuses, so the person retries after arrival. Name it in the PR beside the Codex gap; the source-push window is covered.
 - **Five-harness worker matrix and Linux session enumeration:** gate and CI.
 
-Next: gate. Every implement item has a passing check; what remains is the two review choices above and CI.
+The demo reopened implementation. Next is the shared Working grouping in revision 2, including the automatic verify step for Shipping, followed by the Task bar.
 
 ## QA on a private Machine
 

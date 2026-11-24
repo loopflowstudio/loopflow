@@ -1,4 +1,4 @@
-Choices made for review (recorded in `scratch/plan.md` and `scratch/concept-review.html`):
+Pre-demo choices, superseded by the revision at the top of the plan (recorded in `scratch/plan.md` and `scratch/concept-review.html`):
 
 1. Pause applies to open, started Tasks only (refuses `unstarted` Backlog and terminal Tasks); `unassign`, `complete`, `abandon`, and `reopen` clear the pause hold.
 2. Explicit `lf task unpause` (with `--run` shortcut) lifts the hold; `lf task run`, `lf task auto on`, `lf resume --task`, recovery, and steer wakes respect the hold while paused.
@@ -40,3 +40,7 @@ the next implementation slice.
 - `cargo test -p loopflow --test integration machine_commands::served_pause_holds_the_remote_cursor_and_status_names_unpause -- --exact` passed on macOS. Gate and CI run broader suites.
 - `swift build --package-path swift --target LoopflowMac --jobs 2` built the macOS target with warnings in existing code.
 - `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings` passed.
+
+## Conversation slice
+
+Apply ordinary conversation recovery and steer delivery during a Graph hold. This includes a stopped primary receiving an addressed steer. Keep list membership and Graph presentation for the next slice.

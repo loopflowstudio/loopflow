@@ -1,4 +1,4 @@
-at: 15b1fa1c68c5e67cc792c3905bd00cdefce12b9b
+at: 67f5cc60ca2d6236e0d29f9c3a6cbd251916ea20
 first:
   - path: docs/work.md
     why: Pause and resume from the saved step
@@ -7,7 +7,7 @@ first:
   - path: rust/loopflow-storage/src/migrations/task_pauses.sql
     why: Store one hold and its stopping sessions per Task
   - path: rust/loopflow-storage/src/sqlite/task_pause.rs
-    why: Commit the hold, captured sessions and interrupt together
+    why: Record the hold, worker sessions and Graph stop together
   - path: rust/loopflow/src/lf/commands/write.rs
     why: Route both writes to the execution Machine
   - path: rust/loopflow-execution/src/ops/task/pause.rs
@@ -18,10 +18,8 @@ first:
     why: Capture worker sessions under their attachment locks
   - path: rust/loopflow-execution/src/os_process.rs
     why: Stop verified jobs after their launching shell exits
-  - path: rust/loopflow-execution/src/harness/native_exit.rs
-    why: Distinguish pause from a personal quit
-  - path: rust/loopflow-storage/src/sqlite/steers.rs
-    why: Keep incoming steers queued
+  - path: rust/loopflow/src/lf/commands/graph.rs
+    why: Stop the Graph at its saved cursor
   - path: rust/loopflow-execution/src/ops/human_session/moves.rs
     why: Carry a hold across Machines once
   - path: rust/loopflow-execution/src/task_graph.rs
@@ -35,15 +33,21 @@ first:
   - path: swift/Loopflow/Services/PendingChanges.swift
     why: Update both lists while a write settles
   - path: swift/LoopflowMac/WorkModel.swift
-    why: Read the selected list and keep paused conversations closed
+    why: Read the selected Task list
   - path: swift/LoopflowiOS/TaskWorkspaceView.swift
-    why: Show saved history on iPhone
+    why: Keep the iPhone conversation attached
   - path: rust/loopflow/tests/work/task_graph_launch_tests.rs
-    why: Stop one build and cancel a paused Task’s retry
+    why: Stop one worker while its conversation survives
+  - path: rust/loopflow/src/server/wake.rs
+    why: Deliver steers during a Graph hold
+  - path: rust/loopflow/tests/context_launch_tests.rs
+    why: Recover the conversation during a Graph hold
   - path: rust/loopflow/tests/machine_commands.rs
     why: Exercise pause during a two-Machine move
   - path: swift/LoopflowTests/TaskConceptTests.swift
     why: Open and unpause a Task on Mac
+  - path: swift/LoopflowiOSTests/TaskFeedTests.swift
+    why: Open the live conversation from a paused row
   - path: rust/loopflow/src/server/schema.rs
     why: Embedded requests drive examples and wire round trips
 hide:

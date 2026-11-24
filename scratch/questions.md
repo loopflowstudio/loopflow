@@ -69,3 +69,14 @@
 - A sent membership edit keeps its former external destination in its saved
   baseline until the next send. Finding the issue there confirms the original
   move. Retrying from its observed source sends it to the kept Project.
+- QA run 8: a released Wave whose kept Project arrived from another Machine
+  over Git (the migration keeps the newest started one) and whose dropped
+  Project was this Machine's, with its `create` queued, loses that create.
+  `uncreated` skips Projects another Machine stamped, so nothing queues one:
+  this Machine's translated Task creates name a Project with no external ID,
+  which `remote_project` cannot resolve. The other Machine creates it in
+  Linear, but a tracker repository has no Git exchange to tell this Machine.
+  Open choices: let `uncreated` create any unbound Project (both creates
+  carry its UUID), or have the migration keep a Project this Machine will
+  create. Released lf had the same gap for Tasks it put in another Machine's
+  Project; the migration widens it to Tasks it moves there.

@@ -1956,8 +1956,8 @@ pub enum WaveCommand {
         #[command(subcommand)]
         cmd: Option<WavePlanCommand>,
     },
-    /// Refresh one Wave's planning from its tracker, then show its status;
-    /// a Wave whose Project links no Linear Project shows its local planning
+    /// Send one Wave's queued tracker changes and read its tracker Project,
+    /// then show its status; with no tracker, exchange the repository's plan
     Sync {
         /// Wave name (default: the ambient wave)
         wave: Option<String>,

@@ -236,3 +236,40 @@ $ lf task show 71cc3a     # Write changelog completed</pre>
 <ol><li>A completed Task in a removed Wave never reaches Linear if its Wave's Project wasn't there first. That's the rule above, written in <code>scratch/questions.md</code>; the alternative is a team issue with no Project.</li>
 <li>A failed <code>connect</code> for a missing credential ends "; inspect the affected work before retrying", though nothing was touched.</li>
 <li>Not this branch: <code>lf config set --shared repo.tracker.linear.team …</code> prints <code>saved; DomainAction</code>.</li></ol>
+
+<h2>Eighth run, 2026-11-23: slices 8–10 and the compress after them</h2>
+<p>Branch <code>lf</code> at 0812f501d8, then with this run's help fix, on a private Machine <code>/tmp/lf-qa-995/r</code>. The returning state was written with the installed <code>lf</code> (0.16.0+250e266b4, this branch's base), which still has chapters. Three repositories: <code>repo</code> (Linear team, no login), <code>repo2</code> (Git origin, no tracker), <code>repo3</code> (Asana team, no login).</p>
+<table>
+<tr><th>Scenario</th><th>Result</th></tr>
+<tr><td>Installed lf: Wave <code>billing</code> with its Project, a second Project <code>billing — Chapter 2</code> arriving from another Machine's plan ref, two Tasks in the first, then the Linear team set. Queue: one Project <code>create</code> (first Project), three Task <code>create</code>s.</td><td>Ready to upgrade.</td></tr>
+<tr><td>Branch on that home: <code>lf wave status billing</code>, <code>lf repo tracker</code></td><td><code>Project   billing — Chapter 2 (local) · started</code> (the newest started one is kept). Both Tasks list under billing, are in the kept Project, and their queued creates now name it (<code>task_project</code> rewritten in <code>value_json</code>). The dropped Project's create retired with it.</td></tr>
+<tr><td>A save, then <code>lf wave sync billing</code></td><td>Exits 0, shows each Task's queued create and its reason. <strong>No create is queued for the kept Project</strong>: <code>uncreated</code> skips a Project another Machine stamped. With a login, the Task creates would name a Project this Machine never links. Written up in <code>scratch/questions.md</code>; not fixed (it is a choice between two designs).</td></tr>
+<tr><td><code>lf wave create ledger; lf wave sync ledger</code> (Linear, no login)</td><td><code>Project   ledger (local) · started</code>, then <code>create · queued · No Linear credential found…</code>; JSON carries the action under <code>project.value.sync.actions</code>. Exit 0.</td></tr>
+<tr><td>Asana-only repository: <code>lf wave create ops</code>, a Task, <code>lf wave sync ops</code></td><td>Exit 0 with the Project and Task creates queued, "No Asana credential found". No Linear Team demanded (slice 9's bug).</td></tr>
+<tr><td>No tracker: <code>lf wave sync docs</code></td><td>Exchanges the plan ref, shows the Project and Task. Exit 0.</td></tr>
+<tr><td>A second Project for <code>docs</code> pushed by an older writer (slice 10)</td><td>Stored beside it. <code>lf wave status docs</code> still shows <code>docs (local)</code>; a new Task joins the Wave's own Project. One <code>skipped an unknown plan field</code> WARN (<code>krs</code>).</td></tr>
+<tr><td>A Task the older writer filed in its Project</td><td>Lists under <code>docs</code> (<code>lf wave status</code>, <code>lf task list --wave docs</code>); <code>lf task show</code> gives wave <code>docs</code>.</td></tr>
+<tr><td><code>lf wave rename docs guides</code></td><td>Only the Wave's own Project is renamed; the older writer's keeps its name.</td></tr>
+<tr><td><code>lf wave remove guides</code> (one completed Task, two open, one of them in the older writer's Project)</td><td>"2 open Tasks moved to the repository. 1 completed Task stays readable in history." Both open Tasks have no Project; the completed one still reads wave <code>guides</code>.</td></tr>
+<tr><td><code>lf wave sync nope</code></td><td>"wave 'nope' is not registered…" exit 1; same text as the installed lf.</td></tr>
+</table>
+<pre>$ lf wave status billing     # released home, first branch command
+  Project   billing — Chapter 2 (local) · started
+  b3f82c  unstarted   —             Refund ledger  ready
+    create · queued · No Linear credential found. Run `doppler run -- lf account connect linear`.
+  2e54b5  unstarted   —             Chapter two work  ready
+    create · queued · No Linear credential found. …
+$ sqlite3 copy.db "select kind,project_id,task_id from tracker_actions"
+create||task_b3f82c…    create||task_2e54b5…    create||task_b38681…   # no Project create</pre>
+<h3>Fixed</h3>
+<p><code>lf wave sync</code>'s help said a Wave whose Project links no Linear Project "shows its local planning". Since slice 9 it sends the Wave's queued changes to whichever tracker is configured. It now reads: "Send one Wave's queued tracker changes and read its tracker Project, then show its status; with no tracker, exchange the repository's plan".</p>
+<h3>Not reached</h3>
+<ul>
+<li>Delivery with a real Linear or Asana login (no stand-in for a release <code>lf</code>, see the seventh run). Execution's <code>planning_action_tests::a_released_queue_delivers_after_its_chapter_projects_collapse</code> covers the delivery after upgrade.</li>
+<li>Desktop's removed Project sheet: Backlog menus answer no hook click (fourth run). Covered by <code>WorkModelTests|BacklogViewTests</code> (slice 6, 58 pass).</li>
+</ul>
+<h3>Still wrong, worst first</h3>
+<ol>
+<li>The kept Project of an upgraded Wave gets no tracker create when another Machine made it, so this Machine's Tasks in it never reach Linear (above, and <code>scratch/questions.md</code>).</li>
+<li>Carried over: a failed connect for a missing credential still says "inspect the affected work before retrying".</li>
+</ol>

@@ -231,3 +231,17 @@ tracker`. A completed Task left in a removed, unlinked Wave's Project has no
 open actions (retired "its Wave was removed"); with the link written by hand,
 its `create` stays queued for the linked Linear Project. Do it once with the
 team set before the Wave, once with it set after the removal.
+
+A released Wave with two Projects (a chapter) is the slice-8 upgrade case.
+The installed `lf` has no command that makes a second Project, and `lf wave
+plan bind` refuses one ("Wave already has a different configured Project").
+Make it arrive instead: before setting a tracker, push a `projects/<proj_…>.json`
+record for the Wave (fields `project_wave`, `project_slug`, `project_name`,
+`project_status`, stamped by another `home_<32 hex>` with a later `at`) to that
+Machine's ref and `lf task sync <id>`; `lf wave status` lists it as
+`historical`. Then set `repo.tracker.linear.team`, commit, push and save once:
+the installed `lf` queues one Project `create` for the Wave's own Project and a
+Task `create` per Task. Copy the home (`cp -R`), then run any branch command
+on it. A Task record pushed the same way, with `task_project` naming the second
+Project, is how a released writer's Task in that Project arrives at a branch
+Machine.

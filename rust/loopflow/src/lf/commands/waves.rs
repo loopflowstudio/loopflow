@@ -1921,9 +1921,9 @@ fn snapshot_tasks(
     }
     details.sort_by_cached_key(|task| {
         orders[task.task.repository_id.as_str()].order.key(
-            &task.task.id,
+            task.task.project_id.as_deref(),
             task.task.rank,
-            &task.selection_states,
+            &task.task.id,
         )
     });
     Ok(details)
@@ -2039,13 +2039,9 @@ impl<'a> DetailReads<'a> {
                 .entry(open.repo.clone())
                 .or_insert_with(|| loopflow_execution::ops::tracker::connected(&open.repo));
         }
-        let graphs = store
-            .sqlite
-            .latest_task_graphs(&tasks.iter().map(|task| &task.id).collect::<Vec<_>>())?;
-        let execution = store.sqlite.graph_execution_facts(
-            graphs.values(),
-            &tasks.iter().map(|task| &task.id).collect::<Vec<_>>(),
-        )?;
+        let ids: Vec<_> = tasks.iter().map(|task| &task.id).collect();
+        let graphs = store.sqlite.latest_task_graphs(&ids)?;
+        let execution = store.sqlite.graph_execution_facts(graphs.values(), &ids)?;
         let mut defaults =
             HashMap::<_, (String, Option<loopflow_execution::config::ConfigSource>)>::new();
         let mut selections = HashMap::new();
@@ -3297,11 +3293,12 @@ mod tests {
             .iter()
             .any(|s| s == "busy" || s == "available"));
         let sessions = initial["sessions"].as_array().unwrap();
-        for id in ["bound", "checkout", "unknown"] {
+        for id in ["bound", "checkout"] {
             let session = sessions.iter().find(|s| s["id"] == id).unwrap();
             assert_eq!(session["task_ids"], serde_json::json!([active]));
         }
-        for id in ["repository", "wave"] {
+        // Membership is the recorded Task; a directory inside a checkout adds none.
+        for id in ["unknown", "repository", "wave"] {
             assert_eq!(
                 sessions.iter().find(|s| s["id"] == id).unwrap()["task_ids"],
                 serde_json::json!([])
@@ -3312,7 +3309,12 @@ mod tests {
             [other],
         )
         .unwrap();
-        loopflow_execution::store::selections::reorder_task(&store.sqlite, &repo, active, other)
+        store
+            .sqlite
+            .reorder_task(
+                &TaskId::parse(active).unwrap(),
+                &TaskId::parse(other).unwrap(),
+            )
             .unwrap();
         let attachment = attachment::claim_session_attachment(
             &store.sqlite,
@@ -3422,21 +3424,7 @@ mod tests {
                 [active]
             );
         }
-        // A conflicting planning label never withdraws started execution.
-        db.execute(
-            "UPDATE tasks SET planning_state='completed' WHERE id=?1",
-            [active],
-        )
-        .unwrap();
-        let conflict = read(&store, "active_planning_completed").await;
-        assert_eq!(conflict["tasks"][0]["lifecycle"], "active");
-        assert_eq!(conflict["tasks"][0]["section"], "working");
-        assert!(!store
-            .sqlite
-            .task_state(&TaskId::parse(active).unwrap())
-            .unwrap()
-            .is_terminal());
-        let fixture = serde_json::json!([initial, owned_working, working, available, conflict]);
+        let fixture = serde_json::json!([initial, owned_working, working, available]);
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../tests/fixtures/dto/task_concepts.json");
         if std::env::var_os("UPDATE_TASK_CONCEPT_FIXTURE").is_some() {

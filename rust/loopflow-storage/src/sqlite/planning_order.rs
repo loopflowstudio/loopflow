@@ -9,25 +9,35 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::json;
 
 use crate::work::task::Task;
-use crate::StoreResult;
-use loopflow_model::durable::ProjectId;
+use crate::{StoreError, StoreResult};
+use loopflow_model::durable::{ProjectId, TaskId};
 
 pub(super) fn reorder_in(conn: &Connection, task: &Task, rank: u32) -> StoreResult<()> {
-    let project = task.project_id.as_ref();
-    let mut query = conn.prepare(
-        "SELECT id FROM tasks WHERE repository_id=?1 AND project_id IS ?2
-         AND planning_deleted_at IS NULL ORDER BY planning_rank,created_at,id",
+    place_in_order(
+        conn,
+        &task.id,
+        task.project_id.as_ref(),
+        siblings_in(conn, task)?,
+        rank as usize,
     )?;
-    let previous = query
-        .query_map(
-            params![task.repository_id.as_str(), project.map(ProjectId::as_str)],
-            |row| row.get::<_, String>(0),
-        )?
-        .collect::<Result<Vec<_>, _>>()?;
-    let mut desired = previous.clone();
-    desired.retain(|id| id != task.id.as_str());
-    desired.insert((rank as usize).min(desired.len()), task.id.to_string());
-    if previous != desired {
+    Ok(())
+}
+
+fn place_in_order(
+    conn: &Connection,
+    task: &TaskId,
+    project: Option<&ProjectId>,
+    mut order: Vec<String>,
+    position: usize,
+) -> StoreResult<Vec<String>> {
+    let from = order
+        .iter()
+        .position(|id| id == task.as_str())
+        .ok_or(StoreError::NotFound)?;
+    let to = position.min(order.len() - 1);
+    if from != to {
+        let moved = order.remove(from);
+        order.insert(to, moved);
         if let Some(project) = project {
             let base = observed_order(conn, project)?.map(|value| json!({"value":value}));
             tracker_actions::enqueue(
@@ -35,25 +45,81 @@ pub(super) fn reorder_in(conn: &Connection, task: &Task, rank: u32) -> StoreResu
                 &ActionOwner::Project(project.clone()),
                 ActionKind::Order,
                 None,
-                &json!(desired),
+                &json!(order),
                 base.as_ref(),
             )?;
         }
-        apply_order(conn, project, &desired, WriteOrigin::Local)?;
+        apply_order(conn, &order, WriteOrigin::Local)?;
     }
-    Ok(())
+    Ok(order)
 }
 
+/// `task` takes `target`'s place among `target`'s Project's Tasks, or among
+/// the repository's standalone Tasks, moving into that Project first.
+pub(super) fn move_in(conn: &Connection, task: &Task, target: &Task) -> StoreResult<Vec<String>> {
+    if task.repository_id != target.repository_id {
+        return Err(StoreError::InvalidData(format!(
+            "{} and {} are in different repositories; nothing changed.",
+            task.identifier, target.identifier
+        )));
+    }
+    let project = target.project_id.as_ref();
+    if task.project_id != target.project_id {
+        super::task_content::move_task_in(conn, task, task.project_id.as_ref(), project)?;
+    }
+    let order = siblings_in(conn, target)?;
+    let position = order
+        .iter()
+        .position(|id| id == target.id.as_str())
+        .ok_or(StoreError::NotFound)?;
+    place_in_order(conn, &task.id, project, order, position)
+}
+
+/// The Tasks `task` is ranked among, in rank order. Ties break by id, as
+/// `TaskOrder::key` does on every board, so a Move lands where it was dropped.
+fn siblings_in(conn: &Connection, task: &Task) -> StoreResult<Vec<String>> {
+    let mut query = conn.prepare(
+        "SELECT id FROM tasks WHERE repository_id=?1 AND project_id IS ?2
+         AND planning_deleted_at IS NULL ORDER BY planning_rank,id",
+    )?;
+    let rows = query.query_map(
+        params![
+            task.repository_id.as_str(),
+            task.project_id.as_ref().map(ProjectId::as_str)
+        ],
+        |row| row.get::<_, String>(0),
+    )?;
+    rows.collect::<Result<_, _>>().map_err(Into::into)
+}
+
+/// The tracker's order of a Project's Tasks: their observed items by rank.
+/// `None` when the Project has no tracker Project.
 pub(super) fn observed_order(
     conn: &Connection,
     project: &ProjectId,
 ) -> StoreResult<Option<Vec<String>>> {
-    let body: Option<String> = conn.query_row(
-        "SELECT o.task_order_json FROM projects p JOIN waves w ON w.id=p.wave_id
-         JOIN tracker_projects o ON o.id=p.external_project_id AND o.repo=w.repo AND o.tracker IN ('linear','asana') WHERE p.id=?1",
-        [project.as_str()], |row| row.get(0)).optional()?.flatten();
-    body.map(|body| serde_json::from_str(&body).map_err(Into::into))
-        .transpose()
+    let bound: Option<(String, String, String)> = conn
+        .query_row(
+            "SELECT o.repo,o.tracker,o.id FROM projects p JOIN waves w ON w.id=p.wave_id
+             JOIN tracker_projects o ON o.id=p.external_project_id AND o.repo=w.repo AND o.tracker IN ('linear','asana')
+             WHERE p.id=?1",
+            [project.as_str()],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .optional()?;
+    let Some((repo, tracker, external)) = bound else {
+        return Ok(None);
+    };
+    let mut query = conn.prepare(
+        "SELECT t.id FROM tracker_items i JOIN tasks t ON t.external_issue_id=i.id
+         WHERE i.repo=?1 AND i.tracker=?2 AND i.project_id=?3
+         AND t.project_id=?4 AND t.planning_deleted_at IS NULL
+         ORDER BY i.rank,i.id",
+    )?;
+    let rows = query.query_map(params![repo, tracker, external, project.as_str()], |row| {
+        row.get::<_, String>(0)
+    })?;
+    Ok(Some(rows.collect::<Result<_, _>>()?))
 }
 
 /// Keep newly observed members next to their next known neighbour; retain local
@@ -74,27 +140,23 @@ pub fn include_members(desired: &[String], observed: &[String]) -> Vec<String> {
 
 pub(crate) fn observe_in(
     conn: &Connection,
-    repo: &str,
-    external: &str,
     project: &ProjectId,
     observed: Vec<String>,
 ) -> StoreResult<bool> {
     if let Some(previous) = observed_order(conn, project)? {
         // List omission proves neither deletion nor a completed membership move.
-        for id in previous.iter().filter(|id| !observed.contains(id)) {
-            let retained: bool = conn.query_row("SELECT EXISTS(SELECT 1 FROM tasks WHERE id=?1 AND project_id=?2 AND planning_deleted_at IS NULL)", params![id,project.as_str()], |row| row.get(0))?;
-            if retained {
-                return Ok(false);
-            }
+        if previous.iter().any(|id| !observed.contains(id)) {
+            return Ok(false);
         }
     }
-    conn.execute(
-        "UPDATE tracker_projects SET task_order_json=?4 WHERE repo=?1 AND tracker=?2 AND id=?3",
-        params![repo, "linear", external, serde_json::to_string(&observed)?],
-    )?;
     // The tracker's complete list answers an attempted order the way the
     // drain's look would; the newest unconfirmed order is local intent.
-    for action in unconfirmed_orders(conn, project)? {
+    let mut pending = None;
+    for action in tracker_actions::unconfirmed_for_in(conn, &ActionOwner::Project(project.clone()))?
+    {
+        if action.kind != ActionKind::Order {
+            continue;
+        }
         if action.phase == tracker_actions::ActionPhase::Sent {
             let seen = crate::planning::rules::Observed {
                 order: Some(observed.clone()),
@@ -104,77 +166,45 @@ pub(crate) fn observe_in(
                 crate::planning::rules::decide(&action, Some(&seen), false)
             {
                 tracker_actions::resolve_in(conn, &action.id, &resolution)?;
+                continue;
             }
         }
+        pending = Some(action);
     }
-    let pending = unconfirmed_orders(conn, project)?.pop();
     let order = match pending {
         Some(action) => include_members(
-            &current_members(
-                conn,
-                project,
-                &serde_json::from_value::<Vec<String>>(action.value)?,
-            )?,
+            &current_members(conn, project, serde_json::from_value(action.value)?)?,
             &observed,
         ),
         None => observed,
     };
-    apply_order(conn, Some(project), &order, WriteOrigin::Tracker)?;
+    apply_order(conn, &order, WriteOrigin::Tracker)?;
     Ok(true)
-}
-
-fn unconfirmed_orders(
-    conn: &Connection,
-    project: &ProjectId,
-) -> StoreResult<Vec<tracker_actions::TrackerAction>> {
-    Ok(
-        tracker_actions::unconfirmed_for_in(conn, &ActionOwner::Project(project.clone()))?
-            .into_iter()
-            .filter(|action| action.kind == ActionKind::Order)
-            .collect(),
-    )
-}
-
-fn project_members(conn: &Connection, project: &ProjectId) -> StoreResult<Vec<String>> {
-    let mut query = conn.prepare(
-        "SELECT id FROM tasks WHERE project_id=?1 AND planning_deleted_at IS NULL
-         ORDER BY planning_rank,created_at,id",
-    )?;
-    let rows = query.query_map([project.as_str()], |row| row.get(0))?;
-    rows.collect::<Result<_, _>>().map_err(Into::into)
 }
 
 fn current_members(
     conn: &Connection,
     project: &ProjectId,
-    desired: &[String],
+    mut desired: Vec<String>,
 ) -> StoreResult<Vec<String>> {
-    let members = project_members(conn, project)?;
-    Ok(desired
-        .iter()
-        .filter(|id| members.contains(id))
-        .cloned()
-        .collect())
+    let mut query =
+        conn.prepare("SELECT id FROM tasks WHERE project_id=?1 AND planning_deleted_at IS NULL")?;
+    let members = query
+        .query_map([project.as_str()], |row| row.get(0))?
+        .collect::<rusqlite::Result<std::collections::HashSet<String>>>()?;
+    desired.retain(|id| members.contains(id));
+    Ok(desired)
 }
 
-fn apply_order(
-    conn: &Connection,
-    project: Option<&ProjectId>,
-    order: &[String],
-    origin: WriteOrigin,
-) -> StoreResult<()> {
+// Both the sibling list and the accepted tracker list select current members
+// inside the transaction that writes their ranks.
+fn apply_order(conn: &Connection, order: &[String], origin: WriteOrigin) -> StoreResult<()> {
     for (rank, id) in order.iter().enumerate() {
-        let member: bool = conn.query_row(
-            "SELECT EXISTS(SELECT 1 FROM tasks WHERE id=?1 AND project_id IS ?2 AND planning_deleted_at IS NULL)",
-            params![id, project.map(ProjectId::as_str)], |row| row.get(0),
+        planning_write::write(
+            conn,
+            &crate::work::edit::WorkEdit::for_target(id, &[Edit::TaskRank(rank as u32)]),
+            origin,
         )?;
-        if member {
-            planning_write::write(
-                conn,
-                &crate::work::edit::WorkEdit::for_target(id, &[Edit::TaskRank(rank as u32)]),
-                origin,
-            )?;
-        }
     }
     Ok(())
 }

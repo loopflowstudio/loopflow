@@ -63,8 +63,8 @@ impl Store {
         run_sqlite(&self.sqlite, move |store| store.task_checkout(&task)).await
     }
 
-    pub async fn task_checkouts(&self) -> StoreResult<Vec<super::sqlite::TaskCheckout>> {
-        run_sqlite(&self.sqlite, |store| store.task_checkouts()).await
+    pub async fn task_checkout_paths(&self) -> StoreResult<Vec<(TaskId, std::path::PathBuf)>> {
+        run_sqlite(&self.sqlite, |store| store.task_checkout_paths()).await
     }
     pub(crate) async fn lock_checkout_roots(
         &self,

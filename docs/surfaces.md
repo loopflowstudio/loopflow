@@ -49,8 +49,8 @@ own settings.
 
 The native macOS app reads the same local store as `lf`; it keeps no copy of its own:
 
-- **Sidebar (⌘1–9):** your working Tasks in shared order (dragging reorders
-  them for CLI lists too).
+- **Sidebar (⌘1–9):** your working Tasks in rank order. Dragging a Task changes
+  its rank in CLI lists and on the connected tracker.
 - **Task workspace:** three resizable panes: `session` (conversation), `shell`
   (at the Task's worktree), and `browser` (Files, Graph log, local dev URLs).
 - **Dashboards:** saved side-by-side grids of Tasks selected by query. Each

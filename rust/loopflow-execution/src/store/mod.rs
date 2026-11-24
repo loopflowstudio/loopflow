@@ -662,83 +662,31 @@ mod tests {
     use std::path::PathBuf;
     use time::OffsetDateTime;
 
-    #[test]
-    fn reads_nonterminal_task_ownership_without_opening_the_store_for_writes() {
-        let temp = tempfile::tempdir().expect("create temp directory");
-        let path = temp.path().join("registry.db");
-        let connection = rusqlite::Connection::open(&path).expect("open fixture database");
-        connection
+    /// A released registry's Task checkouts, without the store's other tables.
+    fn released_registry(path: &std::path::Path) {
+        rusqlite::Connection::open(path)
+            .unwrap()
             .execute_batch(
-                "CREATE TABLE tasks (
-                    id TEXT PRIMARY KEY,
-                    worktree TEXT,
-                    abandoned_at INTEGER,
-                    planning_completed INTEGER
-                 );
-                 CREATE TABLE task_workflows (task_id TEXT PRIMARY KEY, node TEXT NOT NULL, edge INTEGER);
-                 INSERT INTO tasks VALUES ('unplaced', NULL, NULL, NULL);
-                 INSERT INTO tasks VALUES ('legacy-unplaced', '', NULL, NULL);
-                 INSERT INTO tasks VALUES ('running', '/repo.running', NULL, NULL);
-                 INSERT INTO tasks VALUES ('waiting', '/repo.waiting', NULL, NULL);
-                 INSERT INTO tasks VALUES ('planned', NULL, NULL, NULL);
-                 INSERT INTO tasks VALUES ('completed', '/repo.completed', NULL, 1);
-                 INSERT INTO tasks VALUES ('abandoned', '/repo.abandoned', 1, NULL);
-                 INSERT INTO task_workflows VALUES ('running', 'review', 2);
-                 INSERT INTO task_workflows VALUES ('completed', 'review', 2);
-                 INSERT INTO task_workflows VALUES ('waiting', 'end', NULL);",
+                "CREATE TABLE tasks (id TEXT PRIMARY KEY, abandoned_at INTEGER, planning_state TEXT);
+                 CREATE TABLE task_checkouts (task_id TEXT PRIMARY KEY, worktree TEXT NOT NULL, branch TEXT NOT NULL);
+                 INSERT INTO tasks VALUES ('running', NULL, NULL), ('done', NULL, 'completed'),
+                     ('abandoned', 1, NULL), ('unplaced', NULL, NULL);
+                 INSERT INTO task_checkouts VALUES ('running', '/repo.running', 'running'),
+                     ('done', '/repo.done', 'done'), ('abandoned', '/repo.abandoned', 'abandoned');",
             )
-            .expect("seed task ownership");
-        drop(connection);
-
-        let mut paths = read_nonterminal_task_worktrees(&path).expect("read task ownership");
-        paths.sort();
-        assert_eq!(
-            paths,
-            vec![
-                PathBuf::from("/repo.running"),
-                PathBuf::from("/repo.waiting")
-            ]
-        );
+            .unwrap();
     }
 
     #[test]
-    fn reads_released_task_ownership_without_migrating_or_losing_unknown_work() {
+    fn reads_released_task_ownership_without_migrating_it() {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("released.db");
-        let connection = rusqlite::Connection::open(&path).unwrap();
-        connection
-            .execute_batch(include_str!(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/../loopflow-storage/tests/fixtures/migrations/task_ownership_released.sql"
-            )))
-            .unwrap();
-        drop(connection);
+        released_registry(&path);
         let before = std::fs::read(&path).unwrap();
-        let mut paths = read_nonterminal_task_worktrees(&path).unwrap();
-        paths.sort();
         assert_eq!(
-            paths,
-            vec![
-                PathBuf::from("/repo.running"),
-                PathBuf::from("/repo.unknown")
-            ]
+            read_nonterminal_task_worktrees(&path).unwrap(),
+            vec![PathBuf::from("/repo.running")]
         );
-        assert_eq!(std::fs::read(&path).unwrap(), before);
-    }
-
-    #[test]
-    fn reads_released_task_placement_without_migrating_the_machine() {
-        let temp = tempfile::tempdir().unwrap();
-        let path = temp.path().join("released.db");
-        let connection = rusqlite::Connection::open(&path).unwrap();
-        connection
-            .execute_batch(include_str!(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/../loopflow-storage/tests/fixtures/migrations/task_placement_released.sql"
-            )))
-            .unwrap();
-        drop(connection);
-        let before = std::fs::read(&path).unwrap();
         let mut ownership: Vec<_> = super::sqlite::read_task_worktree_ownership(&path)
             .unwrap()
             .into_iter()
@@ -748,10 +696,9 @@ mod tests {
         assert_eq!(
             ownership,
             vec![
-                ("local-done".into(), true, false),
-                ("remote-done".into(), false, false),
+                ("abandoned".into(), false, false),
+                ("done".into(), true, false),
                 ("running".into(), false, true),
-                ("unknown".into(), false, true),
             ]
         );
         assert_eq!(std::fs::read(&path).unwrap(), before);

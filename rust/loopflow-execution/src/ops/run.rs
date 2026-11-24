@@ -146,7 +146,7 @@ pub(crate) async fn select_work(
     } else if selected_wave.is_some() {
         (None, crate::session::WorkSource::Declared)
     } else {
-        let task = super::task::task_for_checkout(store, cwd).await?;
+        let task = super::task::checkout_owner(store, cwd).await?;
         (task, crate::session::WorkSource::Checkout)
     };
     let wave =
@@ -523,7 +523,7 @@ mod tests {
             .await
             .unwrap()
             .is_none());
-        assert!(crate::ops::task::task_for_checkout(&store, other.path())
+        assert!(crate::ops::task::checkout_owner(&store, other.path())
             .await
             .unwrap()
             .is_none());
@@ -542,7 +542,7 @@ mod tests {
         assert_eq!(inferred_launch.source, crate::session::WorkSource::Checkout);
         assert_eq!(inferred_launch.context, launch.context);
         assert_eq!(
-            crate::ops::task::task_for_checkout(&store, repo.path())
+            crate::ops::task::checkout_owner(&store, repo.path())
                 .await
                 .unwrap()
                 .unwrap()
@@ -1067,39 +1067,32 @@ mod tests {
         project.slug = "desktop-renamed".into();
         store.create_project(&project).await.unwrap();
         let task = task(&store, &wave, &project, directory.path().join("workspace")).await;
-        let session = |task_id: Option<TaskId>, caller: Option<String>| {
-            let inherited = caller.is_some();
-            crate::session::LfSession {
-                captured: None,
-                id: uuid::Uuid::new_v4().to_string().into(),
-                artifact_key: Some(crate::session_record::new_artifact_key()),
-                caller_artifact_key: caller,
-                input_published: true,
-                cwd: directory.path().to_path_buf(),
-                skill: Some("implement".into()),
-                provider: Some("codex".into()),
-                model: None,
-                node: None,
-                iterations: None,
-                work_source: task_id.as_ref().map(|_| {
-                    if inherited {
-                        crate::session::WorkSource::Inherited
-                    } else {
-                        crate::session::WorkSource::Declared
-                    }
-                }),
-                task_id,
-                wave_id: None,
-                graph_lf_process_id: None,
-                bound_at: None,
-                interactive: false,
-                repo: None,
-                title: "Investigation".into(),
-                title_source: crate::session::TitleSource::Generated,
-                request: None,
-                completed_at: None,
-                created_at: 1,
-            }
+        let session = |task_id: Option<TaskId>, caller: Option<String>| crate::session::LfSession {
+            captured: None,
+            id: uuid::Uuid::new_v4().to_string().into(),
+            artifact_key: Some(crate::session_record::new_artifact_key()),
+            caller_artifact_key: caller,
+            input_published: true,
+            cwd: directory.path().to_path_buf(),
+            skill: Some("implement".into()),
+            provider: Some("codex".into()),
+            model: None,
+            node: None,
+            iterations: None,
+            work_source: task_id
+                .as_ref()
+                .map(|_| crate::session::WorkSource::Declared),
+            task_id,
+            wave_id: None,
+            graph_lf_process_id: None,
+            bound_at: None,
+            interactive: false,
+            repo: None,
+            title: "Investigation".into(),
+            title_source: crate::session::TitleSource::Generated,
+            request: None,
+            completed_at: None,
+            created_at: 1,
         };
         let worker = store
             .create_session(session(Some(task.id.clone()), None))
@@ -1117,7 +1110,7 @@ mod tests {
         assert_eq!(helper.wave_id, Some(wave.id().clone()));
         assert_eq!(
             helper.work_source,
-            Some(crate::session::WorkSource::Inherited)
+            Some(crate::session::WorkSource::Declared)
         );
         store.create_session(session(None, None)).await.unwrap();
         for selector in [

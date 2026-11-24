@@ -12,6 +12,8 @@ pub mod graph;
 pub mod graph_process;
 pub mod history;
 pub mod instrumentation;
+#[cfg(test)]
+mod leaving_guard;
 pub mod machine_records;
 #[cfg(test)]
 pub mod migration_build;

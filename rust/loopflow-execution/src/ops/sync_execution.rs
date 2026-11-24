@@ -58,11 +58,11 @@ pub(crate) fn run_sync_in(
     }
     let started = Instant::now();
     let default = get_default_branch(repo_root)?;
-    let upstream = crate::git::integration_base(repo_root)?;
+    let upstream = crate::git::default_branch_upstream(repo_root, &default)?;
     let on_main = current_branch(repo_root)?.as_deref() == Some(&default);
     if !plan_only && (onto.is_none() || (on_main && onto == Some(upstream.as_str()))) {
         crate::ops::checkout::refresh_main(repo_root, progress)?;
-        if on_main && onto.is_none_or(|target| target == upstream) {
+        if on_main {
             return Ok(Sync::Finished {
                 message: "Main is current; unpublished commits and edits remain local.".into(),
             });
@@ -80,31 +80,27 @@ pub(crate) fn run_sync_in(
     }
     // An explicit default branch detaches the child using its recorded fork;
     // ordinary sync continues to follow the live parent.
-    let stacked = if on_main {
+    let base = if on_main {
         None
     } else {
-        crate::ops::task::task_stack(repo_root)?
+        Some(crate::ops::checkout::checkout_base(repo_root, &default)?)
     };
+    let stacked = base.as_ref().and_then(|base| base.stack());
     let detach =
         stacked.is_some() && onto.is_some_and(|target| target == default || target == upstream);
-    let mut stacked_onto = None;
-    if let Some(stacked) = stacked.as_ref().filter(|_| !detach) {
-        stacked_onto = stacked
-            .live_parent_branch(&default)?
-            .map(|branch| format!("origin/{branch}"));
-        if let Some(onto) = onto {
-            return Err(anyhow!(
-                "{onto} names no other open Task; name one to restack this Task on it, the default branch to detach it, or omit the target to sync its parent"
-            ));
-        }
+    if let (Some(_), Some(onto), false) = (stacked, onto, detach) {
+        return Err(anyhow!(
+            "{onto} names no other open Task; name one to restack this Task on it, the default branch to detach it, or omit the target to sync its parent"
+        ));
     }
-    let fork_base = stacked.as_ref().map(|stacked| stacked.fork_base.clone());
-    let default_target = if on_main { &upstream } else { &default };
-    let target = if detach {
-        upstream.as_str()
-    } else {
-        stacked_onto.as_deref().or(onto).unwrap_or(default_target)
+    let fork_base = stacked.map(|stacked| stacked.fork_base.clone());
+    let target = match (&base, onto) {
+        _ if detach => upstream.clone(),
+        (_, Some(onto)) => onto.to_string(),
+        (Some(base), None) => base.sync_ref(&default)?,
+        (None, None) => upstream.clone(),
     };
+    let target = target.as_str();
     if !plan_only {
         crate::git::fetch_tracking_ref(repo_root, target)?;
     }

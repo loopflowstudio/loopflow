@@ -1005,7 +1005,7 @@ struct DesktopPerformanceTests {
              "title": String(format: "Conversation %03d", index), "detail": "Benchmark fixture",
              "cwd": checkout, "wave_id": "wave-1", "state": "active", "work_path": NSNull(),
              "action": sessionActionFixture(state: "active"),
-             "blocked": false, "title_source": "generated", "ended": NSNull(), "start": NSNull(), "outlook": NSNull(), "status_line": NSNull(), "task_primary": false, "graph_membership": ["kind": "independent"], "task_ids": ["perf-task-\(index)"], "agent_process_id": "44444444-4444-4444-8444-444444444444", "terminal_ids": [], "open_argv": ["must-not-launch"]] as [String: Any]
+             "blocked": false, "title_source": "generated", "ended": NSNull(), "start": NSNull(), "outlook": NSNull(), "status_line": NSNull(), "graph_membership": ["kind": "independent"], "task_ids": ["perf-task-\(index)"], "agent_process_id": "44444444-4444-4444-8444-444444444444", "terminal_ids": [], "open_argv": ["must-not-launch"]] as [String: Any]
         })
         let historyTemplate = try #require(JSONSerialization.jsonObject(with: Data(contentsOf:
             root.appendingPathComponent("tests/fixtures/dto/session_history_summary.json"))) as? [String: Any])

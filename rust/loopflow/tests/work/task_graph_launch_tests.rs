@@ -1051,6 +1051,11 @@ impl GraphTask {
             [self.registered.task.id.as_str()],
         )
         .unwrap();
+        db.execute(
+            "UPDATE agent_sessions SET task_id=?1,wave_id=(SELECT p.wave_id FROM tasks t LEFT JOIN projects p ON p.id=t.project_id WHERE t.id=?1) WHERE id='opening-primary'",
+            [self.registered.task.id.as_str()],
+        )
+        .unwrap();
         let lf = self.home.path().join("lf-open-fixture");
         fs::write(
             &lf,

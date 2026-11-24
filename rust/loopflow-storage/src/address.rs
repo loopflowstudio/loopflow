@@ -34,3 +34,16 @@ impl fmt::Display for CanonicalRepo {
         self.0.display().fmt(formatter)
     }
 }
+
+/// The Git worktree holding `dir`: its nearest ancestor, `dir` included, with
+/// a Git directory or a `.git` file naming one (a linked worktree or
+/// submodule). `None` when no ancestor is one, or `dir` is inside `.git`.
+/// Walks `dir` as spelled; canonicalize first for the resolved root.
+pub fn worktree_root(dir: &Path) -> Option<PathBuf> {
+    let root = dir.ancestors().find(|dir| {
+        let marker = dir.join(".git");
+        marker.join("HEAD").is_file()
+            || std::fs::read(&marker).is_ok_and(|bytes| bytes.starts_with(b"gitdir:"))
+    })?;
+    (!dir.starts_with(root.join(".git"))).then(|| root.to_path_buf())
+}

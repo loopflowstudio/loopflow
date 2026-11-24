@@ -265,7 +265,7 @@ struct ServerProtocolTests {
             ("checkout_sync", "sync-1", .checkoutSync(directory: "/repo", onto: nil, preview: true, manual: false,
                                                       continueSync: false, abort: false, adopt: false)),
             ("checkout_create", "create-1", .checkoutCreate(directory: "/repo", name: "spike", preview: false,
-                                                            persistent: false)),
+                                                            persistent: false, stack: false)),
             ("account_disconnect", "disconnect-1", .accountDisconnect(provider: "linear")),
             ("account_connect", "connect-1", .accountConnect(provider: "linear", chromeProfile: "Profile 1", apiKey: false)),
             ("graph_run", "graph-1", .graphRun(directory: "/repo", name: "code", message: "Serve the graph namespace",

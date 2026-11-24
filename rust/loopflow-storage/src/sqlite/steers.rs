@@ -472,11 +472,12 @@ pub(super) fn save_in(
 /// The steers that apply to Session `?1`, as CTE `applicable`.
 fn scopes() -> String {
     // Membership is derived here; receipts alone retain delivery state.
-    // Reuse Task inventory's association rule, including explicit binds and
-    // checkout membership. UNION terminates even in malformed cyclic ancestry.
+    // Reuse Task inventory's association rule: the Session's recorded Task.
+    // UNION terminates even in malformed cyclic ancestry.
     format!("WITH RECURSIVE member_tasks(id) AS MATERIALIZED (
-        SELECT tw.id FROM agent_sessions s JOIN tasks tw ON tw.id IN ({}) WHERE s.id=?1
-        ), conducted_tasks(id) AS MATERIALIZED ({}
+        SELECT s.task_id FROM agent_sessions s WHERE s.id=?1 AND s.task_id IS NOT NULL AND {}
+        ), conducted_tasks(id) AS MATERIALIZED (
+        SELECT id FROM tasks WHERE parent_task_id IN member_tasks
         ), member_waves(id) AS (
         SELECT wave_id FROM agent_sessions WHERE id=?1
         UNION SELECT pr.wave_id FROM projects pr JOIN tasks t ON t.project_id=pr.id WHERE t.id IN member_tasks
@@ -504,8 +505,7 @@ fn scopes() -> String {
             WHERE d.steer_id=p.id AND d.session_id!=?1 AND d.delivered_at IS NOT NULL
             AND o.interactive=(SELECT interactive FROM agent_sessions WHERE id=?1)))
         )",
-        super::task_work::session_tasks("s"),
-        super::task_work::conducted_tasks("SELECT id FROM member_tasks"))
+        super::task_work::counts_for_task("s"))
 }
 
 /// A claim whose hook never stamped it lapses after this long, and the steer

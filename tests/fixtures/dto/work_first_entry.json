@@ -38,7 +38,6 @@
     "model": null,
     "state": "unknown",
     "task_ids": [],
-    "task_primary": false,
     "terminal_ids": [],
     "title": ".tmpRKKNhK",
     "title_source": "generated",
@@ -90,7 +89,6 @@
     "model": null,
     "state": "unknown",
     "task_ids": [],
-    "task_primary": false,
     "terminal_ids": [],
     "title": ".tmpRKKNhK",
     "title_source": "generated",
@@ -294,7 +292,6 @@
       "model": null,
       "state": "unknown",
       "task_ids": [],
-      "task_primary": false,
       "terminal_ids": [],
       "title": ".tmpRKKNhK",
       "title_source": "generated",
@@ -340,7 +337,7 @@
         "resume",
         "480d8ca67cdb41ffa963f79fdb34637c"
       ],
-      "primary_scope": null,
+      "primary_scope": "task",
       "program_status": null,
       "provider": "opencode",
       "model": null,
@@ -348,7 +345,6 @@
       "task_ids": [
         "task_ab8d3359dc7053bda4afd24ff7e7a7d7"
       ],
-      "task_primary": true,
       "terminal_ids": [],
       "title": "Prove Task PR",
       "title_source": "generated",
@@ -402,7 +398,6 @@
       "model": null,
       "state": "closed",
       "task_ids": [],
-      "task_primary": false,
       "terminal_ids": [],
       "title": "Review parser",
       "title_source": "generated",
@@ -449,7 +444,7 @@
       "resume",
       "480d8ca67cdb41ffa963f79fdb34637c"
     ],
-    "primary_scope": null,
+    "primary_scope": "task",
     "program_status": null,
     "provider": "opencode",
     "model": null,
@@ -457,7 +452,6 @@
     "task_ids": [
       "task_ab8d3359dc7053bda4afd24ff7e7a7d7"
     ],
-    "task_primary": true,
     "terminal_ids": [],
     "title": "Prove Task PR",
     "title_source": "generated",

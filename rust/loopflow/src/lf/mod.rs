@@ -1679,7 +1679,7 @@ pub struct SessionListArgs {
     pub after: Option<String>,
     #[arg(long)]
     pub task: Option<String>,
-    /// Conversations attributed to this Wave or inside one of its Tasks' checkouts
+    /// Conversations attributed to this Wave or to one of its Tasks
     #[arg(long, id = "session_wave", value_name = "W")]
     pub wave: Option<String>,
     /// Current primary conversations; omit the value to include all three scopes
@@ -3321,6 +3321,10 @@ pub enum WtCommand {
         /// Keep this workspace after delivery
         #[arg(long)]
         persistent: bool,
+        /// Start the branch from this checkout's branch instead of main, and
+        /// keep following it: `lf sync` merges it and `lf pr` targets it
+        #[arg(long)]
+        stack: bool,
         /// Print the worktree, or the placement with --plan
         #[arg(long)]
         json: bool,
@@ -4317,7 +4321,6 @@ mod tests {
         let loop_cli = Cli::try_parse_from(["lf", "loop", "infrastructure"])
             .expect("unknown names remain eligible for skill discovery");
         assert!(matches!(loop_cli.command, Some(Commands::External(_))));
-        assert!(Cli::try_parse_from(["lf", "wt", "create", "child", "--stack"]).is_err());
         assert!(Cli::try_parse_from(["lf", "wt", "create", "child", "--child"]).is_err());
         assert!(Cli::try_parse_from(["lf", "wt", "up"]).is_err());
         assert!(Cli::try_parse_from(["lf", "wt", "down"]).is_err());

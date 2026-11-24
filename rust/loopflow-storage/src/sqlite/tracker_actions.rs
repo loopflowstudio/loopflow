@@ -1744,7 +1744,7 @@ mod tests {
             .lock()
             .unwrap()
             .execute(
-                "UPDATE tasks SET planning_state='completed',planning_completed=1 WHERE id=?1",
+                "UPDATE tasks SET planning_state='completed' WHERE id=?1",
                 [done.as_str()],
             )
             .unwrap();

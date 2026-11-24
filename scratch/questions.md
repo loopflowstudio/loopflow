@@ -83,3 +83,8 @@
 - Concept review after slices 8–10 chose to leave the QA run 8 gap (a kept
   Project from another Machine gets no create here) as released lf does and
   name it in the PR body; page question 1.
+- Sync onto main (#1973) brought `leaving_guard.rs`, which denies every
+  member this branch marked leaving. Plan records still read and write
+  `projects.planning_initiatives` (`WorkValue::ProjectInitiatives`, kept for
+  released peers), so it went into `STILL_READ` under LOO-995. Dropping it
+  from plan records instead would be a behavior change, left for the branch.

@@ -364,7 +364,7 @@ private final class ScriptedReader {
         let work = WorkReference.task(id: try #require(task.runtime?.workId))
         var session = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(
             renameFixtureRecord("ensured-\(issue)", title: "task-conversation", work: work))) as? [String: Any])
-        session["task_primary"] = true
+        session["primary_scope"] = "task"
         session["workspace"] = ["machine_id": try #require(workspace.machineId), "worktree": workspace.worktree,
                                 "task_id": task.id, "unavailable": NSNull()]
         sessions = [session]

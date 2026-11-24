@@ -267,7 +267,7 @@ pub(super) fn held_in(conn: &Connection, machine: &MachineId) -> StoreResult<Vec
     let candidates = {
         let mut statement = conn.prepare(
             "SELECT DISTINCT o.task_id FROM task_ownership o JOIN tasks t ON t.id=o.task_id
-             WHERE o.machine_id=?1 AND t.planning_completed=0 AND t.abandoned_at IS NULL
+             WHERE o.machine_id=?1 AND t.planning_state IS NOT 'completed' AND t.abandoned_at IS NULL
              ORDER BY o.task_id",
         )?;
         let rows = statement.query_map([machine.as_str()], |row| row.get::<_, String>(0))?;

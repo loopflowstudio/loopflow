@@ -91,8 +91,9 @@ yourself, call `/usr/bin/log`, since zsh's builtin `log` shadows it:
 ```
 
 Working Tasks lists owned, started, unfinished Tasks, on any Machine this store
-records, in the repository's shared Task order. It is the
-repository's built-in query, so opening a Task neither adds nor reorders it.
+records, in rank order: Tasks follow their Project's rank, then their own, and Tasks
+with no Project come last. It is the repository's built-in query, so opening a Task
+neither adds nor reorders it.
 Click a Wave to scope the sidebar to its Working Tasks and subwaves; its backlog
 keeps the open work nobody is running. **‹ Repo** returns to Working Tasks. Unstarted Tasks
 open their brief beside **Start**, which runs the Task's Workflow; opening alone
@@ -155,10 +156,12 @@ and a busy one, the Task matches both filters; its board badge shows Available.
 The board and sidebar use the same activity reading. These badges describe
 conversations; the Task's lifecycle and NOW condition remain separate.
 
-Task conversations include Sessions bound to the Task and Sessions working in
-its checkout. Repository and Wave primary conversations keep their own scope,
-even in a Task checkout. The Task's conversation list and breadcrumb Session
-picker use the same membership.
+A Task's conversations are the Sessions that started for it: launched for the
+Task, or started inside its checkout. Each Session and Graph run records its Task
+when it starts, so moving the repository on disk, or cloning another one into a
+path a removed checkout used, leaves every Task's list as it was. Repository and
+Wave primary conversations keep their own scope, even in a Task checkout. The
+Task's conversation list and breadcrumb Session picker use the same membership.
 
 A Task's row is its whole title, wrapped rather than cut, then its ID and one
 status word. A row that needs someone adds one line saying why:
@@ -191,10 +194,13 @@ second rule. Click the row on any of them and the Task opens.
 The selected row is filled; rows carry no stripe or border. A Wave's count
 beside its name is in the same face as its name.
 
-Drag a Task in the sidebar to change its shared order. Ordinary repository and
-Wave lists, boards and Task pickers keep that relative order after refresh.
-Filtering or opening a Task leaves the order intact. Saved Dashboard arrangements,
-search results and Done's completion-date ordering keep their own order.
+Drag a Task in the sidebar to change its rank. It is the same order `lf task
+list` and Linear show, so the move reaches a connected tracker like any other planning edit.
+Dropping a Task among another Project's Tasks moves it into that Project at that
+place, which reaches the tracker as a Project change and an order. Ordinary repository and Wave lists, boards and Task pickers
+follow rank. Filtering or opening a Task leaves the order intact. Saved Dashboard
+arrangements, search results and Done's completion-date ordering keep their own
+order.
 
 Each Work keeps one pane layout and document store. The browser offers Brief,
 Diff, Files, Task & workflow, Graph processes and web pages. Rex, Herdr and cmux
@@ -207,8 +213,8 @@ full Task inventory. The Wave header names its Project, linked to the tracker
 when the tracker gave a URL. With a default Graph, the Wave backlog menu's
 **Workflow** opens it in the catalogue inspector. The sidebar starts at 240 points wide;
 drag its edge to resize or use the title-bar button or **⌘\** to toggle it.
-Its scroll position survives Wave and Task navigation. Working order survives
-relaunch; ordinary launch restores the selected Work.
+Its scroll position survives Wave and Task navigation. Ordinary launch restores
+the selected Work.
 
 Closing a repository window keeps its panes, selected Work and file drafts until
 Desktop quits. Reopening a known repository shows retained content immediately,

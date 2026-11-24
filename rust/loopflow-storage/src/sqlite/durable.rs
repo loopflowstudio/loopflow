@@ -301,7 +301,7 @@ pub(super) fn map_machine_by_id(
 pub(crate) fn task_state_sql(t: &str) -> String {
     format!(
         "CASE WHEN {t}.abandoned_at IS NOT NULL THEN 'abandoned' \
-         WHEN {t}.planning_completed=1 THEN 'done' \
+         WHEN {t}.planning_state='completed' THEN 'done' \
          WHEN EXISTS(SELECT 1 FROM task_graphs tg WHERE tg.task_id={t}.id AND tg.run_pid IS NOT NULL) \
              OR EXISTS({open_graphs}) \
          THEN 'moving' \
@@ -316,7 +316,7 @@ pub(crate) fn task_state_sql(t: &str) -> String {
 
 /// SQL: Task row `t` is neither done nor abandoned.
 pub(crate) fn task_open_sql(t: &str) -> String {
-    format!("({t}.abandoned_at IS NULL AND {t}.planning_completed IS NOT 1)")
+    format!("({t}.abandoned_at IS NULL AND {t}.planning_state IS NOT 'completed')")
 }
 
 /// Abandon an open Task at `at`. `false` when it is already done or abandoned.
@@ -652,7 +652,7 @@ mod durable_store_tests {
         }
         // A done Task is still a valid assignment target.
         conn.execute(
-            "UPDATE tasks SET planning_completed=1,planning_state='completed' WHERE id=?1",
+            "UPDATE tasks SET planning_state='completed' WHERE id=?1",
             [bound_task.as_str()],
         )
         .unwrap();

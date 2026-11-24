@@ -1273,7 +1273,7 @@ struct WorkNavigationTests {
          "workspace":{"machine_id":"local","worktree":"/src/loopflow","task_id":\(taskJSON),"unavailable":null},
          "detail":"codex","cwd":"/src/loopflow","state":"\(state.rawValue)",
          "wave_id":\(waveJSON),"work_path":null,"action":\(sessionActionFixtureJSON(state: state.rawValue)),
-         "blocked": false, "title_source":"generated","ended": null, "start": null, "outlook": null, "status_line": null, "task_primary":false, "graph_membership":{"kind":"independent"},"task_ids": \(taskIdsJSON), "agent_process_id": "44444444-4444-4444-8444-444444444444", "turn":null,"raw":false,"terminal_ids":[],"open_argv":["lf","session","resume","\(id)"]}
+         "blocked": false, "title_source":"generated","ended": null, "start": null, "outlook": null, "status_line": null, "graph_membership":{"kind":"independent"},"task_ids": \(taskIdsJSON), "agent_process_id": "44444444-4444-4444-8444-444444444444", "turn":null,"raw":false,"terminal_ids":[],"open_argv":["lf","session","resume","\(id)"]}
         """.utf8))
     }
 }

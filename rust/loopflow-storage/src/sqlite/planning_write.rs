@@ -120,7 +120,7 @@ pub(crate) fn read(conn: &Connection, table: &str, id: &str) -> StoreResult<Vec<
                         WorkValue::ProjectTeams(serde_json::from_str(&row.get::<_, String>(9)?)?),
                     ])
         }),
-        "tasks" => read_record(conn, "SELECT project_id,external_issue_id,issue_identifier,issue_title,issue_description,planning_rank,planning_assignee,planning_due_date,planning_deleted_at,planning_url,planning_branch_name,planning_team_id,planning_state,planning_completed,planning_completed_at,parent_task_id FROM tasks WHERE id=?1", id, |row| {
+        "tasks" => read_record(conn, "SELECT project_id,external_issue_id,issue_identifier,issue_title,issue_description,planning_rank,planning_assignee,planning_due_date,planning_deleted_at,planning_url,planning_branch_name,planning_team_id,planning_state,planning_state IS 'completed',planning_completed_at,parent_task_id FROM tasks WHERE id=?1", id, |row| {
                     Ok(vec![
                         WorkValue::TaskProject(row.get(0)?),
                         WorkValue::TaskLinearId(row.get(1)?),
@@ -136,7 +136,7 @@ pub(crate) fn read(conn: &Connection, table: &str, id: &str) -> StoreResult<Vec<
                         WorkValue::TaskTeam(row.get(11)?),
                         WorkValue::Disposition(Disposition {
                             planning_state: row.get(12)?,
-                            planning_completed: row.get(13)?,
+                            planning_completed: i64::from(row.get::<_, bool>(13)?),
                             planning_completed_at: row.get(14)?,
                         }),
                         WorkValue::TaskParent(row.get(15)?),
@@ -203,7 +203,19 @@ fn write_record(
         changes.push(edit);
         let value = edit.value()?;
         match edit {
-            WorkValue::Disposition(_) | WorkValue::CommentContent(_) => {
+            // The state says whether a Task is completed; the exchanged
+            // boolean only names a completion that carries no state.
+            WorkValue::Disposition(disposition) => {
+                let state = disposition.planning_state.clone().or_else(|| {
+                    (disposition.planning_completed == 1).then(|| "completed".to_owned())
+                });
+                columns.insert("planning_state".into(), state.into());
+                columns.insert(
+                    "planning_completed_at".into(),
+                    disposition.planning_completed_at.clone().into(),
+                );
+            }
+            WorkValue::CommentContent(_) => {
                 columns.extend(value.as_object().expect("typed fields").clone());
             }
             _ => {

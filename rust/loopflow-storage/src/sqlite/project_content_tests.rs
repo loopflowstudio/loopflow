@@ -18,7 +18,7 @@ impl SqliteStore {
 }
 
 #[test]
-fn project_name_receipt_does_not_reconstruct_unrelated_order_evidence() {
+fn a_project_rename_keeps_the_observation_it_was_based_on() {
     let home = tempfile::tempdir().unwrap();
     let store = crate::test_fixture::open(&home.path().join("store.db")).unwrap();
     let wave = Wave::new(WaveId::new(), "product".into(), "/repo".into());
@@ -38,15 +38,6 @@ fn project_name_receipt_does_not_reconstruct_unrelated_order_evidence() {
     .unwrap();
     let project = store.project_of_wave(wave.id()).unwrap().unwrap();
     store
-        .conn
-        .lock()
-        .unwrap()
-        .execute(
-            "UPDATE tracker_projects SET task_order_json='{}' WHERE id=?1",
-            [&linear],
-        )
-        .unwrap();
-    store
         .edit_project_fields(&project.id, &[ProjectName(Some("Renamed".into()))])
         .unwrap();
     let change = store
@@ -60,17 +51,17 @@ fn project_name_receipt_does_not_reconstruct_unrelated_order_evidence() {
     let action = store.tracker_action(&change.id).unwrap().unwrap();
     assert!(store.attempt_tracker_action(&action).unwrap());
     assert_eq!(store.project(&project.id).unwrap().unwrap().name, "Renamed");
-    let retained: (String, i64) = store
+    let retained: i64 = store
         .conn
         .lock()
         .unwrap()
         .query_row(
-            "SELECT task_order_json,observed_at FROM tracker_projects WHERE id=?1",
+            "SELECT observed_at FROM tracker_projects WHERE id=?1",
             [&linear],
-            |row| Ok((row.get(0)?, row.get(1)?)),
+            |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(retained, ("{}".into(), 17));
+    assert_eq!(retained, 17);
 }
 
 #[test]

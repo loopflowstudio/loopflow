@@ -1,4 +1,4 @@
-at: ea43960a9f9e96dc2a1c935d1cbb9b26f913dcbc
+at: d577dc1968f2eb433bc3895b06f98a955448e39d
 first:
   - path: docs/work.md
     why: Pause and resume from the saved step
@@ -35,7 +35,7 @@ first:
   - path: swift/LoopflowiOS/TaskWorkspaceView.swift
     why: Show saved history on iPhone
   - path: rust/loopflow/tests/work/task_graph_launch_tests.rs
-    why: Stop one build while its neighbor continues
+    why: Stop one build and cancel a paused Task’s retry
   - path: rust/loopflow/tests/machine_commands.rs
     why: Exercise pause during a two-Machine move
   - path: swift/LoopflowTests/TaskConceptTests.swift

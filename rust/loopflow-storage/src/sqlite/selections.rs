@@ -86,15 +86,16 @@ fn work_in(
         &super::children::ids_json(ids.iter().map(TaskId::as_str)),
     )?;
     let activity = task_activity_in(conn, &repo, projection)?;
+    let key = |kind, id| WorkWorkspaceKey {
+        repository: repository.to_string(),
+        kind,
+        id,
+    };
     let mut work = Vec::with_capacity(tasks.len());
     for task in tasks {
         let activity = activity.get(&task.id);
         work.push(SelectionWork {
-            key: WorkWorkspaceKey {
-                repository: repository.to_string(),
-                kind: WorkWorkspaceKind::Task,
-                id: task.id.to_string(),
-            },
+            key: key(WorkWorkspaceKind::Task, task.id.to_string()),
             states: task_selection_states(
                 task.lifecycle.observed_here(task.runs_elsewhere),
                 task.section(),
@@ -110,11 +111,6 @@ fn work_in(
 
     let mut waves = super::waves_in(conn, Some(&repo))?;
     waves.sort_by(|a, b| (a.name(), a.id().as_str()).cmp(&(b.name(), b.id().as_str())));
-    let key = |kind, id| WorkWorkspaceKey {
-        repository: repository.to_string(),
-        kind,
-        id,
-    };
     // Tasks precede the alphabetized Waves, then the repository.
     for wave in waves {
         work.push(SelectionWork {
@@ -265,6 +261,10 @@ fn start_times_in<'a>(
     conn: &Connection,
     ids: impl Iterator<Item = &'a str>,
 ) -> StoreResult<HashMap<String, i64>> {
+    let mut ids = ids.peekable();
+    if ids.peek().is_none() {
+        return Ok(HashMap::new());
+    }
     let mut statement = conn.prepare(
         "SELECT t.id, COALESCE(
             (SELECT MIN(o.at) FROM task_ownership o WHERE o.task_id=t.id AND o.kind != 'unclaim'),
@@ -535,6 +535,9 @@ fn fill_task_contents_in(
                 .or_default()
                 .push(content);
         }
+    }
+    if tasks.is_empty() {
+        return Ok(());
     }
     let mut query = conn.prepare(
         "SELECT t.id,t.issue_title,s.id,c.worktree,(SELECT id FROM machines WHERE is_local=1),

@@ -1,9 +1,7 @@
-at: 89425281faab094bb3a82e513f67af05f60e4efb
+at: 8c71894fe43066c98ae8c59265a87b9348f83fcf
 first:
   - path: docs/surfaces.md
     why: Describes the sidebar through a prompt and a drop.
-  - path: rust/loopflow-storage/src/execution.rs
-    why: Places a Task’s lifecycle and ownership on the board.
   - path: rust/loopflow-storage/src/work/selection.rs
     why: Defines Task rows and before-or-after drops.
   - path: rust/loopflow-storage/src/sqlite/selections.rs

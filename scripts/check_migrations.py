@@ -56,9 +56,7 @@ EXPAND_MARKER = re.compile(r"^--[ \t]*expand:[ \t]*([a-z][a-z0-9_]*)[ \t]*$", re
 EXPORTS_MARKER = re.compile(r"^--[ \t]*exports:[ \t]*(\S.*?)[ \t]*$", re.MULTILINE)
 # A member the product stopped using, and the Task that drops it; or a member
 # the product took back, and the Task that kept it.
-MARK_LINE = {
-    verb: re.compile(rf"^--[ \t]*{verb}:(.*)$", re.MULTILINE) for verb in ("leaving", "keeping")
-}
+MARK_LINE = re.compile(r"^--[ \t]*(leaving|keeping):(.*)$", re.MULTILINE)
 MARK = re.compile(
     r"[ \t]*([a-z_][a-z0-9_]*(?:\.[a-z_][a-z0-9_]*)?)[ \t]+([A-Z][A-Z0-9]*-\d+)[ \t]*"
 )
@@ -70,7 +68,7 @@ STAGING_DAYS = 30
 
 @dataclass(frozen=True)
 class Mark:
-    """`-- leaving: tasks.worktree LOO-877`: `member` is `table` or `table.column`."""
+    """A `-- leaving:` or `-- keeping:` mark; `member` is `table` or `table.column`."""
 
     member: str
     task: str
@@ -83,41 +81,33 @@ class Mark:
         return self.member == name
 
 
-def _marks(verb: str, name: str, sql: str) -> list[Mark]:
+def _marks(name: str, sql: str) -> list[tuple[str, Mark]]:
     marks = []
-    for line in MARK_LINE[verb].findall(sql):
+    for verb, line in MARK_LINE.findall(sql):
         mark = MARK.fullmatch(line)
         if mark is None:
             _fail(f"{name}: `-- {verb}:{line}` is not `-- {verb}: <table>[.<column>] <Task ID>`")
-        marks.append(Mark(member=mark.group(1), task=mark.group(2)))
+        marks.append((verb, Mark(member=mark.group(1), task=mark.group(2))))
     return marks
-
-
-def leaving_marks(name: str, sql: str) -> list[Mark]:
-    return _marks("leaving", name, sql)
-
-
-def keeping_marks(name: str, sql: str) -> list[Mark]:
-    return _marks("keeping", name, sql)
 
 
 # Each leaving member with the migration that marked it last, in apply order.
 ActiveMarks = dict[str, tuple[str, Mark]]
 
 
-def apply_marks(active: ActiveMarks, name: str, sql: str) -> None:
-    """Advance `active` past migration `name`: its leaving marks set, its keeping marks clear."""
-    for mark in leaving_marks(name, sql):
-        active[mark.member] = (name, mark)
-    for mark in keeping_marks(name, sql):
-        active.pop(mark.member, None)
+def _apply_marks(active: ActiveMarks, name: str, marks: list[tuple[str, Mark]]) -> None:
+    for verb, mark in marks:
+        if verb == "leaving":
+            active[mark.member] = (name, mark)
+        else:
+            active.pop(mark.member, None)
 
 
 def active_leaving_marks(catalog: Catalog) -> ActiveMarks:
     """The leaving marks no later migration kept, replayed in the order `build.rs` applies."""
     active: ActiveMarks = {}
     for name in catalog.ordered():
-        apply_marks(active, name, catalog.files[name].decode())
+        _apply_marks(active, name, _marks(name, catalog.files[name].decode()))
     return active
 
 
@@ -491,15 +481,16 @@ def _check_staging(local: dict[str, bytes], main: dict[str, bytes], unmerged: li
         before = _schema(conn)
         _apply(conn, name, sql)
         after = _schema(conn)
-        for mark in leaving_marks(name, sql):
+        marks = _marks(name, sql)
+        for verb, mark in marks:
             if not after.has(mark.member):
-                _fail(f"{name} marks {mark.member} leaving, but no such table or column exists")
-        for mark in keeping_marks(name, sql):
-            if not after.has(mark.member):
-                _fail(f"{name} keeps {mark.member}, but no such table or column exists")
-            if mark.member not in active:
+                action = (
+                    f"marks {mark.member} leaving" if verb == "leaving" else f"keeps {mark.member}"
+                )
+                _fail(f"{name} {action}, but no such table or column exists")
+            if verb == "keeping" and mark.member not in active:
                 _fail(f"{name} keeps {mark.member}, which no earlier migration marks leaving")
-        apply_marks(active, name, sql)
+        _apply_marks(active, name, marks)
         drops, breaks = _compare(before, after)
         if breaks:
             _fail(
@@ -541,7 +532,8 @@ def _check_contract(
             f"{name} contracts {step}, which merged {age.days} days ago; its contract clears on"
             f" {drop_after(merged_at):%Y-%m-%d} ({STAGING_DAYS} days)"
         )
-    if leaving_marks(expand_file, catalog.files[expand_file].decode()):
+    expand_marks = _marks(expand_file, catalog.files[expand_file].decode())
+    if any(verb == "leaving" for verb, _ in expand_marks):
         # A member a later migration kept is no longer this step's to drop.
         marks = [mark for marked, mark in active.values() if marked == expand_file]
         for item in drops:

@@ -1975,7 +1975,7 @@ impl<'a> TileEdit<&'a str> {
 #[serde(untagged)]
 pub(crate) enum DesktopTileRecord {
     Dashboard(Box<loopflow_storage::work::selection::Dashboard>),
-    /// The moved Task's order among its Project's Tasks.
+    /// The repository's Working Task order.
     Tasks(Vec<String>),
 }
 

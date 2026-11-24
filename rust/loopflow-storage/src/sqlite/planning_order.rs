@@ -38,8 +38,7 @@ pub(super) fn reorder_in(conn: &Connection, task: &Task, rank: u32) -> StoreResu
     Ok(())
 }
 
-/// The Tasks `task` is ranked among, in rank order. Ties break by id, as
-/// `TaskOrder::key` does on every board, so a Move lands where it was dropped.
+/// The Tasks `task` is ranked among, in rank order, with id breaking ties.
 fn siblings_in(conn: &Connection, task: &Task) -> StoreResult<Vec<String>> {
     let mut query = conn.prepare(
         "SELECT id FROM tasks WHERE repository_id=?1 AND project_id IS ?2

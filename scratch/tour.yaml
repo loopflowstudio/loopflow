@@ -1,7 +1,11 @@
-at: 12f2df83e8b2fd37052b002a2f91ecad0e920c47
+at: dd3077de6f5176da66a1fde27bc4b0593e558e45
 first:
   - path: docs/surfaces.md
     why: Follow a Working Task through a prompt and drop.
+  - path: swift/LoopflowMac/WorkModel.swift
+    why: Groups sidebar rows and holds the open Task’s slot.
+  - path: swift/LoopflowMac/Views/WorkNavigator.swift
+    why: Switches status grouping and sidebar drag gestures.
   - path: rust/loopflow-storage/src/work/selection.rs
     why: Defines membership, row fields and drop placement.
   - path: rust/loopflow-storage/src/sqlite/selections.rs
@@ -10,12 +14,8 @@ first:
     why: Acquires snapshots and retries competing order writes.
   - path: rust/loopflow/src/lf/commands/desktop.rs
     why: Routes CLI and served edits to storage.
-  - path: swift/LoopflowMac/WorkModel.swift
-    why: Submits sorts and drags, then refreshes both lists.
   - path: swift/Loopflow/Services/PendingChanges.swift
     why: Keeps drag previews and writes in click order.
-  - path: swift/LoopflowMac/Views/WorkNavigator.swift
-    why: Displays Graph steps and the status sort.
   - path: swift/LoopflowiOS/TaskListView.swift
     why: Displays the same steps on the phone.
   - path: rust/loopflow-storage/src/sqlite/sessions.rs
@@ -32,6 +32,8 @@ first:
     why: Checks roadmap order against Desktop and phone.
   - path: rust/loopflow/tests/served_reads.rs
     why: Exercises drops from competing clients.
+  - path: swift/LoopflowTests/WorkNavigationTests.swift
+    why: Exercises toggle, status changes and keyboard navigation.
   - path: swift/LoopflowTests/PendingChangesTests.swift
     why: Exercises retries and refused writes.
 hide:

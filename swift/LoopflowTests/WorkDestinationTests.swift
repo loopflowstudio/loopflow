@@ -8,8 +8,6 @@ import os
 @testable import Loopflow
 @testable import LoopflowMac
 
-private final class RemoteCompanionBundleMarker: NSObject {}
-
 @Suite("Work destinations", .serialized)
 @MainActor
 struct WorkDestinationTests {
@@ -391,15 +389,6 @@ struct WorkDestinationTests {
         return (model, registry, tile, ConversationPlaceholder(workspace: tile, model: model, sessions: store))
     }
 
-    /// Rust's fresh location read for the tile's Task, agreeing with its retained checkout.
-    nonisolated private func tileLocation(_ args: [String], task: RoadmapTask, location: WorkspaceIdentity) throws -> String {
-        let request = args[try #require(args.firstIndex(of: "--request")) + 1]
-        let workId = try #require(task.runtime?.workId)
-        return String(decoding: try JSONEncoder().encode([TaskLocationObservation(request: request, repositoryID: "repo",
-            taskID: workId, machineID: location.machineId, observedAt: 1,
-            location: .recorded(taskID: workId, checkout: location.worktree))]), as: UTF8.self)
-    }
-
     private func tileRecord(_ task: RoadmapTask, at location: WorkspaceIdentity) throws -> SessionRecord {
         let workId = try #require(task.runtime?.workId)
         var record = try renameFixtureRecord("primary", title: "Task conversation", work: .task(id: workId))
@@ -419,7 +408,6 @@ struct WorkDestinationTests {
         let launches = DestinationReadCounter()
         let query = RegistryQuery { args, _ in
             if args.starts(with: ["plan", "list"]) { return planning }
-            if args.starts(with: ["--repo-id", "repo", "task", "location"]) { return try tileLocation(args, task: task, location: location) }
             if args.prefix(2) == ["session", "resume"] {
                 // The first opening fails; the person's Retry succeeds.
                 if await launches.next() > 1 { return encoded }
@@ -461,7 +449,6 @@ struct WorkDestinationTests {
         let launches = DestinationReadCounter()
         let query = RegistryQuery { args, _ in
             if args.starts(with: ["plan", "list"]) { return planning }
-            if args.starts(with: ["--repo-id", "repo", "task", "location"]) { return try tileLocation(args, task: task, location: location) }
             if args.prefix(2) == ["session", "resume"] {
                 if await launches.next() > 1 { return encoded }
                 throw RegistryQueryError("Conversation launcher unavailable")
@@ -502,7 +489,6 @@ struct WorkDestinationTests {
         let encoded = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
         let query = RegistryQuery { args, _ in
             if args.starts(with: ["plan", "list"]) { return planning }
-            if args.starts(with: ["--repo-id", "repo", "task", "location"]) { return try tileLocation(args, task: task, location: location) }
             if args.prefix(2) == ["session", "resume"], args.contains("--prepare") { return encoded }
             throw RegistryQueryError("Opening in a tile reads nothing else")
         }
@@ -634,8 +620,12 @@ struct WorkDestinationTests {
         let encoded = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
         let prepares = DestinationReadCounter()
         let query = RegistryQuery { args, _ in
-            // The load also prepares the repository primary; only this Task's preparations count.
-            if args.contains("resume"), args.contains("--task") { _ = await prepares.next(); return encoded }
+            // The load also prepares the repository primary and other working
+            // Tasks; only this Task's preparations count.
+            if args.contains("resume"), args.contains("--task") {
+                if args.contains(task.runtime?.workId ?? task.id) { _ = await prepares.next() }
+                return encoded
+            }
             if args.starts(with: ["plan", "list"]) { return data }
             throw RegistryQueryError("Unexpected opening operation")
         }
@@ -687,12 +677,14 @@ struct WorkDestinationTests {
         let missing = try oneTask(data, taskId: "absent")
         let reads = DestinationReadCounter()
         let barrier = LinkedDestinationBarrier()
+        let workId = try #require(task.runtime?.workId)
         let (model, workspaceRegistry) = destinationModel(query: RegistryQuery { args, _ in
             if args.starts(with: ["session", "list"]) {
                 if await reads.next() == 1 { return #"{"entries":[\#(other)],"next":null}"# }
                 if outcome == "updated-inventory" { return #"{"entries":[\#(updated)],"next":null}"# }
             }
-            if args.prefix(2) == ["session", "resume"] { return encoded }
+            // Other working Tasks warm without this one's conversation.
+            if args.prefix(2) == ["session", "resume"], !args.contains("--task") || args.contains(workId) { return encoded }
             if args.starts(with: ["plan", "list"]) {
                 if outcome == "updated-inventory" { await barrier.wait("planning") }
                 if outcome == "unavailable-plan" { throw RegistryQueryError("Planning disconnected") }
@@ -769,18 +761,9 @@ struct WorkDestinationTests {
         let wave = try #require(snapshot.waves.first)
         let task = try #require(wave.tasks.items.first)
         let taskID = task.runtime?.workId ?? task.id
-        let remoteIdentity = WorkspaceIdentity(machineId: "peer", worktree: "/peer/retained-checkout")
         let query = RegistryQuery { args, _ in
             if args.starts(with: ["config", "repo"]) {
                 return #"{"id":"repository","locators":["repository"]}"#
-            }
-            if args.starts(with: ["--machine", "peer", "--repo-id", "repository", "task", "location"]) {
-                let index = try #require(args.firstIndex(of: "--request"))
-                return String(decoding: try JSONSerialization.data(withJSONObject: [[
-                    "request": args[index + 1], "repository_id": "repository", "task_id": taskID,
-                    "machine_id": "peer", "observed_at": 1,
-                    "location": ["state": "recorded", "task_id": "remote-task", "checkout": remoteIdentity.worktree]
-                ]]), as: UTF8.self)
             }
             throw RegistryQueryError("Bare Work opening cannot prepare a checkout or acquire a Session")
         }
@@ -795,83 +778,37 @@ struct WorkDestinationTests {
         #expect(model.taskOpening?.status == .opening)
         let page = try #require(model.linkedTaskPage)
         #expect(page.taskID == task.id)
-        if remote {
-            #expect(model.navigation.preparedTaskWorktrees[task.id] == remoteIdentity)
-        } else {
-            #expect(model.navigation.preparedTaskWorktrees.isEmpty)
-        }
+        // A Machine in the link is not a second address: nothing is probed or prepared.
+        #expect(model.navigation.preparedTaskWorktrees.isEmpty)
         model.finishTaskPage(page)
         #expect(model.taskOpening?.status == .usable)
     }
 
-    @Test(arguments: ["recorded", "stale", "unavailable", "unrecorded", "wrong-checkout"])
-    func remoteOpeningKeepsLocalPlanningAndRetainedDrafts(outcome: String) async throws {
-        if outcome == "recorded", ProcessInfo.processInfo.environment["LOOPFLOW_REMOTE_COMPANION_HOST"] == nil {
-            let host = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-            try FileManager.default.createDirectory(at: host, withIntermediateDirectories: true)
-            defer { try? FileManager.default.removeItem(at: host) }
-            let executable = try #require(Bundle.main.executableURL)
-            try #require(executable.lastPathComponent == "swiftpm-testing-helper")
-            let owned = host.appendingPathComponent(executable.lastPathComponent)
-            try FileManager.default.copyItem(at: executable, to: owned)
-            let helper = host.appendingPathComponent("lf")
-            try "#!/bin/sh\nexit 93\n".write(to: helper, atomically: true, encoding: .utf8)
-            try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: helper.path)
-            let process = Process()
-            process.executableURL = owned
-            process.arguments = ["--test-bundle-path", try #require(Bundle(for: RemoteCompanionBundleMarker.self).executablePath),
-                "--testing-library", "swift-testing", "--filter", "WorkDestinationTests/remoteOpeningKeepsLocalPlanningAndRetainedDrafts", "--no-parallel"]
-            process.environment = ProcessInfo.processInfo.environment.merging(
-                ["LOOPFLOW_REMOTE_COMPANION_HOST": host.path], uniquingKeysWith: { _, new in new })
-            let output = Pipe()
-            process.standardOutput = output
-            process.standardError = output
-            try process.run()
-            let log = output.fileHandleForReading.readDataToEndOfFile()
-            process.waitUntilExit()
-            print(String(decoding: log, as: UTF8.self))
-            try #require(process.terminationStatus == 0)
-            return
-        }
+    @Test func aRemoteTaskOpensThroughTheServerAndKeepsLocalDrafts() async throws {
         let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(try fixture().utf8))
         let wave = try #require(snapshot.waves.first)
         let task = try #require(wave.tasks.items.first)
         let taskID = try #require(task.runtime?.workId)
         let localIdentity = try #require(task.reference.workspace?.identity)
-        let remoteID = "task_remote_correspondence"
         let remoteIdentity = WorkspaceIdentity(machineId: "peer", worktree: "/peer/retained-checkout")
-        var record = try renameFixtureRecord("peer-session", title: "Remote review", work: .task(id: remoteID))
-        record.workspace = try JSONDecoder().decode(SessionWorkspace.self, from: JSONSerialization.data(withJSONObject: [
-            "machine_id": "peer", "worktree": outcome == "wrong-checkout" ? "/changed" : remoteIdentity.worktree,
-            "task_id": remoteID
-        ]))
+        var record = try renameFixtureRecord("peer-session", title: "Remote review", work: .task(id: taskID))
+        record.workspace = SessionWorkspace(machineId: "peer", worktree: remoteIdentity.worktree, taskId: taskID, unavailable: nil)
         var surface = try JSONSerialization.jsonObject(with: JSONEncoder().encode(record)) as! [String: Any]
-        // Its agent runs on the peer with no terminal showing it.
         surface["state"] = "detached"
         surface["action"] = sessionActionFixture(state: "detached")
-        surface["open_argv"] = ["ssh", "-tt", "peer", "owned-fixture"]
+        // The local server answers a viewer it attaches where the Session runs.
+        surface["open_argv"] = ["lf", "open", "--task", taskID, "--session", record.id, "--here"]
         record = try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: surface))
         let encoded = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
         let query = RegistryQuery { args, cwd in
             if args.starts(with: ["config", "repo"]) { return #"{"id":"selected-plan","locators":["selected-plan","repository"]}"# }
-            guard args.starts(with: ["--machine", "peer", "--repo-id", "repository"]), cwd == nil else {
-                throw RegistryQueryError("Remote paths must never become local working directories")
+            guard !args.contains("--machine"), !(cwd ?? "").hasPrefix("/peer") else {
+                throw RegistryQueryError("Desktop never routes to a Machine or a peer path")
             }
-            let command = Array(args.dropFirst(4))
-            if command.starts(with: ["task", "location"]) {
-                let requestIndex = try #require(command.firstIndex(of: "--request"))
-                let request = outcome == "stale" ? "previous-request" : command[requestIndex + 1]
-                let location: [String: Any] = outcome == "unavailable" ? ["state": "unavailable", "reason": "Offline"]
-                    : outcome == "unrecorded" ? ["state": "unrecorded"]
-                    : ["state": "recorded", "task_id": remoteID, "checkout": remoteIdentity.worktree]
-                return String(decoding: try JSONSerialization.data(withJSONObject: [[
-                    "request": request, "repository_id": "repository", "task_id": taskID,
-                    "machine_id": "peer", "observed_at": 1, "location": location
-                ]]), as: UTF8.self)
-            }
-            if command.starts(with: ["session", "list"]) { return #"{"entries":[\#(encoded)],"next":null}"# }
-            if command.prefix(2) == ["session", "resume"] { return encoded }
-            throw RegistryQueryError("No checkout, provider launch or transfer permitted")
+            // The Task's Sessions, read wherever it runs.
+            if args.prefix(2) == ["session", "list"], args.contains(taskID) { return #"{"entries":[\#(encoded)],"next":null}"# }
+            if args.prefix(2) == ["session", "resume"] { return encoded }
+            throw RegistryQueryError("No checkout, provider launch or transfer permitted: \(args)")
         }
         let (model, workspaceRegistry) = destinationModel(query: query, repoPath: wave.wave.repo)
         model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [])
@@ -882,71 +819,33 @@ struct WorkDestinationTests {
         let files = local.files(issue: taskID, cwd: localIdentity.worktree, query: query)
         let document = files.document("draft.txt")
         document.editor.string = "unfinished local draft"
+        // The link's Machine is not a second address; the server prepares the Session.
         let link = TaskLink(issue: taskID, repo: wave.wave.repo, session: record.id,
                             machine: "peer", repository: "repository")
         await model.openTaskLink(link)
         #expect(model.repoPath == wave.wave.repo)
-        #expect(model.roadmap.value == snapshot)
         #expect(local.multiplexer.layout == layout)
         #expect(document.editor.string == "unfinished local draft")
-        if outcome == "recorded" {
-            let opened = try #require(workspaceRegistry.selectedWork.flatMap(workspaceRegistry.retained))
-            let pane = try #require(opened.multiplexer.layout.allPanes.first { $0.sessionId == record.id })
-            let request = LinkedSession(generation: 0, record: record, task: task, location: pane.executionLocation, prepared: false)
-            #expect(request.record.id == record.id)
-            #expect(request.location?.machineID == "peer")
-            #expect(model.selection == .task(id: task.id))
-            #expect(model.navigation.preparedTaskWorktrees[task.id] == remoteIdentity)
-            #expect(model.taskOpening?.status != .usable)
-            let remote = registry.workspace(for: WorkWorkspaceKey(repository: "repository", kind: .task, id: task.runtime?.workId ?? task.id), title: task.task.name, location: remoteIdentity)
-            remote.multiplexer.load(sessionId: record.id, location: record.workspace?.identity)
-            let companion = try remote.files(for: .browser(taskId: task.id, tabs: [.files], selected: "files", execution: request.location), task: task, query: query)
-            companion.document("remote-draft.txt").editor.string = "retained peer draft"
-            remote.multiplexer.updateSessionLocation(record.id, location: remoteIdentity, execution: request.location)
-            remote.multiplexer.showBrowser(.files, location: remoteIdentity, execution: request.location)
-            let sessions = local.sessionStore(repoPath: wave.wave.repo, query: query)
-            sessions.retainLocation(try #require(request.location), for: record)
-            sessions.reconcile([record])
-            await sessions.select(record.id)
-            #expect(sessions.sessions.first?.state == .prepared)
-            #expect(sessions.sessions.first?.record.openArgv.first == "ssh")
-            #expect(sessions.presentationDirectory(for: record, checkout: remoteIdentity.worktree) == wave.wave.repo)
-            #expect(sessions.taskSubject(for: record) == .task(id: taskID))
-            #expect(companion.issue == remoteID)
-            #expect(companion.query.remoteMachine == "peer")
-            #expect(remote.multiplexer.browserPane.map(remote.multiplexer.isVisible) == true)
-            let targetPane = remote.multiplexer.focusedPane
-            remote.multiplexer.setZoom(targetPane.id, enabled: true)
-            let target = DesktopPaneTarget(repository: "repository", window: UUID().uuidString,
-                work: remote.key, pane: targetPane.id, incarnation: targetPane.incarnation, tab: nil)
-            try DesktopAction.perform(DesktopActionRequest("run", at: target), model: model, workspaces: registry)
-            let shell = try #require(remote.multiplexer.layout.allPanes.first { $0.content.selectedShell?.location == remoteIdentity })
-            let tab = try #require(remote.multiplexer.layout.pane(for: shell.id)?.content.selectedShell)
-            let command = try remote.shellAttachment(tab)
-            #expect(Array(command.dropFirst()) == ["--machine", "peer", "--repo-id", "repository",
-                "desktop", "shell", remoteID, "--checkout", remoteIdentity.worktree, "--id", tab.id, "--create", "--bootstrap", try desktopShellBootstrap()])
-            let splitID = try DesktopAction.perform(DesktopActionRequest("run", at: target), model: model, workspaces: registry)
-            #expect(remote.multiplexer.shell(splitID.tab ?? "")?.execution == request.location)
-            #expect(remote.multiplexer.layout.pane(for: try #require(splitID.pane))?.content.selectedShell?.command == [])
-            // A scripted shell tab keeps the caller's focus and zoom.
-            #expect(remote.multiplexer.layout.pane(for: targetPane.id) == targetPane)
-            #expect(remote.multiplexer.focusedPaneId == targetPane.id)
-            #expect(remote.multiplexer.zoomedPaneId == targetPane.id)
-            #expect(shell.kind == .shell)
-            #expect(companion.document("remote-draft.txt").editor.string == "retained peer draft")
-            remote.multiplexer.showBrowser(.files, location: WorkspaceIdentity(machineId: "peer", worktree: "/replacement"))
-            let unchanged = remote.multiplexer.layout
-            #expect(throws: DesktopTargetError.self) {
-                try DesktopAction.perform(DesktopActionRequest("run", at: target), model: model, workspaces: registry)
-            }
-            #expect(remote.multiplexer.layout == unchanged)
+        #expect(model.selection == .task(id: task.id))
+        // The record says where the Session runs; its pane keeps that Machine.
+        let opened = try #require(workspaceRegistry.selectedWork.flatMap(workspaceRegistry.retained))
+        let pane = try #require(opened.multiplexer.layout.allPanes.first { $0.sessionId == record.id })
+        #expect(pane.content.location == remoteIdentity)
 
-            #expect(local.multiplexer.layout == layout)
-        } else {
-            #expect(model.taskOpening?.status == .failed)
-            #expect(model.navigation.preparedTaskWorktrees[task.id] == nil)
-            #expect(registry.keys == [fixtureWorkKey(localIdentity)])
-        }
+        // A shell starts through the local server by Task; Close names the Machine it started on.
+        let remote = registry.workspace(for: WorkWorkspaceKey(repository: "repository", kind: .task, id: taskID),
+                                        title: task.task.name, location: remoteIdentity)
+        let shellPane = try #require(try remote.newShell())
+        let tab = try #require(shellPane.content.selectedShell)
+        #expect(tab.location == remoteIdentity)
+        let command = try remote.shellAttachment(tab)
+        #expect(Array(command.dropFirst()) == ["desktop", "shell", taskID, "--id", tab.id,
+                                               "--create", "--bootstrap", try desktopShellBootstrap()])
+        // A move leaves the shell labelled with the Machine that started it.
+        remote.location = WorkspaceIdentity(machineId: "mini", worktree: "/mini/checkout")
+        #expect(remote.multiplexer.shell(tab.id)?.location == remoteIdentity)
+        let sessions = local.sessionStore(repoPath: wave.wave.repo, query: query)
+        #expect(sessions.presentationDirectory(for: record, checkout: remoteIdentity.worktree) == wave.wave.repo)
     }
 
     @Test func resolvingTaskKeepsTheWorkspaceVisible() async throws {
@@ -1216,6 +1115,7 @@ struct WorkDestinationTests {
         record = try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: sessionJSON))
         let encoded = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
         let sessionID = record.id
+        let workId = try #require(task.runtime?.workId)
         let fixtureURL = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
             .deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("tests/fixtures/dto/task_files.json")
         let root = try JSONSerialization.jsonObject(with: Data(contentsOf: fixtureURL)) as! [String: Any]
@@ -1223,7 +1123,7 @@ struct WorkDestinationTests {
         let query = RegistryQuery { args, _ in
             if args.starts(with: ["session", "list"]) { return #"{"entries":[\#(encoded)],"next":null}"# }
             // A primary's preparation names neither this Session nor its Task.
-            if args.prefix(2) == ["session", "resume"], args.contains(sessionID) || args.contains("--task") {
+            if args.prefix(2) == ["session", "resume"], args.contains(sessionID) || args.contains(workId) {
                 if outcome == "connection" { throw RegistryQueryError("Connection unavailable") }
                 return encoded
             }
@@ -1294,11 +1194,11 @@ struct WorkDestinationTests {
         let unrelated = try renameFixtureRecord("unrelated", title: "Other work", work: .task(id: "other-task"))
         let otherEncoded = String(decoding: try JSONEncoder().encode(unrelated), as: UTF8.self)
         let (model, workspaceRegistry) = destinationModel(query: RegistryQuery { args, cwd in
-            if args.contains("--task") { return exact }
             if args.prefix(2) == ["session", "list"], cwd == wave.wave.repo {
                 if args.contains("--after") { return #"{"entries":[\#(encoded),\#(otherEncoded)],"next":null}"# }
                 return #"{"entries":[],"next":"page-two"}"#
             }
+            if args.contains("--task") { return exact }
             throw RegistryQueryError("No mutation permitted")
         })
         let url = TaskLink(issue: task.task.identifier, repo: wave.wave.repo, session: record.id)

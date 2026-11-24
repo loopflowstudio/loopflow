@@ -178,3 +178,25 @@ public struct TaskFileSnapshot: Decodable, Sendable, Hashable {
         case readOnlyReason = "read_only_reason"
     }
 }
+
+/// One `task.files.watch` reading: the checkout the Task has now and an opaque
+/// revision of its whole tree. A changed Machine or checkout is a move.
+public struct TaskFilesRevision: Decodable, Sendable, Equatable {
+    public let taskID: String
+    public let machineID: String
+    public let checkout: String
+    public let revision: String
+
+    enum CodingKeys: String, CodingKey {
+        case checkout, revision
+        case taskID = "task_id", machineID = "machine_id"
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        taskID = try values.decode(String.self, forKey: .taskID)
+        machineID = StructuredIdentity.prefixed(try values.decode(String.self, forKey: .machineID), "home_")
+        checkout = try values.decode(String.self, forKey: .checkout)
+        revision = try values.decode(String.self, forKey: .revision)
+    }
+}

@@ -770,7 +770,7 @@ pub enum RepoCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum DesktopCommand {
-    /// Desktop shell runtime on the recorded Machine; does not contact the GUI.
+    /// Desktop's Task shell viewer: the local server runs the shell wherever the Task runs; does not contact the GUI.
     #[command(hide = true)]
     Shell {
         #[command(flatten)]
@@ -3515,17 +3515,21 @@ mod tests {
     fn desktop_shell_runtime_needs_no_gui_and_task_shell_is_removed() {
         assert!(Cli::try_parse_from(["lf", "task", "shell", "task-id"]).is_err());
         let cli = Cli::try_parse_from([
+            "lf", "desktop", "shell", "task-id", "--id", "shell-id", "--create",
+        ])
+        .unwrap();
+        // Only Close names the Machine that started the shell.
+        assert!(Cli::try_parse_from([
             "lf",
             "desktop",
             "shell",
             "task-id",
-            "--checkout",
-            "/checkout",
             "--id",
-            "shell-id",
-            "--create",
+            "s",
+            "--started-on",
+            "home_1",
         ])
-        .unwrap();
+        .is_err());
         let Some(Commands::Desktop { cmd }) = cli.command else {
             panic!("Desktop runtime command");
         };

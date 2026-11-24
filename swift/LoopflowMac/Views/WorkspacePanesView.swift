@@ -108,7 +108,7 @@ struct ConversationPlaceholder: View {
         let panes = store.zoomedPaneId.flatMap { store.layout.pane(for: $0) }.map { [$0] }
             ?? store.visibleLayout?.allPanes ?? []
         return panes.contains { pane in
-            guard case .session(let id, _, _) = pane.content else { return false }
+            guard case .session(let id, _) = pane.content else { return false }
             return !workspace.canOpenTerminals || !sessions.sessions.contains { $0.id == id }
         }
     }
@@ -351,7 +351,7 @@ struct SessionPaneView: View {
     @State private var copyConfirmation: String?
 
     private var item: SessionItem? {
-        guard case .session(let id?, _, _) = pane.content else { return nil }
+        guard case .session(let id?, _) = pane.content else { return nil }
         return sessions.sessions.first { $0.id == id }
     }
 
@@ -605,7 +605,7 @@ struct SessionPaneView: View {
 
     private var paneTaskId: String? {
         switch pane.content {
-        case .browser(let task, _, _, _, _): return task
+        case .browser(let task, _, _, _): return task
         default:
             if let work = primarySession?.record.work, work.kind == .task { return work.id }
             return workspace.key.kind == .task ? workspace.key.id : nil
@@ -629,8 +629,7 @@ struct SessionPaneView: View {
                 if case .shell = pane.content {
                     store.reveal(sessionId: record.id, location: record.workspace?.identity)
                 } else {
-                    store.replace(pane.id, with: .session(id: record.id, location: record.workspace?.identity,
-                        execution: pane.executionLocation))
+                    store.replace(pane.id, with: .session(id: record.id, location: record.workspace?.identity))
                 }
                 workspace.presentation.selectedSessionId = record.id
                 if model.workspaceKey(for: model.selection, repository: workspace.key.repository) == workspace.key {
@@ -739,7 +738,7 @@ struct SessionPaneView: View {
     /// One row names everything the pane can show: the Task's Brief, Diff and
     /// Files, then whatever else is open beside them.
     @ViewBuilder private var browserTabs: some View {
-        if case .browser(let taskId, let tabs, let selected, _, _) = pane.content {
+        if case .browser(let taskId, let tabs, let selected, _) = pane.content {
             let task = model.task(id: taskId)?.task
             let files = try? workspace.files(for: pane.content, task: task, query: sessions.query)
             ScrollView(.horizontal) {
@@ -829,12 +828,12 @@ struct SessionPaneView: View {
                     Text("Shell location is unavailable. Add a new shell in this Work.")
                 }
             }
-        case .browser(let taskId, _, _, let location, let execution):
+        case .browser(let taskId, _, _, let location):
             VStack(spacing: 0) {
                 if !showsStrip { browserTabs.padding(PaneGeometry.inset) }
                 switch pane.content.selectedBrowserTab {
                 case .graphLog:
-                    GraphProcessLog(model: model, taskId: taskId, location: location, execution: execution,
+                    GraphProcessLog(model: model, taskId: taskId, location: location,
                         query: sessions.query, openFiles: { workspace.showBrowser(.files, from: pane) })
                         .id(pane.incarnation)
                         .background(PaneFocusTarget(isFocused: isFocused))
@@ -859,6 +858,8 @@ struct SessionPaneView: View {
                                 }
                             }
                             .simultaneousGesture(TapGesture().onEnded { focusPane() })
+                    case .failure(let error as TaskNotStarted):
+                        EmptyState(title: error.localizedDescription)
                     case .failure(let error):
                         EmptyState(title: "Files did not open", machine: error.localizedDescription)
                     }
@@ -872,7 +873,7 @@ struct SessionPaneView: View {
                                 MarkdownBlocks(source: task.task.description).equatable()
                                 TaskWorkView(model: model, task: task)
                                 GraphProcessLog(model: model, taskId: taskId, location: location,
-                                    execution: execution, query: sessions.query, showsPosition: false)
+                                    query: sessions.query, showsPosition: false)
                             }.padding(Spacing.md)
                         }.textSelection(.enabled)
                     } else { EmptyState(title: "Task is unavailable") }
@@ -982,7 +983,7 @@ struct SessionPaneView: View {
         let fallback: String = switch pane.content {
         case .session: "Session"
         case .shell: "Shell"
-        case .browser(let task, _, _, _, _): model.task(id: task)?.task.task.identifier ?? "Task"
+        case .browser(let task, _, _, _): model.task(id: task)?.task.task.identifier ?? "Task"
         }
         return PaneProgramHeading(provider: paneSessions.count == 1 ? paneSessions.first?.presentationProvider : nil,
             title: paneSessions.count == 1 ? paneSessions.first?.record.title ?? _title : _title,

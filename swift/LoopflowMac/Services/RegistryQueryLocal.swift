@@ -1,5 +1,5 @@
-// Native Work reads, writes and subscriptions use the local server.
-// Execution launches and remote file streams retain their CLI transports.
+// Native Work reads, writes and subscriptions use the local server, which
+// routes a Task's to the Machine that runs it. Execution launches keep the CLI.
 
 #if os(macOS)
 import Foundation
@@ -26,33 +26,8 @@ enum RegistryQueryLocal {
         }
     }, change: { change, requestID in
         try await ServerClient.change(change, requestID: requestID)
-    }, watchFiles: { args, cwd in
-        // Only a remote Task's files: `lf --machine … task watch-files` over SSH.
-        try await Task.detached(priority: .userInitiated) {
-            let configuration = try ReaderLaunchConfiguration.current()
-            let process = LocalWaveAgentLauncher.queryProcess([configuration.helper] + args)
-            process.environment = configuration.environment
-            if let cwd { process.currentDirectoryURL = URL(fileURLWithPath: cwd) }
-            let reader = try LocalLineObservation<TaskFilesFrame>.start(
-                name: "Task files", process: process, frameLimit: 65536,
-                configurationChanged: { try ReaderLaunchConfiguration.current() != configuration },
-                decode: { try JSONDecoder().decode(TaskFilesFrame.self, from: $0) })
-            return TaskFilesObservation(frames: reader.frames, cancel: reader.cancel)
-        }.value
-    }, subscribeRead: { args, cwd in
-        try await Task.detached(priority: .userInitiated) {
-            let configuration = try ReaderLaunchConfiguration.current()
-            let process = LocalWaveAgentLauncher.queryProcess([configuration.helper] + args)
-            process.environment = configuration.environment
-            if let cwd { process.currentDirectoryURL = URL(fileURLWithPath: cwd) }
-            let reader = try LocalLineObservation<Data>.start(
-                name: "Task history", process: process, frameLimit: 32 * 1024 * 1024, silence: nil,
-                configurationChanged: { try ReaderLaunchConfiguration.current() != configuration },
-                decode: { $0 })
-            return LineSubscription(lines: reader.frames, checkpoint: { id in
-                reader.send(Data("{\"id\":\(id)}\n".utf8))
-            }, cancel: reader.cancel, unreadable: { nil })
-        }.value
+    }, subscribeRead: { read in
+        ServerClient.subscribe(read)
     }, subscribeWork: {
         try WorkSubscriptions.observe { ServerClient.subscribe($0) }
     }) { args, cwd in
@@ -67,32 +42,4 @@ enum RegistryQueryLocal {
     }
 }
 
-/// Invalidate on replacement; let lf resolve the selected Machine/store itself.
-/// Metadata is sufficient here: these installation files are atomically replaced.
-private struct ReaderLaunchConfiguration: Equatable {
-    let helper: String
-    let environment: [String: String]
-    let files: [String]
-
-    static func current() throws -> Self {
-        let helper = try LocalWaveAgentLauncher.machineLf().path
-        let install = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".lf-machine/install")
-        let paths = [URL(fileURLWithPath: helper),
-                     install.appendingPathComponent("active.json"),
-                     install.appendingPathComponent("switch.json")]
-        let files = try paths.map { url -> String in
-            let resolved = url.resolvingSymlinksInPath().path
-            do {
-                let attributes = try FileManager.default.attributesOfItem(atPath: resolved)
-                return "\(resolved):\(String(describing: attributes[.systemFileNumber])):\(String(describing: attributes[.size])):\(String(describing: attributes[.modificationDate]))"
-            } catch CocoaError.fileReadNoSuchFile {
-                return "\(resolved):absent"
-            }
-        }
-        return Self(helper: helper,
-                    environment: GUIProcessEnvironment.enriched(ProcessInfo.processInfo.environment),
-                    files: files)
-    }
-}
 #endif

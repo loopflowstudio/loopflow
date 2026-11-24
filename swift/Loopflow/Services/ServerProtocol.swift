@@ -113,6 +113,14 @@ public struct ServerError: LocalizedError, Sendable, Equatable {
     }
 }
 
+extension ServerError {
+    /// A Task with no checkout yet, wherever it runs: `not_found {reason: "not_started"}`.
+    public var notStarted: Bool {
+        guard code == .notFound, case .object(let fields) = data else { return false }
+        return fields["reason"] == .string("not_started")
+    }
+}
+
 /// One message from the client.
 public enum ServerClientMessage: Encodable, Sendable {
     case hello(ServerHello)

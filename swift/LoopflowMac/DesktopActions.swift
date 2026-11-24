@@ -595,7 +595,7 @@ struct DesktopAction {
     /// The addressed browser tab when it is a web page; Files and Graph processes are not.
     private static func webTab(_ context: DesktopActionContext) throws -> (SessionsWorkspace, id: String, url: URL) {
         let (workspace, pane) = try context.addressed
-        guard case .browser(_, let tabs, let selected, _, _) = pane.content,
+        guard case .browser(_, let tabs, let selected, _) = pane.content,
               case .url(let id, let url)? = tabs.first(where: { $0.id == (context.tab ?? selected) }) else {
             throw DesktopTargetError("The addressed tab is not a web page; nothing changed.")
         }

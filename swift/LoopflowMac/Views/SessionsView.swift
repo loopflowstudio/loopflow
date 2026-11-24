@@ -108,8 +108,8 @@ extension PaneContent {
     var terminal: TerminalIdentity? {
         switch self {
         case .shell: selectedShell?.terminal
-        case .session(let id?, let location, _): location.map { .session(id, machineId: $0.machineId) }
-        case .session(nil, _, _), .browser: nil
+        case .session(let id?, let location): location.map { .session(id, machineId: $0.machineId) }
+        case .session(nil, _), .browser: nil
         }
     }
 }
@@ -133,7 +133,6 @@ final class SessionsWorkspace {
     func visit() { lastVisit = Date() }
 
     var conversationClosed = false
-    var requiresLocationValidation = false
     var onConversationClosed: (() -> Void)?
 
     /// Run one conversation opening against this workspace's progress and error.
@@ -175,29 +174,26 @@ final class SessionsWorkspace {
     func prepareTaskPanes(query: RegistryQuery = RegistryQueryLocal.shared) {
         guard key.kind == .task, !didPrepareTaskPanes,
               let session = multiplexer.sessionPane, session.sessionId != nil, session.content.location != nil,
-              case .browser(_, let tabs, _, _, _)? = multiplexer.browserPane?.content, tabs.isEmpty else { return }
+              case .browser(_, let tabs, _, _)? = multiplexer.browserPane?.content, tabs.isEmpty else { return }
         didPrepareTaskPanes = true
         guard let browser = multiplexer.showBrowser(.files, location: session.content.location,
-            execution: session.executionLocation, focus: false) else { return }
+            focus: false) else { return }
         // A location error is presented by the browser's normal error view.
         _ = try? files(for: browser.content, task: nil, query: query)
     }
 
-    /// Add a shell tab at the Task's recorded location.
+    /// Add a shell tab; the server starts it wherever the Task runs, and the
+    /// tab keeps that Machine.
     @discardableResult
     func newShell(command: [String]? = nil, focus: Bool = true) throws -> PaneState? {
         guard key.kind == .task else {
             throw RegistryQueryError("Shells belong to Tasks; no shell was opened.")
         }
-        let (location, execution) = try shellLocation()
-        if location.machineId != localMachineId {
-            guard let execution, execution.machineID == location.machineId,
-                  case .recorded(_, let checkout) = execution.location, checkout == location.worktree else {
-                throw RegistryQueryError("Reopen the remote Task before adding a shell; its location is unavailable.")
-            }
+        guard let location else {
+            throw RegistryQueryError("Open this Task's conversation before adding a shell; where it runs is not known yet.")
         }
         visit()
-        return multiplexer.newShell(command: command ?? [], location: location, execution: execution, focus: focus)
+        return multiplexer.newShell(command: command ?? [], location: location, focus: focus)
     }
 
     func toggleShell() throws {
@@ -223,10 +219,8 @@ final class SessionsWorkspace {
         guard key.kind == .task else { return nil }
         let source = owner ?? multiplexer.sessionPane
         let place = source?.content.location ?? location
-        let execution = source?.executionLocation
-            ?? multiplexer.layout.allPanes.first { $0.content.location == place }?.executionLocation
         if tab == .files { selectFilesPage() }
-        return multiplexer.showBrowser(tab, location: place, execution: execution, focus: focus)
+        return multiplexer.showBrowser(tab, location: place, focus: focus)
     }
 
     /// ⌘W closes the named tab, else the selected one; a session pane, or one
@@ -237,12 +231,13 @@ final class SessionsWorkspace {
         let id = tab ?? pane.content.selectedTabID
         let replaced: ClosedOccurrence?
         if case .shell(let tabs, _) = pane.content, let id, let shell = tabs.first(where: { $0.id == id }) {
-            if shell.location != nil {
+            if let started = shell.location {
+                // Close ends the shell on the Machine that started it, even after a move.
                 do {
-                    let argv = try shellCommand(shell)
+                    let argv = try shellCommand(shell) + ["--close", "--started-on", started.machineId]
                     Task { [weak self] in
                         do {
-                            _ = try await LocalWaveAgentLauncher.queryLf(Array(argv.dropFirst()) + ["--close"], cwd: nil)
+                            _ = try await LocalWaveAgentLauncher.queryLf(Array(argv.dropFirst()), cwd: nil)
                         } catch { self?.conversationError = error.localizedDescription }
                     }
                 } catch { conversationError = error.localizedDescription }
@@ -250,7 +245,7 @@ final class SessionsWorkspace {
             disconnectedShells.insert(id)
             if let terminal = shell.terminal { surfaces.release(terminal) }
             replaced = multiplexer.closeShell(id)
-        } else if case .browser(_, let tabs, _, _, _) = pane.content, let id, tabs.contains(where: { $0.id == id }) {
+        } else if case .browser(_, let tabs, _, _) = pane.content, let id, tabs.contains(where: { $0.id == id }) {
             replaced = multiplexer.closeBrowserTab(id)
         } else {
             if case .session = pane.content {
@@ -269,33 +264,16 @@ final class SessionsWorkspace {
     }
 
     var browserPage: TaskFilesStore.Page {
-        taskFiles?.store.page ?? .files
+        taskFiles?.page ?? .files
     }
 
     func selectFilesPage() {
-        taskFiles?.store.page = .files
+        taskFiles?.page = .files
     }
 
-    private func shellLocation() throws -> (WorkspaceIdentity, TaskLocationObservation?) {
-        guard let location else {
-            throw RegistryQueryError("Prepare this Task's location before opening a shell.")
-        }
-        let execution = multiplexer.layout.allPanes.first { $0.content.location == location }?.executionLocation
-        return (location, execution)
-    }
-
-    /// Both local and remote shells are owned on their recorded Machine.
+    /// The local server runs the shell wherever the Task runs.
     private func shellCommand(_ tab: ShellTab) throws -> [String] {
-        guard let identity = tab.location else { throw RegistryQueryError("Shell location is unavailable") }
-        let observed = tab.execution ?? multiplexer.layout.allPanes.first { $0.content.location == identity }?.executionLocation
-        let task: String
-        if let observed, observed.machineID == identity.machineId,
-           case .recorded(let recorded, let checkout) = observed.location, checkout == identity.worktree {
-            task = recorded
-        } else { task = key.id }
-        return [try LocalWaveAgentLauncher.machineLf().path, "--machine", identity.machineId,
-         "--repo-id", key.repository, "desktop", "shell", task,
-         "--checkout", identity.worktree, "--id", tab.id]
+        [try LocalWaveAgentLauncher.machineLf().path, "desktop", "shell", key.id, "--id", tab.id]
     }
 
     func shellAttachment(_ tab: ShellTab) throws -> [String] {
@@ -356,64 +334,46 @@ final class SessionsWorkspace {
     private var paneLayouts: PaneLayoutStore?
     private var persistenceLoaded = false
     @ObservationIgnored private var persistenceTask: Task<Void, Never>?
-    private var taskFiles: (store: TaskFilesStore, execution: TaskLocationObservation?)?
+    private var taskFiles: TaskFilesStore?
 
-    func files(issue: String, cwd: String, query: RegistryQuery = RegistryQueryLocal.shared, execution: TaskLocationObservation? = nil) -> TaskFilesStore {
-        if let files = taskFiles { return files.store }
-        let files = TaskFilesStore(issue: issue, cwd: cwd, query: query)
+    /// The Task's one Files store. It reads by Task through the server, so the
+    /// Machine is only where it watches; drafts restore whatever their location.
+    func files(issue: String, cwd: String, machine: String? = nil,
+               query: RegistryQuery = RegistryQueryLocal.shared) -> TaskFilesStore {
+        if let files = taskFiles { return files }
+        let files = TaskFilesStore(issue: issue, cwd: cwd, machine: machine, query: query)
         files.measurementRepository = measurementRepository
-        taskFiles = (files, execution)
-        if let machine = execution?.machineID ?? location?.machineId ?? localMachineId {
-            let place = WorkViewPlan.Location(machineID: machine, cwd: cwd)
-            files.restoreDrafts(unavailableDrafts, location: place)
-            unavailableDrafts.removeAll { $0.location == place }
-        }
+        taskFiles = files
+        files.restoreDrafts(unavailableDrafts)
+        unavailableDrafts.removeAll()
         return files
     }
-    /// Resolve Files from its content, not the selected checkout or a previous link.
+
+    /// Resolve Files from its content: the Task and the checkout it was read
+    /// in. A newer reading moves the retained store there with its drafts.
     func files(for content: PaneContent, task: RoadmapTask?, query: RegistryQuery) throws -> TaskFilesStore {
-        guard case .browser(let taskId, _, _, let location, let execution) = content else {
+        guard case .browser(let taskId, _, _, let location) = content else {
             throw RegistryQueryError("The addressed pane is not the browser.")
         }
-        let issue: String
-        let checkout: String
-        if let execution {
-            guard [taskId, task?.runtime?.workId, task?.task.identifier].compactMap({ $0 }).contains(execution.taskID) else {
-                throw RegistryQueryError("The pane's recorded owner belongs to another Task; no files were read.")
-            }
-            guard case .recorded(let ownerTask, let path?) = execution.location else {
-                throw RegistryQueryError("Task location is unavailable. Retained drafts have not moved.")
-            }
-            issue = ownerTask
-            checkout = path
-        } else {
-            guard let recorded = location, recorded.machineId == localMachineId,
-                  query.remoteMachine == nil else {
-                throw RegistryQueryError("Task file location is unavailable. Reopen the Task; no local fallback was used.")
-            }
-            if let current = task?.reference.workspace?.identity, current != recorded {
-                throw RegistryQueryError("The Task file location changed. Its previous drafts are retained, not redirected.")
-            }
-            issue = task?.runtime?.workId ?? taskId
-            checkout = recorded.worktree
+        // This Mac's plan names another owner without its checkout; the
+        // served watch reads that checkout from the owner.
+        let reading = task?.reference.workspace?.identity
+        let owner = task?.runtime?.owner?.machine.id.map { StructuredIdentity.prefixed($0, "home_") }
+        let place = reading ?? location
+        let machine: String? = if let reading { reading.machineId }
+            else if let owner, owner != localMachineId { owner }
+            else { place?.machineId }
+        guard let machine else {
+            if task?.lifecycle == .unstarted { throw TaskNotStarted() }
+            throw RegistryQueryError("Where this Task runs is not known yet; open its conversation.")
         }
-        if let entry = taskFiles {
-            let retained = entry.store
-            guard entry.execution?.repositoryID == execution?.repositoryID,
-                  entry.execution?.taskID == execution?.taskID,
-                  entry.execution?.location == execution?.location,
-                  retained.cwd == checkout,
-                  retained.query.remoteMachine == (execution?.machineID ?? query.remoteMachine),
-                  execution == nil || retained.issue == issue else {
-                throw RegistryQueryError("The Task file location changed. Its previous drafts are retained, not redirected.")
-            }
+        let cwd = (place?.machineId == machine ? place?.worktree : nil) ?? ""
+        let remote = machine == localMachineId ? nil : machine
+        if let retained = taskFiles {
+            retained.relocate(machine: remote, cwd: cwd.isEmpty ? retained.cwd : cwd)
             return retained
         }
-        // Retained documents keep their original transport; build it only once.
-        let fileQuery = execution.map {
-            query.onMachine($0.machineID, repository: $0.repositoryID).pinTaskLocation(to: $0)
-        } ?? query
-        return files(issue: issue, cwd: checkout, query: fileQuery, execution: execution)
+        return files(issue: task?.runtime?.workId ?? taskId, cwd: cwd, machine: remote, query: query)
     }
     let surfaces: GhosttySurfacePool
     let pages = BrowserPages()
@@ -424,9 +384,11 @@ final class SessionsWorkspace {
     func sessionStore(repoPath: String, query: RegistryQuery) -> SessionsStore {
         if let retainedStore {
             retainedStore.repoPath = WaveOrigin.resolve(repoPath)
+            retainedStore.localMachineId = localMachineId
             return retainedStore
         }
         let store = SessionsStore(repoPath: repoPath, query: query, surfaces: surfaces, work: key.reference)
+        store.localMachineId = localMachineId
         retainedStore = store
         return store
     }
@@ -540,15 +502,12 @@ final class SessionsWorkspaceRegistry {
     /// never spend it: admitting one keeps it warm after its board leaves.
     func prefetch(_ key: WorkWorkspaceKey, title: String, location: WorkspaceIdentity, completed: Bool) {
         guard !presentationClosed, !quitting else { return }
-        let restoring = restoreCandidates.contains(key)
         restoreCandidates.removeAll { $0 == key }
         let warm = Set(recentTasks).union(visibleWork.filter { $0.kind == .task })
         guard !completed, !closedConversations.contains(key), !recentTasks.contains(key), !releasedTasks.contains(key),
               recentTasks.count < Self.warmConversationLimit,
               warm.contains(key) || warm.count < Self.warmConversationLimit else { return }
-        let fresh = workspaces[key] == nil
-        let workspace = workspace(for: key, title: title, location: location)
-        if fresh || restoring { workspace.requiresLocationValidation = true }
+        _ = workspace(for: key, title: title, location: location)
         recentTasks.append(key)
         reconcileWarmth()
     }
@@ -561,11 +520,6 @@ final class SessionsWorkspaceRegistry {
         _ = workspace(for: key, title: title, location: location)
         guard !warmPrimaries.contains(key) else { return }
         warmPrimaries.append(key)
-        reconcileWarmth()
-    }
-
-    func confirmLocation(in workspace: SessionsWorkspace) {
-        workspace.requiresLocationValidation = false
         reconcileWarmth()
     }
 
@@ -597,7 +551,7 @@ final class SessionsWorkspaceRegistry {
                     if let id = pane.sessionId { sessions?.release(id) }
                 }
             }
-            workspace.present(workspace.canOpenTerminals && retained && !workspace.conversationClosed && !workspace.requiresLocationValidation)
+            workspace.present(workspace.canOpenTerminals && retained && !workspace.conversationClosed)
         }
         saveWarmIntent()
         onWarmthChanged?()
@@ -684,50 +638,26 @@ final class SessionsWorkspaceRegistry {
         }
     }
 
+    /// Prepare the conversation through the server, which answers it from
+    /// wherever the Task runs; its record says where that is.
     private func openWarmConversation(in workspace: SessionsWorkspace, existing: SessionItem?,
                                       store: SessionsStore) async throws {
-        if let existing, !workspace.requiresLocationValidation {
+        if let existing {
             await store.select(existing.id)
             return
         }
-        guard let location = workspace.location else {
-            throw RegistryQueryError("The recorded Task location is unavailable; no conversation was opened.")
-        }
         let key = workspace.key
-        let query = location.machineId == localMachineId ? store.query
-            : store.query.onMachine(location.machineId, repository: key.repository)
-        var observation: TaskLocationObservation?
-        var task = key.id
-        // Restored retention and preparation use the same fresh location read.
-        if key.kind == .task {
-            let current = try await query.taskLocation(task: key.id, repository: key.repository, machine: location.machineId)
-            try Task.checkCancellation()
-            guard case .recorded(let owner, let checkout) = current.location, checkout == location.worktree else {
-                throw RegistryQueryError("The recorded Task location changed; no conversation was opened.")
-            }
-            observation = current
-            task = owner
-        }
         let record: SessionRecord
-        if let existing { record = existing.record }
-        else if let id = workspace.multiplexer.sessionPane?.sessionId {
-            record = try await query.prepareSession(id: id, work: key.reference, cwd: store.repoPath)
+        if let id = workspace.multiplexer.sessionPane?.sessionId {
+            record = try await store.query.prepareSession(id: id, work: key.reference, cwd: store.repoPath)
         } else if key.kind != .task {
-            record = try await query.ensurePrimarySession(wave: key.kind == .wave ? key.id : nil, cwd: store.repoPath)
+            record = try await store.query.ensurePrimarySession(wave: key.kind == .wave ? key.id : nil, cwd: store.repoPath)
         } else {
-            record = try await query.prepareTaskSession(issue: task, cwd: store.repoPath)
+            record = try await store.query.prepareTaskSession(issue: key.id, cwd: store.repoPath)
         }
         try Task.checkCancellation()
-        guard !workspace.conversationClosed, workspace.location == location else { return }
-        // A primary runs in the persistent checkout Rust chose for its scope, so
-        // only its Machine must agree; a Task conversation must match its checkout.
-        let placed = key.kind == .task ? record.workspace?.identity == location
-            : record.workspace?.machineId == location.machineId
-        guard placed else {
-            throw RegistryQueryError("The conversation belongs to a different Machine or checkout; nothing was opened.")
-        }
-        if location.machineId != localMachineId, let observation { store.retainLocation(observation, for: record) }
-        confirmLocation(in: workspace)
+        guard !workspace.conversationClosed else { return }
+        if key.kind == .task, let place = record.workspace?.identity { workspace.location = place }
         try Task.checkCancellation()
         if let existing {
             await store.select(existing.id)
@@ -751,7 +681,10 @@ final class SessionsWorkspaceRegistry {
     func refreshMachine(query: RegistryQuery) async {
         do {
             localMachineId = try await query.localMachineId()
-            for workspace in workspaces.values { workspace.localMachineId = localMachineId }
+            for workspace in workspaces.values {
+                workspace.localMachineId = localMachineId
+                workspace.retainedStore?.localMachineId = localMachineId
+            }
             machineError = nil
         }
         catch { machineError = error.localizedDescription }
@@ -896,7 +829,7 @@ final class SessionsWorkspaceRegistry {
                     throw DesktopTargetError("The shell tab was removed or replaced; nothing changed.")
                 }
                 return (workspace, pane, tab.terminal)
-            case .browser(_, let tabs, _, _, _):
+            case .browser(_, let tabs, _, _):
                 guard tabs.contains(where: { $0.id == id }), pane.incarnation == target.incarnation else {
                     throw DesktopTargetError("The browser tab was removed or replaced; nothing changed.")
                 }
@@ -1075,6 +1008,11 @@ struct SessionItem: Identifiable, Equatable {
     }
 }
 
+/// A Task with no checkout anywhere yet: its views say **Not started**.
+struct TaskNotStarted: LocalizedError {
+    var errorDescription: String? { "Not started" }
+}
+
 @MainActor
 @Observable
 final class SessionsStore {
@@ -1086,31 +1024,13 @@ final class SessionsStore {
     let query: RegistryQuery
     /// The Task or Wave whose workspace holds this store; none for a repository.
     let work: WorkReference?
-    private var executionLocations: [String: TaskLocationObservation] = [:]
+    /// This Mac, once the workspace registry has read it.
+    var localMachineId: String?
 
-    func executionLocation(for id: String) -> TaskLocationObservation? { executionLocations[id] }
-
-    func retainLocation(_ location: TaskLocationObservation, for record: SessionRecord) {
-        executionLocations[record.id] = location
-    }
-
-    func query(for record: SessionRecord) -> RegistryQuery {
-        guard let location = executionLocations[record.id] else { return query }
-        return query.onMachine(location.machineID, repository: location.repositoryID)
-    }
-
-    func taskSubject(for record: SessionRecord) -> WorkReference? {
-        executionLocations[record.id].map { .task(id: $0.taskID) }
-    }
-
-    /// The Work a reopen names beside the Session id, so it resumes managed:
-    /// a Task-run step's Task, else this workspace's Task or Wave.
-    private func openingWork(for id: String) -> WorkReference? {
-        executionLocations[id].map { .task(id: $0.taskID) } ?? work
-    }
-
+    /// A terminal starts in the Session's checkout when it is on this Mac; a
+    /// viewer of another Machine's Session starts in the repository here.
     func presentationDirectory(for record: SessionRecord, checkout: String) -> String {
-        executionLocations[record.id] == nil ? checkout : repoPath
+        record.workspace?.machineId == localMachineId ? checkout : repoPath
     }
 
     @discardableResult
@@ -1203,16 +1123,8 @@ final class SessionsStore {
         // Release, reset and provider switches invalidate preparation and its surface together.
         let generation = sessions[index].launchId
         do {
-            let record = sessions[index].record
-            let executionQuery = query(for: record)
-            if let location = executionLocations[id] {
-                let current = try await executionQuery.taskLocation(task: location.taskID, repository: location.repositoryID, machine: location.machineID)
-                guard current.location == location.location else {
-                    throw RegistryQueryError("The recorded execution location changed; reopen the Task before connecting.")
-                }
-            }
             Perf.agentInput("connect_prepare_begin", session: id)
-            let surface = try await executionQuery.prepareSession(id: id, work: openingWork(for: id), cwd: repoPath)
+            let surface = try await query.prepareSession(id: id, work: work, cwd: repoPath)
             try Task.checkCancellation()
             Perf.agentInput("connect_prepare_returned", session: id)
             guard let latest = _index(id), sessions[latest].launchId == generation else { return }
@@ -1304,8 +1216,7 @@ final class SessionsStore {
         let previous = sessions[index]
         // Preparation checks the requested provider's continuation before releasing
         // the retained terminal. Failed reads leave current drafts and updates intact.
-        let prepared = try await query(for: previous.record).prepareSession(
-            id: id, work: openingWork(for: id), agent: agent, cwd: repoPath)
+        let prepared = try await query.prepareSession(id: id, work: work, agent: agent, cwd: repoPath)
         guard let current = _index(id) else { throw RegistryQueryError("Session is unavailable.") }
         if let terminal = localTerminal(for: previous.record) { surfaces.release(terminal) }
         sessions[current].record = prepared
@@ -1321,7 +1232,7 @@ final class SessionsStore {
         let previous = sessions[index]
         // The same Session continues on a new thread; its old terminal ends.
         let requestID = UUID().uuidString
-        let restarted = try await query(for: previous.record).resetSession(
+        let restarted = try await query.resetSession(
             previous.record, agent: previous.record.provider, cwd: repoPath, requestID: requestID)
         guard let current = _index(id) else { throw RegistryQueryError("Session is unavailable.") }
         if let terminal = localTerminal(for: previous.record) { surfaces.release(terminal) }
@@ -1910,9 +1821,9 @@ struct SessionsContentView: View {
         case .shell:
             guard let terminal = pane.terminal else { return [] }
             return store.sessions.filter { store.localTerminal(for: $0.record) == terminal }
-        case .session(let id?, _, _):
+        case .session(let id?, _):
             return store.sessions.filter { $0.id == id }
-        case .session(nil, _, _), .browser:
+        case .session(nil, _), .browser:
             return []
         }
     }
@@ -1979,11 +1890,10 @@ extension SessionsWorkspace {
 
     func portableLayout() -> WorkPaneLayout {
         let place = taskFiles.map { files in
-            WorkViewPlan.Location(machineID: files.execution?.machineID ?? location?.machineId ?? localMachineId ?? "",
-                                  cwd: files.store.cwd)
+            WorkViewPlan.Location(machineID: files.machine ?? localMachineId ?? "", cwd: files.cwd)
         }
-        return multiplexer.paneLayout(files: taskFiles?.store.browserTab,
-            drafts: (place.flatMap { place in taskFiles?.store.drafts(location: place) } ?? []) + unavailableDrafts)
+        return multiplexer.paneLayout(files: taskFiles?.browserTab,
+            drafts: (place.flatMap { place in taskFiles?.drafts(location: place) } ?? []) + unavailableDrafts)
     }
 
     func loadPaneIntent() async {
@@ -1994,8 +1904,8 @@ extension SessionsWorkspace {
         let hadLocalTools = multiplexer.layout.allPanes.contains {
             switch $0.content {
             case .shell(let tabs, _): !tabs.isEmpty
-            case .browser(_, let tabs, _, _, _): !tabs.isEmpty
-            case .session(let id, _, _): id != nil
+            case .browser(_, let tabs, _, _): !tabs.isEmpty
+            case .session(let id, _): id != nil
             }
         }
         let preserveCurrent = persistenceLoaded || persistenceError != nil || hadLocalTools
@@ -2009,15 +1919,13 @@ extension SessionsWorkspace {
             unavailableDrafts = restored.drafts
             if case .browser(let place?, let browserTabs, _)? = restored.tree.intent(.browser),
                case .files(_, let tabs, let selected)? = browserTabs.first(where: { if case .files = $0 { true } else { false } }) {
-                let fileQuery = place.machineID == localMachineId ? query : query.onMachine(place.machineID, repository: key.repository)
-                let documents = files(issue: key.id, cwd: place.cwd, query: fileQuery)
+                let documents = files(issue: key.id, cwd: place.cwd,
+                                      machine: place.machineID == localMachineId ? nil : place.machineID, query: query)
                 documents.restoreTabs(tabs, selected: selected)
-                documents.restoreDrafts(restored.drafts, location: place)
-                unavailableDrafts.removeAll { $0.location == place }
                 // Reconcile every recovered base, including documents with closed tabs.
-                for draft in restored.drafts where draft.location == place {
+                for draft in restored.drafts {
                     do {
-                        let disk = try await fileQuery.taskFile(issue: key.id, path: draft.path)
+                        let disk = try await query.taskFile(issue: key.id, path: draft.path)
                         await documents.document(draft.path).reconcile(disk)
                     } catch { persistenceError = error.localizedDescription }
                 }

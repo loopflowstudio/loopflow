@@ -178,7 +178,7 @@ struct TaskChangesView: View {
 
     private func readSettings() async {
         // A checkout on another Machine keeps the defaults for this window only.
-        guard store.query.remoteMachine == nil else { return }
+        guard store.machine == nil else { return }
         do {
             struct Inspection: Decodable { let settings: [String: ConfigurationValue] }
             let work = ServedRead.configSettings(directory: store.cwd, wave: nil, skill: nil, graph: nil, step: nil)
@@ -516,7 +516,7 @@ struct TaskChangesView: View {
                 }
                 .buttonStyle(WorkPlainButtonStyle()).font(Typography.meta)
             }
-            if store.query.remoteMachine == nil, let directory = store.changes?.recoveryDirectory {
+            if store.machine == nil, let directory = store.changes?.recoveryDirectory {
                 Button("Open saved versions") { NSWorkspace.shared.open(URL(fileURLWithPath: directory)) }
                     .buttonStyle(WorkPlainButtonStyle()).font(Typography.meta)
             }

@@ -586,7 +586,10 @@ final class TaskFilesStore {
 
     var measurementRepository: String?
     let issue: String
-    let cwd: String
+    /// The checkout on the Machine that runs the Task, as last read.
+    private(set) var cwd: String
+    /// That Machine when it is not this one; nil while it is this Mac.
+    private(set) var machine: String?
     let query: RegistryQuery
     private(set) var tabs: [WorkFileTab] = []
     var selection: String? {
@@ -617,8 +620,10 @@ final class TaskFilesStore {
         selection = retained.first { $0.id == selected }?.path
     }
 
-    func restoreDrafts(_ drafts: [WorkFileDraft], location: WorkViewPlan.Location) {
-        for draft in drafts where draft.location == location {
+    /// A draft belongs to the Task, its path and its base revision; saving it
+    /// wherever the Task runs now succeeds only while that file is at its base.
+    func restoreDrafts(_ drafts: [WorkFileDraft]) {
+        for draft in drafts {
             document(draft.path).restore(draft, task: issue)
         }
     }
@@ -660,7 +665,9 @@ final class TaskFilesStore {
     private var savedPreference = true
     private var preferenceChanges: AnyCancellable?
     private var observation: TaskFileObservation?
-    @ObservationIgnored private var remoteObservation: Task<Void, Never>?
+    @ObservationIgnored private var servedObservation: Task<Void, Never>?
+    /// What the served watch last answered, so a repeat after a reconnect reads nothing.
+    @ObservationIgnored private var servedRevision: String?
 
     private var invalidation: Task<Void, Never>?
     private var pendingPaths: Set<String> = []
@@ -671,11 +678,13 @@ final class TaskFilesStore {
         didSet { for document in documents.values { scheduleSave(document) } }
     }
 
-    deinit { remoteObservation?.cancel() }
+    deinit { servedObservation?.cancel() }
 
+    /// This Mac's checkout through FSEvents; any other Machine's through the
+    /// server's `task.files.watch`, which follows the Task when it moves.
     func observeFiles() {
-        if let machine = query.remoteMachine {
-            observeRemoteFiles(machine: machine)
+        if machine != nil {
+            observeServedFiles()
             return
         }
         guard observation == nil else { return }
@@ -686,32 +695,56 @@ final class TaskFilesStore {
         } catch { self.error = "Live file observation unavailable: \(error.localizedDescription)" }
     }
 
-    private func observeRemoteFiles(machine: String) {
-        guard remoteObservation == nil else { return }
-        let request = UUID().uuidString
-        remoteObservation = Task { [weak self, query, issue, cwd] in
-            var observation: TaskFilesObservation?
+    /// The Task's reading names another Machine or checkout: watch that one and
+    /// re-read everything open there. Documents and their drafts stay.
+    func relocate(machine: String?, cwd: String) {
+        guard machine != self.machine || cwd != self.cwd else { return }
+        let observing = observation != nil || servedObservation != nil
+        observation = nil
+        servedObservation?.cancel()
+        servedObservation = nil
+        servedRevision = nil
+        self.machine = machine
+        self.cwd = cwd
+        if observing { observeFiles() }
+        invalidate([""])
+    }
+
+    private func observeServedFiles() {
+        guard servedObservation == nil else { return }
+        servedObservation = Task { [weak self, query, issue] in
             do {
-                let opened = try await query.watchTaskFiles(issue: issue, checkout: cwd, request: request)
-                observation = opened
-                for try await frame in opened.frames {
+                let subscription = try query.watchTaskFiles(issue: issue)
+                defer { Task { await subscription.cancel() } }
+                for try await line in subscription.lines {
                     try Task.checkCancellation()
-                    guard frame.request == request, frame.taskID == issue,
-                          frame.machineID == machine, frame.checkout == cwd else {
-                        throw RegistryQueryError("Stale or mismatched file observation; drafts retained. Reopen the Task.")
-                    }
+                    let frame = try JSONDecoder().decode(SubscriptionFrame<TaskFilesRevision>.self, from: line)
                     guard let self else { break }
-                    if !frame.paths.isEmpty { self.error = nil; self.invalidate(frame.paths) }
+                    guard let revision = frame.body else {
+                        self.error = frame.unavailable ?? "Live file observation unavailable"
+                        continue
+                    }
+                    self.error = nil
+                    if revision.machineID != self.machine || revision.checkout != self.cwd {
+                        self.machine = revision.machineID
+                        self.cwd = revision.checkout
+                    } else if revision.revision == self.servedRevision {
+                        continue
+                    }
+                    let first = self.servedRevision == nil
+                    self.servedRevision = revision.revision
+                    // The first reading is the tree already read; later ones mean it changed.
+                    if !first { self.invalidate([""]) }
                 }
-                if !Task.isCancelled { throw RegistryQueryError("Live file observation disconnected; drafts retained. Refresh to reconnect.") }
+            } catch let refusal as ServerError where refusal.notStarted {
+                self?.error = "Not started"
             } catch {
                 if let self, !Task.isCancelled {
                     self.invalidation?.cancel()
                     self.error = "Live file observation unavailable: \(error.localizedDescription)"
                 }
             }
-            await observation?.cancel()
-            self?.remoteObservation = nil
+            self?.servedObservation = nil
         }
     }
 
@@ -746,7 +779,7 @@ final class TaskFilesStore {
             }
             // Every lf read journals under the checkout and builds write ignored
             // output; those writes never move the comparison. A peer filters its own.
-            let ignored = self.query.remoteMachine == nil ? await self.ignoredPaths(changed) : []
+            let ignored = self.machine == nil ? await self.ignoredPaths(changed) : []
             guard !Task.isCancelled else { return }
             let visible = changed.filter { !ignored.contains($0) }
             comparisonChanged = comparisonChanged || !visible.isEmpty
@@ -837,9 +870,10 @@ final class TaskFilesStore {
         }
     }
 
-    init(issue: String, cwd: String, query: RegistryQuery = RegistryQueryLocal.shared) {
+    init(issue: String, cwd: String, machine: String? = nil, query: RegistryQuery = RegistryQueryLocal.shared) {
         self.issue = issue
         self.cwd = cwd
+        self.machine = machine
         self.query = query
         autosave = UserDefaults.standard.savesTaskFilesAutomatically
         savedPreference = autosave
@@ -871,7 +905,7 @@ final class TaskFilesStore {
 
     /// Refresh navigation only; selection and filesystem events own document reads.
     func refresh() async {
-        if query.remoteMachine != nil { observeFiles() }
+        if machine != nil { observeFiles() }
         await refreshChanges()
     }
 
@@ -1367,7 +1401,7 @@ final class TaskFilesStore {
     /// Machine. Offered again once the launch answers: a click during a
     /// healthy run starts a second one that rewrites the same file.
     var tourAction: String? {
-        guard query.remoteMachine == nil, tourWriting != .launching else { return nil }
+        guard machine == nil, tourWriting != .launching else { return nil }
         if diffTour == nil { return "Write tour" }
         return tourAge != nil ? "Update tour" : nil
     }

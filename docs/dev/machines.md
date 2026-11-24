@@ -167,7 +167,8 @@ inside one IMMEDIATE transaction:
 
 A write for a Task another Machine runs travels as the operation itself, not
 as a command line. Running, claiming or unassigning the Task, setting
-its auto, and opening or resuming its Session, reach the writer the same way:
+its auto, steering it, and opening or resuming its Session, reach the writer
+the same way:
 
 ```bash
 lf task auto off LOO-123 --json         # LOO-123 runs on mini; mini's server answers
@@ -190,7 +191,9 @@ A writer with an older `lf` fails the call and names its version and the
 update command, for example ``mini runs lf 0.15.2, which cannot take this
 operation; update it with `ssh -- 'mini' 'lf install'` ``. A writer with a newer
 protocol asks you to update this Machine with `lf install`. Nothing falls back
-to running the write locally.
+to running the write locally, except a steer, which is a Task comment and has
+another way there
+([Steer and read a Task another Machine runs](#steer-and-read-a-task-another-machine-runs)).
 
 Nothing routes to another person's Machine, and nobody moves or unclaims
 another person's claim; moving a Task to another person is deferred. The Machine in a claim
@@ -353,7 +356,7 @@ $ lf task status MTG-321
 …
 MTG-321  Runs on mini since Nov 12 10:42
 $ lf task list
-MTG-321 · Jack · Runs on mini since Nov 12 10:42 · Resume a Session anywhere
+MTG-321 · Jack · Runs on mini since Nov 12 10:42
 $ lf machine list
 mini  mini.local  home_7c0d…
   MTG-321 since Nov 12 10:42
@@ -427,6 +430,61 @@ on the Task (on or off, who, when), carried whether or not the Task has run. The
 it would have on the laptop. `lf task auto off MTG-321` turns it off on either
 Machine. A Machine ships only Tasks it owns: once a Task has
 left, its old checkout starts nothing.
+
+## Steer and read a Task another Machine runs
+
+From the laptop, where mini is added (`lf machine add mini`), a steer and a
+status read go straight to mini's server:
+
+```console
+$ lf steer MTG-321 "also check bar"
+Saved 0199a2f1 on mini; MTG-321's worker reads it at its next boundary
+$ lf task status MTG-321
+MTG-321  Runs on mini since Nov 12 10:42
+…
+```
+
+The rest is mini's own answer: its Graph, its Sessions, its sentence.
+`--json` says so with `reading.kind: "owner"` and `task.runs_on` naming mini.
+Each call waits at most 15 seconds for mini.
+
+A rented sandbox has no route to its siblings. On `modal-2`, steering a Task
+`modal-3` runs goes through the tracker instead:
+
+```console
+$ lf steer MTG-419 "stop refactoring foo"
+Queued 0199a2f4 in Linear for modal-3; modal-3 is not registered here and reads it when it next syncs
+$ lf task status MTG-419
+MTG-419  Runs on modal-3 since Nov 23 09:05; modal-3 is not registered here, so its Graph and Sessions are not read here
+```
+
+A Machine that owns open Tasks reads its tracker, hub or Git plan about every
+30 seconds, from `lf server` or, in a container without one, from the running
+Graph step. A steer that arrives is delivered like a local one: a running
+worker reads it after its next tool call, and an idle or stopped Task
+conversation wakes. A Machine with no open Tasks makes no such requests, and
+a low Linear budget stretches the interval.
+
+When mini is added but can't be reached, the steer takes the same tracker
+route and its sentence names the SSH or server failure; status shows what this
+Machine has saved (planning, comments, PR) with the same failure as its
+reason. If the connection drops after the steer was sent, `lf steer` fails
+rather than saving it a second time; `lf task status` shows whether it landed.
+
+Status and lists never offer `lf task run` for a Task another Machine runs:
+`task.next` is `null`. `lf task list` names the Machine from the ownership log
+and dials no one:
+
+```console
+$ lf task list
+MTG-419 · Jack · Runs on modal-3 since Nov 23 09:05
+```
+
+| `--json` field | Says |
+|---|---|
+| `task.runs_on` | `{machine, since}`, or `null` when this Machine runs it or nobody does |
+| `reading.kind` (status) | `here`, `owner` (the owning Machine answered) or `unobserved` with its `reason` |
+| `delivery.reached` (steer) | `owner`, `tracker` or `here` (only this Machine has it so far) |
 
 ## Own and rent Machines
 

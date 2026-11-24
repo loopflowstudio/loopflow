@@ -195,3 +195,10 @@ Derived from the Wave KRs (*"advance work without getting blocked by Loopflow's 
 - Running `lf task status <remote-task>` or `lf task list` (text or `--json`) from an unreachable sibling sandbox or when a registered peer is offline names the Machine it runs on (`runs_on`) and, for status, reports `reading.kind == "unobserved"`; `task.next == null` on both, never portraying a remote Task as locally idle or unstarted.
 - Idle Machines with no owned open Tasks make zero background Linear requests, and active Machines stay within Linear's existing pacing and reserve limits.
 - `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, Rust DTO/server/remote/steer suites, and Swift DTO/protocol tests pass.
+
+## Docs (written first)
+
+- `docs/work.md` — "Steer work in flight": `lf steer` receipt line and `--json` `delivery` fields.
+- `docs/dev/machines.md` — steer joins the forwarded writes (with its fallback exception); new section "Steer and read a Task another Machine runs"; `lf task list` example drops the trailing next-move text for a remote Task.
+
+Open question: on `modal-2`, which name does `runs_on.machine` print for an unregistered `modal-3`, its public name from the ownership entry or its Machine id? The docs assume the public name (`Runs on modal-3`); the existing machines.md text says a Machine unknown to the caller's preferences shows its id.

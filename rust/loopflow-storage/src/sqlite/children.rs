@@ -98,7 +98,7 @@ pub struct OpenDescendant {
 }
 
 /// What completing a Task now did with its open children.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct ParentCompletion {
     pub children: Vec<ChildCompletion>,
     /// Where rehomed children moved; `None` when they became top-level.
@@ -660,12 +660,8 @@ impl SqliteStore {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         validate_task_project(&tx, task)?;
-        let settled = ParentCompletion {
-            children: Vec::new(),
-            rehomed_to: None,
-        };
         match super::durable::task_state_in(&tx, &task.id)? {
-            TaskState::Done => return Ok(settled),
+            TaskState::Done => return Ok(ParentCompletion::default()),
             TaskState::Abandoned => {
                 return Err(StoreError::InvalidData(format!(
                     "Task {} is abandoned and cannot be completed",
@@ -679,16 +675,16 @@ impl SqliteStore {
                 "Task requires a verified merge".into(),
             ));
         }
-        let open = open_task_child_count(&tx, &task.id)?;
-        if open > 0 && children.is_none() {
+        if children.is_none() && open_task_child_count(&tx, &task.id)? > 0 {
             return Err(StoreError::InvalidData(format!(
                 "{} has open children; pass --children rehome or --children abandon",
                 task.identifier
             )));
         }
         record_task_completion(&tx, &task.id, note)?;
-        let settled = match children.filter(|_| open > 0) {
-            None => settled,
+        // Both policies touch only open children, so with none they settle nothing.
+        let settled = match children {
+            None => ParentCompletion::default(),
             Some(ChildPolicy::Abandon) => ParentCompletion {
                 children: complete_children(&tx, &task.id)?,
                 rehomed_to: None,

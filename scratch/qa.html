@@ -6,85 +6,64 @@ body{font:15px/1.5 -apple-system,system-ui,sans-serif;max-width:980px;margin:2em
 pre{background:#f5f3ef;padding:.8em;overflow:auto;font-size:13px}
 h2{margin-top:2em;border-bottom:1px solid #ddd}
 .ok{color:#2d6a3e;font-weight:600}.fix{color:#8a5a00;font-weight:600}.open{color:#8b1e2b;font-weight:600}
-.shots{display:flex;gap:12px;flex-wrap:wrap}.shots figure{margin:0;width:180px}.shots img{width:180px;border:1px solid #ccc}
-figcaption{font-size:12px;color:#555}
+.shots{display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start}.shots figure{margin:0}.shots img{border:1px solid #ccc}
+figcaption{font-size:12px;color:#555;max-width:320px}
 table{border-collapse:collapse}td,th{border:1px solid #ddd;padding:4px 8px;text-align:left;vertical-align:top}
 </style>
-
-<h1>LOO-1094 QA</h1>
-<p>Branch <code>lf</code> on a private Machine (<code>/tmp/lf-qa-ptc</code>): isolated <code>HOME</code>/<code>LF_HOME</code>,
-a bare origin behind a GitHub-shaped URL, the <code>gh</code> stand-in, a foreground <code>lf server run</code>.
-The phone ran the branch iOS build in an iPhone SE Simulator paired to that private server over the Mac's tailnet.</p>
+<h1>LOO-1094 QA, round 2 (HEAD 15b2270)</h1>
+<p>Branch <code>lf</code> on a private Machine (<code>/tmp/lf-qa-ptc2</code>): isolated <code>HOME</code>/<code>LF_HOME</code>,
+bare origin behind a GitHub-shaped URL, the <code>gh</code> and <code>claude</code> stand-ins, a foreground <code>lf server run</code>.
+Desktop: an isolated Dev bundle on that Machine, driven by the QA hook. Round 1's phone run (screenshots in <code>scratch/qa/phone-*.png</code>) is unchanged since; not repeated.</p>
 
 <h2>CLI</h2>
 <table>
-<tr><th>Scenario</th><th>Saw</th><th></th></tr>
-<tr><td>Bare <code>lf task complete</code> on a parent: merged child with an open grandchild, child with open PR and a running Graph, unstarted child</td>
-<td>Refusal lists the tree and both commands; <code>tasks</code> and <code>task_events</code> identical before and after. Columns were ragged when titles differed.</td><td class="fix">fixed: aligned</td></tr>
-<tr><td><code>--children abandon</code> with the child's Graph running</td><td>Refuses, names the Graph run, writes nothing. Said "stop it" without saying how.</td><td class="fix">fixed: names <code>lf task interrupt &lt;child&gt;</code></td></tr>
-<tr><td><code>--children rehome --reason …</code> while that child still runs</td><td>Parent done; three children move up to the grandparent; the grandchild stays under its parent; the running Graph is untouched; <code>Completed{summary}</code> carries the reason.</td><td class="ok">works</td></tr>
-<tr><td><code>--children abandon</code> from the grandparent after stopping the Graph</td><td>Merged child done, grandchild and the rest abandoned, branch and checkout deleted.</td><td class="ok">works</td></tr>
-<tr><td><code>lf task reopen</code> on an abandoned Task</td><td>Back to <code>started</code>, listed again.</td><td class="ok">works</td></tr>
-<tr><td><code>lf task run</code> on that reopened Task</td><td><code>git fetch origin qa/…: couldn't find remote ref</code>; with the fetch tolerated, the checkout refused "branch missing locally and remotely". A reopened abandoned Task could never run.</td><td class="fix">fixed: starts again from its base; test added</td></tr>
-<tr><td><code>lf task complete</code> on an abandoned Task</td><td>"An abandoned Task cannot be completed"</td><td class="fix">now names <code>lf task reopen &lt;id&gt;</code></td></tr>
+<tr><th>Scenario</th><th>Saw</th></tr>
+<tr><td>Bare <code>lf task complete</code> on a parent: merged child with an open grandchild, a child with open PR and a running Graph, an unstarted child</td>
+<td>Refusal lists the indented tree; the live child reads <code>#101 open, running</code> (round 1 open item, now shown). <code>tasks</code>, <code>task_prs</code>, <code>task_events</code> identical before and after. <span class="ok">works</span></td></tr>
+<tr><td><code>--children abandon</code> while that Graph runs</td><td>Refuses, names the Graph run and <code>lf task interrupt</code>, writes nothing. <span class="ok">works</span></td></tr>
+<tr><td>Served <code>task.complete</code> (desktop client), <code>children: null</code> and <code>"abandon"</code></td><td>Both answer <code>code: conflict</code> with the CLI's text; store unchanged. <span class="ok">works</span></td></tr>
+<tr><td><code>--children rehome --reason 'split into children'</code> while the child still runs</td><td>Parent done, three children move to the grandparent, grandchild stays under its parent, Graph untouched; event <code>{"kind":"completed","summary":"Task completed: split into children"}</code>. <span class="ok">works</span></td></tr>
+<tr><td><code>--children abandon</code> from the grandparent, children holding idle stand-in conversations</td><td>Merged child done, the rest abandoned; PR #101 marked abandoned, its checkout and remote branch deleted, held conversations closed. <span class="ok">works</span></td></tr>
+<tr><td>Rehome past an abandoned ancestor / a deleted ancestor</td><td>"moved up to 99b9fb" (skips the abandoned middle); "moved to top level" when the middle is deleted. Bare refusal names the same destinations, singular grammar for one child. <span class="ok">works</span></td></tr>
+<tr><td>Wrong input</td><td><code>--children bogus</code>: clap lists <code>rehome, abandon</code>, exit 2. Unknown Task: "not found". <code>--children rehome</code> on a childless Task: completes. <code>lf task complete</code> on an abandoned Task names <code>lf task reopen</code>.</td></tr>
+<tr><td>Reopen the abandoned child with a published PR, then <code>lf task run</code></td><td>PR #101 → <code>historical=1</code>; stale checkout row removed. <code>lf task run</code> placed a fresh checkout from current <code>origin/main</code> (has merged #100); <code>lf pr open</code> created #102 as <code>sequence 2</code>. Merging #102 and <code>lf pr reconcile</code> completed it through the pending leaf request. <span class="ok">works</span></td></tr>
+<tr><td>Reopen an abandoned never-started child, <code>lf task complete</code></td><td>Done at once. <span class="ok">works</span></td></tr>
+<tr><td>Child parked at <code>demo</code>, abandoned through its parent, reopened</td><td>Status <code>action: run</code>; Desktop row <code>recommended: run</code>, <code>run_control.unavailable: null</code>. <span class="ok">works</span></td></tr>
 </table>
-<pre>$ lf task complete 6297da
-Error: 6297da has 3 open children; say what happens to them:
-  00b417    Log each retry  #100 merged
-    18609b  Retry metrics   unstarted
-  02b7f2    Retry budget    #101 open
-  4cdb93    Backoff docs    unstarted
-  lf task complete 6297da --children rehome    # direct children move up to 1c3e00 and stay open
-  lf task complete 6297da --children abandon   # merged descendants done, the rest abandoned
-
-$ lf task complete cbe5cb --children abandon
-Error: 30f6ae is still running; stop with `lf task interrupt 30f6ae` or use --children rehome:
-  30f6ae is running: Graph run 428cb7e7-17c5-43b1-bb61-201bbe36fc05
-
-$ lf task complete 6297da --children rehome --reason 'policy split into children'
-6297da done
-  00b417 moved up to 1c3e00
-  02b7f2 moved up to 1c3e00
-  4cdb93 moved up to 1c3e00
-
-$ lf task complete 1c3e00 --children abandon
-1c3e00 done
-  00b417 done: #100 merged
-    18609b abandoned: no merged PR
-  02b7f2 abandoned: #101 open
-  4cdb93 abandoned: no merged PR</pre>
-
-<h2>Served <code>task.complete</code></h2>
-<p>Over the private socket as a <code>desktop</code> client. <code>children: "rehome"</code> answered with the child's <code>outcome: "rehomed"</code>.
-The refusal for <code>children: null</code> came back as <code>outcome_unknown</code> with "; inspect the affected work before retrying" appended, and Swift adds
-"It may have happened; refresh before retrying" to that code, though nothing was written. <span class="fix">Fixed:</span> completion refusals are
-<code>OpsError::Refused</code> carrying <code>conflict</code>; <code>Error::written</code> reads it (unit test added). Missing <code>children</code> → <code>invalid</code>.</p>
-
-<h2>Phone</h2>
-<div class="shots">
-<figure><img src="qa/phone-swipe.png"><figcaption>Swipe on a parent with 2 open children</figcaption></figure>
-<figure><img src="qa/phone-ask.png"><figcaption>Asks first; store unchanged. Tapping outside cancels, still unchanged.</figcaption></figure>
-<figure><img src="qa/phone-rehomed.png"><figcaption>Move Children Up: parent done, both children top-level</figcaption></figure>
-<figure><img src="qa/phone-refused.png"><figcaption>Abandon with a running child: Notice, nothing written</figcaption></figure>
-<figure><img src="qa/phone-abandoned.png"><figcaption>After stopping it: parent done, children abandoned</figcaption></figure>
-</div>
-<p>A leaf swipe completed at once with no dialog.</p>
+<pre>$ lf task complete fcb0ae
+Error: fcb0ae has 3 open children; say what happens to them:
+  1c1feb    Log each retry  #100 merged
+    ba772e  Retry metrics   unstarted
+  77fb04    Retry budget    #101 open, running
+  693aeb    Backoff docs    unstarted
+  lf task complete fcb0ae --children rehome    # direct children move up to 20be56 and stay open
+  lf task complete fcb0ae --children abandon   # merged descendants done, the rest abandoned
+$ lf task complete 82f62a --children rehome
+82f62a done
+  c51397 moved up to 99b9fb
+$ lf task complete 17a1f7 --children rehome
+17a1f7 done
+  74d3c1 moved to top level</pre>
 
 <h2>Desktop</h2>
-<p class="open">Not reached mounted.</p> <p>Complete Task… sits only in SwiftUI menus (Task page, row and dashboard context menus), which the QA hook
-cannot open, and it is not in the main menu. Covered instead: the served write as a <code>desktop</code> client (above) and
-<code>TaskCompleteConfirmationTests</code> on this branch. The dialog's two button layouts have not been seen on screen.</p>
+<p>Reached mounted this round. <code>Complete Task…</code> is only in context menus the hook can't open, so a temporary local
+<code>qa-complete</code> Desktop action called the production <code>WorkModel.beginComplete</code>; everything after that is the shipped dialog and write path. Reverted before commit; route recorded in <code>.lf/qa/task-children.md</code>.</p>
+<div class="shots">
+<figure><img src="qa/desktop-move-first.png" width="285"><figcaption>Parent with an open-PR child and an unstarted child: Move (naming fc9d45) first, Abandon destructive. Cancel wrote nothing; Move rehomed both under fc9d45 and completed the parent.</figcaption></figure>
+<figure><img src="qa/desktop-finish-first.png" width="299"><figcaption>Every open child merged: Finish first, Move second. Finish marked d5fcf1 done.</figcaption></figure>
+<figure><img src="qa/desktop-reopened-start.png" width="500"><figcaption>Reopened abandoned Task (PR closed, checkout deleted): Start and Auto-Ship enabled, no missing-checkout blocker. Start placed a fresh checkout and ran the Graph to <code>demo</code>.</figcaption></figure>
+</div>
 
-<h2>Still wrong, worst first</h2>
+<h2>Still wrong, worst first (none introduced by this branch)</h2>
 <ol>
-<li><b>Phone Notice cuts the reason.</b> One line on an SE: "cbe5cb couldn't be completed: 30f6a… Show". The full text is in the accessibility label only; "Show" opens the Task. NoticeView is one line by design for every client; not changed here.</li>
-<li><b><code>lf task interrupt</code> does not stop a running <code>cmd:</code> step.</b> It says "stopped Graph …" and records the interrupt, but the step process keeps running and the abandon refusal stays. Untouched by this branch; the refusal now points at interrupt, which works for agent steps.</li>
-<li><b>A reopened abandoned Task's status says "PR closed without merge; reopen the same PR or abandon the Task"</b> with action <code>no_action</code>, while <code>lf task run</code> is what works.</li>
-<li>Refusal rows show a child's PR but not that its Graph is running (<code>#101 open</code>, not <code>running</code>).</li>
+<li><span class="open">Recovery starts a conversation for a just-abandoned Task.</span> <code>lf task checkout</code> then <code>lf task abandon</code> within a second: the server's recovery pass, which had read the Task as open, started its conversation one second after <code>abandoned_at</code> (35d41e; also a0fde3 abandoned through its parent). The stand-in stayed running under the holder. Read-then-start race in <code>server/recovery.rs</code>.</li>
+<li>A reopened Task whose last Graph was killed keeps that failure as its reason ("process exited with status 130 … launch fresh work", <code>no_action</code>) in status and on the Desktop row, though Run is enabled. Reached here only by killing <code>cmd:</code> step PIDs, since <code>lf task interrupt</code> does not stop a running <code>cmd:</code> step (round 1 item). A child parked at an interactive step reopens to <code>run</code>.</li>
+<li><code>lf task status</code> for any Task with no checkout here prints no <code>action:</code> line (unplaced path in <code>bin/lf.rs</code>), so the reopened Task's status doesn't say "run" until it's placed; Desktop does.</li>
+<li>Abandoning a PR-less Task keeps its checkout and local branch while saying "PRs and branches removed".</li>
+<li>Round 1 carry-overs: phone Notice truncates the reason to one line.</li>
 </ol>
 
 <h2>Checks</h2>
-<pre>cargo test -p loopflow --test integration -- a_merged_parent_stays_open a_reopened_abandoned_task checkout_restores_exact   pass (here)
-cargo test -p loopflow-execution --lib -- ops::task:: engine::tests                                                     pass (here)
-cargo clippy -p loopflow-execution -p loopflow --all-targets -- -D warnings                                            clean (here)
-Swift TaskCompleteConfirmationTests, TaskFeedTests, ServerProtocolTests; full Rust suites                              CI at gate</pre>
+<pre>private Machine CLI + served socket walkthrough above      pass (here)
+Desktop Dev bundle, dialog both layouts + reopened Start   pass (here)
+Swift suites and full Rust suites                          CI at gate</pre>

@@ -129,3 +129,26 @@ the tree; zsh does not split `${2:+--parent $2}`, so pass `--parent` literally.
   answers `code: conflict`; a missing `children` key is `invalid`; an unknown
   policy reads "this server has no operation `task.complete`", the message a
   newer client gets from an older server.
+
+# Completing a parent in Desktop
+
+`Complete Task…` lives only in SwiftUI context menus, which the QA hook
+cannot open (`desktop.md`). For a local build only, add a top-level
+`DesktopAction("qa-complete", …)` taking `id` (the `task_…` id) that calls
+`context.model.beginComplete(context.model.task(id: id)!.task)`, install
+`QAHook.swift`, and build the isolated Dev bundle. With the hook running,
+`LF_DESKTOP=<bundle id> lf desktop do qa-complete id=<task_…>` raises the
+dialog; `snap` lists it as its own untitled window (about 285x270 pt), and
+`click 1 <x> <y>` in its points (PNG pixels / 2) picks a button. Cancel
+writes nothing. Revert both Swift edits before committing.
+
+- Reading the store between steps: `tasks` has `planning_state`,
+  `planning_completed_at`, `abandoned_at`, `completion_request`,
+  `planning_deleted_at`; `task_prs` has `github_number`, `sequence`,
+  `historical`, `abandoned_at`; `task_events.kind_json`.
+- `lf task status` on a Task with no checkout here (a reopened abandoned Task
+  whose checkout was deleted) prints "Not checked out on …" and no `action:`
+  line; `lf desktop plan --task <id> --json` shows the row Desktop reads
+  (`actions`, `run_control`).
+- Abandoning a Task with no PR keeps its checkout and branch, directly or
+  through `--children abandon`; only a PR's branch is deleted.

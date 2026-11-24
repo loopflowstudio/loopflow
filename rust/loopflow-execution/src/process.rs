@@ -28,6 +28,8 @@ pub struct GraphHeld(pub String);
 
 impl GraphHeld {
     pub const EXIT: u8 = 3;
+    /// Distinguishes a blocked decision from a waiting handoff in recorded errors.
+    pub const BLOCKED_PREFIX: &'static str = "Graph is blocked:";
 }
 
 pub mod diagnosis;

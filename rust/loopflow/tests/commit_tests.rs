@@ -5,7 +5,8 @@ use std::path::Path;
 use std::process::Command;
 
 use loopflow_execution::ops::{
-    commit_selected, commit_step, commit_workflow, step_commit_pending, CommitOptions, NullProgress,
+    commit_selected, commit_step, commit_workflow, step_commit_pending, CommitOptions, CommitPush,
+    NullProgress,
 };
 use loopflow_test_support::TestRepo;
 use support::EnvGuard;
@@ -30,10 +31,10 @@ fn last_commit_message(repo: &TestRepo) -> String {
         .to_string()
 }
 
-fn commit_options(message: &str) -> CommitOptions {
+fn commit_options(message: &str) -> CommitOptions<'_> {
     CommitOptions {
         add: true,
-        message: Some(message.to_string()),
+        message: Some(message),
         ..CommitOptions::for_task("commit")
     }
 }
@@ -45,9 +46,76 @@ fn commit_stages_and_commits() {
 
     let options = commit_options("test commit");
 
-    let committed = commit_workflow(repo.path(), &options, &NullProgress, &|_| {}).expect("commit");
-    assert!(committed);
+    let result = commit_workflow(repo.path(), &options, &NullProgress, &|_| {}).expect("commit");
+    assert!(result.committed);
     assert_eq!(last_commit_message(&repo), "test commit");
+}
+
+#[test]
+fn manual_commit_pushes_branch_checkpoints_unless_kept_local() {
+    let _env = EnvGuard::new(&[]);
+    let repo = TestRepo::new();
+    let commit = |args: &[&str]| -> loopflow_execution::engine::checkout::Committed {
+        let output = Command::new(loopflow_test_support::lf_binary())
+            .current_dir(repo.path())
+            .args(["commit", "--json"])
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{output:?}");
+        serde_json::from_slice(&output.stdout).unwrap()
+    };
+
+    let remote_main = repo.bare_head_sha();
+    repo.create_file("main.txt", "local change");
+    assert!(!commit(&["-m", "Default branch checkpoint"]).pushed);
+    assert_ne!(repo.head_sha(), remote_main);
+    assert_eq!(repo.bare_head_sha(), remote_main);
+
+    repo.create_branch("topic");
+    let remote_topic = || git_output(repo.bare_path(), &["rev-parse", "refs/heads/topic"]);
+    repo.create_file("topic.txt", "first change");
+    assert!(commit(&["-m", "Publish branch"]).pushed);
+    assert_eq!(remote_topic().trim(), repo.head_sha());
+
+    let published = repo.head_sha();
+    repo.create_file("later.txt", "staged separately");
+    repo.stage_all();
+    repo.create_file("topic.txt", "second change");
+    assert!(!commit(&["--no-push", "-m", "Local revision", "topic.txt"]).pushed);
+    assert_ne!(repo.head_sha(), published);
+    assert_eq!(remote_topic().trim(), published);
+
+    repo.create_file("topic.txt", "final change");
+    assert!(commit(&["-m", "Publish selected revision", "topic.txt"]).pushed);
+    assert_eq!(remote_topic().trim(), repo.head_sha());
+    assert_eq!(
+        git_output(repo.path(), &["diff", "--cached", "--name-only"]),
+        "later.txt\n"
+    );
+
+    let last_push = remote_topic();
+    let local = commit(&["--no-push", "-m", "Keep the staged change local"]);
+    assert_ne!(last_push.trim(), local.head);
+    repo.create_file("unstaged.txt", "still being edited");
+    let unstaged = commit(&["--no-add"]);
+    assert!(!unstaged.committed && !unstaged.pushed);
+    assert_eq!(repo.head_sha(), local.head);
+    assert_eq!(remote_topic(), last_push);
+
+    std::fs::remove_file(repo.path().join("unstaged.txt")).unwrap();
+    let retry = commit(&[]);
+    assert!(retry.pushed && !retry.committed);
+    assert_eq!(remote_topic().trim(), repo.head_sha());
+
+    repo.create_file("topic.txt", "another local checkpoint");
+    let local = commit(&["--no-push", "-m", "Local checkpoint"]);
+    repo.create_file("topic.txt", "discarded edit");
+    repo.stage_all();
+    repo.create_file("topic.txt", "another local checkpoint");
+    let retry = commit(&[]);
+    assert!(retry.pushed && !retry.committed);
+    assert_eq!(remote_topic().trim(), local.head);
 }
 
 #[test]
@@ -57,12 +125,12 @@ fn commit_with_push() {
     repo.create_file("push.txt", "hello");
 
     let options = CommitOptions {
-        push: true,
+        push: CommitPush::Always,
         ..commit_options("push commit")
     };
 
-    let committed = commit_workflow(repo.path(), &options, &NullProgress, &|_| {}).expect("commit");
-    assert!(committed);
+    let result = commit_workflow(repo.path(), &options, &NullProgress, &|_| {}).expect("commit");
+    assert!(result.committed);
     assert_eq!(repo.head_sha(), repo.bare_head_sha());
 }
 
@@ -73,8 +141,8 @@ fn commit_skips_empty() {
 
     let options = commit_options("skip");
 
-    let committed = commit_workflow(repo.path(), &options, &NullProgress, &|_| {}).expect("commit");
-    assert!(!committed);
+    let result = commit_workflow(repo.path(), &options, &NullProgress, &|_| {}).expect("commit");
+    assert!(!result.committed);
     assert_eq!(before, repo.head_sha());
 }
 
@@ -112,6 +180,26 @@ fn selected_commit_saves_untracked_scratch_without_unrelated_staged_work() {
         std::fs::read_to_string(repo.path().join("other.md")).unwrap(),
         "later edit\n"
     );
+}
+
+#[test]
+fn whole_and_selected_commits_save_a_whitespace_filename() {
+    let repo = TestRepo::new();
+    let name = " ";
+    repo.create_file(name, "first");
+    let result = commit_workflow(
+        repo.path(),
+        &commit_options("First"),
+        &NullProgress,
+        &|_| {},
+    )
+    .unwrap();
+    assert!(result.committed);
+    assert_eq!(git_output(repo.path(), &["show", "HEAD: "]), "first");
+
+    repo.create_file(name, "second");
+    commit_selected(repo.path(), &[name.into()], Some("Second")).unwrap();
+    assert_eq!(git_output(repo.path(), &["show", "HEAD: "]), "second");
 }
 
 #[test]
@@ -190,8 +278,8 @@ fn commit_generates_message_when_none() {
     };
 
     // Without an agent available, generation fails and falls back to prefix-only.
-    let committed = commit_workflow(repo.path(), &options, &NullProgress, &|_| {}).expect("commit");
-    assert!(committed);
+    let result = commit_workflow(repo.path(), &options, &NullProgress, &|_| {}).expect("commit");
+    assert!(result.committed);
     let message = last_commit_message(&repo);
     assert!(
         message.starts_with("lf implement"),
@@ -229,9 +317,9 @@ fn a_commit_message_comes_from_the_next_agent_when_codex_is_out_of_quota() {
         ..CommitOptions::for_task("implement")
     };
 
-    let committed = commit_workflow(repo.path(), &options, &NullProgress, &|_| {}).expect("commit");
+    let result = commit_workflow(repo.path(), &options, &NullProgress, &|_| {}).expect("commit");
 
-    assert!(committed);
+    assert!(result.committed);
     assert!(
         last_commit_message(&repo).contains("Say hello"),
         "{}",
@@ -366,7 +454,7 @@ fn rejected_push_does_not_rewrite_remote_history() {
     let result = commit_workflow(
         repo.path(),
         &CommitOptions {
-            push: true,
+            push: CommitPush::Always,
             ..commit_options("replacement")
         },
         &NullProgress,

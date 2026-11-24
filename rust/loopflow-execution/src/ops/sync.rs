@@ -988,7 +988,7 @@ mod tests {
                 crate::ops::commit_workflow(
                     &persistent.path,
                     &crate::ops::CommitOptions {
-                        message: Some("Followup".into()),
+                        message: Some("Followup"),
                         ..crate::ops::CommitOptions::for_task("commit")
                     },
                     &crate::ops::NullProgress,

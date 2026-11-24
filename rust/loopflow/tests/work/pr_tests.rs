@@ -8,8 +8,8 @@ use std::process::Command;
 use loopflow_execution::durable::WorkStatus;
 use loopflow_execution::ops::task::{task_complete, task_snapshot, task_status};
 use loopflow_execution::ops::{
-    commit_workflow, current_pr, present_pr_review, CommitOptions, NullProgress, OpsError,
-    PrOptions,
+    commit_workflow, current_pr, present_pr_review, CommitOptions, CommitPush, NullProgress,
+    OpsError, PrOptions,
 };
 use loopflow_execution::work::task::{
     GithubPr, PrMergeMode, PrMergeRequest, PrPhase, PrPresentation, PrPublication,
@@ -115,7 +115,7 @@ fn task_delivery_works_on_an_ordinary_branch_without_registration() {
         String::from_utf8(run(&["pr"])).unwrap().trim(),
         "No open PR for the current branch."
     );
-    run(&["commit", "-m", "Record local work"]);
+    run(&["commit", "--no-push", "-m", "Record local work"]);
     let committed = repo.head_sha();
     assert_ne!(before, committed);
     assert!(!state.exists(), "commit published a PR");
@@ -1159,12 +1159,9 @@ fn pushed_task_commit_revokes_auto_before_exposing_the_new_head() {
         repo.path(),
         &CommitOptions {
             add: true,
-            push: true,
-            create_draft_pr: false,
-            task: "commit".to_string(),
-            sources: Vec::new(),
-            message: Some("new Task head".to_string()),
-            agent: None,
+            push: CommitPush::Always,
+            message: Some("new Task head"),
+            ..CommitOptions::for_task("commit")
         },
         &NullProgress,
         &|_| {},

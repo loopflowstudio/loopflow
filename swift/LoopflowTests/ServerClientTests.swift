@@ -486,9 +486,9 @@ struct ServerClientTests {
         await fresh.cancel()
     }
 
-    @Test func olderPeerKeepsServingCompatibleReadsAndActions() async throws {
+    @Test func anotherBuildKeepsServingCompatibleReadsAndActions() async throws {
         let peer = try ServerPeer()
-        peer.serve(revision: 8) { message, respond in
+        peer.serve { message, respond in
             guard let id = message["id"], let operation = message["operation"] as? [String: Any],
                   let kind = operation["kind"] as? String else { return true }
             let result: Any
@@ -759,7 +759,7 @@ private final class ServerPeer: @unchecked Sendable {
     }
 
     /// `handle` returns false to close the connection after this message.
-    func serve(revision: Int = ServerProtocol.revision, _ handle: @escaping @Sendable (_ message: [String: Any], _ respond: (_ line: [String: Any]) -> Void) -> Bool) {
+    func serve(_ handle: @escaping @Sendable (_ message: [String: Any], _ respond: (_ line: [String: Any]) -> Void) -> Bool) {
         Thread.detachNewThread { [self] in
             let fd = accept(listener, nil, nil)
             guard fd >= 0 else { return }
@@ -768,7 +768,7 @@ private final class ServerPeer: @unchecked Sendable {
             do {
                 _ = try connection.read() // hello
                 try connection.write([
-                    "type": "welcome", "client_id": "fixture-client", "revision": revision, "server_revision": revision, "min_revision": ServerProtocol.minRevision, "instance": "fixture",
+                    "type": "welcome", "client_id": "fixture-client", "revision": ServerProtocol.revision, "server_revision": ServerProtocol.revision, "min_revision": ServerProtocol.minRevision, "instance": "fixture",
                     "build": "test", "executable_sha256": String(repeating: "f", count: 64), "machine": NSNull(),
                     "limits": ["max_message": 1_048_576, "max_connections": 64,"max_open":256,"max_retained_bytes":67108864],
                 ])

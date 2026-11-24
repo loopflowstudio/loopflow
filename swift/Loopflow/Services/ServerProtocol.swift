@@ -1,13 +1,12 @@
 import Foundation
 
-/// Revision 9 of the server protocol: one connection per client, a negotiated
+/// Revision 10 of the server protocol: one connection per client, a negotiated
 /// revision, requests multiplexed by id. Mirrors `rust/loopflow/src/server/wire.rs`;
 /// carriers add no Work authority.
 public enum ServerProtocol {
-    public static let revision = 9
-    /// Revision 8 requires `sender` on `request` and `subscribe`; it keeps 7's
-    /// write revisions and request IDs, which pending changes rely on.
-    public static let minRevision = 8
+    public static let revision = 10
+    /// Session attach and continue require Task and Machine selectors.
+    public static let minRevision = 10
     /// The largest control-connection message; larger ones travel by ticket.
     public static let maxMessage = 1024 * 1024
     /// The largest message a ticketed connection carries.

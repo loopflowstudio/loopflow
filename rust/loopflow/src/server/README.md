@@ -306,10 +306,11 @@ server answers it a revision-1 framed `incompatible` error carrying `instance`
 and closes. That sniff is the whole compatibility layer and goes with revision 1.
 
 Revision 10 routes Task operations to the Task's Machine
-([Tasks on another Machine](#tasks-on-another-machine)): `session.start`,
-`.continue` and `.attach` gain required-nullable `task` and `machine`, and
-`task.shell.start`, `.attach`, `.close` and the `task.files.watch`
-subscription are new.
+([Tasks on another Machine](#tasks-on-another-machine)).
+`session.continue` and `session.attach` carry required-nullable `task` and `machine`.
+`session.start` launches in the caller’s directory. Task shells use
+`task.shell.start`, `task.shell.attach` and `task.shell.close`.
+`task.files.watch` subscribes to checkout changes.
 
 Revision 7 answers each write once it has committed, with `revisions`: the
 store domains it advanced and their value after the commit. Planning sync and

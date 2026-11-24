@@ -1,4 +1,4 @@
-//! Carrier-independent server protocol, revision 9: one connection per client,
+//! Carrier-independent server protocol, revision 10: one connection per client,
 //! negotiated revision, requests multiplexed by id. Local admission is
 //! same-user only; the remote carrier admits the Machine owner's other
 //! Tailscale devices. Each carrier delimits messages its own way: the Unix
@@ -11,13 +11,9 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 /// The newest revision this build speaks.
-pub const REVISION: u32 = 9;
-/// The first revision that holds a plan for other Machines (`plan.apply`,
-/// `plan.changes`).
-pub const PLAN_REVISION: u32 = 9;
-/// The oldest revision this build speaks. Revision 8 requires `sender` on
-/// `request` and `subscribe`; it keeps 7's write revisions and request IDs.
-pub const MIN_REVISION: u32 = 8;
+pub const REVISION: u32 = 10;
+/// Revision 10 requires Task and Machine selectors on Session attach and continue.
+pub const MIN_REVISION: u32 = 10;
 /// The largest message a control connection carries, so a reading never waits
 /// behind a large body. Larger messages travel on a ticketed connection.
 pub const MAX_MESSAGE: usize = 1024 * 1024;

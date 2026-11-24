@@ -10156,7 +10156,7 @@
               "request": "3f2a7c1e-9b4d-4e8a-a1c6-5d0e7f9b2c34",
               "rows": 40,
               "session": "session_5e55105e000040008000000000000001",
-              "task": null
+              "task": "task_00000000000000000000000000000001"
             }
           ],
           "properties": {
@@ -20019,8 +20019,8 @@
     }
   ],
   "title": "Loopflow server protocol",
-  "x-min-revision": 8,
-  "x-revision": 9,
+  "x-min-revision": 10,
+  "x-revision": 10,
   "x-terminal-close": {
     "payload": {
       "$ref": "#/$defs/Close"

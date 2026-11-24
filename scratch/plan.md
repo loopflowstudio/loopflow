@@ -60,19 +60,14 @@ The owner's `task.get` supplies the checkout and validates an exact Session's Ta
 
 ## Client work remaining
 
-### 5. Desktop (`swift/LoopflowMac/WorkModel.swift`, `Views/SessionsView.swift`, `TaskFileDocument.swift`, `Views/TaskWorkView.swift`, `Views/WorkspacePanesView.swift`, `swift/Loopflow/Services/RegistryQuery.swift`)
+### 5. Desktop (`swift/LoopflowMac`)
 
-- **Delete client-side SSH routing:**
-  - Remove `RegistryQuery.onMachine`, `RegistryQuery.pinTaskLocation`, `RegistryQuery.remoteMachine`, `RegistryQuery.taskLocation` (from Task workspace flows), `SessionsStore.executionLocations`, `LinkedSession.location`, and `RegistryQueryLocal`'s `watchFiles` / `subscribeRead` SSH subprocess runners.
-  - Every Task read (`task.get`, `task.detail`, `task.changes`, `task.diff`, `task.file`, `task.files`, `task.files.watch`), write (`task.save`, `session.resume`), and terminal (`session.attach`, `session.continue`, `task.shell.*`) goes through `RegistryQueryLocal.shared` -> `ServerClient` -> local `lf server`.
-- **No client-side location:**
-  - Desktop sends the Task id; it never resolves, passes or compares an owner. Delete `SessionsWorkspace.location`, `confirmLocation`, `retainLocation` and the placement guard at `SessionsView.swift:716` with the rest of the location stack: the server attaches the Session wherever it runs.
-  - Files and Changes reload on a new `reference.workspace.machine_id`; a Diff or clean file view reloads in place. A null workspace during claim propagation keeps the subscription and any draft. Use the owner and typed refusals to distinguish a move from an unstarted Task.
-  - Keep the terminal's Machine label when the workspace moves. `SessionAttached` in `machine/wire.rs` currently supplies the ticket, terminal ID and expiry. Carry the Machine chosen by the server through the attachment receipt during the Desktop migration so the pane can label the actual process even if ownership changes between readings. Mobile uses the same receipt.
-  - Unsaved drafts stay keyed by `(Task, path, base revision)`. Saving after a move goes to the new owner; a revision mismatch shows the existing save conflict with both versions and keeps the draft.
-  - Render **Not started** for `not_found` with `reason == "not_started"`. On peer outages, show the Machine named in the routed error or the subscription's `unavailable` reading and offer **Retry**.
-  - For Task shells, `SessionsWorkspace.shellAttachment` runs local `lf desktop shell <issue> --id <tab.id> [--create --bootstrap <json>]`. `closePane` uses `task.shell.close` through `ServerClient`. Desktop's Close ends the process on the Machine where it started. Today `task.shell.close` follows current Task ownership, so it would leave a pre-move shell running when the new owner cannot find its ID. Carry the shell's issuing Machine for explicit Close and keep new shells addressed by Task.
-  - For Task Sessions, reuse Slice 2's local attachment in `SessionRecord.open_argv`. `Write::prepare_session` and the direct CLI's `--prepare` both call `ssh::prepared_remotely`. Replace that shared preparation path with a local viewer command that retains the Task or Machine and exact Session. Keep the direct interactive `lf --machine … resume` path. Carry `WorkUrl.machine` into the Desktop attachment for a Machine-only Session.
+Built and its location stack deleted; see "Slice 3 status". `SessionsWorkspace.location` stays as the last known Machine and checkout (shell label, Files fallback); nothing compares it (`scratch/questions.md`). Shell tabs keep the Machine of the reading they opened in and Close passes it as `--started-on`; `SessionAttached` gained no `machine`.
+
+Remaining, driven by `RemoteTaskWorkspaceTests`:
+- Changes and Shell render the server's `not_started` text instead of **Not started**.
+- Files' outage shows the routed error without a **Retry**.
+- The Files header shows the Machine ID instead of its label.
 
 ### 6. Mobile (`swift/LoopflowiOS/TaskWorkspaceView.swift`, `RemoteMobileClient.swift`, `SessionLink.swift`)
 
@@ -138,14 +133,7 @@ After a move, an open shell continues on its original Machine. Reattaching by `s
 
 ## What goes
 
-- `swift/Loopflow/Services/RegistryQuery.swift`: `onMachine(_:repository:)`, `pinTaskLocation(to:)`, `remoteMachine`, `observeFiles` / `watchTaskFiles` CLI-subprocess plumbing, and `observeRead` CLI-subprocess plumbing for remote Tasks.
-- `swift/LoopflowMac/Services/RegistryQueryLocal.swift`: `watchFiles` and `subscribeRead` SSH subprocess runners (`LocalLineObservation` for remote Tasks, if no other caller remains — verify before deleting).
-- `swift/LoopflowMac/Views/SessionsView.swift`: `SessionsStore.executionLocations`, `SessionsWorkspace.location`, `confirmLocation`, the placement guard ("The conversation belongs to a different Machine or checkout"), `retainLocation`, `query(for:)`, `onMachine`/`pinTaskLocation` branches in `files(for:task:query:)`, `openWarmConversation`, `loadPaneIntent`, and raw `--machine ... desktop shell` CLI invocation in `shellCommand`.
-- `swift/LoopflowMac/WorkModel.swift`: `LinkedSession.location`, `onMachine` / `taskLocation` double-SSH probe in `prepareLinkedTask`.
-- `swift/LoopflowMac/Views/TaskWorkView.swift`: `onMachine` / `pinTaskLocation` branch in `GraphProcessLog`.
-- `swift/LoopflowMac/TaskFileDocument.swift`: `query.remoteMachine` branches and `observeRemoteFiles` subprocess watcher (replaced by server-routed `task.files.watch` subscription).
-- `rust/loopflow/src/lf/commands/ssh.rs`: the raw SSH viewer argv produced by `prepared_remotely`. Use the local attachment path and keep direct interactive `lf --machine <m> resume` working.
-- Obsolete Swift tests asserting `RegistryQuery.onMachine` / `pinTaskLocation` subprocess args (replaced with server-routed tests in `RemoteTaskWorkspaceTests` and updated `TaskFilesTests` / `RegistryQueryTests`).
+Desktop's client-side SSH routing and `prepared_remotely`'s raw SSH viewer are gone (Slice 3). Still to go: `lf task watch-files --checkout --request`, its `task_files_frames.json` fixture and rejection test, once Mobile Files uses `task.files.watch`.
 
 **Must survive:**
 - Local Task Files, Changes, Diff, Save, Shell, Session, and FSEvents watching on the local Machine.

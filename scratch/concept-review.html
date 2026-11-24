@@ -3,23 +3,23 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>LOO-1083 concept review: where a remote Task's workspace lives</title>
+<title>LOO-1083 concept review (post-build): remote Task workspaces at HEAD</title>
 <style>
   :root {
     --bg: #fbfaf7; --fg: #1d1c1a; --muted: #6b665e; --line: #e2ddd3; --card: #ffffff;
     --yes: #1f7a4d; --yes-bg: #e5f4ec; --no: #a3361f; --no-bg: #fbe9e4;
-    --new: #2954a3; --new-bg: #e6eefb; --code: #f1ede5;
+    --new: #2954a3; --new-bg: #e6eefb; --code: #f1ede5; --built: #4b4740; --built-bg: #ece8df;
   }
   @media (prefers-color-scheme: dark) {
     :root {
       --bg: #161513; --fg: #ebe8e2; --muted: #a39d92; --line: #34312c; --card: #1e1d1a;
       --yes: #6fd3a0; --yes-bg: #183327; --no: #f19a83; --no-bg: #3a1f18;
-      --new: #8fb3f5; --new-bg: #1a2742; --code: #262420;
+      --new: #8fb3f5; --new-bg: #1a2742; --code: #262420; --built: #c7c1b6; --built-bg: #2a2824;
     }
   }
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.55 -apple-system, "SF Pro Text", "Helvetica Neue", sans-serif; }
-  main { max-width: 980px; margin: 0 auto; padding: 40px 24px 80px; }
+  main { max-width: 1020px; margin: 0 auto; padding: 40px 24px 80px; }
   h1 { font-size: 26px; margin: 0 0 6px; }
   h2 { font-size: 19px; margin: 44px 0 10px; }
   h3 { font-size: 16px; margin: 22px 0 8px; }
@@ -32,14 +32,16 @@
   .yes { color: var(--yes); background: var(--yes-bg); font-weight: 600; padding: 1px 7px; border-radius: 10px; white-space: nowrap; }
   .no { color: var(--no); background: var(--no-bg); font-weight: 600; padding: 1px 7px; border-radius: 10px; white-space: nowrap; }
   .new { color: var(--new); background: var(--new-bg); font-weight: 600; padding: 1px 7px; border-radius: 10px; white-space: nowrap; }
+  .built { color: var(--built); background: var(--built-bg); font-weight: 600; padding: 1px 7px; border-radius: 10px; white-space: nowrap; }
   .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-  @media (max-width: 760px) { .cols { grid-template-columns: 1fr; } }
+  @media (max-width: 780px) { .cols { grid-template-columns: 1fr; } }
   .card { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; }
   .card.proposed { border-color: var(--new); }
   .card h3 { margin-top: 0; }
   .flow { font: 13px/1.6 ui-monospace, "SF Mono", Menlo, monospace; white-space: pre; overflow-x: auto; background: var(--code); padding: 10px 12px; border-radius: 6px; }
   .strike { text-decoration: line-through; color: var(--muted); }
   .callout { border-left: 4px solid var(--no); background: var(--no-bg); padding: 12px 16px; border-radius: 0 8px 8px 0; margin: 16px 0; }
+  .callout.info { border-left-color: var(--yes); background: var(--yes-bg); }
   ol.q > li { margin: 14px 0; }
   ol.q ol { list-style: lower-alpha; margin-top: 6px; }
   .muted { color: var(--muted); }
@@ -48,97 +50,181 @@
 <body>
 <main>
 
-<h1>Where does a remote Task's workspace live?</h1>
-<p class="lede">LOO-1083 concept review, 2026-11-23, at <code>20fa14b217</code> (kickoff design only; no code built yet).
-Area taken: <b>opening a Task's workspace (Files, Changes, Save, Shell, Session) when another Machine owns it</b>, across CLI, Desktop and Mobile,
-plus how the server, wire and stores decide which Machine answers. That whole area is what the plan rebuilds, so the review covers all of it rather than one slice.</p>
+<h1>Remote Task workspaces: post-build concept review</h1>
+<p class="lede">LOO-1083 review at <code>HEAD</code> (<code>e348359e59</code>) against base <code>62a368e5cc</code>, 2026-11-24.
+Area taken: <b>opening, watching, and acting on a Task's workspace (Files, Changes, Diff, Save, Shell, Session) when another Machine owns it</b> across CLI, Desktop, Mobile, and <code>lf server</code>.
+All four planned slices and QA have run; this review inspects the whole built area as someone seeing it for the first time.</p>
 
-<p><span class="new">proposed</span> marks what the revised plan builds. Everything else describes code on this branch today or the kickoff plan.
-The plan in <code>scratch/plan.md</code> has already been rewritten to the proposal; nothing is implemented.</p>
+<p><span class="built">built at HEAD</span> marks behavior already committed on this branch.
+<span class="new">proposed</span> marks what the revised <code>scratch/plan.md</code> (Slice 5) changes before gate and release, while protocol revision 10 is still unshipped.</p>
 
-<h2>One interaction, with its failure</h2>
-<p>A Task runs on <code>modal-1</code>. The laptop still has a checkout of it from before it moved. Jack opens the Task in Desktop and clicks the Session.</p>
+<div class="callout info">
+  <b>What already holds at HEAD:</b> "The Task is the address" proved out cleanly across all four slices.
+  One local/paired <code>lf server</code> routes Task reads, <code>task.save</code>, <code>task.get</code>/<code>task.status</code> subscriptions, and bridged Session + Shell terminal tickets over pooled SSH pipes (<code>PeerPool</code>).
+  Desktop's client-side SSH stack (<code>onMachine</code>, <code>pinTaskLocation</code>, <code>LocalLineObservation</code>, placement guard) and <code>lf task watch-files</code> are gone.
+  Stale local checkouts are hidden from plan rows and Task status. Mobile has Session, Files, Changes, and Shell over one pairing.
+</div>
+
+<h2>Two concrete interactions where HEAD still breaks the model</h2>
+
+<h3>1. Watching Files across unstarted, move, and local server restart</h3>
+<p>A Task starts unstarted on <code>mini</code>, gets a checkout, moves back to <code>laptop</code>, and the local server restarts while Desktop and the phone have Files open.</p>
 <div class="cols">
   <div class="card">
-    <h3>Today</h3>
-    <div class="flow">Desktop reads plan.list
-  → reference.workspace = laptop checkout   (stale row, stamped local)
-Desktop pins location = laptop
-Files  → laptop bytes                     (wrong)
-Shell  → laptop $SHELL                    (wrong)
-Session→ session.resume answers modal-1
-  → guard: location ≠ record.workspace
-  → "The conversation belongs to a different
-     Machine or checkout; nothing was opened."</div>
-    <p class="muted">Two routers disagree: Desktop's <code>location</code> and Rust's ownership. The guard is the referee and refuses.</p>
+    <h3><span class="built">built at HEAD</span> <code>task.files.watch</code> watches a directory</h3>
+    <div class="flow">subscribe task.files.watch { issue }
+  unstarted on mini → not_found{not_started}
+    → subscription DIES permanently
+    → Mobile: 5s client while-loop polls until checkout exists
+    → Desktop: stays dead until task.get calls relocate()
+  move laptop → mini (before mini's checkout exists):
+    → not_found{not_started} → subscription DIES mid-move
+  move mini → laptop:
+    → TaskFilesRevision has no machine_label; TaskFilesStore has no localMachineId
+    → store.machine = laptop.id (non-nil!) → stays "remote", shows raw home_…
+  local server restarts:
+    → ServerSubscription retries once after 100 ms, then throws
+    → Desktop Files stuck on "Live file observation unavailable"</div>
+    <p class="muted">Because the server subscription cannot live without a checkout, both clients grew ad-hoc workarounds and Desktop's local/remote state drifts.</p>
   </div>
-  <div class="card">
-    <h3>Kickoff plan</h3>
-    <div class="flow">Desktop reads runtime.owner = modal-1
-every request carries expected_owner = modal-1
-server checks route == expected_owner
-Files/Shell/Session → routed to modal-1   (right)
-Task moves to modal-2:
-  every open pane → conflict{actual_owner}
-  panes invalidate, drafts parked at
-  (modal-1, /work/checkout)
-  "moved" notice → Reopen</div>
-    <p class="muted">Fixes the routing, keeps two routers. A move becomes an error on every pane, and a draft is filed under a Machine nobody can save to.</p>
+  <div class="card proposed">
+    <h3><span class="new">proposed</span> <code>task.files.watch</code> follows the Task</h3>
+    <div class="flow">subscribe task.files.watch { issue }
+  unstarted on mini → reading { machine_id: mini, machine_label: "mini",
+                                checkout: null, revision: null }
+    → subscription STAYS OPEN watching store_revisions
+    → Mobile deletes its 5s while-loop; shows Not started
+  checkout created on mini → reading { …, checkout: "/…/wt", revision: "…" }
+    → same subscription id; Files &amp; Changes load immediately
+  move mini → laptop (even before laptop's checkout):
+    → Producer::follow swaps to laptop under the same id
+    → TaskFilesStore sees machineID == localMachineId → switches cleanly to local
+  local server restarts:
+    → Desktop observeServedFiles reconnects with bounded backoff, clears error</div>
+    <p class="muted">One Task-scoped subscription matches <code>task.get</code> and <code>task.status</code>. No client polling loop; no raw Machine IDs; no stuck banner.</p>
   </div>
 </div>
-<div class="card proposed" style="margin-top:16px">
-  <h3><span class="new">proposed</span> The Task is the address</h3>
-  <div class="flow">Desktop sends Task id only
-server resolves ownership → modal-1 (pooled ssh peer)
-Files/Changes/Save/Shell/Session → modal-1
-Task moves to modal-2:
-  task.get subscription re-routes (same id); next reading names modal-2
-  Files/Changes reload; header says modal-2
-  draft saves to modal-2 if base revision still matches, else the existing save conflict keeps it
-  Shell on modal-1 keeps running, labelled modal-1; reopening it on modal-2 → ended → New shell
-modal-2 unreachable → unavailable{machine: modal-2} → "modal-2 is unreachable · Retry"</div>
+
+<h3>2. Opening or switching a remote Session's harness, then leaving it</h3>
+<p><code>mini</code> has no <code>default_agent</code>. Jack runs <code>lf open --task LOO-12 -a claude</code> from the laptop (or picks Codex in Desktop's pane menu), works, and detaches.</p>
+<div class="cols">
+  <div class="card">
+    <h3><span class="built">built at HEAD</span> <code>agent</code> dropped; peer prints its own command</h3>
+    <div class="flow">lf open --task LOO-12 -a claude
+  1. Write::SessionResume { task, agent: Some("claude") } → mini
+     → ensure_task() calls prepare() without agent → "No agent selected" (fails)
+  2. Even with a default on mini:
+     lf -a codex open --task LOO-12 (or Desktop switchProvider):
+     → routed_terminal calls session.attach first → re-attaches to old claude!
+     → SessionContinue has NO agent field → always drops -a
+  3. Detach / exit:
+     → mini's native_session prints "Continue with: lf resume session_9f2"
+     → running that on laptop: "Session session_9f2 was not found"</div>
+  </div>
+  <div class="card proposed">
+    <h3><span class="new">proposed</span> Caller intent survives the route</h3>
+    <div class="flow">lf open --task LOO-12 -a claude
+  1. Write::SessionResume { task, agent: Some("claude") } → mini
+     → ensure_task() / prepare() honors agent → succeeds without default_agent
+  2. ServerOperation::SessionContinue carries agent: Option&lt;String&gt; (rev 10)
+     → continuing() passes --agent &lt;agent&gt; to lf session resume
+     → when caller's -a differs from current provider, routed_terminal calls
+       SessionContinue instead of blindly re-attaching to the old harness
+  3. Detach / exit:
+     → routed_terminal passes its own fallback_argv to relay_socket
+     → prints "Continue with: lf open --task LOO-12" (works on this Machine)</div>
+  </div>
 </div>
 
 <h2>Do the product's concepts and the code's line up?</h2>
 <table>
-  <tr><th>What a person knows</th><th>Code behind it</th><th></th><th>What is wrong</th></tr>
-  <tr><td><b>Task</b>: one outcome, opened by name (<code>LOO-1083</code>)</td><td><code>task_id</code> UUID per Machine; <code>identifier</code>, <code>tracker_id</code></td><td><span class="no">no</span></td><td>One Task, two UUIDs on two Machines (MTG-421). The plan already forwards the portable selector (<code>tracker_id</code>, else identifier) to peers. Kept.</td></tr>
-  <tr><td><b>The Task's Machine</b>: "it's on modal-1"</td><td><code>task_ownership</code> → <code>task_execution_route</code>; also <code>runtime.owner.machine</code>, <code>workspace.machine_id</code>, <code>execution_machine</code>, <code>task_machine</code>, <code>RegistryQuery.remoteMachine</code>, <code>SessionsStore.executionLocations</code>, <code>SessionsWorkspace.location</code>, <code>LinkedSession.location</code>; kickoff adds <code>expected_owner</code>, <code>actual_owner</code></td><td><span class="no">no</span></td><td>One idea under ten names, held by two routers. <b>Biggest mismatch</b>, below.</td></tr>
-  <tr><td><b>Files / Changes</b> of the Task</td><td><code>task.files</code>, <code>task.file</code>, <code>task.diff</code>, <code>task.changes</code>; Desktop also SSHes <code>lf --machine … task watch-files</code></td><td><span class="no">no</span></td><td>Two transports for one view. Plan routes all through the server and adds <code>task.files.watch</code>. Kept.</td></tr>
-  <tr><td><b>Save</b> an edit</td><td><code>task.save {revision, content}</code>; refuses on content-revision mismatch</td><td><span class="yes">yes</span></td><td>Already the right guard. The kickoff's <code>expected_owner</code> on save duplicated it. <span class="new">proposed</span>: revision is the only write guard.</td></tr>
-  <tr><td><b>Unsaved draft</b></td><td>Desktop <code>drafts</code>; kickoff keys by <code>(machine_id, checkout)</code></td><td><span class="no">no</span></td><td>A person's draft belongs to the Task's file, not to a Machine. <span class="new">proposed</span>: <code>(Task, path, base revision)</code>.</td></tr>
-  <tr><td><b>Shell</b> in the Task</td><td><code>desktop_shells</code> receipts + held terminal; reached by <code>lf --machine … desktop shell</code> over SSH</td><td><span class="no">no</span></td><td>Named for Desktop although Mobile gets it too; bypasses the server. Plan adds <code>task.shell.start/attach/close</code> through the ticket bridge. Kept, minus <code>expected_owner</code>. The <code>desktop_shells</code> table name stays (a rename is a migration with no change people see).</td></tr>
-  <tr><td><b>Session</b>: the agent's conversation</td><td><code>session.attach/continue/start {session}</code>; local <code>agent_sessions</code></td><td><span class="no">no</span></td><td>A Session born on a sandbox has no row here, so the id alone cannot route. Plan adds <code>task</code> and <code>machine</code> selectors. Kept, minus <code>expected_owner</code>.</td></tr>
-  <tr><td><b>Moved</b>: "the Task is somewhere else now"</td><td>kickoff: <code>conflict</code> error on 14 operations</td><td><span class="no">no</span></td><td>A move is ordinary, not a failure. <span class="new">proposed</span>: the subscription follows the Task; no error code.</td></tr>
-  <tr><td><b>Not started</b></td><td><code>OpsError::Message("…not checked out…")</code> → <code>unavailable</code></td><td><span class="no">no</span></td><td>Indistinguishable from an outage. Plan types it <code>not_found{reason: not_started}</code>. Kept.</td></tr>
-  <tr><td><b>Machine unreachable</b></td><td>untyped SSH failure</td><td><span class="no">no</span></td><td>Plan types it <code>unavailable{resource: machine, …}</code> naming the Machine. Kept.</td></tr>
-  <tr><td><b><code>lf open</code></b>: show it here</td><td><code>lf --machine X open</code> runs <code>open</code> on X; <code>resume_argv</code> drops <code>--task</code> with <code>--session</code></td><td><span class="no">no</span></td><td>"Open" always presents on this Machine. Plan normalizes both flag positions into <code>OpenSelection.machine</code>. Kept.</td></tr>
+  <tr><th>What a person knows</th><th>Code behind it at <code>HEAD</code></th><th></th><th>Assessment</th></tr>
+  <tr>
+    <td><b>Task</b>: one outcome, opened by name</td>
+    <td><code>task_execution_route</code> + <code>peer_selector</code> (<code>tracker_id</code> / identifier / local ID)</td>
+    <td><span class="yes">yes</span></td>
+    <td><span class="built">built at HEAD</span> Works across tracker-backed peers with different local UUIDs and trackerless peers.</td>
+  </tr>
+  <tr>
+    <td><b>The Task's Machine</b>: one router</td>
+    <td><code>lf server</code> (<code>PeerPool</code>, <code>Read::peer_route</code>, <code>Write::remote</code>, <code>task_shell</code>, <code>terminal_machine</code>); stale local checkouts dropped from <code>RoadmapTask</code> &amp; <code>TaskSnapshot</code></td>
+    <td><span class="yes">yes</span></td>
+    <td><span class="built">built at HEAD</span> No <code>expected_owner</code>, no <code>conflict</code>, no Desktop SSH fanout, no silent local fallback.</td>
+  </tr>
+  <tr>
+    <td><b>Files / Changes</b> (one-shot reads &amp; save)</td>
+    <td>Routed <code>task.files</code>, <code>task.file</code>, <code>task.changes</code>, <code>task.diff</code>, <code>task.save</code> (CLI &amp; server)</td>
+    <td><span class="yes">yes</span></td>
+    <td><span class="built">built at HEAD</span> Unstarted answers <code>not_found{not_started}</code>; save checks content revision alone.</td>
+  </tr>
+  <tr>
+    <td><b>Live Files watch</b>: follows the Task</td>
+    <td><code>task.files.watch</code> → <code>TaskFilesWatch::open</code> dies on <code>not_started</code>; Mobile 5s <code>while</code> loop; Desktop split FSEvents vs <code>observeServedFiles</code> (no reconnect, no <code>localMachineId</code>, no <code>machine_label</code>)</td>
+    <td><span class="no">no</span></td>
+    <td><b>Biggest mismatch</b> (below). Checkout-scoped watcher pretending to be a Task subscription. <span class="new">proposed</span>: nullable <code>checkout</code>/<code>revision</code> + <code>machine_label</code> on <code>TaskFilesRevision</code>; keep subscription open; delete Mobile polling; fix Desktop reconnect &amp; return-to-Mac.</td>
+  </tr>
+  <tr>
+    <td><b>Unsaved draft across a move</b></td>
+    <td><code>TaskFileDocument.arrive</code> keeps dirty draft as <code>external</code> conflict if revision differs; identical revision saves on new owner</td>
+    <td><span class="yes">yes</span></td>
+    <td><span class="built">built at HEAD</span> Keyed by <code>(Task, path, base revision)</code>; proven by Desktop <code>RemoteTaskWorkspaceTests</code>.</td>
+  </tr>
+  <tr>
+    <td><b>Shell in the Task</b></td>
+    <td><code>task.shell.start/attach/close</code> over ticket bridge; Desktop <code>lf desktop shell</code>; Mobile <code>mobile-&lt;task&gt;</code>. Desktop <code>SessionsWorkspace.newShell</code> still refuses when <code>workspace.location == nil</code>.</td>
+    <td><span class="no">no</span></td>
+    <td>Leftover client gate: <code>files(for:)</code> already falls back to <code>task.runtime.owner</code>, while <code>newShell</code> demands "Open this Task's conversation before adding a shell". <span class="new">proposed</span>: resolve owner from <code>location ?? runtime.owner</code> (same rule). Table name <code>desktop_shells</code> stays.</td>
+  </tr>
+  <tr>
+    <td><b>Open / switch remote Session</b></td>
+    <td><code>lf open --task</code> / <code>--machine</code> (both flag orders) → <code>SessionResume</code> + <code>SessionAttach</code>/<code>SessionContinue</code>. <code>SessionContinue</code> lacks <code>agent</code>; <code>ensure_task</code> ignores <code>agent</code>; peer prints <code>lf resume &lt;id&gt;</code>.</td>
+    <td><span class="no">no</span></td>
+    <td>Breaks <code>lf open --task -a claude</code> (QA #1), <code>lf -a codex open --task</code> (documented), Desktop's remote agent menu, and the detach/exit command (QA #3). <span class="new">proposed</span>: add <code>agent</code> to <code>SessionContinue</code>, honor it in <code>ensure_task</code> + <code>routed_terminal</code>, print local <code>fallback_argv</code> on leave/detach.</td>
+  </tr>
+  <tr>
+    <td><b>Diff delivery status</b></td>
+    <td><code>PullRequestStore.swift:136</code>: <code>"No pull request yet. Changes below are local."</code></td>
+    <td><span class="no">no</span></td>
+    <td>Calls remote changes on <code>mini</code> "local" (QA #7). <span class="new">proposed</span>: omit "local" or name the Machine when remote.</td>
+  </tr>
+  <tr>
+    <td><b>Unreachable Machine</b></td>
+    <td><code>unavailable { resource: "machine", machine_id, machine_label, machine_name }</code>; single <code>ssh</code> check hint</td>
+    <td><span class="yes">yes</span></td>
+    <td><span class="built">built at HEAD</span> Typed outage across one-shot requests and subscriptions; Desktop Retry and Mobile Try again.</td>
+  </tr>
 </table>
 
-<h2>The biggest mismatch: two routers for one fact</h2>
-<div class="callout">The person knows one fact, "this Task is on modal-1". The code keeps it in two places: Rust's ownership log and Desktop's pinned location. Every bug in MTG-421 is the two disagreeing. The kickoff plan fixed which one wins by having the client send its opinion on every request and the server refuse when they differ. That keeps both routers and adds a referee.</div>
+<h2>The biggest mismatch: <code>task.files.watch</code> watches a checkout, not a Task</h2>
+<div class="callout">
+  Every other Task subscription (<code>task.get</code>, <code>task.status</code>) is addressed to the <b>Task</b>: it starts before the Task has a checkout, stays open through a move's intermediate null-workspace reading, and reports what Machine answers.
+  <code>task.files.watch</code> is the sole holdout: it opens a filesystem watcher directly, dies with <code>not_found { reason: "not_started" }</code> whenever no checkout exists, and carries no <code>machine_label</code>.
+  That single mismatch forced Mobile to build a 5-second client polling loop, left Desktop's remote watch dead after a server restart, and broke Desktop's local/remote state when a Task moves back to this Mac.
+</div>
 
 <div class="cols">
   <div class="card">
-    <h3>Before (kickoff)</h3>
+    <h3>Before (<code>HEAD</code> at <code>e348359e59</code>)</h3>
     <ul>
-      <li><span class="strike"><code>expected_owner</code></span> on <code>task.status/get/detail/changes/diff/file/files/runs/files.watch/save</code>, <code>task.shell.*</code>, <code>session.attach/continue/start</code></li>
-      <li><span class="strike"><code>conflict {expected_owner, actual_owner}</code></span> error and its row on every surface</li>
-      <li>Desktop resolves the owner itself, threads <code>ownerMachineId</code> through every call</li>
-      <li>Placement guard at <code>SessionsView.swift:716</code> kept</li>
-      <li>Drafts parked at <span class="strike"><code>(machine_id, checkout)</code></span></li>
-      <li>"Task moved" notice + Reopen on Desktop, Refresh on Mobile</li>
+      <li><code>TaskFilesRevision { task_id, machine_id, checkout, revision }</code> — non-null checkout/revision, no <code>machine_label</code></li>
+      <li><code>Producer::files</code> fails with <code>not_started</code> → subscription terminates on unstarted Tasks and mid-move</li>
+      <li>Mobile <code>TaskFilesTree.follow()</code> loops <code>while !Task.isCancelled { await watch(); sleep(5s) }</code></li>
+      <li>Desktop <code>TaskFilesStore.observeServedFiles()</code> dies permanently on local server restart (QA #2)</li>
+      <li>Desktop <code>TaskFilesStore</code> lacks <code>localMachineId</code> → moving mini → laptop leaves <code>store.machine</code> non-nil</li>
+      <li>Desktop <code>SessionsWorkspace.newShell</code> refuses until <code>workspace.location != nil</code></li>
+      <li><code>SessionContinue</code> has no <code>agent</code>; <code>ensure_task</code> ignores <code>agent</code>; farewell prints peer's <code>lf resume &lt;id&gt;</code></li>
     </ul>
   </div>
   <div class="card proposed">
-    <h3><span class="new">proposed</span> After</h3>
+    <h3><span class="new">proposed</span> After (Slice 5, still rev 10)</h3>
     <ul>
-      <li>Requests name the Task; the local server alone resolves and routes</li>
-      <li>Subscriptions re-route when <code>task_ownership</code> advances, same <code>id</code>; <code>task.files.watch</code> sends one whole-tree invalidation</li>
-      <li>Panes read their Machine from the answer (<code>reference.workspace.machine_id</code>, attach answer)</li>
-      <li>Placement guard and <code>SessionsWorkspace.location</code> deleted with the rest of the location stack</li>
-      <li>Drafts keyed by <code>(Task, path, base revision)</code>; <code>task.save</code>'s revision check decides</li>
-      <li>Running terminals stay on their Machine; a stale <code>shell_id</code> on the new owner answers ended → New shell</li>
+      <li><code>TaskFilesRevision { task_id, machine_id, machine_label, checkout: Option, revision: Option }</code></li>
+      <li><code>Producer::files</code> emits <code>{ checkout: null, revision: null }</code> while unstarted/mid-move and wakes on <code>store_revisions</code> when <code>task_checkouts</code> appears — same subscription ID throughout</li>
+      <li>Mobile <code>TaskFilesTree.follow()</code> deletes its 5s polling loop; one <code>observeTaskFiles</code> stream handles every transition</li>
+      <li>Desktop <code>observeServedFiles()</code> reconnects across local server restarts with bounded backoff and clears <code>error</code> on recovery</li>
+      <li>Desktop <code>TaskFilesStore</code> knows <code>localMachineId</code> (clean move-back-to-Mac) and reads <code>machine_label</code> from the revision</li>
+      <li>Desktop <code>newShell</code> falls back to <code>task.runtime.owner</code>, matching <code>files(for:)</code></li>
+      <li><code>SessionContinue</code> carries <code>agent</code>; <code>ensure_task</code> + <code>routed_terminal</code> honor it; bridged relay prints local <code>lf open</code> command</li>
     </ul>
   </div>
 </div>
@@ -146,53 +232,60 @@ modal-2 unreachable → unavailable{machine: modal-2} → "modal-2 is unreachabl
 <h3>Counterexamples tried</h3>
 <table>
   <tr><th>Case</th><th>Proposed behavior</th><th>Holds?</th></tr>
-  <tr><td>Move A→B while a draft is open; A had uncommitted edits B never got</td><td>B's file is at another revision → save conflict shows both versions; draft kept</td><td><span class="yes">yes</span></td></tr>
-  <tr><td>Move A→B; file identical on B</td><td>Save lands on B, where the Task now is</td><td><span class="yes">yes</span></td></tr>
-  <tr><td>Two one-shot reads straddle a move (Files from A, Diff from B)</td><td>The <code>task.get</code> subscription delivers B's reading; panes reload on the Machine change. A brief mixed view is possible between the two</td><td><span class="yes">yes</span>, transient</td></tr>
-  <tr><td>Shell running on A, Task moves to B</td><td>Shell keeps running on A, labelled A; it is a real process and may hold output the person wants</td><td><span class="yes">yes</span></td></tr>
-  <tr><td>B unreachable after the move</td><td>Re-routed subscription answers <code>unavailable</code> naming B; never falls back to A or local</td><td><span class="yes">yes</span></td></tr>
-  <tr><td>Session on a sandbox with no local row</td><td><code>session.attach{session, task}</code> or <code>{session, machine}</code> routes it</td><td><span class="yes">yes</span></td></tr>
+  <tr><td><code>task.files.watch</code> on a nonexistent Task ID</td><td>Task lookup fails → subscription still ends with <code>not_found</code>; only an existing Task with no checkout stays open with <code>checkout: null</code>.</td><td><span class="yes">yes</span></td></tr>
+  <tr><td>Move laptop → mini before mini's checkout exists, then mini goes offline, then recovers with checkout</td><td><code>Producer::follow</code> swaps to mini (emits <code>checkout: null</code>), publishes <code>unavailable</code> naming mini on outage and retries, then delivers mini's live revision — same subscription ID end to end.</td><td><span class="yes">yes</span></td></tr>
+  <tr><td>Move mini → laptop while Desktop Files is open with a dirty draft</td><td><code>TaskFilesRevision.machine_id == localMachineId</code> → <code>TaskFilesStore.relocate(machine: nil, …)</code> restores "This Mac", local FSEvents, and Diff settings, while keeping the dirty draft as <code>external</code> if revisions differ.</td><td><span class="yes">yes</span></td></tr>
+  <tr><td><code>lf -a codex open --task LOO-12</code> while <code>claude</code> is already running on mini</td><td>If <code>routed_terminal</code> attached blindly first, it would keep <code>claude</code>. Comparing caller's <code>-a</code> against the Session's current provider routes a harness switch through <code>SessionContinue { agent: Some("codex") }</code> instead.</td><td><span class="yes">yes</span> (caught &amp; revised)</td></tr>
+  <tr><td>Desktop <code>lf desktop shell</code> started right as a Task moves</td><td><code>newShell</code> uses <code>location ?? runtime.owner</code>; server routes <code>task.shell.start</code> to the actual owner. Only the race window between a move and Desktop's next <code>task.get</code> could stamp the prior Machine for Close — rare, reversible later if <code>SessionAttached</code> ever moves into Swift.</td><td><span class="yes">yes</span></td></tr>
+  <tr><td>One-shot <code>lf task files</code> / <code>task.files</code> on an unstarted Task</td><td>Unchanged: still returns <code>not_found { reason: "not_started" }</code>. Only the long-lived <code>task.files.watch</code> subscription stays open.</td><td><span class="yes">yes</span></td></tr>
 </table>
 
-<h3>What follows across layers</h3>
+<h3>What follows across layers (Slice 5)</h3>
 <table>
-  <tr><th>Layer</th><th>Change from kickoff</th></tr>
-  <tr><td>Wire (rev 10)</td><td>Drop <code>expected_owner</code> everywhere and the <code>conflict</code> shape. Still rev 10: new <code>task</code>/<code>machine</code> on session ops, <code>task.shell.*</code>, <code>task.files.watch</code>.</td></tr>
-  <tr><td>Server</td><td><code>server/subscriptions.rs</code> watches the <code>task_ownership</code> revision beside each routed stream and swaps the peer stream in place.</td></tr>
-  <tr><td>Desktop</td><td>Delete <code>location</code>, <code>confirmLocation</code>, <code>retainLocation</code>, the placement guard; no owner threading. Smaller than the kickoff.</td></tr>
-  <tr><td>Mobile</td><td>No moved state; the header follows the reading. Old Shell → ended → New shell.</td></tr>
-  <tr><td>Tests</td><td>Slice 1 proves the re-route (same subscription id, next reading names the new Machine) and the stale-revision save after a move.</td></tr>
+  <tr><th>Layer</th><th>Change</th></tr>
+  <tr><td>Wire (rev 10, unshipped)</td><td><code>TaskFilesRevision</code> gains <code>machine_label: Option&lt;String&gt;</code> and nullable <code>checkout</code>/<code>revision</code>. <code>ServerOperation::SessionContinue</code> gains required-nullable <code>agent: Option&lt;String&gt;</code>. Regenerate <code>server_schema.json</code> and fixtures.</td></tr>
+  <tr><td>Rust server &amp; CLI (Slice 5A)</td><td><code>Producer::files</code> stays open on <code>not_started</code> via <code>store_revisions</code>; <code>Write::SessionResume</code> / <code>ensure_task</code> / <code>continuing</code> / <code>routed_terminal</code> honor <code>agent</code> (including harness switch on a running Session); bridged relay prints local <code>fallback_argv</code> on leave/detach.</td></tr>
+  <tr><td>Desktop (Slice 5B)</td><td><code>TaskFilesStore</code> takes <code>localMachineId</code>, uses <code>machine_label</code> + nullable checkout, reconnects <code>observeServedFiles</code> on local server restart; <code>newShell</code> resolves from <code>location ?? runtime.owner</code>; <code>TaskDelivery</code> drops misleading "local" copy.</td></tr>
+  <tr><td>Mobile (Slice 5B)</td><td>Delete the 5-second retry loop in <code>TaskFilesTree.follow()</code>; derive <code>notStarted</code> from <code>body.checkout == nil</code>; pass <code>agent: nil</code> in <code>sessionContinue</code>.</td></tr>
+  <tr><td>Docs</td><td>Update <code>rust/loopflow/src/server/README.md</code> for <code>task.files.watch</code> (stays open with null checkout/revision) and <code>session.continue</code>'s <code>agent</code> field.</td></tr>
 </table>
 
-<h3>First slice</h3>
-<p>Unchanged in order: Slice 1 (peer pool, routed reads/writes/subscriptions, bridged terminal tickets, stale-checkout fix in <code>task_reference</code>) shows soonest whether the model holds, because the two-Machine integration test exercises every claim above, including the move, before any Swift changes.</p>
+<h3>Outside this review (noted from QA, separate scope)</h3>
+<ul>
+  <li><b>Git observation lag on peer reads (QA #5):</b> <code>lf task changes</code> right after an edit reads mini's shared <code>observe.rs</code> cache (a few seconds). Existing server-wide observation design, not specific to remote routing.</li>
+  <li><b>Skewed peer executable message (QA #6):</b> when a peer's server runs a different binary, <code>Connection::open_peer</code> times out at 10s instead of surfacing <code>lf server connect</code>'s stderr. General peer-handshake diagnostic, independent of the workspace model.</li>
+</ul>
 
-<h2>Questions</h2>
+<h2>Open questions</h2>
 <ol class="q">
+  <li>On an unstarted Task or mid-move before checkout creation, <code>task.files.watch</code>:
+    <ol>
+      <li>stays open and emits <code>{ checkout: null, revision: null, machine_id, machine_label }</code>, waking via <code>store_revisions</code> when checkout appears <span class="new">proposed for Slice 5</span></li>
+      <li>keeps ending with <code>not_found { reason: "not_started" }</code> and leaves retry loops to clients</li>
+    </ol>
+  </li>
+  <li>Switching harnesses on a remote Task Session (<code>lf -a codex open --task …</code> or Desktop's pane menu):
+    <ol>
+      <li>add <code>agent: Option&lt;String&gt;</code> to rev 10 <code>session.continue</code> and switch through it <span class="new">proposed for Slice 5</span></li>
+      <li>keep <code>session.continue</code> without <code>agent</code> and refuse harness switches on remote Sessions</li>
+    </ol>
+  </li>
   <li>When a Task moves, a Shell already running on the old Machine:
     <ol>
-      <li>keeps running, labelled with its Machine, until the person closes it <span class="new">built into the plan</span></li>
-      <li>is closed by the move, like the agent Session</li>
-      <li>stays but its pane is detached and shows "on modal-1 · reattach"</li>
+      <li>keeps running, labelled with its Machine, until closed (reattach on new owner → ended → New shell) <span class="built">built at HEAD</span></li>
+      <li>is closed by the move</li>
     </ol>
   </li>
   <li>An unsaved draft after a move:
     <ol>
-      <li>saves to the new owner when the base revision matches, else the save conflict <span class="new">built into the plan</span></li>
-      <li>always asks before saving to a different Machine than it was opened on</li>
+      <li>saves to the new owner when the base revision matches, else held whole as an external conflict <span class="built">built at HEAD</span></li>
+      <li>always asks before saving to a different Machine</li>
     </ol>
   </li>
-  <li>The Desktop shell table and operation are named <code>desktop_shells</code> / <code>lf desktop shell</code> while Mobile uses them too:
+  <li><code>desktop_shells</code> table and <code>lf desktop shell</code> naming (while wire says <code>task.shell.*</code>):
     <ol>
-      <li>leave the names; the wire says <code>task.shell.*</code> <span class="new">built into the plan</span></li>
-      <li>rename to Task shell everywhere in this Task (adds a migration)</li>
-      <li>file the rename as its own Task</li>
-    </ol>
-  </li>
-  <li><code>lf open</code> with a remote-only Session:
-    <ol>
-      <li>accept both <code>lf open --machine X</code> and <code>lf --machine X open</code>, one field <span class="new">built into the plan</span></li>
-      <li>only <code>lf open --machine X</code>; root <code>--machine</code> keeps meaning "run there"</li>
+      <li>leave as-is (avoids a staged migration with no user-visible change) <span class="built">built at HEAD</span></li>
+      <li>file a separate Task to rename to <code>task_shells</code></li>
     </ol>
   </li>
 </ol>

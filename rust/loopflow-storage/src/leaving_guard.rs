@@ -1,8 +1,9 @@
 //! Test stores refuse SQL that reads or writes a member marked leaving.
 //!
 //! A migration marks what the product stopped using with
-//! `-- leaving: <table>[.<column>] <Task ID>`. Once a member is marked, nothing
-//! but its drop may name it, so every store test fails with the member's name
+//! `-- leaving: <table>[.<column>] <Task ID>`, and a later migration retracts
+//! the mark with `-- keeping: <table>[.<column>] <Task ID>`. Once a member is
+//! marked, nothing but its drop may name it, so every store test fails with the member's name
 //! when production SQL touches one. Triggers still name leaving columns until
 //! the contract drops them, so access from inside a trigger is allowed. So are
 //! reads of foreign-key columns and deletes from tables a parent cascades into:
@@ -22,22 +23,30 @@ const STILL_READ: &[(&str, &str)] = &[
     // Fixtures write the rows a released lf does; the bridge triggers read them.
     ("processes", "LOO-965"),
     ("tasks.regressed_in", "LOO-730"),
-    // LOO-1063 keeps Machine-local Working Task order apart from Project rank.
-    ("task_orders", "LOO-1063"),
 ];
 
-/// Leaving tables, and leaving columns as `table.column`.
+/// Leaving tables, and leaving columns as `table.column`: each mark replayed
+/// in catalog order, so a later `-- keeping:` takes its member back.
 fn leaving() -> &'static HashSet<String> {
     static LEAVING: OnceLock<HashSet<String>> = OnceLock::new();
     LEAVING.get_or_init(|| {
-        crate::migration_runner::migration_sqls()
-            .flat_map(str::lines)
-            .filter_map(|line| line.strip_prefix("-- leaving:"))
-            .filter_map(|mark| mark.split_whitespace().next())
-            .filter(|member| !STILL_READ.iter().any(|(read, _)| read == member))
-            .map(str::to_owned)
-            .collect()
+        let mut leaving = HashSet::new();
+        for line in crate::migration_runner::migration_sqls().flat_map(str::lines) {
+            if let Some(member) = mark_member(line, "-- leaving:") {
+                leaving.insert(member.to_owned());
+            } else if let Some(member) = mark_member(line, "-- keeping:") {
+                leaving.remove(member);
+            }
+        }
+        for (read, _) in STILL_READ {
+            leaving.remove(*read);
+        }
+        leaving
     })
+}
+
+fn mark_member<'a>(line: &'a str, prefix: &str) -> Option<&'a str> {
+    line.strip_prefix(prefix)?.split_whitespace().next()
 }
 
 /// What SQLite's foreign-key machinery touches on its own.
@@ -146,6 +155,9 @@ mod tests {
             assert!(error.is_some(), "{sql} was allowed");
         }
         conn.prepare("SELECT issue_title, planning_rank FROM tasks")
+            .unwrap();
+        // `keep_task_orders` takes back what `task_facts_once` marked leaving.
+        conn.prepare("SELECT repository_id, task_ids_json FROM task_orders")
             .unwrap();
         // Triggers that still compare every column keep working.
         conn.execute(

@@ -181,7 +181,7 @@ to one. `uv run python scripts/due_removals.py` prints when each may drop.
 
 - `dashboard_arrangements`: repository_id, dashboard_id, expression_key, selection_json, arrangement_json
 - `dashboards`: repository_id, id, revision, expression_key, name, pinned, slots_json
-- `task_orders` — **leaving → LOO-877, task_facts_once**: repository_id, task_ids_json
+- `task_orders`: repository_id, task_ids_json
 
 ## Desktop shell
 

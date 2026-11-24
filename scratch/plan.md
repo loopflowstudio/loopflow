@@ -15,32 +15,12 @@
 - [`5317225dbe` review]: unified `heldStatusGroup` ownership in `WorkNavigation` + pre-update latching in `WorkModel.applyTaskList` and aligned two stale status sentences in [swift/README.md](../swift/README.md) (`10df280f65`, simplified in `aef236355e`).
 - [`0bc19e976d` review](concept-review.html) (against base `62a368e5cc` after merge `8742243abf` brought in `#1973`): 8 of 9 product-to-code pairings align, including all runtime ordering, drag persistence, status-toggle, status-group hold, Graph step, OSC 7501, and font pairings. One pairing contradicts the product: `task_orders` is permanently live in runtime, yet immutable `task_facts_once.sql:84` still marks `-- leaving: task_orders LOO-877`, leaving `leaving_guard.rs` (`STILL_READ`), `scripts/due_removals.py`, `scripts/check_migrations.py`, `rust/loopflow-storage/SCHEMA.md`, `docs/dev/reference.md`, and `docs/dev/reference-code.md` claiming `task_orders` is leaving for deletion on `2026-12-24` and `tasks.planning_rank` is the single Task order.
 
-## Next slice (retract `task_orders` leaving mark forward)
+## Next
 
-Choice recorded for review (reversible; option `1a` / `2a` in [concept-review.html](concept-review.html)): add `-- keeping: <table>[.<column>] <Task ID>` as the forward retraction of `-- leaving:` in immutable migration history, rather than leaving `task_orders` in `STILL_READ` permanently and relying on a manual note on LOO-877.
-
-1. **`scripts/check_migrations.py`:**
-   - Parse `-- keeping: <table>[.<column>] <Task ID>` with the same grammar as `-- leaving:`.
-   - Add one shared chronological resolver `active_leaving_marks(catalog)` that replays `catalog.ordered()` in order: `-- leaving:` sets `active[member] = (migration_name, mark)` and `-- keeping:` removes `member`.
-   - In `_check_staging`, require every `-- keeping:` mark to name a member that exists in `after` and is currently in `active` before that migration.
-   - In `_check_contract`, if `expand_file` originally carried `leaving_marks`, require every dropped item to be covered by the marks from `expand_file` that are still active in `active_leaving_marks(catalog)` (so retracting one or all marks blocks `DROP TABLE task_orders` in a contract of `task_facts_once`).
-2. **`scripts/due_removals.py` & `scripts/schema_page.py`:**
-   - Both read `check_migrations.active_leaving_marks(catalog)` instead of raw `leaving_marks(...)`, so kept members disappear from `due_removals.py` and render as live tables in `SCHEMA.md`.
-3. **`rust/loopflow-storage/src/leaving_guard.rs`:**
-   - Replay `-- leaving:` (insert) and `-- keeping:` (remove) in `migration_sqls()` catalog order, and delete `("task_orders", "LOO-1063")` from `STILL_READ`.
-4. **Forward migration & generated schema:**
-   - Run `uv run python scripts/new_migration.py keep_task_orders` and add `-- keeping: task_orders LOO-1063` with a short comment explaining that Machine-local Working order stays in `task_orders` apart from Project/backlog `tasks.planning_rank`.
-   - Regenerate `rust/loopflow-storage/SCHEMA.md` via `uv run python scripts/schema_page.py` so `task_orders` appears as a live table.
-5. **Architecture & migration docs:**
-   - Update `docs/dev/reference.md` (Desktop workspace Persistence cell) and `docs/dev/reference-code.md` (Desktop arrangement row) to record `task_orders` as Machine-local Working Task order apart from `tasks.planning_rank`.
-   - Document `-- keeping: <table>[.<column>] <Task ID>` briefly under `### Leaving marks` in `rust/loopflow-storage/src/MIGRATIONS.md`.
-6. **Tests & checks:**
-   - `python/tests/test_check_migrations.py`: cover `-- keeping:` validation (unknown member, un-marked member), blocking a contract from dropping a kept member (both partial and full retraction), and re-leaving a previously kept member with a fresh clock.
-   - `python/tests/test_due_removals.py`: cover a kept member disappearing from `removals(...)` while remaining marks on the same Task stay scheduled.
-   - `rust/loopflow-storage/src/leaving_guard.rs`: verify `task_orders` is readable/writable without a `STILL_READ` entry while genuinely leaving members remain denied.
-   - Run `uv run pytest python/tests/test_check_migrations.py python/tests/test_due_removals.py`, `uv run python scripts/schema_page.py --check`, `uv run python scripts/check_architecture.py`, `uv run python scripts/due_removals.py`, and focused `leaving_guard` tests (with `LF_*` unset and `< /dev/null`). Note: `scripts/check_migrations.py` against `origin/main` also expects `planning_scope_checks.sql` once synced at gate.
-
-Then gate (`documented_commands::` for `swift/README.md` and `server_operations_match_their_lf_commands` check on main).
+Gate: sync `origin/main` (brings `planning_scope_checks.sql`, which
+`check_migrations.py` needs), then `documented_commands::` for the edited
+`docs/dev/*.md`, `swift/README.md` and `MIGRATIONS.md`, and the
+`server_operations_match_their_lf_commands` check on main.
 
 ## Built
 
@@ -64,6 +44,12 @@ Then gate (`documented_commands::` for `swift/README.md` and `server_operations_
   and Finished in the terminal. Busy takes precedence over Available for a row
   that matches both filters. Input clears finished and error reports in both
   Ghostty and held terminals.
+- `-- keeping: <table>[.<column>] <Task ID>` takes back a leaving mark in a
+  later migration. `keep_task_orders.sql` keeps `task_orders` (LOO-1063):
+  `check_migrations.py` (`active_leaving_marks`), `due_removals.py`,
+  `schema_page.py` and `leaving_guard.rs` replay marks in apply order, so
+  `task_orders` left `STILL_READ`, the LOO-877 list and the leaving column of
+  `SCHEMA.md`, and no contract of `task_facts_once` may drop it.
 - Mac and iOS show the Task’s Graph cursor when the Machine sends a step. New Task
   fonts ship in Dev, QA, and Release bundles with a same-size system fallback.
 
@@ -98,6 +84,11 @@ and the [Swift README](../swift/README.md). Deferred ideas stay in
 - [QA round 7](qa.html) at `aef236355e` ran the merged build on the private
   Machine: Working drops, Project rank edits, arrivals and the status toggle
   in the repository and Wave sidebars behaved as built. No defects.
+- Keeping slice: 34 tests in `test_check_migrations.py` and
+  `test_due_removals.py`, `leaving_guard::tests`, `schema_page.py --check`,
+  `check_architecture.py` passed; `check_migrations.py` passed with
+  `planning_scope_checks.sql` copied in from origin/main (`unmerged:
+  keep_task_orders.sql`).
 - After the `#1973` merge (`8742243abf`), `leaving_guard`, the 25
   `store::selections::tests`, and
   `task_concepts_share_lifecycle_activity_membership_and_order` passed.

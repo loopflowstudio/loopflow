@@ -1,11 +1,11 @@
 //! Task membership and saved Graph positions, with observed execution state.
 use crate::graph::runner::ExecutionCursor;
 use crate::store::{sqlite::SqliteStore, StoreResult};
-use crate::task_graph::{CapturedGraph, TaskGraph, TaskGraphRun};
+use crate::task_graph::{CapturedGraph, TaskGraph, TaskGraphPosition, TaskGraphRun};
 use crate::task_work::{TaskOverview, TaskWork};
 use loopflow_model::durable::TaskId;
 use loopflow_model::id::LfProcessId;
-use loopflow_storage::graph_process::{ExecutionStart, TaskCarrier};
+use loopflow_storage::graph_process::{ExecutionStart, GraphExecution, TaskCarrier};
 
 /// A carrier whose OS process cannot be read stays potentially running.
 pub(crate) fn carrier_may_run(carrier: &TaskCarrier) -> bool {
@@ -50,20 +50,33 @@ pub fn task_overview(
     ))
 }
 
-pub(crate) fn task_progress(
+/// Task conversations keep their last settled position while a run advances.
+pub(crate) fn settled_task_progress(
     store: &SqliteStore,
     task: &TaskId,
-) -> StoreResult<(
-    Option<TaskGraph>,
-    Vec<loopflow_storage::graph_process::GraphExecution>,
-)> {
-    let (graph, runs) = store.task_progress_records(task)?;
-    Ok((
-        graph
-            .map(|row| decode_row(row).map(read_task_graph))
-            .transpose()?,
-        runs,
-    ))
+    previous_position: Option<&TaskGraphPosition>,
+) -> StoreResult<(Option<TaskGraphPosition>, Vec<GraphExecution>)> {
+    let (row, runs) = store.task_progress_records(task)?;
+    let Some(row) = row else {
+        return Ok((None, runs));
+    };
+    let position = match row.run {
+        None => Some(TaskGraphPosition::At { step: row.step }),
+        Some((_, carrier)) if carrier_may_run(&carrier) => previous_position.cloned(),
+        Some((cursor, carrier)) => {
+            let graph: CapturedGraph = serde_json::from_str(&row.graph)?;
+            let cursor = serde_json::from_str(&cursor)?;
+            Some(TaskGraphPosition::Run {
+                at: graph
+                    .step_name_of(&cursor)
+                    .unwrap_or_else(|| row.step.clone()),
+                step: row.step,
+                lf_process_id: carrier.id.to_string(),
+                running: false,
+            })
+        }
+    };
+    Ok((position, runs))
 }
 
 fn read_task_graph(row: TaskGraphRow) -> TaskGraph {

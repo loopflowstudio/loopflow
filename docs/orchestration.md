@@ -121,15 +121,11 @@ Mix Skills and mechanical `cmd:` steps:
 
 ### Loops (`loop:`)
 
-A `loop:` block repeats as long as its final step says `iterate`. The built-in
-`plan` and `build` Graphs compose two nested loops:
+A `loop:` block repeats when its final step returns `iterate`. The built-in
+`build` Graph puts implementation in an inner loop so the outer loop reviews
+the whole change.
 
 ```yaml
-# plan (builtin)
-- kickoff              # plan the change, answering key risks
-- concept-review       # pressure-test the premise before writing code
-- write-docs           # update actual user docs before implementation
-
 # build (builtin)
 - loop:
     - loop:
@@ -145,7 +141,7 @@ A `loop:` block repeats as long as its final step says `iterate`. The built-in
 Any Skill can be the deciding step of a loop: it returns `advance`, `iterate`
 (with direction), or `blocked` (with a question).
 
-Every `iterate` reruns the loop, starting each Skill in a fresh conversation.
+During a Graph run, each `iterate` launches the loop’s Skills again in fresh conversations.
 For work that needs several passes, `kickoff` groups it into 2–4 substantial
 end-to-end passes, aiming for no more than 5. After each pass, `realign`
 regroups what remains. Within a pass, `implement` keeps building while the
@@ -163,20 +159,6 @@ Decision pass 3. Iterating repeats 3 steps, back to implement.
 
 It keeps iterating past 5 when real work is left, and returns `blocked` when
 passes shrink into small increments that no longer converge.
-
-Put the expensive reviews (`compress`, `qa`, `concept-review`) in an outer
-loop, as `build` does, so they judge the finished change once instead of every
-pass. In your own Graph:
-
-```yaml
-# .lf/graphs/coverage.yaml
-- loop:
-    - loop:
-        - implement
-        - realign          # next pass, or on to review
-    - coverage-review      # decides: whole change done, or back to implement
-- pr-publish
-```
 
 ### Docs-first (`write-docs`) and QA playbooks (`.lf/qa/`)
 

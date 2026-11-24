@@ -280,7 +280,8 @@ impl CapturedGraph {
 
     /// What a person calls the step `cursor` stands at, if the graph has it.
     pub fn step_name_of(&self, cursor: &ExecutionCursor) -> Option<String> {
-        self.place_of(cursor).map(|place| self.step_name(&place))
+        let (body, leaf) = cursor.current_body(&self.steps);
+        body.get(leaf.index).map(step_name)
     }
 
     /// Steps a person would name for `--from`, for messages.
@@ -445,6 +446,15 @@ pub enum TaskGraphPosition {
     },
 }
 
+impl TaskGraphPosition {
+    /// Where the Task waits, or the step its run left.
+    pub fn step(&self) -> &str {
+        match self {
+            Self::At { step } | Self::Run { step, .. } => step,
+        }
+    }
+}
+
 /// A Task's run as its Graph row holds it.
 #[derive(Debug, Clone)]
 pub struct TaskGraphRun<'a> {
@@ -534,9 +544,7 @@ impl TaskGraph {
 
     /// Where the Task waits, or the step its run left.
     pub fn step(&self) -> &str {
-        match &self.position {
-            TaskGraphPosition::At { step } | TaskGraphPosition::Run { step, .. } => step,
-        }
+        self.position.step()
     }
 
     /// The interactive step a person takes part at now, such as `explore`.

@@ -126,9 +126,8 @@ pub fn create_or_update_pr(
     // remain behind its base until an explicit integration boundary.
     let commit_options = CommitOptions {
         add: true,
-        push: false,
-        message: Some("lf pr open: prepare branch".to_string()),
-        agent: options.agent.clone(),
+        message: Some("lf pr open: prepare branch"),
+        agent: options.agent.as_deref(),
         ..CommitOptions::for_task("commit")
     };
     if !crate::git::worktrees::is_persistent_worktree(repo)? {

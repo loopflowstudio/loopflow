@@ -5,4 +5,6 @@
 - Manual commits apply the branch push default to selected paths too. The independent index still limits the commit to the named files. A clean checkout can push an earlier local checkpoint on the next `lf commit`.
 - The decision prompt uses the same name for the return target as the Task's Graph position. A command shows its arguments and an XOR shows its router.
 
+The commit workflow keeps release pushes unconditional and checks the branch for manual and step checkpoints. Task updates keep the existing saved reading format and attach the run error when delivering a change.
+
 The loop cap (`max_loop_passes`) and the scratch-only commit-message skip were dropped by steers; see `scratch/plan.md`. `scratch/concept-review.html` predates those steers.

@@ -23,7 +23,7 @@ use crate::git::{
     rev_parse, worktree_remove_owned, WorktreeLease,
 };
 use crate::naming::{git_user, sanitize_for_branch};
-use crate::ops::commit::{commit_workflow, CommitOptions};
+use crate::ops::commit::{commit_workflow, CommitOptions, CommitPush};
 use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::land::{finish_arm_after_sync, LandOptions};
 use crate::ops::pr::{current_pr, merge_gate_state, PrCopy};
@@ -1686,13 +1686,12 @@ fn prepare_release_in_worktree(
     )?;
 
     progress.status("Committing release changes...");
-    let _ = commit_workflow(
+    commit_workflow(
         wt_path,
         &CommitOptions {
             add: true,
-            push: true,
-            create_draft_pr: false,
-            message: Some(release_commit_message(target, version)),
+            push: CommitPush::Always,
+            message: Some(&release_commit_message(target, version)),
             ..CommitOptions::for_task("release")
         },
         progress,

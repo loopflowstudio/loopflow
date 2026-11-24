@@ -82,9 +82,7 @@ impl TaskObservation {
 
     /// The step the Task stands at or last left.
     fn step(&self) -> Option<&str> {
-        self.position.as_ref().map(|position| match position {
-            TaskGraphPosition::At { step } | TaskGraphPosition::Run { step, .. } => step.as_str(),
-        })
+        self.position.as_ref().map(TaskGraphPosition::step)
     }
 
     /// How each run that ended without succeeding ended, by run.
@@ -142,12 +140,11 @@ struct RunObservation {
     name: String,
     outcome: Option<String>,
     completed: bool,
-    error: Option<String>,
     step: Option<GraphStepProcess>,
 }
 
 impl RunObservation {
-    fn report(&self, id: &LfProcessId) -> String {
+    fn report(&self, id: &LfProcessId, error: Option<&str>) -> String {
         let outcome = self
             .outcome
             .as_deref()
@@ -162,7 +159,7 @@ impl RunObservation {
             ));
         }
         report.push('.');
-        if let Some(error) = &self.error {
+        if let Some(error) = error {
             report.push(' ');
             report.push_str(error);
         }
@@ -228,14 +225,11 @@ fn write_task(store: &SqliteStore, task: &TaskId) -> StoreResult<()> {
         return Ok(());
     };
     let (stored, old) = reading(store, task)?;
-    let (graph, graphs) = crate::store::task_work::task_progress(store, task)?;
+    let previous_position = old.as_ref().and_then(|old| old.position.as_ref());
+    let (position, graphs) =
+        crate::store::task_work::settled_task_progress(store, task, previous_position)?;
     let mut observation = TaskObservation {
-        position: match graph.map(|graph| graph.position) {
-            Some(TaskGraphPosition::Run { running: true, .. }) => {
-                old.as_ref().and_then(|old| old.position.clone())
-            }
-            position => position,
-        },
+        position,
         runs: HashMap::new(),
         comments: BTreeSet::new(),
         pr: store
@@ -259,13 +253,12 @@ fn write_task(store: &SqliteStore, task: &TaskId) -> StoreResult<()> {
             name: graph.name,
             outcome: Some(outcome.to_owned()),
             completed: true,
-            error: graph.run.error,
             step,
         };
-        // Older readings omitted the error and also recorded running steps.
+        // Older readings included running steps with no outcome.
         let previous = old.as_ref().and_then(|old| old.runs.get(&id));
-        if previous.and_then(|run| run.outcome.as_deref()) != Some(outcome) {
-            changes.push(run.report(&id));
+        if old.is_some() && previous.and_then(|run| run.outcome.as_deref()) != Some(outcome) {
+            changes.push(run.report(&id, graph.run.error.as_deref()));
         }
         observation.runs.insert(id, run);
     }

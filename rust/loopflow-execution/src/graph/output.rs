@@ -30,29 +30,25 @@ impl GraphOutput {
         format!("\n\nReturn the final answer as the declared JSON value: {}. This output contract supersedes saved instructions to run Graph decision or router commands. The selected successful completion supplies the decision. Return blocked with a reason when a person must resolve the question. That stops the Graph at this position; explain the missing input in the reason.", self.schema())
     }
 
-    pub fn for_step(step: &ConcreteStep) -> Option<Self> {
-        match step {
-            ConcreteStep::Skill(skill) if skill.returns.is_some() => Some(Self::Decision),
+    /// Append the step's output instructions and return the contract used to decode its answer.
+    pub fn append_step_instructions(step: &ConcreteStep, prompt: &mut String) -> Option<Self> {
+        let output = match step {
+            ConcreteStep::Skill(skill) if skill.returns.is_some() => Self::Decision,
             ConcreteStep::Xor(branch) => {
                 let mut paths: Vec<_> = branch.paths.keys().cloned().collect();
                 paths.sort();
-                Some(Self::Route(paths))
+                Self::Route(paths)
             }
-            _ => None,
-        }
-    }
-
-    pub fn for_step_instructions(step: &ConcreteStep) -> Option<String> {
-        let output = Self::for_step(step)?;
-        let mut instructions = output.instructions();
-        if output == Self::Decision {
-            instructions.push_str(DECISION_CRITERIA);
-        }
+            _ => return None,
+        };
+        prompt.push_str(&output.instructions());
         if let ConcreteStep::Xor(branch) = step {
-            instructions.push_str("\n\n");
-            instructions.push_str(&crate::graph::build_xor_routing_suffix(branch));
+            prompt.push_str("\n\n");
+            prompt.push_str(&crate::graph::build_xor_routing_suffix(branch));
+        } else {
+            prompt.push_str(DECISION_CRITERIA);
         }
-        Some(instructions)
+        Some(output)
     }
 
     pub fn schema(&self) -> Value {

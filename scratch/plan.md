@@ -29,6 +29,8 @@ Field case behind this: five `manabot` `coverage-working` Tasks (MTG-418..422) r
 
 - `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings` passed.
 
+**Compression checks.** The focused nextest run passed all 39 tests, including `documented_commands`, Task wakeups, Graph loop and router prompts, manual commits and merge revocation before push. A second run of `manual_commit_pushes_branch_checkpoints_unless_kept_local` passed with a staged edit reverted in the working tree. Restaging it published the existing checkpoint at the same SHA.
+
 ## Remaining
 
-Gate checks `documented_commands`.
+Gate runs branch CI.

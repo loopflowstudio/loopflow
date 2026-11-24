@@ -1,43 +1,41 @@
-at: bcae93555820deb1ece27e2bc3535c8214a51693
+at: 6eb8ef4bbb02d0fe42742cb6635226862d4d5f05
 first:
   - path: docs/orchestration.md
-    why: Pass sizing and the deciding step's prompt
-  - path: rust/loopflow-definitions/src/builtins/task/skill/kickoff.md
-    why: Group related work when planning
-  - path: rust/loopflow-definitions/src/builtins/task/skill/implement.md
-    why: Build through the next review or decision
-  - path: rust/loopflow-definitions/src/builtins/task/skill/realign.md
-    why: Regroup the work after each pass
-  - path: rust/loopflow-definitions/src/builtins/task/skill/loop-or-next.md
-    why: What restarting the loop costs
-  - path: rust/loopflow-execution/src/graph/output.rs
-    why: Decision criteria for any final skill
-  - path: rust/loopflow-execution/src/graph/instructions.rs
-    why: Equivalent guidance for a conversational Graph
-  - path: rust/loopflow/src/lf/commands/graph.rs
-    why: Count repeated steps from the return target
-  - path: rust/loopflow/tests/session_lifecycle_tests.rs
-    why: Prompts the provider received across three passes
+    why: Pass sizing and the outer review loop
   - path: docs/sessions.md
     why: When an idle Task conversation wakes
-  - path: rust/loopflow-storage/src/sqlite/task_work.rs
-    why: Task position and Graph executions share a snapshot
-  - path: rust/loopflow-execution/src/harness/task_updates.rs
-    why: Only settled runs produce updates
-  - path: rust/loopflow/src/server/wake.rs
-    why: Idle inbox stays silent until settlement
   - path: docs/ops.md
-    why: Commit and push behavior from the command line
-  - path: rust/loopflow/src/lf/mod.rs
-    why: Branch default and local opt-out in help
+    why: Which checkpoints push
+  - path: rust/loopflow-definitions/src/builtins/task/skill/kickoff.md
+    why: Plan related work in substantial passes
+  - path: rust/loopflow-definitions/src/builtins/task/skill/implement.md
+    why: Build until the next decision or review
+  - path: rust/loopflow-definitions/src/builtins/task/skill/realign.md
+    why: Regroup the remaining work
+  - path: rust/loopflow-execution/src/graph/output.rs
+    why: One contract instructs and decodes the step
+  - path: rust/loopflow/src/lf/commands/graph.rs
+    why: Show the pass number and repeated steps
+  - path: rust/loopflow-storage/src/sqlite/task_work.rs
+    why: Snapshot the Task position and Graph executions together
+  - path: rust/loopflow-execution/src/store/task_work.rs
+    why: Read the last settled Task position
+  - path: rust/loopflow-execution/src/harness/task_updates.rs
+    why: Deliver newly settled outcomes and errors
+  - path: rust/loopflow-execution/src/ops/commit.rs
+    why: One push decision for whole and selected commits
   - path: rust/loopflow-execution/src/engine/checkout.rs
-    why: Push decision shared by whole and selected commits
+    why: Translate manual commit options and report the result
+  - path: rust/loopflow/tests/session_lifecycle_tests.rs
+    why: Provider prompts across three passes
+  - path: rust/loopflow/src/server/wake.rs
+    why: Idle inbox delivery after settlement
   - path: rust/loopflow/tests/commit_tests.rs
-    why: Remote heads and receipts across local checkpoints
+    why: Remote heads, local checkpoints and retry receipts
 hide:
   - path: tests/goldens/builtin_implement.md
     why: Generated from the implement skill
   - path: tests/goldens/builtin_realign.md
     why: Generated from the realign skill
   - path: tests/fixtures/dto/server_schema.json
-    why: Generated command spelling matches server describe
+    why: Generated from the served command schema

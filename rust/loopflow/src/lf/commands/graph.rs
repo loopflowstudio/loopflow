@@ -886,10 +886,10 @@ impl RunningGraph<'_> {
     }
 
     /// The captured step the runner is about to run.
-    fn current(&self) -> Option<ConcreteStep> {
+    fn current(&self) -> Option<&ConcreteStep> {
         let position = self.position.lock().expect("Graph position mutex poisoned");
         let (body, leaf) = position.current_body(self.steps);
-        body.get(leaf.index).cloned()
+        body.get(leaf.index)
     }
 
     /// Reserve the step about to spawn under the id minted for it, so the
@@ -912,7 +912,7 @@ impl RunningGraph<'_> {
         let Some(task) = self.task.as_ref().filter(|_| self.task_run.is_some()) else {
             return Ok(None);
         };
-        let Some(step) = self.current().as_ref().and_then(|step| {
+        let Some(step) = self.current().and_then(|step| {
             loopflow_execution::task_graph::landing_name(
                 step,
                 crate::lf::navigation::command_merges,
@@ -1259,7 +1259,7 @@ impl SkillExecutor for &RunningGraph<'_> {
         let name = &skill.skill.name;
         print_step_progress(ctx.progress, name);
         let mut message = self.message.unwrap_or_default().to_owned();
-        let (output, instructions) = {
+        let step = {
             let position = self.position.lock().expect("Graph position mutex poisoned");
             let (body, leaf) = position.current_body(self.steps);
             if let Some(start) = return_target(body, leaf.index) {
@@ -1269,11 +1269,7 @@ impl SkillExecutor for &RunningGraph<'_> {
                 let target = loopflow_execution::task_graph::step_name(&body[start]);
                 message.push_str(&format!("\n\nDecision pass {pass}. Iterating repeats {steps} steps, back to {target}.\nCompare what the preceding pass set out to do with what changed or was learned. Say when earlier results are missing."));
             }
-            let step = body.get(leaf.index);
-            (
-                step.and_then(GraphOutput::for_step),
-                step.and_then(GraphOutput::for_step_instructions),
-            )
+            body.get(leaf.index)
         };
         if let Some(direction) = &ctx.direction {
             message.push_str(&format!(
@@ -1285,9 +1281,8 @@ impl SkillExecutor for &RunningGraph<'_> {
             let step = skill.interactive_step().unwrap_or(name);
             message.push_str(&stand_in_message(step, skill.returns.is_some()));
         }
-        if let Some(instructions) = instructions {
-            message.push_str(&instructions);
-        }
+        let output =
+            step.and_then(|step| GraphOutput::append_step_instructions(step, &mut message));
         let mut step_cli = self.launcher.process_options();
         // spawn carries verbosity for skills, operations, and correction turns.
         step_cli.verbose = false;

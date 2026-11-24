@@ -195,7 +195,7 @@ impl ExecutionCursor {
     }
 
     /// Return no executable steps when the selection has no captured definition.
-    pub fn current_body<'a>(&'a self, steps: &'a [ConcreteStep]) -> (&'a [ConcreteStep], &'a Self) {
+    pub fn current_body<'a>(&self, steps: &'a [ConcreteStep]) -> (&'a [ConcreteStep], &Self) {
         match self.child.as_deref() {
             Some(NestedCursor::Xor { selected, cursor }) => {
                 match selected_body(steps, self.index, selected) {

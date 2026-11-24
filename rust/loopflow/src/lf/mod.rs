@@ -1430,6 +1430,9 @@ pub enum ServerCommand {
     /// Look up a submitted creation without retrying it
     Receipt {
         request_id: String,
+        /// The Task the creation was for, read where that Task runs
+        #[arg(long)]
+        task: Option<String>,
         #[arg(long)]
         json: bool,
     },

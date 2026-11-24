@@ -8,7 +8,7 @@ extension CreationSubmissions {
     static let shared = CreationSubmissions(
         directory: WorkCache.homeDirectory.appendingPathComponent("submissions"),
         machine: { try await localMachine() },
-        lookup: { try await ServerClient.read(.creationGet(requestID: $0)) },
+        lookup: { try await ServerClient.read(.creationGet(requestID: $0, task: $1)) },
         send: { try await ServerClient.submittedCreation($0) })
 
     static func localMachine() async throws -> String {
@@ -127,7 +127,7 @@ final class CreationRecovery {
                     let encoder = JSONEncoder()
                     encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
                     let resource = Resource(destination: record.destination, directory: directory,
-                        task: receipt.taskId, session: receipt.sessionId,
+                        task: receipt.taskId ?? record.task, session: receipt.sessionId,
                         receipt: String(decoding: try encoder.encode(receipt), as: UTF8.self))
                     current.append(Item(id: record.id, text: receipt.explanation,
                         complete: receipt.disposition == .complete, resource: resource))

@@ -36,7 +36,7 @@ public typealias RegistryRunner = @Sendable (_ lfArgs: [String], _ cwd: String?)
 /// `--subscribe` is also served as that subscription.
 public enum ServedRead: Equatable, Sendable, Encodable {
     case sessionHistoryGet(id: String)
-    case creationGet(requestID: String)
+    case creationGet(requestID: String, task: String?)
     case desktopViewList(directory: String)
     case sessionList(directory: String, headless: Bool, after: String?, limit: Int?, task: String?)
     case taskGet(directory: String, issue: String)
@@ -97,7 +97,8 @@ public enum ServedRead: Equatable, Sendable, Encodable {
     public var argv: [String] {
         switch self {
         case .sessionHistoryGet(let id): return ["session", "history", "show", id]
-        case .creationGet(let requestID): return ["server", "receipt", requestID, "--json"]
+        case .creationGet(let requestID, let task):
+            return ["server", "receipt", requestID] + (task.map { ["--task", $0] } ?? []) + ["--json"]
         case .desktopViewList:
             return ["desktop", "view", "list", "--json"]
         case .sessionList(_, let headless, let after, let limit, let task):
@@ -216,7 +217,7 @@ public enum ServedRead: Equatable, Sendable, Encodable {
     private var tagged: TaggedFields {
         switch self {
         case .sessionHistoryGet(let id): TaggedFields("session.history.get", ["id": id])
-        case .creationGet(let requestID): TaggedFields("creation.get", ["request_id": requestID])
+        case .creationGet(let requestID, let task): TaggedFields("creation.get", ["request_id": requestID, "task": task])
         case .desktopViewList(let directory): TaggedFields("desktop.view.list", ["directory": directory])
         case .sessionList(let directory, let headless, let after, let limit, let task):
             TaggedFields("session.list", ["directory": directory, "headless": headless, "after": after, "limit": limit, "task": task])

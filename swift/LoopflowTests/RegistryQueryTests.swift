@@ -98,6 +98,11 @@ struct RegistryQueryTests {
         #expect(ServedRead.waveList.cwd == nil)
         #expect(try object(ServedRead.taskFilesWatch(issue: "FIX-1"))
             == object(#"{"kind":"task.files.watch","issue":"FIX-1"}"#))
+        let receipt = ServedRead.creationGet(requestID: "reset", task: "LOO-1")
+        #expect(try object(receipt) == object(#"{"kind":"creation.get","request_id":"reset","task":"LOO-1"}"#))
+        #expect(receipt.argv == ["server", "receipt", "reset", "--task", "LOO-1", "--json"])
+        #expect(try object(ServedRead.creationGet(requestID: "new", task: nil))
+            == object(#"{"kind":"creation.get","request_id":"new","task":null}"#))
     }
 
     /// The JSON `write::tests::desktop_encodings_name_their_writes` decodes in Rust.

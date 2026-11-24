@@ -1787,7 +1787,12 @@ final class WorkModel {
             guard answers >= max(taskFloor, scopeFloor) else { return }
             // A frame about its own Task stays true after the selection moves on.
             if let body, let row = body.row, row.task.identifier == body.task {
-                if subscribedTaskRow != .available(row) { subscribedTaskRow = .available(row) }
+                if subscribedTaskRow != .available(row) {
+                    subscribedTaskRow = .available(row)
+                    // The owner's standing can be what starts a Task only a
+                    // peer has run; its Session opens now, not at the next list.
+                    openWarmConversations()
+                }
             } else if body == nil {
                 subscribedTaskRow = .unavailable(lastGood: subscribedTaskRow.value, reason: reason)
             }

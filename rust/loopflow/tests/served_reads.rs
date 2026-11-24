@@ -1051,6 +1051,7 @@ fn server_operations_match_their_lf_commands() {
                 },
                 Read::CreationGet {
                     request_id: "absent-creation".into(),
+                    task: None,
                 },
                 Read::GraphRunGet { id: graph },
                 Read::SessionUsage {
@@ -3060,6 +3061,7 @@ fn served_task_create_survives_a_dropped_connection_and_server_restart() {
     let found = connection
         .request(Operation::Read(Read::CreationGet {
             request_id: "lost-answer".into(),
+            task: None,
         }))
         .unwrap()
         .result;
@@ -3104,6 +3106,7 @@ fn served_task_create_survives_a_dropped_connection_and_server_restart() {
     let continuation = connection
         .request(Operation::Read(Read::CreationGet {
             request_id: "lost-answer".into(),
+            task: None,
         }))
         .unwrap()
         .result;
@@ -3116,6 +3119,7 @@ fn served_task_create_survives_a_dropped_connection_and_server_restart() {
     let interrupted = connection
         .request(Operation::Read(Read::CreationGet {
             request_id: "lost-answer".into(),
+            task: None,
         }))
         .unwrap()
         .result;
@@ -3162,6 +3166,7 @@ fn served_task_create_survives_a_dropped_connection_and_server_restart() {
     let removed = connection
         .request(Operation::Read(Read::CreationGet {
             request_id: "lost-answer".into(),
+            task: None,
         }))
         .unwrap()
         .result;

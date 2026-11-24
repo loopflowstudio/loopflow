@@ -1448,10 +1448,15 @@ impl Remote {
         launching: bool,
         source: Option<loopflow_execution::ops::task::remote::TaskSource>,
     ) -> anyhow::Result<Self> {
-        let selection = Selection::capture(change.directory(), source)?;
+        // What this Machine runs with comes from its own checkout of the
+        // repository, as `read::peer_of` captures it: a client may name the
+        // owner's checkout path, which does not exist here.
+        let local = super::work_route::repository_path(&repository)
+            .unwrap_or_else(|_| change.directory().to_path_buf());
+        let selection = Selection::capture(&local, source)?;
         let secrets = match launching {
             true => {
-                let mut forwarded = loopflow_execution::machine::forward::read(change.directory())?;
+                let mut forwarded = loopflow_execution::machine::forward::read(&local)?;
                 let secrets = forwarded.take_secrets();
                 let mut notices = Vec::new();
                 loopflow_execution::machine::forward::deliver(&machine, &forwarded, &mut notices)?;

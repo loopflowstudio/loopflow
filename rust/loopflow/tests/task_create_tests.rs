@@ -835,7 +835,10 @@ fn task_create_request_recovers_lost_replies_without_repeating_start() {
     let lookup = service
         .connect()
         .request(loopflow::server::wire::Operation::Read(
-            loopflow::lf::commands::read::Read::CreationGet { request_id: id },
+            loopflow::lf::commands::read::Read::CreationGet {
+                request_id: id,
+                task: None,
+            },
         ))
         .unwrap()
         .result;

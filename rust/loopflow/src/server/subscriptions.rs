@@ -572,7 +572,6 @@ impl Producer {
     ) -> Result<()> {
         let mut generation = lock(&self.requested).generation;
         let mut asked = generation;
-        let labels_owner = matches!(query, Read::TaskFilesWatch { .. });
         let placed = query.clone();
         let mut peer = super::peers::PeerSubscription::open(machine, sender, query, select).await?;
         self.latest.send_modify(|latest| latest.ready = true);
@@ -601,14 +600,6 @@ impl Producer {
                 ServerMessage::Reading { mut frame, .. } => {
                     if let Some(answer) = frame["answers"].as_u64() {
                         generation = answer;
-                    }
-                    // The owner names itself; readers here use this Machine's name for it.
-                    if labels_owner {
-                        if let Some(body) = frame["body"].as_object_mut() {
-                            if body.contains_key("machine_label") {
-                                body["machine_label"] = serde_json::json!(machine.label);
-                            }
-                        }
                     }
                     if let Some(body) = frame.get_mut("body") {
                         placed.localize_peer_reading(body, machine, route)?;

@@ -472,7 +472,7 @@ case names one operation, including distinct claim/unassign and pin/unpin writes
 | `task.runs` | `lf task runs <issue>` | read |
 | `task.wait` | `lf task wait <issue> --until <state>` | `engine::task` |
 | `task.create` | `lf task create [--session <id>] [--run] --request-id <id>` | write |
-| `creation.get` | `lf server receipt <request-id> --json` | read; no creation or launch |
+| `creation.get` | `lf server receipt <request-id> [--task <task>] --json` | read; no creation or launch; a `task` another Machine runs is read there |
 | `task.run` | `lf task run <issue>` | `engine::task` |
 | `task.auto.on` | `lf task auto on <issue>` | `engine::task` |
 | `task.auto.off` | `lf task auto off <issue>` | `engine::task` |
@@ -1436,7 +1436,9 @@ finish local preparation or proceed to its first launch; `inspect` means retain
 it without resubmitting. The creation handler checks again under its request
 lock, so a lookup cannot authorize repeating an uncertain effect. The receipt
 retains original `run` intent; disposition is computed from the receipt and
-current resource, never persisted as another outcome.
+current resource, never persisted as another outcome. A creation for a Task
+another Machine runs (`session.new` there) keeps its receipt on that Machine;
+naming the `task` reads it there.
 
 After reconnect or cold startup, look up the receipt first. Send the saved bytes
 only for confirmed absence or `continue`. Unavailable lookup stays unavailable.

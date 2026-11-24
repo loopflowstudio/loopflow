@@ -37,8 +37,8 @@ final class RemoteMobileClient: MobileTaskCreationClient {
     private lazy var journal: CreationSubmissions = {
         let directory = URL.applicationSupportDirectory.appending(path: "submissions-\(savedMachine.machineID)")
         let machineID = savedMachine.machineID
-        return CreationSubmissions(directory: directory, machine: { machineID }, lookup: { [self] id in
-            try await connection().read(.creationGet(requestID: id), deadline: Self.requestDeadline)
+        return CreationSubmissions(directory: directory, machine: { machineID }, lookup: { [self] id, task in
+            try await connection().read(.creationGet(requestID: id, task: task), deadline: Self.requestDeadline)
         }, send: { [self] payload in
             let creation = try JSONDecoder().decode(JSONValue.self, from: payload)
             return String(decoding: try await connection().request(.submittedCreation(creation), deadline: Self.requestDeadline).bytes,

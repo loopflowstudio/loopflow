@@ -238,7 +238,7 @@ Build thinly end to end; each slice runs and proves itself before moving on, and
 
 ## Remaining before merge
 
-- Implement Slice 8 (8A, 8B, 8C above).
+- Slice 8 built (8A, 8B, 8C). `creation.get` with a `task` also localizes a non-null receipt `task_id`; `SubmittedCreation.task` reads the saved payload's `task`, so Desktop and Mobile both route lookups by it. Swift suites (`CreationSubmissionTests`, `RegistryQueryTests`, `WorkNavigationTests`) go to gate.
 - Clicking Reset session and New conversation in the app on an unlocked display (QA drove their exact requests; `scratch/qa.html`).
 - Gate: the four acceptance commands below, then CI.
 

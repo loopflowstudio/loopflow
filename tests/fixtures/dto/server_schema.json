@@ -6987,11 +6987,19 @@
             },
             "request_id": {
               "type": "string"
+            },
+            "task": {
+              "description": "The Task the creation was for: a Task another Machine runs keeps\nits receipt there, as `--task <task>` reads it.",
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           "required": [
             "kind",
-            "request_id"
+            "request_id",
+            "task"
           ],
           "type": "object",
           "x-result": {

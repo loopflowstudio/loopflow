@@ -4577,7 +4577,7 @@ fn server_routed_task_workspace() {
     assert_eq!(
         waiting["body"],
         serde_json::json!({
-            "task_id": peer_task,
+            "task_id": task,
             "machine_id": mini.id,
             "machine_label": "mini",
             "checkout": null,
@@ -4692,9 +4692,17 @@ fn server_routed_task_workspace() {
         })
         .unwrap()
         .result;
+    // Mini answers; the reading names the Task, its repository and mini as
+    // this Machine does. The files stay in mini's checkout.
     let workspace = &pane["row"]["reference"]["workspace"];
     assert_eq!(workspace["machine_id"], mini.id.as_str());
+    assert_eq!(workspace["machine_label"], "mini");
     assert_eq!(workspace["worktree"], plan.remote_path.to_str().unwrap());
+    assert_eq!(pane["row"]["task"]["id"], task.as_str());
+    assert_eq!(
+        pane["row"]["task"]["repo"],
+        plan.local_path.to_str().unwrap()
+    );
     let detail = client
         .request(Read::TaskDetail {
             directory: directory.clone(),
@@ -4702,7 +4710,7 @@ fn server_routed_task_workspace() {
         })
         .unwrap()
         .result;
-    assert_eq!(detail["task"]["id"], peer_task.as_str());
+    assert_eq!(detail["task"]["id"], task.as_str());
     let runs = client
         .request(Read::TaskRuns {
             directory: directory.clone(),
@@ -4759,8 +4767,29 @@ fn server_routed_task_workspace() {
         })
         .unwrap()
         .result;
-    assert_eq!(detail["task"]["repo"], other.remote_path.to_str().unwrap());
-    assert_eq!(peer_client(), (connection_id.clone(), requests + 5));
+    assert_eq!(detail["task"]["repo"], other.local_path.to_str().unwrap());
+    // A Reset sent to mini keeps its receipt there; naming the Task reads it.
+    peer.execute(
+        "INSERT INTO creation_receipts
+            (request_id,kind,fingerprint,task_id,session_id,artifact_key,milestone,result,created_at,updated_at,run)
+            VALUES ('reset-on-mini','session.new','fingerprint',NULL,'session_1',NULL,'stopping',NULL,1,1,0)",
+        [],
+    )
+    .unwrap();
+    let mut receipt = |task: Option<String>| {
+        client
+            .request(Read::CreationGet {
+                request_id: "reset-on-mini".into(),
+                task,
+            })
+            .unwrap()
+            .result
+    };
+    assert_eq!(receipt(None), Value::Null);
+    let routed = receipt(Some(task.to_string()));
+    assert_eq!(routed["request_id"], "reset-on-mini", "{routed}");
+    assert_eq!(routed["session_id"], "session_1");
+    assert_eq!(peer_client(), (connection_id.clone(), requests + 6));
 
     let save = |base: &Value| Write::TaskSave {
         directory: plan.local_path.clone(),
@@ -4792,7 +4821,7 @@ fn server_routed_task_workspace() {
         fs::read_to_string(plan.local_path.join(file)).unwrap(),
         "old laptop copy"
     );
-    assert_eq!(peer_client(), (connection_id, requests + 7));
+    assert_eq!(peer_client(), (connection_id, requests + 8));
     assert!(plan
         .remote
         .command_answer("save-on-mini")

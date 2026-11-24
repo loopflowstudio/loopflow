@@ -50,8 +50,9 @@ struct TaskConceptTests {
     @Test func pausedTaskKeepsItsConversationWarm() throws {
         var wire = try activeTaskWire()
         wire["lifecycle"] = "paused"
-        wire["section"] = "paused"
-        wire["selection_states"] = ["open", "paused"]
+        wire["section"] = "working"
+        wire["working_group"] = "paused"
+        wire["selection_states"] = ["open", "working"]
         wire["run_control"] = ["pausing": false, "unavailable": "Task is paused"]
         let row = try JSONDecoder().decode(RoadmapTask.self, from: JSONSerialization.data(withJSONObject: wire))
         let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("Passive rendering") }, repoPath: "/repo")
@@ -60,20 +61,15 @@ struct TaskConceptTests {
         ]))
         model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [])
         let key = WorkWorkspaceKey(repository: row.task.repositoryId, kind: .task, id: row.id)
-        let member = WorkViewPlan.Content(work: key, title: row.task.name, states: [.open, .paused],
-                                          identifier: row.task.identifier, graphStep: nil, primarySession: nil, location: nil, argv: nil, unavailable: [])
+        let member = WorkViewPlan.Content(work: key, title: row.task.name, states: [.open, .working],
+                                          identifier: row.task.identifier, workingGroup: .paused, graphStep: nil, primarySession: nil, location: nil, argv: nil, unavailable: [])
         let plan = fixtureViewPlan(owner: .init(repository: key.repository, kind: .repository, id: key.repository), members: [member])
         model.applyTaskList(plan, wave: nil, reason: "")
-        #expect(model.sidebarTaskIDs.isEmpty)
-        model.navigation.sidebarFilter = .paused
-        #expect(model.taskListReading.isLoading)
-        #expect(model.workScope.taskList == .paused)
-        model.applyTaskList(plan, wave: nil, list: .paused, reason: "")
         #expect(model.sidebarTaskIDs == [row.id])
-        #expect(TaskList.paused.expression(wave: "product") == "wave:product kind:task state:paused")
+        #expect(model.sidebarRows.first?.workingGroup == .paused)
         let board = BacklogList(tasks: [row], truncated: false, wave: nil, waveNames: [:], state: BacklogState())
-        #expect(board.all.isEmpty && board.paused.map(\.id) == [row.id])
-        #expect(model.startedTaskCount(.repository) == 0)
+        #expect(board.all.isEmpty)
+        #expect(model.startedTaskCount(.repository) == 1)
         #expect(row.opensConversationAutomatically)
         let registry = SessionsWorkspaceRegistry(localMachineId: "local")
         model.bindWorkspaces(registry, repository: key.repository)
@@ -87,6 +83,25 @@ struct TaskConceptTests {
         try action.tap()
         #expect(model.pendingChanges.changes.last?.command == .unpause(task: row.task.identifier, owned: row.runtime?.owner != nil))
         #expect(throws: (any Error).self) { try view.find(button: "Start") }
+    }
+
+    @Test func workingGroupsKeepOrderAndKeyboardSlotsWhenSortedByStatus() throws {
+        let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("Passive rendering") }, repoPath: "/repo")
+        #expect(model.startedTaskCount(.repository) == nil)
+        var plan = fixtureStartedPlan([("P", [.working]), ("S1", [.working, .busy]), ("A", [.working, .busy]), ("S2", [.working, .available])])
+        for (index, group) in [WorkingGroup.paused, .shipping, .active, .shipping].enumerated() {
+            plan.contents[index].workingGroup = group
+        }
+        model.applyTaskList(plan, wave: nil, reason: "")
+        let navigator = WorkNavigator(model: model, onOpenSession: { _ in })
+        for title in ["Active", "Shipping", "Paused"] {
+            _ = try navigator.inspect().find(text: title)
+        }
+        #expect(model.sidebarTaskIDs == ["A", "S1", "S2", "P"])
+        model.toggleSidebarSortByStatus()
+        #expect(model.sidebarTaskIDs == ["A", "S2", "S1", "P"])
+        model.selectSidebarTask(slot: 1)
+        #expect(model.selection == .task(id: "S2"))
     }
 
     @Test func lifecycleAndActionsFollowTheSameRustReading() throws {
@@ -175,7 +190,6 @@ struct TaskConceptTests {
             for filter in WorkNavigation.SidebarFilter.allCases {
                 model.navigation.sidebarFilter = filter
                 let expected = phase.tasks.filter { task in
-                    if filter == .paused { return task.section == .paused }
                     return task.selectionStates.contains(.working) && (filter == .working
                         || task.selectionStates.contains(filter == .available ? .available : .busy))
                 }.map(\.id)
@@ -249,7 +263,7 @@ struct TaskConceptTests {
 
     @Test func missingKeysFailAndSavedActivityCannotReturn() throws {
         var row = try activeTaskWire()
-        for key in ["lifecycle", "selection_states"] {
+        for key in ["lifecycle", "selection_states", "working_group"] {
             var missing = row
             missing.removeValue(forKey: key)
             #expect(throws: (any Error).self) {

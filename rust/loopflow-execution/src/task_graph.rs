@@ -88,7 +88,10 @@ fn names(step: &ConcreteStep) -> Vec<&str> {
 
 /// The name a Task waits at before a step that merges: `lf land` or `lf pr
 /// arm` however the graph spells it, or the `pr-land` skill.
-pub fn landing_name(step: &ConcreteStep, merges: fn(&[String]) -> bool) -> Option<String> {
+pub fn landing_name(
+    step: &ConcreteStep,
+    mut merges: impl FnMut(&[String]) -> bool,
+) -> Option<String> {
     match step {
         ConcreteStep::Command(command) => {
             merges(&command.item.argv()).then(|| command.item.display_name())
@@ -230,6 +233,34 @@ impl CapturedGraph {
         }
     }
 
+    /// Could any remaining path need a person before its next landing?
+    fn needs_review(&self, place: &Place, merges: &mut dyn FnMut(&[String]) -> bool) -> bool {
+        fn scan(
+            steps: &[ConcreteStep],
+            after: bool,
+            merges: &mut dyn FnMut(&[String]) -> bool,
+        ) -> bool {
+            steps.iter().rev().fold(after, |later, step| match step {
+                ConcreteStep::Skill(skill) if skill.interactive_step().is_some() => true,
+                ConcreteStep::Xor(branch) => branch
+                    .paths
+                    .values()
+                    .any(|path| scan(&path.steps, later, merges)),
+                _ => later && landing_name(step, &mut *merges).is_none(),
+            })
+        }
+        let mut steps = self.steps.as_slice();
+        let mut later = false;
+        for (index, selected) in &place.path {
+            later = scan(&steps[index + 1..], later, merges);
+            let ConcreteStep::Xor(branch) = &steps[*index] else {
+                unreachable!("validated XOR path")
+            };
+            steps = &branch.paths[selected].steps;
+        }
+        scan(&steps[place.index..], later, merges)
+    }
+
     /// The place `cursor` stands at, if the graph has it.
     pub fn place_of(&self, cursor: &ExecutionCursor) -> Option<Place> {
         let mut path = Vec::new();
@@ -364,7 +395,7 @@ pub struct WorkflowOutline {
     pub steps: Vec<WorkflowStep>,
     /// Every step where a person takes part, as `TaskGraph` carries them.
     pub interactive_steps: Vec<InteractiveStep>,
-    /// "You take part at explore, ship-review and verify." or "Runs on its own."
+    /// "You take part at explore and ship-review." or "Runs on its own."
     pub sentence: String,
 }
 
@@ -591,6 +622,28 @@ impl TaskGraph {
     }
 }
 
+/// The Task's captured cursor takes precedence over the stop its run left.
+pub fn ships_before_review(
+    graph: &str,
+    step: &str,
+    cursor: Option<&str>,
+    mut merges: impl FnMut(&[String]) -> bool,
+) -> crate::store::StoreResult<bool> {
+    let graph: CapturedGraph = serde_json::from_str(graph)?;
+    let place = if let Some(cursor) = cursor {
+        let cursor: ExecutionCursor = serde_json::from_str(cursor)?;
+        if cursor.index == graph.steps.len() {
+            return Ok(true);
+        }
+        graph.place_of(&cursor)
+    } else if step == END {
+        return Ok(true);
+    } else {
+        graph.interactive_step(step).or_else(|| graph.find(step))
+    };
+    Ok(place.is_some_and(|place| !graph.needs_review(&place, &mut merges)))
+}
+
 /// Name the committed file a teammate's graph selection needs.
 pub fn missing_graph(name: &str) -> String {
     format!(
@@ -607,7 +660,17 @@ pub(crate) fn validate_graph_name(name: &str) -> Result<(), String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
+    pub(crate) fn ships_before_review(
+        graph: &str,
+        step: &str,
+        cursor: Option<&str>,
+    ) -> crate::store::StoreResult<bool> {
+        super::ships_before_review(graph, step, cursor, |args| {
+            args.get(1).is_some_and(|arg| arg == "land")
+        })
+    }
+
     use super::{interactive_summary, CapturedGraph, TaskGraph, TaskGraphRun};
     use loopflow_storage::sqlite::{Auto, AutoState};
 
@@ -627,7 +690,7 @@ mod tests {
             .into_iter()
             .map(|step| step.name)
             .collect();
-        assert_eq!(steps, ["explore", "ship-review", "verify"]);
+        assert_eq!(steps, ["explore", "ship-review"]);
         let pursue = CapturedGraph::load("pursue", repo.path()).unwrap().unwrap();
         assert!(pursue.interactive_steps().is_empty());
         assert!(CapturedGraph::load("no-such-graph", repo.path())
@@ -657,10 +720,10 @@ mod tests {
         );
         assert_eq!(graph.find("start").unwrap().cursor().index, 0);
         assert!(graph.find("no-such-step").is_none());
-        // After the last interactive step nothing remains.
-        let verify = graph.interactive_step("verify").unwrap();
+        // Delivery and verification run after review.
+        let review = graph.interactive_step("ship-review").unwrap();
         assert!(graph
-            .after(&verify)
+            .after(&review)
             .is_none_or(|place| graph.next_interactive(&place).is_none()));
     }
 
@@ -745,7 +808,7 @@ mod tests {
                 ("build", false),
                 ("ship-review", true),
                 ("deliver", false),
-                ("verify", true)
+                ("verify", false)
             ]
         );
         assert_eq!(

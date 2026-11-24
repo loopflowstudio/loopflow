@@ -325,8 +325,9 @@ pub fn task_ownership(
 pub fn task_detail_facts(
     store: &SqliteStore,
     tasks: &[&Task],
+    ships: loopflow_storage::sqlite::ShipsBeforeReview<'_>,
 ) -> StoreResult<loopflow_storage::sqlite::TaskDetailFacts> {
-    let (local, mut facts) = store.saved_task_detail_facts(tasks)?;
+    let (local, mut facts) = store.saved_task_detail_facts(tasks, ships)?;
     let mut names = machine_names(store)?;
     names.insert(local, local_label());
     for ownership in facts.ownership.values_mut() {

@@ -230,7 +230,13 @@ public struct TaskWorktreeSnapshot: Decodable, Sendable, Hashable {
 /// Where a Task sits on the Wave board, derived once in Rust: the board, the
 /// sidebar's Working Tasks and every count read it.
 public enum TaskSection: String, Decodable, Sendable, Hashable {
-    case backlog, working, paused, done, abandoned
+    case backlog, working, done, abandoned
+}
+
+public enum WorkingGroup: String, Codable, CaseIterable, Sendable {
+    case active, shipping, paused
+
+    public var title: String { rawValue.capitalized }
 }
 
 public struct RoadmapTask: Decodable, Sendable, Identifiable, Hashable {
@@ -240,6 +246,7 @@ public struct RoadmapTask: Decodable, Sendable, Identifiable, Hashable {
     public let reference: TaskReferenceSnapshot
     /// Effective lifecycle, including planning withdrawal of never-started work.
     public internal(set) var lifecycle: TaskState
+    public internal(set) var workingGroup: WorkingGroup?
     /// The same states Rust uses for Task selections and conversation activity.
     public let selectionStates: Set<WorkSelectionState>
     public internal(set) var runtime: TaskRuntimeSnapshot?
@@ -258,6 +265,7 @@ public struct RoadmapTask: Decodable, Sendable, Identifiable, Hashable {
 
     enum CodingKeys: String, CodingKey {
         case task, reference, runtime, condition, actions, execution, section, pr, lifecycle
+        case workingGroup = "working_group"
         case selectionStates = "selection_states"
         case ownedByYou = "owned_by_you"
         case graphName = "graph_name"
@@ -265,6 +273,27 @@ public struct RoadmapTask: Decodable, Sendable, Identifiable, Hashable {
         case latestGraphProcess = "latest_graph_process"
         case runControl = "run_control"
         case nextMove = "next_move"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        task = try c.decode(TaskPlanningSnapshot.self, forKey: .task)
+        reference = try c.decode(TaskReferenceSnapshot.self, forKey: .reference)
+        lifecycle = try c.decode(TaskState.self, forKey: .lifecycle)
+        workingGroup = try c.decode(WorkingGroup?.self, forKey: .workingGroup)
+        selectionStates = try c.decode(Set<WorkSelectionState>.self, forKey: .selectionStates)
+        runtime = try c.decodeIfPresent(TaskRuntimeSnapshot.self, forKey: .runtime)
+        nextMove = try c.decode(WorkNextMove.self, forKey: .nextMove)
+        condition = try c.decode(TaskConditionSnapshot.self, forKey: .condition)
+        actions = try c.decode(TaskActionModel.self, forKey: .actions)
+        graphName = try c.decodeIfPresent(String.self, forKey: .graphName)
+        graphSource = try c.decodeIfPresent(String.self, forKey: .graphSource)
+        latestGraphProcess = try c.decodeIfPresent(GraphProcessDetail.self, forKey: .latestGraphProcess)
+        execution = try c.decodeIfPresent(TaskExecutionSnapshot.self, forKey: .execution)
+        runControl = try c.decode(TaskRunControl.self, forKey: .runControl)
+        pr = try c.decodeIfPresent(PrSnapshot.self, forKey: .pr)
+        section = try c.decode(TaskSection.self, forKey: .section)
+        ownedByYou = try c.decode(Bool.self, forKey: .ownedByYou)
     }
 
     /// A started Task nobody owns: nothing moves it until someone claims it.
@@ -308,7 +337,7 @@ public struct RoadmapTask: Decodable, Sendable, Identifiable, Hashable {
     /// Working Tasks open their conversation without being asked, owned or not:
     /// opening claims nothing. Unstarted and finished Tasks open one only when a
     /// person asks, or when Desktop already shows its Session.
-    public var opensConversationAutomatically: Bool { lifecycle.isWorking || lifecycle == .paused }
+    public var opensConversationAutomatically: Bool { lifecycle.isWorking }
 }
 
 public enum WorkNextMoveOwner: String, Decodable, Sendable, Hashable {

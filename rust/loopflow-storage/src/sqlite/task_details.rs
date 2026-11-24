@@ -9,7 +9,7 @@ use super::children::{
 };
 use super::task_pause::PauseCleanup;
 use super::SqliteStore;
-use crate::execution::TaskState;
+use crate::execution::{TaskSection, TaskState, WorkingGroup};
 use crate::planning_sync::TrackerActions;
 use crate::work::task::{Task, TaskEvent, TaskId, TaskPr, TaskPrId};
 use crate::{StoreError, StoreResult, TrackerState};
@@ -18,6 +18,7 @@ use loopflow_model::durable::{RepositoryId, TaskOwnership};
 /// Durable facts about a set of Tasks, read in one snapshot.
 #[derive(Debug)]
 pub struct TaskDetailFacts {
+    pub working_groups: HashMap<String, WorkingGroup>,
     pub states: HashMap<TaskId, TaskState>,
     /// Unsettled pauses, with the first worker OS session awaiting cleanup when recorded.
     pub pause_cleanup: HashMap<TaskId, PauseCleanup>,
@@ -46,6 +47,7 @@ impl SqliteStore {
     pub fn saved_task_detail_facts(
         &self,
         tasks: &[&Task],
+        ships: ShipsBeforeReview<'_>,
     ) -> StoreResult<(loopflow_model::durable::MachineId, TaskDetailFacts)> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let snapshot = conn.savepoint()?;
@@ -69,7 +71,21 @@ impl SqliteStore {
             )?
         };
         let (local, ownership) = super::task_ownership::ownerships_in(&snapshot, &ids)?;
+        let auto_on = auto_on_in(&snapshot, &json)?;
+        let working = tasks.iter().filter_map(|task| {
+            let state = states.get(&task.id)?.lifecycle(task.state.as_deref());
+            let owner = ownership.get(&task.id);
+            let remote = owner.is_some_and(|owner| owner.runs_on(&local).is_some());
+            (TaskSection::of(state, owner.is_some(), remote) == TaskSection::Working).then(|| {
+                (
+                    task.id.as_str(),
+                    state.observed_here(remote),
+                    auto_on.contains(&task.id),
+                )
+            })
+        });
         let facts = TaskDetailFacts {
+            working_groups: working_groups_in(&snapshot, working, ships)?,
             states,
             pause_cleanup,
             open_children: keyed(
@@ -147,13 +163,55 @@ impl SqliteStore {
                 &json,
                 |row| Ok((TaskId::from_raw(row.get::<_, String>(0)?), row.get::<_, String>(1)?)),
             )?,
-            auto_on: auto_on_in(&snapshot, &json)?,
+            auto_on,
             tracker_actions: super::planning_sync::task_tracker_actions_in(&snapshot, &ids)?,
             repository_paths: repository_paths_in(&snapshot)?,
         };
         snapshot.commit()?;
         Ok((local, facts))
     }
+}
+
+/// Execution interprets the cursor and the CLI recognizes commands that land a PR.
+pub type ShipsBeforeReview<'a> = &'a mut dyn FnMut(&str, &str, Option<&str>) -> StoreResult<bool>;
+
+pub(super) fn working_groups_in<'a>(
+    conn: &Connection,
+    working: impl Iterator<Item = (&'a str, Option<TaskState>, bool)>,
+    ships: ShipsBeforeReview<'_>,
+) -> StoreResult<HashMap<String, WorkingGroup>> {
+    let mut groups = HashMap::new();
+    let mut inspect = Vec::new();
+    for (id, state, auto) in working {
+        let group = match (state, auto) {
+            (Some(TaskState::Paused), _) => WorkingGroup::Paused,
+            (_, true) => WorkingGroup::Shipping,
+            (observed, false) => {
+                if observed.is_some() {
+                    inspect.push(id);
+                }
+                WorkingGroup::Active
+            }
+        };
+        groups.insert(id.to_owned(), group);
+    }
+    if !inspect.is_empty() {
+        let mut query = conn.prepare(
+            "SELECT task_id,graph,step,run_start FROM task_graphs
+             WHERE task_id IN (SELECT value FROM json_each(?1))",
+        )?;
+        let mut rows = query.query([ids_json(inspect)])?;
+        while let Some(row) = rows.next()? {
+            if ships(
+                &row.get::<_, String>(1)?,
+                &row.get::<_, String>(2)?,
+                row.get::<_, Option<String>>(3)?.as_deref(),
+            )? {
+                groups.insert(row.get(0)?, WorkingGroup::Shipping);
+            }
+        }
+    }
+    Ok(groups)
 }
 
 /// The Tasks among `ids` whose auto setting is on.

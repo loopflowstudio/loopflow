@@ -116,7 +116,6 @@ pub enum SelectionState {
     Idle,
     Active,
     Moving,
-    Paused,
     /// Board axis: the Task's `TaskSection`.
     Backlog,
     Working,
@@ -158,6 +157,7 @@ impl SelectionResolution {
 /// Facts from a complete shared Work read. Task state failures fail the read.
 #[derive(Debug, Clone)]
 pub struct SelectionWork {
+    pub lifecycle: Option<crate::execution::TaskState>,
     pub key: WorkWorkspaceKey,
     pub parent_wave: Option<WaveId>,
     pub name: String,
@@ -764,6 +764,8 @@ pub struct ViewPlan {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ViewContent {
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub working_group: Option<crate::execution::WorkingGroup>,
     pub work: WorkWorkspaceKey,
     pub title: String,
     pub states: BTreeSet<SelectionState>,

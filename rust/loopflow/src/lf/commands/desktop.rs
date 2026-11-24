@@ -724,7 +724,11 @@ pub(crate) fn read_plans(
 ) -> Result<Vec<loopflow_storage::work::selection::ViewPlan>> {
     let store = work_registry()?;
     let repository = repository_in(selected, directory, &store.sqlite)?;
-    Ok(selections::selection_plans(&store.sqlite, &repository)?)
+    Ok(selections::selection_plans(
+        &store.sqlite,
+        &repository,
+        &mut crate::lf::navigation::shipping_reader(),
+    )?)
 }
 
 /// `lf desktop view list --subscribe` for `--repository`, else the repository
@@ -743,7 +747,11 @@ pub(crate) fn subscribe_plans(
                 .context("Work registry is unavailable")
                 .and_then(|store| {
                     let repository = repository_in(selected.as_ref(), &directory, &store.sqlite)?;
-                    Ok(selections::selection_plans(&store.sqlite, &repository)?)
+                    Ok(selections::selection_plans(
+                        &store.sqlite,
+                        &repository,
+                        &mut crate::lf::navigation::shipping_reader(),
+                    )?)
                 });
             async move { result }
         },
@@ -774,6 +782,7 @@ pub(crate) fn subscribe_view_plan(
                         &store.sqlite,
                         &repository,
                         expression.as_deref(),
+                        &mut crate::lf::navigation::shipping_reader(),
                     )?)
                 });
             async move { result }
@@ -807,6 +816,7 @@ pub(crate) fn read_all_view_plans(
         &store.sqlite,
         expression,
         &portfolio_repos()?,
+        &mut crate::lf::navigation::shipping_reader(),
     )?)
 }
 
@@ -828,6 +838,7 @@ pub(crate) fn subscribe_all_view_plans(
                 &store.sqlite,
                 args.expression.as_deref(),
                 &portfolio_repos()?,
+                &mut crate::lf::navigation::shipping_reader(),
             )?)
         },
         transport,
@@ -850,6 +861,7 @@ pub fn plan_view(
         &store.sqlite,
         &repository,
         expression,
+        &mut crate::lf::navigation::shipping_reader(),
     )?)
 }
 
@@ -899,6 +911,7 @@ fn view_plan(
                 id: SelectionId("work-default".into()),
                 expression,
             },
+            &mut crate::lf::navigation::shipping_reader(),
         )?
     } else {
         plan_view(

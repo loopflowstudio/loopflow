@@ -266,6 +266,7 @@
         "wave_id": "b007dd43-6b65-410d-8a0e-c58be2910faf"
       },
       "lifecycle": "done",
+      "working_group": null,
       "selection_states": [
         "done"
       ]
@@ -897,6 +898,7 @@
           "wave_id": "b007dd43-6b65-410d-8a0e-c58be2910faf"
         },
         "lifecycle": "done",
+        "working_group": null,
         "selection_states": [
           "done"
         ]
@@ -1263,6 +1265,7 @@
         "wave_id": "b007dd43-6b65-410d-8a0e-c58be2910faf"
       },
       "lifecycle": "done",
+      "working_group": null,
       "selection_states": [
         "done"
       ]
@@ -1868,6 +1871,7 @@
           "wave_id": "b007dd43-6b65-410d-8a0e-c58be2910faf"
         },
         "lifecycle": "done",
+        "working_group": null,
         "selection_states": [
           "done"
         ]
@@ -2198,6 +2202,7 @@
         "wave_id": "b007dd43-6b65-410d-8a0e-c58be2910faf"
       },
       "lifecycle": "moving",
+      "working_group": "active",
       "selection_states": [
         "open",
         "moving",
@@ -2761,6 +2766,7 @@
           "wave_id": "b007dd43-6b65-410d-8a0e-c58be2910faf"
         },
         "lifecycle": "moving",
+        "working_group": "active",
         "selection_states": [
           "open",
           "moving",

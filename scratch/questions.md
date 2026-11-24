@@ -44,3 +44,11 @@ the next implementation slice.
 ## Conversation slice
 
 Apply ordinary conversation recovery and steer delivery during a Graph hold. This includes a stopped primary receiving an addressed steer. Keep list membership and Graph presentation for the next slice.
+
+## Working groups
+
+Keep saved order and status sorting inside each Working group. A drop reorders within its group. For an unselected XOR, a reachable human step before landing keeps the row Active. A Working Task without an observed Graph stays Active unless auto is on.
+
+Automatic verify cannot return across ship-review. Remove that outer loop and file a linked fix-forward Task for a failed merged claim.
+
+On unpause the action and lifecycle update immediately. The list keeps the row in place until the Machine returns the group for its saved cursor.

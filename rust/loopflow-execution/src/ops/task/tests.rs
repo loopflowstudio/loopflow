@@ -4,6 +4,7 @@ use crate::durable::TaskState;
 use crate::linear::{LinearIssueId, LinearProjectId};
 use crate::ops::pr_landing::{reconcile_pr_landing, wait_with_io, LandingIo, LandingObservation};
 use crate::store::{SharedStore, StorageConfig};
+use crate::task_graph::tests::ships_before_review;
 use crate::test_linear_input::SeedLinear;
 use crate::work::wave::Wave;
 use loopflow_model::durable::{WorkRef, WorkStatus};
@@ -550,9 +551,13 @@ fn adopting_a_checkout_with_a_running_graph_prevents_another_run() {
         assert_eq!(snapshot.execution.state, state);
         assert_eq!(snapshot.status, TaskState::Moving);
         assert_eq!(
-            crate::store::ownership::task_detail_facts(&fixture.store.sqlite, &[&fixture.task])
-                .unwrap()
-                .states[&fixture.task.id],
+            crate::store::ownership::task_detail_facts(
+                &fixture.store.sqlite,
+                &[&fixture.task],
+                &mut ships_before_review
+            )
+            .unwrap()
+            .states[&fixture.task.id],
             TaskState::Moving
         );
         assert_eq!(

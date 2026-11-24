@@ -174,7 +174,6 @@ struct StartFlows: Equatable {
 struct BacklogList {
     /// Every backlog Task, in rank order, before filtering.
     let all: [RoadmapTask]
-    let paused: [RoadmapTask]
     /// What the list shows.
     let rows: [RoadmapTask]
     let truncated: Bool
@@ -197,7 +196,6 @@ struct BacklogList {
                 || "\(task.task.identifier) \(task.task.name) \(task.task.description)".localizedCaseInsensitiveContains(needle))
         }
         rows = all.filter(matches)
-        paused = tasks.filter { $0.section == .paused && matches($0) }
         selection = state.selection.intersection(rows.map(\.id))
     }
 
@@ -439,17 +437,13 @@ struct BacklogList {
             return filter == state.filter && filter != .all ? "[\(label)]" : label
         }.joined(separator: " · "))
         if !state.query.isEmpty { lines.append("  search “\(state.query)”") }
-        if rows.isEmpty && paused.isEmpty { lines.append("  \(empty.title)") }
+        if rows.isEmpty { lines.append("  \(empty.title)") }
         lines += rows.map { task in
             var line = "  \(task.task.identifier) \(task.task.name)"
             if let standing = Self.standing(task) { line += " · \(standing)" }
             if let ownership = ownership(task) { line += " · \(ownership)" }
             if selection.contains(task.id) { line = "›" + line.dropFirst() }
             return line
-        }
-        if !paused.isEmpty {
-            lines.append("Paused")
-            lines += paused.map { "  \($0.task.identifier) \($0.task.name)" }
         }
         if truncated { lines.append("  Partial: searching the \(all.count) loaded") }
         return lines.joined(separator: "\n")
@@ -789,7 +783,7 @@ struct BacklogView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
-                    if list.rows.isEmpty, list.paused.isEmpty, model.viewTasks(view) != nil { emptyState(list) }
+                    if list.rows.isEmpty, model.viewTasks(view) != nil { emptyState(list) }
                     ForEach(list.rows) { task in
                         let isOpen = list.opened?.id == task.id
                         VStack(alignment: .leading, spacing: 0) {
@@ -810,18 +804,6 @@ struct BacklogView: View {
                         .background(isOpen ? palette.surfaceMuted : .clear)
                         .id(task.id)
                         Divider()
-                    }
-                    if !list.paused.isEmpty {
-                        Section {
-                            ForEach(list.paused) { task in
-                                Button { model.select(.task(id: task.id)) } label: {
-                                    Text("\(task.task.identifier)  \(task.task.name)").frame(maxWidth: .infinity, alignment: .leading)
-                                }
-                                .buttonStyle(WorkPlainButtonStyle()).padding(.horizontal, Spacing.xl).padding(.vertical, Spacing.sm)
-                            }
-                        } header: {
-                            Text("Paused").font(Typography.textStrong).padding(.horizontal, Spacing.xl).padding(.top, Spacing.md)
-                        }
                     }
                     if list.truncated {
                         Text("Partial: searching the \(list.all.count) loaded").font(Typography.text)

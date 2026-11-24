@@ -97,6 +97,7 @@
     "graph_name": "code",
     "graph_source": "builtin",
     "lifecycle": "unstarted",
+    "working_group": null,
     "selection_states": [
       "unstarted",
       "backlog"

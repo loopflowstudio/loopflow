@@ -72,6 +72,7 @@
     "pr": null,
     "graph_source": null,
     "lifecycle": "unstarted",
+    "working_group": null,
     "selection_states": [
       "unstarted",
       "backlog"
@@ -370,6 +371,7 @@
     "pr": null,
     "graph_source": null,
     "lifecycle": "done",
+    "working_group": null,
     "selection_states": [
       "done"
     ]
@@ -635,6 +637,7 @@
     "pr": null,
     "graph_source": null,
     "lifecycle": "moving",
+    "working_group": "active",
     "selection_states": [
       "open",
       "moving",
@@ -738,6 +741,7 @@
     "pr": null,
     "graph_source": null,
     "lifecycle": "unstarted",
+    "working_group": null,
     "selection_states": [
       "open",
       "unstarted",
@@ -1006,6 +1010,7 @@
     "pr": null,
     "graph_source": null,
     "lifecycle": "unstarted",
+    "working_group": null,
     "selection_states": [
       "open",
       "unstarted",
@@ -1109,6 +1114,7 @@
     "pr": null,
     "graph_source": null,
     "lifecycle": "unstarted",
+    "working_group": null,
     "selection_states": [
       "open",
       "unstarted",
@@ -1402,6 +1408,7 @@
     },
     "graph_source": null,
     "lifecycle": "unstarted",
+    "working_group": null,
     "selection_states": [
       "open",
       "unstarted",

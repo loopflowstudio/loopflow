@@ -368,6 +368,7 @@
           "work_id": "task_22222222222222222222222222222222"
         },
         "section": "working",
+        "working_group": "active",
         "selection_states": [
           "open",
           "active",
@@ -464,6 +465,7 @@
           "work_id": "task_11111111111111111111111111111111"
         },
         "section": "backlog",
+        "working_group": null,
         "selection_states": [
           "open",
           "unstarted",
@@ -552,6 +554,7 @@
           "work_id": "task_33333333333333333333333333333333"
         },
         "section": "abandoned",
+        "working_group": null,
         "selection_states": [
           "done"
         ],
@@ -646,6 +649,7 @@
           "work_id": "task_44444444444444444444444444444444"
         },
         "section": "done",
+        "working_group": null,
         "selection_states": [
           "done"
         ],
@@ -1047,6 +1051,7 @@
           "work_id": "task_11111111111111111111111111111111"
         },
         "section": "working",
+        "working_group": "active",
         "selection_states": [
           "open",
           "idle",
@@ -1162,6 +1167,7 @@
           "work_id": "task_22222222222222222222222222222222"
         },
         "section": "working",
+        "working_group": "active",
         "selection_states": [
           "open",
           "available",
@@ -1251,6 +1257,7 @@
           "work_id": "task_33333333333333333333333333333333"
         },
         "section": "abandoned",
+        "working_group": null,
         "selection_states": [
           "done"
         ],
@@ -1345,6 +1352,7 @@
           "work_id": "task_44444444444444444444444444444444"
         },
         "section": "done",
+        "working_group": null,
         "selection_states": [
           "done"
         ],
@@ -1755,6 +1763,7 @@
           "work_id": "task_11111111111111111111111111111111"
         },
         "section": "working",
+        "working_group": "active",
         "selection_states": [
           "open",
           "idle",
@@ -1870,6 +1879,7 @@
           "work_id": "task_22222222222222222222222222222222"
         },
         "section": "working",
+        "working_group": "active",
         "selection_states": [
           "open",
           "busy",
@@ -1959,6 +1969,7 @@
           "work_id": "task_33333333333333333333333333333333"
         },
         "section": "abandoned",
+        "working_group": null,
         "selection_states": [
           "done"
         ],
@@ -2053,6 +2064,7 @@
           "work_id": "task_44444444444444444444444444444444"
         },
         "section": "done",
+        "working_group": null,
         "selection_states": [
           "done"
         ],
@@ -2463,6 +2475,7 @@
           "work_id": "task_11111111111111111111111111111111"
         },
         "section": "working",
+        "working_group": "active",
         "selection_states": [
           "open",
           "idle",
@@ -2570,6 +2583,7 @@
           "work_id": "task_22222222222222222222222222222222"
         },
         "section": "backlog",
+        "working_group": null,
         "selection_states": [
           "busy",
           "active",
@@ -2658,6 +2672,7 @@
           "work_id": "task_33333333333333333333333333333333"
         },
         "section": "abandoned",
+        "working_group": null,
         "selection_states": [
           "done"
         ],
@@ -2752,6 +2767,7 @@
           "work_id": "task_44444444444444444444444444444444"
         },
         "section": "done",
+        "working_group": null,
         "selection_states": [
           "done"
         ],
@@ -3173,6 +3189,7 @@
           "work_id": "task_22222222222222222222222222222222"
         },
         "section": "working",
+        "working_group": "active",
         "selection_states": [
           "open",
           "available",
@@ -3280,6 +3297,7 @@
           "work_id": "task_11111111111111111111111111111111"
         },
         "section": "working",
+        "working_group": "active",
         "selection_states": [
           "open",
           "idle",
@@ -3368,6 +3386,7 @@
           "work_id": "task_33333333333333333333333333333333"
         },
         "section": "abandoned",
+        "working_group": null,
         "selection_states": [
           "done"
         ],
@@ -3462,6 +3481,7 @@
           "work_id": "task_44444444444444444444444444444444"
         },
         "section": "done",
+        "working_group": null,
         "selection_states": [
           "done"
         ],

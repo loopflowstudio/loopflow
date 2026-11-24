@@ -392,13 +392,13 @@ mod tests {
                 ("build", false),
                 ("ship-review", true),
                 ("deliver", false),
-                ("verify", true)
+                ("verify", false)
             ]
         );
-        assert_eq!(code.sentence, "You take part at ship-review and verify.");
+        assert_eq!(code.sentence, "You take part at ship-review.");
         assert_eq!(
             outline("feature").unwrap().sentence,
-            "You take part at explore, ship-review and verify."
+            "You take part at explore and ship-review."
         );
 
         let conditional = outline("conditional").unwrap();

@@ -95,6 +95,7 @@ fn work_in(
     for task in tasks {
         let activity = activity.get(&task.id);
         work.push(SelectionWork {
+            lifecycle: task.lifecycle.observed_here(task.runs_elsewhere),
             key: key(WorkWorkspaceKind::Task, task.id.to_string()),
             states: task_selection_states(
                 task.lifecycle.observed_here(task.runs_elsewhere),
@@ -114,6 +115,7 @@ fn work_in(
     // Tasks precede the alphabetized Waves, then the repository.
     for wave in waves {
         work.push(SelectionWork {
+            lifecycle: None,
             key: key(WorkWorkspaceKind::Wave, wave.id().to_string()),
             parent_wave: wave.parent_wave_id().cloned(),
             name: wave.name().to_string(),
@@ -122,6 +124,7 @@ fn work_in(
         });
     }
     work.push(SelectionWork {
+        lifecycle: None,
         key: key(WorkWorkspaceKind::Repository, repository.to_string()),
         parent_wave: None,
         name: repo,
@@ -296,18 +299,17 @@ pub fn task_selection_states(
     if auto && open {
         states.insert(SelectionState::Auto);
     }
-    states.extend(state.map(|state| match state {
-        TaskState::Unstarted => SelectionState::Unstarted,
-        TaskState::Idle => SelectionState::Idle,
-        TaskState::Active => SelectionState::Active,
-        TaskState::Moving => SelectionState::Moving,
-        TaskState::Paused => SelectionState::Paused,
-        TaskState::Done | TaskState::Abandoned => SelectionState::Done,
+    states.extend(state.and_then(|state| match state {
+        TaskState::Unstarted => Some(SelectionState::Unstarted),
+        TaskState::Idle => Some(SelectionState::Idle),
+        TaskState::Active => Some(SelectionState::Active),
+        TaskState::Moving => Some(SelectionState::Moving),
+        TaskState::Paused => None,
+        TaskState::Done | TaskState::Abandoned => Some(SelectionState::Done),
     }));
     states.insert(match section {
         TaskSection::Backlog => SelectionState::Backlog,
         TaskSection::Working => SelectionState::Working,
-        TaskSection::Paused => SelectionState::Paused,
         TaskSection::Done | TaskSection::Abandoned => SelectionState::Done,
     });
     states
@@ -443,14 +445,53 @@ impl<'a> RepositoryViews<'a> {
         })
     }
 
-    fn selected(&self, selection: Selection) -> StoreResult<ViewPlan> {
+    fn fill_working_groups(
+        &self,
+        conn: &Connection,
+        plans: &mut [ViewPlan],
+        ships: super::task_details::ShipsBeforeReview<'_>,
+    ) -> StoreResult<()> {
+        let selected: BTreeSet<_> = plans
+            .iter()
+            .flat_map(|plan| &plan.contents)
+            .filter(|content| content.states.contains(&SelectionState::Working))
+            .map(|content| &content.work)
+            .collect();
+        let groups = super::task_details::working_groups_in(
+            conn,
+            selected.into_iter().map(|key| {
+                let item = self.by_key[key];
+                (
+                    item.key.id.as_str(),
+                    item.lifecycle,
+                    item.states.contains(&SelectionState::Auto),
+                )
+            }),
+            ships,
+        )?;
+        for content in plans.iter_mut().flat_map(|plan| &mut plan.contents) {
+            if content.states.contains(&SelectionState::Working) {
+                content.working_group = groups.get(&content.work.id).copied();
+            }
+        }
+        Ok(())
+    }
+
+    fn selected(
+        &self,
+        conn: &Connection,
+        selection: Selection,
+        ships: super::task_details::ShipsBeforeReview<'_>,
+    ) -> StoreResult<ViewPlan> {
         let saved = selection
             .referenced_query()
             .and_then(|id| self.catalog.iter().find(|saved| &saved.id == id));
-        self.plan(
+        let mut plan = self.plan(
             saved.map_or(selection, |saved| saved.selection.clone()),
             saved,
-        )
+        )?;
+        self.fill_working_groups(conn, std::slice::from_mut(&mut plan), ships)?;
+        Ok(plan)
     }
 
     fn plan(&self, selection: Selection, saved: Option<&Dashboard>) -> StoreResult<ViewPlan> {
@@ -472,6 +513,7 @@ impl<'a> RepositoryViews<'a> {
             .map(|key| {
                 let facts = self.by_key.get(&key);
                 ViewContent {
+                    working_group: None,
                     identifier: facts
                         .filter(|_| key.kind == WorkWorkspaceKind::Task)
                         .map(|item| item.name.clone()),
@@ -618,13 +660,15 @@ impl SqliteStore {
         inputs: &SessionProjectionInputs,
         projection: &SessionProjection,
         running_step: RunningStep,
+        ships: super::task_details::ShipsBeforeReview<'_>,
     ) -> StoreResult<Option<ViewPlan>> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let Some(snapshot) = inputs.pin(&mut conn)? else {
             return Ok(None);
         };
         let work = work_in(&snapshot, repository, projection)?;
-        let mut plan = RepositoryViews::read(&snapshot, repository, &work)?.selected(selection)?;
+        let mut plan = RepositoryViews::read(&snapshot, repository, &work)?
+            .selected(&snapshot, selection, ships)?;
         fill_task_contents_in(&snapshot, std::slice::from_mut(&mut plan), running_step)?;
         Ok(Some(plan))
     }
@@ -639,6 +683,7 @@ impl SqliteStore {
         inputs: &SessionProjectionInputs,
         projection: &SessionProjection,
         running_step: RunningStep,
+        ships: super::task_details::ShipsBeforeReview<'_>,
     ) -> StoreResult<Option<Vec<ViewPlan>>> {
         let selection = match source {
             Some(source) => Selection::parse(source, None).map_err(StoreError::from)?,
@@ -664,8 +709,11 @@ impl SqliteStore {
                     continue;
                 }
                 plans.push(
-                    RepositoryViews::read(&snapshot, &repository, &work)?
-                        .selected(selection.clone())?,
+                    RepositoryViews::read(&snapshot, &repository, &work)?.selected(
+                        &snapshot,
+                        selection.clone(),
+                        ships,
+                    )?,
                 );
             }
         }
@@ -680,6 +728,7 @@ impl SqliteStore {
         inputs: &SessionProjectionInputs,
         projection: &SessionProjection,
         running_step: RunningStep,
+        ships: super::task_details::ShipsBeforeReview<'_>,
     ) -> StoreResult<Option<Vec<ViewPlan>>> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let Some(snapshot) = inputs.pin(&mut conn)? else {
@@ -703,6 +752,7 @@ impl SqliteStore {
         for saved in &views.catalog {
             plans.push(views.plan(saved.selection.clone(), Some(saved))?);
         }
+        views.fill_working_groups(&snapshot, &mut plans, ships)?;
         fill_task_contents_in(&snapshot, &mut plans, running_step)?;
         Ok(Some(plans))
     }

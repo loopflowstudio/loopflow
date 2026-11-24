@@ -81,7 +81,7 @@ lf desktop dashboard query attention 'state:available or state:blocked'
 ```
 
 Queries support `wave:`, `task:`, `kind:task|wave`, and
-`state:open|available|busy|blocked|error|unstarted|idle|active|moving|paused|backlog|working|done|auto`
+`state:open|available|busy|blocked|error|unstarted|idle|active|moving|backlog|working|done|auto`
 (`auto`: an open Task with auto on), combined with whitespace (AND), `or`, and parentheses.
 
 ### Changes show at once
@@ -98,6 +98,11 @@ connection returns. See [Connect clients](server.md) for connection recovery.
 
 ### Working Tasks in the sidebar
 
+Mac and iPhone show three groups within Working. **Active** holds the ordinary
+working rows. **Shipping** holds Tasks with auto on or no human step left
+before landing. **Paused** holds owned Tasks whose Graph is on hold, including
+those with auto on. Each group keeps the shared Working order.
+
 In the default order, open the second Working Task and send a prompt. Its row
 stays second as the conversation turns Busy and then Available again.
 
@@ -109,7 +114,7 @@ arranged. Sidebar and phone rows show the current Graph step beside the status
 when the Machine reports it.
 
 Turn on **Sort by status** in a repository or Wave sidebar, or from **⌘K**,
-to group rows by Blocked, Error, Available, Idle and Busy. A Task with both
+to sort within each Working group by Blocked, Error, Available, Idle and Busy. A Task with both
 busy and available conversations sorts as Busy. Each group follows the shared
 Working order.
 Sending a prompt updates the open Task’s status, but its row stays in the
@@ -202,8 +207,8 @@ What do you want?
 
 In Product ▾, running feature ▾, Product's default
 
-☺ explore   plan   build   ☺ ship-review   deliver   ☺ verify
-You take part at explore, ship-review and verify.
+☺ explore   plan   build   ☺ ship-review   deliver   verify
+You take part at explore and ship-review.
 
                                         Cancel   File   Start ⌘↩
 ```
@@ -234,12 +239,12 @@ request stays on screen with "Not started.", the error, **Try again** and
 Open a filed Task and it says what Start will do, in the sheet's words:
 
 ```text
-feature   ☺ explore   plan   build   ☺ ship-review   deliver   ☺ verify   Start
+feature   ☺ explore   plan   build   ☺ ship-review   deliver   verify   Start
 
 Not started
 
 It will run feature, Product's default.
-You take part at explore, ship-review and verify.
+You take part at explore and ship-review.
 
 [Start]   Start with… ▾
 ```
@@ -257,8 +262,8 @@ the repository's. ▾ lists the others, each with its description and how many
 times it stops for you:
 
 ```text
-✓ feature                 Explore, build, deliver and verify      3 stops
-  code                    Build, deliver and verify               2 stops
+✓ feature                 Explore, build, deliver and verify      2 stops
+  code                    Build, deliver and verify               1 stop
   redesign                Rethink a started Task                  1 stop
   research                Investigate and report, with no PR      1 stop
   More ›

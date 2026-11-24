@@ -210,9 +210,6 @@ final class WorkNavigation {
         case working = "Working tasks"
         case available = "Available"
         case busy = "Busy"
-        case paused = "Paused"
-
-        var list: TaskList { self == .paused ? .paused : .started }
     }
     /// The Wave the sidebar lists; nil lists Working Tasks. Selecting a Task keeps it.
     var sidebarWaveID: String?
@@ -259,7 +256,7 @@ final class WorkNavigation {
         }
     }
     var heldStatusGroup: (taskID: String, group: StatusGroup)?
-    var canReorderSidebar: Bool { sidebarScope == .repository && sidebarFilter != .paused && !sidebarSortByStatus }
+    var canReorderSidebar: Bool { sidebarScope == .repository && !sidebarSortByStatus }
     var sidebarFilter: SidebarFilter = .working {
         willSet {
             if newValue != sidebarFilter { Perf.begin(Perf.hierarchyInteraction, "filter", id: "outline:\(newValue.rawValue)", liveSessions: liveSessionCount, owner: performanceOwner) }

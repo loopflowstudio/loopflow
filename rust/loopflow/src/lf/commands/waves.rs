@@ -503,6 +503,8 @@ pub struct RoadmapTask {
     pub run_control: TaskRunControl,
     pub pr: Option<PrSnapshot>,
     pub section: TaskSection,
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub working_group: Option<loopflow_storage::execution::WorkingGroup>,
     /// Whether its owner is you; `false` when nobody owns it.
     pub owned_by_you: bool,
     /// The Machine that runs it when another Machine than this one owns it;
@@ -925,6 +927,10 @@ pub fn list_tasks(repo: &Path, query: &TaskListArgs, json: bool) -> Result<()> {
                     });
                 if let Some(place) = place {
                     owner = format!("{owner} · {place}");
+                }
+                if let Some(group) = task.working_group {
+                    owner.push_str(" · ");
+                    owner.push_str(group.label());
                 }
                 let indent = "  ".repeat(depth);
                 println!(
@@ -2251,7 +2257,11 @@ impl<'a> DetailReads<'a> {
         {
             selection_readings.insert(repository.clone(), shared.selections(store, repository)?);
         }
-        let facts = loopflow_execution::store::ownership::task_detail_facts(&store.sqlite, tasks)?;
+        let facts = loopflow_execution::store::ownership::task_detail_facts(
+            &store.sqlite,
+            tasks,
+            &mut crate::lf::navigation::shipping_reader(),
+        )?;
         let mut planning_connections = HashMap::new();
         for open in facts.tracker_actions.values() {
             planning_connections
@@ -2587,6 +2597,7 @@ async fn snapshot_task_detail(
         ),
         reference,
         lifecycle,
+        working_group: facts.working_groups.get(task.id.as_str()).copied(),
         selection_states: task_selection_states(
             observed,
             section,
@@ -3485,7 +3496,6 @@ fn section_label(section: TaskSection) -> &'static str {
     match section {
         TaskSection::Backlog => "BACKLOG",
         TaskSection::Working => "WORKING",
-        TaskSection::Paused => "PAUSED",
         TaskSection::Done => "DONE",
         TaskSection::Abandoned => "ABANDONED",
     }
@@ -3565,7 +3575,6 @@ fn print_roadmap(roadmap: &RoadmapSnapshot) {
             .clamp(12, 32);
         for section in [
             TaskSection::Working,
-            TaskSection::Paused,
             TaskSection::Backlog,
             TaskSection::Done,
             TaskSection::Abandoned,
@@ -3884,7 +3893,12 @@ mod tests {
                 .map(|task| task["task"]["id"].as_str().unwrap())
                 .collect();
             assert_eq!(working, expected, "roadmap {}", frame["name"]);
-            let plans = selections::selection_plans(&store.sqlite, &repo).unwrap();
+            let plans = selections::selection_plans(
+                &store.sqlite,
+                &repo,
+                &mut crate::lf::navigation::shipping_reader(),
+            )
+            .unwrap();
             for id in [
                 "repository-default",
                 "wave-default:11111111-1111-1111-1111-111111111111",
@@ -3896,6 +3910,7 @@ mod tests {
                 &store.sqlite,
                 Some("kind:task state:working"),
                 &["/repo".into()],
+                &mut crate::lf::navigation::shipping_reader(),
             )
             .unwrap();
             assert_eq!(phone.len(), 1);
@@ -3903,7 +3918,13 @@ mod tests {
         };
         let check_filters = |available: &[&str], busy: &[&str]| {
             for (query, expected) in [("state:available", available), ("state:busy", busy)] {
-                let plan = selections::view_plan(&store.sqlite, &repo, Some(query)).unwrap();
+                let plan = selections::view_plan(
+                    &store.sqlite,
+                    &repo,
+                    Some(query),
+                    &mut crate::lf::navigation::shipping_reader(),
+                )
+                .unwrap();
                 assert_eq!(plan.resolution.task_ids(), expected, "{query}");
             }
         };
@@ -3986,12 +4007,52 @@ mod tests {
         check_filters(&[active], &[active]);
         report_states(9, &[State::Working, State::Error]);
         check_filters(&[], &[active]);
-        let errors = selections::view_plan(&store.sqlite, &repo, Some("state:error")).unwrap();
+        let errors = selections::view_plan(
+            &store.sqlite,
+            &repo,
+            Some("state:error"),
+            &mut crate::lf::navigation::shipping_reader(),
+        )
+        .unwrap();
         assert_eq!(errors.resolution.task_ids(), [active]);
         assert!(errors
             .resolution
             .attention
             .contains(&errors.resolution.members[0].work));
+        for id in [active, other] {
+            db.execute(
+                "INSERT INTO task_auto(task_id,state,set_at,set_by) VALUES(?1,'on',1,json_object('kind','person','name','Ada'))",
+                [id],
+            ).unwrap();
+        }
+        db.execute("INSERT INTO task_pauses(task_id,paused_at,paused_by) VALUES(?1,1,json_object('kind','person','name','Ada'))", [other]).unwrap();
+        let grouped = read(&store, "shipping_and_paused").await;
+        check_order(&grouped, [active, other]);
+        let plan = selections::view_plan(
+            &store.sqlite,
+            &repo,
+            Some("kind:task state:working"),
+            &mut crate::lf::navigation::shipping_reader(),
+        )
+        .unwrap();
+        for (id, group) in [(active, "shipping"), (other, "paused")] {
+            let row = grouped["tasks"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|row| row["task"]["id"] == id)
+                .unwrap();
+            assert_eq!(row["working_group"], group);
+            let tile = plan
+                .contents
+                .iter()
+                .find(|tile| tile.work.id == id)
+                .unwrap();
+            assert_eq!(
+                serde_json::to_value(tile.working_group).unwrap(),
+                row["working_group"]
+            );
+        }
         report_states(10, &[State::Blocked, State::Working]);
         let fixture =
             serde_json::json!([initial, owned_available, owned_working, working, available]);
@@ -4022,6 +4083,7 @@ mod tests {
                                 "id": task["task"]["id"],
                                 "lifecycle": task["lifecycle"],
                                 "section": task["section"],
+                                "working_group": task["working_group"],
                                 "states": task["selection_states"],
                                 "runtime": task["runtime"]["status"],
                                 "owner": task["runtime"]["owner"],

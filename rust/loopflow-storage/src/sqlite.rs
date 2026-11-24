@@ -79,7 +79,7 @@ pub use graph_inventory::{entry_of, AgentLimitRecovery, GraphExecutionFacts, Unr
 pub use project_selection::{ProjectActivation, ProjectReadiness, ProjectReadinessState};
 pub use revisions::{Revisions, StoreRevisions};
 pub use session_events::{AnsweredTurn, CurrentConversation, TurnSpan};
-pub use task_details::TaskDetailFacts;
+pub use task_details::{ShipsBeforeReview, TaskDetailFacts};
 pub use task_work::{Auto, AutoState, OpenWork};
 
 /// A fleet can legitimately queue longer than SQLite's common five-second

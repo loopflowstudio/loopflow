@@ -252,7 +252,7 @@ extension WorkViewPlan.Content {
     /// no conversation opens from here, which every Task without one lists, so
     /// it is the word only when the reading gives no other.
     public var status: TaskRowStatus? {
-        if states.contains(.paused) { return .lifecycle(.paused) }
+        if workingGroup == .paused && !states.contains(.idle) { return .lifecycle(.paused) }
         if let state = states.programState { return .program(state) }
         if let state = states.lazy.compactMap({ TaskState(rawValue: $0.rawValue) }).first { return .lifecycle(state) }
         return unavailable.isEmpty ? nil : .unavailable(unavailable)

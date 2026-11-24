@@ -372,6 +372,7 @@
       "owned_by_you": false,
       "runs_on": null,
       "lifecycle": "done",
+      "working_group": null,
       "selection_states": [
         "done"
       ]

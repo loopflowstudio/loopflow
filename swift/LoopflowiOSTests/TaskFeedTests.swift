@@ -24,7 +24,8 @@ private actor HeldServer: ServerCarrier {
         var contents = try XCTUnwrap(plan["contents"] as? [[String: Any]])
         for index in contents.indices {
             contents[index]["identifier"] = "LOO-\(index + 1)"
-            contents[index]["states"] = paused ? ["open", "paused"] : ["open", "working", "idle", "available"]
+            contents[index]["working_group"] = paused ? "paused" : "active"
+            contents[index]["states"] = paused ? ["open", "working"] : ["open", "working", "idle", "available"]
         }
         plan["contents"] = contents
         self.plan = plan
@@ -113,22 +114,24 @@ final class TaskFeedTests: XCTestCase {
         }
     }
 
-    func testUnpauseLeavesThePausedListAndARefusalBringsTheTaskBack() async throws {
+    func testUnpauseStaysInWorkingAndARefusalRestoresItsState() async throws {
         let machineID = "HOME_\(UUID().uuidString.lowercased())"
         let server = try HeldServer(machineID: machineID, paused: true)
         let feed = TaskFeed(client: client(server, machineID: machineID), notices: NoticeCenter())
         defer { feed.forget() }
-        feed.filter = .paused
         await feed.start()
         try await until { identifiers(feed).count == 3 }
         let expression = await server.expression
-        XCTAssertEqual(expression, "kind:task state:paused")
+        XCTAssertEqual(expression, "kind:task state:working")
         await server.refuse("land is still finishing")
         feed.pendingChanges.make(.unpause(task: "LOO-2", owned: true), subject: "LOO-2", verb: "unpaused",
                                  write: .taskUnpause(directory: "/repo", issue: "LOO-2", run: false),
                                  notices: feed.notices, show: nil)
-        XCTAssertEqual(identifiers(feed), ["LOO-1", "LOO-3"])
+        XCTAssertEqual(identifiers(feed), ["LOO-1", "LOO-2", "LOO-3"])
+        XCTAssertTrue(feed.shownRepositories.first?.tasks[1].states.contains(.idle) == true)
         try await until { feed.notices.current != nil }
+        XCTAssertEqual(feed.shownRepositories.first?.tasks[1].workingGroup, .paused)
+        XCTAssertFalse(feed.shownRepositories.first?.tasks[1].states.contains(.idle) == true)
         XCTAssertEqual(identifiers(feed), ["LOO-1", "LOO-2", "LOO-3"])
     }
 
@@ -138,7 +141,6 @@ final class TaskFeedTests: XCTestCase {
         let client = client(server, machineID: id)
         let feed = TaskFeed(client: client, notices: NoticeCenter())
         defer { feed.forget() }
-        feed.filter = .paused
         await feed.start()
         try await until { feed.loaded }
         let row = try XCTUnwrap(feed.shownRepositories.first?.tasks.first)

@@ -2,7 +2,7 @@ import Foundation
 
 /// The Task list Desktop and iPhone request from the Machine.
 public enum TaskList: String, CaseIterable, Identifiable, Sendable {
-    case started, available, busy, paused, backlog, done
+    case started, available, busy, backlog, done
 
     public var id: String { rawValue }
 
@@ -12,7 +12,6 @@ public enum TaskList: String, CaseIterable, Identifiable, Sendable {
         case .available: .available
         case .busy: .busy
         case .backlog: .backlog
-        case .paused: .paused
         case .done: .done
         }
     }

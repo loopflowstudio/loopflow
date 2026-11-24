@@ -108,9 +108,9 @@ attach with `lf resume --task LOO-12`. The Task keeps its branch, dirty files,
 PR, and auto setting. New Graph runs, Auto-Ship, and worker retries wait for
 unpause, including after a Machine restart.
 
-Find it in **Paused** on Mac and iPhone, in `lf wave show`, or with
-`lf task list --state paused`. Plain `lf task unpause LOO-12` lifts the hold.
-An owned Task returns to Working and an unassigned Task returns to Backlog.
+An owned Task stays in **Working**, under **Paused** on Mac and iPhone.
+The Working rows in `lf task list --json` carry `working_group`.
+Find held Tasks with `lf task list --state paused`. Plain `lf task unpause LOO-12` lifts the hold.
 To run from the saved step immediately, use `lf task unpause LOO-12 --run`.
 
 Unassign clears the hold once cleanup settles. Complete, abandon, and reopen

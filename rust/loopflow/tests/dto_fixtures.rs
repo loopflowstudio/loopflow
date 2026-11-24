@@ -34,7 +34,7 @@ fn roadmap_requires_shared_lifecycle_and_selection_states() {
     ))
     .unwrap();
     let row = &wire[0]["tasks"][0];
-    for field in ["lifecycle", "selection_states"] {
+    for field in ["lifecycle", "selection_states", "working_group"] {
         let mut missing = row.clone();
         missing.as_object_mut().unwrap().remove(field);
         assert!(serde_json::from_value::<RoadmapTask>(missing).is_err());

@@ -17,7 +17,7 @@ fn invalid(error: impl std::fmt::Display) -> StoreError {
 // A process can change between observation and pinning the SQL snapshot.
 fn read_projected<T>(
     store: &SqliteStore,
-    read: impl Fn(&SessionProjectionInputs, &SessionProjection) -> StoreResult<Option<T>>,
+    mut read: impl FnMut(&SessionProjectionInputs, &SessionProjection) -> StoreResult<Option<T>>,
 ) -> StoreResult<T> {
     loop {
         let reading = Reading::acquire(store, loopflow_storage::rows::now_unix(), None)?;
@@ -31,6 +31,7 @@ pub fn plan_selection(
     store: &SqliteStore,
     repository: &RepositoryId,
     selection: Selection,
+    ships: loopflow_storage::sqlite::ShipsBeforeReview<'_>,
 ) -> StoreResult<ViewPlan> {
     let plan = read_projected(store, |inputs, projection| {
         store.projected_plan_selection(
@@ -39,6 +40,7 @@ pub fn plan_selection(
             inputs,
             projection,
             running_step,
+            ships,
         )
     })?;
     prepare_plan(store, plan)
@@ -48,9 +50,10 @@ pub fn all_view_plans(
     store: &SqliteStore,
     source: Option<&str>,
     repos: &[String],
+    ships: loopflow_storage::sqlite::ShipsBeforeReview<'_>,
 ) -> StoreResult<Vec<ViewPlan>> {
     let plans = read_projected(store, |inputs, projection| {
-        store.projected_all_view_plans(source, repos, inputs, projection, running_step)
+        store.projected_all_view_plans(source, repos, inputs, projection, running_step, ships)
     })?;
     plans
         .into_iter()
@@ -61,9 +64,10 @@ pub fn all_view_plans(
 pub fn selection_plans(
     store: &SqliteStore,
     repository: &RepositoryId,
+    ships: loopflow_storage::sqlite::ShipsBeforeReview<'_>,
 ) -> StoreResult<Vec<ViewPlan>> {
     let plans = read_projected(store, |inputs, projection| {
-        store.projected_selection_plans(repository, inputs, projection, running_step)
+        store.projected_selection_plans(repository, inputs, projection, running_step, ships)
     })?;
     plans
         .into_iter()
@@ -105,12 +109,13 @@ pub fn view_plan(
     store: &SqliteStore,
     repository: &RepositoryId,
     source: Option<&str>,
+    ships: loopflow_storage::sqlite::ShipsBeforeReview<'_>,
 ) -> StoreResult<ViewPlan> {
     let selection = match source {
         Some(source) => Selection::parse(source, None).map_err(StoreError::from)?,
         None => repository_default(),
     };
-    plan_selection(store, repository, selection)
+    plan_selection(store, repository, selection, ships)
 }
 
 pub fn edit_dashboard(

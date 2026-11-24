@@ -472,6 +472,7 @@
         "graph_source": null,
         "section": "backlog",
         "lifecycle": "unstarted",
+        "working_group": null,
         "selection_states": [
           "open",
           "unstarted",
@@ -634,6 +635,7 @@
         "graph_source": null,
         "section": "backlog",
         "lifecycle": "unstarted",
+        "working_group": null,
         "selection_states": [
           "unstarted",
           "backlog"

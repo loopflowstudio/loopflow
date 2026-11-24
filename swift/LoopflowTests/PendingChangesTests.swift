@@ -70,7 +70,7 @@ struct PendingChangesTests {
         json["projection"] = ["visible": members, "suppressed": []]
         json["contents"] = members.enumerated().map { index, member in
             ["work": member["work"]!, "title": "Task \(index + 1)", "states": states, "identifier": "LOO-\(index + 1)",
-             "graph_step": NSNull(), "primary_session": NSNull(), "location": NSNull(), "argv": NSNull(), "unavailable": [], "face": NSNull(),
+             "working_group": states.contains("auto") ? "shipping" : "active", "graph_step": NSNull(), "primary_session": NSNull(), "location": NSNull(), "argv": NSNull(), "unavailable": [], "face": NSNull(),
              "pane_revision": NSNull()]
         }
         let value = try JSONDecoder().decode(WorkViewPlan.self, from: JSONSerialization.data(withJSONObject: json))
@@ -110,15 +110,16 @@ struct PendingChangesTests {
                      write: .taskComplete(directory: "/repo", issue: issue), notices: notices, show: nil)
     }
 
-    @Test func pauseMovesBothListsAndARefusalRestoresTheRow() async throws {
+    @Test func pauseKeepsTheWorkingRowAndARefusalRestoresItsGroup() async throws {
         let changes = changes()
         let row = try task("LOO-2")
         let started = try plan(["open", "working", "moving", "busy", "auto"])
         changes.setPause(.pause, row: row, directory: "/repo", notices: notices, show: nil) {}
         let held = try #require(changes.apply(to: [row], readAt: at(4)).first)
-        #expect(held.section == .paused && held.lifecycle == .paused && held.runtime?.owner == row.runtime?.owner)
+        #expect(held.section == .working && held.workingGroup == .paused && held.lifecycle == .paused && held.runtime?.owner == row.runtime?.owner)
         let contents = try #require(changes.apply(to: started)?.contents)
-        #expect(Set(contents[1].states) == [.open, .paused, .auto])
+        #expect(Set(contents[1].states) == [.open, .working, .busy, .auto]
+                && contents[1].workingGroup == .paused)
         #expect(contents[0].states.contains(.working))
         await machine.fail(ServerError(code: "conflict", message: "Task moved", data: .null))
         #expect(changes.apply(to: started)?.contents == started.value?.contents)
@@ -127,7 +128,7 @@ struct PendingChangesTests {
         changes.setPause(.unpause, row: held, directory: "/repo", notices: notices, show: nil) {}
         #expect(changes.apply(to: [held], readAt: at(4)).first?.section == .working)
         let unpaused = changes.apply(to: contents, readAt: at(4))
-        #expect(Set(unpaused[1].states) == [.open, .working, .idle, .auto])
+        #expect(Set(unpaused[1].states) == [.open, .working, .busy, .idle, .auto])
         await machine.answer(nil)
     }
 

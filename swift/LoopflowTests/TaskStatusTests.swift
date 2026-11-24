@@ -4,7 +4,7 @@ import Testing
 struct TaskStatusTests {
     private func content(_ states: [WorkSelectionState], session: String? = "session", unavailable: [String] = []) -> WorkViewPlan.Content {
         WorkViewPlan.Content(work: .init(repository: "repo", kind: .task, id: "task"), title: "Task",
-            states: states, identifier: nil, graphStep: nil, primarySession: session, location: nil, argv: nil, unavailable: unavailable)
+            states: states, identifier: nil, workingGroup: .active, graphStep: nil, primarySession: session, location: nil, argv: nil, unavailable: unavailable)
     }
 
     @Test("A row says what the Mac row says: the conversation's report, else the lifecycle")

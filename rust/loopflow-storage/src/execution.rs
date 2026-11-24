@@ -140,11 +140,29 @@ impl TaskState {
 pub enum TaskSection {
     /// Waiting for someone to pick it up: unstarted, or started and unassigned.
     Backlog,
-    /// Someone's idle, active or moving Task, or a Task owned on another Machine.
+    /// Someone's idle, active, moving or paused Task, or a Task owned on another Machine.
     Working,
-    Paused,
     Done,
     Abandoned,
+}
+
+/// The groups inside Working, in sidebar order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkingGroup {
+    Active,
+    Shipping,
+    Paused,
+}
+
+impl WorkingGroup {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Active => "Active",
+            Self::Shipping => "Shipping",
+            Self::Paused => "Paused",
+        }
+    }
 }
 
 impl TaskSection {
@@ -156,9 +174,10 @@ impl TaskSection {
             TaskState::Abandoned => Self::Abandoned,
             _ if runs_elsewhere => Self::Working,
             TaskState::Unstarted => Self::Backlog,
-            TaskState::Paused => Self::Paused,
             _ if !owned => Self::Backlog,
-            TaskState::Idle | TaskState::Active | TaskState::Moving => Self::Working,
+            TaskState::Idle | TaskState::Active | TaskState::Moving | TaskState::Paused => {
+                Self::Working
+            }
         }
     }
 }
@@ -270,6 +289,8 @@ mod tests {
         let of = TaskSection::of;
         assert_eq!(of(TaskState::Idle, true, false), TaskSection::Working);
         assert_eq!(of(TaskState::Moving, true, false), TaskSection::Working);
+        assert_eq!(of(TaskState::Paused, true, false), TaskSection::Working);
+        assert_eq!(of(TaskState::Paused, false, false), TaskSection::Backlog);
         assert_eq!(of(TaskState::Idle, false, false), TaskSection::Backlog);
         assert_eq!(of(TaskState::Moving, false, false), TaskSection::Backlog);
         assert_eq!(of(TaskState::Unstarted, true, false), TaskSection::Backlog);

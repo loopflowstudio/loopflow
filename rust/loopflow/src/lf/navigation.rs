@@ -708,6 +708,22 @@ pub fn command_merges(argv: &[String]) -> bool {
         .is_ok_and(|cli| cli.merges())
 }
 
+/// Tasks in a list often run the same Graph. Resolve each command once per reading.
+pub(crate) fn shipping_reader(
+) -> impl FnMut(&str, &str, Option<&str>) -> loopflow_storage::StoreResult<bool> {
+    let mut commands = std::collections::HashMap::<Vec<String>, bool>::new();
+    move |graph, step, cursor| {
+        loopflow_execution::task_graph::ships_before_review(graph, step, cursor, |argv| {
+            if let Some(merges) = commands.get(argv) {
+                return *merges;
+            }
+            let merges = command_merges(argv);
+            commands.insert(argv.to_vec(), merges);
+            merges
+        })
+    }
+}
+
 #[cfg(test)]
 mod landing_tests {
     use super::command_merges;
@@ -739,6 +755,25 @@ mod landing_tests {
         assert!(deliver
             .landing_step("land --wait-and-fix", command_merges)
             .is_some());
+    }
+
+    #[test]
+    fn shipping_checks_the_selected_path_up_to_its_landing() {
+        let repo = tempfile::tempdir().unwrap();
+        write(repo.path(), ".lf/graphs/ship.yaml",
+            "- xor:\n    paths:\n      direct:\n        description: Land now\n        graph: deliver\n      review:\n        description: Review first\n        steps:\n          - interactive: demo\n- interactive: verify\n");
+        let graph = CapturedGraph::load("ship", repo.path()).unwrap().unwrap();
+        let saved = serde_json::to_string(&graph).unwrap();
+        let mut ships = super::shipping_reader();
+        assert!(!ships(&saved, "start", None).unwrap());
+        for (step, expected) in [("reflect", true), ("demo", false), ("verify", false)] {
+            let cursor = serde_json::to_string(&graph.find(step).unwrap().cursor()).unwrap();
+            assert_eq!(
+                ships(&saved, "start", Some(&cursor)).unwrap(),
+                expected,
+                "{step}"
+            );
+        }
     }
 
     #[test]

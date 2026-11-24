@@ -329,8 +329,9 @@ public final class PendingChanges {
                     states.inSection(Self.started(states) ? .working : .backlog).union([.open])
                 }
             case .pause:
-                contents.updateStates(of: matches) {
-                    $0.inSection(.paused).subtracting([.moving, .active, .idle, .busy, .available, .blocked, .error])
+                for index in contents.indices where matches.contains(contents[index].work) {
+                    if contents[index].states.contains(.working) { contents[index].workingGroup = .paused }
+                    contents[index].states.removeAll { [.moving, .active, .idle].contains($0) }
                 }
             case .unpause(_, let owned):
                 contents.updateStates(of: matches) { $0.inSection(owned ? .working : .backlog).union([.idle]) }
@@ -340,8 +341,7 @@ public final class PendingChanges {
                 }
             case .unassign:
                 contents.updateStates(of: matches) { states in
-                    let backlog = states.inSection(.backlog)
-                    return states.contains(.paused) ? backlog.union([.idle]) : backlog
+                    states.inSection(.backlog)
                 }
             case .renameSession, .reorder:
                 break
@@ -369,6 +369,7 @@ public final class PendingChanges {
             guard let index = tasks.firstIndex(where: { $0.task.identifier == issue }) else { continue }
             switch change.command {
             case .complete:
+                tasks[index].workingGroup = nil
                 tasks[index].lifecycle = .done
                 tasks[index].section = .done
             case .abandon:
@@ -380,15 +381,21 @@ public final class PendingChanges {
                 tasks[index].section = checkedOut && tasks[index].runtime?.owner != nil ? .working : .backlog
             case .pause:
                 tasks[index].lifecycle = .paused
-                tasks[index].section = .paused
+                if tasks[index].section == .working { tasks[index].workingGroup = .paused }
             case .unpause(_, let owned):
                 tasks[index].lifecycle = .idle
                 tasks[index].section = owned ? .working : .backlog
+                // The next reading knows whether the saved Graph returns to Shipping.
+                if !owned { tasks[index].workingGroup = nil }
             case .claim(_, let owner):
                 if let owner { tasks[index].runtime?.owner = owner }
-                if tasks[index].lifecycle.isWorking { tasks[index].section = .working }
+                if tasks[index].lifecycle.isWorking {
+                    tasks[index].section = .working
+                    if tasks[index].lifecycle == .paused { tasks[index].workingGroup = .paused }
+                }
             case .unassign:
                 if tasks[index].lifecycle == .paused { tasks[index].lifecycle = .idle }
+                tasks[index].workingGroup = nil
                 tasks[index].runtime?.owner = nil
                 tasks[index].section = .backlog
             case .move(_, let target):
@@ -436,7 +443,7 @@ private struct WeakNoticeCenter {
 
 private extension Set<WorkSelectionState> {
     func inSection(_ section: WorkSelectionState) -> Self {
-        subtracting([.backlog, .working, .paused, .done]).union([section])
+        subtracting([.backlog, .working, .done]).union([section])
     }
 }
 
@@ -445,6 +452,10 @@ private extension [WorkViewPlan.Content] {
                                _ update: (Set<WorkSelectionState>) -> Set<WorkSelectionState>) {
         for index in indices where members.contains(self[index].work) {
             let next = update(Set(self[index].states))
+            if !next.contains(.working) { self[index].workingGroup = nil }
+            else if self[index].workingGroup == nil {
+                self[index].workingGroup = next.contains(.auto) ? .shipping : .active
+            }
             self[index].states = WorkSelectionState.allCases.filter(next.contains)
         }
     }

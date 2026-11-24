@@ -30,10 +30,11 @@ Each process chain is worker `claude -p` → `zsh -c` → `cargo` → `build-scr
 The primary `claude --name <id>` runs beside it. macOS `ps -o sess` prints 0, so
 check survivors by PID.
 
-Status lines to check after a pause: `Graph qa: Paused at compile…`, the
-`latest Graph:` line, `Conversation: paused; …` and `action: no_action`. A
-`lf comment` sent while paused stays in `steers` with no `steer_deliveries` row
-until unpause, then goes to the new worker's Session.
+After pause, `lf task status` shows the saved Graph step and the same primary
+Session. Send a steer to that conversation and check that it receives the turn
+while the Graph stays held. In `lf task list --json` the owned Task has
+`section: working` and `working_group: paused`. An auto Task beside it stays
+under Shipping. Both count toward Working on Mac and iPhone.
 
 The served answer to `task.pause` can read `pausing (Graph run … is finishing)`
 while the CLI waits and prints `paused`. Read `lf task status` a moment later.

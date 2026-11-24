@@ -71,7 +71,7 @@ struct WorkNavigator: View {
             }.padding([.horizontal, .top], Spacing.sm)
             WorkTaskList(navigation: model.navigation) {
                 let scope = model.navigation.sidebarScope
-                let dragOrder = model.navigation.canReorderSidebar ? rows.map(\.work.id) : []
+                let dragOrders = model.navigation.canReorderSidebar ? Dictionary(grouping: rows, by: \.workingGroup).mapValues { $0.map(\.work.id) } : [:]
                 VStack(alignment: .leading, spacing: Spacing.xs) {
                     HStack {
                         NewTaskRow(model: model)
@@ -93,7 +93,12 @@ struct WorkNavigator: View {
                         .pickerStyle(.menu).labelsHidden().accessibilityLabel("Show Tasks")
                     }
                     ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
-                        taskRow(row, dragOrder: dragOrder, slotHint: index < 9 ? "⌘\(index + 1)" : nil)
+                        if scope.isWorkingList, let group = row.workingGroup,
+                           index == 0 || rows[index - 1].workingGroup != group {
+                            Text(group.title).font(Typography.meta).foregroundStyle(palette.textSecondary)
+                                .padding(.horizontal, Spacing.sm).accessibilityAddTraits(.isHeader)
+                        }
+                        taskRow(row, dragOrder: dragOrders[row.workingGroup] ?? [], slotHint: index < 9 ? "⌘\(index + 1)" : nil)
                     }
                     if rows.isEmpty, let emptyListText {
                         Text(emptyListText)
@@ -104,9 +109,9 @@ struct WorkNavigator: View {
                        !rows.contains(where: { model.isSelected(.task(id: $0.id)) }) {
                         VStack(alignment: .leading, spacing: Spacing.xs) {
                             Text("Open Task is outside this list")
-                            let target: WorkNavigation.SidebarFilter = model.task(id: selection.id)?.task.lifecycle == .paused ? .paused : .working
-                            Button(target == .paused ? "Show paused Tasks" : "Show working Tasks") {
-                                Perf.userAction(Perf.hierarchyInteraction, scenario: target == .paused ? "sidebar_paused" : "sidebar_working", id: "outline:\(target.rawValue)",
+                            let target = WorkNavigation.SidebarFilter.working
+                            Button("Show working Tasks") {
+                                Perf.userAction(Perf.hierarchyInteraction, scenario: "sidebar_working", id: "outline:\(target.rawValue)",
                                                 repository: model.repoPath, liveSessions: model.liveSessionCount, owner: model.navigation.performanceOwner) {
                                     model.navigation.sidebarFilter = target
                                     model.navigation.sidebarWaveID = nil
@@ -190,7 +195,7 @@ struct WorkNavigator: View {
     /// The repository is the default Wave; it lists Working Tasks and can't be edited.
     private var repositoryRow: some View {
         waveRow(scope: .repository, name: model.repoPath.map { URL(fileURLWithPath: $0).lastPathComponent } ?? "Repository",
-                icon: nil, count: model.startedTaskCount(.repository), unavailableReason: nil)
+                icon: nil, count: model.startedTaskCount(.repository), unavailableReason: model.roadmap.value?.tasks.unavailableReason)
     }
 
     private func waveRow(_ wave: WaveRoadmap) -> some View {
@@ -202,7 +207,7 @@ struct WorkNavigator: View {
     }
 
     private func waveRow(scope: WorkNavigation.SidebarScope, name: String, icon: String?,
-                         count: Int, unavailableReason: String?) -> some View {
+                         count: Int?, unavailableReason: String?) -> some View {
         let reference: WorkReference? = if case .wave(let id) = scope { .wave(id: id) } else { nil }
         let state: SidebarSelection = pressedScope == scope || model.navigation.destination == .work(reference) ? .shown
             : model.navigation.sidebarScope == scope ? .containing : .none
@@ -222,8 +227,10 @@ struct WorkNavigator: View {
                 Spacer()
                 if let unavailableReason {
                     Image(systemName: "exclamationmark.triangle").help(unavailableReason)
-                } else {
+                } else if let count {
                     Text("\(count)").font(Typography.meta).monospacedDigit().help("\(count) working Tasks")
+                } else {
+                    Text("…").foregroundStyle(palette.textTertiary)
                 }
             }.font(Typography.text).padding(Spacing.sm)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -233,7 +240,7 @@ struct WorkNavigator: View {
                 .contentShape(RoundedRectangle(cornerRadius: CornerRadius.row))
         }.buttonStyle(.plain)
             .modifier(FocusedWork(focus: $focusedWork, reference: reference))
-            .accessibilityLabel("\(name), \(count) working Tasks")
+            .accessibilityLabel(count.map { "\(name), \($0) working Tasks" } ?? name)
             .accessibilityIdentifier("work-wave-\(reference?.id ?? "repository")")
             .matchedGeometryEffect(id: scope, in: scopeTitle)
     }

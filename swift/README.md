@@ -91,9 +91,9 @@ yourself, call `/usr/bin/log`, since zsh's builtin `log` shadows it:
 ```
 
 Working Tasks lists owned, started, unfinished Tasks on any Machine this store
-records. Drag in the repository sidebar or Working Tasks grid to save an order.
-Turn on **Sort by status** in a repository or Wave sidebar to group Tasks by
-activity. [Sidebar order, filters and shortcuts](../docs/surfaces.md#working-tasks-in-the-sidebar).
+records. The sidebar groups them into **Active**, **Shipping**, and **Paused**.
+Drag within a group or in the Working Tasks grid to save an order. Turn on
+**Sort by status** to sort each group by conversation activity. [Sidebar order, filters and shortcuts](../docs/surfaces.md#working-tasks-in-the-sidebar).
 
 Click a Wave to see its Working Tasks and subwaves. Its backlog holds the open
 work nobody is running. **‹ Repo** returns to Working Tasks. Unstarted Tasks
@@ -128,7 +128,7 @@ path follows hierarchy: click a name to go there, or the **›** after it to lis
 search what it contains; Back and **⌘[ / ⌘]** follow visits. **⌘K** searches Work
 across repositories and opens another repository in its own window. Its
 **Sidebar shows** picker filters the rows to **Working tasks**, **Available**,
-**Busy**, or **Paused** while keeping the selected workspace open. **⌘1–9** selects a
+or **Busy** while keeping the selected workspace open. **⌘1–9** selects a
 visible row by position and **⌃Tab / ⌃⇧Tab** cycles the rows. Missing slots do
 nothing. Selecting a Dashboard's Task keeps the Dashboard in the path, as its tile does.
 With sidebar focus, **⌘F** searches its visible Tasks and Waves; **Search all Work**
@@ -396,7 +396,7 @@ Source and license notices ship offline with the catalogue.
 Under the jump bar, the workflow bar reads where the Task stands:
 
 ```text
-code  plan  build  👤ship-review  deliver  👤verify   build is running implement. You are next needed at ship-review.   [Auto-Ship]  …
+code  plan  build  👤ship-review  deliver  verify   build is running implement. You are next needed at ship-review.   [Auto-Ship]  …
 ```
 
 The Graph's name, then its top-level steps in order, a person before each step

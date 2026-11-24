@@ -60,7 +60,7 @@ public enum TaskState: String, Codable, Sendable, Hashable {
 
     public var label: String { rawValue.replacingOccurrences(of: "_", with: " ") }
     public var isTerminal: Bool { self == .done || self == .abandoned }
-    public var isWorking: Bool { self == .idle || self == .active || self == .moving }
+    public var isWorking: Bool { self == .idle || self == .active || self == .moving || self == .paused }
 }
 
 public struct WorkReference: Codable, Sendable, Hashable {

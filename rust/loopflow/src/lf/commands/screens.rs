@@ -293,7 +293,7 @@ mod tests {
         );
         assert_eq!(
             decoded.section,
-            loopflow_execution::durable::TaskSection::Paused
+            loopflow_execution::durable::TaskSection::Working
         );
         assert_eq!(
             decoded.checks.as_ref().unwrap().failing_checks[0].name,

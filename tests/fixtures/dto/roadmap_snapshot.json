@@ -404,6 +404,7 @@
         "pr": null,
         "graph_source": null,
         "lifecycle": "moving",
+        "working_group": null,
         "selection_states": [
           "moving",
           "backlog",
@@ -699,6 +700,7 @@
         },
         "graph_source": null,
         "lifecycle": "unstarted",
+        "working_group": null,
         "selection_states": [
           "open",
           "unstarted",
@@ -778,6 +780,7 @@
         "pr": null,
         "graph_source": null,
         "lifecycle": "unstarted",
+        "working_group": null,
         "selection_states": [
           "unstarted",
           "backlog"
@@ -880,6 +883,7 @@
         "pr": null,
         "graph_source": null,
         "lifecycle": "done",
+        "working_group": null,
         "selection_states": [
           "done"
         ]

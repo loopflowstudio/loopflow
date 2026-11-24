@@ -1,4 +1,5 @@
 use crate::store::Store;
+use crate::task_graph::tests::ships_before_review;
 use loopflow_model::durable::TaskId;
 use loopflow_storage::query_plans::{growing_scans, statements};
 use loopflow_storage::sqlite::tracker_actions::ActionPhase;
@@ -83,10 +84,16 @@ fn planning_receipt_queries_stay_batched_across_repositories() {
     let first = task(&store, &TestRepo::new());
     let second = task(&store, &TestRepo::new());
     let single = statements(&store, || {
-        crate::store::ownership::task_detail_facts(&store, &[&first]).unwrap();
+        crate::store::ownership::task_detail_facts(&store, &[&first], &mut ships_before_review)
+            .unwrap();
     });
     let multiple = statements(&store, || {
-        let facts = crate::store::ownership::task_detail_facts(&store, &[&first, &second]).unwrap();
+        let facts = crate::store::ownership::task_detail_facts(
+            &store,
+            &[&first, &second],
+            &mut ships_before_review,
+        )
+        .unwrap();
         assert_eq!(facts.tracker_actions.len(), 2);
         assert_ne!(
             facts.tracker_actions[&first.id].repo,

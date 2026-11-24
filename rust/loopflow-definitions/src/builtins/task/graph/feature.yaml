@@ -1,10 +1,9 @@
-description: Explore, build, deliver and verify. You choose what to build, review the change and check it on main.
+description: Explore, build, deliver and verify. You choose what to build and review the change before it lands.
 steps:
 - interactive: explore
 - graph: plan
 - loop:
-    - loop:
-        - graph: build
-        - interactive: ship-review     # you read the page; iterate goes back to build
-    - graph: deliver
-    - interactive: verify
+    - graph: build
+    - interactive: ship-review     # you read the page; iterate goes back to build
+- graph: deliver
+- verify

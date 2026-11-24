@@ -23,7 +23,8 @@ final class TaskActionsTests: XCTestCase {
         var row = try XCTUnwrap(((roadmap["tasks"] as? [String: Any])?["items"] as? [[String: Any]])?.first)
         if paused {
             row["lifecycle"] = "paused"
-            row["section"] = "paused"
+            row["section"] = "working"
+            row["working_group"] = "paused"
             row["run_control"] = ["pausing": false, "unavailable": "Task is paused"]
         }
         return .value(TaskWorkspaceView.Reading(
@@ -32,9 +33,7 @@ final class TaskActionsTests: XCTestCase {
             execution: nil))
     }
 
-    func testPausedTaskOpensFromItsOwnFilterWithUnpause() throws {
-        XCTAssertEqual(TaskList.paused.title, "Paused")
-        XCTAssertEqual(TaskList.paused.expression(wave: nil), "kind:task state:paused")
+    func testPausedTaskOffersUnpauseInWorking() throws {
         guard case .value(let held) = try reading(sessions: true, paused: true) else { return XCTFail("missing Task") }
         XCTAssertEqual(held.actions?.pause, .unpause)
         XCTAssertNil(held.actions?.run)

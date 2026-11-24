@@ -388,7 +388,6 @@ impl Parser {
                 "idle" => SelectionState::Idle,
                 "active" => SelectionState::Active,
                 "moving" => SelectionState::Moving,
-                "paused" => SelectionState::Paused,
                 "backlog" => SelectionState::Backlog,
                 "working" => SelectionState::Working,
                 "done" => SelectionState::Done,

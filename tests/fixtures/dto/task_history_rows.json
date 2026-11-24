@@ -65,6 +65,7 @@
     "pr": null,
     "graph_source": null,
     "lifecycle": "abandoned",
+    "working_group": null,
     "selection_states": [
       "done"
     ]
@@ -135,6 +136,7 @@
     "pr": null,
     "graph_source": null,
     "lifecycle": "abandoned",
+    "working_group": null,
     "selection_states": [
       "done"
     ]
@@ -205,6 +207,7 @@
     "pr": null,
     "graph_source": null,
     "lifecycle": "abandoned",
+    "working_group": null,
     "selection_states": [
       "done"
     ]
@@ -275,6 +278,7 @@
     "pr": null,
     "graph_source": null,
     "lifecycle": "abandoned",
+    "working_group": null,
     "selection_states": [
       "done"
     ]
@@ -345,6 +349,7 @@
     "pr": null,
     "graph_source": null,
     "lifecycle": "abandoned",
+    "working_group": null,
     "selection_states": [
       "done"
     ]
@@ -415,6 +420,7 @@
     "pr": null,
     "graph_source": null,
     "lifecycle": "abandoned",
+    "working_group": null,
     "selection_states": [
       "done"
     ]
@@ -485,6 +491,7 @@
     "pr": null,
     "graph_source": null,
     "lifecycle": "abandoned",
+    "working_group": null,
     "selection_states": [
       "done"
     ]
@@ -555,6 +562,7 @@
     "pr": null,
     "graph_source": null,
     "lifecycle": "unstarted",
+    "working_group": null,
     "selection_states": [
       "unstarted",
       "backlog"
@@ -626,6 +634,7 @@
     "pr": null,
     "graph_source": null,
     "lifecycle": "unstarted",
+    "working_group": null,
     "selection_states": [
       "unstarted",
       "backlog"
@@ -697,6 +706,7 @@
     "pr": null,
     "graph_source": null,
     "lifecycle": "unstarted",
+    "working_group": null,
     "selection_states": [
       "unstarted",
       "backlog"
@@ -768,6 +778,7 @@
     "pr": null,
     "graph_source": null,
     "lifecycle": "unstarted",
+    "working_group": null,
     "selection_states": [
       "unstarted",
       "backlog"
@@ -839,6 +850,7 @@
     "pr": null,
     "graph_source": null,
     "lifecycle": "done",
+    "working_group": null,
     "selection_states": [
       "done"
     ]
@@ -909,6 +921,7 @@
     "pr": null,
     "graph_source": null,
     "lifecycle": "done",
+    "working_group": null,
     "selection_states": [
       "done"
     ]
@@ -979,6 +992,7 @@
     "pr": null,
     "graph_source": null,
     "lifecycle": "done",
+    "working_group": null,
     "selection_states": [
       "done"
     ]
@@ -1049,6 +1063,7 @@
     "pr": null,
     "graph_source": null,
     "lifecycle": "unstarted",
+    "working_group": null,
     "selection_states": [
       "unstarted",
       "backlog"
@@ -1120,6 +1135,7 @@
     "pr": null,
     "graph_source": null,
     "lifecycle": "abandoned",
+    "working_group": null,
     "selection_states": [
       "done"
     ]

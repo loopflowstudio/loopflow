@@ -209,19 +209,18 @@ compresses and re-measures. Compose it with `deliver` to ship the win:
 ## Where a person takes part
 
 Mark any step `interactive:` to pause for human input; every other step runs
-headless. Built-in `feature` puts you in the loop at three high-leverage
-moments:
+headless. In the builtin `feature` Graph you choose what to build at `explore`
+and review it at `ship-review`.
 
 ```yaml
 # feature (builtin)
 - interactive: explore      # choose what to build
 - graph: plan               # kickoff, concept-review, write-docs
 - loop:
-    - loop:
-        - graph: build      # implement, compress, qa, publish PR
-        - interactive: ship-review  # read one summary page; iterate sends feedback back to build
-    - graph: deliver        # reflect, gate, land --wait-and-fix
-    - interactive: verify   # check it on main; finish or fix forward
+    - graph: build      # implement, compress, qa, publish PR
+    - interactive: ship-review  # read one summary page; iterate sends feedback back to build
+- graph: deliver        # reflect, gate, land --wait-and-fix
+- verify                # check it on main; finish or fix forward
 ```
 
 ```bash
@@ -237,13 +236,14 @@ what ships, in your terms, and everything the run left outside the PR, each
 with a proposal to fix it here, give it its own Task, or drop it. It is not a
 code review; concept review and gate already answered whether the change is
 right. Ask for changes in the Task conversation to loop back to `build`, or
-move on to `deliver`.
+move on to `deliver`. After merge, `verify` checks what it can quickly on
+main and records any check that needs a later release.
 
 ### Built-in Graphs
 
 | Graph | What it does |
 |---|---|
-| `feature` | `explore` (interactive) → `plan` → `build` ↔ `ship-review` (interactive) → `deliver` → `verify` (interactive) |
+| `feature` | `explore` (interactive) → `plan` → `build` ↔ `ship-review` (interactive) → `deliver` → `verify` |
 | `code` | Same as `feature`, starting at `plan` (default when no Graph is configured) |
 | `pursue` | `plan` then `build` with no interactive stops: request to published PR |
 | `research` | Investigate and report findings without opening a PR |
@@ -270,7 +270,7 @@ steps:
 
 ```console
 $ lf graph list
-code       Build, deliver and verify. You review the change, then check it on main.
+code       Build, deliver and verify. You review the change before it lands.
 my-graph
 ship-api   Build the endpoint, audit it, then deliver.
 ```
@@ -292,10 +292,10 @@ $ lf graph list --json | jq '.[] | select(.name=="code") | .workflow'
     {"name": "build", "interactive": false},
     {"name": "ship-review", "interactive": true},
     {"name": "deliver", "interactive": false},
-    {"name": "verify", "interactive": true}
+    {"name": "verify", "interactive": false}
   ],
   "interactive_steps": [...],
-  "sentence": "You take part at ship-review and verify."
+  "sentence": "You take part at ship-review."
 }
 ```
 

@@ -129,8 +129,8 @@ final class WorkModel {
         set { selectionReadings[repositoryReadingKey(repoPath ?? "")] = newValue }
     }
 
-    /// The sidebar reading and the list expression it answers.
-    private var taskListReadings: [RepositoryReadingKey: (expression: String, reading: Reading<WorkViewPlan>)] = [:] {
+    /// The Working list for the repository or Wave the sidebar shows.
+    private var taskListReadings: [RepositoryReadingKey: (wave: String?, reading: Reading<WorkViewPlan>)] = [:] {
         didSet {
             reported(WorkPart.taskList.rawValue, "Tasks", from: oldValue.mapValues(\.reading),
                      to: taskListReadings.mapValues(\.reading))
@@ -138,18 +138,17 @@ final class WorkModel {
     }
     private var taskListGeneration = 0
 
-    func applyTaskList(_ plan: WorkViewPlan?, wave: String?, list: TaskList = .started, reason: String, readAt: Revisions? = nil) {
-        let expression = list.expression(wave: wave)
+    func applyTaskList(_ plan: WorkViewPlan?, wave: String?, reason: String, readAt: Revisions? = nil) {
         taskListGeneration &+= 1
         let key = repositoryReadingKey(repoPath ?? "")
         let previous = taskListReadings[key]
-        let kept = previous?.expression == expression ? previous?.reading : nil
+        let kept = previous?.wave == wave ? previous?.reading : nil
         let next: Reading<WorkViewPlan> = plan.map { .available($0, readAt: readAt) }
             ?? (kept?.failed(reason) ?? .unavailable(lastGood: nil, reason: reason))
-        guard previous?.expression != expression || previous?.reading != next else { return }
+        guard previous?.wave != wave || previous?.reading != next else { return }
         // Hold the open Task's group from the reading it was seen in, before this one moves it.
-        if previous?.expression == expression { holdSelectedStatusGroup() }
-        taskListReadings[key] = (expression, next)
+        if previous?.wave == wave { holdSelectedStatusGroup() }
+        taskListReadings[key] = (wave, next)
         holdSelectedStatusGroup()
         endLaunchWhenCurrent()
     }
@@ -160,7 +159,7 @@ final class WorkModel {
 
     /// The list once it answers for the sidebar's current scope.
     var taskListReading: Reading<WorkViewPlan> {
-        guard let entry = taskListReadings[repositoryReadingKey(repoPath ?? "")], entry.expression == navigation.sidebarFilter.list.expression(wave: taskListWave) else { return .loading }
+        guard let entry = taskListReadings[repositoryReadingKey(repoPath ?? "")], entry.wave == taskListWave else { return .loading }
         return entry.reading
     }
 
@@ -1430,21 +1429,19 @@ final class WorkModel {
         return SavedReadings(machine: machine, directory: cache.directory)
     }
 
-    static func taskListSubscription(repo: String, wave: String?, list: TaskList = .started) -> String {
-        let prefix = list == .started ? "task_list" : list.rawValue + "_tasks"
-        return "\(prefix)-\(repo.normalizedFilePath)-\(wave ?? "")"
+    static func taskListSubscription(repo: String, wave: String?) -> String {
+        "task_list-\(repo.normalizedFilePath)-\(wave ?? "")"
     }
 
     /// Restore the list for the filter and Wave the sidebar opens with.
     private func restoreTaskList(repo: String, saved: SavedReadings) {
         let wave: String? = if case .wave(let id) = navigationByRepo[repo]?.sidebarScope { id } else { nil }
-        let list = navigationByRepo[repo]?.sidebarFilter.list ?? .started
-        let scope = WorkScope(repo: repo, headless: false, task: nil, activity: nil, taskListWave: wave, taskList: list)
-        guard let line = saved.load(Self.taskListSubscription(repo: repo, wave: wave, list: list)),
+        let scope = WorkScope(repo: repo, headless: false, task: nil, activity: nil, taskListWave: wave)
+        guard let line = saved.load(Self.taskListSubscription(repo: repo, wave: wave)),
               let frame = try? WorkFrame.decode(part: .taskList, scope: scope, sequence: 0, line: line),
               case .taskList(let plan?) = frame.content else { return }
         taskListReadings[RepositoryReadingKey(machineId: saved.machine, repository: repo)] =
-            (list.expression(wave: wave), .available(plan, readAt: frame.readAt))
+            (wave, .available(plan, readAt: frame.readAt))
     }
 
     /// Show the saved workspace before any read. Text that no longer decodes is skipped.
@@ -1655,7 +1652,7 @@ final class WorkModel {
             headless: false,
             task: shown?.task.task.identifier,
             activity: activityScope(for: selection),
-            taskListWave: taskListWave, taskList: navigation.sidebarFilter.list)
+            taskListWave: taskListWave)
     }
 
     /// Tell the reader what this window shows now. Frames for the previous
@@ -1742,7 +1739,7 @@ final class WorkModel {
         }
         if repoPath != nil {
             applySelectionPlans(nil, reason: reason)
-            applyTaskList(nil, wave: workScope.taskListWave, list: workScope.taskList, reason: reason)
+            applyTaskList(nil, wave: workScope.taskListWave, reason: reason)
         }
         if repoPath != nil { repositoryPlan = .unavailable(lastGood: repositoryPlan.value, reason: reason) }
         taskExecution.values = taskExecution.values.mapValues { .unavailable(lastGood: $0.value, reason: reason) }
@@ -1781,9 +1778,9 @@ final class WorkModel {
             guard answers >= max(planningFloor, scopeFloor) else { return }
             guard let sentScope else { return }
             let wave = sentScope.taskListWave
-            applyTaskList(body, wave: wave, list: sentScope.taskList, reason: reason, readAt: frame.readAt)
+            applyTaskList(body, wave: wave, reason: reason, readAt: frame.readAt)
             if let line = frame.wire?.taskList, let repoPath {
-                savedReadings(observingMachineId)?.save(line, Self.taskListSubscription(repo: repoPath, wave: wave, list: sentScope.taskList))
+                savedReadings(observingMachineId)?.save(line, Self.taskListSubscription(repo: repoPath, wave: wave))
             }
         case .planHome(let body):
             guard answers >= max(planningFloor, scopeFloor), let repoPath else { return }
@@ -1948,19 +1945,18 @@ final class WorkModel {
         guard !usesFixedFixture, let repo = repoPath else { return }
         let key = repositoryReadingKey(repo)
         let wave = workScope.taskListWave
-        let list = workScope.taskList
         taskListGeneration &+= 1
         let generation = taskListGeneration
         let plan: WorkViewPlan?
         var reason = ""
-        do { plan = try await query.viewPlan(expression: list.expression(wave: wave), repoPath: repo) }
+        do { plan = try await query.viewPlan(expression: TaskList.started.expression(wave: wave), repoPath: repo) }
         catch {
             plan = nil
             reason = error.localizedDescription
         }
         guard generation == taskListGeneration, repoPath == repo, repositoryReadingKey(repo) == key,
-              workScope.taskListWave == wave, workScope.taskList == list else { return }
-        applyTaskList(plan, wave: wave, list: list, reason: reason)
+              workScope.taskListWave == wave else { return }
+        applyTaskList(plan, wave: wave, reason: reason)
     }
 
     private func refreshRepositoryPlan() async {
@@ -2195,6 +2191,7 @@ final class WorkModel {
         let id: String
         let work: WorkWorkspaceKey
         let states: [WorkSelectionState]
+        let workingGroup: WorkingGroup?
         let graphStep: String?
     }
 
@@ -2206,7 +2203,7 @@ final class WorkModel {
         switch navigation.sidebarScope {
         case .repository, .wave:
             plan = taskList
-            requiredStates = [navigation.sidebarFilter.list.state]
+            requiredStates = [.working]
         case .dashboard(let id):
             plan = dashboard(id)
             requiredStates = []
@@ -2214,7 +2211,6 @@ final class WorkModel {
         guard let plan else { return [] }
         switch navigation.sidebarFilter {
         case .working: break
-        case .paused: requiredStates.append(.paused)
         case .available: requiredStates.append(.available)
         case .busy: requiredStates.append(.busy)
         }
@@ -2226,13 +2222,19 @@ final class WorkModel {
             let content = contents[member.work]
             let states = content?.states ?? []
             guard requiredStates.allSatisfy(states.contains) else { return nil }
-            return SidebarTaskRow(id: id, work: member.work, states: states, graphStep: content?.graphStep)
+            return SidebarTaskRow(id: id, work: member.work, states: states, workingGroup: content?.workingGroup, graphStep: content?.graphStep)
         }
     }
 
     var sidebarRows: [SidebarTaskRow] {
         let rows = filteredSidebarRows
-        guard navigation.sidebarScope.isWorkingList, navigation.sidebarSortByStatus else { return rows }
+        guard navigation.sidebarScope.isWorkingList else { return rows }
+        let groups = Dictionary(grouping: rows, by: \.workingGroup)
+        return WorkingGroup.allCases.flatMap { orderedWithinGroup(groups[$0] ?? []) }
+    }
+
+    private func orderedWithinGroup(_ rows: [SidebarTaskRow]) -> [SidebarTaskRow] {
+        guard navigation.sidebarSortByStatus else { return rows }
         let held = navigation.heldStatusGroup
         // Grouping retains the shared Task order within each status.
         let groups = Dictionary(grouping: rows) { row in
@@ -2259,8 +2261,9 @@ final class WorkModel {
     }
 
     /// A Wave or repository row's count: its Working Tasks.
-    func startedTaskCount(_ board: WorkNavigation.Board) -> Int {
-        (viewTasks(board)?.items ?? []).count { $0.section == .working }
+    func startedTaskCount(_ board: WorkNavigation.Board) -> Int? {
+        guard case .available(let rows, false) = viewTasks(board) else { return nil }
+        return rows.count { $0.section == .working }
     }
 
     /// Display identity comes from the same scoped readings as membership, never from IDs.

@@ -11,7 +11,7 @@ struct WorkflowLineTests {
     private static let code: [TaskGraph.Step] = [
         .init(name: "plan", interactive: false), .init(name: "build", interactive: false),
         .init(name: "ship-review", interactive: true), .init(name: "deliver", interactive: false),
-        .init(name: "verify", interactive: true),
+        .init(name: "verify", interactive: false),
     ]
 
     private func graph(_ position: TaskGraph.Position, current: Int?, sentence: String) -> TaskGraph {
@@ -82,11 +82,11 @@ struct WorkflowLineTests {
     @Test("An outline: every step ahead, where you take part under the steps; a Task's bar shows the name and no sentence")
     func outline() throws {
         let outline = WorkflowOutline(steps: Self.code, interactiveSteps: [],
-                                      sentence: "You take part at ship-review and verify.")
+                                      sentence: "You take part at ship-review.")
         let sheet = WorkflowLine(outline: outline)
         #expect(sheet.tones == Array(repeating: .ahead, count: 5))
         _ = try sheet.inspect().find(text: "ship-review")
-        _ = try sheet.inspect().find(text: "You take part at ship-review and verify.")
+        _ = try sheet.inspect().find(text: "You take part at ship-review.")
         #expect(throws: (any Error).self) { try sheet.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-bar-name") }
         let bar = WorkflowLine(name: "code", outline: outline)
         #expect(try bar.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-bar-name").text().string() == "code")

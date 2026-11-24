@@ -5,10 +5,9 @@ import SwiftUI
 extension TaskList {
     var title: String {
         switch self {
-        case .started: "Started"
+        case .started: "Working"
         case .available: "Ready for you"
         case .busy: "Working now"
-        case .paused: "Paused"
         case .backlog: "Backlog"
         case .done: "Done"
         }
@@ -221,17 +220,29 @@ struct TaskListView: View {
         _feed = State(initialValue: TaskFeed(client: client, notices: notices))
     }
 
-    /// Repositories with matching Tasks, each split into Tasks with a conversation and those without.
-    private var sections: [(repository: String, open: [WorkViewPlan.Content], quiet: [WorkViewPlan.Content])] {
+    private struct TaskSectionRows: Identifiable {
+        let repository: String
+        let group: WorkingGroup?
+        let tasks: [WorkViewPlan.Content]
+        var id: String { repository + "/" + (group?.rawValue ?? "") }
+    }
+
+    private var sections: [TaskSectionRows] {
         feed.project()
         let term = search.trimmingCharacters(in: .whitespacesAndNewlines)
-        return feed.shownRepositories.compactMap { entry in
-            guard shown.isEmpty || entry.repository == shown else { return nil }
+        return feed.shownRepositories.flatMap { entry -> [TaskSectionRows] in
+            guard shown.isEmpty || entry.repository == shown else { return [] }
             let tasks = term.isEmpty ? entry.tasks : entry.tasks.filter {
                 $0.title.localizedStandardContains(term) || $0.location?.cwd.localizedStandardContains(term) == true
             }
-            guard !tasks.isEmpty else { return nil }
-            return (entry.repository, tasks.filter { $0.primarySession != nil }, tasks.filter { $0.primarySession == nil })
+            guard !tasks.isEmpty else { return [] }
+            guard feed.filter == .started else {
+                return [TaskSectionRows(repository: entry.repository, group: nil, tasks: tasks)]
+            }
+            let groups = Dictionary(grouping: tasks, by: \.workingGroup)
+            return WorkingGroup.allCases.compactMap { group in
+                groups[group].map { TaskSectionRows(repository: entry.repository, group: group, tasks: $0) }
+            }
         }
     }
 
@@ -257,21 +268,24 @@ struct TaskListView: View {
     var body: some View {
         NavigationStack {
             List {
-                ForEach(sections, id: \.repository) { section in
+                ForEach(sections) { section in
+                    let quiet = section.tasks.filter { $0.primarySession == nil }
                     Section {
-                        ForEach(section.open, id: \.work) { link($0) }
-                        if !section.quiet.isEmpty {
+                        ForEach(section.tasks.filter { $0.primarySession != nil }, id: \.work) { link($0) }
+                        if !quiet.isEmpty {
                             // Started Tasks nobody has opened a conversation for stay one tap away.
-                            DisclosureGroup("\(section.quiet.count) without a conversation") {
-                                ForEach(section.quiet, id: \.work) { link($0) }
+                            DisclosureGroup("\(quiet.count) without a conversation") {
+                                ForEach(quiet, id: \.work) { link($0) }
                             }
                             .font(Typography.meta)
                             .foregroundStyle(theme.palette.textSecondary)
                             .listRowBackground(theme.palette.background)
                         }
                     } header: {
-                        if shown.isEmpty {
-                            Text(name(section.repository))
+                        let title = [shown.isEmpty ? name(section.repository) : nil, section.group?.title]
+                            .compactMap { $0 }.joined(separator: " · ")
+                        if !title.isEmpty {
+                            Text(title)
                                 .font(Typography.meta)
                                 .foregroundStyle(theme.palette.textSecondary)
                                 .textCase(nil)

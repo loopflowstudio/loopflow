@@ -270,6 +270,7 @@
           "graph_name": "feature",
           "graph_source": null,
           "lifecycle": "unstarted",
+          "working_group": null,
           "selection_states": [
             "open",
             "unstarted",

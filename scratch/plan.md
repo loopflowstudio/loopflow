@@ -6,7 +6,7 @@
 
 Stacked on `LOO-1063` (Working sidebar order + status sort). Keep the `stopping_sessions` rename and the documented Codex 0.171.0 / post-send move limits; revise the implementation as follows:
 
-1. **Implemented in this slice — keep the Task Session open on pause.**
+1. **Implemented — keep the Task Session open on pause.**
    - `lf task pause` stops only the Task's worker / Graph run, **any subprocesses in the worker's OS session** (describe generically in code/docs, not cargo-specific), and scheduled worker/limit retries.
    - Do **not** close the primary interactive Task Session on pause. Remove `Departure::Paused`, `Left::Paused`, primary-session teardown during pause, and Desktop's paused-conversation skip when opening/warming a Task.
    - While paused, the open Task Session keeps working normally (steers/messages reach the open conversation), while Graph runs (`lf task run`, `lf task auto on`, carrier recovery, limit recovery, `wave-operate`) stay held until explicit `lf task unpause`.
@@ -16,14 +16,15 @@ Stacked on `LOO-1063` (Working sidebar order + status sort). Keep the `stopping_
    - `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, and the architecture and Swift module checks passed. Gate and CI cover the wider suites.
    - A Task-bound standalone turn also polls interrupt events. Pause now records a Graph stop in the same transaction as the hold. The Graph checks only events after its launch cursor. In SQLite with 10,000 Tasks and one million events, the poll used `idx_task_events_task (task_id=? AND id>?)` and took 3.06 µs with no new event.
 
-2. **Keep paused Tasks inside `TaskSection::Working`, with 3 sections in the left Working list.**
+2. **Implemented — keep paused Tasks inside `TaskSection::Working`, with 3 sections in the left Working list.**
    - Owned paused Tasks remain in `TaskSection::Working` (not a separate `TaskSection::Paused` or separate Paused sidebar filter / Wave board section). Remove `TaskSection::Paused`, `TaskList.paused`, the Mac sidebar Paused filter, the Wave board / `lf wave show` `PAUSED` section, and the iPhone Paused filter. Keep `lf task list --state paused` filtering by `TaskState::Paused`.
    - On top of `LOO-1063`'s Working sidebar order and status-sort toggle, group owned Working Tasks in the left sidebar into **3 sections**:
      - **Active** — owned working Tasks not in Shipping or Paused
      - **Shipping** — `auto == on` OR no interactive step left ahead before landing (compute one shared predicate in Rust and carry it on the wire; Mac, iOS, and CLI read it)
      - **Paused** — owned paused Tasks (`TaskState::Paused`)
-3. **Make `verify` an automatic step in `code` and rewrite it to stay fast.**
+3. **Implemented — make `verify` an automatic step in `code` and rewrite it to stay fast.**
    - Change `verify` in the builtin `code` graph from `interactive: true` to an ordinary automatic step.
+   - The candidate CLI rejected the old outer loop: `loop at verify returns across interactive step "ship-review"; a person decides there`. Keep the build/review loop and end both Graphs with deliver, then automatic verify. A failed merged claim gets a linked fix-forward Task.
    - Rewrite the builtin `verify` skill (`rust/loopflow-definitions/src/builtins/task/skill/verify.md`) so it runs whatever verification it can **quickly** after merge and never blocks indefinitely (e.g. waiting for a production release/deploy).
    - With `verify` automatic, the existing "no interactive step left ahead" rule cleanly aligns with **Shipping** once a Task passes `ship-review`.
 4. **Redesign the top-right Task bar (`TaskWorkflowBar` / `TaskActions`) per `scratch/explore.html` Round 5 (V4).**
@@ -43,14 +44,22 @@ During a build, `lf task pause INF-123` stops the worker, every subprocess in th
 - **Stop.** Headless workers get their own OS session; pause, interrupt and the reaper stop its verified members, including reparented jobs. Pause records the hold, the session members and a Graph stop in one transaction, then signals outside the admission and SQLite locks; a separate per-Task cleanup lock serializes cleanup with unpause and move send. In-flight mutations (`lf land`) drain; the receipt and `TaskGraph.sentence` name them.
 - **Gates.** `lf task run`, `lf task auto on`, carrier and limit recovery, and operator recommendations (`TaskActionModel` NoAction) respect the hold. Conversations do not: steers, child-Task updates and primary recovery reach the open Task Session as usual.
 - **Surfaces.** `lf task pause`, `lf task unpause [--run]`, `lf task list --state paused`, served `task.pause` / `task.unpause` routed to the execution Machine, `TaskRunControl` refusal and `pausing` flag, Swift DTOs and `TaskActions.pause` (Unpause on Mac's Workflow bar and iPhone's action menu). Docs: `docs/work.md`, `surfaces.md`, `orchestration.md`, `sessions.md`, `troubleshooting.md`, `agent-api.md`.
-- **Still the pre-demo shape (removed by slice 2 below):** `TaskSection::Paused` / `SelectionState::Paused` (`sqlite/selections.rs:304-310`, `work/selection/query.rs:391`), `PAUSED` in `lf wave show` (`commands/waves.rs:3488,3568`), the screens mapping (`commands/screens.rs:296`), Swift `TaskList.paused`, Mac's Paused sidebar filter and Wave board section, iPhone's Paused filter.
+- **Working.** Owned held Tasks stay in Working. Roadmap rows and view contents carry the same `working_group` from Rust. Active, Shipping and Paused keep their saved order, with the Mac status sort inside each group. The CLI prints the group; the iPhone Working feed shows it within the repository.
+- **Verify.** New code and feature Graphs end with automatic verify after deliver. Previously captured Graphs keep their own steps. A post-merge check that fails gets a linked fix-forward Task.
+
+## Working groups on a private Machine
+
+- With FIX-2 in auto, `lf task pause FIX-1` left two Working rows. Both `lf task list --json` and the phone's `kind:task state:working` query returned FIX-1 as paused and FIX-2 as shipping. `lf wave show Product` kept a single Working section. Plain unpause returned FIX-1 to active.
+- The branch CLI loaded both corrected builtin Graphs. Code said “You take part at ship-review.” Feature said “You take part at explore and ship-review.”
+- At 10,000 Tasks with 30,520-byte captured Graphs, SQLite fetched the 100 Working Graphs by primary key in 1.18 ms (median of 20). With all 100 at start, a complete private `lf desktop view show` went from 1,450 ms to 427 ms by parsing each distinct command once per read (median of three debug CLI processes). All 100 after review read Shipping.
+- On macOS the focused checks covered refusal, paused conversations, Working counts, group order and keyboard navigation. On an iOS 26.2 Simulator the three pause tests passed, including opening the live terminal from Working and restoring the held row when unpause was refused.
+- Rust checks covered Paused taking precedence over auto, a running Graph crossing review into Shipping, selected and undecided XOR paths, and a served pause on another Machine. The DTO, schema, documented-command and golden-prompt checks passed. So did `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, the architecture check and the Swift module check.
 
 ## Remaining, in order
 
-1. **Working grouping (revision 2) + automatic verify (revision 3)** — next slice, one change. Delete `TaskSection::Paused` and every surface listed above so paused Tasks read as Working. Add one Rust predicate for Shipping (`auto == on` or no interactive step ahead before landing) carried on the wire beside the Task, and group the Mac sidebar's Working list into Active / Shipping / Paused on top of LOO-1063's order and status sort; iPhone and CLI read the same field. Flip `- interactive: verify` to `- verify` in `rust/loopflow-definitions/src/builtins/task/graph/code.yaml` (check `feature.yaml`) and rewrite `rust/loopflow-definitions/src/builtins/task/skill/verify.md` to check what it can quickly and never wait on a release. Demo: two Tasks, one in auto, one paused — the sidebar shows them under Shipping and Paused, the Working count includes both.
-2. **Task bar (revision 4)** — per `scratch/explore.html` Round 5 V4, after slice 1 is demoed ("4 im done with until the next slice is finsihed").
-3. **Named gaps for the PR:** Codex tool commands run in their own OS session and stay outside signal authority on 0.171.0 (open choice: accept, or a PreToolUse prefix that registers the session); a pause issued after a move's payload is sent but before the destination has a checkout is refused until arrival.
-4. **Gate / CI:** five-harness worker matrix, Linux session enumeration, lifeline/attachment/hosted-terminal suites.
+1. **Task bar (revision 4)** — per `scratch/explore.html` Round 5 V4, after the Working groups demo ("4 im done with until the next slice is finsihed").
+2. **Named gaps for the PR:** Codex tool commands run in their own OS session and stay outside signal authority on 0.171.0 (open choice: accept, or a PreToolUse prefix that registers the session); a pause issued after a move's payload is sent but before the destination has a checkout is refused until arrival.
+3. **Gate / CI:** five-harness worker matrix, Linux session enumeration, lifeline/attachment/hosted-terminal suites.
 
 ## QA on a private Machine
 

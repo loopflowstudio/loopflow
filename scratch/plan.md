@@ -375,8 +375,11 @@ deleted one).
    docs.
 2. **Desktop** (built): `ServedWrite` field, Desktop dialog (both all-merged and
    unmerged layouts).
-3. **iOS**: `ViewContent.open_children` in `selections.rs` + Swift +
+3. **iOS** (built): `ViewContent.open_children` in `selections.rs` + Swift +
    fixtures, iOS confirmation dialog, view tests.
+4. **Gate**: Swift `TaskCompleteConfirmationTests`, `TaskFeedTests`,
+   `ServerProtocolTests` and the full Rust suites in CI; the acceptance check
+   above; the demo.
 
 ## Exclusions
 

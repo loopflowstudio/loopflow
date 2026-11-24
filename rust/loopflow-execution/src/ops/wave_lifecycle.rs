@@ -45,7 +45,8 @@ pub struct WaveAdded {
 }
 
 /// Register a Wave, seed its authored files on the main checkout and commit
-/// them. Re-adding a live Wave changes nothing.
+/// them, then make its Project in the repository's tracker. Re-adding a live
+/// Wave changes nothing but a Project the tracker does not hold yet.
 pub async fn add(repo: &Path, name: &str, objective: Option<&str>) -> OpsResult<WaveAdded> {
     let store = super::planning_sync::planning_store().await?;
     let main = crate::repository::discover(repo).map_err(lifecycle_error)?;
@@ -53,6 +54,14 @@ pub async fn add(repo: &Path, name: &str, objective: Option<&str>) -> OpsResult<
         let _lifecycle = recovery::lock_async(main.as_path()).await?;
         add_local(&store, main.as_path(), name, objective).await?
     };
+    super::tracker::create_wave_project(&store, &added.main_checkout, &added.id)
+        .await
+        .map_err(|error| {
+            lifecycle_error(format!(
+                "wave/{} has no tracker Project yet: {error}. Run `lf wave create {}` again to make it.",
+                added.name, added.name
+            ))
+        })?;
     sync_wave_project(&store, &added.main_checkout.to_string_lossy(), &added.id).await?;
     Ok(added)
 }

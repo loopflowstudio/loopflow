@@ -142,7 +142,7 @@ impl SqliteStore {
                  WHERE id=?1",
                 params![wave, reason, at],
             )?;
-            // A removed Wave's Project never reaches the tracker, nor do its unsent changes.
+            // A removed Wave's unsent Project and Task changes never reach the tracker.
             super::tracker_actions::retire_wave_in(&tx, wave)?;
         }
         tx.commit()?;

@@ -712,34 +712,16 @@ fn insert(
     Ok(id)
 }
 
-fn creation_baseline(conn: &Connection, owner: &ActionOwner) -> StoreResult<Vec<WorkValue>> {
-    Ok(match owner {
-        ActionOwner::Task(id) => {
-            let task = super::children::task_on(conn, id)?.ok_or(StoreError::NotFound)?;
-            vec![
-                WorkValue::TaskTitle(Some(task.title)),
-                WorkValue::TaskDescription(Some(task.description)),
-                WorkValue::TaskAssignee(task.assignee),
-                WorkValue::TaskDueDate(task.due_date),
-                WorkValue::TaskProject(task.project_id.as_ref().map(ToString::to_string)),
-                WorkValue::TaskParent(task.parent_task_id.as_ref().map(ToString::to_string)),
-            ]
-        }
-        ActionOwner::Project(id) => {
-            let project = super::children::project_in(conn, id)?;
-            vec![
-                WorkValue::ProjectName(Some(project.name)),
-                WorkValue::ProjectSummary(project.summary),
-                WorkValue::ProjectDescription(Some(project.description)),
-                WorkValue::ProjectStatus(project.status),
-            ]
-        }
-        ActionOwner::Wave(_) => {
-            return Err(StoreError::InvalidData(
-                "a Wave is connected, never created, by a tracker".into(),
-            ))
-        }
-    })
+fn creation_baseline(conn: &Connection, id: &TaskId) -> StoreResult<Vec<WorkValue>> {
+    let task = super::children::task_on(conn, id)?.ok_or(StoreError::NotFound)?;
+    Ok(vec![
+        WorkValue::TaskTitle(Some(task.title)),
+        WorkValue::TaskDescription(Some(task.description)),
+        WorkValue::TaskAssignee(task.assignee),
+        WorkValue::TaskDueDate(task.due_date),
+        WorkValue::TaskProject(task.project_id.as_ref().map(ToString::to_string)),
+        WorkValue::TaskParent(task.parent_task_id.as_ref().map(ToString::to_string)),
+    ])
 }
 
 /// Resolve an unconfirmed action; false when it resolved already.
@@ -938,15 +920,14 @@ fn retire_changed_again(
     Ok(())
 }
 
-/// Called by every ingestion path before it can allocate a new local identity.
-/// An observation of an id this store created claims the owner whose `create`
-/// was sent with it (both trackers carry the owner's uuid): the creation
-/// resolves, actions queued behind it take its values as their base, and the
-/// owner binds. Ordinary title matches do nothing.
+/// Called by every Task ingestion path before it can allocate a new local
+/// identity. An observation of an id this store created claims the Task whose
+/// `create` was sent with it (both trackers carry the Task's uuid): the
+/// creation resolves, actions queued behind it take its values as their base,
+/// and the Task binds. Ordinary title matches do nothing.
 pub(crate) fn attach_in(
     conn: &Connection,
     repo: &str,
-    project: bool,
     external: &str,
     revision: Option<&str>,
     observed: &[WorkValue],
@@ -954,17 +935,11 @@ pub(crate) fn attach_in(
     let Ok(uuid) = uuid::Uuid::parse_str(external) else {
         return Ok(());
     };
-    let sql = if project {
-        "SELECT o.id,e.id,e.value_json FROM projects o JOIN waves w ON w.id=o.wave_id
-         JOIN tracker_actions e ON e.project_id=o.id AND e.kind='create' AND e.phase='sent'
-         WHERE w.repo=?1 AND o.external_project_id IS NULL AND substr(o.id,6)=?2
-         ORDER BY e.seq DESC LIMIT 1"
-    } else {
+    let sql =
         "SELECT o.id,e.id,e.value_json FROM tasks o JOIN repository_plans w ON w.id=o.repository_id
          JOIN tracker_actions e ON e.task_id=o.id AND e.kind='create' AND e.phase='sent'
          WHERE w.repo=?1 AND o.external_issue_id IS NULL AND substr(o.id,6)=?2
-         ORDER BY e.seq DESC LIMIT 1"
-    };
+         ORDER BY e.seq DESC LIMIT 1";
     let created: Option<(String, String, String)> = conn
         .query_row(sql, params![repo, uuid.simple().to_string()], |row| {
             Ok((row.get(0)?, row.get(1)?, row.get(2)?))
@@ -973,11 +948,7 @@ pub(crate) fn attach_in(
     let Some((id, action, baseline)) = created else {
         return Ok(());
     };
-    let owner = if project {
-        ActionOwner::Project(ProjectId::from_raw(id.clone()))
-    } else {
-        ActionOwner::Task(TaskId::from_raw(id.clone()))
-    };
+    let owner = ActionOwner::Task(TaskId::from_raw(id.clone()));
     resolve_in(
         conn,
         &action,
@@ -998,9 +969,7 @@ pub(crate) fn attach_in(
     {
         bases.push((ActionKind::State, None, state.clone()));
     }
-    if !project {
-        bases.push((ActionKind::Delete, None, WorkValue::TaskDeletedAt(None)));
-    }
+    bases.push((ActionKind::Delete, None, WorkValue::TaskDeletedAt(None)));
     for (kind, subject, value) in bases {
         let base = PlanningBaseline {
             revision: revision.map(str::to_owned),
@@ -1014,49 +983,29 @@ pub(crate) fn attach_in(
             params![id, kind.as_str(), subject, serde_json::to_string(&base)?],
         )?;
     }
-    let bind = if project {
-        WorkValue::ProjectLinearId(Some(external.to_owned()))
-    } else {
-        WorkValue::TaskLinearId(Some(external.to_owned()))
-    };
+    let bind = WorkValue::TaskLinearId(Some(external.to_owned()));
     super::planning_write::tracker(conn, &crate::work::edit::WorkEdit::for_target(&id, &[bind]))?;
     Ok(())
 }
 
-/// Unbound Projects of live Waves in `repo`, then Tasks made on this Machine,
-/// with no live `create`. Any Machine creates a Project, wherever its record
-/// was made: every create carries the Project's UUID, so a second create binds
-/// the tracker's existing Project instead of making another.
-fn uncreated(conn: &Connection, repo: &str) -> StoreResult<Vec<ActionOwner>> {
+/// Tasks made on this Machine in `repo` with no live `create`. A Wave's
+/// Project is never queued: the command that makes the Wave creates it.
+fn uncreated(conn: &Connection, repo: &str) -> StoreResult<Vec<TaskId>> {
     let mut query = conn.prepare_cached(&format!(
-        "SELECT 'project',p.id FROM projects p JOIN waves w ON w.id=p.wave_id
-         WHERE w.repo=?1 AND w.retired_at IS NULL AND p.external_project_id IS NULL
-         AND NOT EXISTS(SELECT 1 FROM tracker_actions e WHERE e.project_id=p.id AND e.kind='create' AND e.phase!='retired')
-         UNION ALL
-         SELECT 'task',t.id FROM tasks t JOIN repository_plans r ON r.id=t.repository_id
+        "SELECT t.id FROM tasks t JOIN repository_plans r ON r.id=t.repository_id
          WHERE r.repo=?1 AND t.external_issue_id IS NULL AND t.planning_deleted_at IS NULL
          AND EXISTS(SELECT 1 FROM task_creation_intents c WHERE c.task_id=t.id)
          AND NOT ({STRANDED_TASK})
          AND NOT EXISTS(SELECT 1 FROM tracker_actions e WHERE e.task_id=t.id AND e.kind='create' AND e.phase!='retired')",
     ))?;
-    let rows = query.query_map([repo], |row| {
-        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-    })?;
-    rows.map(|row| {
-        let (kind, id) = row?;
-        Ok(if kind == "project" {
-            ActionOwner::Project(ProjectId::from_raw(id))
-        } else {
-            ActionOwner::Task(TaskId::from_raw(id))
-        })
-    })
-    .collect()
+    let rows = query.query_map([repo], |row| Ok(TaskId::from_raw(row.get::<_, String>(0)?)))?;
+    Ok(rows.collect::<Result<_, _>>()?)
 }
 
 impl SqliteStore {
-    /// Give every unbound local Project and Task in `repo` a `create` for
-    /// `tracker`, including those made before the tracker was connected, then
-    /// queue their comments behind it. Sends nothing.
+    /// Give every unbound local Task in `repo` a `create` for `tracker`,
+    /// including those made before the tracker was connected, then queue
+    /// their state and comments behind it. Sends nothing.
     pub fn enqueue_tracker_creations(
         &self,
         repo: &str,
@@ -1069,9 +1018,10 @@ impl SqliteStore {
             return Ok(0);
         }
         let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        let owners = uncreated(&tx, repo)?;
-        for owner in &owners {
-            let baseline = serde_json::to_value(creation_baseline(&tx, owner)?)?;
+        let tasks = uncreated(&tx, repo)?;
+        for task in &tasks {
+            let owner = &ActionOwner::Task(task.clone());
+            let baseline = serde_json::to_value(creation_baseline(&tx, task)?)?;
             insert(
                 &tx,
                 owner,
@@ -1081,60 +1031,57 @@ impl SqliteStore {
                 None,
                 tracker,
             )?;
-            if let ActionOwner::Task(task) = owner {
-                // A creation opens the item; a Task already started or done
-                // before the tracker was connected says so next.
-                let moved = super::planning_write::read(&tx, "tasks", task.as_str())?
-                    .into_iter()
-                    .find(|value| match value {
-                        WorkValue::Disposition(disposition) => {
-                            disposition.planning_completed != 0
-                                || disposition
-                                    .planning_state
-                                    .as_deref()
-                                    .is_some_and(|state| state != "unstarted")
-                        }
-                        _ => false,
-                    });
-                if let Some(disposition) = moved {
-                    insert(
-                        &tx,
-                        owner,
-                        ActionKind::State,
-                        None,
-                        &serde_json::to_value(disposition)?,
-                        None,
-                        tracker,
-                    )?;
-                }
-                let mut comments = tx.prepare(
-                    "SELECT id FROM task_comments WHERE task_id=?1 ORDER BY created_at,id",
+            // A creation opens the item; a Task already started or done
+            // before the tracker was connected says so next.
+            let moved = super::planning_write::read(&tx, "tasks", task.as_str())?
+                .into_iter()
+                .find(|value| match value {
+                    WorkValue::Disposition(disposition) => {
+                        disposition.planning_completed != 0
+                            || disposition
+                                .planning_state
+                                .as_deref()
+                                .is_some_and(|state| state != "unstarted")
+                    }
+                    _ => false,
+                });
+            if let Some(disposition) = moved {
+                insert(
+                    &tx,
+                    owner,
+                    ActionKind::State,
+                    None,
+                    &serde_json::to_value(disposition)?,
+                    None,
+                    tracker,
                 )?;
-                let ids = comments
-                    .query_map([task.as_str()], |row| row.get::<_, String>(0))?
-                    .collect::<Result<Vec<_>, _>>()?;
-                for comment in ids {
-                    let values = super::planning_write::read(&tx, "task_comments", &comment)?;
-                    let Some(content) = values
-                        .into_iter()
-                        .find(|value| matches!(value, WorkValue::CommentContent(_)))
-                    else {
-                        continue;
-                    };
-                    insert(
-                        &tx,
-                        owner,
-                        ActionKind::Comment,
-                        Some(&comment),
-                        &serde_json::to_value(content)?,
-                        None,
-                        tracker,
-                    )?;
-                }
+            }
+            let mut comments =
+                tx.prepare("SELECT id FROM task_comments WHERE task_id=?1 ORDER BY created_at,id")?;
+            let ids = comments
+                .query_map([task.as_str()], |row| row.get::<_, String>(0))?
+                .collect::<Result<Vec<_>, _>>()?;
+            for comment in ids {
+                let values = super::planning_write::read(&tx, "task_comments", &comment)?;
+                let Some(content) = values
+                    .into_iter()
+                    .find(|value| matches!(value, WorkValue::CommentContent(_)))
+                else {
+                    continue;
+                };
+                insert(
+                    &tx,
+                    owner,
+                    ActionKind::Comment,
+                    Some(&comment),
+                    &serde_json::to_value(content)?,
+                    None,
+                    tracker,
+                )?;
             }
         }
         tx.commit()?;
-        Ok(owners.len())
+        Ok(tasks.len())
     }
 
     /// Show the Task's pull request in its tracker: `state` is what the PR
@@ -1478,93 +1425,6 @@ mod tests {
             .tracker_actions_for(&ActionOwner::Task(bound))
             .unwrap()
             .is_empty());
-    }
-
-    #[test]
-    fn every_unbound_project_of_a_live_wave_is_created_in_the_tracker() {
-        let (_dir, store) = store();
-        let wave = crate::work::wave::Wave::new(
-            loopflow_model::id::WaveId::new(),
-            "billing".into(),
-            "/repo".into(),
-        );
-        crate::test_fixture::wave(&store, &wave);
-        let here = store.seed_project(wave.id()).unwrap().id;
-        let (theirs, removed) = (
-            loopflow_model::id::WaveId::new(),
-            loopflow_model::id::WaveId::new(),
-        );
-        // A removed Wave's Project is never made in a tracker connected later.
-        let retired = loopflow_model::durable::ProjectId::new();
-        store
-            .conn
-            .lock()
-            .unwrap()
-            .execute_batch(&format!(
-                "INSERT INTO waves(id,name,repo,created_at,retired_at) VALUES('{theirs}','theirs','/repo',1,NULL),('{removed}','removed','/repo',1,2);
-                 INSERT INTO projects(id,wave_id,created_at,updated_at,description,project_name,project_slug)
-                 VALUES('{retired}','{removed}',1,1,'','Removed','removed')"
-            ))
-            .unwrap();
-        // Another Machine made this Project's record; this one creates it too.
-        let elsewhere = loopflow_model::durable::ProjectId::new();
-        crate::test_fixture::arrive(
-            &store,
-            "/repo",
-            &crate::work::edit::WorkEdit::for_target(
-                elsewhere.as_str(),
-                &[
-                    WorkValue::ProjectWave(theirs.to_string()),
-                    WorkValue::ProjectName(Some("Theirs".into())),
-                    WorkValue::ProjectSlug(Some("theirs".into())),
-                ],
-            ),
-        )
-        .unwrap();
-        assert_eq!(
-            store
-                .enqueue_tracker_creations("/repo", TrackerKind::Linear)
-                .unwrap(),
-            2
-        );
-        let mut created: Vec<_> = store
-            .unconfirmed_tracker_actions("/repo")
-            .unwrap()
-            .into_iter()
-            .map(|action| action.owner)
-            .collect();
-        created.sort_by_key(|owner| format!("{owner:?}"));
-        let mut expected = vec![ActionOwner::Project(here), ActionOwner::Project(elsewhere)];
-        expected.sort_by_key(|owner| format!("{owner:?}"));
-        assert_eq!(created, expected);
-    }
-
-    #[test]
-    fn a_removed_waves_project_is_not_created_in_the_tracker() {
-        let (_dir, store) = store();
-        let wave = crate::work::wave::Wave::new(
-            loopflow_model::id::WaveId::new(),
-            "gone".into(),
-            "/repo".into(),
-        );
-        crate::test_fixture::wave(&store, &wave);
-        let project = store.seed_project(wave.id()).unwrap().id;
-        store
-            .enqueue_tracker_creations("/repo", TrackerKind::Linear)
-            .unwrap();
-        assert_eq!(store.unconfirmed_tracker_actions("/repo").unwrap().len(), 1);
-        store
-            .retire_waves(std::slice::from_ref(wave.id()), "removed")
-            .unwrap();
-        assert!(store
-            .unconfirmed_tracker_actions("/repo")
-            .unwrap()
-            .is_empty());
-        let actions = store
-            .tracker_actions_for(&ActionOwner::Project(project))
-            .unwrap();
-        assert_eq!(actions.len(), 1);
-        assert_eq!(actions[0].phase, ActionPhase::Retired);
     }
 
     #[test]

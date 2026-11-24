@@ -502,7 +502,6 @@ fn accept_project(
             edits,
         )
     };
-    tracker_actions::attach_in(tx, repo, true, external, revision.as_deref(), &edits)?;
     let existing: Option<(String, WaveId)> = tx
         .query_row(
             "SELECT id,wave_id FROM projects WHERE external_project_id=?1",
@@ -520,19 +519,16 @@ fn accept_project(
             ProjectId::parse(&id).map_err(|error| StoreError::InvalidData(error.to_string()))?
         }
         // A Wave is exactly one Project. A tracker Project no Wave links
-        // becomes the Wave's when its Project links none yet, unless that
-        // Project's own `create` is out and this is not it.
+        // becomes the Wave's when its Project links none yet.
         None => {
             let own = sqlite::children::held_wave_project_in(tx, &wave_id)?
                 .unwrap_or_else(|| ProjectId::for_wave(&wave_id));
-            let (linked, creating): (bool, bool) = tx
-                .query_row(
-                    "SELECT EXISTS(SELECT 1 FROM projects WHERE id=?1 AND external_project_id IS NOT NULL),
-                        EXISTS(SELECT 1 FROM tracker_actions WHERE project_id=?1 AND kind='create' AND phase IN ('queued','sent','conflicted'))",
-                    [own.as_str()],
-                    |row| Ok((row.get(0)?, row.get(1)?)),
-                )?;
-            if linked || (creating && !own.made_as(external)) {
+            let linked: bool = tx.query_row(
+                "SELECT EXISTS(SELECT 1 FROM projects WHERE id=?1 AND external_project_id IS NOT NULL)",
+                [own.as_str()],
+                |row| row.get(0),
+            )?;
+            if linked {
                 return Ok(());
             }
             own
@@ -595,7 +591,7 @@ fn apply_items(
         .collect::<Result<Vec<_>, _>>()?;
     drop(query);
     for (id, revision, edits) in observed {
-        tracker_actions::attach_in(tx, repo, false, &id, revision.as_deref(), &edits)?;
+        tracker_actions::attach_in(tx, repo, &id, revision.as_deref(), &edits)?;
     }
     // Admission and refresh share one accepted observation. Existing Tasks retain
     // their IDs, local order and pending disposition; new Tasks receive only Work.

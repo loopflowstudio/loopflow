@@ -176,10 +176,18 @@ pub(crate) fn check_directory(directory: &Path) -> OpsResult<()> {
         })
 }
 
-/// Exchange the repository delta and queued saves, then read the selected
-/// Wave's Linear inventory if its Project is linked after delivery.
+/// Make the selected Wave's Project in the tracker if it has none (a Wave
+/// registered from another checkout's files, or upgraded), exchange the
+/// repository delta and queued saves, then read the Wave's Linear inventory.
 pub async fn refresh_wave(wave: &crate::work::wave::Wave, tracker: TrackerKind) -> OpsResult<()> {
     let store = planning_store().await?;
+    if super::tracker::create_wave_project(&store, Path::new(wave.repo()), wave.id()).await? {
+        crate::journal::request::diagnostic(format_args!(
+            "Made wave/{}'s Project in {}.",
+            wave.slug(),
+            tracker.display_name()
+        ));
+    }
     let project = store.sqlite.wave_project(wave.id()).map_err(message)?;
     super::tracker_events::refresh_repository(&store, wave.repo(), &ActionOwner::Project(project))
         .await;

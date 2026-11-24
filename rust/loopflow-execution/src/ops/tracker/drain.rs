@@ -111,7 +111,40 @@ pub(crate) async fn drain_repository(
             return Ok(Pass::default());
         }
     };
+    create_named_projects(store, Path::new(repo), &tracker, &actions).await;
     drain(store, repo, &tracker, actions, scope, bound).await
+}
+
+/// A live Wave's Project the tracker does not hold yet (its Wave came from
+/// another checkout's files, or from an upgrade) is created here, before the
+/// Tasks that name it are sent. A failure leaves those Tasks to say why.
+async fn create_named_projects(
+    store: &Store,
+    repo: &Path,
+    tracker: &Tracker,
+    actions: &[TrackerAction],
+) {
+    let mut named: Vec<loopflow_model::durable::ProjectId> = Vec::new();
+    for parent in actions.iter().flat_map(parents_named) {
+        if let ActionOwner::Project(project) = parent {
+            if !named.contains(&project) {
+                named.push(project);
+            }
+        }
+    }
+    for id in named {
+        let Ok(Some(project)) = store.sqlite.project(&id) else {
+            continue;
+        };
+        if project.tracker_id.is_some()
+            || !matches!(store.sqlite.get_wave(&project.wave_id), Ok(Some(wave)) if !wave.is_retired())
+        {
+            continue;
+        }
+        if let Err(error) = tracker.create_project(store, repo, &project).await {
+            tracing::warn!(project = %id, %error, "Wave Project not created in the tracker");
+        }
+    }
 }
 
 /// The repository's unconfirmed actions for `tracker`, after queueing a
@@ -173,8 +206,8 @@ async fn drain(
         resolved: AtomicUsize::new(0),
     };
     pass.round(grouped(actions, scope), bound.concurrency).await;
-    // Owners run concurrently, so a Task can wait on a Project or a parent
-    // created in the same round; those get one more turn once it has resolved.
+    // Owners run concurrently, so a Task can wait on a parent created in the
+    // same round; those get one more turn once it has resolved.
     if !pass.creating.is_empty() {
         let mut owners = grouped(
             store

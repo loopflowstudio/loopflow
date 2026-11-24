@@ -25,6 +25,7 @@ use loopflow_storage::sqlite::tracker_actions::{
     ActionKind, ActionOwner, ActionPhase, TaskLink, TrackerAction,
 };
 use loopflow_storage::work::edit::WorkValue;
+use loopflow_storage::work::project::Project;
 
 impl LinearClient {
     pub(crate) async fn send_action(
@@ -36,9 +37,6 @@ impl LinearClient {
         let sent = match (&action.owner, action.kind) {
             (ActionOwner::Task(task), ActionKind::Create) => {
                 self.create_task(store, repo, task, action).await
-            }
-            (ActionOwner::Project(project), ActionKind::Create) => {
-                self.create_project(store, repo, project, action).await
             }
             (ActionOwner::Task(task), ActionKind::Field) => {
                 self.task_field(store, repo, task, action).await
@@ -57,7 +55,8 @@ impl LinearClient {
             (ActionOwner::Task(task), ActionKind::Link) => {
                 self.task_link(store, task, action).await
             }
-            (owner, kind) => Err(message(format!(
+            // A released lf can still queue a Project create; it retires.
+            (owner, kind) => Ok(Sent::Unsupported(format!(
                 "Linear carries no {} action for {owner:?}",
                 kind.as_str()
             ))),
@@ -75,9 +74,6 @@ impl LinearClient {
         let observed = match (&action.owner, action.kind) {
             (ActionOwner::Task(task), ActionKind::Create) => {
                 self.look_created_task(store, repo, task).await
-            }
-            (ActionOwner::Project(project), ActionKind::Create) => {
-                self.look_created_project(store, project).await
             }
             (ActionOwner::Task(task), ActionKind::Delete) => {
                 self.look_deletion(store, repo, task, action).await
@@ -133,51 +129,41 @@ impl LinearClient {
         self.accepted(store, repo, response).await
     }
 
-    async fn create_project(
+    /// Make `project` in Linear under its own UUID and bind it. A create whose
+    /// reply was lost is refused the second time (Linear never reuses an id),
+    /// so a refusal first looks for the Project holding that id.
+    pub(crate) async fn create_project(
         &self,
         store: &Store,
         repo: &Path,
-        project: &ProjectId,
-        action: &TrackerAction,
-    ) -> OpsResult<Sent> {
-        let wave = project_wave(store, project).await?;
-        let team = repository_scope(repo)?;
-        let id = creation_id(project.as_str())?;
-        let mut input =
-            json!({"id": id, "teamIds": [team], "useDefaultTemplate": false, "content": ""});
-
-        for value in values(action)? {
-            match value {
-                WorkValue::ProjectName(name) => input["name"] = json!(name),
-                WorkValue::ProjectSummary(summary) => input["description"] = json!(summary),
-                WorkValue::ProjectDescription(text) => {
-                    input["content"] = json!(text.unwrap_or_default())
-                }
-                WorkValue::ProjectStatus(status) => {
-                    input["statusId"] =
-                        json!(self.project_status_id(status).await.map_err(message)?)
-                }
-                _ => {}
-            }
-        }
-        let project = match crate::linear::urgent(self.deliver_planning_creation(true, input)).await
+        project: &Project,
+    ) -> OpsResult<()> {
+        let id = creation_id(project.id.as_str())?;
+        let input = json!({
+            "id": id,
+            "teamIds": [repository_scope(repo)?],
+            "useDefaultTemplate": false,
+            "name": project.name,
+            "description": project.summary,
+            "content": project.description,
+            "statusId": self.project_status_id(project.status).await.map_err(message)?,
+        });
+        let created = match crate::linear::urgent(self.deliver_planning_creation(true, input)).await
         {
             Ok(PlanningResponse::Project { project, .. }) => *project,
             Ok(PlanningResponse::Task { .. }) => {
-                return Ok(Sent::Unknown("Project creation returned an issue".into()))
+                return Err(message("Linear Project creation returned an issue"))
             }
-            // Another Machine may have created this Project under the same id,
-            // which Linear refuses to reuse: a Project holding it is this one.
             Err(error) => match self.find_project(&id).await {
                 Ok(Some(found)) => found,
-                _ => return Ok(Sent::failed(error)),
+                _ => {
+                    return Err(message(format!(
+                        "Linear did not create the Project: {error}"
+                    )))
+                }
             },
         };
-        accept_project(store, &wave, &project)?;
-        Ok(Sent::Acknowledged {
-            revision: project.revision,
-            remote_id: Some(id),
-        })
+        accept_project(store, &project.wave_id, &created)
     }
 
     async fn task_field(
@@ -551,22 +537,6 @@ impl LinearClient {
         };
         ingest_task(store, repo, &item, project.as_ref(), now()).await?;
         Ok(Some(observed_task(store, &item).await?))
-    }
-
-    async fn look_created_project(
-        &self,
-        store: &Store,
-        project: &ProjectId,
-    ) -> OpsResult<Option<Observed>> {
-        let Some(found) = self
-            .find_project(&creation_id(project.as_str())?)
-            .await
-            .map_err(message)?
-        else {
-            return Ok(None);
-        };
-        accept_project(store, &project_wave(store, project).await?, &found)?;
-        Ok(Some(observed_project(&found)))
     }
 
     async fn look_task(

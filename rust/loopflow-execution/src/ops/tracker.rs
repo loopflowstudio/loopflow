@@ -13,11 +13,13 @@ use crate::asana::AsanaClient;
 use crate::config::TrackerConfig;
 use crate::linear::LinearClient;
 use crate::store::Store;
+use loopflow_model::id::WaveId;
 use loopflow_storage::planning::rules::Observed;
 use loopflow_storage::planning::{TrackerEvent, TrackerItem, TrackerProject};
 use loopflow_storage::planning_sync::TrackerKind;
 use loopflow_storage::sqlite::tracker_actions::{ActionKind, TrackerAction};
 use loopflow_storage::work::edit::{Disposition, WorkValue};
+use loopflow_storage::work::project::Project;
 
 use super::{OpsError, OpsResult};
 
@@ -93,6 +95,27 @@ pub fn queued_tracker(repo: &Path) -> Option<TrackerKind> {
 
 pub fn connected(repo: &str) -> bool {
     queued_tracker(Path::new(repo)).is_some()
+}
+
+/// Give `wave`'s Project its tracker id, creating it in the repository's
+/// tracker on this Machine when it has none: the command that makes, connects
+/// or syncs a Wave does this before it returns. True when it created one; a
+/// tracker error fails the caller and leaves the Project unbound.
+pub async fn create_wave_project(store: &Store, repo: &Path, wave: &WaveId) -> OpsResult<bool> {
+    if queued_tracker(repo).is_none() {
+        return Ok(false);
+    }
+    let Some(project) = store.project_of_wave(wave).await.map_err(message)? else {
+        return Ok(false);
+    };
+    if project.tracker_id.is_some() {
+        return Ok(false);
+    }
+    Tracker::for_repository(repo)
+        .await?
+        .create_project(store, repo, &project)
+        .await?;
+    Ok(true)
 }
 
 #[cfg(any(test, feature = "test-support"))]
@@ -186,6 +209,22 @@ impl Tracker {
             Self::Asana(client) => client.look_action(store, repo, action).await,
             #[cfg(test)]
             Self::Fake(fake) => fake.look(action),
+        }
+    }
+
+    /// Make a Wave's Project in the tracker and bind it, or fail with the
+    /// tracker's error. Project creates are never queued.
+    pub(crate) async fn create_project(
+        &self,
+        store: &Store,
+        repo: &Path,
+        project: &Project,
+    ) -> OpsResult<()> {
+        match self {
+            Self::Linear(client) => client.create_project(store, repo, project).await,
+            Self::Asana(client) => client.create_project(store, repo, project).await,
+            #[cfg(test)]
+            Self::Fake(_) => Err(message("fake tracker creates no Projects")),
         }
     }
 

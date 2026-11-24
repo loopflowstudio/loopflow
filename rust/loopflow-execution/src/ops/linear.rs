@@ -25,7 +25,6 @@ use crate::store::{
 use crate::work::wave::Wave;
 use loopflow_model::id::WaveId;
 use loopflow_storage::planning::{ProjectInventory, TrackerProject};
-use loopflow_storage::sqlite::tracker_actions::ActionOwner;
 use loopflow_storage::work::task::Task;
 use loopflow_storage::work::wave::normalize_wave_name;
 use serde::{Deserialize, Serialize};
@@ -615,7 +614,7 @@ async fn connect_async(
 
     let ctx = resolve_repository_context(repo).await?;
     // Find the named Project before adding a Wave: a Wave added for a connect
-    // that then fails would export a `create` for a Project of its own.
+    // that then fails would be left holding a Project of its own.
     let named = match options.project.as_deref() {
         Some(key) => {
             progress.status(&format!("looking for Linear Project `{key}`"));
@@ -672,10 +671,11 @@ async fn connect_async(
         ));
         let locks = lock_wave_planning(&wave_id).await?;
         let observed_at = time::OffsetDateTime::now_utc().unix_timestamp();
+        let linking = wave_id.clone();
         crate::store::run_planning_write(&store.sqlite, Some(locks), move |sqlite| {
             loopflow_storage::sqlite::linear_events::link_wave_project_in(
                 &sqlite,
-                &wave_id,
+                &linking,
                 &project,
                 observed_at,
                 loopflow_storage::planning_sync::TrackerKind::Linear,
@@ -686,15 +686,8 @@ async fn connect_async(
     }
     drop(lifecycle);
     if create {
-        // The Project's `create` goes out with the repository's other
-        // saved changes; a failed send waits for the next exchange.
         progress.status(&format!("making wave/{wave}'s Project in Linear"));
-        super::planning_sync::sync_after_save(
-            &store,
-            &repo.to_string_lossy(),
-            Some(&ActionOwner::Project(own.clone())),
-        )
-        .await;
+        super::tracker::create_wave_project(&store, repo, &wave_id).await?;
     }
     refresh_inventory(repo, &wave, &ctx).await?;
     let project = store

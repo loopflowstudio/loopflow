@@ -542,8 +542,9 @@ fn asana_tasks_coworkers_create_become_tasks() {
         let asana = runtime.block_on(state.lock());
         let id = task.tracker_id.as_ref().unwrap().as_str();
         assert_eq!(asana.tasks[id]["external"]["gid"], id);
-        // The existing team project was reused; the other is the Wave's.
-        assert_eq!(asana.projects.len(), 3);
+        // The existing team project was reused. The fixture Wave's Project is
+        // made only by a command on that Wave or a Task sent into it.
+        assert_eq!(asana.projects.len(), 2);
         assert_eq!(
             asana
                 .projects
@@ -673,7 +674,7 @@ fn asana_wave_projects_become_team_projects_holding_their_tasks() {
 }
 
 #[test]
-fn a_wave_project_another_machine_mirrored_in_asana_is_bound_not_duplicated() {
+fn a_wave_sync_binds_the_asana_project_a_lost_create_reply_left() {
     with_asana(|runtime, fixture, repo, state| {
         let wave = fixture
             .store
@@ -685,12 +686,19 @@ fn a_wave_project_another_machine_mirrored_in_asana_is_bound_not_duplicated() {
             .unwrap();
         let project = fixture.store.sqlite.wave_project(wave.id()).unwrap();
         let id = crate::ops::tracker::creation_id(project.as_str()).unwrap();
-        // Asana takes no caller id; the other Machine's project carries it in its footer.
+        // Asana takes no caller id; a create whose reply was lost left a
+        // project carrying it in its footer.
         runtime.block_on(state.lock()).projects.push(json!({
             "gid": "1200000000000099", "name": "Product",
             "html_notes": format!("<body>Loopflow ID: {id}</body>"),
             "modified_at": "2026-10-19T11:00:00.000Z",
         }));
+        runtime
+            .block_on(crate::ops::planning_sync::refresh_wave(
+                &wave,
+                crate::ops::tracker::queued_tracker(repo).unwrap(),
+            ))
+            .unwrap();
         let saved = crate::ops::task::task_create(
             repo,
             Some("product"),

@@ -174,7 +174,8 @@ fn connecting_after_an_offline_rename_keeps_the_linear_projects_name() {
         super::test_fixture::commit_planning_repo(repo);
         runtime.block_on(async {
             fixture.store.delete_provider_token("linear").await.unwrap();
-            wave_lifecycle::add(repo, "sales", None).await.unwrap();
+            // Offline, the Wave is added without its Linear Project.
+            wave_lifecycle::add(repo, "sales", None).await.unwrap_err();
             wave_lifecycle::rename(repo, "sales", Some("payments"), None)
                 .await
                 .unwrap();
@@ -243,39 +244,36 @@ fn a_lost_reply_distinguishes_retired_and_unlinked_projects_from_no_project() {
 }
 
 #[test]
-fn adding_and_renaming_waves_send_their_projects_ahead_of_older_work() {
+fn adding_a_wave_makes_its_linear_project_before_it_returns() {
     with_planning_task(|runtime, fixture, repo, _, state| {
         super::test_fixture::commit_planning_repo(repo);
         runtime.block_on(async {
-            let repo_key = repo.to_str().unwrap();
-            for n in 0..(2 * crate::ops::tracker::drain::Bound::PASS.requests) {
-                fixture
-                    .store
-                    .create_wave(&crate::work::wave::Wave::new(
-                        loopflow_model::id::WaveId::new(),
-                        format!("older-{n}"),
-                        repo_key.into(),
-                    ))
-                    .await
-                    .unwrap();
-            }
-            fixture
-                .store
-                .sqlite
-                .enqueue_tracker_creations(
-                    repo_key,
-                    loopflow_storage::planning_sync::TrackerKind::Linear,
-                )
-                .unwrap();
             state.lock().await.export_mode = true;
-
-            wave_lifecycle::add(repo, "billing", None).await.unwrap();
+            let added = wave_lifecycle::add(repo, "billing", None).await.unwrap();
+            let project = fixture
+                .store
+                .project_of_wave(&added.id)
+                .await
+                .unwrap()
+                .unwrap();
+            let linked = project
+                .tracker_id
+                .expect("the Wave records its Linear Project");
             assert!(state
                 .lock()
                 .await
                 .extra_projects
                 .iter()
-                .any(|p| p["name"] == "billing"));
+                .any(|p| p["name"] == "billing" && p["id"] == linked.as_str()));
+            // Nothing waits in the queue for a Project.
+            assert!(fixture
+                .store
+                .sqlite
+                .tracker_actions_for(
+                    &loopflow_storage::sqlite::tracker_actions::ActionOwner::Project(project.id)
+                )
+                .unwrap()
+                .is_empty());
 
             wave_lifecycle::rename(repo, "product", Some("payments"), None)
                 .await
@@ -284,6 +282,57 @@ fn adding_and_renaming_waves_send_their_projects_ahead_of_older_work() {
             let renamed = provider.project_fields.as_ref().unwrap();
             assert_eq!(renamed["id"], "project-1");
             assert_eq!(renamed["name"], "payments");
+        });
+    });
+}
+
+#[test]
+fn adding_a_wave_offline_fails_and_a_second_add_makes_its_project() {
+    with_planning_task(|runtime, fixture, repo, _, state| {
+        super::test_fixture::commit_planning_repo(repo);
+        runtime.block_on(async {
+            state.lock().await.export_mode = true;
+            fixture.store.delete_provider_token("linear").await.unwrap();
+            let error = wave_lifecycle::add(repo, "billing", None)
+                .await
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains("Run `lf wave create billing` again"), "{error}");
+            let wave = fixture
+                .store
+                .sqlite
+                .list_waves(None)
+                .unwrap()
+                .into_iter()
+                .find(|wave| wave.slug() == "billing")
+                .unwrap();
+            let project = fixture
+                .store
+                .project_of_wave(wave.id())
+                .await
+                .unwrap()
+                .unwrap();
+            assert!(project.tracker_id.is_none());
+            assert!(fixture
+                .store
+                .sqlite
+                .tracker_actions_for(
+                    &loopflow_storage::sqlite::tracker_actions::ActionOwner::Project(
+                        project.id.clone()
+                    )
+                )
+                .unwrap()
+                .is_empty());
+
+            fixture.seed(now() + 3600).await;
+            wave_lifecycle::add(repo, "billing", None).await.unwrap();
+            let project = fixture
+                .store
+                .project_of_wave(wave.id())
+                .await
+                .unwrap()
+                .unwrap();
+            assert!(project.tracker_id.is_some());
         });
     });
 }
@@ -1269,17 +1318,24 @@ fn linear_on_demand_adopts_new_open_issues_without_allocating_execution() {
 }
 
 #[test]
-fn a_wave_project_another_machine_created_in_linear_is_bound_not_duplicated() {
+fn a_wave_sync_binds_the_linear_project_a_lost_create_reply_left() {
     with_export_plan(|runtime, fixture, repo, task, state| {
         let project = task.project_id.clone().unwrap();
         let id = crate::ops::tracker::creation_id(project.as_str()).unwrap();
-        // The other Machine's create landed under the Project's own UUID.
-        let mut theirs = planning_project(&id);
-        theirs["name"] = json!("Product");
-        runtime.block_on(state.lock()).extra_projects.push(theirs);
+        // A create whose reply was lost landed under the Project's own UUID;
+        // Linear refuses that id again, so the sync finds it instead.
+        let mut landed = planning_project(&id);
+        landed["name"] = json!("Product");
+        runtime.block_on(state.lock()).extra_projects.push(landed);
         let wave = runtime
             .block_on(fixture.store.get_wave(task.wave_id.as_ref().unwrap()))
             .unwrap()
+            .unwrap();
+        runtime
+            .block_on(crate::ops::planning_sync::refresh_wave(
+                &wave,
+                loopflow_storage::planning_sync::TrackerKind::Linear,
+            ))
             .unwrap();
         let saved = crate::ops::task::task_create(
             repo,

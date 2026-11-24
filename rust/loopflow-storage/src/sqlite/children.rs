@@ -2921,7 +2921,23 @@ mod local_planning_tests {
                 params![id, tasks[0].as_str(), kind, value.to_string(), phase, observed.to_string()],
             ).unwrap();
         }
+        // A Project create released lf queued: the command that makes,
+        // connects or syncs the Wave creates its Project now.
+        conn.execute(
+            "INSERT INTO tracker_actions(id,project_id,kind,value_json,phase,tracker)
+             VALUES('made',?1,'create','[]','queued','linear')",
+            [kept.as_str()],
+        )
+        .unwrap();
         upgrade_from_migration(&observers, &build, &conn, "remove_chapters");
+        let made: String = conn
+            .query_row(
+                "SELECT phase FROM tracker_actions WHERE id='made'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(made, "retired");
 
         let actions: String = conn
             .query_row(

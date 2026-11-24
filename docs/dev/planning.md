@@ -429,13 +429,17 @@ Task registers or runs, and an ended Project stays the Wave's.
 Creating a Task in a Wave, or moving one in, puts it in that Wave's Project;
 moving one out of every Wave clears it. A Task's Wave is its Project's.
 
-A Project made here has no tracker binding until the drain gives it a
-`create`, including one made before a tracker was connected. A Task's
-`issueCreate` waits for its Project's tracker ID. A live Wave links the tracker Project
+A Wave's Project is never queued. `lf wave create` and `lf wave plan connect`
+create it in the tracker on the Machine running them and record its id before
+they return (`tracker::create_wave_project`); a tracker error fails the
+command. `lf wave sync`, and a drain about to send a Task naming an unbound
+live Project, create it the same way. Each create carries the Project's UUID:
+Linear refuses it a second time and the refusal finds the existing Project,
+Asana's is found by its footer, so a lost reply never makes two. A live Wave links the tracker Project
 through `projects.external_project_id`. Issues in that tracker Project belong to the Wave.
 Removing the Wave ends the link and another Wave can claim the tracker Project.
 
-The Project's create receipt, a Wave inventory refresh, and
+That create, a Wave inventory refresh, and
 `lf wave plan connect <wave> <project>` can record the binding. Connect can
 replace a link while none of the Wave's Tasks is in the tracker. Sent
 actions and conflicted creates must resolve first. Connect retires the other

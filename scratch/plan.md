@@ -16,22 +16,18 @@ Field case behind this: five `manabot` `coverage-working` Tasks (MTG-418..422) r
 
 **Manual `lf commit` pushes by default** (commits 6701b8a0df, 44d1fc2eef). Branch checkpoints push, selected paths included; default branch and detached HEAD stay local; `--no-push` opts out; the served `push` boolean carries it through Desktop. Checked: in a disposable repo, commits on the advertised `trunk` default and on detached HEAD stayed local; `lf help commit` showed `--no-push`; old flags failed to parse; `lf server describe --json` matched the schema fixture byte for byte. `cargo test -p loopflow --test integration commit_tests::manual_commit_pushes_branch_checkpoints_unless_kept_local -- --exact` passed; with an unavailable remote the commit stayed and the same SHA pushed on retry.
 
-**Docs** (write-docs, describe the target): `docs/orchestration.md` Loops section — pass sizing guidelines, the prompt line `Decision pass 3. Iterating repeats 3 steps, back to implement.`, outer-review-loop example. `rust/loopflow-execution/src/harness/README.md` Task updates — run starts and passing steps are not news; settled runs carry their error. Code must match these.
+**Pass sizing.** Kickoff groups larger changes into 2–4 passes. Implement batches related work into one reviewable diff, and realign regroups the rest. Graph decisions name a substantial next pass and can continue past five. The prompt takes its count from the current loop's first step through its decider, counting both.
+
+- `cargo test -p loopflow --test session_lifecycle_tests public_taskless_graph_records_distinct_completed_loop_passes` passed. Six skill launches across three passes. The provider received `Decision pass 2. Iterating repeats 2 steps, back to work-proof.` on the second decision.
+- `cargo test -p loopflow --test golden_prompt` passed after refreshing the implement and realign snapshots.
+- `uv run pytest python/tests/test_instruction_levels.py python/tests/test_loopflow_skill_alignment.py` passed all 23 tests.
+- `cargo fmt` and `cargo clippy --all-targets -- -D warnings` passed for this slice.
 
 ## Remaining
 
-### Pass 2: pass-sizing guidance + decider pass count (one pass)
-
-- `rust/loopflow-definitions/src/builtins/task/skill/implement.md:18` and `kickoff.md:68`: replace "end to end, thinly" with thick end-to-end passes; add guidelines (1)–(4) where each skill uses them (implement: 1, 2, 4; kickoff: 3; realign "What is next?": regroup into the remaining passes, aim ≤5 total).
-- `loop-or-next.md`: drop stale pre-#1962 `step:` wording; each `iterate` restarts every loop step fresh, so name a substantial next pass.
-- `rust/loopflow-execution/src/graph/output.rs:11` `DECISION_CRITERIA`: drop "not from … the number of passes"; iterate names a substantial pass; blocked when passes shrink into small increments that don't converge.
-- `rust/loopflow-execution/src/graph/instructions.rs:69`: drop "There is no arbitrary pass limit"; same guidance.
-- `rust/loopflow/src/lf/commands/graph.rs:1272`: prompt reads `Decision pass {n}. Iterating repeats {k} steps, back to {target}.` where `k` counts the steps the backward edge repeats (incl. the decider). Keep or trim the evidence-gap sentence; it is the current text, not in the docs.
-- Refresh `tests/goldens/builtin_{implement,realign,…}.md` (`cargo test -p loopflow --test golden_prompt`), update any test asserting the old prompt (`grep -rn "Decision pass" rust/`).
-- Check: a CLI Graph fixture with a stand-in decider shows the new line on pass 2; `uv run pytest python/tests/test_instruction_levels.py python/tests/test_loopflow_skill_alignment.py`.
-
 ### Pass 3: quiet running steps in `task_updates`
 
+- `rust/loopflow-execution/src/harness/README.md` describes the intended Task updates.
 - `rust/loopflow-execution/src/harness/task_updates.rs`: for a Task's own conversation, while the Graph runs keep the last settled position (run start and intermediate steps write no steer), as conducted children already do (`"Steps passing inside a run are not news"`). Settled runs (finished, failed, crashed without `ended_at`), interactive/end stops, merges, comments and steers still report once. Add `graph.run.error` to `RunObservation` and its report. A stored mid-run reading stays quiet until the run settles.
 - Replace `a_run_between_steps_keeps_its_last_report` and the "child's own conversation hears its steps" assertion with: a run advancing across steps writes zero updates; settling writes one, with the error when failed.
 - Check through `server::wake` that an idle Task session is not woken mid-run.

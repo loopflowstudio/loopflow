@@ -1258,19 +1258,23 @@ impl SkillExecutor for &RunningGraph<'_> {
         .await;
         let name = &skill.skill.name;
         print_step_progress(ctx.progress, name);
-        let current = self.current();
-        let output = current.as_ref().and_then(GraphOutput::for_step);
         let mut message = self.message.unwrap_or_default().to_owned();
-        if skill.returns.is_some() {
+        let (output, instructions) = {
             let position = self.position.lock().expect("Graph position mutex poisoned");
             let (body, leaf) = position.current_body(self.steps);
-            let traversals = leaf.progress.repeats.get(&leaf.index.to_string());
-            let target = match return_target(body, leaf.index).map(|target| &body[target]) {
-                Some(ConcreteStep::Skill(target)) => target.skill.name.as_str(),
-                _ => "an earlier step",
-            };
-            message.push_str(&format!("\n\nDecision pass {}. The backward edge returns to {target}. Compare the preceding pass's intended progress with its observed results; new evidence counts as progress. Missing prior evidence is an evidence gap, not proof of no progress.", u64::from(traversals.copied().unwrap_or(0)) + 1));
-        }
+            if let Some(start) = return_target(body, leaf.index) {
+                let traversals = leaf.progress.repeats.get(&leaf.index.to_string());
+                let pass = u64::from(traversals.copied().unwrap_or(0)) + 1;
+                let steps = leaf.index - start + 1;
+                let target = loopflow_execution::task_graph::step_name(&body[start]);
+                message.push_str(&format!("\n\nDecision pass {pass}. Iterating repeats {steps} steps, back to {target}.\nCompare what the preceding pass set out to do with what changed or was learned. Say when earlier results are missing."));
+            }
+            let step = body.get(leaf.index);
+            (
+                step.and_then(GraphOutput::for_step),
+                step.and_then(GraphOutput::for_step_instructions),
+            )
+        };
         if let Some(direction) = &ctx.direction {
             message.push_str(&format!(
                 "\n\nPrevious step feedback or iteration direction:\n{direction}"
@@ -1281,10 +1285,7 @@ impl SkillExecutor for &RunningGraph<'_> {
             let step = skill.interactive_step().unwrap_or(name);
             message.push_str(&stand_in_message(step, skill.returns.is_some()));
         }
-        if let Some(instructions) = current
-            .as_ref()
-            .and_then(GraphOutput::for_step_instructions)
-        {
+        if let Some(instructions) = instructions {
             message.push_str(&instructions);
         }
         let mut step_cli = self.launcher.process_options();

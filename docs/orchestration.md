@@ -145,18 +145,17 @@ A `loop:` block repeats as long as its final step says `iterate`. The built-in
 Any Skill can be the deciding step of a loop: it returns `advance`, `iterate`
 (with direction), or `blocked` (with a question).
 
-Every `iterate` starts each step of the loop again in a fresh conversation, so
-a Task finishes in a few thick passes rather than many thin ones. `kickoff`
-splits the work into 2–4 passes up front, aiming for no more than 5, and
-`realign` regroups what is left into the remaining passes. Within a pass,
-`implement` keeps building while the next item is the same kind of work, and
-stops when the next item needs a decision a review or the plan could change.
-A pass is about as much as one review can judge: one diff a person reads in a
-sitting. Around 2,000 lines of non-test change is a point to pause and let
-the loop look, a ceiling and not a target.
+Every `iterate` reruns the loop, starting each Skill in a fresh conversation.
+For work that needs several passes, `kickoff` groups it into 2–4 substantial
+end-to-end passes, aiming for no more than 5. After each pass, `realign`
+regroups what remains. Within a pass, `implement` keeps building while the
+next item is the same kind of work. It pauses when the next item needs a
+decision or review, or when what it learned could change the plan.
+Aim for one diff a person can review in a sitting. Around 2,000 lines of
+non-test change is a soft ceiling.
 
-These are guidelines, not a limit. The deciding step sees which pass it is on
-and how many steps the loop repeats:
+The deciding step sees which pass it is on and how many steps the loop
+repeats, including the decision itself.
 
 ```text
 Decision pass 3. Iterating repeats 3 steps, back to implement.

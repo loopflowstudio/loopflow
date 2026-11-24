@@ -2290,6 +2290,28 @@ fn public_taskless_graph_records_distinct_completed_loop_passes() {
         ]
     );
     assert_eq!(fixture.launches().len(), 6);
+    let sessions: std::collections::BTreeMap<String, Vec<Value>> = serde_json::from_slice(
+        &std::fs::read(fixture.home.path().join("native-sessions.json")).unwrap(),
+    )
+    .unwrap();
+    let mut decisions: Vec<_> = sessions
+        .values()
+        .filter_map(|messages| {
+            messages[0]["text"]
+                .as_str()?
+                .lines()
+                .find(|line| line.starts_with("Decision pass "))
+        })
+        .collect();
+    decisions.sort_unstable();
+    assert_eq!(
+        decisions,
+        [
+            "Decision pass 1. Iterating repeats 2 steps, back to work-proof.",
+            "Decision pass 2. Iterating repeats 2 steps, back to work-proof.",
+            "Decision pass 3. Iterating repeats 2 steps, back to work-proof.",
+        ]
+    );
 }
 
 #[test]

@@ -353,7 +353,7 @@ fn workflow(steps: &[ConcreteStep]) -> (Vec<WorkflowStep>, Vec<u32>) {
 
 /// What a person calls `step`; an operation by the display name its Graph
 /// records it under.
-fn step_name(step: &ConcreteStep) -> String {
+pub fn step_name(step: &ConcreteStep) -> String {
     match step {
         ConcreteStep::Command(command) => command.item.display_name(),
         step => names(step)[0].to_owned(),

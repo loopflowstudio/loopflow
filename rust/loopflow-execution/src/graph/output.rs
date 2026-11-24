@@ -8,7 +8,15 @@ use crate::graph::ConcreteStep;
 
 /// What every loop decision means, so a skill placed on a loop edge needs no
 /// loop instructions of its own.
-const DECISION_CRITERIA: &str = "\n\nThis step also decides a loop. Do the step's work first, then judge from results, not from confidence or the number of passes:\n\n- advance when what this step requires is done. Later obligations belong to later steps.\n- iterate when the last pass made real progress and you can name the next action and the result it should produce, inside the scope already set. The loop finishes the work; it never grows it.\n- blocked when the last pass made no real progress, repeated a failure with nothing learned, or needs an input you can't supply.\n\nA check that can't run here belongs to gate, CI or a person later and blocks nothing; never report it as passed. Carry the next action and the paths it needs in the summary.";
+const DECISION_CRITERIA: &str = "
+
+This step also decides a loop. Do the step's work first, then judge from its results.
+
+- advance when what this step requires is done. Later obligations belong to later steps.
+- iterate when the last pass made progress and you can name a substantial next pass within scope and the result it should produce. Aim to finish within five passes. Continue past five when the work warrants it.
+- blocked when passes shrink into small increments that no longer converge, the last pass made no progress, a failure repeats with nothing learned, or you need input you can't supply.
+
+Leave checks that can't run here to gate, CI or review. Report them as deferred. Carry the next action and the paths it needs in the summary.";
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]

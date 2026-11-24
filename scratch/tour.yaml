@@ -1,21 +1,23 @@
-at: 05968c2e1cf3f9fd38a7b42a99ac267a084fb8b8
+at: 3a9b149dc1f2f6a6a38aff3f4ed9d9b8fe006f14
 first:
   - path: rust/loopflow/src/server/README.md
-    why: Intended workspace protocol across Machines
+    why: How clients address another Machine’s Task
   - path: scratch/plan.md
-    why: Implemented file operations and remaining workspace work
+    why: Implemented reads and remaining workspace work
   - path: rust/loopflow-storage/src/sqlite/repositories.rs
-    why: Ownership route includes the shared tracker key
+    why: The ownership route carries the portable Task selector
   - path: rust/loopflow-storage/src/sqlite/children.rs
-    why: Indexed Task lookup within the receiving repository
-  - path: rust/loopflow/src/lf/commands/read.rs
-    why: File requests follow the execution owner through moves
-  - path: rust/loopflow/src/lf/commands/write.rs
-    why: Owner checks the revision and saves the draft
-  - path: rust/loopflow/src/server/service.rs
-    why: Peer requests resolve locally in the sender’s repository
+    why: Indexed selector lookup on the receiving Machine
   - path: rust/loopflow-execution/src/machine/client.rs
-    why: Lost reads identify the unavailable Machine
+    why: Each request carries its sender through the SSH connection
+  - path: rust/loopflow/src/server/peers.rs
+    why: Idle connections, route changes, and one reconnect
+  - path: rust/loopflow/src/lf/commands/read.rs
+    why: Which reads follow Task ownership
+  - path: rust/loopflow/src/server/service.rs
+    why: Served reads share connections across clients
+  - path: rust/loopflow/src/lf/commands/write.rs
+    why: The owning Machine checks revisions before saving
   - path: rust/loopflow/tests/machine_commands.rs
-    why: Two servers exercise moving, editing and losing connectivity
+    why: Two Machines report checkout paths and count requests
 hide: []

@@ -4353,6 +4353,59 @@ fn entry_input(record: &Path) -> (Value, Value) {
 }
 
 #[test]
+fn a_placed_task_retries_on_its_owner_after_the_launch_connection_breaks() {
+    let fixture = preview_machines();
+    let plan = SharedPlan::cloned(&fixture);
+    let task = plan.local_task();
+    plan.to_remote();
+    assert_success(&fixture.run(&["pool", "add", "lab"]));
+    assert_success(&fixture.run(&["machine", "add", "mini", "--pool", "lab"]));
+    let ssh = fixture.root.path().join("bin/ssh");
+    let working = fs::read_to_string(&ssh).unwrap();
+    executable(&ssh, "#!/bin/sh\nexit 88\n");
+    let run = |placement: &[&str]| {
+        let mut args = vec!["task", "run", task.as_str()];
+        args.extend(placement);
+        fixture
+            .command(&args)
+            .current_dir(&plan.local_path)
+            .stdin(Stdio::null())
+            .output()
+            .unwrap()
+    };
+    assert!(!run(&["--pool", "lab"]).status.success());
+    let owner = loopflow_execution::store::ownership::task_ownership(&plan.local, &task).unwrap();
+    assert_eq!(owner.log.len(), 1);
+    let mini = loopflow_execution::store::machines::local_machine(&plan.remote)
+        .unwrap()
+        .id;
+    assert_eq!(owner.log[0].machine_id.as_ref(), Some(&mini));
+
+    let unreachable = run(&["--rent", "modal"]);
+    assert!(!unreachable.status.success());
+    assert!(
+        String::from_utf8_lossy(&unreachable.stderr).contains("could not read"),
+        "{unreachable:?}"
+    );
+
+    executable(&ssh, &working);
+    let record = fixture.root.path().join("entry");
+    fs::create_dir(&record).unwrap();
+    let mut detail: Value =
+        serde_json::from_str(include_str!("../../../tests/fixtures/dto/task_detail.json")).unwrap();
+    detail["task"]["id"] = task.to_string().into();
+    answering_entry(&fixture, &record, &detail);
+    assert_success(&run(&["--rent", "modal"]));
+    let (_, request) = entry_input(&record);
+    assert_eq!(request["operation"]["kind"], "task.status");
+    assert_eq!(request["operation"]["issue"], task.as_str());
+    assert_eq!(
+        loopflow_execution::store::ownership::task_ownership(&plan.local, &task).unwrap(),
+        owner
+    );
+}
+
+#[test]
 fn a_hold_for_a_task_mini_runs_is_answered_by_minis_server() {
     let fixture = preview_machines();
     let (plan, task) = task_on_mini(&fixture);

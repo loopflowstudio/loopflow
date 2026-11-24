@@ -244,6 +244,9 @@ Returned modal-1 (2 sessions copied; ceiling estimate $0.24)
   in `lf ondemand list` and `lf machine end` is labeled as a ceiling estimate.
   In rental JSON, `ceiling_estimate_usd` gives that estimate. Rentals created
   before Modal limits were recorded keep their original `cost_usd`.
+- A rental claims the Task once its repository is ready. If the launch connection
+  drops, repeat the placement command. It checks the recorded Machine and reports
+  a Graph that already started. Plain `lf task run` advances that Graph.
 - A rental runs the Linux build matching the caller. Your Machine fetches the
   release or dev package before forwarding logins. For a local build or an
   expired CI artifact, set `LF_RENT_LINUX_BIN` to the Linux executable.

@@ -629,6 +629,28 @@ pub fn place(
     let runtime = tokio::runtime::Runtime::new()?;
     let store = open_store(&runtime)?;
     let sqlite = &store.sqlite;
+    let task = if placement.quote {
+        None
+    } else {
+        let (_, task) = runtime.block_on(loopflow_execution::ops::task::resolve_saved_task(
+            repo, None, issue,
+        ))?;
+        let local = loopflow_execution::store::machines::local_machine(sqlite)?.id;
+        let ownership = loopflow_execution::store::ownership::task_ownership(sqlite, &task.id)?;
+        if let Some(owner) = ownership.owner_elsewhere(&local) {
+            let name = owner.name();
+            // Only the owner can tell whether an interrupted launch started its Graph.
+            let detail = super::waves::remote_task_detail(repo, task.id.as_str())
+                .with_context(|| format!("could not read {issue} on {name}"))?
+                .ok_or_else(|| {
+                    anyhow!("{issue} is owned on {name}; check its move before running it")
+                })?;
+            let detail: super::task_row::TaskDetail = serde_json::from_value(detail)?;
+            eprintln!("{issue} on {name}: {}", detail.task.standing());
+            return Ok(detail.task.state.is_terminal() || !detail.graph_processes.is_empty());
+        }
+        Some(task)
+    };
     if let Some(pool) = placement.pool {
         let record = loopflow_execution::store::rentals::pool(sqlite, pool)?
             .ok_or_else(|| anyhow!("no pool {pool}; `lf machine pool add {pool}` creates it"))?;
@@ -642,7 +664,14 @@ pub fn place(
                 return Ok(true);
             }
             Ok(free) => {
-                hand_off(&runtime, repo, issue, free.label())?;
+                hand_off(
+                    repo,
+                    task.as_ref()
+                        .expect("a placement resolves its Task")
+                        .id
+                        .as_str(),
+                    free.label(),
+                )?;
                 return Ok(false);
             }
             Err(refusal) if placement.rent.is_some() => eprintln!("{refusal}; renting instead"),
@@ -666,15 +695,12 @@ pub fn place(
         );
         return Ok(true);
     }
-    // The Task's own repository, wherever this checkout was first recorded.
-    let (_, task) = runtime.block_on(loopflow_execution::ops::task::resolve_saved_task(
-        repo, None, issue,
-    ))?;
+    let task = task.expect("a placement resolves its Task");
     // A rental that could not authenticate its launch is money for nothing.
     loopflow_execution::machine::forward::read_for_rental(repo)?;
     let (rental, machine) = rent(&runtime, sqlite, name, None, None, false)?;
     let label = machine.name();
-    if let Err(error) = prepare(&runtime, &label, repo, &task.repository_id, batch) {
+    if let Err(error) = prepare(&runtime, &machine, repo, &task, sqlite, batch) {
         // Nothing ran on it yet, so nothing is lost by giving it back now.
         let cleanup = Sandboxes::from_env(rental.provider)
             .and_then(|api| delete_sandbox(sqlite, &api, &rental));
@@ -683,7 +709,14 @@ pub fn place(
         }
         return Err(error);
     }
-    hand_off(&runtime, repo, issue, &label)?;
+    if let Err(error) = hand_off(repo, task.id.as_str(), &label) {
+        // A failure reading the receipt can follow a committed handoff.
+        if !sqlite.machine_ever_held(&machine.id)? {
+            let api = Sandboxes::from_env(rental.provider)?;
+            give_back(sqlite, &api, &rental, &machine, true, false)?;
+        }
+        return Err(error);
+    }
     Ok(false)
 }
 
@@ -736,23 +769,9 @@ pub fn place_by_default(repo: &std::path::Path, issue: &str, batch: bool) -> any
     place(repo, issue, &placement, batch).map(|_| ())
 }
 
-/// Your claim moves to the Machine; an unowned Task is claimed first.
-fn hand_off(
-    runtime: &tokio::runtime::Runtime,
-    repo: &std::path::Path,
-    issue: &str,
-    label: &str,
-) -> anyhow::Result<()> {
+/// Place the Task with one claim naming the destination.
+fn hand_off(repo: &Path, issue: &str, label: &str) -> anyhow::Result<()> {
     use loopflow_execution::ops::task_ownership::{change, OwnershipChange};
-    let (store, task) = runtime.block_on(loopflow_execution::ops::task::resolve_saved_task(
-        repo, None, issue,
-    ))?;
-    if loopflow_execution::store::ownership::task_ownership(&store.sqlite, &task.id)?
-        .owner
-        .is_none()
-    {
-        change(repo, issue, OwnershipChange::Claim)?;
-    }
     let ownership = change(repo, issue, OwnershipChange::Move(label.to_string()))?;
     eprintln!(
         "{}",
@@ -769,17 +788,15 @@ fn hand_off(
 /// plan there.
 fn prepare(
     runtime: &tokio::runtime::Runtime,
-    label: &str,
-    repo: &std::path::Path,
-    repository: &RepositoryId,
+    machine: &Machine,
+    repo: &Path,
+    task: &loopflow_storage::work::task::Task,
+    sqlite: &SqliteStore,
     batch: bool,
 ) -> anyhow::Result<()> {
     use loopflow_execution::provider_auth::Provider as Login;
-    let machine = runtime.block_on(loopflow_execution::machine::connection::resolve_target(
-        label, false,
-    ))?;
     runtime.block_on(loopflow_execution::machine::credentials::connect(
-        &machine,
+        machine,
         Login::GitHub,
         None,
         None,
@@ -788,19 +805,25 @@ fn prepare(
     let planning = loopflow_execution::config::load_config(Some(repo))?
         .unwrap_or_default()
         .planning_transport();
-    if matches!(
+    let linear = matches!(
         planning,
         Some(loopflow_execution::config::TrackerConfig::Linear { .. })
-    ) {
+    );
+    if linear {
         runtime.block_on(loopflow_execution::machine::credentials::connect(
-            &machine,
+            machine,
             Login::Linear,
             None,
             None,
             batch,
         ))?;
     }
-    let (origin, script) = checkout_script(repo, repository)?;
+    let (origin, mut script) = checkout_script(repo, &task.repository_id)?;
+    let wave = task.wave_id.as_ref().filter(|_| linear);
+    if let Some(wave) = wave {
+        let id = loopflow_execution::machine::ssh::sh_quote(wave.as_str());
+        script.push_str(&format!(" && lf task list --wave {id} --json >/dev/null"));
+    }
     let status = Command::new("ssh")
         .args(loopflow_execution::machine_route::bounded_ssh_args(
             &machine.route,
@@ -811,7 +834,42 @@ fn prepare(
         .status()
         .context("could not run ssh")?;
     if !status.success() {
-        return Err(anyhow!("could not clone {origin} on {label}"));
+        return Err(anyhow!("could not prepare {origin} on {}", machine.name()));
+    }
+    if let Some(wave) = wave {
+        use crate::server::wire::Operation;
+        use loopflow_execution::machine::wire::{Secrets, Selection, Sender};
+        let sender = Sender {
+            repository: task.repository_id.clone(),
+            selection: Selection::capture(repo, None)?,
+            secrets: Secrets::default(),
+        };
+        let mut connection =
+            loopflow_execution::machine::client::Connection::open_on(machine, sender, None)?;
+        let plan = connection.request(Operation::Read(super::read::Read::WavePlan {
+            directory: repo.to_owned(),
+            wave: wave.to_string(),
+        }))?;
+        let plan: super::waves::WaveDetailSnapshot = serde_json::from_value(plan.result)?;
+        if plan.project_readiness.state
+            == loopflow_storage::sqlite::ProjectReadinessState::Unconfigured
+        {
+            let project = sqlite
+                .selected_project(wave)?
+                .and_then(|p| p.tracker_id)
+                .with_context(|| {
+                    format!(
+                        "Wave {} needs a Linear Project. Select one with `lf wave plan bind`.",
+                        plan.wave.name
+                    )
+                })?;
+            connection.request(Operation::Write(super::write::Write::WavePlanBind {
+                directory: repo.to_owned(),
+                wave: wave.to_string(),
+                project: project.as_str().to_owned(),
+                replace: false,
+            }))?;
+        }
     }
     Ok(())
 }

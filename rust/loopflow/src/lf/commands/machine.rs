@@ -286,6 +286,9 @@ async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
             if *json {
                 println!("{}", serde_json::to_string(&listings)?);
             } else {
+                if listings.is_empty() {
+                    println!("No Machines.");
+                }
                 for listing in &listings {
                     print_machine(&listing.machine, false)?;
                     if listing.hub {
@@ -321,6 +324,9 @@ async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
         }
         MachineCommand::Status { label, json } => {
             let machines = selected(&store, label.as_deref()).await?;
+            if machines.is_empty() && !*json {
+                println!("No Machines.");
+            }
             let mut statuses = Vec::new();
             for machine in machines {
                 let status = connection_status(&store, machine).await?;
@@ -425,9 +431,12 @@ async fn connection_status(store: &Store, machine: Machine) -> anyhow::Result<Ma
         .rental_for_machine(&machine.id)?
         .filter(|rental| !rental.state.is_live());
     let (state, remote_version, error) = if let Some(rental) = ended {
-        let when = rental
-            .ended_at
-            .map_or_else(String::new, |at| format!(" {at}"));
+        let when = rental.ended_at.map_or_else(String::new, |at| {
+            format!(
+                " {}",
+                loopflow_execution::output::format_time(at.unix_timestamp())
+            )
+        });
         (
             ConnectionState::EndedRental,
             None,

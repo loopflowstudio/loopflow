@@ -5153,6 +5153,9 @@ fn ending_a_rental_its_provider_terminated_settles_and_leaves_the_default_listin
     // The default listings leave its dead route out; its label still resolves.
     assert_eq!(fixture.json(&["machine", "list", "--json"]), json!([]));
     assert_eq!(fixture.json(&["machine", "status", "--json"]), json!([]));
+    let listed = fixture.command(&["machine", "list"]).output().unwrap();
+    assert_success(&listed);
+    assert_eq!(String::from_utf8_lossy(&listed.stdout), "No Machines.\n");
     assert_eq!(
         fixture.json(&["machine", "list", "mini", "--json"])[0]["label"],
         "mini"

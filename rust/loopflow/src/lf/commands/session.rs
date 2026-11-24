@@ -805,6 +805,14 @@ async fn list(
                 line.push_str(&format!("  {}", turn.describe(now)));
             }
             println!("{line}");
+            // A stopped Session says why it is down and what brings it back.
+            if let Some(status) = session
+                .status_line
+                .as_ref()
+                .filter(|_| session.outlook.is_some())
+            {
+                println!("  {status}");
+            }
             if let Some(action) = session.action {
                 println!("  {} — {}", action.label, action.help);
             }

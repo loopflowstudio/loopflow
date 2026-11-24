@@ -8,6 +8,82 @@ pre{background:#f5f5f7;padding:.8em;overflow:auto;font-size:12.5px;border-radius
 table{border-collapse:collapse;width:100%}td,th{border:1px solid #ddd;padding:.35em .6em;text-align:left;vertical-align:top}
 </style></head><body>
 <h1>LOO-1081 QA — a branch build on a real Modal sandbox</h1>
+
+<h2>Run 2 · 2026-11-23, HEAD 005970f20 — the two fixes since run 1, live</h2>
+<p>Fresh private caller home (copy of the personal <code>config.yaml</code> without <code>machines:</code>), branch debug <code>lf</code>, the same
+revision cross-built for Linux in <code>LF_RENT_LINUX_BIN</code>, caller server running. One Modal sandbox capped at $0.60; ceiling estimate $0.073.</p>
+
+<h3>Rent and a batch turn — <span class="ok">works</span></h3>
+<pre>$ lf ondemand rent modal --max-usd 0.6 --json          # 2m03s
+Renting 8 vCPU 16 GB burst on modal at $0.95184/h ceiling until 00:15
+{…"modal_sizing":"burst"},"usd_per_hour":"0.95184","cap_usd":"0.60","state":"running",…}
+$ lf --machine modal-1 -b commit-message 'Reply with exactly: QA-1081 gate marker 2'
+QA-1081 gate marker 2                                  # 7.2s
+$ lf machine forward modal-1
+Refreshed 1 file on modal-1.                           # rental: -rw------- "probe v2 rotated …"</pre>
+
+<h3>A steer to a stopped Session with no login — <span class="ok">fixed (run 1's worst finding)</span>, <span class="bug">CLI list hid it, fixed</span></h3>
+<p>On the rental, a fresh repository Session pinned to <code>codex</code> (installed, not logged in), steered from the caller:</p>
+<pre>$ lf --machine modal-1 steer d7297afe… 'say pong'
+Saved eb1210ec…; the Machine server starts d7297afe… to read it
+rental lf.log:  WARN loopflow::server::wake: stopped Session not started; its steers wait for its next start
+                failure=Waiting for a harness: codex has no usable login on this Machine; run `codex login`
+rental session list --json:
+  status_line: could not start: codex has no usable login on this Machine; run `codex login`; `lf resume d7297afe…` opens it
+  outlook: {kind: could_not_start, reason: …, command: lf resume d7297afe…}</pre>
+<p>Run 1 saw nothing. Now the server refuses to spawn, logs it and carries the reason on the wire. But <code>lf session list</code> printed
+only <code>Start conversation — No saved provider history; this starts it</code>: the human list never printed <code>status_line</code>.</p>
+<p><b>Fix</b> (<code>lf/commands/session.rs</code>): the list prints the status line under any Session that has an outlook (it is down and something says why).
+Reproduced and checked on a private local Machine with the same codex-only setup:</p>
+<pre>b91eecfb…  closed  Repository  repo2
+  died 23:32 (exit 137); `lf resume b91eecfb…` opens it
+  Open here — Open this Session in a terminal
+bf201a65…  unknown Repository  repo3
+  could not start: codex has no usable login on this Machine; run `codex login`; `lf resume bf201a65…` opens it
+  Start conversation — No saved provider history; this starts it</pre>
+
+<h3>Abrupt loss, then <code>lf machine end</code> at once — <span class="ok">fixed (run 1's second finding)</span></h3>
+<pre>$ modal.Sandbox.from_id('sb-01M867…').terminate(); poll() → None      # gone a few seconds later: 137
+$ lf machine end modal-1                                              # same second, no --force
+modal-1 was already gone (ended; ceiling estimate $0.072974)          # 4.2s, exit 0
+$ lf machine end modal-1
+modal-1 was already given back (ended)
+$ lf ondemand list
+  modal-1 · ended 23:41 · 8 vCPU 16 GB burst · $0.95184/h ceiling · ceiling estimate $0.072974 · by hand · 2 sessions copied
+$ lf session history show session_820e48b7… --transcript
+Conversation session_820e48b7… · from modal-1 · collected 2026-11-24 07:41 UTC
+── 07:39 UTC · claude-haiku-5-5 · 20.6k in (11.9k cached) · 112 out
+$ lf session usage --days 1
+Nov 23 23:39  lf  -  commit-message  2  112  11,853  -  1/1  0  0cb7d516 from modal-1
+$ lf session history search 'gate marker 2'
+session_820e48b7… · from modal-1 · 2026-11-24 07:39 UTC · QA-1081 gate marker 2</pre>
+<p>Default listings drop the dead route (run 1's third finding), but read as nothing at all:</p>
+<pre>$ lf machine list          # (blank)
+$ lf machine status        # (blank)
+$ lf machine status modal-1
+modal-1  rental ended 2026-11-24 7:41:47.0 +00:00:00  remote lf unknown / local lf …</pre>
+<p><b>Fix</b> (<code>lf/commands/machine.rs</code>): an empty list or status prints <code>No Machines.</code>, and the ended time uses the local clock
+like <code>lf ondemand list</code>: <code>modal-1  rental ended Nov 23 23:41  remote lf unknown / …</code>. The CLI lost-rental fixture now checks the text.</p>
+
+<h3>What works now</h3>
+<p>Burst rent of HEAD on Modal; batch turn; file refresh; a steer's failed start recorded and shown; live collection; loss settled by
+<code>lf machine end</code> without <code>--force</code> while Modal still reported the sandbox; transcript, usage and search from the copy; dead
+route gone from default listings, still resolvable by label and in <code>lf ondemand list</code>.</p>
+<h3>Not reached</h3>
+<table><tr><th>Scenario</th><th>Why</th></tr>
+<tr><td>Linear-backed <code>lf task run --rent modal</code>, packaged Linux install, live <code>forward --session</code> restart</td><td>Same as run 1: no disposable GitHub/Linear repository, no CI package for this revision. Gate runs them.</td></tr>
+<tr><td>Idle billing at the 0.125-core floor</td><td>Needs the Modal dashboard after idle hours.</td></tr>
+<tr><td>Desktop Telemetry/Task History for the copy</td><td>Covered by the <code>session.usage</code> fixture; no Dev app run here.</td></tr>
+<tr><td>The fixed <code>lf session list</code> line on the rental</td><td>The Linux build predates the edit; checked on a local private Machine and in the rental's JSON.</td></tr></table>
+<h3>Still wrong, worst first</h3>
+<ul>
+<li>A copied Session that could not start reads <code>unknown qa from modal-1</code> on the caller; the reason stays on the lost Machine.</li>
+<li><code>lf session resume --prepare -a codex</code> warns "--agent has no effect" and then records <code>codex</code> (from main, <code>bin/lf.rs</code>).</li>
+<li><code>lf session usage</code> still shows cost <code>-</code> for subscription Claude turns.</li>
+<li>Version skew warning names <code>ssh -- 'ssh://…' 'lf install'</code> for a rental, where install comes from <code>LF_RENT_LINUX_BIN</code>; harmless here (dirty local build).</li>
+</ul>
+
+<h2>Run 1 · 2026-11-23, 87fd28917</h2>
 <p>2026-11-23. Caller: branch debug <code>lf 0.16.0+87fd28917</code> with a private <code>LF_HOME</code> holding a copy of the personal
 <code>config.yaml</code> (38 skill routes, the <code>modal</code> on-demand at 8 vCPU / 16 GB, <code>forward.env: [CLAUDE_CODE_OAUTH_TOKEN]</code>,
 plus a probe file in <code>forward.files</code>). Rental: the same revision cross-built for x86_64 Linux, passed in <code>LF_RENT_LINUX_BIN</code>.

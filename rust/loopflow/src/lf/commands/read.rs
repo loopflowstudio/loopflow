@@ -8,7 +8,7 @@
 //! instead: `--cwd <directory>` in its argv, and an explicit path in the server,
 //! where concurrent subscriptions cannot change the working directory.
 //!
-//! Reads only read: they record no Process and change no Work. The app's
+//! Reads only read: they change no Work and leave no journal trace. The app's
 //! writes are [`super::write::Write`]s.
 
 use std::path::{Path, PathBuf};
@@ -24,7 +24,7 @@ use super::waves::list as list_waves;
 use crate::lf::SessionListArgs;
 use loopflow_execution::engine::{Error, ErrorCode};
 use loopflow_execution::machine::connection::local_machine;
-use loopflow_execution::ops::task::{task_changes, task_diff, task_file};
+use loopflow_execution::ops::task::{task_changes, task_diff, task_file, task_files};
 use loopflow_execution::read_stream::{Subscription, Transport};
 use loopflow_execution::session::SessionFilter;
 use loopflow_model::durable::RepositoryId;
@@ -80,18 +80,14 @@ fn at(directory: &Path, command: &[&str]) -> Vec<String> {
 #[serde(tag = "kind", deny_unknown_fields)]
 // Exhaustive on purpose: the equivalence test matches every variant.
 pub enum Read {
-    /// The CLI's retained process or Session history, as display text.
-    #[serde(rename = "process.history")]
+    /// `lf session history show <id>`: one Session's history, as display text.
+    #[serde(rename = "session.history.get")]
     #[schemars(extend("x-result" = generator.subschema_for::<String>()))]
-    ProcessHistory { id: String },
+    SessionHistoryGet { id: String },
     /// Look up a creation without starting or retrying it. Null confirms absence.
     #[serde(rename = "creation.get")]
     #[schemars(extend("x-result" = generator.subschema_for::<Option<loopflow_storage::sqlite::creation::CreationReceipt>>()))]
     CreationGet { request_id: String },
-    /// `lf process list`: live Loopflow call trees.
-    #[serde(rename = "process.list")]
-    #[schemars(extend("x-result" = generator.subschema_for::<crate::lf::commands::top::ActivitySnapshot>()))]
-    ProcessList,
     /// `lf --cwd <directory> desktop view list`: the plans a repository window shows.
     #[serde(rename = "desktop.view.list")]
     #[schemars(extend("x-result" = generator.subschema_for::<Vec<loopflow_storage::work::selection::ViewPlan>>()))]
@@ -136,6 +132,11 @@ pub enum Read {
     #[serde(rename = "task.get")]
     #[schemars(extend("x-result" = generator.subschema_for::<crate::lf::commands::waves::DesktopTaskPane>()))]
     TaskGet { directory: PathBuf, issue: String },
+    /// `lf --cwd <directory> task status <issue> --json`: one Task's status
+    /// and its planning.
+    #[serde(rename = "task.status")]
+    #[schemars(extend("x-result" = generator.subschema_for::<loopflow_execution::machine::schema::Untyped>()))]
+    TaskStatus { directory: PathBuf, issue: String },
     /// `lf task changes <issue> --base <base> [--head <head>]`: a Task's changed files.
     #[serde(rename = "task.changes")]
     #[schemars(extend("x-result" = generator.subschema_for::<loopflow_execution::ops::task::TaskChangesSnapshot>()))]
@@ -155,10 +156,25 @@ pub enum Read {
         draft: Option<String>,
         head: Option<String>,
     },
-    /// `lf task file <issue> <path>`: one file of a Task's checkout.
+    /// `lf task file <issue> <path> [--at <rev>]`: one file of a Task's
+    /// checkout, or its version at a commit.
     #[serde(rename = "task.file")]
     #[schemars(extend("x-result" = generator.subschema_for::<loopflow_execution::ops::task::TaskFileSnapshot>()))]
-    TaskFile { issue: String, path: String },
+    TaskFile {
+        issue: String,
+        path: String,
+        at: Option<String>,
+    },
+    /// `lf task files <issue> <path> [--cursor <cursor>] [--show-ignored]`:
+    /// one page of a Task checkout directory's immediate entries.
+    #[serde(rename = "task.files")]
+    #[schemars(extend("x-result" = generator.subschema_for::<loopflow_execution::ops::task::TaskDirectory>()))]
+    TaskFiles {
+        issue: String,
+        path: String,
+        cursor: Option<String>,
+        show_ignored: bool,
+    },
     /// `lf wave list --all`: every Wave on this Machine that is not removed.
     #[serde(rename = "wave.list")]
     #[schemars(extend("x-result" = generator.subschema_for::<Vec<crate::lf::commands::waves::WaveSnapshot>>()))]
@@ -186,6 +202,16 @@ pub enum Read {
         graph: Option<String>,
         step: Option<String>,
     },
+    /// Effective settings and editable declarations for Global, a checkout or a Wave.
+    #[serde(rename = "config.scope")]
+    #[schemars(extend("x-result" = generator.subschema_for::<loopflow_execution::engine::config::Scope>()))]
+    ConfigScope {
+        target: loopflow_execution::engine::config::ScopeTarget,
+        #[serde(deserialize_with = "Option::deserialize")]
+        directory: Option<PathBuf>,
+        #[serde(deserialize_with = "Option::deserialize")]
+        wave: Option<String>,
+    },
     /// `lf config get <key> <destination flags> --json`: one file's declaration.
     #[serde(rename = "config.get")]
     #[schemars(extend("x-result" = generator.subschema_for::<loopflow_execution::engine::config::Declaration>()))]
@@ -201,9 +227,9 @@ pub enum Read {
         destination: loopflow_execution::config::files::Destination,
         key: String,
     },
-    /// `lf --cwd <directory> desktop layout <work>`: a Work's saved panes.
+    /// `lf --cwd <directory> desktop layout query:<id>`: a Dashboard's slots.
     #[serde(rename = "desktop.layout")]
-    #[schemars(extend("x-result" = generator.subschema_for::<crate::lf::commands::desktop::DesktopLayoutRecord>()))]
+    #[schemars(extend("x-result" = generator.subschema_for::<loopflow_storage::work::selection::Dashboard>()))]
     DesktopLayout { directory: PathBuf, work: String },
     /// `lf --cwd <directory> repo people`: who owns the repository's Tasks.
     #[serde(rename = "repo.people")]
@@ -230,10 +256,10 @@ pub enum Read {
         task: String,
         after: Option<String>,
     },
-    /// `lf process show <id>`: one Graph that ran, with its steps.
-    #[serde(rename = "process.get")]
+    /// `lf graph show <id>`: one Graph that ran, with its steps.
+    #[serde(rename = "graph.run.get")]
     #[schemars(extend("x-result" = generator.subschema_for::<loopflow_execution::durable::GraphProcessDetail>()))]
-    ProcessGet { id: String },
+    GraphRunGet { id: String },
     /// `lf usage --days <days> [--wave|--project|--task …]`: the Session
     /// inputs recorded in that window, by Work.
     #[serde(rename = "session.usage")]
@@ -269,6 +295,12 @@ pub enum Read {
     #[serde(rename = "machine.list")]
     #[schemars(extend("x-result" = generator.subschema_for::<Vec<crate::lf::commands::machine::MachineListing>>()))]
     MachineList,
+    /// Check one registered connection by its durable identity.
+    #[serde(rename = "machine.status")]
+    #[schemars(extend("x-result" = generator.subschema_for::<Vec<super::machine::MachineStatus>>()))]
+    MachineStatus {
+        machine: loopflow_model::durable::MachineId,
+    },
     /// `lf session history`: what Sessions did, by Work.
     #[serde(rename = "session.history")]
     #[schemars(extend("x-result" = generator.subschema_for::<crate::lf::commands::activity::WorkActivitySnapshot>()))]
@@ -284,11 +316,11 @@ pub enum Read {
         task: Option<String>,
         all: bool,
     },
-    /// `lf --cwd <directory> repo plan`: where the repository's
+    /// `lf --cwd <directory> repo tracker`: where the repository's
     /// planning is exchanged. Its subscription exchanges it while it runs.
-    #[serde(rename = "repo.plan")]
-    #[schemars(extend("x-result" = generator.subschema_for::<super::plan::PlanStatus>()))]
-    RepoPlan { directory: PathBuf },
+    #[serde(rename = "repo.tracker")]
+    #[schemars(extend("x-result" = generator.subschema_for::<super::tracker::TrackerStatus>()))]
+    RepoTracker { directory: PathBuf },
     /// `lf --cwd <directory> open <url> --link`: what a Work address opens.
     #[serde(rename = "work.resolve")]
     #[schemars(extend("x-result" = generator.subschema_for::<Vec<crate::lf::commands::open::WorkLink>>()))]
@@ -367,9 +399,8 @@ impl Read {
     /// command takes it. Its subscription is this argv with `--subscribe`.
     pub fn argv(&self) -> Vec<String> {
         match self {
-            Self::ProcessHistory { id } => words(&["session", "history", "show", id]),
+            Self::SessionHistoryGet { id } => words(&["session", "history", "show", id]),
             Self::CreationGet { request_id } => words(&["server", "receipt", request_id, "--json"]),
-            Self::ProcessList => words(&["process", "list", "--json"]),
             Self::DesktopViewList { directory } => {
                 at(directory, &["desktop", "view", "list", "--json"])
             }
@@ -417,6 +448,9 @@ impl Read {
                 argv
             }
             Self::TaskGet { directory, issue } => at(directory, &["task", "show", issue, "--json"]),
+            Self::TaskStatus { directory, issue } => {
+                at(directory, &["task", "status", issue, "--json"])
+            }
             Self::TaskChanges { issue, base, head } => {
                 let mut argv = words(&["task", "changes", issue, "--base", base, "--json"]);
                 argv.extend(optional("--head", head.as_ref()));
@@ -438,11 +472,48 @@ impl Read {
                 }
                 argv
             }
-            Self::TaskFile { issue, path } => words(&["task", "file", issue, path, "--json"]),
+            Self::TaskFile { issue, path, at } => {
+                let mut argv = words(&["task", "file", issue, path, "--json"]);
+                argv.extend(optional("--at", at.as_ref()));
+                argv
+            }
+            Self::TaskFiles {
+                issue,
+                path,
+                cursor,
+                show_ignored,
+            } => {
+                let mut argv = words(&["task", "files", issue, path, "--json"]);
+                argv.extend(optional("--cursor", cursor.as_ref()));
+                if *show_ignored {
+                    argv.push("--show-ignored".into());
+                }
+                argv
+            }
             Self::WaveList => words(&["wave", "list", "--all", "--json"]),
             Self::MachineSelf => words(&["machine", "self", "--json"]),
             Self::DesktopPortfolio => words(&["desktop", "portfolio", "--json"]),
             Self::ConfigCatalog => words(&["config", "catalog", "--json"]),
+            Self::ConfigScope {
+                directory,
+                wave,
+                target,
+            } => {
+                let mut argv = directory.as_ref().map_or_else(
+                    || words(&["config", "scope", "--global", "--json"]),
+                    |dir| at(dir, &["config", "scope", "--json"]),
+                );
+                argv.extend(optional("--wave", wave.as_ref()));
+                use loopflow_execution::engine::config::ScopeTarget;
+                match target {
+                    ScopeTarget::General => {}
+                    ScopeTarget::Skill { name } => argv.extend(words(&["--skill", name])),
+                    ScopeTarget::Step { graph, step } => {
+                        argv.extend(words(&["--graph", graph, "--step", step]))
+                    }
+                }
+                argv
+            }
             Self::ConfigGet { destination, key } => {
                 destination_argv(destination, &["config", "get", key, "--json"])
             }
@@ -486,7 +557,7 @@ impl Read {
                 argv.push("--json".into());
                 argv
             }
-            Self::ProcessGet { id } => words(&["process", "show", id, "--json"]),
+            Self::GraphRunGet { id } => words(&["graph", "show", id, "--json"]),
             Self::SessionUsage {
                 days,
                 wave,
@@ -515,6 +586,9 @@ impl Read {
                 argv.extend(optional("--after", after.as_ref()));
                 argv
             }
+            Self::MachineStatus { machine } => {
+                words(&["machine", "status", machine.as_str(), "--json"])
+            }
             Self::MachineList => words(&["machine", "list", "--json"]),
             Self::SessionHistory(window) => {
                 let mut argv = window.argv();
@@ -536,7 +610,7 @@ impl Read {
                 argv.push("--json".into());
                 argv
             }
-            Self::RepoPlan { directory } => at(directory, &["repo", "plan", "--json"]),
+            Self::RepoTracker { directory } => at(directory, &["repo", "tracker", "--json"]),
             Self::WorkResolve { directory, url } => {
                 at(directory, &["open", url, "--link", "--json"])
             }
@@ -616,10 +690,22 @@ impl Read {
     }
 
     /// What `lf <argv>` prints, as a JSON value, read on the caller's thread.
-    /// A command that prints bare text (`config repo --path`) is a string.
+    /// A Task another Machine runs is read by that Machine's server.
     pub fn read(&self) -> anyhow::Result<serde_json::Value> {
+        if let Self::TaskStatus { directory, issue } = self {
+            if let Some(detail) = super::waves::remote_task_detail(directory, issue)? {
+                return Ok(detail);
+            }
+        }
+        self.read_here()
+    }
+
+    /// `read` on this Machine, never sent on: what a request another Machine
+    /// sent runs. A command that prints bare text (`config repo --path`) is a
+    /// string.
+    pub fn read_here(&self) -> anyhow::Result<serde_json::Value> {
         match self {
-            Self::ProcessHistory { id } => value(&super::history::render(
+            Self::SessionHistoryGet { id } => value(&super::history::render(
                 id,
                 false,
                 None,
@@ -643,7 +729,6 @@ impl Read {
                 value(&super::screens::task_detail(directory, issue)?)
             }
             Self::SessionCard { id } => value(&super::screens::session_card(id)?),
-            Self::ProcessList => value(&super::top::load_snapshot()?),
             Self::DesktopViewList { directory } => {
                 value(&super::desktop::read_plans(None, directory)?)
             }
@@ -666,6 +751,9 @@ impl Read {
             Self::TaskGet { directory, issue } => {
                 value(&super::desktop::read_task_pane(directory, issue)?)
             }
+            Self::TaskStatus { directory, issue } => {
+                value(&super::waves::read_task_detail(directory, issue)?)
+            }
             Self::TaskChanges { issue, base, head } => {
                 value(&task_changes(issue, base, head.as_deref())?)
             }
@@ -682,7 +770,15 @@ impl Read {
                 head.as_deref(),
                 draft.as_deref(),
             )?),
-            Self::TaskFile { issue, path } => value(&task_file(issue, path, false)?),
+            Self::TaskFile { issue, path, at } => {
+                value(&task_file(issue, path, at.as_deref(), false)?)
+            }
+            Self::TaskFiles {
+                issue,
+                path,
+                cursor,
+                show_ignored,
+            } => value(&task_files(issue, path, cursor.as_deref(), *show_ignored)?),
             Self::WaveList => {
                 let waves = block_on(list_waves(true))??;
                 value(&waves.unwrap_or_default())
@@ -701,6 +797,15 @@ impl Read {
                 skill.as_deref(),
                 graph.as_deref(),
                 step.as_deref(),
+            )?),
+            Self::ConfigScope {
+                directory,
+                wave,
+                target,
+            } => value(&loopflow_execution::engine::config::scope(
+                directory.as_deref(),
+                wave.as_deref(),
+                target,
             )?),
             Self::ConfigCatalog => value(&loopflow_execution::engine::config::catalog()),
             Self::ConfigGet { destination, key } => {
@@ -740,13 +845,13 @@ impl Read {
             } => value(&graph_inventory::page(
                 directory,
                 &graph_inventory::GraphProcessInventoryArgs {
-                    processes: true,
+                    runs: true,
                     for_task: Some(task.clone()),
                     after: after.clone(),
                     ..Default::default()
                 },
             )?),
-            Self::ProcessGet { id } => value(&graph_inventory::detail(id)?),
+            Self::GraphRunGet { id } => value(&graph_inventory::detail(id)?),
             Self::SessionUsage {
                 days,
                 wave,
@@ -785,6 +890,9 @@ impl Read {
                 wave,
                 after.as_deref(),
             )?),
+            Self::MachineStatus { machine } => {
+                value(&block_on(super::machine::status_by_id(machine))??)
+            }
             Self::MachineList => value(&block_on(machines())??),
             Self::SessionHistory(window) => value(&super::activity::snapshot(window)?),
             Self::PlanList {
@@ -799,7 +907,7 @@ impl Read {
                 *all,
                 false,
             )?),
-            Self::RepoPlan { directory } => value(&super::plan::read_status(directory)?),
+            Self::RepoTracker { directory } => value(&super::tracker::read_status(directory)?),
             Self::WorkResolve { directory, url } => value(&super::open::url_links(directory, url)?),
             // The command prints the path alone.
             Self::RepoPath { id } => {
@@ -860,6 +968,62 @@ impl Read {
         }
     }
 
+    /// The directory this read is scoped by, which a read another Machine
+    /// sent names on that Machine.
+    pub(crate) fn directory_mut(&mut self) -> Option<&mut PathBuf> {
+        match self {
+            Self::DesktopViewList { directory }
+            | Self::SessionList { directory, .. }
+            | Self::PlanBoard { directory, .. }
+            | Self::TaskDetail { directory, .. }
+            | Self::TaskGet { directory, .. }
+            | Self::TaskStatus { directory, .. }
+            | Self::ConfigSettings { directory, .. }
+            | Self::DesktopLayout { directory, .. }
+            | Self::RepoPeople { directory }
+            | Self::GraphList { directory }
+            | Self::DesktopViewGet { directory, .. }
+            | Self::TaskRuns { directory, .. }
+            | Self::WavePlan { directory, .. }
+            | Self::TaskList { directory, .. }
+            | Self::PlanList { directory, .. }
+            | Self::RepoTracker { directory }
+            | Self::WorkResolve { directory, .. }
+            | Self::WaveGraph { directory, .. }
+            | Self::RepoTokens { directory, .. }
+            | Self::SkillList { directory, .. }
+            | Self::PrChecks { directory, .. }
+            | Self::PrReviews { directory, .. } => Some(directory),
+            Self::ConfigScope { directory, .. } => directory.as_mut(),
+            Self::SessionHistoryGet { .. }
+            | Self::CreationGet { .. }
+            | Self::ViewSelect { .. }
+            | Self::SessionCard { .. }
+            | Self::TaskChanges { .. }
+            | Self::TaskDiff { .. }
+            | Self::TaskFile { .. }
+            | Self::TaskFiles { .. }
+            | Self::WaveList
+            | Self::MachineSelf
+            | Self::DesktopPortfolio
+            | Self::ConfigCatalog
+            | Self::ConfigGet { .. }
+            | Self::ConfigExplain { .. }
+            | Self::GraphRunGet { .. }
+            | Self::SessionUsage { .. }
+            | Self::TaskContext { .. }
+            | Self::MachineList
+            | Self::MachineStatus { .. }
+            | Self::SessionHistory(_)
+            | Self::RepoPath { .. }
+            | Self::SessionRetention
+            | Self::MachineDoctor
+            | Self::RepoCi { .. }
+            | Self::AccountList { .. }
+            | Self::TaskWait { .. } => None,
+        }
+    }
+
     /// Serve this read's subscription inside this process, as `lf <argv> --subscribe`
     /// prints it, keeping only `select`'s dotted paths of each body. `wake` is called from any thread when a
     /// [`Subscription::pull`] may find a reading or occurrences; dropping the subscription ends
@@ -877,6 +1041,7 @@ impl Read {
         let events = matches!(
             self,
             Self::TaskGet { .. }
+                | Self::TaskStatus { .. }
                 | Self::TaskWait { .. }
                 | Self::PlanList { .. }
                 | Self::DesktopViewList { .. }
@@ -887,7 +1052,11 @@ impl Read {
             events,
         };
         let subscription = match self {
-            Self::ProcessList => super::top::subscribe_ps(transport),
+            Self::ConfigScope {
+                directory,
+                wave,
+                target,
+            } => super::setting::subscribe_scope(directory, wave, target, transport),
             Self::DesktopViewList { directory } => {
                 super::desktop::subscribe_plans(None, directory, transport)
             }
@@ -907,6 +1076,9 @@ impl Read {
             Self::TaskGet { directory, issue } => {
                 super::desktop::subscribe_task_pane(&directory, &issue, transport)
             }
+            Self::TaskStatus { directory, issue } => {
+                super::waves::subscribe_task_status(&directory, issue, transport)
+            }
             Self::SessionHistory(window) => super::activity::subscribe(window, transport),
             Self::PlanList {
                 directory,
@@ -914,8 +1086,8 @@ impl Read {
                 task,
                 all,
             } => super::waves::subscribe_show(directory, wave, task, all, transport),
-            Self::RepoPlan { directory } => super::plan::subscribe_status(
-                &super::plan::status_repository(&directory)?,
+            Self::RepoTracker { directory } => super::tracker::subscribe_status(
+                &super::tracker::status_repository(&directory)?,
                 transport,
             ),
             Self::TaskWait { issue, until } => {
@@ -990,6 +1162,60 @@ fn value(value: &impl Serialize) -> anyhow::Result<serde_json::Value> {
 #[cfg(test)]
 mod tests {
     use super::Read;
+
+    #[test]
+    fn machine_status_shares_the_desktop_wire_shape() {
+        use super::super::machine::MachineStatus;
+        use serde_json::{from_value, to_value, Value};
+
+        let fixture: Value = serde_json::from_str(include_str!(
+            "../../../../../tests/fixtures/dto/machine_status.json"
+        ))
+        .unwrap();
+        let read: Read = from_value(fixture["read"].clone()).unwrap();
+        assert_eq!(to_value(read).unwrap(), fixture["read"]);
+        let status: Vec<MachineStatus> = from_value(fixture["status"].clone()).unwrap();
+        assert_eq!(to_value(status).unwrap(), fixture["status"]);
+    }
+
+    #[test]
+    fn checkout_scope_and_checked_edit_share_the_desktop_wire_shape() {
+        use loopflow_execution::{config::files::edit::Applied, engine::config::Scope};
+        use serde_json::{from_value, to_value, Value};
+        let fixture: Value = serde_json::from_str(include_str!(
+            "../../../../../tests/fixtures/dto/configuration_scope.json"
+        ))
+        .unwrap();
+        let check = |key: &str, value: Value| assert_eq!(value, fixture[key]);
+        check(
+            "read",
+            to_value(from_value::<Read>(fixture["read"].clone()).unwrap()).unwrap(),
+        );
+        for name in ["write", "preview", "promote", "dismiss"] {
+            check(
+                name,
+                to_value(
+                    from_value::<crate::lf::commands::write::Write>(fixture[name].clone()).unwrap(),
+                )
+                .unwrap(),
+            );
+        }
+        check(
+            "scope",
+            to_value(from_value::<Scope>(fixture["scope"].clone()).unwrap()).unwrap(),
+        );
+        for name in ["move_result", "dismissed"] {
+            let outcome = from_value::<loopflow_execution::engine::config::promotion::Outcome>(
+                fixture[name].clone(),
+            )
+            .unwrap();
+            check(name, to_value(outcome).unwrap());
+        }
+        check(
+            "receipt",
+            to_value(from_value::<Applied>(fixture["receipt"].clone()).unwrap()).unwrap(),
+        );
+    }
 
     /// The JSON Desktop's `ServedRead` encodes.
     #[test]

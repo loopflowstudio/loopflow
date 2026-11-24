@@ -713,7 +713,7 @@ SUITES: list[Suite] = [
         trigger_desc="iOS client, shared models or server protocol",
         match=lambda c: _touches(c, *IOS_INPUTS),
         build=_ios_commands,
-        proves="iOS app, model and UI tests run on a disposable Simulator.",
+        proves="iOS app and model tests run on a disposable Simulator.",
     ),
     Suite(
         name="e2e",

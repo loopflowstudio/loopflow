@@ -197,7 +197,7 @@ pub(crate) fn terminate_process_group(pgid: u32) -> Result<()> {
             unsafe {
                 libc::waitpid(group, std::ptr::null_mut(), libc::WNOHANG);
             }
-            survivors = crate::journal::OsProcess::group(pgid)
+            survivors = crate::process::OsProcess::group(pgid)
                 .map_err(|error| anyhow!("cannot observe process group {pgid}: {error}"))?;
             if survivors.is_empty() {
                 return Ok(());
@@ -210,7 +210,7 @@ pub(crate) fn terminate_process_group(pgid: u32) -> Result<()> {
     }
     Err(anyhow!(
         "process group {pgid} survives SIGKILL: {}",
-        crate::journal::OsProcess::describe(&survivors)
+        crate::process::OsProcess::describe(&survivors)
     ))
 }
 
@@ -291,12 +291,79 @@ pub fn execution_context() -> Result<loopflow_storage::child::ChildExecutionCont
     })
 }
 
+/// Where the tools lf starts live (providers, `gh`, `git`, `node`). launchd,
+/// systemd and an SSH command give lf a `PATH` holding none of them; a
+/// terminal's usually holds all of them.
+const TOOL_DIRS: [&str; 7] = [
+    "~/.local/bin",
+    // OpenCode's installer puts it here and nowhere else.
+    "~/.opencode/bin",
+    "/opt/homebrew/bin",
+    "/opt/homebrew/sbin",
+    "/usr/local/bin",
+    "/usr/local/sbin",
+    "~/.cargo/bin",
+];
+
+/// `TOOL_DIRS` with `~/` under `home`.
+pub fn tool_dirs(home: &Path) -> [String; TOOL_DIRS.len()] {
+    TOOL_DIRS.map(|entry| match entry.strip_prefix("~/") {
+        Some(rest) => home.join(rest).to_string_lossy().into_owned(),
+        None => entry.to_owned(),
+    })
+}
+
+/// `path` with each tool directory it lacks appended. Appending only resolves
+/// what `path` could not, so a terminal's own order still wins.
+pub fn tool_path(path: &str, home: &Path) -> String {
+    let mut entries: Vec<String> = path
+        .split(':')
+        .filter(|entry| !entry.is_empty())
+        .map(str::to_owned)
+        .collect();
+    for entry in tool_dirs(home) {
+        if !entries.contains(&entry) {
+            entries.push(entry);
+        }
+    }
+    entries.join(":")
+}
+
+/// Give this process, and everything it starts, the tool directories. Call
+/// first in `main`, while the process has one thread.
+pub fn repair_path() {
+    let Some(home) = dirs::home_dir() else {
+        return;
+    };
+    let path = match std::env::var("PATH") {
+        Ok(path) if !path.is_empty() => path,
+        // Not ours to rewrite: joining it as text would drop its entries.
+        Err(std::env::VarError::NotUnicode(_)) => return,
+        // With none set the OS searches these; setting one must not lose them.
+        _ => "/usr/bin:/bin".to_owned(),
+    };
+    std::env::set_var("PATH", tool_path(&path, &home));
+}
+
 pub fn which_on_path(name: &Path) -> Option<PathBuf> {
+    which_in(name, &std::env::var_os("PATH")?)
+}
+
+/// The executable `command` would start, resolved on the `PATH` it will run
+/// with, as spawning it resolves it.
+pub(crate) fn which_command(command: &std::process::Command) -> Option<PathBuf> {
+    let path = match command.get_envs().find(|(name, _)| *name == "PATH") {
+        Some((_, path)) => path.map(std::ffi::OsStr::to_os_string),
+        None => std::env::var_os("PATH"),
+    };
+    which_in(Path::new(command.get_program()), &path?)
+}
+
+fn which_in(name: &Path, path: &std::ffi::OsStr) -> Option<PathBuf> {
     if name.components().count() > 1 {
         return executable_file(name).then(|| name.to_path_buf());
     }
-    let path = std::env::var_os("PATH")?;
-    std::env::split_paths(&path)
+    std::env::split_paths(path)
         .map(|dir| dir.join(name))
         .find(|candidate| executable_file(candidate))
 }
@@ -339,6 +406,45 @@ mod tests {
     use std::time::Duration;
 
     use super::terminate_process_group;
+
+    #[test]
+    fn a_program_is_found_only_as_an_executable_file() {
+        use std::os::unix::fs::{symlink, PermissionsExt};
+        let found = |path: &std::path::Path| super::which_on_path(path).is_some();
+
+        let root = tempfile::tempdir().unwrap();
+        let provider = root.path().join("provider");
+        std::fs::write(&provider, "#!/bin/sh\nexit 1\n").unwrap();
+        std::fs::set_permissions(&provider, std::fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(!found(&provider));
+        std::fs::set_permissions(&provider, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(found(&provider));
+        let linked = root.path().join("linked-provider");
+        symlink(&provider, &linked).unwrap();
+        assert!(found(&linked));
+        std::fs::remove_file(provider).unwrap();
+        assert!(!found(&linked));
+        assert!(!found(root.path()));
+    }
+
+    #[test]
+    fn a_bare_path_gains_the_tool_directories_after_its_own() {
+        let home = std::path::Path::new("/Users/maya");
+        let path = super::tool_path("/usr/bin:/bin:/opt/homebrew/bin", home);
+        let entries: Vec<_> = path.split(':').collect();
+        assert_eq!(entries[..3], ["/usr/bin", "/bin", "/opt/homebrew/bin"]);
+        assert_eq!(entries[3], "/Users/maya/.local/bin");
+        assert!(entries.contains(&"/Users/maya/.opencode/bin"));
+        assert!(entries.contains(&"/Users/maya/.cargo/bin"));
+        assert_eq!(
+            entries
+                .iter()
+                .filter(|e| **e == "/opt/homebrew/bin")
+                .count(),
+            1
+        );
+        assert_eq!(super::tool_path(&path, home), path);
+    }
 
     #[test]
     fn private_home_keeps_explicit_binary_selection() {
@@ -409,7 +515,7 @@ fn terminate_terminal_jobs(session: u32) -> std::io::Result<()> {
     }
     let deadline = Instant::now() + Duration::from_secs(3);
     loop {
-        let members = crate::journal::OsProcess::session(session)?;
+        let members = crate::process::OsProcess::session(session)?;
         if members.is_empty() {
             return Ok(());
         }
@@ -479,7 +585,7 @@ mod terminal_jobs_tests {
         jobs.terminate().unwrap();
         shell.wait().unwrap();
         for pid in pids {
-            assert!(crate::journal::OsProcess::read(pid)
+            assert!(crate::process::OsProcess::read(pid)
                 .unwrap()
                 .is_none_or(|p| p.has_exited()));
         }

@@ -4,180 +4,109 @@ import Loopflow
 
 struct ThemeChooser: View {
     let appearance: AppearanceStore
-    @State private var editing = false
-    @Environment(\.dismiss) private var dismiss
+    let notices: NoticeCenter
+    var highlightedKey: String?
+    @Environment(\.undoManager) private var undoManager
     @Environment(\.palette) private var palette
 
     var body: some View {
-        // System shows both pickers; Light or Dark shows only its own.
-        let sides: [AppearanceMode] = appearance.current.mode == .system ? [.light, .dark] : [appearance.current.mode]
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Choose Theme").font(Typography.sectionTitle())
-            HStack(alignment: .top, spacing: 16) {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Mode").font(.caption).foregroundStyle(palette.textSecondary)
-                    Picker("Mode", selection: Binding(get: { appearance.current.mode }, set: { appearance.previewMode($0) })) {
-                        ForEach(AppearanceMode.allCases, id: \.self) { mode in Text(mode.menuTitle).tag(mode) }
+        Form {
+            if appearance.readFailure != nil || appearance.notice != nil {
+                Section {
+                    if let failure = appearance.readFailure { Text(failure).foregroundStyle(palette.failure).textSelection(.enabled) }
+                    if let notice = appearance.notice { Text(notice).textSelection(.enabled) }
+                }
+            }
+            if appearance.editing {
+                ThemeEditor(appearance: appearance)
+                    .settingsRow(SettingsMatch.theme.id, highlighted: highlightedKey)
+            } else {
+                Section {
+                    Picker("Appearance", selection: Binding(get: { appearance.selection.mode }, set: { mode in
+                        Task { await appearance.applyMode(mode, notices: notices, manager: undoManager) }
+                    })) {
+                        ForEach(AppearanceMode.allCases, id: \.self) { Text($0.menuTitle).tag($0) }
                     }
                     .pickerStyle(.segmented)
-                    .labelsHidden()
-                    .frame(height: 36)
                     .accessibilityIdentifier("appearance-mode")
+                    .settingsRow(SettingsMatch.appearanceMode.id, highlighted: highlightedKey)
+
+                    Button("Customize \(appearance.selectedName)") { appearance.customize() }
+                        .accessibilityIdentifier("appearance-customize-theme")
+                        .settingsRow(SettingsMatch.theme.id, highlighted: highlightedKey)
                 }
-                .frame(width: 180)
-                ForEach([AppearanceMode.light, .dark], id: \.self) { side in
-                    let enabled = appearance.current.mode == .system || appearance.current.mode == side
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("\(side.menuTitle) theme").font(.caption).foregroundStyle(palette.textSecondary)
-                        Button { editing = false; appearance.showPicker(side) } label: {
-                            Text(appearance.themeName(for: side))
-                                .lineLimit(1).truncationMode(.tail)
-                                .frame(maxWidth: .infinity, minHeight: 28, alignment: .leading)
-                        }
-                        .buttonStyle(WorkOutlineButtonStyle())
-                        .workSelection(enabled && appearance.picker == side)
-                        .disabled(!enabled)
-                        .accessibilityLabel("\(side.menuTitle) theme")
-                        .accessibilityValue(appearance.themeName(for: side))
-                        .accessibilityIdentifier("appearance-picker-\(side.rawValue)")
-                        .help(enabled ? "Choose your \(side.menuTitle.lowercased()) theme" : "Used in \(side.menuTitle) or System mode")
+
+                let sides: [AppearanceMode] = appearance.selection.mode == .system ? [.light, .dark] : [appearance.selection.mode]
+                ForEach(sides, id: \.self) { side in
+                    let entries = appearance.entries(for: side)
+                    Section {
+                        Text("Built-in").font(Typography.meta)
+                        grid(entries.builtins, side: side)
+                        Text("Yours").font(Typography.meta)
+                        grid(entries.yours, side: side, importTile: true)
+                    } header: {
+                        Text("\(side.menuTitle) themes · \(appearance.themeName(for: side))")
+                            .accessibilityIdentifier("appearance-heading-\(side.rawValue)")
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .opacity(enabled ? 1 : 0.45)
                 }
-            }
-            Text("Previewing \(appearance.selectedTheme.name)")
-                .font(.caption).foregroundStyle(palette.textSecondary)
-            ScrollView {
-                if editing, appearance.selectedSource == .yours {
-                    ThemeEditor(appearance: appearance)
-                } else {
-                    VStack(alignment: .leading, spacing: 10) {
-                        ForEach(sides, id: \.self) { side in
-                            let entries = appearance.entries(for: side)
-                            if sides.count > 1 { Text("\(side.menuTitle) themes").font(Typography.strong(13)) }
-                            Text("Built-in").font(.caption).foregroundStyle(palette.textSecondary)
-                            grid(entries.builtins, side: side)
-                            Text("Yours").font(.caption).foregroundStyle(palette.textSecondary)
-                            grid(entries.yours, side: side, importTile: true)
+                if let config = appearance.configPath {
+                    Section {
+                        LabeledContent("Configuration file") {
+                            Text(config).font(Typography.mono).textSelection(.enabled)
                         }
                     }
                 }
-                HStack(spacing: 12) {
-                    Text("Selected Work").foregroundStyle(palette.workSelectedText)
-                        .padding(6).workDestinationSelection(true)
-                    Text("Working").foregroundStyle(palette.working)
-                    Text("Available").foregroundStyle(palette.available)
-                    Text("Warning").foregroundStyle(palette.warning)
-                    Text("Error").foregroundStyle(palette.failure)
-                }.padding(.vertical, 14)
-                VStack(alignment: .leading, spacing: 6) {
-                    ForEach(appearance.diagnostics, id: \.self) { Text($0) }
-                    ForEach(appearance.draftErrors, id: \.self) { Text($0).foregroundStyle(palette.failure) }
-                }.font(.caption).frame(maxWidth: .infinity, alignment: .leading)
             }
-            if let refusal = appearance.refusal {
-                Text(refusal).foregroundStyle(palette.failure).accessibilityIdentifier("appearance-import-refusal")
-            }
-            if let notice = appearance.notice { Text(notice).foregroundStyle(palette.failure).textSelection(.enabled) }
-            HStack {
-                if editing, appearance.selectedSource == .yours {
-                    Button("Done Editing") { editing = false }
-                }
-                DisclosureGroup("Advanced") {
-                    Text(appearance.paths.config.path).font(.caption).textSelection(.enabled)
-                }
-                Spacer()
-                Button("Cancel") { appearance.cancel() }.disabled(appearance.saving).keyboardShortcut(.cancelAction)
-                Button("Apply") { Task { await appearance.apply() } }.keyboardShortcut(.defaultAction)
-                    .disabled(!appearance.canApply)
-            }.buttonStyle(WorkOutlineButtonStyle())
         }
+        .settingsForm(highlighted: highlightedKey)
         .disabled(appearance.saving)
-        .padding(20).frame(minWidth: 620, minHeight: 560)
-        .foregroundStyle(palette.text).background(palette.background)
-        .onAppear { appearance.beginPreview() }
-        .onChange(of: appearance.chooserOpen) { _, open in if !open { editing = false; dismiss() } }
-        .onDisappear { if appearance.chooserOpen { appearance.cancel() } }
+        .onDisappear { if appearance.editing { appearance.cancel() } }
     }
 
     private func grid(_ entries: [ThemeEntry], side: AppearanceMode, importTile: Bool = false) -> some View {
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 150))], alignment: .leading, spacing: 12) {
-            ForEach(entries) { entry in tile(entry, side: side) }
-            if importTile { importPlaceholder(side: side) }
+        CardGrid(minimum: 180, spacing: Spacing.md) {
+            ForEach(entries) { entry in card(entry, side: side) }
+            if importTile { importPlaceholder }
         }
     }
 
-    /// A dashed tile the same shape as a theme tile.
-    private func importPlaceholder(side: AppearanceMode) -> some View {
-        Button { importTheme(side: side) } label: {
-            VStack(alignment: .leading, spacing: 8) {
+    /// A dashed tile the same shape as a theme card. The file joins the side its own colors say.
+    private var importPlaceholder: some View {
+        Button { importTheme() } label: {
+            VStack(alignment: .leading, spacing: Spacing.sm) {
                 Text("Import file…").foregroundStyle(palette.textSecondary)
                 Color.clear.frame(height: 8)
             }
-            .padding(8)
+            .padding(Spacing.sm)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(10)
+            .padding(Spacing.sm)
             .contentShape(Rectangle())
-            .overlay(Rectangle().strokeBorder(palette.borderStrong, style: StrokeStyle(lineWidth: 1, dash: [4, 3])))
+            .overlay(RoundedRectangle(cornerRadius: CornerRadius.row)
+                .strokeBorder(palette.borderStrong, style: StrokeStyle(lineWidth: 1, dash: [4, 3])))
         }
         .buttonStyle(.plain)
-        .help("Add a Ghostty theme file to your \(side.menuTitle.lowercased()) themes")
-        .accessibilityIdentifier(side == .dark ? "appearance-import-theme-dark" : "appearance-import-theme")
+        .help("Add a Ghostty theme file to your themes")
+        .accessibilityIdentifier("appearance-import-theme")
     }
 
-    private func tile(_ entry: ThemeEntry, side: AppearanceMode) -> some View {
-        let theme = entry.theme
+    /// The theme drawn in its own roles; the chosen card is ringed in the window's focus color.
+    private func card(_ entry: ThemeEntry, side: AppearanceMode) -> some View {
         let assigned = appearance.themeName(for: side) == entry.name
-        let selected = assigned && appearance.picker == side
-        return VStack(alignment: .leading, spacing: 0) {
-            Button { editing = false; appearance.showPicker(side); appearance.previewTheme(entry.name) } label: {
-                // The name doubles as the terminal text sample; the tile's edge shows the app surface.
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(theme.name).foregroundStyle(theme.terminal.foreground.color)
-                    HStack(spacing: 3) {
-                        ForEach(0..<8) { i in Rectangle().fill(theme.terminal.indexed[i].color).frame(height: 8) }
-                    }
-                }
-                .padding(8)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(theme.terminal.background.color)
-                .padding(10)
-                .contentShape(Rectangle()) // The whole tile, gaps included, selects the theme.
-            }
-            .buttonStyle(.plain)
-            .accessibilityIdentifier("appearance-theme-\(entry.name)")
-            if selected {
-                // Labels never wrap mid-word; a narrow tile stacks the buttons instead.
-                ViewThatFits(in: .horizontal) {
-                    HStack(spacing: 6) { themeActions(entry) }
-                    VStack(alignment: .leading, spacing: 6) { themeActions(entry) }
-                }
-                .font(.caption).buttonStyle(WorkOutlineButtonStyle())
-                .padding([.horizontal, .bottom], 10)
-            }
+        return Button { Task { await appearance.selectTheme(entry.name, notices: notices, manager: undoManager) } } label: {
+            ThemeCard(theme: entry.theme)
+                .overlay(RoundedRectangle(cornerRadius: CornerRadius.row)
+                    .strokeBorder(assigned ? Color.accentColor : entry.theme.palette.border, lineWidth: assigned ? 2 : 1))
+                .contentShape(Rectangle())
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(theme.palette.background)
-        .workSelection(assigned)
+        .buttonStyle(.plain)
         .workFocusRing()
+        .accessibilityLabel(entry.name)
+        .accessibilityAddTraits(assigned ? .isSelected : [])
+        .accessibilityIdentifier("appearance-theme-\(entry.name)")
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    @ViewBuilder
-    private func themeActions(_ entry: ThemeEntry) -> some View {
-        Button("Customize") { appearance.customize(); editing = true }
-            .help(entry.source == .yours ? "Edit your theme" : "Make your own copy of \(entry.name)")
-            .accessibilityIdentifier("appearance-customize-theme")
-            .fixedSize()
-        if appearance.canDelete {
-            Button(appearance.deleteRevertsToBuiltin ? "Revert to built-in" : "Delete") { appearance.deleteTheme() }
-                .accessibilityIdentifier("appearance-delete-theme")
-                .fixedSize()
-        }
-    }
-
-    private func importTheme(side: AppearanceMode) {
-        appearance.showPicker(side)
+    private func importTheme() {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
@@ -189,24 +118,81 @@ struct ThemeChooser: View {
     }
 }
 
-struct KeyboardShortcutsView: View {
-    /// Window chrome, then every registry action with a default key.
-    private var shortcuts: [(String, String)] {
-        [("Navigate", "⌘K"), ("Toggle sidebar", "⌘\\"), ("Task actions", "⌘/")]
-            + DesktopAction.all.filter { !$0.keys.isEmpty }.map { action in
-                let keys = action.keys.map(\.display)
-                let display = keys.count > 2 ? "\(keys[0])…\(keys[keys.count - 1])" : keys.joined(separator: " / ")
-                return (action.title, display)
-            }
-            + [("Choose Task file", "⌘P"), ("Save Task file", "⌘S"), ("Open repository", "⇧⌘O"), ("Settings", "⌘,")]
+/// Equal columns at least `minimum` wide, rows as tall as their tallest card, cards top-aligned.
+/// Not a `LazyVGrid`: a lazy grid drew no cards after Settings was closed and reopened.
+private struct CardGrid: Layout {
+    let minimum: CGFloat
+    let spacing: CGFloat
+
+    private func columns(_ width: CGFloat) -> (count: Int, width: CGFloat) {
+        let count = max(1, Int((width + spacing) / (minimum + spacing)))
+        return (count, (width - spacing * CGFloat(count - 1)) / CGFloat(count))
     }
+
+    /// Each row's cards and its height: the tallest card at the column width.
+    private func rows(_ subviews: Subviews, _ count: Int, _ column: CGFloat) -> [(cards: Subviews.SubSequence, height: CGFloat)] {
+        stride(from: 0, to: subviews.count, by: count).map { start in
+            let cards = subviews[start..<min(start + count, subviews.count)]
+            return (cards, cards.map { $0.sizeThatFits(ProposedViewSize(width: column, height: nil)).height }.max() ?? 0)
+        }
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        // An ideal-size question proposes nil or infinity; answer with one column.
+        let width = proposal.width.flatMap { $0.isFinite ? $0 : nil } ?? minimum
+        let (count, column) = columns(width)
+        let heights = rows(subviews, count, column).map(\.height)
+        return CGSize(width: width, height: heights.reduce(0, +) + spacing * CGFloat(max(0, heights.count - 1)))
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let (count, column) = columns(bounds.width)
+        var y = bounds.minY
+        for (cards, height) in rows(subviews, count, column) {
+            for (index, subview) in cards.enumerated() {
+                let x = bounds.minX + CGFloat(index) * (column + spacing)
+                subview.place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(width: column, height: nil))
+            }
+            y += height + spacing
+        }
+    }
+}
+
+/// A theme where its colors land in the app: the title bar, a heading, three status
+/// words, ANSI 1–6, a selected row and a primary button. It reads the theme it is given,
+/// not the environment, so every card in the chooser shows its own theme.
+struct ThemeCard: View {
+    let theme: ThemeDefinition
+
     var body: some View {
-        ScrollView {
-            Grid(alignment: .leading, horizontalSpacing: 32, verticalSpacing: 12) {
-                ForEach(shortcuts, id: \.0) { item in
-                    GridRow { Text(item.0); Text(item.1).monospaced() }
+        let palette = theme.palette
+        VStack(alignment: .leading, spacing: 0) {
+            palette.titlebarBackground.frame(height: Spacing.md)
+            VStack(alignment: .leading, spacing: Spacing.sm) {
+                Text(theme.name).font(Typography.textStrong).foregroundStyle(palette.emphasisInk).lineLimit(1)
+                HStack(spacing: Spacing.sm) {
+                    Text("Busy").foregroundStyle(palette.working)
+                    Text("Blocked").foregroundStyle(palette.warning)
+                    Text("Error").foregroundStyle(palette.failure)
                 }
-            }.padding(24)
-        }.frame(minWidth: 500, minHeight: 440)
+                .font(Typography.meta)
+                HStack(spacing: Spacing.xxs) {
+                    ForEach(1..<7) { index in Circle().fill(theme.terminal.indexed[index].color).frame(width: 8, height: 8) }
+                }
+                HStack(spacing: Spacing.xs) {
+                    Text("Selected row").foregroundStyle(palette.workSelectedText)
+                        .padding(.horizontal, Spacing.xs).padding(.vertical, Spacing.xxs)
+                        .background(palette.workSelectedFill, in: RoundedRectangle(cornerRadius: CornerRadius.row))
+                    Text("Run").foregroundStyle(palette.accentText)
+                        .padding(.horizontal, Spacing.sm).padding(.vertical, Spacing.xxs)
+                        .background(palette.accent, in: RoundedRectangle(cornerRadius: CornerRadius.control))
+                }
+                .font(Typography.meta).lineLimit(1).fixedSize()
+            }
+            .padding(Spacing.sm)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(palette.background)
+        .clipShape(RoundedRectangle(cornerRadius: CornerRadius.row))
     }
 }

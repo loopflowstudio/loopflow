@@ -25,7 +25,7 @@ struct ServerClientTests {
             case "creation":
                 try await Self.submission(peer: peer)
             default:
-                try await ServerClient.read(.machineSelf, location: peer.location)
+                try await ServerClient.read(.machineSelf, location: peer.location).text
             }
         }
         #expect(try JSONDecoder().decode(JSONValue.self, from: Data(value.utf8)) == .object(["id": .string("home_fixture")]))
@@ -39,11 +39,11 @@ struct ServerClientTests {
     private static func submission(peer: ServerPeer) async throws -> String {
         let link = try await ServerLink.open(.unix(path: peer.path))
         let change = ServedWrite.taskCreate(directory: "/repo", requestID: "creation-one", title: nil,
-            request: "A bounded request", wave: nil, graph: nil, session: nil, run: true)
+            request: "A bounded request", wave: nil, parent: nil, graph: nil, session: nil, run: true)
         let payload = try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(change))
-        let result = try await link.request(.submittedCreation(payload)).printed
+        let result = try await link.request(.submittedCreation(payload))
         await link.close()
-        return result
+        return String(decoding: result.bytes, as: UTF8.self)
     }
 
     @Test func admissionBusyWaitsThenCompletesTheWriteOnce() async throws {
@@ -85,6 +85,28 @@ struct ServerClientTests {
         #expect(effects.get() == 1)
     }
 
+    @Test(arguments: [true, false])
+    func aRequestTheServerCannotParseNamesBothBuilds(parse: Bool) async throws {
+        let peer = try ServerPeer()
+        // What a 0.16.0 server answers for `config.theme` without `path`, or for an operation it lacks.
+        let refusal = parse ? "config.theme: missing field `path`" : "this server has no operation `config.theme`; update the selected installation"
+        peer.serve { message, respond in
+            guard message["type"] as? String == "request" else { return true }
+            respond(["type": "error", "revisions": NSNull(), "id": message["id"]!, "code": "invalid",
+                     "message": refusal, "data": ["kind": "config.theme"]])
+            return true
+        }
+        do {
+            _ = try await ServerClient.configuration(.configTheme(value: nil), location: peer.location)
+            Issue.record("A refused request succeeded")
+        } catch {
+            let client = "\(LaunchJournal.appVersion)+\(DesktopLog.sourceRevision)"
+            #expect(error.localizedDescription == (parse
+                ? "The server (test) can't read what this Loopflow (\(client)) asked. Update the older one."
+                : refusal))
+        }
+    }
+
     @Test func cancelledReadSendsCancelDropsLateAnswerAndKeepsTheConnection() async throws {
         let peer = try ServerPeer()
         let firstId = Mutex<String?>(nil)
@@ -116,8 +138,8 @@ struct ServerClientTests {
         } catch { #expect(error is CancellationError) }
         // The connection stays open; the dropped late answer does not corrupt it.
         let reading = try await ServerClient.read(.machineSelf, location: peer.location)
-        #expect(reading.contains("home_fixture"))
-        #expect(!reading.contains("late"))
+        #expect(reading.text.contains("home_fixture"))
+        #expect(!reading.text.contains("late"))
     }
 
     @Test func unansweredReadsExpireThenEndAStalledConnection() async throws {
@@ -196,7 +218,7 @@ struct ServerClientTests {
             }
             return true
         }
-        #expect(try await ServerClient.read(.repoPath(id: "repo_1"), location: peer.location) == "/src/again")
+        #expect(try await ServerClient.read(.repoPath(id: "repo_1"), location: peer.location).decode(String.self) == "/src/again")
     }
 
     @Test func disconnectedWatchResumesItsBaselineAndNewestConfirmation() async throws {
@@ -237,7 +259,7 @@ struct ServerClientTests {
             return true
         }
         // Only the newest confirmation needs replay; it answers every earlier request.
-        for id in 1...100 { subscription.send(Data("{\"id\":\(id)}".utf8)) }
+        for id in 1...100 { subscription.checkpoint(id) }
         let confirmed = try #require(try await frames.next())
         let value = try JSONSerialization.jsonObject(with: confirmed) as! [String: Any]
         #expect(value["body"] as? String == "confirmed")
@@ -282,7 +304,7 @@ struct ServerClientTests {
         let value = try JSONSerialization.jsonObject(with: baseline) as! [String: Any]
         #expect(value["body"] as? String == "baseline")
         #expect(value["answers"] is NSNull)
-        subscription.send(Data(#"{"id":1}"#.utf8))
+        subscription.checkpoint(1)
         let confirmed = try #require(try await frames.next())
         let confirmation = try JSONSerialization.jsonObject(with: confirmed) as! [String: Any]
         #expect(confirmation["body"] as? String == "baseline")
@@ -309,7 +331,7 @@ struct ServerClientTests {
             }
             return true
         }
-        #expect(try await ServerClient.read(.repoPath(id: "repo_1"), location: peer.location) == "/src/after-stall")
+        #expect(try await ServerClient.read(.repoPath(id: "repo_1"), location: peer.location).decode(String.self) == "/src/after-stall")
     }
 
     @Test func delayedBulkReadingKeepsItsPlaceWithoutBlockingOtherRequests() async throws {
@@ -339,7 +361,7 @@ struct ServerClientTests {
         let subscription = ServerClient.subscribe(.allPlans, location: peer.location)
         defer { Task { await subscription.cancel() } }
         peer.waitForMessage { $0["type"] as? String == "subscribe" }
-        #expect(try await ServerClient.read(.machineSelf, location: peer.location) == "independent")
+        #expect(try await ServerClient.read(.machineSelf, location: peer.location).decode(String.self) == "independent")
         release.signal()
         var frames = subscription.lines.makeAsyncIterator()
         let first = try await frames.next()
@@ -370,9 +392,9 @@ struct ServerClientTests {
             }
             return true
         }
-        #expect(try await ServerClient.read(.repoPath(id: "repo_1"), location: peer.location) == big)
-        let output = try await ServerClient.configuration(.configTheme(path: "/unused", value: big), location: peer.location)
-        #expect(String(decoding: output, as: UTF8.self) == "\(big.utf8.count)")
+        #expect(try await ServerClient.read(.repoPath(id: "repo_1"), location: peer.location).decode(String.self) == big)
+        let output = try await ServerClient.configuration(.configTheme(value: big), location: peer.location)
+        #expect(try output.decode(Int.self) == big.utf8.count)
     }
 
     @Test func oversizedControlResponseIsRefusedEvenWhenItsLastReadContainsTheNewline() async throws {
@@ -413,10 +435,10 @@ struct ServerClientTests {
             }
             return true
         }
-        subscription.send(Data(#"{"id":1}"#.utf8))
+        subscription.checkpoint(1)
         guard case .reading(let frame) = try await updates.next() else { Issue.record("Missing reconnect baseline"); return }
         #expect(try frame.fields()["body"]?.string == "fresh")
-        await subscription.cancel()
+        subscription.cancel()
     }
 
     @Test(arguments: [false, true])
@@ -446,7 +468,7 @@ struct ServerClientTests {
         let subscription = ServerClient.subscribeEvents(.allPlans, location: peer.location)
         var frames = subscription.updates.makeAsyncIterator()
         guard case .reading = try await frames.next() else { Issue.record("Missing baseline"); return }
-        subscription.send(Data(#"{"id":7}"#.utf8))
+        subscription.checkpoint(7)
         if !gap {
             guard case .event(.taskSteer(_, let steer, _)) = try await frames.next() else { Issue.record("Missing event after baseline"); return }
             #expect(steer.text == "new direction")
@@ -457,11 +479,82 @@ struct ServerClientTests {
         } catch {
             #expect(error.localizedDescription.contains("subscribe again"))
         }
-        #expect(try await ServerClient.read(.machineSelf, location: peer.location) == "still here")
+        #expect(try await ServerClient.read(.machineSelf, location: peer.location).decode(String.self) == "still here")
         let fresh = ServerClient.subscribe(.allPlans, location: peer.location)
         var readings = fresh.lines.makeAsyncIterator()
         #expect(try await readings.next() != nil)
         await fresh.cancel()
+    }
+
+    @Test func olderPeerKeepsServingCompatibleReadsAndActions() async throws {
+        let peer = try ServerPeer()
+        peer.serve(revision: 8) { message, respond in
+            guard let id = message["id"], let operation = message["operation"] as? [String: Any],
+                  let kind = operation["kind"] as? String else { return true }
+            let result: Any
+            switch kind {
+            case "machine.self": result = ["id": "home_fixture", "older_field": true] as [String: Any]
+            case "task.list": result = ["next": NSNull()]
+            case "session.history.get": result = "First line\nSecond line"
+            case "graph.customize": result = ["path": "/repo/code.yaml"]
+            default:
+                respond(["type": "error", "id": id, "code": "invalid", "message": "Unknown operation: \(kind)",
+                         "data": ["kind": kind], "revisions": NSNull()])
+                return true
+            }
+            respond(["type": "response", "id": id, "trace_id": "trace", "revisions": NSNull(), "result": result])
+            return true
+        }
+        let query = RegistryQuery(serve: { try await ServerClient.read($0, location: peer.location) },
+                                  write: { try await ServerClient.write($0, location: peer.location) }) { _, _ in
+            throw RegistryQueryError("Unexpected CLI call")
+        }
+        do {
+            _ = try await query.closedTasks(wave: "desktop", cwd: "/repo")
+            Issue.record("A Task page without tasks decoded")
+        } catch {
+            let client = "\(LaunchJournal.appVersion)+\(DesktopLog.sourceRevision)"
+            #expect(error.localizedDescription == "This Loopflow (\(client)) can't read what the server (test) sent. (missing tasks at root)")
+        }
+        do {
+            try await query.rankTask(issue: "task_fixture", rank: 1, cwd: "/repo")
+            Issue.record("The older peer accepted an unknown operation")
+        } catch let error as ServerError {
+            #expect(error.code == .invalid)
+            #expect(error.message.contains("task.update"))
+        }
+        #expect(try await query.localMachineId() == "home_fixture")
+        #expect(try await query.sessionHistoryText(id: "session_fixture") == "First line\nSecond line")
+        #expect(try await query.customizeGraph("code", cwd: "/repo") == "/repo/code.yaml")
+    }
+
+    @Test("A reading from another build fails its part with a sentence naming both builds")
+    func aReadingThisBuildCannotDecodeNamesBothBuilds() async throws {
+        let peer = try ServerPeer()
+        peer.serve { message, respond in
+            guard message["type"] as? String == "subscribe" else { return true }
+            let id = message["id"]!
+            respond(["type": "response", "revisions": NSNull(), "id": id, "trace_id": "trace", "result": NSNull()])
+            // A plan without the fields this build requires, as another build sends it.
+            respond(["type": "reading", "id": id, "checkpoint": "fixture-checkpoint",
+                     "frame": ["answers": NSNull(), "unavailable": NSNull(), "body": ["tasks": []], "read_at": NSNull()]])
+            return true
+        }
+        let location = peer.location
+        let observation = try WorkSubscriptions.observe { ServerClient.subscribe($0, location: location) }
+        var frames = observation.frames.makeAsyncIterator()
+        let frame = try #require(try await frames.next())
+        #expect(frame.content.part == "planning")
+        let reason = try #require(frame.unavailable)
+        #expect(reason.hasPrefix("This Loopflow (\(LaunchJournal.appVersion)+\(DesktopLog.sourceRevision)) can't read what the server (test) sent. (missing "))
+        // The Notice a window shows for it, with the link up.
+        let shown = await MainActor.run {
+            let notices = NoticeCenter()
+            notices.read("planning", "The plan", from: nil, to: reason, link: .connected)
+            return notices.current?.text
+        }
+        #expect(shown == "The plan couldn't be read: \(reason)")
+        await observation.cancel()
     }
 
     @Test func serverEndingASubscriptionFailsItAlone() async throws {
@@ -489,7 +582,7 @@ struct ServerClientTests {
         var frames = subscription.lines.makeAsyncIterator()
         let first = try #require(try await frames.next())
         #expect((try JSONSerialization.jsonObject(with: first) as? [String: Any])?["answers"] as? Int == 1)
-        subscription.send(Data(#"{"id":4}"#.utf8 + [10]))
+        subscription.checkpoint(4)
         let last = try #require(try await frames.next())
         #expect((try JSONSerialization.jsonObject(with: last) as? [String: Any])?["unavailable"] as? String == "gone")
         do {
@@ -500,8 +593,24 @@ struct ServerClientTests {
             #expect(error.localizedDescription == "gone")
         }
         // The connection outlives the subscription.
-        #expect(try await ServerClient.read(.repoPath(id: "repo_1"), location: peer.location) == "still here")
+        #expect(try await ServerClient.read(.repoPath(id: "repo_1"), location: peer.location).decode(String.self) == "still here")
         await subscription.cancel()
+    }
+
+    @Test func visitorReportsStoppedServerAndRecoversOnNextRead() async throws {
+        let attempts = Mutex(0)
+        let location = ServerLocation(startsServer: false) { args in
+            #expect(args == ["server", "status"])
+            return attempts.increment() == 1
+                ? #"{"socket":"/fixture","ready":false,"error":"Connection refused"}"#
+                : #"{"socket":"/fixture","ready":true}"#
+        }
+        await #expect {
+            try await location.path()
+        } throws: { error in
+            error.localizedDescription == "Loopflow's server isn't running. Open Loopflow, or run `lf install server`. Connection refused"
+        }
+        #expect(try await location.path() == "/fixture")
     }
 
     @Test(arguments: [false, true])
@@ -535,7 +644,7 @@ struct ServerClientTests {
         exec "$TEST_LF" "$@"
         """.write(to: installer, atomically: true, encoding: .utf8)
         try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: installer.path)
-        let location = ServerLocation { try await lf.run($0, executable: installer.path) }
+        let location = ServerLocation(startsServer: true) { try await lf.run($0, executable: installer.path) }
         let query = ServedRead.planList(directory: root.path, wave: nil, task: nil, all: true)
         do {
             _ = try await ServerClient.read(query, location: location)
@@ -578,7 +687,7 @@ struct ServerClientTests {
         do {
             _ = try await server.status()
             let reading = try await ServerClient.read(query, location: location)
-            #expect(reading.contains("Recovered Work"))
+            #expect(reading.text.contains("Recovered Work"))
             let subscription = ServerClient.subscribe(query, location: location)
             do {
                 var frames = subscription.lines.makeAsyncIterator()
@@ -625,8 +734,9 @@ private final class ServerPeer: @unchecked Sendable {
     init() throws {
         let path = "/tmp/lf-peer-\(UUID().uuidString).sock"
         self.path = path
-        location = ServerLocation { _ in
-            String(decoding: try JSONSerialization.data(withJSONObject: ["socket": path, "ready": true]), as: UTF8.self)
+        location = ServerLocation(startsServer: false) { args in
+            #expect(args == ["server", "status"])
+            return String(decoding: try JSONSerialization.data(withJSONObject: ["socket": path, "ready": true]), as: UTF8.self)
         }
         listener = socket(AF_UNIX, SOCK_STREAM, 0)
         var address = sockaddr_un()
@@ -649,7 +759,7 @@ private final class ServerPeer: @unchecked Sendable {
     }
 
     /// `handle` returns false to close the connection after this message.
-    func serve(_ handle: @escaping @Sendable (_ message: [String: Any], _ respond: (_ line: [String: Any]) -> Void) -> Bool) {
+    func serve(revision: Int = ServerProtocol.revision, _ handle: @escaping @Sendable (_ message: [String: Any], _ respond: (_ line: [String: Any]) -> Void) -> Bool) {
         Thread.detachNewThread { [self] in
             let fd = accept(listener, nil, nil)
             guard fd >= 0 else { return }
@@ -658,7 +768,7 @@ private final class ServerPeer: @unchecked Sendable {
             do {
                 _ = try connection.read() // hello
                 try connection.write([
-                    "type": "welcome", "client_id": "fixture-client", "revision": ServerProtocol.revision, "server_revision": ServerProtocol.revision, "min_revision": ServerProtocol.minRevision, "instance": "fixture",
+                    "type": "welcome", "client_id": "fixture-client", "revision": revision, "server_revision": revision, "min_revision": ServerProtocol.minRevision, "instance": "fixture",
                     "build": "test", "executable_sha256": String(repeating: "f", count: 64), "machine": NSNull(),
                     "limits": ["max_message": 1_048_576, "max_connections": 64,"max_open":256,"max_retained_bytes":67108864],
                 ])

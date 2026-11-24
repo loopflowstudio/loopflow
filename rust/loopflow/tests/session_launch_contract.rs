@@ -144,11 +144,12 @@ impl Fixture {
         for harness in ["claude", "codex", "opencode"] {
             let script = fixture.home.path().join("bin").join(harness);
             let source = if harness == "opencode" {
-                include_str!("../../loopflow-execution/tests/support/opencode_server.py")
+                include_str!("../../loopflow-execution/tests/support/opencode_cli.py")
                     .replace("__WAIT__", "False")
             } else {
                 r#"#!/usr/bin/python3
 import json, os, sys, runpy
+from pathlib import Path
 args = sys.argv[1:]
 if '--version' in args:
     print('fixture'); sys.exit(0)
@@ -175,7 +176,12 @@ if stream:
     message = json.loads(sys.stdin.readline())
     record['input'] = message
 elif os.path.basename(sys.argv[0]) == 'claude':
-    record['input'] = sys.stdin.read()
+    if '--session-id' in args:
+        project = Path(native) / 'projects' / 'fixture'
+        project.mkdir(parents=True, exist_ok=True)
+        (project / (args[args.index('--session-id')+1] + '.jsonl')).write_text('{}\n')
+    # Resume opens history with no seed; a held terminal keeps stdin open.
+    record['input'] = '' if '--resume' in args else sys.stdin.read()
 with open(os.environ['HOME']+'/received.json.tmp', 'w') as out:
     json.dump(record, out)
 os.replace(os.environ['HOME']+'/received.json.tmp', os.environ['HOME']+'/received.json')
@@ -288,10 +294,33 @@ fn files_named(dir: &Path, file: &str) -> Vec<std::path::PathBuf> {
     found
 }
 
+/// The Machine's store, with Session history attached as `history` and turns as `usage`.
+fn machine_db(home: &Path) -> rusqlite::Connection {
+    let store = home.join("machine/loopflow.db");
+    let db = rusqlite::Connection::open(&store).unwrap();
+    db.execute(
+        "ATTACH ?1 AS history",
+        [loopflow_storage::history::history_path(&store)
+            .to_string_lossy()
+            .as_ref()],
+    )
+    .unwrap();
+    db.execute(
+        "ATTACH ?1 AS usage",
+        [loopflow_storage::history::history_path(&store)
+            .to_string_lossy()
+            .as_ref()],
+    )
+    .unwrap();
+    db
+}
+
 fn success(output: &Output) {
     assert!(
         output.status.success(),
-        "{}",
+        "{}\n{}\n{}",
+        output.status,
+        String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
 }
@@ -335,7 +364,7 @@ fn bypass(value: &Value, provider: &str, enabled: bool) {
             assert!(!args(value).contains(&"--dangerously-bypass-approvals-and-sandbox"));
         }
         "opencode" => {
-            let config: Value = serde_json::from_str(value["opencode"].as_str().unwrap()).unwrap();
+            let config = &value["server"];
             assert_eq!(
                 config["permissions"][0]["effect"].as_str() == Some("allow"),
                 enabled,
@@ -351,7 +380,7 @@ fn opencode_diagnostics_stay_off_the_terminal_on_launch_and_resume() {
     let fixture = Fixture::new("opencode");
     fs::write(
         fixture.home.path().join("bin/opencode"),
-        include_str!("../../loopflow-execution/tests/support/opencode_server.py").replace("__WAIT__", "False")
+        include_str!("../../loopflow-execution/tests/support/opencode_cli.py").replace("__WAIT__", "False")
             .replace("    _record_launch()\n    if False:", r#"    _record_launch()
     mode = 'resume' if (HOME / 'opened').exists() else 'launch'
     (HOME / 'opened').touch()
@@ -405,7 +434,7 @@ fn opencode_diagnostics_stay_off_the_terminal_on_launch_and_resume() {
 }
 
 #[test]
-fn opencode_failure_before_session_creation_keeps_diagnostics() {
+fn opencode_startup_failure_reports_its_exit_and_keeps_diagnostics() {
     let fixture = Fixture::new("opencode");
     fs::write(
         fixture.home.path().join("bin/opencode"),
@@ -420,7 +449,7 @@ fn opencode_failure_before_session_creation_keeps_diagnostics() {
     assert!(!output.status.success());
     let stderr = String::from_utf8(output.stderr).unwrap();
     assert!(
-        stderr.contains("startup failure without a session"),
+        stderr.contains("opencode exited with exit status: 23"),
         "{stderr}"
     );
     let logs = files_named(fixture.home.path(), "opencode.stderr.log");
@@ -429,49 +458,6 @@ fn opencode_failure_before_session_creation_keeps_diagnostics() {
         fs::read(&logs[0]).unwrap(),
         b"startup failure without a session\n"
     );
-}
-
-#[test]
-fn opencode_terminal_setup_failure_stops_the_private_server() {
-    let fixture = Fixture::new("opencode");
-    let source = include_str!("../../loopflow-execution/tests/support/opencode_server.py")
-        .replace("__WAIT__", "False")
-        .replace(
-            "        if self.path == \"/api/event\":",
-            r#"        if self.path == "/api/event":
-            (HOME / 'server-port').write_text(str(self.server.server_port))
-            for path in Path(os.environ['LF_HOME']).glob('runs/*/*/opencode.stderr.log'):
-                path.unlink()
-                path.mkdir()"#,
-        );
-    fs::write(fixture.home.path().join("bin/opencode"), source).unwrap();
-    let mut child = fixture
-        .command()
-        .args(["-i", ":", "launch"])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap();
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
-    while child.try_wait().unwrap().is_none() {
-        if std::time::Instant::now() >= deadline {
-            child.kill().unwrap();
-            child.wait().unwrap();
-            panic!("terminal setup failure left the server worker waiting");
-        }
-        std::thread::sleep(std::time::Duration::from_millis(10));
-    }
-    let output = child.wait_with_output().unwrap();
-    assert!(!output.status.success());
-    assert!(
-        String::from_utf8_lossy(&output.stderr).contains("open OpenCode diagnostics"),
-        "{output:?}"
-    );
-    let port: u16 = fs::read_to_string(fixture.home.path().join("server-port"))
-        .unwrap()
-        .parse()
-        .unwrap();
-    assert!(std::net::TcpStream::connect((std::net::Ipv4Addr::LOCALHOST, port)).is_err());
 }
 
 #[test]
@@ -496,12 +482,19 @@ fn terminal_launch_and_resume_use_current_policy_and_preserve_native_identity() 
                 "INSERT INTO provider_accounts(provider,account_id,home,credential_state,cooldown_until,created_at,updated_at) VALUES(?1,'retired',?2,'missing',4000000000,1,1)",
                 rusqlite::params![provider,saved.to_str().unwrap()]).unwrap();
         }
-        // A bare Codex launch runs plain `codex`; behind its app-server it is Work.
-        let mut launch = vec!["-i", ":", "--", "--- keep spaces and 雪"];
-        if provider == "codex" {
-            fixture.create_wave();
-            launch.splice(1..1, ["--wave", "fixture"]);
-        }
+        let session = (provider == "codex").then(|| {
+            crate::support::prepare_native_conversation(
+                &fixture.home.path().join("machine/loopflow.db"),
+                fixture.repo.path(),
+                "codex",
+                None,
+                "--- keep spaces and 雪",
+            )
+        });
+        let launch = match &session {
+            Some(session) => vec!["-i", "resume", session],
+            None => vec!["-i", ":", "--", "--- keep spaces and 雪"],
+        };
         let first = fixture.run(&launch);
         bypass(&first, provider, true);
         if provider != "opencode" {
@@ -630,7 +623,7 @@ fn previews_do_not_start_a_provider_and_terminal_schema_is_explicitly_unsupporte
         .output()
         .unwrap();
     assert!(!output.status.success());
-    assert!(String::from_utf8_lossy(&output.stderr).contains("require a headless Run"));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("lf -b steer"));
     assert!(!fixture.home.path().join("received.json").exists());
     assert_eq!(fixture.session(), session);
 }
@@ -1081,7 +1074,8 @@ fn another_agent_resumes_a_failed_codex_bootstrap_on_its_own_input() {
     let fixture = Fixture::new("codex");
     let machine = fixture.home.path().join("machine");
     fixture.create_wave();
-    fs::write(machine.join("fail-server"), "").unwrap();
+    // A chat is a bare Codex terminal; this one exits before starting a thread.
+    fs::write(machine.join("fail-terminal"), "").unwrap();
     let failed = fixture
         .command()
         .args([
@@ -1095,8 +1089,7 @@ fn another_agent_resumes_a_failed_codex_bootstrap_on_its_own_input() {
         .unwrap();
     assert!(!failed.status.success());
     let session = fixture.session();
-    fs::remove_file(machine.join("fail-server")).unwrap();
-    // The server failed before Codex started a thread.
+    fs::remove_file(machine.join("fail-terminal")).unwrap();
     let resumed = fixture.run(&["-a", "claude", "session", "resume", &session]);
     // A fresh Claude input, not the reopened Codex bootstrap.
     assert!(args(&resumed).contains(&"--session-id"), "{resumed}");
@@ -1118,13 +1111,6 @@ fn linked_worktree_metadata_is_accessible_on_launch_and_resume() {
         let fixture = Fixture::new(provider);
         fixture.repo.stage_all();
         fixture.repo.commit("fixture config");
-        // Codex reaches its app-server as Work.
-        let launch: &[&str] = if provider == "codex" {
-            fixture.create_wave();
-            &["-i", "--wave", "fixture", ":", "--", "--- literal prompt"]
-        } else {
-            &["-i", ":", "--", "--- literal prompt"]
-        };
         let worktree = fixture.home.path().join("work tree with spaces");
         success(
             &Command::new("git")
@@ -1134,11 +1120,24 @@ fn linked_worktree_metadata_is_accessible_on_launch_and_resume() {
                 .output()
                 .unwrap(),
         );
+        let prepared = (provider == "codex").then(|| {
+            crate::support::prepare_native_conversation(
+                &fixture.home.path().join("machine/loopflow.db"),
+                &worktree,
+                "codex",
+                None,
+                "--- literal prompt",
+            )
+        });
+        let launch = match &prepared {
+            Some(session) => vec!["-i", "resume", session],
+            None => vec!["-i", ":", "--", "--- literal prompt"],
+        };
         success(
             &fixture
                 .command()
                 .current_dir(&worktree)
-                .args(launch)
+                .args(&launch)
                 .output()
                 .unwrap(),
         );
@@ -1280,7 +1279,7 @@ fn live_taskless_provider_switch_preserves_identity_and_accepts_terminal_input()
     let _ = first.kill();
     first.wait().unwrap();
     success(&switched);
-    // A bare Codex launch is plain `codex`: the import rides its opening prompt.
+    // A taskless chat reopens as a chat: bare Codex takes the history as argv.
     let imported = fixture.received();
     assert!(
         args(&imported)
@@ -1342,12 +1341,10 @@ fn provider_switch_imports_session_history_with_current_policy() {
     fixture.settings("claude", true, false);
     let imported = fixture.run(&[
         "-b",
-        "session",
-        "resume",
-        &session,
         "-a",
         "codex:new-model",
-        "--message",
+        "steer",
+        &session,
         "Continue the design",
     ]);
     assert_eq!(imported["method"], "thread/start");
@@ -1368,10 +1365,8 @@ fn opencode_headless_start_selects_the_model_and_permissions() {
         if managed {
             fixture.create_wave();
         }
-        let script = include_str!("../../loopflow-execution/tests/support/opencode_server.py").replace("__WAIT__", "False").replace(
-        "            if evidence := os.environ.get(\"LF_TEST_REPLAY_EVIDENCE\"):",
-        "            (HOME / 'received.json').write_text(json.dumps({'session':self.path.split('/')[3], 'request':body, 'config':json.loads(os.environ['OPENCODE_CONFIG_CONTENT'])}))\n            if evidence := os.environ.get(\"LF_TEST_REPLAY_EVIDENCE\"):"
-    );
+        let script = include_str!("../../loopflow-execution/tests/support/opencode_cli.py")
+            .replace("__WAIT__", "False");
         fs::write(fixture.home.path().join("bin/opencode"), script).unwrap();
         fixture.settings("opencode:opencode/first-model", true, false);
         let first = fixture.run(if managed {
@@ -1386,8 +1381,8 @@ fn opencode_headless_start_selects_the_model_and_permissions() {
             .unwrap()["id"],
             "first-model"
         );
-        assert_eq!(first["config"]["permissions"][0]["effect"], "allow");
-        let plugin = first["config"]["plugins"][0]
+        assert_eq!(first["server"]["permissions"][0]["effect"], "allow");
+        let plugin = first["server"]["plugins"][0]
             .as_str()
             .unwrap()
             .strip_prefix("file://")
@@ -1566,14 +1561,7 @@ fn wave_targets_prepare_reuse_and_open_in_the_selected_checkout_in_both_formats(
         .find(|pair| pair[0] == "--resume")
         .unwrap()[1]
         .to_owned();
-    let continued = fixture.run(&[
-        "-b",
-        "resume",
-        "--wave",
-        wave_id,
-        "--message",
-        "next Wave turn",
-    ]);
+    let continued = fixture.run(&["-b", "steer", id, "next Wave turn"]);
     pair(&continued, "--resume", &native);
     pair(&continued, "--model", "haiku");
     assert!(continued["input"].to_string().contains("next Wave turn"));
@@ -1710,8 +1698,7 @@ fn contextual_resume_uses_scope_and_recovers_unassociated_checkouts() {
     assert_eq!(explanation["resolution"]["session"]["value"], id);
     assert_eq!(count(), before);
     assert_eq!(prepare(&linked, &["resume", id])["id"], id);
-    // Beside an id, a Task or Wave only makes the resume managed: the id
-    // still selects, whatever Work the flag names.
+    // Beside a Task or Wave flag, the id still selects the Session.
     for argv in [
         vec!["resume", id, "--wave", "fixture"],
         vec!["--task", "missing", "resume", id],
@@ -1722,7 +1709,7 @@ fn contextual_resume_uses_scope_and_recovers_unassociated_checkouts() {
 }
 
 #[test]
-fn missing_native_history_fails_without_replacing_the_selected_conversation() {
+fn provider_rejected_resume_keeps_the_selected_conversation() {
     let fixture = Fixture::new("claude:sonnet");
     fixture.run(&["-i", ":", "existing history"]);
     let id = fixture.session();
@@ -1914,18 +1901,25 @@ fn pi_native_callbacks_retain_identity_final_output_and_usage() {
     let fixture = pi_fixture();
     // Pi's callbacks carry provider context only for a managed launch.
     fixture.create_wave();
+    let prepared = crate::support::prepare_native_conversation(
+        &fixture.home.path().join("machine/loopflow.db"),
+        fixture.repo.path(),
+        "pi",
+        None,
+        "Native Pi input",
+    );
     let output = fixture
         .command()
         .env(
             "PI_FIXTURE_RECORD",
             fixture.home.path().join("received.json"),
         )
-        .args(["-i", "--wave", "fixture", ":", "Native Pi input"])
+        .args(["-i", "resume", &prepared])
         .output()
         .unwrap();
     success(&output);
     let session = fixture.session();
-    let db = rusqlite::Connection::open(fixture.home.path().join("machine/loopflow.db")).unwrap();
+    let db = machine_db(fixture.home.path());
     let (provider, thread): (String, String) = db
         .query_row(
             "SELECT provider,provider_thread FROM agent_sessions WHERE id=?1",
@@ -1945,18 +1939,17 @@ fn pi_native_callbacks_retain_identity_final_output_and_usage() {
             .display()
             .to_string()
     );
-    let output: String = db.query_row("SELECT json_extract(payload,'$.text') FROM session_events WHERE session_id=?1 AND kind='output'", [&session], |row| row.get(0)).unwrap();
-    assert_eq!(output, "native answer");
-    let tokens: i64 = db.query_row("SELECT json_extract(payload,'$.usage.total_input_tokens') FROM session_events WHERE session_id=?1 AND kind='usage' ORDER BY seq DESC LIMIT 1", [&session], |row| row.get(0)).unwrap();
+    assert_eq!(pi_final_answer(&fixture, &session), "native answer");
+    let tokens: i64 = db.query_row("SELECT total_input_tokens FROM history.turns WHERE session_id=?1 AND usage_at IS NOT NULL ORDER BY id DESC LIMIT 1", [&session], |row| row.get(0)).unwrap();
     assert_eq!(tokens, 26);
     let receipts: i64 = db
         .query_row(
-            "SELECT count(*) FROM session_events WHERE session_id=?1 AND kind='usage'",
+            "SELECT count(*) FROM history.turns WHERE session_id=?1 AND usage_at IS NOT NULL",
             [&session],
             |row| row.get(0),
         )
         .unwrap();
-    // The turn's three native receipts merge into one usage row.
+    // The turn's three native receipts merge into one turn's usage.
     assert_eq!(receipts, 1);
     let received = fixture.received();
     assert!(args(&received).contains(&"--extension"));
@@ -1970,28 +1963,29 @@ fn pi_native_callbacks_retain_identity_final_output_and_usage() {
 fn pi_native_crash_keeps_the_paid_step_and_interrupts_the_turn() {
     let fixture = pi_fixture();
     fixture.create_wave();
+    let prepared = crate::support::prepare_native_conversation(
+        &fixture.home.path().join("machine/loopflow.db"),
+        fixture.repo.path(),
+        "pi",
+        None,
+        "Crash after a paid model step",
+    );
     let output = fixture
         .command()
         .env("PI_FIXTURE_CRASH", "1")
-        .args([
-            "-i",
-            "--wave",
-            "fixture",
-            ":",
-            "Crash after a paid model step",
-        ])
+        .args(["-i", "resume", &prepared])
         .output()
         .unwrap();
     assert!(!output.status.success());
     let session = fixture.session();
-    let db = rusqlite::Connection::open(fixture.home.path().join("machine/loopflow.db")).unwrap();
+    let db = machine_db(fixture.home.path());
     let (count, tokens): (i64, i64) = db.query_row(
-        "SELECT count(*), json_extract(payload,'$.usage.total_input_tokens') FROM session_events WHERE session_id=?1 AND kind='usage'",
+        "SELECT count(*), total_input_tokens FROM history.turns WHERE session_id=?1 AND usage_at IS NOT NULL",
         [&session], |row| Ok((row.get(0)?, row.get(1)?))).unwrap();
     assert_eq!((count, tokens), (1, 13));
     // The exit read closes the turn the transcript left open.
     let statuses: Vec<String> = db
-        .prepare("SELECT json_extract(payload,'$.status') FROM session_events WHERE session_id=?1 AND kind='completed' AND provider_turn IS NOT NULL")
+        .prepare("SELECT status FROM history.turns WHERE session_id=?1 AND ended_at IS NOT NULL")
         .unwrap()
         .query_map([&session], |row| row.get(0))
         .unwrap()
@@ -2004,12 +1998,19 @@ fn pi_native_crash_keeps_the_paid_step_and_interrupts_the_turn() {
 fn pi_native_failed_start_reopens_without_replacing_the_loopflow_session() {
     let fixture = pi_fixture();
     fixture.create_wave();
+    let prepared = crate::support::prepare_native_conversation(
+        &fixture.home.path().join("machine/loopflow.db"),
+        fixture.repo.path(),
+        "pi",
+        None,
+        "Initial input",
+    );
     let provider = fixture.home.path().join("bin/pi");
     let original = fs::read(&provider).unwrap();
     fs::write(&provider, "#!/bin/sh\nexit 9\n").unwrap();
     let failed = fixture
         .command()
-        .args(["-i", "--wave", "fixture", ":", "Initial input"])
+        .args(["-i", "resume", &prepared])
         .output()
         .unwrap();
     assert!(!failed.status.success());
@@ -2022,7 +2023,7 @@ fn pi_native_failed_start_reopens_without_replacing_the_loopflow_session() {
         .unwrap();
     success(&resumed);
     assert_eq!(fixture.session(), id);
-    let db = rusqlite::Connection::open(fixture.home.path().join("machine/loopflow.db")).unwrap();
+    let db = machine_db(fixture.home.path());
     let sessions: i64 = db
         .query_row(
             "SELECT count(*) FROM agent_sessions WHERE provider='pi'",
@@ -2031,14 +2032,18 @@ fn pi_native_failed_start_reopens_without_replacing_the_loopflow_session() {
         )
         .unwrap();
     assert_eq!(sessions, 1);
-    let outputs: i64 = db
-        .query_row(
-            "SELECT count(*) FROM session_events WHERE session_id=?1 AND kind='output'",
-            [&id],
-            |row| row.get(0),
-        )
+    assert_eq!(pi_final_answer(&fixture, &id), "native answer");
+}
+
+/// What `lf history show --final` prints for a Session, read from Pi's file.
+fn pi_final_answer(fixture: &Fixture, session: &str) -> String {
+    let output = fixture
+        .command()
+        .args(["history", "show", session, "--final"])
+        .output()
         .unwrap();
-    assert_eq!(outputs, 1);
+    success(&output);
+    String::from_utf8(output.stdout).unwrap().trim().to_owned()
 }
 
 #[test]

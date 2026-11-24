@@ -2,16 +2,26 @@ use crate::process::attachment;
 use loopflow_model::durable::{ProjectId, RepositoryId, TaskId};
 use loopflow_model::id::WaveId;
 use loopflow_storage::migration_runner::migration_section_sql;
-use loopflow_storage::planning_exchange::PlanningMutation;
 use loopflow_storage::sqlite::SqliteStore;
 use loopflow_storage::work::task::{NewTask, TaskUpdate};
-use rusqlite::{params, OptionalExtension};
+use rusqlite::params;
 
 fn local_repository(store: &SqliteStore) -> RepositoryId {
     let repo = store.home_dir().unwrap();
     // Fence Git discovery before registering the fixture repository.
     std::fs::create_dir_all(repo.join(".git")).unwrap();
     crate::repository::location::ensure_repository(store, repo.to_str().unwrap()).unwrap()
+}
+
+fn local_repository_path(store: &SqliteStore) -> String {
+    local_repository(store);
+    store
+        .home_dir()
+        .unwrap()
+        .canonicalize()
+        .unwrap()
+        .to_string_lossy()
+        .into_owned()
 }
 
 fn local_project(store: &SqliteStore) -> ProjectId {
@@ -25,42 +35,13 @@ fn local_project(store: &SqliteStore) -> ProjectId {
     .id
 }
 
+/// Take `edits` in as another Machine's values, the way a carrier brings them.
 fn import_edits(
     store: &SqliteStore,
     edits: &[loopflow_storage::work::edit::WorkEdit],
 ) -> crate::store::StoreResult<()> {
     let repo = store.home_dir()?.canonicalize().unwrap();
-    let repo = repo.to_str().unwrap();
-    let destination = crate::planning_git::PlanningDestination::new(
-        "/fixture.git",
-        "refs/loopflow/planning/shared/title-fixture",
-    )
-    .unwrap();
-    let route = store.bind_peer_planning(repo, &destination)?;
-    let mut snapshot = store.export_peer_planning(repo, &route)?;
-    let clock = snapshot
-        .changes
-        .values()
-        .map(|change| change.clock)
-        .max()
-        .unwrap_or(0)
-        + 1;
-    for edit in edits {
-        let parents = snapshot
-            .heads()
-            .filter(|(_, change)| change.edit.key() == edit.key())
-            .map(|(id, _)| id.to_string())
-            .collect();
-        snapshot.changes.insert(
-            uuid::Uuid::new_v4().to_string(),
-            PlanningMutation {
-                edit: edit.clone(),
-                clock,
-                parents,
-            },
-        );
-    }
-    crate::store::planning_peers::import_peer_planning(store, repo, &route, "edited", &snapshot)
+    loopflow_storage::test_fixture::arrive(store, repo.to_str().unwrap(), edits)
 }
 
 #[test]
@@ -76,6 +57,7 @@ fn task_identifier_repairs_all_generated_titles_from_a_replaced_editor_with_fore
     let store = crate::store::opening::open_ephemeral(&path).unwrap();
     let task = store
         .create_task(&NewTask {
+            parent_task_id: None,
             repository_id: local_repository(&store),
             id: TaskId::new(),
             project_id: Some(local_project(&store)),
@@ -115,15 +97,16 @@ fn task_identifier_repairs_all_generated_titles_from_a_replaced_editor_with_fore
         capture_key: None,
     };
     let first = store
-        .attach_session("editor", None, &process, true, None, &absent)
+        .attach_session("editor", None, &process, None, &absent)
         .unwrap();
     store
-        .attach_session("editor", Some(&first), &process, true, None, &absent)
+        .attach_session("editor", Some(&first), &process, None, &absent)
         .unwrap();
     let caller = AgentCaller {
         session_id: "editor".into(),
         agent_process_id: Some(first.agent_process_id),
         origin_lf_process_id: process,
+        trace_id: None,
     };
     std::env::set_var(AGENT_CALLER_ENV, serde_json::to_string(&caller).unwrap());
     crate::journal::with_runtime(
@@ -163,6 +146,7 @@ fn task_labels_and_generated_names_follow_local_identity_and_linear_mapping() {
     let store = crate::store::opening::open_ephemeral(&home.path().join("db")).unwrap();
     let task = store
         .create_task(&NewTask {
+            parent_task_id: None,
             repository_id: local_repository(&store),
             id: TaskId::from_raw("task_abcdef10000000000000000000000001"),
             project_id: Some(local_project(&store)),
@@ -238,7 +222,7 @@ fn task_labels_and_generated_names_follow_local_identity_and_linear_mapping() {
             "INSERT INTO processes(id,trace_id,started_at,command,cwd) VALUES(?1,'trace',1,'lf session resume','/fixture')",
             [&process],
         ).unwrap();
-    attachment::claim_session_attachment(&store, "generated", None, &process, false).unwrap();
+    attachment::claim_session_attachment(&store, "generated", None, &process).unwrap();
     assert_eq!(
         store.session("generated").unwrap().unwrap().title,
         "abcdef Fix login"
@@ -323,6 +307,7 @@ fn local_labels_extend_only_for_collisions_including_completed_tasks() {
     for id in [&first, &second] {
         store
             .create_task(&NewTask {
+                parent_task_id: None,
                 repository_id: local_repository(&store),
                 id: id.clone(),
                 project_id: Some(project.clone()),
@@ -354,6 +339,7 @@ fn task_checkout_reads_this_machines_checkout() {
     let store = crate::store::opening::open_ephemeral(&directory.path().join("db")).unwrap();
     let task = store
         .create_task(&NewTask {
+            parent_task_id: None,
             repository_id: local_repository(&store),
             due_date: None,
             id: TaskId::new(),
@@ -383,8 +369,7 @@ fn task_checkout_reads_this_machines_checkout() {
 }
 
 #[test]
-fn canonical_task_fields_survive_restart_and_peer_import() {
-    use crate::planning_git::PlanningDestination;
+fn canonical_task_fields_survive_restart_and_reach_another_machine_through_the_hub() {
     use loopflow_storage::work::edit::{Disposition, WorkValue};
 
     let source = tempfile::tempdir().unwrap();
@@ -393,6 +378,7 @@ fn canonical_task_fields_survive_restart_and_peer_import() {
     let store = crate::store::opening::open_ephemeral(&path).unwrap();
     let task = store
         .create_task(&NewTask {
+            parent_task_id: None,
             repository_id: local_repository(&store),
             id: TaskId::new(),
             project_id: Some(local_project(&store)),
@@ -432,27 +418,16 @@ fn canonical_task_fields_survive_restart_and_peer_import() {
     assert_eq!(saved.branch, task.branch);
     assert_eq!(saved.parent_pr_id, task.parent_pr_id);
     let peer = crate::store::opening::open_ephemeral(&target.path().join("loopflow.db")).unwrap();
-    let destination =
-        PlanningDestination::new("/fixture.git", "refs/loopflow/planning/shared/test").unwrap();
     let wave = store
         .get_wave(saved.wave_id.as_ref().unwrap())
         .unwrap()
         .unwrap();
-    let repo = wave.repo();
-    let target_path = target.path().canonicalize().unwrap();
-    let target_repo = target_path.to_str().unwrap();
-    let destination_id = store.bind_peer_planning(repo, &destination).unwrap();
-    peer.bind_peer_planning(target_repo, &destination).unwrap();
-    let snapshot = store.export_peer_planning(repo, &destination_id).unwrap();
+    let page = store.plan_records_since(wave.repo(), 0, 1 << 20).unwrap();
+    assert!(!page.more);
+    let target_repo = local_repository_path(&peer);
     for _ in 0..2 {
-        crate::store::planning_peers::import_peer_planning(
-            &peer,
-            target_repo,
-            &destination_id,
-            "fixture",
-            &snapshot,
-        )
-        .unwrap();
+        peer.apply_plan_records(&target_repo, &page.records, None, &Default::default())
+            .unwrap();
         let imported = peer.task(&task.id).unwrap().unwrap();
         assert_eq!(imported.id, saved.id);
         assert_eq!(imported.project_id, saved.project_id);
@@ -520,6 +495,7 @@ fn local_planning_creation_retry_keeps_identity_after_edit_and_restart() {
     let path = directory.path().join("loopflow.db");
     let store = crate::store::opening::open_ephemeral(&path).unwrap();
     let input = NewTask {
+        parent_task_id: None,
         repository_id: local_repository(&store),
         due_date: None,
         id: TaskId::new(),
@@ -529,7 +505,7 @@ fn local_planning_creation_retry_keeps_identity_after_edit_and_restart() {
     };
     let task = store.create_task(&input).unwrap();
     assert!(task.worktree.is_none());
-    assert!(task.linear_id.is_none());
+    assert!(task.tracker_id.is_none());
     assert!(store.task_prs(&task.id).unwrap().is_empty());
     assert!(store.task_checkouts().unwrap().is_empty());
     let edited = store
@@ -560,14 +536,34 @@ fn local_planning_creation_retry_keeps_identity_after_edit_and_restart() {
     let store = crate::store::opening::open_ephemeral(&path).unwrap();
     let retried = store.create_task(&input).unwrap();
     assert_eq!(retried, edited);
-    let second = store
-        .create_task(&NewTask {
-            repository_id: local_repository(&store),
-            due_date: None,
-            id: TaskId::new(),
-            ..input.clone()
-        })
+    let child_request = NewTask {
+        id: TaskId::new(),
+        parent_task_id: Some(task.id.clone()),
+        ..input.clone()
+    };
+    let other_repo = loopflow_storage::test_fixture::repository(&store, "/other");
+    let cross_repo = NewTask {
+        repository_id: other_repo,
+        project_id: None,
+        ..child_request.clone()
+    };
+    assert!(store
+        .create_task(&cross_repo)
+        .unwrap_err()
+        .to_string()
+        .contains("another repository"));
+    let second = store.create_task(&child_request).unwrap();
+    let detached = store
+        .edit_task(
+            &second.id,
+            second.revision,
+            &TaskUpdate {
+                parent: Some(None),
+                ..Default::default()
+            },
+        )
         .unwrap();
+    assert_eq!(store.create_task(&child_request).unwrap(), detached);
     assert_ne!(second.id, task.id);
     assert_eq!(store.list_tasks(None).unwrap().len(), 2);
     assert_eq!(
@@ -604,6 +600,7 @@ fn local_planning_provider_mapping_preserves_identity_and_creation_receipt() {
     let store =
         crate::store::opening::open_ephemeral(&directory.path().join("loopflow.db")).unwrap();
     let input = NewTask {
+        parent_task_id: None,
         repository_id: local_repository(&store),
         due_date: None,
         id: TaskId::new(),
@@ -612,7 +609,7 @@ fn local_planning_provider_mapping_preserves_identity_and_creation_receipt() {
         description: String::new(),
     };
     let local = store.create_task(&input).unwrap();
-    assert_eq!(local.pm_snapshot_synced_at, None);
+    assert_eq!(local.tracker_synced_at, None);
     // Export is a separate slice; this proves the schema accepts a different
     // provider UUID without changing local identity or creation history.
     store.conn.lock().unwrap().execute(
@@ -643,16 +640,24 @@ fn local_planning_provider_mapping_preserves_identity_and_creation_receipt() {
         )
         .unwrap();
     assert_eq!(edited.title, "A mapping does not transfer authority");
-    store.conn.lock().unwrap().execute("INSERT INTO task_deletions(wave_id,issue_id,identifier,confirmed_at) VALUES(?1,'different-provider-uuid','TEAM-9',1)", [&mapped.wave_id]).unwrap();
+    store
+        .conn
+        .lock()
+        .unwrap()
+        .execute(
+            "UPDATE tasks SET planning_deleted_at=1 WHERE id=?1",
+            [mapped.id.as_str()],
+        )
+        .unwrap();
     assert!(store.task_deleted(&mapped).unwrap());
     assert!(store.list_tasks(None).unwrap().is_empty());
     let retained = store.task(&mapped.id).unwrap().unwrap();
     assert_eq!(retained.revision, edited.revision);
-    assert_eq!(retained.linear_id, edited.linear_id);
+    assert_eq!(retained.tracker_id, edited.tracker_id);
     assert_eq!(retained.identifier, edited.identifier);
     assert_eq!(retained.title, edited.title);
     assert_eq!(retained.description, edited.description);
-    assert_eq!(retained.pm_snapshot_synced_at, edited.pm_snapshot_synced_at);
+    assert_eq!(retained.tracker_synced_at, edited.tracker_synced_at);
     assert_eq!(store.create_task(&input).unwrap(), retained);
 }
 
@@ -662,6 +667,7 @@ fn local_planning_prefix_collision_is_explicit() {
     let store =
         crate::store::opening::open_ephemeral(&directory.path().join("loopflow.db")).unwrap();
     let input = NewTask {
+        parent_task_id: None,
         repository_id: local_repository(&store),
         due_date: None,
         id: TaskId::parse("task_0123456789ab40008000000000000001").unwrap(),
@@ -718,9 +724,8 @@ fn local_planning_prefix_collision_is_explicit() {
 }
 
 #[test]
-fn local_planning_migration_preserves_released_links_and_orphan_deletion_evidence() {
+fn local_planning_migration_preserves_released_links() {
     use crate::store::migrations::{apply_before_migration, upgrade_from_migration};
-    use std::sync::{Arc, Mutex};
 
     let conn = rusqlite::Connection::open_in_memory().unwrap();
     apply_before_migration(&conn, "local_planning");
@@ -835,25 +840,22 @@ fn local_planning_migration_preserves_released_links_and_orphan_deletion_evidenc
     upgrade_from_migration(&conn, "optional_task_pr");
     let order: String = conn
         .query_row(
-            "SELECT task_order_json FROM pm_projects WHERE id='current'",
+            "SELECT task_order_json FROM tracker_projects WHERE id='current'",
             [],
             |row| row.get(0),
         )
         .unwrap();
-    let store = SqliteStore {
-        token_key: crate::store::token_key::encryption_key,
-        conn: Arc::new(Mutex::new(conn)),
-    };
+    let store = SqliteStore::from_fixture_connection(conn, crate::store::token_key::encryption_key);
     let observation: crate::test_linear_input::IssueFixture =
         loopflow_test_support::retained_task_input_in(
             &store.conn.lock().unwrap(),
             "/repo",
             "LOO-318",
         );
-    assert_eq!(
-        serde_json::to_value(observation.item).unwrap(),
-        payload["items"][0]
-    );
+    let mut expected = payload["items"][0].clone();
+    expected["parent_id"] = serde_json::Value::Null;
+    expected["parent_observed"] = serde_json::json!(false);
+    assert_eq!(serde_json::to_value(observation.item).unwrap(), expected);
     assert_eq!(
         serde_json::to_value(observation.project.unwrap()).unwrap(),
         payload["projects"][0]
@@ -867,7 +869,7 @@ fn local_planning_migration_preserves_released_links_and_orphan_deletion_evidenc
     assert_eq!(imported.project_id, Some(imported_project));
     assert!(imported.worktree.is_none());
     assert!(store.task_prs(&imported.id).unwrap().is_empty());
-    assert_eq!(imported.pm_snapshot_synced_at, Some(7));
+    assert_eq!(imported.tracker_synced_at, Some(7));
     let stored_state: (Option<String>, bool) = store
         .conn
         .lock()
@@ -892,15 +894,86 @@ fn local_planning_migration_preserves_released_links_and_orphan_deletion_evidenc
     let retained = store.task(&task).unwrap().unwrap();
     assert_eq!(retained.id, task);
     assert_eq!(retained.project_id, Some(project.clone()));
-    assert_eq!(retained.linear_id.unwrap().as_str(), "linear-task");
+    assert_eq!(retained.tracker_id.unwrap().as_str(), "linear-task");
     assert_eq!(retained.identifier, "LOO-1");
     assert_eq!(retained.worktree.unwrap().to_str(), Some("/repo/task"));
     let project = store.project(&project).unwrap().unwrap();
-    assert_eq!(project.linear_id.unwrap().as_str(), "linear-project");
+    assert_eq!(project.tracker_id.unwrap().as_str(), "linear-project");
     assert_eq!(project.description, "Retain KRs");
-    assert_eq!(
-            store.conn.lock().unwrap().query_row("SELECT issue_id,identifier FROM task_issue_identities WHERE wave_id=?1 AND identifier='LOO-2'", [&orphan_wave], |row| Ok((row.get::<_, String>(0)?,row.get::<_, String>(1)?))).optional().unwrap(),
-            Some(("orphan-issue".into(), "LOO-2".into()))
-        );
     assert!(store.task_by_issue("LOO-2").unwrap().is_none());
+}
+
+#[test]
+fn an_admitted_creation_commits_task_graph_claim_and_conversation_together() {
+    use loopflow_storage::sqlite::creation::{
+        CreationIdentity, RecoveryDisposition, TaskAdmission, TaskCreationRecord,
+    };
+    let directory = tempfile::tempdir().unwrap();
+    let store =
+        crate::store::opening::open_ephemeral(&directory.path().join("loopflow.db")).unwrap();
+    let repository_id = local_repository(&store);
+    let admit = |request: &str, graph: &str| {
+        let creation = NewTask {
+            parent_task_id: None,
+            repository_id: repository_id.clone(),
+            due_date: None,
+            id: TaskId::new(),
+            project_id: None,
+            title: "Start in the conversation".into(),
+            description: "Start in the conversation".into(),
+        };
+        let mut session = loopflow_storage::test_fixture::unpublished_conversation(
+            Some(creation.id.clone()),
+            None,
+            1,
+        );
+        session.interactive = true;
+        let record = TaskCreationRecord {
+            identity: CreationIdentity {
+                request_id: request.into(),
+                kind: "task.create",
+                fingerprint: "f".into(),
+                run: true,
+            },
+            admission: Some(TaskAdmission {
+                graph: Some(graph.into()),
+                session: session.clone(),
+                caller: None,
+            }),
+        };
+        let result = crate::store::ownership::promote_task(
+            &store,
+            &creation.id,
+            Some(&creation),
+            None,
+            None,
+            None,
+            Some(&record),
+        );
+        (creation.id, session, result)
+    };
+
+    // A write failing inside admission leaves nothing: no Task without its
+    // Graph or conversation, and no receipt to answer a repeat with.
+    let (failed, _, result) = admit("broken", "not json");
+    assert!(result.is_err());
+    assert!(store.task(&failed).unwrap().is_none());
+    assert!(store.creation_receipt("broken").unwrap().is_none());
+
+    let (task, session, result) = admit("req", r#"{"name":"code","steps":[]}"#);
+    result.unwrap();
+    // One reading holds all of it.
+    assert_eq!(
+        store.task_graph_row(&task).unwrap().unwrap().step,
+        loopflow_storage::sqlite::task_work::START
+    );
+    assert!(store.task_claimed_here(&task).unwrap());
+    assert_eq!(store.task_primary(&task).unwrap().unwrap().id, session.id);
+    let admitted = store.creation_receipt("req").unwrap().unwrap();
+    assert_eq!(admitted.milestone, "admitted");
+    assert_eq!(admitted.disposition, RecoveryDisposition::Complete);
+    let result = admitted.result.unwrap();
+    assert_eq!(result["milestone"], "admitted");
+    assert_eq!(result["graph"], "code");
+    assert_eq!(result["session_id"], session.id.as_str());
 }

@@ -2,6 +2,7 @@
 import Darwin
 import Foundation
 import Loopflow
+import Synchronization
 
 /// Shared Work operations use the server over one connection per location;
 /// service errors remain visible.
@@ -10,12 +11,12 @@ enum ServerClient {
     /// can give up; writes wait, because their outcome would become unknown.
     static let readDeadline = Duration.seconds(60)
 
-    /// What `lf <read>` prints: bare text for a string value, JSON otherwise.
+    /// Read from the link selected for this location.
     static func read(_ query: ServedRead, location: ServerLocation = .shared,
-                     deadline: Duration = readDeadline) async throws -> String {
+                     deadline: Duration = readDeadline) async throws -> ReadOutput {
         try Task.checkCancellation()
         let link = try await links.link(for: location)
-        return try await link.request(.read(query), deadline: deadline).printed
+        return try await link.read(query, deadline: deadline)
     }
 
     /// What the write returned, as JSON: what `lf <write> --json` prints.
@@ -35,8 +36,14 @@ enum ServerClient {
         return String(decoding: try await request(.submittedCreation(value), location: .shared).bytes, as: UTF8.self)
     }
 
-    static func configuration(_ operation: ConfigOperation, location: ServerLocation = .shared) async throws -> Data {
-        Data(try await request(.config(operation), location: location).bytes)
+    static func configuration(_ operation: ConfigOperation, location: ServerLocation = .shared) async throws -> RawJSON {
+        try await request(.config(operation), location: location)
+    }
+
+    static func edit(_ change: ConfigurationChange, destination: JSONValue, key: String,
+                     expected: [ConfigurationEntry], location: ServerLocation) async throws -> ConfigurationEditReceipt {
+        try await configuration(.configEdit(destination: destination, key: key, expected: expected, change: change),
+                                location: location).decode()
     }
 
     private static func request(_ operation: ServerOperation, location: ServerLocation) async throws -> RawJSON {
@@ -45,64 +52,51 @@ enum ServerClient {
         return try await link.request(operation)
     }
 
-    /// A subscription on the location's connection; `send` carries checkpoints,
+    /// A subscription on the location's connection; `checkpoint` confirms a reading,
     /// `cancel` ends it. After a reading, connection loss resumes the same stream.
     static func subscribe(_ query: ServedRead, location: ServerLocation = .shared) -> LineSubscription {
-        let watch = ServerLink.subscribe(query, connect: { try await links.link(for: location) }) { update -> Data? in
+        // The newest link's sentence for a reading this build can't decode; nil before one connects.
+        let unreadable = Mutex<String?>(nil)
+        let watch = ServerLink.subscribe(query, connect: {
+            let link = try await links.link(for: location)
+            unreadable.withLock { $0 = link.unreadable }
+            return link
+        }) { update -> Data? in
             guard case .reading(let frame) = update else { return nil }
             return Data(frame.bytes)
         }
-        return LineSubscription(lines: watch.updates, send: checkpoints(watch), cancel: watch.cancel)
+        return LineSubscription(lines: watch.updates, checkpoint: { id in
+            guard let number = UInt64(exactly: id) else { watch.cancel(); return }
+            watch.checkpoint(number)
+        }, cancel: watch.cancel, unreadable: { unreadable.withLock { $0 } })
     }
 
     /// Readings and occurrences share one stream so the consumer applies its
     /// baseline before events. Reconnect replaces state without replaying events.
-    static func subscribeEvents(_ query: ServedRead, location: ServerLocation = .shared) -> ServerEventSubscription {
-        let watch = ServerLink.subscribe(query, events: true, connect: { try await links.link(for: location) }) { $0 }
-        return ServerEventSubscription(updates: watch.updates, send: checkpoints(watch), cancel: watch.cancel)
-    }
-
-    /// A subscription's stdin line, `{"id": n}`: a checkpoint. A subscription's
-    /// arguments are fixed; new arguments are a new subscription.
-    private static func checkpoints<Output>(_ watch: ServerWatch<Output>) -> @Sendable (Data) -> Void {
-        { line in
-            guard let checkpoint = try? JSONDecoder().decode(SubscriptionCheckpoint.self, from: line) else {
-                watch.cancel()
-                return
-            }
-            watch.checkpoint(checkpoint.id)
-        }
+    static func subscribeEvents(_ query: ServedRead, location: ServerLocation = .shared) -> ServerWatch<ServerSubscriptionUpdate> {
+        ServerLink.subscribe(query, events: true, connect: { try await links.link(for: location) }) { $0 }
     }
 
     private static let links = ServerLinks()
 }
 
-private struct SubscriptionCheckpoint: Decodable {
-    let id: UInt64
-    init(from decoder: Decoder) throws {
-        let box = try decoder.container(keyedBy: Keys.self)
-        guard box.allKeys == [.id] else {
-            throw DecodingError.dataCorrupted(.init(codingPath: [], debugDescription: "a subscription takes only checkpoints"))
-        }
-        id = try box.decode(UInt64.self, forKey: .id)
-    }
-    private enum Keys: String, CodingKey { case id, args }
-}
-
-struct ServerEventSubscription: Sendable {
-    let updates: AsyncThrowingStream<ServerSubscriptionUpdate, any Error>
-    let send: @Sendable (Data) -> Void
-    let cancel: @Sendable () async -> Void
-}
-
 /// One live connection per server location, reopened on demand with bounded
 /// backoff after consecutive failures to open.
 private actor ServerLinks {
+    private struct Owner { weak var location: ServerLocation? }
+    private var owners: [ObjectIdentifier: Owner] = [:]
     private var links: [ObjectIdentifier: Task<ServerLink, any Error>] = [:]
     private var failures: [ObjectIdentifier: Int] = [:]
 
     func link(for location: ServerLocation) async throws -> ServerLink {
         let key = ObjectIdentifier(location)
+        // A freed location's identifier can name a new one at the same
+        // address; that one starts without the old one's connection.
+        if owners[key]?.location !== location {
+            links[key] = nil
+            failures[key] = nil
+            owners[key] = Owner(location: location)
+        }
         while let opening = links[key] {
             // A failed open answers everyone it kept waiting; only a link that
             // opened and later closed is worth another attempt.
@@ -130,22 +124,27 @@ private actor ServerLinks {
 }
 
 actor ServerLocation {
-    static let shared = ServerLocation()
+    static let shared = ServerLocation(startsServer: LocalWaveAgentLauncher.machineLf().startsServer)
     private let query: @Sendable ([String]) async throws -> String
     private var endpoint: Task<String, any Error>?
+    private let startsServer: Bool
     private var setupError: String?
 
-    init(query: @escaping @Sendable ([String]) async throws -> String = {
-        try await LocalWaveAgentLauncher.queryLf($0, cwd: "/")
-    }) {
+    init(
+        startsServer: Bool,
+        query: @escaping @Sendable ([String]) async throws -> String = {
+            try await LocalWaveAgentLauncher.queryLf($0, cwd: "/")
+        }
+    ) {
+        self.startsServer = startsServer
         self.query = query
     }
 
     func path() async throws -> String {
         if let endpoint { return try await endpoint.value }
-        // The shared task retains a successful endpoint. A failed initial lookup
-        // retains its diagnosis instead; later lookups only observe status.
-        let prepare = setupError == nil
+        // Keep a successful endpoint. After a failed install, keep its diagnosis
+        // and check status on subsequent attempts.
+        let prepare = startsServer && setupError == nil
         let previousSetupError = setupError
         let task = Task {
             do {
@@ -156,7 +155,13 @@ actor ServerLocation {
                     let error: String?
                 }
                 let status = try JSONDecoder().decode(Status.self, from: Data(result.utf8))
-                guard status.ready else { throw RegistryQueryError(status.error ?? "Loopflow server unavailable") }
+                guard status.ready else {
+                    if !startsServer {
+                        let guidance = "Loopflow's server isn't running. Open Loopflow, or run `lf install server`."
+                        throw RegistryQueryError([guidance, status.error].compactMap { $0 }.joined(separator: " "))
+                    }
+                    throw RegistryQueryError(status.error ?? "Loopflow server unavailable")
+                }
                 return status.socket
             } catch {
                 // Every concurrent waiter gets the same actionable diagnosis.
@@ -183,7 +188,9 @@ extension ServerEndpoint {
     /// The Machine's server on its private Unix socket.
     static func unix(path: String) -> ServerEndpoint {
         ServerEndpoint(
-            client: ServerClientIdentity(kind: "desktop", platform: "macos", name: "Loopflow", version: LaunchJournal.appVersion),
+            client: ServerClientIdentity(kind: "desktop", platform: "macos",
+                                          name: Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String ?? "Loopflow",
+                                          version: "\(LaunchJournal.appVersion)+\(DesktopLog.sourceRevision)"),
             control: { try UnixSocketCarrier(path: path, limit: ServerProtocol.maxMessage) },
             ticketed: { try UnixSocketCarrier(path: path, limit: ServerProtocol.maxBulk) })
     }
@@ -209,7 +216,7 @@ private final class UnixSocketCarrier: ServerCarrier, @unchecked Sendable {
         var line = message
         line.append(10)
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, any Error>) in
-            writes.async { [self] in
+            writes.async { [self, line] in
                 do {
                     try Self.write(fd, line)
                     continuation.resume()

@@ -1,0 +1,545 @@
+{
+  "configuration": {
+    "revision": "bb939942b04d22882b62c7d97e0b6fd6cddaecf9",
+    "cohorts": 3,
+    "rustc": "rustc 1.98.1 (48a229cea 2026-09-01) (Homebrew)\nbinary: rustc\ncommit-hash: 48a229ceaefd4985c50990b14116b6d856af0985\ncommit-date: 2026-09-01\nhost: aarch64-apple-darwin\nrelease: 1.98.1\nLLVM version: 22.1.8",
+    "cpus": 16,
+    "machine": [
+      "Darwin",
+      "Jacks-MacBook-Pro-2.local",
+      "25.6.0",
+      "Darwin Kernel Version 25.6.0: Wed Nov 11 21:57:36 PST 2026; root:xnu-12377.161.15.702.20~1/RELEASE_ARM64_T6041",
+      "arm64"
+    ],
+    "commands": {
+      "build": [
+        "cargo",
+        "build",
+        "--locked",
+        "-v",
+        "-p",
+        "loopflow",
+        "--bin",
+        "lf"
+      ],
+      "test": [
+        "cargo",
+        "test",
+        "--locked",
+        "-v",
+        "-p",
+        "loopflow",
+        "--lib",
+        "lf::tests::task_deletion_accepts_issue_identity",
+        "--",
+        "--exact"
+      ]
+    },
+    "created": 1795409822.654329
+  },
+  "method": {
+    "written_bytes": "Allocated bytes (st_blocks \u00d7 512) of regular files under target/debug that the command created or replaced, by inode and mtime against a walk before it; hard links count once. In a seeded target every other file still shares its blocks with the source's clone.",
+    "cpu_seconds": "/usr/bin/time user + sys of the Cargo process tree.",
+    "rss_bytes": "Largest single process, from /usr/bin/time.",
+    "tree_rss_bytes": "Peak of the Cargo process tree, sampled each second.",
+    "units": "Lines Cargo -v prints as Compiling and Fresh."
+  },
+  "background_load": {
+    "min_1m": 17.2626953125,
+    "max_1m": 103.04248046875
+  },
+  "seed_sources": [
+    [
+      "/Users/jack/src/loopflow.43bf9b-remove-chapters-krs",
+      "10016f1f66",
+      140
+    ],
+    [
+      "/Users/jack/src/loopflow.43bf9b-remove-chapters-krs",
+      "ecf604d8c0",
+      143
+    ],
+    [
+      "/Users/jack/src/loopflow.b87204-visual-redesign-of",
+      "f6a35cb6f0",
+      18
+    ]
+  ],
+  "report_sha256": "e0c5befbccbb24594eac3ac72d2509fbbd777d0feb5446cedc7d94ac54f244d8",
+  "receipts": [
+    {
+      "cohort": 1,
+      "arm": "seeded",
+      "seed": {
+        "source": "/Users/jack/src/loopflow.43bf9b-remove-chapters-krs",
+        "commit": "10016f1f66",
+        "commits_apart": 140
+      },
+      "add": {
+        "wall_seconds": 4.808437084000616
+      },
+      "seed_bytes": 2119430144,
+      "build": {
+        "command": [
+          "cargo",
+          "build",
+          "--locked",
+          "-v",
+          "-p",
+          "loopflow",
+          "--bin",
+          "lf"
+        ],
+        "exit_code": 0,
+        "wall_seconds": 235.71568316699995,
+        "cpu_seconds": 227.69,
+        "rss_bytes": 3410690048,
+        "tree_rss_bytes": 4356243456,
+        "compiled": 31,
+        "fresh": 225,
+        "build_scripts_run": 7,
+        "tests_passed": 0,
+        "written_bytes": 2057629696,
+        "load_before": [
+          88.32958984375,
+          80.46044921875,
+          80.5185546875
+        ],
+        "load_after": [
+          103.04248046875,
+          91.94189453125,
+          85.77685546875
+        ]
+      },
+      "test": {
+        "command": [
+          "cargo",
+          "test",
+          "--locked",
+          "-v",
+          "-p",
+          "loopflow",
+          "--lib",
+          "lf::tests::task_deletion_accepts_issue_identity",
+          "--",
+          "--exact"
+        ],
+        "exit_code": 0,
+        "wall_seconds": 307.0765591669988,
+        "cpu_seconds": 227.83,
+        "rss_bytes": 3331309568,
+        "tree_rss_bytes": 3354312704,
+        "compiled": 16,
+        "fresh": 284,
+        "build_scripts_run": 5,
+        "tests_passed": 1,
+        "written_bytes": 2811363328,
+        "load_before": [
+          103.04248046875,
+          91.94189453125,
+          85.77685546875
+        ],
+        "load_after": [
+          71.94482421875,
+          90.49658203125,
+          87.95458984375
+        ]
+      },
+      "target_bytes": 6920540160,
+      "still_seeded_bytes": 2084737024
+    },
+    {
+      "cohort": 1,
+      "arm": "cold",
+      "seed": null,
+      "add": {
+        "wall_seconds": 3.7409905419990537
+      },
+      "seed_bytes": 0,
+      "build": {
+        "command": [
+          "cargo",
+          "build",
+          "--locked",
+          "-v",
+          "-p",
+          "loopflow",
+          "--bin",
+          "lf"
+        ],
+        "exit_code": 0,
+        "wall_seconds": 307.2740512079981,
+        "cpu_seconds": 317.41999999999996,
+        "rss_bytes": 3434299392,
+        "tree_rss_bytes": 4281516032,
+        "compiled": 256,
+        "fresh": 0,
+        "build_scripts_run": 35,
+        "tests_passed": 0,
+        "written_bytes": 2577604608,
+        "load_before": [
+          70.39990234375,
+          89.517578125,
+          87.63427734375
+        ],
+        "load_after": [
+          70.296875,
+          75.5595703125,
+          81.44384765625
+        ]
+      },
+      "test": {
+        "command": [
+          "cargo",
+          "test",
+          "--locked",
+          "-v",
+          "-p",
+          "loopflow",
+          "--lib",
+          "lf::tests::task_deletion_accepts_issue_identity",
+          "--",
+          "--exact"
+        ],
+        "exit_code": 0,
+        "wall_seconds": 321.9432357919941,
+        "cpu_seconds": 288.03000000000003,
+        "rss_bytes": 3358097408,
+        "tree_rss_bytes": 3379445760,
+        "compiled": 78,
+        "fresh": 222,
+        "build_scripts_run": 15,
+        "tests_passed": 1,
+        "written_bytes": 3148263424,
+        "load_before": [
+          70.296875,
+          75.5595703125,
+          81.44384765625
+        ],
+        "load_after": [
+          81.43505859375,
+          74.5,
+          78.7333984375
+        ]
+      },
+      "target_bytes": 5705211904,
+      "still_seeded_bytes": 0
+    },
+    {
+      "cohort": 2,
+      "arm": "cold",
+      "seed": null,
+      "add": {
+        "wall_seconds": 2.1918531659975997
+      },
+      "seed_bytes": 0,
+      "build": {
+        "command": [
+          "cargo",
+          "build",
+          "--locked",
+          "-v",
+          "-p",
+          "loopflow",
+          "--bin",
+          "lf"
+        ],
+        "exit_code": 0,
+        "wall_seconds": 236.71694583300268,
+        "cpu_seconds": 212.64,
+        "rss_bytes": 2240659456,
+        "tree_rss_bytes": 2301214720,
+        "compiled": 256,
+        "fresh": 0,
+        "build_scripts_run": 35,
+        "tests_passed": 0,
+        "written_bytes": 2182602752,
+        "load_before": [
+          80.75927734375,
+          74.47509765625,
+          78.69970703125
+        ],
+        "load_after": [
+          78.5830078125,
+          73.1240234375,
+          76.92041015625
+        ]
+      },
+      "test": {
+        "command": [
+          "cargo",
+          "test",
+          "--locked",
+          "-v",
+          "-p",
+          "loopflow",
+          "--lib",
+          "lf::tests::task_deletion_accepts_issue_identity",
+          "--",
+          "--exact"
+        ],
+        "exit_code": 0,
+        "wall_seconds": 179.02070341599756,
+        "cpu_seconds": 250.32999999999998,
+        "rss_bytes": 3296886784,
+        "tree_rss_bytes": 3244867584,
+        "compiled": 78,
+        "fresh": 222,
+        "build_scripts_run": 15,
+        "tests_passed": 1,
+        "written_bytes": 3064467456,
+        "load_before": [
+          78.5830078125,
+          73.1240234375,
+          76.92041015625
+        ],
+        "load_after": [
+          39.31689453125,
+          60.080078125,
+          70.97998046875
+        ]
+      },
+      "target_bytes": 5226414080,
+      "still_seeded_bytes": 0
+    },
+    {
+      "cohort": 2,
+      "arm": "seeded",
+      "seed": {
+        "source": "/Users/jack/src/loopflow.b87204-visual-redesign-of",
+        "commit": "f6a35cb6f0",
+        "commits_apart": 18
+      },
+      "add": {
+        "wall_seconds": 1.794832415995188
+      },
+      "seed_bytes": 7963885568,
+      "build": {
+        "command": [
+          "cargo",
+          "build",
+          "--locked",
+          "-v",
+          "-p",
+          "loopflow",
+          "--bin",
+          "lf"
+        ],
+        "exit_code": 0,
+        "wall_seconds": 107.45254837500397,
+        "cpu_seconds": 155.31,
+        "rss_bytes": 3404398592,
+        "tree_rss_bytes": 4383326208,
+        "compiled": 7,
+        "fresh": 249,
+        "build_scripts_run": 5,
+        "tests_passed": 0,
+        "written_bytes": 1774968832,
+        "load_before": [
+          38.25048828125,
+          59.51416015625,
+          70.71630859375
+        ],
+        "load_after": [
+          46.2314453125,
+          55.84130859375,
+          67.91748046875
+        ]
+      },
+      "test": {
+        "command": [
+          "cargo",
+          "test",
+          "--locked",
+          "-v",
+          "-p",
+          "loopflow",
+          "--lib",
+          "lf::tests::task_deletion_accepts_issue_identity",
+          "--",
+          "--exact"
+        ],
+        "exit_code": 0,
+        "wall_seconds": 104.15785941700597,
+        "cpu_seconds": 185.11,
+        "rss_bytes": 3330654208,
+        "tree_rss_bytes": 3434364928,
+        "compiled": 8,
+        "fresh": 292,
+        "build_scripts_run": 5,
+        "tests_passed": 1,
+        "written_bytes": 2705534976,
+        "load_before": [
+          46.2314453125,
+          55.84130859375,
+          67.91748046875
+        ],
+        "load_after": [
+          31.4384765625,
+          47.23828125,
+          63.1025390625
+        ]
+      },
+      "target_bytes": 10031267840,
+      "still_seeded_bytes": 5571420160
+    },
+    {
+      "cohort": 3,
+      "arm": "seeded",
+      "seed": {
+        "source": "/Users/jack/src/loopflow.43bf9b-remove-chapters-krs",
+        "commit": "ecf604d8c0",
+        "commits_apart": 143
+      },
+      "add": {
+        "wall_seconds": 1.2759364169978653
+      },
+      "seed_bytes": 6477430784,
+      "build": {
+        "command": [
+          "cargo",
+          "build",
+          "--locked",
+          "-v",
+          "-p",
+          "loopflow",
+          "--bin",
+          "lf"
+        ],
+        "exit_code": 0,
+        "wall_seconds": 62.234102792004705,
+        "cpu_seconds": 113.92,
+        "rss_bytes": 3367223296,
+        "tree_rss_bytes": 4077010944,
+        "compiled": 7,
+        "fresh": 249,
+        "build_scripts_run": 5,
+        "tests_passed": 0,
+        "written_bytes": 1861873664,
+        "load_before": [
+          31.4384765625,
+          47.23828125,
+          63.1025390625
+        ],
+        "load_after": [
+          28.1572265625,
+          43.7041015625,
+          60.6318359375
+        ]
+      },
+      "test": {
+        "command": [
+          "cargo",
+          "test",
+          "--locked",
+          "-v",
+          "-p",
+          "loopflow",
+          "--lib",
+          "lf::tests::task_deletion_accepts_issue_identity",
+          "--",
+          "--exact"
+        ],
+        "exit_code": 0,
+        "wall_seconds": 63.62002137499803,
+        "cpu_seconds": 107.21000000000001,
+        "rss_bytes": 3300048896,
+        "tree_rss_bytes": 3185786880,
+        "compiled": 8,
+        "fresh": 292,
+        "build_scripts_run": 5,
+        "tests_passed": 1,
+        "written_bytes": 2700021760,
+        "load_before": [
+          28.1572265625,
+          43.7041015625,
+          60.6318359375
+        ],
+        "load_after": [
+          17.2626953125,
+          37.70556640625,
+          57.14453125
+        ]
+      },
+      "target_bytes": 9449283584,
+      "still_seeded_bytes": 4908044288
+    },
+    {
+      "cohort": 3,
+      "arm": "cold",
+      "seed": null,
+      "add": {
+        "wall_seconds": 0.992196209001122
+      },
+      "seed_bytes": 0,
+      "build": {
+        "command": [
+          "cargo",
+          "build",
+          "--locked",
+          "-v",
+          "-p",
+          "loopflow",
+          "--bin",
+          "lf"
+        ],
+        "exit_code": 0,
+        "wall_seconds": 253.2219149159937,
+        "cpu_seconds": 196.5,
+        "rss_bytes": 2196930560,
+        "tree_rss_bytes": 2296561664,
+        "compiled": 256,
+        "fresh": 0,
+        "build_scripts_run": 35,
+        "tests_passed": 0,
+        "written_bytes": 2179883008,
+        "load_before": [
+          17.2626953125,
+          37.70556640625,
+          57.14453125
+        ],
+        "load_after": [
+          79.3828125,
+          64.599609375,
+          64.130859375
+        ]
+      },
+      "test": {
+        "command": [
+          "cargo",
+          "test",
+          "--locked",
+          "-v",
+          "-p",
+          "loopflow",
+          "--lib",
+          "lf::tests::task_deletion_accepts_issue_identity",
+          "--",
+          "--exact"
+        ],
+        "exit_code": 0,
+        "wall_seconds": 166.10144233399478,
+        "cpu_seconds": 252.82,
+        "rss_bytes": 3297804288,
+        "tree_rss_bytes": 3357769728,
+        "compiled": 78,
+        "fresh": 222,
+        "build_scripts_run": 15,
+        "tests_passed": 1,
+        "written_bytes": 3064160256,
+        "load_before": [
+          79.3828125,
+          64.599609375,
+          64.130859375
+        ],
+        "load_after": [
+          46.876953125,
+          55.74609375,
+          60.50732421875
+        ]
+      },
+      "target_bytes": 5223387136,
+      "still_seeded_bytes": 0
+    }
+  ]
+}

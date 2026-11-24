@@ -4,26 +4,34 @@
 //! the store's `task_updates` revision moves, one watcher reads them and wakes
 //! each one it has news for. A server restart forgets nothing. No process or
 //! clock per Session: Claude takes the message in its cross-session inbox,
-//! Codex as a turn its app-server starts. A conversation the server cannot
-//! reach hears it at its next boundary.
+//! Codex as a turn its app-server starts, OpenCode and Pi as a turn their
+//! plugin or extension starts. A conversation the server cannot reach hears
+//! it at its next boundary.
+//!
+//! A steer naming a stopped interactive Session starts it, once per steer,
+//! in a held terminal as `session.continue` does; the resumed conversation
+//! reads its steers as its first input.
 
-use std::io::Write;
+use std::io::{Read, Write};
 use std::os::unix::net::UnixStream;
 use std::path::Path;
+use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
 use serde_json::json;
 
-use loopflow_execution::steer::{IdleConversation, IdleReach};
+use loopflow_execution::steer::{IdleConversation, IdleReach, Inbox};
+use loopflow_execution::transport::registry::Registry;
+use loopflow_model::id::LfSessionId;
 use loopflow_storage::sqlite::SqliteStore;
 
 /// How long the watcher waits for a store change before reading the revision
 /// anyway: the change signal can miss a checkpoint or a Machine's sleep.
 const UNSIGNALLED: Duration = Duration::from_secs(60);
 const SEND_DEADLINE: Duration = Duration::from_secs(2);
-/// A Codex turn start loads nothing new; it answers once the turn exists.
-const CODEX_DEADLINE: Duration = Duration::from_secs(15);
+/// A provider's turn start loads nothing new; it answers once the turn exists.
+const TURN_START_DEADLINE: Duration = Duration::from_secs(15);
 
 /// Wake `session` now if it is idle and has news: a turn just ended, so an
 /// update that arrived during it waits no longer. Blocking.
@@ -31,33 +39,39 @@ pub(super) fn after_turn(store: &SqliteStore, session: &str) {
     wake_idle(store, Some(session));
 }
 
-/// Start the Machine's one watcher. It runs as long as the server.
-pub(super) fn start() {
+/// Start the Machine's one watcher. It runs as long as the server; without
+/// `terminals` it starts no stopped Session.
+pub(super) fn start(terminals: Option<Arc<Registry>>) {
     let spawned = std::thread::Builder::new()
         .name("task-update-wake".into())
         .spawn(|| {
-            loopflow_execution::journal::request::isolate(watch);
+            loopflow_execution::journal::request::isolate(|| watch(terminals));
         });
     if let Err(error) = spawned {
         tracing::warn!(%error, "Task updates wait for each conversation's next turn");
     }
 }
 
-fn watch() {
+fn watch(terminals: Option<Arc<Registry>>) {
     let path = loopflow_execution::store::default_db_path();
     let mut changes = loopflow_storage::changes::StoreChanges::watch(&path);
-    let mut watcher = Watcher::default();
+    let mut watcher = Watcher {
+        terminals,
+        ..Watcher::default()
+    };
     loop {
         watcher.read(&path);
         changes.wait(UNSIGNALLED);
     }
 }
 
-/// The watcher's store and the revisions it last woke conversations for.
+/// The watcher's store, the revisions it last woke conversations for, and
+/// the held terminals it starts stopped Sessions in.
 #[derive(Default)]
 struct Watcher {
     store: Option<SqliteStore>,
     seen: Option<(i64, i64)>,
+    terminals: Option<Arc<Registry>>,
 }
 
 impl Watcher {
@@ -80,6 +94,9 @@ impl Watcher {
         {
             Ok(revision) if self.seen != Some(revision) => {
                 self.seen = Some(revision);
+                if let Some(terminals) = &self.terminals {
+                    start_stopped(store, |session, request| hold(terminals, session, request));
+                }
                 wake_idle(store, None);
             }
             Ok(_) => {}
@@ -89,6 +106,39 @@ impl Watcher {
             }
         }
     }
+}
+
+/// Start each stopped Session the steers saved since the last reading name,
+/// once, with `start(session, request)`: the request is the first steer that
+/// named it. A start that fails is not retried; its steers wait, unread, for
+/// the Session's next start.
+fn start_stopped(store: &SqliteStore, mut start: impl FnMut(&LfSessionId, String) -> Result<()>) {
+    let wakes = match loopflow_execution::steer::sessions_to_start(store) {
+        Ok(wakes) => wakes,
+        Err(error) => {
+            tracing::warn!(%error, "steers unread for stopped Sessions");
+            return;
+        }
+    };
+    for wake in wakes {
+        if let Err(error) = start(
+            &LfSessionId::from(wake.session.as_str()),
+            wake.steer.clone(),
+        ) {
+            tracing::warn!(session = wake.session, steer = wake.steer, error = %format!("{error:#}"), "stopped Session not started; its steers wait for its next start");
+        }
+    }
+}
+
+/// `session.continue`'s held start, unless a held terminal already runs it.
+fn hold(terminals: &Registry, session: &LfSessionId, request: String) -> Result<()> {
+    if terminals.session_terminal(session).is_some() {
+        return Ok(());
+    }
+    let start = super::service::continuing(session.clone(), request, 0, 0)
+        .map_err(|error| anyhow!("{}", error.message))?;
+    terminals.start(start)?;
+    Ok(())
 }
 
 fn wake_idle(store: &SqliteStore, session: Option<&str>) {
@@ -123,11 +173,12 @@ fn wake(store: &SqliteStore, conversation: &IdleConversation) {
         // Connect before claiming, so an unreachable conversation keeps its
         // news for its next boundary.
         let reach = match reach {
-            IdleReach::Claude(key) => match open_inbox(key, thread)? {
-                Some((socket, token)) => Reach::Inbox(socket, token),
+            IdleReach::Inbox(Inbox::Claude(key)) => match open_inbox(key, thread)? {
+                Some((socket, token)) => Reach::Claude(socket, token),
                 None => return Ok(()),
             },
             IdleReach::Codex(endpoint) => Reach::Codex(endpoint),
+            IdleReach::Inbox(Inbox::Socket(socket)) => Reach::Socket(open_socket(socket)?),
         };
         let steers = loopflow_execution::steer::claim(
             store,
@@ -140,10 +191,11 @@ fn wake(store: &SqliteStore, conversation: &IdleConversation) {
             return Ok(());
         };
         match reach {
-            Reach::Inbox(mut socket, token) => {
+            Reach::Claude(mut socket, token) => {
                 send_inbox(&mut socket, &token, thread, &steers.text)?
             }
             Reach::Codex(endpoint) => start_codex_turn(endpoint, thread, &steers.text)?,
+            Reach::Socket(mut socket) => start_extension_turn(&mut socket, thread, &steers.text)?,
         }
         store.record_woken(adapter)?;
         loopflow_execution::steer::delivered(store, session, &steers);
@@ -155,8 +207,37 @@ fn wake(store: &SqliteStore, conversation: &IdleConversation) {
 }
 
 enum Reach<'a> {
-    Inbox(UnixStream, String),
+    Claude(UnixStream, String),
     Codex(&'a Path),
+    Socket(UnixStream),
+}
+
+/// The socket an OpenCode plugin or Pi extension listens on while its work
+/// session runs.
+fn open_socket(socket: &Path) -> Result<UnixStream> {
+    let stream = UnixStream::connect(socket)
+        .with_context(|| format!("wake socket {} unreachable", socket.display()))?;
+    stream.set_write_timeout(Some(SEND_DEADLINE))?;
+    stream.set_read_timeout(Some(TURN_START_DEADLINE))?;
+    Ok(stream)
+}
+
+/// One JSON line naming the conversation and the message, then this side
+/// closes. The plugin or extension asks its provider for a turn and answers
+/// `started` once the provider took the message; a turn already running
+/// queues it as a steer.
+fn start_extension_turn(socket: &mut UnixStream, thread: &str, text: &str) -> Result<()> {
+    socket.write_all(format!("{}\n", json!({"thread":thread,"text":text})).as_bytes())?;
+    socket.shutdown(std::net::Shutdown::Write)?;
+    let mut answer = String::new();
+    socket
+        .read_to_string(&mut answer)
+        .context("the provider did not answer the turn start")?;
+    anyhow::ensure!(
+        answer.trim() == "started",
+        "the provider did not start a turn"
+    );
+    Ok(())
 }
 
 /// Claude's inbox socket and key for `thread`, from the key it publishes
@@ -197,7 +278,7 @@ fn start_codex_turn(endpoint: &Path, thread: &str, text: &str) -> Result<()> {
         .build()?;
     runtime.block_on(async {
         tokio::time::timeout(
-            CODEX_DEADLINE,
+            TURN_START_DEADLINE,
             loopflow_execution::harness::codex_connection::deliver_update(endpoint, thread, text),
         )
         .await
@@ -232,10 +313,10 @@ fn send_inbox(socket: &mut UnixStream, token: &str, thread: &str, text: &str) ->
 mod tests {
     use loopflow_execution::process::attachment;
 
-    use super::{after_turn, wake_idle, Watcher};
+    use super::{after_turn, start_stopped, wake_idle, Watcher};
     use crate::server::wire::{BoundaryMoment, SessionBoundary};
     use loopflow_execution::context_block::ContextDelivery;
-    use loopflow_execution::steer::{NativeBoundary, SteerAdapter};
+    use loopflow_execution::steer::{Inbox, NativeBoundary, SteerAdapter};
     use loopflow_storage::sqlite::SqliteStore;
     use std::io::Read;
     use std::os::unix::net::UnixListener;
@@ -261,15 +342,14 @@ mod tests {
             &loopflow_execution::session_record::new_artifact_key(),
         );
         let process = store.test_lf_process();
-        let claim =
-            attachment::claim_session_attachment(&store, session, None, &process, false).unwrap();
+        let claim = attachment::claim_session_attachment(&store, session, None, &process).unwrap();
         let pid = std::process::id();
         store
             .record_agent_process_identity(
                 session,
                 &claim,
                 pid,
-                loopflow_execution::journal::process_started_at(pid)
+                loopflow_execution::process::os_process::process_started_at(pid)
                     .unwrap()
                     .unwrap(),
             )
@@ -286,6 +366,7 @@ mod tests {
         let task = loopflow_model::durable::TaskId::new();
         store
             .create_task(&loopflow_storage::work::task::NewTask {
+                parent_task_id: None,
                 repository_id: loopflow_execution::repository::location::ensure_repository(
                     &store, "/wake",
                 )
@@ -305,7 +386,7 @@ mod tests {
             )
             .unwrap();
             conn.execute(
-                "UPDATE processes SET agent_interactive=1 WHERE id=?1",
+                "UPDATE agent_sessions SET agent_interactive=1 WHERE agent_process_id=?1",
                 [&adapter.agent_process_id],
             )
             .unwrap();
@@ -388,10 +469,59 @@ mod tests {
                     callback: serde_json::json!({"hook_event_name":"Stop","session_id":"native"}),
                     gap: None,
                     printed: Vec::new(),
-                    inbox: Some(inbox.to_owned()),
+                    inbox: Some(Inbox::Claude(inbox.to_owned())),
                 },
             )
             .unwrap();
+        }
+
+        /// An OpenCode or Pi work session's turn ends, as its plugin or
+        /// extension reports it, naming the socket it listens on.
+        fn settle(&self, provider: &str, socket: &Path) {
+            let thread = match provider {
+                "pi" => "/pi/session.jsonl",
+                _ => "native",
+            };
+            self.store
+                .conn
+                .lock()
+                .unwrap()
+                .execute(
+                    "UPDATE agent_sessions SET provider=?1,provider_thread=?2 WHERE id=?3",
+                    [provider, thread, &self.adapter.session],
+                )
+                .unwrap();
+            let report = |moment, callback| {
+                super::super::boundary::answer(
+                    &self.store,
+                    &SessionBoundary {
+                        moment,
+                        delivery: self.delivery.clone(),
+                        adapter: Some(self.adapter.clone()),
+                        callback,
+                        gap: None,
+                        printed: Vec::new(),
+                        inbox: Some(Inbox::Socket(socket.to_owned())),
+                    },
+                )
+                .unwrap();
+            };
+            if provider == "pi" {
+                let answer = serde_json::json!({"type":"message_end","message":{"role":"assistant",
+                    "content":[{"type":"text","text":"Done."}],"stopReason":"stop"}});
+                report(
+                    BoundaryMoment::Event,
+                    serde_json::json!({"type":"agent_settled","aborted":false,"sessionFile":thread,
+                        "turn":uuid::Uuid::new_v4().to_string(),"openTools":0,"pendingInput":0,
+                        "events":[answer]}),
+                );
+                report(BoundaryMoment::Stop, serde_json::json!({}));
+            } else {
+                report(
+                    BoundaryMoment::Stop,
+                    serde_json::json!({"hook_event_name":"Stop","session_id":thread}),
+                );
+            }
         }
 
         fn comment(&self, store: &SqliteStore, id: &str, body: &str) {
@@ -418,6 +548,194 @@ mod tests {
         wire.lines()
             .map(|line| serde_json::from_str(line).unwrap())
             .collect()
+    }
+
+    /// A plugin or extension listening for the server: every message it
+    /// takes, each answered as `answer`.
+    fn extension(
+        socket: &Path,
+        answer: &'static str,
+    ) -> std::sync::mpsc::Receiver<serde_json::Value> {
+        let listener = UnixListener::bind(socket).unwrap();
+        let (taken, messages) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let mut stream = stream.unwrap();
+                let mut wire = String::new();
+                stream.read_to_string(&mut wire).unwrap();
+                let _ = std::io::Write::write_all(&mut stream, answer.as_bytes());
+                if taken.send(serde_json::from_str(&wire).unwrap()).is_err() {
+                    return;
+                }
+            }
+        });
+        messages
+    }
+
+    /// A Codex app-server that answers one client's `turn/start`: the request
+    /// it took.
+    fn codex_app_server(endpoint: &Path) -> std::thread::JoinHandle<serde_json::Value> {
+        use futures_util::{SinkExt, StreamExt};
+        use tokio_tungstenite::tungstenite::Message;
+        let listener = UnixListener::bind(endpoint).unwrap();
+        listener.set_nonblocking(true).unwrap();
+        std::thread::spawn(move || {
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap()
+                .block_on(async move {
+                    let listener = tokio::net::UnixListener::from_std(listener).unwrap();
+                    let (stream, _) = listener.accept().await.unwrap();
+                    let mut socket = tokio_tungstenite::accept_async(stream).await.unwrap();
+                    async fn receive(
+                        socket: &mut tokio_tungstenite::WebSocketStream<tokio::net::UnixStream>,
+                    ) -> serde_json::Value {
+                        loop {
+                            if let Message::Text(text) = socket.next().await.unwrap().unwrap() {
+                                return serde_json::from_str(&text).unwrap();
+                            }
+                        }
+                    }
+                    let initialize = receive(&mut socket).await;
+                    let answer = serde_json::json!({"id":initialize["id"],"result":{}});
+                    socket
+                        .send(Message::Text(answer.to_string().into()))
+                        .await
+                        .unwrap();
+                    assert_eq!(receive(&mut socket).await["method"], "initialized");
+                    let start = receive(&mut socket).await;
+                    let answer =
+                        serde_json::json!({"id":start["id"],"result":{"turn":{"id":"woken"}}});
+                    socket
+                        .send(Message::Text(answer.to_string().into()))
+                        .await
+                        .unwrap();
+                    let _ = socket.next().await;
+                    start
+                })
+        })
+    }
+
+    #[test]
+    fn an_idle_opencode_or_pi_work_session_starts_a_turn_on_its_direction_once() {
+        for (provider, thread) in [("opencode", "native"), ("pi", "/pi/session.jsonl")] {
+            let session = format!("wake-{provider}");
+            let fixture = fixture(&session);
+            let socket = fixture.home.path().join("s");
+            let messages = extension(&socket, "started\n");
+            fixture.settle(provider, &socket);
+            fixture.comment(&fixture.store, "c-1", "use the staging bucket");
+            after_turn(&fixture.store, &session);
+            let message = messages.try_recv().expect(provider);
+            assert_eq!(message["thread"], thread);
+            let text = message["text"].as_str().unwrap();
+            assert!(text.contains("use the staging bucket"), "{text}");
+            assert_eq!(
+                fixture
+                    .store
+                    .session_steers(&session, 0, 8)
+                    .unwrap()
+                    .pending,
+                0
+            );
+            // Woken, it is in a turn: nothing more goes out until that ends.
+            fixture.comment(&fixture.store, "c-2", "and the eu region");
+            wake_idle(&fixture.store, None);
+            assert!(messages.try_recv().is_err(), "{provider} woken mid-turn");
+            fixture.settle(provider, &socket);
+            after_turn(&fixture.store, &session);
+            let text = messages.try_recv().expect(provider)["text"].to_string();
+            assert!(text.contains("and the eu region"));
+            assert!(!text.contains("staging bucket"), "{text}");
+        }
+    }
+
+    /// Codex runs no hook before its first turn: the launch reports a
+    /// reopened conversation's start, and the wake runs the waiting steer as
+    /// a turn on its app-server before anyone types.
+    #[test]
+    fn a_reopened_codex_work_session_starts_a_turn_on_its_waiting_steer() {
+        let session = "wake-codex";
+        let fixture = fixture(session);
+        let endpoint = fixture.home.path().join("codex.sock");
+        let report = |moment, event: &str| {
+            super::super::boundary::answer(
+                &fixture.store,
+                &SessionBoundary {
+                    moment,
+                    delivery: fixture.delivery.clone(),
+                    adapter: Some(fixture.adapter.clone()),
+                    callback: serde_json::json!({"hook_event_name":event,"session_id":"native","source":"resume"}),
+                    gap: None,
+                    printed: Vec::new(),
+                    inbox: None,
+                },
+            )
+            .unwrap()
+            .1
+        };
+        // The Codex before it was quit mid-turn.
+        report(BoundaryMoment::Tool, "UserPromptSubmit");
+        {
+            let conn = fixture.store.conn.lock().unwrap();
+            conn.execute("UPDATE session_activity SET agent_process_id='earlier'", [])
+                .unwrap();
+            conn.execute(
+                "UPDATE agent_sessions SET provider='codex',agent_endpoint=?2 WHERE id=?1",
+                rusqlite::params![session, endpoint.to_string_lossy()],
+            )
+            .unwrap();
+        }
+        fixture
+            .store
+            .save_session_steer(session, "Fixture author", "use the other table")
+            .unwrap();
+        let provider = codex_app_server(&endpoint);
+        let Some(super::super::boundary::After::Reachable(woken)) =
+            report(BoundaryMoment::Start, "SessionStart")
+        else {
+            panic!("a reopened Codex start leaves no wake");
+        };
+        after_turn(&fixture.store, &woken);
+        let start = provider.join().unwrap();
+        assert_eq!(start["method"], "turn/start");
+        assert_eq!(start["params"]["threadId"], "native");
+        let output = start["params"]["toolOutput"]["output"].to_string();
+        assert!(output.contains("use the other table"), "{output}");
+        assert_eq!(
+            fixture.store.session_steers(session, 0, 8).unwrap().pending,
+            0
+        );
+    }
+
+    #[test]
+    fn a_work_session_that_starts_no_turn_keeps_its_news_for_the_next_boundary() {
+        // Nothing listens on the first socket; the second takes the message
+        // and closes without starting a turn.
+        for refused in [false, true] {
+            let session = format!("wake-refused-{refused}");
+            let fixture = fixture(&session);
+            let socket = fixture.home.path().join("s");
+            let _messages = refused.then(|| extension(&socket, ""));
+            fixture.settle("opencode", &socket);
+            fixture.comment(&fixture.store, "c-1", "use the staging bucket");
+            after_turn(&fixture.store, &session);
+            assert_eq!(
+                loopflow_execution::steer::idle_conversations(&fixture.store, Some(&session))
+                    .unwrap()
+                    .len(),
+                1,
+                "still idle"
+            );
+            // Claimed or not, nothing was stamped as read.
+            let page = fixture.store.session_steers(&session, 0, 8).unwrap();
+            assert!(
+                !page.items.is_empty() && page.items.iter().all(|row| row.delivered_at.is_none()),
+                "refused: {refused}: {:?}",
+                page.items
+            );
+        }
     }
 
     #[test]
@@ -525,7 +843,10 @@ mod tests {
                 [],
             )
             .unwrap();
-        let (listener, _) = fixture.idle_claude();
+        // Bare hooks read steers directly; they never report a Stop or inbox.
+        let socket = fixture.home.path().join("inbox.sock");
+        let listener = UnixListener::bind(&socket).unwrap();
+        fixture.claude(&socket);
         listener.set_nonblocking(true).unwrap();
         fixture.comment(&fixture.store, "c-1", "PR: https://example.test/pr/1");
         after_turn(&fixture.store, "wake-bare");
@@ -586,5 +907,63 @@ mod tests {
         )
         .unwrap()
         .is_empty());
+    }
+
+    /// The steers saved since the last reading start each stopped Session
+    /// they name once, however many name it; a running one and a steer
+    /// already read start nothing.
+    #[test]
+    fn steers_start_a_stopped_session_once() {
+        let fixture = fixture("wake-stopped");
+        let started = |store: &SqliteStore| {
+            let mut starts = Vec::new();
+            start_stopped(store, |session, request| {
+                starts.push((session.to_string(), request));
+                Ok(())
+            });
+            starts
+        };
+        let running = fixture
+            .store
+            .save_session_steer("wake-stopped", "jack", "while running")
+            .unwrap();
+        assert!(
+            started(&fixture.store).is_empty(),
+            "{running:?} is read at a boundary"
+        );
+        fixture
+            .store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE agent_sessions SET agent_ended_at=unixepoch(), agent_pid=NULL, agent_os_started_at=NULL WHERE agent_process_id=?1",
+                [&fixture.adapter.agent_process_id],
+            )
+            .unwrap();
+        let first = fixture
+            .store
+            .save_session_steer("wake-stopped", "jack", "what word did I give you?")
+            .unwrap();
+        fixture
+            .store
+            .save_session_steer("wake-stopped", "jack", "and spell it backwards")
+            .unwrap();
+        assert_eq!(
+            started(&fixture.store),
+            [("wake-stopped".to_string(), first.id.to_string())]
+        );
+        // A restarted server's first reading starts nothing it read before.
+        let restarted = loopflow_execution::store::open_sqlite(&fixture.store_path()).unwrap();
+        assert!(started(&restarted).is_empty());
+        assert_eq!(
+            fixture
+                .store
+                .session_steers("wake-stopped", 0, 8)
+                .unwrap()
+                .pending,
+            3,
+            "unread until the started conversation takes them"
+        );
     }
 }

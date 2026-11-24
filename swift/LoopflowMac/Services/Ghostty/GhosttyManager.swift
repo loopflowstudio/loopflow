@@ -44,21 +44,7 @@ struct GhosttyTerminalTitle {
 enum GhosttyRuntimeResources {
     static let sourceRevision = "a60e9e2a57f73e1eef2bd1cf2995a467f69e7fb0"
 
-    static var directoryURL: URL? {
-        #if SWIFT_PACKAGE
-        if let resources = Bundle.main.resourceURL,
-           let bundle = Bundle(url: resources.appendingPathComponent(
-               "LoopflowSwift_LoopflowMac.bundle",
-               isDirectory: true
-           )),
-           let directory = directoryURL(in: bundle) {
-            return directory
-        }
-        return directoryURL(in: .module)
-        #else
-        return directoryURL(in: .main)
-        #endif
-    }
+    static var directoryURL: URL? { directoryURL(in: .loopflowMacResources) }
 
     static func directoryURL(in bundle: Bundle) -> URL? {
         guard let resources = bundle.resourceURL else { return nil }
@@ -126,7 +112,47 @@ final class GhosttyManager: ObservableObject {
     // Current preview plus applied candidate; cancel reuses validated config.
     private nonisolated(unsafe) var themeConfigs: [String: (TerminalPalette, ghostty_config_t)] = [:]
     private(set) var theme = ThemeDefinition.light
-    static let loopflowConfig = "font-size = 13\nminimum-contrast = 3\n"
+
+    /// Loaded before the person's files so their bindings and values win.
+    static let loopflowConfig = """
+    font-size = \(Int(Typography.terminalSize))
+    adjust-cell-height = 10%
+    font-feature = -calt
+    font-feature = -liga
+    minimum-contrast = 3
+    keybind = clear
+    keybind = alt+arrow_left=esc:b
+    keybind = alt+arrow_right=esc:f
+    keybind = super+arrow_left=text:\\x01
+    keybind = super+arrow_right=text:\\x05
+    keybind = super+backspace=text:\\x15
+    keybind = super+shift+arrow_up=jump_to_prompt:-1
+    keybind = super+shift+arrow_down=jump_to_prompt:1
+    keybind = super+a=select_all
+    keybind = performable:shift+arrow_left=adjust_selection:left
+    keybind = performable:shift+arrow_right=adjust_selection:right
+    keybind = performable:shift+arrow_up=adjust_selection:up
+    keybind = performable:shift+arrow_down=adjust_selection:down
+    keybind = performable:shift+page_up=adjust_selection:page_up
+    keybind = performable:shift+page_down=adjust_selection:page_down
+    keybind = performable:shift+home=adjust_selection:home
+    keybind = performable:shift+end=adjust_selection:end
+    keybind = super+home=scroll_to_top
+    keybind = super+end=scroll_to_bottom
+    keybind = super+page_up=scroll_page_up
+    keybind = super+page_down=scroll_page_down
+    keybind = performable:super+j=scroll_to_selection
+    keybind = super+==increase_font_size:1
+    keybind = super++=increase_font_size:1
+    keybind = super+-=decrease_font_size:1
+    keybind = super+0=reset_font_size
+    keybind = performable:super+e=search_selection
+    keybind = performable:super+g=navigate_search:next
+    keybind = performable:super+shift+g=navigate_search:previous
+    keybind = performable:super+shift+f=end_search
+    keybind = performable:escape=end_search
+
+    """
 
     func applyTheme(_ theme: ThemeDefinition, retaining appliedID: String? = nil) throws {
         if let baseline {
@@ -157,14 +183,13 @@ final class GhosttyManager: ObservableObject {
         NotificationCenter.default.post(name: .loopflowThemeChanged, object: theme)
     }
 
-    // These settings load after user defaults. Resources enable Ghostty's
-    // native shell integration for detected shells; provider Sessions launch
-    // `lf`, so they receive no shell hooks. Keep their historical TERM value
-    // even though the matching Ghostty terminfo is now bundled. The padding
-    // is fixed here because block overlays are laid out from the same numbers.
-    // Command-Up and Command-Down move between prompts whatever the person's
-    // own Ghostty config binds them to.
+    /// Loaded after personal settings. Ghostty appends Spline Sans Mono as a
+    /// fallback for any personal font family. Clearing the theme prevents Ghostty
+    /// from replaying personal colors over the palette selected in Appearance.
+    /// Provider Sessions launch `lf`, so shell detection skips their hooks.
+    /// Keep their historical TERM and match padding to the block overlays.
     static let embeddedConfig = """
+    font-family = \(Typography.monoFamily)
     term = xterm-256color
     macos-login-session = false
     shell-integration = detect
@@ -175,6 +200,12 @@ final class GhosttyManager: ObservableObject {
     image-storage-limit = 67108864
     keybind = super+arrow_up=jump_to_prompt:-1
     keybind = super+arrow_down=jump_to_prompt:1
+    keybind = super+q=unbind
+    keybind = super+,=unbind
+    keybind = super+comma=unbind
+    keybind = super+shift+w=unbind
+    theme =
+
     """
 
     /// Ghostty's process-wide state is set up once, however many callers ask.
@@ -216,9 +247,7 @@ final class GhosttyManager: ObservableObject {
                 print("[GhosttyManager] CoreVideo display link unavailable (\(displayLinkStatus)); using timer rendering")
             }
             displayLink = nil
-            // Independent theme files never participate in the base configuration.
-            // Clearing before finalize also removes their conditional replay path.
-            try GhosttyThemeConfiguration.load(embeddedConfig + "\ntheme =\n", into: cfg)
+            try GhosttyThemeConfiguration.load(embeddedConfig, into: cfg)
             ghostty_config_finalize(cfg)
             self.baseline = cfg
             config = try GhosttyThemeConfiguration.candidate(theme, baseline: cfg)
@@ -389,8 +418,14 @@ final class GhosttyManager: ObservableObject {
         }
 
         self.app = ghosttyApp
+        NotificationCenter.default.addObserver(self, selector: #selector(keyboardSelectionChanged),
+            name: NSTextInputContext.keyboardSelectionDidChangeNotification, object: nil)
         ghostty_app_set_color_scheme(ghosttyApp, theme.isDark ? GHOSTTY_COLOR_SCHEME_DARK : GHOSTTY_COLOR_SCHEME_LIGHT)
         state = .ready
+    }
+
+    @objc private func keyboardSelectionChanged(_ notification: Notification) {
+        if let app { ghostty_app_keyboard_changed(app) }
     }
 
     func tick() {

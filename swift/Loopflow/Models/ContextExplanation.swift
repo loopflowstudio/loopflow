@@ -45,12 +45,42 @@ public struct ContextExplanation: Codable, Equatable, Sendable {
     public let task: ContextFact
     public let session: ContextFact
     public let process: ContextFact
-    public let planningObservedAt: Int64?
+    public let trackerSyncedAt: Int64?
 
     enum CodingKeys: String, CodingKey {
         case observedAt = "observed_at", repositoryPath = "repository_path"
-        case executionMachine = "execution_machine", planningObservedAt = "planning_observed_at"
+        case executionMachine = "execution_machine", trackerSyncedAt = "tracker_synced_at"
         case machine, repository, checkout, wave, task, session, process
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        observedAt = try values.decode(Int64.self, forKey: .observedAt)
+        machine = try values.decode(ContextFact.self, forKey: .machine)
+        repository = try values.decode(ContextFact.self, forKey: .repository)
+        repositoryPath = try values.decode(ContextFact.self, forKey: .repositoryPath)
+        checkout = try values.decode(ContextFact.self, forKey: .checkout)
+        executionMachine = try values.decode(ContextFact.self, forKey: .executionMachine)
+        wave = try values.decode(ContextFact.self, forKey: .wave)
+        task = try values.decode(ContextFact.self, forKey: .task)
+        session = try values.decode(ContextFact.self, forKey: .session)
+        process = try values.decode(ContextFact.self, forKey: .process)
+        trackerSyncedAt = try values.decode(Int64?.self, forKey: .trackerSyncedAt)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(observedAt, forKey: .observedAt)
+        try values.encode(machine, forKey: .machine)
+        try values.encode(repository, forKey: .repository)
+        try values.encode(repositoryPath, forKey: .repositoryPath)
+        try values.encode(checkout, forKey: .checkout)
+        try values.encode(executionMachine, forKey: .executionMachine)
+        try values.encode(wave, forKey: .wave)
+        try values.encode(task, forKey: .task)
+        try values.encode(session, forKey: .session)
+        try values.encode(process, forKey: .process)
+        try values.encode(trackerSyncedAt, forKey: .trackerSyncedAt)
     }
 }
 
@@ -134,11 +164,10 @@ public struct WorkLink: Codable, Equatable, Sendable {
         public let taskId: String?
         public let wave: String?
         public let session: String?
-        public let diff: Bool
         public let executionMachine: String?
 
         enum CodingKeys: String, CodingKey {
-            case kind, task, wave, session, diff
+            case kind, task, wave, session
             case repositoryPath = "repo_path", repositoryId = "repo_id"
             case taskId = "task_id", executionMachine = "execution_machine"
         }
@@ -185,6 +214,9 @@ public struct WorkLink: Codable, Equatable, Sendable {
 
 public enum SessionResumeIntent: String, Codable, Equatable, Sendable {
     case start, resume
+    /// A live held terminal gains a view.
+    case view
+    /// A provider running in a native client lf can't share; that client ends.
     case takeOver = "take_over"
     case newThread = "new_thread"
 }
@@ -207,9 +239,31 @@ public struct SessionResumeExplanation: Codable, Equatable, Sendable {
     public let resolution: ContextExplanation
     public let action: SessionResumeAction?
     public let state: SessionState?
-    public let actions: [SessionAction]
+    /// What opening it does; nil when it can't open.
+    public let opening: SessionAction?
     public let impediments: [String]
     public let unavailable: [String]
+
+    enum CodingKeys: String, CodingKey { case resolution, action, state, opening, impediments, unavailable }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        resolution = try values.decode(ContextExplanation.self, forKey: .resolution)
+        action = try values.decode(SessionResumeAction?.self, forKey: .action)
+        state = try values.decode(SessionState?.self, forKey: .state)
+        opening = try values.decode(SessionAction?.self, forKey: .opening)
+        impediments = try values.decode([String].self, forKey: .impediments)
+        unavailable = try values.decode([String].self, forKey: .unavailable)
+    }
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(resolution, forKey: .resolution)
+        try values.encode(action, forKey: .action)
+        try values.encode(state, forKey: .state)
+        try values.encode(opening, forKey: .opening)
+        try values.encode(impediments, forKey: .impediments)
+        try values.encode(unavailable, forKey: .unavailable)
+    }
 }
 
 public enum TaskPlanningAction: Codable, Equatable, Sendable {

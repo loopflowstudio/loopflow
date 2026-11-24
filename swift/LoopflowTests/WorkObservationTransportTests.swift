@@ -5,7 +5,7 @@ import Testing
 @testable import LoopflowMac
 
 /// A window's subscriptions, served by stand-ins or by a private Loopflow server.
-/// Every window starts with the plan and the live-process subscription.
+/// Every window starts with the plan subscription.
 @Suite("Workspace subscription transport", .serialized)
 struct WorkObservationTransportTests {
     @Test("A server command completes from an async caller")
@@ -36,7 +36,7 @@ struct WorkObservationTransportTests {
         let first = try #require(try await lines.next())
         let frame = try #require(try JSONSerialization.jsonObject(with: first) as? [String: Any])
         #expect(frame.keys.contains("body"))
-        subscription.send(Data(#"{"id":7}"#.utf8 + [10]))
+        subscription.checkpoint(7)
         let answered = try #require(try await lines.next())
         #expect((try JSONSerialization.jsonObject(with: answered) as? [String: Any])?["answers"] as? Int == 7)
         await subscription.cancel()
@@ -66,7 +66,7 @@ struct WorkObservationTransportTests {
         let subscriptions = FakeSubscriptions()
         let observation = try WorkSubscriptions.observe(launch: subscriptions.launch)
         var frames = observation.frames.makeAsyncIterator()
-        try await subscriptions.answer(.allPlans, 0)
+        try subscriptions.answer(.allPlans, 0)
         #expect(try await frames.next()?.sequence == 1)
         observation.request(.scope(id: 2, WorkScope(repo: "/src/loopflow", headless: false, task: "LOO-1", activity: nil, taskListWave: nil)))
         // The plan answers from its last reading.
@@ -81,14 +81,18 @@ struct WorkObservationTransportTests {
         let subscriptions = FakeSubscriptions()
         let observation = try WorkSubscriptions.observe(launch: subscriptions.launch)
         var frames = observation.frames.makeAsyncIterator()
+        try subscriptions.answer(.allPlans, 0)
+        #expect(try await frames.next()?.sequence == 1)
+        observation.request(.scope(id: 2, WorkScope(repo: nil, headless: false, task: "LOO-1", activity: nil, taskListWave: nil)))
+        #expect(try await frames.next()?.answers == 2)
+        let task = ServedRead.taskGet(directory: "/", issue: "LOO-1")
         observation.request(.checkpoint(id: 5, replay: []))
-        try await subscriptions.answer(.allPlans, 5)
+        try subscriptions.answer(.allPlans, 5)
         #expect(try await frames.next()?.answers == 5)
-        #expect(subscriptions.requests(.processList) == [#"{"id":5}"#])
-        // The live-process subscription has not answered, so nothing is confirmed yet.
-        try await subscriptions.answer(.processList, 5)
+        // The Task subscription has not answered, so nothing is confirmed yet.
+        try subscriptions.answer(task, 5)
         let answered = try await frames.next()
-        #expect(answered?.content.part == "activity")
+        #expect(answered?.content.part == "task")
         let checkpoint = try await frames.next()
         #expect(checkpoint?.content.part == "checkpoint")
         #expect(checkpoint?.answers == 5)
@@ -168,22 +172,21 @@ struct WorkObservationTransportTests {
 /// Subscriptions with no reader: a test sends each line a subscription would.
 private final class FakeSubscriptions: @unchecked Sendable {
     private let lock = NSLock()
-    private var subscriptions: [(read: ServedRead, lines: AsyncThrowingStream<Data, any Error>.Continuation, sent: [String])] = []
+    private var subscriptions: [(read: ServedRead, lines: AsyncThrowingStream<Data, any Error>.Continuation, sent: [Int])] = []
 
     var launch: WorkSubscriptions.Launch {
         { [self] read in
             let (lines, continuation) = AsyncThrowingStream<Data, any Error>.makeStream()
             let index = lock.withLock { subscriptions.append((read, continuation, [])); return subscriptions.count - 1 }
-            return LineSubscription(lines: lines, send: { [self] line in
-                lock.withLock { subscriptions[index].sent.append(String(decoding: line, as: UTF8.self)
-                    .trimmingCharacters(in: .newlines)) }
-            }, cancel: { continuation.finish() })
+            return LineSubscription(lines: lines, checkpoint: { [self] id in
+                lock.withLock { subscriptions[index].sent.append(id) }
+            }, cancel: { continuation.finish() }, unreadable: { nil })
         }
     }
 
     var launched: [ServedRead] { lock.withLock { subscriptions.map(\.read) } }
 
-    func requests(_ read: ServedRead) -> [String] {
+    func requests(_ read: ServedRead) -> [Int] {
         lock.withLock { subscriptions.first { $0.read == read }?.sent ?? [] }
     }
 
@@ -196,10 +199,8 @@ private final class FakeSubscriptions: @unchecked Sendable {
     }
 
     /// Answer request `id` (0 answers none) with a failed reading.
-    func answer(_ read: ServedRead, _ id: Int) async throws {
-        for _ in 0..<400 where id != 0 && !requests(read).contains(#"{"id":\#(id)}"#) {
-            try await Task.sleep(for: .milliseconds(5))
-        }
+    func answer(_ read: ServedRead, _ id: Int) throws {
+        try #require(id == 0 || requests(read).contains(id))
         send(read, id == 0 ? #"{"answers":null,"unavailable":"gone","body":null,"read_at":null}"#
              : #"{"answers":\#(id),"unavailable":"gone","body":null,"read_at":null}"#)
     }

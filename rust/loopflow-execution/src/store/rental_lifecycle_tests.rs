@@ -27,7 +27,6 @@ fn code(max: u32) -> OnDemand {
         max_usd_per_hour: usd("0.40"),
         hours: 4.0,
         logins: Vec::new(),
-        created_at: OffsetDateTime::from_unix_timestamp(1_792_000_000).unwrap(),
     }
 }
 
@@ -176,6 +175,7 @@ fn an_owned_machine_joins_a_pool_with_its_cost_and_leaves_when_the_pool_goes() {
 fn open_task(store: &SqliteStore) -> TaskId {
     let now = OffsetDateTime::now_utc();
     let task = Task {
+        parent_task_id: None,
         id: TaskId::new(),
         revision: 0,
         identifier: "LOO-570".into(),
@@ -186,9 +186,9 @@ fn open_task(store: &SqliteStore) -> TaskId {
         due_date: None,
         state: None,
         completed_at: None,
-        linear_id: None,
-        pm_snapshot_synced_at: None,
-        pm_writeback: LinearWritebackState::Current,
+        tracker_id: None,
+        tracker_synced_at: None,
+        tracker_writeback: LinearWritebackState::Current,
         wave_id: None,
         repository_id: crate::repository::location::ensure_repository(store, "/repo").unwrap(),
         project_id: None,

@@ -21,19 +21,14 @@ fn prune_moves_a_headless_run_with_a_dead_agent_process_to_history() {
             &loopflow_storage::session_record::new_artifact_key(),
         );
         conn.execute(
-            "INSERT INTO processes(id,trace_id,pid,started_at,kind,agent_session_id)
-             VALUES(?1,?1,?2,?3,'agent',?4)",
-            rusqlite::params![process, exited, now, session],
-        )
-        .unwrap();
-        conn.execute(
-            "UPDATE agent_sessions SET agent_process_id=?2,interactive=?3 WHERE id=?1",
-            rusqlite::params![session, process, interactive],
+            "UPDATE agent_sessions SET agent_process_id=?2,attachment_token=?2,interactive=?3,agent_started_at=?4,
+                agent_pid=?5,agent_spawn_state='spawn_requested' WHERE id=?1",
+            rusqlite::params![session, process, interactive, now, exited],
         )
         .unwrap();
     }
 
-    assert_eq!(prune(&path, now).unwrap().closed_processes, 2);
+    assert_eq!(prune(&path, now).unwrap().ended_owners, 2);
     let completed: Vec<(String, Option<i64>)> = conn
         .prepare("SELECT id,completed_at FROM agent_sessions ORDER BY id")
         .unwrap()

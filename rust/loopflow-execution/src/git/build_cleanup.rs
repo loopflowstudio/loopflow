@@ -103,11 +103,8 @@ fn ownership(worktree: &Path, registries: &[PathBuf]) -> Result<()> {
         if associated.is_empty() {
             continue;
         }
-        let store = SqliteStore::open_processes_read_only(
-            registry,
-            crate::store::token_key::encryption_key,
-        )
-        .context("execution inspection unavailable")?;
+        let store = SqliteStore::open_read_only(registry, crate::store::token_key::encryption_key)
+            .context("execution inspection unavailable")?;
         for owner in associated {
             let task = loopflow_model::durable::TaskId::parse(&owner.task)?;
             let blockers = crate::ops::task_execution::task_execution_blockers(&store, &task)

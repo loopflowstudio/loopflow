@@ -322,6 +322,37 @@ pub fn is_ancestor(repo: &Path, commit: &str, descendant: &str) -> Result<bool, 
     })
 }
 
+/// Whether a stacked merge of `target` must compare from the recorded `fork`
+/// rather than from shared history: the fork is not in the target's history
+/// (a squash-landed parent), or the target is in HEAD's history but its
+/// changes since the fork are not. A child detached with `lf sync main` keeps
+/// its parent's commits and reverts their changes, so restacking it would
+/// otherwise look current. Changes that conflict with HEAD are the child's own
+/// edits and leave the merge as Git sees it.
+pub fn stack_needs_fork_comparison(
+    worktree: &Path,
+    fork: &str,
+    target: &str,
+) -> Result<bool, GitError> {
+    if !is_ancestor(worktree, fork, target)? {
+        return Ok(true);
+    }
+    if !is_ancestor(worktree, target, "HEAD")? {
+        return Ok(false);
+    }
+    let merge_base = format!("--merge-base={fork}");
+    let output = run_git(
+        worktree,
+        &["merge-tree", "--write-tree", &merge_base, "HEAD", target],
+    )?;
+    if !output.status.success() {
+        return Ok(false);
+    }
+    let merged = String::from_utf8_lossy(&output.stdout);
+    let head_tree = rev_parse(worktree, "HEAD^{tree}")?;
+    Ok(merged.lines().next().map(str::trim) != Some(head_tree.as_str()))
+}
+
 /// Whether this repo holds `revision` as a commit object.
 pub fn commit_exists(repo: &Path, revision: &str) -> Result<bool, GitError> {
     let object = format!("{revision}^{{commit}}");
@@ -1184,7 +1215,7 @@ pub fn merge(
     let target_sha = rev_parse(worktree, target)?;
     let target = target_sha.as_str();
     let comparison_base = match fork_base {
-        Some(base) if !is_ancestor(worktree, base, target)? => Some(base),
+        Some(base) if stack_needs_fork_comparison(worktree, base, target)? => Some(base),
         _ => None,
     };
     if comparison_base.is_none() && is_ancestor(worktree, target, "HEAD")? {

@@ -13,9 +13,8 @@ uv run python scripts/benchmarks/desktop-performance/record_live.py record --sec
 uv run python scripts/benchmarks/desktop-performance/record_live.py summarize /tmp/loopflow-live-recording
 
 # Compare native workspace journeys on the same host and build mode.
-cargo build -p loopflow --bin lf --bin lf-world
-uv run python scripts/desktop_performance.py run --cli target/debug/lf --output /tmp/desktop-baseline
-uv run python scripts/desktop_performance.py run --cli target/debug/lf --output /tmp/desktop-after --baseline /tmp/desktop-baseline
+uv run python scripts/desktop_performance.py run --output /tmp/desktop-baseline
+uv run python scripts/desktop_performance.py run --output /tmp/desktop-after --baseline /tmp/desktop-baseline
 ```
 
 Keep recordings, snapshots and reports outside the checkout. Snapshots contain
@@ -107,11 +106,17 @@ Missing timestamps leave attribution unavailable. These are busy-turn counts,
 not a scroll frame-drop measurement.
 
 Server creation traces contain `task_creation` and timed `creation_step` spans:
-repository resolution, lock, store open, receipt check, Task filing, primary
-Session preparation, Graph launch and receipt admission. They retain the creation
-request ID and elapsed time, with no request text, title or provider output. New
-Task creation uses the interaction observation ID as its creation request ID, so
-the live journey and server stages can be joined directly.
+repository resolution, lock, store open, receipt check, admission, held
+conversation start and the answer's reads. The conversation logs
+`conversation_setup` spans (`step=checkout|graph`); what follows them in a
+sample is the provider starting. Both keep the creation request ID and elapsed
+time in `<Machine>/logs/lf.log` under the `loopflow::start_timing` tracing
+target, with no request text, title or provider output.
+New Task creation uses the interaction observation ID as its creation request
+ID, so `timings.py` nests the server and setup steps under their Start → typing
+sample (`machine_steps` in `--json`, medians under the sample in text). A remote
+Machine's steps stay in that Machine's log. Start records the Machine kind
+(`local` or `remote`) and the report splits Start → typing by it.
 
 Each record carries the selected repository (Desktop path or phone repository ID)
 so Loopflow, Manabot and Kata stay separate. Session counts describe the cached
@@ -191,9 +196,10 @@ startup reads against copied state. `--built` reuses its bundle; `--home` select
 a prior private fixture. Native launches need a display host. `startup.py`
 replays captured reader responses without a display and makes no rendering claim.
 
-The owned Task and Session come from an `lf-world` one-task world built by the
-`lf-world` beside `--cli`/`--lf`; its stub `claude` resumes the world transcript
-and echoes input, so no account or network is involved.
+The ordinary run uses DTO fixtures and `/bin/cat`. Snapshot runs and
+`verify-fixture` use the supplied `lf` to create a Task and a resumable Session
+in a private `LF_HOME`. A stand-in `claude` echoes input without an account or
+network access.
 
 Workspace journeys use mounted controls, bitmap capture and text recognition.
 They cover hierarchy interactions, retained panes, Task details and file editing.
@@ -228,9 +234,9 @@ the checkout. Different application/CLI source builds are expected; changing the
 measurement contract requires collecting both sides again.
 
 ```sh
-uv run python scripts/desktop_performance.py run --optimized --samples 21 --cli target/debug/lf --output /tmp/reactivity-parent
+uv run python scripts/desktop_performance.py run --optimized --samples 21 --output /tmp/reactivity-parent
 # Check out and build the candidate, retaining the same harness and fixtures.
-uv run python scripts/desktop_performance.py run --optimized --samples 21 --cli target/debug/lf --output /tmp/reactivity-candidate --baseline /tmp/reactivity-parent
+uv run python scripts/desktop_performance.py run --optimized --samples 21 --output /tmp/reactivity-candidate --baseline /tmp/reactivity-parent
 uv run python scripts/desktop_performance.py report /tmp/reactivity-candidate --baseline /tmp/reactivity-parent
 ```
 

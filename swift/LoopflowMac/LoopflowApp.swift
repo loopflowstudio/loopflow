@@ -54,7 +54,7 @@ struct LoopflowApp: App {
     @State private var showSnapshotError = false
     @State private var openingError: String?
     @State private var didOpenCaptureView = false
-    @AppStorage("taskFilesAutosave") private var taskFilesAutosave = true
+    @State private var settings = SettingsNavigation()
     @State private var appearance: AppearanceStore
     /// `lf desktop`'s socket, held for the app's lifetime.
     @State private var desktopServer: DesktopServer?
@@ -95,7 +95,8 @@ struct LoopflowApp: App {
                 // A capture opens its target window from a window that stays:
                 // the launch view hands off to a repository window, and opening
                 // another window during that hand-off aborts in AttributeGraph.
-                if let workspace {
+                // A window restored from another Machine takes the launch path.
+                if let workspace = workspace?.opened() {
                     RepositoryWorkspaceView(workspace: workspace, portfolioService: portfolioService,
                                             workspaces: workspaces,
                                             query: registryQuery, router: taskLinks,
@@ -116,7 +117,7 @@ struct LoopflowApp: App {
                     }
                 }
             }
-            .modifier(AppAppearance(appearance: appearance))
+            .modifier(appAppearance)
             .onOpenURL { handleDeepLink($0) }
             .uiTestWindowWidth()
             .uiTestSnapshot()
@@ -125,7 +126,7 @@ struct LoopflowApp: App {
         .windowToolbarStyle(.unifiedCompact(showsTitle: false))
         .defaultSize(width: 1280, height: 800)
         .commands {
-            ConsoleCommands()
+            ConsoleCommands(appearance: appearance)
             CommandGroup(replacing: .appInfo) {
                 Button("About Loopflow") { openWindow(id: "about-loopflow") }
             }
@@ -188,37 +189,36 @@ struct LoopflowApp: App {
             WavesView(portfolioService: portfolioService, openTask: { path, id in
                 requestRepository(path, .task(TaskLink(issue: id, repo: path)))
             })
-                .modifier(AppAppearance(appearance: appearance))
+                .modifier(appAppearance)
                 .onOpenURL { handleDeepLink($0) }
         }
         .defaultSize(width: 1080, height: 760)
 
         Window("Open Work", id: "open-work") {
             WorkspaceOpeningFeedback(error: $openingError)
-                .modifier(AppAppearance(appearance: appearance))
+                .modifier(appAppearance)
         }
         .defaultSize(width: 480, height: 240)
 
         Settings {
-            TabView {
-                ThemeChooser(appearance: appearance).tabItem { Label("Appearance", systemImage: "paintpalette") }
-                Form { Toggle("Autosave Task Files", isOn: $taskFilesAutosave) }
-                    .padding(24).tabItem { Label("Editing", systemImage: "pencil") }
-                ConfigurationSettingsView().tabItem { Label("Configuration", systemImage: "slider.horizontal.3") }
-                KeyboardShortcutsView().tabItem { Label("Keyboard Shortcuts", systemImage: "keyboard") }
-                MobileSettings().tabItem { Label("Mobile", systemImage: "iphone") }
-            }.modifier(AppAppearance(appearance: appearance))
+            SettingsWindow(navigation: $settings, appearance: appearance,
+                           checkout: launchRepoURL?.path ?? loadLoopflowState()?.selectedRepoPath, portfolio: portfolioService)
         }
+        .defaultSize(width: 960, height: 620)
         Window("Keyboard Shortcuts", id: "keyboard-shortcuts") { KeyboardShortcutsView() }
             .defaultSize(width: 540, height: 480)
 
         Window("Telemetry", id: "telemetry") {
             TelemetryDashboardView()
-                .modifier(AppAppearance(appearance: appearance))
+                .modifier(appAppearance)
                 .onOpenURL { handleDeepLink($0) }
         }
         .defaultSize(width: 1180, height: 860)
 
+    }
+
+    private var appAppearance: AppAppearance {
+        AppAppearance(appearance: appearance) { settings.open(.appearance) }
     }
 
     @MainActor
@@ -325,6 +325,7 @@ struct LoopflowApp: App {
 /// Resolve every window from the app-owned theme, including native controls.
 struct AppAppearance: ViewModifier {
     let appearance: AppearanceStore
+    var selectAppearance: () -> Void = {}
     @Environment(\.openSettings) private var openSettings
 
     func body(content: Content) -> some View {
@@ -338,15 +339,18 @@ struct AppAppearance: ViewModifier {
             .foregroundStyle(theme.palette.text)
             .background(theme.palette.background)
             .safeAreaInset(edge: .top) {
-                if let notice = appearance.notice, !appearance.chooserOpen {
+                if !appearance.editing, let notice = appearance.readFailure ?? appearance.notice {
                     HStack {
-                        Text(notice).font(.caption)
-                        Button("Choose Theme…") {
-                            appearance.beginPreview()
-                            openSettings()
+                        Text(notice).font(Typography.meta)
+                        // After a failed read, choosing again would send the request that just failed.
+                        if appearance.readFailure == nil {
+                            Button("Choose Theme…") {
+                                selectAppearance()
+                                openSettings()
+                            }
                         }
                     }
-                    .padding(8).foregroundStyle(theme.palette.text)
+                    .padding(Spacing.sm).foregroundStyle(theme.palette.text)
                     .background(theme.palette.surface)
                 }
             }

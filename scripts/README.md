@@ -11,9 +11,10 @@ LF_HOME="$(mktemp -d)" local-bin/lf wave list --json   # run a disposable experi
 uv run pytest python/tests/test_gate_bounded.py        # one Python behavior
 uv run python scripts/resource_envelope.py             # attribute local disk pressure
 uv run python scripts/check_architecture.py            # architecture owners and vocabulary
+uv run python scripts/due_removals.py                  # leaving store members and their drop dates
 uv run python scripts/test.py --list                   # affected-suite plan
 uv run python scripts/test.py --reuse-passing          # affected suites once per exact tree
-uv run python scripts/desktop_performance.py run --cli target/debug/lf --output /tmp/desktop-check --samples 1  # needs lf-world built beside lf
+uv run python scripts/desktop_performance.py run --output /tmp/desktop-check --samples 1
 lf telemetry-daily                                     # maintainer report
 ```
 
@@ -27,15 +28,60 @@ to reproduce a matrix failure or when release guidance requires it.
 
 ## Developer build cache
 
-`scripts/dev-lf` calls `build_cache.py` before Cargo. Root inventory is derived
-from Git; other settings follow the Machine's default sccache file. The build selects it through `SCCACHE_CONF`; it takes effect after the shared
-server's normal idle exit. The script never restarts a server, shares a Cargo
-target or installs Machine configuration. An explicit cache configuration stays
-with its caller. See [build commands](testing.md#builds).
+```bash
+uv run python scripts/build_cache.py install   # share the Machine cache and install this repository's worktree hook
+uv run python scripts/build_cache.py status    # which wrapper and daemon, and whether this checkout's root is loaded
+```
+
+Plain `cargo build` in a new worktree can reuse unchanged workspace libraries.
+Focused tests keep incremental state for repeated edits.
+Git registers its root before checkout returns. If the pinned daemon lacks the
+root, registration stops it and the next compile loads the list. An in-flight
+client compile can finish across that stop and lose its cache write.
+Each worktree owns its Cargo target. For setup, recovery and the measured
+edit-to-test times, see [the shared compilation cache](testing.md#shared-compilation-cache).
 
 ## Scheduled disk cleanup
 
 Reclaim disposable coding output with [opt-in hourly cleanup](disk-cleanup.md).
+
+## Store size and leaving members
+
+```bash
+$ uv run python scripts/model_size.py
+tables                         74
+columns                        645
+storage pub fns (non-test)     1029
+SQL call sites outside storage 35 in 8 files
+
+$ uv run python scripts/due_removals.py
+LOO-836  agent_sessions.work_source  drop after 2026-12-17  unstarted
+
+uv run python scripts/due_removals.py --start      # run each due, unstarted removal Task
+uv run python scripts/schema_page.py               # rewrite rust/loopflow-storage/SCHEMA.md
+uv run python scripts/schema_page.py --check       # what CI runs
+```
+
+`model_size.py` counts what a change adds to or removes from the model; paste
+its before and after into the PR. `due_removals.py` reads the `-- leaving:`
+marks in migrations ([migration rules](../rust/loopflow-storage/src/MIGRATIONS.md#leaving-marks))
+and prints every marked Task with the date its members may drop. A Task is due
+once its marking migration has been on `origin/main` for `STAGING_DAYS`.
+
+`--start` runs `lf task run <ID> -a claude` for each due Task whose
+`lf task status --json` is `unstarted`. It never restarts a started, done or
+abandoned Task, so running it again is safe. Without `--start` it only prints.
+
+Schedule it weekly on the Machine that runs your Tasks:
+
+```bash
+uv run python scripts/due_removals.py install      # weekly LaunchAgent, Monday 09:00
+uv run python scripts/due_removals.py uninstall
+```
+
+It is a LaunchAgent, not cron, so `lf task run` can reach the Keychain
+([scheduling](../docs/work.md#operate-a-wave)). Its output goes to
+`~/Library/Logs/loopflow-due-removals.log`. lf itself schedules nothing.
 
 ## Changed-aware runner
 
@@ -303,7 +349,7 @@ tree: stale inventory fails both Python tests and Desktop packaging.
 `scripts/` contains runnable validation and demo scripts. Use these for branch validation and manual UI walkthroughs.
 
 ```bash
-uv run python scripts/loopflow-dev.py run-debug     # build and launch Loopflow (macOS)
+uv run python scripts/loopflow-dev.py run-debug     # open Loopflow Dev on the live Machine with logs (macOS)
 uv run python scripts/check_swift_multiplatform_boundaries.py  # Stage 01 boundary guardrails
 ```
 

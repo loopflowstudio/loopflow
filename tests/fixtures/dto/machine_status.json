@@ -1,0 +1,22 @@
+{
+  "read": {
+    "kind": "machine.status",
+    "machine": "home_11111111111111111111111111111111"
+  },
+  "status": [
+    {
+      "state": "reachable",
+      "machine": {
+        "label": "builder",
+        "id": "home_11111111111111111111111111111111",
+        "route": "builder",
+        "created_at": "2026-11-05T12:00:00Z",
+        "observed_at": "2026-11-05T12:00:00Z"
+      },
+      "local_version": "0.16.0",
+      "remote_version": "0.16.0",
+      "error": null,
+      "update_command": "ssh -- 'builder' 'lf install'"
+    }
+  ]
+}

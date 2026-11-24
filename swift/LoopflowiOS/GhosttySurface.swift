@@ -19,11 +19,16 @@ final class GhosttyRuntime {
 
     private static let ready = ghostty_init(UInt(CommandLine.argc), CommandLine.unsafeArgv) == GHOSTTY_SUCCESS
 
-    /// Ghostty's own font is JetBrains Mono. The Session view insets the terminal,
-    /// and nothing runs here to confirm closing.
+    /// The app’s mono with ligatures off and 10% more cell height, as on the
+    /// Mac. The Session view insets the terminal, and nothing runs here to
+    /// confirm closing.
     static func configuration(_ theme: ThemeDefinition, fontSize: Double) -> String {
         """
+        font-family = \(Typography.monoFamily)
         font-size = \(fontSize)
+        adjust-cell-height = 10%
+        font-feature = -calt
+        font-feature = -liga
         window-padding-x = 0
         window-padding-y = 0
         window-padding-balance = false

@@ -10,6 +10,7 @@ struct AppearanceSelection: Equatable {
     var dark = ThemeDefinition.dark.name
 
     func name(dark: Bool) -> String { dark ? self.dark : light }
+    mutating func setName(_ name: String, dark: Bool) { if dark { self.dark = name } else { light = name } }
     func isDark(systemDark: Bool) -> Bool { mode == .dark || (mode == .system && systemDark) }
 
     /// System writes the pair; Light or Dark writes only that side's name.
@@ -22,16 +23,30 @@ struct AppearanceSelection: Equatable {
     }
 }
 
-/// The chooser's preview. `changed` names your files to rewrite from `library.yours`, or delete when absent there.
-private struct AppearanceDraft {
+struct ThemeDeclaration: Decodable {
+    let file: ConfigurationFileValue
+    let entries: [ConfigurationEntry]?
+
+    private enum CodingKeys: String, CodingKey { case entries }
+
+    init(from decoder: Decoder) throws {
+        file = try ConfigurationFileValue(from: decoder)
+        let fields = try decoder.container(keyedBy: CodingKeys.self)
+        // Older servers omit entries. Their theme can be displayed, but editing needs the checked slot.
+        entries = fields.contains(.entries) ? try fields.decode([ConfigurationEntry].self, forKey: .entries) : nil
+    }
+}
+
+/// One personal theme file being edited. A nil theme stages removal of that file.
+private struct ThemeDraft {
+    let name: String
+    var theme: ThemeDefinition?
     var selection: AppearanceSelection
-    var library: ThemeLibrary
-    var changed: Set<String> = []
-    var refusal: String?
+    var original: [ConfigurationEntry]?
 }
 
 /// All windows share one theme choice from `theme:` in `~/.lf/config.yaml`, your theme files and
-/// one reversible preview. The files are the only store: Apply writes them, Cancel writes nothing.
+/// a live preview while editing a theme file.
 @MainActor @Observable
 final class AppearanceStore {
     static let shared = AppearanceStore(paths: .standard, watches: true,
@@ -39,12 +54,16 @@ final class AppearanceStore {
     let paths: ThemePaths
     private(set) var selection = AppearanceSelection()
     private(set) var library = ThemeLibrary()
-    private var draft: AppearanceDraft?
-    private(set) var picker: AppearanceMode = .light
+    private var declaration: [ConfigurationEntry]? = []
+    private var draft: ThemeDraft?
+    private(set) var previewSide: AppearanceMode = .light
     private(set) var effectiveTheme = ThemeDefinition.light
     private(set) var systemDark: Bool
     private(set) var diagnostics: [String] = []
+    /// What Choose Theme can fix: an unknown name, an unreadable theme file.
     var notice: String?
+    /// The server couldn't read or write `theme:`; choosing again sends the same request.
+    private(set) var readFailure: String?
     @ObservationIgnored private let location: ServerLocation
     private(set) var saving = false
     @ObservationIgnored private var reading = UUID()
@@ -52,6 +71,8 @@ final class AppearanceStore {
     @ObservationIgnored private var observation: NSKeyValueObservation?
     @ObservationIgnored private var watcher: Timer?
     @ObservationIgnored private var fingerprint: [String] = []
+    /// Where the server keeps `theme:`, as its last answer said.
+    private(set) var configPath: String?
 
     init(paths: ThemePaths, systemDark: Bool? = nil, watches: Bool = false, location: ServerLocation = .shared,
          publish: @escaping (ThemeDefinition, String) throws -> Void = { _, _ in }) {
@@ -62,7 +83,7 @@ final class AppearanceStore {
         library = ThemeLibrary.load(paths)
         notice = library.problems.isEmpty ? nil : library.problems.joined(separator: "\n")
         effectiveTheme = resolved(selection, in: library)
-        picker = self.systemDark ? .dark : .light
+        previewSide = self.systemDark ? .dark : .light
         do { try publish(effectiveTheme, effectiveTheme.id) } catch { notice = error.localizedDescription }
         if systemDark == nil {
             observation = NSApplication.shared.observe(\.effectiveAppearance) { [weak self] _, _ in
@@ -73,7 +94,6 @@ final class AppearanceStore {
         }
         if watches {
             Task { await reload() }
-            fingerprint = currentFingerprint()
             watcher = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
                 Task { @MainActor [weak self] in await self?.reloadIfChanged() }
             }
@@ -83,25 +103,28 @@ final class AppearanceStore {
     // MARK: Reading
 
     var current: AppearanceSelection { draft?.selection ?? selection }
-    private var currentLibrary: ThemeLibrary { draft?.library ?? library }
-    var chooserOpen: Bool { draft != nil }
-    var selectedName: String { current.name(dark: picker == .dark) }
-    var selectedTheme: ThemeDefinition { theme(selectedName, dark: picker == .dark, in: currentLibrary) }
+    private var currentLibrary: ThemeLibrary {
+        guard let draft else { return library }
+        var result = library
+        result.yours[draft.name] = draft.theme
+        return result
+    }
+    var removingTheme: String? { draft.flatMap { $0.theme == nil ? $0.name : nil } }
+    var editing: Bool { draft != nil }
+    var selectedName: String { current.name(dark: previewSide == .dark) }
+    var selectedTheme: ThemeDefinition { theme(selectedName, dark: previewSide == .dark, in: currentLibrary) }
     var selectedSource: ThemeEntry.Source? { currentLibrary.source(of: selectedName) }
     func entries(for side: AppearanceMode) -> (builtins: [ThemeEntry], yours: [ThemeEntry]) {
         currentLibrary.entries(dark: side == .dark)
     }
     var canDelete: Bool { selectedSource == .yours }
     var deleteRevertsToBuiltin: Bool { canDelete && currentLibrary.isBuiltin(selectedName) }
-    var refusal: String? { draft?.refusal }
     var draftErrors: [String] {
-        guard let draft else { return [] }
-        return draft.changed.sorted().flatMap { name in
-            (draft.library.yours[name]?.readabilityErrors ?? []).map { "\(name): \($0)" }
-        }
+        guard let theme = draft?.theme else { return [] }
+        return theme.readabilityErrors.map { "\(theme.name): \($0)" }
     }
-    var canApply: Bool { !saving && refusal == nil && draftErrors.isEmpty }
-    func themeName(for picker: AppearanceMode) -> String { current.name(dark: picker == .dark) }
+    var canApply: Bool { editing && !saving && draftErrors.isEmpty }
+    func themeName(for side: AppearanceMode) -> String { current.name(dark: side == .dark) }
 
     private func theme(_ name: String, dark: Bool, in library: ThemeLibrary) -> ThemeDefinition {
         library.resolve(name) ?? (dark ? .dark : .light)
@@ -115,26 +138,36 @@ final class AppearanceStore {
     func reload() async {
         let generation = UUID()
         reading = generation
+        let observedFiles = currentFingerprint()
         library = ThemeLibrary.load(paths)
         var problems = library.problems
-        let raw: String?
-        do { raw = try await ThemeConfig.read(paths.config, location: location) }
-        catch { if reading == generation { notice = error.localizedDescription }; return }
+        let answer: ThemeDeclaration
+        do {
+            answer = try await ServerClient.configuration(.configTheme(value: nil), location: location).decode(ThemeDeclaration.self)
+        } catch {
+            if reading == generation { readFailure = error.localizedDescription }
+            return
+        }
         guard reading == generation else { return }
-        switch selection(from: raw) {
+        readFailure = nil
+        configPath = answer.file.path
+        let previous = selection
+        declaration = answer.entries
+        fingerprint = observedFiles
+        switch selection(from: answer.file.text) {
         case let .success(choice): selection = choice
         case let .failure(error): problems.insert(error.message, at: 0)
         }
         notice = problems.isEmpty ? nil : problems.joined(separator: "\n")
         if draft == nil {
-            picker = selection.isDark(systemDark: systemDark) ? .dark : .light
+            if selection != previous { previewSide = selection.isDark(systemDark: systemDark) ? .dark : .light }
             update(resolved(selection, in: library), keepingNotice: true)
         }
     }
 
     private func selection(from raw: String?) -> Result<AppearanceSelection, ThemeError> {
-        guard let raw, let value = ThemeConfig.parse(raw) else { return .success(AppearanceSelection()) }
-        let config = paths.config.path
+        guard let raw, let value = ThemeChoice.parse(raw) else { return .success(AppearanceSelection()) }
+        let config = configPath ?? "~/.lf/config.yaml"
         func unknown(_ name: String) -> ThemeError {
             ThemeError("No theme named “\(name)”: keeping \(effectiveTheme.name). Fix theme: in \(config) with a built-in name or a file in \(paths.themes.path).")
         }
@@ -143,7 +176,7 @@ final class AppearanceStore {
         case let .single(name):
             guard let theme = library.resolve(name) else { return .failure(unknown(name)) }
             choice.mode = theme.isDark ? .dark : .light
-            if theme.isDark { choice.dark = name } else { choice.light = name }
+            choice.setName(name, dark: theme.isDark)
         case let .pair(light, dark):
             for name in [light, dark].compactMap({ $0 }) where library.resolve(name) == nil {
                 return .failure(unknown(name))
@@ -156,129 +189,144 @@ final class AppearanceStore {
     }
 
     private func currentFingerprint() -> [String] {
-        let files = [paths.config] + [paths.themes, paths.ghostty].compactMap { $0 }.flatMap { (try? ThemeFile.directory($0)) ?? [] }
+        let config = configPath.map { [URL(fileURLWithPath: $0)] } ?? []
+        let files = config + [paths.themes, paths.ghostty].compactMap { $0 }.flatMap { (try? ThemeFile.directory($0)) ?? [] }
         return files.map { url in
             let values = try? url.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey])
             return "\(url.path)|\(values?.contentModificationDate?.timeIntervalSince1970 ?? 0)|\(values?.fileSize ?? -1)"
         }
     }
 
+    /// A failed read retries every tick: until the server answers, its config path is unknown, so
+    /// there is no file to watch, and updating the older build should clear the banner on its own.
     private func reloadIfChanged() async {
+        guard !saving else { return }
         let latest = currentFingerprint()
-        guard latest != fingerprint else { return }
-        fingerprint = latest
+        guard latest != fingerprint || readFailure != nil else { return }
         await reload()
     }
 
-    // MARK: Preview
+    // MARK: Editor
 
     func setSystemDark(_ dark: Bool) {
         guard systemDark != dark else { return }
         systemDark = dark
-        if draft == nil { update(resolved(selection, in: library)) }
-        else if current.mode == .system {
-            picker = dark ? .dark : .light
-            update(selectedTheme)
+        if draft == nil {
+            previewSide = selection.isDark(systemDark: dark) ? .dark : .light
+            update(resolved(selection, in: library))
         }
     }
-    func beginPreview() {
-        guard draft == nil else { return }
-        draft = AppearanceDraft(selection: selection, library: library)
-        picker = selection.isDark(systemDark: systemDark) ? .dark : .light
+
+    func customize() {
+        guard !editing else { return }
         diagnostics = []
-    }
-    func showPicker(_ appearance: AppearanceMode) {
-        guard appearance != .system else { return }
-        beginPreview()
-        picker = appearance
-        draft?.refusal = nil
-        update(selectedTheme)
-    }
-    func previewMode(_ mode: AppearanceMode) {
-        beginPreview()
-        draft?.selection.mode = mode
-        draft?.refusal = nil
-        picker = current.isDark(systemDark: systemDark) ? .dark : .light
-        update(selectedTheme)
-    }
-    func previewTheme(_ name: String) {
-        guard let theme = currentLibrary.resolve(name) else { notice = "No theme named “\(name)”."; return }
-        beginPreview()
-        if picker == .dark { draft?.selection.dark = name } else { draft?.selection.light = name }
-        draft?.refusal = nil
-        diagnostics = []
+        let theme = selectedTheme
+        draft = ThemeDraft(name: theme.name, theme: theme, selection: selection, original: declaration)
         update(theme)
     }
 
-    /// Make the selected theme yours: a built-in or Ghostty theme becomes your file of the same name.
-    func customize() {
-        beginPreview()
-        guard selectedSource != .yours else { return }
-        stage(selectedTheme, for: selectedName)
-    }
-
     func editTheme(_ edit: (inout PaletteDefinition, inout TerminalPalette) -> Void) {
-        customize()
-        var palette = selectedTheme.palette.definition
-        var terminal = selectedTheme.terminal
+        if !editing { customize() }
+        guard let theme = draft?.theme else { return }
+        var palette = theme.palette.definition
+        var terminal = theme.terminal
         edit(&palette, &terminal)
-        stage(ThemeDefinition(name: selectedName, palette: LoopflowPalette(palette), terminal: terminal), for: selectedName)
+        let edited = ThemeDefinition(name: theme.name, palette: LoopflowPalette(palette), terminal: terminal)
+        draft?.theme = edited
+        update(edited)
     }
 
-    /// Delete your file. One that overrides a built-in reverts to it; otherwise the side returns to Loopflow's.
+    /// Removing a personal override reveals its built-in. Other names return to the default for that side.
     func deleteTheme() {
         guard canDelete else { return }
-        let name = selectedName
-        let builtin = currentLibrary.isBuiltin(name)
-        stage(nil, for: name)
+        customize()
+        let builtin = library.isBuiltin(selectedName)
+        draft?.theme = nil
         if !builtin {
-            if picker == .dark { draft?.selection.dark = ThemeDefinition.dark.name } else { draft?.selection.light = ThemeDefinition.light.name }
+            let dark = previewSide == .dark
+            draft?.selection.setName((dark ? ThemeDefinition.dark : .light).name, dark: dark)
         }
         update(selectedTheme)
     }
 
-    /// Import a theme file into the active picker. Only that picker's appearance is accepted.
     func importTheme(_ url: URL) {
-        beginPreview()
         do {
             let file = try ThemeFile.read(url)
-            let dark = picker == .dark
-            guard file.theme.isDark == dark else {
-                let other = file.theme.isDark ? "Dark" : "Light"
-                draft?.refusal = "“\(file.theme.name)” is a \(other.lowercased()) theme. Import it from the \(other) picker."
-                return
-            }
-            draft?.refusal = nil
-            stage(file.theme, for: file.theme.name)
-            if dark { draft?.selection.dark = file.theme.name } else { draft?.selection.light = file.theme.name }
+            let theme = file.theme
+            var choice = selection
+            previewSide = theme.isDark ? .dark : .light
+            if choice.mode != .system { choice.mode = previewSide }
+            choice.setName(theme.name, dark: theme.isDark)
+            draft = ThemeDraft(name: theme.name, theme: theme, selection: choice, original: declaration)
             diagnostics = file.diagnostics
-            update(file.theme)
+            update(theme)
         } catch { notice = error.localizedDescription }
-    }
-
-    /// Stage your file `name`: a theme to write, or nil to delete.
-    private func stage(_ theme: ThemeDefinition?, for name: String) {
-        draft?.changed.insert(name)
-        draft?.library.yours[name] = theme
-        if let theme { update(theme) }
     }
 
     // MARK: Writing
 
-    /// Menu Mode change: writes the config at once and discards any preview.
-    func applyMode(_ mode: AppearanceMode) async {
-        guard !saving else { return }
+    func applyMode(_ mode: AppearanceMode, notices: NoticeCenter? = nil, manager: UndoManager? = nil) async {
+        var choice = selection
+        choice.mode = mode
+        await choose(choice, side: choice.isDark(systemDark: systemDark) ? .dark : .light, notices: notices, manager: manager)
+    }
+
+    func selectTheme(_ name: String, notices: NoticeCenter, manager: UndoManager?) async {
+        guard let theme = library.resolve(name) else { notice = "No theme named “\(name)”."; return }
+        guard theme.readabilityErrors.isEmpty else { notice = theme.readabilityErrors.joined(separator: "\n"); return }
+        let side: AppearanceMode = theme.isDark ? .dark : .light
+        var choice = selection
+        if choice.mode != .system { choice.mode = side }
+        choice.setName(name, dark: theme.isDark)
+        await choose(choice, side: side, notices: notices, manager: manager)
+    }
+
+    private func choose(_ choice: AppearanceSelection, side: AppearanceMode, notices: NoticeCenter?, manager: UndoManager?) async {
+        guard !saving, !editing else { return }
         saving = true
         reading = UUID()
         defer { saving = false }
-        var choice = selection
-        choice.mode = mode
         do {
-            try await ThemeConfig.write(choice.configValue, to: paths.config, location: location)
+            let receipt = try await save(choice, original: declaration)
             selection = choice
-            draft = nil
-            update(resolved(selection, in: library))
-        } catch { notice = error.localizedDescription }
+            previewSide = side
+            readFailure = nil
+            update(resolved(choice, in: library))
+            guard receipt.before != receipt.after else { return }
+            let undo = Notice.Action.undo("Change Theme", manager: manager, target: self) { [weak notices] store in
+                Task {
+                    do {
+                        _ = try await store.edit(.restore(receipt.before), expected: receipt.after)
+                        notices?.clear(key: "theme")
+                    } catch {
+                        let failure = error.localizedDescription
+                        await store.reload()
+                        store.readFailure = failure
+                        notices?.post(Notice(failure, key: "theme"))
+                        return
+                    }
+                    await store.reload()
+                }
+            }
+            notices?.post(Notice("Theme saved", key: "theme", action: undo))
+        } catch {
+            await reload()
+            readFailure = error.localizedDescription
+        }
+    }
+
+    private func edit(_ change: ConfigurationChange, expected: [ConfigurationEntry]) async throws -> ConfigurationEditReceipt {
+        try await ServerClient.edit(change, destination: .object(["kind": .string("personal_global")]),
+                                    key: "theme", expected: expected, location: location)
+    }
+
+    private func save(_ choice: AppearanceSelection, original: [ConfigurationEntry]?) async throws -> ConfigurationEditReceipt {
+        guard let original else {
+            throw RegistryQueryError("Update the Machine’s server to edit themes from Settings.")
+        }
+        let receipt = try await edit(.set(JSONValue.string(choice.configValue).settingsYAML), expected: original)
+        declaration = receipt.after
+        return receipt
     }
 
     func apply() async {
@@ -287,25 +335,33 @@ final class AppearanceStore {
         reading = UUID()
         defer { saving = false }
         do {
-            for name in draft.changed.sorted() {
-                let url = paths.themes.appendingPathComponent(name)
-                if let theme = draft.library.yours[name] {
-                    try FileManager.default.createDirectory(at: paths.themes, withIntermediateDirectories: true)
-                    try Data(ThemeFile.text(theme).utf8).write(to: url, options: .atomic)
-                } else if FileManager.default.fileExists(atPath: url.path) {
-                    try FileManager.default.removeItem(at: url)
-                }
+            let url = paths.themes.appendingPathComponent(draft.name)
+            if let theme = draft.theme {
+                try FileManager.default.createDirectory(at: paths.themes, withIntermediateDirectories: true)
+                try Data(ThemeFile.text(theme).utf8).write(to: url, options: .atomic)
+            } else if FileManager.default.fileExists(atPath: url.path) {
+                try FileManager.default.removeItem(at: url)
             }
-            try await ThemeConfig.write(draft.selection.configValue, to: paths.config, location: location)
-        } catch { notice = error.localizedDescription; return }
+            _ = try await save(draft.selection, original: draft.original)
+        } catch {
+            await reload()
+            if readFailure == nil { self.draft?.original = declaration }
+            notice = error.localizedDescription
+            return
+        }
         selection = draft.selection
         self.draft = nil
-        await reload()
+        readFailure = nil
+        diagnostics = []
+        library = ThemeLibrary.load(paths)
+        notice = library.problems.isEmpty ? nil : library.problems.joined(separator: "\n")
+        update(resolved(selection, in: library), keepingNotice: true)
     }
 
     func cancel() {
-        guard !saving else { return }
         draft = nil
+        diagnostics = []
+        previewSide = selection.isDark(systemDark: systemDark) ? .dark : .light
         update(resolved(selection, in: library))
     }
 

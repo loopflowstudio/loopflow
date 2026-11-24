@@ -22,7 +22,6 @@ pub struct Status {
     reading: Reading,
     stream: Option<UnixStream>,
     received: Vec<u8>,
-    pending_move: Option<u64>,
     retry: bool,
     gap: crate::store::RecordingGap,
 }
@@ -31,7 +30,6 @@ pub struct Status {
 struct Reading {
     generation: u64,
     state: &'static str,
-    input: bool,
     native_ready: bool,
     message: Option<String>,
     transition: Option<loopflow_storage::sqlite::provider_transitions::ProviderTransition>,
@@ -41,7 +39,6 @@ struct Reading {
 #[serde(tag = "kind", rename_all = "snake_case")]
 enum Action {
     Retry,
-    Move { generation: u64 },
 }
 
 impl Status {
@@ -54,23 +51,20 @@ impl Status {
             reading: Reading {
                 generation: 0,
                 state: "connecting",
-                input: false,
                 native_ready: false,
                 message: None,
                 transition: None,
             },
             stream: None,
             received: Vec::new(),
-            pending_move: None,
             retry: false,
             gap: crate::store::RecordingGap::default(),
         })
     }
 
-    fn publish(&mut self, state: &'static str, input: bool, message: Option<&str>) {
+    fn publish(&mut self, state: &'static str, message: Option<&str>) {
         self.reading.generation = self.generation;
         self.reading.state = state;
-        self.reading.input = input;
         self.reading.message = message.map(str::to_owned);
         if self.stream.is_none() {
             self.refresh(); // A new connection receives the latest reading below.
@@ -90,10 +84,9 @@ impl Status {
 
     fn disconnect(&mut self, error: &io::Error) {
         // A broken/slow status consumer cannot block the provider's byte path.
-        // Closing also makes Desktop discard its previous input permission.
+        // Closing also makes Desktop pause input until the next reading.
         self.stream = None;
         self.received.clear();
-        self.pending_move = None;
         self.retry = false;
         if !self.closed() {
             self.gap.note("publish terminal connection status", error);
@@ -187,27 +180,24 @@ impl Status {
             let line: Vec<_> = self.received.drain(..=end).collect();
             match serde_json::from_slice::<Action>(&line) {
                 Ok(Action::Retry) if self.reading.state == "unavailable" => self.retry = true,
-                Ok(Action::Move { generation }) if self.reading.state == "connected" => {
-                    self.pending_move = Some(generation)
-                }
                 _ => {}
             }
         }
     }
 
-    pub fn connected(&mut self, input: bool) {
+    pub fn connected(&mut self) {
         self.connected_once = true;
         self.attempts = 0;
-        self.publish("connected", input, None);
+        self.publish("connected", None);
     }
 
     pub fn native_ready(&mut self) {
         self.reading.native_ready = true;
-        self.publish(self.reading.state, self.reading.input, None);
+        self.publish(self.reading.state, None);
     }
 
     pub fn ended(&mut self, message: Option<&str>) {
-        self.publish("ended", false, message);
+        self.publish("ended", message);
     }
 
     pub fn closed(&self) -> bool {
@@ -216,26 +206,14 @@ impl Status {
         })
     }
 
-    /// Consume before sending: a lost acknowledgement never retries a takeover.
-    pub(super) fn take_move(&mut self, ready: bool) -> bool {
-        self.refresh();
-        let requested = self.pending_move.take();
-        if !ready || self.closed() || requested != Some(self.generation) {
-            return false;
-        }
-        self.generation += 1;
-        self.publish("moving", false, None);
-        true
-    }
-
-    /// Returns the bridge and whether connection failure consumed the initial
-    /// intent to replace claims. Recovery may only ask for free claims.
+    /// Returns the bridge and whether it is a recovery: connection failure
+    /// consumed the first attempt.
     pub fn connect(
         &mut self,
         terminal: &loopflow_model::id::TerminalId,
         session: &loopflow_model::id::LfSessionId,
         initial: bool,
-        paste: &mut super::input::Paste,
+        input: &mut super::RelayInput,
     ) -> Result<Option<(UnixStream, bool)>> {
         self.generation += 1;
         self.reading.native_ready = false;
@@ -244,8 +222,8 @@ impl Status {
         } else {
             "connecting"
         };
-        self.publish(waiting, false, None);
-        super::discard_reconnect_input(paste)?;
+        self.publish(waiting, None);
+        super::discard_reconnect_input(input)?;
         let mut recovered = !initial;
         // Readiness belongs to this first call, never to a Retry cycle. A failed
         // setup consumes it too; installation must repair availability separately.
@@ -264,8 +242,8 @@ impl Status {
         };
         // Each cycle is bounded; a native Retry action starts another cycle.
         loop {
-            self.publish(waiting, false, setup_error.as_deref());
-            super::discard_reconnect_input(paste)?;
+            self.publish(waiting, setup_error.as_deref());
+            super::discard_reconnect_input(input)?;
             let mut reason = "The held terminal did not acknowledge its connection".to_owned();
             while self.attempts < MAX_ATTEMPTS {
                 let attempt = self.attempts;
@@ -342,7 +320,7 @@ impl Status {
                 .map(|error| format!("Initial setup failed: {error}. "))
                 .unwrap_or_default();
             let message = format!("Session unavailable. Last screen is stale. {setup}{reason}. Check the selected Loopflow installation and Background Items, then Retry. Retry only reconnects. No provider was restarted.");
-            self.publish("unavailable", false, Some(&message));
+            self.publish("unavailable", Some(&message));
             loop {
                 if !self.wait(Duration::from_millis(100))? {
                     return Ok(None);

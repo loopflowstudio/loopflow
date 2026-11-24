@@ -58,7 +58,6 @@ fn service_auth_survives_subscription_removal() {
             "opencodezen",
             "linear",
             "asana",
-            "notion",
             "doppler"
         ]
     );

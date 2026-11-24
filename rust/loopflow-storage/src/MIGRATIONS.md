@@ -137,6 +137,39 @@ under the migration fence, so an interrupted upgrade still has every document it
 replaced.
 The check measures; nothing at runtime refuses to install or migrate.
 
+### Leaving marks
+
+A member the product stopped using gets a mark in the migration that stops
+using it, naming the Task that will drop it:
+
+```sql
+-- leaving: agent_sessions.work_source LOO-836
+-- leaving: provider_accounts LOO-928
+```
+
+```bash
+$ uv run python scripts/due_removals.py
+LOO-836  agent_sessions.work_source  drop after 2026-12-17  unstarted
+LOO-928  provider_accounts, provider_session_accounts, …  drop after 2026-12-17  unstarted
+```
+
+The clock starts when the marking migration merges to `origin/main`
+(first-parent), and the member may drop `STAGING_DAYS` later. Mark a member
+when its last read or write is deleted, not when it was superseded: an old
+migration that happened to add the replacement says nothing about when older
+lf stopped reading the original, so it cannot stand in as `-- expand:`.
+
+The contract that drops them names the marking migration as its `-- expand:`.
+When that migration carries marks, the contract may drop only marked members.
+A mark must name a table or column that exists and a Task ID; it is a comment,
+so a marked member stays fully readable until the contract runs.
+
+`rust/loopflow-storage/SCHEMA.md` is generated from the migrations and lists
+every table under its product concept, with each leaving member's Task and the
+migration that marked it. `uv run python scripts/schema_page.py` rewrites it;
+`--check` runs in CI. The page names no date, so merging leaves it current;
+`due_removals.py` prints the dates.
+
 Rename and reshape are expand then contract. A process older than the window
 meets a dropped column as an error from the one statement that reads it; the
 rest of the store still answers.
@@ -163,6 +196,8 @@ f5981e removes the write 30 days after that release.
 - An unmerged migration is additive against `origin/main`'s schema, or a contract
   whose `-- expand:` step merged `STAGING_DAYS` ago and whose `-- exports:` names
   where the dropped data went.
+- Every `-- leaving:` mark names a current table or column and a Task ID; a
+  contract whose expand step carries marks drops only marked members.
 
 ## What a database can be told
 

@@ -51,7 +51,8 @@ pub struct ContextExplanation {
     pub task: ContextFact,
     pub session: ContextFact,
     pub process: ContextFact,
-    pub planning_observed_at: Option<i64>,
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub tracker_synced_at: Option<i64>,
 }
 
 impl ContextExplanation {
@@ -67,7 +68,7 @@ impl ContextExplanation {
             task: ContextFact::Unbound,
             session: ContextFact::Unbound,
             process: ContextFact::Unbound,
-            planning_observed_at: None,
+            tracker_synced_at: None,
         }
     }
 
@@ -106,8 +107,8 @@ impl ContextExplanation {
             lines.push(format!("{label}: {}", fact.render()));
         }
         lines.push(format!(
-            "Planning observed: {}",
-            self.planning_observed_at
+            "Tracker synced: {}",
+            self.tracker_synced_at
                 .map(|at| at.to_string())
                 .unwrap_or_else(|| "unknown".into())
         ));
@@ -116,16 +117,15 @@ impl ContextExplanation {
 }
 
 /// Explicit subjects and checkout inference share the launch identity reader.
-/// Session/Process arguments name recorded history; neither requests takeover.
+/// A Session argument names recorded history; it never requests takeover.
 pub async fn explain_context(
     store: &SharedStore,
     cwd: &Path,
     work: WorkSelection<'_>,
     session: Option<&str>,
-    process: Option<&str>,
 ) -> ContextExplanation {
     let mut report = ContextExplanation::empty();
-    if let Err(error) = read_context(store, cwd, work, session, process, &mut report).await {
+    if let Err(error) = read_context(store, cwd, work, session, &mut report).await {
         // Preserve independently read provenance; failure never becomes unbound.
         let failure = ContextFact::unavailable(error);
         for fact in [
@@ -149,7 +149,6 @@ async fn read_context(
     cwd: &Path,
     work: WorkSelection<'_>,
     session: Option<&str>,
-    process: Option<&str>,
     report: &mut ContextExplanation,
 ) -> anyhow::Result<()> {
     let local = match store.local_machine().await {
@@ -163,28 +162,7 @@ async fn read_context(
     let mut directory = cwd.to_path_buf();
     let mut source = "checkout";
     let mut session_record = None;
-    if let Some(selector) = process {
-        let record = match store.resolve_process(selector).await {
-            Ok(Some(record)) => record,
-            result => {
-                let error = result.err().map(|e| e.to_string()).unwrap_or_else(|| {
-                    format!("Process {selector} is not recorded on this Machine")
-                });
-                report.process = ContextFact::unavailable(&error);
-                anyhow::bail!(error);
-            }
-        };
-        report.process = ContextFact::bound(record.id(), "explicit");
-        // The caller is provenance, not the work this command performed.
-        if let Some(id) = record.as_lf().and_then(|lf| lf.caller_session_id.clone()) {
-            report.session = ContextFact::bound(id, "process_caller");
-        }
-        let Some(path) = record.cwd() else {
-            anyhow::bail!("Process has no recorded checkout")
-        };
-        directory = path.into();
-        source = "process_checkout";
-    } else if let Some(selector) = session {
+    if let Some(selector) = session {
         let record = match super::human_session::session_by_id(store, selector).await {
             Ok(Some(record)) => record,
             result => {
@@ -224,11 +202,7 @@ async fn read_context(
     // because their retained cwd happens to be a Task checkout.
     let selected = if session.is_some() && selection.task.is_none() && selection.wave.is_none() {
         None
-    } else if session.is_none()
-        && process.is_none()
-        && selection.task.is_none()
-        && selection.wave.is_none()
-    {
+    } else if session.is_none() && selection.task.is_none() && selection.wave.is_none() {
         select_execution_work(store, &directory).await?
     } else {
         select_work(store, &directory, selection).await?
@@ -258,7 +232,7 @@ async fn read_context(
         };
         if let Some(task) = selected.task {
             report.task = ContextFact::bound(&task.id, provenance);
-            report.planning_observed_at = task.pm_snapshot_synced_at;
+            report.tracker_synced_at = task.tracker_synced_at;
             if let Some(checkout) = store.task_checkout(&task.id).await? {
                 report.checkout =
                     ContextFact::bound(checkout.worktree.display(), "recorded_checkout");
@@ -295,7 +269,7 @@ async fn read_context(
                 report.checkout = ContextFact::bound(root.display(), source);
                 report.execution_machine = ContextFact::bound(local, "local_checkout");
             }
-            Err(error) if work.wave.is_some() || session.is_some() || process.is_some() => {
+            Err(error) if work.wave.is_some() || session.is_some() => {
                 report.checkout = ContextFact::unavailable(error);
                 report.execution_machine =
                     ContextFact::unavailable("Selected location is not available locally");

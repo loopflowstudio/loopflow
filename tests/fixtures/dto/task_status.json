@@ -3,8 +3,6 @@
   "plan_stale": false,
   "sync": null,
   "execution": null,
-  "plan_state": "available",
-  "observed_at": 1790683200,
   "task": {
     "id": "task_11111111111111111111111111111111",
     "revision": 1,
@@ -16,13 +14,14 @@
     "due_date": null,
     "state": "unstarted",
     "completed_at": null,
-    "linear_id": "issue-gmail",
-    "pm_snapshot_synced_at": 1790683200,
-    "pm_writeback": {
+    "tracker_id": "issue-gmail",
+    "tracker_synced_at": 1790683200,
+    "tracker_writeback": {
       "state": "current"
     },
     "wave_id": "11111111-1111-4111-8111-111111111111",
     "project_id": "project_11111111111111111111111111111111",
+    "parent_task_id": null,
     "worktree": null,
     "workspace_slug": "",
     "branch": "",
@@ -46,8 +45,8 @@
     ],
     "metric_targets": [],
     "status": "started",
-    "linear_id": "project-gmail",
-    "pm_snapshot_synced_at": 1790683200,
+    "tracker_id": "project-gmail",
+    "tracker_synced_at": 1790683200,
     "wave_id": "11111111-1111-4111-8111-111111111111",
     "created_at": "2026-09-29T12:00:00Z",
     "updated_at": "2026-09-29T12:00:00Z"
@@ -74,7 +73,9 @@
         "machine_id": "home_1b2c3d4e5f60718293a4b5c6d7e8f901",
         "machine_label": "jack-mbp",
         "writer_machine_id": "home_1b2c3d4e5f60718293a4b5c6d7e8f901",
-        "at": 1790683100
+        "at": 1790683100,
+        "order": null,
+        "seen": null
       },
       {
         "id": "own_1d0e9f8a7b6c5d4e3f2a1b0c9d8e7f6a",
@@ -86,7 +87,9 @@
         "machine_id": "home_7a3f0c2e9b1d4e5f8a6b0c1d2e3f4a5b",
         "machine_label": "mini",
         "writer_machine_id": "home_1b2c3d4e5f60718293a4b5c6d7e8f901",
-        "at": 1790683150
+        "at": 1790683150,
+        "order": null,
+        "seen": null
       }
     ]
   },
@@ -120,5 +123,48 @@
     ],
     "refresh_error": null,
     "conflicts": {}
-  }
+  },
+  "tracker_state": {
+    "state": "available",
+    "synced_at": 1790683200
+  },
+  "row": null,
+  "parent": {
+    "id": "task_44444444444444444444444444444444",
+    "identifier": "LOO-1",
+    "title": "Parse incoming mail",
+    "wave": null,
+    "project": "Mail",
+    "parent_id": null,
+    "state": "idle",
+    "reason": "Merged · 2 children open",
+    "graph": {
+      "name": "code",
+      "step": "end"
+    },
+    "pr": {
+      "number": 1718,
+      "url": "https://github.com/loopflowstudio/loopflow/pull/1718",
+      "phase": "merged"
+    },
+    "next": null
+  },
+  "children": [
+    {
+      "id": "task_33333333333333333333333333333333",
+      "identifier": "LOO-3",
+      "title": "Retry the bounced mail",
+      "wave": null,
+      "project": "Mail",
+      "parent_id": "task_11111111111111111111111111111111",
+      "state": "idle",
+      "reason": "Waiting at ship-review",
+      "graph": {
+        "name": "code",
+        "step": "ship-review"
+      },
+      "pr": null,
+      "next": "lf task run LOO-3"
+    }
+  ]
 }

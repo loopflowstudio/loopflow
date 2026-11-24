@@ -1,16 +1,16 @@
 //! Name remote machines without transferring credentials or execution authority.
 
 use anyhow::{anyhow, Context};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::io::{self, IsTerminal, Write};
 use std::process::Stdio;
 
 use crate::lf::MachineCommand;
 use loopflow_execution::machine::connection::{
     find_machine, install_command, local_machine, probe, report_version, update_command,
-    ConnectionFailure, FailureKind, INSTALL_COMMAND,
+    verify_identity, ConnectionFailure, FailureKind, INSTALL_COMMAND,
 };
-use loopflow_execution::machine::ssh::REMOTE_PATH;
+use loopflow_execution::machine::ssh::remote_path;
 use loopflow_execution::store::Store;
 use loopflow_model::durable::{DefaultScope, Machine, MachineDefault, MachineSetting};
 
@@ -20,9 +20,33 @@ pub fn run(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
         MachineCommand::End { label, force } => return super::rental::end(label, *force),
         MachineCommand::Pool { cmd } => return super::rental::run_pool(cmd),
         MachineCommand::Ondemand { cmd } => return super::rental::run_ondemand(cmd, batch),
+        MachineCommand::Prune { json } => return prune(*json),
         _ => {}
     }
     tokio::runtime::Runtime::new()?.block_on(run_async(cmd, batch))
+}
+
+/// `lf machine prune`: store retention, as the Machine server runs it hourly.
+fn prune(json: bool) -> anyhow::Result<()> {
+    let database = loopflow_execution::store::database_path_from_env()?;
+    if !database.exists() {
+        anyhow::bail!("no store at {}", database.display());
+    }
+    let now = time::OffsetDateTime::now_utc().unix_timestamp();
+    let report = loopflow_execution::store::retention::prune(&database, now)?;
+    if json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        println!(
+            "ended {} runs and agents nobody saw exit · moved {} observations · converted {} turns · forgot {} history rows{}",
+            report.ended_owners,
+            report.moved_observations,
+            report.converted_turns,
+            report.forgotten_history,
+            if report.vacuumed { " · vacuumed" } else { "" },
+        );
+    }
+    Ok(())
 }
 
 async fn existing_store() -> anyhow::Result<Store> {
@@ -47,6 +71,7 @@ async fn listings(store: &Store, label: Option<&str>) -> anyhow::Result<Vec<Mach
     if label.is_none() && defaults.iter().any(|d| d.machine_id == local.id) {
         machines.insert(0, local);
     }
+    let hub = loopflow_execution::ops::plan_hub::hub(&store.sqlite)?.map(|hub| hub.id);
     let mut listed = Vec::new();
     for machine in machines {
         let mut tasks = Vec::new();
@@ -60,6 +85,7 @@ async fn listings(store: &Store, label: Option<&str>) -> anyhow::Result<Vec<Mach
             }
         }
         listed.push(MachineListing {
+            hub: hub.as_ref() == Some(&machine.id),
             defaults: defaults
                 .iter()
                 .filter(|d| d.machine_id == machine.id)
@@ -138,7 +164,11 @@ async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
         }
         _ => {}
     }
-    let store = existing_store().await?;
+    // Changes to the registry start it on a fresh home.
+    let store = loopflow_execution::store::open_store(
+        &loopflow_execution::store::storage_config_from_env()?,
+    )
+    .await?;
     match cmd {
         MachineCommand::Public { name } => {
             let name = (name != "off").then_some(name.as_str());
@@ -176,7 +206,9 @@ async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
             };
             if let Some(pool) = pool {
                 if loopflow_execution::store::rentals::pool(&store.sqlite, pool)?.is_none() {
-                    return Err(anyhow!("no pool {pool}; `lf pool add {pool}` creates it"));
+                    return Err(anyhow!(
+                        "no pool {pool}; `lf machine pool add {pool}` creates it"
+                    ));
                 }
             }
             let probe = match probe(target, false).await {
@@ -213,6 +245,27 @@ async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
             }
             print_machine(&machine, *json)?;
         }
+        MachineCommand::Hub { machine, clear } => {
+            let selected = match machine {
+                Some(machine) => Some(find_machine(&store, machine).await?),
+                None if *clear => None,
+                None => {
+                    match loopflow_execution::ops::plan_hub::hub(&store.sqlite)? {
+                        Some(hub) => println!("Hub {}.", hub.name()),
+                        None => println!("No hub."),
+                    }
+                    return Ok(());
+                }
+            };
+            loopflow_execution::ops::plan_hub::set_hub(
+                &store.sqlite,
+                selected.as_ref().map(|machine| &machine.id),
+            )?;
+            match selected {
+                Some(hub) => println!("This Machine exchanges its plan with {}.", hub.name()),
+                None => println!("No hub."),
+            }
+        }
         MachineCommand::List { label, json } => {
             let listings = listings(&store, label.as_deref()).await?;
             if *json {
@@ -220,6 +273,9 @@ async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
             } else {
                 for listing in &listings {
                     print_machine(&listing.machine, false)?;
+                    if listing.hub {
+                        println!("  hub: this Machine exchanges its plan with it");
+                    }
                     for default in &listing.defaults {
                         let scope = match &default.scope {
                             DefaultScope::Wave(_) => "Wave",
@@ -255,38 +311,7 @@ async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
             };
             let mut statuses = Vec::new();
             for machine in machines {
-                // A given-back sandbox is gone; probing it would only time out.
-                let ended = store
-                    .sqlite
-                    .rental_for_machine(&machine.id)?
-                    .filter(|rental| !rental.state.is_live());
-                let result = match &ended {
-                    Some(rental) => Err(anyhow!(
-                        "rental ended{}",
-                        rental
-                            .ended_at
-                            .map_or_else(String::new, |at| format!(" {at}"))
-                    )),
-                    None => probe(&machine.route, false).await,
-                };
-                let (remote_version, error) = match result {
-                    Ok(probe) => {
-                        let error = match probe.id {
-                            Ok(id) if id == machine.id => None,
-                            Ok(id) => Some(format!("identity changed: expected {}, reached {id}; remove and add the connection again", machine.id)),
-                            Err(error) => Some(error.to_string()),
-                        };
-                        (Some(probe.version), error)
-                    }
-                    Err(error) => (None, Some(error.to_string())),
-                };
-                let status = MachineStatus {
-                    update_command: update_command(&machine.route),
-                    machine,
-                    local_version: crate::build_info::BUILD_VERSION,
-                    remote_version,
-                    error,
-                };
+                let status = connection_status(&store, machine).await?;
                 if !*json {
                     println!(
                         "{}  {}  remote lf {} / local lf {}",
@@ -324,6 +349,7 @@ async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
             )
         }
         MachineCommand::End { .. }
+        | MachineCommand::Prune { .. }
         | MachineCommand::Pool { .. }
         | MachineCommand::Ondemand { .. } => {
             unreachable!("machine end, pool and ondemand dispatch before the store opens")
@@ -401,6 +427,8 @@ pub struct MachineListing {
     #[serde(flatten)]
     machine: Machine,
     defaults: Vec<MachineDefault>,
+    /// This Machine exchanges its plan with it (`lf machine hub`).
+    hub: bool,
     /// Unfinished Tasks it owns, as this Machine reads their ownership.
     tasks: Vec<HeldTask>,
 }
@@ -413,11 +441,71 @@ struct HeldTask {
     since: i64,
 }
 
-#[derive(Debug, Serialize)]
-struct MachineStatus {
+/// Health of a registered connection, using the CLI's identity check and deadline.
+pub(super) async fn status_by_id(
+    id: &loopflow_model::durable::MachineId,
+) -> anyhow::Result<Vec<MachineStatus>> {
+    static PROBES: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(4);
+    let _permit = PROBES.acquire().await?;
+    let store = existing_store().await?;
+    let machine = loopflow_execution::store::machines::machine_by_id(&store.sqlite, id)?
+        .filter(|machine| machine.label.is_some())
+        .ok_or_else(|| anyhow!("Machine {id} is no longer registered"))?;
+    Ok(vec![connection_status(&store, machine).await?])
+}
+
+async fn connection_status(store: &Store, machine: Machine) -> anyhow::Result<MachineStatus> {
+    let ended = store
+        .sqlite
+        .rental_for_machine(&machine.id)?
+        .filter(|rental| !rental.state.is_live());
+    let (state, remote_version, error) = if let Some(rental) = ended {
+        let when = rental
+            .ended_at
+            .map_or_else(String::new, |at| format!(" {at}"));
+        (
+            ConnectionState::EndedRental,
+            None,
+            Some(format!("rental ended{when}")),
+        )
+    } else {
+        match probe(&machine.route, false).await {
+            Ok(probe) => {
+                let version = Some(probe.version);
+                match probe.id.and_then(|id| verify_identity(&machine.id, id)) {
+                    Ok(()) => (ConnectionState::Reachable, version, None),
+                    Err(error) => (ConnectionState::Error, version, Some(error.to_string())),
+                }
+            }
+            Err(error) => (ConnectionState::Error, None, Some(error.to_string())),
+        }
+    };
+    Ok(MachineStatus {
+        state,
+        remote_version,
+        error,
+        update_command: update_command(&machine.route),
+        local_version: crate::build_info::BUILD_VERSION.to_owned(),
+        machine,
+    })
+}
+
+#[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+enum ConnectionState {
+    Reachable,
+    Error,
+    EndedRental,
+}
+
+#[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
+pub(super) struct MachineStatus {
+    state: ConnectionState,
     machine: Machine,
-    local_version: &'static str,
+    local_version: String,
+    #[serde(deserialize_with = "Option::deserialize")]
     remote_version: Option<String>,
+    #[serde(deserialize_with = "Option::deserialize")]
     error: Option<String>,
     update_command: String,
 }
@@ -437,8 +525,10 @@ fn confirm_install(target: &str) -> anyhow::Result<bool> {
 
 async fn install_remote(target: &str) -> anyhow::Result<()> {
     // Recheck on the target: another add may have installed it while we asked.
-    let command =
-        format!("{REMOTE_PATH}; if ! command -v lf >/dev/null 2>&1; then {INSTALL_COMMAND}; fi");
+    let command = format!(
+        "{}; if ! command -v lf >/dev/null 2>&1; then {INSTALL_COMMAND}; fi",
+        remote_path()
+    );
     let status = tokio::process::Command::new("ssh")
         .args(loopflow_execution::machine_route::bounded_ssh_args(
             target, false,

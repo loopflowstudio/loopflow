@@ -1,4 +1,4 @@
-use crate::machine::ssh::REMOTE_PATH;
+use crate::machine::ssh::remote_path;
 use crate::store::Store;
 use anyhow::{anyhow, Context};
 use loopflow_model::durable::{Machine, MachineId};
@@ -88,9 +88,19 @@ pub async fn find_machine(store: &Store, selector: &str) -> anyhow::Result<Machi
         .find(|machine| {
             machine.label.as_deref() == Some(selector) || machine.id.as_str() == selector
         })
-        .ok_or_else(|| {
-            anyhow!("machine {selector:?} is not added; run `lf machine add {selector}` first")
-        })
+        .ok_or_else(|| not_added(selector))
+}
+
+/// `selector` in this Machine's registry; a home with no registry has added none.
+pub async fn find_registered_machine(selector: &str) -> anyhow::Result<Machine> {
+    match crate::store::read_existing_registry()? {
+        Some(store) => find_machine(&store, selector).await,
+        None => Err(not_added(selector)),
+    }
+}
+
+fn not_added(selector: &str) -> anyhow::Error {
+    anyhow!("machine {selector:?} is not added; run `lf machine add {selector}` first")
 }
 
 #[derive(Debug)]
@@ -104,7 +114,8 @@ pub async fn probe(target: &str, forward_agent: bool) -> anyhow::Result<Probe> {
         return Err(anyhow!("SSH destination cannot be empty or contain NUL"));
     }
     let command = format!(
-        "{REMOTE_PATH}; command -v lf >/dev/null 2>&1 || {{ echo lf-not-installed; exit 127; }}; lf --version && lf machine id"
+        "{}; command -v lf >/dev/null 2>&1 || {{ echo lf-not-installed; exit 127; }}; lf --version && lf machine id",
+        remote_path()
     );
     let mut child = tokio::process::Command::new("ssh");
     child
@@ -211,14 +222,16 @@ pub async fn resolve_target(
     }
     let probe = probe(&machine.route, forward_agent).await?;
     report_version(&machine.route, &probe.version);
-    let reached = probe.id?;
-    if reached != machine.id {
-        return Err(anyhow!(
-            "remote machine identity changed: expected {}, reached {reached}; remove and add the connection again",
-            machine.id
-        ));
-    }
+    verify_identity(&machine.id, probe.id?)?;
     Ok(machine)
+}
+
+pub fn verify_identity(expected: &MachineId, reached: MachineId) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        reached == *expected,
+        "remote machine identity changed: expected {expected}, reached {reached}; remove and add the connection again"
+    );
+    Ok(())
 }
 
 /// This Machine's durable identity.

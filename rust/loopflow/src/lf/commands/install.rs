@@ -450,7 +450,7 @@ fn _executable_compatibility(connection: &rusqlite::Connection) -> ExecutableCom
     }
     if absent > 0 {
         // Never silent: a large count is a signal the registry has drifted from
-        // the filesystem and wants a `lf monitor prune`/reconcile sweep.
+        // the filesystem.
         eprintln!(
             "note: skipped {absent} placed Work reference(s) whose catalog root is gone \
              (dead worktrees); they cannot run and do not gate promotion"
@@ -667,6 +667,7 @@ mod compatibility_tests {
             loopflow_execution::store::migrations::latest_applied_version_sqlite(&conn).unwrap();
         let global = home.path().join("config.yaml");
         let private = loopflow_execution::config::files::private_path(repo.path()).unwrap();
+        std::fs::create_dir_all(private.parent().unwrap()).unwrap();
         let original = "# personal\nchrome: false\n";
         std::fs::write(&global, original).unwrap();
 
@@ -942,7 +943,10 @@ fn prepare_artifacts(
             if fs::symlink_metadata(target).is_err() {
                 return None;
             }
-            Some(install_scratch(target).join(format!("superseded.{upgrade_id}")))
+            Some(retired_app_path(
+                target,
+                &format!("superseded.{upgrade_id}"),
+            ))
         });
     Ok(PreparedArtifacts {
         cli_binary,
@@ -1193,15 +1197,27 @@ struct AppPromotion<'a> {
     expected_verdict: &'a Verdict,
 }
 
-/// Where promotion stages and retires bundles for `target`: one hidden
-/// `.noindex` directory beside it, so a commit stays a same-volume rename while
-/// Spotlight never indexes the copies. Its entries never end in `.app`.
-fn install_scratch(target: &Path) -> PathBuf {
-    let name = target
+fn app_bundle_name(target: &Path) -> &str {
+    target
         .file_name()
         .and_then(|name| name.to_str())
-        .unwrap_or("Loopflow.app");
-    target.with_file_name(format!(".{name}.noindex"))
+        .unwrap_or("Loopflow.app")
+}
+
+/// Where promotion stages and retires bundles for `target`: one hidden
+/// `.noindex` directory beside it, so a commit stays a same-volume rename while
+/// Spotlight never indexes the copies. Retired bundles keep their `.app` name
+/// inside a per-switch subdirectory (`superseded.<id>/Loopflow.app`) so macOS
+/// displays "Loopflow" rather than `superseded.switch-*` in TCC prompts while
+/// older processes finish.
+fn install_scratch(target: &Path) -> PathBuf {
+    target.with_file_name(format!(".{}.noindex", app_bundle_name(target)))
+}
+
+fn retired_app_path(target: &Path, slot: &str) -> PathBuf {
+    install_scratch(target)
+        .join(slot)
+        .join(app_bundle_name(target))
 }
 
 /// A unique path inside the scratch directory, which exists on return; a
@@ -1238,7 +1254,10 @@ fn commit_app_bundle(staged: &Path, plan: &AppPromotion<'_>) -> Result<Option<Pa
     let parent = plan.target.parent().unwrap_or_else(|| Path::new("."));
     let superseded = match plan.superseded {
         Some(superseded) => superseded.to_path_buf(),
-        None => scratch_entry(plan.target, "superseded")?,
+        None => retired_app_path(
+            plan.target,
+            &format!("superseded.{}-{}", std::process::id(), Uuid::new_v4()),
+        ),
     };
     let had_superseded = superseded.exists();
     if had_superseded && plan.target.exists() {
@@ -1249,6 +1268,9 @@ fn commit_app_bundle(staged: &Path, plan: &AppPromotion<'_>) -> Result<Option<Pa
     }
     let had_target = fs::symlink_metadata(plan.target).is_ok();
     if had_target {
+        if let Some(slot) = superseded.parent() {
+            fs::create_dir_all(slot).with_context(|| format!("create {}", slot.display()))?;
+        }
         fs::rename(plan.target, &superseded).with_context(|| {
             format!(
                 "preserve installed app {} as {}",
@@ -1261,6 +1283,9 @@ fn commit_app_bundle(staged: &Path, plan: &AppPromotion<'_>) -> Result<Option<Pa
     if let Err(error) = fs::rename(staged, plan.target) {
         if had_target {
             let _ = fs::rename(&superseded, plan.target);
+            if let Some(slot) = superseded.parent() {
+                let _ = fs::remove_dir(slot);
+            }
         }
         return Err(error).with_context(|| {
             format!(
@@ -1293,6 +1318,10 @@ fn remove_retired_app(path: &Path) -> Result<()> {
 }
 
 fn settle_app_artifacts(artifacts: &PreparedArtifacts) -> Result<()> {
+    let unregister = artifacts
+        .app_target
+        .as_deref()
+        .is_some_and(in_applications_folder);
     for path in [
         artifacts.app_source.as_deref(),
         artifacts.app_superseded.as_deref(),
@@ -1301,6 +1330,9 @@ fn settle_app_artifacts(artifacts: &PreparedArtifacts) -> Result<()> {
     .into_iter()
     .flatten()
     {
+        if unregister && path.exists() {
+            lsregister(&["-u"], path);
+        }
         remove_retired_app(path)?;
         if let Some(parent) = path.parent() {
             fs::File::open(parent)
@@ -1320,30 +1352,47 @@ fn settle_app_artifacts(artifacts: &PreparedArtifacts) -> Result<()> {
 /// afresh. Callers settle the legacy target. Runs under the promotion lock with
 /// no switch in flight; the install is already committed, so failures are logged.
 fn converge_release_app(target: &Path) {
-    // Nothing in it ends in `.app`, so Launch Services holds none of it.
-    // Inspect each bundle separately: a renamed helper may still own a Session.
+    let registered = in_applications_folder(target);
     let mut stale = sibling_promotion_copies(target);
-    match fs::read_dir(install_scratch(target)) {
+    if registered {
+        stale.extend(earlier_release_installs(target));
+    }
+    let scratch = install_scratch(target);
+    let bundle_name = app_bundle_name(target);
+    let mut scratch_slots = Vec::new();
+    match fs::read_dir(&scratch) {
         Ok(entries) => {
-            stale.extend(entries.filter_map(|entry| entry.ok().map(|entry| entry.path())))
+            for entry in entries.filter_map(Result::ok) {
+                let path = entry.path();
+                let nested = path.join(bundle_name);
+                if fs::symlink_metadata(&nested).is_ok() {
+                    stale.push(nested);
+                    scratch_slots.push(path);
+                } else if path.is_dir() && fs::symlink_metadata(path.join("Contents")).is_err() {
+                    scratch_slots.push(path);
+                } else {
+                    stale.push(path);
+                }
+            }
         }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
         Err(error) => tracing::warn!(%error, "superseded app copies could not be read"),
     }
-    let registered = in_applications_folder(target);
     if registered {
-        stale.extend(earlier_release_installs(target));
+        for app in &stale {
+            lsregister(&["-u"], app);
+        }
     }
     for app in stale {
-        if registered {
-            lsregister(&["-u"], &app);
-        }
         if let Err(error) = remove_retired_app(&app) {
             tracing::warn!(%error, "superseded app was not removed");
         }
     }
+    for slot in scratch_slots {
+        let _ = fs::remove_dir(slot);
+    }
     // Remove the container only once every retained image has exited.
-    let _ = fs::remove_dir(install_scratch(target));
+    let _ = fs::remove_dir(&scratch);
     if registered && target.exists() {
         lsregister(&["-f"], target);
     }
@@ -1584,7 +1633,7 @@ fn process_executables() -> Result<Vec<(libc::pid_t, String, Option<PathBuf>)>> 
         else {
             continue;
         };
-        let executable = loopflow_execution::journal::OsProcess::executable(pid as u32);
+        let executable = loopflow_execution::process::OsProcess::executable(pid as u32);
         // SAFETY: signal zero does not mutate the process and only probes
         // whether the pid observed above still exists.
         if executable.is_none() && unsafe { libc::kill(pid, 0) } != 0 {
@@ -1741,6 +1790,14 @@ mod app_process_tests {
         .unwrap();
         remove_retired_app(&retired).unwrap();
         converge_release_app(&app);
+        assert_eq!(
+            retired.file_name(),
+            Some(std::ffi::OsStr::new("Loopflow.app"))
+        );
+        assert_eq!(
+            retired.parent().and_then(Path::parent),
+            Some(root.join("Applications/.Loopflow.app.noindex").as_path())
+        );
         assert!(retired.join("Contents/MacOS/lf").exists());
         assert!(child.0.try_wait().unwrap().is_none());
         assert_eq!(
@@ -1751,6 +1808,7 @@ mod app_process_tests {
         child.0.wait().unwrap();
         converge_release_app(&app);
         assert!(!retired.exists());
+        assert!(!root.join("Applications/.Loopflow.app.noindex").exists());
     }
 
     #[test]
@@ -2235,6 +2293,15 @@ fn activate_switch_targets(
         verify_selected_app_bundle(app_target, &receipt.target.artifact_set)?;
     }
     if let Some(superseded) = superseded_app {
+        if receipt
+            .activation
+            .app
+            .as_deref()
+            .is_some_and(in_applications_folder)
+            && superseded.exists()
+        {
+            lsregister(&["-u"], &superseded);
+        }
         remove_retired_app(&superseded)?;
         if let Some(parent) = superseded.parent() {
             fs::File::open(parent)?.sync_all()?;
@@ -2932,15 +2999,11 @@ pub fn promote(
     if sync_skills && !preview_only {
         if promoted.is_some() {
             if let Err(error) = crate::lf::commands::ops::run_sync_skills(true, false, false) {
-                eprintln!(
-                    "warning: skill sync failed ({error:#}); binaries installed, skills unchanged"
-                );
+                eprintln!("warning: binaries installed, but skill sync failed ({error:#})");
             }
         }
         install_link_receiver(app_target);
     }
-    // The result goes last: skill sync prints dozens of lines, and the person or
-    // agent installing reads the tail.
     if let Some(promoted) = promoted {
         println!("{}", promoted.summary);
         crate::lf::commands::binaries::report_after_promote(promoted.replaced_app, &promoted.store);
@@ -3430,9 +3493,12 @@ mod artifact_tests {
         let directory = tempfile::tempdir().unwrap();
         let applications = directory.path().join("Applications");
         let target = applications.join("Loopflow.app");
-        // Earlier lf staged beside the target; Spotlight indexed the leftovers.
+        // Earlier lf staged beside the target and retired flat entries inside
+        // `.Loopflow.app.noindex/`; both are cleaned up alongside the nested layout.
         let orphan = applications.join(".Loopflow.app.superseded.4242-old");
         fs::create_dir_all(orphan.join("Contents")).unwrap();
+        let legacy_flat = applications.join(".Loopflow.app.noindex/superseded.switch-legacy");
+        fs::create_dir_all(legacy_flat.join("Contents")).unwrap();
         let candidate = CandidateIdentity::current();
         for version in ["1", "2"] {
             let source = directory.path().join(version).join("Loopflow.app");

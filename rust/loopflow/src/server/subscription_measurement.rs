@@ -43,9 +43,8 @@ fn attach(store: &SqliteStore, session: &str, pid: u32) -> SessionAttachment {
             [owner.as_str()],
         )
         .unwrap();
-    let attachment =
-        attachment::claim_session_attachment(store, session, None, &owner, true).unwrap();
-    let born = loopflow_execution::journal::process_started_at(pid)
+    let attachment = attachment::claim_session_attachment(store, session, None, &owner).unwrap();
+    let born = loopflow_execution::process::os_process::process_started_at(pid)
         .unwrap()
         .unwrap();
     store
@@ -78,6 +77,7 @@ fn seed(home: &Path, pid: u32) {
     for i in 0..64 {
         store
             .create_task(&loopflow_storage::work::task::NewTask {
+                parent_task_id: None,
                 repository_id: repository_id.clone(),
                 id: TaskId::new(),
                 project_id: None,
@@ -197,7 +197,7 @@ fn subscription_writer() {
         let delta = meter::snapshot().since(before);
         cpu += delta.user_ms + delta.system_ms;
         let (receipts, payload_bytes): (i64, i64) = store.conn.lock().unwrap().query_row(
-            "SELECT count(*),coalesce(sum(length(CAST(payload AS BLOB))),0) FROM session_events WHERE session_id='session-127' AND kind='observed'",
+            "SELECT count(*),coalesce(sum(length(CAST(payload AS BLOB))),0) FROM history.session_history WHERE session_id='session-127'",
             [], |row| Ok((row.get(0)?, row.get(1)?)),
         ).unwrap();
         assert_eq!(receipts as u64, count);

@@ -2,11 +2,54 @@
 use std::io::IsTerminal;
 use std::path::Path;
 
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
+use serde::{Deserialize, Serialize};
 
 use crate::lf::TaskCommand;
 use loopflow_execution::command::CommandIo;
 use loopflow_execution::engine::creation::{self, TaskCreation};
+use loopflow_storage::graph_process::{Execution, ExecutionResult};
+use loopflow_storage::sqlite::SqliteStore;
+
+/// `task.create`'s answer: its receipt, the primary conversation's record, the
+/// Task's parent and its row in the Work projection's shape, read when answering, so a
+/// client selects the Task and opens the conversation before its planning
+/// subscription lists it. The stored receipt holds neither.
+#[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct TaskCreated {
+    #[serde(flatten)]
+    pub receipt: creation::TaskCreateReceipt,
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub session: Option<loopflow_execution::ops::human_session::SessionRecord>,
+    pub row: super::waves::RoadmapTask,
+    /// The Task this one was filed from; `null` for top-level work.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub parent: Option<super::task_row::TaskRow>,
+}
+
+/// Read the created Task's row after its commit and join it to the answer, as
+/// the `row` step of request `id`'s creation.
+pub(crate) fn answer(
+    id: &str,
+    receipt: creation::TaskCreateReceipt,
+    session: Option<loopflow_execution::ops::human_session::SessionRecord>,
+) -> Result<TaskCreated> {
+    let _creation = tracing::info_span!(target: loopflow_execution::journal::START_TIMING_TARGET, "task_creation", request_id = id).entered();
+    creation::step("row", || {
+        tokio::runtime::Runtime::new()?.block_on(async {
+            let store = loopflow_execution::store::read_existing_registry()?
+                .map(std::sync::Arc::new)
+                .context("no Loopflow store exists on this Machine")?;
+            let (row, parent, _) = super::waves::task_with_family(&store, &receipt.task).await?;
+            Ok(TaskCreated {
+                receipt,
+                session,
+                row,
+                parent,
+            })
+        })
+    })
+}
 
 pub fn create(
     repo: &Path,
@@ -21,6 +64,7 @@ pub fn create(
         request,
         no_wave,
         wave,
+        parent,
         title,
         notes,
         run,
@@ -45,6 +89,7 @@ pub fn create(
             title: title.clone(),
             request: report,
             wave: if *no_wave { None } else { wave.clone() },
+            parent: parent.clone(),
             graph: graph.clone(),
             session: session.clone(),
             worktree: worktree.clone(),
@@ -53,8 +98,12 @@ pub fn create(
             approve,
         },
     );
-    let receipt = match created {
-        Ok(receipt) => receipt,
+    let creation::Created {
+        receipt,
+        session,
+        after,
+    } = match created {
+        Ok(created) => created,
         Err(error) => {
             if *json {
                 if let Some(result) = creation::lookup(&id).ok().flatten().and_then(|r| r.result) {
@@ -66,8 +115,9 @@ pub fn create(
     };
     if let Some(provider) = loopflow_execution::config::load_config_or_default(Some(repo))
         .planning_transport()
-        .remote_name()
-        .filter(|_| receipt.task.linear_id.is_none())
+        .map(|tracker| tracker.name())
+        // An admitted creation exchanges planning after its answer.
+        .filter(|_| receipt.task.tracker_id.is_none() && after.is_none())
     {
         writeln!(
             io.error,
@@ -76,13 +126,22 @@ pub fn create(
         )?;
     }
     if *json {
-        writeln!(io.output, "{}", serde_json::to_string_pretty(&receipt)?)?;
+        let answer = self::answer(&id, receipt.clone(), session)?;
+        writeln!(io.output, "{}", serde_json::to_string_pretty(&answer)?)?;
     } else {
         writeln!(
             io.output,
             "{} · {}",
             receipt.task.title, receipt.task.identifier
         )?;
+        // Filed from a Task's conversation, the link was never typed: say it.
+        if receipt.task.parent_task_id.is_some() {
+            let store = loopflow_execution::store::read_existing_registry()?
+                .context("no Loopflow store exists on this Machine")?;
+            if let Some(parent) = super::waves::parent_identifier(&store.sqlite, &receipt.task)? {
+                writeln!(io.output, "  parent: {parent}")?;
+            }
+        }
     }
     if *run && approve {
         // The first Graph attempt identifies this launch's carrier. Batch callers
@@ -93,25 +152,42 @@ pub fn create(
             {
                 let store = loopflow_execution::store::read_existing_registry()?
                     .ok_or_else(|| anyhow::anyhow!("Machine registry is unavailable"))?;
-                let carrier = store
-                    .sqlite
-                    .lf_process(&graph_process)?
-                    .ok_or_else(|| {
-                        anyhow::anyhow!("creation Graph {} is unavailable", graph_process)
-                    })?
-                    .parent_lf_process_id
-                    .ok_or_else(|| anyhow::anyhow!("creation Graph has no Task run"))?;
-                loop {
-                    let process = store.sqlite.lf_process(&carrier)?.ok_or_else(|| {
-                        anyhow::anyhow!("creation Task run {} is unavailable", carrier)
-                    })?;
-                    if process.completed_at.is_some() {
-                        if process.exit_code != Some(0) {
-                            bail!("Task run {} ended with {:?}", carrier, process.exit_code);
+                let task = loopflow_execution::store::children::resolve_task_id(
+                    &store.sqlite,
+                    &receipt.task.identifier,
+                    None,
+                )?
+                .ok_or_else(|| {
+                    anyhow::anyhow!("created Task {} is unknown", receipt.task.identifier)
+                })?;
+                // The carrier stays live between attempts. Successful arrival
+                // can clear it before the last Graph records its result.
+                let (last, result) = loop {
+                    let carrying = store
+                        .sqlite
+                        .task_graph_row(&task)?
+                        .and_then(|row| row.run)
+                        .is_some_and(|(_, carrier)| {
+                            loopflow_execution::process::os_process::carrier_evidence(&carrier)
+                                != loopflow_execution::store::ProcessIdentityEvidence::Dead
+                        });
+                    if !carrying {
+                        let last = store.sqlite.task_graphs(&task)?.pop().ok_or_else(|| {
+                            anyhow::anyhow!("creation Graph {graph_process} is unavailable")
+                        })?;
+                        let result = graph_result(&store.sqlite, &last.run)?;
+                        if result != ExecutionResult::Running {
+                            break (last, result);
                         }
-                        break;
                     }
                     std::thread::sleep(std::time::Duration::from_millis(50));
+                };
+                if result != ExecutionResult::Succeeded {
+                    bail!(
+                        "Task run ended: Graph {} {}",
+                        last.id(),
+                        result.outcome().unwrap_or("running")
+                    );
                 }
             }
         }
@@ -136,11 +212,90 @@ pub fn create(
             )?;
         }
     }
+    // Planning exchange runs after the answer; this process waits for it.
+    if let Some(after) = after {
+        after.run();
+    }
     Ok(())
+}
+
+fn graph_result(store: &SqliteStore, run: &Execution) -> Result<ExecutionResult> {
+    let result = loopflow_execution::process::os_process::observed_result(run);
+    if result == ExecutionResult::Unknown && run.ended_at.is_none() {
+        // The Graph can record its result and exit between our SQLite and OS reads.
+        // Read that same run after observing its exit before reporting it as unknown.
+        return Ok(store
+            .graph_process(run.id.as_str())?
+            .map(|(graph, _)| graph.run.result())
+            .filter(|result| *result != ExecutionResult::Running)
+            .unwrap_or(ExecutionResult::Unknown));
+    }
+    Ok(result)
 }
 
 pub fn read_report(input: &mut dyn std::io::Read) -> Result<Option<String>> {
     let mut report = String::new();
     input.read_to_string(&mut report)?;
     Ok((!report.trim().is_empty()).then_some(report))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::process::{Command, Stdio};
+
+    use loopflow_model::id::LfProcessId;
+    use loopflow_storage::graph::CompiledGraph;
+    use loopflow_storage::graph_process::{ExecutionResult, ExecutionStart, RunOwner};
+    use loopflow_storage::rows::now_unix;
+
+    #[test]
+    fn graph_exit_uses_the_result_written_since_the_last_read() {
+        let home = tempfile::tempdir().unwrap();
+        let store =
+            loopflow_execution::store::opening::open_ephemeral(&home.path().join("db")).unwrap();
+        let id = LfProcessId::new();
+        let mut child = Command::new("/bin/cat")
+            .stdin(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let started_at = now_unix();
+        let start = ExecutionStart {
+            started_at,
+            pid: Some(child.id()),
+            os_started_at: Some(
+                loopflow_execution::process::os_process::process_started_at(child.id())
+                    .unwrap()
+                    .unwrap(),
+            ),
+            caller_session: None,
+        };
+        store
+            .record_graph(
+                &id,
+                &CompiledGraph {
+                    name: "gate".into(),
+                    steps: vec![],
+                },
+                None,
+                &start,
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+        let (graph, _) = store.graph_process(id.as_str()).unwrap().unwrap();
+        store
+            .finish_run(RunOwner::GraphRun, &id, now_unix(), Some(0), None)
+            .unwrap();
+        assert!(child.wait().unwrap().success());
+
+        assert_eq!(
+            loopflow_execution::process::os_process::observed_result(&graph.run),
+            ExecutionResult::Unknown
+        );
+        assert_eq!(
+            super::graph_result(&store, &graph.run).unwrap(),
+            ExecutionResult::Succeeded
+        );
+    }
 }

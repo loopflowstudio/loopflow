@@ -1,5 +1,5 @@
-import { statSync as markerStamp } from "node:fs";
-import { createConnection as connectMachineServer } from "node:net";
+import { mkdtempSync as makeWakeDirectory, rmSync as removeWakeDirectory, statSync as markerStamp } from "node:fs";
+import { createConnection as connectMachineServer, createServer as listenForWake } from "node:net";
 
 // Every launch reads its own news: its unread steers and what changed on its
 // Tasks. It compares the markers a steer for it touches against its last
@@ -28,13 +28,14 @@ function ownNews(callback, log, args = [], options = {}) {
   }
 }
 
-// A held launch reports each boundary for the server to record: one
+// A managed launch reports each boundary for the server to record: one
 // machine.sock connection, as a hook makes one request: connect, the hello a
 // hook sends, one session.boundary, close. The server's connection slot is
 // back as soon as the answer arrives. Nothing here throws: an unanswered
 // boundary is a recording gap, one `recording gap` line per changed failure
-// through `log`, and the next boundary sends the open gap.
-function machineServer(delivery, log) {
+// through `log`, and the next boundary sends the open gap. `wake` is the
+// socket where the server wakes this conversation once it is idle (`wakeSocket`).
+function machineServer(delivery, log, wake = null) {
   const adapter = process.env.LF_PROVIDER_CONTEXT ? JSON.parse(process.env.LF_PROVIDER_CONTEXT) : null;
   let queue = Promise.resolve();
   let gap;
@@ -64,7 +65,7 @@ function machineServer(delivery, log) {
         try { message = JSON.parse(buffer.slice(0, end)); } catch (error) { return finish(error); }
         buffer = buffer.slice(end + 1);
         if (message.type === "welcome") {
-          socket.write(`${JSON.stringify({ type: "request", id: "boundary", operation, select: null, request_id: null })}\n`);
+          socket.write(`${JSON.stringify({ type: "request", id: "boundary", operation, select: null, sender: null, request_id: null })}\n`);
         } else if (message.type === "response") {
           finish(undefined, message.result);
         } else if (message.type === "error") {
@@ -84,7 +85,8 @@ function machineServer(delivery, log) {
     if (skippable && gap) return undefined;
     try {
       const answer = await ask({ kind: "session.boundary", moment, delivery, adapter, callback,
-        gap: gap ? { first: gap.first, last: gap.last } : null, printed: [], inbox: null });
+        gap: gap ? { first: gap.first, last: gap.last } : null, printed: [],
+        inbox: wake ? { socket: wake } : null });
       if (gap) log(`recording gap closed (${gap.message}); lf records from here`);
       gap = undefined;
       return answer;
@@ -107,4 +109,42 @@ function machineServer(delivery, log) {
       return answer;
     },
   };
+}
+
+// A work session hears the Machine server while it sits idle: a Unix socket
+// in a directory only this account can enter, on a path short enough for a
+// socket address. The server connects, writes one JSON line naming the
+// conversation and the rendered steers, and closes its side; `start` asks the
+// provider for a turn, and `started` goes back once it took the message. A
+// connection that closes without it leaves the steers for the next boundary.
+// Returns the socket's path, or null when it cannot listen: the steer then
+// waits for the next turn. Nothing here throws or keeps the provider alive.
+function wakeSocket(start, log) {
+  try {
+    const directory = makeWakeDirectory("/tmp/lf-wake-");
+    const listener = listenForWake({ allowHalfOpen: true }, (socket) => {
+      let wire = "";
+      socket.setEncoding("utf8");
+      socket.on("error", () => {});
+      socket.on("data", (chunk) => { wire += chunk; });
+      socket.on("end", async () => {
+        try {
+          const { thread, text } = JSON.parse(wire);
+          await start(thread, text);
+          socket.end("started\n");
+        } catch (error) {
+          log(`idle wake not started: ${String(error?.message ?? error).split("\n")[0]}`);
+          socket.destroy();
+        }
+      });
+    });
+    listener.on("error", (error) => log(`idle wake socket: ${error.message}`));
+    listener.listen(`${directory}/s`);
+    listener.unref();
+    process.on("exit", () => removeWakeDirectory(directory, { recursive: true, force: true }));
+    return `${directory}/s`;
+  } catch (error) {
+    log(`idle wake socket: ${error.message}`);
+    return null;
+  }
 }

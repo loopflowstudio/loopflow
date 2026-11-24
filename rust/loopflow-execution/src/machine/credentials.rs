@@ -208,7 +208,7 @@ pub(crate) fn remote_command(
 ) -> Result<Vec<u8>> {
     let script = format!(
         "{}; export {}={}; exec lf {}",
-        crate::machine::ssh::REMOTE_PATH,
+        crate::machine::ssh::remote_path(),
         crate::machine::ssh::EXPECTED_MACHINE_ID_ENV,
         crate::machine::ssh::sh_quote(machine.id.as_str()),
         args.iter()
@@ -502,7 +502,7 @@ fn opencode_export(home: Option<&Path>, host: &str) -> Result<Vec<serde_json::Va
         .map_err(|_| anyhow!("OpenCode returned an unreadable credential export"))?;
     Ok(entries
         .into_iter()
-        .filter(|entry| entry["integrationID"] == "opencode")
+        .filter(|entry| entry["integrationID"] == loopflow_harness::HarnessKind::OpenCode.as_str())
         .collect())
 }
 

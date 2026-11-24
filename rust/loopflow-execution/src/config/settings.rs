@@ -8,7 +8,6 @@ use serde_yaml_ng::Value;
 use super::{Config, ConfigDeclarations, ConfigSource};
 use crate::error::LoadError;
 use crate::graph::Skill;
-use loopflow_storage::work::selection::{WorkWorkspaceKey, WorkWorkspaceKind};
 
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, schemars::JsonSchema,
@@ -110,7 +109,7 @@ pub struct ResolvedSettings {
 }
 
 fn invalid(message: impl Into<String>) -> LoadError {
-    LoadError::InvalidGraph(message.into())
+    LoadError::InvalidSetting(message.into())
 }
 
 pub fn validate_scope(
@@ -183,9 +182,15 @@ fn _list_agents(value: &mut Value) {
 
 pub(crate) fn validate_value(path: &[&str], value: &Value) -> Result<(), LoadError> {
     if value.is_null() {
-        return Err(invalid(
-            "omit a file value or use unset to remove a preference",
-        ));
+        // YAML deserializes null into an empty mapping too. Use JSON's strict
+        // null here so only a nullable field can retain the declaration.
+        let mut check = Value::Mapping(Default::default());
+        insert(&mut check, path, Value::Null);
+        return serde_json::from_value::<Config>(
+            serde_json::to_value(check).expect("string keys and null"),
+        )
+        .map(|_| ())
+        .map_err(|error| invalid(format!("{}: {error}", path.join("."))));
     }
     if ["agent", "default_agent"].contains(&path[0]) {
         let agent = value
@@ -233,19 +238,6 @@ pub(crate) fn validate_value(path: &[&str], value: &Value) -> Result<(), LoadErr
             return Err(invalid("stream must be stable, preview or dev"));
         }
     }
-    // The same check a launch makes, so an unusable layout fails where it is written.
-    if let Some(template) = &parsed.task_layout {
-        template
-            .instantiate(WorkWorkspaceKey {
-                repository: String::new(),
-                kind: WorkWorkspaceKind::Task,
-                id: String::new(),
-            })
-            .map_err(|error| invalid(format!("task_layout: {error}")))?;
-    }
-    if !["gh", "local"].contains(&parsed.land.as_str()) {
-        return Err(invalid("land must be gh or local"));
-    }
     if parsed.machine.tasks.is_some() && parsed.machine.capacity.is_some() {
         return Err(invalid(
             "choose machine.tasks or machine.capacity in one declaration",
@@ -291,43 +283,17 @@ pub(crate) fn validate_value(path: &[&str], value: &Value) -> Result<(), LoadErr
 
 fn validate_agent_policy(agent: &str) -> Result<(), LoadError> {
     let (harness, variant) = super::parse_agent(agent);
-    match harness.as_str() {
-        "claude" | "codex" | "pi" => return Ok(()),
-        "opencode" => {}
-        _ => {
-            return Err(invalid(format!(
-                "unsupported agent harness '{harness}': use 'claude', 'codex', 'opencode', or 'pi'"
-            )));
-        }
+    let kind = loopflow_harness::HarnessKind::parse(&harness).ok_or_else(|| {
+        invalid(format!(
+            "unsupported agent harness '{harness}': use 'claude', 'codex', 'opencode', 'pi', or 'agy'"
+        ))
+    })?;
+    if let Some(model) = variant {
+        kind.harness()
+            .validate_model(&model)
+            .map_err(|error| invalid(error.to_string()))?;
     }
-
-    let Some(variant) = variant else {
-        return Ok(());
-    };
-    if is_supported_opencode_model_variant(&variant) {
-        return Ok(());
-    }
-
-    Err(invalid(format!(
-        "unsupported OpenCode model '{}': supported variants are 'opencode/*' (excluding claude/codex families) and 'moonshotai/kimi*'",
-        variant
-    )))
-}
-
-fn is_supported_opencode_model_variant(variant: &str) -> bool {
-    let variant = variant.trim().to_ascii_lowercase();
-    let Some((provider, model_id)) = variant.split_once('/') else {
-        return false;
-    };
-    if model_id.is_empty() {
-        return false;
-    }
-
-    match provider {
-        "moonshotai" => model_id.starts_with("kimi"),
-        "opencode" => !model_id.contains("claude") && !model_id.contains("codex"),
-        _ => false,
-    }
+    Ok(())
 }
 
 pub fn insert(root: &mut Value, path: &[&str], value: Value) {
@@ -506,17 +472,8 @@ pub(super) fn filter_file_preferences(
         super::reader::warn(file, None, "skipping settings that are not a mapping");
         *value = Value::Mapping(Default::default());
     }
-    _normalize_preferences(value);
+    super::normalize_preferences(value);
     _filter_file_settings(value, &mut Vec::new(), file, source, scope);
-}
-
-fn _normalize_preferences(value: &mut Value) {
-    super::normalize_context(value);
-    if let Some(map) = value.as_mapping_mut() {
-        if let Some(graph) = map.remove(super::GRAPH_ALIAS) {
-            map.entry(Value::String("graph".into())).or_insert(graph);
-        }
-    }
 }
 
 /// Account routing preferences the released lf still reads from personal
@@ -639,26 +596,67 @@ fn _split_agent_list(values: &mut serde_yaml_ng::Mapping, locator: &str) {
     }
 }
 
+/// What settings resolution reads that is not a file. It is the argument of
+/// [`resolve_with`] and part of a shared value's key, so the key cannot drift
+/// from what the resolution read.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Outside {
+    environment: Value,
+    invocation: Value,
+    sole_harness: Option<&'static str>,
+    pub(super) home: PathBuf,
+    pub(super) remote: Option<String>,
+}
+
+impl Outside {
+    /// `compute`'s result, shared by served readings under `key`. A
+    /// `--setting` override belongs to the command that carries it, so with
+    /// one the value is computed here and never shared.
+    pub(crate) fn shared<T: Clone + Send + Sync + 'static>(
+        &self,
+        key: crate::observe::Derived,
+        compute: impl FnOnce() -> T,
+    ) -> T {
+        if !self.invocation.is_null() {
+            return compute();
+        }
+        (*crate::observe::derived(key, compute)).clone()
+    }
+}
+
+pub fn outside() -> Result<Outside, LoadError> {
+    Ok(Outside {
+        environment: environment()?,
+        invocation: invocation_values(),
+        sole_harness: super::default_agent(),
+        home: crate::store::lf_home_dir(),
+        remote: super::remote::incoming_text(),
+    })
+}
+
 /// Resolve agent choices before fallbacks; within each key use source, scope, target.
 pub fn resolve_layers(
     layers: &[ConfigDeclarations],
     skill: Option<&Skill>,
 ) -> Result<ResolvedSettings, LoadError> {
+    resolve_with(layers, skill, &outside()?)
+}
+
+pub(crate) fn resolve_with(
+    layers: &[ConfigDeclarations],
+    skill: Option<&Skill>,
+    outside: &Outside,
+) -> Result<ResolvedSettings, LoadError> {
     // Each block shares provenance; specificity orders blocks within a source/scope.
     let mut candidates = Vec::new();
     let mut defaults = serde_yaml_ng::to_value(Config::default()).expect("Config serializes");
-    if let Some(agent) = super::default_agent() {
+    if let Some(agent) = outside.sole_harness {
         insert(&mut defaults, &["default_agent"], agent.into());
     }
     insert(
         &mut defaults,
         &["graph"],
         crate::ops::task::DEFAULT_TASK_GRAPH.into(),
-    );
-    insert(
-        &mut defaults,
-        &["planning"],
-        serde_yaml_ng::to_value(super::PlanningConfig::default()).expect("planning serializes"),
     );
     for key in crate::prompt::context_budget::BudgetKey::ALL {
         insert(
@@ -686,13 +684,13 @@ pub fn resolve_layers(
             source: ConfigSource::Environment,
             scope: SettingScope::Global,
             path: "environment".into(),
-            value: environment()?,
+            value: outside.environment.clone(),
         },
         ConfigDeclarations {
             source: ConfigSource::CommandLine,
             scope: SettingScope::Global,
             path: "CLI".into(),
-            value: invocation_values(),
+            value: outside.invocation.clone(),
         },
     ];
     for layer in layers.iter().chain(&invocation) {
@@ -703,7 +701,7 @@ pub fn resolve_layers(
         ) {
             filter_file_preferences(&mut layer.value, &layer.path, layer.source, layer.scope);
         } else {
-            _normalize_preferences(&mut layer.value);
+            super::normalize_preferences(&mut layer.value);
         }
         if layer.value.is_null() {
             continue;
@@ -1315,7 +1313,8 @@ mod tests {
                 None,
             )
             .unwrap();
-            assert!(!resolved.config.yolo);
+            // An unreadable `yolo` falls to the default, which is on.
+            assert!(resolved.config.yolo);
             assert!(resolved.config.claude.model.is_none());
             if values.starts_with("context:") {
                 assert_eq!(resolved.config.context.docs, ["README.md"]);
@@ -1330,6 +1329,16 @@ mod tests {
             None,
         )
         .is_err());
+    }
+
+    #[test]
+    fn explicit_null_requires_a_nullable_declaration() {
+        for key in ["chrome", "codex.service_tier", "merge_method", "agent"] {
+            assert_eq!(super::parse_value(key, "null").unwrap(), Value::Null);
+        }
+        for key in ["yolo", "land", "context.diff", "agents", "machines", "logs"] {
+            assert!(super::parse_value(key, "null").is_err(), "{key}");
+        }
     }
 
     #[test]
@@ -1364,7 +1373,8 @@ mod tests {
                 .unwrap(),
             "claude:fable"
         );
-        for invalid in ["''", "' '", "null", "{}"] {
+        assert!(super::parse_value("claude.model", "null").is_ok());
+        for invalid in ["''", "' '", "{}"] {
             assert!(
                 super::parse_value("claude.model", invalid).is_err(),
                 "{invalid}"
@@ -1397,7 +1407,8 @@ mod tests {
             .unwrap();
             assert_eq!(resolved.config.codex.service_tier, Some(expected));
         }
-        for value in ["slow", "true", "null", "42"] {
+        assert!(super::parse_value("codex.service_tier", "null").is_ok());
+        for value in ["slow", "true", "42"] {
             assert!(super::parse_value("codex.service_tier", value).is_err());
         }
     }
@@ -1797,6 +1808,66 @@ mod tests {
             .is_empty());
     }
     #[test]
+    fn diff_hidden_adds_every_layer_and_diff_groups_take_the_nearest_list_whole() {
+        use super::super::catalog::{DiffGroup, DiffPathGroup, DiffRestGroup};
+        let _env = loopflow_test_support::env_lock().lock().unwrap();
+        let builtin = resolve_layers(&[], None).unwrap().config;
+        assert_eq!(builtin.diff_hidden, ["scratch/"]);
+        let titles = |groups: &[DiffGroup]| -> Vec<String> {
+            groups
+                .iter()
+                .map(|group| match group {
+                    DiffGroup::Paths(group) => group.title.clone(),
+                    DiffGroup::Rest(group) => format!("rest: {:?}", group.rest),
+                })
+                .collect()
+        };
+        assert_eq!(
+            titles(&builtin.diff_groups),
+            [
+                "Docs",
+                "Data model",
+                "rest: Some(\"Everything else\")",
+                "Tests",
+                "Generated and lock files"
+            ]
+        );
+
+        let resolved = resolve_layers(
+            &[
+                layer(
+                    ConfigSource::Repository,
+                    SettingScope::Repository,
+                    "diff_hidden: [vendor/]\ndiff_groups: [{title: Model, paths: [model/]}, {rest: null}]",
+                ),
+                layer(
+                    ConfigSource::Personal,
+                    SettingScope::Repository,
+                    "diff_hidden: [tests/]\ndiff_groups: [{rest: Rest}, {title: Mine, paths: [\"*.rs\"]}]",
+                ),
+            ],
+            None,
+        )
+        .unwrap()
+        .config;
+        assert_eq!(resolved.diff_hidden, ["scratch/", "vendor/", "tests/"]);
+        assert_eq!(
+            resolved.diff_groups,
+            [
+                DiffGroup::Rest(DiffRestGroup {
+                    rest: Some("Rest".into())
+                }),
+                DiffGroup::Paths(DiffPathGroup {
+                    title: "Mine".into(),
+                    paths: vec!["*.rs".into()]
+                }),
+            ]
+        );
+        assert!(super::parse_value("diff_groups", "[{rest: null}]").is_ok());
+        assert!(super::parse_value("diff_groups", "[{}]").is_err());
+        assert!(super::parse_value("diff_groups", "[{title: A, paths: [a/], rest: x}]").is_err());
+    }
+    #[test]
     fn typed_values_reject_unknown_keys_and_wrong_types() {
         for (key, value) in [
             ("graphs.release.steps.write-code.yolo", "false"),
@@ -1819,34 +1890,6 @@ mod tests {
         ] {
             assert!(super::parse_value(key, value).is_err(), "{key}");
         }
-    }
-    #[test]
-    fn task_layout_is_validated_where_it_is_set() {
-        let pane =
-            |id: &str, content: &str| format!("{{kind: pane, id: {id}, content: {content}}}");
-        let layout = |session: &str| {
-            format!(
-                "{{tree: {{kind: split, axis: vertical, ratio: 0.5, first: {{kind: split, axis: horizontal, ratio: 0.5, first: {}, second: {}}}, second: {}}}}}",
-                pane("conversation", &format!("{{kind: session, session_id: {session}, location: null}}")),
-                pane("changes", "{kind: browser, location: null, tabs: [{kind: changes, id: changes, comparison: {kind: working_tree, base: parent}}], selected: changes}"),
-                pane("shell", "{kind: shell, tabs: [{id: s, location: null, lf_process_id: null}], selected: s}"),
-            )
-        };
-        assert!(super::parse_value("task_layout", &layout("null")).is_ok());
-        let captured = super::parse_value("task_layout", &layout("abc")).unwrap_err();
-        assert!(
-            captured.to_string().contains("cannot capture a Session"),
-            "{captured}"
-        );
-        // A tree without Desktop's three Task panes is unusable at launch.
-        let partial = format!(
-            "{{tree: {}}}",
-            pane(
-                "shell",
-                "{kind: shell, tabs: [{id: s, location: null, lf_process_id: null}], selected: s}"
-            )
-        );
-        assert!(super::parse_value("task_layout", &partial).is_err());
     }
     #[test]
     fn composed_occurrences_keep_their_settings_and_match_launch_preparation() {
@@ -1894,7 +1937,7 @@ mod tests {
                 },
             )
             .unwrap();
-            assert_eq!(prepared.config.agent().unwrap(), expected);
+            assert_eq!(prepared.config.agent.to_string(), expected);
             assert_eq!(prepared.config.chrome, Some(index % 2 != 0));
         }
         repo.create_file(

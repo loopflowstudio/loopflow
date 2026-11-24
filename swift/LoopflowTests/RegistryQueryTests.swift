@@ -19,7 +19,7 @@ struct RegistryQueryTests {
         }
         let adoption = Adoption()
         let query = RegistryQuery(write: { change in
-            guard case .taskCreate(_, _, let title?, _, _, _, _, _) = change else {
+            guard case .taskCreate(_, _, let title?, _, _, _, _, _, _) = change else {
                 throw RegistryQueryError("Unexpected write")
             }
             return try await adoption.submit(title: title)
@@ -52,7 +52,7 @@ struct RegistryQueryTests {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
         let detail = try String(contentsOf: root.appendingPathComponent("tests/fixtures/dto/graph_detail.json"), encoding: .utf8)
         let expected = try JSONDecoder().decode(GraphProcessDetail.self, from: Data(detail.utf8))
-        let overview = "{\"sessions\":[],\"graph_processes\":[],\"graph\":{\"name\":\"feature\",\"interactive_steps\":[],\"position\":{\"kind\":\"at\",\"step\":\"demo\"}}}"
+        let overview = "{\"sessions\":[],\"graph_processes\":[],\"graph\":{\"name\":\"feature\",\"interactive_steps\":[],\"position\":{\"kind\":\"at\",\"step\":\"demo\"},\"steps\":[{\"name\":\"demo\",\"interactive\":true}],\"current_step\":0,\"sentence\":\"Waiting for you at demo.\"}}"
         let query = RegistryQuery(subscribeRead: { args, cwd in
             guard args == ["--machine", "peer", "--repo-id", "plan", "task", "show", "task", "--json", "--subscribe"], cwd == nil else {
                 throw RegistryQueryError("A peer run page must never use local execution")
@@ -62,7 +62,7 @@ struct RegistryQueryTests {
                 continuation.yield(Data("{\"answers\":null,\"unavailable\":null,\"body\":\(body),\"read_at\":{\"planning\":7}}".utf8))
                 continuation.finish()
             }
-            return LineSubscription(lines: lines, send: { _ in }, cancel: {})
+            return LineSubscription(lines: lines, checkpoint: { _ in }, cancel: {}, unreadable: { nil })
         }) { _, _ in throw RegistryQueryError("Unexpected one-shot read") }
         let subscription = try await query.onMachine("peer", repository: "plan").subscribeTask(task: "task")
         var iterator = subscription.lines.makeAsyncIterator()
@@ -75,15 +75,15 @@ struct RegistryQueryTests {
         #expect(reading.work.graph?.position == .at(step: "demo"))
     }
 
-    @Test("Step history uses the exact process on the content Machine")
-    func contentRoutedStepHistory() async throws {
+    @Test("Session history routes to the content Machine")
+    func contentRoutedSessionHistory() async throws {
         let query = RegistryQuery { args, cwd in
-            guard args == ["--machine", "peer", "--repo-id", "plan", "session", "history", "show", "process-step"], cwd == nil else {
-                throw RegistryQueryError("Wrong process history owner")
+            guard args == ["--machine", "peer", "--repo-id", "plan", "session", "history", "show", "session-1"], cwd == nil else {
+                throw RegistryQueryError("Wrong Session history owner")
             }
             return "gate failed: exit 1"
         }
-        #expect(try await query.onMachine("peer", repository: "plan").processHistory(id: "process-step") == "gate failed: exit 1")
+        #expect(try await query.onMachine("peer", repository: "plan").sessionHistoryText(id: "session-1") == "gate failed: exit 1")
     }
 
     /// The JSON `read::tests::desktop_encodings_name_their_reads` decodes in Rust.
@@ -124,9 +124,12 @@ struct RegistryQueryTests {
         #expect(try object(move) == object(#"{"kind":"task.move","directory":"/r","issue":"FIX-1","wave":null,"machine":null}"#))
         #expect(move.argv == ["task", "move", "FIX-1", "--no-wave", "--json"])
         #expect(move.cwd == "/r")
-        let stop = ServedWrite.taskHold(directory: "/r", issue: "FIX-1")
-        #expect(try object(stop) == object(#"{"kind":"task.hold","directory":"/r","issue":"FIX-1"}"#))
-        #expect(stop.argv == ["task", "hold", "FIX-1", "--json"])
+        let off = ServedWrite.taskAutoOff(directory: "/r", issue: "FIX-1")
+        #expect(try object(off) == object(#"{"kind":"task.auto.off","directory":"/r","issue":"FIX-1","reason":null}"#))
+        let keep = ServedWrite.repoTrackerAnswer(directory: "/r", action: "a1", answer: .keepTheirs)
+        #expect(try object(keep) == object(#"{"kind":"repo.tracker.answer","directory":"/r","action":"a1","answer":"keep_theirs"}"#))
+        #expect(keep.argv == ["repo", "tracker", "answer", "a1", "--keep-theirs", "--json"])
+        #expect(off.argv == ["task", "auto", "off", "FIX-1", "--json"])
         let save = ServedWrite.taskSave(directory: "/", issue: "FIX-1", path: "a.txt", revision: "r", content: "text")
         #expect(try object(save) == object(
             #"{"kind":"task.save","directory":"/","issue":"FIX-1","path":"a.txt","revision":"r","content":"text"}"#))
@@ -139,14 +142,14 @@ struct RegistryQueryTests {
         #expect(try object(portfolio) == object(#"{"kind":"desktop.portfolio.set","change":{"action":"remove","path":"/r"}}"#))
         #expect(portfolio.argv == ["desktop", "portfolio", "remove", "/r", "--json"])
         #expect(portfolio.cwd == "/")
-        let primary = ServedWrite.sessionResume(directory: "/r", id: nil, task: nil, wave: nil, agent: nil, intent: .resume)
+        let primary = ServedWrite.sessionResume(directory: "/r", id: nil, task: nil, wave: nil, agent: nil)
         #expect(try object(primary) == object(
-            #"{"kind":"session.resume","directory":"/r","id":null,"task":null,"wave":null,"agent":null,"intent":"resume"}"#))
+            #"{"kind":"session.resume","directory":"/r","id":null,"task":null,"wave":null,"agent":null}"#))
         #expect(primary.argv == ["--repo", "/r", "session", "resume", "--prepare", "--json"])
-        let start = ServedWrite.sessionResume(directory: "/r", id: nil, task: "FIX-1", wave: nil, agent: nil, intent: .start)
-        #expect(try object(start) == object(
-            #"{"kind":"session.resume","directory":"/r","id":null,"task":"FIX-1","wave":null,"agent":null,"intent":"start"}"#))
-        #expect(start.argv == ["session", "resume", "--start-if-free", "--task", "FIX-1", "--prepare", "--json"])
+        let task = ServedWrite.sessionResume(directory: "/r", id: nil, task: "FIX-1", wave: nil, agent: nil)
+        #expect(try object(task) == object(
+            #"{"kind":"session.resume","directory":"/r","id":null,"task":"FIX-1","wave":null,"agent":null}"#))
+        #expect(task.argv == ["session", "resume", "--task", "FIX-1", "--prepare", "--json"])
         let restart = ServedWrite.sessionNew(directory: "/r", requestID: "fixture-thread", id: "session_1", agent: "codex")
         #expect(try object(restart) == object(
             #"{"kind":"session.new","directory":"/r","request_id":"fixture-thread","id":"session_1","agent":"codex"}"#))
@@ -343,8 +346,8 @@ struct RegistryQueryTests {
     "items": [
       {
         "id": "project-1",
-        "linear_id": null,
-        "sync": {"connected": false, "changes": []},
+        "tracker_id": null,
+        "sync": {"actions": []},
         "slug": "release-feedback",
         "name": "current",
         "workflow": "task-design",
@@ -374,7 +377,7 @@ struct RegistryQueryTests {
           "name": "Wire it",
           "description": "",
           "rank": 1,
-          "state": "unstarted", "completed_at": null, "due_date": null, "acquisition": {"state": "available", "observed_at": null}, "linear_id": null, "sync": {"connected": false, "changes": []},
+          "state": "unstarted", "completed_at": null, "due_date": null, "tracker_state": {"state": "available", "synced_at": null}, "tracker_id": null, "parent_id": null, "sync": {"actions": []},
           "assignee": null
         },
         "reference": {
@@ -393,7 +396,7 @@ struct RegistryQueryTests {
           "provider": "codex",
           "owner": {"person": "Jack Heart", "person_id": null, "machine": {"id": null, "label": null}}
         },
-        "graph_name":"feature","graph_source":"repository","latest_graph_process":null,"execution":null,"lifecycle":"unstarted","selection_states":["unstarted","backlog"],"run_control":{"unavailable":null},"ship_control":{"unavailable":null},"shipping":null,
+        "graph_name":"feature","graph_source":"repository","latest_graph_process":null,"execution":null,"lifecycle":"unstarted","selection_states":["unstarted","backlog"],"run_control":{"unavailable":null},
         "next_move": {
           "owner": "task",
           "reason": "ready"
@@ -418,7 +421,8 @@ struct RegistryQueryTests {
           "reason": "resume the parked Task"
         },
         "pr": null,
-        "section": "working"
+        "section": "working",
+        "owned_by_you": false
       }
     ],
     "truncated": false
@@ -550,7 +554,7 @@ struct RegistryQueryTests {
             #expect(cwd == nil)
             switch args {
             case ["task", "changes", "INF-123", "--base", "parent", "--json"]:
-                return #"{"issue_identifier":"INF-123","task_id":"ts_1","base_commit":"abc","head_commit":"def","files":[{"path":"src/parser.rs","old_path":null,"committed":true,"staged":false,"unstaged":true,"untracked":false}],"scratch":[],"scratch_truncated":false}"#
+                return #"{"issue_identifier":"INF-123","task_id":"ts_1","base_commit":"abc","head_commit":"def","commits":[],"files":[{"path":"src/parser.rs","old_path":null,"committed":true,"staged":false,"unstaged":true,"untracked":false,"changes":2}],"scratch":[],"scratch_truncated":false}"#
             case ["task", "diff", "INF-123", "src/parser.rs", "--base", "parent", "--json"]:
                 return #"{"issue_identifier":"INF-123","task_id":"ts_1","path":"src/parser.rs","base_commit":"abc","patch":"@@ -1 +1 @@","binary":false,"truncated":false}"#
             case ["task", "file", "INF-123", "src/parser.rs", "--json"]:
@@ -601,8 +605,8 @@ struct RegistryQueryTests {
             switch args {
             case ["session", "list", "--json", "--page", "--limit", "100"]:
                 return #"{"entries":\#(sessionsJSON),"next":null}"#
-            case ["session", "resume", "--start-if-free", session.id, "--prepare", "--json"],
-                 ["session", "resume", "--start-if-free", "--task", "INF-123", "--prepare", "--json"]:
+            case ["session", "resume", session.id, "--prepare", "--json"],
+                 ["session", "resume", "--task", "INF-123", "--prepare", "--json"]:
                 return sessionJSON
             default:
                 throw RegistryQueryError("unexpected argv: \(args)")
@@ -690,12 +694,11 @@ struct RegistryQueryTests {
     func doctorDecodes() async throws {
         let json = """
         {
-          "rows": 2,
           "checks": [
             {
-              "name": "lineage",
+              "name": "store",
               "status": "ok",
-              "detail": "every parent process resolves"
+              "detail": "selected database is compatible with this build"
             }
           ]
         }
@@ -706,8 +709,7 @@ struct RegistryQueryTests {
         }
 
         let report = try await query.doctor()
-        #expect(report.rows == 2)
-        #expect(report.checks[0].name == "lineage")
+        #expect(report.checks[0].name == "store")
         #expect(report.checks[0].status == "ok")
     }
 

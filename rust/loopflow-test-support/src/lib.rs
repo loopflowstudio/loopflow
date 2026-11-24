@@ -20,7 +20,7 @@ pub fn path_without_installed_harnesses(path: &str) -> String {
             entry
                 .canonicalize()
                 .is_ok_and(|entry| entry.starts_with(&stand_ins))
-                || !["claude", "codex", "opencode", "pi"]
+                || !["claude", "codex", "opencode", "pi", "agy"]
                     .iter()
                     .any(|harness| entry.join(harness).exists())
         })
@@ -61,9 +61,20 @@ impl RunningParent {
     }
 }
 
-/// End running fixture Processes and wait for completed ones to finish exiting.
-/// A completion receipt can precede the owner's final screen write. Detached
-/// owners leave the test's process group and must settle before removing `home`.
+/// Owner rows keep a pid only while their process runs.
+const RUNNING_OWNERS: &str = "SELECT pid,1 FROM (
+    SELECT agent_pid pid FROM agent_sessions UNION SELECT attached_pid FROM agent_sessions
+    UNION SELECT pid FROM graph_processes UNION SELECT pid FROM graph_process_steps
+    UNION SELECT run_pid FROM task_graphs
+    UNION SELECT project_activation_pid FROM waves UNION SELECT repair_pid FROM ci_incidents
+) WHERE pid IS NOT NULL";
+/// Rows a released lf or a fixture wrote, finished ones included.
+const PROCESS_ROWS: &str = "SELECT pid,completed_at IS NULL FROM processes WHERE pid IS NOT NULL";
+
+/// End running fixture processes their records name, and wait for completed
+/// ones to finish exiting. A completion receipt can precede the owner's final
+/// screen write. Detached owners leave the test's process group and must
+/// settle before removing `home`.
 #[cfg(unix)]
 pub fn end_recorded_processes(home: &Path, lf: &Path) {
     let Ok(sql) = rusqlite::Connection::open_with_flags(
@@ -72,15 +83,16 @@ pub fn end_recorded_processes(home: &Path, lf: &Path) {
     ) else {
         return;
     };
-    let Ok(mut rows) =
-        sql.prepare("SELECT pid,completed_at IS NULL FROM processes WHERE pid IS NOT NULL")
-    else {
-        return;
-    };
-    let pids: Vec<(libc::pid_t, bool)> = rows
-        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
-        .map(|rows| rows.flatten().collect())
-        .unwrap_or_default();
+    let mut pids: Vec<(libc::pid_t, bool)> = Vec::new();
+    for query in [RUNNING_OWNERS, PROCESS_ROWS] {
+        if let Ok(mut rows) = sql.prepare(query) {
+            pids.extend(
+                rows.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+                    .map(|rows| rows.flatten().collect::<Vec<_>>())
+                    .unwrap_or_default(),
+            );
+        }
+    }
     let home = home.to_string_lossy().into_owned();
     let lf = lf.to_string_lossy().into_owned();
     let ours = |pid: libc::pid_t| {
@@ -191,6 +203,12 @@ pub struct MachineServer(std::process::Child);
 impl MachineServer {
     /// Run `lf server run` for `home` and wait until it is ready.
     pub fn start(lf: &str, home: &Path) -> Self {
+        Self::start_with_path(lf, home, "/usr/bin:/bin")
+    }
+
+    /// [`MachineServer::start`] with the `PATH` the server, and every
+    /// conversation it starts, finds providers on.
+    pub fn start_with_path(lf: &str, home: &Path, path: &str) -> Self {
         std::fs::create_dir_all(home).expect("create the fixture's Machine home");
         let command = |args: &[&str]| {
             let mut command = Command::new(lf);
@@ -199,7 +217,7 @@ impl MachineServer {
                 .env("HOME", home)
                 .env("LF_HOME", home)
                 .env("LF_BIN", lf)
-                .env("PATH", "/usr/bin:/bin")
+                .env("PATH", path)
                 .env("HTTPS_PROXY", "http://127.0.0.1:1")
                 .env("HTTP_PROXY", "http://127.0.0.1:1")
                 .args(args)
@@ -439,8 +457,8 @@ pub fn journal_files_under(root: &Path) -> Vec<PathBuf> {
     found
 }
 
-/// Read retained provider input for replay and preservation assertions in fixtures.
-/// This never resolves Work or makes an acquisition/admission decision.
+/// Read retained tracker input for replay and preservation assertions in fixtures.
+/// This never resolves Work or makes a fetch or admission decision.
 pub fn retained_task_input<T: serde::de::DeserializeOwned>(
     database: &Path,
     repo: &str,
@@ -457,9 +475,9 @@ pub fn retained_task_input_in<T: serde::de::DeserializeOwned>(
 ) -> T {
     let (item, project, observed_at): (String, Option<String>, i64) = conn
         .query_row(
-            "SELECT json_object('id',i.id,'identifier',i.identifier,'project_id',i.project_id,'revision',i.revision,'branch_name',i.branch_name,'url',i.url,'name',i.name,'description',i.description,'rank',i.rank,'completed',json(CASE i.completed WHEN 1 THEN 'true' ELSE 'false' END),'completed_at',i.completed_at,'due_date',i.due_date,'state',i.state,'team_id',i.team_id,'assignee',i.assignee),CASE WHEN p.id IS NOT NULL THEN json_object('id',p.id,'revision',p.revision,'slug',p.slug,'name',p.name,'summary',p.summary,'status',p.status,'krs',json(p.krs),'metric_targets',json(p.metric_targets),'initiative_ids',json(p.initiative_ids),'team_ids',json(p.team_ids)) END,i.observed_at FROM pm_items i LEFT JOIN pm_projects p
-         ON p.repo=i.repo AND p.provider=i.provider AND p.id=i.project_id
-         WHERE i.repo=?1 AND i.provider='linear' AND (i.id=?2 OR i.identifier=?2)",
+            "SELECT json_object('id',i.id,'identifier',i.identifier,'project_id',i.project_id,'revision',i.revision,'branch_name',i.branch_name,'url',i.url,'name',i.name,'description',i.description,'rank',i.rank,'completed',json(CASE i.completed WHEN 1 THEN 'true' ELSE 'false' END),'completed_at',i.completed_at,'due_date',i.due_date,'state',i.state,'team_id',i.team_id,'assignee',i.assignee,'parent_id',i.parent_id,'parent_observed',json(CASE i.parent_id_observed WHEN 1 THEN 'true' ELSE 'false' END)),CASE WHEN p.id IS NOT NULL THEN json_object('id',p.id,'revision',p.revision,'slug',p.slug,'name',p.name,'summary',p.summary,'status',p.status,'krs',json(p.krs),'metric_targets',json(p.metric_targets),'initiative_ids',json(p.initiative_ids),'team_ids',json(p.team_ids)) END,i.observed_at FROM tracker_items i LEFT JOIN tracker_projects p
+         ON p.repo=i.repo AND p.tracker=i.tracker AND p.id=i.project_id
+         WHERE i.repo=?1 AND i.tracker='linear' AND (i.id=?2 OR i.identifier=?2)",
             rusqlite::params![repo, selector],
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )

@@ -10,9 +10,9 @@ ps -axo command | grep '^lf '
 ```
 
 [What runs on a Machine](../../../../docs/dev/index.md#what-runs-on-a-machine)
-is the model: a launch runs here, held or detached, and hooks follow Work, not
-the place. This README owns the holder and view protocols, headless launches,
-exit settlement and Desktop shells.
+is the model: commands choose lifetime independently of Task attribution.
+This README owns the holder and view protocols, headless launches, exit
+settlement and Desktop shells.
 
 ## Held terminals
 
@@ -21,22 +21,30 @@ holder to start the agent on a PTY and keeps everything else: the terminal
 registry, one libghostty-vt terminal per held terminal, views, viewing
 records, queued input, the child's control requests and exit settlement.
 
-`transport::delegate` chooses the place once:
+`local_session_kind` answers which `LaunchKind` runs in this process;
+`delegate` starts a held terminal for the rest and relays its view. Launches
+are bare or managed, with [four launch names](../../../../docs/glossary.md#loopflows-words).
+Only a work session goes to a held terminal; every other kind runs in its
+caller's process.
 
-| Launch | Runs |
-|---|---|
-| `lf task run` or an interactive `lf ship` step at a terminal, `lf resume --task`, a Task's primary conversation, Wave session commands | held |
-| A repository's conversation (`lf resume` in a checkout with no Task), from a terminal or a Desktop pane | held |
-| `lf resume SESSION` of a Session bound to a Task or Wave | held |
-| A bare Session opened through a Desktop pane or a framed `lf --machine` view | held, with the two bare hooks |
-| Desktop Task shells | held, with no hooks |
-| `lf <skill>`, `lf graph …`, `lf -i` at a terminal; a repository conversation recorded before it was managed (no `work_source`) | here, as the terminal's foreground program |
-| A bare `-b` or piped run, every headless Graph step | here, as the caller's child |
-| Graph launches, landing watchers, `lf ship`, a `-b` or piped Work command | [detached](#headless-work) |
+| Command | Launch | Lifetime |
+|---|---|---|
+| Direct `lf`, skill or Graph launch in the caller's terminal or pipe, with or without `--task`, `--wave` or `LF_AS` | chat or batch | its caller or terminal |
+| `lf -b steer <ID> TEXT` | batch; a Graph's correction turn inside a Task run is a worker | one turn, then exits |
+| Resume a chat with no message | chat | its terminal |
+| Resume a bound or primary Session, or open a Task, Wave or repository conversation | work session | held interactive terminal, independent of its viewer |
+| Open a conversation in a held terminal through a Desktop pane or framed `lf --machine` view | work session | held interactive terminal, independent of its viewer |
+| Headless steps of `lf task run` or `lf task auto on`, and the `ci-fix` run landing starts | worker | headless until the step or repair ends |
+| A Discord answer for a Wave | worker | returns the answer to the bridge |
+| Desktop Task shells | held shell | independent of its viewer, no hooks |
 
-A held launch calls `session.start` and becomes a view of the returned
-terminal. With the server unreachable it fails with `Loopflow server is not
-running; run lf server status` and starts nothing in its place. The one launch
+`lf task run` and `lf task auto on` start no agent themselves. `transport::detach_current`
+reruns them detached from their terminal so the Graph outlives the caller;
+`lf -b task run` waits for it.
+
+To open a work session from the CLI, `lf` calls `session.start` and becomes
+a view of the returned terminal. With the server unreachable it fails with
+`Loopflow server is not running; run lf server status`. The one launch
 nobody views, a Task's background conversation, goes unstarted instead and its
 Graph runs on.
 
@@ -45,46 +53,38 @@ foreground program, such as Rex, shows `lf` there, not the agent. Attaching
 never creates: a view of a Session whose terminal is gone says so and offers
 resume.
 
-### Which launches are managed
+### Launch lifetime and Task membership
 
-A launch is managed when it comes through a Task, Wave or repository
-conversation command, including those Desktop opens. `--task` and `--wave` (a
-Task or Wave conversation passes them, and `lf task run` passes `--task` to
-its Graph's agent steps) bind it as `WorkSource::Declared`, and the launch
-carries that as `Holder::Server` (`AgentConfig::holder`). Beside a Session id,
-`--task`/`--wave` make the resume managed and the id still selects: Desktop's
-Task and Wave workspaces prepare with `lf session resume [ID] --task X
---prepare`, and the `open_argv` it gets back is `lf session resume ID --task
-X`. Reopening a recorded conversation by id alone names no Work, so there the
-Session row decides: `SqliteStore::is_bare` is false for `declared` or `bound`
-Work and for a scope's primary conversation.
+A command chooses the launch kind; the checkout, `--task` and `LF_AS` choose which
+Task it belongs to. Every launch belonging to a Task counts toward its usage
+and receives its steers. Work sessions and workers report turn
+boundaries to the Machine server; chats and batches read their steers directly.
 
-A bare `lf` typed inside a Task's checkout stays bare and records the Task as
-its ancestry; its usage and time still count toward the Task. So do a child
-run started by a Session's agent, which that agent steers, and plain `lf
-<skill>`. Desktop adds no mark: an agent started from a Desktop shell is bare.
-Design the bare path for subagents started by a Task's agent, not a person at
-a prompt: nobody watches, the caller waits on the exit and reads the output,
-and the run ends with its parent.
+A Session reopened in this process runs as the kind `local_session_kind`
+returns; any other goes to a held terminal through `delegate`. Direct
+launches outside a held terminal or worker step choose between a chat and a
+batch. `--batch` selects a batch. Otherwise `--interactive`, a terminal or no
+prompt selects a chat. Reopening a Session with no message reads its binding
+and primary scope once to choose its kind. Chats reopen as chats, and bound and
+primary conversations reopen as work sessions. A Desktop pane or a framed
+`lf --machine` viewer is no terminal a chat can own, so a Session it reopens
+is a work session the holder keeps.
+An unreadable store falls back to a work session and logs a recording gap.
 
-### Bare conversations at a terminal
+### Chats at a terminal
 
-Bare conversations typed at a terminal (`lf`, `lf <skill>`, or `lf resume` of
-an unmanaged Session) run as the terminal's foreground process-group leader
-with only the context hooks, and closing the terminal ends them.
-`os_process::foreground` hands the terminal over before exec and takes it back
-after; a provider stopped with Ctrl+Z stops lf too, and `fg` continues both.
-Opening a bare Session somewhere else starts a new process in the same Session
-from the provider's history; a process still open elsewhere is not one `lf`
-stops.
+Chats started with `lf` or a skill run as the terminal's foreground process-group
+leader. Closing the terminal ends them. `os_process::foreground` hands over
+the terminal before exec and takes it back after; Ctrl+Z stops lf with its
+provider and `fg` continues both. `lf resume` reopens a chat in
+its terminal too.
 
 ### Identity
 
 A held terminal is a `TerminalId`, not an LfProcess: Session → TerminalId →
 holder (build, pid) + PTY + child AgentProcess. A holder is one LfProcess
-however many terminals it holds, and `lf process list` shows it once. Launcher
-LfProcess rows and capture attachment keep describing the processes that
-really ran. The registry is live state the server rebuilds from holder
+however many terminals it holds. Each Session's attachment records the holder
+that holds it. The registry is live state the server rebuilds from holder
 inventory, the per-terminal files below and the store; it is not a second
 record of Work.
 
@@ -106,7 +106,9 @@ runs no async runtime and knows nothing about Sessions.
   running when the server's service stops or is replaced.
 - **Lifetime.** It exits 60 seconds after its last child, if no start
   arrives. Logout and reboot end it. Nothing restarts a holder, and a holder
-  that dies takes its agents with it.
+  that dies takes its agents with it; the server's
+  [recovery pass](../../../loopflow/src/server/README.md#recovery-pass)
+  starts the Task work sessions among them again, in the current holder.
 - **Ring.** The newest 2 MiB of raw output per PTY, addressed by absolute
   byte count since the child started. The holder drains every PTY whether or
   not a server is connected, so a stopped server never blocks an agent.
@@ -129,6 +131,10 @@ any older holder, and no field has a default:
 | `resize {terminal, rows, cols}` | `done`. The foreground program is signalled even when the size is unchanged |
 | `restore {terminal}` | `done`. The PTY returns to the modes it had before its child ran |
 | `forget {terminal}` | `done`. An exited terminal's ring is dropped; a running one is an error |
+
+When starting a held terminal, the server fills missing or empty `TERM` with
+`xterm-256color` and `COLORTERM` with `truecolor`. Programs launched from
+Desktop can detect color, and a terminal caller keeps its own settings.
 
 Anything else answers `error {message}` and the connection keeps taking
 requests. A `TerminalId` names one PTY and is never reused: a `read` of a
@@ -165,13 +171,12 @@ reported as such, never given an invented exit code.
 A Claude launcher hands the server what it would record at exit, then execs
 into the provider, so Claude is the holder's direct child and no `lf -i` waits
 beside it; the server records the provider's exit, settles its capture and
-reports where the conversation moved. Interactive Graph steps keep their
-launcher so each step settles before the Graph continues. A Codex launcher
-does the same into its client, which talks to its app-server directly. The
+reports where the conversation moved. A Codex launcher does the same into its client, which talks to its app-server directly. The
 server's lifetime worker checks that client's attachment every two seconds
 and stops it when the conversation moves; a failed store read leaves it
-running, and the byte-handling loop never waits for that read. OpenCode keeps
-its launcher beside its private server. The server strips `LF_SERVER` and
+running, and the byte-handling loop never waits for that read. An OpenCode
+launcher becomes `opencode --standalone` the same way. The launcher drops the
+pane’s `LF_RELAY_FOCUSED` before requesting a held terminal. The server strips `LF_SERVER` and
 `LF_SERVER_STATUS` from what the holder starts, so an agent in a Desktop pane
 runs like one opened from a CLI.
 
@@ -228,11 +233,15 @@ skipped (output the ring dropped before the server read it, or a native
 client's exit text lf replaced); lf's reports and events travel in `aside`
 frames, which it writes and does not count. The server keeps no spool.
 
-A view that reconnects attaches with `from`, the position its screen shows:
+A view that reconnects attaches with `from`, the position its screen shows, and
+`focused`, the focus state it last had:
 
 ```json
-{"id":1,"kind":"attach","control":true,"replace":false,"own":"request","rows":40,"cols":120,"name":null,"moved":null,"from":48213}
+{"id":1,"kind":"attach","rows":40,"cols":120,"name":null,"from":48213,"focused":false}
 ```
+
+Sending its last known focus keeps a background terminal that reconnects on its
+own from taking the size away from the view a person moved to.
 
 The server answers a new viewer identity, reads the PTY bytes from `from`
 out of the holder's ring on a connection of its own, and sends them as `out`
@@ -242,8 +251,8 @@ sends the current state again (size, owner, theme, directory, title and
 program status, a child exit) and a `live` event. A `from` the ring no
 longer holds, or past what the PTY printed, gets a snapshot and `position`
 instead, then `live`. Until it has caught up the view receives no reports or
-events, and its terminal's answers do not count as the controller's: the
-retained screen answers the agent's live queries meanwhile.
+events, and the server drops its terminal's answers: the retained screen
+answers the agent's live queries meanwhile.
 
 The replayed bytes contain queries the agent asked long ago, and the view's
 terminal answers them again. The relay discards everything it reads from
@@ -251,7 +260,7 @@ its terminal until the stream is live, then writes a status report query
 (`CSI 5 n`) and keeps discarding until the terminal's answer to it: answers
 come in order, so every late one has arrived by then (one second at most if
 a terminal never answers). Anything the relay itself prints into the screen
-(a reconnect notice, an input hint, an ownership change) makes its next
+(a reconnect notice, an input hint) makes its next
 reconnect a fresh attach that repaints instead. The replayed stretch is the
 raw PTY output, including a native client's exit text that live views see
 replaced.
@@ -265,14 +274,15 @@ An exit record the launcher hands over is kept beside it in
 `exit-record.json` until it is settled, and its native client's announcement
 in `native-client.json` until that client ends. A launcher that execs its
 provider never announces it again, so a server that takes the terminal up
-reads it there; without it a Desktop pane would stay **Opening…** after a
-restart.
+reads it there; without it a Desktop pane would stay paused waiting for
+readiness after a restart.
 
 On startup the server greets every `holder-*.sock`, lists it, and hosts each
 running terminal under its existing `TerminalId`. The screen is rebuilt by
 replaying the holder's ring from its start, then one size nudge (one column
-narrower for 0.4 s, and back) asks the agent to repaint what the ring no
-longer holds. The same nudge follows a gap, when the ring passed output the
+narrower for 0.4 s, then back to the size the terminal has by then) asks the
+agent to repaint what the ring no longer holds. A view that takes the size
+during the nudge keeps it. The same nudge follows a gap, when the ring passed output the
 server had not read. Scrollback reaches only as far back as the ring, and a
 terminal mode set before the ring's start is known only if the agent sets it
 again when resized. Replayed output answers none of its queries: they were
@@ -293,20 +303,20 @@ agents quit.
 ## Using a view
 
 Ctrl+] detaches a view. Ctrl+C reaches the running program. A Task step's live
-controls (`/status`, `/interrupt`, `/detach`, messages) are shown to each
-controlling view as it attaches; headless output never sees them. Closing a
-terminal leaves the agent, its provider requests and capture settlement with
-the holder and server; `lf session list` shows its Session as `detached` and
-`lf resume` reattaches it. Attaching takes control: the previous view's input
-token is revoked and that terminal says where the conversation went.
-`lf resume SESSION --json` prints the Session record after a successful
-return, including detaching or moving to another view. Terminal traffic does
-not wait for store reads; the final record is read after relaying ends.
-`lf resume SESSION --prepare --json` returns the one command Desktop runs,
-without opening a socket or starting a provider. Desktop decides from the
-record's actions whether showing a pane reattaches: a held Session offers
-reveal, attaching read-only if another viewer holds input. **Move here** takes
-input explicitly; an ended Session waits for an explicit open.
+controls (`/status`, `/interrupt`, `/detach`, messages) are shown to each view
+as it attaches; headless output never sees them. Closing a terminal leaves the
+agent, its provider requests and capture settlement with the holder and
+server; `lf session list` shows its Session as `detached` and `lf resume`
+reattaches it. A held terminal takes any number of views and every attached
+view types: `lf resume` here adds one more view and leaves the others open, and
+a draft typed in one shows in all of them. `lf resume SESSION --json` prints
+the Session record after a successful return, including detaching. Terminal
+traffic does not wait for store reads; the final record is read after relaying
+ends. When stdout is no terminal it holds only that record, and the terminal's
+output goes to stderr. `lf resume SESSION --prepare --json` returns the one
+command Desktop runs, without opening a socket or starting a provider. Desktop
+decides from the record's actions whether showing a pane reattaches: a held
+Session offers reveal; an ended Session waits for an explicit open.
 
 `lf session rename SESSION 'Resume repair'` updates the attached terminal
 title, including Rex and other terminals that support OSC titles. Reattaching
@@ -319,14 +329,14 @@ Leaving a relay restores keyboard and drawing modes at the current cursor
 position. Returning to the shell must not home the cursor or overwrite the
 command's output.
 
-During initial attachment, cooked input waits until the server grants control.
-Input then goes straight to the holder's PTY; only bytes not yet written are
+During initial attachment, cooked input waits until the server acknowledges
+the view. Input then goes straight to the holder's PTY; only bytes not yet written are
 queued, and no store read or write delays forwarding. Returning does not
 resubmit input. Unsent input is lost when the conversation is quit and
 resumed.
 
-An interrupted bracketed paste ends when its controlling view leaves or loses
-control. This releases the native parser's accumulated draft without submitting
+An unfinished bracketed paste ends when its view leaves, and before another
+view's keystrokes reach the agent. This releases the native parser's accumulated draft without submitting
 it. A reconnect tracks paste delimiters even while dropping queued input and
 restores paste framing before forwarding any remaining content. Ctrl+] inside
 a paste is content; outside a paste it detaches the view. No paste timeout or
@@ -345,39 +355,34 @@ delivery unknown and starts nothing. Heartbeat intervals and timeouts use
 monotonic uptime, so laptop sleep does not expire a local connection.
 Completed-Task cleanup counts wall time.
 
-For commands using pipes, the controlling view forwards stdin EOF after all
-accepted input. Disconnecting the view alone leaves stdin open. Terminal
+For commands using pipes, the view forwards stdin EOF after all accepted
+input. Disconnecting the view alone leaves stdin open. Terminal
 views keep the PTY open; the running program interprets terminal EOF keys.
 Keystrokes a view sent before it closed reach the program in order, even when
-the view quits in the same instant, as long as it still held control.
+the view quits in the same instant.
 
 ### Desktop status
 
-Desktop shows **Opening… Input paused** until attachment and native input
-readiness are acknowledged. Initial retries keep that label;
-**Reconnecting…** follows a previously acknowledged connection. Workspace
-preparation uses the same display and keeps its last available screen.
+Initial connection attempts keep the pane quiet. **Reconnecting…** follows
+a previously acknowledged connection.
 Connection feedback overlays the screen without changing the terminal's size;
 the first retained screen uses the new pane's dimensions and cursor position.
 The relay stays alive when its server connection drops. Its native status row
 then shows **Reconnecting…** and pauses input while local selection, copy,
 Find and scrolling remain available. Disconnected typing and uncertain writes
-are never replayed. If another view took control, recovery observes it
-without replacing input or geometry. Choose **Move here** in the read-only
-pane's connection row to edit the same running Session; input stays paused
-until the server acknowledges, and a lost reply never repeats that takeover.
-Eight attempts with capped backoff lead to **Session unavailable** and a native
+are never replayed. Eight attempts with capped backoff lead to **Session unavailable** and a native
 **Retry connection** action. A final Close frame ends recovery and disables input;
 its reason explains replacement, completion or retirement. Bare EOF remains unknown. Closing the
 surface cancels recovery. Ordinary explicit Open remains separate.
 
 The native surface listens on a private Unix socket and passes its path through
 `LF_SERVER_STATUS` to its relay. Newline-delimited JSON readings carry
-generation, state, input capability, native readiness and optional
-explanation. The same stream carries `{"kind":"retry"}` or
-`{"kind":"move","generation":N}`. A move is consumed once before its
-replacing attachment; stale generations and lost actions are never replayed.
-Closing the surface removes its private directory and cancels recovery. A
+generation, state (`connecting`, `reconnecting`, `connected`, `unavailable`,
+`ended`), native readiness, an optional message and the provider transition
+for older clients. Desktop accepts input when the state is `connected` and
+`native_ready` is true. The one action on the same stream is
+`{"kind":"retry"}`, honored only while `unavailable`; lost actions are never
+replayed. Closing the surface removes its private directory and cancels recovery. A
 broken status stream pauses Desktop input immediately; the relay records the
 gap, keeps the terminal running, and reconnects the status stream with its
 current reading. Status I/O, including connect, is nonblocking. This is
@@ -388,8 +393,8 @@ interaction.
 
 The server keeps a libghostty-vt terminal per held terminal (the Ghostty
 revision pinned in `rust/loopflow-terminal/ghostty-vt.json`, 8 MiB of scrollback) and
-answers the program's cursor, device and mode queries while no view's
-terminal is there to. A new view is repainted through Ghostty's VT formatter:
+answers the program's cursor, device and mode queries while no view is
+attached to answer them. A new view is repainted through Ghostty's VT formatter:
 the newest scrollback rows (up to 2,000, under 768 KiB) above its own
 history, then the active screen with colors and styles, OSC 8 hyperlinks,
 cursor position, Kitty keyboard stack, charsets, modes (alternate screen,
@@ -456,50 +461,54 @@ at most 64 KiB; a payload over 4 MiB is a protocol error.
 | `0x06` aside | server → view | lf's reports and events; not PTY bytes |
 | `0x07` close | server → view | final JSON `{reason: replaced\|finished\|retired}`; not PTY bytes |
 | `0x11` request | view → server | JSON with `id` and `kind` |
-| `0x12` input | view → server | keystrokes from the connection holding input control |
+| `0x12` input | view → server | keystrokes from any attached connection |
 
 ```json
-{"id":1,"kind":"attach","control":true,"replace":true,"own":"take","rows":40,"cols":120,"name":"/dev/ttys004","moved":null,"from":null}
-{"answers":1,"seq":0,"kind":"attached","viewer":"…","nonce":"…","token":"…","terminal":true,"owner":"…"}
+{"id":1,"kind":"attach","rows":40,"cols":120,"name":"/dev/ttys004","from":null,"focused":true}
+{"answers":1,"seq":0,"kind":"attached","viewer":"…","nonce":"…","terminal":true,"owner":"…"}
+{"id":2,"kind":"focus","focused":true}
 ```
 
 Before attachment, a destination may send a `snapshot` of retained history.
-It grants no input or retention claim; the live snapshot replaces it on
-attachment. The attached stream opens with the snapshot, a `resize` event, a
-`theme` event when one is known, an `owner` event, and live output.
+It grants no retention claim; the live snapshot replaces it on attachment. The
+attached stream opens with the snapshot, a `resize` event, a `theme` event when
+one is known, an `owner` event, and live output.
 
 Events travel in `aside` frames as ``ESC _ lf1;<nonce>;<json> ESC \``, with
 the view's own nonce, so a program printing the same bytes passes through as
 output. Each carries a gapless `seq` per view, and every
 reply carries the `seq` of the last event queued when it was computed. Kinds:
 `resize {rows,cols}`, `theme {theme}`, `program_status {status}`,
-`owner {viewer,name,held}`, `control {held,notice}` (input control left this
-connection), `child_exited {code}`, `detached`, `hint {text}`,
-`return {detach}` and `live`. A terminal view that receives `control` with
-`held: false` restores its terminal, prints the notice and leaves. Desktop keeps
-its view attached read-only and offers Move here, the only action that replaces
-another view's control. When a heartbeat's `controlled` reply says nobody holds
-input, a read-only Desktop view asks for it without replacing; Busy keeps it
-read-only.
+`owner {viewer,name,held}`, `child_exited {code}`, `detached`, `hint {text}`,
+`return {detach}` and `live`.
 
-Input control and geometry release when a connection ends; a reconnecting view
-asks for them again. Another view's input or geometry claim survives, and
-closing a stale socket later cannot revoke a replacement connection's claims.
+Every attached view can type. The sizing view supplies the PTY size and
+colors. The `attached` reply names it in `owner`, and the `owner` event's
+`held` field tells each recipient whether it owns the size. A view without
+reported colors supplies no color override.
 
-Geometry ownership arbitrates only size and colors. `own: "take"` replaces the
-geometry owner, who receives `owner` with `held: false` and stays attached;
-`own: "request"` queues until the owner leaves. A view may report its size and
-colors before it owns them; only the selected owner's reports are broadcast as
-effective appearance, and its known size and colors follow ownership. A view
-that has not reported colors supplies no color override. Who may type is
-separate: the `token` of a controlling attach, `busy` when control is held and
-`replace` is false, and a `control` event to the connection that lost it.
+A focused attach, focus-in or typing takes the size. An unfocused attach
+takes it only when there is no owner. When the owner leaves, the most
+recently used live view takes over. Older relays omit `focused` on attach,
+which counts as a focused attach.
+
+A relay starts focused when stdin is a terminal unless given `--unfocused`
+or `LF_RELAY_FOCUSED=0`. Desktop sets the variable in every Session pane.
+The relay enables DEC mode 1004 to track focus across reconnects. Ghostty
+reports its current focus when the mode turns on, so a focused pane takes
+the size before the first key. The agent receives focus reports only when
+it enables mode 1004 itself. Focus-out reaches it only from the sizing view.
+
+Only the sizing view's terminal answers the agent's queries. The server drops
+the other views' answers (cursor position, device attributes, OSC color
+replies, mode reports) so the agent hears one answer.
 
 A view sends `{"id":N,"kind":"controlled"}` every ten seconds on its attached
-connection, independent of input and output; after thirty seconds without one
-the server releases that connection's retention and input claim. Silent
-network loss needs no EOF. The view also detects thirty seconds without an
-answer or output, even when its writes still succeed, and reconnects. Neither
+connection, independent of input and output, and gets `controlled {viewed,
+ready}` back; after thirty seconds without one the server drops that view and
+its retention claim. Silent network loss needs no EOF. The view also detects
+thirty seconds without an answer or output, even when its writes still
+succeed, and reconnects. Neither
 starts a provider or replays input. Queued replies are read before checking
 the deadline so a responsive, quiet provider stays attached after waking.
 
@@ -512,27 +521,18 @@ ps -axo ppid,command | grep 'graph run'
 # 1 lf --agent claude --task task_… graph run
 ```
 
-Nothing hosts headless work (`os_process::detached`). A bare `-b` or piped
-execution, and every headless Graph step, runs in the caller's process and its
-agent is that process's child, so it ends with its caller and its stdout and
-stderr are the caller's. Work that must outlive its caller (Graph launches,
-landing watchers, `lf ship`, a `-b` or piped Work command) is spawned with
-`setsid`, stdin from `/dev/null` and every inherited descriptor closed except
-release locks and worktree leases. It gets one more pipe, named by
-`LF_LAUNCHER_FD`: the child writes its LfProcess ID there once admitted, and
-`released` when it lets its launcher go. Server launches, landing watchers and
-ship restarts read the ID and append the child's output to
-`logs/detached.log`; a pipe that closes without an ID leaves delivery unknown,
-and nothing is launched again. A `-b` or piped Work command prints the child's
-stdout and stderr as they grow and exits with its status, or with success
-once a Task run or ship lets it go after naming its Graph log. A piped
-`lf session resume` of a Task conversation also passes its stdin on while it
-waits, so piped input reaches the agent. Killing that caller leaves the work
-running.
+Nothing hosts headless work (`os_process::detached`). Batches and direct
+headless Graphs run with their caller. Task Graph workers, landing watchers
+and delivery controllers that must outlive the command use `setsid`, stdin
+from `/dev/null` and closed inherited descriptors except release locks and
+worktree leases. Task steps themselves wait inside their Graph's process tree.
 
-No PTY, view protocol or screen is involved. Hooks, turn recording and
-steers work as they do for any headless run; the child's own process records
-its exit.
+`LF_LAUNCHER_FD` carries the admitted LfProcess ID and a `released` message.
+Server launches, landing watchers and run restarts record the ID and append
+output to `logs/detached.log`. A pipe closing without an ID leaves delivery
+unknown; nothing launches again on that uncertainty. Workers report turns and
+read Task steers while running without a PTY, viewer or screen. Their own
+process records their exit.
 
 ## Exit and settlement
 
@@ -566,7 +566,7 @@ reopens provider history without starting a turn.
 
 Desktop creates a shell once, on the Task's recorded Machine, in a terminal
 that Machine's holder keeps. The shell is plain: no hooks, no steers, and an
-`lf` typed in it is bare. Its private runtime in `desktop::shells` owns
+`lf` typed in it starts a chat. Its private runtime in `desktop::shells` owns
 execution receipts, startup, reconnect and Close. A Linux Machine runs the
 same server and holder under systemd; no Desktop app is needed there. Machine
 routing carries the same view protocol across SSH. There is no Task shell
@@ -585,7 +585,7 @@ different execution. An unavailable destination never opens a local successor
 prompt.
 
 Keep a Task Session view open to retain its worktree. Hidden or unfocused
-views count, passive ones too; input control is separate. Closing the last
+views count. Closing the last
 view starts a completed Task's cleanup grace; requested work delays cleanup
 without restarting that clock. A shell does not retain the worktree.
 Loopflow cleans up its Desktop shells; Rex shells remain yours to manage in
@@ -652,17 +652,14 @@ Desktop keeps views open for visible Tasks and a bounded recent set of
 unfinished conversations, so those hold their checkouts; leaving the set,
 Close and window close detach them.
 
-Desktop's automatic opening uses a non-replacing input claim: working Tasks use
-Start, which permits first-thread creation; other Work uses reveal, which
-requires existing history. Their prepared commands keep that distinction
-through launch. If another view wins before attachment, the server returns
-Busy; Desktop attaches read-only and keeps that view's input. Only Take back uses
-ordinary resume to take control; Try again on a consumed first launch uses it on a Session no client
-holds. The live relay announces native input readiness to Desktop after the
-server acknowledges the native client; saved screen bytes never provide that
-announcement. A successful automatic attach records its Desktop terminal
-association after the handshake, keeping current provider status without
-claiming another view's input during preparation.
+Desktop opens a conversation the way `lf resume` does: it attaches one more
+view beside any already open, resumes an ended provider from history, and
+takes over a Session whose provider runs outside a held terminal, in a native
+client lf cannot share. Try again on a consumed first launch gives its request
+another attempt. The live relay announces native input readiness to Desktop after
+the server acknowledges the native client; saved screen bytes never provide
+that announcement. A successful automatic attach records its Desktop terminal
+association after the handshake.
 
 Terminal parsing and repainting live in
 [`loopflow-terminal`](../../../loopflow-terminal/README.md). The application

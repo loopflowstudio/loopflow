@@ -4,17 +4,17 @@ use super::{
     block_on_task, comparison_context, completion_pending, completion_refusal, file_context,
     file_save, file_store, owning_wave, repository_for_task, resolve_task_agent,
     task_configuration_refusal, task_error, task_event_process_refusal, task_store,
-    task_worktree_blocker, TaskChangedFile, TaskChangesSnapshot, TaskComparison, TaskDiffSnapshot,
-    TaskFileSnapshot, TaskFileState, TaskSnapshot, TaskWorkspace,
+    task_worktree_blocker, TaskChangedFile, TaskChangesSnapshot, TaskCommit, TaskComparison,
+    TaskDiffSnapshot, TaskFileSnapshot, TaskFileState, TaskSnapshot, TaskWorkspace,
 };
 use std::collections::BTreeMap;
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 
-use crate::config::parse_agent;
-use crate::ops::error::{OpsError, OpsResult};
+use crate::ops::error::OpsResult;
 use crate::ops::task_actions::{derive_task_actions, TaskActionEvidence, TaskActionModel};
 use crate::store::SharedStore;
+use base64::Engine as _;
 use loopflow_storage::child::ChildRef;
 use loopflow_storage::work::task::{PrPhase, Task, TaskPr};
 use sha2::{Digest, Sha256};
@@ -29,8 +29,6 @@ pub fn task_snapshot(task: &Task) -> OpsResult<TaskSnapshot> {
 pub(super) async fn read_task_snapshot(store: &SharedStore, task: Task) -> OpsResult<TaskSnapshot> {
     let wave = owning_wave(store, &task).await?;
     let repo = repository_for_task(store, &task)?;
-    let personal =
-        crate::config::PersonalSettings::read(Some(&repo), wave.as_ref().map(|w| w.slug()));
     let project = match &task.project_id {
         Some(id) => Some(
             store
@@ -55,26 +53,49 @@ pub(super) async fn read_task_snapshot(store: &SharedStore, task: Task) -> OpsRe
         .work_status(&work)
         .await
         .map_err(|error| task_error(format!("failed to derive Task Work status: {error}")))?;
-    let execution = crate::ops::task_execution::task_execution(store, &task)
+    let mut execution = crate::ops::task_execution::task_execution(store, &task)
         .await
         .map_err(task_error)?;
     let work_set =
         crate::store::task_work::task_work(&store.sqlite, &task.id).map_err(task_error)?;
+    let auto = store.sqlite.task_auto(&task.id).map_err(task_error)?;
+    if execution.state == crate::ops::task_execution::TaskExecutionState::Idle {
+        if let Some(wait) = work_set
+            .graph
+            .as_ref()
+            .and_then(|graph| graph.waiting_to_land(auto.as_ref(), &task.identifier))
+        {
+            execution.state = crate::ops::task_execution::TaskExecutionState::Waiting;
+            execution.reason = wait;
+        }
+    }
     let status = store.task_state(&task.id).await.map_err(task_error)?;
+    let parent_pr = match task.parent_pr_id.as_ref() {
+        Some(parent_id) => store
+            .get_task_pr(parent_id)
+            .await
+            .map_err(|error| task_error(format!("failed to read parent PR: {error}")))?,
+        None => None,
+    };
+    let stack_parent = match parent_pr.as_ref() {
+        Some(parent) => store
+            .get_task(&parent.task_id)
+            .await
+            .map_err(task_error)?
+            .map(|parent_task| super::TaskStackParent {
+                identifier: parent_task.identifier,
+                branch: parent.branch.clone(),
+                pr_number: parent.github().map(|github| u64::from(github.number)),
+            }),
+        None => None,
+    };
     let actions = if store.sqlite.task_deleted(&task).map_err(task_error)? {
         TaskActionModel {
             recommended: Some(crate::ops::task_actions::TaskAction::NoAction),
             reason: "Task was deleted; retained history is read-only".into(),
         }
     } else {
-        let predecessor_phase = match task.parent_pr_id.as_ref() {
-            Some(parent_id) => store
-                .get_task_pr(parent_id)
-                .await
-                .map_err(|error| task_error(format!("failed to read parent PR: {error}")))?
-                .map(|pr| pr.phase()),
-            None => None,
-        };
+        let predecessor_phase = parent_pr.as_ref().map(TaskPr::phase);
         let completion_refusal = completion_refusal(pr.as_ref(), &task.identifier);
         let worktree_blocker = task_worktree_blocker(store, &task).await?;
         let run_refusal = worktree_blocker
@@ -83,7 +104,7 @@ pub(super) async fn read_task_snapshot(store: &SharedStore, task: Task) -> OpsRe
         let launch_refusal = if worktree_blocker.is_some() {
             None
         } else {
-            task_configuration_refusal(&task, wave.as_ref().map(|w| w.slug()), &personal, None)
+            task_configuration_refusal(&task, &repo, wave.as_ref().map(|w| w.slug()))
                 .or_else(|| task_event_process_refusal(latest_event.as_ref()).map(str::to_string))
         };
         let action_evidence = TaskActionEvidence {
@@ -95,6 +116,16 @@ pub(super) async fn read_task_snapshot(store: &SharedStore, task: Task) -> OpsRe
                 .as_ref()
                 .filter(|pr| pr.phase() == PrPhase::Open)
                 .map(|pr| pr.presentation().is_some()),
+            at_end: work_set.graph.as_ref().is_some_and(|graph| {
+                matches!(
+                    &graph.position,
+                    crate::task_graph::TaskGraphPosition::At { step } if step == crate::task_graph::END
+                )
+            }),
+            open_children: store
+                .sqlite
+                .open_task_child_count(&task.id)
+                .map_err(task_error)?,
             completion_refusal: completion_refusal.as_deref(),
             run_refusal: run_refusal.as_deref(),
             ci: active.and_then(|pr| pr.fresh_ci()),
@@ -105,11 +136,11 @@ pub(super) async fn read_task_snapshot(store: &SharedStore, task: Task) -> OpsRe
     };
     let agent = resolve_task_agent(
         task.worktree.as_deref().unwrap_or(&repo),
+        &repo,
         wave.as_ref().map(|w| w.slug()),
-        &personal,
         None,
     );
-    let provider = agent.ok().map(|agent| parse_agent(&agent).0);
+    let provider = agent.ok().map(|agent| agent.harness.as_str().to_owned());
     // A Task's worktree is its checkout on this Machine.
     let local_machine = store.local_machine().await.map_err(task_error)?;
     let machine_id = task.worktree.is_some().then(|| local_machine.id.clone());
@@ -120,51 +151,28 @@ pub(super) async fn read_task_snapshot(store: &SharedStore, task: Task) -> OpsRe
             .unwrap_or_else(|| path.clone())
     });
     let completion_pending = completion_pending(store, &task)?;
-    let starter = |process: Option<&loopflow_model::id::LfProcessId>| {
-        super::ship::starter(&store.sqlite, &repo, process).map_err(task_error)
-    };
-    let mark = |at, by: Option<&loopflow_model::id::LfProcessId>| {
-        Ok::<_, OpsError>(super::ShipMark {
-            at,
-            by: starter(by)?,
-        })
+    let starter = |session: Option<&loopflow_model::id::LfSessionId>| {
+        super::auto::starter(&store.sqlite, &repo, session).map_err(task_error)
     };
     let started_by = store
         .sqlite
         .latest_task_graphs(&[&task.id])
         .map_err(task_error)?
         .get(&task.id)
-        .map(|graph| starter(Some(graph.id())))
-        .transpose()?;
-    let ship_approval = store
-        .sqlite
-        .task_shipping(&task.id)
-        .map_err(task_error)?
-        .map(|shipping| mark(shipping.shipped_at, shipping.approved_by.as_ref()))
-        .transpose()?;
-    let ship_stop = store
-        .sqlite
-        .task_ship_stop(&task.id)
-        .map_err(task_error)?
-        .map(|stop| {
-            Ok::<_, OpsError>(super::ShipMark {
-                at: stop.at,
-                by: super::ship::stopper(&store.sqlite, &repo, &stop).map_err(task_error)?,
-            })
-        })
+        .map(|graph| starter(graph.caller_session.as_ref()))
         .transpose()?;
     Ok(TaskSnapshot {
         machine_id,
-        issue_id: task.linear_id.as_ref().map(|id| id.as_str().to_string()),
+        issue_id: task.tracker_id.as_ref().map(|id| id.as_str().to_string()),
         issue_identifier: task.identifier,
         task_id: task.id.to_string(),
         external_project_id: project
             .as_ref()
-            .and_then(|p| p.linear_id.as_ref())
+            .and_then(|p| p.tracker_id.as_ref())
             .map(|id| id.as_str().to_string()),
         project: project.map(|p| p.slug),
-        pm_snapshot_synced_at: task.pm_snapshot_synced_at,
-        pm_writeback: task.pm_writeback,
+        tracker_synced_at: task.tracker_synced_at,
+        tracker_writeback: task.tracker_writeback,
         wave: wave.as_ref().map(|w| w.slug().to_string()),
         project_id: task.project_id.as_ref().map(ToString::to_string),
         repository_id: task.repository_id.to_string(),
@@ -184,8 +192,8 @@ pub(super) async fn read_task_snapshot(store: &SharedStore, task: Task) -> OpsRe
         observation: task.observation,
         actions,
         started_by,
-        ship_approval,
-        ship_stop,
+        auto,
+        stack_parent,
     })
 }
 
@@ -247,9 +255,36 @@ pub(super) fn changes_snapshot(workspace: TaskComparison<'_>) -> OpsResult<TaskC
     )?
     .trim()
     .to_string();
+    let commits = git_output(
+        workspace.checkout.worktree,
+        &[
+            "log",
+            "--reverse",
+            "--first-parent",
+            "--no-merges",
+            "--format=%H%x1f%P%x1f%s",
+            &format!("{}..{head_commit}", workspace.base_commit),
+        ],
+    )?
+    .lines()
+    .filter_map(|line| {
+        let mut fields = line.splitn(3, '\u{1f}');
+        Some(TaskCommit {
+            sha: fields.next()?.to_string(),
+            parent: fields.next()?.to_string(),
+            subject: fields.next()?.to_string(),
+        })
+    })
+    .collect();
     let net = net_changed_paths(workspace)?;
+    let counts = change_counts(workspace)?;
     files.retain(|path, file| {
         file.old_path = net.get(path).cloned().flatten();
+        file.changes = match counts.get(path) {
+            Some(count) => *count,
+            None if file.untracked => untracked_changes(&workspace.checkout.worktree.join(path)),
+            None => 0,
+        };
         net.contains_key(path) || file.untracked
     });
     let (scratch, scratch_truncated) = if workspace.head_commit.is_none() {
@@ -266,10 +301,146 @@ pub(super) fn changes_snapshot(workspace: TaskComparison<'_>) -> OpsResult<TaskC
         task_id: workspace.checkout.task_id.to_string(),
         base_commit: workspace.base_commit.to_string(),
         head_commit,
+        commits,
         files: files.into_values().collect(),
         scratch,
         scratch_truncated,
     })
+}
+
+/// Each tracked file's runs of changed lines, from the patch the Diff reads:
+/// with its usual context, since Git aligns some changes differently without.
+/// A file with no hunks (binary, a pure rename) is absent.
+fn change_counts(workspace: TaskComparison<'_>) -> OpsResult<BTreeMap<String, u64>> {
+    Ok(count_changes(&git_output_bytes(
+        workspace.checkout.worktree,
+        &comparison_diff_args(workspace),
+    )?))
+}
+
+/// Patch flags pinned against Machine configuration (`color.diff`, external
+/// drivers, `diff.noprefix`, `diff.mnemonicPrefix`), so the counts and the Diff
+/// read the same patch.
+const PINNED_PATCH_FLAGS: [&str; 4] = [
+    "--no-color",
+    "--no-ext-diff",
+    "--src-prefix=a/",
+    "--dst-prefix=b/",
+];
+
+/// `git diff` over the comparison, renames found whatever `diff.renames` says.
+/// Pathspecs follow.
+fn comparison_diff_args<'a>(workspace: TaskComparison<'a>) -> Vec<&'a str> {
+    let mut args = vec!["diff", "--find-renames"];
+    args.extend(PINNED_PATCH_FLAGS);
+    args.push(workspace.base_commit);
+    args.extend(workspace.head_commit);
+    args.push("--");
+    args
+}
+
+pub(super) fn count_changes(patch: &[u8]) -> BTreeMap<String, u64> {
+    let mut counts = BTreeMap::new();
+    let mut old_path = None::<String>;
+    let mut path = None::<String>;
+    // Lines left in the current hunk, old and new side.
+    let (mut old, mut new) = (0u64, 0u64);
+    let mut previous = b' ';
+    for line in patch.split(|byte| *byte == b'\n') {
+        if old > 0 || new > 0 {
+            match line.first() {
+                Some(b'-') => old = old.saturating_sub(1),
+                Some(b'+') => new = new.saturating_sub(1),
+                Some(b' ') => {
+                    old = old.saturating_sub(1);
+                    new = new.saturating_sub(1);
+                }
+                _ => continue,
+            }
+            let kind = line[0];
+            let starts = kind != b' ' && (previous == b' ' || (kind == b'-' && previous == b'+'));
+            if starts {
+                if let Some(path) = path.as_ref().or(old_path.as_ref()) {
+                    *counts.entry(path.clone()).or_insert(0) += 1;
+                }
+            }
+            previous = kind;
+        } else if line.starts_with(b"diff --git ") {
+            old_path = None;
+            path = None;
+        } else if let Some(name) = line.strip_prefix(b"--- a/") {
+            old_path = Some(patch_path(name));
+        } else if let Some(name) = line.strip_prefix(b"+++ b/") {
+            path = Some(patch_path(name));
+        } else if line.starts_with(b"@@ ") {
+            (old, new) = hunk_lengths(line);
+            previous = b' ';
+        }
+    }
+    counts
+}
+
+/// A path as Git writes it after `a/` or `b/`: C-quoted when it holds
+/// unusual bytes, followed by a tab when it holds a space.
+fn patch_path(name: &[u8]) -> String {
+    let name = name.strip_suffix(b"\t").unwrap_or(name);
+    let Some(quoted) = name
+        .strip_prefix(b"\"")
+        .and_then(|name| name.strip_suffix(b"\""))
+    else {
+        return String::from_utf8_lossy(name).into_owned();
+    };
+    let mut bytes = Vec::with_capacity(quoted.len());
+    let mut rest = quoted.iter().copied();
+    while let Some(byte) = rest.next() {
+        if byte != b'\\' {
+            bytes.push(byte);
+            continue;
+        }
+        match rest.next() {
+            Some(b'n') => bytes.push(b'\n'),
+            Some(b't') => bytes.push(b'\t'),
+            Some(digit @ b'0'..=b'7') => {
+                let mut value = digit - b'0';
+                for _ in 0..2 {
+                    if let Some(next) = rest.next() {
+                        value = value.wrapping_mul(8).wrapping_add(next.wrapping_sub(b'0'));
+                    }
+                }
+                bytes.push(value);
+            }
+            Some(other) => bytes.push(other),
+            None => {}
+        }
+    }
+    String::from_utf8_lossy(&bytes).into_owned()
+}
+
+/// The old and new line counts of `@@ -a[,b] +c[,d] @@`; a missing count is 1.
+fn hunk_lengths(header: &[u8]) -> (u64, u64) {
+    let header = String::from_utf8_lossy(header);
+    let mut sides = header.split(' ').skip(1).take(2);
+    let mut length = || {
+        let side = sides.next().and_then(|side| side.get(1..)).unwrap_or("");
+        side.split_once(',')
+            .map_or(Ok(1), |(_, count)| count.parse())
+            .unwrap_or(0)
+    };
+    (length(), length())
+}
+
+/// An untracked file reads as one addition, unless it is empty or binary (a
+/// NUL in Git's first 8,000 bytes), when there is nothing to step to.
+fn untracked_changes(path: &Path) -> u64 {
+    use std::io::Read;
+    match std::fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => return 1,
+        Ok(metadata) if metadata.is_file() => {}
+        _ => return 0,
+    }
+    let mut head = Vec::with_capacity(8_000);
+    let read = std::fs::File::open(path).and_then(|file| file.take(8_000).read_to_end(&mut head));
+    u64::from(read.is_ok() && !head.is_empty() && !head.contains(&0))
 }
 
 pub fn task_diff(
@@ -312,9 +483,7 @@ pub(super) fn diff_snapshot(
         Some(path) => net_changed_paths(workspace)?.remove(path).flatten(),
         None => None,
     };
-    let mut args = vec!["diff", "--no-ext-diff", "--no-color", workspace.base_commit];
-    args.extend(workspace.head_commit);
-    args.push("--");
+    let mut args = comparison_diff_args(workspace);
     // Both sides of a rename are needed for Git to preserve its identity.
     if let Some(old) = &old_path {
         args.push(old);
@@ -334,7 +503,12 @@ pub(super) fn diff_snapshot(
     for path in include_untracked {
         let output = crate::observe::git(
             workspace.checkout.worktree,
-            &["diff", "--no-index", "--no-color", "--", "/dev/null", &path],
+            &[
+                &["diff", "--no-index"][..],
+                &PINNED_PATCH_FLAGS,
+                &["--", "/dev/null", &path],
+            ]
+            .concat(),
         )
         .map_err(|error| task_error(format!("failed to diff untracked file {path}: {error}")))?;
         if !output.status.success() && output.status.code() != Some(1) {
@@ -349,8 +523,9 @@ pub(super) fn diff_snapshot(
 }
 
 pub fn task_workspace_context(task: &Task) -> OpsResult<String> {
-    const MAX_PATCH_TOKENS: usize = 15_000;
-
+    if !task.worktree.as_ref().is_some_and(|path| path.is_dir()) {
+        return Ok("This Task has no checkout here: none was made, or it was retired when the Task closed. Read its changes from its pull request and Git history.".into());
+    }
     if !crate::git::commit_exists(task.worktree()?, &task.base_commit)? {
         return Ok(format!(
             "The recorded Task comparison base {} is unavailable in {}. The saved checkout and its edits remain the working copy. Inspect Git history and the actual files, recover the comparison base through managed sync, and do not treat the missing diff as an empty change.",
@@ -384,7 +559,7 @@ pub fn task_workspace_context(task: &Task) -> OpsResult<String> {
         .join("\n");
     let include_patch = !diff.binary
         && !diff.truncated
-        && crate::prompt::count_tokens(&diff.patch) < MAX_PATCH_TOKENS;
+        && crate::prompt::count_tokens(&diff.patch) < crate::prompt::change::PATCH_INLINE_TOKENS;
     let patch = if include_patch {
         diff.patch.as_str()
     } else {
@@ -396,7 +571,21 @@ pub fn task_workspace_context(task: &Task) -> OpsResult<String> {
     ))
 }
 
-pub fn task_file(issue: &str, path: &str, inspect_recovery: bool) -> OpsResult<TaskFileSnapshot> {
+/// Largest binary file whose bytes a read carries, base64, in `data`.
+pub const MAX_BINARY_DATA_BYTES: usize = 16 * 1024 * 1024;
+
+/// One file of a Task: the working tree, or the version at `at` (`parent`,
+/// `head` or a resolved commit SHA), which is read-only and has no recoveries.
+pub fn task_file(
+    issue: &str,
+    path: &str,
+    at: Option<&str>,
+    inspect_recovery: bool,
+) -> OpsResult<TaskFileSnapshot> {
+    if let Some(at) = at {
+        let (checkout, commit) = comparison_context(issue, at)?;
+        return committed_file_snapshot(TaskWorkspace::from(&checkout), &commit, path);
+    }
     let checkout = file_context(&file_store()?, issue)?;
     let workspace = TaskWorkspace::from(&checkout);
     let mut file = file_snapshot(workspace, path)?;
@@ -404,6 +593,21 @@ pub fn task_file(issue: &str, path: &str, inspect_recovery: bool) -> OpsResult<T
         file.recoveries = file_save::recoveries(workspace, &file.path)?;
     }
     Ok(file)
+}
+
+fn missing_snapshot(workspace: TaskWorkspace<'_>, path: String) -> TaskFileSnapshot {
+    TaskFileSnapshot {
+        recoveries: Vec::new(),
+        issue_identifier: workspace.issue_identifier.to_string(),
+        task_id: workspace.task_id.to_string(),
+        path,
+        content: None,
+        data: None,
+        state: TaskFileState::Missing,
+        revision: None,
+        read_only_reason: None,
+        size_bytes: 0,
+    }
 }
 
 pub(super) fn file_snapshot(
@@ -415,17 +619,7 @@ pub(super) fn file_snapshot(
         .worktree
         .canonicalize()
         .map_err(|error| task_error(format!("cannot resolve Task worktree: {error}")))?;
-    let mut snapshot = TaskFileSnapshot {
-        recoveries: Vec::new(),
-        issue_identifier: workspace.issue_identifier.to_string(),
-        task_id: workspace.task_id.to_string(),
-        path: relative.clone(),
-        content: None,
-        state: TaskFileState::Missing,
-        revision: None,
-        read_only_reason: None,
-        size_bytes: 0,
-    };
+    let mut snapshot = missing_snapshot(workspace, relative.clone());
     let absolute = match root.join(&relative).canonicalize() {
         Ok(path) => path,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(snapshot),
@@ -458,21 +652,103 @@ pub(super) fn file_snapshot(
     {
         snapshot.read_only_reason = Some("Git metadata is read-only.".into());
     }
-    let (size, bytes) = crate::observe::file_bytes(&absolute, MAX_FILE_BYTES + 1)
-        .map_err(|error| task_error(format!("cannot read Task file {relative:?}: {error}")))?;
+    let read = |limit| {
+        crate::observe::file_bytes(&absolute, limit)
+            .map_err(|error| task_error(format!("cannot read Task file {relative:?}: {error}")))
+    };
+    let (size, bytes) = read(MAX_FILE_BYTES + 1)?;
     snapshot.size_bytes = size;
-    snapshot.state = if bytes.len() > MAX_FILE_BYTES {
-        TaskFileState::Truncated
-    } else if bytes.contains(&0) {
-        TaskFileState::Binary
+    read_contents(&mut snapshot, bytes, || Ok(read(MAX_BINARY_DATA_BYTES)?.1))?;
+    Ok(snapshot)
+}
+
+pub(super) fn committed_file_snapshot(
+    workspace: TaskWorkspace<'_>,
+    commit: &str,
+    path: &str,
+) -> OpsResult<TaskFileSnapshot> {
+    let relative = validate_task_relative_path(path)?;
+    let mut snapshot = missing_snapshot(workspace, relative.clone());
+    snapshot.read_only_reason = Some("A committed version is read-only.".into());
+    // `<mode> <type> <object> <size>\t<path>`; nothing when the commit has no such path.
+    let listing = git_output_bytes(
+        workspace.worktree,
+        &["ls-tree", "-l", "-z", commit, "--", &relative],
+    )?;
+    let Some(entry) = listing
+        .split(|byte| *byte == 0)
+        .find(|entry| !entry.is_empty())
+    else {
+        return Ok(snapshot);
+    };
+    let header =
+        String::from_utf8_lossy(entry.split(|byte| *byte == b'\t').next().unwrap_or(entry))
+            .into_owned();
+    let fields = header.split_whitespace().collect::<Vec<_>>();
+    let [_, "blob", object, size] = fields[..] else {
+        return Err(task_error(format!(
+            "Task file {relative:?} is not a file at {commit}"
+        )));
+    };
+    snapshot.size_bytes = size
+        .parse()
+        .map_err(|_| task_error(format!("Git listed no size for {relative:?}")))?;
+    let bytes = git_blob_prefix(workspace.worktree, object, MAX_FILE_BYTES + 1)?;
+    read_contents(&mut snapshot, bytes, || {
+        git_output_bytes(workspace.worktree, &["cat-file", "blob", object])
+    })?;
+    Ok(snapshot)
+}
+
+/// Classifies a file from its first bytes (at most `MAX_FILE_BYTES + 1`).
+/// `whole` reads the rest of a binary file small enough to carry in `data`.
+fn read_contents(
+    snapshot: &mut TaskFileSnapshot,
+    bytes: Vec<u8>,
+    whole: impl FnOnce() -> OpsResult<Vec<u8>>,
+) -> OpsResult<()> {
+    if bytes.contains(&0) {
+        snapshot.state = TaskFileState::Binary;
+        if snapshot.size_bytes <= MAX_BINARY_DATA_BYTES as u64 {
+            let bytes = if bytes.len() as u64 >= snapshot.size_bytes {
+                bytes
+            } else {
+                whole()?
+            };
+            snapshot.data = Some(base64::engine::general_purpose::STANDARD.encode(bytes));
+        }
+    } else if bytes.len() > MAX_FILE_BYTES {
+        snapshot.state = TaskFileState::Truncated;
     } else if let Ok(content) = String::from_utf8(bytes) {
         snapshot.revision = Some(hex::encode(Sha256::digest(content.as_bytes())));
         snapshot.content = Some(content);
-        TaskFileState::Text
+        snapshot.state = TaskFileState::Text;
     } else {
-        TaskFileState::UnsupportedEncoding
-    };
-    Ok(snapshot)
+        snapshot.state = TaskFileState::UnsupportedEncoding;
+    }
+    Ok(())
+}
+
+/// The first `limit` bytes of a blob, without reading a large one whole.
+fn git_blob_prefix(worktree: &Path, object: &str, limit: usize) -> OpsResult<Vec<u8>> {
+    use std::io::Read as _;
+    let mut child = Command::new("git")
+        .current_dir(worktree)
+        .args(["cat-file", "blob", object])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()?;
+    let mut bytes = Vec::new();
+    child
+        .stdout
+        .take()
+        .expect("stdout is piped")
+        .take(limit as u64)
+        .read_to_end(&mut bytes)?;
+    // A blob longer than the limit leaves git blocked on a full pipe.
+    let _ = child.kill();
+    child.wait()?;
+    Ok(bytes)
 }
 
 pub(super) fn resolve_file_base(
@@ -486,7 +762,7 @@ pub(super) fn resolve_file_base(
         sha if sha.len() == 40 && sha.bytes().all(|byte| byte.is_ascii_hexdigit()) => sha,
         _ => {
             return Err(task_error(
-                "Comparison must be parent, head, or a resolved commit SHA",
+                "A revision must be parent, head, or a resolved commit SHA",
             ))
         }
     };
@@ -685,6 +961,7 @@ fn record_changed_paths(
                 staged: false,
                 unstaged: false,
                 untracked: false,
+                changes: 0,
             });
         mark(file);
     }

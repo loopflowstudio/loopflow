@@ -78,8 +78,17 @@ export default function (pi) {
     log(`recording gap closed (${gap}); lf records from here`);
     gap = undefined;
   };
-  const server = spec.turns && process.env.LF_CONTEXT_DELIVERY
-    ? machineServer(process.env.LF_CONTEXT_DELIVERY, log) : undefined;
+  // The conversation Pi runs now, by its session file.
+  let sessionFile;
+  // A work session takes the server's steers while idle, as a turn Pi starts;
+  // one already running queues the message as a steer.
+  const delivery = process.env.LF_CONTEXT_DELIVERY;
+  const wake = spec.wake && delivery ? wakeSocket(async (thread, text) => {
+    if (thread !== sessionFile) throw new Error(`this Pi runs ${sessionFile}, not ${thread}`);
+    await pi.sendMessage({ customType: "loopflow-steer", content: text, display: true },
+      { triggerTurn: true });
+  }, log) : null;
+  const server = spec.turns && delivery ? machineServer(delivery, log, wake) : undefined;
   // The block comes from checkout files, rendered without the launch's
   // capability; the Session's news is read apart from it.
   const { LF_PROVIDER_CONTEXT: _, LF_BARE_STEER: __, ...renderEnv } = process.env;
@@ -102,7 +111,7 @@ export default function (pi) {
   const kept = new Set(["session_start", "tool_execution_start", "agent_settled"]);
   const report = async (event, ctx, extra = {}) => {
     if (!started && event.type !== "session_start") return;
-    const sessionFile = ctx.sessionManager.getSessionFile();
+    sessionFile = ctx.sessionManager.getSessionFile();
     if (server && spec.native) {
       await server.boundary("event", { ...event, ...extra, sessionFile,
         turn, openTools: tools.size, pendingInput }, { skippable: !kept.has(event.type) });

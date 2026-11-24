@@ -175,7 +175,7 @@ struct SessionRenameDraft: Equatable {
 
 /// A Wave view's named parts, as `lf desktop -p` names them.
 enum WaveViewPart: String, CaseIterable, Hashable {
-    case board, session, tiles
+    case backlog, session, tiles
 
     /// The Tasks strip distracts more than it helps for now (Jack Heart, LOO-673);
     /// Show… or `lf desktop show -p tiles` brings it back.
@@ -184,24 +184,18 @@ enum WaveViewPart: String, CaseIterable, Hashable {
     /// How the view's `Show…` menu names it.
     var title: String {
         switch self {
-        case .board: "Board"
+        case .backlog: "Backlog"
         case .session: "Session"
         case .tiles: "Tasks"
         }
     }
 }
 
-/// The section a Wave board shows, one at a time; Backlog by default.
-enum WaveBoardSection: String, CaseIterable, Hashable {
-    case backlog, working, autonomous, done
-
-    var title: String { rawValue.capitalized }
-}
-
 /// A Wave view's dividers: the conversation's share of the top band's width, and
-/// the top band's share of the view's height, golden by default.
+/// the top band's share of the view's height. The backlog takes the golden share
+/// of the band and the conversation the golden share of what remains.
 struct WaveViewRatios: Equatable {
-    var session = 1 - FocusSizing.golden
+    var session = (1 - FocusSizing.golden) * FocusSizing.golden
     var band = FocusSizing.golden
 }
 
@@ -232,12 +226,13 @@ final class WorkNavigation {
     }
     /// Each board's page; it outlives entering a tile and coming back. Nil is the unsaved view.
     var boardPages: [Board?: Int] = [:]
-    /// Each Wave view's hidden board and strip; its conversation hides as its session pane.
+    /// Each Wave view's hidden backlog and strip; its conversation hides as its session pane.
     var hiddenViewParts: [Board: Set<WaveViewPart>] = [:]
-    /// Each Wave view's zoomed board or strip; its conversation zooms as its session pane.
+    /// Each Wave view's zoomed backlog or strip; its conversation zooms as its session pane.
     var zoomedViewParts: [Board: WaveViewPart] = [:]
     var waveRatios: [Board: WaveViewRatios] = [:]
-    var boardSections: [Board: WaveBoardSection] = [:]
+    /// Each Wave view's backlog selection, filter, search and draft; it outlives entering a Task.
+    var backlogs: [Board: BacklogState] = [:]
     var showsSlotHints = false
     var sidebarFilter: SidebarFilter = .working {
         willSet {
@@ -295,9 +290,17 @@ final class WorkNavigation {
     }
     var renaming: SessionRenameDraft?
     var binding: SessionBindingDraft?
+    /// The Task whose Abandon… waits for its confirmation.
+    var abandoning: String?
+    /// The parent Task whose Complete… waits for confirmation of its open children.
+    var completing: String?
     /// The window's one Notice: refusals, requested changes and failed reads.
     let notices = NoticeCenter()
     var startingTaskSessions: Set<String> = []
+    /// The New Task request this window submitted and has not opened yet. Its
+    /// words stand in for the Task's conversation from the click until the
+    /// answer installs it.
+    var startingTask: StartingTask?
     /// Successful `task prepare` receipts, available before the next roadmap read.
     var preparedTaskWorktrees: [String: WorkspaceIdentity] = [:]
     /// Tasks whose Comments are expanded; a presentation fact, not a reading.

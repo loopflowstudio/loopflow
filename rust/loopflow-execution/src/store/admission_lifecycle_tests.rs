@@ -4,7 +4,7 @@ use crate::process::attachment;
 use crate::session::WorkSource;
 use loopflow_model::durable::{ProjectId, TaskId};
 use loopflow_model::id::WaveId;
-use loopflow_storage::linear_records::{LinearIssueId, LinearProjectId};
+use loopflow_storage::planning::{LinearIssueId, LinearProjectId};
 use loopflow_storage::sqlite::SqliteStore;
 use loopflow_storage::test_fixture::{unpublished_conversation, unregistered_task};
 use std::sync::{Arc, Barrier};
@@ -31,7 +31,7 @@ fn configured_project_admission_preserves_started_continuation() {
         .unwrap()
         .unwrap();
     other.id = ProjectId::new();
-    other.linear_id = Some(LinearProjectId::new("218967b6-a760-4b7c-9a46-11d9d61a42c2").unwrap());
+    other.tracker_id = Some(LinearProjectId::new("218967b6-a760-4b7c-9a46-11d9d61a42c2").unwrap());
     other.name = "An unrelated ordinary plan".into();
     store.insert_project(&other).unwrap();
     // Another Started Project does not compete with the configured identity.
@@ -54,13 +54,13 @@ fn configured_project_admission_preserves_started_continuation() {
         &store,
         task.wave_id.as_ref().unwrap(),
         Some("999bdbdd-c045-41a6-8ffc-a97c4a40b0b3"),
-        other.linear_id.as_ref().unwrap().as_str(),
+        other.tracker_id.as_ref().unwrap().as_str(),
         &guard,
     )
     .unwrap();
     let (mut rejected, mut rejected_pr) =
         unregistered_task(&store, &task_id, dir.path().join("rejected"));
-    rejected.linear_id = Some(LinearIssueId::new("third-issue").unwrap());
+    rejected.tracker_id = Some(LinearIssueId::new("third-issue").unwrap());
     rejected.identifier = "PROBE-3".into();
     rejected.workspace_slug = "rejected".into();
     rejected_pr.slug = "rejected".into();
@@ -553,7 +553,6 @@ fn bind_preserves_prior_work_and_usage_while_assigning_future_work() {
             title: id.to_string(),
             title_source: crate::session::TitleSource::Generated,
             request: None,
-            ready_summary: None,
             completed_at: None,
             created_at: 1,
         };
@@ -589,24 +588,14 @@ fn bind_preserves_prior_work_and_usage_while_assigning_future_work() {
     assert_eq!(store.session("orphan").unwrap(), Some(replacement.clone()));
     let elsewhere = open("elsewhere", Some(other_wave));
     let old_runs = store.session_inputs("orphan").unwrap();
-    store
-        .record_session_event(
-            "orphan",
-            &"thread".into(),
-            "active",
-            crate::session::SessionEventKind::Started,
-            &serde_json::json!({}),
-        )
-        .unwrap();
-    store
-        .record_session_event(
-            "orphan",
-            &"thread".into(),
-            "active",
-            crate::session::SessionEventKind::Usage,
-            &serde_json::json!({"input": 20}),
-        )
-        .unwrap();
+    store.record_turn_start("orphan", &"thread".into(), "active", 1);
+    store.record_turn_usage(
+        "orphan",
+        &"thread".into(),
+        "active",
+        2,
+        &serde_json::json!({"usage": {"input_tokens": 20}}),
+    );
     let earlier = store.session_history("orphan", 0, 0).unwrap();
     assert!(
         crate::store::sessions::bind_session(&store, "orphan", first.captured, &task_id).is_err()
@@ -630,15 +619,13 @@ fn bind_preserves_prior_work_and_usage_while_assigning_future_work() {
         bound
     );
     // A late observation belongs to the old turn, never the new bind.
-    store
-        .record_session_event(
-            "orphan",
-            &"thread".into(),
-            "active",
-            crate::session::SessionEventKind::Completed,
-            &serde_json::json!({"status": "completed"}),
-        )
-        .unwrap();
+    store.record_turn_completion(
+        "orphan",
+        &"thread".into(),
+        "active",
+        3,
+        &serde_json::json!({"status": "completed"}),
+    );
     // Attribution freezes when the attached LfProcess sends the request.
     let process = loopflow_model::id::LfProcessId::new();
     store
@@ -651,20 +638,14 @@ fn bind_preserves_prior_work_and_usage_while_assigning_future_work() {
         )
         .unwrap();
     let attachment =
-        attachment::claim_session_attachment(&store, "orphan", None, &process, false).unwrap();
+        attachment::claim_session_attachment(&store, "orphan", None, &process).unwrap();
     let origin = store.session_turn_origin("orphan", &attachment).unwrap();
-    store
-        .record_session_turn_origin(&"thread".into(), "future", &origin)
-        .unwrap();
+    store.record_session_turn_origin(&"thread".into(), "future", &origin);
     let events = store.session_history("orphan", 0, 0).unwrap();
-    assert!(events
-        .iter()
-        .filter(|event| event.provider_turn.as_deref() == Some("active"))
-        .all(|event| event.task_id.is_none()));
-    assert_eq!(
-        events.last().unwrap().task_id.as_deref(),
-        Some(task_id.as_str())
-    );
+    let turns = store.session_turns("orphan").unwrap();
+    let turn = |id: &str| turns.iter().find(|turn| turn.turn == id).unwrap();
+    assert_eq!(turn("active").task_id, None);
+    assert_eq!(turn("future").task_id.as_deref(), Some(task_id.as_str()));
     let future = crate::store::sessions::replace_session_input(
         &store,
         replacement.captured,
@@ -682,17 +663,8 @@ fn bind_preserves_prior_work_and_usage_while_assigning_future_work() {
         .session_inputs("orphan")
         .unwrap()
         .contains(first.input_key().unwrap()));
-    let history = store.session_history("orphan", 0, 0).unwrap();
-    assert_eq!(&history[..events.len()], events);
-    assert_eq!(history.len(), events.len() + 1);
-    assert_eq!(
-        history.last().unwrap().kind,
-        crate::session::SessionEventKind::Captured
-    );
-    assert_eq!(
-        history.last().unwrap().task_id.as_deref(),
-        Some(task_id.as_str())
-    );
+    // A new input is Session state, not history.
+    assert_eq!(store.session_history("orphan", 0, 0).unwrap(), events);
     let refused =
         crate::store::sessions::bind_session(&store, "elsewhere", elsewhere.captured, &task_id)
             .unwrap_err();
@@ -723,8 +695,8 @@ fn competing_session_assignments_bind_only_the_winning_task() {
     .unwrap();
     {
         let conn = store.conn.lock().unwrap();
-        conn.execute("INSERT INTO tasks(id,repository_id,project_id,external_issue_id,issue_identifier,worktree,created_at)
-                SELECT ?1,repository_id,project_id,?1,?1,?1,1 FROM tasks WHERE id=?2",
+        conn.execute("INSERT INTO tasks(id,repository_id,project_id,external_issue_id,issue_identifier,created_at)
+                SELECT ?1,repository_id,project_id,?1,?1,1 FROM tasks WHERE id=?2",
                 rusqlite::params![other_task.as_str(), task_id.as_str()]).unwrap();
     }
     let barrier = Arc::new(Barrier::new(2));

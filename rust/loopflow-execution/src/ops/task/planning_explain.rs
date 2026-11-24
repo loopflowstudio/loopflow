@@ -1,4 +1,4 @@
-//! Task mutation previews validate local input, without acquisition, saving or delivery.
+//! Task mutation previews validate local input, without a tracker fetch, save or action.
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
@@ -14,7 +14,10 @@ pub enum TaskPlanningRequest<'a> {
         title: Option<&'a str>,
         notes: Option<&'a str>,
     },
-    Edit(TaskUpdate),
+    Edit {
+        update: TaskUpdate,
+        parent: Option<&'a str>,
+    },
     Move {
         wave: Option<&'a str>,
     },
@@ -124,7 +127,7 @@ impl TaskPlanningExplanation {
         ] {
             lines.extend(values.iter().map(|value| format!("{label}: {value}")));
         }
-        lines.push("Observation only; execution re-reads planning. Nothing was saved, acquired or synchronized.".into());
+        lines.push("Observation only; execution re-reads planning. Nothing was saved, fetched or synchronized.".into());
         lines.join("\n")
     }
 }
@@ -135,7 +138,7 @@ pub async fn explain_task_planning(
     selection: WorkSelection<'_>,
     request: &TaskPlanningRequest<'_>,
 ) -> TaskPlanningExplanation {
-    let resolution = crate::ops::context::explain_context(store, cwd, selection, None, None).await;
+    let resolution = crate::ops::context::explain_context(store, cwd, selection, None).await;
     let mut report = TaskPlanningExplanation {
         resolution,
         action: None,
@@ -160,15 +163,25 @@ async fn read_planning(
         TaskPlanningRequest::Create { title, notes } => {
             read_creation(store, cwd, selection.wave, *title, *notes, report).await?;
         }
-        TaskPlanningRequest::Edit(update) => {
-            if let Err(error) = super::validate_task_edit_input(update) {
+        TaskPlanningRequest::Edit { update, parent } => {
+            if let Err(error) = super::validate_task_edit_input(update, *parent) {
                 report.impediments.push(error.to_string());
                 return Ok(());
             }
             let task = read_saved_task(store, cwd, selection.wave, &report.resolution).await?;
+            let mut update = update.clone();
+            if update.parent.is_none() {
+                match super::resolve_parent_update(store, *parent).await {
+                    Ok(resolved) => update.parent = resolved,
+                    Err(error) => {
+                        report.impediments.push(error.to_string());
+                        return Ok(());
+                    }
+                }
+            }
             if let Err(error) = store
                 .sqlite
-                .validate_task_edit(&task.id, task.revision, update)
+                .validate_task_edit(&task.id, task.revision, &update)
             {
                 report.impediments.push(error.to_string());
                 return Ok(());
@@ -178,6 +191,7 @@ async fn read_planning(
                 ("description", update.description.is_some()),
                 ("rank", update.rank.is_some()),
                 ("assignee", update.assignee.is_some()),
+                ("parent", update.parent.is_some()),
             ]
             .into_iter()
             .filter(|(_, present)| *present)
@@ -266,7 +280,7 @@ async fn read_planning(
                 }
                 report.effects.push("Append one local comment with stable identity and authored provenance; attempt configured synchronization. Execution stays unchanged".into());
                 report.unavailable.push("Comment identity and caller/participant provenance are captured only when saving".into());
-            } else if task.linear_id.is_some() {
+            } else if task.tracker_id.is_some() {
                 report.effects.push("Refresh Linear comments with a bounded wait, then show the saved thread even if refresh fails".into());
             } else {
                 report
@@ -276,11 +290,14 @@ async fn read_planning(
             report.action = Some(TaskPlanningAction::Comment {
                 message: message.map(|value| value.trim().to_owned()),
                 steer: *steer,
-                refresh: message.is_none() && task.linear_id.is_some(),
+                refresh: message.is_none() && task.tracker_id.is_some(),
             });
         }
     }
-    report.unavailable.push("Provider freshness, synchronization delivery and concurrent saves are not observed or reserved".into());
+    report.unavailable.push(
+        "Tracker freshness, queued tracker actions and concurrent saves are not read or reserved"
+            .into(),
+    );
     Ok(())
 }
 
@@ -293,10 +310,10 @@ async fn read_saved_task(
     let id = match &resolution.task {
         ContextFact::Bound { value, .. } => loopflow_model::durable::TaskId::parse(value)?,
         ContextFact::Unavailable { reason } => {
-            anyhow::bail!("{reason}; no planning acquisition was performed")
+            anyhow::bail!("{reason}; nothing was fetched from the tracker")
         }
         ContextFact::Unbound => {
-            anyhow::bail!("No saved Task selected; no planning acquisition was performed")
+            anyhow::bail!("No saved Task selected; nothing was fetched from the tracker")
         }
     };
     let task = store
@@ -322,7 +339,7 @@ async fn read_creation(
     };
     report.resolution.checkout = ContextFact::Unbound;
     report.resolution.execution_machine = ContextFact::Unbound;
-    report.resolution.planning_observed_at = None;
+    report.resolution.tracker_synced_at = None;
     let input = match super::resolve_task_create_input(title, notes) {
         Ok(input) => input,
         Err(error) => {
@@ -358,7 +375,9 @@ async fn read_creation(
             report.resolution.wave = ContextFact::Unavailable {
                 reason: error.to_string(),
             };
-            anyhow::bail!("{error}; Wave registration/acquisition was not performed");
+            anyhow::bail!(
+                "{error}; the Wave was not registered and nothing was fetched from the tracker"
+            );
         }
     };
     report.resolution = crate::ops::context::explain_context(
@@ -368,7 +387,6 @@ async fn read_creation(
             task: None,
             wave: Some(wave.id().as_str()),
         },
-        None,
         None,
     )
     .await;

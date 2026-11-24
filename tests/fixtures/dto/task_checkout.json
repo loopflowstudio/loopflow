@@ -5,8 +5,8 @@
   "task_id": "ts_11111111111111111111111111111111",
   "external_project_id": "project-external",
   "project": "workspace",
-  "pm_snapshot_synced_at": 1,
-  "pm_writeback": {
+  "tracker_synced_at": 1,
+  "tracker_writeback": {
     "state": "current"
   },
   "wave": "product",
@@ -17,7 +17,9 @@
     "state": "idle",
     "reason": "Checkout prepared",
     "step": null,
-    "captured": null
+    "captured": null,
+    "died": null,
+    "outlook": null
   },
   "worktree": "/src/loopflow.workspace",
   "workspace_slug": "workspace",
@@ -34,7 +36,6 @@
   },
   "work": {
     "sessions": [],
-    "processes": [],
     "graph": null,
     "graph_processes": []
   },
@@ -48,12 +49,17 @@
     "name": "LOO-291 task",
     "requester": "Maya"
   },
-  "ship_approval": null,
-  "ship_stop": {
+  "auto": {
+    "state": "off",
     "at": 1793266380,
     "by": {
       "kind": "person",
       "name": "Maya"
     }
+  },
+  "stack_parent": {
+    "identifier": "LOO-290",
+    "branch": "maya/loo-290-parent",
+    "pr_number": null
   }
 }

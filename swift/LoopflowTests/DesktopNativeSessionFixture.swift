@@ -5,9 +5,7 @@ import Testing
 @testable import Loopflow
 @testable import LoopflowMac
 
-/// An `lf-world` one-task world prepared by desktop_performance.py: its stub `claude`
-/// resumes the world transcript. The public CLI supplies Session identity and launch
-/// commands; no live Machine is copied.
+/// A Task and its primary Session created through the CLI on a private Machine.
 struct DesktopNativeSessionFixture: Decodable, Sendable {
     let cli: String
     let home: String
@@ -34,9 +32,9 @@ struct DesktopNativeSessionFixture: Decodable, Sendable {
 
     func read(_ args: [String]) async throws -> String {
         if args.prefix(2) == ["session", "resume"] {
-            guard [SessionOpenIntent.resume, .start, .reveal].contains(where: {
-                args == ["session", "resume"] + $0.arguments + [sessionId, "--prepare", "--json"]
-            }) else {
+            let resume = ["session", "resume", sessionId]
+            let prepare = ["--prepare", "--json"]
+            guard args == resume + prepare || args == resume + ["--task", taskId] + prepare else {
                 throw RegistryQueryError("Only the owned Session may resume")
             }
             let output = try await Task.detached { try capture([cli] + args) }.value
@@ -45,18 +43,20 @@ struct DesktopNativeSessionFixture: Decodable, Sendable {
             record["open_argv"] = isolatedCommand(argv)
             return String(decoding: try JSONSerialization.data(withJSONObject: record), as: UTF8.self)
         }
-        guard ["wave show", "wave list", "machine self", "session list", "session card", "session history", "task status", "task files", "task file", "task diff", "graph list"].contains(args.prefix(2).joined(separator: " ")) else {
-            throw RegistryQueryError("Fixture does not execute this command")
+        guard ["plan list", "task show", "task detail", "task changes", "wave show", "wave list", "machine self", "session list", "session card", "session history", "task status", "task files", "task file", "task diff", "graph list"].contains(args.prefix(2).joined(separator: " ")) else {
+            throw RegistryQueryError("Fixture does not execute \(args.prefix(2).joined(separator: " "))")
         }
         return try await Task.detached { try capture([cli] + args) }.value
     }
 
     func records() async throws -> [SessionRecord] {
         let ids = try snapshotSessionIDs(home: try #require(environment["LF_HOME"]))
-        let outputs = try await Task.detached {
-            try ids.map { try capture([cli, "session", "card", $0, "--json"]) }
-        }.value
-        return try outputs.map { try JSONDecoder().decode(SessionCard.self, from: Data($0.utf8)).session }
+        var records: [SessionRecord] = []
+        for id in ids {
+            let card = try await read(["session", "card", id, "--json"])
+            records.append(try JSONDecoder().decode(SessionCard.self, from: Data(card.utf8)).session)
+        }
+        return records
     }
 
     func resume(_ record: SessionRecord) async throws -> String {
@@ -64,7 +64,9 @@ struct DesktopNativeSessionFixture: Decodable, Sendable {
     }
 
     func isolatedCommand(_ argv: [String]) -> [String] {
-        ["/usr/bin/env", "-i"] + environment.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" } + argv
+        var environment = environment
+        environment["BENCHMARK_INTERACTIVE"] = ProcessInfo.processInfo.environment["LOOPFLOW_NATIVE_TESTS"]
+        return ["/usr/bin/env", "-i"] + environment.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" } + argv
     }
 
     func historyIsPreserved() throws -> Bool {
@@ -188,14 +190,14 @@ struct DesktopNativeSessionTests {
     func combinedWorkspacePreservesTaskMembershipAndRejectsCopiedClients() async throws {
         let fixture = try DesktopNativeSessionFixture.load()
         let snapshot = try #require(ProcessInfo.processInfo.environment["LF_DESKTOP_TASK_SNAPSHOT"])
-        // The copied Machine is another world with its own repository.
+        // The copied Machine is a private fixture with its own repository.
         let copiedRepo = try #require(ProcessInfo.processInfo.environment["LF_DESKTOP_TASK_REPO"])
         let reads = SnapshotReads()
         let query = RegistryQuery { args, _ in
             try await reads.read(binary: fixture.cli, home: snapshot, args: args, cwd: copiedRepo, fixture: fixture).get()
         }
         let destination = try await query.taskDestination(issue: fixture.issue, repo: fixture.repo)
-        #expect(destination.waves.flatMap { $0.tasks.items }.contains { $0.runtime?.workId == fixture.taskId })
+        #expect(destination.tasks.items.contains { $0.runtime?.workId == fixture.taskId })
         let copiedRecords = try await reads.records(binary: fixture.cli, home: snapshot, cwd: copiedRepo)
         let copiedRecord = try #require(copiedRecords.first)
         let activityJSON = try await reads.read(binary: fixture.cli, home: snapshot,
@@ -205,7 +207,7 @@ struct DesktopNativeSessionTests {
         await #expect(throws: (any Error).self) { try await query.prepareSession(id: copiedRecord.id) }
         let model = WorkModel(query: query, repoPath: fixture.repo)
         await model.refresh()
-        let originalIDs = Set(model.projection.waves.flatMap { $0.tasks.map { $0.task.id } })
+        let originalIDs = Set(model.projection.standaloneTasks.map { $0.task.id })
         #expect(originalIDs.contains(fixture.taskId))
         // Exact cards keep closed conversations readable alongside the owned Session.
         let history = try await reads.records(binary: fixture.cli, home: snapshot, cwd: copiedRepo, fixture: fixture)
@@ -232,7 +234,7 @@ struct DesktopNativeSessionTests {
             #expect(model.selection?.id == fixture.taskId)
             #expect(model.sessions.value?.contains { $0.id == model.navigation.selectedSessionId && $0.taskIds.contains(fixture.taskId) } == true)
             store.reconcile(try await fixture.records())
-            await store.start(fixture.sessionId)
+            await store.select(fixture.sessionId)
             let prepared = try #require(store.sessions.first?.surface)
             #expect(try await fixture.resume(prepared).contains("resumed \(fixture.nativeId)"))
             store.recordPaneLive(fixture.sessionId)
@@ -243,7 +245,7 @@ struct DesktopNativeSessionTests {
             #expect(document.text == "Preserved draft")
             #expect(document.editor.selectedRange() == NSRange(location: 2, length: 3))
             #expect(workspace.multiplexer.layout == layout)
-            #expect(Set(model.projection.waves.flatMap { $0.tasks.map { $0.task.id } }) == originalIDs)
+            #expect(Set(model.projection.standaloneTasks.map { $0.task.id }) == originalIDs)
             #expect(try fixture.historyIsPreserved())
         }
         let after = try await reads.records(binary: fixture.cli, home: snapshot, cwd: copiedRepo)
@@ -257,7 +259,7 @@ struct DesktopNativeSessionTests {
         let store = SessionsStore(repoPath: fixture.home, query: fixture.query)
         for _ in 0..<3 {
             store.reconcile(try await fixture.records())
-            await store.start(fixture.sessionId)
+            await store.select(fixture.sessionId)
             let prepared = try #require(store.sessions.first?.surface)
             #expect(prepared.id == fixture.sessionId)
             #expect(prepared.taskIds.contains(fixture.taskId))

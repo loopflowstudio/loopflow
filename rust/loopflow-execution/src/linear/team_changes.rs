@@ -5,8 +5,9 @@ use serde::Deserialize;
 use serde_json::json;
 
 use super::{CommentNode, Connection, IssueNode, LinearClient, PageInfo, CHANGED_ISSUE_FIELDS};
-use super::{LinearIssue, LinearProject};
-use crate::linear::{LinearComment, LinearError, LinearIssueObservation, LinearResult};
+use super::{TrackerItem, TrackerProject};
+use crate::linear::{LinearError, LinearResult};
+use loopflow_storage::planning::{TrackerComment, TrackerEvent};
 
 const QUERY: &str = r#"query TeamChanges($issues: IssueFilter!, $comments: CommentFilter!, $issuesAfter: String, $commentsAfter: String, $readIssues: Boolean!, $readComments: Boolean!) {
   issues(filter: $issues, first: 25, after: $issuesAfter, orderBy: updatedAt) @include(if: $readIssues) {
@@ -40,7 +41,7 @@ impl LinearClient {
         through: &str,
         live: &[String],
         finished: &[String],
-    ) -> LinearResult<Vec<(LinearIssue, Option<LinearProject>, LinearIssueObservation)>> {
+    ) -> LinearResult<Vec<(TrackerItem, Option<TrackerProject>, TrackerEvent)>> {
         let mut eligible = json!({"team":{"id":{"eq":team}}, "id":{"nin":finished},
             "or":[{"id":{"in":live}}, {"state":{"type":{"nin":["completed","canceled"]}}}]});
         let mut revision = json!({"lte":through});
@@ -56,7 +57,7 @@ impl LinearClient {
         // An issue can occur on several comment pages or complete in this batch.
         // Keep its latest fields and all comments together until ingestion.
         let mut changes = BTreeMap::new();
-        let mut record = |node: IssueNode, mut comments: Vec<LinearComment>| {
+        let mut record = |node: IssueNode, mut comments: Vec<TrackerComment>| {
             let issue = node.into_issue(0)?;
             match changes.entry(issue.id.clone()) {
                 Entry::Vacant(entry) => {
@@ -113,7 +114,10 @@ impl LinearClient {
             .filter_map(|(issue, _)| issue.project_id.clone())
         {
             if let Entry::Vacant(entry) = projects.entry(id) {
-                let project = self.project_node(entry.key()).await?.into_observation()?;
+                let project = self
+                    .project_node(entry.key())
+                    .await?
+                    .into_tracker_project()?;
                 entry.insert(project);
             }
         }
@@ -125,13 +129,13 @@ impl LinearClient {
                     .as_ref()
                     .and_then(|id| projects.get(id).cloned());
                 comments.sort_by(|a, b| a.revision.cmp(&b.revision).then(a.id.cmp(&b.id)));
-                let observation = LinearIssueObservation {
+                let event = TrackerEvent {
                     revision: issue.revision.clone().expect("Linear issue has a revision"),
                     title: issue.name.clone(),
                     description: issue.description.clone(),
                     comments,
                 };
-                (issue, project, observation)
+                (issue, project, event)
             })
             .collect())
     }
@@ -157,7 +161,7 @@ mod tests {
     async fn team_delta_keeps_comments_across_pages_and_completion() {
         let issue = json!({"id":"issue-1","identifier":"FIX-1","title":"Completed with direction",
             "description":"Body","branchName":null,"completedAt":null,"dueDate":null,
-            "updatedAt":"2026-10-11T12:00:00Z","url":null,"prioritySortOrder":0.0,"sortOrder":1.0,
+            "updatedAt":"2026-10-11T12:00:00Z","url":null,"parent":null,"prioritySortOrder":0.0,"sortOrder":1.0,
             "assignee":null,"state":{"type":"completed"},"team":{"id":"team-1"},"project":null});
         let comment = |id, revision| {
             let mut issue = issue.clone();

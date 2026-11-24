@@ -11,13 +11,13 @@
       "completed_at": null,
       "due_date": null,
       "sync": {
-        "connected": false,
-        "changes": []
+        "actions": []
       },
-      "linear_id": null,
-      "acquisition": {
+      "tracker_id": null,
+      "parent_id": null,
+      "tracker_state": {
         "state": "available",
-        "observed_at": null
+        "synced_at": null
       },
       "repo_id": "repo_00000000000040008000000000000001",
       "repo": "/repo",
@@ -58,6 +58,7 @@
       "reason": "Merged; complete the Task"
     },
     "section": "working",
+    "owned_by_you": false,
     "actions": {
       "recommended": "open_pr",
       "reason": "merge head head-commits on GitHub"
@@ -246,15 +247,13 @@
       "state": "running",
       "reason": "Worker is running realign",
       "step": null,
-      "captured": null
+      "captured": null,
+      "died": null,
+      "outlook": null
     },
     "run_control": {
       "unavailable": null
     },
-    "ship_control": {
-      "unavailable": null
-    },
-    "shipping": null,
     "pr": {
       "id": "pr_commits",
       "sequence": 1,
@@ -303,13 +302,13 @@
       "completed_at": "2026-10-07T20:00:00Z",
       "due_date": null,
       "sync": {
-        "connected": false,
-        "changes": []
+        "actions": []
       },
-      "linear_id": null,
-      "acquisition": {
+      "tracker_id": null,
+      "parent_id": null,
+      "tracker_state": {
         "state": "available",
-        "observed_at": null
+        "synced_at": null
       },
       "repo_id": "repo_00000000000040008000000000000001",
       "repo": "/repo",
@@ -350,6 +349,7 @@
       "reason": "Task is complete"
     },
     "section": "done",
+    "owned_by_you": false,
     "actions": {
       "recommended": "open_pr",
       "reason": "merge head head-commits on GitHub"
@@ -538,15 +538,13 @@
       "state": "running",
       "reason": "Worker is running realign",
       "step": null,
-      "captured": null
+      "captured": null,
+      "died": null,
+      "outlook": null
     },
     "run_control": {
       "unavailable": null
     },
-    "ship_control": {
-      "unavailable": null
-    },
-    "shipping": null,
     "pr": {
       "id": "pr_commits",
       "sequence": 1,
@@ -593,13 +591,13 @@
       "completed_at": "2026-10-07T20:00:00Z",
       "due_date": null,
       "sync": {
-        "connected": false,
-        "changes": []
+        "actions": []
       },
-      "linear_id": null,
-      "acquisition": {
+      "tracker_id": null,
+      "parent_id": null,
+      "tracker_state": {
         "state": "available",
-        "observed_at": null
+        "synced_at": null
       },
       "repo_id": "repo_00000000000040008000000000000001",
       "repo": "/repo",
@@ -640,6 +638,7 @@
       "reason": "Task is complete"
     },
     "section": "done",
+    "owned_by_you": false,
     "actions": {
       "recommended": "open_pr",
       "reason": "merge head head-commits on GitHub"
@@ -828,15 +827,13 @@
       "state": "running",
       "reason": "Worker is running realign",
       "step": null,
-      "captured": null
+      "captured": null,
+      "died": null,
+      "outlook": null
     },
     "run_control": {
       "unavailable": null
     },
-    "ship_control": {
-      "unavailable": null
-    },
-    "shipping": null,
     "pr": {
       "id": "pr_commits",
       "sequence": 1,
@@ -883,13 +880,13 @@
       "completed_at": null,
       "due_date": "2026-10-08",
       "sync": {
-        "connected": false,
-        "changes": []
+        "actions": []
       },
-      "linear_id": null,
-      "acquisition": {
+      "tracker_id": null,
+      "parent_id": null,
+      "tracker_state": {
         "state": "available",
-        "observed_at": null
+        "synced_at": null
       },
       "repo_id": "repo_00000000000040008000000000000001",
       "repo": "/repo",
@@ -906,6 +903,7 @@
       "reason": "Task is ready to start"
     },
     "section": "backlog",
+    "owned_by_you": false,
     "actions": {
       "recommended": null,
       "reason": "Task is ready to start"
@@ -931,15 +929,13 @@
       "state": "idle",
       "reason": "No active execution",
       "step": null,
-      "captured": null
+      "captured": null,
+      "died": null,
+      "outlook": null
     },
     "run_control": {
       "unavailable": null
     },
-    "ship_control": {
-      "unavailable": null
-    },
-    "shipping": null,
     "pr": null,
     "graph_source": null,
     "lifecycle": "unstarted",
@@ -960,13 +956,13 @@
       "completed_at": null,
       "due_date": "2026-10-08",
       "sync": {
-        "connected": false,
-        "changes": []
+        "actions": []
       },
-      "linear_id": null,
-      "acquisition": {
+      "tracker_id": null,
+      "parent_id": null,
+      "tracker_state": {
         "state": "available",
-        "observed_at": null
+        "synced_at": null
       },
       "repo_id": "repo_00000000000040008000000000000001",
       "repo": "/repo",
@@ -983,6 +979,7 @@
       "reason": "Task is ready to start"
     },
     "section": "backlog",
+    "owned_by_you": false,
     "actions": {
       "recommended": null,
       "reason": "Task is ready to start"
@@ -1008,15 +1005,13 @@
       "state": "idle",
       "reason": "No active execution",
       "step": null,
-      "captured": null
+      "captured": null,
+      "died": null,
+      "outlook": null
     },
     "run_control": {
       "unavailable": null
     },
-    "ship_control": {
-      "unavailable": null
-    },
-    "shipping": null,
     "pr": null,
     "graph_source": null,
     "lifecycle": "unstarted",
@@ -1037,13 +1032,13 @@
       "completed_at": null,
       "due_date": null,
       "sync": {
-        "connected": false,
-        "changes": []
+        "actions": []
       },
-      "linear_id": null,
-      "acquisition": {
+      "tracker_id": null,
+      "parent_id": null,
+      "tracker_state": {
         "state": "available",
-        "observed_at": null
+        "synced_at": null
       },
       "repo_id": "repo_00000000000040008000000000000001",
       "repo": "/repo",
@@ -1084,6 +1079,7 @@
       "reason": "Merged; complete the Task"
     },
     "section": "working",
+    "owned_by_you": false,
     "actions": {
       "recommended": "open_pr",
       "reason": "merge head head-commits on GitHub"
@@ -1272,15 +1268,13 @@
       "state": "running",
       "reason": "Worker is running realign",
       "step": null,
-      "captured": null
+      "captured": null,
+      "died": null,
+      "outlook": null
     },
     "run_control": {
       "unavailable": null
     },
-    "ship_control": {
-      "unavailable": null
-    },
-    "shipping": null,
     "pr": {
       "id": "pr_commits",
       "sequence": 1,
@@ -1329,13 +1323,13 @@
       "completed_at": null,
       "due_date": null,
       "sync": {
-        "connected": false,
-        "changes": []
+        "actions": []
       },
-      "linear_id": null,
-      "acquisition": {
+      "tracker_id": null,
+      "parent_id": null,
+      "tracker_state": {
         "state": "available",
-        "observed_at": null
+        "synced_at": null
       },
       "repo_id": "repo_00000000000040008000000000000001",
       "repo": "/repo",
@@ -1376,6 +1370,7 @@
       "reason": "Merged; complete the Task"
     },
     "section": "done",
+    "owned_by_you": false,
     "actions": {
       "recommended": "open_pr",
       "reason": "merge head head-commits on GitHub"
@@ -1564,15 +1559,13 @@
       "state": "running",
       "reason": "Worker is running realign",
       "step": null,
-      "captured": null
+      "captured": null,
+      "died": null,
+      "outlook": null
     },
     "run_control": {
       "unavailable": null
     },
-    "ship_control": {
-      "unavailable": null
-    },
-    "shipping": null,
     "pr": {
       "id": "pr_commits",
       "sequence": 1,

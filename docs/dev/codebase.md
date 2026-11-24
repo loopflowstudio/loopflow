@@ -20,10 +20,11 @@ uv run python scripts/check_architecture.py
 | CLI and presentation | `rust/loopflow/src/{lf,bin}/` | Command grammar, dispatch and text/JSON output |
 | Shared operations | `rust/loopflow-execution/src/{engine,ops}/` | Typed Work operations, execution launches, delivery and planning |
 | Client access | `rust/loopflow/src/server/`, `rust/loopflow-execution/src/machine/` | Server admission and dispatch; shared Machine clients and wire types |
-| Execution | `rust/loopflow-execution/src/{agent,graph,prompt,skills,harness}/` | Skill/Graph discovery, prompts, provider processes and streams |
-| Tracked Work | `rust/loopflow-execution/src/work/`, `rust/loopflow-storage/src/work/` | Wave, Project and Task facts, delivery identity and planning-provider models |
-| Persistence | `rust/loopflow-storage/src/`, `rust/loopflow-execution/src/{store,journal}/` | Synchronous records and SQL; acquisition and command/conversation history |
-| Authentication and history | `rust/loopflow-execution/src/{provider_auth,transcript}/` | Service authentication, native homes and transcript adoption |
+| Execution | `rust/loopflow-execution/src/{agent,graph,prompt,skills,harness}/` | Skill/Graph discovery, prompts, provider processes and recording |
+| Harness formats | `rust/loopflow-harness/src/` | What each native client writes: stream decoders, transcript readers, file locations |
+| Tracked Work | `rust/loopflow-execution/src/work/`, `rust/loopflow-storage/src/work/` | Wave, Project and Task facts, delivery identity and tracker models |
+| Persistence | `rust/loopflow-storage/src/`, `rust/loopflow-execution/src/{store,journal}/` | Synchronous records and SQL; tracker fetches and command/conversation history |
+| Authentication and history | `rust/loopflow-execution/src/{provider_auth,transcript}/` | Service authentication, native homes, transcript adoption and a Session's conversation |
 | Installation | `rust/loopflow-execution/src/installation{.rs,/}` | Selected artifacts, server registration, update and rollback |
 | Native app | `swift/Loopflow/`, `swift/LoopflowMac/` | Shared DTOs/services and macOS presentation |
 | Tests | Rust, Python and Swift test roots | Cross-module, wire, migration, CLI and app checks |
@@ -42,7 +43,8 @@ subprocess edge to one concept.
 | prompt assembly | [`prompt/mod.rs`](../../rust/loopflow-execution/src/prompt/mod.rs) | system/task prompt pair |
 | model/harness fallback | [`agent/`](../../rust/loopflow-execution/src/agent) | configured headless continuation order |
 | invocation resources | [`process/runtime.rs`](../../rust/loopflow-execution/src/process/runtime.rs) | current attachment, retry state and cleanup under the existing `LfProcess` |
-| provider streams | [`harness/`](../../rust/loopflow-execution/src/harness) | normalized conversation and usage |
+| provider launch and recording | [`harness/`](../../rust/loopflow-execution/src/harness) | `Launch`, recorded conversation and usage |
+| provider output | [`loopflow-harness`](../../rust/loopflow-harness/README.md) | decoded facts and transcript `Turn`s |
 | Session capture evidence | [`session_record.rs`](../../rust/loopflow-execution/src/session_record.rs) | manifest, append events, terminal receipt |
 | shared Work types | [`durable.rs`](../../rust/loopflow-execution/src/durable.rs) and [`work/`](../../rust/loopflow-execution/src/work) | `WorkRef`, status, inputs, Task ownership, Wave/Task facts |
 | Wave operation | [`ops/project.rs`](../../rust/loopflow-execution/src/ops/project.rs) | finite attributed `wave-operate` conversation |
@@ -59,7 +61,6 @@ subprocess edge to one concept.
 ```text
 lf                         foreground command and Skill/Graph launches
 lf-prompt                  prompt-oriented executable surface
-lf-world                   builds fake worlds for demos and tests through production writers
 lf __context-block         provider turn-boundary hook: renders context at start/compaction and asks the Machine server for turn recording and steers (`session.boundary`); opens no store
 Loopflow.app               client over shared server/CLI DTOs
 ```
@@ -74,7 +75,7 @@ Graphs may invoke the named internal operations that own their exact boundary.
 | `lf session` | durable Sessions and resolution |
 | `lf wt`, `commit`, `sync`, `pr`, `repo ci` | worktree and delivery operations |
 | `lf session history`, `session history show`, `session usage` | durable execution/history projections |
-| `lf process list`, `process top`, `process prune`, `machine doctor` | local OS and command-journal observation |
+| `lf machine doctor` | local OS observation: strays, live lf binaries, store contention |
 | `lf machine`, `lf --machine` | Machine identity and execution-destination routing |
 | `lf server` | Client API serving and observational readiness |
 | `lf machine login\|logins\|logout` | each provider's own sign-in on any Machine, approved here |
@@ -109,18 +110,38 @@ not resolve either from the planning store.
 
 ## External transport
 
-The CLI talks to planning and model providers. The independent Discord bridge
+The CLI talks to trackers and model providers. The independent Discord bridge
 uses outbound REST requests. Remote execution reaches the target Machine through
 `lf --machine`; see [Machines and processes](machines.md).
 
 ## Add a provider
 
-Follow the same composition order as a provider launch:
+A provider is one unit struct with two implementations: what it writes, then
+how lf launches it. Launch and transcript decisions branch on what the harness
+declares.
 
-1. Add the provider kind and let its native client own authentication.
-2. Add one harness adapter that maps native output to the common stream.
-3. Preserve native session ids, cumulative usage, omissions, and finality.
-4. Add conformance fixtures for normal, tool, error, and retry output.
+```sh
+cargo test -p loopflow-harness <name>_decode                         # after steps 1-2
+cargo test -p loopflow-execution --lib harness::launch_matrix        # after step 4
+```
+
+1. In [`loopflow-harness`](../../rust/loopflow-harness/README.md), add the unit
+   struct, its `HarnessKind` variant and its line in `HarnessKind::harness()`.
+2. Implement `Harness` on it. Map native output to the common stream in
+   `<name>_decode.rs` and implement `transcript_reader` in
+   `transcript/<name>.rs`. `transcript_home` has no default: name the client's
+   own home variable and directory. Supply the provider's saved-history layout
+   and retention policy when it keeps transcripts. Keep native session ids, usage
+   omissions and finality. Captured output for normal, tool, error and retry
+   turns goes in `src/testdata/` and `src/transcript/testdata/`.
+3. In execution, add `harness/<name>.rs` implementing `Launcher` on the same
+   struct: its `Capabilities`, `open` for the native interactive client and
+   `driver` for the headless stream, and `recognizes` when a running process
+   is its client by more than the command name. Add its line in
+   `harness::launcher`: the match is exhaustive, so execution does not compile
+   until the new variant has one. Its native client owns authentication.
+4. Add conformance fixtures; the `harness::launch_matrix` test picks the new
+   variant up from `HarnessKind::ALL`.
 5. Map the new edge in the checked architecture reference.
 
 Do not add a collector daemon, mandatory telemetry store, or synthetic final

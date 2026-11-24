@@ -4,6 +4,7 @@ use std::fs::OpenOptions;
 use std::io::{self, BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
 use std::os::unix::process::CommandExt;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
@@ -49,13 +50,27 @@ impl Client {
         })
     }
 
-    /// The holder at `place`, started first when none is listening. Starting is
-    /// idempotent: a holder that is alive keeps its lock and its socket.
-    pub fn ensure(place: &Place) -> Result<Self> {
+    /// The holder of `build` at `place`, started first when none is listening.
+    /// Starting is idempotent: a holder that is alive keeps its lock and its
+    /// socket.
+    pub fn ensure(place: &Place, build: &str) -> Result<Self> {
         if let Ok(client) = Self::connect(place) {
             return Ok(client);
         }
-        spawn()?;
+        let executable = holder_executable()?;
+        // The executable was replaced since this process started: its holder
+        // binds another build's place, and nobody will bind this one.
+        if let Some(started) = spawn(&executable)?.filter(|started| started != build) {
+            // Twelve digits, as the socket and state directory are named.
+            let short = |build: &str| build.get(..12).unwrap_or(build).to_owned();
+            bail!(
+                "The executable at {} is now build {}; this server is build {} and has been \
+                 replaced since it started. Run `lf install server` to restart it",
+                executable.display(),
+                short(&started),
+                short(build)
+            );
+        }
         let deadline = Instant::now() + STARTUP;
         loop {
             match Self::connect(place) {
@@ -193,10 +208,28 @@ impl Output {
     }
 }
 
-/// Start this build's holder in its own session, so that stopping or replacing
-/// the server's service leaves it running, and wait until it is listening or
-/// has found another holder of this build already there.
-fn spawn() -> Result<()> {
+#[cfg(test)]
+thread_local! {
+    /// A test's stand-in for the executable its holder is started from.
+    pub(super) static HOLDER_EXECUTABLE: std::cell::RefCell<Option<PathBuf>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// The executable a holder is started from: this process's own.
+fn holder_executable() -> io::Result<PathBuf> {
+    #[cfg(test)]
+    if let Some(executable) = HOLDER_EXECUTABLE.with_borrow(Clone::clone) {
+        return Ok(executable);
+    }
+    std::env::current_exe()
+}
+
+/// Start a holder from `executable` in its own session, so that stopping or
+/// replacing the server's service leaves it running, and wait until it is
+/// listening or has found another holder of its build already there. Returns
+/// the build its ready line names; a holder that found the lock taken says
+/// nothing.
+fn spawn(executable: &Path) -> Result<Option<String>> {
     let logs = crate::store::lf_home_dir().join("logs");
     std::fs::create_dir_all(&logs)?;
     let log = OpenOptions::new()
@@ -204,7 +237,7 @@ fn spawn() -> Result<()> {
         .append(true)
         .open(logs.join("holder.log"))
         .with_context(|| format!("Cannot open holder log in {}", logs.display()))?;
-    let mut command = Command::new(std::env::current_exe()?);
+    let mut command = Command::new(executable);
     command
         .args(["holder", "run"])
         .stdin(Stdio::null())
@@ -221,148 +254,12 @@ fn spawn() -> Result<()> {
     }
     let mut child = command.spawn().context("Start lf holder run")?;
     let output = child.stdout.take().expect("ready pipe configured");
-    let started = crate::journal::process_started_at(child.id())
-        .ok()
-        .flatten();
+    // Reap it when it exits.
     std::thread::spawn(move || {
-        let status = child.wait();
-        if let (Some(started), Ok(status)) = (started, status) {
-            settle(child.id(), started, Some(status));
-        }
+        let _ = child.wait();
     });
-    // A ready line, or end of file from a holder that found the lock taken.
+    // `<pid> <build>`, or end of file from a holder that found the lock taken.
     let mut line = String::new();
     BufReader::new(output).read_line(&mut line)?;
-    Ok(())
-}
-
-// ---- The holder's LfProcess ----
-
-const HOLDER_COMMAND: &str = r#"["lf","holder","run"]"#;
-
-/// The LfProcess a holder is recorded as: its open row when one names the
-/// same pid and a start within the kernel's reading (Linux derives a start
-/// from `ps` elapsed time, which moves by a second between reads), else a new
-/// one. Every server that meets the same holder names the same row, however
-/// many terminals it holds.
-fn holder_process(pid: u32, os_started_at: i64) -> crate::process::LfProcess {
-    let open = crate::journal::process_ledger()
-        .and_then(|store| store.unfinished_processes())
-        .unwrap_or_default()
-        .into_iter()
-        .find_map(|row| match row {
-            crate::process::ProcessEntry::Lf(process)
-                if process.command.as_deref() == Some(HOLDER_COMMAND)
-                    && process.pid == Some(pid)
-                    && process
-                        .os_started_at
-                        .is_some_and(|started| started.abs_diff(os_started_at) <= 3) =>
-            {
-                Some(process)
-            }
-            _ => None,
-        });
-    open.unwrap_or_else(|| new_holder_process(pid, os_started_at))
-}
-
-/// A first row for the holder `pid`, named by its pid and OS start time.
-fn new_holder_process(pid: u32, os_started_at: i64) -> crate::process::LfProcess {
-    let name = format!("holder:{pid}:{os_started_at}");
-    let id = uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_OID, name.as_bytes());
-    crate::process::LfProcess {
-        id: loopflow_model::id::LfProcessId::parse(&id.to_string())
-            .expect("a UUID is an LfProcessId"),
-        pid: Some(pid),
-        os_started_at: Some(os_started_at),
-        trace_id: loopflow_model::id::TraceId::new(),
-        parent_lf_process_id: None,
-        via_agent: Some(false),
-        caller_session_id: None,
-        caller_agent_process_id: None,
-        command: Some(HOLDER_COMMAND.to_owned()),
-        repo: None,
-        cwd: None,
-        started_at: os_started_at,
-        completed_at: None,
-        outcome: None,
-        exit_code: None,
-        signal: None,
-        error: None,
-    }
-}
-
-/// Record the holder `pid` as running. Recording again writes nothing; a
-/// store that cannot be written leaves the holder unlisted, never stopped.
-pub fn record(pid: u32) {
-    let Ok(Some(started)) = crate::journal::process_started_at(pid) else {
-        return;
-    };
-    write(&holder_process(pid, started));
-}
-
-/// Record the holder `pid` at `place`, which another server started, and
-/// settle its row when its socket closes. Nothing here waits on its exit, so
-/// the row has no outcome. An idle request connection never keeps a holder.
-pub fn adopt(place: &Place, pid: u32) {
-    let Ok(Some(started)) = crate::journal::process_started_at(pid) else {
-        return;
-    };
-    write(&holder_process(pid, started));
-    let Ok(mut socket) = UnixStream::connect(&place.socket) else {
-        return;
-    };
-    std::thread::spawn(move || {
-        // Blocks until the holder's end closes: it exited or was killed.
-        let _ = io::copy(&mut socket, &mut io::sink());
-        settle(pid, started, None);
-    });
-}
-
-/// Complete the row of every recorded holder that is no longer running, with
-/// no outcome: nobody saw it exit. A process that cannot be read is left.
-pub fn settle_departed() {
-    let Ok(rows) = crate::journal::process_ledger().and_then(|store| store.unfinished_processes())
-    else {
-        return;
-    };
-    for row in rows {
-        let crate::process::ProcessEntry::Lf(process) = row else {
-            continue;
-        };
-        let (Some(pid), Some(started)) = (process.pid, process.os_started_at) else {
-            continue;
-        };
-        if process.command.as_deref() != Some(HOLDER_COMMAND) {
-            continue;
-        }
-        if crate::journal::process_identity_evidence(pid, started)
-            == crate::journal::ProcessIdentityEvidence::Dead
-        {
-            settle(pid, started, None);
-        }
-    }
-}
-
-/// Complete the holder's row. With no `status` nobody saw the exit, so the row
-/// has no outcome.
-fn settle(pid: u32, os_started_at: i64, status: Option<std::process::ExitStatus>) {
-    let mut process = holder_process(pid, os_started_at);
-    process.completed_at = Some(time::OffsetDateTime::now_utc().unix_timestamp());
-    process.outcome = status.map(|status| {
-        if status.success() {
-            "succeeded"
-        } else {
-            "failed"
-        }
-        .to_owned()
-    });
-    process.exit_code = status.and_then(|status| status.code());
-    write(&process);
-}
-
-fn write(process: &crate::process::LfProcess) {
-    let recorded = crate::journal::process_ledger().and_then(|store| store.record_process(process));
-    if let Err(error) = recorded {
-        tracing::warn!(%error, pid = process.pid, "holder process not recorded");
-    }
+    Ok(line.split_whitespace().nth(1).map(str::to_owned))
 }

@@ -22,7 +22,9 @@ pub fn accepts(cli: &Cli) -> bool {
                 | TaskCommand::Abandon { .. }
                 | TaskCommand::Update { .. }
                 | TaskCommand::Move { .. }
-                | TaskCommand::Hold { .. }
+                | TaskCommand::Auto {
+                    cmd: crate::lf::AutoCommand::Off { .. }
+                }
         ),
         Some(Commands::Wave { cmd }) => matches!(
             cmd,
@@ -53,17 +55,16 @@ fn execute(cli: &Cli, args: &[String], directory: &Path, io: &mut CommandIo<'_>)
     if let Some(forward) = super::work_route::forward(cli, args, directory)? {
         return forward.run(cli, directory, io);
     }
-    // Session, shipping, holding and arrangement select their own Work. Other
+    // Session, auto and arrangement select their own Work. Other
     // commands retain the CLI's explicit Task placement without changing
     // process cwd.
     let binding = if !matches!(
         cli.command,
         Some(
             Commands::Session { .. }
-                | Commands::Ship { .. }
                 | Commands::Desktop { .. }
                 | Commands::Task {
-                    cmd: TaskCommand::Hold { .. }
+                    cmd: TaskCommand::Auto { .. }
                 }
         )
     ) {
@@ -109,21 +110,33 @@ fn local(
     match cli.command.as_ref().context("missing mutation")? {
         Commands::Task {
             cmd:
-                TaskCommand::Hold {
-                    issue,
-                    reason,
-                    json,
+                TaskCommand::Auto {
+                    cmd:
+                        crate::lf::AutoCommand::Off {
+                            issue,
+                            reason,
+                            json,
+                        },
                 },
         } => {
             let issue = issue
                 .as_deref()
                 .or(cli.task.as_deref())
                 .context("No Task selected")?;
-            let held = loopflow_execution::engine::task::hold(directory, issue, reason.as_deref())?;
+            // A Task another Machine runs is set there.
+            let super::write::WriteResult::TaskAutoOff(off) = super::write::Write::TaskAutoOff {
+                directory: directory.to_path_buf(),
+                issue: issue.to_owned(),
+                reason: reason.clone(),
+            }
+            .run()?
+            else {
+                unreachable!("task.auto.off answers with what it turned off")
+            };
             if *json {
-                writeln!(io.output, "{}", serde_json::to_string(&held)?)?;
+                writeln!(io.output, "{}", serde_json::to_string(&off)?)?;
             } else {
-                writeln!(io.output, "{}", held.render())?;
+                writeln!(io.output, "{}", off.render())?;
             }
             Ok(())
         }
@@ -178,12 +191,19 @@ fn task(repo: &Path, command: &TaskCommand, io: &mut CommandIo<'_>) -> Result<()
     match command {
         TaskCommand::Create { .. } => super::task_create::create(repo, command, io, false, None),
         TaskCommand::Claim { issue, json } | TaskCommand::Unassign { issue, json } => {
-            use loopflow_execution::ops::task_ownership::{render, OwnershipChange};
-            let requested = match command {
-                TaskCommand::Claim { .. } => OwnershipChange::Claim,
-                _ => OwnershipChange::Unassign,
+            use super::write::{Write, WriteResult};
+            use loopflow_execution::ops::task_ownership::render;
+            let (directory, issue) = (repo.to_path_buf(), issue.clone());
+            let write = match command {
+                TaskCommand::Claim { .. } => Write::TaskClaim { directory, issue },
+                _ => Write::TaskUnassign { directory, issue },
             };
-            let ownership = loopflow_execution::engine::task::ownership(repo, issue, requested)?;
+            // A Task whose ownership another Machine writes is changed there.
+            let (WriteResult::TaskClaim(ownership) | WriteResult::TaskUnassign(ownership)) =
+                write.run()?
+            else {
+                unreachable!("an ownership write answers with ownership")
+            };
             if *json {
                 writeln!(io.output, "{}", serde_json::to_string(&ownership)?)?;
             } else {
@@ -209,12 +229,14 @@ fn task(repo: &Path, command: &TaskCommand, io: &mut CommandIo<'_>) -> Result<()
             reason,
             json,
         } => {
-            let task =
+            let completion =
                 loopflow_execution::ops::task::task_complete(repo, issue, reason.as_deref())?;
             if *json {
-                writeln!(io.output, "{}", serde_json::to_string_pretty(&task)?)?;
+                let completed = super::waves::task_completed(completion)?;
+                writeln!(io.output, "{}", serde_json::to_string_pretty(&completed)?)?;
             } else {
-                writeln!(io.output, "{issue}: completed")?;
+                writeln!(io.output, "{} done", completion.task.identifier)?;
+                write_child_completions(io.output, &completion.children, 1)?;
             }
             Ok(())
         }
@@ -252,6 +274,7 @@ fn task(repo: &Path, command: &TaskCommand, io: &mut CommandIo<'_>) -> Result<()
             notes,
             rank,
             assignee,
+            parent,
             wave,
             json,
         } => {
@@ -260,6 +283,7 @@ fn task(repo: &Path, command: &TaskCommand, io: &mut CommandIo<'_>) -> Result<()
                 issue,
                 wave.as_deref(),
                 task_edit_update(title, notes, *rank, assignee),
+                parent.as_deref(),
             )?;
             print_edit(&result, *json, "updated", io)
         }
@@ -269,7 +293,12 @@ fn task(repo: &Path, command: &TaskCommand, io: &mut CommandIo<'_>) -> Result<()
             json,
             ..
         } => {
-            let ownership = loopflow_execution::ops::session_move::move_task(issue, machine, None)?;
+            let ownership = loopflow_execution::ops::session_move::move_task(
+                issue,
+                machine,
+                None,
+                super::write::run_task,
+            )?;
             if *json {
                 writeln!(io.output, "{}", serde_json::to_string(&ownership)?)?;
             }
@@ -322,6 +351,7 @@ pub fn task_edit_update(
         description: notes.clone(),
         rank,
         assignee: assignee.clone().map(Some),
+        parent: None,
     }
 }
 
@@ -367,4 +397,46 @@ pub fn read_task_draft(input: &mut dyn Read) -> Result<String> {
     input.take(limit as u64 + 1).read_to_end(&mut bytes)?;
     anyhow::ensure!(bytes.len() <= limit, "Draft exceeds 1 MB");
     Ok(String::from_utf8(bytes)?)
+}
+
+/// One line per child, each child's own children indented under it.
+fn write_child_completions(
+    output: &mut dyn std::io::Write,
+    children: &[loopflow_storage::sqlite::children::ChildCompletion],
+    depth: usize,
+) -> Result<()> {
+    for child in children {
+        writeln!(
+            output,
+            "{}{}",
+            "  ".repeat(depth),
+            child_completion_line(child)
+        )?;
+        write_child_completions(output, &child.children, depth + 1)?;
+    }
+    Ok(())
+}
+
+fn child_completion_line(child: &loopflow_storage::sqlite::children::ChildCompletion) -> String {
+    use loopflow_storage::sqlite::children::ChildOutcome;
+
+    let id = &child.task.identifier;
+    let pr = child.pr.as_ref().and_then(|pr| {
+        pr.github()
+            .map(|github| format!("#{} {}", github.number, pr.phase().as_str()))
+    });
+    match child.outcome {
+        ChildOutcome::Done => {
+            format!("{id} done: {}", pr.as_deref().unwrap_or("PR merged"))
+        }
+        ChildOutcome::Abandoned => {
+            let step = child.step.as_ref().map(|step| format!("at {step}"));
+            let reasons: Vec<String> = pr.into_iter().chain(step).collect();
+            if reasons.is_empty() {
+                format!("{id} abandoned: no merged PR")
+            } else {
+                format!("{id} abandoned: {}", reasons.join(", "))
+            }
+        }
+    }
 }

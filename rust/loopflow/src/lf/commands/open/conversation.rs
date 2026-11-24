@@ -1,4 +1,4 @@
-//! One Session, presented without replacing another viewer's input.
+//! One Session, presented as one more view: every view of it types.
 use std::path::PathBuf;
 use std::process::Command;
 use std::time::{Duration, SystemTime};
@@ -10,8 +10,9 @@ use super::{
     OpenHost, OpenReceipt, OpenRoute, OpenStatus, Opening, Resolved,
 };
 use crate::lf::commands::desktop::{self, DesktopOpeningStatus};
-use loopflow_execution::ops::human_session::{select_connection, SessionTarget};
-use loopflow_execution::session::SessionOpenIntent;
+use loopflow_execution::ops::human_session::{
+    existing_connection, select_connection, SessionTarget,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Mode {
@@ -91,10 +92,6 @@ fn present(target: &mut Resolved, args: &OpenArgs, focus_new: bool) -> Result<Op
         args.selection.server.is_none() || host == OpenHost::Rex,
         "--server requires --tab --host rex"
     );
-    anyhow::ensure!(
-        !target.url.diff || mode == Mode::Desktop,
-        "--diff requires --host desktop; use lf diff for terminal changes"
-    );
     if mode == Mode::Here
         && args.selection.host != OpenHost::Auto
         && args.selection.host != OpenHost::Terminal
@@ -113,19 +110,15 @@ fn present(target: &mut Resolved, args: &OpenArgs, focus_new: bool) -> Result<Op
     resolve(target, false)?;
     if let Some(view) = conversation_view(target)? {
         let destination = view.placement.as_deref().and_then(super::placement_host);
-        // Changes needs its own opening even when the conversation is ready.
-        let companion = mode == Mode::Desktop
-            && target.url.diff
-            && view.attachment == DesktopOpeningStatus::Usable;
         let focus_existing = mode == Mode::Focus
             || (mode == Mode::Desktop
-                && !companion
                 && focus_new
                 && view.attachment == DesktopOpeningStatus::Usable
                 && destination.is_some_and(|(host, _)| host == OpenHost::Desktop));
         if focus_existing {
-            let (host, destination) = destination
-                .with_context(|| format!("Not open in a focusable view; {}", view.reason))?;
+            let (host, destination) = destination.context(
+                "Not open in a view lf can focus; lf open without --focus adds a view here",
+            )?;
             focus_destination(host, destination).with_context(|| view.reason.clone())?;
             return Ok(target.receipt(
                 Some(host),
@@ -134,7 +127,12 @@ fn present(target: &mut Resolved, args: &OpenArgs, focus_new: bool) -> Result<Op
                 Some(view.reason),
             ));
         }
-        if view.retains_attachment() && !companion {
+        // Desktop shows a conversation once, and an agent is already in its own;
+        // anywhere else, opening adds a view or takes it over from a client lf
+        // can't share.
+        let own = loopflow_execution::journal::agent_caller()
+            .is_some_and(|caller| target.conversation() == Some(caller.session_id.as_str()));
+        if ((mode == Mode::Desktop && view.in_desktop) || own) && view.retains_attachment() {
             return Ok(target.receipt(
                 destination.map(|(host, _)| host),
                 view.placement.clone(),
@@ -212,14 +210,6 @@ fn desktop_open(target: &mut Resolved, focus: bool) -> Result<OpenReceipt> {
                         None,
                     ))
                 }
-                DesktopOpeningStatus::Elsewhere => {
-                    return Ok(target.receipt(
-                        Some(OpenHost::Desktop),
-                        None,
-                        OpenStatus::Elsewhere,
-                        opening.reason,
-                    ))
-                }
                 DesktopOpeningStatus::Failed => anyhow::bail!(
                     "{}",
                     opening
@@ -263,41 +253,18 @@ pub(super) fn resolve(target: &mut Resolved, prepare: bool) -> Result<()> {
             (_, _, Some(wave)) => SessionTarget::Wave(wave),
             _ => SessionTarget::Repository,
         };
-        let selected = select_connection(
-            &store,
-            &target.repository_path,
-            selector,
-            if prepare {
-                SessionOpenIntent::Start
-            } else {
-                SessionOpenIntent::Reveal
-            },
-        )
-        .await;
-        // No primary is the ordinary absent-focus result, not an admission.
-        let selected = match selected {
-            Ok(selected) => selected,
-            Err(error)
-                if !prepare
-                    && error.to_string() == "No existing conversation; start one explicitly" =>
-            {
-                return Ok(())
+        let id = if prepare {
+            select_connection(&store, &target.repository_path, selector)
+                .await?
+                .id
+        } else {
+            // No conversation yet is the ordinary absent-focus result.
+            match existing_connection(&store, &target.repository_path, selector).await? {
+                (_, Some(id)) => id,
+                (_, None) => return Ok(()),
             }
-            Err(error) => return Err(error),
         };
-        let session = store
-            .session(&selected.id)
-            .await?
-            .context("Session not found")?;
-        target.agent = match &session.provider {
-            Some(provider) => Some(
-                session
-                    .model
-                    .as_ref()
-                    .map_or_else(|| provider.clone(), |model| format!("{provider}:{model}")),
-            ),
-            None => loopflow_execution::config::agent_override(),
-        };
+        let session = store.session(&id).await?.context("Session not found")?;
         if prepare && session.provider.is_none() {
             loopflow_execution::config::load_wave_config(
                 Some(&session.cwd),
@@ -306,15 +273,15 @@ pub(super) fn resolve(target: &mut Resolved, prepare: bool) -> Result<()> {
             .unwrap_or_default()
             .agent()?;
         }
-        target.session = Some(selected.id);
+        target.session = Some(id);
         target.session_cwd = Some(session.cwd);
         Ok(())
     })
 }
 
-/// A launch-scoped acknowledgement, removed after its caller settles. The
-/// transport writes it only after the native conversation is ready for input.
-/// A failed child leaves its error visible and reports failure through this file.
+/// A launch-scoped receipt, removed after its caller settles. The transport
+/// writes "attached" once the native conversation has started, or the error
+/// that stopped it; a failed child also leaves that error on screen.
 #[derive(Debug)]
 pub(super) struct Attachment {
     directory: tempfile::TempDir,
@@ -369,9 +336,17 @@ exit "$result""#.into(),
         match self.wait(Duration::from_secs(30)) {
             Ok(()) => receipt.status = OpenStatus::Usable,
             Err(error) => {
+                let reason = format!("{error:#}");
+                tracing::warn!(
+                    url = receipt.url,
+                    destination = receipt.destination.as_deref().unwrap_or_default(),
+                    error = %reason,
+                    "lf open: the conversation did not attach"
+                );
                 receipt.status = OpenStatus::Failed;
                 receipt.reason = Some(format!(
-                    "{error:#}; see the destination for diagnostics and retry the same command"
+                    "{}; retry the same command",
+                    reason.trim_end().trim_end_matches('.')
                 ));
             }
         }
@@ -459,6 +434,45 @@ mod tests {
         assert!(output.status.success(), "{output:?}");
         assert!(output.stdout.is_empty(), "{output:?}");
         assert!(output.stderr.is_empty(), "{output:?}");
+    }
+
+    #[test]
+    fn conversation_keeps_the_hosts_path_not_the_callers() {
+        let attachment = Attachment::new().unwrap();
+        let argv = attachment.argv(vec!["lf".into(), "session".into(), "resume".into()]);
+        assert!(!argv.iter().any(|arg| arg.starts_with("PATH=")), "{argv:?}");
+    }
+
+    #[test]
+    fn a_failed_opening_reports_the_conversations_own_reason() {
+        let attachment = Attachment::new().unwrap();
+        let argv = attachment.argv(vec![
+            "/bin/sh".into(),
+            "-c".into(),
+            r#"printf "'claude' is not installed." > "$LF_OPEN_RECEIPT"; exit 1"#.into(),
+        ]);
+        let output = Command::new(&argv[0])
+            .args(&argv[1..])
+            .stdin(std::process::Stdio::null())
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(1));
+        let mut receipt = super::OpenReceipt {
+            label: "LOO-1".into(),
+            url: String::new(),
+            host: None,
+            destination: None,
+            container: None,
+            status: super::OpenStatus::Usable,
+            reason: None,
+            fallback_argv: Vec::new(),
+        };
+        attachment.settle(&mut receipt);
+        assert_eq!(receipt.status, super::OpenStatus::Failed);
+        assert_eq!(
+            receipt.reason.as_deref(),
+            Some("'claude' is not installed; retry the same command")
+        );
     }
 
     #[test]

@@ -71,20 +71,19 @@ public enum WorkRequest: Equatable, Sendable {
 
 /// One subscription a window runs, and the read behind it.
 public enum WorkPart: String, CaseIterable, Sendable {
-    case task, sessions, planning, selections, activity
+    case task, sessions, planning, selections
     case taskList = "task_list"
-    case peerPlanning = "peer_planning"
+    case planHome = "plan_home"
     case workActivity = "work_activity"
 
     /// The read this part subscriptions for `scope`; nil when the scope shows no such part.
     public func read(for scope: WorkScope) -> ServedRead? {
         switch self {
         case .planning: return .allPlans
-        case .activity: return .processList
         case .selections: return scope.repo.map { .desktopViewList(directory: $0) }
         case .taskList:
             return scope.repo.map { .desktopViewGet(directory: $0, expression: TaskList.started.expression(wave: scope.taskListWave)) }
-        case .peerPlanning: return scope.repo.map { .repoPlan(directory: $0) }
+        case .planHome: return scope.repo.map { .repoTracker(directory: $0) }
         case .sessions: return scope.repo.map { .sessionList(directory: $0, headless: scope.headless, after: nil, limit: nil, task: nil) }
         case .task:
             // Without a repository the Task resolves Machine-wide, from no checkout.
@@ -105,9 +104,9 @@ public struct WorkFrame: Sendable {
         public let waves: [WaveSnapshot]
     }
 
-    public struct PeerPlanning: Sendable {
+    public struct PlanHomeReading: Sendable {
         public let repo: String
-        public let destinations: [PeerPlanningStatus]
+        public let plan: RepositoryPlan
     }
 
     public struct Sessions: Sendable {
@@ -139,11 +138,10 @@ public struct WorkFrame: Sendable {
         case selections([WorkViewPlan]?)
         /// The sidebar's started Tasks, as the phone lists them.
         case taskList(WorkViewPlan?)
-        case peerPlanning(PeerPlanning?)
+        case planHome(PlanHomeReading?)
         case sessions(Sessions?)
         case task(TaskPart?)
         case workActivity(WorkActivityPart?)
-        case activity(ActivitySnapshot?)
         case checkpoint
 
         public var part: String {
@@ -151,11 +149,10 @@ public struct WorkFrame: Sendable {
             case .planning: WorkPart.planning.rawValue
             case .selections: WorkPart.selections.rawValue
             case .taskList: WorkPart.taskList.rawValue
-            case .peerPlanning: WorkPart.peerPlanning.rawValue
+            case .planHome: WorkPart.planHome.rawValue
             case .sessions: WorkPart.sessions.rawValue
             case .task: WorkPart.task.rawValue
             case .workActivity: WorkPart.workActivity.rawValue
-            case .activity: WorkPart.activity.rawValue
             case .checkpoint: "checkpoint"
             }
         }
@@ -197,24 +194,6 @@ public struct WorkFrame: Sendable {
         WorkFrame(sequence: sequence, answers: answers, unavailable: unavailable, content: content, wire: wire, readAt: readAt)
     }
 
-    /// Every field is required; an absent one is a parse error, not a nil.
-    private struct Envelope<Body: Decodable>: Decodable {
-        let answers: Int?
-        let unavailable: String?
-        let body: Body?
-        let readAt: Revisions?
-
-        enum CodingKeys: String, CodingKey { case answers, unavailable, body, readAt = "read_at" }
-
-        init(from decoder: any Decoder) throws {
-            let container = try decoder.container(keyedBy: CodingKeys.self)
-            answers = try container.decode(Int?.self, forKey: .answers)
-            unavailable = try container.decode(String?.self, forKey: .unavailable)
-            body = try container.decode(Body?.self, forKey: .body)
-            readAt = try container.decode(Revisions?.self, forKey: .readAt)
-        }
-    }
-
     public struct TaskStatusReading: Decodable {
         public let overview: TaskOverview?
         public let graphProcesses: [GraphProcessDetail]
@@ -228,16 +207,12 @@ public struct WorkFrame: Sendable {
         }
     }
 
-    private struct PeerPlanningReading: Decodable {
-        let destinations: [PeerPlanningStatus]
-    }
-
     /// Decode one line of `part`'s subscription, read for `scope`.
     public static func decode(part: WorkPart, scope: WorkScope, sequence: Int, line: Data) throws -> WorkFrame {
-        func envelope<Body: Decodable>(_: Body.Type) throws -> Envelope<Body> {
-            try JSONDecoder().decode(Envelope<Body>.self, from: line)
+        func envelope<Body: Decodable>(_: Body.Type) throws -> SubscriptionFrame<Body> {
+            try JSONDecoder().decode(SubscriptionFrame<Body>.self, from: line)
         }
-        func frame<Body>(_ envelope: Envelope<Body>, _ content: Content, unavailable: String? = nil,
+        func frame<Body>(_ envelope: SubscriptionFrame<Body>, _ content: Content, unavailable: String? = nil,
                          wire: Wire? = nil) -> WorkFrame {
             WorkFrame(sequence: sequence, answers: envelope.answers, unavailable: envelope.unavailable ?? unavailable,
                       content: content, wire: wire, readAt: envelope.readAt)
@@ -268,10 +243,10 @@ public struct WorkFrame: Sendable {
             let read = try envelope(WorkViewPlan.self)
             return frame(read, .taskList(read.body),
                          wire: Wire(roadmap: nil, waves: nil, sessionPage: nil, taskList: read.body == nil ? nil : line))
-        case .peerPlanning:
-            let read = try envelope(PeerPlanningReading.self)
-            return frame(read, .peerPlanning(read.body.map {
-                PeerPlanning(repo: scope.repo ?? "", destinations: $0.destinations)
+        case .planHome:
+            let read = try envelope(RepositoryPlan.self)
+            return frame(read, .planHome(read.body.map {
+                PlanHomeReading(repo: scope.repo ?? "", plan: $0)
             }))
         case .sessions:
             let read = try envelope([SessionRecord].self)
@@ -295,9 +270,43 @@ public struct WorkFrame: Sendable {
             return frame(read, .workActivity(zip(scope.activity, read.body).map {
                 WorkActivityPart(scope: $0, snapshot: $1)
             }))
-        case .activity:
-            let read = try envelope(ActivitySnapshot.self)
-            return frame(read, .activity(read.body))
+        }
+    }
+}
+
+extension WorkFrame {
+    /// `part`'s failed reading for a `line` whose body this build can't decode;
+    /// throws when the line is not a reading at all.
+    static func unread(part: WorkPart, sequence: Int, line: Data, reason: String) throws -> WorkFrame {
+        struct Unread: Decodable { init(from decoder: any Decoder) {} }
+        let read = try JSONDecoder().decode(SubscriptionFrame<Unread>.self, from: line)
+        let content: Content = switch part {
+        case .planning: .planning(nil)
+        case .selections: .selections(nil)
+        case .taskList: .taskList(nil)
+        case .planHome: .planHome(nil)
+        case .sessions: .sessions(nil)
+        case .task: .task(nil)
+        case .workActivity: .workActivity(nil)
+        }
+        return WorkFrame(sequence: sequence, answers: read.answers, unavailable: reason, content: content,
+                         wire: nil, readAt: read.readAt)
+    }
+}
+
+extension DecodingError {
+    /// Where decoding stopped, for the log and the Notice: "(missing owned_by_you at body.tasks.0)".
+    var place: String {
+        // An array position names itself "Index 0"; the path says 0.
+        func path(_ context: Context) -> String {
+            if context.codingPath.isEmpty { return "root" }
+            return context.codingPath.map { $0.intValue.map(String.init) ?? $0.stringValue }.joined(separator: ".")
+        }
+        return switch self {
+        case .keyNotFound(let key, let context): "(missing \(key.stringValue) at \(path(context)))"
+        case .valueNotFound(_, let context), .typeMismatch(_, let context), .dataCorrupted(let context):
+            "(unexpected value at \(path(context)))"
+        @unknown default: "(unreadable)"
         }
     }
 }
@@ -307,19 +316,42 @@ private func zip<A, B>(_ a: A?, _ b: B?) -> (A, B)? {
     return (a, b)
 }
 
+/// Every field is required; an absent one is a parse error, not a nil.
+public struct SubscriptionFrame<Body: Decodable>: Decodable {
+    public let answers: Int?
+    public let unavailable: String?
+    public let body: Body?
+    public let readAt: Revisions?
+
+    enum CodingKeys: String, CodingKey { case answers, unavailable, body, readAt = "read_at" }
+
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        answers = try container.decode(Int?.self, forKey: .answers)
+        unavailable = try container.decode(String?.self, forKey: .unavailable)
+        body = try container.decode(Body?.self, forKey: .body)
+        readAt = try container.decode(Revisions?.self, forKey: .readAt)
+    }
+}
+
 /// One served subscription speaking `lf <read> --json --subscribe`'s newline-delimited JSON.
 public struct LineSubscription: Sendable {
     public let lines: AsyncThrowingStream<Data, any Error>
-    /// Queue one newline-terminated request line.
-    public let send: @Sendable (Data) -> Void
+    /// Ask for a reading begun after this request, even when its body is unchanged.
+    public let checkpoint: @Sendable (Int) -> Void
+
     /// Returns only after the subscription has ended.
     public let cancel: @Sendable () async -> Void
+    /// What to say of a line this build can't decode, when the transport knows
+    /// which server sent it: `ServerLink.unreadable`.
+    public let unreadable: @Sendable () -> String?
 
-    public init(lines: AsyncThrowingStream<Data, any Error>, send: @escaping @Sendable (Data) -> Void,
-                cancel: @escaping @Sendable () async -> Void) {
+    public init(lines: AsyncThrowingStream<Data, any Error>, checkpoint: @escaping @Sendable (Int) -> Void,
+                cancel: @escaping @Sendable () async -> Void, unreadable: @escaping @Sendable () -> String?) {
         self.lines = lines
-        self.send = send
+        self.checkpoint = checkpoint
         self.cancel = cancel
+        self.unreadable = unreadable
     }
 }
 
@@ -374,11 +406,11 @@ public final class WorkSubscriptions: @unchecked Sendable {
                     scope = next
                     try select(id: id)
                 case .refresh(let id):
-                    for running in running.values { running.subscription.send(Self.confirm(id)) }
+                    for running in running.values { running.subscription.checkpoint(id) }
                 case .checkpoint(let id, let replay):
                     let parts = replay.isEmpty ? Set(running.keys)
                         : Set(replay.compactMap(WorkPart.init(rawValue:))).intersection(running.keys)
-                    for part in parts { running[part]?.subscription.send(Self.confirm(id)) }
+                    for part in parts { running[part]?.subscription.checkpoint(id) }
                     checkpoints.append((id, parts, []))
                     settleCheckpoints()
                 }
@@ -426,7 +458,15 @@ public final class WorkSubscriptions: @unchecked Sendable {
             guard !finished, var current = running[part], current.generation == generation else { return }
             do {
                 sequence += 1
-                let decoded = try WorkFrame.decode(part: part, scope: scope, sequence: sequence, line: line)
+                let decoded: WorkFrame
+                do {
+                    decoded = try WorkFrame.decode(part: part, scope: scope, sequence: sequence, line: line)
+                } catch let error as DecodingError {
+                    // Another build's reading fails this part alone, and says so;
+                    // the link is up and the other parts stay current.
+                    guard let reason = current.subscription.unreadable() else { throw error }
+                    decoded = try WorkFrame.unread(part: part, sequence: sequence, line: line, reason: "\(reason) \(error.place)")
+                }
                 let frame = decoded.answering(max(decoded.answers ?? 0, current.floor), sequence: sequence)
                 current.last = frame
                 running[part] = current
@@ -490,9 +530,5 @@ public final class WorkSubscriptions: @unchecked Sendable {
             running.reader.cancel()
             await running.subscription.cancel()
         }
-    }
-
-    private static func confirm(_ id: Int) -> Data {
-        Data("{\"id\":\(id)}\n".utf8)
     }
 }

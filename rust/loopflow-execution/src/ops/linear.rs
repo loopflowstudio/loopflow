@@ -1,10 +1,9 @@
 //! Provider planning operations shared by Task, Wave, and repository commands.
 //!
-//! Work owns authored Project content and Tasks. Linear refresh accepts provider
+//! Work owns authored Project content and Tasks. Linear refresh accepts tracker
 //! facts through the shared writer; ordinary readers consume saved Work.
 
 use super::planning_sync::{lock_wave_planning, planning_store};
-use crate::linear::LinearIssue;
 use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
 use std::path::Path;
@@ -13,7 +12,6 @@ use std::time::{Duration, Instant};
 
 use crate::linear::LinearClient;
 use crate::linear::LinearError;
-use crate::linear::LinearProject;
 use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::progress::Progress;
 use crate::provider_auth::{
@@ -21,11 +19,12 @@ use crate::provider_auth::{
 };
 use crate::repository::RepoId;
 use crate::store::{
-    open_existing_store, LinearIssueEvidence, PlanningState, ProviderToken,
-    ProviderTokenReplacement, StorageConfig, Store,
+    open_existing_store, LinearIssueState, PlanningState, ProviderToken, ProviderTokenReplacement,
+    StorageConfig, Store,
 };
 use crate::work::wave::config::{read_wave_config, update_wave_config};
 use crate::work::wave::Wave;
+use loopflow_storage::planning::TrackerProject;
 use loopflow_storage::work::task::Task;
 use loopflow_storage::work::wave::normalize_wave_name;
 use serde::{Deserialize, Serialize};
@@ -72,7 +71,6 @@ pub enum LinearRefresh {
 #[derive(Debug, Clone, Default)]
 pub struct LinearSyncOptions {
     pub wave: Option<String>,
-    pub plan: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -163,7 +161,7 @@ pub fn selected_linear_team(repo: &Path) -> OpsResult<Option<String>> {
         .unwrap_or_default()
         .planning_transport();
     Ok(match transport {
-        crate::config::PlanningConfig::Linear { team } => {
+        Some(crate::config::TrackerConfig::Linear { team }) => {
             team.filter(|team| !team.trim().is_empty())
         }
         _ => None,
@@ -173,7 +171,7 @@ pub fn selected_linear_team(repo: &Path) -> OpsResult<Option<String>> {
 pub(crate) fn repository_team_id(repo: &Path) -> OpsResult<String> {
     selected_linear_team(repo)?.ok_or_else(|| {
         OpsError::Message(
-            ".lf/config.yaml has no `repo.plan.team`. \
+            ".lf/config.yaml has no `repo.tracker.linear.team`. \
              Run `lf wave plan connect <wave> --team-key <KEY>` before creating or mutating work."
                 .to_string(),
         )
@@ -260,7 +258,7 @@ pub(crate) async fn resolve_context(
     Ok((repository, initiative))
 }
 
-/// Planning providers authenticate via OAuth: the access token and refresh grant
+/// Trackers authenticate via OAuth: the access token and refresh grant
 /// live in store, and access refreshes the grant before the access token expires.
 pub(super) async fn resolve_planning_token(provider: Provider) -> OpsResult<String> {
     Ok(planning_token(provider, false).await?.access_token)
@@ -460,9 +458,6 @@ pub mod test_fixture;
 mod asana_planning_tests;
 
 #[cfg(test)]
-mod notion_planning_tests;
-
-#[cfg(test)]
 pub(crate) mod task_planning_tests;
 
 #[cfg(test)]
@@ -473,8 +468,6 @@ mod oauth_tests;
 
 #[cfg(test)]
 mod task_comments_tests;
-
-mod adoption;
 
 // ── snapshot freshness policy ────────────────────────────────────────
 
@@ -518,8 +511,8 @@ pub(crate) async fn refresh_inventory(
                 "no Wave {wave} here; run `lf wave add {wave}` first"
             ))
         })?;
-    let acquisition = lock_wave_planning(&registered).await?;
-    refresh_inventory_locked(repo, &registered, ctx, initiative, &store, acquisition).await
+    let locks = lock_wave_planning(&registered).await?;
+    refresh_inventory_locked(repo, &registered, ctx, initiative, &store, locks).await
 }
 
 pub(crate) async fn refresh_inventory_locked(
@@ -528,28 +521,23 @@ pub(crate) async fn refresh_inventory_locked(
     ctx: &LinearRepository,
     initiative: &str,
     store: &Store,
-    acquisition: Arc<crate::store::PlanningLocks>,
+    locks: Arc<crate::store::PlanningLocks>,
 ) -> OpsResult<()> {
     let observed_at = time::OffsetDateTime::now_utc().unix_timestamp();
     let projects = checked_projects_with_store(repo, ctx, initiative, wave.slug(), store).await?;
-    let mut items = ctx
+    let items = ctx
         .client
         .list_project_issues(&projects)
         .await
         .map_err(linear_error)?;
-    let removed = store
-        .deleted_task_issues(wave.id())
-        .await
-        .map_err(|error| OpsError::Message(error.to_string()))?;
-    items.retain(|item| !removed.contains(&item.id));
-    crate::linear::acceptance::accept_linear_inventory(
+    crate::linear::events::accept_linear_inventory(
         store,
         wave.id().clone(),
         initiative.to_owned(),
         projects,
         items,
         observed_at,
-        Some(acquisition),
+        Some(locks),
     )
     .await
     .map_err(|err| OpsError::Message(format!("failed to accept Linear inventory: {err}")))?;
@@ -686,129 +674,6 @@ async fn connect_async(
     })
 }
 
-// ── Pull request linkage ────────────────────────────────────────────
-
-/// The Linear linkage a published PR carries on its owning issue: a first-class
-/// attachment and a loopflow-managed comment. Ids are `None` until each is created;
-/// their presence switches the writeback from create to idempotent update.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct PrLinkageIds {
-    pub attachment_id: Option<String>,
-    pub comment_id: Option<String>,
-}
-
-/// The content a PR linkage writes onto its Linear issue: the issue to link, the
-/// PR URL, the attachment title/subtitle, and the comment body. Assembled by the
-/// caller from the PR model so the writeback layer stays free of PR-domain shape.
-#[derive(Debug, Clone)]
-pub(crate) struct PrLinkRequest {
-    pub issue_id: String,
-    pub url: String,
-    pub title: String,
-    pub subtitle: String,
-    pub body: String,
-}
-
-/// A best-effort linkage attempt: the ids obtained so far (carrying prior ids
-/// forward), plus the failure message when Linear writeback degraded. `error` is
-/// `None` only on full success. This never fails the caller — the GitHub
-/// publication has already happened.
-#[derive(Debug, Clone)]
-pub(crate) struct PrLinkageOutcome {
-    pub ids: PrLinkageIds,
-    pub error: Option<String>,
-}
-
-/// Idempotently link a published PR to its owning Linear issue. Upserts a
-/// first-class attachment (create via `attachmentLinkURL`, later `attachmentUpdate`)
-/// and a managed comment (create via `commentCreate`, later `commentUpdate`), so
-/// repeated `pr open/submit/land` refresh the same linkage instead of duplicating.
-/// Partial progress is preserved: whatever id was obtained rides back in the
-/// outcome even when a later step fails.
-pub(crate) async fn link_pr_async(
-    repo: &Path,
-    request: &PrLinkRequest,
-    prior: &PrLinkageIds,
-) -> PrLinkageOutcome {
-    // PR links spend the reserved Linear budget so they never fail behind sync.
-    crate::linear::urgent(link_pr(repo, request, prior)).await
-}
-
-async fn link_pr(repo: &Path, request: &PrLinkRequest, prior: &PrLinkageIds) -> PrLinkageOutcome {
-    let client = match linear_client(repo).await {
-        Ok(client) => client,
-        Err(error) => {
-            return PrLinkageOutcome {
-                ids: prior.clone(),
-                error: Some(error.to_string()),
-            }
-        }
-    };
-    if let Err(error) = acquire_task(repo, &request.issue_id, LinearRefresh::Auto).await {
-        return PrLinkageOutcome {
-            ids: prior.clone(),
-            error: Some(error.to_string()),
-        };
-    }
-    link_pr_with_client(&client, request, prior).await
-}
-
-async fn link_pr_with_client(
-    client: &LinearClient,
-    request: &PrLinkRequest,
-    prior: &PrLinkageIds,
-) -> PrLinkageOutcome {
-    let mut ids = prior.clone();
-
-    match &ids.attachment_id {
-        Some(id) => {
-            if let Err(error) = client
-                .update_attachment(id, &request.title, &request.subtitle)
-                .await
-            {
-                return PrLinkageOutcome {
-                    ids,
-                    error: Some(error.to_string()),
-                };
-            }
-        }
-        None => match client
-            .link_attachment(&request.issue_id, &request.url, &request.title)
-            .await
-        {
-            Ok(id) => ids.attachment_id = Some(id),
-            Err(error) => {
-                return PrLinkageOutcome {
-                    ids,
-                    error: Some(error.to_string()),
-                }
-            }
-        },
-    }
-
-    match &ids.comment_id {
-        Some(id) => {
-            if let Err(error) = client.update_comment(id, &request.body).await {
-                return PrLinkageOutcome {
-                    ids,
-                    error: Some(error.to_string()),
-                };
-            }
-        }
-        None => match client.comment(&request.issue_id, &request.body).await {
-            Ok(id) => ids.comment_id = Some(id),
-            Err(error) => {
-                return PrLinkageOutcome {
-                    ids,
-                    error: Some(error.to_string()),
-                }
-            }
-        },
-    }
-
-    PrLinkageOutcome { ids, error: None }
-}
-
 // ── status ──────────────────────────────────────────────────────────
 
 pub fn list_linear_waves(repo: &Path) -> OpsResult<Vec<String>> {
@@ -820,7 +685,7 @@ pub fn list_linear_waves(repo: &Path) -> OpsResult<Vec<String>> {
 
 #[derive(Debug)]
 pub(crate) struct TaskPlanningInspection {
-    pub observation: LinearIssueEvidence,
+    pub issue_state: LinearIssueState,
     pub refresh_error: Option<String>,
 }
 
@@ -834,7 +699,7 @@ pub(crate) async fn inspect_task_planning_async(
         .to_string();
     let store = planning_store().await?;
     let existing = store
-        .linear_issue_evidence(&scope, issue)
+        .linear_issue_state(&scope, issue)
         .await
         .map_err(|error| OpsError::Message(error.to_string()))?;
     let now = time::OffsetDateTime::now_utc().unix_timestamp();
@@ -844,10 +709,10 @@ pub(crate) async fn inspect_task_planning_async(
         || (existing.state == PlanningState::Available
             && refresh == LinearRefresh::Auto
             && (age.is_some_and(|age| age < LINEAR_SOFT_STALE_SECS)
-                || super::linear_observe::team_current(&store, &scope).await))
+                || super::tracker_events::team_current(&store, &scope).await))
     {
         return Ok(TaskPlanningInspection {
-            observation: existing,
+            issue_state: existing,
             refresh_error: None,
         });
     }
@@ -876,7 +741,7 @@ pub(crate) async fn inspect_task_planning_async(
         } else {
             None
         };
-        let mut acquisition = None;
+        let mut locks = None;
         let mut confirmed_wave = None;
         if let Some(initiative) = discovered_initiative {
             let wave = wave_for_initiative(repo, &initiative)?;
@@ -887,7 +752,7 @@ pub(crate) async fn inspect_task_planning_async(
                 .await
                 .map_err(|error| OpsError::Message(error.to_string()))?
                 .ok_or_else(|| OpsError::Message(format!("Wave {wave} is not initialized")))?;
-            acquisition = Some(lock_wave_planning(&registered).await?);
+            locks = Some(lock_wave_planning(&registered).await?);
             observed_at = time::OffsetDateTime::now_utc().unix_timestamp();
             observation = repository
                 .client
@@ -906,7 +771,7 @@ pub(crate) async fn inspect_task_planning_async(
         let Some((item, project)) = observation else {
             if existing.issue_id.is_some() {
                 store
-                    .invalidate_linear_issue(&scope, existing.clone(), acquisition)
+                    .invalidate_linear_issue(&scope, existing.clone(), locks)
                     .await
                     .map_err(|error| OpsError::Message(error.to_string()))?;
             }
@@ -920,14 +785,14 @@ pub(crate) async fn inspect_task_planning_async(
                 repository.team_id
             )));
         }
-        crate::linear::acceptance::accept_linear_issue(
+        crate::linear::events::accept_linear_issue(
             &store,
             &scope,
             item,
             project,
             observed_at,
             confirmed_wave,
-            acquisition,
+            locks,
         )
         .await
         .map_err(|error| OpsError::Message(error.to_string()))?;
@@ -940,81 +805,81 @@ pub(crate) async fn inspect_task_planning_async(
             LINEAR_REFRESH_TIMEOUT.as_secs()
         ))),
     };
-    // Read again: an event may have invalidated the record while acquisition ran.
-    let mut observation = store
-        .linear_issue_evidence(&scope, selector)
+    // Read again: an event may have invalidated the record during the refresh.
+    let mut issue_state = store
+        .linear_issue_state(&scope, selector)
         .await
         .map_err(|error| OpsError::Message(error.to_string()))?;
     let refresh_error = match result {
-        Ok(false) if matches!(observation.state, PlanningState::Removed | PlanningState::Available) => None,
+        Ok(false) if matches!(issue_state.state, PlanningState::Removed | PlanningState::Available) => None,
         Ok(false) => {
-            observation.state = PlanningState::Absent;
+            issue_state.state = PlanningState::Absent;
             Some(format!("task {issue:?} is absent from repository planning"))
         }
-        Ok(true) if observation.state != PlanningState::Available => Some(format!(
-            "Task {issue:?} observation cannot repair stored invalidation, unresolved Project ownership or confirmed removal"
+        Ok(true) if issue_state.state != PlanningState::Available => Some(format!(
+            "Task {issue:?} refresh cannot repair stored invalidation, unresolved Project ownership or confirmed removal"
         )),
         Ok(true) => None,
         Err(error) => {
-            if observation.state == PlanningState::Available {
-                observation.state = PlanningState::Unavailable;
+            if issue_state.state == PlanningState::Available {
+                issue_state.state = PlanningState::Unavailable;
             }
             Some(format!("unable to resolve task {issue:?}: {error}"))
         }
     };
     Ok(TaskPlanningInspection {
-        observation,
+        issue_state,
         refresh_error,
     })
 }
 
-pub(crate) async fn acquire_task(
+pub(crate) async fn fetch_task(
     repo: &Path,
     issue: &str,
     refresh: LinearRefresh,
 ) -> OpsResult<Task> {
     let read = inspect_task_planning_async(repo, issue, refresh).await?;
-    let evidence = read.observation;
-    if evidence.state != PlanningState::Available {
+    let issue_state = read.issue_state;
+    if issue_state.state != PlanningState::Available {
         return Err(OpsError::Message(read.refresh_error.unwrap_or_else(|| {
             format!(
                 "Task {issue:?} planning is {:?}; run `lf task sync {issue}`",
-                evidence.state
+                issue_state.state
             )
         })));
     }
     let team = repository_team_id(repo)?;
-    if let Some(project) = &evidence.project_id {
-        let [initiative] = evidence.initiative_ids.as_slice() else {
+    if let Some(project) = &issue_state.project_id {
+        let [initiative] = issue_state.initiative_ids.as_slice() else {
             return Err(OpsError::Message(format!(
                 "Project {project} has no unambiguous Initiative"
             )));
         };
         wave_for_initiative(repo, initiative)?;
-        if evidence.project_team_ids.as_slice() != [team.as_str()] {
+        if issue_state.project_team_ids.as_slice() != [team.as_str()] {
             return Err(OpsError::Message(format!(
                 "Project {project} must belong to repository Team {team}"
             )));
         }
     }
-    if evidence.team_id.as_deref() != Some(team.as_str()) {
+    if issue_state.team_id.as_deref() != Some(team.as_str()) {
         return Err(OpsError::Message(format!(
             "Task {issue} must belong to repository Team {team}"
         )));
     }
     let store = planning_store().await?;
     let task = store
-        .get_task_by_issue(evidence.issue_id.as_deref().unwrap_or(issue))
+        .get_task_by_issue(issue_state.issue_id.as_deref().unwrap_or(issue))
         .await
         .map_err(|error| OpsError::Message(error.to_string()))?
         .ok_or_else(|| {
             OpsError::Message("accepted planning did not retain the Task identity".into())
         })?;
-    let acquisition = store
+    let tracker_state = store
         .sqlite
-        .task_acquisition(&task.id)
+        .task_tracker_state(&task.id)
         .map_err(|error| OpsError::Message(error.to_string()))?;
-    if acquisition.state != PlanningState::Available {
+    if tracker_state.state != PlanningState::Available {
         return Err(OpsError::Message(format!(
             "Task {issue} has invalid retained ownership; run `lf task sync {issue}`"
         )));
@@ -1022,7 +887,7 @@ pub(crate) async fn acquire_task(
     Ok(task)
 }
 
-pub(crate) fn singular_project_initiative(project: &LinearProject) -> OpsResult<String> {
+pub(crate) fn singular_project_initiative(project: &TrackerProject) -> OpsResult<String> {
     match project.initiative_ids.as_slice() {
         [initiative] => Ok(initiative.clone()),
         initiatives => Err(OpsError::Message(format!(
@@ -1084,7 +949,7 @@ fn reteam_comment_body(old_identifier: &str, team_key: &str) -> String {
 async fn resolve_reteam_context(repo: &Path) -> OpsResult<ResolvedReteamContext> {
     let team_id = selected_linear_team(repo)?.ok_or_else(|| {
         OpsError::Message(
-            ".lf/config.yaml has no `repo.plan.team`. \
+            ".lf/config.yaml has no `repo.tracker.linear.team`. \
              Run `lf wave plan connect <wave> --team-key <KEY>` to establish the migration target."
                 .to_string(),
         )
@@ -1130,8 +995,8 @@ async fn reteam_async(
 async fn accept_reteam_project(
     resolved: &ResolvedReteamContext,
     wave: &crate::work::wave::Wave,
-    project: &LinearProject,
-    acquisition: Arc<crate::store::PlanningLocks>,
+    project: &TrackerProject,
+    locks: Arc<crate::store::PlanningLocks>,
     expected_teams: &[String],
 ) -> OpsResult<()> {
     let observed_at = time::OffsetDateTime::now_utc().unix_timestamp();
@@ -1152,13 +1017,13 @@ async fn accept_reteam_project(
             project.id
         )));
     }
-    crate::linear::acceptance::reconcile_linear_project_teams(
+    crate::linear::events::reconcile_linear_project_teams(
         &resolved.store,
         wave.id(),
         &project.initiative_ids[0],
         confirmed,
         observed_at,
-        acquisition,
+        locks,
     )
     .await
     .map_err(|error| OpsError::Message(error.to_string()))
@@ -1169,7 +1034,7 @@ async fn accept_reteam_task(
     resolved: &ResolvedReteamContext,
     wave: &crate::work::wave::Wave,
     issue: &str,
-    acquisition: Arc<crate::store::PlanningLocks>,
+    locks: Arc<crate::store::PlanningLocks>,
 ) -> OpsResult<(String, bool)> {
     let observed_at = time::OffsetDateTime::now_utc().unix_timestamp();
     let (item, project) = resolved
@@ -1197,14 +1062,14 @@ async fn accept_reteam_task(
         .await
         .map_err(|error| OpsError::Message(error.to_string()))?
         .is_some_and(|previous| previous != identifier);
-    crate::linear::acceptance::accept_linear_issue(
+    crate::linear::events::accept_linear_issue(
         &resolved.store,
         wave.repo(),
         item,
         Some(project),
         observed_at,
         Some((wave.id().clone(), initiative)),
-        Some(acquisition),
+        Some(locks),
     )
     .await
     .map_err(|error| OpsError::Message(error.to_string()))?;
@@ -1250,8 +1115,8 @@ async fn apply_or_plan_repository_reteam(
     registered.sort_by(|left, right| left.id().as_str().cmp(right.id().as_str()));
     let mut locked_waves = BTreeMap::new();
     for wave in registered {
-        let acquisition = lock_wave_planning(&wave).await?;
-        locked_waves.insert(wave.slug().to_string(), (wave, acquisition));
+        let locks = lock_wave_planning(&wave).await?;
+        locked_waves.insert(wave.slug().to_string(), (wave, locks));
     }
     let mut project_moves = Vec::new();
     let mut moves = Vec::new();
@@ -1290,7 +1155,7 @@ async fn apply_or_plan_repository_reteam(
             if project.initiative_ids.as_slice() != [initiative.as_str()] {
                 return Err(OpsError::Message(format!(
                     "Linear Project `{}` ({}) in wave/{wave} belongs to Initiatives [{}]; \
-                     reteam requires exactly {initiative} before any provider mutation",
+                     reteam requires exactly {initiative} before any tracker mutation",
                     project.name,
                     project.id,
                     project.initiative_ids.join(", ")
@@ -1362,9 +1227,9 @@ async fn apply_or_plan_repository_reteam(
 
     if apply {
         // Linear requires the destination Team on a Project before its Issues
-        // can move. Expand first; narrowing is the final provider phase.
+        // can move. Expand first; narrowing is the final tracker phase.
         for (wave, project) in &projects {
-            let (wave, acquisition) = &locked_waves[*wave];
+            let (wave, locks) = &locked_waves[*wave];
             let mut expected_teams = project.team_ids.clone();
             if !expected_teams.contains(team_id) {
                 expected_teams.push(team_id.clone());
@@ -1379,20 +1244,12 @@ async fn apply_or_plan_repository_reteam(
                     .await
                     .map_err(linear_error)?;
             }
-            accept_reteam_project(
-                resolved,
-                wave,
-                project,
-                acquisition.clone(),
-                &expected_teams,
-            )
-            .await?;
+            accept_reteam_project(resolved, wave, project, locks.clone(), &expected_teams).await?;
         }
         for update in identifier_updates {
-            let (wave, acquisition) = &locked_waves[&update.wave];
+            let (wave, locks) = &locked_waves[&update.wave];
             let (_, changed) =
-                accept_reteam_task(repo, resolved, wave, &update.issue_id, acquisition.clone())
-                    .await?;
+                accept_reteam_task(repo, resolved, wave, &update.issue_id, locks.clone()).await?;
             task_updates += usize::from(changed);
         }
 
@@ -1401,7 +1258,7 @@ async fn apply_or_plan_repository_reteam(
             let comment_bodies = resolved
                 .repository
                 .client
-                .observe_issue(&mv.id)
+                .fetch_issue(&mv.id)
                 .await
                 .map_err(linear_error)?
                 .comments
@@ -1426,9 +1283,9 @@ async fn apply_or_plan_repository_reteam(
                 .move_item_to_team(&mv.id, team_id)
                 .await
                 .map_err(linear_error)?;
-            let (wave, acquisition) = &locked_waves[&mv.wave];
+            let (wave, locks) = &locked_waves[&mv.wave];
             let (confirmed_identifier, changed) =
-                accept_reteam_task(repo, resolved, wave, &mv.id, acquisition.clone()).await?;
+                accept_reteam_task(repo, resolved, wave, &mv.id, locks.clone()).await?;
             if confirmed_identifier != new_identifier {
                 return Err(OpsError::Message(format!(
                     "Task {} move is not confirmed",
@@ -1440,7 +1297,7 @@ async fn apply_or_plan_repository_reteam(
         }
 
         for (wave, project) in &projects {
-            let (wave, acquisition) = &locked_waves[*wave];
+            let (wave, locks) = &locked_waves[*wave];
             if project_needs_reteam(team_id, &project.team_ids) {
                 progress.status(&format!(
                     "narrowing Project `{}` onto team {team_key}",
@@ -1457,7 +1314,7 @@ async fn apply_or_plan_repository_reteam(
                 resolved,
                 wave,
                 project,
-                acquisition.clone(),
+                locks.clone(),
                 std::slice::from_ref(team_id),
             )
             .await?;
@@ -1468,16 +1325,9 @@ async fn apply_or_plan_repository_reteam(
             let initiative =
                 read_initiative(repo, wave).expect("preflight required every Initiative");
             let ctx = &resolved.repository;
-            let (registered, acquisition) = &locked_waves[wave];
-            refresh_inventory_locked(
-                repo,
-                registered,
-                ctx,
-                &initiative,
-                store,
-                acquisition.clone(),
-            )
-            .await?;
+            let (registered, locks) = &locked_waves[wave];
+            refresh_inventory_locked(repo, registered, ctx, &initiative, store, locks.clone())
+                .await?;
         }
     }
 
@@ -1516,7 +1366,6 @@ async fn refresh_async(
     };
     let mut actions = Vec::new();
     let mut diagnostics = Vec::new();
-    let mut blocking = Vec::new();
     let team_id = selected_linear_team(repo)?;
 
     if let Some(store) = open_existing_store()
@@ -1548,9 +1397,8 @@ async fn refresh_async(
     }
 
     if team_id.is_none() {
-        let message = ".lf/config.yaml has no `repo.plan.team`; run `lf wave plan connect <wave> --team-key <KEY>`".to_string();
-        diagnostics.push(message.clone());
-        blocking.push(message);
+        let message = ".lf/config.yaml has no `repo.tracker.linear.team`; run `lf wave plan connect <wave> --team-key <KEY>`".to_string();
+        diagnostics.push(message);
     }
 
     let mut initiative_waves: BTreeMap<String, Vec<String>> = BTreeMap::new();
@@ -1570,8 +1418,7 @@ async fn refresh_async(
                 "Linear Initiative {initiative} is bound by multiple local Waves: {}",
                 owners.join(", ")
             );
-            diagnostics.push(message.clone());
-            blocking.push(message);
+            diagnostics.push(message);
         }
     }
 
@@ -1601,7 +1448,6 @@ async fn refresh_async(
     let default_branch = crate::git::get_default_branch(repo)?;
     let summary_revision =
         crate::git::rev_parse(repo, &format!("refs/heads/{default_branch}^{{commit}}"))?;
-    let mut wave_updates = Vec::new();
     let mut seen_projects: BTreeMap<String, String> = BTreeMap::new();
     for wave in &waves {
         let goal = format!(".lf/wave/{wave}/GOAL.md");
@@ -1609,22 +1455,19 @@ async fn refresh_async(
             let message = format!(
                 "{goal} is missing on default branch {default_branch}; cannot sync its summary"
             );
-            diagnostics.push(message.clone());
-            blocking.push(message);
+            diagnostics.push(message);
             continue;
         };
         let summary = crate::work::wave::config::wave_summary(&content);
         let summary = crate::linear::linear_description(&summary);
         let Some(initiative_id) = read_initiative(repo, wave) else {
-            blocking.push(format!("wave/{wave} has no Linear Initiative"));
             continue;
         };
         let expected_initiative_name = title_case(wave);
         let Some(actual) = initiatives_by_id.get(&initiative_id) else {
             let message =
                 format!("wave/{wave} points at missing Linear Initiative {initiative_id}");
-            diagnostics.push(message.clone());
-            blocking.push(message);
+            diagnostics.push(message);
             continue;
         };
         let name = (actual.name != expected_initiative_name).then_some(expected_initiative_name);
@@ -1665,8 +1508,7 @@ async fn refresh_async(
                     "Linear Project `{}` ({}) appears under both wave/{existing_wave} and wave/{wave}",
                     project.name, project.id
                 );
-                diagnostics.push(message.clone());
-                blocking.push(message);
+                diagnostics.push(message);
             }
             if project.initiative_ids.as_slice() != [initiative_id.as_str()] {
                 let message = format!(
@@ -1675,8 +1517,7 @@ async fn refresh_async(
                     project.id,
                     project.initiative_ids.join(", ")
                 );
-                diagnostics.push(message.clone());
-                blocking.push(message);
+                diagnostics.push(message);
             }
             if let Some(team_id) = &team_id {
                 if project.team_ids.as_slice() != [team_id.as_str()] {
@@ -1686,8 +1527,7 @@ async fn refresh_async(
                         project.id,
                         project.team_ids.join(", ")
                     );
-                    diagnostics.push(message.clone());
-                    blocking.push(message);
+                    diagnostics.push(message);
                 }
             }
             let name = &project.name;
@@ -1696,8 +1536,7 @@ async fn refresh_async(
                 let message = format!(
                     "Linear Projects `{existing}` and `{name}` in wave/{wave} both derive slug `{slug}`"
                 );
-                diagnostics.push(message.clone());
-                blocking.push(message);
+                diagnostics.push(message);
             }
 
             let items = client.list_items(&project.id).await.map_err(linear_error)?;
@@ -1713,8 +1552,7 @@ async fn refresh_async(
                         "Linear task {} resolves to Project {:?}, expected {}",
                         item.identifier, item.project_id, project.id
                     );
-                    diagnostics.push(message.clone());
-                    blocking.push(message);
+                    diagnostics.push(message);
                 }
                 if let Some(team_id) = &team_id {
                     if item.team_id.as_deref() != Some(team_id.as_str()) {
@@ -1722,44 +1560,14 @@ async fn refresh_async(
                             "Linear task {} belongs to Team {}, expected repository Team {team_id}. Run `lf reteam`.",
                             item.identifier, item.team_id.as_deref().unwrap_or("unmapped")
                         );
-                        diagnostics.push(message.clone());
-                        blocking.push(message);
+                        diagnostics.push(message);
                     }
                 }
             }
         }
         actions.push(format!(
-            "refresh wave/{wave} Linear observations from Linear Initiative {initiative_id}"
+            "refresh wave/{wave} Project and Task data from Linear Initiative {initiative_id}"
         ));
-        // Apply the checked binding and fields, not a later reread of the goal.
-        wave_updates.push((wave, initiative_id, name, summary));
-    }
-
-    if !options.plan && !blocking.is_empty() {
-        return Err(OpsError::Message(format!(
-            "Linear ownership validation failed before mutation: {}",
-            blocking.join("; ")
-        )));
-    }
-
-    if !options.plan {
-        let team_id = team_id.expect("non-plan sync requires repository Team");
-        for (wave, initiative, name, summary) in wave_updates {
-            if name.is_some() || summary.is_some() {
-                client
-                    .update_wave(&initiative, name.as_deref(), summary.as_deref())
-                    .await
-                    .map_err(linear_error)?;
-            }
-            let ctx = LinearRepository {
-                client: client.clone(),
-                repo_id: repo_id.clone(),
-                team_id: team_id.clone(),
-            };
-            let store = planning_store().await?;
-            adoption::adopt_legacy_projects(repo, &store, wave, &ctx, &initiative, true).await?;
-            refresh_inventory(repo, wave, &ctx, &initiative).await?;
-        }
     }
 
     Ok(LinearSyncResult {
@@ -1833,11 +1641,10 @@ fn write_initiative_to_wave(repo: &Path, wave: &str, initiative_id: &str) -> Ops
     .map_err(OpsError::Message)
 }
 
-/// Declare `repo.plan` as Linear with `team_id`, at its canonical
-/// spelling; other keys keep their text and comments.
+/// Declare the Linear tracker in the released layout, retaining unrelated settings and comments.
 fn write_repository_linear_config(repo: &Path, team_id: &str) -> OpsResult<bool> {
     let path = repo.join(".lf/config.yaml");
-    let planning = serde_yaml_ng::to_value(crate::config::PlanningConfig::Linear {
+    let planning = serde_yaml_ng::to_value(crate::config::TrackerConfig::Linear {
         team: Some(team_id.to_string()),
     })
     .map_err(|error| OpsError::Message(error.to_string()))?;
@@ -1913,7 +1720,7 @@ fn matching_initiative_id(
     }
 }
 
-fn ensure_unique_project_slugs(projects: &[LinearProject], wave: &str) -> OpsResult<()> {
+fn ensure_unique_project_slugs(projects: &[TrackerProject], wave: &str) -> OpsResult<()> {
     let mut names_by_slug = BTreeMap::new();
     for project in projects {
         if project.slug.is_empty() {
@@ -1938,7 +1745,7 @@ pub(super) async fn checked_projects_with_store(
     initiative: &str,
     wave: &str,
     store: &Store,
-) -> OpsResult<Vec<LinearProject>> {
+) -> OpsResult<Vec<TrackerProject>> {
     let mut projects = ctx
         .client
         .list_projects(initiative)
@@ -1958,7 +1765,7 @@ pub(super) async fn checked_projects_with_store(
                 OpsError::Message(format!("failed to read retained Projects: {error}"))
             })?
         {
-            let Some(id) = &known.linear_id else {
+            let Some(id) = &known.tracker_id else {
                 // Local Work awaits its own export; it supplies no Linear lookup identity.
                 continue;
             };
@@ -1974,15 +1781,6 @@ pub(super) async fn checked_projects_with_store(
         }
     }
 
-    for adopted in
-        adoption::adopt_legacy_projects(repo, store, wave, ctx, initiative, false).await?
-    {
-        if let Some(project) = projects.iter_mut().find(|project| project.id == adopted.id) {
-            *project = adopted;
-        } else {
-            projects.push(adopted);
-        }
-    }
     projects.retain(|project| !project_is_foreign(project, &ctx.team_id));
     for project in &projects {
         validate_project_ownership(project, wave, initiative, &ctx.team_id)?;
@@ -1991,12 +1789,12 @@ pub(super) async fn checked_projects_with_store(
     Ok(projects)
 }
 
-pub(super) fn project_is_foreign(project: &LinearProject, team_id: &str) -> bool {
+pub(super) fn project_is_foreign(project: &TrackerProject, team_id: &str) -> bool {
     !project.team_ids.is_empty() && !project.team_ids.iter().any(|id| id == team_id)
 }
 
 fn validate_project_ownership(
-    project: &LinearProject,
+    project: &TrackerProject,
     wave: &str,
     initiative_id: &str,
     team_id: &str,
@@ -2101,104 +1899,10 @@ fn block_on_linear<T>(future: impl Future<Output = OpsResult<T>>) -> OpsResult<T
 }
 
 fn linear_error(err: LinearError) -> OpsError {
-    OpsError::Message(err.to_string())
-}
-
-#[derive(Debug)]
-pub(crate) struct ChapterSweep {
-    pub candidates: Vec<(String, String, LinearIssue)>,
-    pub skipped_projects: Vec<(String, LinearProject)>,
-}
-
-/// Read every linked Initiative, including archived predecessor Projects.
-pub(crate) async fn chapter_sweep_candidates(repo: &Path) -> OpsResult<ChapterSweep> {
-    let store = planning_store().await?;
-    let mut candidates = Vec::new();
-    let mut skipped_projects = Vec::new();
-    let mut skipped_ids = BTreeSet::new();
-    for name in list_linear_waves(repo)? {
-        let (ctx, initiative) = resolve_context(repo, &name).await?;
-        let locator = crate::work::wave::discover(repo, &name)
-            .map_err(|error| OpsError::Message(error.to_string()))?;
-        let wave = store
-            .get_wave_at(&locator)
-            .await
-            .map_err(|error| OpsError::Message(error.to_string()))?
-            .ok_or_else(|| OpsError::Message(format!("{name}: current chapter is unavailable")))?;
-        let chapter = super::project::current_project(&store, &wave)?;
-        for project in ctx
-            .client
-            .list_projects_including_archived(&initiative, true)
-            .await
-            .map_err(|error| OpsError::Message(error.to_string()))?
-        {
-            if project_is_foreign(&project, &ctx.team_id) {
-                if skipped_ids.insert(project.id.clone()) {
-                    skipped_projects.push((name.clone(), project));
-                }
-                continue;
-            }
-            validate_project_ownership(&project, &name, &initiative, &ctx.team_id)?;
-            if chapter
-                .linear_id
-                .as_ref()
-                .is_some_and(|id| id.as_str() == project.id)
-            {
-                continue;
-            }
-            for item in ctx
-                .client
-                .list_items_including_archived(&project.id, true)
-                .await
-                .map_err(|error| OpsError::Message(error.to_string()))?
-            {
-                if item.completed
-                    || matches!(
-                        item.state.as_deref(),
-                        Some("completed" | "canceled" | "duplicate")
-                    )
-                {
-                    continue;
-                }
-                if item.state.is_none() || item.team_id.as_deref() != Some(ctx.team_id.as_str()) {
-                    return Err(OpsError::Message(format!(
-                        "{} has unresolved state or ownership; sweep was not applied",
-                        item.identifier
-                    )));
-                }
-                candidates.push((name.clone(), project.name.clone(), item));
-            }
-        }
+    match err {
+        LinearError::RateLimited { .. } => OpsError::Tracker(err.into()),
+        LinearError::Message(text) => OpsError::Message(text),
     }
-    Ok(ChapterSweep {
-        candidates,
-        skipped_projects,
-    })
-}
-
-pub(crate) async fn require_outside_current_chapter(repo: &Path, issue: &str) -> OpsResult<Task> {
-    let resolved = acquire_task(repo, issue, LinearRefresh::Force).await?;
-    let store = planning_store().await?;
-    let Some(wave_id) = &resolved.wave_id else {
-        return Ok(resolved);
-    };
-    let wave = store
-        .get_wave(wave_id)
-        .await
-        .map_err(|error| OpsError::Message(error.to_string()))?
-        .ok_or_else(|| OpsError::Message("current Wave is unavailable".into()))?;
-    let chapter = super::project::current_project(&store, &wave)?;
-    if Some(&chapter.id) == resolved.project_id.as_ref()
-        || matches!(
-            resolved.state.as_deref(),
-            Some("completed" | "canceled" | "duplicate")
-        )
-    {
-        return Err(OpsError::Message(
-            "issue moved to the current chapter or is already terminal".into(),
-        ));
-    }
-    Ok(resolved)
 }
 
 #[cfg(test)]
@@ -2298,7 +2002,7 @@ mod tests {
             "url": null,
             "title": format!("Task {identifier}"),
             "description": "",
-            "completedAt": null, "dueDate": null, "prioritySortOrder": 0.0,
+            "completedAt": null, "dueDate": null, "parent":null,"prioritySortOrder": 0.0,
             "sortOrder": 0.0, "updatedAt": time::OffsetDateTime::now_utc().format(&time::format_description::well_known::Rfc3339).unwrap(),
             "assignee": null,
             "state": { "type": if completed { "completed" } else { "unstarted" } },
@@ -2394,13 +2098,7 @@ mod tests {
                             assert!(!result.created && !result.team_created);
                         }
                         let config = crate::config::load_config(Some(&repo)).unwrap().unwrap();
-                        assert_eq!(
-                            config.planning_transport(),
-                            crate::config::PlanningConfig::Git {
-                                remote: "personal".into(),
-                                plan: crate::config::GitPlan::Shared("private".into()),
-                            }
-                        );
+                        assert_eq!(config.planning_transport(), None);
                         assert_eq!(
                             selected_linear_team(&repo).unwrap().as_deref(),
                             Some("team-1")
@@ -2456,8 +2154,10 @@ mod tests {
                     "description": "<!-- loopflow-repository: loopflowstudio/fixture -->"
                 }]}}});
                 let (url, requests) = test_server::spawn(vec![
+                    // Adding the Wave checks its tracker before the Initiative lookup.
                     json_response(StatusCode::OK, team.clone()),
                     json_response(StatusCode::OK, team.clone()),
+                    json_response(StatusCode::OK, team),
                     json_response(
                         StatusCode::OK,
                         json!({"data": {"initiatives": {"nodes": [], "pageInfo": {"hasNextPage": false, "endCursor": null}}}}),
@@ -2466,7 +2166,6 @@ mod tests {
                         StatusCode::OK,
                         json!({"data": {"initiativeCreate": {"initiative": {"id": "6f1d2c3b-4a5e-4f60-8a71-9b2c3d4e5f60"}}}}),
                     ),
-                    json_response(StatusCode::OK, team),
                     projects_response(json!([])),
                 ])
                 .await;
@@ -2542,9 +2241,9 @@ mod tests {
                 .unwrap();
             assert_eq!(
                 config.planning_transport(),
-                crate::config::PlanningConfig::Linear {
+                Some(crate::config::TrackerConfig::Linear {
                     team: Some("team-product".into())
-                }
+                })
             );
             assert_eq!(config.agent.as_deref(), Some("codex"));
             let updated = std::fs::read_to_string(goal).unwrap();
@@ -2819,8 +2518,8 @@ mod tests {
                     let projects = resolved.store.list_projects(Some(registered.id())).await.unwrap();
                     assert_eq!(projects.len(), 1);
                     let teams: String = rusqlite::Connection::open(&database).unwrap().query_row(
-                        "SELECT team_ids FROM pm_projects WHERE id=?1",
-                        [projects[0].linear_id.as_ref().unwrap().as_str()], |r| r.get(0)
+                        "SELECT team_ids FROM tracker_projects WHERE id=?1",
+                        [projects[0].tracker_id.as_ref().unwrap().as_str()], |r| r.get(0)
                     ).unwrap();
                     assert_eq!(serde_json::from_str::<Vec<String>>(&teams).unwrap(), ["team-loo"]);
                 }
@@ -3035,7 +2734,6 @@ mod tests {
                         .seed_inventory(
                             InventoryFixture {
                                 wave_id: wave.id().clone(),
-                                provider: "linear".into(),
                                 initiative: "initiative-survival".into(),
                                 synced_at: 1,
                                 snapshot: Inventory { projects, items },
@@ -3067,8 +2765,8 @@ mod tests {
                 }
                 let projects = resolved.store.list_projects(Some(wave.id())).await.unwrap();
                 let teams: String = rusqlite::Connection::open(&database).unwrap().query_row(
-                        "SELECT team_ids FROM pm_projects WHERE id=?1",
-                        [projects[0].linear_id.as_ref().unwrap().as_str()], |r| r.get(0)
+                        "SELECT team_ids FROM tracker_projects WHERE id=?1",
+                        [projects[0].tracker_id.as_ref().unwrap().as_str()], |r| r.get(0)
                     ).unwrap();
                     assert_eq!(serde_json::from_str::<Vec<String>>(&teams).unwrap(), ["team-loo"]);
                 let tasks = resolved.store.list_tasks(Some(wave.id())).await.unwrap();
@@ -3089,7 +2787,7 @@ mod tests {
 
     #[test]
     fn duplicate_linear_project_slugs_are_drift() {
-        let project = |id: &str, name: &str| LinearProject {
+        let project = |id: &str, name: &str| TrackerProject {
             description: None,
             revision: None,
             id: id.to_string(),
@@ -3111,13 +2809,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn acquisition_reads_projects_and_their_issues() {
+    async fn refresh_reads_projects_and_their_issues() {
         let (base_url, requests) = test_server::spawn(vec![
             projects_response(json!([project_node("project-123", "Scan")])),
             issues_response(json!([
                 { "id": "issue-1", "identifier": "LOO-1", "url": null,
                   "title": "First", "description": "one",
-                  "completedAt": null, "dueDate": null, "prioritySortOrder": 0.0, "sortOrder": 0.0, "updatedAt":"2026-09-29T12:00:00.123Z",
+                  "completedAt": null, "dueDate": null, "parent":null,"prioritySortOrder": 0.0, "sortOrder": 0.0, "updatedAt":"2026-09-29T12:00:00.123Z",
                   "assignee": null, "state": { "type": "unstarted" },
                   "project": { "id": "project-123", "name": "Scan" },
                   "team": { "id": "team-123" } }
@@ -3142,20 +2840,20 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn acquisition_preserves_moved_and_detached_issue_ownership() {
+    async fn refresh_preserves_moved_and_detached_issue_ownership() {
         let (base_url, _) = test_server::spawn(vec![
             projects_response(json!([project_node("project-123", "Scan")])),
             issues_response(json!([
                 { "id": "moved", "identifier": "LOO-1", "url": null,
                   "title": "Moved", "description": "Preserve the observed destination",
-                  "completedAt": null, "dueDate": null, "prioritySortOrder": 0.0, "sortOrder": 0.0,
+                  "completedAt": null, "dueDate": null, "parent":null,"prioritySortOrder": 0.0, "sortOrder": 0.0,
                   "updatedAt": "2026-10-05T12:00:00Z",
                   "assignee": null, "state": { "type": "started" },
                   "project": { "id": "successor", "name": "Next work" },
                   "team": { "id": "team-123" } },
                 { "id": "detached", "identifier": "LOO-2", "url": null,
                   "title": "Detached", "description": "Do not invent membership",
-                  "completedAt": null, "dueDate": null, "prioritySortOrder": 1.0, "sortOrder": 1.0,
+                  "completedAt": null, "dueDate": null, "parent":null,"prioritySortOrder": 1.0, "sortOrder": 1.0,
                   "updatedAt": "2026-10-05T12:00:01Z",
                   "assignee": null, "state": { "type": "started" },
                   "project": null, "team": { "id": "team-123" } }
@@ -3180,173 +2878,5 @@ mod tests {
             snapshot.items[1].revision.as_deref(),
             Some("2026-10-05T12:00:01Z")
         );
-    }
-
-    fn attachment_link_response(id: &str) -> QueuedResponse {
-        json_response(
-            StatusCode::OK,
-            json!({ "data": { "attachmentLinkURL": { "attachment": { "id": id } } } }),
-        )
-    }
-
-    fn attachment_update_response(id: &str) -> QueuedResponse {
-        json_response(
-            StatusCode::OK,
-            json!({ "data": { "attachmentUpdate": { "attachment": { "id": id } } } }),
-        )
-    }
-
-    fn comment_create_response(id: &str) -> QueuedResponse {
-        json_response(
-            StatusCode::OK,
-            json!({ "data": { "commentCreate": { "comment": { "id": id } } } }),
-        )
-    }
-
-    fn comment_update_response(id: &str) -> QueuedResponse {
-        json_response(
-            StatusCode::OK,
-            json!({ "data": { "commentUpdate": { "comment": { "id": id } } } }),
-        )
-    }
-
-    fn link_request(subtitle: &str) -> PrLinkRequest {
-        PrLinkRequest {
-            issue_id: "issue-uuid".to_string(),
-            url: "https://github.com/acme/repo/pull/7".to_string(),
-            title: "GitHub PR #7".to_string(),
-            subtitle: subtitle.to_string(),
-            body: format!("[GitHub PR #7](https://github.com/acme/repo/pull/7) — {subtitle}"),
-        }
-    }
-
-    #[tokio::test]
-    async fn link_pr_creates_attachment_and_comment_on_first_publish() {
-        let (base_url, requests) = test_server::spawn(vec![
-            attachment_link_response("att-1"),
-            comment_create_response("comment-1"),
-        ])
-        .await;
-        let client = linear_test_ctx(base_url).client.clone();
-
-        let outcome = link_pr_with_client(
-            &client,
-            &link_request("Open · published"),
-            &PrLinkageIds::default(),
-        )
-        .await;
-
-        assert_eq!(outcome.ids.attachment_id.as_deref(), Some("att-1"));
-        assert_eq!(outcome.ids.comment_id.as_deref(), Some("comment-1"));
-        assert!(outcome.error.is_none());
-
-        let requests = requests.lock().await;
-        let link = requests
-            .iter()
-            .find(|req| req.body.contains("attachmentLinkURL"))
-            .expect("create sends attachmentLinkURL");
-        // The create path must never send an argument Linear rejects: the
-        // `subtitle` on attachmentLinkURL is the 400 that shipped in #1010.
-        let link_body: Value = serde_json::from_str(&link.body).expect("link body is json");
-        assert!(
-            link_body["variables"].get("subtitle").is_none(),
-            "attachmentLinkURL must not send a subtitle variable"
-        );
-        assert!(requests
-            .iter()
-            .any(|req| req.body.contains("commentCreate")));
-    }
-
-    #[tokio::test]
-    async fn link_pr_updates_existing_linkage_without_duplicating() {
-        let (base_url, requests) = test_server::spawn(vec![
-            attachment_update_response("att-1"),
-            comment_update_response("comment-1"),
-        ])
-        .await;
-        let client = linear_test_ctx(base_url).client.clone();
-        let prior = PrLinkageIds {
-            attachment_id: Some("att-1".to_string()),
-            comment_id: Some("comment-1".to_string()),
-        };
-
-        let outcome = link_pr_with_client(
-            &client,
-            &link_request("Open · completes task on merge"),
-            &prior,
-        )
-        .await;
-
-        assert!(outcome.error.is_none());
-        assert_eq!(outcome.ids, prior);
-
-        let requests = requests.lock().await;
-        // Existing ids drive in-place updates, never a second create.
-        assert!(requests
-            .iter()
-            .any(|req| req.body.contains("attachmentUpdate")));
-        assert!(requests
-            .iter()
-            .any(|req| req.body.contains("commentUpdate")));
-        assert!(!requests
-            .iter()
-            .any(|req| req.body.contains("commentCreate")));
-        assert!(!requests
-            .iter()
-            .any(|req| req.body.contains("attachmentLinkURL")));
-        // The refreshed state rides the update body.
-        assert!(requests
-            .iter()
-            .any(|req| req.body.contains("completes task on merge")));
-    }
-
-    #[tokio::test]
-    async fn link_pr_records_error_then_completes_on_retry() {
-        // First publish: attachment links, but the comment write fails.
-        let (base_url, _requests) = test_server::spawn(vec![
-            attachment_link_response("att-1"),
-            json_response(
-                StatusCode::OK,
-                json!({ "errors": [{ "message": "linear is down" }] }),
-            ),
-        ])
-        .await;
-        let client = linear_test_ctx(base_url).client.clone();
-
-        let degraded = link_pr_with_client(
-            &client,
-            &link_request("Open · published"),
-            &PrLinkageIds::default(),
-        )
-        .await;
-
-        // Partial progress is preserved: the attachment id survives for the retry.
-        assert_eq!(degraded.ids.attachment_id.as_deref(), Some("att-1"));
-        assert!(degraded.ids.comment_id.is_none());
-        assert!(degraded.error.is_some());
-
-        // Retry with the surviving ids: the attachment updates in place and the
-        // missing comment is created, clearing the error.
-        let (base_url, requests) = test_server::spawn(vec![
-            attachment_update_response("att-1"),
-            comment_create_response("comment-1"),
-        ])
-        .await;
-        let client = linear_test_ctx(base_url).client.clone();
-
-        let healed =
-            link_pr_with_client(&client, &link_request("Open · published"), &degraded.ids).await;
-
-        assert!(healed.error.is_none());
-        assert_eq!(healed.ids.attachment_id.as_deref(), Some("att-1"));
-        assert_eq!(healed.ids.comment_id.as_deref(), Some("comment-1"));
-
-        let requests = requests.lock().await;
-        assert!(requests
-            .iter()
-            .any(|req| req.body.contains("attachmentUpdate")));
-        assert!(requests
-            .iter()
-            .any(|req| req.body.contains("commentCreate")));
     }
 }

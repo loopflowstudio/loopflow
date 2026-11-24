@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-/// Survives attachment-only handoff; replacement creates another capability.
+/// Belongs to one agent; replacement creates another capability.
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SteerAdapter {
@@ -40,10 +40,23 @@ pub struct IdleConversation {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum IdleReach {
-    /// The inbox key file Claude publishes beside its session record.
-    Claude(std::path::PathBuf),
     /// The Session's private app-server.
     Codex(std::path::PathBuf),
+    /// What the provider's own code listens on.
+    Inbox(Inbox),
+}
+
+/// Where code the provider loads takes a message for an idle conversation,
+/// as its hook, plugin or extension names it at a boundary.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub enum Inbox {
+    /// The key file Claude publishes for peers of its cross-session inbox,
+    /// `sessions/<pid>.<sha256 of socket>.key` in its configuration
+    /// directory; the server reads the key when it sends.
+    Claude(std::path::PathBuf),
+    /// The Unix socket an OpenCode plugin or Pi extension listens on.
+    Socket(std::path::PathBuf),
 }
 
 impl std::fmt::Debug for SteerAdapter {
@@ -81,4 +94,13 @@ pub struct SessionSteerPage {
     #[serde(deserialize_with = "Option::deserialize")]
     pub next_after: Option<i64>,
     pub pending: i64,
+}
+
+/// A steer the server read that names `session`, an interactive Session
+/// that has not read it; `identity` is its unfinished AgentProcess, if any.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SteerWake {
+    pub steer: String,
+    pub session: String,
+    pub identity: Option<(u32, i64)>,
 }

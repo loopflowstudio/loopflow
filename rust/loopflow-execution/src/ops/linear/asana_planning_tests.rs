@@ -9,6 +9,7 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::Json;
+use loopflow_storage::work::task::Task;
 use serde_json::{json, Value};
 use tokio::sync::Mutex;
 
@@ -87,7 +88,7 @@ async fn create(State(state): State<Shared>, Json(body): Json<Value>) -> Respons
         "name": input["name"], "html_notes": input["html_notes"],
         "completed": input["completed"].as_bool().unwrap_or(false), "completed_at": null,
         "modified_at": modified, "permalink_url": format!("https://app.asana.com/0/{PROJECT}/{id}"),
-        "due_on": input["due_on"], "assignee": null,
+        "due_on": input["due_on"], "assignee": null, "parent": input["parent"],
         "memberships": input["projects"].as_array().unwrap().iter()
             .map(|project| json!({"project": {"gid": project}})).collect::<Vec<_>>(),
     });
@@ -289,11 +290,12 @@ fn asana_task_create_mirrors_task_under_its_loopflow_identity() {
             Some("Ship the Asana provider".into()),
             Some("Mirror **Tasks** into Asana".into()),
             crate::ops::task::TaskAdoptionOptions::default(),
+            Default::default(),
             None,
         )
         .unwrap();
         let id = saved
-            .linear_id
+            .tracker_id
             .as_ref()
             .expect("Task reached Asana")
             .as_str();
@@ -317,6 +319,31 @@ fn asana_task_create_mirrors_task_under_its_loopflow_identity() {
 }
 
 #[test]
+fn asana_follow_up_is_created_as_a_subtask_of_its_parent() {
+    with_asana(|runtime, _fixture, repo, state| {
+        let file = |title: &str, parent: Option<&Task>| {
+            crate::ops::task::task_create(
+                repo,
+                None,
+                Some(title.into()),
+                Some("Brief".into()),
+                crate::ops::task::TaskAdoptionOptions::default(),
+                parent.map(|parent| parent.identifier.clone()),
+                None,
+            )
+            .unwrap()
+        };
+        let parent = file("Parent", None);
+        let child = file("Follow-up", Some(&parent));
+        let asana =
+            |task: &Task| mirrored(runtime, &state, task.tracker_id.as_ref().unwrap().as_str());
+        assert_eq!(asana(&child)["parent"], asana(&parent)["gid"]);
+        // Asana's answer does not say what the parent is; the link stands.
+        assert_eq!(child.parent_task_id, Some(parent.id));
+    });
+}
+
+#[test]
 fn asana_status_title_and_comments_write_back_to_the_mirrored_task() {
     with_asana(|runtime, fixture, repo, state| {
         let saved = crate::ops::task::task_create(
@@ -325,10 +352,11 @@ fn asana_status_title_and_comments_write_back_to_the_mirrored_task() {
             Some("Write back".into()),
             None,
             crate::ops::task::TaskAdoptionOptions::default(),
+            Default::default(),
             None,
         )
         .unwrap();
-        let id = saved.linear_id.clone().unwrap();
+        let id = saved.tracker_id.clone().unwrap();
         let id = id.as_str();
 
         crate::ops::task::task_complete(repo, saved.id.as_str(), None).unwrap();
@@ -345,6 +373,7 @@ fn asana_status_title_and_comments_write_back_to_the_mirrored_task() {
                 title: Some("Write back, renamed".into()),
                 ..Default::default()
             },
+            None,
         )
         .unwrap();
         assert_eq!(mirrored(runtime, &state, id)["name"], "Write back, renamed");
@@ -358,7 +387,7 @@ fn asana_status_title_and_comments_write_back_to_the_mirrored_task() {
         )
         .unwrap();
         // A later delivery pass and observation neither repost nor echo it.
-        runtime.block_on(crate::ops::linear_observe::sync_repository(
+        runtime.block_on(crate::ops::tracker_events::sync_repository(
             &fixture.store,
             repo.to_str().unwrap(),
         ));
@@ -367,7 +396,7 @@ fn asana_status_title_and_comments_write_back_to_the_mirrored_task() {
             .unwrap()
             .unwrap();
         runtime
-            .block_on(crate::ops::linear_observe::refresh_task_comments(
+            .block_on(crate::ops::tracker_events::refresh_task_comments(
                 &fixture.store,
                 &task,
             ))
@@ -394,13 +423,14 @@ fn asana_outage_keeps_the_local_save_and_publishes_once_on_retry() {
             Some("Saved offline".into()),
             None,
             crate::ops::task::TaskAdoptionOptions::default(),
+            Default::default(),
             None,
         )
         .unwrap();
-        assert!(saved.linear_id.is_none());
+        assert!(saved.tracker_id.is_none());
 
         runtime.block_on(state.lock()).offline = false;
-        runtime.block_on(crate::ops::linear_observe::sync_repository(
+        runtime.block_on(crate::ops::tracker_events::sync_repository(
             &fixture.store,
             repo.to_str().unwrap(),
         ));
@@ -408,7 +438,7 @@ fn asana_outage_keeps_the_local_save_and_publishes_once_on_retry() {
             .block_on(fixture.store.get_task(&saved.id))
             .unwrap()
             .unwrap();
-        assert!(task.linear_id.is_some());
+        assert!(task.tracker_id.is_some());
         assert_eq!(runtime.block_on(state.lock()).creations, 1);
     });
 }
@@ -422,17 +452,18 @@ fn asana_comments_and_edits_by_people_become_task_direction() {
             Some("Take direction".into()),
             None,
             crate::ops::task::TaskAdoptionOptions::default(),
+            Default::default(),
             None,
         )
         .unwrap();
-        let id = saved.linear_id.clone().unwrap().as_str().to_string();
+        let id = saved.tracker_id.clone().unwrap().as_str().to_string();
         let task = runtime
             .block_on(fixture.store.get_task(&saved.id))
             .unwrap()
             .unwrap();
         let refresh = || {
             runtime
-                .block_on(crate::ops::linear_observe::refresh_task_comments(
+                .block_on(crate::ops::tracker_events::refresh_task_comments(
                     &fixture.store,
                     &task,
                 ))
@@ -494,7 +525,7 @@ fn asana_tasks_coworkers_create_become_tasks() {
                 }),
             );
         });
-        runtime.block_on(crate::ops::linear_observe::sync_repository(
+        runtime.block_on(crate::ops::tracker_events::sync_repository(
             &fixture.store,
             repo.to_str().unwrap(),
         ));
@@ -506,7 +537,7 @@ fn asana_tasks_coworkers_create_become_tasks() {
         assert_eq!(task.description, "From the **meeting**");
         // Asana now carries the Loopflow identity every machine derives.
         let asana = runtime.block_on(state.lock());
-        let id = task.linear_id.as_ref().unwrap().as_str();
+        let id = task.tracker_id.as_ref().unwrap().as_str();
         assert_eq!(asana.tasks[id]["external"]["gid"], id);
         assert_eq!(asana.projects.len(), 2, "the existing project was reused");
     });
@@ -521,17 +552,18 @@ fn asana_tasks_coworkers_delete_leave_the_plan() {
             Some("Deleted in Asana".into()),
             None,
             crate::ops::task::TaskAdoptionOptions::default(),
+            Default::default(),
             None,
         )
         .unwrap();
-        let id = saved.linear_id.clone().unwrap().as_str().to_string();
+        let id = saved.tracker_id.clone().unwrap().as_str().to_string();
         runtime.block_on(state.lock()).tasks.remove(&id);
         let task = runtime
             .block_on(fixture.store.get_task(&saved.id))
             .unwrap()
             .unwrap();
         runtime
-            .block_on(crate::ops::linear_observe::refresh_task_comments(
+            .block_on(crate::ops::tracker_events::refresh_task_comments(
                 &fixture.store,
                 &task,
             ))
@@ -553,11 +585,12 @@ fn asana_wave_projects_become_team_projects_holding_their_tasks() {
             Some("Planned work".into()),
             None,
             crate::ops::task::TaskAdoptionOptions::default(),
+            Default::default(),
             None,
         )
         .unwrap();
         let id = saved
-            .linear_id
+            .tracker_id
             .clone()
             .expect("the Task reached Asana after its Project");
         let project = runtime
@@ -569,7 +602,7 @@ fn asana_wave_projects_become_team_projects_holding_their_tasks() {
             .unwrap()
             .unwrap();
         let mirrored = project
-            .linear_id
+            .tracker_id
             .clone()
             .expect("the Project reached Asana");
         let (repository, wave_project, task) = runtime.block_on(async {
@@ -602,7 +635,7 @@ fn asana_wave_projects_become_team_projects_holding_their_tasks() {
         assert_eq!(members, [&repository["gid"], &wave_project["gid"]]);
 
         // Read back, the Task keeps its Project.
-        runtime.block_on(crate::ops::linear_observe::sync_repository(
+        runtime.block_on(crate::ops::tracker_events::sync_repository(
             &fixture.store,
             repo.to_str().unwrap(),
         ));

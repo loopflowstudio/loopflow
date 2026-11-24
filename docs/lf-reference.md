@@ -3,42 +3,40 @@
 ```bash
 lf help --all
 lf help pr land
-lf process list --json
+lf session list --json
 ```
 
-The command sections below are generated from the released `lf` when the website
-builds; `lf help --all` prints the same tree locally. Canonical command paths are shown; unique shortcuts also resolve. See
-[Get started](getting-started.md) for examples. This reference lists public commands.
+The command tree below is generated from the released `lf` binary when the
+website builds; run `lf help --all` for the exact same tree locally. Canonical
+command paths are shown, and unique shortcuts also resolve (for example
+`lf land` → `lf pr land`). See [Get started](getting-started.md) for
+walkthrough examples.
 
-## Selection and output
+## Selection, output, and exit codes
 
-`--machine <label-or-id>` runs the command remotely; `--repo NAME_OR_PATH` overrides its saved repository.
-`--forward-agent` requires `--machine`.
-`--task` selects a Task checkout; `--wt` selects an existing worktree.
-`--wave` adds context without moving directories and must match a Task's
-owning Wave. `task run` places a Task's worktree and then runs like
-`lf --task ISSUE graph GRAPH`; every Graph naming a Task is equally its work.
+- `--machine <label-or-id>` runs the command on a saved remote Machine;
+  `--repo <name-or-path>` overrides its saved repository; `--forward-agent`
+  opts into SSH agent forwarding.
+- `--task <ID>` selects a Task checkout; `--wt <name>` selects a worktree;
+  `--wave <name>` adds Wave context without changing directories.
+- `-a <harness[:model]>` selects an explicit harness/model for the command.
+  Headless launches without an explicit pin follow configured `agents`
+  failover; interactive launches keep refusals visible.
+- `--json` emits one JSON document; `--subscribe --json` streams NDJSON lines
+  until stdin closes. Diagnostics print to stderr.
+- Exit codes: `0` success, `1` operational failure, `2` syntax/lookup error,
+  `8` checks still pending (`lf checks`), `130` interrupted. A successful
+  auto-merge request is not a merge.
 
-`-a` selects an explicit harness/model. Headless launches can follow configured
-`agents` fallbacks when no explicit choice pins them; interactive launches
-require an explicit retry or move. Claude and Codex use native authentication on
-the execution Machine.
-
-JSON readers emit one document; a watched read such as
-`lf process list --watch --json` emits NDJSON until stdin closes. Diagnostics go to stderr. Exit 0 means the requested
-operation succeeded; 1 denotes an operational failure, 2 a syntax or lookup
-failure, and 130 interruption. A successful auto-merge request is not a merge.
-
-## Graph decisions and recovery
+## Graph runs
 
 ```bash
 lf task run EXP-12 pursue
-lf process show GRAPH_ID --json
+lf graph show RUN_ID --json
 lf task interrupt EXP-12
 ```
 
-Each start is a new Graph: one lf process and the step processes it starts. Its ID
-is the Graph process's. `--state` selects `current` (the Graph process has no recorded
-exit), `completed` (it succeeded) or `stopped` (it exited before the last
-step). A stopped Graph's Processes are its history; nothing resumes it. Inspect
-them, then launch the work that remains.
+Each launch starts a new Graph run recording its own PID, steps, exit codes,
+and errors (`--state current|completed|stopped`). A stopped run is history and
+never resumes: inspect it, fix the cause, and run `lf task run` to continue
+from the step it stopped on.

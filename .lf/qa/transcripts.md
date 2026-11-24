@@ -29,9 +29,25 @@ directory to check pairing. Codex's first-run trust prompt writes into the real
 Plain `pi` and `opencode` need no trust answer and list the same way. A
 headless `lf -b -a pi : '<prompt>'` (or `opencode`) in the raw process's
 directory checks pairing against an lf-written conversation and writes
-`usage` rows with `cost_usd`. OpenCode's default headless model may fail
+one `history.db` `turns` row per turn with `cost_usd`. OpenCode's default headless model may fail
 upstream; name one that answered interactively, `-a opencode:opencode/<model>`.
 `pi --session <file>` resumes a recorded Pi conversation raw. To learn
 which filesystem events a provider home really sends, a throwaway ignored
 test holding a `notify` watcher on it shows them; FSEvents sent none for
 OpenCode's `opencode.db-wal` writes.
+
+# Inherited session markers (caller's Claude Code or Codex)
+
+Claude 2.1.327 drops a transcript only when interactive: `claude -p` (every
+`lf -b` batch) keeps it even with `CLAUDE_CODE_CHILD_SESSION` set, so a batch
+can't show the bug. Run an interactive `lf -a claude : '<prompt>'` chat from
+an agent shell in a PTY, with `LF_*`, `REX_*` and `LOOPFLOW_*` stripped but
+the `CLAUDE_*`/`CODEX_*` markers kept, the real `HOME` and a private
+`LF_HOME`. A fresh directory's trust dialog defaults to "No, exit": Down,
+Enter. A kept marker shows "⚠ Transcript saving is off — inherited
+CLAUDE_CODE_CHILD_SESSION marker" in the footer, no `.jsonl` appears, and
+`lf session resume <session>` starts the conversation again ("This
+conversation has no saved claude transcript…"). The provider thread is `agent_sessions.provider_thread` in the private
+`loopflow.db` (Python `sqlite3` with `?mode=ro`; the sqlite3 CLI couldn't
+open it here). `ps eww -o command= -p <claude pid>` shows the environment lf
+handed the provider; walk the PTY child's descendants to find it.

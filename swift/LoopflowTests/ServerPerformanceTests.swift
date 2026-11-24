@@ -33,7 +33,7 @@ struct ServerPerformanceTests {
         for _ in 0..<31 {
             var start = ContinuousClock.now
             let reading = try await ServerClient.read(.allPlans, location: location)
-            #expect(reading.contains("Performance fixture"))
+            #expect(reading.text.contains("Performance fixture"))
             results["read_ms", default: []].append(start.elapsedMs)
             start = .now
             _ = try await ServerClient.write(.sessionRename(directory: root.path, id: session, name: "Measured Session"), location: location)
@@ -44,7 +44,7 @@ struct ServerPerformanceTests {
             _ = try #require(try await frames.next())
             results["watch_first_ms", default: []].append(start.elapsedMs)
             start = .now
-            subscription.send(Data(#"{"id":7}"#.utf8))
+            subscription.checkpoint(7)
             let frame = try #require(try await frames.next())
             #expect(String(decoding: frame, as: UTF8.self).contains("\"answers\":7"))
             results["checkpoint_ms", default: []].append(start.elapsedMs)

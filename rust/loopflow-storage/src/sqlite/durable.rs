@@ -8,17 +8,14 @@ use crate::rows::now_unix;
 use crate::work::project::ProjectEventKind;
 use crate::work::task::TaskEventKind;
 use crate::{StoreError, StoreResult};
-use loopflow_model::durable::{
-    Author, MachineId, ProjectId, TaskId, ToolResponseId, ToolResponseReceipt, ToolResponseWrite,
-    WorkRef, WorkStatus,
-};
+use loopflow_model::durable::{Author, MachineId, ProjectId, TaskId, WorkRef, WorkStatus};
 use loopflow_model::id::WaveId;
 
 use super::SqliteStore;
 
 impl SqliteStore {
     /// A Task may launch a Graph while it is ready, not being abandoned, and
-    /// planned in its Wave's current chapter.
+    /// planned in its Wave's current project.
     pub fn require_task_launch(&self, task_id: &TaskId) -> StoreResult<()> {
         let mut connection = self.conn.lock().expect("store mutex poisoned");
         let conn = connection.savepoint()?;
@@ -119,16 +116,9 @@ impl SqliteStore {
                 [task_id.as_str()], |row| Ok((row.get(0)?, row.get(1)?)),
             ).optional()?;
             if let Some((at, saved_reason)) = retained {
-                // Migrated cancellations can predate delivery receipts. An explicit
-                // repeat repairs that missing intention without replacing uncertainty.
-                let has_delivery: bool = tx.query_row(
-                    "SELECT EXISTS(SELECT 1 FROM task_state_deliveries WHERE task_id=?1)",
-                    [task_id.as_str()],
-                    |row| row.get(0),
-                )?;
-                if !has_delivery {
-                    super::task_state_delivery::queue_in(&tx, task_id, "canceled")?;
-                }
+                // Migrated cancellations can predate their state. An explicit
+                // repeat repairs it; one already saved changes nothing.
+                super::task_state::decide_in(&tx, task_id, "canceled")?;
                 tx.commit()?;
                 return Ok(AbandonReceipt {
                     work: work.clone(),
@@ -138,34 +128,24 @@ impl SqliteStore {
                 });
             }
         }
-        let abandon = match work {
-            WorkRef::Task(_) => format!(
-                "UPDATE tasks AS t SET abandoned_at=?2 WHERE t.id=?1 AND {}",
-                task_open_sql("t")
-            ),
-            _ => format!(
-                "UPDATE {table} SET work_state='abandoned', work_terminal_at=?2
-                 WHERE id=?1 AND work_state='ready'"
-            ),
+        let abandoned = match work {
+            WorkRef::Task(task_id) => abandon_task_in(&tx, task_id, reason, now)?,
+            _ => {
+                tx.execute(
+                    &format!(
+                        "UPDATE {table} SET work_state='abandoned', work_terminal_at=?2
+                         WHERE id=?1 AND work_state='ready'"
+                    ),
+                    params![id, now],
+                )? == 1
+            }
         };
-        if tx.execute(&abandon, params![id, now])? != 1 {
+        if !abandoned {
             return Err(StoreError::InvalidAuthority(format!(
                 "{} {} is not ready",
                 work.kind(),
                 work.id()
             )));
-        }
-        if let WorkRef::Task(task_id) = work {
-            tx.execute(
-                "UPDATE tasks SET abandon_reason=?2 WHERE id=?1",
-                params![task_id.as_str(), reason],
-            )?;
-            super::task_state_delivery::queue_in(&tx, task_id, "canceled")?;
-            super::task_summaries::write_in(
-                &tx,
-                task_id,
-                super::task_summaries::TaskEnd::Abandoned,
-            )?;
         }
         tx.commit()?;
         Ok(AbandonReceipt {
@@ -299,62 +279,6 @@ impl SqliteStore {
         conn.query_row(&sql, params![id], |row| row.get(0))
             .map_err(StoreError::from)
     }
-
-    pub fn write_tool_response(
-        &self,
-        work: &WorkRef,
-        write: &ToolResponseWrite,
-    ) -> StoreResult<(ToolResponseReceipt, bool)> {
-        let choice = write.choice.trim();
-        if choice.is_empty() {
-            return Err(StoreError::InvalidData(
-                "tool response choice cannot be empty".to_string(),
-            ));
-        }
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        require_ready_work(&tx, work)?;
-        if let Some(existing) = tool_response_in(&tx, work, &write.request_id)? {
-            if existing.choice != choice {
-                return Err(StoreError::InvalidData(format!(
-                    "tool response {} is already resolved as {:?}",
-                    write.request_id, existing.choice
-                )));
-            }
-            return Ok((existing, false));
-        }
-        let receipt = ToolResponseReceipt {
-            id: ToolResponseId::new(),
-            work: work.clone(),
-            request_id: write.request_id.clone(),
-            choice: choice.to_string(),
-            responded_at: OffsetDateTime::now_utc(),
-        };
-        tx.execute(
-            "INSERT INTO tool_responses (
-                id, work_kind, work_id, request_id, choice, responded_at
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            params![
-                receipt.id.as_str(),
-                work.kind(),
-                work.id(),
-                receipt.request_id,
-                receipt.choice,
-                receipt.responded_at.unix_timestamp(),
-            ],
-        )?;
-        tx.commit()?;
-        Ok((receipt, true))
-    }
-
-    pub fn tool_response(
-        &self,
-        work: &WorkRef,
-        request_id: &str,
-    ) -> StoreResult<Option<ToolResponseReceipt>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        tool_response_in(&conn, work, request_id)
-    }
 }
 
 pub(super) fn local_public_name_in(conn: &Connection) -> StoreResult<Option<String>> {
@@ -403,35 +327,51 @@ pub(super) fn map_machine_by_id(
 }
 
 /// Completion and abandonment are durable. An open Task's state follows
-/// what it is doing: its Task run, ship process or a Graph in its work has not
-/// exited. Its carrier is the latest Auto-Ship log entry naming one; the
-/// Auto-Ship approval (`shipped_at`) makes that run shipping.
-/// Approved with nothing running, it is idle until recovery restarts its ship process.
+/// what it is doing: its Task run's carrier still has an OS process, or a
+/// Graph run in its work has not ended. The auto setting says who takes the
+/// interactive steps; state never reads it.
+/// A Task with neither a checkout nor a Graph taken up is unstarted; creation
+/// admits a Graph before setup makes the checkout.
 pub(crate) fn task_state_sql(t: &str) -> String {
     format!(
         "CASE WHEN {t}.abandoned_at IS NOT NULL THEN 'abandoned' \
          WHEN {t}.planning_completed=1 THEN 'done' \
-         WHEN EXISTS(SELECT 1 FROM processes lp WHERE lp.completed_at IS NULL AND (lp.id=(SELECT CASE WHEN e.kind IN ('approved','carried') THEN e.lf_process_id END \
-             FROM task_ship_events e WHERE e.task_id={t}.id \
-             AND e.kind IN ('approved','carried','stopped','withdrawn') ORDER BY e.id DESC LIMIT 1) \
-             OR lp.id=(SELECT tg.lf_process_id FROM task_graphs tg WHERE tg.task_id={t}.id))) \
-             OR EXISTS({open_processes}) \
-         THEN CASE WHEN {t}.shipped_at IS NOT NULL THEN 'shipping' ELSE 'moving' END \
-         WHEN {t}.shipped_at IS NULL AND EXISTS(SELECT 1 FROM task_graphs tg WHERE tg.task_id={t}.id \
+         WHEN EXISTS(SELECT 1 FROM task_graphs tg WHERE tg.task_id={t}.id AND tg.run_pid IS NOT NULL) \
+             OR EXISTS({open_graphs}) \
+         THEN 'moving' \
+         WHEN EXISTS(SELECT 1 FROM task_graphs tg WHERE tg.task_id={t}.id \
              AND tg.lf_process_id IS NULL AND tg.step NOT IN ('start','end')) THEN 'active' \
-         WHEN NOT EXISTS(SELECT 1 FROM task_checkouts c WHERE c.task_id={t}.id) THEN 'unstarted' \
+         WHEN NOT EXISTS(SELECT 1 FROM task_checkouts c WHERE c.task_id={t}.id) \
+             AND NOT EXISTS(SELECT 1 FROM task_graphs tg WHERE tg.task_id={t}.id) THEN 'unstarted' \
          ELSE 'idle' END",
-        open_processes = super::task_work::task_open_process_ids(
-            &format!("{t}.id"),
-            "p.kind='lf' AND EXISTS(SELECT 1 FROM graph_processes g \
-                WHERE g.lf_process_id IN (p.id,p.parent_lf_process_id))",
-        )
+        open_graphs = super::task_work::task_open_graph_pairs(&format!("{t}.id")),
     )
 }
 
 /// SQL: Task row `t` is neither done nor abandoned.
 pub(crate) fn task_open_sql(t: &str) -> String {
     format!("({t}.abandoned_at IS NULL AND {t}.planning_completed IS NOT 1)")
+}
+
+/// Abandon an open Task at `at`. `false` when it is already done or abandoned.
+pub(super) fn abandon_task_in(
+    conn: &Connection,
+    task: &TaskId,
+    reason: &str,
+    at: i64,
+) -> StoreResult<bool> {
+    let abandoned = conn.execute(
+        &format!(
+            "UPDATE tasks AS t SET abandoned_at=?2,abandon_reason=?3 WHERE t.id=?1 AND {}",
+            task_open_sql("t")
+        ),
+        params![task.as_str(), at, reason],
+    )? == 1;
+    if abandoned {
+        super::task_state::decide_in(conn, task, "canceled")?;
+        super::task_summaries::write_in(conn, task, super::task_summaries::TaskEnd::Abandoned)?;
+    }
+    Ok(abandoned)
 }
 
 pub(crate) fn task_state_in(conn: &Connection, task: &TaskId) -> StoreResult<TaskState> {
@@ -558,41 +498,6 @@ pub(crate) fn work_for_child_in(conn: &Connection, target: &ChildRef) -> StoreRe
             Ok(WorkRef::Task(task_id.clone()))
         }
     }
-}
-
-fn tool_response_in(
-    conn: &Connection,
-    work: &WorkRef,
-    request_id: &str,
-) -> StoreResult<Option<ToolResponseReceipt>> {
-    let row = conn
-        .query_row(
-            "SELECT id, choice, responded_at FROM tool_responses
-             WHERE work_kind=?1 AND work_id=?2 AND request_id=?3",
-            params![work.kind(), work.id(), request_id],
-            |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, i64>(2)?,
-                ))
-            },
-        )
-        .optional()?;
-    let Some((id, choice, responded_at)) = row else {
-        return Ok(None);
-    };
-    Ok(Some(ToolResponseReceipt {
-        id: ToolResponseId::parse(&id).map_err(|error| {
-            StoreError::InvalidData(format!("invalid stored ToolResponse id: {error}"))
-        })?,
-        work: work.clone(),
-        request_id: request_id.to_string(),
-        choice,
-        responded_at: OffsetDateTime::from_unix_timestamp(responded_at).map_err(|error| {
-            StoreError::InvalidData(format!("invalid Decision timestamp: {error}"))
-        })?,
-    }))
 }
 
 #[cfg(test)]
@@ -785,7 +690,7 @@ mod durable_store_tests {
     }
 
     #[test]
-    fn chapter_evidence_marks_taskless_graphs_started_in_their_checkout() {
+    fn project_evidence_marks_taskless_graphs_started_in_their_checkout() {
         let (dir, store, existing) = store_with_task();
         // A checkout recorded without an ownership entry, so only the Graph is evidence.
         let (task, _) = unregistered_task(&store, &existing, dir.path().join("unclaimed"));
@@ -824,8 +729,8 @@ mod durable_store_tests {
         let losing_task = TaskId::new();
         for id in [&bound_task, &losing_task] {
             conn.execute("INSERT INTO repository_plans(id,repo,selected) SELECT 'repo_'||lower(hex(randomblob(16))),w.repo,1 FROM waves w WHERE NOT EXISTS(SELECT 1 FROM repository_plans r WHERE r.repo=w.repo AND r.selected=1) GROUP BY w.repo", []).unwrap();
-            conn.execute("INSERT INTO tasks(repository_id,id,project_id,external_issue_id,issue_identifier,worktree,created_at)
-                VALUES((SELECT r.id FROM projects p JOIN waves w ON w.id=p.wave_id JOIN repository_plans r ON r.repo=w.repo AND r.selected=1 WHERE p.id=?2),?1,?2,?1,?1,?1,1)",
+            conn.execute("INSERT INTO tasks(repository_id,id,project_id,external_issue_id,issue_identifier,created_at)
+                VALUES((SELECT r.id FROM projects p JOIN waves w ON w.id=p.wave_id JOIN repository_plans r ON r.repo=w.repo AND r.selected=1 WHERE p.id=?2),?1,?2,?1,?1,1)",
                 rusqlite::params![id.as_str(), task.project_id.as_ref().unwrap().as_str()]).unwrap();
         }
         // A done Task is still a valid assignment target.

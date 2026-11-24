@@ -32,7 +32,7 @@ public struct DesktopChange: Codable, Sendable, Equatable {
 
 public struct DesktopOpening: Codable, Sendable, Equatable {
     public let revision: String
-    public enum Status: String, Codable, Sendable { case opening, usable, elsewhere, failed }
+    public enum Status: String, Codable, Sendable { case opening, usable, failed }
     public let url: String
     public let status: Status
     public let reason: String?
@@ -59,7 +59,7 @@ public struct DesktopWindowInspection: Codable, Sendable, Equatable {
     public let actions: [DesktopActionDescriptor]
     public let workspaces: [DesktopWorkspaceInspection]
     public let view: WorkViewPlan?
-    /// The view's named parts that are neither panes nor tiles, such as a Wave view's board.
+    /// The view's named parts that are neither panes nor tiles, such as a Wave view's backlog.
     public let viewParts: [DesktopViewPart]
     /// Work shown in this window, in slot fill order.
     public let openWork: [WorkWorkspaceKey]
@@ -86,16 +86,12 @@ public struct DesktopWindowInspection: Codable, Sendable, Equatable {
 /// A named part of a view that `-p` addresses before tiles and panes. Each kind
 /// reports its own state; `actions` names the verbs it accepts.
 public struct DesktopViewPart: Codable, Sendable, Equatable {
-    public enum Kind: String, Codable, Sendable { case board, session, strip }
+    public enum Kind: String, Codable, Sendable { case backlog, session, strip }
     public let name: String
     public let kind: Kind
     /// The Work a session part converses with.
     public let work: WorkWorkspaceKey?
-    /// A board's shown section: `backlog`, `working`, `autonomous` or `done`.
-    public let section: String?
-    /// A board's Done window in days; 0 includes all ages.
-    public let doneDays: Int?
-    /// A board as rendered text, what `lf desktop capture -p board` prints.
+    /// A backlog as text, what `lf desktop capture -p backlog` prints: its filter counts, then its rows.
     public let text: String?
     /// A strip's page, from 1, and its page count.
     public let page: Int?
@@ -104,23 +100,22 @@ public struct DesktopViewPart: Codable, Sendable, Equatable {
     public let visible: [WorkWorkspaceKey]
     /// Hidden by `lf desktop hide` or its hover button; the view's `Show…` menu lists it.
     public let hidden: Bool
-    /// The part's share of its split: the conversation's and board's of the top
+    /// The part's share of its split: the conversation's and backlog's of the top
     /// band's width, the strip's of the view's height.
     public let ratio: Double
     /// Filling the whole view, as `lf desktop zoom` or its hover button set it.
     public let zoomed: Bool
     public let actions: [String]
 
-    public init(name: String, kind: Kind, work: WorkWorkspaceKey?, section: String?, doneDays: Int?, text: String?,
+    public init(name: String, kind: Kind, work: WorkWorkspaceKey?, text: String?,
                 page: Int?, pages: Int?, visible: [WorkWorkspaceKey], hidden: Bool, ratio: Double, zoomed: Bool,
                 actions: [String]) {
-        self.name = name; self.kind = kind; self.work = work; self.section = section; self.doneDays = doneDays
+        self.name = name; self.kind = kind; self.work = work
         self.text = text; self.page = page; self.pages = pages; self.visible = visible; self.hidden = hidden
         self.ratio = ratio; self.zoomed = zoomed; self.actions = actions
     }
     enum CodingKeys: String, CodingKey {
-        case name, kind, work, section, text, page, pages, visible, hidden, ratio, zoomed, actions
-        case doneDays = "done_days"
+        case name, kind, work, text, page, pages, visible, hidden, ratio, zoomed, actions
     }
 }
 
@@ -381,16 +376,35 @@ public struct DesktopSessionInspection: Codable, Sendable, Equatable {
     /// The Session reader currently supplies no observation timestamp. Do not
     /// substitute UI inspection time or the provider's generation for freshness.
     public let observedAt: String?
-    public let actions: [SessionAction]?
+    public let action: SessionAction?
 
     public init(id: String, machineId: String?, reading: String, reason: String?,
-                observedAt: String?, actions: [SessionAction]?) {
+                observedAt: String?, action: SessionAction?) {
         self.id = id; self.machineId = machineId; self.reading = reading; self.reason = reason
-        self.observedAt = observedAt; self.actions = actions
+        self.observedAt = observedAt; self.action = action
     }
     enum CodingKeys: String, CodingKey {
-        case id, reading, reason, actions
+        case id, reading, reason, action
         case machineId = "machine_id", observedAt = "observed_at"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        id = try values.decode(String.self, forKey: .id)
+        machineId = try values.decodeIfPresent(String.self, forKey: .machineId)
+        reading = try values.decode(String.self, forKey: .reading)
+        reason = try values.decodeIfPresent(String.self, forKey: .reason)
+        observedAt = try values.decodeIfPresent(String.self, forKey: .observedAt)
+        action = try values.decode(SessionAction?.self, forKey: .action)
+    }
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(id, forKey: .id)
+        try values.encode(machineId, forKey: .machineId)
+        try values.encode(reading, forKey: .reading)
+        try values.encode(reason, forKey: .reason)
+        try values.encode(observedAt, forKey: .observedAt)
+        try values.encode(action, forKey: .action)
     }
 }
 

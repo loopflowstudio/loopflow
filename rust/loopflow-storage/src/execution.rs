@@ -7,7 +7,7 @@ pub use loopflow_model::durable::{
     person_text, Author, CapacityDefault, DefaultScope, DurableDataError, Machine, MachineDefault,
     MachineId, MachineRef, MachineSetting, OwnershipEntryId, OwnershipKind, ProjectId,
     RepositoryId, RepositoryIdentity, TaskId, TaskOwner, TaskOwnership, TaskOwnershipEntry,
-    ToolResponseId, ToolResponseReceipt, ToolResponseWrite, WorkRef, WorkStatus,
+    WorkRef, WorkStatus,
 };
 
 /// A fresh, Machine-local observation, never replicated as planning or a start claim.
@@ -50,7 +50,7 @@ impl TaskLocation {
 }
 
 /// A Task's state, derived from its checkout, Graph position, whether a
-/// Graph runs for it and the Auto-Ship approval. Completion and abandonment
+/// Graph runs for it. Completion and abandonment
 /// are durable; the open states follow what the Task is doing now. Whether
 /// anyone owns it is ownership, not state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -59,15 +59,13 @@ pub enum TaskState {
     /// No checkout yet.
     Unstarted,
     /// A checkout, no Graph running and not at an interactive step: before its first run,
-    /// after a stopped one, or shipping whose ship process exited.
+    /// or after a stopped one.
     Idle,
     /// Between Graphs at an interactive step, in a conversation in its Task Session.
     Active,
-    /// A Graph runs for it with an interactive step still ahead that will stop for a person.
+    /// A Graph runs for it. Its auto setting says whether the run stands in
+    /// at interactive steps or stops there for a person.
     Moving,
-    /// A Graph runs for it and no interactive step ahead will stop it: none remain, or
-    /// Auto-Ship approved stand-ins at the rest. It finishes on its own to merge.
-    Shipping,
     /// Completed independently of Graph position.
     Done,
     Abandoned,
@@ -80,7 +78,6 @@ impl TaskState {
             Self::Idle => "idle",
             Self::Active => "active",
             Self::Moving => "moving",
-            Self::Shipping => "shipping",
             Self::Done => "done",
             Self::Abandoned => "abandoned",
         }
@@ -92,7 +89,6 @@ impl TaskState {
             Self::Idle,
             Self::Active,
             Self::Moving,
-            Self::Shipping,
             Self::Done,
             Self::Abandoned,
         ]
@@ -106,10 +102,7 @@ impl TaskState {
 
     /// Has a checkout and is still open and unheld.
     pub fn is_started(&self) -> bool {
-        matches!(
-            self,
-            Self::Idle | Self::Active | Self::Moving | Self::Shipping
-        )
+        matches!(self, Self::Idle | Self::Active | Self::Moving)
     }
 
     /// Planning withdraws never-started work; started work follows execution.
@@ -140,8 +133,6 @@ pub enum TaskSection {
     Backlog,
     /// Someone's idle, active or moving Task.
     Working,
-    /// Someone's shipping Task, running to merge with nothing left for a person.
-    Autonomous,
     Done,
     Abandoned,
 }
@@ -155,7 +146,6 @@ impl TaskSection {
             TaskState::Abandoned => Self::Abandoned,
             TaskState::Unstarted => Self::Backlog,
             _ if !owned => Self::Backlog,
-            TaskState::Shipping => Self::Autonomous,
             TaskState::Idle | TaskState::Active | TaskState::Moving => Self::Working,
         }
     }
@@ -227,6 +217,8 @@ pub struct GraphStepProcess {
     pub completed_at: Option<i64>,
     pub outcome: Option<String>,
     pub exit_code: Option<i32>,
+    /// Why the step failed, as the step recorded it.
+    pub error: Option<String>,
 }
 
 impl GraphStepProcess {
@@ -251,12 +243,7 @@ mod tests {
             ("duplicate", TaskState::Abandoned),
         ] {
             assert_eq!(TaskState::Unstarted.lifecycle(Some(planning)), terminal);
-            for runtime in [
-                TaskState::Idle,
-                TaskState::Active,
-                TaskState::Moving,
-                TaskState::Shipping,
-            ] {
+            for runtime in [TaskState::Idle, TaskState::Active, TaskState::Moving] {
                 assert_eq!(runtime.lifecycle(Some(planning)), runtime);
                 assert_eq!(
                     TaskSection::of(runtime, false, Some(planning)),
@@ -275,8 +262,7 @@ mod tests {
             TaskSection::Working
         );
         assert_eq!(of(TaskState::Idle, false, None), TaskSection::Backlog);
-        assert_eq!(of(TaskState::Shipping, true, None), TaskSection::Autonomous);
-        assert_eq!(of(TaskState::Shipping, false, None), TaskSection::Backlog);
+        assert_eq!(of(TaskState::Moving, false, None), TaskSection::Backlog);
         assert_eq!(of(TaskState::Unstarted, true, None), TaskSection::Backlog);
         assert_eq!(
             of(TaskState::Unstarted, false, Some("completed")),

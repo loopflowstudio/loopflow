@@ -32,9 +32,9 @@ Connecting a client does not rent a worker, move a Task, or select another provi
 If the server is replaced during an unfinished draft and a running Graph,
 Desktop retains the screen and local reading actions. Native status shows the
 connection recovering; input pauses until the server acknowledges the same
-held terminal. A newer viewer's control claim survives automatic recovery.
-**Move here** explicitly requests control. A lost acknowledgement is never a reason to
-repeat takeover or replay input. **Retry** repairs the connection only.
+held terminal. Other views stay attached and keep typing meanwhile. A lost
+acknowledgement is never a reason to replay input. **Retry** repairs the
+connection only.
 
 The server may become unavailable while execution continues: agents run in a
 holder and Graphs in their own processes. Only a child exit, reported by its
@@ -50,10 +50,11 @@ phone ─ authenticated HTTPS/WSS ─ server (LOO-718)
 server read/subscription ─ shared Rust readers
 server write ─ request worker ─ Write::run ─┐
 CLI mutation ─ mutation dispatcher ─────────┴─ engine operations / shared Rust write functions
-server task.run, task.ship ─ engine::launch ─ detached `lf task run`, `lf ship` ─ Graph processes
+server task.run, task.auto.on ─ engine::launch ─ detached `lf task run`, `lf task auto on` ─ Graph processes
 server session.start / attach ─ held terminal ─ holder ─ PTY ─ agent
 
 Desktop terminal preparation/launch ─ ordinary CLI ─ held terminals
+write for another Machine's Task ─ SSH ─ destination's `lf server connect` ─ its server ─ Write::run_here
 lf --machine host … ─ SSH ─ destination's ordinary lf command
 lf install ─ selected artifacts + OS registration of server
 lf desktop ─ app-owned automation socket ─ windows / panes
@@ -62,9 +63,11 @@ lf desktop ─ app-owned automation socket ─ windows / panes
 The server owns client admission, revision negotiation, framing, bounded
 delivery and connection diagnostics. Shared commands own resolution, defaults, mutation,
 attribution and recoverable outcomes. Holders own PTYs and the agents on
-them; the server owns each held terminal's screen, views and input/geometry
-claims. Graph processes own Graph execution.
-CLI operations can run without the server. Desktop owns rendering and UI actions.
+them; the server owns each held terminal's screen, views and which view sizes
+it. Graph processes own Graph execution.
+CLI operations on a Machine can run without its server; work sent to another
+Machine runs in that Machine's server, reached over SSH through `lf server
+connect`. Desktop owns rendering and UI actions.
 
 Subscriptions carry complete readings of current state and typed events for
 occurrences such as a Task shipping, a steer arriving or a Graph step finishing.
@@ -99,8 +102,11 @@ refresh authoritative state before another deliberate edit. The
 defines persistence, receipt lookup, admission budgets and recovery by error scope.
 
 `task.create` shares its creation function and receipt with the CLI, covering
-both new Tasks and Session adoption; `run` requests the Task's Graph launch.
-`task.run` and `task.ship` start the same command a terminal would as a plain
+both new Tasks and Session adoption. With `run`, one transaction records the
+Task, its claim, its Graph and its primary Session; the server starts the held
+conversation and answers. The conversation makes the checkout and starts the
+Graph; tracker sync and the assignee check run after the answer.
+`task.run` and `task.auto.on` start the same command a terminal would as a plain
 detached process, and answer the typed value that process reports
 (`engine/launch.rs`); the request never carries the run. Desktop's Work operations
 use the shared protocol; execution stays with holders and Graph processes.
@@ -110,9 +116,10 @@ The server adds no scheduler, Work database, viewer registry or provider supervi
 
 Local peer credentials apply only to the private Unix socket. Remote access needs
 its own authenticated admission even over Tailscale. Never forward a trusted local
-socket and treat the proxy's UID as the phone's identity. Disabling remote access
-or revoking a client must preserve local access and running agents; client
-credentials grant no permission to disregard another view's control claim.
+socket and treat the proxy's UID as the phone's identity. `lf server connect`
+pipes SSH to the socket because an SSH login is the socket's own OS user. Disabling remote access
+or revoking a client must preserve local access and running agents. A client
+the server admits to a held terminal can type into it, like every other view.
 
 ## One namespace in three places
 
@@ -154,7 +161,9 @@ product choices. Removal must preserve Work and credentials.
 
 ## Commands and installed-state migration
 
-`lf server run` is the supervisor's foreground entry. `lf server describe --json`
+`lf server run` is the supervisor's foreground entry. `lf server connect` pipes
+stdin and stdout to the server, starting it first; another Machine runs it
+over SSH to reach this one (see [Machines](machines.md)). `lf server describe --json`
 prints the protocol's JSON Schema, generated from the wire types, with no server
 running. `lf server status` reports
 readiness without registering a helper. The hidden `install server` operation

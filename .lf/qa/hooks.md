@@ -6,9 +6,9 @@ A Session launched in a Task's checkout is Task work. Headless (`-b`) there
 confines the agent and runs on the native login, like every other launch:
 with the real `HOME`, a private `LF_HOME` and that home's `lf server run`,
 `lf -b --task <id> -a claude:haiku : '<msg>'` in the Task checkout answers.
-Starting a private server resumes every Task whose Auto-Ship was approved:
+Starting a private server resumes every Task with auto on:
 abandon old QA Tasks first. Dead AgentProcesses are reaped by
-`lf process prune`, not by `lf session list`.
+the server's recovery pass, not by `lf session list`.
 Interactive (`-i`) launches run in a PTY. A stand-in
 `claude` on `PATH` can read `--settings` and run each hook command exactly as
 installed, with Claude's callback JSON on stdin; release its turns with marker
@@ -16,13 +16,19 @@ files so steers and server changes can happen between them. Run `lf` commands
 from the disposable repository: from inside this checkout they resolve
 loopflow's Linear planning.
 
-Managed is decided by the command: `--task` or `--wave` gets turn hooks and
-the server check, on a launch or a resume (`lf -i --task <id> resume`,
-`lf session resume <session> --task <id>`, and the `open_argv` that
-`lf session resume --prepare --json --task <id>` returns for Desktop). Plain
-`lf -b <skill>` gets the start and compact hooks only; plain `lf -i` and
-`lf -i resume <session>` keep turn hooks without the check, so they never
-start a stopped server. Driver scripts that delete their marker directory
+Managed means the launch reports turns, and transport decides it. A Task's
+primary conversation (started by `lf checkout <task>`, reopened by
+`lf resume --task <id>` or a bound Session's `lf resume`) is a work session
+held by `lf holder run`; a Task Graph's headless step is a worker. Both get
+`Stop` and `crossSessionInbound: accept` in Claude's `--settings`, and
+`LF_PROVIDER_CONTEXT`. Direct `lf -i` and `lf -b` launches are chats and
+batches even with `--task`: start, compact, prompt and tool hooks only,
+`LF_BARE_STEER`, and Task steers through `LF_STEER_TASK`; a chat's resume
+stays in the calling terminal, and a Graph's commit message is a batch. A
+stand-in must honor each hook group's `matcher`, or it runs the compact
+`SessionStart` hook at startup too. Use a private Machine and create a Task
+with `lf task create`, then run `lf checkout <id>` to start its work session.
+Driver scripts that delete their marker directory
 must do it before waiting on it, or a stale `provider.jsonl` releases a turn
 too early. A managed launch
 with the server down registers it before the agent starts: check
@@ -30,8 +36,7 @@ with the server down registers it before the agent starts: check
 answers with no login (its free `opencode/big-pickle` model), so
 `lf -i --task <id> -a opencode : '<message>'` in a PTY drives the real plugin;
 its turns land in `$HOME/.local/share/opencode/opencode.db` (`session_message`).
-The model runs tools in the checkout, so keep it disposable and stop the
-`opencode serve` child afterwards. Pi needs the nvm `bin` on `PATH` and a model;
+The model runs tools in the checkout, so keep it disposable. Pi needs the nvm `bin` on `PATH` and a model;
 a private home has no key. Both reach a scripted local model instead: a small
 OpenAI-compatible HTTP server (streamed `chat/completions`, scripted `bash`
 calls for Pi, `shell` for OpenCode 2.x, then a reply naming what it saw) named

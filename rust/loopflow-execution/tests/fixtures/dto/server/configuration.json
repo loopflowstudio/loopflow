@@ -10,5 +10,6 @@
     "value": "Hearth"
   },
   "select": null,
+  "sender": null,
   "request_id": null
 }

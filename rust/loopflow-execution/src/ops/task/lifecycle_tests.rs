@@ -147,7 +147,7 @@ fi
     std::env::set_var("PATH", std::env::join_paths(paths).unwrap());
     // The delivery run holds at a skill step whose provider waits until released.
     let claude = home.path().join("bin/claude");
-    fs::write(&claude, crate::test_support::task_graph::HOLDING_CLAUDE).unwrap();
+    fs::write(&claude, crate::test_support::task_graph::holding_claude()).unwrap();
     fs::set_permissions(&claude, fs::Permissions::from_mode(0o755)).unwrap();
     crate::config::files::update(&home.path().join("config.yaml"), |value| {
         value["agent"] = "claude".into();
@@ -178,7 +178,7 @@ fi
     }, || {
         let planning = runtime.block_on(crate::ops::linear::test_fixture::refresh_task_input(repo.path(), "FIX-1", LinearRefresh::Force)).unwrap();
         store.sqlite.seed_inventory(&crate::test_linear_input::InventoryFixture {
-            wave_id: wave.id().clone(), provider: "linear".into(), initiative: "initiative-1".into(),
+            wave_id: wave.id().clone(), initiative: "initiative-1".into(),
             synced_at: time::OffsetDateTime::now_utc().unix_timestamp(),
             snapshot: serde_json::from_value(json!({"projects": [planning.project], "items": [planning.item]})).unwrap(),
         }).unwrap();
@@ -199,7 +199,7 @@ fi
         // Exercise buffered filing while the selected planning transport is offline.
         provider.lock().unwrap().unavailable = true;
         let child = crate::ops::task::task_create(repo.path(), Some(wave.slug()),
-            Some("Verify installed release".into()), Some("Run the released command; retain failures.".into()), crate::ops::task::TaskAdoptionOptions::default(), None).unwrap();
+            Some("Verify installed release".into()), Some("Run the released command; retain failures.".into()), crate::ops::task::TaskAdoptionOptions::default(), Default::default(), None).unwrap();
         let thread = crate::ops::task::task_comment(repo.path(), "FIX-1", None,
             Some(&format!("Installed verification continues in {}.", child.identifier)), false).unwrap();
         assert!(thread.comments.iter().any(|comment| comment.body.contains(&child.identifier)));
@@ -216,10 +216,10 @@ fi
         let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
         let completions: i64 = db.query_row("SELECT count(*) FROM task_events WHERE json_extract(kind_json,'$.kind')='completed'", [], |row| row.get(0)).unwrap();
         assert_eq!(completions, 1);
-        let graphs: i64 = db.query_row("SELECT count(*) FROM graph_processes g JOIN processes p ON p.id=g.lf_process_id WHERE p.outcome='succeeded'", [], |row| row.get(0)).unwrap();
+        let graphs: i64 = db.query_row("SELECT count(*) FROM graph_processes WHERE ended_at IS NOT NULL AND exit_code=0", [], |row| row.get(0)).unwrap();
         assert_eq!(graphs, 1);
         assert!(child.worktree.is_none());
-        assert!(child.linear_id.is_none());
+        assert!(child.tracker_id.is_none());
         assert_ne!(store.sqlite.task_state(&child.id).unwrap(), crate::durable::TaskState::Done);
         // Completion and filing are saved locally; provider delivery has its own receipt.
         assert!(provider.lock().unwrap().unavailable);
@@ -257,7 +257,7 @@ async fn respond(
         json!({"issue": {"id":"source-issue", "identifier":"FIX-1", "url":"https://linear.app/fixture/issue/FIX-1",
             "title":"Deliver the command", "description":"", "dueDate":null,
             "updatedAt":"2026-10-07T00:00:00Z", "completedAt":null, "branchName":null,
-            "prioritySortOrder":1.0, "sortOrder":1.0, "assignee":null, "state":{"type":"unstarted"},
+            "parent":null,"prioritySortOrder":1.0, "sortOrder":1.0, "assignee":null, "state":{"type":"unstarted"},
             "team":{"id":"team-1"}, "project":{"id":"project-1", "name":"Provider destination",
                 "description":"", "content":"workflow: feature", "status":{"type":"started"},
                 "updatedAt":"2026-10-07T00:00:00Z", "archivedAt":null,
@@ -320,33 +320,34 @@ fn fixture(
     let project = Project {
         id: ProjectId::new(),
 
-        linear_id: Some(LinearProjectId::new("project-1").unwrap()),
+        tracker_id: Some(LinearProjectId::new("project-1").unwrap()),
         summary: String::new(),
-        slug: "chapter".into(),
-        name: "Chapter".into(),
+        slug: "project".into(),
+        name: "Project".into(),
         status: loopflow_storage::work::project::ProjectStatus::Started,
         description: String::new(),
         krs: Vec::new(),
         metric_targets: Vec::new(),
-        pm_snapshot_synced_at: Some(now.unix_timestamp()),
+        tracker_synced_at: Some(now.unix_timestamp()),
 
         wave_id: wave.id().clone(),
         created_at: now,
         updated_at: now,
     };
     let task = Task {
+        parent_task_id: None,
         repository_id: crate::repository::location::ensure_repository(&store.sqlite, wave.repo())
             .unwrap(),
         id: TaskId::new(),
 
-        linear_id: Some(LinearIssueId::new("source-issue").unwrap()),
+        tracker_id: Some(LinearIssueId::new("source-issue").unwrap()),
         revision: 0,
         identifier: "FIX-1".into(),
         title: "Deliver the command".into(),
         description: String::new(),
-        pm_snapshot_synced_at: Some(now.unix_timestamp()),
+        tracker_synced_at: Some(now.unix_timestamp()),
 
-        pm_writeback: LinearWritebackState::Current,
+        tracker_writeback: LinearWritebackState::Current,
         wave_id: Some(wave.id().clone()),
         project_id: Some(project.id.clone()),
         worktree: Some(repo.path().canonicalize().unwrap()),
@@ -398,7 +399,7 @@ fn fixture(
             &store.sqlite,
             wave.id(),
             None,
-            project.linear_id.as_ref().unwrap().as_str(),
+            project.tracker_id.as_ref().unwrap().as_str(),
             &crate::store::PlanningLocks::new(tempfile::tempfile().unwrap()),
         )
         .unwrap();

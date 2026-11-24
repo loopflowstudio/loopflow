@@ -74,7 +74,9 @@ public struct WorkSelection: Codable, Equatable, Sendable {
 }
 
 public enum WorkSelectionState: String, Codable, Sendable, Hashable {
-    case open, available, busy, blocked, unstarted, idle, active, moving, shipping, backlog, working, autonomous, done
+    case open, available, busy, blocked, unstarted, idle, active, moving, backlog, working, done
+    /// An open Task whose auto setting is on.
+    case auto
 }
 
 public struct WorkMemberRef: Codable, Hashable, Sendable {
@@ -166,8 +168,6 @@ public struct WorkViewPlan: Codable, Equatable, Sendable {
         enum CodingKeys: String, CodingKey { case machineID = "machine_id", cwd }
     }
     public struct Content: Codable, Equatable, Sendable {
-        public let paneRevision: Int64?
-        public let face: WorkPaneIntent?
         public let work: WorkWorkspaceKey
         public let title: String
         public var states: [WorkSelectionState]
@@ -178,7 +178,7 @@ public struct WorkViewPlan: Codable, Equatable, Sendable {
         public let argv: [String]?
         public let unavailable: [String]
         enum CodingKeys: String, CodingKey {
-            case work, title, states, identifier, location, argv, unavailable, face, paneRevision = "pane_revision"
+            case work, title, states, identifier, location, argv, unavailable
             case primarySession = "primary_session"
         }
     }
@@ -247,18 +247,16 @@ extension WorkViewPlan {
     }
 }
 
-/// Portable intent only. The native host creates fresh incarnations when restoring it.
+/// One Work's pane layout as Desktop saves it on this Mac. Portable intent only:
+/// the native host creates fresh incarnations when restoring it.
 public struct WorkPaneLayout: Codable, Equatable, Sendable {
-    public let work: WorkWorkspaceKey
-    public let revision: Int64
     public let tree: WorkPaneTree
     public let focused: String?
     public let zoomed: String?
     public let hidden: [String]
     public let drafts: [WorkFileDraft]
-    public init(work: WorkWorkspaceKey, revision: Int64, tree: WorkPaneTree, focused: String?, zoomed: String?, hidden: [String], drafts: [WorkFileDraft]) {
-        self.work = work; self.revision = revision; self.tree = tree; self.focused = focused
-        self.zoomed = zoomed; self.hidden = hidden; self.drafts = drafts
+    public init(tree: WorkPaneTree, focused: String?, zoomed: String?, hidden: [String], drafts: [WorkFileDraft]) {
+        self.tree = tree; self.focused = focused; self.zoomed = zoomed; self.hidden = hidden; self.drafts = drafts
     }
 }
 

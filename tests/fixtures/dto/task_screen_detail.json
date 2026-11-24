@@ -10,17 +10,17 @@
     "completed_at": null,
     "due_date": null,
     "sync": {
-      "connected": false,
-      "changes": []
+      "actions": []
     },
-    "linear_id": null,
-    "acquisition": {
+    "tracker_id": null,
+    "parent_id": null,
+    "tracker_state": {
       "state": "available",
-      "observed_at": null
+      "synced_at": null
     },
     "repo_id": "repo_00000000000040008000000000000001",
     "repo": "/src/loopflow",
-    "project_id": "proj-chapter-current",
+    "project_id": "proj-project-current",
     "wave_id": "wave-1"
   },
   "section": "backlog",
@@ -182,7 +182,8 @@
           "started_at": 10,
           "completed_at": 20,
           "outcome": "succeeded",
-          "exit_code": 0
+          "exit_code": 0,
+          "error": null
         },
         {
           "lf_process_id": "00000002-0000-4000-8000-000000000000",
@@ -196,7 +197,8 @@
           "started_at": 20,
           "completed_at": 30,
           "outcome": "succeeded",
-          "exit_code": 0
+          "exit_code": 0,
+          "error": null
         },
         {
           "lf_process_id": "00000003-0000-4000-8000-000000000000",
@@ -210,7 +212,8 @@
           "started_at": 30,
           "completed_at": 40,
           "outcome": "succeeded",
-          "exit_code": 0
+          "exit_code": 0,
+          "error": null
         },
         {
           "lf_process_id": "00000004-0000-4000-8000-000000000000",
@@ -224,7 +227,8 @@
           "started_at": 40,
           "completed_at": 50,
           "outcome": "succeeded",
-          "exit_code": 0
+          "exit_code": 0,
+          "error": null
         },
         {
           "lf_process_id": "00000005-0000-4000-8000-000000000000",
@@ -238,7 +242,8 @@
           "started_at": 50,
           "completed_at": 60,
           "outcome": "succeeded",
-          "exit_code": 0
+          "exit_code": 0,
+          "error": null
         },
         {
           "lf_process_id": "00000006-0000-4000-8000-000000000000",
@@ -252,7 +257,8 @@
           "started_at": 60,
           "completed_at": null,
           "outcome": null,
-          "exit_code": null
+          "exit_code": null,
+          "error": null
         }
       ]
     }
@@ -287,7 +293,6 @@
     "model": null,
     "cwd": "/src/loopflow.task",
     "state": "unknown",
-    "ready_summary": null,
     "open_argv": [
       "lf",
       "session",
@@ -300,20 +305,10 @@
     ],
     "terminal_ids": [],
     "work_path": "product / LOO-291",
-    "actions": [
-      {
-        "kind": "open",
-        "label": "Open here",
-        "help": "Open this Session in a terminal",
-        "unavailable_reason": null
-      },
-      {
-        "kind": "reveal",
-        "label": "Show conversation",
-        "help": "Continue existing history without taking another terminal's input",
-        "unavailable_reason": null
-      }
-    ],
+    "action": {
+      "label": "Open here",
+      "help": "Open this Session in a terminal"
+    },
     "graph_membership": {
       "kind": "independent"
     },
@@ -328,6 +323,10 @@
     "account": null,
     "transition": null,
     "turn": null,
-    "raw": false
+    "raw": false,
+    "ended": null,
+    "start": null,
+    "outlook": null,
+    "status_line": "unknown"
   }
 }

@@ -23,8 +23,9 @@ remembered.
 
 **Name the step that waits.** At an interactive step the Task waits here for a
 person; say which, and what they decide there. In `code`, the first is
-`human-review` after `build`: they read one page built from what the run
-produced, and their answer sends the change back to `build` or on to delivery.
+`ship-review` after `build`: they read one page saying what ships and what
+was left outside it, decide what happens to each finding, and their answer
+sends the change back to `build` or on to delivery.
 `lf task run <issue>` continues once they have answered.
 
 **End a turn when the Task has its disposition.** Merge alone is not done.
@@ -38,8 +39,18 @@ The Task's Graphs keep running on their own, and settled progress arrives here
 as posts while the conversation is open.
 
 **A post is an observation, not direction.** Report it briefly, name each
-changed run by its id, and leave review and shipping state as they are. Don't
+changed run by its id, and leave review and the auto setting as they are. Don't
 promise follow-ups for when the conversation is closed.
+
+**Conduct this Task's children.** Pass `--parent <this-task-id>` to
+`lf task create` when filing a child Task (or `lf task update <id> --parent
+<this-task-id>` to adopt an existing one); plain `lf task create` files
+top-level work. A notice arrives when a direct child stops at an interactive
+step, a run of it fails or stops, its PR merges, or it closes; steps passing
+inside its run send nothing. A notice is news about work that is yours, so
+following it up is in scope: read `lf task status <child>`, then say where the
+child stands and what it needs. Direction for a child goes to the child, with
+`lf steer <child> '<direction>'`.
 
 **Wait, don't poll.** Within a turn, `lf task wait <issue> --until submitted`
 (or `terminal`, with `--timeout`) waits for a change.

@@ -1,4 +1,5 @@
 //! Pi 1.3 RPC transport. Pi owns models, credentials and its JSONL conversation.
+use crate::harness::LaunchKind;
 use std::collections::HashMap;
 use std::io::BufRead;
 use std::path::{Path, PathBuf};
@@ -14,29 +15,22 @@ use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 
-use super::agent_process::AttachmentOwner;
-use super::fact::{Decoded, ProviderFact, ProviderTurn};
 use super::fact_writer::FactWriter;
-use super::pi_decode::Turn;
-use super::{Harness, HarnessError, SendCurrentOutcome};
+use super::Recording;
+use super::{Driver as StreamDriver, HarnessError};
 use crate::agent::AgentConfig;
 use crate::steer::NativeBoundary;
+use loopflow_harness::fact::{Decoded, ProviderFact, ProviderTurn};
+use loopflow_harness::pi_decode::{self, Turn};
 use loopflow_model::chat::types::{ConversationEvent, Lifecycle};
 use loopflow_model::id::AgentSessionId;
-
-#[derive(Debug)]
-struct Response {
-    value: Value,
-    // Snapshot in stream order: a later settlement cannot change the receipt.
-    turn: Option<String>,
-}
 
 #[derive(Debug, Default)]
 struct State {
     turn: Option<Turn>,
     /// Writes what this process's turns establish; present once started.
     writer: Option<FactWriter>,
-    responses: HashMap<String, oneshot::Sender<Response>>,
+    responses: HashMap<String, oneshot::Sender<Value>>,
     dead: bool,
 }
 
@@ -58,10 +52,12 @@ impl State {
 }
 
 #[derive(Debug)]
-pub struct PiHarness {
+pub struct Driver {
     events: mpsc::UnboundedSender<ConversationEvent>,
     state: Arc<Mutex<State>>,
-    owner: Option<AttachmentOwner>,
+    config: AgentConfig,
+    owner: Recording,
+    kind: LaunchKind,
     session: Option<AgentSessionId>,
     child: Option<Child>,
     stdin: Option<ChildStdin>,
@@ -94,7 +90,7 @@ pub(crate) fn validate_resume(token: &AgentSessionId) -> Result<PathBuf> {
 
 /// Pi arguments that reopen a recorded thread. A bare launch's id with no file
 /// yet never got a reply, so Pi starts it fresh under that id, as it would
-/// alone; a held launch's recorded file must still exist.
+/// alone. A managed launch's recorded file must still exist.
 pub(crate) fn resume_args(token: &AgentSessionId) -> Result<[String; 2]> {
     // An unfound bare id stays the relative token.
     if conversation_file(token).is_relative() {
@@ -106,7 +102,7 @@ pub(crate) fn resume_args(token: &AgentSessionId) -> Result<[String; 2]> {
     ])
 }
 
-/// The file holding a recorded Pi thread. A held launch records the file Pi
+/// The file holding a recorded Pi thread. A managed launch records the file Pi
 /// reports; a bare launch records the `--session-id` lf gave it, which Pi
 /// keeps as `<agent dir>/sessions/<cwd>/<time>_<id>.jsonl`.
 pub(crate) fn conversation_file(token: &AgentSessionId) -> PathBuf {
@@ -135,26 +131,30 @@ pub(crate) fn conversation_file(token: &AgentSessionId) -> PathBuf {
         .unwrap_or_else(|| path.to_owned())
 }
 
-pub fn options(config: &AgentConfig, context_file: Option<&Path>) -> Result<Vec<String>> {
-    anyhow::ensure!(config.write_scope != crate::agent::AgentWriteScope::Worktree || config.execution_boundary.is_some(), "Pi has no provider-only worktree sandbox; use a managed Task in an OS environment with the required boundary");
+pub fn options(config: &AgentConfig, context_file: Option<&Path>) -> Vec<String> {
     let mut args = Vec::new();
-    if let Some(model) = crate::config::parse_agent(config.agent()?).1 {
+    if let Some(model) = config.agent.model.clone() {
         args.extend(["--model".into(), model]);
     }
     if let Some(path) = context_file {
         args.extend(["--append-system-prompt".into(), path.display().to_string()]);
     }
     // Project trust is separate from tool permissions; retain the user's policy.
-    Ok(args)
+    args
 }
 
-impl PiHarness {
-    pub fn new(events: mpsc::UnboundedSender<ConversationEvent>) -> Self {
+impl Driver {
+    pub fn new(
+        launch: &super::Launch<'_>,
+        events: mpsc::UnboundedSender<ConversationEvent>,
+    ) -> Self {
         Self {
             events,
             state: Arc::default(),
-            owner: None,
-            session: None,
+            config: launch.config.clone(),
+            owner: launch.recording.clone(),
+            kind: launch.kind,
+            session: launch.start.thread(),
             child: None,
             stdin: None,
             reader: None,
@@ -163,14 +163,12 @@ impl PiHarness {
         }
     }
 
-    fn owner(&self) -> Result<AttachmentOwner> {
-        self.owner
-            .clone()
-            .ok_or_else(|| anyhow!("Pi has not started"))
-    }
-
     async fn write(&mut self, value: &Value) -> Result<()> {
-        let (store, session, attachment) = self.owner()?;
+        let Recording {
+            store,
+            session,
+            attachment,
+        } = self.owner.clone();
         let mut stdin = self
             .stdin
             .take()
@@ -188,7 +186,8 @@ impl PiHarness {
         Ok(())
     }
 
-    async fn request_observed(&mut self, mut value: Value) -> Result<Response> {
+    async fn request(&mut self, mut value: Value) -> Result<Value> {
+        let command = value["type"].as_str().unwrap_or("command").to_owned();
         let id = uuid::Uuid::new_v4().to_string();
         value["id"] = json!(id);
         let (tx, rx) = oneshot::channel();
@@ -210,12 +209,7 @@ impl PiHarness {
             .expect("Pi state lock poisoned")
             .responses
             .remove(&id);
-        result
-    }
-
-    async fn request(&mut self, value: Value) -> Result<Value> {
-        let command = value["type"].as_str().unwrap_or("command").to_owned();
-        let response = self.request_observed(value).await?.value;
+        let response = result?;
         anyhow::ensure!(
             response["success"] == true,
             "Pi {}: {}",
@@ -226,41 +220,39 @@ impl PiHarness {
     }
 
     async fn start_process(&mut self, config: &AgentConfig) -> Result<()> {
-        let owner = self.owner()?;
-        let resumed = self
-            .session
-            .as_ref()
-            .or(config.resume_token.as_ref())
-            .map(validate_resume)
-            .transpose()?;
+        let owner = self.owner.clone();
+        let resumed = self.session.as_ref().map(validate_resume).transpose()?;
         let context = crate::agent::write_system_prompt_file(config, "pi")?;
         let mut command = Command::new("pi");
         command
             .args(["--mode", "rpc"])
-            .args(options(config, context.as_deref())?);
+            .args(options(config, context.as_deref()));
         if let Some(file) = &resumed {
             command.arg("--session").arg(file);
         }
         command.args(super::context::pi_args(
             config.conversation_context.as_ref(),
             false,
-            config.holder,
+            self.kind,
         )?);
         super::configure_agent_env(&mut command, config);
         if let Some(context) = &config.conversation_context {
             context.configure_hooks(command.as_std_mut())?;
         }
         super::configure_vendor_std_env(command.as_std_mut())?;
-        if let Some(cwd) = &config.cwd {
-            command.current_dir(cwd);
-        }
         command
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-        let mut child = super::agent_process::spawn(command, None, &owner, config.holder)
-            .with_context(|| crate::agent::missing_agent_message("pi"))?;
-        let (store, session, attachment) = owner;
+        let mut child = super::agent_process::spawn(command, None, &owner, self.kind)
+            .with_context(|| {
+                crate::agent::missing_agent_message(loopflow_harness::HarnessKind::Pi)
+            })?;
+        let Recording {
+            store,
+            session,
+            attachment,
+        } = owner;
         self.state.lock().expect("Pi state lock poisoned").writer = Some(FactWriter::new(
             store,
             session,
@@ -280,9 +272,9 @@ impl PiHarness {
             .as_str()
             .filter(|f| Path::new(f).is_absolute())
             .ok_or_else(|| anyhow!("Pi did not report a persistent conversation file"))?;
-        if let Some(expected) = self.session.as_ref().or(config.resume_token.as_ref()) {
+        if let Some(expected) = &resumed {
             anyhow::ensure!(
-                file == expected.as_str(),
+                Path::new(file) == expected,
                 "Pi opened a different conversation than requested"
             );
         }
@@ -299,13 +291,18 @@ impl PiHarness {
         let events = self.events.clone();
         tokio::spawn(async move {
             let mut lines = BufReader::new(stdout).lines();
+            let mut code = "pi_disconnected";
             let outcome: Result<()> = async {
                 while let Some(line) = lines.next_line().await? {
-                    let value: Value = serde_json::from_str(&line).context("Invalid Pi RPC JSON")?;
+                    let value: Value =
+                        serde_json::from_str(&line).context("Invalid Pi RPC JSON")?;
                     let mut state = state.lock().expect("Pi state lock poisoned");
                     if value["type"] == "response" {
-                        if let Some(tx) = value["id"].as_str().and_then(|id| state.responses.remove(id)) {
-                            let _ = tx.send(Response { value, turn: state.turn.as_ref().map(|turn| turn.id().to_owned()) });
+                        if let Some(tx) = value["id"]
+                            .as_str()
+                            .and_then(|id| state.responses.remove(id))
+                        {
+                            let _ = tx.send(value);
                         }
                         continue;
                     }
@@ -317,16 +314,25 @@ impl PiHarness {
                     }
                     if value["type"] == "extension_ui_request" {
                         // A headless extension dialog requires a person; never silently answer it.
-                        if matches!(value["method"].as_str(), Some("select" | "confirm" | "input" | "editor")) {
-                            bail!("Pi extension requested interactive input; open this Session in Pi to answer it");
+                        if matches!(
+                            value["method"].as_str(),
+                            Some("select" | "confirm" | "input" | "editor")
+                        ) {
+                            let question = [&value["title"], &value["message"]]
+                                .iter()
+                                .filter_map(|text| text.as_str())
+                                .collect::<Vec<_>>()
+                                .join(" ");
+                            code = loopflow_model::chat::types::UNANSWERED_QUESTION;
+                            bail!(loopflow_harness::fact::unanswered_question("Pi", &question));
                         }
                     }
                     if let Some(turn) = state.turn.as_mut() {
                         let decoded = turn.event(&value);
                         let mapped = state.record(decoded)?;
-                        let complete = mapped.iter().any(|e| {
-                            matches!(e, ConversationEvent::TurnCompleted { .. })
-                        });
+                        let complete = mapped
+                            .iter()
+                            .any(|e| matches!(e, ConversationEvent::TurnCompleted { .. }));
                         for event in mapped {
                             let _ = events.send(event);
                         }
@@ -336,12 +342,23 @@ impl PiHarness {
                     }
                 }
                 bail!("Pi RPC stream closed")
-            }.await;
+            }
+            .await;
             let mut state = state.lock().expect("Pi state lock poisoned");
             state.dead = true;
             state.responses.clear();
+            // A signal ending lf takes Pi with it: that turn was interrupted.
+            let interrupted = crate::agent::interrupted();
+            let message = outcome
+                .expect_err("Pi reader returns only after an error or EOF")
+                .to_string();
             if let Some(mut turn) = state.turn.take() {
-                let decoded = turn.finish(Lifecycle::Failed);
+                let decoded = if interrupted {
+                    turn.finish(Lifecycle::Interrupted, None)
+                } else {
+                    let error = loopflow_model::chat::types::turn_error(code, &message);
+                    turn.finish(Lifecycle::Failed, Some(error))
+                };
                 let mapped = display(&decoded);
                 if let Err(error) = state.record(decoded) {
                     tracing::warn!(%error, "could not retain Pi failure");
@@ -350,11 +367,12 @@ impl PiHarness {
                     let _ = events.send(event);
                 }
             }
+            if interrupted {
+                return;
+            }
             let _ = events.send(ConversationEvent::Error {
-                code: "pi_disconnected".into(),
-                message: outcome
-                    .expect_err("Pi reader returns only after an error or EOF")
-                    .to_string(),
+                code: code.into(),
+                message,
                 evidence: None,
             });
         })
@@ -362,10 +380,7 @@ impl PiHarness {
 }
 
 #[async_trait]
-impl Harness for PiHarness {
-    fn set_agent_session(&mut self, session: Option<AgentSessionId>) {
-        self.session = session;
-    }
+impl StreamDriver for Driver {
     fn agent_session(&self) -> Option<AgentSessionId> {
         self.session.clone()
     }
@@ -376,12 +391,11 @@ impl Harness for PiHarness {
         self.pid()
     }
 
-    async fn start(&mut self, config: &AgentConfig) -> Result<()> {
-        self.owner = Some(super::agent_process::open_owner(
-            config.session_attachment.as_ref(),
-        )?);
+    async fn start(&mut self) -> Result<()> {
+        let config = self.config.clone();
+        let config = &config;
         self.seed = Some(match &config.skill_invocation {
-            Some(skill) => skill.terminal_input("pi", config)?.1,
+            Some(skill) => skill.terminal_input(&loopflow_harness::Pi, config)?.1,
             None => config.task_prompt.clone(),
         });
         if let Err(error) = self.start_process(config).await {
@@ -440,7 +454,7 @@ impl Harness for PiHarness {
             let mapped = {
                 let mut state = self.state.lock().expect("Pi state lock poisoned");
                 match state.turn.take() {
-                    Some(mut turn) => state.record(turn.finish(Lifecycle::Failed))?,
+                    Some(mut turn) => state.record(turn.finish(Lifecycle::Failed, None))?,
                     None => Vec::new(),
                 }
             };
@@ -452,62 +466,6 @@ impl Harness for PiHarness {
         Ok(())
     }
 
-    async fn send_current(&mut self, content: &str) -> SendCurrentOutcome {
-        if content.trim().is_empty() {
-            return SendCurrentOutcome::Failed {
-                error: "steer input is empty".into(),
-            };
-        }
-        let turn = self
-            .state
-            .lock()
-            .expect("Pi state lock poisoned")
-            .turn
-            .as_ref()
-            .map(|turn| turn.id().to_owned());
-        let Some(turn) = turn else {
-            return SendCurrentOutcome::NotSteerable;
-        };
-        if let Err(error) = self.owner() {
-            return SendCurrentOutcome::Failed {
-                error: error.to_string(),
-            };
-        }
-        // Pi owns the queue. An acknowledgment proves acceptance, not incorporation.
-        // Missing responses and a settlement racing the acknowledgment are uncertain.
-        match self
-            .request_observed(json!({"type":"steer", "message":content}))
-            .await
-        {
-            Ok(response) if response.value["success"] == false => SendCurrentOutcome::Failed {
-                error: response.value["error"]
-                    .as_str()
-                    .unwrap_or("Pi rejected steering")
-                    .into(),
-            },
-            Ok(response)
-                if response.value["success"] == true
-                    && response.value["data"]["disposition"] == "queued"
-                    && response.turn.as_deref() == Some(&turn) =>
-            {
-                SendCurrentOutcome::Sent {
-                    provider_turn_id: turn,
-                }
-            }
-            Ok(response) => SendCurrentOutcome::Unknown {
-                provider_turn_id: Some(turn),
-                error: format!(
-                    "Pi steer did not confirm queuing during the active turn (disposition: {})",
-                    response.value["data"]["disposition"]
-                ),
-            },
-            Err(error) => SendCurrentOutcome::Unknown {
-                provider_turn_id: Some(turn),
-                error: error.to_string(),
-            },
-        }
-    }
-
     async fn interrupt(&mut self) -> Result<()> {
         self.request(json!({"type":"clear_queue"})).await?;
         self.request(json!({"type":"abort"})).await?;
@@ -517,7 +475,7 @@ impl Harness for PiHarness {
     async fn stop(&mut self) -> Result<()> {
         if self.child.is_some() {
             // Use the shared attachment-fenced process-group teardown.
-            super::agent_process::stop(&self.owner()?)?;
+            super::agent_process::stop(&self.owner.clone())?;
             self.stdin = None;
             // Shared teardown already reaps the group leader.
             self.child = None;
@@ -607,9 +565,171 @@ pub fn observe_native(
             .map_err(|e| crate::store::StoreError::InvalidData(e.to_string()))?;
             return Ok(());
         }
-        let decoded = super::pi_decode::native(&thread, value)
+        let decoded = pi_decode::native(&thread, value)
             .map_err(|e| crate::store::StoreError::InvalidData(e.to_string()))?;
         writer.record(&decoded)
     })?;
     Ok(())
+}
+
+impl super::Launcher for loopflow_harness::Pi {
+    fn recognizes(&self, process: &crate::process::OsProcess) -> bool {
+        process.command == "node"
+            && crate::process::OsProcess::arguments(process.pid)
+                .ok()
+                .flatten()
+                .is_some_and(|args| runs_pi(&args))
+    }
+    fn locate_transcript(
+        &self,
+        _store: &loopflow_storage::sqlite::SqliteStore,
+        id: &AgentSessionId,
+        _cwd: &Path,
+    ) -> Result<crate::transcript::Located> {
+        let path = conversation_file(id);
+        Ok(if path.is_file() {
+            crate::transcript::Located::Found {
+                source: loopflow_harness::transcript::Source::File(path),
+                home: None,
+            }
+        } else {
+            crate::transcript::Located::Gone(crate::transcript::Gap::FileMissing {
+                home: path.parent().map(Path::to_path_buf).unwrap_or_default(),
+            })
+        })
+    }
+    fn transcript_retention(
+        &self,
+        thread: &AgentSessionId,
+    ) -> (crate::transcript::RetentionState, Option<i64>) {
+        match loopflow_harness::transcript::modified(thread.as_str().as_ref()) {
+            Some(at) => (crate::transcript::RetentionState::Provider, Some(at)),
+            None => (crate::transcript::RetentionState::Facts, None),
+        }
+    }
+    fn recent_transcripts(
+        &self,
+        home: &Path,
+        cwd: &Path,
+        since: i64,
+        owned: &std::collections::HashSet<&str>,
+    ) -> Vec<(String, loopflow_harness::transcript::Source, i64)> {
+        let name = cwd
+            .to_string_lossy()
+            .trim_start_matches('/')
+            .replace('/', "-");
+        crate::transcript::raw::unowned(
+            crate::transcript::raw::in_directory(
+                &home.join("sessions").join(format!("--{name}--")),
+                |path| Some(path.to_str()?.to_owned()),
+            )
+            .into_iter()
+            .filter(|(_, path, at)| {
+                *at >= since
+                    && loopflow_harness::transcript::recorded_cwd(path).as_deref() == Some(cwd)
+            })
+            .map(|(id, path, at)| (id, loopflow_harness::transcript::Source::File(path), at))
+            .collect(),
+            owned,
+        )
+    }
+    fn classify_failure(&self, code: &str, message: &str) -> Option<crate::agent::AgentFailure> {
+        // Pi retries a transient failure itself.
+        crate::agent::routing_failure(code, message)
+    }
+    fn capabilities(&self) -> super::Capabilities {
+        super::Capabilities {
+            thread: super::ThreadNaming {
+                bare: super::ThreadName::Assigned,
+                managed: super::ThreadName::Reported,
+            },
+            initial_prompt_on_resume: false,
+            native_skills: None,
+            installed_skills: super::InstalledSkills {
+                global: ".agents/skills",
+                repository: ".agents/skills",
+                global_registry: None,
+            },
+            turn_limit: false,
+            output_schema: false,
+            respawns_after_crash: false,
+            install_hint: concat!(
+                "Install Pi 1.3 or later with ",
+                "`npm install -g --ignore-scripts @earendil-works/pi-coding-agent`. ",
+                "Configure its model and credentials in Pi.",
+            ),
+        }
+    }
+    fn driver(
+        &self,
+        launch: &super::Launch<'_>,
+        events: mpsc::UnboundedSender<ConversationEvent>,
+        _approval: super::ApprovalPolicy,
+    ) -> Box<dyn super::Driver> {
+        Box::new(Driver::new(launch, events))
+    }
+
+    fn open(&self, launch: &super::Launch<'_>) -> Result<super::native_session::NativeClient> {
+        let mut client = super::native_session::NativeClient::new(launch)?;
+        let (mut args, input) = launch.terminal_input()?;
+        args.extend(options(launch.config, launch.context_file));
+        match launch.start {
+            super::Start::Resume { thread } => args.extend(resume_args(thread)?),
+            super::Start::New => {
+                if let Some(thread) = &client.thread {
+                    args.extend(["--session-id".into(), thread.to_string()]);
+                }
+            }
+        }
+        if let Some(input) = input.filter(|input| !input.is_empty()) {
+            crate::agent::validate_terminal_turn(&input)?;
+            args.extend(["--".into(), input]);
+        }
+        if let Some(context) = &launch.config.conversation_context {
+            context.configure_hooks(&mut client.process)?;
+        }
+        client
+            .process
+            .args(super::context::pi_args(
+                launch.config.conversation_context.as_ref(),
+                true,
+                launch.kind,
+            )?)
+            .args(args);
+        Ok(client)
+    }
+}
+
+fn runs_pi(arguments: &[String]) -> bool {
+    if arguments.first().is_some_and(|title| title == "pi") {
+        return true;
+    }
+    let Some(script) = arguments.get(1).map(Path::new) else {
+        return false;
+    };
+    script.file_name().is_some_and(|name| name == "pi")
+        || script.components().any(|part| {
+            part.as_os_str()
+                .to_string_lossy()
+                .ends_with("pi-coding-agent")
+        })
+}
+
+#[cfg(test)]
+mod recognition_tests {
+    use super::runs_pi;
+    #[test]
+    fn pi_is_its_title_or_the_node_script_its_package_installs() {
+        let pi = |arguments: &[&str]| {
+            runs_pi(&arguments.iter().map(|a| a.to_string()).collect::<Vec<_>>())
+        };
+        assert!(pi(&["pi"]), "Pi's own process title");
+        assert!(pi(&["node", "/Users/me/.nvm/versions/node/v24/bin/pi"]));
+        assert!(pi(&[
+            "node",
+            "/usr/lib/node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js"
+        ]));
+        assert!(!pi(&["node", "/usr/lib/node_modules/vite/bin/vite.js"]));
+        assert!(!pi(&["pi-rpc"]), "lf launches Pi under RPC");
+    }
 }

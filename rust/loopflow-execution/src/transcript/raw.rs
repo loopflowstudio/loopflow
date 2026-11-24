@@ -6,13 +6,13 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-use super::Source;
-use crate::harness::HarnessKind;
-use crate::journal::OsProcess;
+use crate::process::OsProcess;
+use loopflow_harness::transcript::Source;
+use loopflow_harness::HarnessKind;
 
-/// A transcript written this long before its process started still counts:
+/// A transcript or owner file this far from its process start still counts:
 /// clocks and first writes are coarse.
-const START_SLACK: i64 = 60;
+pub(crate) const START_SLACK: i64 = 60;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RawConversation {
@@ -98,11 +98,21 @@ pub fn discover() -> Vec<RawDirectory> {
         .iter()
         .map(|process| (process.pid, process))
         .collect::<HashMap<_, _>>();
-    let owners = claude_owners(&super::home(HarnessKind::Claude), &by_pid);
-    let owned = owners.values().map(String::as_str).collect::<HashSet<_>>();
+    let owners = HarnessKind::ALL
+        .into_iter()
+        .map(|kind| {
+            (
+                kind,
+                crate::harness::launcher(kind)
+                    .conversation_owners(&kind.harness().transcript_home(), &by_pid),
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
     let mut found = Vec::new();
     for ((harness, cwd), open) in open(&processes, &by_pid) {
-        let home = super::home(harness);
+        let home = harness.harness().transcript_home();
+        let owners = &owners[&harness];
+        let owned = owners.values().map(String::as_str).collect::<HashSet<_>>();
         let mut named = Vec::new();
         let mut unnamed = Vec::new();
         for (pid, started) in open {
@@ -110,9 +120,11 @@ pub fn discover() -> Vec<RawDirectory> {
                 unnamed.push(started);
                 continue;
             };
-            let transcript = super::live::claude_project(&home, &cwd).join(format!("{id}.jsonl"));
-            // Claude writes no transcript before the first message.
-            if transcript.is_file() {
+            if let Some(transcript) = harness
+                .harness()
+                .direct_transcript(&home, &cwd, id)
+                .filter(|path| path.is_file())
+            {
                 named.push((id.clone(), Source::File(transcript)));
             }
         }
@@ -155,79 +167,14 @@ fn open(
     open
 }
 
-/// The conversation each live Claude process has open, from the
-/// `sessions/<pid>.json` Claude keeps in its home and rewrites when `/clear`
-/// or `/resume` changes it. Claude versions before 2.1.318 may keep none.
-fn claude_owners(home: &Path, by_pid: &HashMap<u32, &OsProcess>) -> HashMap<u32, String> {
-    #[derive(serde::Deserialize)]
-    #[serde(rename_all = "camelCase")]
-    struct Owner {
-        pid: u32,
-        session_id: String,
-        /// Milliseconds.
-        started_at: i64,
-    }
-    std::fs::read_dir(home.join("sessions"))
-        .into_iter()
-        .flatten()
-        .flatten()
-        .filter_map(|entry| {
-            let path = entry.path();
-            if path.extension()? != "json" {
-                return None;
-            }
-            let owner: Owner = serde_json::from_slice(&std::fs::read(&path).ok()?).ok()?;
-            let process = by_pid.get(&owner.pid)?;
-            // A file left by an exited process names whoever reused its pid.
-            ((owner.started_at / 1000 - process.started_at).abs() <= START_SLACK)
-                .then_some((owner.pid, owner.session_id))
-        })
-        .collect()
-}
-
 /// The provider a process runs. Claude's installer links `claude` to
 /// `…/claude/versions/<version>`, so the kernel names that process by its
 /// version and only its executable says what it is. Pi is a Node script the
 /// kernel names `node`; its arguments say it is Pi.
 fn provider(process: &OsProcess) -> Option<HarnessKind> {
-    match process.command.as_str() {
-        "claude" => return Some(HarnessKind::Claude),
-        "codex" => return Some(HarnessKind::Codex),
-        "opencode" => return Some(HarnessKind::OpenCode),
-        "node" => {
-            let arguments = OsProcess::arguments(process.pid).ok()??;
-            return runs_pi(&arguments).then_some(HarnessKind::Pi);
-        }
-        name if !is_version(name) => return None,
-        _ => {}
-    }
-    let executable = OsProcess::executable(process.pid)?;
-    let versions = executable.parent()?;
-    (versions.file_name()? == "versions" && versions.parent()?.file_name()? == "claude")
-        .then_some(HarnessKind::Claude)
-}
-
-/// Whether a Node process's arguments are Pi's. Pi titles its process `pi`
-/// once it starts, which overwrites its arguments with that one word; before
-/// then the script is its `pi` link or the CLI of the `pi-coding-agent`
-/// package.
-fn runs_pi(arguments: &[String]) -> bool {
-    if arguments.first().is_some_and(|title| title == "pi") {
-        return true;
-    }
-    let Some(script) = arguments.get(1).map(Path::new) else {
-        return false;
-    };
-    script.file_name().is_some_and(|name| name == "pi")
-        || script.components().any(|part| {
-            part.as_os_str()
-                .to_string_lossy()
-                .ends_with("pi-coding-agent")
-        })
-}
-
-fn is_version(name: &str) -> bool {
-    name.contains('.') && name.chars().all(|c| c.is_ascii_digit() || c == '.')
+    HarnessKind::ALL
+        .into_iter()
+        .find(|kind| crate::harness::launcher(*kind).recognizes(process))
 }
 
 /// Loopflow's own launches run under `lf` or a staged copy (`lf-<digest>`,
@@ -266,59 +213,25 @@ fn written(
     since: i64,
     owned: &HashSet<&str>,
 ) -> Vec<Written> {
-    if harness == HarnessKind::OpenCode {
-        let store = super::opencode::store(home);
-        return super::opencode::written_in(&store, cwd, since)
-            .into_iter()
-            .map(|(id, at)| Written {
-                source: Source::OpenCode {
-                    store: store.clone(),
-                    id: id.clone(),
-                },
-                id,
-                at,
-            })
-            .collect();
-    }
-    let mut candidates = match harness {
-        HarnessKind::Claude => in_directory(&super::live::claude_project(home, cwd), |path| {
-            Some(path.file_stem()?.to_str()?.to_owned())
-        }),
-        // Pi's conversation id is its absolute session file.
-        HarnessKind::Pi => in_directory(&pi_directory(home, cwd), |path| {
-            Some(path.to_str()?.to_owned())
-        }),
-        _ => super::scan(harness, home)
-            .into_iter()
-            .map(|(id, indexed)| (id, indexed.path, indexed.modified))
-            .collect(),
-    };
-    candidates.retain(|(id, _, modified)| *modified >= since && !owned.contains(id.as_str()));
-    candidates.sort_by_key(|candidate| std::cmp::Reverse(candidate.2));
-    candidates
+    crate::harness::launcher(harness)
+        .recent_transcripts(home, cwd, since, owned)
         .into_iter()
-        .filter(|(_, path, _)| {
-            harness == HarnessKind::Claude || super::recorded_cwd(path).as_deref() == Some(cwd)
-        })
-        .map(|(id, path, at)| Written {
-            id,
-            source: Source::File(path),
-            at,
-        })
+        .map(|(id, source, at)| Written { id, source, at })
         .collect()
 }
 
-/// Pi keeps a directory's conversations under its path, `/` replaced by `-`
-/// and wrapped in `--`.
-fn pi_directory(home: &Path, cwd: &Path) -> PathBuf {
-    let path = cwd.to_string_lossy();
-    let name = path.trim_start_matches('/').replace('/', "-");
-    home.join("sessions").join(format!("--{name}--"))
+pub(crate) fn unowned(
+    mut candidates: Vec<(String, Source, i64)>,
+    owned: &HashSet<&str>,
+) -> Vec<(String, Source, i64)> {
+    candidates.retain(|(id, _, _)| !owned.contains(id.as_str()));
+    candidates.sort_by_key(|candidate| std::cmp::Reverse(candidate.2));
+    candidates
 }
 
 /// The `.jsonl` files in `directory`, with the conversation `id` names and
 /// when each was last written.
-fn in_directory(
+pub(crate) fn in_directory(
     directory: &Path,
     id: impl Fn(&Path) -> Option<String>,
 ) -> Vec<(String, PathBuf, i64)> {
@@ -331,7 +244,7 @@ fn in_directory(
             if path.extension()? != "jsonl" {
                 return None;
             }
-            let modified = super::modified(&path)?;
+            let modified = loopflow_harness::transcript::modified(&path)?;
             Some((id(&path)?, path, modified))
         })
         .collect()
@@ -354,8 +267,6 @@ mod tests {
 
     #[test]
     fn versions_name_claude_only_by_its_executable() {
-        assert!(is_version("2.1.322"));
-        assert!(!is_version("claude") && !is_version("2") && !is_version("v2.1"));
         let mut process = process(std::process::id(), 1, "2.1.322");
         assert_eq!(provider(&process), None, "this test is not Claude");
         process.command = "codex".into();
@@ -394,26 +305,10 @@ mod tests {
     }
 
     #[test]
-    fn pi_is_its_title_or_the_node_script_its_package_installs() {
-        let pi = |arguments: &[&str]| {
-            runs_pi(&arguments.iter().map(|a| a.to_string()).collect::<Vec<_>>())
-        };
-        assert!(pi(&["pi"]), "Pi's own process title");
-        assert!(pi(&["node", "/Users/me/.nvm/versions/node/v24/bin/pi"]));
-        assert!(pi(&[
-            "node",
-            "/usr/lib/node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js"
-        ]));
-        assert!(!pi(&["node", "/usr/lib/node_modules/vite/bin/vite.js"]));
-        assert!(!pi(&["pi-rpc"]), "lf launches Pi under RPC");
-    }
-
-    #[test]
     fn a_pi_process_takes_the_newest_session_file_of_its_directory() {
         let home = tempfile::tempdir().unwrap();
         let cwd = Path::new("/work/my.app");
         let directory = home.path().join("sessions/--work-my.app--");
-        assert_eq!(pi_directory(home.path(), cwd), directory);
         std::fs::create_dir_all(&directory).unwrap();
         let file = directory.join("2026-11-11T11-00-01-513Z_01a1ca43.jsonl");
         std::fs::write(&file, "{\"type\":\"session\",\"cwd\":\"/work/my.app\"}\n").unwrap();
@@ -567,7 +462,7 @@ mod tests {
         reused.started_at = 1_794_393_000;
         let by_pid = HashMap::from([(7, &live), (8, &reused)]);
         assert_eq!(
-            claude_owners(home.path(), &by_pid),
+            crate::harness::launcher(HarnessKind::Claude).conversation_owners(home.path(), &by_pid),
             HashMap::from([(7, "b307f698".to_owned())])
         );
     }

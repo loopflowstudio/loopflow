@@ -19,7 +19,7 @@ use loopflow_storage::rows::unix_to_datetime;
 use loopflow_storage::work::task::PrPhase;
 
 /// One Task. Wire type; no defaults.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TaskRow {
     pub id: String,
     pub identifier: String,
@@ -28,6 +28,9 @@ pub struct TaskRow {
     pub wave: Option<String>,
     /// Its Project's name; `null` outside any Project.
     pub project: Option<String>,
+    /// The `id` of the Task this one was filed from; `null` for top-level work.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub parent_id: Option<String>,
     pub state: TaskState,
     /// Why it is in that state, or what it waits on.
     pub reason: String,
@@ -38,14 +41,14 @@ pub struct TaskRow {
     pub next: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TaskRowGraph {
     pub name: String,
     /// The step it stands at (`start`, `end` or an interactive step); `null` while a run carries it.
     pub step: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TaskRowPr {
     pub number: u32,
     pub url: String,
@@ -59,18 +62,67 @@ pub struct TaskDetail {
     pub task: TaskRow,
     /// As `lf session list` lists them, joined by `id`.
     pub sessions: Vec<SessionFacts>,
+    /// Which of `sessions` is the Task's conversation, the one the server
+    /// starts again when it dies; `null` before the Task has one.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub conversation: Option<loopflow_model::id::LfSessionId>,
+    /// The Graph the Task took up and where it stands on it, as the workflow
+    /// line reads it; `null` before it takes one up.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub graph: Option<loopflow_execution::task_graph::TaskGraph>,
     pub graph_processes: Vec<TaskGraphRow>,
     pub comments: Option<TaskThread>,
     /// What the Task's run came to, written when it completed or was
     /// abandoned; `null` while it never has.
     #[serde(deserialize_with = "Option::deserialize")]
     pub summary: Option<loopflow_storage::sqlite::task_summaries::TaskSummary>,
+    /// The Task's auto setting: on or off, and who set it when; `null`
+    /// when nobody has.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub auto: Option<loopflow_storage::sqlite::Auto>,
+    /// The Task this one is stacked on; `null` when it builds on the default branch.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub stack_parent: Option<loopflow_execution::ops::task::TaskStackParent>,
+    /// The Task this one was filed from; `null` for top-level work.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub parent: Option<TaskRow>,
+    /// The Tasks filed from this one, in filing order.
+    pub children: Vec<TaskRow>,
 }
 
-/// One of the Task's Graph processes; `lf graph show <id> --processes` draws it.
+impl TaskRow {
+    /// Where the Task stands, in a few words: "idle at ship-review · #12 open".
+    pub fn standing(&self) -> String {
+        let state = self.state.label();
+        let open = !matches!(self.state, TaskState::Done | TaskState::Abandoned);
+        let mut standing = match self.graph.as_ref().and_then(|graph| graph.step.as_deref()) {
+            Some(step) if open => format!("{state} at {step}"),
+            _ => state.to_owned(),
+        };
+        if let Some(pr) = self.pr.as_ref().filter(|_| open) {
+            standing.push_str(&format!(" · #{} {}", pr.number, pr.phase.as_str()));
+        }
+        standing
+    }
+}
+
+/// What `lf task status` adds to a Task's state line: " · auto: on by Maya, Nov 18 09:04".
+pub fn auto_phrase(auto: &loopflow_storage::sqlite::Auto) -> String {
+    use loopflow_storage::process::Starter;
+    // A mark an earlier lf wrote may name nobody.
+    let by = match &auto.by {
+        Starter::Person { name: None } => String::new(),
+        by => format!(" by {by}"),
+    };
+    let state = auto.state.as_str();
+    let at = loopflow_execution::output::format_time(auto.at);
+    format!(" · auto: {state}{by}, {at}")
+}
+
+/// One of the Task's Graph runs; `lf graph show <id>` draws it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskGraphRow {
-    /// The Graph process.
+    /// The Graph run.
     pub id: String,
     pub name: String,
     pub state: GraphProcessSummaryState,
@@ -162,11 +214,9 @@ impl TaskNames {
             id: summary.id,
             identifier: summary.identifier,
             title: summary.name,
+            parent_id: summary.parent_id,
             state,
-            // An approved Task waits on its ship, whatever its next move says.
-            reason: task
-                .shipping
-                .map_or(task.next_move.reason, |shipping| shipping.reason),
+            reason: task.conducting.unwrap_or(task.next_move.reason),
             graph: task.graph_name.map(|name| TaskRowGraph {
                 name,
                 step: task.step,
@@ -187,14 +237,11 @@ impl TaskNames {
 fn next_command(task: &RoadmapTask) -> Option<String> {
     let id = &task.task.identifier;
     match task.lifecycle {
-        TaskState::Done | TaskState::Abandoned | TaskState::Moving | TaskState::Shipping => None,
-        _ if task
-            .pr
-            .as_ref()
-            .is_some_and(|pr| pr.phase == PrPhase::Merged) =>
-        {
-            Some(format!("lf task complete {id}"))
-        }
+        TaskState::Done | TaskState::Abandoned | TaskState::Moving => None,
+        _ if task.finished.is_some() => task
+            .conducting
+            .is_none()
+            .then(|| format!("lf task complete {id}")),
         _ if task.run_control.unavailable.is_none() => Some(format!("lf task run {id}")),
         _ => None,
     }

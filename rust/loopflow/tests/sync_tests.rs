@@ -835,9 +835,26 @@ fn stacked_child_merges_main_after_parent_squash() {
     );
 }
 
+/// How a Task stacked on a PR that closed unmerged is placed again.
+#[derive(Clone, Copy, Debug)]
+enum Replacement {
+    /// `lf checkout --stack-on`, with or without a successor PR row.
+    Checkout { successor: bool },
+    /// `lf sync` with these arguments follows the parent to its successor #43.
+    Sync(&'static [&'static str]),
+    /// No successor: bare sync names both commands, `lf sync main` detaches.
+    Detach,
+}
+
 #[test]
 fn stacking_retry_replaces_an_abandoned_parent_and_syncs() {
-    for live_parent in [false, true] {
+    for case in [
+        Replacement::Checkout { successor: false },
+        Replacement::Checkout { successor: true },
+        Replacement::Sync(&["sync"]),
+        Replacement::Sync(&["sync", "INF-123"]),
+        Replacement::Detach,
+    ] {
         let home = tempfile::TempDir::new().unwrap();
         let repo = TestRepo::new();
         let _env = EnvGuard::with_lf_home(&[], home.path());
@@ -858,61 +875,101 @@ fn stacking_retry_replaces_an_abandoned_parent_and_syncs() {
         runtime
             .block_on(parent.store.update_task_pr(&closed))
             .unwrap();
-        assert!(task_stack(&child_path)
-            .unwrap_err()
-            .to_string()
-            .contains("closed without merging"));
         let closed = runtime
             .block_on(parent.store.get_task_pr(&closed.id))
             .unwrap()
             .unwrap();
-        let live = if live_parent {
+        let successor = |github: Option<GithubPr>| {
             let mut next = closed.clone();
             next.id = loopflow_execution::work::task::TaskPrId::new();
             next.sequence += 1;
-            next.publication = None;
+            next.publication = github.map(|github| PrPublication {
+                requested_at: next.created_at,
+                presentation: None,
+                github: Some(github),
+                merge: None,
+            });
             next.abandoned_at = None;
             runtime
                 .block_on(parent.store.insert_task_pr(&next))
                 .unwrap();
-            Some(next.id)
-        } else {
-            None
+            next.id
         };
 
-        let output = lf(
-            &child_path,
-            &["checkout", "INF-124", "--stack-on", "INF-123"],
-        );
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        assert!(stderr.contains("pushed INF-123's branch"), "{stderr}");
-        assert!(
-            stderr.contains("This Task's checkout and PR are unchanged"),
-            "{stderr}"
-        );
-        let selected = runtime
-            .block_on(parent.store.active_task_pr(&parent.task.id))
-            .unwrap()
-            .unwrap();
-        assert_ne!(selected.id, closed.id);
-        assert_eq!(selected.sequence, closed.sequence + 1);
-        if let Some(live) = live {
-            assert_eq!(selected.id, live);
+        match case {
+            Replacement::Checkout { successor: live } => {
+                let live = live.then(|| successor(None));
+                let output = lf(
+                    &child_path,
+                    &["checkout", "INF-124", "--stack-on", "INF-123"],
+                );
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                assert!(stderr.contains("pushed INF-123's branch"), "{stderr}");
+                assert!(stderr.contains("Stacked INF-124 on INF-123"), "{stderr}");
+                let selected = runtime
+                    .block_on(parent.store.active_task_pr(&parent.task.id))
+                    .unwrap()
+                    .unwrap();
+                assert_ne!(selected.id, closed.id);
+                assert_eq!(selected.sequence, closed.sequence + 1);
+                if let Some(live) = live {
+                    assert_eq!(selected.id, live);
+                }
+                let stacked = task_stack(&child_path)
+                    .unwrap()
+                    .expect("retry restores a live stack");
+                assert_eq!(stacked.child.parent_pr_id, Some(selected.id));
+                lf(&child_path, &["sync"]);
+            }
+            Replacement::Sync(args) => {
+                git(&parent_path, &["push", "origin", "parent"]);
+                let next = successor(Some(GithubPr {
+                    number: 43,
+                    url: "https://github.com/fixture/repo/pull/43".into(),
+                    head_sha: Some(parent_tip.clone()),
+                }));
+                lf(&child_path, args);
+                let child = runtime
+                    .block_on(parent.store.get_task(&child.id))
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(child.parent_pr_id, Some(next), "{args:?}");
+                let output = lf(&child_path, &["task", "status", "INF-124", "--json"]);
+                let status: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+                assert_eq!(status["stack_parent"]["pr_number"], 43, "{status}");
+            }
+            Replacement::Detach => {
+                let output = Command::new(env!("CARGO_BIN_EXE_lf"))
+                    .arg("sync")
+                    .current_dir(&child_path)
+                    .stdin(std::process::Stdio::null())
+                    .output()
+                    .unwrap();
+                assert!(!output.status.success());
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                assert!(
+                    stderr.contains(
+                        "stack parent INF-123's PR #41 closed without merging; `lf sync INF-123` restacks this Task on its branch, `lf sync main` detaches it"
+                    ),
+                    "{stderr}"
+                );
+                lf(&child_path, &["sync", "main"]);
+                assert!(task_stack(&child_path).unwrap().is_none());
+                assert!(!child_path.join("parent.txt").exists());
+                continue;
+            }
         }
         assert_eq!(
             runtime
                 .block_on(parent.store.get_task_pr(&closed.id))
                 .unwrap(),
-            Some(closed)
+            Some(closed),
+            "{case:?}"
         );
-        let stacked = task_stack(&child_path)
-            .unwrap()
-            .expect("retry restores a live stack");
-        assert_eq!(stacked.child.parent_pr_id, Some(selected.id));
-        lf(&child_path, &["sync"]);
         assert_eq!(
             std::fs::read_to_string(child_path.join("parent.txt")).unwrap(),
-            "parent work\n"
+            "parent work\n",
+            "{case:?}"
         );
     }
 }
@@ -939,7 +996,7 @@ fn stacking_on_a_different_parent_keeps_inherited_files_on_sync() {
         .block_on(parent.store.sync_task_placement(
             &child.id,
             &parent_tip,
-            false,
+            None,
             time::OffsetDateTime::now_utc(),
         ))
         .unwrap();
@@ -959,7 +1016,7 @@ fn stacking_on_a_different_parent_keeps_inherited_files_on_sync() {
         );
         let stacked = task_stack(&child_path).unwrap().unwrap();
         assert_eq!(stacked.fork_base, main);
-        assert_eq!(stacked.parent_branch.as_deref(), Some("next"));
+        assert_eq!(stacked.live_parent_branch("main").unwrap(), Some("next"));
     }
     assert_eq!(git(&child_path, &["rev-parse", "HEAD"]), original_head);
 
@@ -1012,7 +1069,7 @@ fn stacking_on_an_unpushed_parent_pushes_its_branch_and_sync_follows_it() {
         .unwrap();
     assert_eq!(child.parent_pr_id, Some(parent_pr.id));
     let stacked = task_stack(&child_path).unwrap().expect("child is stacked");
-    assert_eq!(stacked.parent_branch.as_deref(), Some("parent"));
+    assert_eq!(stacked.live_parent_branch("main").unwrap(), Some("parent"));
     let output = lf(&child_path, &["sync", "--plan"]);
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("base: origin/parent\n"), "{stdout}");
@@ -1054,7 +1111,7 @@ fn stacked_child_targets_main_after_merged_parent_checkout_is_removed() {
     let stacked = task_stack(&child_path)
         .expect("stack resolves without the parent checkout")
         .expect("child is stacked");
-    assert_eq!(stacked.parent_branch, None);
+    assert_eq!(stacked.live_parent_branch("main").unwrap(), None);
     let output = Command::new(env!("CARGO_BIN_EXE_lf"))
         .args(["sync", "--plan"])
         .current_dir(&child_path)
@@ -1115,7 +1172,7 @@ esac
                 .block_on(parent.store.sync_task_placement(
                     &child.id,
                     "0000000000000000000000000000000000000001",
-                    false,
+                    Some(&parent.pr.id),
                     time::OffsetDateTime::now_utc(),
                 ))
                 .unwrap();
@@ -2618,4 +2675,193 @@ for line in sys.stdin:
             content
         );
     }
+}
+
+/// A `gh` whose one open PR, #42, keeps its base in `$LF_HOME/pr-base` and
+/// logs every call to `$LF_HOME/gh.log`.
+const GH_PR_42: &str = r#"#!/bin/sh
+test "$1" = "--version" && exit 0
+echo "$@" >> "$LF_HOME/gh.log"
+base=$(cat "$LF_HOME/pr-base" 2>/dev/null || echo main)
+head=$(git rev-parse HEAD)
+case "$1 $2" in
+  'pr list')
+    case "$*" in *merged*) echo '[]' ;; *)
+      printf '[{"number":42,"url":"https://github.com/fixture/repo/pull/42","state":"OPEN","isDraft":false,"headRefOid":"%s","baseRefName":"%s"}]\n' "$head" "$base" ;;
+    esac ;;
+  'pr edit')
+    case "$*" in *--base*) printf '%s' "${5}" > "$LF_HOME/pr-base" ;; esac ;;
+  'pr view') echo 'https://github.com/fixture/repo/pull/42' ;;
+  *) exit 1 ;;
+esac
+"#;
+
+/// Parent Task INF-123 on pushed branch `parent`, and unstacked child INF-124 on
+/// pushed branch `child` with its own open PR #42.
+fn parent_and_published_child(
+    repo: &TestRepo,
+    home: &std::path::Path,
+) -> (
+    support::RegisteredTask,
+    std::path::PathBuf,
+    Task,
+    std::path::PathBuf,
+) {
+    let main = repo.head_sha();
+    let parent_path = repo.create_named_worktree("parent");
+    commit_file(&parent_path, "parent.txt", "parent work\n");
+    git(&parent_path, &["push", "-u", "origin", "parent"]);
+    let parent = support::register_task_without_pr(home, &parent_path, "parent", &main);
+    let child_path = repo.create_named_worktree("child");
+    commit_file(&child_path, "child.txt", "child work\n");
+    git(&child_path, &["push", "-u", "origin", "child"]);
+    let child = support::register_sibling_task(&parent, "INF-124", "child", &child_path);
+    publish_child_pr(&parent, &child, &child_path);
+    (parent, parent_path, child, child_path)
+}
+
+/// Give `child` its own published PR #42 at its current head.
+fn publish_child_pr(parent: &support::RegisteredTask, child: &Task, child_path: &std::path::Path) {
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let placed = runtime
+        .block_on(parent.store.get_task(&child.id))
+        .unwrap()
+        .unwrap();
+    let mut pr = parent.pr.clone();
+    pr.id = loopflow_execution::work::task::TaskPrId::new();
+    pr.task_id = child.id.clone();
+    pr.branch = child.branch.clone();
+    pr.slug = child.workspace_slug.clone();
+    pr.base_commit = placed.base_commit;
+    pr.parent_pr_id = placed.parent_pr_id;
+    pr.publication = Some(PrPublication {
+        requested_at: pr.created_at,
+        presentation: None,
+        github: Some(GithubPr {
+            number: 42,
+            url: "https://github.com/fixture/repo/pull/42".into(),
+            head_sha: Some(git(child_path, &["rev-parse", "HEAD"])),
+        }),
+        merge: None,
+    });
+    runtime.block_on(parent.store.insert_task_pr(&pr)).unwrap();
+}
+
+fn gh_log(home: &std::path::Path) -> String {
+    std::fs::read_to_string(home.join("gh.log")).unwrap_or_default()
+}
+
+#[test]
+fn sync_onto_an_open_task_stacks_it_moves_its_pr_and_main_detaches_it() {
+    let home = tempfile::TempDir::new().unwrap();
+    let repo = TestRepo::new();
+    let _env = EnvGuard::with_lf_home(&[("gh", GH_PR_42)], home.path());
+    let (_parent, parent_path, _child, child_path) = parent_and_published_child(&repo, home.path());
+
+    let output = lf(&child_path, &["sync", "INF-123"]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("Stacked INF-124 on INF-123; PR #42 now targets parent"),
+        "{stdout}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(child_path.join("parent.txt")).unwrap(),
+        "parent work\n"
+    );
+    let stacked = task_stack(&child_path)
+        .unwrap()
+        .expect("sync records the stack");
+    assert_eq!(stacked.live_parent_branch("main").unwrap(), Some("parent"));
+    assert!(gh_log(home.path()).contains("pr edit 42 --base parent"));
+    let status = lf(&child_path, &["task", "status", "INF-124"]);
+    let status = String::from_utf8_lossy(&status.stdout);
+    assert!(status.contains("stacked on INF-123 (parent)"), "{status}");
+
+    // The parent moves on; a bare sync follows the record.
+    commit_file(&parent_path, "later.txt", "later parent work\n");
+    git(&parent_path, &["push", "origin", "parent"]);
+    lf(&child_path, &["sync"]);
+    assert!(child_path.join("later.txt").exists());
+
+    lf(&child_path, &["sync", "main"]);
+    assert!(task_stack(&child_path).unwrap().is_none());
+    assert!(!child_path.join("parent.txt").exists());
+    assert_eq!(
+        std::fs::read_to_string(home.path().join("pr-base")).unwrap(),
+        "main"
+    );
+
+    // Restacking after a detach brings back the parent's work, though its
+    // commits never left the child's history.
+    lf(&child_path, &["sync", "INF-123"]);
+    assert!(child_path.join("parent.txt").exists());
+    assert!(child_path.join("later.txt").exists());
+}
+
+#[test]
+fn publish_keeps_the_prs_base_and_names_a_disagreement() {
+    let home = tempfile::TempDir::new().unwrap();
+    let repo = TestRepo::new();
+    let open = "#!/bin/sh\nexit 0\n";
+    let _env = EnvGuard::with_lf_home(
+        &[("gh", GH_PR_42), ("open", open), ("xdg-open", open)],
+        home.path(),
+    );
+    let (parent, _parent_path, child, child_path) = parent_and_published_child(&repo, home.path());
+    rusqlite::Connection::open(&parent.database)
+        .unwrap()
+        .execute(
+            "UPDATE tasks SET planning_url='https://linear.app/fixture/issue/INF-124' WHERE id=?1",
+            [child.id.as_str()],
+        )
+        .unwrap();
+    lf(
+        &child_path,
+        &["checkout", "INF-124", "--stack-on", "INF-123"],
+    );
+    lf(&child_path, &["sync"]);
+    let publish = || {
+        Command::new(env!("CARGO_BIN_EXE_lf"))
+            .args([
+                "pr",
+                "open",
+                "--title",
+                "Child work",
+                "--body",
+                "Builds on the parent",
+            ])
+            .current_dir(&child_path)
+            .stdin(std::process::Stdio::null())
+            .output()
+            .unwrap()
+    };
+
+    std::fs::remove_file(home.path().join("gh.log")).unwrap();
+    let agreed = publish();
+    assert!(
+        agreed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&agreed.stderr)
+    );
+    let log = gh_log(home.path());
+    assert!(log.contains("pr edit 42 --title"), "{log}");
+    assert!(!log.contains("--base"), "{log}");
+
+    // Someone moves the PR on GitHub; publish leaves it and names both sides.
+    std::fs::write(home.path().join("pr-base"), "main").unwrap();
+    let moved = publish();
+    let stderr = String::from_utf8_lossy(&moved.stderr);
+    assert!(moved.status.success(), "{stderr}");
+    assert!(
+        stderr.contains("PR #42 targets main, but INF-124 is stacked on INF-123 (parent)."),
+        "{stderr}"
+    );
+    assert!(
+        stderr.contains("Record it: lf sync main. Follow the record: gh pr edit 42 --base parent"),
+        "{stderr}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(home.path().join("pr-base")).unwrap(),
+        "main"
+    );
 }

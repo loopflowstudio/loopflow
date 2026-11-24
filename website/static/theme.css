@@ -1,0 +1,45 @@
+/* Written by scripts/theme_catalogue.py from Loopflow Light; do not edit. */
+:root {
+    --background: #faf8f5;
+    --surface: #fffdf9;
+    --surface-muted: #f3eee7;
+    --surface-element: #ece6dd;
+    --border: #e6dfd6;
+    --border-strong: #d6ccc0;
+    --border-active: #8b8277;
+    --shadow: #000000;
+    --text: #2a2624;
+    --text-secondary: #5f5752;
+    --text-tertiary: #65605d;
+    --accent: #722f37;
+    --accent-hover: #5e2630;
+    --accent-pressed: #4c1f27;
+    --accent-text: #faf8f5;
+    --accent-ink: #722f37;
+    --working-ink: #2f629f;
+    --working-fill: #d5dde6;
+    --warning-ink: #7f5a19;
+    --warning-fill: #e4dccd;
+    --failure-ink: #a64038;
+    --failure-fill: #ecd9d5;
+    --success-ink: #386c48;
+    --success-fill: #d7dfd6;
+    --terminal-background: #faf8f5;
+    --terminal-foreground: #2a2624;
+    --terminal-0: #2a2624;
+    --terminal-1: #a02e25;
+    --terminal-2: #31633e;
+    --terminal-3: #79520d;
+    --terminal-4: #24579e;
+    --terminal-5: #722f37;
+    --terminal-6: #246568;
+    --terminal-7: #b5ada3;
+    --terminal-8: #685f58;
+    --terminal-9: #c72f26;
+    --terminal-10: #387a4a;
+    --terminal-11: #966300;
+    --terminal-12: #266ac6;
+    --terminal-13: #913a45;
+    --terminal-14: #227c80;
+    --terminal-15: #fffdf9;
+}

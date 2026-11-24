@@ -5,13 +5,15 @@ listener and `lf wave status` contracts consumed by the Mac app. Every absent fi
 is a parse error or an explicit null.
 
 `task_detail.json` pins `lf task status --json`: one Task row (each fact once:
-state, reason, Workflow stage, PR, next command) with its Sessions, Graph
-processes, comments and, once it has ended, the summary of its run. `lf task list`, `lf wave show` and `lf wave status`
+state, reason, Workflow stage, PR, next command) with its Sessions, the one that
+is its `conversation` (here it died with exit 137 and the server is starting it
+again), Graph processes, comments and, once it has ended, the summary of its run. `lf task list`, `lf wave show` and `lf wave status`
 print the same row. Rust round-trips it; Desktop reads `lf desktop` instead.
 
 `task_status.json` pins `lf task show --json`: the planning/execution envelope
 for available, unavailable, invalid, removed and absent planning, with the Task's
-overview, Graph processes and comments. Rust round-trips it. The Mac app reads the
+overview, Graph processes and comments, the Task it was filed from and its
+children. Rust round-trips it. The Mac app reads the
 overview, Graph processes, comments and recorded work from
 `lf task show --subscribe` (`subscribe_frames.json`). These cases have no execution.
 
@@ -31,6 +33,10 @@ condition, reason, and actions through the existing Wave Task row.
 `session.json` pins `lf resume --prepare --json`: one unresolved Task GraphStep
 session, its explicit readiness state, and its exact Machine-local attach route.
 
+`session_memberships.json` also pins `ended` (a quit, a death with exit 137,
+a death nobody saw), a Task conversation's `start`, one `outlook` of each
+kind and the `status_line` the server writes from them.
+
 `session_memberships.json` pins each Session's required `graph_membership`:
 the current Graph step, an earlier step, an independent conversation, a Session that
 predates recorded membership (unknown, never independent), and a remote Graph
@@ -40,11 +46,6 @@ Session whose canonical name lives on its Machine (`title_source: unavailable`).
 backlog, completion, external and review waits, local recovery blockers, and
 unavailable evidence. Rust and Swift decode the same Task rows; consumers never
 reconstruct the condition from process flags.
-
-`activity_snapshot.json` pins `lf process list --json`: exact live Process and provider
-processes carry OS-derived state, while a provider without exact ownership
-stays separate from the call tree. Desktop receives the same wire type through
-the Work observation stream; it does not poll `lf process list`.
 
 `session_history_summary.json` and `wave_detail.json` pin the `SessionHistory`
 shape used by `lf session usage --json` and Wave detail. Captured event sequences
@@ -117,18 +118,13 @@ no ownership; execution locations never enter planning exchange.
 `task_files_frames.json` preserves request/Task/Machine/checkout identity and distinguishes filesystem invalidation from heartbeat.
 
 `dashboard.json` pins an independently identified Dashboard and its expression
-and arrangement; Task panes and drafts remain Work-owned. Rust and Swift round-trip
+and arrangement; pane layouts and drafts stay on each Mac. Rust and Swift round-trip
 it without manufacturing defaults.
 
 `view_plan.json` pins the shared headless selection/arrangement plan, including
 repeated Work, duplicate suppression and a backlog Task without a primary Session.
 Rust round-trips it; Swift decodes the same plan directly and from `lf desktop view list --subscribe` in `subscribe_frames.json`.
-
-`pane_layout.json` covers portable pane content, focus versus explicit zoom, hidden
-members, two Shell tabs, two Files tabs, selected-tab identities and file-draft
-base recovery. Shell identity is independent of its tool pane; saved intent never
-asserts a live native process. `view_plan.json` includes query discovery
-metadata, independent Dashboard identity and portable tile-face intent.
+It includes query discovery metadata and independent Dashboard identity.
 
 `sessions.json` pins `lf session list --json`: one Session record each, as the
 server sends it.
@@ -143,8 +139,9 @@ removals ahead, and each home's expiry policy. Rust and Swift decode it; the
 Desktop Retention card renders it.
 
 `task_create_receipt.json` pins `lf task create REQUEST --run --json`: the created
-Task, the graph it took up and its admitted primary conversation, null after a
-headless `-b` run; both are null when the run failed after the Task was filed.
+Task, the graph it took up, its admitted primary conversation with that Session's
+record and its planning row; the conversation is null after a headless `-b`
+run.
 `wave_graph.json` pins `lf wave graph show --json` for a Wave and for the
 repository (`--no-wave`); `default` is Rust's resolution and the setting that
 chose it, which Desktop's New Task sheet shows instead of rebuilding it. Rust and

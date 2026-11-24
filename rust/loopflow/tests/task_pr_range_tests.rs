@@ -46,7 +46,7 @@ fi
 echo "$@" >> "{log_path}"
 if [ "$1 $2" = "pr list" ]; then
   head=$(git rev-parse HEAD)
-  printf '[{{"url":"https://example.com/pr/925","state":"OPEN","isDraft":false,"number":925,"mergeCommit":null,"headRefOid":"%s"}}]\n' "$head"
+  printf '[{{"url":"https://example.com/pr/925","state":"OPEN","isDraft":false,"number":925,"mergeCommit":null,"headRefOid":"%s","baseRefName":"main"}}]\n' "$head"
   exit 0
 fi
 if [ "$1 $2" = "api graphql" ]; then
@@ -838,10 +838,15 @@ esac
         );
         assert_eq!(recorded_base(&task), expected_base);
         let log = fs::read_to_string(log).unwrap();
-        assert!(
-            (log.contains("pr edit") || log.contains("pr create")) && log.contains("--base main"),
-            "{log}"
-        );
+        if scenario == "rebased" {
+            assert!(
+                log.contains("pr create") && log.contains("--base main"),
+                "{log}"
+            );
+        } else {
+            // The open PR already targets main: publication leaves its base alone.
+            assert!(log.contains("pr edit") && !log.contains("--base"), "{log}");
+        }
         assert!(!log.contains("pr merge"), "{log}");
         eprintln!("{scenario}: lf pr open succeeded; local/remote HEAD and every commit preserved; comparison matches GitHub");
         if scenario != "rebased" {

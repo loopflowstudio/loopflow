@@ -178,7 +178,7 @@ struct ServerProtocolTests {
     }
 
     @Test func mobileOperationsUseTheSharedFixtures() throws {
-        let task = ServedWrite.taskCreate(directory: "/repo", requestID: "00000000-0000-4000-8000-000000000001", title: nil, request: "Fix the retry test", wave: nil, graph: nil, session: nil, run: true)
+        let task = ServedWrite.taskCreate(directory: "/repo", requestID: "00000000-0000-4000-8000-000000000001", title: nil, request: "Fix the retry test", wave: nil, parent: nil, graph: nil, session: nil, run: true)
         #expect(try encoded(.request(id: "create-1", operation: .command(task), select: nil, requestID: nil)) == value("task_create"))
         #expect(try encoded(.request(id: "sessions-1", operation: .read(.sessionList(
             directory: "/repo", headless: false, after: nil, limit: 100, task: "task_00000000000000000000000000000001")), select: nil, requestID: nil)) == value("session_page"))
@@ -198,7 +198,7 @@ struct ServerProtocolTests {
                                "prompt_id": .string("p-12")]),
             gap: .object(["first": .integer(1794358000), "last": .integer(1794358020)]),
             printed: ["54dc6432-26f1-43fe-ad9d-20b7e91bad69"],
-            inbox: .string("/Users/maya/.claude/sessions/4242.9c1d.key")), select: nil, requestID: nil)
+            inbox: .object(["claude": .string("/Users/maya/.claude/sessions/4242.9c1d.key")])), select: nil, requestID: nil)
         #expect(try encoded(boundary) == value("session_boundary"))
         guard case .response(_, _, .object(let answer)) = try answer("session_boundary_answer") else {
             Issue.record("Missing boundary answer"); return
@@ -223,16 +223,10 @@ struct ServerProtocolTests {
         let destination = JSONValue.object(["kind": .string("personal_global")])
         let operations: [(ConfigOperation, String)] = [
             (.configCatalog, #"{"kind":"config.catalog"}"#),
-            (.configGet(destination: destination, key: "theme"),
-             #"{"kind":"config.get","destination":{"kind":"personal_global"},"key":"theme"}"#),
-            (.configExplain(destination: destination, key: "theme"),
-             #"{"kind":"config.explain","destination":{"kind":"personal_global"},"key":"theme"}"#),
             (.configUnset(destination: destination, key: "theme"),
              #"{"kind":"config.unset","destination":{"kind":"personal_global"},"key":"theme"}"#),
-            (.configTheme(path: "/theme.yaml", value: nil),
-             #"{"kind":"config.theme","path":"/theme.yaml","value":null}"#),
-            (.configTheme(path: "/theme.yaml", value: "Hearth"),
-             #"{"kind":"config.theme","path":"/theme.yaml","value":"Hearth"}"#),
+            (.configTheme(value: nil), #"{"kind":"config.theme","value":null}"#),
+            (.configTheme(value: "Hearth"), #"{"kind":"config.theme","value":"Hearth"}"#),
         ]
         for (operation, json) in operations {
             let encoded = try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(operation))
@@ -242,15 +236,15 @@ struct ServerProtocolTests {
 
     @Test func sessionAdoptionSharesTheRustWriteContract() throws {
         let request = ServerClientMessage.request(id: "adopt-1", operation: .command(
-            .taskCreate(directory: "/repo", requestID: "fixture-creation", title: "Keep the conversation", request: nil, wave: nil, graph: nil, session: "session_5e55105e000040008000000000000001", run: false)), select: nil, requestID: nil)
+            .taskCreate(directory: "/repo", requestID: "fixture-creation", title: "Keep the conversation", request: nil, wave: nil, parent: nil, graph: nil, session: "session_5e55105e000040008000000000000001", run: false)), select: nil, requestID: nil)
         #expect(try encoded(request) == value("task_from_session"))
     }
 
     @Test func coreLoopWritesShareTheRustWriteContract() throws {
         let writes: [(String, String, ServedWrite)] = [
             ("task_run", "run-1", .taskRun(directory: "/repo", issue: "LOO-1", graph: nil, from: "implement", agent: "claude", approve: false)),
-            ("task_ship", "ship-1", .taskShip(directory: "/repo", issue: "LOO-1")),
-            ("task_hold", "hold-1", .taskHold(directory: "/repo", issue: "LOO-1")),
+            ("task_auto_on", "auto-on-1", .taskAutoOn(directory: "/repo", issue: "LOO-1")),
+            ("task_auto_off", "auto-1", .taskAutoOff(directory: "/repo", issue: "LOO-1")),
             ("task_steer", "steer-1", .taskSteer(directory: "/repo", issue: "LOO-1", message: "Keep the API small")),
             ("task_report", "report-1", .taskReport(directory: "/repo", issue: "LOO-1", message: "Demo recorded")),
             ("task_interrupt", "interrupt-1", .taskInterrupt(directory: "/repo", issue: "LOO-1")),
@@ -294,8 +288,8 @@ struct ServerProtocolTests {
         ]
         for (name, id, write) in writes {
             do {
-                // Auto-Ship names itself so a repeat after a lost reply runs once.
-                let requestID = name == "task_ship" ? "5d0f7f5e-1c1a-4a53-9d39-2f7c7a1b0e01" : nil
+                // `task.auto.on` names itself so a repeat after a lost reply runs once.
+                let requestID = name == "task_auto_on" ? "5d0f7f5e-1c1a-4a53-9d39-2f7c7a1b0e01" : nil
                 #expect(try encoded(.request(id: id, operation: .command(write), select: nil, requestID: requestID)) == value(name), "\(name)")
             } catch { Issue.record("\(name): \(error)") }
         }
@@ -306,14 +300,16 @@ struct ServerProtocolTests {
         }
         #expect(running["state"] == .string("running"))
         #expect(running["graph_process"] == .string("85c31c1e-850c-4821-878d-55527b6dba46"))
-        guard case .response(_, _, .object(let shipping)) = try answer("task_shipping") else {
-            Issue.record("Missing task.ship result"); return
+        guard case .response(_, _, .object(let autoOn)) = try answer("task_auto_on_answer") else {
+            Issue.record("Missing task.auto.on result"); return
         }
-        #expect(shipping["state"] == .string("shipping"))
-        guard case .response(_, _, .object(let held)) = try answer("task_held") else {
-            Issue.record("Missing task.hold result"); return
+        // `task.auto.on` returns the run, as `task.run` does.
+        #expect(autoOn["state"] == .string("running"))
+        #expect(autoOn["merges"] == .bool(true))
+        guard case .response(_, _, .object(let autoOff)) = try answer("task_auto_off_answer") else {
+            Issue.record("Missing task.auto.off result"); return
         }
-        #expect(held["stopped"] == .bool(true))
+        #expect(autoOff["was_on"] == .bool(true))
         guard case .response(_, _, .object(let steered)) = try answer("session_steered") else {
             Issue.record("Missing session.steer result"); return
         }
@@ -458,8 +454,9 @@ struct ServerProtocolTests {
             let name = url.deletingPathExtension().lastPathComponent
             let object = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any])
             let type = try #require(object["type"] as? String)
-            // Mobile setup is exposed to Desktop by the CLI; Swift has no encoder for it.
-            if ["mobile_status_request", "configure_remote"].contains(name) { continue }
+            // Mobile setup is exposed to Desktop by the CLI, and only another
+            // Machine's lf sends a `sender`; Swift has no encoder for either.
+            if ["mobile_status_request", "configure_remote", "machine_request"].contains(name) { continue }
             if client[type] == Set(object.keys).subtracting(["type"]) {
                 let encodedHere = tests.contains("\"\(name)\"")
                 #expect(encodedHere, "No test here encodes the client fixture \(name)")

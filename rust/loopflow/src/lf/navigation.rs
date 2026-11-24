@@ -320,13 +320,14 @@ pub fn normalize_args(args: Vec<String>) -> Result<Vec<String>, clap::Error> {
 pub fn inspect(cli: &Cli) -> Option<Result<()>> {
     let command = cli.command.as_ref()?;
     if matches!(command,
-        Commands::Graph { cmd: GraphCommand::List { inventory, .. } } if inventory.processes
+        Commands::Graph { cmd: GraphCommand::List { inventory, .. } } if inventory.runs
     ) {
         return None;
     }
     if !matches!(
         command,
         Commands::Help { .. }
+            | Commands::Docs { .. }
             | Commands::List { .. }
             | Commands::Graph {
                 cmd: GraphCommand::List { .. }
@@ -354,19 +355,30 @@ pub fn inspect(cli: &Cli) -> Option<Result<()>> {
                     print!("{}", render_help(path, &repo, *all)?);
                 }
             }
+            Commands::Docs { topic, json } => {
+                crate::lf::commands::docs::show(topic.as_deref(), *json || cli.json)?
+            }
             Commands::List { path, json } => crate::lf::commands::list::show(path, &repo, *json)?,
             Commands::Graph {
                 cmd: GraphCommand::List { json, inventory },
             } => {
                 anyhow::ensure!(
                     inventory.is_empty(),
-                    "filters over Graphs that ran require --processes"
+                    "filters over Graphs that ran require --runs"
                 );
                 crate::lf::commands::graph::list(&repo, *json)?;
             }
             Commands::Graph {
                 cmd: GraphCommand::Show { name, json },
             } => {
+                // A name no authored Graph has may be a run's id.
+                if let Err(loopflow_execution::error::LoadError::GraphNotFound(_)) =
+                    loopflow_execution::graph::load_authored_graph(name, &repo)
+                {
+                    if let Some(run) = crate::lf::commands::graph_inventory::find(name)? {
+                        return crate::lf::commands::graph_inventory::print(&run, *json);
+                    }
+                }
                 if *json {
                     let entry =
                         loopflow_execution::graph::compiled::graph_catalog_entry(name, &repo)?;
@@ -510,7 +522,7 @@ pub fn render_help(path: &[String], repo: &Path, all: bool) -> Result<String> {
             .filter(|cmd| !cmd.is_hide_set())
             .map(Command::get_name)
             .collect::<Vec<_>>();
-        let mut output = String::from("Usage: lf <name> [message] | <command>\n\nRun\n  lf pursue [message]        build a change through to a published PR\n  lf graph <name> [message]   select a graph explicitly\n  lf skill <name> [message]  select a skill explicitly\n\nDiscover\n  lf list                   commands, skills, and graphs\n  lf help <path>             explain a command or definition\n  lf help --all              show the complete command tree\n\nCommands\n");
+        let mut output = String::from("Usage: lf <name> [message] | <command>\n\nRun\n  lf pursue [message]        build a change through to a published PR\n  lf graph <name> [message]   select a graph explicitly\n  lf skill <name> [message]  select a skill explicitly\n\nDiscover\n  lf list                   commands, skills, and graphs\n  lf help <path>             explain a command or definition\n  lf help --all              show the complete command tree\n  lf docs [topic]            read embedded user docs\n\nCommands\n");
         for row in names.chunks(5) {
             output.push_str(&format!(
                 "  {}\n",

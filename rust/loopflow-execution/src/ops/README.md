@@ -4,47 +4,37 @@
 synchronization. Most modules explain themselves; this file documents the one
 contract that spans processes and a shared request budget.
 
-## Planning export
+## Tracker queue
 
-`planning_export.rs` gives every locally saved Task and Project its Linear (or
-Asana, Notion) identity. Creation is idempotent by construction: the receipt in
-`task_creation_intents` / `project_transitions` holds the generated id and the
-exact input, a pass looks for that id before it ever sends a create, and a
-re-sent create carries the same id, which Linear accepts at most once.
+Every save a tracker carries leaves one `tracker_actions` row (storage
+`sqlite/tracker_actions.rs`); `tracker/drain.rs` is the only code that sends
+them, through the repository's tracker in `tracker.rs`.
 
 ```text
-lf task create            prepare receipt → look (FindExportIssue) → create (DeliverTaskCreation)
-any lf command (a pass)   for each pending export: skip inside the window, else look, else re-send
-lf task sync ISSUE        look now, ahead of the window, and re-send if absent
+any save                  queue the action → one pass, the saved owner first
+lf repo tracker           list unconfirmed actions: owner, kind, phase, error
+lf task sync ISSUE        drain that owner now, looking for lost replies at once
 ```
 
-**Pass cost.** A pass over N pending exports costs no requests when nothing
-changed. The repository's Team claim is validated once per process
-(`ops/linear.rs`, `VALIDATED_TEAM_CLAIMS`), so `ListTeams` is sent at most once
-per process. Queued-response fixtures (`linear::test_server::spawn`) therefore
-answer one Team validation per repository, however many lookups follow. An attempted creation whose outcome is unknown (the reply was lost
-or the deadline fired) is *uncertain*; its receipt records when a pass last
-looked for it (`export_observed_at`), and the pass refuses it inside the window
-before any client is built. An unattempted export is new work and always
-proceeds; a mapped one is finished.
+**Pass cost.** A pass sends at most 20 requests or runs 5 s, four owners at a
+time. With nothing unconfirmed it sends none and builds no client. Only a queued
+`create` builds the Team-validated Linear client; the repository's Team claim
+is validated once per process (`ops/linear.rs`, `VALIDATED_TEAM_CLAIMS`), so
+queued-response fixtures (`linear::test_server::spawn`) answer one Team
+validation per repository, however many sends follow.
 
-**Retry policy.** Only looks at uncertain creations are stamped, so a creation
-whose first send timed out is looked for on the very next pass. If the look
-finds the issue, the pass binds it (no second send). If it finds nothing, the
-pass re-sends the creation with its saved id and logs that it did. A creation
-that stays uncertain after that is looked for once per window: ten minutes while
-the Linear budget is healthy, one pacing interval while it is paced, and not
-until reset inside the reserve (`max(600, delta_fresh_secs())`). A pass logs
-"looked Ns ago, next look in Ms" inside the window; `lf task sync ISSUE` is the
-person's own look and ignores it.
+**Lost replies.** A send whose reply never came leaves its action `sent`.
+Before anything else on that subject goes, a pass looks for it in the tracker,
+at most once per `max(600, delta_fresh_secs())` seconds (`looked_at`): ten
+minutes while the budget is healthy, one pacing interval while it is paced.
+Linear comments and every link are sent again instead, since repeating them
+cannot duplicate. `lf task sync ISSUE` ignores the window.
 
-**Deadline.** Each export has its own five-second deadline covering only the
-provider path: Team validation, the look, the workflow state and the send. No
-scope freshness check runs inside a write (`LinearClient::graphql` sends what it
-is given); freshness belongs to work boundaries (`linear_observe::sync_scope`,
-`team_current`) and to `deliver_task_state`, which calls `check_before_write`
-itself. A timeout names the step it interrupted: "Export timed out while sending
-the creation; creation identity and uncertainty retained".
+**Deadline.** Each request has its own five-second deadline; the pass bound
+counts requests, so one slow creation cannot starve every later owner. No scope
+freshness check runs inside a send (`LinearClient::graphql` sends what it is
+given); freshness belongs to work boundaries (`tracker_events::sync_scope`,
+`team_current`).
 
 Request accounting lives in `logs/linear-requests.jsonl` when
 `logs.linear_requests` is on (`lf history linear`).

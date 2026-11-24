@@ -99,6 +99,7 @@ pub(crate) fn subscribe(
     transport: loopflow_execution::read_stream::Transport,
 ) -> Result<Option<loopflow_execution::read_stream::Subscription>> {
     loopflow_execution::read_stream::start(
+        loopflow_execution::read_stream::Watch::History,
         window,
         |store, window| async move { read(store.as_ref().map(|store| &store.sqlite), &window) },
         transport,
@@ -496,6 +497,7 @@ mod tests {
         .unwrap();
         let task = store
             .create_task(&loopflow_execution::work::task::NewTask {
+                parent_task_id: None,
                 repository_id: repository,
                 id: loopflow_model::durable::TaskId::new(),
                 project_id: None,

@@ -4,6 +4,7 @@
 use rusqlite::{params, types::Type, OptionalExtension};
 use time::OffsetDateTime;
 
+use crate::graph_process::{Execution, ExecutionStart};
 use crate::pr_landing::PrLandingId;
 use crate::records::CiIncidentReportRow;
 use crate::work::task::{CiIncident, TaskId, TaskPrId};
@@ -212,42 +213,36 @@ impl super::SqliteStore {
         )?)
     }
 
-    /// Each unfinished repair for this PR, as its incident and Process, newest first.
+    /// Each unsettled repair for this PR, as its incident and run, newest first.
     pub fn pr_repair_processes(
         &self,
         repo: &str,
         pr_number: u32,
-    ) -> StoreResult<Vec<(String, loopflow_model::id::LfProcessId)>> {
+    ) -> StoreResult<Vec<(String, Execution)>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut statement = conn.prepare(
-            "SELECT identity,repair_lf_process_id FROM ci_incidents
+        let mut statement = conn.prepare(&format!(
+            "SELECT identity,{REPAIR_RUN} FROM ci_incidents
              WHERE repo=?1 AND pr_number=?2
                AND repair_lf_process_id IS NOT NULL AND repair_finished_at IS NULL
-             ORDER BY updated_at DESC",
-        )?;
+             ORDER BY updated_at DESC"
+        ))?;
         let rows = statement.query_map(params![repo, i64::from(pr_number)], |row| {
-            Ok((row.get(0)?, row.get(1)?))
+            Ok((row.get(0)?, read_repair_run(row, 1)?))
         })?;
         rows.collect::<Result<Vec<_>, _>>()
             .map_err(StoreError::from)
     }
 
-    /// Each repair's Process, its start and its recorded end, in Unix seconds.
-    /// Only an incident's latest attempt is retained.
-    pub fn pr_repair_lifetimes(
-        &self,
-        repo: &str,
-        pr_number: u32,
-    ) -> StoreResult<Vec<(loopflow_model::id::LfProcessId, i64, Option<i64>)>> {
+    /// Each repair's run for this PR. Only an incident's latest attempt is
+    /// retained.
+    pub fn pr_repair_lifetimes(&self, repo: &str, pr_number: u32) -> StoreResult<Vec<Execution>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut statement = conn.prepare(
-            "SELECT ci.repair_lf_process_id, p.started_at,
-                    COALESCE(ci.repair_finished_at, p.completed_at)
-             FROM ci_incidents ci JOIN processes p ON p.id=ci.repair_lf_process_id
-             WHERE ci.repo=?1 AND ci.pr_number=?2",
-        )?;
+        let mut statement = conn.prepare(&format!(
+            "SELECT {REPAIR_RUN} FROM ci_incidents
+             WHERE repo=?1 AND pr_number=?2 AND repair_lf_process_id IS NOT NULL"
+        ))?;
         let rows = statement.query_map(params![repo, i64::from(pr_number)], |row| {
-            Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+            read_repair_run(row, 0)
         })?;
         rows.collect::<Result<Vec<_>, _>>()
             .map_err(StoreError::from)
@@ -322,11 +317,28 @@ impl super::SqliteStore {
 
 #[derive(Debug)]
 pub struct RepairReservation {
-    pub process: Option<LfProcessId>,
+    /// The run holding the reservation: the launcher until its ci-fix run
+    /// takes it over. Its end is when the attempt was settled.
+    pub run: Option<Execution>,
     pub retries: u32,
-    pub finished: Option<i64>,
     pub conclusion: Option<String>,
-    pub error: Option<String>,
+}
+
+/// A repair's run, from the incident's `repair_*` columns.
+const REPAIR_RUN: &str = "repair_lf_process_id,repair_started_at,repair_finished_at,\
+    repair_pid,repair_os_started_at,repair_error";
+
+fn read_repair_run(row: &rusqlite::Row<'_>, at: usize) -> rusqlite::Result<Execution> {
+    Ok(Execution {
+        id: row.get(at)?,
+        // A repair a released lf reserved before its Process row has no start.
+        started_at: row.get::<_, Option<i64>>(at + 1)?.unwrap_or_default(),
+        ended_at: row.get(at + 2)?,
+        pid: row.get(at + 3)?,
+        os_started_at: row.get(at + 4)?,
+        exit_code: None,
+        error: row.get(at + 5)?,
+    })
 }
 
 /// One repair attempt for a CI incident, as its row records it.
@@ -372,18 +384,29 @@ impl super::SqliteStore {
 
     pub fn repair_reservation(&self, identity: &str) -> StoreResult<RepairReservation> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        Ok(conn.query_row("SELECT repair_lf_process_id,repair_retries,repair_finished_at,repair_error,repair_conclusion FROM ci_incidents WHERE identity=?1", [identity], |row| Ok(RepairReservation {
-            process: row.get(0)?, retries: row.get(1)?, finished: row.get(2)?, error: row.get(3)?, conclusion: row.get(4)?,
-        }))?)
+        Ok(conn.query_row(
+            &format!("SELECT repair_retries,repair_conclusion,repair_lf_process_id IS NOT NULL,{REPAIR_RUN}
+                 FROM ci_incidents WHERE identity=?1"),
+            [identity],
+            |row| {
+                Ok(RepairReservation {
+                    retries: row.get(0)?,
+                    conclusion: row.get(1)?,
+                    run: if row.get(2)? { Some(read_repair_run(row, 3)?) } else { None },
+                })
+            },
+        )?)
     }
 
-    /// Reserve an incident's repair for `process`; the run it launches takes
-    /// the reservation over, and settlement records the Session it opened.
+    /// Reserve an incident's repair for the running `process`; the run it
+    /// launches takes the reservation over, and settlement records the
+    /// Session it opened.
     pub fn reserve_repair(
         &self,
         identity: &str,
         generation: u64,
         process: &LfProcessId,
+        start: &ExecutionStart,
         retry: bool,
         task: Option<&loopflow_model::durable::TaskId>,
     ) -> StoreResult<bool> {
@@ -396,21 +419,27 @@ impl super::SqliteStore {
                 ));
             }
         }
-        let changed = tx.execute("UPDATE ci_incidents SET repair_lf_process_id=?3,repair_session_id=NULL,repair_retries=repair_retries+?4,repair_finished_at=NULL,repair_error=NULL,claimed_landing_generation=?2
-            WHERE identity=?1 AND EXISTS(SELECT 1 FROM pr_landings p WHERE p.id=ci_incidents.landing_id AND p.generation=?2 AND p.state IN ('watching','repairing','blocked'))",params![identity,generation as i64,process.as_str(),retry])? == 1;
+        let changed = tx.execute("UPDATE ci_incidents SET repair_lf_process_id=?3,repair_session_id=NULL,repair_retries=repair_retries+?4,repair_finished_at=NULL,repair_error=NULL,claimed_landing_generation=?2,
+                repair_started_at=?5,repair_pid=?6,repair_os_started_at=?7
+            WHERE identity=?1 AND EXISTS(SELECT 1 FROM pr_landings p WHERE p.id=ci_incidents.landing_id AND p.generation=?2 AND p.state IN ('watching','repairing','blocked'))",params![identity,generation as i64,process.as_str(),retry,start.started_at,start.pid,start.os_started_at])? == 1;
         if changed {
             tx.commit()?;
         }
         Ok(changed)
     }
 
+    /// The ci-fix run `worker`, started as `pid`, takes over `launcher`'s
+    /// reservation.
     pub fn handoff_repair(
         &self,
         identity: &str,
         launcher: &LfProcessId,
         worker: &LfProcessId,
+        start: &ExecutionStart,
     ) -> StoreResult<bool> {
-        Ok(self.conn.lock().expect("store mutex poisoned").execute("UPDATE ci_incidents SET repair_lf_process_id=?3,responded_at=COALESCE(responded_at,?4) WHERE identity=?1 AND repair_lf_process_id=?2 AND repair_finished_at IS NULL", params![identity,launcher.as_str(),worker.as_str(),time::OffsetDateTime::now_utc().unix_timestamp_nanos() as i64])? == 1)
+        Ok(self.conn.lock().expect("store mutex poisoned").execute("UPDATE ci_incidents SET repair_lf_process_id=?3,responded_at=COALESCE(responded_at,?4),
+                repair_started_at=?5,repair_pid=?6,repair_os_started_at=?7
+            WHERE identity=?1 AND repair_lf_process_id=?2 AND repair_finished_at IS NULL", params![identity,launcher.as_str(),worker.as_str(),time::OffsetDateTime::now_utc().unix_timestamp_nanos() as i64,start.started_at,start.pid,start.os_started_at])? == 1)
     }
 
     /// Settle an exited run: its Session, if any, and its conclusion or the
@@ -424,7 +453,7 @@ impl super::SqliteStore {
         conclusion: Option<&str>,
     ) -> StoreResult<()> {
         // A run another check already settled matches no row.
-        self.conn.lock().expect("store mutex poisoned").execute("UPDATE ci_incidents SET repair_finished_at=?3,repair_error=?4,repair_conclusion=?5,repair_session_id=?6 WHERE identity=?1 AND repair_lf_process_id=?2 AND repair_finished_at IS NULL",params![identity,process.as_str(),time::OffsetDateTime::now_utc().unix_timestamp(),error,conclusion,session])?;
+        self.conn.lock().expect("store mutex poisoned").execute("UPDATE ci_incidents SET repair_finished_at=?3,repair_error=?4,repair_conclusion=?5,repair_session_id=?6,repair_pid=NULL,repair_os_started_at=NULL WHERE identity=?1 AND repair_lf_process_id=?2 AND repair_finished_at IS NULL",params![identity,process.as_str(),time::OffsetDateTime::now_utc().unix_timestamp(),error,conclusion,session])?;
         Ok(())
     }
 }

@@ -1,5 +1,7 @@
 //! One editor for personal and shared preference files. Locks protect LF writers;
 //! a content comparison also detects hand edits made while an edit is prepared.
+pub mod edit;
+
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -7,18 +9,45 @@ use std::str::FromStr;
 
 use anyhow::{ensure, Context, Result};
 use serde_yaml_ng::Value;
+use sha2::Digest;
 use yaml_edit::{Mapping, YamlFile};
 
-use super::{settings::SettingScope, ConfigSource};
+use super::{keys::Root, settings::SettingScope, ConfigSource};
+use crate::engine::Error;
 
-pub const PRIVATE_FILE: &str = "lf.config.local.yaml";
+/// Your own settings for a clone, beside the committed `.lf/config.yaml`.
+pub const PRIVATE_FILE: &str = ".lf/config.local.yaml";
+/// Where that file lived through 0.16, loose in the checkout root. Task b108f6
+/// removes this path and the move in `private_path`.
+const FORMER_PRIVATE_FILE: &str = "lf.config.local.yaml";
 
+/// The main checkout's private settings file. One left at the former path
+/// moves here, ignored before it arrives, the first time anything asks.
 pub fn private_path(repo: &Path) -> Result<PathBuf> {
     let root = match crate::git::worktree_root(repo) {
         Ok(_) => crate::git::worktrees::main_repo_root(repo)?,
         Err(_) => repo.to_owned(),
     };
-    Ok(root.join(PRIVATE_FILE))
+    let path = root.join(PRIVATE_FILE);
+    let former = root.join(FORMER_PRIVATE_FILE);
+    if former.exists() && !path.exists() {
+        protect_private_file(&path)?;
+        fs::create_dir_all(path.parent().context("private file has a parent")?)?;
+        match fs::rename(&former, &path) {
+            // Another lf moved it first.
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            moved => moved
+                .with_context(|| format!("moving {} to {}", former.display(), path.display()))?,
+        }
+    }
+    Ok(path)
+}
+
+/// The checkout a private settings file belongs to.
+pub(crate) fn private_root(path: &Path) -> Result<&Path> {
+    path.parent()
+        .and_then(Path::parent)
+        .context("private settings sit in a checkout's .lf directory")
 }
 
 pub(crate) fn wave_key(repo: &Path, name: &str) -> Result<Option<String>> {
@@ -67,6 +96,28 @@ pub struct ResolvedDestination {
     pub scope: super::settings::SettingScope,
     pub repository: Option<PathBuf>,
     pub wave: Option<String>,
+}
+
+impl ResolvedDestination {
+    /// A graph name must resolve in the checkout where this declaration will live.
+    pub(crate) fn parse_value(&self, key: &str, text: &str) -> Result<Value> {
+        let value = super::settings::parse_value(key, text)?;
+        if matches!(key, "wave.graph" | "graph") {
+            if let (Some(repo), Some(name)) = (&self.repository, value.as_str()) {
+                let graph = crate::graph::load_authored_graph(name, repo)?;
+                crate::graph::compile_graph(&graph, repo)?;
+            }
+        }
+        Ok(value)
+    }
+
+    pub fn root(&self) -> super::keys::Root {
+        if self.prefix.is_empty() && self.scope == SettingScope::Wave {
+            super::keys::Root::Wave
+        } else {
+            super::keys::Root::General
+        }
+    }
 }
 
 impl Destination {
@@ -205,35 +256,28 @@ pub fn wave_name(repo: &Path, selector: &str) -> Result<String> {
     };
     let root = repo.join(".lf/wave");
     let mut names = Vec::new();
-    if root.exists() {
-        for entry in ignore::WalkBuilder::new(&root)
-            .hidden(false)
-            .ignore(false)
-            .git_ignore(false)
-            .git_exclude(false)
-            .git_global(false)
-            .build()
+    let mut directories = vec![root.clone()];
+    while let Some(directory) = directories.pop() {
+        let entries = match crate::observe::read_dir(&directory) {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(error.into()),
+        };
+        for entry in entries {
+            if crate::observe::is_dir(&entry) && !crate::observe::is_symlink(&entry) {
+                directories.push(entry);
+            }
+        }
+        if directory == root {
+            continue;
+        }
+        let name = directory.strip_prefix(&root)?.to_string_lossy();
+        if crate::work::wave::config::try_read_wave_config(repo, &name)?
+            .and_then(|config| config.id)
+            .as_ref()
+            == Some(&id)
         {
-            let entry = entry?;
-            if entry.file_name() != "config.yaml"
-                || !entry.file_type().is_some_and(|kind| kind.is_file())
-            {
-                continue;
-            }
-            let name = entry
-                .path()
-                .parent()
-                .context("Wave file has a parent")?
-                .strip_prefix(&root)?
-                .to_string_lossy()
-                .into_owned();
-            if crate::work::wave::config::try_read_wave_config(repo, &name)?
-                .and_then(|config| config.id)
-                .as_ref()
-                == Some(&id)
-            {
-                names.push(name);
-            }
+            names.push(name.into_owned());
         }
     }
     ensure!(
@@ -257,7 +301,7 @@ fn diagnose_private_file(path: &Path) -> Result<()> {
     if !path.exists() {
         return Ok(());
     }
-    let repo = path.parent().context("private file has a parent")?;
+    let repo = private_root(path)?;
     if !git(repo, &["rev-parse", "--git-dir"])?.status.success() {
         return Ok(());
     }
@@ -279,7 +323,7 @@ fn diagnose_private_file(path: &Path) -> Result<()> {
 
 pub(crate) fn protect_private_file(path: &Path) -> Result<()> {
     diagnose_private_file(path)?;
-    let repo = path.parent().context("private file has a parent")?;
+    let repo = private_root(path)?;
     let output = git(
         repo,
         &["rev-parse", "--path-format=absolute", "--git-common-dir"],
@@ -289,34 +333,101 @@ pub(crate) fn protect_private_file(path: &Path) -> Result<()> {
     }
     let exclude = PathBuf::from(String::from_utf8(output.stdout)?.trim()).join("info/exclude");
     let _lock = lock(&exclude)?;
-    let mut text = read_text(&exclude)?;
+    let before = read_text(&exclude)?;
+    // The former path's rule goes when this one is written.
+    let mut text: String = before
+        .lines()
+        .filter(|line| *line != format!("/{FORMER_PRIVATE_FILE}"))
+        .map(|line| format!("{line}\n"))
+        .collect();
     if !text.lines().any(|line| line == format!("/{PRIVATE_FILE}")) {
-        if !text.is_empty() && !text.ends_with('\n') {
-            text.push('\n');
-        }
         text.push_str(&format!("/{PRIVATE_FILE}\n"));
+    }
+    if text != before {
         atomic_write(&exclude, &text)?;
     }
     Ok(())
 }
 
+/// Serialize LF writers of one configuration file. The lock file lives under the
+/// Machine's home, keyed by the file's real path, so a checkout gains no untracked file.
 pub fn lock(path: &Path) -> Result<File> {
-    fs::create_dir_all(path.parent().context("configuration has a parent")?)?;
+    let parent = path.parent().context("configuration has a parent")?;
+    fs::create_dir_all(parent)?;
+    let file =
+        fs::canonicalize(parent)?.join(path.file_name().context("configuration has a name")?);
+    let locks = crate::store::lf_home_dir().join("locks/config");
+    fs::create_dir_all(&locks)?;
+    let digest = hex::encode(sha2::Sha256::digest(file.as_os_str().as_encoded_bytes()));
     let lock = OpenOptions::new()
         .create(true)
         .truncate(false)
         .read(true)
         .write(true)
-        .open(path.with_extension("yaml.lock"))?;
+        .open(locks.join(format!("{digest}.lock")))?;
     fs2::FileExt::lock_exclusive(&lock)?;
     Ok(lock)
 }
 
 pub fn read_text(path: &Path) -> Result<String> {
-    match crate::observe::read_to_string(path) {
-        Ok(text) => Ok(text),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
-        Err(error) => Err(error).with_context(|| format!("Read {}", path.display())),
+    settings_text(path, Root::General)
+}
+
+pub(crate) fn settings_text(path: &Path, root: Root) -> Result<String> {
+    Ok(SettingsSource::read(path, root)?.text)
+}
+
+#[derive(Debug)]
+pub(crate) struct SettingsSource {
+    pub path: PathBuf,
+    pub text: String,
+}
+
+impl SettingsSource {
+    fn read(path: &Path, root: Root) -> Result<Self> {
+        let text = match crate::observe::read_to_string(path) {
+            Ok(text) => text,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                if root == Root::Wave {
+                    if let Some((goal, mapping)) =
+                        crate::work::wave::config::goal_settings(path.with_file_name("GOAL.md"))?
+                    {
+                        return Ok(Self {
+                            path: goal,
+                            text: serde_yaml_ng::to_string(&mapping)?,
+                        });
+                    }
+                }
+                String::new()
+            }
+            Err(error) => return Err(error).with_context(|| format!("Read {}", path.display())),
+        };
+        Ok(Self {
+            path: path.into(),
+            text,
+        })
+    }
+
+    pub(crate) fn verify(&self, path: &Path, root: Root, text: &str) -> Result<()> {
+        // A no-op keeps GOAL.md as the source. A changed edit writes config.yaml.
+        let expected_path = if text == self.text { &self.path } else { path };
+        let current = Self::read(path, root)?;
+        ensure!(
+            current.path == expected_path && current.text == text,
+            Error::conflict(format!(
+                "{} changed during this edit; retry with the current file",
+                path.display()
+            ))
+        );
+        Ok(())
+    }
+
+    pub(crate) fn write(&self, path: &Path, root: Root, text: &str) -> Result<()> {
+        self.verify(path, root, &self.text)?;
+        if text != self.text {
+            atomic_write(path, text)?;
+        }
+        Ok(())
     }
 }
 
@@ -345,6 +456,7 @@ pub(crate) fn atomic_write(path: &Path, text: &str) -> Result<()> {
     file.write_all(text.as_bytes())?;
     file.as_file().sync_all()?;
     file.persist(path)?;
+    crate::observe::invalidate_path(path);
     File::open(parent)?.sync_all()?;
     Ok(())
 }
@@ -410,10 +522,18 @@ fn patch_node(node: &yaml_edit::YamlNode, before: &Value, after: &Value) -> Resu
 }
 
 pub fn update<T>(path: &Path, change: impl FnOnce(&mut Value) -> Result<T>) -> Result<T> {
-    if path.file_name().is_some_and(|name| name == PRIVATE_FILE) {
+    update_settings(path, Root::General, change)
+}
+
+pub(crate) fn update_settings<T>(
+    path: &Path,
+    root: Root,
+    change: impl FnOnce(&mut Value) -> Result<T>,
+) -> Result<T> {
+    if path.ends_with(PRIVATE_FILE) {
         protect_private_file(path)?;
     }
-    LockedFile::open(path)?.update(change)
+    LockedFile::open(path)?.update(root, change)
 }
 
 /// The same serialized, hand-edit-aware writer also edits definition frontmatter.
@@ -421,7 +541,7 @@ pub(crate) fn update_text<T>(
     path: &Path,
     change: impl FnOnce(&str) -> Result<(String, T)>,
 ) -> Result<T> {
-    LockedFile::open(path)?.update_text(change)
+    LockedFile::open(path)?.update_text(Root::General, change)
 }
 
 /// Hold a preference writer's fence across configuration acquisition and its command.
@@ -439,38 +559,33 @@ impl LockedFile {
         })
     }
 
-    pub fn update<T>(&self, change: impl FnOnce(&mut Value) -> Result<T>) -> Result<T> {
-        self.update_text(|original| {
+    pub fn update<T>(&self, root: Root, change: impl FnOnce(&mut Value) -> Result<T>) -> Result<T> {
+        self.update_text(root, |original| {
             let mut after = parse_document(original, &self.path)?;
-            let before = after.clone();
             let result = change(&mut after)?;
-            let text = if after == before {
-                original.to_owned()
-            } else {
-                edited_text(original, &after)?
-            };
-            Ok((text, result))
+            Ok((edited_text(original, &after)?, result))
         })
     }
 
-    fn update_text<T>(&self, change: impl FnOnce(&str) -> Result<(String, T)>) -> Result<T> {
-        let original = read_text(&self.path)?;
-        let (text, result) = change(&original)?;
-        if text == original {
-            return Ok(result);
-        }
-        ensure!(
-            read_text(&self.path)? == original,
-            "{} changed during this edit; retry with the current file",
-            self.path.display()
-        );
-        atomic_write(&self.path, &text)?;
+    fn update_text<T>(
+        &self,
+        root: Root,
+        change: impl FnOnce(&str) -> Result<(String, T)>,
+    ) -> Result<T> {
+        let original = SettingsSource::read(&self.path, root)?;
+        let (text, result) = change(&original.text)?;
+        original.write(&self.path, root, &text)?;
         Ok(result)
     }
 }
 
 pub(crate) fn edited_text(original: &str, after: &Value) -> Result<String> {
     let before: Value = serde_yaml_ng::from_str(original)?;
+    if before == *after
+        || (before.is_null() && after.as_mapping().is_some_and(|map| map.is_empty()))
+    {
+        return Ok(original.to_owned());
+    }
     let file = YamlFile::from_str(original)?;
     let document = file.ensure_document();
     if let Some(sequence) = document.as_sequence() {
@@ -530,7 +645,7 @@ pub fn remove(root: &mut Value, path: &[&str]) -> bool {
         return false;
     };
     let removed = remove(child, rest);
-    if child.as_mapping().is_some_and(|map| map.is_empty()) {
+    if removed && child.as_mapping().is_some_and(|map| map.is_empty()) {
         map.remove(*key);
     }
     removed
@@ -544,54 +659,72 @@ pub fn edit(
     value: Option<Value>,
     root: super::keys::Root,
 ) -> Result<bool> {
-    update(path, |document| {
-        let written = super::keys::gather(document, parts, root);
-        let written: Vec<&str> = written.iter().map(String::as_str).collect();
-        if written.len() >= 2 && written[written.len() - 2] == "machine" {
-            if let Some(placement) = written[..written.len() - 1]
-                .iter()
-                .try_fold(&mut *document, |value, key| value.get_mut(*key))
-            {
-                super::placement::expand_shorthand(placement)?;
-            }
-        }
-        let changed = match value {
-            Some(value) => {
-                if written.len() >= 2 && written[written.len() - 2] == "machine" {
-                    let sibling = match written.last() {
-                        Some(&"tasks") => Some("capacity"),
-                        Some(&"capacity") => Some("tasks"),
-                        _ => None,
-                    };
-                    if let Some(sibling) = sibling {
-                        let mut path = written[..written.len() - 1].to_vec();
-                        path.push(sibling);
-                        remove(document, &path);
-                    }
-                }
-                super::settings::insert(document, &written, value);
-                true
-            }
-            None => remove(document, &written),
-        };
-        let offset = if parts.first() == Some(&"waves") {
-            2
-        } else {
-            0
-        };
-        let settings = &parts[offset..];
-        let preference = super::settings::preference_parts(settings)?.len();
-        let root_index = parts.len() - preference;
-        let mut typed = document.clone();
-        super::keys::fold(&mut typed);
-        if let Some(value) = parts[..=root_index]
-            .iter()
-            .try_fold(&typed, |value, key| value.get(*key))
-        {
-            super::settings::validate_value(&[parts[root_index]], value)?;
-        }
-        Ok(changed)
+    update_settings(path, root, |document| {
+        edit_document(document, parts, value, root)
     })
+}
+
+fn edit_document(
+    document: &mut Value,
+    parts: &[&str],
+    value: Option<Value>,
+    root: super::keys::Root,
+) -> Result<bool> {
+    let written = super::keys::gather(document, parts, root);
+    let written: Vec<&str> = written.iter().map(String::as_str).collect();
+    let settings = match parts {
+        ["waves", _, settings @ ..] => settings,
+        _ => parts,
+    };
+    let preference = super::settings::preference_parts(settings)?;
+    let mut removed_alias = false;
+    if preference == ["context"] {
+        let mut path = written.clone();
+        for &(alias, _) in super::keys::CONTEXT_ALIASES {
+            *path.last_mut().expect("a context setting has a key") = alias;
+            removed_alias |= remove(document, &path);
+        }
+    }
+    if matches!(preference, ["context", _]) {
+        return edit::context_field(document, &written, preference, value, root);
+    }
+    if let [prefix @ .., "machine", field] = written.as_slice() {
+        if let Some(placement) = prefix
+            .iter()
+            .try_fold(&mut *document, |value, key| value.get_mut(*key))
+            .and_then(|block| block.get_mut("machine"))
+        {
+            super::placement::expand_shorthand(placement)?;
+            if value.is_some() {
+                match *field {
+                    "tasks" => {
+                        remove(placement, &["capacity"]);
+                    }
+                    "capacity" => {
+                        remove(placement, &["tasks"]);
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+    let changed = match value {
+        Some(value) => {
+            super::settings::insert(document, &written, value);
+            true
+        }
+        None => remove(document, &written),
+    };
+    let root_index = parts.len() - preference.len();
+    let mut typed = document.clone();
+    super::keys::fold(&mut typed);
+    if let Some(value) = parts[..=root_index]
+        .iter()
+        .try_fold(&typed, |value, key| value.get(*key))
+    {
+        super::settings::validate_value(&[parts[root_index]], value)?;
+    }
+    Ok(changed || removed_alias)
 }
 
 /// Explicitly adopt authored recovery declarations into the addressed clone or global file.
@@ -730,6 +863,7 @@ mod tests {
             .status
             .success());
         let private = repo.path().join(super::PRIVATE_FILE);
+        std::fs::create_dir_all(private.parent().unwrap()).unwrap();
         std::fs::write(&private, "agent: codex\n").unwrap();
         let bin = home.path().join("bin");
         std::fs::create_dir(&bin).unwrap();
@@ -771,6 +905,60 @@ mod tests {
     }
 
     #[test]
+    fn a_settings_write_leaves_only_the_settings_file_in_the_checkout() {
+        use crate::config::environment::EnvVarGuard;
+
+        let _env = loopflow_test_support::env_lock().lock().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let _home = EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
+        let repo = loopflow_test_support::TestRepo::new();
+        let shared = repo.path().join(".lf/config.yaml");
+        update(&shared, |document| {
+            *document = serde_yaml_ng::from_str("merge_method: squash").unwrap();
+            Ok(())
+        })
+        .unwrap();
+        let status = std::process::Command::new("git")
+            .arg("-C")
+            .arg(repo.path())
+            .args(["status", "--porcelain", "--untracked-files=all"])
+            .output()
+            .unwrap();
+        assert_eq!(
+            String::from_utf8(status.stdout).unwrap(),
+            "?? .lf/config.yaml\n"
+        );
+    }
+
+    #[test]
+    fn a_private_file_left_in_the_checkout_root_moves_under_lf_already_ignored() {
+        // The polling fixtures temporarily replace PATH to detect Git subprocesses.
+        let _env = loopflow_test_support::env_lock().lock().unwrap();
+        let repo = loopflow_test_support::TestRepo::new();
+        repo.create_file(super::FORMER_PRIVATE_FILE, "agent: codex # mine\n");
+        repo.create_file(".git/info/exclude", "/lf.config.local.yaml\n/keep\n");
+        let path = private_path(repo.path()).unwrap();
+        assert!(path.ends_with(super::PRIVATE_FILE));
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "agent: codex # mine\n"
+        );
+        assert!(!repo.path().join(super::FORMER_PRIVATE_FILE).exists());
+        assert_eq!(
+            std::fs::read_to_string(repo.path().join(".git/info/exclude")).unwrap(),
+            "/keep\n/.lf/config.local.yaml\n"
+        );
+        assert!(std::process::Command::new("git")
+            .arg("-C")
+            .arg(repo.path())
+            .args(["status", "--porcelain"])
+            .output()
+            .unwrap()
+            .stdout
+            .is_empty());
+    }
+
+    #[test]
     fn polling_settings_needs_no_git_and_sees_edits_while_writes_check_tracking() {
         let _env = loopflow_test_support::env_lock().lock().unwrap();
         let home = tempfile::tempdir().unwrap();
@@ -778,6 +966,7 @@ mod tests {
             crate::config::environment::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
         let repo = loopflow_test_support::TestRepo::new();
         let path = repo.path().join(super::PRIVATE_FILE);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(&path, "agent: codex\n").unwrap();
         {
             // Missing Git makes any subprocess attempt fail. Ordinary reads
@@ -847,7 +1036,7 @@ mod tests {
             repository: repo.path().to_owned(),
         };
         let declared = crate::engine::config::get(&shared, "linear.team").unwrap();
-        assert_eq!(declared.key, "repo.plan.team");
+        assert_eq!(declared.key, "repo.tracker.linear.team");
         assert_eq!(declared.value, "released");
         crate::engine::config::set(&shared, "planning", "{provider: linear, team: typed}").unwrap();
         let text = std::fs::read_to_string(&path).unwrap();
@@ -862,9 +1051,9 @@ mod tests {
                 .unwrap()
                 .unwrap()
                 .planning_transport(),
-            crate::config::PlanningConfig::Linear {
+            Some(crate::config::TrackerConfig::Linear {
                 team: Some("typed".into())
-            }
+            })
         );
         let saved = crate::engine::config::set(&shared, "skills.design.agent", "claude").unwrap();
         assert_eq!(saved.key, "skill.design.agent");

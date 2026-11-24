@@ -5,42 +5,29 @@ title: Native authentication
 
 # Native authentication
 
-Sign in with the native client, then launch work through Loopflow:
+Sign in with each provider's own CLI, then run work through Loopflow:
 
 ```bash
-lf machine login claude         # runs Claude's own sign-in
+lf machine login claude         # runs Claude Code's own sign-in
 lf -a claude implement
 
 lf machine login codex          # runs Codex's own sign-in
 lf -a codex implement
 ```
 
-Signing in with `claude` or `codex login` yourself works the same. Each launch
-uses the native client's authentication on the Machine where it runs. Claude and Codex own login, logout, credential refresh and subscription
-usage limits. Their API-key configuration also applies. Loopflow adds context,
-records Sessions and usage, and continues work across configured models and
-harnesses.
+Signing in with `claude` or `codex login` yourself works the same.
 
-## Homes and existing conversations
+Each launch uses the native client's authentication on the Machine where it
+runs. Claude Code and Codex own login, logout, token refresh, and subscription
+limits (their API-key configurations work too). Loopflow never polls quotas,
+switches logins behind your back, or proxies your API traffic.
 
-Claude uses its native home (`~/.claude`, or `CLAUDE_CONFIG_DIR`); Codex uses
-`~/.codex`, or `CODEX_HOME`. Loopflow honors those environment settings and
-uses the native client's configured authentication. Changing a native
-login affects subsequent launches; an already running client follows its own
-authentication behavior.
+## Homes and conversation history
 
-```bash
-lf resume <session-id>
-```
-
-Resume retains the native conversation ID. Older conversations stored outside
-the native home are adopted as transcript history only. Existing native history takes precedence; newer transcript data
-is retained. Credentials are never copied as part of resume. Missing history
-is reported instead of silently starting an empty conversation.
-
-Usage records retain provider-reported tokens and costs. Native clients own
-subscription limits and authentication; Loopflow does not poll quotas or change
-logins.
+Claude uses `~/.claude` (or `CLAUDE_CONFIG_DIR`); Codex uses `~/.codex` (or
+`CODEX_HOME`). Changing your native login applies to subsequent launches.
+`lf resume <session-id>` keeps the native conversation ID without copying
+credentials, and reports missing history instead of starting a blank chat.
 
 ## When a provider refuses work
 
@@ -49,37 +36,25 @@ lf set --global agents claude,codex
 lf -b implement
 ```
 
-A classified usage-limit or model-unavailable refusal lets a Graph step try
-its configured next model or harness. Switching harnesses seeds the new
-conversation with earlier history and retains earlier outcomes. See
-[agent order](config.md#keep-going-when-a-provider-runs-out) for defaults,
-model fallthrough and explicit pins.
+When headless work hits a classified usage-limit or model-unavailable error,
+Loopflow moves to the next entry in your `agents` order (`codex: provider usage
+limit; continuing on claude`). Switching harnesses seeds the new conversation
+with a plain log of the work so far. See
+[Keep going when a provider runs out](config.md#keep-going-when-a-provider-runs-out).
 
 | Launch | After a classified refusal |
-| --- | --- |
-| Graph step, with or without a Task | Follow configured model/harness fallbacks |
-| Other headless work (`lf -b`, commit and PR text) | Stop with the provider error; someone is waiting on it |
-| Interactive, with or without a Task | Keep the provider, thread and refusal visible; wait for an explicit retry or move |
-| Explicit agent | Keep the harness; bare Claude retains model fallthrough |
-| Explicit model pin | Wait on that choice, then stop |
-| Graph step's order exhausted on a usage limit | Wait 5, 15, 30, then 60 minutes, trying the order again after each; then stop with the provider error and a next step |
-| Revoked or missing login | Skip that provider's other models; with no other provider left, stop with the `lf machine login` command that fixes it |
-| Order exhausted otherwise | Stop with the provider error and a next step |
+|---|---|
+| Graph step, with or without a Task | Follows configured model/harness fallbacks |
+| Other headless work (`lf -b <skill>`, commit/PR copy, sync conflicts) | Follows fallbacks and stops when the order runs out |
+| Interactive, with or without a Task | Keeps the thread and refusal visible; wait for your retry or `lf -a <harness> resume` |
+| Explicit agent (`-a` or `agent:`) | Keeps the harness (bare Claude still tries its other models; `claude:opus` pins the model) |
+| Graph step's order exhausted on a usage limit | Wait 5, 15, 30, then 60 minutes, retrying from the first entry after each; then stop with the error |
+| Revoked or missing login | Skips that provider's remaining models; tries the next provider or stops with the `lf machine login` command that fixes it |
+| Graph step's agent is not installed | Skips to the next entry and logs why; if none left, fails with the install command |
 
-```
-claude: You've hit your limit. Resets 3pm (America/Los_Angeles).
-Waiting until Nov 16 14:05 before trying again
-```
-
-Each try after a wait starts the order again at its first agent and uses
-whatever native login the Machine has then, so signing in elsewhere or buying
-more usage is picked up. `lf task status <ID>` shows the wait and when the
-next try starts. Loopflow never polls quotas, reads reset times or retries
-through another saved login. A quota reading or a successful answer mentioning
-limits does not trigger fallback. After fixing native authentication, retry a
-stopped run explicitly. For a stopped Task, inspect `lf task status <ID>`, then
-run `lf task run <ID>` to continue its remaining steps. To move a conversation to
-another harness, use `lf -a codex resume <session-id>`.
+Each retry after a wait restarts at the first entry of `agents` using whatever
+native login is active on the Machine, so renewing usage or signing in picks up
+automatically. `lf task status <ID>` shows the wait and next retry time.
 
 ## Sign in on any Machine
 
@@ -165,7 +140,7 @@ lf set --global approvers.github.command 'my-approver'
 | `command: <cmd>` | Runs the command with `LF_APPROVE_PROVIDER`, `LF_APPROVE_URL`, `LF_APPROVE_MACHINE` and, when the page asks for a device code (Codex, GitHub, OpenCode), `LF_APPROVE_CODE`; exit 0 means approved |
 
 The setting covers every sign-in `lf machine login` opens a page for: Codex,
-GitHub, Linear, Asana, Notion and OpenCode. Claude's own login here opens its
+GitHub, Linear, Asana and OpenCode. Claude's own login here opens its
 page itself. `--chrome-profile <profile>` overrides the setting for one run.
 The browser picks the account; Loopflow keeps no list of accounts. A command
 approver needs no terminal, so unattended sign-ins use one.
@@ -223,8 +198,8 @@ lf machine login opencode mini
 lf machine login opencode --api-key
 ```
 
-The same command signs in GitHub, Linear, Asana, Notion, Doppler and OpenCode,
-here or on another Machine. Sending one to another Machine signs it in here
+The same command signs in GitHub, Linear, Asana, Doppler and OpenCode here;
+GitHub, Linear and OpenCode also reach another Machine. Sending one to another Machine signs it in here
 first if needed, then installs it there over SSH: a GitHub token, a Linear
 access token refreshed here, or a fresh OpenCode device login. A destination
 already signed in to a different account keeps its own.

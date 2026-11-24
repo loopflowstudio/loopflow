@@ -11,7 +11,7 @@ use super::sqlite::scope_defaults::TaskScope;
 use super::sqlite::task_ownership::{OwnershipFacts, Person};
 use super::sqlite::SqliteStore;
 use super::{ProcessIdentityEvidence, StoreResult};
-use crate::linear_records::{LinearIssueId, LinearProjectId};
+use crate::planning::{LinearIssueId, LinearProjectId};
 use crate::session::{LfSession, TitleSource, WorkSource};
 use crate::steer::SteerAdapter;
 use crate::work::project::Project;
@@ -68,6 +68,66 @@ pub fn repository(store: &SqliteStore, path: &str) -> RepositoryId {
 }
 
 /// Register saved Wave facts without authored configuration or discovery.
+/// One exchange as a hub carries it: `local` sends what its hub has not
+/// taken, then takes in what changed there.
+pub fn exchange(local: &SqliteStore, local_repo: &str, hub: &SqliteStore, hub_repo: &str) {
+    use crate::sqlite::plan_carriers::Carrier;
+    let held = local
+        .select_carrier(local_repo, Carrier::Hub, "hub")
+        .unwrap();
+    let page = local
+        .plan_records_since(local_repo, held.sent_seq, usize::MAX)
+        .unwrap();
+    // What the hub could not write stays unsent and goes again.
+    if hub
+        .apply_plan_records(hub_repo, &page.records, None, &Default::default())
+        .unwrap()
+        .is_empty()
+    {
+        local.plan_sent(local_repo, Carrier::Hub, page.seq).unwrap();
+    }
+    let page = hub
+        .plan_records_since(hub_repo, held.seen_seq.unwrap_or(0), usize::MAX)
+        .unwrap();
+    local
+        .apply_plan_records(
+            local_repo,
+            &page.records,
+            Some((Carrier::Hub, page.seq)),
+            &Default::default(),
+        )
+        .unwrap();
+}
+
+/// Take `edits` in as another Machine's values, newer than anything here.
+pub fn arrive(
+    store: &SqliteStore,
+    repo: &str,
+    edits: &[crate::work::edit::WorkEdit],
+) -> StoreResult<()> {
+    use crate::sqlite::planning_write;
+    use crate::work::edit::{StampedRecord, StampedValue};
+    let at = planning_write::next_at(&store.conn.lock().unwrap())?;
+    let records: Vec<StampedRecord> = planning_write::grouped(edits)
+        .into_iter()
+        .map(|((table, id), edits)| StampedRecord {
+            table: table.to_owned(),
+            id: id.to_owned(),
+            fields: edits
+                .into_iter()
+                .map(|edit| StampedValue {
+                    value: edit.change,
+                    at,
+                    machine: "home_elsewhere".into(),
+                })
+                .collect(),
+        })
+        .collect();
+    store
+        .apply_plan_records(repo, &records, None, &Default::default())
+        .map(drop)
+}
+
 pub fn wave(store: &SqliteStore, wave: &crate::work::wave::Wave) {
     repository(store, wave.repo());
     assert!(store.upsert_wave_prepared(wave, None).unwrap());
@@ -122,7 +182,6 @@ pub fn steer() -> (tempfile::TempDir, SqliteStore, SteerAdapter) {
             "session",
             None,
             &process,
-            false,
             None,
             &crate::sqlite::SessionCaller {
                 agent: None,
@@ -167,7 +226,7 @@ pub fn native_steer() -> (tempfile::TempDir, SqliteStore, SteerAdapter, Terminal
     {
         let conn = store.conn.lock().unwrap();
         conn.execute(
-            "UPDATE processes SET agent_interactive=1 WHERE id=?1",
+            "UPDATE agent_sessions SET agent_interactive=1 WHERE agent_process_id=?1",
             [&adapter.agent_process_id],
         )
         .unwrap();
@@ -201,7 +260,6 @@ pub fn unpublished_conversation(
         title: "Investigation".into(),
         title_source: TitleSource::Generated,
         request: None,
-        ready_summary: None,
         completed_at: None,
         created_at,
     }
@@ -228,13 +286,13 @@ pub fn task() -> (tempfile::TempDir, SqliteStore, Task, TaskPr) {
 
         summary: String::new(),
         status: crate::work::project::ProjectStatus::Started,
-        linear_id: Some(LinearProjectId::new("999bdbdd-c045-41a6-8ffc-a97c4a40b0b3").unwrap()),
+        tracker_id: Some(LinearProjectId::new("999bdbdd-c045-41a6-8ffc-a97c4a40b0b3").unwrap()),
         slug: "probe".to_string(),
         name: "Probe".to_string(),
         description: "Probe Task execution".to_string(),
         krs: Vec::new(),
         metric_targets: Vec::new(),
-        pm_snapshot_synced_at: Some(now.unix_timestamp()),
+        tracker_synced_at: Some(now.unix_timestamp()),
 
         wave_id: wave_id.clone(),
         created_at: now,
@@ -245,22 +303,23 @@ pub fn task() -> (tempfile::TempDir, SqliteStore, Task, TaskPr) {
         &store,
         &wave_id,
         None,
-        project.linear_id.as_ref().unwrap().as_str(),
+        project.tracker_id.as_ref().unwrap().as_str(),
         &crate::PlanningLocks::new(tempfile::tempfile().unwrap()),
     )
     .unwrap();
     let task = Task {
+        parent_task_id: None,
         repository_id: crate::test_fixture::repository(&store, "/repo"),
         id: task_id.clone(),
 
         revision: 0,
-        linear_id: Some(LinearIssueId::new("task-uuid").unwrap()),
+        tracker_id: Some(LinearIssueId::new("task-uuid").unwrap()),
         identifier: "PROBE-1".to_string(),
         title: "Probe Task execution".to_string(),
         description: "Exercise the Task Graph store".to_string(),
-        pm_snapshot_synced_at: Some(now.unix_timestamp()),
+        tracker_synced_at: Some(now.unix_timestamp()),
 
-        pm_writeback: LinearWritebackState::Current,
+        tracker_writeback: LinearWritebackState::Current,
         wave_id: Some(wave_id),
         project_id: Some(project_id),
         worktree: Some(PathBuf::from("/repo.probe")),
@@ -338,7 +397,6 @@ pub fn conversation(
         title: "Implementation".into(),
         title_source: crate::session::TitleSource::Generated,
         request: None,
-        ready_summary: None,
         completed_at: None,
         created_at: 100,
     }
@@ -352,7 +410,7 @@ pub fn unregistered_task(
     let mut task = store.task(existing).unwrap().unwrap();
     let mut pr = store.task_prs(existing).unwrap().remove(0);
     task.id = TaskId::new();
-    task.linear_id = Some(LinearIssueId::new("later-issue").unwrap());
+    task.tracker_id = Some(LinearIssueId::new("later-issue").unwrap());
     task.identifier = "PROBE-2".into();
     task.worktree = Some(checkout);
     task.workspace_slug = "later-checkout".into();
@@ -370,6 +428,7 @@ pub fn unowned_task() -> (tempfile::TempDir, SqliteStore, TaskId) {
     let repo = dir.path().canonicalize().unwrap();
     let task = store
         .create_task(&crate::work::task::NewTask {
+            parent_task_id: None,
             id: TaskId::new(),
             repository_id: crate::test_fixture::repository(&store, repo.to_str().unwrap()),
             project_id: None,
@@ -401,37 +460,7 @@ pub fn process(store: &SqliteStore, number: u32, started_at: i64) -> LfProcessId
     id
 }
 
-/// Apply a validated peer snapshot against explicit disconnected fixture facts.
-pub fn import_saved(
-    store: &SqliteStore,
-    repo: &str,
-    destination: &str,
-    revision: &str,
-    incoming: &crate::planning_exchange::PlanningSnapshot,
-) -> StoreResult<()> {
-    repository(store, repo);
-    let inputs = store.repository_registration(repo)?;
-    let incoming = incoming
-        .canonicalized()
-        .map_err(|error| super::StoreError::InvalidData(error.to_string()))?;
-    incoming
-        .validate()
-        .map_err(|error| super::StoreError::InvalidData(error.to_string()))?;
-    assert!(
-        store.import_prepared_peer_planning(&super::sqlite::PeerImport {
-            inputs: &inputs,
-            repo,
-            destination,
-            revision,
-            incoming: &incoming,
-            planning_connected: false,
-            machine_names: Default::default(),
-        })?
-    );
-    Ok(())
-}
-
-pub fn record_captured_start(store: &SqliteStore, session: &str, turn: &str) -> i64 {
+pub fn record_captured_start(store: &SqliteStore, session: &str, turn: &str) {
     let attachment = store
         .session_attachment(session)
         .unwrap()
@@ -451,7 +480,6 @@ pub fn record_captured_start(store: &SqliteStore, session: &str, turn: &str) -> 
                     session,
                     None,
                     &process,
-                    false,
                     None,
                     &crate::sqlite::SessionCaller {
                         agent: None,
@@ -461,9 +489,7 @@ pub fn record_captured_start(store: &SqliteStore, session: &str, turn: &str) -> 
                 .unwrap()
         });
     let origin = store.session_turn_origin(session, &attachment).unwrap();
-    store
-        .record_session_turn_origin(&"thread".into(), turn, &origin)
-        .unwrap()
+    store.record_session_turn_origin(&"thread".into(), turn, &origin);
 }
 
 pub fn retirement() -> (
@@ -483,9 +509,9 @@ pub fn retirement() -> (
     {
         let conn = store.conn.lock().unwrap();
         conn.execute(
-            "INSERT INTO tasks(id,repository_id,issue_identifier,created_at,
-                 planning_completed,planning_completed_at)
-             VALUES(?1,?2,'PLAN-1',1,1,'done')",
+            "INSERT INTO tasks(id,repository_id,issue_identifier,issue_title,issue_description,
+                 workspace_slug,created_at,updated_at,planning_completed,planning_completed_at)
+             VALUES(?1,?2,'PLAN-1','Plan','','plan',1,1,1,'done')",
             rusqlite::params![task.as_str(), repo.as_str()],
         )
         .unwrap();

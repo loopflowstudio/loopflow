@@ -14,17 +14,18 @@ use loopflow_storage::work::task::Task;
 pub async fn planning_repo(fixture: &Fixture) -> (PathBuf, crate::work::wave::Wave) {
     let (repo, wave) = fixture.planning_repo().await;
     let project = serde_json::from_value(json!({
-        "id": "project-1", "slug": "Chapter", "name": "Chapter", "summary": "",
+        "id": "project-1", "slug": "Project", "name": "Project", "summary": "",
         "metric_targets": [], "workflow": "feature", "status": "started", "krs": [],
         "initiative_ids": ["initiative-1"], "team_ids": ["team-1"]
     }))
     .unwrap();
-    loopflow_storage::sqlite::linear_acceptance::accept_linear_project_in(
+    loopflow_storage::sqlite::linear_events::accept_linear_project_in(
         &fixture.store.sqlite,
         wave.id(),
         "initiative-1",
         &project,
         now(),
+        loopflow_storage::planning_sync::TrackerKind::Linear,
     )
     .unwrap();
     loopflow_storage::sqlite::project_selection::write_project_binding(
@@ -121,9 +122,9 @@ pub fn mark_issue_updated(issue: &mut serde_json::Value) {
 pub fn planning_project(id: &str, current: &str) -> serde_json::Value {
     let completed = id == "prior-project" || (id == "project-1" && current == "project-2");
     let name = match id {
-        "project-1" => "Chapter",
-        "prior-project" => "Previous chapter",
-        _ => "Next chapter",
+        "project-1" => "Project",
+        "prior-project" => "Previous project",
+        _ => "Next project",
     };
     json!({"id":id, "name":name, "description":"", "content":"workflow: feature",
         "status":{"type":if completed { "completed" } else { "started" }},
@@ -388,10 +389,13 @@ pub async fn planning_response(
         } else {
             let mut issue = json!({"id":input["id"],"identifier":format!("FIX-{}",state.issues.len()+1),
                 "title":input["title"],"description":input["description"],"url":"https://fixture.invalid/task",
-                "branchName":null,"completedAt":null,"dueDate":input["dueDate"],"trashed":null,"prioritySortOrder":0.0,"sortOrder":0.0,"state":{"type":input["stateId"]},
-                "assignee":null,"team":{"id":input["teamId"]},"project":{"id":input["projectId"],"name":"Local chapter"}});
+                "branchName":null,"completedAt":null,"dueDate":input["dueDate"],"trashed":null,"parent":null,"prioritySortOrder":0.0,"sortOrder":0.0,"state":{"type":input["stateId"]},
+                "assignee":null,"team":{"id":input["teamId"]},"project":{"id":input["projectId"],"name":"Local project"}});
             if input["projectId"].is_null() {
                 issue["project"] = json!(null);
+            }
+            if !input["parentId"].is_null() {
+                issue["parent"] = json!({"id": input["parentId"]});
             }
             mark_issue_updated(&mut issue);
             state.issues.push(issue);
@@ -473,7 +477,14 @@ pub async fn planning_response(
                     target["project"] = if value.is_null() {
                         json!(null)
                     } else {
-                        json!({"id":value,"name":"Chapter"})
+                        json!({"id":value,"name":"Project"})
+                    }
+                }
+                "parentId" => {
+                    target["parent"] = if value.is_null() {
+                        json!(null)
+                    } else {
+                        json!({"id":value})
                     }
                 }
                 _ => target[field] = value.clone(),
@@ -617,10 +628,8 @@ pub async fn planning_response(
             state.issues[0]["project"]["id"] = json!(initial_project_id);
             mark_issue_updated(&mut state.issues[0]);
         }
-        json!({"issue":{"attachments":page(state.attachments.iter().map(|url| json!({"url":url})).collect::<Vec<_>>())}})
-    } else if query.contains("query LinearIssueObservation")
-        || query.contains("query IssueObservation")
-    {
+        json!({"issue":{"attachments":page(state.attachments.iter().map(|url| json!({"id":format!("att-{url}"),"url":url})).collect::<Vec<_>>())}})
+    } else if query.contains("query IssueEvent") {
         let mut issue = state
             .issues
             .iter()
@@ -702,7 +711,7 @@ pub fn seed_provider_task(
     repo: &Path,
     title: &str,
     description: &str,
-) -> crate::ops::OpsResult<crate::linear::LinearIssue> {
+) -> crate::ops::OpsResult<loopflow_storage::planning::TrackerItem> {
     runtime.block_on(async {
         let mut state = state.lock().await;
         let project = state
@@ -715,9 +724,9 @@ pub fn seed_provider_task(
         state.issues.push(json!({
             "id":id,"identifier":format!("FIX-{index}"),"url":null,
             "title":title,"description":description,"completedAt":null,"dueDate":null,
-            "prioritySortOrder":0.0,"sortOrder":index as f64,"assignee":null,"trashed":null,
+            "parent":null,"prioritySortOrder":0.0,"sortOrder":index as f64,"assignee":null,"trashed":null,
             "updatedAt":"2026-09-29T12:00:00.123Z","state":{"type":"unstarted"},
-            "team":{"id":"team-1"},"project":{"id":project,"name":"Chapter"}
+            "team":{"id":"team-1"},"project":{"id":project,"name":"Project"}
         }));
         drop(state);
         crate::ops::linear::refresh_wave(repo, "product").await?;

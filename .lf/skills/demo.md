@@ -1,24 +1,24 @@
 ---
 extends: builtin
 ---
+## Desktop demos
+
+Build an isolated `.dev` bundle (`.lf/qa/desktop.md#loopflow-dev-on-the-live-machine`),
+not the shared `~/Applications/Loopflow Dev.app` that other worktrees overwrite,
+and confirm its stamped revision matches `HEAD` before launching or relaunching.
+When the change works with the installed server, point it at `~/.lf` instead of
+building `lf` and a fixture repo, noting any server change waiting on branch `lf`.
+
 ## Disposable Loopflow demos
 
-Before launch, create two private roots outside build output and temporary
-directories, which get purged; use any location the repo's cleanup guidance
-names. The history root holds the private Machine, provider history and fixture
-repository. The runtime root holds the whole copied runtime (the full app bundle
-when there is one) and generated output. Fix absolute paths from the start and
-never relocate them. Use the history root as `LF_HOME` and the copied CLI's
-absolute path as `LF_BIN` for launch, fixture commands and teardown. Record both
-roots, the Session, each demo process's exact identity, the teardown command and
-how to reopen the private Machine's history in the note. Keep both roots through
-rebuilds while those processes live.
+Use a private Machine when the demo needs a branch `lf`/server or destructive
+state. Create two fixed roots outside build output and `/tmp`: a history root
+(`LF_HOME`, provider history, fixture repo) and a runtime root (copied runtime,
+generated output, copied `lf` as `LF_BIN`). Record both roots, the Session, each
+process's exact identity, the teardown command, and how to reopen the history in
+the note; keep both roots while those processes live.
 
-When the demo ends, wait for live turns and pending requests to settle. Then
-`lf resume` each demo Session and quit its provider, signaling only its verified
-PID if it won't exit. Quitting discards unsent input; saved history cannot
-recreate the editor.
-
-Confirm the demo processes exited before removing the runtime root. Never delete
-the history root. If teardown is incomplete, keep the runtime root and record
-what survives and the next action. No other cleaner, no signaling by process name.
+At teardown, wait for live turns and pending requests to settle, then
+`lf resume` each demo Session and quit its provider (signal only its verified
+PID if it won't exit). Confirm every demo process exited before removing the
+runtime root; if any survive, keep it and record what remains.

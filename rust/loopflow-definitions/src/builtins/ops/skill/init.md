@@ -24,7 +24,7 @@ lf --version
 lf machine logins --json     # what this Machine is signed in to
 lf machine self --json
 lf wave list --json
-command -v claude codex opencode
+command -v claude codex opencode pi agy
 ```
 
 Show one compact picture:
@@ -50,7 +50,8 @@ someone is here, ask and save it as `user.name` in `~/.lf/config.yaml`. Never
 take a name from an account, directory or commit author, and never put one in
 repository config.
 
-One agent must be installed: Claude Code, Codex, OpenCode or Pi. With none,
+One agent must be installed: Claude Code, Codex, OpenCode, Pi or Antigravity
+(`agy`). With none,
 stop with install commands; don't run a package manager. Keep a valid existing
 `agent` setting. With one installed, use it; with several and no preference,
 ask, then `lf set --global default_agent <harness>`. Set `agent` in

@@ -4,9 +4,8 @@ use crate::git::{current_branch, get_default_branch};
 use crate::graph::load_skill;
 use crate::ops::telemetry::record_ops_metric;
 use crate::ops::{
-    abort_sync_after_authorization, abort_sync_for_resolution, continue_sync_after_authorization,
-    continue_sync_for_resolution, plan_sync, recover_sync, sync_class_name, sync_strategy_name,
-    sync_with_plan, OpsError, Progress, SyncOptions,
+    abort_sync_for_resolution, continue_sync_for_resolution, plan_sync, recover_sync,
+    sync_class_name, sync_strategy_name, sync_with_plan, OpsError, Progress, SyncOptions,
 };
 use crate::prompt::process::{prepare_process_prompt, ContextSourceOverrides, ProcessPromptInput};
 use crate::prompt::Surface;
@@ -22,7 +21,7 @@ pub(crate) fn run_sync_in(
 ) -> Result<crate::engine::checkout::Sync> {
     use crate::engine::checkout::Sync;
     let crate::engine::checkout::SyncInput {
-        onto,
+        mut onto,
         preview: plan_only,
         manual,
         continue_sync,
@@ -40,33 +39,13 @@ pub(crate) fn run_sync_in(
         ));
     }
     if continue_sync {
-        if adopt {
-            continue_sync_after_authorization(repo_root, true, || {
-                crate::ops::task::record_task_pr_repair(
-                    repo_root,
-                    loopflow_storage::work::task::TaskPrRepairKind::ManualGitRepair,
-                )
-                .map(|_| ())
-            })?;
-        } else {
-            continue_sync_for_resolution(repo_root, false)?;
-        }
+        continue_sync_for_resolution(repo_root, adopt)?;
         return Ok(Sync::Finished {
             message: "Sync complete; branch remains local.".into(),
         });
     }
     if abort {
-        if adopt {
-            abort_sync_after_authorization(repo_root, true, || {
-                crate::ops::task::record_task_pr_repair(
-                    repo_root,
-                    loopflow_storage::work::task::TaskPrRepairKind::ManualGitRepair,
-                )
-                .map(|_| ())
-            })?;
-        } else {
-            abort_sync_for_resolution(repo_root, false)?;
-        }
+        abort_sync_for_resolution(repo_root, adopt)?;
         return Ok(Sync::Finished {
             message: "Sync aborted.".into(),
         });
@@ -89,6 +68,16 @@ pub(crate) fn run_sync_in(
             });
         }
     }
+    // Another open Task as the target stacks this Task on it; the stacked sync
+    // below then merges the parent the record now names.
+    if let Some(target) =
+        onto.filter(|target| !plan_only && !on_main && *target != default && *target != upstream)
+    {
+        if let Some(parent) = crate::ops::task::open_task_named(repo_root, target)? {
+            progress.status(&crate::ops::task::stack_task(repo_root, &parent)?);
+            onto = None;
+        }
+    }
     // An explicit default branch detaches the child using its recorded fork;
     // ordinary sync continues to follow the live parent.
     let stacked = if on_main {
@@ -98,15 +87,17 @@ pub(crate) fn run_sync_in(
     };
     let detach =
         stacked.is_some() && onto.is_some_and(|target| target == default || target == upstream);
-    if stacked.is_some() && onto.is_some() && !detach {
-        return Err(anyhow!(
-            "use the default branch to detach this Task, or omit the target to sync its parent"
-        ));
+    let mut stacked_onto = None;
+    if let Some(stacked) = stacked.as_ref().filter(|_| !detach) {
+        stacked_onto = stacked
+            .live_parent_branch(&default)?
+            .map(|branch| format!("origin/{branch}"));
+        if let Some(onto) = onto {
+            return Err(anyhow!(
+                "{onto} names no other open Task; name one to restack this Task on it, the default branch to detach it, or omit the target to sync its parent"
+            ));
+        }
     }
-    let stacked_onto = stacked
-        .as_ref()
-        .and_then(|stacked| stacked.parent_branch.as_ref())
-        .map(|branch| format!("origin/{branch}"));
     let fork_base = stacked.as_ref().map(|stacked| stacked.fork_base.clone());
     let default_target = if on_main { &upstream } else { &default };
     let target = if detach {
@@ -130,14 +121,12 @@ pub(crate) fn run_sync_in(
         && !on_main
         && matches!(plan.strategy, crate::ops::SyncStrategy::MergeTarget)
         && crate::git::intervention_state(repo_root)?.is_none()
-        && {
-            progress.status("Committing uncommitted edits before merging...");
-            checkpoint_uncommitted_work(
-                repo_root,
-                &format!("Checkpoint edits before syncing onto {}", plan.base_ref),
-            )?
-        }
+        && checkpoint_uncommitted_work(
+            repo_root,
+            &format!("Checkpoint edits before syncing onto {}", plan.base_ref),
+        )?
     {
+        progress.status("Committed uncommitted edits before merging.");
         plan = plan_sync(repo_root, Some(target), fork_base.clone())?;
     }
     let options = SyncOptions {
@@ -145,7 +134,6 @@ pub(crate) fn run_sync_in(
         push: !manual && !on_main,
         fork_base,
     };
-    let avoidable = is_avoidable_sync_class(&plan.class);
     let (verification, agent_launched) = if manual {
         (sync_with_plan(repo_root, &options, &plan, progress)?, false)
     } else {
@@ -163,7 +151,6 @@ pub(crate) fn run_sync_in(
                         &onto,
                         &detail,
                         recovery,
-                        avoidable,
                         progress,
                         &recovery_config,
                     )
@@ -237,15 +224,14 @@ pub fn checkpoint_uncommitted_work(repo: &Path, message: &str) -> Result<bool> {
     Ok(true)
 }
 
-/// Hand a conflicted sync to exactly one recovery agent under the owning
-/// operation's scoped ids. The agent continues the existing sequencer; the
-/// caller keeps ownership and performs verification and the single push.
+/// Run one conflict resolution under the owning operation's scoped IDs.
+/// The agent continues the existing sequencer. The caller keeps ownership
+/// and performs verification and the single push.
 fn resolve_sync_conflict(
     repo_root: &Path,
     onto: &str,
     detail: &str,
     recovery: Option<Box<crate::ops::SyncRecovery>>,
-    avoidable: bool,
     progress: &impl Progress,
     config: &Config,
 ) -> Result<crate::ops::SyncVerification> {
@@ -254,24 +240,11 @@ fn resolve_sync_conflict(
     let context = format!(
         "<lf:sync-conflict>\nSync onto: {onto}\n{detail}\nContinue the existing owned sequencer; do not start another sync or push.\n</lf:sync-conflict>"
     );
-    if avoidable {
-        crate::ops::task::record_task_pr_repair(
-            repo_root,
-            loopflow_storage::work::task::TaskPrRepairKind::AvoidableRebaseAgent,
-        )?;
-    }
     progress.status("Launching sync agent to resolve conflicts...");
     Ok(recover_sync(*recovery, || {
         process_skill_agent(repo_root, "sync-conflicts", Some(&context), config)
             .map_err(|error| OpsError::Message(error.to_string()))
     })?)
-}
-
-fn is_avoidable_sync_class(class: &crate::ops::SyncClass) -> bool {
-    matches!(
-        class,
-        crate::ops::SyncClass::StaleEmpty | crate::ops::SyncClass::ScratchOnly
-    )
 }
 
 /// Run a PR-mutating op; on a sync conflict, launch the sync agent to
@@ -294,7 +267,6 @@ pub(crate) fn with_sync_retry<T>(
                 &onto,
                 &detail,
                 recovery,
-                false,
                 progress,
                 &load_config_or_default(Some(repo_root)),
             )?;
@@ -340,8 +312,9 @@ fn process_skill_agent(
         },
     )?;
 
-    let agent = prepared.config.agent()?;
-    let (provider, model) = crate::config::parse_agent(agent);
+    let agent = &prepared.config.agent;
+    let provider = agent.harness.as_str().to_owned();
+    let model = agent.model.clone();
     let cwd = prepared
         .config
         .cwd
@@ -373,13 +346,12 @@ fn process_skill_agent(
 
     let launch = prepared.config;
     let process = ProcessConfig {
-        auto: true,
         stream: true,
         runtime: Some(capture.clone()),
         ..Default::default()
     };
 
-    let result = run_agent(&launch, &process);
+    let result = run_agent(&launch, &process, crate::harness::LaunchKind::Batch);
     let outcome = match &result {
         Ok(result) if result.exit_code == 0 => "completed",
         Ok(_) | Err(_) => "failed",
@@ -387,25 +359,16 @@ fn process_skill_agent(
     capture.finish(outcome)?;
     let result = result?;
     if result.exit_code != 0 {
+        let reason = result.stderr.trim();
+        let reason = if reason.is_empty() {
+            String::new()
+        } else {
+            format!("\n{reason}")
+        };
         return Err(anyhow!(
-            "agent exited with code {} while resolving {}",
-            result.exit_code,
-            skill_name,
+            "agent exited with code {} while resolving {skill_name}{reason}",
+            result.exit_code
         ));
     }
     Ok(())
-}
-
-#[cfg(test)]
-mod sync_performance_tests {
-    use super::is_avoidable_sync_class;
-    use crate::ops::SyncClass;
-
-    #[test]
-    fn disposable_sync_classes_make_an_agent_launch_a_repair_incident() {
-        assert!(is_avoidable_sync_class(&SyncClass::StaleEmpty));
-        assert!(is_avoidable_sync_class(&SyncClass::ScratchOnly));
-        assert!(!is_avoidable_sync_class(&SyncClass::CleanAuthored));
-        assert!(!is_avoidable_sync_class(&SyncClass::Protected));
-    }
 }

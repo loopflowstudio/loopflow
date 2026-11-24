@@ -3,7 +3,6 @@
 use anyhow::{anyhow, Context, Result};
 use std::io::Write;
 
-use loopflow_execution::agent::check_cli_available;
 use loopflow_execution::agent::run_agent;
 use loopflow_execution::agent::AgentConfig;
 use loopflow_execution::agent::ProcessConfig;
@@ -30,8 +29,8 @@ fn replay_at(home: &std::path::Path, selector: &str) -> Result<String> {
             source.artifact_key
         )
     })?;
-    let (harness, model) = loopflow_execution::config::parse_agent(&request.agent);
-    if harness != source.harness || model != source.model {
+    let agent = loopflow_execution::config::Agent::parse(&request.agent)?;
+    if agent.harness.as_str() != source.harness || agent.model != source.model {
         return Err(anyhow!(
             "capture {} has inconsistent provider identity",
             source.artifact_key
@@ -43,24 +42,22 @@ fn replay_at(home: &std::path::Path, selector: &str) -> Result<String> {
         task_prompt: request.task_prompt.clone(),
         skill_invocation: request.skill_invocation.clone(),
         output_schema: request.output_schema.clone(),
-        agent: Some(request.agent.clone()),
         max_turns: request.max_turns,
         cwd: Some(source.cwd.clone()),
-        write_scope: request.write_scope,
-        execution_boundary: request.execution_boundary.clone(),
-        skip_permissions: request.skip_permissions,
+        yolo: request.skip_permissions,
         chrome: request.chrome,
         codex_service_tier: request.codex_service_tier,
-        ..AgentConfig::default()
+        ..AgentConfig::new(agent)
     };
-    config.apply_agent_override();
-    let (selected_harness, model) = loopflow_execution::config::parse_agent(config.agent()?);
-    if !check_cli_available(&selected_harness) {
+    config.apply_agent_override()?;
+    let selected_harness = config.agent.harness.as_str().to_owned();
+    let model = config.agent.model.clone();
+    if !loopflow_execution::harness::launcher(config.agent.harness).installed() {
         return Err(anyhow!(
             "'{selected_harness}' CLI is unavailable on this Machine"
         ));
     }
-    request.agent = config.agent()?.to_owned();
+    request.agent = config.agent.to_string();
     request.account_id = None;
     let spec = SessionCaptureSpec {
         harness: selected_harness,
@@ -101,13 +98,16 @@ fn replay_at(home: &std::path::Path, selector: &str) -> Result<String> {
         Some(file)
     };
     let process = ProcessConfig {
-        auto: true,
         stream: true,
         runtime: Some(capture.clone()),
         context_file: context_file.as_ref().map(|file| file.path().to_path_buf()),
         ..ProcessConfig::default()
     };
-    let result = run_agent(&config, &process);
+    let result = run_agent(
+        &config,
+        &process,
+        loopflow_execution::harness::LaunchKind::Batch,
+    );
     let outcome = match &result {
         Ok(result) if result.exit_code == 0 => "completed",
         Ok(_) | Err(_) => "failed",
@@ -161,6 +161,7 @@ for line in sys.stdin:
     with open(os.environ['LF_TEST_REPLAY_EVIDENCE'], 'w') as evidence:
         json.dump({'capture': os.environ['LF_CAPTURE_KEY'], 'context': context, 'message': message, 'schema': schema}, evidence)
     message['session_id'] = 'replay-thread'
+    keep_claude_turn(message, 'not the answer', {'decision': 'advance'})
     print(json.dumps(message), flush=True)
     print(json.dumps({'type': 'system', 'subtype': 'init', 'session_id': 'replay-thread'}), flush=True)
     print(json.dumps({'type': 'result', 'uuid': 'replay-result', 'session_id': 'replay-thread', 'subtype': 'success', 'is_error': False, 'result': 'not the answer', 'structured_output': {'decision': 'advance'}}), flush=True)
@@ -168,10 +169,15 @@ for line in sys.stdin:
         // Replay can switch providers; both the source and override must use
         // stand-ins, never a provider installed on the test host.
         for (name, source) in [
-            ("claude", claude_source.to_string()),
+            (
+                "claude",
+                crate::test_support::claude_stand_in(claude_source),
+            ),
+            // Signing the shared Claude home in goes through the Keychain on macOS.
+            ("security", crate::test_support::FAKE_SECURITY.to_string()),
             (
                 "opencode",
-                include_str!("../../../../loopflow-execution/tests/support/opencode_server.py")
+                include_str!("../../../../loopflow-execution/tests/support/opencode_cli.py")
                     .replace("__WAIT__", "False"),
             ),
         ] {
@@ -220,8 +226,6 @@ for line in sys.stdin:
             account_id,
             max_turns: Some(3),
             codex_service_tier: None,
-            write_scope: loopflow_execution::agent::AgentWriteScope::Worktree,
-            execution_boundary: None,
             skip_permissions: true,
             chrome: None,
         };
@@ -245,7 +249,7 @@ for line in sys.stdin:
         let source_id = source.artifact_key();
         source.finish("completed").unwrap();
 
-        let session = loopflow_storage::sqlite::SqliteStore::open_processes_read_only(
+        let session = loopflow_storage::sqlite::SqliteStore::open_read_only(
             &registry,
             loopflow_execution::store::token_key::encryption_key,
         )

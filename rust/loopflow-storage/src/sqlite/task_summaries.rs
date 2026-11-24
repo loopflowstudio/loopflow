@@ -1,5 +1,5 @@
 //! TaskSummary: what a Task's run came to, written once when the Task ends.
-//! Derived from Graph processes, their steps, the Auto-Ship log and Sessions;
+//! Derived from Graph processes, their steps, the auto mark and Sessions;
 //! nothing else records into it.
 
 use std::collections::BTreeMap;
@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
-use crate::graph_process::GraphProcess;
+use crate::graph_process::GraphExecution;
 use crate::StoreResult;
 use loopflow_model::durable::TaskId;
 
@@ -41,8 +41,9 @@ pub struct TaskSummary {
     pub graph: Option<String>,
     /// Times each loop decider sent its loop around again, by step label.
     pub loop_passes: BTreeMap<String, u32>,
-    /// Auto-Ship log rows by kind: approved, carried, restarted, stopped, withdrawn.
-    pub ship_events: BTreeMap<String, u32>,
+    /// The Task's auto mark when it ended; `null` when nobody set one.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub auto: Option<super::AutoState>,
     /// From the first Graph process's start, else the Task's creation.
     pub wall_seconds: i64,
     /// First line the latest `reflect` step said last; `null` without one.
@@ -53,7 +54,7 @@ pub struct TaskSummary {
 /// Returns each loop decider took, across every Graph process of one Task. A
 /// decider returned when the next step its Graph process started stands at or
 /// before it with different loop counts; a retried step keeps its counts.
-fn loop_passes(graphs: &[GraphProcess]) -> BTreeMap<String, u32> {
+fn loop_passes(graphs: &[GraphExecution]) -> BTreeMap<String, u32> {
     let mut passes = BTreeMap::new();
     for graph in graphs {
         for pair in graph.steps.windows(2) {
@@ -75,23 +76,14 @@ pub(super) fn write_in(conn: &Connection, task: &TaskId, ended: TaskEnd) -> Stor
     let graphs = super::graph_inventory::graphs_in(conn, "g.task_id=?1", &[&task.as_str()])?;
     let ended_at = crate::rows::now_unix();
     let started_at = match graphs.first() {
-        Some(graph) => graph.process.started_at,
+        Some(graph) => graph.run.started_at,
         None => conn.query_row(
             "SELECT created_at FROM tasks WHERE id=?1",
             [task.as_str()],
             |row| row.get(0),
         )?,
     };
-    let mut ship_events = BTreeMap::<String, u32>::new();
-    for row in conn
-        .prepare_cached(
-            "SELECT kind,count(*) FROM task_ship_events WHERE task_id=?1 GROUP BY kind",
-        )?
-        .query_map([task.as_str()], |row| Ok((row.get(0)?, row.get(1)?)))?
-    {
-        let (kind, count) = row?;
-        ship_events.insert(kind, count);
-    }
+    let auto = super::task_work::auto_in(conn, task)?.map(|mark| mark.state);
     let reflect = conn
         .query_row(
             "SELECT json_extract(a.preview,'$.text') FROM agent_sessions s
@@ -110,10 +102,11 @@ pub(super) fn write_in(conn: &Connection, task: &TaskId, ended: TaskEnd) -> Stor
                 .map(str::to_owned)
         });
     conn.execute(
-        "INSERT INTO task_summaries(task_id,ended,ended_at,graph,loop_passes,ship_events,wall_seconds,reflect)
-         VALUES(?1,?2,?3,?4,?5,?6,?7,?8)
+        // `ship_events` is leaving (LOO-971); new rows write it empty.
+        "INSERT INTO task_summaries(task_id,ended,ended_at,graph,loop_passes,ship_events,auto,wall_seconds,reflect)
+         VALUES(?1,?2,?3,?4,?5,'{}',?6,?7,?8)
          ON CONFLICT(task_id) DO UPDATE SET ended=excluded.ended,ended_at=excluded.ended_at,
-             graph=excluded.graph,loop_passes=excluded.loop_passes,ship_events=excluded.ship_events,
+             graph=excluded.graph,loop_passes=excluded.loop_passes,auto=excluded.auto,
              wall_seconds=excluded.wall_seconds,reflect=excluded.reflect",
         params![
             task.as_str(),
@@ -121,7 +114,7 @@ pub(super) fn write_in(conn: &Connection, task: &TaskId, ended: TaskEnd) -> Stor
             ended_at,
             graphs.last().map(|graph| graph.name.as_str()),
             serde_json::to_string(&loop_passes(&graphs))?,
-            serde_json::to_string(&ship_events)?,
+            auto.map(|state| state.as_str()),
             (ended_at - started_at).max(0),
             reflect,
         ],
@@ -135,7 +128,7 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let row = conn
             .query_row(
-                "SELECT ended,ended_at,graph,loop_passes,ship_events,wall_seconds,reflect
+                "SELECT ended,ended_at,graph,loop_passes,auto,wall_seconds,reflect
                  FROM task_summaries WHERE task_id=?1",
                 [task.as_str()],
                 |row| {
@@ -144,14 +137,14 @@ impl SqliteStore {
                         row.get(1)?,
                         row.get(2)?,
                         row.get::<_, String>(3)?,
-                        row.get::<_, String>(4)?,
+                        row.get::<_, Option<String>>(4)?,
                         row.get(5)?,
                         row.get(6)?,
                     ))
                 },
             )
             .optional()?;
-        let Some((ended, ended_at, graph, passes, events, wall_seconds, reflect)) = row else {
+        let Some((ended, ended_at, graph, passes, auto, wall_seconds, reflect)) = row else {
             return Ok(None);
         };
         Ok(Some(TaskSummary {
@@ -159,7 +152,9 @@ impl SqliteStore {
             ended_at,
             graph,
             loop_passes: serde_json::from_str(&passes)?,
-            ship_events: serde_json::from_str(&events)?,
+            auto: auto
+                .map(|state| super::AutoState::parse(&state))
+                .transpose()?,
             wall_seconds,
             reflect,
         }))
@@ -175,21 +170,9 @@ mod tests {
     #[test]
     fn an_abandoned_task_keeps_one_summary_of_its_run() {
         let (_dir, store, task) = crate::test_fixture::store_with_task();
-        let process = |parent: Option<&LfProcessId>| {
-            let id = LfProcessId::new();
-            store
-                .conn
-                .lock()
-                .unwrap()
-                .execute(
-                    "INSERT INTO processes(id,trace_id,parent_lf_process_id,started_at) VALUES(?1,?2,?3,1)",
-                    rusqlite::params![id, loopflow_model::id::TraceId::new(), parent],
-                )
-                .unwrap();
-            id
-        };
+        let start = crate::graph_process::ExecutionStart::reserved(1);
         // One Graph whose only step sent its loop around twice before going on.
-        let graph = process(None);
+        let graph = LfProcessId::new();
         let compiled = crate::graph::CompiledGraph {
             name: "polish".into(),
             steps: vec![crate::graph::GraphNode {
@@ -204,23 +187,22 @@ mod tests {
             }],
         };
         store
-            .record_graph_process(&graph, &compiled, Some(&task))
+            .record_graph(&graph, &compiled, Some(&task), &start, None, None, None)
             .unwrap();
         for pass in 0..=2 {
             store
-                .record_graph_step(&graph, &process(Some(&graph)), 0, &[vec![pass]])
+                .record_graph_step(&graph, &LfProcessId::new(), 0, &[vec![pass]], &start)
                 .unwrap();
         }
         store
-            .conn
-            .lock()
-            .unwrap()
-            .execute_batch(
-                "INSERT INTO task_ship_events(task_id,kind,at) SELECT id,'approved',3 FROM tasks;
-                 INSERT INTO task_ship_events(task_id,kind,at) SELECT id,'stopped',4 FROM tasks;
-                 INSERT INTO task_ship_events(task_id,kind,at) SELECT id,'approved',5 FROM tasks;",
-            )
+            .take_up_task_graph(&task, r#"{"name":"polish","steps":[]}"#)
             .unwrap();
+        let stopped = super::super::Auto {
+            state: super::super::AutoState::Off,
+            at: 4,
+            by: crate::process::Starter::Person { name: None },
+        };
+        store.set_task_auto(&task, &stopped, false).unwrap();
         assert_eq!(store.task_summary(&task).unwrap(), None);
 
         let statements = crate::query_plans::statements(&store, || {
@@ -237,7 +219,7 @@ mod tests {
             ended,
             graph,
             loop_passes,
-            ship_events,
+            auto,
             wall_seconds,
             reflect,
             ..
@@ -245,10 +227,7 @@ mod tests {
         assert_eq!(ended, TaskEnd::Abandoned);
         assert_eq!(graph.as_deref(), Some("polish"));
         assert_eq!(loop_passes, [("review".to_owned(), 2)].into());
-        assert_eq!(
-            ship_events,
-            [("approved".to_owned(), 2), ("stopped".to_owned(), 1)].into()
-        );
+        assert_eq!(auto, Some(super::super::AutoState::Off));
         assert!(wall_seconds >= 0);
         assert_eq!(reflect, None);
     }

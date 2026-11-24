@@ -6,16 +6,18 @@ use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
-use crate::agent::{run_agent, AgentConfig, ProcessConfig};
-use crate::config::{load_config_or_default, MergeMethod};
+use crate::agent::{run_agent, ProcessConfig};
+use crate::config::MergeMethod;
 use crate::git::worktrees::{list_worktrees, main_repo_root};
 use crate::git::{current_branch, get_default_branch, rev_parse};
 use crate::graph::load_skill;
 
-use crate::ops::commit::{commit_workflow, CommitOptions};
+use crate::ops::commit::{commit_workflow, message_launch, CommitOptions, MessageAgent};
 use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::progress::Progress;
+use crate::ops::task::{StackParentPr, StackedSync};
 use crate::ops::util::{command_exists, stderr_from_output};
+use crate::prompt::change::{Change, ChangeRange};
 
 #[derive(Debug, Clone)]
 pub struct PrOptions {
@@ -84,6 +86,8 @@ struct GhPr {
     merge_commit: Option<GhCommit>,
     #[serde(default, rename = "headRefOid")]
     head_ref_oid: Option<String>,
+    #[serde(default, rename = "baseRefName")]
+    base_ref_name: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -106,16 +110,7 @@ pub fn create_or_update_pr(
 
     let main_repo = resolve_main_repo(repo);
     let default_branch = get_default_branch(&main_repo)?;
-    let publication_base = || -> OpsResult<(bool, String)> {
-        let stack = crate::ops::task::task_stack(repo)?;
-        let base = match stack.as_ref().and_then(|stack| stack.parent_branch.clone()) {
-            Some(parent) => parent,
-            None if stack.is_some() => default_branch.clone(),
-            None => pr_target(repo, &main_repo, &default_branch)?,
-        };
-        Ok((stack.is_some(), base))
-    };
-    let (stacked, base_branch) = publication_base()?;
+    let (stack, base_branch) = publication_base(repo, &main_repo, &default_branch)?;
 
     // Record the ancestry already present in Git before the first remote effect.
     // This recognizes completed merges without integrating or rewriting history.
@@ -140,7 +135,7 @@ pub fn create_or_update_pr(
         commit_workflow(repo, &commit_options, progress, &|_| {})?;
     }
     crate::ops::task::require_task_pr_range_nonempty(repo)?;
-    require_non_task_pr_range_nonempty(repo, stacked, &base_branch)?;
+    require_non_task_pr_range_nonempty(repo, stack.is_some(), &base_branch)?;
     let branch =
         current_branch(repo)?.ok_or_else(|| OpsError::Message("not on a branch".to_string()))?;
     let published_head = rev_parse(repo, "HEAD")?;
@@ -159,8 +154,8 @@ pub fn create_or_update_pr(
     // to later Loopflow pushes and shipping requests in this worktree.
     let _mutation = crate::ops::task::lock_task_pr_mutation(repo)?;
     // Preparation may have selected a parent while copy generation was running.
-    let (stacked, base_branch) = publication_base()?;
-    require_non_task_pr_range_nonempty(repo, stacked, &base_branch)?;
+    let (stack, base_branch) = publication_base(repo, &main_repo, &default_branch)?;
+    require_non_task_pr_range_nonempty(repo, stack.is_some(), &base_branch)?;
     let locked_branch = current_branch(repo)?;
     let locked_head = rev_parse(repo, "HEAD")?;
     if locked_branch.as_deref() != Some(branch.as_str()) || locked_head != published_head {
@@ -195,7 +190,30 @@ pub fn create_or_update_pr(
             crate::ops::task::attach_task_github_pr(repo, Some(&pr_info(&branch, &pr)), &|_| {})?;
         }
         progress.status("Updating PR...");
-        update_pr(repo, info.number, title, body, &base_branch)?;
+        update_pr(repo, info.number, title, body)?;
+        let record = PublicationRecord {
+            identifier: task_context
+                .as_ref()
+                .map(|context| context.identifier.as_str()),
+            parent: stack.as_ref().map(|stack| RecordedParent {
+                identifier: &stack.parent_identifier,
+                branch: &stack.parent_branch,
+                merged: stack.parent == StackParentPr::Merged,
+            }),
+            base: &base_branch,
+            default_branch: &default_branch,
+        };
+        match pr_base_update(pr.base_ref_name.as_deref(), &record) {
+            PrBaseUpdate::Keep => {}
+            PrBaseUpdate::Retarget => retarget_pr(repo, info.number, &base_branch, &|_| {})?,
+            PrBaseUpdate::Disagree(pr_base) => {
+                let owner = crate::ops::task::open_task_named(repo, pr_base)?;
+                eprintln!(
+                    "{}",
+                    pr_base_disagreement(info.number, pr_base, owner.as_deref(), &record)
+                );
+            }
+        }
         crate::ops::task::record_task_pr_presentation(repo, title, body)?;
         Ok(PrResult {
             url: info.url,
@@ -500,58 +518,36 @@ pub fn generate_pr_copy(
     progress: &impl Progress,
     agent_override: Option<&str>,
 ) -> OpsResult<PrCopy> {
-    let template = load_skill("pr-message", repo)
-        .map_err(|err| OpsError::Message(format!("pr-message skill not found: {err}")))?
+    let skill = load_skill("pr-message", repo)
+        .map_err(|err| OpsError::Message(format!("pr-message skill not found: {err}")))?;
+    let template = skill
         .content
+        .as_deref()
         .ok_or_else(|| OpsError::Message("pr-message skill has no content".to_string()))?;
     let main_repo = resolve_main_repo(repo);
     let default_branch = get_default_branch(&main_repo)?;
-    let stack = crate::ops::task::task_stack(repo)?;
-    let base_branch = match stack.as_ref() {
-        Some(stack) => stack.parent_branch.clone().unwrap_or(default_branch),
-        None => pr_target(repo, &main_repo, &default_branch)?,
-    };
+    let (stack, base_branch) = publication_base(repo, &main_repo, &default_branch)?;
     require_non_task_pr_range_nonempty(repo, stack.is_some(), &base_branch)?;
     let log = git_stdout(
         repo,
         &["log", &format!("origin/{base_branch}..HEAD"), "--oneline"],
     )?;
-    let stat = git_stdout(
-        repo,
-        &["diff", &format!("origin/{base_branch}...HEAD"), "--stat"],
-    )?;
-    let diff = git_stdout(repo, &["diff", &format!("origin/{base_branch}...HEAD")])?;
-    let diff = truncate_chars(&diff, 20_000);
+    let change =
+        Change::read(repo, ChangeRange::Since(format!("origin/{base_branch}")))?.prompt_section();
 
     let prompt = format!(
-        "{template}\n\n## Base branch\n{base_branch}\n\n## Commits\n```\n{log}\n```\n\n## Diff stat\n```\n{stat}\n```\n\n## Unified diff\n```diff\n{diff}\n```\n\nReturn exactly one JSON object with this schema:\n{{\"title\":\"...\",\"body\":\"...\"}}\nNo markdown fences. No explanation."
+        "{template}\n\n## Base branch\n{base_branch}\n\n## Commits\n```\n{log}\n```\n\n## Change\n{change}\nReturn exactly one JSON object with this schema:\n{{\"title\":\"...\",\"body\":\"...\"}}\nNo markdown fences. No explanation."
     );
 
-    let config = load_config_or_default(Some(repo));
-    let agent = match agent_override {
-        Some(agent) => agent,
-        None => config.agent()?,
-    }
-    .to_string();
     progress.status("Generating PR title/body...");
 
-    let launch = AgentConfig {
-        chrome: config.chrome,
-        codex_service_tier: config.codex.service_tier,
-        claude_model: config.claude.model.clone(),
-        task_prompt: prompt,
-        agent: Some(agent),
-        cwd: Some(repo.to_path_buf()),
-        skip_permissions: config.yolo,
-        ..Default::default()
-    };
+    let launch = message_launch(repo, &skill, MessageAgent::Chosen(agent_override), prompt)?;
     let process = ProcessConfig {
-        auto: true,
         stream: false,
         ..Default::default()
     };
 
-    let result = run_agent(&launch, &process)
+    let result = run_agent(&launch, &process, crate::harness::LaunchKind::Batch)
         .map_err(|err| OpsError::Message(format!("failed to generate PR copy: {err}")))?;
     if result.exit_code != 0 {
         return Err(OpsError::Message(format!(
@@ -1990,7 +1986,7 @@ fn find_open_branch_pr(repo: &Path, branch: &str) -> OpsResult<Option<GhPr>> {
         .arg("--head")
         .arg(branch)
         .arg("--json")
-        .arg("url,state,isDraft,number,mergeCommit,headRefOid")
+        .arg("url,state,isDraft,number,mergeCommit,headRefOid,baseRefName")
         .current_dir(repo)
         .output()?;
 
@@ -2010,7 +2006,7 @@ fn find_open_branch_pr(repo: &Path, branch: &str) -> OpsResult<Option<GhPr>> {
     Ok(open)
 }
 
-fn update_pr(repo: &Path, number: u64, title: &str, body: &str, base: &str) -> OpsResult<()> {
+fn update_pr(repo: &Path, number: u64, title: &str, body: &str) -> OpsResult<()> {
     let output = Command::new("gh")
         .arg("pr")
         .arg("edit")
@@ -2019,8 +2015,6 @@ fn update_pr(repo: &Path, number: u64, title: &str, body: &str, base: &str) -> O
         .arg(title)
         .arg("--body")
         .arg(body)
-        .arg("--base")
-        .arg(base)
         .current_dir(repo)
         .output()?;
     if !output.status.success() {
@@ -2030,6 +2024,96 @@ fn update_pr(repo: &Path, number: u64, title: &str, body: &str, base: &str) -> O
         });
     }
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// PR base
+// ---------------------------------------------------------------------------
+
+/// The Task's stack and the base its PR should target: a stacked Task's live
+/// parent, else the default branch; a worktree without a stack follows its upstream.
+fn publication_base(
+    repo: &Path,
+    main_repo: &Path,
+    default_branch: &str,
+) -> OpsResult<(Option<StackedSync>, String)> {
+    let stack = crate::ops::task::task_stack(repo)?;
+    let base = match stack.as_ref() {
+        Some(stack) => stack
+            .live_parent_branch(default_branch)?
+            .unwrap_or(default_branch)
+            .to_string(),
+        None => pr_target(repo, main_repo, default_branch)?,
+    };
+    Ok((stack, base))
+}
+
+/// What publication knows about where an existing PR should point.
+struct PublicationRecord<'a> {
+    /// The Task's identifier; `None` outside a Task worktree.
+    identifier: Option<&'a str>,
+    parent: Option<RecordedParent<'a>>,
+    /// The base the record names: the live parent, else the default branch.
+    base: &'a str,
+    default_branch: &'a str,
+}
+
+struct RecordedParent<'a> {
+    identifier: &'a str,
+    branch: &'a str,
+    merged: bool,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum PrBaseUpdate<'a> {
+    Keep,
+    Retarget,
+    /// The PR's base, which the record does not name.
+    Disagree(&'a str),
+}
+
+/// Publication moves an existing PR's base only when the record's parent merged.
+/// A Task's record never overwrites a base someone chose; it reports both.
+fn pr_base_update<'a>(pr_base: Option<&'a str>, record: &PublicationRecord) -> PrBaseUpdate<'a> {
+    let Some(pr_base) = pr_base else {
+        tracing::warn!("gh pr list returned no baseRefName; leaving the PR's base");
+        return PrBaseUpdate::Keep;
+    };
+    if pr_base == record.base {
+        return PrBaseUpdate::Keep;
+    }
+    let merged_parent = record
+        .parent
+        .as_ref()
+        .is_some_and(|parent| parent.merged && parent.branch == pr_base);
+    if merged_parent || record.identifier.is_none() {
+        return PrBaseUpdate::Retarget;
+    }
+    PrBaseUpdate::Disagree(pr_base)
+}
+
+/// Name both sides and the command that settles each.
+fn pr_base_disagreement(
+    number: u64,
+    pr_base: &str,
+    owner: Option<&str>,
+    record: &PublicationRecord,
+) -> String {
+    let identifier = record.identifier.unwrap_or("this Task");
+    let owned = owner.map(|owner| format!(" ({owner})")).unwrap_or_default();
+    let recorded = match record.parent.as_ref().filter(|parent| !parent.merged) {
+        Some(parent) => format!("is stacked on {} ({})", parent.identifier, parent.branch),
+        None => "records no stack parent".to_string(),
+    };
+    let record_it = match owner {
+        Some(owner) => format!("Record it: lf sync {owner}. "),
+        None if pr_base == record.default_branch => format!("Record it: lf sync {pr_base}. "),
+        None => String::new(),
+    };
+    format!(
+        "PR #{number} targets {pr_base}{owned}, but {identifier} {recorded}.\nKept the PR's base. {record_it}Follow the record: gh pr edit {number} --base {}",
+        record.base
+    )
 }
 
 pub(crate) fn retarget_open_pr(
@@ -2481,23 +2565,90 @@ fn git_stdout(repo: &Path, args: &[&str]) -> OpsResult<String> {
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
 
-fn truncate_chars(text: &str, max_chars: usize) -> String {
-    let mut iter = text.char_indices();
-    if iter.nth(max_chars).is_none() {
-        return text.to_string();
-    }
-    let end = text
-        .char_indices()
-        .nth(max_chars)
-        .map(|(idx, _)| idx)
-        .unwrap_or(text.len());
-    format!("{}\n\n[diff truncated]", &text[..end])
-}
-
 #[cfg(test)]
 mod tests {
     use std::ffi::OsString;
     use std::os::unix::fs::PermissionsExt;
+
+    use super::{
+        pr_base_disagreement, pr_base_update, PrBaseUpdate, PublicationRecord, RecordedParent,
+    };
+
+    fn record<'a>(parent: Option<RecordedParent<'a>>, base: &'a str) -> PublicationRecord<'a> {
+        PublicationRecord {
+            identifier: Some("LOO-13"),
+            parent,
+            base,
+            default_branch: "main",
+        }
+    }
+
+    fn parent(merged: bool) -> Option<RecordedParent<'static>> {
+        Some(RecordedParent {
+            identifier: "LOO-12",
+            branch: "jack/loo-12",
+            merged,
+        })
+    }
+
+    #[test]
+    fn publication_keeps_a_base_the_record_names_and_one_it_cannot_read() {
+        let stacked = record(parent(false), "jack/loo-12");
+        assert_eq!(
+            pr_base_update(Some("jack/loo-12"), &stacked),
+            PrBaseUpdate::Keep
+        );
+        assert_eq!(pr_base_update(None, &stacked), PrBaseUpdate::Keep);
+    }
+
+    #[test]
+    fn publication_retargets_only_from_a_merged_parent() {
+        let landed = record(parent(true), "main");
+        assert_eq!(
+            pr_base_update(Some("jack/loo-12"), &landed),
+            PrBaseUpdate::Retarget
+        );
+        assert_eq!(
+            pr_base_update(Some("jack/other"), &landed),
+            PrBaseUpdate::Disagree("jack/other")
+        );
+    }
+
+    #[test]
+    fn a_pr_on_another_tasks_branch_names_both_commands() {
+        let unstacked = record(None, "main");
+        assert_eq!(
+            pr_base_update(Some("jack/loo-12"), &unstacked),
+            PrBaseUpdate::Disagree("jack/loo-12")
+        );
+        assert_eq!(
+            pr_base_disagreement(1972, "jack/loo-12", Some("LOO-12"), &unstacked),
+            "PR #1972 targets jack/loo-12 (LOO-12), but LOO-13 records no stack parent.\n\
+             Kept the PR's base. Record it: lf sync LOO-12. Follow the record: gh pr edit 1972 --base main"
+        );
+    }
+
+    #[test]
+    fn a_stacked_pr_moved_to_main_offers_to_detach() {
+        let stacked = record(parent(false), "jack/loo-12");
+        assert_eq!(
+            pr_base_disagreement(1972, "main", None, &stacked),
+            "PR #1972 targets main, but LOO-13 is stacked on LOO-12 (jack/loo-12).\n\
+             Kept the PR's base. Record it: lf sync main. Follow the record: gh pr edit 1972 --base jack/loo-12"
+        );
+        assert_eq!(
+            pr_base_disagreement(1972, "release", None, &stacked),
+            "PR #1972 targets release, but LOO-13 is stacked on LOO-12 (jack/loo-12).\n\
+             Kept the PR's base. Follow the record: gh pr edit 1972 --base jack/loo-12"
+        );
+    }
+
+    #[test]
+    fn a_worktree_without_a_task_follows_its_upstream() {
+        let mut plain = record(None, "main");
+        plain.identifier = None;
+        assert_eq!(pr_base_update(Some("old"), &plain), PrBaseUpdate::Retarget);
+    }
     #[test]
     fn merge_policy_uses_allowed_methods_and_rejects_disabled_preferences() {
         use crate::config::MergeMethod;

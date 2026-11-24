@@ -101,7 +101,7 @@ saved between turns delivered at the next prompt, two retained completed turns,
 provider cleanup, and preserved user settings.
 Add `--context-repo /path/to/loopflow-checkout` to run the built-in `demo` with
 copied agent instructions, scratch and Infrastructure Wave context. Wave context
-is supplied as scratch in the isolated store, without a planning provider binding.
+is supplied as scratch in the isolated store, without a tracker binding.
 Add `--cmux-wrapper /path/to/cmux-codex-wrapper` to exercise the cmux entry
 script with an isolated home, a nonexistent socket and computer-use attachment
 disabled. It cannot report into existing panes.
@@ -119,6 +119,32 @@ Add `--new-thread` to continue each case: the resumed TUI types `/new` and a
 prompt, the Session must select the new conversation with one `new` selection
 (Codex's ephemeral title thread must not move it) and record its answer, and a
 further `lf session resume` must reopen it.
+
+## Idle wake on OpenCode and Pi
+
+```bash
+uv run python tests/e2e/idle_wake.py --lf target/debug/lf \
+  --harness opencode --native "$(command -v opencode)" --output /tmp/idle-wake-opencode
+uv run python tests/e2e/idle_wake.py --lf target/debug/lf \
+  --harness pi --native "$(command -v pi)" --output /tmp/idle-wake-pi
+```
+
+Each run opens a Task's work session on the real TUI in a PTY, against a
+private Machine and a scripted local model named in the provider's own config
+files under a disposable `HOME`. After the first turn ends nothing is typed:
+`lf steer <task>` must produce a model request carrying the steer, and a typed
+prompt afterwards must still run a turn. Then the TUI quits, `lf steer` runs
+while nothing is open, and `lf resume --task` must start a turn on that steer
+with nothing typed; `lf session steers` must read it delivered and the model
+must see it once. `requests.json`, the screens, `steers.json` and the
+Machine's logs land in `--output`. It needs the provider CLI installed and no
+account. Run it with inherited `LF_*` unset. It passed on OpenCode 2.0.32 and
+Pi 1.6.0. The OpenCode model sits on its own provider id: OpenCode 2 asks for a
+Console login before any request on its built-in `opencode` provider.
+
+`tests/e2e/hold_tui.py <dir> <cwd> <command…>` holds any TUI in a PTY for a
+walkthrough from another shell: keys go in through `<dir>/in`, the rendered
+screen comes out in `<dir>/screen.txt`.
 
 ## Released capture-history preservation
 

@@ -95,7 +95,7 @@ private struct CompositionDisclosures: View {
                     get: { expanded.contains(id) },
                     set: { if $0 { expanded.insert(id) } else { expanded.remove(id) } }
                 )) {
-                    if children.isEmpty { Text("No steps").font(Typography.caption()) }
+                    if children.isEmpty { Text("No steps.").emptyLine() }
                     AnyView(CompositionDisclosures(items: children, compiled: compiled, expanded: $expanded))
                 } label: {
                     Text("\(name) · \(item.nodeKeys.count) steps").font(Typography.mono)
@@ -125,9 +125,9 @@ private struct TemplateDisclosureStyle: DisclosureGroupStyle {
     func makeBody(configuration: Configuration) -> some View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
             Button { configuration.isExpanded.toggle() } label: {
-                HStack(spacing: 4) {
+                HStack(spacing: Spacing.xs) {
                     Image(systemName: configuration.isExpanded ? "chevron.down" : "chevron.right")
-                        .font(.system(size: 10, weight: .semibold))
+                        .font(Typography.meta).fontWeight(.semibold)
                         .frame(width: 12)
                         .accessibilityHidden(true)
                     configuration.label
@@ -146,7 +146,7 @@ private struct TemplateDisclosureStyle: DisclosureGroupStyle {
             }
             .accessibilityValue(configuration.isExpanded ? "Expanded" : "Collapsed")
             if configuration.isExpanded {
-                configuration.content.padding(.leading, 16)
+                configuration.content.padding(.leading, Spacing.lg)
             }
         }
     }
@@ -350,7 +350,7 @@ struct GraphDiagram: View {
         return ZStack(alignment: .topLeading) {
             if let label = row.label {
                 Text(label)
-                    .font(Typography.code(10.5))
+                    .font(Typography.mono)
                     .foregroundStyle(palette.textTertiary)
                     .frame(width: Self.labelSlot - 6, height: Self.nodeHeight, alignment: .leading)
                     .offset(x: 0, y: nodeTop)
@@ -417,7 +417,7 @@ struct GraphDiagram: View {
         let color = palette.working
         let title = span.evidence.map { "Loop \(span.number) · \($0.traversals) \($0.traversals == 1 ? "return" : "returns")" }
             ?? "Loop \(span.number)"
-        let shape = RoundedRectangle(cornerRadius: 12)
+        let shape = RoundedRectangle(cornerRadius: CornerRadius.pane)
         // Every label sits in its region's top-left corner; nested regions stack.
         return ZStack(alignment: .topLeading) {
             shape.fill(color.opacity(level.isMultiple(of: 2) ? 0.10 : 0.045))
@@ -427,10 +427,10 @@ struct GraphDiagram: View {
                 shape.strokeBorder(color.opacity(0.30), style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
             }
             Text(title)
-                .font(Typography.strong(11))
+                .font(Typography.textStrong)
                 .foregroundStyle(color)
-                .padding(.horizontal, 10)
-                .padding(.top, 1)
+                .padding(.horizontal, Spacing.sm)
+                .padding(.top, Spacing.xxs)
                 .help(span.evidence.map { "\($0.traversals) returns along this arrow" } ?? "Loop")
                 .accessibilityIdentifier("task-graph-loop-\(span.decider)")
         }
@@ -440,26 +440,26 @@ struct GraphDiagram: View {
 
     private func nodeButton(_ node: GraphNode, number: Int, width: CGFloat, state: GraphNodeState) -> some View {
         let tone = GraphPalette.tone(state)
-        let shape = RoundedRectangle(cornerRadius: 7)
+        let shape = RoundedRectangle(cornerRadius: CornerRadius.row)
         let selected = inspected.map { node.contains($0) } ?? false
         let emphasized = state == .running || state == .blocked || state == .stalled
         return Button {
             inspected = selected ? nil : node.key
         } label: {
-            HStack(spacing: 5) {
+            HStack(spacing: Spacing.xs) {
                 Text("\(number)")
-                    .font(Typography.caption(9.5))
+                    .font(Typography.meta)
                     .monospacedDigit()
                     .foregroundStyle(palette.textTertiary)
                     .frame(minWidth: 12, alignment: .trailing)
                 Text(nodeText(node))
-                    .font(Typography.code(11))
+                    .font(Typography.mono)
                     .italic(node.kind == .op)
                     .lineLimit(1)
                     .foregroundStyle(tone == .neutral ? palette.text : tone.text(in: palette))
             }
-            .padding(.leading, 6)
-            .padding(.trailing, 8)
+            .padding(.leading, Spacing.xs)
+            .padding(.trailing, Spacing.sm)
             .frame(width: width, height: Self.nodeHeight, alignment: .leading)
             // An opaque base keeps state colors legible over the loop tint.
             .background(shape.fill(tone == .neutral ? palette.surface : tone.fill(in: palette)))
@@ -479,7 +479,7 @@ struct GraphDiagram: View {
             }
             .overlay {
                 if selected {
-                    RoundedRectangle(cornerRadius: 9).stroke(palette.selectionEdge, lineWidth: 2).padding(-3)
+                    RoundedRectangle(cornerRadius: CornerRadius.pane).stroke(palette.selectionEdge, lineWidth: 2).padding(-Spacing.xs)
                 }
             }
             .contentShape(Rectangle())
@@ -560,27 +560,27 @@ private struct GraphNodeDetail: View {
     @Environment(\.palette) private var palette
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
+        VStack(alignment: .leading, spacing: Spacing.xxs) {
             HStack(spacing: Spacing.sm) {
                 Text(node.label).font(Typography.mono)
-                Text(GraphPalette.describe(state)).font(Typography.caption(11)).foregroundStyle(palette.textSecondary)
+                Text(GraphPalette.describe(state)).font(Typography.meta).foregroundStyle(palette.textSecondary)
             }
             .accessibilityIdentifier("graph-node-detail-\(node.key)")
             if !facts.isEmpty {
                 Text(facts.joined(separator: " · "))
-                    .font(Typography.caption(11))
+                    .font(Typography.meta)
                     .foregroundStyle(palette.textSecondary)
             }
             ForEach(node.paths, id: \.name) { path in
                 let current = latest?.current.map { key in path.steps.contains { $0.contains(key) } } ?? false
                 Text("\(path.name)\(current ? " (selected)" : "") — \(path.steps.map(\.label).joined(separator: " → ").ifEmpty("no steps")) · \(path.description)")
-                    .font(Typography.caption(11))
+                    .font(Typography.meta)
                     .foregroundStyle(current ? palette.text : palette.textSecondary)
             }
         }
         .padding(Spacing.sm)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(palette.surfaceMuted, in: RoundedRectangle(cornerRadius: CornerRadius.md))
+        .background(palette.surfaceMuted, in: RoundedRectangle(cornerRadius: CornerRadius.row))
         .accessibilityIdentifier("task-graph-detail")
     }
 

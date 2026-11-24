@@ -1,4 +1,4 @@
-use crate::support;
+use crate::support::{self, prepare_conversation, record_native, CALLER};
 use loopflow_execution::process::attachment;
 
 use std::process::{Command, Output};
@@ -21,7 +21,6 @@ fn command(home: &std::path::Path, args: &[&str]) -> Command {
         .env_remove("LF_TRACE_ID")
         .env_remove("LF_PROCESS_ID")
         .env_remove("LF_GRAPH_ID")
-        .env_remove("LF_HUMAN_SESSION")
         .env_remove("LF_WAVE_ID")
         .env_remove("LF_TERMINAL_ID")
         .env_remove("LF_TERMINAL_TTY")
@@ -149,7 +148,6 @@ fn development_session_handoff_keeps_its_binary_and_home() {
             "LF_RUN_DIR",
             "LF_TRACE_ID",
             "LF_PROCESS_ID",
-            "LF_HUMAN_SESSION",
             "LF_GRAPH_ID",
         ] {
             command.env_remove(name);
@@ -290,9 +288,12 @@ fn boundary_launch_and_resume_remain_openable_while_provider_waits() {
                 [id],
             )
             .unwrap();
-            db.execute("INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload,captured_event)
-                SELECT id,'observed',?2||':fixture-native',created_at,json_object('input_id',?2,'source','provider-session:fixture','evidence',json_object('schema_version',1,'provider_session_id','ses_resume-proof','account_id',NULL)),current_capture
-                FROM agent_sessions WHERE id=?1", [id,run_id]).unwrap();
+            db.execute(
+                "UPDATE session_events SET provider_thread='ses_resume-proof',provider_account=NULL
+                 WHERE session_id=?1 AND kind='captured' AND receipt_key=?2",
+                [id, run_id],
+            )
+            .unwrap();
             std::fs::remove_file(dir.join("manifest.json")).unwrap();
         }
         std::fs::write(
@@ -310,33 +311,11 @@ fn boundary_launch_and_resume_remain_openable_while_provider_waits() {
         let provider = bin.join("opencode");
         std::fs::write(
             &provider,
-            include_str!("../../loopflow-execution/tests/support/opencode_server.py")
+            include_str!("../../loopflow-execution/tests/support/opencode_cli.py")
                 .replace("__WAIT__", "True"),
         )
         .unwrap();
         std::fs::set_permissions(&provider, std::fs::Permissions::from_mode(0o755)).unwrap();
-        if !resume {
-            let rejected = bin.join("rejecting-lf");
-            std::fs::write(
-                &rejected,
-                "#!/bin/sh\necho 'fixture launcher rejected invocation' >&2\nexit 2\n",
-            )
-            .unwrap();
-            std::fs::set_permissions(&rejected, std::fs::Permissions::from_mode(0o755)).unwrap();
-            let failed = command(home.path(), &["session", "resume", id])
-                .env("LF_BIN", &rejected)
-                .output()
-                .unwrap();
-            assert_eq!(failed.status.code(), Some(2));
-            let error = String::from_utf8_lossy(&failed.stderr);
-            // Connect becomes the launcher, preserving its error and pending input.
-            assert!(
-                error.contains("fixture launcher rejected invocation"),
-                "{error}"
-            );
-            assert!(dir.join("prepared").exists());
-            assert!(!error.contains("Local proof"), "prompt leaked: {error}");
-        }
         let evidence = home.path().join("resumed");
         let mut first = command(home.path(), &["session", "resume", id])
             .env(
@@ -459,72 +438,9 @@ fn boundary_launch_and_resume_remain_openable_while_provider_waits() {
     }
 }
 
-const CALLER: &str = "run_00000000000000000000000000000002";
-
-/// A prepared conversation, before a provider has started.
-fn prepare_conversation(
-    home: &std::path::Path,
-    cwd: &std::path::Path,
-    harness: &str,
-    title: &str,
-) -> (String, String, std::path::PathBuf) {
-    let store = loopflow_execution::store::open_sqlite(&home.join("loopflow.db")).unwrap();
-    let input = format!("run_{}", uuid::Uuid::new_v4().simple());
-    let session = loopflow_execution::store::sessions::create_session(
-        &store,
-        loopflow_execution::session::LfSession {
-            captured: None,
-            id: format!("session_{input}").into(),
-            artifact_key: Some(input.clone()),
-            caller_artifact_key: Some(CALLER.into()),
-            input_published: false,
-            cwd: cwd.into(),
-            skill: None,
-            provider: Some(harness.into()),
-            model: None,
-            node: None,
-            iterations: None,
-            task_id: None,
-            wave_id: None,
-            graph_lf_process_id: None,
-            work_source: None,
-            bound_at: None,
-            interactive: true,
-            repo: None,
-            title: title.into(),
-            title_source: loopflow_execution::session::TitleSource::Generated,
-            request: Some(title.into()),
-            ready_summary: None,
-            completed_at: None,
-            created_at: 1,
-        },
-        None,
-    )
-    .unwrap();
-    let dir = home.join("runs").join(&input[4..6]).join(&input);
-    std::fs::create_dir_all(&dir).unwrap();
-    let manifest = serde_json::json!({
-        "schema_version": 1, "artifact_key": input, "caller_artifact_key": CALLER,
-        "created_at": "2026-01-01T00:00:00Z", "harness": harness, "model": null,
-        "surface": "tui", "cwd": cwd, "repo": null, "worktree": null,
-        "skill": null, "subjects": [], "flow": {"kind":"independent"}, "exec": null, "context": null,
-        "runtime_path": null, "runtime_digest": null, "host": "test", "boot_id": null
-    });
-    std::fs::write(dir.join("manifest.json"), manifest.to_string()).unwrap();
-    std::fs::write(dir.join("prepared"), "").unwrap();
-    rusqlite::Connection::open(home.join("loopflow.db"))
-        .unwrap()
-        .execute(
-            "UPDATE agent_sessions SET input_published=1 WHERE id=?1",
-            [&session.id],
-        )
-        .unwrap();
-    (session.id.to_string(), input, dir)
-}
-
 #[cfg(unix)]
 #[test]
-fn headless_resume_preserves_a_held_owners_capture_on_both_harnesses() {
+fn a_headless_steer_preserves_a_held_owners_capture_on_both_harnesses() {
     use std::os::unix::fs::PermissionsExt;
 
     for harness in ["claude", "codex"] {
@@ -552,8 +468,7 @@ fn headless_resume_preserves_a_held_owners_capture_on_both_harnesses() {
                 [process.as_str()],
             )
             .unwrap();
-        let attachment =
-            attachment::claim_session_attachment(&store, &id, None, &process, true).unwrap();
+        let attachment = attachment::claim_session_attachment(&store, &id, None, &process).unwrap();
         let before = store.session(&id).unwrap().unwrap();
         let history = store.session_history(&id, 0, 0).unwrap();
         let mut paths = vec![bin];
@@ -562,14 +477,7 @@ fn headless_resume_preserves_a_held_owners_capture_on_both_harnesses() {
         ));
         let output = command(
             home.path(),
-            &[
-                "--batch",
-                "session",
-                "resume",
-                &id,
-                "--message",
-                "another instruction",
-            ],
+            &["--batch", "steer", &id, "another instruction"],
         )
         .current_dir(&cwd)
         .env("PATH", std::env::join_paths(paths).unwrap())
@@ -595,20 +503,13 @@ fn headless_resume_preserves_a_held_owners_capture_on_both_harnesses() {
     }
 }
 
+/// A stand-in `claude` in `bin` that answers one resumed turn and writes its
+/// cwd, arguments, caller, hook context and input beside `LF_TEST_RESUME_PROOF`.
 #[cfg(unix)]
-#[test]
-fn headless_resume_reads_the_saved_workspace_and_retains_process_provenance() {
+fn claude_resume_probe(bin: &std::path::Path) {
     use std::os::unix::fs::PermissionsExt;
 
-    let home = tempfile::tempdir().unwrap();
-    let saved = home.path().join("saved");
-    let caller = home.path().join("caller");
-    let bin = home.path().join("bin");
-    for (path, marker) in [(&saved, "SAVED_CONTEXT"), (&caller, "CALLER_CONTEXT")] {
-        std::fs::create_dir_all(path.join("scratch")).unwrap();
-        std::fs::write(path.join("scratch/context.md"), marker).unwrap();
-    }
-    std::fs::create_dir(&bin).unwrap();
+    std::fs::create_dir(bin).unwrap();
     let provider = bin.join("claude");
     std::fs::write(
         &provider,
@@ -642,6 +543,424 @@ for line in sys.stdin:
     )
     .unwrap();
     std::fs::set_permissions(&provider, std::fs::Permissions::from_mode(0o755)).unwrap();
+}
+
+/// What `lf` prints when run in `repo`, by the conversation `caller` when one is named.
+fn lf_in(
+    home: &std::path::Path,
+    repo: &std::path::Path,
+    args: &[&str],
+    caller: Option<&str>,
+) -> String {
+    let mut command = command(home, args);
+    command.current_dir(repo).env("HOME", home);
+    if let Some(caller) = caller {
+        command.env("LF_AGENT_CALLER", caller);
+    }
+    let output = command.output().unwrap();
+    assert!(
+        output.status.success(),
+        "{args:?}: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8(output.stdout).unwrap()
+}
+
+fn json(text: String) -> serde_json::Value {
+    serde_json::from_str(&text).unwrap()
+}
+
+#[test]
+fn explicit_parent_shows_under_parent_and_update_reparents_without_cycles() {
+    let home = tempfile::tempdir().unwrap();
+    let repo = loopflow_test_support::TestRepo::new();
+    let lf = |args: &[&str], caller: Option<&str>| lf_in(home.path(), repo.path(), args, caller);
+    let parent = json(lf(
+        &["task", "create", "--title", "Retry requests", "--json"],
+        None,
+    ));
+    let parent_id = parent["task"]["id"].as_str().unwrap().to_owned();
+    let parent_name = parent["task"]["identifier"].as_str().unwrap().to_owned();
+    assert!(parent["task"]["parent_task_id"].is_null());
+
+    // Even inside the parent Task's conversation, plain `lf task create` stays top-level.
+    let (session, _, _) = prepare_conversation(home.path(), repo.path(), "claude", "Parent");
+    let database = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    let launcher = loopflow_model::id::LfProcessId::new();
+    database
+        .execute(
+            "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",
+            [&launcher],
+        )
+        .unwrap();
+    database
+        .execute(
+            "UPDATE agent_sessions SET task_id=?2 WHERE id=?1",
+            [&session, &parent_id],
+        )
+        .unwrap();
+    let store = loopflow_execution::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
+    let attachment =
+        attachment::claim_session_attachment(&store, &session, None, &launcher).unwrap();
+    let caller = serde_json::to_string(&attachment.caller(session.clone().into(), None)).unwrap();
+
+    let apart = json(lf(
+        &["task", "create", "--title", "Unrelated", "--json"],
+        Some(&caller),
+    ));
+    assert!(apart["task"]["parent_task_id"].is_null());
+    assert!(apart["parent"].is_null());
+    let apart_name = apart["task"]["identifier"].as_str().unwrap().to_owned();
+
+    // Explicit `--parent` links the new Task under the parent.
+    let child = json(lf(
+        &[
+            "task",
+            "create",
+            "--title",
+            "Retry budget per host",
+            "--parent",
+            &parent_name,
+            "--json",
+        ],
+        Some(&caller),
+    ));
+    assert_eq!(child["task"]["parent_task_id"], parent_id);
+    // The receipt names the parent Task as a list would show it.
+    assert_eq!(child["parent"]["identifier"], parent_name);
+    assert_eq!(child["parent"]["state"], "unstarted");
+    assert!(parent["parent"].is_null());
+    let child_name = child["task"]["identifier"].as_str().unwrap().to_owned();
+
+    // Without `--json` the receipt says where the child went.
+    let receipt = lf(
+        &[
+            "task",
+            "create",
+            "--title",
+            "Log each retry",
+            "--parent",
+            &parent_name,
+        ],
+        Some(&caller),
+    );
+    assert!(
+        receipt.ends_with(&format!("\n  parent: {parent_name}\n")),
+        "{receipt}"
+    );
+
+    // `lf task update --parent` adopts an existing Task, refuses cycles, and clears with `none`.
+    lf(
+        &["task", "update", &apart_name, "--parent", &parent_name],
+        None,
+    );
+    let adopted = json(lf(&["task", "status", &apart_name, "--json"], None));
+    assert_eq!(adopted["parent"]["identifier"], parent_name);
+
+    let mut cycle = command(
+        home.path(),
+        &["task", "update", &parent_name, "--parent", &apart_name],
+    );
+    cycle.current_dir(repo.path()).env("HOME", home.path());
+    let cycle = cycle.output().unwrap();
+    assert!(!cycle.status.success());
+    let stderr = String::from_utf8_lossy(&cycle.stderr);
+    assert!(stderr.contains("cannot be its own ancestor"), "{stderr}");
+
+    lf(&["task", "update", &apart_name, "--parent", "none"], None);
+    let cleared = json(lf(&["task", "status", &apart_name, "--json"], None));
+    assert!(cleared["parent"].is_null());
+
+    // `lf task show` carries the same two keys as `lf task status`.
+    let shown = json(lf(&["task", "show", &parent_name, "--json"], None));
+    assert!(shown["parent"].is_null());
+    assert_eq!(shown["children"][0]["identifier"], child_name);
+    let shown = json(lf(&["task", "show", &child_name, "--json"], None));
+    assert_eq!(shown["parent"]["identifier"], parent_name);
+    assert_eq!(shown["children"], serde_json::json!([]));
+
+    let status = json(lf(&["task", "status", &parent_name, "--json"], None));
+    assert!(status["parent"].is_null());
+    let children = status["children"].as_array().unwrap();
+    assert_eq!(children.len(), 2, "{children:?}");
+    assert_eq!(children[0]["identifier"], child_name);
+    assert_eq!(children[0]["state"], "unstarted");
+    let status = json(lf(&["task", "status", &child_name, "--json"], None));
+    // The same row the creation receipt carried, wherever a parent is read.
+    assert_eq!(status["parent"]["identifier"], parent_name);
+    assert_eq!(status["parent"]["id"], parent_id);
+    assert_eq!(status["task"]["parent_id"], parent_id);
+    assert_eq!(status["children"], serde_json::json!([]));
+
+    let shown = lf(&["task", "status", &parent_name], None);
+    assert!(
+        shown.contains(&format!(
+            "child: {child_name}  Retry budget per host  unstarted"
+        )),
+        "{shown}"
+    );
+    let shown = lf(&["task", "status", &child_name], None);
+    assert!(shown.contains(&format!("parent: {parent_name}")), "{shown}");
+}
+
+#[test]
+fn a_merged_parent_stays_open_until_it_is_completed_with_its_children() {
+    let home = tempfile::tempdir().unwrap();
+    let repo = loopflow_test_support::TestRepo::new();
+    let lf = |args: &[&str]| lf_in(home.path(), repo.path(), args, None);
+    let file = |title: &str, parent: Option<&str>| {
+        let mut args = vec!["task", "create", "--title", title, "--json"];
+        args.extend(parent.into_iter().flat_map(|parent| ["--parent", parent]));
+        let task = json(lf(&args))["task"].clone();
+        (
+            task["id"].as_str().unwrap().to_owned(),
+            task["identifier"].as_str().unwrap().to_owned(),
+        )
+    };
+    let (parent_id, parent) = file("Retry requests", None);
+    let (landed_id, landed) = file("Retry budget per host", Some(&parent));
+    let (reviewing_id, reviewing) = file("Log each retry", Some(&parent));
+    let (_, unstarted) = file("Document the budget", Some(&parent));
+    let (_, unstarted_child) = file("Translate the budget docs", Some(&unstarted));
+    // The landed child has follow-ups of its own.
+    let (_, grandchild) = file("Tune the budget", Some(&landed));
+    let (kept_id, kept) = file("Budget dashboards", Some(&landed));
+
+    let database = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    let publish = |task: &str, number: u32, merged: bool| {
+        let branch = format!("pr-{number}");
+        database
+            .execute(
+                "INSERT INTO task_checkouts(task_id,worktree,branch,base_commit) VALUES(?1,?2,?3,'base')
+                 ON CONFLICT(task_id) DO UPDATE SET branch=excluded.branch,base_commit=excluded.base_commit",
+                rusqlite::params![task, home.path().join(&branch).to_str(), branch],
+            )
+            .unwrap();
+        database
+            .execute(
+                "UPDATE tasks SET workspace_slug=?2 WHERE id=?1",
+                [task, &branch],
+            )
+            .unwrap();
+        database
+            .execute(
+                "INSERT INTO task_prs(id,task_id,sequence,slug,branch,base_commit,publication_requested_at,created_at,updated_at,github_number,github_url,merge_commit)
+                 VALUES(?1,?2,1,?3,?3,'base',1,1,1,?4,'https://example.test/pr/'||?4,?5)",
+                rusqlite::params![
+                    uuid::Uuid::new_v4().to_string(),
+                    task,
+                    branch,
+                    number,
+                    merged.then_some("abc123")
+                ],
+            )
+            .unwrap();
+    };
+    publish(&parent_id, 1979, true);
+    publish(&landed_id, 1980, true);
+    publish(&reviewing_id, 1981, false);
+    publish(&kept_id, 1982, false);
+
+    // Merged with children open: it says so, and nothing asks to complete it.
+    let status = json(lf(&["task", "status", &parent, "--json"]));
+    assert_eq!(status["task"]["pr"]["phase"], "merged");
+    assert_eq!(status["task"]["reason"], "Merged · 3 children open");
+    assert!(status["task"]["next"].is_null(), "{}", status["task"]);
+    assert_ne!(status["task"]["state"], "done");
+    assert_eq!(status["children"][0]["parent_id"], parent_id);
+    let listed = lf(&["task", "list"]);
+    let line = |listed: &str, start: String| listed.lines().any(|line| line.starts_with(&start));
+    assert!(line(&listed, format!("  {reviewing} ·")), "{listed}");
+
+    // A child that becomes done settles its own children by the same rule.
+    let completed = json(lf(&["task", "complete", &parent, "--json"]));
+    assert_eq!(completed["identifier"], parent);
+    let outcomes = |children: &serde_json::Value| {
+        children
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|child| {
+                (
+                    child["task"]["identifier"].as_str().unwrap().to_owned(),
+                    child["outcome"].as_str().unwrap().to_owned(),
+                    child["task"]["state"].as_str().unwrap().to_owned(),
+                )
+            })
+            .collect::<Vec<_>>()
+    };
+    let children = outcomes(&completed["children"]);
+    assert_eq!(children[0], (landed.clone(), "done".into(), "done".into()));
+    let abandoned: Vec<_> = children[1..]
+        .iter()
+        .map(|(id, outcome, state)| {
+            assert_eq!(outcome, "abandoned");
+            assert_eq!(state, "abandoned");
+            id.as_str()
+        })
+        .collect();
+    assert!(abandoned.contains(&unstarted.as_str()), "{children:?}");
+    assert!(abandoned.contains(&reviewing.as_str()), "{children:?}");
+
+    let grandchildren = outcomes(&completed["children"][0]["children"]);
+    assert_eq!(grandchildren.len(), 2, "{grandchildren:?}");
+    for (_, outcome, state) in &grandchildren {
+        assert_eq!(outcome, "abandoned");
+        assert_eq!(state, "abandoned");
+    }
+    let grandchild_ids: Vec<_> = grandchildren.iter().map(|(id, _, _)| id.as_str()).collect();
+    assert!(grandchild_ids.contains(&grandchild.as_str()));
+    assert!(grandchild_ids.contains(&kept.as_str()));
+
+    // An abandoned child also settles its own open descendants.
+    let unstarted_row = completed["children"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|child| child["task"]["identifier"] == unstarted)
+        .unwrap();
+    assert_eq!(
+        outcomes(&unstarted_row["children"]),
+        [(
+            unstarted_child.clone(),
+            "abandoned".into(),
+            "abandoned".into()
+        )]
+    );
+    let state = |task: &str| json(lf(&["task", "status", task, "--json"]))["task"]["state"].clone();
+    assert_eq!(state(&parent), "done");
+    assert_eq!(state(&landed), "done");
+    assert_eq!(state(&unstarted), "abandoned");
+    assert_eq!(state(&reviewing), "abandoned");
+    assert_eq!(state(&grandchild), "abandoned");
+    assert_eq!(state(&kept), "abandoned");
+    assert_eq!(state(&unstarted_child), "abandoned");
+
+    // Reopening a done parent with prior work restores `started` planning state;
+    // abandoned children cannot be reopened.
+    let reopened = json(lf(&["task", "reopen", &parent, "--json"]));
+    assert_eq!(reopened["state"], "started");
+    let mut reopen_abandoned = command(home.path(), &["task", "reopen", &reviewing]);
+    reopen_abandoned
+        .current_dir(repo.path())
+        .env("HOME", home.path());
+    assert!(!reopen_abandoned.output().unwrap().status.success());
+
+    // A Task with no PR whose Graph reached `end` stands the same way.
+    let (planned_id, planned) = file("Plan the cache", None);
+    let (_, follow_up) = file("Cache responses per host", Some(&planned));
+    database
+        .execute(
+            "INSERT INTO task_graphs(task_id,graph,step,updated_at) VALUES(?1,?2,'end',1)",
+            rusqlite::params![
+                planned_id,
+                serde_json::json!({"name": "code", "steps": []}).to_string()
+            ],
+        )
+        .unwrap();
+    lf(&["task", "claim", &planned]);
+    let status = json(lf(&["task", "status", &planned, "--json"]));
+    assert_eq!(status["task"]["reason"], "Finished · 1 child open");
+    assert!(status["task"]["next"].is_null(), "{}", status["task"]);
+    lf(&["task", "abandon", &follow_up]);
+    let status = json(lf(&["task", "status", &planned, "--json"]));
+    assert_eq!(status["task"]["reason"], "Finished; complete the Task");
+    assert_eq!(
+        status["task"]["next"],
+        format!("lf task complete {planned}")
+    );
+    lf(&["task", "complete", &planned]);
+    assert_eq!(state(&planned), "done");
+
+    // In text, each child's own children are indented under it.
+    let (second_id, second) = file("Cache responses", None);
+    let (merged_id, merged) = file("Cache per host", Some(&second));
+    let (_, idle) = file("Document the cache", Some(&merged));
+    publish(&second_id, 1990, true);
+    publish(&merged_id, 1991, true);
+    assert_eq!(
+        lf(&["task", "complete", &second]),
+        format!(
+            "{second} done\n  {merged} done: #1991 merged\n    {idle} abandoned: no merged PR\n"
+        )
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_closed_tasks_conversation_resumes_in_the_main_checkout() {
+    let home = tempfile::tempdir().unwrap();
+    let repo = loopflow_test_support::TestRepo::new();
+    let bin = home.path().join("bin");
+    claude_resume_probe(&bin);
+    // The Task is done and its checkout was retired with the conversation's directory.
+    let retired = home.path().join("retired-checkout");
+    let (id, _, _) = prepare_conversation(home.path(), &retired, "claude", "Original input");
+    let store = loopflow_execution::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
+    let repository = loopflow_execution::repository::location::ensure_repository(
+        &store,
+        repo.path().to_str().unwrap(),
+    )
+    .unwrap();
+    let database = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    database
+        .execute(
+            "INSERT INTO tasks(id,repository_id,issue_identifier,issue_title,issue_description,created_at,updated_at,workspace_slug,planning_completed,planning_completed_at)
+             VALUES('task_00000000000000000000000000000001',?1,'INF-1','Closed work','',1,1,'closed-work',1,'2026-11-03T00:00:00Z')",
+            [repository.as_str()],
+        )
+        .unwrap();
+    database
+        .execute_batch(&format!(
+            "UPDATE agent_sessions SET provider_thread='fixture-native',task_id='task_00000000000000000000000000000001' WHERE id='{id}';
+             INSERT INTO task_primary_sessions(task_id,session_id) VALUES('task_00000000000000000000000000000001','{id}');"
+        ))
+        .unwrap();
+    let path = std::env::join_paths(std::iter::once(bin).chain(std::env::split_paths(
+        &std::env::var_os("PATH").unwrap_or_default(),
+    )))
+    .unwrap();
+    let output = command(home.path(), &["-b", "steer", &id, "Where are you?"])
+        .current_dir(home.path())
+        .env("PATH", path)
+        .env("HOME", home.path())
+        .env("LF_TEST_RESUME_PROOF", home.path().join("proof"))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let main = repo.path().canonicalize().unwrap();
+    assert_eq!(
+        std::fs::read_to_string(home.path().join("proof.cwd"))
+            .unwrap()
+            .trim(),
+        main.to_str().unwrap()
+    );
+    let args = std::fs::read_to_string(home.path().join("proof.args")).unwrap();
+    assert!(args.contains("--resume\nfixture-native\n"), "{args}");
+    let after = store.session(&id).unwrap().unwrap();
+    assert_eq!(after.cwd.canonicalize().unwrap(), main);
+    assert_eq!(
+        after.task_id.as_ref().map(ToString::to_string).as_deref(),
+        Some("task_00000000000000000000000000000001")
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_headless_steer_reads_the_saved_workspace_and_names_its_caller() {
+    let home = tempfile::tempdir().unwrap();
+    let saved = home.path().join("saved");
+    let caller = home.path().join("caller");
+    let bin = home.path().join("bin");
+    for (path, marker) in [(&saved, "SAVED_CONTEXT"), (&caller, "CALLER_CONTEXT")] {
+        std::fs::create_dir_all(path.join("scratch")).unwrap();
+        std::fs::write(path.join("scratch/context.md"), marker).unwrap();
+    }
+    claude_resume_probe(&bin);
     let (id, input, dir) = prepare_conversation(home.path(), &saved, "claude", "Original input");
     let database = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
     database
@@ -670,18 +989,22 @@ for line in sys.stdin:
         &std::env::var_os("PATH").unwrap_or_default(),
     )))
     .unwrap();
-    let output = command(
-        home.path(),
-        &["-b", "session", "resume", &id, "--message", "Continue here"],
-    )
-    .current_dir(&caller)
-    .env("PATH", path)
-    .env("HOME", home.path())
-    .env("LF_TEST_RESUME_PROOF", home.path().join("proof"))
-    // A calling agent's Wave must not supply a different conversation's context.
-    .env("LF_WAVE_ID", wave.id().as_str())
-    .output()
-    .unwrap();
+    // A steer saved while the Session was stopped is read in the next turn.
+    let earlier = command(home.path(), &["steer", &id, "Earlier direction"])
+        .current_dir(&caller)
+        .env("HOME", home.path())
+        .output()
+        .unwrap();
+    assert!(earlier.status.success(), "{earlier:?}");
+    let output = command(home.path(), &["-b", "steer", &id, "Continue here"])
+        .current_dir(&caller)
+        .env("PATH", path)
+        .env("HOME", home.path())
+        .env("LF_TEST_RESUME_PROOF", home.path().join("proof"))
+        // A calling agent's Wave must not supply a different conversation's context.
+        .env("LF_WAVE_ID", wave.id().as_str())
+        .output()
+        .unwrap();
     assert!(
         output.status.success(),
         "{}",
@@ -691,6 +1014,12 @@ for line in sys.stdin:
     assert!(sent.contains("SAVED_CONTEXT"), "{sent}");
     let sent_input = std::fs::read_to_string(home.path().join("proof.input")).unwrap();
     assert!(sent_input.contains("Continue here"), "{sent_input}");
+    assert!(
+        sent_input.contains("Earlier direction")
+            && sent_input.find("Earlier direction") < sent_input.find("Continue here"),
+        "{sent_input}"
+    );
+    assert_eq!(store.session_steers(&id, 0, 32).unwrap().pending, 0);
     assert!(!sent.contains("CALLER_CONTEXT"), "{sent}");
     assert!(!sent.contains("CALLER_WAVE_CONTEXT"), "{sent}");
     assert!(!sent.contains("missing-original-skill"), "{sent}");
@@ -728,16 +1057,6 @@ for line in sys.stdin:
     let agent_caller: loopflow_execution::process::AgentCaller =
         serde_json::from_slice(&std::fs::read(home.path().join("proof.caller")).unwrap()).unwrap();
     assert_eq!(agent_caller.session_id, id);
-    let process_cwd = store
-        .lf_process(&agent_caller.origin_lf_process_id)
-        .unwrap()
-        .unwrap()
-        .cwd
-        .unwrap();
-    assert_eq!(
-        std::path::Path::new(&process_cwd).canonicalize().unwrap(),
-        caller.canonicalize().unwrap()
-    );
 }
 
 #[test]
@@ -770,8 +1089,7 @@ fn available_lists_only_conversations_ready_for_input() {
     )
     .unwrap();
     for (id, pending) in [(&working, 0), (&asked, 1)] {
-        let attachment =
-            attachment::claim_session_attachment(&store, id, None, &parent, true).unwrap();
+        let attachment = attachment::claim_session_attachment(&store, id, None, &parent).unwrap();
         db.execute(
             "UPDATE processes SET pid=?2,os_started_at=?3 WHERE id=?1",
             rusqlite::params![attachment.agent_process_id, provider.0.id(), started],
@@ -907,7 +1225,7 @@ fn terminal_titles_follow_session_rename_and_reconnect_without_provider_accounts
         let native = uuid::Uuid::new_v4().to_string();
         let transcript = if provider == "codex" {
             home.path()
-                .join("codex/sessions")
+                .join("codex/sessions/2026/01/01")
                 .join(format!("rollout-{native}.jsonl"))
         } else {
             home.path()
@@ -1142,7 +1460,7 @@ fn session_names_survive_capture_replacement() {
     let provider = bin.join("opencode");
     std::fs::write(
         &provider,
-        include_str!("../../loopflow-execution/tests/support/opencode_server.py")
+        include_str!("../../loopflow-execution/tests/support/opencode_cli.py")
             .replace("__WAIT__", "True"),
     )
     .unwrap();
@@ -1370,14 +1688,13 @@ fn terminal_first_launch_and_failed_startup_reopen_the_same_conversation() {
         std::fs::write(&provider, body).unwrap();
         std::fs::set_permissions(&provider, std::fs::Permissions::from_mode(0o755)).unwrap();
     };
-    // The private server exits before reporting readiness. OpenCode reports
-    // that failure; retry must still reach the provider in the same Session.
-    write_provider("#!/bin/sh\nexit 0\n");
+    // OpenCode fails at startup. Retry must still reach the provider in the
+    // same Session.
+    write_provider("#!/bin/sh\nexit 3\n");
     let first = open(&["session", "resume", &id]);
     assert!(!first.status.success());
-    assert!(String::from_utf8_lossy(&first.stderr).contains("private server failed to start"));
     write_provider(
-        &include_str!("../../loopflow-execution/tests/support/opencode_server.py")
+        &include_str!("../../loopflow-execution/tests/support/opencode_cli.py")
             .replace("__WAIT__", "False"),
     );
     let retry = open(&["session", "resume", &id]);
@@ -1391,7 +1708,7 @@ fn terminal_first_launch_and_failed_startup_reopen_the_same_conversation() {
     let failed = open(&["session", "resume", &id]);
     assert!(!failed.status.success());
     write_provider(
-        &include_str!("../../loopflow-execution/tests/support/opencode_server.py")
+        &include_str!("../../loopflow-execution/tests/support/opencode_cli.py")
             .replace("__WAIT__", "False"),
     );
     for _ in 0..2 {
@@ -1401,7 +1718,6 @@ fn terminal_first_launch_and_failed_startup_reopen_the_same_conversation() {
     let store = loopflow_execution::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
     let session = store.session(&id).unwrap().unwrap();
     assert_eq!(session.id.as_str(), id);
-    let history = store.session_history(&id, 0, 1000).unwrap();
     // Failed and exited starts are retained as their own AgentProcess records.
     let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
     for (state, minimum) in [("spawn_failed", 1), ("exited", 1)] {
@@ -1415,27 +1731,25 @@ fn terminal_first_launch_and_failed_startup_reopen_the_same_conversation() {
             .unwrap();
         assert!(recorded >= minimum, "{state}: {recorded}");
     }
-    assert!(
-        history
-            .iter()
-            .filter(|event| event.kind == loopflow_execution::session::SessionEventKind::Captured)
-            .count()
-            >= 2
-    );
+    // Every start continues the one native conversation lf named.
+    let native: Option<String> = db
+        .query_row(
+            "SELECT max(provider_thread) FROM session_events
+             WHERE session_id=?1 AND kind='captured'",
+            [id.as_str()],
+            |row| row.get(0),
+        )
+        .unwrap();
     let count: i64 = db
         .query_row("SELECT count(*) FROM agent_sessions", [], |row| row.get(0))
         .unwrap();
     assert_eq!(count, 1);
-    assert!(history
-        .iter()
-        .any(|event| event.payload["evidence"]["provider_session_id"]
-            .as_str()
-            .is_some_and(|id| id.starts_with("ses_"))));
+    assert!(native.is_some_and(|id| id.starts_with("ses_")));
 }
 
 #[cfg(unix)]
 #[test]
-fn provider_switch_without_transcript_preserves_conversation_and_retries() {
+fn provider_switch_without_transcript_seeds_from_the_original_request() {
     let home = tempfile::tempdir().unwrap();
     let (id, input, _) =
         prepare_conversation(home.path(), home.path(), "claude", "Keep this conversation");
@@ -1459,45 +1773,19 @@ fn provider_switch_without_transcript_preserves_conversation_and_retries() {
             .output()
             .unwrap()
     };
-    for prepare in [true, false] {
-        let failed = connect(prepare);
-        assert!(!failed.status.success());
-        let error = String::from_utf8_lossy(&failed.stderr);
-        assert!(
-            error.contains("transcript") && error.contains("retry"),
-            "{error}"
-        );
-        let retained = store.session(&id).unwrap().unwrap();
-        assert_eq!(retained.artifact_key.as_ref(), Some(&input));
-        assert_eq!(retained.provider, before.provider);
-        assert_eq!(retained.title, before.title);
-        let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
-        let thread: String = db
-            .query_row(
-                "SELECT provider_thread FROM agent_sessions WHERE id=?1",
-                [&id],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(thread, native);
-        assert_eq!(
-            store.session_history(&id, 0, 1000).unwrap().len(),
-            history.len()
-        );
-    }
-    let transcripts = home.path().join("claude/projects/fixture");
-    std::fs::create_dir_all(&transcripts).unwrap();
-    std::fs::write(transcripts.join(format!("{native}.jsonl")),
-        r#"{"type":"user","userType":"external","message":{"content":"Keep the original request"}}"#).unwrap();
     let prepared = connect(true);
+    assert!(!prepared.status.success());
+    let error = String::from_utf8_lossy(&prepared.stderr);
     assert!(
-        prepared.status.success(),
-        "{}",
-        String::from_utf8_lossy(&prepared.stderr)
+        error.contains("transcript") && error.contains("retry"),
+        "{error}"
     );
+    let retained = store.session(&id).unwrap().unwrap();
+    assert_eq!(retained.artifact_key.as_ref(), Some(&input));
+    assert_eq!(retained.provider, before.provider);
     assert_eq!(
-        store.session(&id).unwrap().unwrap().artifact_key.as_ref(),
-        Some(&input)
+        store.session_history(&id, 0, 1000).unwrap().len(),
+        history.len()
     );
     install_codex_fixture(home.path(), None);
     let recovered = connect(false);
@@ -1513,7 +1801,7 @@ fn provider_switch_without_transcript_preserves_conversation_and_retries() {
     assert!(continued
         .request
         .unwrap()
-        .contains("Keep the original request"));
+        .contains("Keep this conversation"));
     assert!(store.session_history(&id, 0, 1000).unwrap().len() > history.len());
 }
 
@@ -1563,12 +1851,19 @@ fn session_new_restarts_the_same_conversation_on_a_seeded_thread() {
         .request
         .unwrap()
         .contains("Keep the original request"));
-    // The old thread stays in the conversation's history.
-    assert!(store
-        .session_history(&id, 0, 1000)
+    // The old input stays in the conversation with the thread it resumed.
+    let thread: Option<String> = store
+        .conn
+        .lock()
         .unwrap()
-        .iter()
-        .any(|event| event.payload["input_id"] == input.as_str()));
+        .query_row(
+            "SELECT provider_thread FROM session_events
+             WHERE session_id=?1 AND kind='captured' AND receipt_key=?2",
+            [id.as_str(), input.as_str()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(thread.is_some());
 }
 
 #[cfg(unix)]
@@ -1701,18 +1996,6 @@ fn provider_switch_stops_startup_output_before_codex_opens() {
     .contains("Keep the original request"));
 }
 
-fn record_native(home: &std::path::Path, id: &str, input: &str, native: &str) {
-    let db = rusqlite::Connection::open(home.join("loopflow.db")).unwrap();
-    db.execute(
-        "UPDATE agent_sessions SET provider_thread=?2 WHERE id=?1",
-        [id, native],
-    )
-    .unwrap();
-    db.execute("INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload,captured_event)
-        SELECT id,'observed',?2||':fixture-native',created_at,json_object('input_id',?2,'source','provider-session:fixture','evidence',json_object('schema_version',1,'provider_session_id',?3,'account_id',NULL)),current_capture
-        FROM agent_sessions WHERE id=?1", [id,input,native]).unwrap();
-}
-
 #[cfg(unix)]
 #[test]
 fn resume_admits_native_claude_and_codex_ids_and_keeps_their_identity() {
@@ -1770,7 +2053,7 @@ fn resume_admits_native_claude_and_codex_ids_and_keeps_their_identity() {
         let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
         let count: i64 = db
             .query_row(
-                "SELECT count(DISTINCT session_id) FROM session_events WHERE json_extract(payload,'$.evidence.provider_session_id')=?1",
+                "SELECT count(DISTINCT session_id) FROM session_events WHERE kind='captured' AND provider_thread=?1",
                 [&id],
                 |row| row.get(0),
             )
@@ -1826,7 +2109,7 @@ fn program_status_cli_observes_available_without_completing_work() {
     )
     .unwrap();
     let attachment =
-        attachment::claim_session_attachment(&store, &id, None, &lf_process_id, true).unwrap();
+        attachment::claim_session_attachment(&store, &id, None, &lf_process_id).unwrap();
     conn.execute(
         "UPDATE processes SET pid=?2,os_started_at=?3 WHERE id=?1",
         rusqlite::params![
@@ -2013,8 +2296,11 @@ fn program_status_cli_observes_available_without_completing_work() {
     assert!(ended["program_status"].is_null());
     assert!(ended["availability"].is_null());
     let attachment = store.session_attachment(&id).unwrap();
-    attachment::claim_session_attachment(&store, &id, attachment.as_ref(), &lf_process_id, true)
+    // A Session runs one agent: the killed provider's exit lands first.
+    store
+        .record_agent_process_exit(&id, attachment.as_ref().unwrap(), true)
         .unwrap();
+    attachment::claim_session_attachment(&store, &id, attachment.as_ref(), &lf_process_id).unwrap();
     let stale = observe("pane-3", 1, &records("idle"));
     assert!(!stale.status.success());
     assert!(String::from_utf8_lossy(&stale.stderr).contains("Session provider changed"));

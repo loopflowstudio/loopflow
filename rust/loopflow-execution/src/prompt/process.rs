@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use crate::agent::AgentConfig;
-use crate::config::{parse_agent, Config};
+use crate::config::Config;
 use crate::error::CoreError;
 use crate::graph::Skill;
 use crate::prompt::structured_reply::{structured_replies_for_context, ClientContext};
@@ -95,7 +95,7 @@ fn prepare_prompt(
     };
     let effective = crate::config::settings::resolve(config, resolved_skill.as_ref())?;
     let config = &effective.config;
-    let agent = config.agent()?.to_owned();
+    let (agent, fallback_agents) = config.resolve_agents()?;
     let mut docs = config.context.docs.clone();
     docs.extend(requested_docs);
     let diff_files = source_overrides
@@ -168,7 +168,10 @@ fn prepare_prompt(
         .skill
         .as_ref()
         .filter(|skill| {
-            matches!(parse_agent(&agent).0.as_str(), "claude" | "codex")
+            crate::harness::launcher(agent.harness)
+                .capabilities()
+                .native_skills
+                .is_some()
                 && skill.source.as_ref().is_some_and(|source| {
                     source.dialect != crate::skills::catalog::SkillDialect::Loopflow
                 })
@@ -194,25 +197,20 @@ fn prepare_prompt(
     let launch = AgentConfig {
         chrome: config.chrome,
         codex_service_tier: config.codex.service_tier,
-        claude_model: config.claude.model.clone(),
-        session_attachment: None,
         system_prompt,
         conversation_context,
-        // The command that names the launch's Work decides this.
-        holder: crate::session::Holder::Caller,
         task_prompt,
         skill_invocation,
         output_schema: None,
-        agent: Some(agent),
-        fallback_agents: config.fallback_agents(),
+        agent,
+        fallback_agents,
         max_turns: None,
         resume_token: None,
         cwd: Some(repo_root),
-        write_scope: crate::agent::AgentWriteScope::Configured,
-        execution_boundary: None,
-        skip_permissions: config.yolo,
+        yolo: config.yolo,
         structured_replies: structured_replies_for_context(&client_context, action_style),
         directive_relay: None,
+        launch_lock: None,
         env: [(
             crate::config::USER_NAME_ENV.to_string(),
             components.user_name.clone().unwrap_or_default(),
@@ -519,8 +517,8 @@ Test skill body.
         let _name =
             crate::config::environment::EnvVarGuard::set(crate::config::USER_NAME_ENV, "  Jack  ");
         let tmp = create_repo_fixture();
-        for agent in ["claude", "codex", "opencode", "pi"] {
-            let _selection = select_agent(agent);
+        for agent in loopflow_harness::HarnessKind::ALL {
+            let _selection = select_agent(agent.as_str());
             for surface in [
                 Surface::Cli,
                 Surface::Mac,
@@ -573,7 +571,10 @@ Test skill body.
         )
         .expect("prepare Process prompt");
 
-        assert_eq!(prepared.config.agent.as_deref(), Some("codex:o3"));
+        assert_eq!(
+            Some(prepared.config.agent.to_string()).as_deref(),
+            Some("codex:o3")
+        );
     }
 
     #[test]
@@ -593,7 +594,10 @@ Test skill body.
         )
         .expect("prepare Process prompt");
 
-        assert_eq!(prepared.config.agent.as_deref(), Some("claude:sonnet"));
+        assert_eq!(
+            Some(prepared.config.agent.to_string()).as_deref(),
+            Some("claude:sonnet")
+        );
     }
 
     #[test]
@@ -670,7 +674,10 @@ Test skill body.
         )
         .expect("prepare Process prompt");
 
-        assert_eq!(prepared.config.agent.as_deref(), Some("claude:sonnet"));
+        assert_eq!(
+            Some(prepared.config.agent.to_string()).as_deref(),
+            Some("claude:sonnet")
+        );
     }
 
     #[test]
@@ -696,7 +703,7 @@ Test skill body.
             )
             .expect("prepare Process prompt");
             assert_eq!(
-                prepared.config.agent().unwrap(),
+                prepared.config.agent.to_string(),
                 crate::config::default_agent().unwrap(),
                 "{name}"
             );
@@ -736,7 +743,10 @@ Test skill body.
         )
         .expect("prepare Process prompt");
 
-        assert_eq!(prepared.config.agent.as_deref(), Some("codex:o3"));
+        assert_eq!(
+            Some(prepared.config.agent.to_string()).as_deref(),
+            Some("codex:o3")
+        );
     }
 
     #[test]
@@ -886,7 +896,10 @@ Test skill body.
                 .map(|skill| skill.name.as_str()),
             Some("team/skill-creator")
         );
-        assert_eq!(prepared.config.agent.as_deref(), Some("codex:o3"));
+        assert_eq!(
+            Some(prepared.config.agent.to_string()).as_deref(),
+            Some("codex:o3")
+        );
     }
 
     #[test]
@@ -1093,7 +1106,7 @@ Test skill body.
         .expect("supported OpenCode model should pass");
 
         assert_eq!(
-            prepared.config.agent.as_deref(),
+            Some(prepared.config.agent.to_string()).as_deref(),
             Some("opencode:moonshotai/kimi-k2")
         );
     }
@@ -1114,6 +1127,9 @@ Test skill body.
         )
         .expect("bare OpenCode should defer to the user's default");
 
-        assert_eq!(prepared.config.agent.as_deref(), Some("opencode"));
+        assert_eq!(
+            Some(prepared.config.agent.to_string()).as_deref(),
+            Some("opencode")
+        );
     }
 }

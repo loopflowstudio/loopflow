@@ -15,8 +15,7 @@ pub fn parse_target(agent: Option<&str>) -> Result<String> {
     let Some(agent) = agent else {
         bail!("a Session move needs a target: -a harness[:model]");
     };
-    let (harness, _) = crate::config::parse_agent(agent);
-    if crate::harness::HarnessKind::parse(&harness).is_none() {
+    if crate::config::Agent::parse(agent).is_err() {
         bail!("unknown agent {agent}: name harness[:model], such as claude:opus or codex");
     }
     Ok(agent.to_owned())
@@ -129,7 +128,7 @@ async fn move_agent(
         session.id.as_str(),
         Some(agent),
         false,
-        false,
+        Default::default(),
         &uuid::Uuid::new_v4().to_string(),
     )
     .await
@@ -152,7 +151,7 @@ pub async fn apply_pending_move(store: &SharedStore, session: &str) -> Result<()
         session,
         Some(&agent),
         false,
-        false,
+        Default::default(),
         &uuid::Uuid::new_v4().to_string(),
     )
     .await?;

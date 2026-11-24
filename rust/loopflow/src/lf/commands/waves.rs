@@ -22,7 +22,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::lf::commands::session::SessionFacts;
 use crate::lf::commands::session_history::format_tokens;
-use crate::lf::commands::task_row::{TaskDetail, TaskGraphRow, TaskNames, TaskThread};
+use crate::lf::commands::task_row::{TaskDetail, TaskGraphRow, TaskNames, TaskRow, TaskThread};
 use loopflow_execution::durable::{TaskSection, TaskState};
 use loopflow_execution::ops::task_execution::{TaskExecutionSnapshot, TaskExecutionState};
 use loopflow_execution::output::Colors;
@@ -123,10 +123,14 @@ pub struct TaskSummary {
     pub repo: String,
     pub project_id: Option<String>,
     pub wave_id: Option<String>,
-    pub acquisition: loopflow_execution::store::TaskAcquisition,
-    pub sync: loopflow_storage::planning_sync::PlanningSyncStatus,
+    pub tracker_state: loopflow_execution::store::TrackerState,
+    pub sync: loopflow_storage::planning_sync::TrackerSync,
     pub id: String,
-    pub linear_id: Option<String>,
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub tracker_id: Option<String>,
+    /// The stable ID of the Task this one was filed from.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub parent_id: Option<String>,
     pub identifier: String,
     pub name: String,
     pub description: String,
@@ -387,10 +391,11 @@ impl RoadmapSnapshot {
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ProjectSummary {
-    pub sync: loopflow_storage::planning_sync::PlanningSyncStatus,
+    pub sync: loopflow_storage::planning_sync::TrackerSync,
     pub current: bool,
     pub id: String,
-    pub linear_id: Option<String>,
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub tracker_id: Option<String>,
     pub slug: String,
     pub name: String,
     pub status: loopflow_storage::work::project::ProjectStatus,
@@ -409,15 +414,15 @@ async fn project_planning(store: &SharedStore, wave: &Wave) -> Evidence<ProjectS
             .into_iter()
             .map(|project| -> Result<ProjectSummary> {
                 Ok(ProjectSummary {
-                    sync: store.project_planning_sync(&project.id)?,
+                    sync: store.project_tracker_sync(&project.id)?,
                     current: current.as_deref().is_some_and(|id| {
                         id == project.id.as_str()
                             || project
-                                .linear_id
+                                .tracker_id
                                 .as_ref()
                                 .is_some_and(|linear| linear.as_str() == id)
                     }),
-                    linear_id: project.linear_id.map(|id| id.as_str().to_owned()),
+                    tracker_id: project.tracker_id.map(|id| id.as_str().to_owned()),
                     id: project.id.to_string(),
                     slug: project.slug,
                     name: project.name,
@@ -439,7 +444,7 @@ fn print_projects(projects: &Evidence<ProjectSummary>) {
         Evidence::Ok { items, .. } => {
             for project in items {
                 println!(
-                    "  chapter   {} ({}) · {} · {}",
+                    "  Project   {} ({}) · {} · {}",
                     project.name,
                     project.id,
                     if project.current {
@@ -493,14 +498,21 @@ pub struct RoadmapTask {
     pub latest_graph_process: Option<GraphProcessDetail>,
     pub execution: Option<TaskExecutionSnapshot>,
     pub run_control: TaskRunControl,
-    pub ship_control: TaskRunControl,
-    pub shipping: Option<loopflow_execution::ops::task::ship::ShippingSnapshot>,
     pub pr: Option<PrSnapshot>,
     pub section: TaskSection,
+    /// Whether its owner is you; `false` when nobody owns it.
+    pub owned_by_you: bool,
     /// The graph step the Task stands at; `None` while a run carries it.
     /// Carried to `lf task status`'s `TaskRow`, not on the wire.
     #[serde(skip)]
     pub(crate) step: Option<String>,
+    /// How the Task's own work ended, while it is open. Not on the wire.
+    #[serde(skip)]
+    pub(crate) finished: Option<loopflow_execution::ops::task_actions::Finished>,
+    /// Why a finished Task stays open: it has open children to conduct.
+    /// Stands for the reason in `TaskRow` and the lists, not on the wire.
+    #[serde(skip)]
+    pub(crate) conducting: Option<String>,
 }
 
 /// `lf wave list` — every durable Wave identity the registry knows.
@@ -564,7 +576,7 @@ pub(crate) async fn wave_snapshots(store: &SharedStore, all: bool) -> Result<Vec
     Ok(snapshots)
 }
 
-/// `lf wave status [wave]` — one Wave's current plan, Tasks and Session evidence.
+/// `lf wave status [wave]` — one Wave's current Project, Tasks and Session evidence.
 /// `lf wave status [<wave>]` observes the tracker first; `lf wave plan
 /// <wave>` reads what the store records and `lf wave sync` exchanges planning.
 pub fn status(wave: Option<&str>, json: bool, observe: bool) -> Result<()> {
@@ -605,7 +617,7 @@ async fn read_status(
     };
     let wave = loopflow_execution::work::wave::context::resolve_in(&store, directory, wave).await?;
     if observe {
-        loopflow_execution::ops::linear_observe::sync_repository(&store, wave.repo()).await;
+        loopflow_execution::ops::tracker_events::sync_repository(&store, wave.repo()).await;
     }
     Ok(Some(wave_detail(&store, &wave).await?))
 }
@@ -638,14 +650,18 @@ pub const CLOSED_TASK_PAGE: usize = 50;
 /// `lf wave status --subscribe`: `lf wave status --json` now and each time it
 /// changes. The subscription reads the store; it does not observe the tracker.
 pub fn subscribe_status(wave: Option<String>) -> Result<()> {
-    loopflow_execution::read_stream::run((), |store, ()| {
-        let wave = wave.clone();
-        async move {
-            let store = loopflow_execution::read_stream::require_store(store)?;
-            let wave = resolve_status_wave(&store, wave.as_deref()).await?;
-            Ok(serde_json::to_value(wave_detail(&store, &wave).await?)?)
-        }
-    })
+    loopflow_execution::read_stream::run(
+        loopflow_execution::read_stream::Watch::State,
+        (),
+        |store, ()| {
+            let wave = wave.clone();
+            async move {
+                let store = loopflow_execution::read_stream::require_store(store)?;
+                let wave = resolve_status_wave(&store, wave.as_deref()).await?;
+                Ok(serde_json::to_value(wave_detail(&store, &wave).await?)?)
+            }
+        },
+    )
 }
 
 /// One Wave's `lf wave status` reading.
@@ -663,7 +679,7 @@ pub(crate) async fn wave_detail(store: &SharedStore, wave: &Wave) -> Result<Wave
     let metric_portfolio =
         loopflow_execution::ops::metrics::wave_metric_portfolio(store, wave, now()).await?;
     Ok(WaveDetailSnapshot {
-        project_readiness: store.sqlite.project_readiness(wave.id())?,
+        project_readiness: loopflow_execution::ops::project::readiness(&store.sqlite, wave.id())?,
         history: Evidence::from_result(
             crate::lf::commands::session_history::collect_recent_history(
                 &store.sqlite,
@@ -736,6 +752,7 @@ pub fn subscribe_show(
     transport: loopflow_execution::read_stream::Transport,
 ) -> Result<Option<loopflow_execution::read_stream::Subscription>> {
     loopflow_execution::read_stream::start(
+        loopflow_execution::read_stream::Watch::State,
         (),
         move |store, ()| {
             let (wave, task, directory) = (wave.clone(), task.clone(), directory.clone());
@@ -845,7 +862,7 @@ async fn show_roadmap(
         let mut checked = std::collections::HashSet::new();
         for wave in &waves {
             if checked.insert(wave.repo()) {
-                loopflow_execution::ops::linear_observe::sync_repository(store, wave.repo()).await;
+                loopflow_execution::ops::tracker_events::sync_repository(store, wave.repo()).await;
             }
         }
     }
@@ -870,7 +887,7 @@ pub struct TaskListArgs {
     pub wave: Option<String>,
     /// Project ID, provider ID, slug or name.
     pub project: Option<String>,
-    /// An open `TaskState` label: unstarted, idle, active, moving or shipping.
+    /// An open `TaskState` label: unstarted, idle, active or moving.
     pub state: Option<String>,
 }
 
@@ -879,6 +896,7 @@ pub struct TaskListArgs {
 pub fn list_tasks(repo: &Path, query: &TaskListArgs, json: bool) -> Result<()> {
     let runtime = tokio::runtime::Runtime::new()?;
     runtime.block_on(async {
+        loopflow_execution::ops::plan_carriers::before_first_read(repo).await;
         let store = loopflow_execution::store::read_existing_registry()?.map(std::sync::Arc::new);
         let tasks = match &store {
             Some(store) => open_tasks(store, repo, query).await?,
@@ -889,7 +907,7 @@ pub fn list_tasks(repo: &Path, query: &TaskListArgs, json: bool) -> Result<()> {
         } else if let Some(store) = &store {
             // Without a store there are no Tasks to print.
             let local = loopflow_execution::store::machines::local_machine(&store.sqlite)?.id;
-            for task in tasks {
+            for (task, depth, _) in task_hierarchy(&tasks) {
                 let id = loopflow_model::durable::TaskId::from_raw(task.task.id.clone());
                 let ownership =
                     loopflow_execution::store::ownership::task_ownership(&store.sqlite, &id)?;
@@ -902,7 +920,11 @@ pub fn list_tasks(repo: &Path, query: &TaskListArgs, json: bool) -> Result<()> {
                 if let Some(place) = place {
                     owner = format!("{owner} · {place}");
                 }
-                println!("{} · {owner} · {}", task.task.identifier, task.task.name);
+                let indent = "  ".repeat(depth);
+                println!(
+                    "{indent}{} · {owner} · {}",
+                    task.task.identifier, task.task.name
+                );
             }
         }
         Ok(())
@@ -911,15 +933,19 @@ pub fn list_tasks(repo: &Path, query: &TaskListArgs, json: bool) -> Result<()> {
 
 /// `lf task list --subscribe`: `lf task list --json` now and each time it changes.
 pub fn subscribe_tasks(repo: &Path, args: TaskListArgs) -> Result<()> {
-    loopflow_execution::read_stream::run(args, |store, args| {
-        let repo = repo.to_owned();
-        async move {
-            let Some(store) = store else {
-                return Ok(Vec::new());
-            };
-            open_tasks(&store, &repo, &args).await
-        }
-    })
+    loopflow_execution::read_stream::run(
+        loopflow_execution::read_stream::Watch::State,
+        args,
+        |store, args| {
+            let repo = repo.to_owned();
+            async move {
+                let Some(store) = store else {
+                    return Ok(Vec::new());
+                };
+                open_tasks(&store, &repo, &args).await
+            }
+        },
+    )
 }
 
 /// What a `lf task status --subscribe` request can select instead.
@@ -939,6 +965,168 @@ pub fn subscribe_task_status(
     watch_task(repo, issue, transport, |store, status| async move {
         task_detail(&store, status).await
     })
+}
+
+/// A connection to the server of the Machine that runs the Task `issue`
+/// names, and the `task.status` read to send it; `None` when it runs here or
+/// a move from here has not arrived, whose progress only this Machine knows.
+fn task_machine(repo: &Path, issue: &str) -> Result<Option<TaskMachine>> {
+    use loopflow_execution::machine::wire::{Secrets, Selection, Sender};
+    let Some(route) = loopflow_execution::machine::task::remote_ownership_writer(issue)? else {
+        return Ok(None);
+    };
+    let machine = super::write::find_machine(route.machine_id.as_str())?;
+    let sender = Sender {
+        repository: route.repository_id,
+        selection: Selection::capture(repo, None)?,
+        secrets: Secrets::default(),
+    };
+    let connection =
+        loopflow_execution::machine::client::Connection::open_on(&machine, sender, None)?;
+    let read = super::read::Read::TaskStatus {
+        directory: repo.to_owned(),
+        issue: route.task_id.to_string(),
+    };
+    Ok(Some(TaskMachine {
+        name: machine.name(),
+        connection,
+        read,
+    }))
+}
+
+struct TaskMachine {
+    name: String,
+    connection: loopflow_execution::machine::client::Connection,
+    read: super::read::Read,
+}
+
+impl TaskMachine {
+    fn status(mut self) -> Result<serde_json::Value> {
+        let answer = self
+            .connection
+            .request(crate::server::wire::Operation::Read(self.read))?;
+        Ok(answer.result)
+    }
+}
+
+/// `task.status` for a Task another Machine runs, as that Machine's server
+/// reads it; `None` when it runs here.
+pub(crate) fn remote_task_detail(repo: &Path, issue: &str) -> Result<Option<serde_json::Value>> {
+    task_machine(repo, issue)?
+        .map(TaskMachine::status)
+        .transpose()
+}
+
+/// `lf task status <issue>` (`--json`, `--subscribe`) for a Task another
+/// Machine runs, from that Machine's server. `false` when it runs here.
+pub fn print_remote_task_status(
+    repo: &Path,
+    issue: &str,
+    json: bool,
+    subscribe: bool,
+) -> Result<bool> {
+    let Some(machine) = task_machine(repo, issue)? else {
+        return Ok(false);
+    };
+    if subscribe {
+        print_remote_readings(machine)?;
+    } else if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&loopflow_execution::read_stream::selected_answer(
+                &machine.status()?
+            )?)?
+        );
+    } else {
+        let name = machine.name.clone();
+        print_remote_detail(&name, &serde_json::from_value(machine.status()?)?)?;
+    }
+    Ok(true)
+}
+
+fn print_remote_detail(machine: &str, detail: &TaskDetail) -> Result<()> {
+    let task = &detail.task;
+    println!("{} · {}", task.title, task.identifier);
+    println!("Runs on {machine}; read from its server.");
+    println!(
+        "State: {}{} · {}",
+        serde_json::to_value(task.state)?
+            .as_str()
+            .expect("a Task state is a string"),
+        detail
+            .auto
+            .as_ref()
+            .map(crate::lf::commands::task_row::auto_phrase)
+            .unwrap_or_default(),
+        task.reason
+    );
+    if let Some(graph) = &task.graph {
+        match &graph.step {
+            Some(step) => println!("Graph: {} · {step}", graph.name),
+            None => println!("Graph: {}", graph.name),
+        }
+    }
+    if let Some(pr) = &task.pr {
+        println!("PR #{}: {}", pr.number, pr.url);
+    }
+    for process in &detail.graph_processes {
+        println!(
+            "Graph run {} · {}{}",
+            process.id,
+            process.name,
+            process
+                .step
+                .as_deref()
+                .map(|step| format!(" · {step}"))
+                .unwrap_or_default()
+        );
+    }
+    if let Some(next) = &task.next {
+        println!("Next: {next}");
+    }
+    Ok(())
+}
+
+/// The `--subscribe` readings of the Machine's server, one JSON line each.
+fn print_remote_readings(machine: TaskMachine) -> Result<()> {
+    use std::io::Write as _;
+    use std::sync::atomic::Ordering;
+    let TaskMachine {
+        mut connection,
+        read,
+        ..
+    } = machine;
+    let id = connection.subscribe(read, loopflow_execution::read_stream::selected())?;
+    // As here, the subscription ends when stdin closes, after its first
+    // reading; closing this end of the pipe ends it on the other Machine too.
+    let printed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let closed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    {
+        let (printed, closed) = (printed.clone(), closed.clone());
+        std::thread::spawn(move || {
+            let _ = std::io::copy(&mut std::io::stdin().lock(), &mut std::io::sink());
+            closed.store(true, Ordering::SeqCst);
+            if printed.load(Ordering::SeqCst) {
+                std::process::exit(0);
+            }
+        });
+    }
+    let mut stdout = std::io::stdout().lock();
+    while let Some(frame) = connection.reading(&id)? {
+        serde_json::to_writer(&mut stdout, &frame)?;
+        if stdout
+            .write_all(b"\n")
+            .and_then(|()| stdout.flush())
+            .is_err()
+        {
+            break;
+        }
+        printed.store(true, Ordering::SeqCst);
+        if closed.load(Ordering::SeqCst) {
+            break;
+        }
+    }
+    Ok(())
 }
 
 /// `lf task show <issue> --subscribe`: `lf task show --json` now and each time it
@@ -970,6 +1158,7 @@ where
 {
     let repo = repo.to_owned();
     loopflow_execution::read_stream::start(
+        loopflow_execution::read_stream::Watch::History,
         TaskStatusArgs { issue },
         move |store, args| {
             let repo = repo.to_owned();
@@ -993,20 +1182,191 @@ pub struct DesktopTaskPane {
     #[serde(flatten)]
     pub status: loopflow_execution::ops::task::TaskStatus,
     pub row: Option<RoadmapTask>,
+    /// The Task this one was filed from; `null` for top-level work.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub parent: Option<TaskRow>,
+    /// The Tasks filed from this one, in filing order.
+    pub children: Vec<TaskRow>,
 }
 
 pub(crate) async fn task_pane(
     store: &SharedStore,
     status: loopflow_execution::ops::task::TaskStatus,
 ) -> Result<DesktopTaskPane> {
-    let row = match &status.task {
+    let (row, parent, children) = match &status.task {
         Some(task) => {
-            let shared = SharedTaskReads::read(store).await?;
-            snapshot_task_details(store, vec![task], false, &shared)?.pop()
+            let (row, parent, children) = task_with_family(store, task).await?;
+            (Some(row), parent, children)
         }
+        None => (None, None, Vec::new()),
+    };
+    Ok(DesktopTaskPane {
+        status,
+        row,
+        parent,
+        children,
+    })
+}
+
+/// The rows of `tasks` in the Work projection's shape, as the plan reads
+/// them, in one reading.
+async fn roadmap_rows(store: &SharedStore, tasks: Vec<&Task>) -> Result<Vec<RoadmapTask>> {
+    if tasks.is_empty() {
+        return Ok(Vec::new());
+    }
+    let shared = SharedTaskReads::read(store).await?;
+    snapshot_task_details(store, tasks, false, &shared)
+}
+
+/// The rows of `tasks`, as `lf task list --json` prints them.
+async fn task_rows(store: &SharedStore, tasks: Vec<&Task>) -> Result<Vec<TaskRow>> {
+    let rows = roadmap_rows(store, tasks).await?;
+    if rows.is_empty() {
+        return Ok(Vec::new());
+    }
+    let names = TaskNames::read(Some(store)).await?;
+    Ok(rows.into_iter().map(|row| names.row(row)).collect())
+}
+
+/// `task`'s own row, the row of the Task it was filed from and the rows of
+/// the Tasks filed from it, in one reading. The parent is `None` for
+/// top-level work and for a parent this Machine does not hold.
+pub(crate) async fn task_with_family(
+    store: &SharedStore,
+    task: &Task,
+) -> Result<(RoadmapTask, Option<TaskRow>, Vec<TaskRow>)> {
+    let parent = match &task.parent_task_id {
+        Some(parent) => store.get_task(parent).await?,
         None => None,
     };
-    Ok(DesktopTaskPane { status, row })
+    let children = store.sqlite.task_children(&task.id)?;
+    let tasks = std::iter::once(task).chain(&parent).chain(&children);
+    let mut rows = roadmap_rows(store, tasks.collect()).await?.into_iter();
+    let row = rows.next().expect("one Task reads one row");
+    let names = TaskNames::read(Some(store)).await?;
+    let mut family = rows.map(|row| names.row(row));
+    let parent = parent.and_then(|_| family.next());
+    Ok((row, parent, family.collect()))
+}
+
+/// The identifier of the Task `task` was filed from, when this Machine holds it.
+pub(crate) fn parent_identifier(
+    store: &loopflow_storage::sqlite::SqliteStore,
+    task: &Task,
+) -> Result<Option<String>> {
+    Ok(match &task.parent_task_id {
+        Some(parent) => store.task(parent)?.map(|parent| parent.identifier),
+        None => None,
+    })
+}
+
+/// `lf task complete --json`: the completed Task and what its completion did
+/// with each child. Wire type; no defaults.
+#[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct TaskCompleted {
+    #[serde(flatten)]
+    pub task: Task,
+    /// One entry per Task filed from it that was open, in the order the
+    /// command prints them.
+    pub children: Vec<CompletedChild>,
+}
+
+/// One child of a completed Task. Wire type; no defaults.
+#[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct CompletedChild {
+    /// The child as it stands now.
+    pub task: TaskRow,
+    pub outcome: loopflow_storage::sqlite::children::ChildOutcome,
+    /// What becoming done did with its own children.
+    pub children: Vec<CompletedChild>,
+}
+
+/// Join a completion to the rows its children have now.
+pub(crate) fn task_completed(
+    completion: loopflow_execution::ops::task::TaskCompletion,
+) -> Result<TaskCompleted> {
+    use loopflow_storage::sqlite::children::ChildCompletion;
+
+    fn ids<'a>(
+        children: &'a [ChildCompletion],
+        into: &mut Vec<&'a loopflow_storage::work::task::TaskId>,
+    ) {
+        for child in children {
+            into.push(&child.task.id);
+            ids(&child.children, into);
+        }
+    }
+    fn join(
+        children: &[ChildCompletion],
+        rows: &mut HashMap<String, TaskRow>,
+    ) -> Result<Vec<CompletedChild>> {
+        children
+            .iter()
+            .map(|child| {
+                Ok(CompletedChild {
+                    task: rows
+                        .remove(child.task.id.as_str())
+                        .ok_or_else(|| anyhow!("{} has no row", child.task.identifier))?,
+                    outcome: child.outcome,
+                    children: join(&child.children, rows)?,
+                })
+            })
+            .collect()
+    }
+    let mut settled = Vec::new();
+    ids(&completion.children, &mut settled);
+    let mut rows = HashMap::new();
+    if !settled.is_empty() {
+        tokio::runtime::Runtime::new()?.block_on(async {
+            let store = loopflow_execution::store::read_existing_registry()?
+                .map(std::sync::Arc::new)
+                .ok_or_else(|| anyhow!("no Loopflow store exists on this Machine"))?;
+            // Read after the settlement, so each row shows where its Task stands now.
+            let mut tasks = Vec::with_capacity(settled.len());
+            for id in settled {
+                tasks.extend(store.get_task(id).await?);
+            }
+            for row in task_rows(&store, tasks.iter().collect()).await? {
+                rows.insert(row.id.clone(), row);
+            }
+            anyhow::Ok(())
+        })?;
+    }
+    Ok(TaskCompleted {
+        children: join(&completion.children, &mut rows)?,
+        task: completion.task,
+    })
+}
+
+/// `lf task status`: the Task it was filed from and one line per child.
+pub fn print_task_family(task: &Task) -> Result<()> {
+    tokio::runtime::Runtime::new()?.block_on(async {
+        let store = loopflow_execution::store::read_existing_registry()?
+            .map(std::sync::Arc::new)
+            .ok_or_else(|| anyhow!("no Loopflow store exists on this Machine"))?;
+        if let Some(parent) = parent_identifier(&store.sqlite, task)? {
+            println!("  parent: {parent}");
+        }
+        let children = store.sqlite.task_children(&task.id)?;
+        let children = task_rows(&store, children.iter().collect()).await?;
+        let width = |text: fn(&TaskRow) -> &str| {
+            children
+                .iter()
+                .map(|row| text(row).chars().count())
+                .max()
+                .unwrap_or(0)
+        };
+        let (identifier, title) = (width(|row| &row.identifier), width(|row| &row.title));
+        for child in &children {
+            println!(
+                "  child: {:identifier$}  {:title$}  {}",
+                child.identifier,
+                child.title,
+                child.standing()
+            );
+        }
+        Ok(())
+    })
 }
 
 /// `lf task status --json`.
@@ -1027,6 +1387,18 @@ pub fn print_task_detail(status: loopflow_execution::ops::task::TaskStatus) -> R
     })
 }
 
+/// `lf --cwd <directory> task status <issue> --json`, read from the store.
+pub(crate) fn read_task_detail(directory: &Path, issue: &str) -> Result<TaskDetail> {
+    let repo = loopflow_execution::ops::task::task_repository(directory, Some(issue))?;
+    tokio::runtime::Runtime::new()?.block_on(async {
+        let store = loopflow_execution::store::read_existing_registry()?
+            .map(std::sync::Arc::new)
+            .ok_or_else(|| anyhow!("no Loopflow store exists on this Machine"))?;
+        let status = loopflow_execution::ops::task::read_task_status(&store, &repo, issue).await?;
+        task_detail(&store, status).await
+    })
+}
+
 /// `lf task status`'s reading of one registered Task.
 pub(crate) async fn task_detail(
     store: &SharedStore,
@@ -1035,27 +1407,42 @@ pub(crate) async fn task_detail(
     let task = status
         .task
         .ok_or_else(|| anyhow!("this Task is not registered in Loopflow"))?;
-    let shared = SharedTaskReads::read(store).await?;
-    let row = snapshot_task_details(store, vec![&task], false, &shared)?
-        .pop()
-        .expect("a registered Task has a row");
-    let mut sessions = Vec::new();
-    for session in status
+    let (row, parent, children) = task_with_family(store, &task).await?;
+    let (overview_sessions, graph) = status
         .overview
-        .map(|overview| overview.sessions)
-        .unwrap_or_default()
-    {
+        .map(|overview| (overview.sessions, overview.graph))
+        .unwrap_or_default();
+    let mut sessions = Vec::new();
+    for session in overview_sessions {
         if let Some(record) =
             loopflow_execution::ops::human_session::listed(store, session.id.as_str())?
         {
             sessions.push(SessionFacts::of(record));
         }
     }
+    let conversation = task_conversation(store, &task.id)?;
+    let conversation_id = conversation.as_ref().map(|facts| facts.id.clone());
+    if let Some(facts) = conversation {
+        if !sessions.iter().any(|session| session.id == facts.id) {
+            sessions.insert(0, facts);
+        }
+    }
     let summary = store.sqlite.task_summary(&task.id)?;
     Ok(TaskDetail {
         summary,
+        parent,
+        children,
+        conversation: conversation_id,
+        auto: status
+            .execution
+            .as_ref()
+            .and_then(|execution| execution.auto.clone()),
+        stack_parent: status
+            .execution
+            .and_then(|execution| execution.stack_parent),
         task: TaskNames::read(Some(store)).await?.row(row),
         sessions,
+        graph,
         graph_processes: status
             .graph_processes
             .into_iter()
@@ -1063,6 +1450,36 @@ pub(crate) async fn task_detail(
             .collect(),
         comments: status.comments.map(TaskThread::from),
     })
+}
+
+/// The Task's conversation, as `lf session list` reads it; `None` before it
+/// has one.
+fn task_conversation(
+    store: &SharedStore,
+    task: &loopflow_model::durable::TaskId,
+) -> Result<Option<SessionFacts>> {
+    let Some(session) =
+        store
+            .sqlite
+            .primary_session(&loopflow_execution::session::PrimaryScope::Task(
+                task.clone(),
+            ))?
+    else {
+        return Ok(None);
+    };
+    Ok(
+        loopflow_execution::ops::human_session::listed(store, session.id.as_str())?
+            .map(SessionFacts::of),
+    )
+}
+
+/// `lf task status`'s conversation line for `task`, as the server wrote it;
+/// `None` before it has one.
+pub fn task_conversation_line(task: &loopflow_model::durable::TaskId) -> Result<Option<String>> {
+    let Some(store) = loopflow_execution::store::read_existing_registry()? else {
+        return Ok(None);
+    };
+    Ok(task_conversation(&std::sync::Arc::new(store), task)?.and_then(|facts| facts.status_line))
 }
 
 /// The open Tasks `query` selects, read from the store's filter rather than
@@ -1317,7 +1734,10 @@ async fn roadmap_snapshot(
         }
         roadmaps.push(WaveRoadmap {
             graph: loopflow_execution::work::wave::config::wave_graph(&checkout, wave.slug())?,
-            project_readiness: store.sqlite.project_readiness(wave.id())?,
+            project_readiness: loopflow_execution::ops::project::readiness(
+                &store.sqlite,
+                wave.id(),
+            )?,
             wave: snapshot,
             projects: project_planning(store, wave).await,
             unavailable_tasks: Vec::new(),
@@ -1615,10 +2035,23 @@ async fn snapshot_tasks(
     Ok((details, unavailable_tasks))
 }
 
+/// The details of one reading's Tasks. A bare command reads them as one
+/// reading too, so Tasks that share a checkout resolve its settings once.
+fn snapshot_task_details(
+    store: &SharedStore,
+    requests: Vec<&Task>,
+    probe_pr_empty: bool,
+    shared: &SharedTaskReads,
+) -> Result<Vec<RoadmapTask>> {
+    loopflow_execution::observe::reading(|| {
+        gather_task_details(store, requests, probe_pr_empty, shared)
+    })
+}
+
 /// Each detail waits on fresh Git observations of its own checkout. Gather
 /// them side by side: one after another, those children are most of a
 /// roadmap read. Details and the first error keep their request order.
-fn snapshot_task_details(
+fn gather_task_details(
     store: &SharedStore,
     requests: Vec<&Task>,
     probe_pr_empty: bool,
@@ -1681,30 +2114,17 @@ struct DetailReads<'a> {
     >,
     /// Each Task Wave's name, which selects its agent; read once per Wave.
     wave_names: HashMap<loopflow_model::id::WaveId, String>,
-    /// Each Task Wave's and repository's checkout with your `lf set` values,
-    /// which select its agent; read once per Wave and repository.
-    personal: HashMap<
-        (
-            Option<loopflow_model::id::WaveId>,
-            loopflow_model::durable::RepositoryId,
-        ),
-        (
-            std::path::PathBuf,
-            loopflow_execution::config::PersonalSettings,
-        ),
+    /// Each repository's checkout, where a Task without a worktree resolves
+    /// its agent; read once per repository.
+    repositories: HashMap<loopflow_model::durable::RepositoryId, std::path::PathBuf>,
+    /// You in each Task's repository, which recognizes your claims; read once per repository.
+    you: HashMap<
+        loopflow_model::durable::RepositoryId,
+        loopflow_storage::sqlite::task_ownership::You,
     >,
-    /// Each handed-off Task's Auto-Ship progress.
-    shipping: HashMap<
-        loopflow_model::durable::TaskId,
-        loopflow_execution::ops::task::ship::ShippingSnapshot,
-    >,
-    /// Agents already resolved in this reading, by the configuration that chose
-    /// them. Checkouts of one repository usually share their files, and resolving
-    /// validates every setting, so each distinct configuration resolves once.
-    agents: std::sync::Mutex<HashMap<String, Option<String>>>,
     /// Each Task's latest Graph and what its execution reads, asked once.
     graphs:
-        HashMap<loopflow_model::durable::TaskId, loopflow_execution::graph::process::GraphProcess>,
+        HashMap<loopflow_model::durable::TaskId, loopflow_storage::graph_process::GraphExecution>,
     execution: loopflow_storage::sqlite::GraphExecutionFacts,
 }
 
@@ -1720,12 +2140,10 @@ impl<'a> DetailReads<'a> {
         }
         let facts = loopflow_execution::store::ownership::task_detail_facts(&store.sqlite, tasks)?;
         let mut planning_connections = HashMap::new();
-        for receipts in facts.planning_receipts.values() {
+        for open in facts.tracker_actions.values() {
             planning_connections
-                .entry(receipts.repo.clone())
-                .or_insert_with(|| {
-                    loopflow_execution::ops::planning_client::connected(&receipts.repo)
-                });
+                .entry(open.repo.clone())
+                .or_insert_with(|| loopflow_execution::ops::tracker::connected(&open.repo));
         }
         let graphs = store
             .sqlite
@@ -1738,7 +2156,8 @@ impl<'a> DetailReads<'a> {
             HashMap::<_, (String, Option<loopflow_execution::config::ConfigSource>)>::new();
         let mut selections = HashMap::new();
         let mut wave_names = HashMap::new();
-        let mut personal = HashMap::new();
+        let mut repositories = HashMap::new();
+        let mut you = HashMap::new();
         for task in tasks {
             let selection = match facts.graph_names.get(&task.id) {
                 Some(name) => (name.clone(), None),
@@ -1764,32 +2183,18 @@ impl<'a> DetailReads<'a> {
                 }
             }
             if let std::collections::hash_map::Entry::Vacant(entry) =
-                personal.entry((task.wave_id.clone(), task.repository_id.clone()))
+                repositories.entry(task.repository_id.clone())
             {
                 let repo = loopflow_execution::ops::task::repository_for_task(store, task)?;
-                let wave = task
-                    .wave_id
-                    .as_ref()
-                    .and_then(|id| wave_names.get(id))
-                    .map(String::as_str);
-                let values = loopflow_execution::config::PersonalSettings::read(Some(&repo), wave);
-                entry.insert((repo, values));
-            }
-        }
-        let mut shipping = HashMap::new();
-        for task in tasks.iter().filter(|task| facts.shipped.contains(&task.id)) {
-            let status = *facts
-                .states
-                .get(&task.id)
-                .ok_or_else(|| anyhow!("Task {} has no state", task.id))?;
-            let graph = loopflow_execution::store::task_work::task_graph(&store.sqlite, &task.id)?;
-            if let Some(snapshot) = loopflow_execution::ops::task::ship::read_shipping(
-                &store.sqlite,
-                &task.id,
-                graph.as_ref(),
-                status,
-            )? {
-                shipping.insert(task.id.clone(), snapshot);
+                you.insert(
+                    task.repository_id.clone(),
+                    loopflow_execution::store::ownership::you(
+                        &store.sqlite,
+                        &task.repository_id,
+                        &repo,
+                    )?,
+                );
+                entry.insert(repo);
             }
         }
         Ok(Self {
@@ -1799,47 +2204,11 @@ impl<'a> DetailReads<'a> {
             planning_connections,
             selections,
             wave_names,
-            personal,
-            shipping,
+            repositories,
+            you,
             graphs,
             execution,
-            agents: Default::default(),
         })
-    }
-
-    /// The agent Task work at `checkout` would launch with, resolved once per
-    /// distinct configuration in this reading.
-    fn agent(
-        &self,
-        checkout: &Path,
-        wave: Option<&str>,
-        personal: &loopflow_execution::config::PersonalSettings,
-    ) -> Option<String> {
-        let resolve = || {
-            loopflow_execution::ops::task::resolve_task_agent(checkout, wave, personal, None).ok()
-        };
-        let Ok(layers) =
-            loopflow_execution::config::config_layers_with(Some(checkout), wave, personal)
-        else {
-            return resolve();
-        };
-        // Paths only name where a value came from; the agent depends on the values.
-        let key = serde_json::to_string(
-            &layers
-                .iter()
-                .map(|layer| (&layer.source, &layer.scope, &layer.value))
-                .collect::<Vec<_>>(),
-        )
-        .expect("configuration values serialize");
-        if let Some(agent) = self.agents.lock().expect("agent memo poisoned").get(&key) {
-            return agent.clone();
-        }
-        let agent = resolve();
-        self.agents
-            .lock()
-            .expect("agent memo poisoned")
-            .insert(key, agent.clone());
-        agent
     }
 }
 
@@ -1889,12 +2258,18 @@ async fn snapshot_task_detail(
         .as_ref()
         .and_then(|id| reads.wave_names.get(id))
         .map(String::as_str);
-    let (repo, personal) = reads
-        .personal
-        .get(&(task.wave_id.clone(), task.repository_id.clone()))
-        .ok_or_else(|| anyhow!("Task {} has no setup reading", task.id))?;
-    let agent = reads.agent(task.worktree.as_deref().unwrap_or(repo), wave, personal);
-    let provider = agent.map(|agent| loopflow_execution::config::parse_agent(&agent).0);
+    let repo = reads
+        .repositories
+        .get(&task.repository_id)
+        .ok_or_else(|| anyhow!("Task {} has no repository reading", task.id))?;
+    let provider = loopflow_execution::ops::task::resolve_task_agent(
+        task.worktree.as_deref().unwrap_or(repo),
+        repo,
+        wave,
+        None,
+    )
+    .ok()
+    .map(|agent| agent.harness.as_str().to_owned());
     let runtime = snapshot_task_runtime(&execution, task, status, pending, owner, provider);
     let reference = task_reference(
         facts.issue_urls.get(&task.id).cloned(),
@@ -1902,38 +2277,51 @@ async fn snapshot_task_detail(
         &shared.machines,
         &shared.local_machine,
     );
-    let acquisition = facts
-        .acquisitions
+    let tracker_state = facts
+        .tracker_states
         .get(&task.id)
         .cloned()
-        .ok_or_else(|| anyhow!("Task {} has no planning acquisition", task.id))?;
+        .ok_or_else(|| anyhow!("Task {} has no tracker state", task.id))?;
     let latest_event = facts.latest_events.get(&task.id);
     let worktree_blocker =
         loopflow_execution::ops::task::task_worktree_blocker_after(task, latest_event)?;
     let launch_refusal = if worktree_blocker.is_none() {
-        loopflow_execution::ops::task::task_process_refusal_after(
-            task,
-            wave,
-            personal,
-            latest_event,
-        )
-        .or_else(|| {
-            matches!(
-                acquisition.state,
-                loopflow_execution::store::PlanningState::Invalid
-                    | loopflow_execution::store::PlanningState::Removed
-            )
-            .then(|| {
-                format!(
-                    "Task planning has invalidation or removal evidence; run `lf task sync {}`",
-                    task.identifier
+        loopflow_execution::ops::task::task_process_refusal_after(task, repo, wave, latest_event)
+            .or_else(|| {
+                matches!(
+                    tracker_state.state,
+                    loopflow_execution::store::PlanningState::Invalid
+                        | loopflow_execution::store::PlanningState::Removed
                 )
+                .then(|| {
+                    format!(
+                        "Task planning has invalidation or removal evidence; run `lf task sync {}`",
+                        task.identifier
+                    )
+                })
             })
-        })
     } else {
         None
     };
-    let next_move = if unassigned(&runtime) {
+    let open_children = facts.open_children.get(&task.id).copied().unwrap_or(0);
+    let at_end = facts
+        .steps
+        .get(&task.id)
+        .is_some_and(|step| step == loopflow_execution::task_graph::END);
+    let finished = loopflow_execution::ops::task_actions::Finished::of(
+        &status.work_status(),
+        pr.as_ref().map(TaskPr::phase),
+        at_end,
+    );
+    let conducting = finished
+        .filter(|_| open_children > 0 && execution.state != TaskExecutionState::Running)
+        .map(|finished| finished.reason(open_children));
+    let next_move = if let Some(reason) = conducting.clone() {
+        NextMove {
+            owner: NextMoveOwner::Task,
+            reason,
+        }
+    } else if unassigned(&runtime) {
         NextMove {
             owner: NextMoveOwner::User,
             reason: "Unassigned; nothing moves it until `lf task claim` or `lf task run`".into(),
@@ -1946,12 +2334,10 @@ async fn snapshot_task_detail(
             },
             reason: execution.reason.clone(),
         }
-    } else if pr.as_ref().is_some_and(|pr| pr.phase() == PrPhase::Merged)
-        && !runtime.status.is_terminal()
-    {
+    } else if let Some(finished) = finished {
         NextMove {
             owner: NextMoveOwner::Wave,
-            reason: "Merged; complete the Task".into(),
+            reason: finished.reason(open_children),
         }
     } else {
         next_move_for_task(
@@ -1993,6 +2379,8 @@ async fn snapshot_task_detail(
             .as_ref()
             .filter(|pr| pr.phase() == PrPhase::Open)
             .map(|pr| pr.presentation().is_some()),
+        at_end,
+        open_children,
         completion_refusal: completion_refusal.as_deref(),
         run_refusal: run_refusal.as_deref(),
         ci: active.and_then(|pr| pr.fresh_ci()),
@@ -2023,22 +2411,6 @@ async fn snapshot_task_detail(
             launch_refusal: launch_refusal.as_deref(),
         },
     );
-    let shipping = reads.shipping.get(&task.id).cloned();
-    let ship_control = TaskRunControl {
-        unavailable: run_control.unavailable.clone().or_else(|| {
-            if shipping.is_some() {
-                Some("Task is already shipping".to_string())
-            } else if facts
-                .steps
-                .get(&task.id)
-                .is_some_and(|step| step == loopflow_execution::task_graph::END)
-            {
-                Some("Task is at the end of its graph".to_string())
-            } else {
-                None
-            }
-        }),
-    };
     let (graph_name, graph_source) = reads
         .selections
         .get(&task.id)
@@ -2049,19 +2421,21 @@ async fn snapshot_task_detail(
         runtime.owner.is_some(),
         task.state.as_deref(),
     );
+    let owned_by_you = runtime.owner.as_ref().is_some_and(|holder| {
+        reads
+            .you
+            .get(&task.repository_id)
+            .is_some_and(|you| you.holds(holder))
+    });
     Ok(RoadmapTask {
         task: task_summary(
             task,
             facts
-                .planning_receipts
+                .tracker_actions
                 .get(&task.id)
-                .map(|receipts| {
-                    receipts
-                        .clone()
-                        .status(reads.planning_connections[&receipts.repo])
-                })
-                .ok_or_else(|| anyhow!("Task {} has no planning receipts", task.id))?,
-            acquisition,
+                .map(|open| open.clone().status(reads.planning_connections[&open.repo]))
+                .ok_or_else(|| anyhow!("Task {} has no tracker actions read", task.id))?,
+            tracker_state,
             facts
                 .repository_paths
                 .get(&task.repository_id)
@@ -2074,6 +2448,7 @@ async fn snapshot_task_detail(
             status,
             runtime.owner.is_some(),
             pr.as_ref().is_some_and(|pr| pr.publication.is_some()),
+            facts.auto_on.contains(&task.id),
             task.state.as_deref(),
             reads.selection_readings[&task.repository_id]
                 .activity
@@ -2088,8 +2463,6 @@ async fn snapshot_task_detail(
         latest_graph_process: graph_record,
         execution: Some(execution),
         run_control,
-        ship_control,
-        shipping,
         pr: pr.as_ref().map(|pr| {
             let empty = (probe_pr_empty && pr.is_active())
                 .then(|| task_pr_empty(task, pr))
@@ -2097,7 +2470,10 @@ async fn snapshot_task_detail(
             PrSnapshot::new(pr, empty)
         }),
         section,
+        owned_by_you,
         step: facts.steps.get(&task.id).cloned(),
+        finished,
+        conducting,
     })
 }
 
@@ -2370,8 +2746,8 @@ fn task_pr_empty(task: &Task, pr: &TaskPr) -> Option<bool> {
 
 fn task_summary(
     task: &Task,
-    sync: loopflow_storage::planning_sync::PlanningSyncStatus,
-    acquisition: loopflow_execution::store::TaskAcquisition,
+    sync: loopflow_storage::planning_sync::TrackerSync,
+    tracker_state: loopflow_execution::store::TrackerState,
     repo: String,
 ) -> TaskSummary {
     TaskSummary {
@@ -2379,12 +2755,13 @@ fn task_summary(
         repo,
         project_id: task.project_id.as_ref().map(ToString::to_string),
         wave_id: task.wave_id.as_ref().map(ToString::to_string),
-        acquisition,
+        tracker_state,
         due_date: task.due_date.clone(),
         sync,
         id: task.id.to_string(),
-        linear_id: task.linear_id.as_ref().map(|id| id.as_str().to_string()),
+        tracker_id: task.tracker_id.as_ref().map(|id| id.as_str().to_string()),
         identifier: task.identifier.clone(),
+        parent_id: task.parent_task_id.as_ref().map(ToString::to_string),
         name: task.title.clone(),
         description: task.description.clone(),
         rank: task.rank,
@@ -2520,6 +2897,7 @@ fn print_setup(setup: &loopflow_execution::work::wave::setup::WaveSetup) {
     };
     println!("  setup");
     line("graph", &setup.graph);
+    line("auto", &setup.auto);
     line("agent", &setup.agent);
     for (skill, value) in &setup.skill_agents {
         line(&format!("  {skill}"), value);
@@ -2729,14 +3107,14 @@ fn metric_value(metric: &MetricReadingDto) -> String {
 fn metric_target(metric: &MetricReadingDto, portfolio: &MetricPortfolioDto) -> String {
     if portfolio.contract_issues.iter().any(|issue| {
         matches!(issue,
-            MetricContractIssueDto::ChapterUnavailable { wave_id, .. }
+            MetricContractIssueDto::ProjectUnavailable { wave_id, .. }
             if wave_id == metric.identity.wave_id()
         )
     }) {
-        return "unavailable for this chapter".into();
+        return "unavailable for this Project".into();
     }
     match metric.target {
-        None => "unset for this chapter".into(),
+        None => "unset for this Project".into(),
         Some(Threshold::AtLeast { value }) => {
             format!(">= {}", format_metric_number(value, &metric.unit))
         }
@@ -2783,7 +3161,7 @@ fn metric_reason(evidence: &MetricEvidenceDto) -> Option<String> {
         MetricEvidenceDto::Unknown { cause } => Some(match cause {
             MetricUnknownCauseDto::Never => "no observation has arrived".to_string(),
             MetricUnknownCauseDto::TargetUnavailable { .. } => {
-                "chapter target planning is unavailable".to_string()
+                "Project target planning is unavailable".to_string()
             }
             MetricUnknownCauseDto::RevisionMismatch {
                 expected_contract_revision,
@@ -2817,8 +3195,8 @@ fn metric_reason(evidence: &MetricEvidenceDto) -> Option<String> {
 
 fn metric_contract_issue(issue: &MetricContractIssueDto) -> String {
     match issue {
-        MetricContractIssueDto::ChapterUnavailable { wave_id, reason } => format!("{wave_id}: chapter targets unavailable: {reason}"),
-        MetricContractIssueDto::UnresolvedTarget { wave_id, metric_id } => format!("{wave_id}/{metric_id}: chapter target has no readable instrument contract"),
+        MetricContractIssueDto::ProjectUnavailable { wave_id, reason } => format!("{wave_id}: Project targets unavailable: {reason}"),
+        MetricContractIssueDto::UnresolvedTarget { wave_id, metric_id } => format!("{wave_id}/{metric_id}: Project target has no readable instrument contract"),
         MetricContractIssueDto::MalformedContract { path, message } => {
             format!("{path}: {message}")
         }
@@ -2912,10 +3290,14 @@ fn task_roadmap_row(task: &RoadmapTask, now: time::OffsetDateTime) -> RoadmapRow
             .as_ref()
             .map(|workspace| workspace.slug.clone()),
         condition: Some(task.condition.state),
-        reason: std::iter::once(task.condition.reason.clone())
-            .chain(task.task.sync.lines())
-            .collect::<Vec<_>>()
-            .join(" · "),
+        reason: std::iter::once(
+            task.conducting
+                .clone()
+                .unwrap_or_else(|| task.condition.reason.clone()),
+        )
+        .chain(task.task.sync.lines())
+        .collect::<Vec<_>>()
+        .join(" · "),
     }
 }
 
@@ -2955,10 +3337,48 @@ fn section_label(section: TaskSection) -> &'static str {
     match section {
         TaskSection::Backlog => "BACKLOG",
         TaskSection::Working => "WORKING",
-        TaskSection::Autonomous => "AUTONOMOUS",
         TaskSection::Done => "DONE",
         TaskSection::Abandoned => "ABANDONED",
     }
+}
+
+fn task_hierarchy<'a>(
+    tasks: impl IntoIterator<Item = &'a RoadmapTask>,
+) -> Vec<(&'a RoadmapTask, usize, TaskSection)> {
+    let tasks: Vec<_> = tasks.into_iter().collect();
+    let open: HashSet<_> = tasks
+        .iter()
+        .filter(|task| !task.lifecycle.is_terminal())
+        .map(|task| task.task.id.as_str())
+        .collect();
+    let mut children = HashMap::<_, Vec<_>>::new();
+    let mut roots = Vec::new();
+    for task in tasks {
+        if let Some(parent) = task
+            .task
+            .parent_id
+            .as_deref()
+            .filter(|id| open.contains(id))
+        {
+            children.entry(parent).or_default().push(task);
+        } else {
+            roots.push((task, 0, task.section));
+        }
+    }
+    let mut ordered = Vec::new();
+    let mut stack: Vec<_> = roots.into_iter().rev().collect();
+    while let Some((task, depth, section)) = stack.pop() {
+        ordered.push((task, depth, section));
+        if let Some(children) = children.remove(task.task.id.as_str()) {
+            stack.extend(
+                children
+                    .into_iter()
+                    .rev()
+                    .map(|child| (child, depth + 1, section)),
+            );
+        }
+    }
+    ordered
 }
 
 fn print_roadmap(roadmap: &RoadmapSnapshot) {
@@ -2979,9 +3399,9 @@ fn print_roadmap(roadmap: &RoadmapSnapshot) {
             }
             Evidence::Ok { items, .. } => items,
         };
-        let rows: Vec<RoadmapRow> = tasks
+        let rows: Vec<_> = task_hierarchy(tasks)
             .into_iter()
-            .map(|task| task_roadmap_row(task, now))
+            .map(|(task, depth, section)| (task_roadmap_row(task, now), depth, section))
             .collect();
         if rows.is_empty() {
             println!("  (no plan rows)");
@@ -2990,26 +3410,33 @@ fn print_roadmap(roadmap: &RoadmapSnapshot) {
         // Wide enough for an unnamed owner's email key.
         let owner_width = rows
             .iter()
-            .map(|row| row.owner.chars().count())
+            .map(|(row, _, _)| row.owner.chars().count())
             .max()
             .unwrap_or(0)
             .clamp(12, 32);
         for section in [
             TaskSection::Working,
-            TaskSection::Autonomous,
             TaskSection::Backlog,
             TaskSection::Done,
             TaskSection::Abandoned,
         ] {
-            let in_section: Vec<&RoadmapRow> =
-                rows.iter().filter(|row| row.section == section).collect();
+            let in_section: Vec<_> = rows
+                .iter()
+                .filter(|(_, _, root)| *root == section)
+                .collect();
             if in_section.is_empty() {
                 continue;
             }
             println!("  {}", section_label(section));
-            for row in in_section {
+            for (row, depth, _) in in_section {
+                let indent = "  ".repeat(*depth);
+                let nested_section = if row.section == section {
+                    String::new()
+                } else {
+                    format!(" · {}", section_label(row.section))
+                };
                 println!(
-                    "    {id}  {rank:>4}  {owner:<owner_width$}  next:{next:<8}  {age:>5}  {condition:<7}  {workspace:<20}  {pr:<24}  {title}",
+                    "    {indent}{id}  {rank:>4}  {owner:<owner_width$}  next:{next:<8}  {age:>5}  {condition:<7}  {workspace:<20}  {pr:<24}  {title}{nested_section}",
                     id = task_identifier_label(
                         &row.id,
                         row.issue_url.as_deref(),
@@ -3034,7 +3461,7 @@ fn print_roadmap(roadmap: &RoadmapSnapshot) {
                     pr = truncate(row.pr.as_deref().unwrap_or("-"), 24),
                     title = truncate(&row.title, 36),
                 );
-                println!("      {}", row.reason);
+                println!("      {indent}{}", row.reason);
             }
         }
     }
@@ -3256,7 +3683,6 @@ mod tests {
             "bound",
             None,
             &store.sqlite.test_lf_process(),
-            true,
         )
         .unwrap();
         store
@@ -3265,7 +3691,7 @@ mod tests {
                 "bound",
                 &attachment,
                 std::process::id(),
-                loopflow_execution::journal::process_started_at(std::process::id())
+                loopflow_execution::process::os_process::process_started_at(std::process::id())
                     .unwrap()
                     .unwrap(),
             )
@@ -3325,8 +3751,8 @@ mod tests {
             .task_ids(),
             [active]
         );
-        db.execute("INSERT INTO task_ownership(id,task_id,kind,person,machine_id,at,ordered_at,written_here)
-            VALUES('own_55555555555555555555555555555555',?1,'recorded',NULL,NULL,3,3000,1)", [active]).unwrap();
+        db.execute("INSERT INTO task_ownership(id,task_id,kind,person,machine_id,at,ordered_at,writer_machine_id,written_here)
+            VALUES('own_55555555555555555555555555555555',?1,'recorded',NULL,NULL,3,3000,(SELECT id FROM machines WHERE is_local=1),1)", [active]).unwrap();
         store
             .sqlite
             .record_program_status(
@@ -3442,7 +3868,6 @@ mod tests {
             .seed_inventory(
                 crate::test_linear_input::InventoryFixture {
                     wave_id: wave.id().clone(),
-                    provider: "linear".into(),
                     initiative: "initiative".into(),
                     synced_at: 1,
                     snapshot: serde_json::from_str(include_str!(
@@ -3514,7 +3939,6 @@ mod tests {
             .seed_inventory(
                 crate::test_linear_input::InventoryFixture {
                     wave_id: wave.id().clone(),
-                    provider: "linear".into(),
                     initiative: "initiative".into(),
                     synced_at: 1,
                     snapshot: planning.clone(),
@@ -3539,7 +3963,7 @@ mod tests {
             let item = planning
                 .items
                 .iter()
-                .find(|item| Some(item.id.as_str()) == detail.task.linear_id.as_deref())
+                .find(|item| Some(item.id.as_str()) == detail.task.tracker_id.as_deref())
                 .unwrap();
             assert_eq!(detail.task.state, item.state);
             assert_eq!(detail.task.completed_at, item.completed_at);
@@ -3625,7 +4049,6 @@ mod tests {
                 .seed_inventory(
                     crate::test_linear_input::InventoryFixture {
                         wave_id: wave.id().clone(),
-                        provider: "linear".into(),
                         initiative: "initiative".into(),
                         synced_at: 2,
                         snapshot: serde_json::from_value(serde_json::json!({"projects":[{
@@ -3653,7 +4076,7 @@ mod tests {
         rusqlite::Connection::open(directory.path().join("registry.db"))
             .unwrap()
             .execute(
-                "UPDATE pm_projects SET initiative_ids='not-json' WHERE id='first-ear'",
+                "UPDATE tracker_projects SET initiative_ids='not-json' WHERE id='first-ear'",
                 [],
             )
             .unwrap();
@@ -3671,7 +4094,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn chapter_deletion_stays_absent_from_wave_and_roadmap_planning() {
+    async fn project_deletion_stays_absent_from_wave_and_roadmap_planning() {
         let directory = tempfile::tempdir().unwrap();
         let database = directory.path().join("registry.db");
         let store = Arc::new(
@@ -3687,7 +4110,7 @@ mod tests {
             directory.path().display().to_string(),
         );
         store.create_wave(&wave).await.unwrap();
-        let mut item = loopflow_execution::linear::LinearIssue {
+        let mut item = loopflow_storage::planning::TrackerItem {
             branch_name: None,
             revision: None,
             id: "removed".into(),
@@ -3703,6 +4126,8 @@ mod tests {
             project_id: Some("current".into()),
             team_id: Some("team".into()),
             assignee: None,
+            parent_id: None,
+            parent_observed: true,
         };
         let mut items = vec![item.clone()];
         item.id = "started".into();
@@ -3711,11 +4136,10 @@ mod tests {
         items.push(item);
         let snapshot = crate::test_linear_input::InventoryFixture {
             wave_id: wave.id().clone(),
-            provider: "linear".into(),
             initiative: "initiative".into(),
             synced_at: 1,
             snapshot: serde_json::from_value(serde_json::json!({"projects":[{
-                "id":"current", "slug":"current", "name":"Current chapter", "summary":"",
+                "id":"current", "slug":"current", "name":"Current project", "summary":"",
                 "metric_targets":[], "workflow":"feature", "status":"started", "krs":[],
                 "initiative_ids":["initiative"], "team_ids":["team"]
             }], "items":items}))
@@ -3736,7 +4160,7 @@ mod tests {
                 let mut successor = stale.snapshot.projects[0].clone();
                 successor.id = "next".into();
                 successor.slug = "next".into();
-                successor.name = "Next chapter".into();
+                successor.name = "Next project".into();
                 stale.snapshot.projects[0].status =
                     loopflow_storage::work::project::ProjectStatus::Completed;
                 stale.snapshot.projects[0].revision = Some("2026-09-30T00:00:01Z".into());
@@ -3762,7 +4186,7 @@ mod tests {
             };
             assert_eq!(items.len(), 1);
             assert!(detail.unavailable_tasks.is_empty());
-            assert_eq!(items[0].task.linear_id.as_deref(), Some("started"));
+            assert_eq!(items[0].task.tracker_id.as_deref(), Some("started"));
         }
     }
 
@@ -3798,12 +4222,12 @@ mod tests {
         assert!(missing.metrics.is_empty());
         assert!(matches!(
             &missing.contract_issues[..],
-            [loopflow_execution::work::wave::metrics::MetricContractIssueDto::ChapterUnavailable { .. }]
+            [loopflow_execution::work::wave::metrics::MetricContractIssueDto::ProjectUnavailable { .. }]
         ));
         store.seed_inventory(crate::test_linear_input::InventoryFixture {
-            wave_id: wave.id().clone(), provider: "linear".into(), initiative: "initiative".into(), synced_at: 2,
+            wave_id: wave.id().clone(), initiative: "initiative".into(), synced_at: 2,
             snapshot: serde_json::from_value(serde_json::json!({"projects":[{
-                "id":"999bdbdd-c045-41a6-8ffc-a97c4a40b0b3", "slug":"first", "name":"First chapter", "summary":"",
+                "id":"999bdbdd-c045-41a6-8ffc-a97c4a40b0b3", "slug":"first", "name":"First project", "summary":"",
                 "metric_targets":[], "workflow":"feature", "status":"started", "krs":[{"text":"Edited proof", "holds":false}],
                 "initiative_ids":["initiative"], "team_ids":["team"]
             }], "items":[]})).unwrap(),
@@ -3827,7 +4251,6 @@ mod tests {
         );
         let unreadable = crate::test_linear_input::InventoryFixture {
             wave_id: wave.id().clone(),
-            provider: "linear".into(),
             initiative: "initiative".into(),
             synced_at: 3,
             snapshot: crate::test_linear_input::Inventory {
@@ -3843,7 +4266,7 @@ mod tests {
         // Invalid provider evidence cannot erase the owned plan, but prevents metric evaluation.
         rusqlite::Connection::open(directory.path().join("registry.db"))
             .unwrap()
-            .execute("UPDATE pm_projects SET initiative_ids='not-json'", [])
+            .execute("UPDATE tracker_projects SET initiative_ids='not-json'", [])
             .unwrap();
         let super::Evidence::Ok {
             items,
@@ -3868,7 +4291,7 @@ mod tests {
         .unwrap();
         assert!(matches!(
             &missing.contract_issues[..],
-            [loopflow_execution::work::wave::metrics::MetricContractIssueDto::ChapterUnavailable { .. }]
+            [loopflow_execution::work::wave::metrics::MetricContractIssueDto::ProjectUnavailable { .. }]
         ));
     }
 
@@ -3892,7 +4315,7 @@ mod tests {
         store.create_wave(&wave).await.unwrap();
         let selected = "999bdbdd-c045-41a6-8ffc-a97c4a40b0b3";
         let predecessor = "218967b6-a760-4b7c-9a46-11d9d61a42c2";
-        let project = |id: &str, name: &str| loopflow_execution::linear::LinearProject {
+        let project = |id: &str, name: &str| loopflow_storage::planning::TrackerProject {
             description: None,
             id: id.into(),
             name: name.into(),
@@ -3905,7 +4328,7 @@ mod tests {
             initiative_ids: vec!["initiative".into()],
             team_ids: vec!["team".into()],
         };
-        let item = loopflow_execution::linear::LinearIssue {
+        let item = loopflow_storage::planning::TrackerItem {
             id: "issue".into(),
             identifier: "FIX-1".into(),
             name: "Unreviewed backlog".into(),
@@ -3918,6 +4341,8 @@ mod tests {
             project_id: Some(predecessor.into()),
             team_id: Some("team".into()),
             assignee: None,
+            parent_id: None,
+            parent_observed: true,
             branch_name: None,
             revision: None,
             url: None,
@@ -3926,7 +4351,6 @@ mod tests {
             .seed_inventory(
                 crate::test_linear_input::InventoryFixture {
                     wave_id: wave.id().clone(),
-                    provider: "linear".into(),
                     initiative: "initiative".into(),
                     synced_at: 2,
                     snapshot: crate::test_linear_input::Inventory {
@@ -3958,7 +4382,7 @@ mod tests {
         );
         for _ in 0..2 {
             let current = loopflow_execution::ops::project::current_project(&store, &wave).unwrap();
-            assert_eq!(current.linear_id.as_ref().unwrap().as_str(), selected);
+            assert_eq!(current.tracker_id.as_ref().unwrap().as_str(), selected);
 
             let super::Evidence::Ok {
                 items: projects, ..
@@ -3994,7 +4418,7 @@ mod tests {
                 .unwrap()
                 .unwrap();
             assert_eq!(items[0].task.id, saved.id.as_str());
-            assert_eq!(items[0].task.linear_id.as_deref(), Some(item.id.as_str()));
+            assert_eq!(items[0].task.tracker_id.as_deref(), Some(item.id.as_str()));
             assert!(tasks.unavailable_tasks.is_empty());
         }
         let after = (
@@ -4023,7 +4447,7 @@ mod tests {
         .await
         .unwrap();
         assert!(
-            matches!(retained.tasks, super::Evidence::Ok { items, .. } if items.len() == 1 && items[0].task.linear_id.as_deref() == Some(item.id.as_str()))
+            matches!(retained.tasks, super::Evidence::Ok { items, .. } if items.len() == 1 && items[0].task.tracker_id.as_deref() == Some(item.id.as_str()))
         );
     }
 
@@ -4037,7 +4461,7 @@ mod tests {
     }
 
     #[test]
-    fn text_metrics_preserve_values_when_chapter_targets_are_unavailable() {
+    fn text_metrics_preserve_values_when_project_targets_are_unavailable() {
         let fixture: MetricPortfolioDto = serde_json::from_str(include_str!(
             "../../../../../tests/fixtures/dto/metric_portfolio.json"
         ))
@@ -4072,7 +4496,7 @@ mod tests {
             metric.evidence = MetricEvidenceDto::Unknown { cause };
             let portfolio = MetricPortfolioDto {
                 contract_issues: vec![
-                    loopflow_execution::work::wave::metrics::MetricContractIssueDto::ChapterUnavailable {
+                    loopflow_execution::work::wave::metrics::MetricContractIssueDto::ProjectUnavailable {
                         wave_id: metric.identity.wave_id().to_string(),
                         reason: "current Project is ambiguous".into(),
                     },
@@ -4080,9 +4504,9 @@ mod tests {
                 metrics: vec![metric],
             };
             let text = metric_portfolio_text(&portfolio);
-            assert!(text.contains("Target unavailable for this chapter"));
+            assert!(text.contains("Target unavailable for this Project"));
             assert!(text.contains(if never { "Value -" } else { "Value 100.00%" }));
-            assert!(!text.contains("unset for this chapter"));
+            assert!(!text.contains("unset for this Project"));
         }
         let mut known_empty = observed.clone();
         known_empty.evidence = MetricEvidenceDto::Untargeted {
@@ -4093,14 +4517,14 @@ mod tests {
         let text = metric_portfolio_text(&MetricPortfolioDto {
             metrics: vec![known_empty],
             contract_issues: vec![
-                loopflow_execution::work::wave::metrics::MetricContractIssueDto::ChapterUnavailable {
+                loopflow_execution::work::wave::metrics::MetricContractIssueDto::ProjectUnavailable {
                     wave_id: "another-wave".into(),
                     reason: "no saved plan".into(),
                 },
             ],
         });
         assert!(text.contains("[no target]"));
-        assert!(text.contains("Target unset for this chapter"));
+        assert!(text.contains("Target unset for this Project"));
     }
 
     #[test]
@@ -4215,6 +4639,8 @@ mod tests {
             reason: "Release target is unavailable".into(),
             step: None,
             captured: None,
+            died: None,
+            outlook: None,
         });
         let none = None;
         let missing = LocalProgressEvidenceState::Missing;
@@ -4246,6 +4672,8 @@ mod tests {
                 reason: "Process evidence remains unresolved".into(),
                 step: None,
                 captured: None,
+                died: None,
+                outlook: None,
             };
             assert!(unresolved(
                 TaskState::Done,
@@ -4337,6 +4765,8 @@ mod tests {
                 reason: "worker evidence".into(),
                 step: None,
                 captured: None,
+                died: None,
+                outlook: None,
             };
             let actions = TaskActionEvidence {
                 status: WorkStatus::Ready,
@@ -4344,6 +4774,8 @@ mod tests {
                 latest_pr_phase: None,
                 latest_pr_merge_request: None,
                 latest_pr_presentation_current: None,
+                at_end: false,
+                open_children: 0,
                 completion_refusal: None,
                 run_refusal: None,
                 ci: None,
@@ -4430,6 +4862,8 @@ mod tests {
             reason: "gate: process exited with status 1".into(),
             step: None,
             captured: None,
+            died: None,
+            outlook: None,
         };
         for (status, reason) in [
             (TaskState::Done, "Task is complete"),
@@ -4464,6 +4898,8 @@ mod tests {
                     latest_pr_phase: None,
                     latest_pr_merge_request: None,
                     latest_pr_presentation_current: None,
+                    at_end: false,
+                    open_children: 0,
                     completion_refusal: None,
                     run_refusal: None,
                     ci: None,
@@ -4494,6 +4930,8 @@ mod tests {
             latest_pr_phase: Some(PrPhase::Open),
             latest_pr_merge_request: None,
             latest_pr_presentation_current: Some(true),
+            at_end: false,
+            open_children: 0,
             completion_refusal: None,
             run_refusal: None,
             ci: None,
@@ -4620,8 +5058,8 @@ mod tests {
         .replace("}]}','demo',3)", "}]}','end',3)");
         conn.execute_batch(&fixture).unwrap();
         loopflow_execution::store::migrations::upgrade_from_migration(&conn, "task_paused");
-        // The planning read, not this setup, fails.
-        conn.execute_batch("DROP TABLE task_ship_events").unwrap();
+        // Fail the planning inventory's latest-event query.
+        conn.execute_batch("DROP TABLE task_events").unwrap();
         let frontier =
             loopflow_execution::store::migrations::latest_applied_version_sqlite(&conn).unwrap();
         let store: loopflow_execution::store::SharedStore =
@@ -4650,10 +5088,7 @@ mod tests {
                 roadmap.tasks
             );
         };
-        assert!(
-            reason.contains("no such table: task_ship_events"),
-            "{reason}"
-        );
+        assert!(reason.contains("no such table: task_events"), "{reason}");
         let graph = loopflow_execution::store::task_work::task_overview(&store.sqlite, &task)
             .unwrap()
             .0

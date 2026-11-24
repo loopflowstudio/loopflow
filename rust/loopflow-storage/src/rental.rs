@@ -452,8 +452,6 @@ pub struct Pool {
     pub name: String,
     /// Takes no new work; what it holds stays.
     pub off: bool,
-    #[serde(with = "time::serde::rfc3339")]
-    pub created_at: OffsetDateTime,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -467,8 +465,6 @@ pub struct OnDemand {
     /// Providers each rental is signed in to as it starts; empty, every
     /// provider signed in on the Machine that rents it.
     pub logins: Vec<crate::provider::Provider>,
-    #[serde(with = "time::serde::rfc3339")]
-    pub created_at: OffsetDateTime,
 }
 
 impl OnDemand {

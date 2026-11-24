@@ -353,7 +353,6 @@ mod tests {
             &session.id,
             None,
             &store.test_lf_process(),
-            true,
         )
         .unwrap();
         let client = Client(std::sync::Mutex::new(ClientState {

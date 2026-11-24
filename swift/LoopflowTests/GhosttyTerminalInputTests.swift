@@ -26,12 +26,13 @@ struct GhosttyTerminalMountTests {
         // advances one reading; no provider or personal Session is involved.
         terminal.command = """
         /bin/sh -c \(shellEscape("""
+        printf '%s' "$LF_RELAY_FOCUSED" > "\(directory.path)/initial-focus"
         {
-          printf '%s\\n' '{"generation":1,"state":"connected","input":true,"native_ready":false,"message":null}'
+          printf '%s\\n' '{"generation":1,"state":"connected","native_ready":false,"message":null}'
           for phase in 1 2 3; do
             while [ ! -e "\(directory.path)/$phase" ]; do sleep 0.01; done
-            if [ "$phase" = 2 ]; then state=reconnecting; ready=false; input=false; else state=connected; ready=true; input=true; fi
-            printf '{"generation":%s,"state":"%s","input":%s,"native_ready":%s,"message":null}\\n' "$phase" "$state" "$input" "$ready"
+            if [ "$phase" = 2 ]; then state=reconnecting; ready=false; else state=connected; ready=true; fi
+            printf '{"generation":%s,"state":"%s","native_ready":%s,"message":null}\\n' "$phase" "$state" "$ready"
           done
           cat < /dev/tty
         } | /usr/bin/nc -U "$LF_SERVER_STATUS"
@@ -61,6 +62,7 @@ struct GhosttyTerminalMountTests {
             try Data().write(to: directory.appendingPathComponent(String(phase)))
         }
         try await wait { terminal.connectionReading?.state == .connected }
+        #expect(try String(contentsOf: directory.appendingPathComponent("initial-focus"), encoding: .utf8) == "0")
         #expect(!terminal.connectionAcceptsInput)
         window.makeFirstResponder(nil)
         try advance(1)
@@ -377,11 +379,7 @@ struct GhosttyShellBlockTests {
         try #require(GhosttyManager.libraryReady)
         let config = try #require(ghostty_config_new())
         defer { ghostty_config_free(config) }
-        let path = FileManager.default.temporaryDirectory
-            .appendingPathComponent("loopflow-ghostty-\(UUID().uuidString)")
-        try GhosttyManager.embeddedConfig.write(to: path, atomically: true, encoding: .utf8)
-        defer { try? FileManager.default.removeItem(at: path) }
-        path.path.withCString { ghostty_config_load_file(config, $0) }
+        try GhosttyThemeConfiguration.load(GhosttyManager.embeddedConfig, into: config)
         ghostty_config_finalize(config)
         #expect(ghostty_config_diagnostics_count(config) == 0)
 
@@ -418,24 +416,15 @@ struct GhosttyTerminalInputTests {
         view.createSurface(manager: manager)
         let surface = try #require(view.surface)
 
-        func waitFor(_ state: String, _ ready: () -> Bool) async throws {
-            let deadline = ContinuousClock.now + .seconds(5)
-            while true {
-                manager.tick()
-                if ready() { return }
-                try #require(ContinuousClock.now < deadline, "Missing \(state)")
-                try await Task.sleep(for: .milliseconds(20))
-            }
-        }
-        try await waitFor("child readiness") { terminalText(view).contains("visibility-ready") }
+        try await waitForTerminal(view, timeout: .seconds(5)) { terminalViewport(view).contains("visibility-ready") }
         // Mode 2033 reports the terminal's actual visibility to its child,
         // including surfaces prepared before they are mounted in a window.
-        try await waitFor("hidden report") {
+        try await waitForTerminal(view, timeout: .seconds(5)) {
             (try? String(contentsOf: reports, encoding: .utf8))?.contains("\u{1b}[?999;2n") == true
         }
         let marker = "child-still-running"
         marker.withCString { ghostty_surface_text(surface, $0, UInt(marker.utf8.count)) }
-        try await waitFor("child input") {
+        try await waitForTerminal(view, timeout: .seconds(5)) {
             (try? String(contentsOf: reports, encoding: .utf8))?.contains(marker) == true
         }
         #expect(view.surface == surface)
@@ -479,7 +468,7 @@ struct GhosttyTerminalInputTests {
         #expect(terminal.surface == surface)
     }
 
-    @Test("Shell-launched sessions focus their live terminal and external clients stay elsewhere")
+    @Test("Shell-launched sessions focus their live terminal; another window holds no view of them")
     @MainActor
     func shellSessionAttachment() async throws {
         _ = NSApplication.shared
@@ -505,7 +494,7 @@ struct GhosttyTerminalInputTests {
                 "id": id, "run_id": id, "interactive": true, "work": NSNull(), "title": id,
                 "workspace": ["machine_id": fixtureMachineId, "worktree": NSTemporaryDirectory(), "task_id": NSNull(), "unavailable": NSNull()],
                 "detail": "test", "cwd": NSTemporaryDirectory(), "state": "active",
-                "ready_summary": NSNull(), "work_path": NSNull(), "actions": sessionActionFixture(state: "active"), "blocked": false, "title_source": "generated", "task_primary": false, "graph_membership": ["kind": "independent"], "task_ids": [], "agent_process_id": "44444444-4444-4444-8444-444444444444", "turn": NSNull(), "raw": false, "terminal_ids": [pane], "open_argv": ["unused"],
+                "work_path": NSNull(), "action": sessionActionFixture(state: "active"), "blocked": false, "title_source": "generated", "ended": NSNull(), "start": NSNull(), "outlook": NSNull(), "status_line": NSNull(), "task_primary": false, "graph_membership": ["kind": "independent"], "task_ids": [], "agent_process_id": "44444444-4444-4444-8444-444444444444", "turn": NSNull(), "raw": false, "terminal_ids": [pane], "open_argv": ["unused"],
             ])
             records.append(try JSONDecoder().decode(SessionRecord.self, from: data))
         }
@@ -518,9 +507,7 @@ struct GhosttyTerminalInputTests {
         }
         let otherWindow = SessionsStore(repoPath: NSTemporaryDirectory())
         otherWindow.reconcile(records)
-        #expect(otherWindow.sessions.allSatisfy { $0.state == .elsewhere })
-        await otherWindow.select("one")
-        #expect(otherWindow.sessions.first { $0.id == "one" }?.state == .elsewhere)
+        #expect(otherWindow.sessions.allSatisfy { $0.state == .pending && $0.surface == nil })
         #expect(registry.surfaces.hasSurface(.shell(records[0].terminalIds[0], machineId: fixtureMachineId)))
     }
 
@@ -720,7 +707,7 @@ struct GhosttyTerminalInputTests {
         for view in [first, second] {
             view.setFrameSize(CGSize(width: 400, height: 300))
             view.workingDirectory = NSTemporaryDirectory()
-            view.command = "/bin/cat"
+            view.command = echoingSessionRelay
             view.createSurface(manager: manager)
             _ = try #require(view.surface)
         }
@@ -729,18 +716,13 @@ struct GhosttyTerminalInputTests {
             second.handleSurfaceClose()
         }
 
-        firstPool.release(id)
+        await firstPool.release(id)?.value
         #expect(first.surface == nil)
         #expect(!firstPool.hasSurface(id))
         #expect(secondPool.hasSurface(id))
-        let survivor = try #require(second.surface)
-        let marker = "still-running"
-        marker.withCString { ghostty_surface_text(survivor, $0, UInt(marker.utf8.count)) }
-        let deadline = ContinuousClock.now + .seconds(3)
-        while !terminalText(second).contains(marker), ContinuousClock.now < deadline {
-            try await Task.sleep(for: .milliseconds(20))
-        }
-        #expect(terminalText(second).contains(marker))
+        try await waitForTerminal(second, timeout: .seconds(3)) { second.connectionAcceptsInput }
+        second.keyDown(with: try terminalKeyEvent("x", 7))
+        try await waitForTerminalLine("x", in: second, timeout: .seconds(3))
         #expect(firstPool.view(for: id) !== first)
     }
 
@@ -768,12 +750,7 @@ struct GhosttyTerminalInputTests {
             view.createSurface(manager: manager)
             defer { view.handleSurfaceClose() }
             _ = try #require(view.surface)
-            let deadline = ContinuousClock.now + .seconds(3)
-            while !terminalText(view).contains("title-ready"), ContinuousClock.now < deadline {
-                manager.tick()
-                try await Task.sleep(for: .milliseconds(20))
-            }
-            #expect(terminalText(view).contains("title-ready"))
+            try await waitForTerminal(view, timeout: .seconds(3)) { terminalViewport(view).contains("title-ready") }
             manager.tick()
             await Task.yield()
         }
@@ -795,33 +772,17 @@ struct GhosttyTerminalInputTests {
         view.createSurface(manager: manager)
         defer { view.destroySurface(); window.contentView = nil }
         let surface = try #require(view.surface)
-        func viewport() -> String {
-            guard case .available(let text, _) = try? view.readText(region: .screen, maxBytes: 16384) else { return "" }
-            return text
-        }
-        let readyDeadline = ContinuousClock.now + .seconds(3)
-        while !viewport().contains("ready"), ContinuousClock.now < readyDeadline {
-            try await Task.sleep(for: .milliseconds(20))
-        }
-        try #require(viewport().contains("ready"))
+        try await waitForTerminalLine("ready", in: view, timeout: .seconds(3))
         let scroll = "scroll_to_top"
         #expect(scroll.withCString { ghostty_surface_binding_action(surface, $0, UInt(scroll.utf8.count)) })
-        try #require(viewport().contains("history-1"))
-        try #require(!viewport().contains("ready"))
+        try await waitForTerminalLine("history-1", in: view, timeout: .seconds(3))
+        try #require(!terminalViewport(view).contains("ready"))
         #expect(window.makeFirstResponder(view))
-        let event = try #require(NSEvent.keyEvent(
-            with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
-            windowNumber: window.windowNumber, context: nil, characters: "x",
-            charactersIgnoringModifiers: "x", isARepeat: false, keyCode: 7))
+        let event = try terminalKeyEvent("x", 7, windowNumber: window.windowNumber)
         if !view.performKeyEquivalent(with: event) { view.keyDown(with: event) }
-        let deadline = ContinuousClock.now + .seconds(3)
-        // With key.text absent in key-equivalent dispatch, Ghostty emits the
-        // valid Kitty press CSI 120u. The echoing TTY displays ESC as ^[.
-        while !viewport().contains("^[[120u"), ContinuousClock.now < deadline {
-            try await Task.sleep(for: .milliseconds(20))
-        }
-        #expect(viewport().contains("ready"))
-        #expect(viewport().contains("^[[120u"))
+        // These modes still encode ordinary printable keys as text.
+        try await waitForTerminalLine("x", in: view, timeout: .seconds(3))
+        #expect(terminalViewport(view).contains("ready"))
     }
 
     @Test("paste shortcuts reach only the focused terminal in a split")
@@ -839,10 +800,11 @@ struct GhosttyTerminalInputTests {
         window.contentView = root
         let left = GhosttyMetalView(terminal: .session("left", machineId: fixtureMachineId), frame: CGRect(x: 0, y: 0, width: 400, height: 300))
         let right = GhosttyMetalView(terminal: .shell("right", machineId: fixtureMachineId), frame: CGRect(x: 400, y: 0, width: 400, height: 300))
+        left.command = echoingSessionRelay
+        right.command = "/bin/cat"
         for view in [left, right] {
             root.addSubview(view)
             view.workingDirectory = NSTemporaryDirectory()
-            view.command = "/bin/cat"
             view.createSurface(manager: manager)
             _ = try #require(view.surface)
         }
@@ -850,6 +812,7 @@ struct GhosttyTerminalInputTests {
             left.handleSurfaceClose()
             right.handleSurfaceClose()
         }
+        try await waitForTerminal(left, timeout: .seconds(3)) { left.connectionAcceptsInput }
         let pasteboard = NSPasteboard.general
         let savedItems = (pasteboard.pasteboardItems ?? []).map { item in
             let saved = NSPasteboardItem()
@@ -866,34 +829,11 @@ struct GhosttyTerminalInputTests {
             #expect(window.makeFirstResponder(focused))
             pasteboard.clearContents()
             pasteboard.setString(marker, forType: .string)
-            let event = try #require(NSEvent.keyEvent(
-                with: .keyDown, location: .zero, modifierFlags: .command,
-                timestamp: 0, windowNumber: window.windowNumber, context: nil,
-                characters: "v", charactersIgnoringModifiers: "v", isARepeat: false, keyCode: 9
-            ))
+            let event = try terminalKeyEvent("v", 9, .command, windowNumber: window.windowNumber)
             #expect(root.performKeyEquivalent(with: event))
-            let deadline = ContinuousClock.now + .seconds(3)
-            while !terminalText(focused).contains(marker), ContinuousClock.now < deadline {
-                try await Task.sleep(for: .milliseconds(20))
-            }
-            #expect(terminalText(focused).contains(marker))
-            #expect(!terminalText(other).contains(marker))
+            try await waitForTerminal(focused, timeout: .seconds(3)) { terminalViewport(focused).contains(marker) }
+            #expect(!terminalViewport(other).contains(marker))
         }
-    }
-
-    @MainActor
-    private func terminalText(_ view: GhosttyMetalView) -> String {
-        guard let surface = view.surface else { return "" }
-        var text = ghostty_text_s()
-        let selection = ghostty_selection_s(
-            top_left: ghostty_point_s(tag: GHOSTTY_POINT_SCREEN, coord: GHOSTTY_POINT_COORD_TOP_LEFT, x: 0, y: 0),
-            bottom_right: ghostty_point_s(tag: GHOSTTY_POINT_SCREEN, coord: GHOSTTY_POINT_COORD_BOTTOM_RIGHT, x: 0, y: 0),
-            rectangle: false
-        )
-        guard ghostty_surface_read_text(surface, selection, &text) else { return "" }
-        defer { ghostty_surface_free_text(surface, &text) }
-        guard let bytes = text.text else { return "" }
-        return String(decoding: Data(bytes: bytes, count: Int(text.text_len)), as: UTF8.self)
     }
 
     @Test("clicking a split terminal makes that exact pane the input target")

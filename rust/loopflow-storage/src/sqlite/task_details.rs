@@ -5,19 +5,20 @@ use std::collections::{HashMap, HashSet};
 use rusqlite::Connection;
 
 use super::children::{
-    ids_json, map_task_event_row, map_task_pr_row, task_acquisitions_in, TASK_PR_COLUMNS,
+    ids_json, map_task_event_row, map_task_pr_row, tracker_states_in, TASK_PR_COLUMNS,
 };
 use super::SqliteStore;
 use crate::execution::TaskState;
-use crate::planning_sync::PlanningSyncReceipts;
+use crate::planning_sync::TrackerActions;
 use crate::work::task::{Task, TaskEvent, TaskId, TaskPr, TaskPrId};
-use crate::{StoreError, StoreResult, TaskAcquisition};
+use crate::{StoreError, StoreResult, TrackerState};
 use loopflow_model::durable::{RepositoryId, TaskOwner};
 
 /// Durable facts about a set of Tasks, read in one snapshot.
 #[derive(Debug)]
 pub struct TaskDetailFacts {
     pub states: HashMap<TaskId, TaskState>,
+    pub open_children: HashMap<TaskId, u32>,
     pub active_prs: HashMap<TaskId, TaskPr>,
     /// Predecessor PRs the Tasks are stacked on.
     pub parent_prs: HashMap<TaskPrId, TaskPr>,
@@ -25,15 +26,15 @@ pub struct TaskDetailFacts {
     pub completion_pending: HashMap<TaskId, String>,
     pub issue_urls: HashMap<TaskId, String>,
     pub owners: HashMap<TaskId, TaskOwner>,
-    pub acquisitions: HashMap<TaskId, TaskAcquisition>,
+    pub tracker_states: HashMap<TaskId, TrackerState>,
     pub latest_events: HashMap<TaskId, TaskEvent>,
     /// The name of the graph each Task took up.
     pub graph_names: HashMap<TaskId, String>,
     /// The step each Task stands at on its graph; absent while a run carries it.
     pub steps: HashMap<TaskId, String>,
-    /// Tasks handed off to Auto-Ship.
-    pub shipped: HashSet<TaskId>,
-    pub planning_receipts: HashMap<TaskId, PlanningSyncReceipts>,
+    /// Tasks with auto on.
+    pub auto_on: HashSet<TaskId>,
+    pub tracker_actions: HashMap<TaskId, TrackerActions>,
     pub repository_paths: HashMap<RepositoryId, String>,
 }
 
@@ -48,6 +49,17 @@ impl SqliteStore {
         let json = ids_json(ids.iter().map(TaskId::as_str));
         let facts = TaskDetailFacts {
             states: states_in(&snapshot, &json)?,
+            open_children: keyed(
+                &snapshot,
+                &format!(
+                    "SELECT parent_task_id, COUNT(*) FROM tasks t
+                     WHERE parent_task_id IN (SELECT value FROM json_each(?1)) AND {}
+                     GROUP BY parent_task_id",
+                    super::children::open_task_children_where()
+                ),
+                &json,
+                |row| Ok((TaskId::from_raw(row.get::<_, String>(0)?), row.get::<_, u32>(1)?)),
+            )?,
             active_prs: keyed(
                 &snapshot,
                 &format!(
@@ -86,7 +98,7 @@ impl SqliteStore {
                 |row| Ok((TaskId::from_raw(row.get::<_, String>(0)?), row.get::<_, String>(1)?)),
             )?,
             owners: super::task_ownership::owners_in(&snapshot, &ids)?,
-            acquisitions: task_acquisitions_in(&snapshot, tasks, true)?,
+            tracker_states: tracker_states_in(&snapshot, tasks, true)?,
             latest_events: keyed(
                 &snapshot,
                 "SELECT id, task_id, kind_json, created_at FROM task_events
@@ -112,19 +124,24 @@ impl SqliteStore {
                 &json,
                 |row| Ok((TaskId::from_raw(row.get::<_, String>(0)?), row.get::<_, String>(1)?)),
             )?,
-            shipped: task_set(
-                &snapshot,
-                "SELECT id FROM tasks
-                 WHERE id IN (SELECT value FROM json_each(?1)) AND shipped_at IS NOT NULL",
-                &json,
-            )?,
-            planning_receipts: super::planning_sync::task_planning_receipts_in(&snapshot, &ids)?,
+            auto_on: auto_on_in(&snapshot, &json)?,
+            tracker_actions: super::planning_sync::task_tracker_actions_in(&snapshot, &ids)?,
             repository_paths: repository_paths_in(&snapshot)?,
         };
         let local = super::task_ownership::local_machine_in(&snapshot)?;
         snapshot.commit()?;
         Ok((local, facts))
     }
+}
+
+/// The Tasks among `ids` whose auto setting is on.
+pub(super) fn auto_on_in(conn: &Connection, ids: &str) -> StoreResult<HashSet<TaskId>> {
+    task_set(
+        conn,
+        "SELECT task_id FROM task_auto
+         WHERE task_id IN (SELECT value FROM json_each(?1)) AND state='on'",
+        ids,
+    )
 }
 
 fn keyed<K: std::hash::Hash + Eq, V>(

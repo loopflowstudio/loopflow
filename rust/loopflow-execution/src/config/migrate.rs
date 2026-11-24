@@ -392,11 +392,7 @@ fn apply_edit(edit: &Edit) -> Result<()> {
         "{} changed during settings cutover; its edits were preserved",
         edit.path.display()
     );
-    if edit
-        .path
-        .file_name()
-        .is_some_and(|name| name == super::files::PRIVATE_FILE)
-    {
+    if edit.path.ends_with(super::files::PRIVATE_FILE) {
         super::files::protect_private_file(&edit.path)?;
     }
     super::files::atomic_write(&edit.path, &edit.after)
@@ -584,6 +580,7 @@ mod tests {
         )
         .unwrap();
         let path = super::super::files::private_path(repo.path()).unwrap();
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(&path, "skills: {implement: {agent: claude}}\n").unwrap();
         assert!(preflight(&conn, &mut Vec::new())
             .unwrap_err()

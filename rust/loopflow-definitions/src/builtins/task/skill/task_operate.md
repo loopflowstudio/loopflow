@@ -6,20 +6,20 @@ action_style: procedural
 ---
 Move the Task as far forward as its Graph allows.
 
-With no live Graph process, nobody else takes this Task's next step, so it is
+With no live Graph run, nobody else takes this Task's next step, so it is
 yours. Make routine decisions yourself, ask for judgment in this conversation,
 then continue. Headless, exit when done or stuck. A Task with no owner is
 nobody's to move: read and discuss it, but don't launch or ship it.
 
-**Never start a second Graph process.** A live one is left running, and unknown
-liveness is not permission. A run listed in status is not a live process: check
-each Graph and unfinished Process against `lf process list`.
+**Never start a second Graph run.** A live one is left running, and unknown
+liveness is not permission. A run listed in status is not a live process: its
+`running` in `lf task status <issue> --json` is read from the run's own pid.
 
 ## Method
 
 1. **Read the work.** `lf task status <issue> --json`, then the brief, design
    and `scratch/` in its checkout, telling decisions from drafts.
-   `lf session list --json` and `lf process show <graph-id>` say what each
+   `lf session list --json` and `lf graph show <graph-id>` say what each
    Graph finished, how it ended and what it changed. If the Task is missing or
    ambiguous, ask; headless, say so and stop.
 
@@ -44,9 +44,11 @@ each Graph and unfinished Process against `lf process list`.
    fix the cause if you can, and retry with `--reason "<what changed>"` only
    when something changed. Never relaunch to get past a blocker.
 
-   `lf -b task run`, `lf ship`, and any run with no interactive step left ahead
-   approve Auto-Ship and may merge the PR. Use them only when asked to ship or
-   land. After shipping is stopped, only a requested `lf ship` approves again.
+   `lf task auto on` turns auto on: the run stands in at the interactive steps and
+   may merge the PR. `lf -b task run` stands in for its own run, and a run
+   with no interactive step left ahead may merge it too. Use them only when asked to ship or land. After
+   someone turns auto off (`lf task auto off`), only a requested `lf task auto on` turns
+   it on again.
 
 4. **Stay with it.** A launch is progress, not the stopping point. Reread
    status after each action, wait for real changes without tight polling,
@@ -55,7 +57,7 @@ each Graph and unfinished Process against `lf process list`.
    for anyone: `lf sync`, resolve, verify, push.
 
 5. **Finish merged work.** Merging doesn't complete a Task. After a verified
-   merge with no live ship Graph, when the outcome holds, run
+   merge with no live Graph, when the outcome holds, run
    `lf task complete <issue>` and reread status. It is safe to repeat; retry
    it alone, never by rerunning gate or steps that succeeded.
 
@@ -63,7 +65,7 @@ each Graph and unfinished Process against `lf process list`.
 
 Finish with one, and what showed it:
 
-- **moving** — a live Graph process, left alone.
+- **moving** — a live Graph run, left alone.
 - **acted** — you continued, repaired or delivered it, and reread status.
 - **available** — a review, demo, choice or merge click someone can take up,
   with its conversation link or PR.

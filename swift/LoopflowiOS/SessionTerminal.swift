@@ -68,18 +68,17 @@ final class TerminalActions {
 struct SessionTerminal: UIViewControllerRepresentable {
     let link: SessionLink
     let actions: TerminalActions
-    let theme: ThemeDefinition
 
     func makeUIViewController(context: Context) -> SessionTerminalController {
         let controller = SessionTerminalController(link: link)
         actions.controller = controller
-        controller.apply(theme)
+        controller.apply(context.environment.theme)
         controller.loadViewIfNeeded()
         return controller
     }
 
     func updateUIViewController(_ controller: SessionTerminalController, context: Context) {
-        controller.apply(theme)
+        controller.apply(context.environment.theme)
     }
 
     static func dismantleUIViewController(_ controller: SessionTerminalController, coordinator: ()) {
@@ -146,15 +145,15 @@ final class SessionTerminalController: UIViewController, UIScrollViewDelegate {
         NSLayoutConstraint.activate([
             terminal.topAnchor.constraint(equalTo: view.topAnchor),
             terminal.bottomAnchor.constraint(equalTo: view.bottomAnchor),
-            terminal.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 8),
-            terminal.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -8),
+            terminal.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: Spacing.sm),
+            terminal.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -Spacing.sm),
             scroller.topAnchor.constraint(equalTo: terminal.topAnchor),
             scroller.bottomAnchor.constraint(equalTo: terminal.bottomAnchor),
             scroller.leadingAnchor.constraint(equalTo: terminal.leadingAnchor),
             scroller.trailingAnchor.constraint(equalTo: terminal.trailingAnchor),
             latest.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            latest.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -8),
-            latest.heightAnchor.constraint(greaterThanOrEqualToConstant: 44),
+            latest.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -Spacing.sm),
+            latest.heightAnchor.constraint(greaterThanOrEqualToConstant: HitTarget.touch),
         ])
         applyAppearance()
     }
@@ -165,10 +164,10 @@ final class SessionTerminalController: UIViewController, UIScrollViewDelegate {
         applyAppearance()
     }
 
-    /// Theme colours, and JetBrains Mono 12 scaled by Dynamic Type.
+    /// Theme colours, and the ramp's terminal size scaled by Dynamic Type.
     private func applyAppearance() {
         guard let theme else { return }
-        let size = UIFontMetrics(forTextStyle: .body).scaledValue(for: 12, compatibleWith: traitCollection)
+        let size = UIFontMetrics(forTextStyle: .body).scaledValue(for: Typography.terminalSize, compatibleWith: traitCollection)
         GhosttyRuntime.shared.apply(theme, fontSize: Double(size))
         guard isViewLoaded else { return }
         view.backgroundColor = UIColor(theme.terminal.background.color)

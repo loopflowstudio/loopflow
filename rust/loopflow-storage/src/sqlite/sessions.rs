@@ -22,10 +22,11 @@ pub struct SessionCaller {
 #[derive(Debug, PartialEq, Eq)]
 pub struct SessionProcessIdentity {
     pub id: String,
-    pub completed_at: Option<i64>,
     pub pid: Option<u32>,
     pub os_started_at: Option<i64>,
     pub started_at: i64,
+    /// The OS process of the lf holding the attachment; `None` when released.
+    pub holder: Option<crate::process::AttachmentHolder>,
 }
 
 /// Explicit observed inputs for one pinned Session reading. SQL performs no OS acquisition.
@@ -34,6 +35,10 @@ pub struct SessionProjection {
     pub now: i64,
     pub live_agents: String,
     pub evidence: std::collections::HashMap<String, crate::ProcessIdentityEvidence>,
+    /// Whether the lf holding each agent's attachment runs, by agent.
+    pub holders: std::collections::HashMap<String, crate::ProcessIdentityEvidence>,
+    /// Each of `graph_runs`' results as this Machine observes it.
+    pub graph_results: std::collections::HashMap<String, crate::graph_process::ExecutionResult>,
 }
 
 impl SessionProjection {
@@ -45,13 +50,40 @@ impl SessionProjection {
             .copied()
             .unwrap_or(crate::ProcessIdentityEvidence::Unknown)
     }
+
+    fn holder(
+        &self,
+        id: Option<&loopflow_model::id::AgentProcessId>,
+    ) -> crate::ProcessIdentityEvidence {
+        id.and_then(|id| self.holders.get(id.as_str()))
+            .copied()
+            .unwrap_or(crate::ProcessIdentityEvidence::Unknown)
+    }
+
+    fn graph_result(
+        &self,
+        run: &crate::graph_process::Execution,
+    ) -> crate::graph_process::ExecutionResult {
+        self.graph_results
+            .get(run.id.as_str())
+            .copied()
+            .unwrap_or_else(|| run.result())
+    }
 }
 
+/// What a Session reading must learn outside SQL, found from the agents that
+/// have not ended. An ended agent is dead by its own row and appears nowhere here.
 #[derive(Debug, PartialEq, Eq)]
 pub struct SessionProjectionInputs {
     read_at: i64,
     session: Option<String>,
+    /// The agents the OS must be asked about.
     pub identities: Vec<SessionProcessIdentity>,
+    /// The Graph runs the OS must be asked about: every unended run when
+    /// reading all Sessions, else the unended run whose step captured the one
+    /// Session's input.
+    pub graph_runs: Vec<crate::graph_process::Execution>,
+    /// When a live agent's quiet time next makes its Session available with no write.
     pub deadlines: Vec<i64>,
 }
 
@@ -60,33 +92,65 @@ pub(crate) fn session_projection_inputs_in(
     now: i64,
     session: Option<&str>,
 ) -> StoreResult<SessionProjectionInputs> {
-    let predicate = if session.is_some() {
-        "id=?1"
+    // Reading all Sessions starts from the unended agents, never from history.
+    let (sessions, selected, graphs) = if session.is_some() {
+        (
+            "agent_sessions s",
+            "s.id=?1",
+            format!(
+                "g.lf_process_id IN (SELECT {SESSION_GRAPH} FROM agent_sessions s WHERE s.id=?1)"
+            ),
+        )
     } else {
-        "completed_at IS NULL AND ?1 IS NULL"
+        (
+            "agent_sessions s INDEXED BY agent_sessions_unended_agent",
+            "?1 IS NULL AND s.agent_process_id IS NOT NULL",
+            "?1 IS NULL".to_owned(),
+        )
     };
     let mut query = conn.prepare(&format!(
-        "SELECT id,completed_at,pid,os_started_at,started_at FROM processes
-         WHERE id IN (SELECT agent_process_id FROM agent_sessions WHERE {predicate}) ORDER BY id"
+        "SELECT s.agent_process_id,s.agent_pid,s.agent_os_started_at,s.agent_started_at,
+         s.attached_lf_process_id IS NOT NULL,s.attached_pid,s.attached_os_started_at
+         FROM {sessions} WHERE {selected} AND s.agent_ended_at IS NULL
+         AND s.agent_started_at IS NOT NULL
+         ORDER BY s.agent_process_id"
     ))?;
     let identities = query
         .query_map([session], |row| {
             Ok(SessionProcessIdentity {
                 id: row.get(0)?,
-                completed_at: row.get(1)?,
-                pid: row.get(2)?,
-                os_started_at: row.get(3)?,
-                started_at: row.get(4)?,
+                pid: row.get(1)?,
+                os_started_at: row.get(2)?,
+                started_at: row.get(3)?,
+                holder: row
+                    .get::<_, bool>(4)?
+                    .then(|| -> rusqlite::Result<_> {
+                        Ok(crate::process::AttachmentHolder {
+                            pid: row.get(5)?,
+                            os_started_at: row.get(6)?,
+                        })
+                    })
+                    .transpose()?,
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
-    let mut query = conn.prepare(
-        "SELECT DISTINCT observed_at + ?1 FROM session_activity
-        WHERE observed_at + ?1 > ?2 ORDER BY 1",
-    )?;
+    let mut query = conn.prepare(&format!(
+        "SELECT {} FROM graph_processes g WHERE g.ended_at IS NULL AND {graphs}
+         ORDER BY g.lf_process_id",
+        super::graph_inventory::run_columns("g")
+    ))?;
+    let graph_runs = query
+        .query_map([session], super::graph_inventory::read_run)?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    let mut query = conn.prepare(&format!(
+        "SELECT DISTINCT act.observed_at + ?2 FROM {sessions}
+         JOIN session_activity act ON {}
+         WHERE {selected} AND act.observed_at > ?3 - ?2 ORDER BY 1",
+        current_agent_activity("s")
+    ))?;
     let deadlines = query
         .query_map(
-            params![crate::session::AVAILABILITY_QUIET_SECONDS, now],
+            params![session, crate::session::AVAILABILITY_QUIET_SECONDS, now],
             |row| row.get(0),
         )?
         .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -94,6 +158,7 @@ pub(crate) fn session_projection_inputs_in(
         read_at: now,
         session: session.map(str::to_owned),
         identities,
+        graph_runs,
         deadlines,
     })
 }
@@ -166,10 +231,9 @@ pub(super) const SESSION_GRAPH: &str = session_graph!();
 /// Current provider work or a viewed terminal's working status holds Session `s`.
 /// Terminal idle cannot settle owned work; unviewed status is only history.
 const TURN_LIVE: &str = "EXISTS(SELECT 1 FROM session_activity act
-    JOIN processes p ON p.id=s.agent_process_id
     WHERE act.session_id=s.id AND act.agent_process_id IS s.agent_process_id
-    AND p.completed_at IS NULL
-    AND ((act.attachment_token IS p.attachment_token
+    AND s.agent_ended_at IS NULL
+    AND ((act.attachment_token IS s.attachment_token
             AND (act.open_tools>0 OR act.pending_input>0 OR act.yielded=0))
         OR (act.program_status IS NOT NULL
             AND EXISTS(SELECT 1 FROM held_terminals t WHERE t.id=s.held_terminal_id AND t.viewed=1)
@@ -177,16 +241,16 @@ const TURN_LIVE: &str = "EXISTS(SELECT 1 FROM session_activity act
                 WHERE json_extract(r.value,'$.state') IN ('idle','blocked','done')))))";
 
 const SESSION_SELECT: &str = concat!("SELECT s.id,c.receipt_key AS artifact_key,s.title,s.title_source,
-    (SELECT json_extract(feedback.payload,'$.summary') FROM session_events feedback WHERE feedback.session_id=s.id AND feedback.kind='observed' AND feedback.receipt_key='legacy_review_feedback') AS feedback_summary,s.completed_at,s.created_at,s.request,s.interactive,s.repo,
+    s.completed_at,s.created_at,s.request,s.interactive,s.repo,
     s.task_id,s.wave_id,", session_graph!(), " AS graph_lf_process_id,s.work_source,s.bound_at,
     s.input_published,s.cwd,s.skill,s.provider,s.model,", session_step!("node"), " AS node,", session_step!("iterations"), " AS iterations,json_extract(c.payload,'$.caller_key') AS caller_artifact_key,s.current_capture FROM agent_sessions s LEFT JOIN session_events c ON c.seq=s.current_capture");
 
 fn read_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoreResult<LfSession>> {
     Ok((|| {
         Ok(LfSession {
-            captured: row.get(23)?,
+            captured: row.get(22)?,
             caller_artifact_key: row
-                .get::<_, Option<String>>(22)?
+                .get::<_, Option<String>>(21)?
                 .map(|id| crate::session_record::parse_artifact_key(&id))
                 .transpose()
                 .map_err(invalid)?,
@@ -198,36 +262,35 @@ fn read_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoreResult<LfSessi
                 .map_err(invalid)?,
             title: row.get(2)?,
             title_source: serde_json::from_value(serde_json::Value::String(row.get(3)?))?,
-            ready_summary: row.get(4)?,
-            completed_at: row.get(5)?,
-            created_at: row.get(6)?,
-            request: row.get(7)?,
-            interactive: row.get(8)?,
-            repo: row.get(9)?,
+            completed_at: row.get(4)?,
+            created_at: row.get(5)?,
+            request: row.get(6)?,
+            interactive: row.get(7)?,
+            repo: row.get(8)?,
             task_id: row
-                .get::<_, Option<String>>(10)?
+                .get::<_, Option<String>>(9)?
                 .map(|id| TaskId::parse(&id))
                 .transpose()
                 .map_err(invalid)?,
             wave_id: row
-                .get::<_, Option<String>>(11)?
+                .get::<_, Option<String>>(10)?
                 .map(|id| loopflow_model::id::WaveId::parse(&id))
                 .transpose()
                 .map_err(invalid)?,
-            graph_lf_process_id: row.get(12)?,
+            graph_lf_process_id: row.get(11)?,
             work_source: row
-                .get::<_, Option<String>>(13)?
+                .get::<_, Option<String>>(12)?
                 .map(|source| serde_json::from_value(serde_json::Value::String(source)))
                 .transpose()?,
-            bound_at: row.get(14)?,
-            input_published: row.get(15)?,
-            cwd: row.get::<_, String>(16)?.into(),
-            skill: row.get(17)?,
-            provider: row.get(18)?,
-            model: row.get(19)?,
-            node: row.get(20)?,
+            bound_at: row.get(13)?,
+            input_published: row.get(14)?,
+            cwd: row.get::<_, String>(15)?.into(),
+            skill: row.get(16)?,
+            provider: row.get(17)?,
+            model: row.get(18)?,
+            node: row.get(19)?,
             iterations: row
-                .get::<_, Option<String>>(21)?
+                .get::<_, Option<String>>(20)?
                 .map(|value| serde_json::from_str(&value))
                 .transpose()?,
         })
@@ -257,22 +320,32 @@ pub(super) fn session_in(conn: &Connection, id: &str) -> StoreResult<Option<LfSe
     .transpose()
 }
 
+/// Activity row `act` counts toward Session `session`'s availability: the
+/// Session is open and the reading is its current agent's, which has not ended.
+/// The quiet deadlines join on this too, so the rule and the time its answer
+/// next changes read the same rows.
+fn current_agent_activity(session: &str) -> String {
+    format!(
+        "act.session_id={session}.id AND {session}.completed_at IS NULL
+            AND act.agent_process_id IS {session}.agent_process_id
+            AND {session}.agent_ended_at IS NULL"
+    )
+}
+
 /// Reported status wins for the current AgentProcess; otherwise use the
 /// current attachment's input/hand-back/quiet reading. Filter before pagination.
 fn available_sql(session: &str, now: i64) -> String {
     format!(
         "EXISTS(SELECT 1 FROM session_activity act
-            JOIN processes p ON p.id={session}.agent_process_id
-            WHERE act.session_id={session}.id
-            AND {session}.completed_at IS NULL AND act.agent_process_id IS {session}.agent_process_id
-            AND p.completed_at IS NULL
+            WHERE {current}
             AND CASE WHEN act.program_status IS NOT NULL THEN
                 EXISTS(SELECT 1 FROM json_each(act.program_status,'$.records') r
                     WHERE json_extract(r.value,'$.state')='blocked'
                     OR ({session}.interactive=1 AND json_extract(r.value,'$.state')='idle'))
-            ELSE act.attachment_token=p.attachment_token
+            ELSE act.attachment_token={session}.attachment_token
                 AND (act.pending_input>0 OR (act.open_tools=0 AND (({session}.interactive=1 AND act.yielded=1)
                     OR {now}-act.observed_at>={quiet}))) END)",
+        current = current_agent_activity(session),
         quiet = crate::session::AVAILABILITY_QUIET_SECONDS
     )
 }
@@ -354,57 +427,59 @@ fn inventory_query(
 
 // Preserve the existing filters/order. Materialize only the selected metadata
 // before joining Graph/Work labels; no request or historical payload is selected.
-const SUMMARY_SELECT: &str = concat!("SELECT s.id,c.receipt_key AS artifact_key,s.title,s.title_source,
-    (SELECT json_extract(feedback.payload,'$.summary') FROM session_events feedback WHERE feedback.session_id=s.id AND feedback.kind='observed' AND feedback.receipt_key='legacy_review_feedback') AS feedback_summary,s.completed_at,s.interactive,s.task_id,s.wave_id,
-    ", session_graph!(), " AS graph_lf_process_id,s.cwd,s.skill,s.provider,s.model,", session_step!("node"), " AS node,", session_step!("iterations"), " AS iterations,s.current_capture
-    FROM agent_sessions s LEFT JOIN session_events c ON c.seq=s.current_capture");
-
-const MEMBERSHIP_KIND: &str = "CASE WHEN json_valid(payload) THEN CASE WHEN json_extract(payload,'$.source')='manifest.json' AND json_extract(payload,'$.evidence.schema_version')=1 AND json_extract(payload,'$.evidence.artifact_key')=json_extract(payload,'$.input_id') AND receipt_key=json_extract(payload,'$.input_id')||':manifest.json' THEN json_extract(payload,'$.evidence.flow.kind') END END";
+const SUMMARY_SELECT: &str = concat!(
+    "SELECT s.id,c.receipt_key AS artifact_key,s.title,s.title_source,
+    s.completed_at,s.interactive,s.task_id,s.wave_id,
+    ",
+    session_graph!(),
+    " AS graph_lf_process_id,s.cwd,s.skill,s.provider,s.model,",
+    session_step!("node"),
+    " AS node,",
+    session_step!("iterations"),
+    " AS iterations,s.current_capture
+    FROM agent_sessions s LEFT JOIN session_events c ON c.seq=s.current_capture"
+);
 
 fn summary_query(page: &str, by_id: bool, now: i64) -> String {
     let available = available_sql("a", now);
     let order = if by_id { "s.id" } else { "s.title,s.id" };
     // A Graph is the Graph process above the step that captured the current input.
     format!("WITH page AS MATERIALIZED ({page})
-        SELECT s.id,s.artifact_key,s.title,s.title_source,s.feedback_summary,s.completed_at,s.interactive,s.task_id,s.wave_id,s.graph_lf_process_id,s.cwd,s.skill,s.provider,s.model,s.node,s.iterations,s.current_capture,graph_process.id,graph.graph,graph_process.outcome,graph_process.completed_at,step.started_at,
+        SELECT s.id,s.artifact_key,s.title,s.title_source,s.completed_at,s.interactive,s.task_id,s.wave_id,s.graph_lf_process_id,s.cwd,s.skill,s.provider,s.model,s.node,s.iterations,s.current_capture,graph.lf_process_id,graph.graph,graph.started_at,graph.ended_at,COALESCE(gs.started_at,graph.started_at),
         (gs.seq=(SELECT MAX(later.seq) FROM graph_process_steps later WHERE later.graph_lf_process_id=gs.graph_lf_process_id)),
         w.slug,
-        ((SELECT {MEMBERSHIP_KIND} FROM session_events INDEXED BY session_input_membership
-         WHERE session_id=s.id AND captured_event=s.current_capture
-         AND kind='observed' AND substr(receipt_key,-14)=':manifest.json')='independent'),
+        COALESCE(captured.independent=1,0),
         (SELECT json_group_array(id) FROM ({})),
         a.primary_scope,
         {available},
         COALESCE(({task_state}) IN ('done','abandoned'),0),
         s.id IN (SELECT session_id FROM task_primary_sessions),
-        (SELECT act.program_status FROM session_activity act WHERE act.session_id=s.id AND act.agent_process_id IS a.agent_process_id),a.agent_process_id,(SELECT terminal_id FROM processes WHERE id=p.attached_lf_process_id AND completed_at IS NULL),
+        (SELECT act.program_status FROM session_activity act WHERE act.session_id=s.id AND act.agent_process_id IS a.agent_process_id),a.agent_process_id,CASE WHEN a.attached_lf_process_id IS NOT NULL THEN a.attached_terminal_id END,
         (SELECT act.preview FROM session_activity act WHERE act.session_id=s.id AND act.agent_process_id IS a.agent_process_id
          AND json_extract(act.preview,'$.provider_thread')=a.provider_thread
-         AND act.attachment_token=p.attachment_token AND p.attached_lf_process_id IS NOT NULL AND a.completed_at IS NULL),
+         AND act.attachment_token=a.attachment_token AND a.attached_lf_process_id IS NOT NULL AND a.completed_at IS NULL),
         COALESCE((SELECT t.viewed IS NOT 1 FROM held_terminals t WHERE t.id=a.held_terminal_id AND t.ended_at IS NULL),0),
         (SELECT pin.account_id FROM provider_session_accounts pin WHERE pin.provider=s.provider AND pin.provider_session_id=a.provider_thread),
-        EXISTS(
-            SELECT 1 FROM session_events history
-            WHERE history.session_id=s.id AND history.captured_event=s.current_capture
-            AND history.kind='observed'
-            AND CASE WHEN json_valid(history.payload) THEN
-                (instr(history.receipt_key,':provider-session:')>0
-                 OR (instr(history.receipt_key,':events.jsonl:')>0
-                     AND json_extract(history.payload,'$.evidence.type')='provider_session_observed'))
-            AND json_extract(history.payload,'$.evidence.schema_version')=1
-            AND length(json_extract(history.payload,'$.evidence.provider_session_id'))>0 END),
-        EXISTS(SELECT 1 FROM held_terminals t WHERE t.id=a.held_terminal_id AND t.ended_at IS NULL)
+        COALESCE(captured.provider_thread IS NOT NULL,0),
+        EXISTS(SELECT 1 FROM held_terminals t WHERE t.id=a.held_terminal_id AND t.ended_at IS NULL),
+        graph.pid,graph.os_started_at,graph.exit_code,graph.error,a.agent_ended_at IS NOT NULL,
+        a.agent_ended_at,a.agent_exit_code,
+        a.starts_since_turn,a.last_started_at,a.start_failure,
+        EXISTS(SELECT 1 FROM task_primary_sessions tp
+         JOIN tasks pt ON pt.id=tp.task_id
+         JOIN task_checkouts pc ON pc.task_id=tp.task_id
+         WHERE tp.session_id=a.id AND {here}),
+        a.agent_pid IS NULL AND a.agent_ended_at IS NULL
+         AND EXISTS(SELECT 1 FROM held_terminals t WHERE t.id=a.held_terminal_id AND t.ended_at IS NULL)
         FROM page s JOIN agent_sessions a ON a.id=s.id
-        LEFT JOIN processes p ON p.id=a.agent_process_id
         LEFT JOIN session_events captured ON captured.seq=s.current_capture
         LEFT JOIN graph_process_steps gs ON gs.lf_process_id=captured.lf_process_id
         LEFT JOIN graph_processes graph ON graph.lf_process_id=gs.graph_lf_process_id
-        LEFT JOIN processes step ON step.id=gs.lf_process_id
-        LEFT JOIN processes graph_process ON graph_process.id=gs.graph_lf_process_id
         LEFT JOIN wave_addresses w ON w.id=s.wave_id
         LEFT JOIN tasks t ON t.id=s.task_id
         ORDER BY {order}", super::task_work::session_tasks("a"),
-        task_state = super::durable::task_state_sql("t"))
+        task_state = super::durable::task_state_sql("t"),
+        here = super::session_recovery::task_conversation_here_sql("a", "pt", "pc"))
 }
 
 fn read_summary(
@@ -415,40 +490,51 @@ fn read_summary(
 ) -> rusqlite::Result<StoreResult<crate::session::SessionSummary>> {
     Ok((|| {
         let task_id = row
-            .get::<_, Option<String>>(7)?
+            .get::<_, Option<String>>(6)?
             .map(|id| TaskId::parse(&id))
             .transpose()
             .map_err(invalid)?;
         let wave_id = row
-            .get::<_, Option<String>>(8)?
+            .get::<_, Option<String>>(7)?
             .map(|id| loopflow_model::id::WaveId::parse(&id))
             .transpose()
             .map_err(invalid)?;
-        let graph = match row.get::<_, Option<String>>(17)? {
-            Some(graph_process) => {
-                let completed: Option<i64> = row.get(20)?;
-                let name: String = row.get(18)?;
+        let graph = match row.get::<_, Option<loopflow_model::id::LfProcessId>>(16)? {
+            Some(id) => {
+                let run = crate::graph_process::Execution {
+                    id,
+                    started_at: row.get::<_, Option<i64>>(18)?.unwrap_or_default(),
+                    ended_at: row.get(19)?,
+                    pid: row.get(37)?,
+                    os_started_at: row.get(38)?,
+                    exit_code: row.get(39)?,
+                    error: row.get(40)?,
+                };
                 Some(crate::session::GraphProcessSummary {
-                    id: graph_process,
-                    name,
-                    state: crate::session::GraphProcessSummaryState::of_process(
-                        row.get::<_, Option<String>>(19)?.as_deref(),
-                        completed,
+                    id: run.id.to_string(),
+                    name: row.get(17)?,
+                    state: crate::session::GraphProcessSummaryState::of_run(
+                        projection.graph_result(&run),
                     ),
                     task_id: task_id.clone(),
                     wave_id: wave_id.clone(),
-                    updated_at: match completed {
-                        Some(completed) => completed,
-                        None => row.get(21)?,
+                    updated_at: match run.ended_at {
+                        Some(ended) => ended,
+                        None => row.get::<_, Option<i64>>(20)?.unwrap_or(run.started_at),
                     },
                 })
             }
             None => None,
         };
-        let agent_process_id: Option<loopflow_model::id::AgentProcessId> = row.get(31)?;
-        let agent_process_evidence = projection.evidence(agent_process_id.as_ref());
+        let agent_process_id: Option<loopflow_model::id::AgentProcessId> = row.get(30)?;
+        // An agent whose end is recorded is dead by its row; the OS is asked about the rest.
+        let agent_process_evidence = if row.get(41)? {
+            crate::ProcessIdentityEvidence::Dead
+        } else {
+            projection.evidence(agent_process_id.as_ref())
+        };
         let live = agent_process_evidence == crate::ProcessIdentityEvidence::Live;
-        let unviewed: bool = row.get(34)?;
+        let unviewed: bool = row.get(33)?;
         let task_identifier = task_id
             .as_ref()
             .map(|id| super::children::cached_short_task_id(conn, labels, id))
@@ -456,31 +542,45 @@ fn read_summary(
             .flatten();
         Ok(crate::session::SessionSummary {
             transition: super::provider_transitions::latest_in(conn, &row.get::<_, String>(0)?)?,
-            has_provider_history: row.get(36)?,
+            has_provider_history: row.get(35)?,
             preview: row
-                .get::<_, Option<String>>(33)?
+                .get::<_, Option<String>>(32)?
                 .map(|json| serde_json::from_str(&json))
                 .transpose()?
                 .filter(|_| live),
             // A terminal no viewer occupies is gone, whatever its launch recorded.
-            terminal_id: row
-                .get::<_, Option<String>>(32)?
-                .filter(|_| live && !unviewed),
+            terminal_id: row.get::<_, Option<String>>(31)?.filter(|_| {
+                live && !unviewed
+                    && projection.holder(agent_process_id.as_ref())
+                        != crate::ProcessIdentityEvidence::Dead
+            }),
             unviewed,
-            held: live && row.get(37)?,
-            task_ids: serde_json::from_str(&row.get::<_, String>(25)?)?,
-            primary_scope: row.get(26)?,
+            held: live && row.get(36)?,
+            agent_end: row
+                .get::<_, Option<i64>>(42)?
+                .map(|at| {
+                    row.get(43)
+                        .map(|exit_code| crate::session::AgentEnd { at, exit_code })
+                })
+                .transpose()?,
+            starts_since_turn: row.get(44)?,
+            last_started_at: row.get(45)?,
+            start_failure: row.get(46)?,
+            task_ids: serde_json::from_str(&row.get::<_, String>(24)?)?,
+            primary_scope: row.get(25)?,
             agent_process_evidence,
-            available: live && row.get(27)?,
+            available: live && row.get(26)?,
             program_status: row
-                .get::<_, Option<String>>(30)?
+                .get::<_, Option<String>>(29)?
                 .map(|json| serde_json::from_str(&json))
                 .transpose()?
                 .filter(|_| live),
             agent_process_id,
-            task_terminal: row.get(28)?,
-            task_primary: row.get(29)?,
-            captured: row.get(16)?,
+            task_terminal: row.get(27)?,
+            task_primary: row.get(28)?,
+            in_task_checkout: row.get(47)?,
+            launching: row.get(48)?,
+            captured: row.get(15)?,
             id: row.get(0)?,
             artifact_key: row
                 .get::<_, Option<String>>(1)?
@@ -489,31 +589,30 @@ fn read_summary(
                 .map_err(invalid)?,
             title: row.get(2)?,
             title_source: serde_json::from_value(serde_json::Value::String(row.get(3)?))?,
-            ready_summary: row.get(4)?,
-            completed_at: row.get(5)?,
-            interactive: row.get(6)?,
+            completed_at: row.get(4)?,
+            interactive: row.get(5)?,
             task_id,
             wave_id,
-            graph_lf_process_id: row.get(9)?,
-            cwd: row.get::<_, String>(10)?.into(),
-            skill: row.get(11)?,
-            provider: row.get(12)?,
+            graph_lf_process_id: row.get(8)?,
+            cwd: row.get::<_, String>(9)?.into(),
+            skill: row.get(10)?,
+            provider: row.get(11)?,
             account: row
-                .get::<_, Option<String>>(35)?
+                .get::<_, Option<String>>(34)?
                 .map(|id| crate::ProviderAccountId::parse(&id))
                 .transpose()
                 .map_err(invalid)?,
-            model: row.get(13)?,
-            node: row.get(14)?,
+            model: row.get(12)?,
+            node: row.get(13)?,
             iterations: row
-                .get::<_, Option<String>>(15)?
+                .get::<_, Option<String>>(14)?
                 .map(|raw| serde_json::from_str(&raw))
                 .transpose()?,
             graph,
-            graph_step_latest: row.get::<_, Option<bool>>(22)?.unwrap_or(false),
-            wave_name: row.get(23)?,
+            graph_step_latest: row.get::<_, Option<bool>>(21)?.unwrap_or(false),
+            wave_name: row.get(22)?,
             task_identifier,
-            independent: row.get::<_, Option<bool>>(24)?.unwrap_or(false),
+            independent: row.get::<_, Option<bool>>(23)?.unwrap_or(false),
         })
     })())
 }
@@ -559,7 +658,7 @@ pub(super) fn claim_session_input_in(
     mut next: LfSession,
     expected: Option<&crate::process::SessionAttachment>,
     process: &LfProcessId,
-    start: Option<&crate::process::LfProcessStart>,
+    start: Option<&crate::process::AttachingLf>,
 ) -> StoreResult<(LfSession, crate::process::SessionAttachment)> {
     let previous = session_in(tx, &next.id)?.ok_or(StoreError::NotFound)?;
     if next.task_id == previous.task_id && next.task_id.is_some() {
@@ -576,7 +675,7 @@ pub(super) fn claim_session_input_in(
         ));
     }
     replace_input_in(tx, &mut next, Some(process))?;
-    let attachment = super::processes::attach_in(tx, &next.id, expected, process, true, start)?;
+    let attachment = super::processes::attach_in(tx, &next.id, expected, process, start)?;
     let next = session_in(tx, &next.id)?.ok_or(StoreError::NotFound)?;
     Ok((next, attachment))
 }
@@ -609,6 +708,23 @@ pub(super) fn complete_primary_session_in(
         )?;
     }
     Ok(current)
+}
+
+/// A Task's primary when it has one, else `session`: chosen when it is
+/// already one of the Task's conversations, admitted as new otherwise.
+pub(super) fn admit_task_primary_in(
+    conn: &Connection,
+    task: &TaskId,
+    session: &LfSession,
+    caller_process: Option<&loopflow_model::id::LfProcessId>,
+) -> StoreResult<LfSession> {
+    let scope = PrimaryScope::Task(task.clone());
+    if primary_session_in(conn, &scope)?.is_none()
+        && session_in(conn, session.id.as_str())?.is_some()
+    {
+        choose_task_primary_in(conn, task, session.id.as_str())?;
+    }
+    ensure_primary_session_in(conn, &scope, session.clone(), caller_process)
 }
 
 fn ensure_primary_session_in(
@@ -685,6 +801,7 @@ pub struct HistoryInput {
     pub session: crate::session::HistoryCapture,
     pub artifact_key: Option<String>,
     pub events: Vec<crate::session::SessionEvent>,
+    pub turns: Vec<crate::session::Turn>,
     pub names: (Option<String>, Option<String>),
 }
 
@@ -772,25 +889,9 @@ impl SqliteStore {
         Ok(conn
             .query_row(
                 "SELECT t.id FROM agent_sessions s
-                 JOIN processes p ON p.id=s.agent_process_id
                  JOIN held_terminals t ON t.id=s.held_terminal_id
-                 WHERE s.id=?1 AND p.completed_at IS NULL AND t.ended_at IS NULL",
-                [canonical.as_str()],
-                |row| row.get(0),
-            )
-            .optional()?)
-    }
-
-    /// The `lf session serve` owner an earlier build recorded as hosting the
-    /// Session, while that owner's row says it runs. Only `lf resume` reads
-    /// it, to end the owner before resuming the conversation held.
-    pub fn session_owner(&self, session: &str) -> StoreResult<Option<LfProcessId>> {
-        let canonical = loopflow_model::id::canonical_session(session);
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        Ok(conn
-            .query_row(
-                "SELECT o.id FROM agent_sessions s JOIN processes o ON o.id=s.transport_lf_process_id
-                 WHERE s.id=?1 AND s.held_terminal_id IS NULL AND o.completed_at IS NULL",
+                 WHERE s.id=?1 AND s.agent_started_at IS NOT NULL AND s.agent_ended_at IS NULL
+                 AND t.ended_at IS NULL",
                 [canonical.as_str()],
                 |row| row.get(0),
             )
@@ -814,10 +915,10 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         Ok(conn
             .query_row(
-                "SELECT agent_session_id FROM processes
-                     WHERE kind='agent' AND attached_lf_process_id=?1 AND agent_session_id IS NOT NULL
-                 UNION ALL SELECT session_id FROM session_events INDEXED BY session_process_membership
-                     WHERE lf_process_id=?1
+                "SELECT id FROM agent_sessions WHERE attached_lf_process_id=?1
+                 UNION ALL SELECT session_id FROM session_events WHERE lf_process_id=?1
+                 UNION ALL SELECT session_id FROM history.session_history WHERE lf_process_id=?1
+                 UNION ALL SELECT session_id FROM history.turns WHERE lf_process_id=?1
                  LIMIT 1",
                 [process],
                 |row| row.get(0),
@@ -832,25 +933,15 @@ impl SqliteStore {
         terminal: &TerminalId,
     ) -> StoreResult<Option<TerminalRetention>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        // A terminal is not a process: the lf processes running in it name it.
-        // A running Graph started inside one, as from a terminal, holds its
-        // steps there. CROSS JOIN seeds the walk from the few Graphs, not
-        // every Process.
+        // A running Graph started inside the terminal, or a Session's Graph
+        // shown in it, holds its steps there.
         Ok(conn.query_row(
             &format!(
-                "WITH RECURSIVE graph_ancestors(id) AS (
-                     SELECT p.parent_lf_process_id FROM graph_processes f
-                         CROSS JOIN processes p ON p.id=f.lf_process_id
-                         WHERE p.completed_at IS NULL
-                     UNION SELECT p.parent_lf_process_id FROM processes p
-                         JOIN graph_ancestors a ON p.id=a.id)
-                 SELECT EXISTS(SELECT 1 FROM processes a WHERE a.held_terminal_id=?1 AND (
-                         a.id IN (SELECT id FROM graph_ancestors WHERE id IS NOT NULL)
-                         OR (a.completed_at IS NULL
-                             AND a.id IN (SELECT lf_process_id FROM graph_processes))))
+                "SELECT EXISTS(SELECT 1 FROM graph_processes g INDEXED BY graph_processes_unended
+                         WHERE g.held_terminal_id=?1 AND g.ended_at IS NULL)
                      OR EXISTS(SELECT 1 FROM agent_sessions s
-                         JOIN processes g ON g.id={SESSION_GRAPH}
-                         WHERE s.held_terminal_id=?1 AND g.completed_at IS NULL)
+                         JOIN graph_processes g ON g.lf_process_id={SESSION_GRAPH}
+                         WHERE s.held_terminal_id=?1 AND g.ended_at IS NULL)
                      AS running_graph,
                  NOT EXISTS(SELECT 1 FROM agent_sessions s
                      WHERE s.held_terminal_id=?1 AND s.completed_at IS NULL)
@@ -884,11 +975,8 @@ impl SqliteStore {
     pub fn task_conversations(&self, task: &TaskId) -> StoreResult<Vec<(LfSession, Option<i64>)>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut query = conn.prepare(&format!(
-            "SELECT candidates.id,candidates.artifact_key,candidates.title,candidates.title_source,candidates.feedback_summary,candidates.completed_at,candidates.created_at,candidates.request,candidates.interactive,candidates.repo,candidates.task_id,candidates.wave_id,candidates.graph_lf_process_id,candidates.work_source,candidates.bound_at,candidates.input_published,candidates.cwd,candidates.skill,candidates.provider,candidates.model,candidates.node,candidates.iterations,candidates.caller_artifact_key,candidates.current_capture, (
-                SELECT MAX(json_extract(payload,'$.opened_at_ms'))
-                FROM session_events WHERE session_id=candidates.id AND kind='observed'
-                AND json_extract(payload,'$.type')='interactive_opened'
-            ) AS opened_at FROM ({SESSION_SELECT}
+            "SELECT candidates.id,candidates.artifact_key,candidates.title,candidates.title_source,candidates.completed_at,candidates.created_at,candidates.request,candidates.interactive,candidates.repo,candidates.task_id,candidates.wave_id,candidates.graph_lf_process_id,candidates.work_source,candidates.bound_at,candidates.input_published,candidates.cwd,candidates.skill,candidates.provider,candidates.model,candidates.node,candidates.iterations,candidates.caller_artifact_key,candidates.current_capture,
+                (SELECT opened_at FROM agent_sessions WHERE id=candidates.id) AS opened_at FROM ({SESSION_SELECT}
             WHERE s.interactive=1 AND s.completed_at IS NULL
             AND s.id IN ({})) AS candidates",
             super::task_work::session_ids("?1")
@@ -912,17 +1000,23 @@ impl SqliteStore {
                 "{SESSION_SELECT}
                 WHERE s.interactive=1 AND s.completed_at IS NULL
                 AND (s.cwd=?1 OR substr(s.cwd,1,length(?1)+1)=?1||'/')
-                ORDER BY COALESCE((
-                    SELECT MAX(json_extract(payload,'$.opened_at_ms'))
-                    FROM session_events WHERE session_id=s.id AND kind='observed'
-                    AND json_extract(payload,'$.type')='interactive_opened'
-                ), s.created_at*1000) DESC, s.id DESC LIMIT 1"
+                ORDER BY COALESCE(s.opened_at, s.created_at*1000) DESC, s.id DESC LIMIT 1"
             ),
             [root.as_ref()],
             read_session,
         )
         .optional()?
         .transpose()
+    }
+
+    /// A person opened the interactive conversation `session` at `at_ms`.
+    pub fn record_session_opened(&self, session: &str, at_ms: i64) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "UPDATE agent_sessions SET opened_at=?2 WHERE id=?1 AND interactive=1",
+            params![session, at_ms],
+        )?;
+        Ok(())
     }
 
     /// The conversation a Task's primary pointer names, while it is unfinished.
@@ -1036,14 +1130,10 @@ impl SqliteStore {
     /// Sessions that recorded `thread` as their provider's own conversation id.
     pub fn sessions_for_agent_session(&self, thread: &AgentSessionId) -> StoreResult<Vec<String>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        // Only `provider-session:` observations carry the id. The expression
-        // matches `session_events_provider_session` exactly so it is searched.
+        // An input's captured row names the conversation that resumes it.
         let mut query = conn.prepare(
             "SELECT id FROM agent_sessions WHERE provider_thread=?1
-             UNION SELECT session_id FROM session_events WHERE kind='observed'
-                AND instr(receipt_key,':provider-session:')>0
-                AND CASE WHEN json_valid(payload)
-                    THEN json_extract(payload,'$.evidence.provider_session_id') END=?1
+             UNION SELECT session_id FROM session_events WHERE kind='captured' AND provider_thread=?1
              ORDER BY 1",
         )?;
         let ids = query
@@ -1094,8 +1184,7 @@ impl SqliteStore {
             // `windowed` holds every capture that could start or end in the
             // window, read by range from the window indexes; the exact filters
             // below decide. A Task drill's window is the Task: its arm reads every
-            // row naming the resolved Task id (capture, manifest, `started`
-            // origin) and turns the time arms off. With no lower bound the
+            // row naming the resolved Task id (capture, manifest, turn origin) and turns the time arms off. With no lower bound the
             // capture and turn arms already read everything, so the others stay
             // off. Each arm is one source of `started` or `ended`: a new source
             // below needs its own arm here, or inputs it places in the window
@@ -1106,68 +1195,69 @@ impl SqliteStore {
             // which it would get by scanning the whole index instead of the range.
             let mut query = conn.prepare("WITH windowed(seq) AS (
                 SELECT seq FROM session_events WHERE kind='captured' AND receipt_key=?7
-                UNION SELECT CASE kind WHEN 'captured' THEN seq ELSE captured_event END FROM session_events
-                    WHERE ?7 IS NULL AND task_id=?3 AND kind IN ('captured','observed','started')
+                UNION SELECT seq FROM session_events WHERE ?7 IS NULL AND task_id=?3 AND kind='captured'
+                UNION SELECT captured_event FROM history.session_history
+                    WHERE ?7 IS NULL AND task_id=?3
+                UNION SELECT captured_event FROM history.turns WHERE ?7 IS NULL AND task_id=?3
                 UNION SELECT +seq FROM session_events WHERE ?7 IS NULL AND ?3 IS NULL AND kind='captured' AND observed_at>=?5
-                UNION SELECT +c.seq FROM session_events o CROSS JOIN session_events c ON c.kind='captured'
-                    AND c.receipt_key=substr(o.receipt_key,1,length(o.receipt_key)-14)
-                    WHERE ?7 IS NULL AND ?3 IS NULL AND ?5>0 AND o.kind='observed' AND substr(o.receipt_key,-14) IN (':manifest.json',':terminal.json')
-                    AND o.observed_at>=?5 AND (?6 OR substr(o.receipt_key,-14)=':manifest.json')
-                UNION SELECT origin.captured_event FROM session_events completion CROSS JOIN session_events origin
-                    ON origin.session_id=completion.session_id AND origin.provider_thread=completion.provider_thread
-                    AND origin.provider_turn=completion.provider_turn AND origin.kind='started'
-                    WHERE ?7 IS NULL AND ?3 IS NULL AND ?5>0 AND ?6 AND completion.kind IN ('started','usage','completed','output')
-                    AND completion.kind='completed' AND completion.observed_at>=?5 AND +origin.captured_event IS NOT NULL
-                UNION SELECT CASE ran.kind WHEN 'captured' THEN ran.seq ELSE ran.captured_event END
-                    FROM processes exited CROSS JOIN session_events ran ON ran.lf_process_id=exited.id
-                    WHERE ?7 IS NULL AND ?3 IS NULL AND ?5>0 AND ?6 AND exited.completed_at>=?5 AND ran.kind IN ('captured','started')),
-            -- A native turn starts in the window only if all its events fall in it;
-            -- one its Process completed in the window may have started earlier.
-            turns(session_id,provider_thread,provider_turn) AS (
-                SELECT +session_id,+provider_thread,+provider_turn FROM session_events
-                    WHERE ?7 IS NULL AND ?3 IS NULL AND kind IN ('started','usage','completed','output') AND observed_at>=?5
-                UNION SELECT +ran.session_id,+ran.provider_thread,+ran.provider_turn
-                    FROM processes exited CROSS JOIN session_events ran ON ran.lf_process_id=exited.id
-                    WHERE ?7 IS NULL AND ?3 IS NULL AND ?5>0 AND ?6 AND exited.completed_at>=?5 AND ran.kind='started' AND ran.captured_event IS NULL
-                UNION SELECT +session_id,+provider_thread,+provider_turn FROM session_events
-                    WHERE ?7 IS NULL AND task_id=?3 AND kind='started' AND captured_event IS NULL),
+                UNION SELECT +o.captured_event FROM history.session_history o
+                    WHERE ?7 IS NULL AND ?3 IS NULL AND ?5>0 AND o.kind IN ('manifest','terminal')
+                    AND o.observed_at>=?5 AND (?6 OR o.kind='manifest')
+                UNION SELECT +captured_event FROM history.turns
+                    WHERE ?7 IS NULL AND ?3 IS NULL AND ?5>0 AND ?6 AND ended_at>=?5 AND +captured_event IS NOT NULL
+                UNION SELECT +ran.seq FROM agent_sessions exited INDEXED BY agent_sessions_agent_ended
+                    CROSS JOIN session_events ran ON ran.lf_process_id=exited.agent_launcher_lf_process_id
+                    WHERE ?7 IS NULL AND ?3 IS NULL AND ?5>0 AND ?6 AND exited.agent_ended_at>=?5 AND ran.kind='captured'
+                UNION SELECT +ran.captured_event FROM agent_sessions exited INDEXED BY agent_sessions_agent_ended
+                    CROSS JOIN history.turns ran ON ran.lf_process_id=exited.agent_launcher_lf_process_id
+                    WHERE ?7 IS NULL AND ?3 IS NULL AND ?5>0 AND ?6 AND exited.agent_ended_at>=?5),
+            -- Turns no input started: one that started or ended in the window,
+            -- or whose launcher's agent ended in it, though it started earlier.
+            turns(id) AS (
+                SELECT id FROM history.turns
+                    WHERE ?7 IS NULL AND ?3 IS NULL AND started_at>=?5 AND +captured_event IS NULL
+                UNION SELECT id FROM history.turns
+                    WHERE ?7 IS NULL AND ?3 IS NULL AND ended_at>=?5 AND +captured_event IS NULL
+                UNION SELECT +ran.id FROM agent_sessions exited INDEXED BY agent_sessions_agent_ended
+                    CROSS JOIN history.turns ran ON ran.lf_process_id=exited.agent_launcher_lf_process_id
+                    WHERE ?7 IS NULL AND ?3 IS NULL AND ?5>0 AND ?6 AND exited.agent_ended_at>=?5 AND ran.captured_event IS NULL
+                UNION SELECT id FROM history.turns
+                    WHERE ?7 IS NULL AND task_id=?3 AND captured_event IS NULL),
             inputs AS (
                 SELECT i.seq AS captured,i.receipt_key AS input_id,i.session_id,json_extract(i.payload,'$.caller_key') AS caller_input_id,
                     COALESCE(m.observed_at,i.observed_at) AS started,
                     CASE WHEN m.seq IS NOT NULL THEN m.task_id ELSE i.task_id END AS task_id,
                     CASE WHEN m.seq IS NOT NULL THEN m.wave_id ELSE i.wave_id END AS wave_id,
-                    CASE WHEN attached.completed_at IS NOT NULL THEN attached.completed_at
+                    -- An input ends when its lf's agent does: the Session's
+                    -- current launcher's at that agent's end, an earlier
+                    -- launcher's by the time the next agent started.
+                    CASE WHEN COALESCE(latest_turn.lf_process_id,i.lf_process_id) IS NOT NULL
+                        AND (s.agent_launcher_lf_process_id IS NOT COALESCE(latest_turn.lf_process_id,i.lf_process_id) OR s.agent_ended_at IS NOT NULL)
+                    THEN CASE WHEN s.agent_launcher_lf_process_id IS COALESCE(latest_turn.lf_process_id,i.lf_process_id)
+                        THEN s.agent_ended_at ELSE s.agent_started_at END
                     WHEN terminal.seq IS NOT NULL AND NOT (
                         json_valid(terminal.payload) AND CASE WHEN json_valid(terminal.payload) THEN
                         COALESCE(json_type(terminal.payload,'$.evidence.outcome')='text',0)
                         AND unixepoch(json_extract(terminal.payload,'$.evidence.ended_at')) IS NOT NULL ELSE 0 END
                     ) THEN NULL WHEN EXISTS (
-                        SELECT 1 FROM session_events origin WHERE origin.session_id=s.id
-                        AND origin.captured_event=i.seq AND origin.kind='started' AND NOT EXISTS (
-                            SELECT 1 FROM session_events done WHERE done.session_id=origin.session_id
-                            AND done.provider_thread=origin.provider_thread AND done.provider_turn=origin.provider_turn
-                            AND done.kind='completed')
+                        SELECT 1 FROM history.turns origin WHERE origin.session_id=s.id
+                        AND origin.captured_event=i.seq AND origin.ended_at IS NULL
                         ) THEN NULL ELSE
                         COALESCE(terminal.observed_at,(
-                            SELECT MAX(done.observed_at) FROM session_events origin JOIN session_events done
-                            ON done.session_id=origin.session_id AND done.provider_thread=origin.provider_thread
-                            AND done.provider_turn=origin.provider_turn AND done.kind='completed'
-                            WHERE origin.session_id=s.id AND origin.captured_event=i.seq AND origin.kind='started')) END AS ended, NULL AS thread, NULL AS turn,
+                            SELECT MAX(origin.ended_at) FROM history.turns origin
+                            WHERE origin.session_id=s.id AND origin.captured_event=i.seq)) END AS ended, NULL AS thread, NULL AS turn,
                     MAX(i.observed_at,COALESCE(m.observed_at,0),
-                        COALESCE((SELECT MAX(o.observed_at) FROM session_events o WHERE o.captured_event=i.seq),0),
-                        COALESCE((SELECT MAX(d.observed_at) FROM session_events origin JOIN session_events d
-                            ON d.session_id=origin.session_id AND d.provider_thread=origin.provider_thread
-                            AND d.provider_turn=origin.provider_turn
-                            WHERE origin.session_id=s.id AND origin.captured_event=i.seq AND origin.kind='started'),0)) AS latest
+                        COALESCE((SELECT MAX(o.observed_at) FROM history.session_history o WHERE o.captured_event=i.seq),0),
+                        COALESCE((SELECT MAX(MAX(COALESCE(origin.started_at,0),COALESCE(origin.usage_at,0),
+                            COALESCE(origin.ended_at,0))) FROM history.turns origin
+                            WHERE origin.session_id=s.id AND origin.captured_event=i.seq),0)) AS latest
                 FROM windowed CROSS JOIN session_events i ON i.seq=windowed.seq JOIN agent_sessions s ON s.id=i.session_id
-                LEFT JOIN session_events latest_turn ON latest_turn.seq=(
-                    SELECT origin.seq FROM session_events origin WHERE origin.session_id=i.session_id
-                    AND origin.captured_event=i.seq AND origin.kind='started' ORDER BY origin.seq DESC LIMIT 1)
-                LEFT JOIN processes attached ON attached.id=CASE WHEN latest_turn.seq IS NULL
-                    THEN i.lf_process_id ELSE latest_turn.lf_process_id END
-                LEFT JOIN session_events m ON m.session_id=s.id AND m.kind='observed'
+                LEFT JOIN history.turns latest_turn ON latest_turn.id=(
+                    SELECT origin.id FROM history.turns origin WHERE origin.session_id=i.session_id
+                    AND origin.captured_event=i.seq ORDER BY origin.id DESC LIMIT 1)
+                LEFT JOIN history.session_history m ON m.session_id=s.id
                     AND m.receipt_key=i.receipt_key||':manifest.json'
-                LEFT JOIN session_events terminal ON terminal.session_id=s.id AND terminal.kind='observed'
+                LEFT JOIN history.session_history terminal ON terminal.session_id=s.id
                     AND terminal.receipt_key=i.receipt_key||':terminal.json'
                 WHERE i.kind='captured'
                     -- `eligible` keeps only these when finished inputs are excluded;
@@ -1175,43 +1265,35 @@ impl SqliteStore {
                     AND (?6 OR COALESCE(m.observed_at,i.observed_at)>=?5) AND
                     (?7 IS NOT NULL OR m.seq IS NOT NULL
                     OR (i.receipt_key=(SELECT receipt_key FROM session_events WHERE seq=s.current_capture) AND s.input_published=1)
-                    OR EXISTS(SELECT 1 FROM session_events origin WHERE origin.session_id=i.session_id
-                        AND origin.captured_event=i.seq AND origin.kind='started'))
+                    OR EXISTS(SELECT 1 FROM history.turns origin WHERE origin.session_id=i.session_id
+                        AND origin.captured_event=i.seq))
                 UNION ALL
-                SELECT NULL,NULL,e.session_id,NULL,e.started,origin.task_id,origin.wave_id,
-                    COALESCE(MAX(attached.completed_at),e.completed),e.provider_thread,e.provider_turn,e.latest
-                FROM (SELECT turn_event.session_id,turn_event.provider_thread,turn_event.provider_turn,
-                        MIN(observed_at) AS started,
-                        MAX(CASE WHEN kind='completed' THEN observed_at END) AS completed,
-                        MAX(observed_at) AS latest
-                    FROM turns CROSS JOIN session_events turn_event USING (session_id,provider_thread,provider_turn)
-                    WHERE turn_event.kind IN ('started','usage','completed','output') AND turn_event.captured_event IS NULL
-                    GROUP BY turn_event.session_id,turn_event.provider_thread,turn_event.provider_turn
-                    HAVING ?6 OR MIN(observed_at)>=?5) e
-                LEFT JOIN session_events origin
-                    ON origin.session_id=e.session_id AND origin.provider_thread=e.provider_thread
-                    AND origin.provider_turn=e.provider_turn AND origin.kind='started'
-                LEFT JOIN processes attached ON attached.id=origin.lf_process_id
-                WHERE origin.captured_event IS NULL
-                GROUP BY e.session_id,e.provider_thread,e.provider_turn)
+                SELECT NULL,NULL,t.session_id,NULL,COALESCE(t.started_at,t.usage_at,t.ended_at),t.task_id,t.wave_id,
+                    COALESCE(CASE WHEN t.lf_process_id IS NULL THEN NULL
+                        WHEN ts.agent_launcher_lf_process_id IS t.lf_process_id THEN ts.agent_ended_at
+                        ELSE ts.agent_started_at END,t.ended_at),t.provider_thread,t.provider_turn,
+                    MAX(COALESCE(t.started_at,0),COALESCE(t.usage_at,0),COALESCE(t.ended_at,0))
+                FROM turns CROSS JOIN history.turns t ON t.id=turns.id
+                LEFT JOIN agent_sessions ts ON ts.id=t.session_id
+                WHERE t.captured_event IS NULL AND (?6 OR COALESCE(t.started_at,t.usage_at,t.ended_at)>=?5))
                 , eligible AS MATERIALIZED (
                 SELECT captured,input_id,session_id,caller_input_id,started,task_id,wave_id,ended,thread,turn,latest, SUM(ended IS NULL) OVER () AS unfinished,
                     ROW_NUMBER() OVER (PARTITION BY ended IS NULL ORDER BY started DESC,input_id DESC,session_id,thread,turn) AS ordinal,
                     COUNT(*) OVER () AS total
                 FROM inputs
                 WHERE (?1 IS NULL OR wave_id IN (SELECT id FROM wave_addresses WHERE id=?9 OR slug=?1)
-                    OR EXISTS (SELECT 1 FROM session_events origin WHERE origin.session_id=inputs.session_id
-                        AND inputs.captured IS NOT NULL AND origin.captured_event=inputs.captured AND origin.kind='started'
+                    OR EXISTS (SELECT 1 FROM history.turns origin WHERE origin.session_id=inputs.session_id
+                        AND inputs.captured IS NOT NULL AND origin.captured_event=inputs.captured
                         AND origin.wave_id IN (SELECT id FROM wave_addresses WHERE id=?9 OR slug=?1)))
                 AND (?2 IS NULL OR task_id IN (SELECT t.id FROM projects p CROSS JOIN tasks t ON t.project_id=p.id
                     WHERE p.id=?10 OR p.project_slug=?2 OR p.external_project_id=?11)
-                    OR EXISTS (SELECT 1 FROM session_events origin WHERE origin.session_id=inputs.session_id
-                        AND inputs.captured IS NOT NULL AND origin.captured_event=inputs.captured AND origin.kind='started'
+                    OR EXISTS (SELECT 1 FROM history.turns origin WHERE origin.session_id=inputs.session_id
+                        AND inputs.captured IS NOT NULL AND origin.captured_event=inputs.captured
                         AND origin.task_id IN (SELECT t.id FROM projects p CROSS JOIN tasks t ON t.project_id=p.id
                             WHERE p.id=?10 OR p.project_slug=?2 OR p.external_project_id=?11)))
                 AND (?3 IS NULL OR task_id=?3
-                    OR EXISTS (SELECT 1 FROM session_events origin WHERE origin.session_id=inputs.session_id
-                        AND inputs.captured IS NOT NULL AND origin.captured_event=inputs.captured AND origin.kind='started'
+                    OR EXISTS (SELECT 1 FROM history.turns origin WHERE origin.session_id=inputs.session_id
+                        AND inputs.captured IS NOT NULL AND origin.captured_event=inputs.captured
                         AND origin.task_id=?3))
                 AND (?4 IS NULL OR caller_input_id=?4 OR caller_input_id IN (SELECT receipt_key FROM session_events WHERE kind='captured' AND session_id=?12))
                 AND (started>=?5 OR (?6 AND ended>=?5)))
@@ -1364,14 +1446,19 @@ impl SqliteStore {
         };
         let history = match input.as_deref() {
             Some(input) => self.summary_for_input_matching(&session_id, input, scope)?,
-            None => {
-                self.orphaned_native_history(&session_id, scope, thread.as_ref(), turn.as_deref())?
-            }
+            None => Vec::new(),
         };
+        let turns = self.turns_matching(
+            &session_id,
+            input.as_deref(),
+            (thread.as_ref(), turn.as_deref()),
+            scope,
+        )?;
         Ok(HistoryInput {
             session,
             artifact_key: input,
             events: history,
+            turns,
             names,
         })
     }
@@ -1756,6 +1843,16 @@ impl SqliteStore {
             .flatten())
     }
 
+    /// The Session continues in `cwd`; its recorded directory is gone.
+    pub fn relocate_session(&self, id: &str, cwd: &Path) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "UPDATE agent_sessions SET cwd=?2 WHERE id=?1",
+            params![id, cwd.to_string_lossy()],
+        )?;
+        Ok(())
+    }
+
     /// A Session that moved away comes back: open again, in `cwd`.
     pub fn reopen_moved_session(&self, id: &str, cwd: &Path) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
@@ -1834,13 +1931,17 @@ pub(super) fn repair_task_titles_in(
     Ok(())
 }
 
+/// Keep `observations` of `session`'s inputs. A resume reference and an
+/// independent launch are state of their input, kept on its captured row;
+/// every other observation is history, returned for the caller to append
+/// once this transaction commits.
 pub(super) fn retain_history_in(
     conn: &Connection,
     session: &LfSession,
-    history: &[crate::session::SessionObservation],
-) -> StoreResult<bool> {
-    let mut changed = false;
-    for observation in history {
+    observations: &[crate::session::SessionObservation],
+) -> StoreResult<Vec<crate::history::Row>> {
+    let mut history = Vec::new();
+    for observation in observations {
         let captured: Option<(i64,String)> = conn.query_row(
             "SELECT seq,session_id FROM session_events WHERE kind='captured' AND receipt_key=?1",
             [&observation.artifact_key], |row| Ok((row.get(0)?,row.get(1)?))).optional()?;
@@ -1848,32 +1949,53 @@ pub(super) fn retain_history_in(
         if owner != session.id.as_str() {
             return Err(invalid("artifact belongs to another conversation"));
         }
-        if Some(captured) == session.captured {
-            if let Some(thread) = observation.payload["evidence"]["provider_session_id"].as_str() {
-                super::provider_transitions::observe_in(conn, &session.id, thread, "observed")?;
+        let evidence = &observation.payload["evidence"];
+        if observation.source.starts_with("provider-session:") {
+            let reference: crate::session_record::ProviderSessionRef =
+                serde_json::from_value(evidence.clone())?;
+            reference.validate().map_err(invalid)?;
+            if Some(captured) == session.captured {
+                history.extend(super::provider_transitions::observe_in(
+                    conn,
+                    &session.id,
+                    reference.agent_session.as_str(),
+                    "observed",
+                )?);
             }
+            conn.execute(
+                "UPDATE session_events SET provider_thread=?2,provider_account=?3 WHERE seq=?1",
+                params![
+                    captured,
+                    reference.agent_session,
+                    reference.account_id.as_ref().map(|id| id.as_str())
+                ],
+            )?;
+            continue;
         }
-        let key = format!("{}:{}", observation.artifact_key, observation.source);
-        let payload = serde_json::to_string(&observation.payload)?;
-        let saved: Option<String> = conn.query_row(
-            "SELECT payload FROM session_events WHERE session_id=?1 AND kind='observed' AND receipt_key=?2",
-            params![session.id,key], |row| row.get(0)).optional()?;
-        if let Some(saved) = saved {
-            if saved == payload {
-                continue;
-            }
-            return Err(invalid(format!(
-                "input {} has conflicting {} evidence",
-                observation.artifact_key, observation.source
-            )));
+        if observation.source == "manifest.json" && evidence["flow"]["kind"] == "independent" {
+            conn.execute(
+                "UPDATE session_events SET independent=1 WHERE seq=?1",
+                [captured],
+            )?;
         }
-        conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,task_id,wave_id,observed_at,payload,captured_event)
-            VALUES(?1,'observed',?2,?3,?4,?5,?6,?7)",
-            params![session.id,key,observation.task_id.as_ref().map(TaskId::as_str),
-                observation.wave_id.as_ref().map(loopflow_model::id::WaveId::as_str),observation.observed_at,payload,captured])?;
-        changed = true;
+        let mut row = crate::history::Row::observed(
+            &session.id,
+            format!("{}:{}", observation.artifact_key, observation.source),
+            Some(captured),
+            observation.observed_at,
+            serde_json::to_string(&observation.payload)?,
+        );
+        row.task_id = observation
+            .task_id
+            .as_ref()
+            .map(|id| id.as_str().to_owned());
+        row.wave_id = observation
+            .wave_id
+            .as_ref()
+            .map(|id| id.as_str().to_owned());
+        history.push(row);
     }
-    Ok(changed)
+    Ok(history)
 }
 
 /// Resolve ancestry on the conversation's admission transaction.
@@ -1914,10 +2036,9 @@ pub(super) fn require_current_actor_in(
         .filter(|caller| caller.session_id == id)
     {
         let current: bool = conn.query_row(
-            "SELECT EXISTS(SELECT 1 FROM agent_sessions s JOIN processes p ON p.id=s.agent_process_id WHERE s.id=?1
-                AND p.id=?2 AND p.parent_lf_process_id=?3
-                AND p.attached_lf_process_id IS NOT NULL)",
-            params![id, caller.agent_process_id, caller.origin_lf_process_id],
+            "SELECT EXISTS(SELECT 1 FROM agent_sessions WHERE id=?1
+                AND agent_process_id=?2 AND attached_lf_process_id IS NOT NULL)",
+            params![id, caller.agent_process_id],
             |row| row.get(0),
         )?;
         if !current {
@@ -2044,14 +2165,6 @@ fn insert_session_in(
         "UPDATE agent_sessions SET current_capture=?2 WHERE id=?1",
         params![session.id, session.captured],
     )?;
-    if let Some(summary) = &session.ready_summary {
-        conn.execute(
-            "INSERT INTO session_events(session_id,kind,receipt_key,task_id,wave_id,observed_at,payload,captured_event)
-             VALUES(?1,'observed','legacy_review_feedback',?2,?3,?4,?5,?6)",
-            params![session.id,session.task_id.as_ref().map(TaskId::as_str),session.wave_id.as_ref().map(loopflow_model::id::WaveId::as_str),crate::rows::now_unix(),
-                serde_json::to_string(&serde_json::json!({"type":"legacy_review_feedback","summary":summary}))?,session.captured],
-        )?;
-    }
     Ok(())
 }
 
@@ -2130,7 +2243,6 @@ impl SqliteStore {
                 title: "Retained".into(),
                 title_source: TitleSource::Human,
                 request: None,
-                ready_summary: None,
                 completed_at: None,
                 created_at: 1,
             },
@@ -2142,6 +2254,163 @@ impl SqliteStore {
 
 #[cfg(test)]
 mod metadata_tests {
+
+    #[test]
+    fn resume_reopens_the_conversation_last_opened_in_a_checkout() {
+        let home = tempfile::tempdir().unwrap();
+        let store = crate::test_fixture::open(&home.path().join("loopflow.db")).unwrap();
+        for id in ["first", "second"] {
+            store.test_session(id, &crate::session_record::new_artifact_key());
+        }
+        let reopened = |store: &crate::sqlite::SqliteStore| {
+            store
+                .checkout_conversation(std::path::Path::new("/fixture"))
+                .unwrap()
+                .unwrap()
+                .id
+        };
+        store.record_session_opened("first", 5_000).unwrap();
+        store.record_session_opened("second", 3_000).unwrap();
+        assert_eq!(reopened(&store).as_str(), "first");
+        store.record_session_opened("second", 9_000).unwrap();
+        assert_eq!(reopened(&store).as_str(), "second");
+    }
+
+    #[test]
+    fn an_upgrade_keeps_each_conversations_last_opening() {
+        use crate::migration_runner::{apply_before_migration, migration_section_sql};
+
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        apply_before_migration(
+            &crate::test_fixture::observers(),
+            &crate::test_fixture::build(),
+            &conn,
+            "history_apart_from_state",
+        );
+        conn.execute_batch(
+            "INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd)
+             VALUES('opened','Opened','human',1,0,'/repo'),('never','Never','human',1,0,'/repo');
+             INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload) VALUES
+             ('opened','observed','a',1,'{\"type\":\"interactive_opened\",\"opened_at_ms\":4000}'),
+             ('opened','observed','b',2,'{\"type\":\"interactive_opened\",\"opened_at_ms\":7000}');",
+        )
+        .unwrap();
+        conn.execute_batch(&migration_section_sql("history_apart_from_state"))
+            .unwrap();
+        let opened: Vec<Option<i64>> = conn
+            .prepare("SELECT opened_at FROM agent_sessions ORDER BY id DESC")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(opened, [Some(7_000), None]);
+    }
+
+    #[test]
+    fn an_upgrade_moves_resume_references_and_the_latest_transition_onto_their_owners() {
+        use crate::migration_runner::{apply_before_migration, migration_section_sql};
+
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        apply_before_migration(
+            &crate::test_fixture::observers(),
+            &crate::test_fixture::build(),
+            &conn,
+            "history_apart_from_state",
+        );
+        let reference = |thread: &str, account: &str| {
+            format!(
+                r#"{{"source":"provider-session","evidence":{{"schema_version":1,"provider_session_id":"{thread}","account_id":{account}}}}}"#
+            )
+        };
+        let insert = |session: &str, kind: &str, receipt: &str, payload: &str| {
+            conn.execute(
+                "INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload) VALUES(?1,?2,?3,7,?4)",
+                rusqlite::params![session, kind, receipt, payload],
+            )
+            .unwrap();
+        };
+        conn.execute_batch(
+            "INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd)
+             VALUES('current','Current','human',1,0,'/repo'),('legacy','Legacy','human',1,0,'/repo');",
+        )
+        .unwrap();
+        insert("current", "captured", "first", "{}");
+        insert("current", "captured", "second", "{}");
+        insert(
+            "current",
+            "observed",
+            "first:provider-session:a",
+            &reference("old", "\"work\""),
+        );
+        insert(
+            "current",
+            "observed",
+            "first:provider-session:b",
+            &reference("new", "null"),
+        );
+        insert(
+            "current",
+            "observed",
+            "second:manifest.json",
+            r#"{"source":"manifest.json","evidence":{"flow":{"kind":"independent"}}}"#,
+        );
+        insert(
+            "legacy",
+            "observed",
+            "agent-session:1",
+            r#"{"type":"agent_session_selected","agent_process_id":"44444444-4444-4444-8444-444444444444","provider_thread":"earlier","next_provider_thread":"fork","source":"fork"}"#,
+        );
+        insert(
+            "current",
+            "observed",
+            "agent-session:2",
+            r#"{"type":"agent_session_selected","agent_process_id":"44444444-4444-4444-8444-444444444444","provider_thread":null,"next_provider_thread":"old","source":"new"}"#,
+        );
+        insert(
+            "current",
+            "observed",
+            "provider-transition:3",
+            r#"{"type":"provider_transition","source":"observed","transition":{"kind":"resumed","from_provider_session":"old","to_provider_session":"new","from_agent_process":null,"to_agent_process":"55555555-5555-4555-8555-555555555555","original_running":null,"seed":null,"observed_at":9}}"#,
+        );
+        conn.execute_batch(&migration_section_sql("history_apart_from_state"))
+            .unwrap();
+
+        type Input = (String, Option<String>, Option<String>, Option<i64>);
+        let inputs: Vec<Input> = conn
+            .prepare("SELECT receipt_key,provider_thread,provider_account,independent FROM session_events WHERE kind='captured' ORDER BY seq")
+            .unwrap()
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(
+            inputs,
+            [
+                ("first".into(), Some("new".into()), None, None),
+                ("second".into(), None, None, Some(1)),
+            ]
+        );
+        let transition = |session: &str| -> super::super::provider_transitions::ProviderTransition {
+            let json: String = conn
+                .query_row(
+                    "SELECT transition FROM agent_sessions WHERE id=?1",
+                    [session],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            serde_json::from_str(&json).unwrap()
+        };
+        assert_eq!(transition("current").to_provider_session, "new");
+        let legacy = transition("legacy");
+        assert_eq!(
+            legacy.kind,
+            super::super::provider_transitions::TransitionKind::Forked
+        );
+        assert_eq!(legacy.from_provider_session.as_deref(), Some("earlier"));
+        assert_eq!(legacy.seed.as_deref(), Some("native"));
+        assert_eq!(legacy.observed_at, 7);
+    }
 
     #[test]
     fn a_released_tasks_primary_session_stays_its_conversation_here() {

@@ -9,12 +9,11 @@ use crate::durable::GraphProcessInventoryEntry;
 pub struct TaskWork {
     pub sessions: Vec<TaskSession>,
     pub graph_processes: Vec<GraphProcessInventoryEntry>,
-    pub processes: Vec<crate::process::ProcessEntry>,
     /// The graph the Task took up; `None` until its first `lf task run`.
     pub graph: Option<crate::task_graph::TaskGraph>,
 }
 
-/// Workspace facts needed before opening diagnostic Process history.
+/// Workspace facts without the Task's full history.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TaskOverview {
     pub sessions: Vec<TaskSession>,

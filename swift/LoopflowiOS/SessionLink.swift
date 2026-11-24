@@ -13,9 +13,10 @@ struct SessionNotRunning: LocalizedError {
 
 /// The phone's hold on one Task's running Session.
 ///
-/// The device touched last has the terminal: opening fits it to the phone and
-/// takes the keyboard. When another device takes it back, this one stops
-/// drawing and waits for **Continue here**. Nothing typed is ever sent twice.
+/// Every device viewing the Session may type; the one touched last sizes the
+/// terminal. Opening fits it to the phone. When another device takes the size,
+/// this one stops drawing and waits for **Continue here**. Nothing typed is
+/// ever sent twice.
 @MainActor
 @Observable
 final class SessionLink {
@@ -24,7 +25,8 @@ final class SessionLink {
         case disconnected(String), unavailable(String)
     }
 
-    let task: WorkViewPlan.Content
+    let task: MobileTask
+    let session: String
     private(set) var state: State = .opening
     /// Draws terminal bytes; `true` clears the screen first.
     @ObservationIgnored var render: ((Data, Bool) -> Void)?
@@ -43,13 +45,10 @@ final class SessionLink {
     @ObservationIgnored private var hasSnapshot = false
     @ObservationIgnored private var openingObserved = false
 
-    init(client: RemoteMobileClient, task: WorkViewPlan.Content) {
+    init(client: RemoteMobileClient, task: MobileTask, session: String) {
         self.client = client
         self.task = task
-        if task.primarySession == nil {
-            state = .unavailable(task.unavailable.first ?? "This Task has no Session on this Machine.")
-            wantsOpen = false
-        }
+        self.session = session
     }
 
     var canStart: Bool { state == .ended || state == .notRunning }
@@ -70,13 +69,12 @@ final class SessionLink {
     }
 
     func open() async {
-        guard let session = task.primarySession else { return }
         guard let size else { wantsOpen = true; return }
         close()
         state = .opening
         hasSnapshot = false
         openingObserved = false
-        self.opening = Perf.takeOpening(task.work.id) ?? Perf.begin("return_session", scenario: "remote_attach")
+        self.opening = Perf.takeOpening(task.id) ?? Perf.begin("return_session", scenario: "remote_attach")
         let opening = generation
         do {
             let link = try await client.attach(sessionID: session, size: size)
@@ -105,7 +103,7 @@ final class SessionLink {
 
     /// Continue a recorded conversation whose terminal stopped, then open it.
     func start() async {
-        guard canStart, let session = task.primarySession, let size else { return }
+        guard canStart, let size else { return }
         close()
         state = .opening
         let opening = generation
@@ -123,7 +121,7 @@ final class SessionLink {
         guard state == .elsewhere, let size else { return }
         state = .opening
         do {
-            try attachment?.takeControl(size: size)
+            try attachment?.takeSize(size)
             sentSize = size
         } catch { fail(error.localizedDescription) }
     }
@@ -176,8 +174,8 @@ final class SessionLink {
             if state != .elsewhere { render?(data, false) }
             if let echo { Perf.end(echo) }
             echo = nil
-        case .control(let input, let geometry):
-            state = input && geometry ? .live : .elsewhere
+        case .sizing(let sizing):
+            state = sizing ? .live : .elsewhere
             if state == .live, let size, sentSize != size { fit(columns: size.columns, rows: size.rows) }
         case .ended:
             close()

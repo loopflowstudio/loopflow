@@ -1,4 +1,4 @@
-//! Task fields and their delivery evidence commit together, before provider I/O.
+//! Task fields and the tracker actions they ask for commit together, before provider I/O.
 
 use super::planning_write;
 use crate::work::edit::WorkValue as Edit;
@@ -11,7 +11,6 @@ use crate::work::task::TaskUpdate;
 use crate::{StoreError, StoreResult};
 use loopflow_model::durable::{ProjectId, TaskId};
 
-use super::planning_changes::PlanningChanges;
 use super::SqliteStore;
 
 impl SqliteStore {
@@ -23,7 +22,7 @@ impl SqliteStore {
     ) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction()?;
-        planning_write::local(
+        planning_write::tracker(
             &tx,
             &crate::work::edit::WorkEdit::for_target(
                 task.as_str(),
@@ -34,7 +33,7 @@ impl SqliteStore {
         Ok(())
     }
 
-    /// The tombstone and pending effect are one save; retries retain the first identity.
+    /// The tombstone and its `delete` action are one save; a repeat changes nothing.
     pub fn delete_task(&self, id: &TaskId) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -44,23 +43,14 @@ impl SqliteStore {
             [id.as_str()],
             |r| r.get(0),
         )?;
-        let changed = if deleted {
-            false
-        } else {
+        if !deleted {
             planning_write::local(
                 &tx,
                 &crate::work::edit::WorkEdit::for_target(
                     id.as_str(),
                     &[Edit::TaskDeletedAt(Some(now_unix()))],
                 ),
-            )?
-        };
-        if changed {
-            tx.execute("INSERT INTO task_changes(id,task_id,value_json,base_json)
-                SELECT ?1,t.id,'true',CASE WHEN o.id IS NOT NULL THEN json_object('revision',o.revision,'value',json('false')) END
-                FROM tasks t JOIN repository_plans w ON w.id=t.repository_id
-                LEFT JOIN pm_items o ON o.id=t.external_issue_id AND o.repo=w.repo AND o.provider='linear'
-                WHERE t.id=?2", rusqlite::params![uuid::Uuid::new_v4().to_string(),id.as_str()])?;
+            )?;
         }
         tx.commit()?;
         Ok(())
@@ -68,7 +58,10 @@ impl SqliteStore {
 
     pub fn pending_task_changes(&self, task: &TaskId) -> StoreResult<Vec<PlanningChange>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        PlanningChanges::Task(task).pending(&conn)
+        super::tracker_actions::queued_changes_in(
+            &conn,
+            &super::tracker_actions::ActionOwner::Task(task.clone()),
+        )
     }
 
     /// Membership and its pending effect commit together without transferring execution.
@@ -84,10 +77,14 @@ impl SqliteStore {
         if current.project_id.as_ref() == destination {
             return Ok(());
         }
-        PlanningChanges::Task(id).save(
+        super::planning_write::local(
             &tx,
-            &[Edit::TaskProject(destination.map(ToString::to_string))],
-        )?;
+            &crate::work::edit::WorkEdit::for_target(
+                id.as_str(),
+                &[Edit::TaskProject(destination.map(ToString::to_string))],
+            ),
+        )
+        .map(|_| ())?;
         tx.commit()?;
         Ok(())
     }
@@ -138,7 +135,16 @@ impl SqliteStore {
         if let Some(value) = &patch.assignee {
             edits.push(Edit::TaskAssignee(value.clone()));
         }
-        PlanningChanges::Task(id).save(&tx, &edits)?;
+        if let Some(value) = &patch.parent {
+            edits.push(Edit::TaskParent(
+                value.as_ref().map(|parent| parent.as_str().to_owned()),
+            ));
+        }
+        super::planning_write::local(
+            &tx,
+            &crate::work::edit::WorkEdit::for_target(id.as_str(), &edits),
+        )
+        .map(|_| ())?;
         if let Some(rank) = patch.rank {
             super::planning_order::reorder_in(&tx, &task, rank)?;
         }
@@ -167,6 +173,13 @@ fn validate_edit(
         .is_some_and(|title| title.trim().is_empty())
     {
         return Err(StoreError::InvalidData("Task title cannot be empty".into()));
+    }
+    if let Some(Some(parent)) = &patch.parent {
+        if let Some(refusal) =
+            super::planning_write::parent_refusal(conn, id.as_str(), parent.as_str())?
+        {
+            return Err(StoreError::InvalidAuthority(refusal.into()));
+        }
     }
     Ok(task)
 }
@@ -229,6 +242,7 @@ mod tests {
                 .map(|index| {
                     store
                         .create_task(&NewTask {
+                            parent_task_id: None,
                             id: TaskId::new(),
                             repository_id: repository_id.clone(),
                             project_id: project_id.clone(),

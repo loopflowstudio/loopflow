@@ -1,67 +1,138 @@
 # The Agent API
 
-`lf` is the API agents call to launch, steer, and observe other agents. There
-is no SDK. The verbs are the same binary you use; every read surface takes
-`--json`; and every launched agent receives the
-launcher contract (`LOOPFLOW.md`) in its context, which holds the Task model
-and its commands. Choose the commands and Skills that fit the requested work. Work context does not select a Graph or authorize Wave
-memory maintenance; the selected Loopflow Graph owns that procedure.
+`lf` is both the CLI humans use and the API agents call to launch, steer, and
+observe other agents. There is no separate SDK: every command is the same
+binary, every read supports `--json` (and `--subscribe --json` for live
+streams), and every agent Loopflow launches receives the operating contract
+(`LOOPFLOW.md`) automatically.
 
-## Select the execution or client surface
+## Teach an external coding agent to drive `lf`
 
-Use `lf --machine mini …` to run a command at a saved execution destination.
-Use `lf server status` to inspect local Desktop client access; it installs
-nothing and starts no agent. `lf install` owns updates and server registration.
-`lf desktop` controls app windows and panes. Ordinary Work commands remain the
-agent API and do not require the client server. [Connect clients](server.md)
-covers connection recovery and the current local-only scope.
-
-## Inspect instruction selection
-
-```bash
-lf session history show SESSION --instructions
-lf session history show SESSION --instructions --json
-```
-
-The retained input records why launcher guidance and selected skills were
-supplied. It also records automatic opt-out. Use `--input INPUT` to
-inspect an earlier input belonging to that Session. These are recorded decisions,
-not a reconstruction from the repository's current state. Old captures may have
-less detailed reasons; missing captures report unavailable evidence. Native
-provider instructions not attributed in the input remain outside this view.
-
-## Install the external skill
-
-Give an agent harness the same operating contract when it was not launched by
-Loopflow:
+If you run Claude Code, Codex, OpenCode, Pi, or Antigravity directly outside `lf`, install
+the Loopflow skill once:
 
 ```bash
 npx skills add loopflowstudio/loopflow --skill loopflow -g
 ```
 
-The installed skill teaches the harness to use `lf`; it does not implement a
-second client, store, or transport.
+An external harness acts on your behalf as a Loopflow **User**, the same caller
+kind as the Mac app. The skill teaches it to inspect status, start Sessions
+you ask for, and work with the Tasks you name.
 
-## Two caller authorities
+A Loopflow-launched Wave or Task agent is an internal participant. It receives
+`LOOPFLOW.md` automatically and coordinates through Work observations recorded
+by Loopflow.
 
-An external harness opened by a person is a Loopflow **User**, the same caller
-kind as the Mac app. It may inspect status and start a Session when the person
-asks it to converse with a Wave.
-
-A Loopflow-launched Wave or Task agent is an internal participant.
-It receives `LOOPFLOW.md`; typed Work observations carry durable coordination,
-and headless failures remain visible in ordinary output and recorded outcomes.
-
-A Wave directing a task is the internal case:
+## Delegate work as Tasks
 
 ```bash
-lf checkout INF-123                              # tracked Work, no execution
-lf --task INF-123 research "write scratch/api.md"    # independent conversation
-lf task run INF-123                                  # start built-in Task automation
-lf task report INF-123 "took the smaller approach"   # post progress to the Task's thread
-lf task status INF-123 --json                        # inspect durable state
-lf task wait INF-123 --until terminal                   # block until it settles
+lf task create --wave <wave> --title "add passkeys"   # file a Task
+pbpaste | lf task create --wave <wave>                # title on line 1, notes below
+lf task run INF-123                                   # place worktree, start Graph, return once running
+lf task run INF-124 --stack-on INF-123                # dependent Task on INF-123's branch
+lf sync INF-123                                       # stack the current Task on INF-123
+lf task report INF-123 "took the smaller approach"    # post progress (not treated as a steer)
+lf task status INF-123 --json                         # read its recorded state
+lf task wait INF-123 --until terminal                 # block until done or abandoned
 ```
+
+**Delegation rule:** only delegate a strict subset that can finish
+independently as its own PR. Never delegate the entire problem or the single
+blocker in front of you; resolve that inline.
+
+**Children:** pass `--parent <ID>` on `lf task create` (or `lf task update <ID>
+--parent <parent|none>`) to attach or detach a child Task; plain `lf task
+create` always files top-level work. The parent's interactive conversations
+conduct its direct children: they hear when a child stops at an interactive
+step, a run of it fails or stops, its PR merges, or it is completed or
+abandoned. Acting on that notice is in scope. Steers saved for a child are not
+delivered to its parent.
+
+**Stacking rule:** always use `lf task run --stack-on <ID>` or `lf sync <ID>`
+(and `lf sync main` to detach). Never `git merge` another Task's branch or run
+`gh pr edit --base` directly, because `lf` tracks the stack relationship for
+squash-merge survival.
+
+## Run a headless child agent
+
+For focused work inside the current checkout (no separate PR needed):
+
+```bash
+lf list                                               # see available Skills and Graphs
+lf -b -a codex research 'how does src/sync.rs retry? report; edit nothing'
+```
+
+`lf -b` runs headless in the current checkout, prints the result, and exits.
+Unlike a harness's built-in subagent, it can run a different harness or model,
+records a Session, and attributes cost to the current Task. Redirect a running
+child with a steer:
+
+```bash
+lf session list --headless                            # find the child's Session ID
+lf steer SESSION 'skip the vendored code'             # read after its next tool call
+```
+
+## Steer and interrupt
+
+```bash
+lf steer INF-123 "keep the public API"                # every Session on the Task (syncs to tracker)
+lf steer SESSION "skip the vendored code"             # one Session
+lf --wave parser steer "tokenizer first"              # every Session on the Wave
+lf --repo . steer "hold merges"                       # every Session in the repository
+lf session steers SESSION --json                      # pending vs. delivered
+lf task interrupt INF-123                             # stop its running Graph
+```
+
+Running Sessions read steers after their next tool call; idle work sessions
+wake automatically. A steer naming a stopped interactive Session starts it in
+a held terminal. A Task steer also starts its stopped primary conversation.
+Use `lf -b steer SESSION TEXT` to run a stopped conversation’s turn here. Use `lf task report` for progress notes so they are not
+delivered back as steers.
+
+A stopped or crashed Graph stays as history and never resumes. Read
+`lf task status INF-123 --json` and `lf graph show <RUN_ID> --json`, then
+continue remaining steps with `lf task run INF-123`.
+
+## Ship
+
+Pick the commitment level that matches the state of the work:
+
+```bash
+lf pr publish    # ready PR, headless; the agent default
+lf pr submit     # synced, scratch cleared, ready for a person's merge click
+lf land          # request auto-merge (add --wait-and-fix to repair CI until merged)
+```
+
+Reserve `lf pr open` (which opens a browser) for when someone explicitly asked
+to view the PR.
+
+## Observe (`--json` and `--subscribe`)
+
+Every read surface returns structured JSON, and works remotely with
+`lf --machine <id>`:
+
+```bash
+lf wave list --json                                   # Waves and runtime status
+lf wave status <wave> --json                          # focused Wave view with KRs and metrics
+lf wave show --json                                   # every Wave's plan joined to runtime state
+lf task list --json                                   # open Tasks (same records Desktop renders)
+lf task status INF-123 --json                         # one Task, its Sessions, Graph runs, and thread
+lf session list --json --select id,title,state        # select specific fields only
+lf session history --task INF-123 --json              # chronological turns and outcomes
+lf session history show SESSION --instructions --json # why each instruction/skill was included
+lf session usage --task INF-123 --json                # token and cost breakdown
+lf session usage --weekly --json                      # weekly context cost and turn latency
+lf graph list --runs --state current --json           # OS-confirmed live Graph runs
+```
+
+Add `--subscribe` to `lf task list`, `lf task status`, `lf wave show`,
+`lf wave status`, `lf session list`, `lf session history`, or `lf repo tracker`
+for live NDJSON updates until stdin closes.
+
+Use `lf server status` for local client server health, `lf desktop` for Desktop
+pane automation, and `lf --machine <id>` to run any command on a remote
+Machine. See [Telemetry](telemetry.md) and [Surfaces](surfaces.md) for full
+schemas.
 
 ## The owners
 
@@ -69,205 +140,23 @@ Tracked Work follows Wave → Task in navigation. A Wave owns its objective and
 memory; its planning holds Tasks, KRs and targets.
 A Task owns its checkout and its PR history, with one current PR. Every
 conversation and Graph attributed to it is part of its work. The Task has one
-captured graph and position, advanced by `lf task run` and `lf ship`; independent
+captured graph and position, advanced by `lf task run` and `lf task auto on`; independent
 Graph runs do not move that position.
 
-Process records an actual lf command process. LfSession keeps a continuable
-conversation, whether interactive or headless. A Graph is one lf process and
-the step processes it starts. Provider turns and retries remain history
-inside the conversation; they do not create another generic execution object.
+LfSession keeps a continuable conversation, whether interactive or headless,
+and records the lf attached to it and the agent it runs: pid, OS start time and
+exit. A Graph run is one lf process and the steps it starts; the run and each
+step record their own pid, start, end, exit code and error. No table records lf
+commands themselves: one an agent issues is a tool call in its transcript.
+Alive means the OS still has the recorded pid with the recorded start time.
+Provider turns and retries remain history inside the conversation; they do not
+create another generic execution object.
 
-A child command records its causal parent and, when issued by an agent, its
-calling conversation and AgentProcess. That evidence grants neither
-process-control authority nor permission to move a Graph cursor. An attachment
-handoff retains conversation identity while fencing the old writer.
+A recorded pid grants neither process-control authority nor permission to move
+a Graph cursor. Each attachment starts a new agent with a fresh token, which
+fences out the old writer; the conversation keeps its identity.
 Passive observation acquires no claim. See the [contract and cutover status](dev/reference-cutover.md#cutover-status)
 for the remaining reader, wire and lifecycle conversion.
-
-## Delegate
-
-```bash
-lf checkout INF-123                    # ensure Work and worktree only
-lf task run INF-123                    # place an existing Task, start its Graph, return once it runs
-lf task create --wave <wave> --title "add passkeys"  # file the issue; run it with `lf task run`
-pbpaste | lf task create --wave <wave>               # report from stdin; first line is the title
-lf task run INF-124 --stack-on INF-123 # dependent work before the parent lands
-```
-
-The contract every agent runs under: **delegation must make the problem
-smaller**. Delegate only a strict subset that can finish independently; never
-hand off the whole seed, and never delegate the one blocker between you and
-completion — resolve that inline. The current process and worktree are the
-default execution surface.
-
-`--stack-on` forks the child's worktree from the parent Task's branch, records
-the fork commit, and inherits the parent's files. The parent needs a placed
-branch, not a PR. When the parent has no PR yet, its branch is pushed to origin
-if needed, never forced. A published parent's missing remote branch is restored
-after reading its PR from GitHub: a merged PR stops stacking; a closed PR uses
-a new unpublished parent record. If Auto was requested for an earlier head,
-stacking turns Auto off before pushing. The same clean head keeps its merge
-request. When its remote branch exists, the child uses `origin/<branch>` and
-reports any local commits left out. Run `lf commit -p`
-in the parent's checkout to include them. Scratch follows the same Git
-merge behavior as other content, including edits to existing notes. The child's PR targets the parent's branch until
-merge, then `lf sync` merges main using the recorded fork as the comparison base.
-Child edits survive the parent's squash landing without replay.
-
-## Run a child agent
-
-```bash
-lf list                                              # is there a Skill or Graph for this?
-lf -b -a codex research 'how does src/sync.rs retry? report; edit nothing'
-```
-
-`lf -b` runs the child headless in the current checkout and returns when it
-ends, printing its output. Unlike the harness's own subagent, it can run another
-harness or model, leaves a recorded Session, and counts its cost to the Task.
-The harness's subagent stays available for quick lookups.
-
-The agent that starts a child directs it and answers for its result. The brief
-says what to do, what done looks like and where the result goes. Redirect a
-running child with a steer:
-
-```bash
-lf session list --headless                        # the child's Session ID
-lf steer SESSION 'skip the vendored code'
-```
-
-The child reads the steer after its next tool call, with no Machine server
-involved. A finished
-`lf -b` child can't be resumed; start another whose brief carries what the first returned.
-A child does the work itself and starts no children unless its brief says to.
-
-A child job that recurs belongs in a skill under `.lf/skills/`, so the next
-child starts from it; `lf skill customize NAME` writes an extension of a builtin there to edit.
-Work that ends in its own PR is a Task; wait for it with `lf task wait`.
-
-## Steer
-
-```bash
-lf steer INF-123 "keep the public API"   # every Session on the Task; joins its thread
-lf steer SESSION "skip the vendored code"   # one conversation
-lf --wave parser steer "tokenizer first"    # every Session on the Wave
-lf --repo . steer "hold merges"             # every Session in the repository
-lf session steers SESSION --json            # what that Session has read
-lf --wave <wave> wave-operate "prioritize the parser"
-lf --wave <wave> wave-operate "recover the failed parser Graph"
-```
-
-A Task steer saves locally; planning sync shares it, and Linear comments arrive as steers.
-Each associated Session receives acquired steers independently, including
-conversations associated through the checkout or `--task`. Repository and Wave
-steers apply downward through the Work tree; direct Session steers apply only
-to that Session. Repository and Wave steers currently remain Machine-local.
-
-A running Session reads a steer after its next tool call. An idle one the
-Machine server holds is woken; an idle bare one reads it at its next prompt.
-Each new Session receives applicable steers at launch; continuing or compacting
-the same Session keeps what it has read. The context stays bounded, with
-complete sources available for excerpts.
-
-`lf session steers SESSION` shows each steer as pending or delivered. Delivered
-means lf printed it into the conversation, not that the model followed it; to
-say it again, steer again.
-
-Task updates arrive the same way. When a Task's position, a run or a comment
-that is not direction changes, lf saves a steer for the Task's interactive
-conversations, marked as an observation and not a request.
-
-Keep routine agent progress in working notes and the Session response. `lf task report`
-from an agent Session marks its entry as progress, excluded from steers. Use
-`lf steer` only to save a deliberate steer. Tracker comments from people
-and `lf steer` remain steers, even through the same account. Other
-integrations should mark progress with
-`<!-- loopflow-progress:<source-id> -->`; historical unmarked comments remain
-eligible because their authorship cannot be inferred safely.
-
-`lf task interrupt INF-123` records a separate control request. An attached Task
-command observes it and interrupts its provider turn; steer delivery retains
-its independent Session history.
-Loopflow never guesses signal authority from a conversation ID, Work ID, PID, or
-tmux name. Wave operations are ordinary finite conversations; they have no long-running
-process to interrupt, resume, wait for, or attach to.
-
-Work survives its provider process. A Graph whose process died leaves its Processes
-as history; nothing resumes it. Inspect
-`lf task status ISSUE` and `lf process show ID --json`, then launch
-fresh work with `lf task run INF-123`. The Task keeps its durable
-direction, worktree and PR. `task run` never reopens terminal Work; create a
-new Task for new work.
-
-Automated Task commit, PR, and completion commands also re-check current planning
-ownership. If Linear moved the issue to another Linear Project, the Task operation
-fails closed before a commit, push, publication, merge request, or
-completion; a person retains explicit authority to inspect and remediate the
-preserved Work.
-
-Guide Wave operations through extra instructions to their operate
-skills. Edit the Wave's goal when the guidance should persist.
-
-## Memory
-
-`.lf/wave/<name>/MEMORY.md` is the Wave's durable memory. Read it for context;
-a selected Loopflow Graph maintains it through ordinary file edits. Standalone
-Work use keeps proposed changes in scratch. The file remains the source of
-truth; there is no separate memory CLI or server surface.
-
-Remove registered or planning-only Tasks with `lf task delete ISSUE`. Repeat the same command
-after an incomplete operation, even after a planning refresh.
-Missing provider data does not confirm deletion.
-Deletion cancels unfinished placed work or cleans completed delivery before trashing
-the issue. Live or unresolved execution and dirty checkouts block it; a stopped
-Graph is history and blocks nothing. Task, PR and
-Run history remain readable; confirmed provider trash makes retries idempotent.
-
-## Ship
-
-Three commitment levels, all headless — pick by how done the work is and who
-lands it:
-
-```bash
-lf pr publish                          # make work visible mid-stream; the agent's default verb
-lf pr submit                           # done, a person clicks merge
-lf land                                 # watch CI, repair failures, and finish merged
-```
-
-`lf pr open` is the one presenting verb — it opens a browser. Agents reach for
-it only when a person asked to see the PR.
-
-## Observe
-
-Every read the conducting surfaces offer is `--json`:
-
-```bash
-lf wave list --json                    # every durable Wave and its Machine/runtime evidence
-lf wave status <wave> --json           # hierarchy plus one Rust-derived metric_portfolio
-lf wave show --json                      # every Wave repeats that required portfolio envelope
-lf session history --task INF-123 --json
-lf session usage --wave parser --json
-lf session history list --task INF-123 --json
-lf session usage --days 30 --json   # recorded provider usage, newest first
-lf session usage --task INF-123 --json # the same evidence drilled to one Task
-lf session usage --weekly --json   # context cost and turn time by week since 2026-09-30
-lf session usage --binds --json    # Task and Wave totals under prospective and post-hoc bind attribution
-lf process list --json                # one OS-live process frame
-lf session list --json --select id,title,state   # only those fields of each Session
-```
-
-`lf wave list` is the registry plane, `lf wave status` is the focused operational view,
-and `lf wave show` joins the current plan to that runtime truth.
-`lf session history` is the ordered durable history; each item reuses `WorkRef` and
-carries one typed fact with its execution, Task PR, or Steer evidence. Agents consume
-those projections; they do not rebuild the joins.
-
-All of these reads are local to the executing Machine. Use `lf --machine <machine-id> ...`
-to execute the same read remotely. The historical `lf session history show` interface and `lf session usage` read that Machine's evidence;
-their transitional wire shape is recorded in the cutover status. They do not
-query a central execution service.
-
-[Telemetry →](telemetry.md) covers the full monitoring surface. The Mac app is
-built on exactly these calls — it keeps no second database.
 
 ## The contract
 
@@ -279,3 +168,16 @@ The Task model and its commands are in that text, so every launch carries
 them. Association supplies context and ownership; the selected skill or Graph supplies
 the procedure. Keep repeatable instructions with that skill and repository rules
 in its agent guide.
+
+## Memory and cleanup
+
+- **Wave memory:** `.lf/wave/<name>/MEMORY.md` is plain Markdown; edit it
+  directly as part of Graph work rather than through a special API.
+- **Deleting Tasks:** `lf task delete ISSUE` cancels unfinished placed work or
+  cleans completed delivery before removing the tracker issue (safe to retry;
+  blocked by live runs or dirty checkouts).
+- **Ownership safety:** automated commit, PR, and completion commands fail
+  closed if Linear moved an issue to another Project, leaving the checkout
+  intact for inspection.
+
+Next: [Configuration](config.md) · [`lf` reference](lf-reference.md).

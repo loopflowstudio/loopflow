@@ -28,7 +28,7 @@ struct DesktopStartupTests {
                 if scenario != "uncached" {
                     // The previous launch: every read succeeded and was saved.
                     let previous = WorkModel(query: capture.query(latency: false, offline: false, reads: ReadCounts()),
-                                               launchCandidates: [capture.repo], cache: saving)
+                                               launchCandidates: [capture.repo], cache: saving, paneLayouts: nil)
                     await previous.refresh()
                     previous.confirmMachine(capture.machineId)
                     saving.flush()
@@ -42,7 +42,7 @@ struct DesktopStartupTests {
                 let clock = ContinuousClock()
                 let start = clock.now
                 // The window's own constructor: an unsaved repository costs its `git` checks here.
-                let model = WorkModel(query: query, launchCandidates: [capture.repo], cache: cache)
+                let model = WorkModel(query: query, launchCandidates: [capture.repo], cache: cache, paneLayouts: nil)
                 let initMs = milliseconds(clock.now - start)
                 let usableFrom = model.roadmap.value != nil && model.sessions.value != nil ? "saved" : "read"
                 let loop = Task { await model.keepWorkCurrent() }

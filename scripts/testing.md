@@ -34,9 +34,8 @@ also run `cargo test -p loopflow --test integration documented_commands::`.
 It checks command examples and maintained copy, including design documents;
 include `test(documented_commands::)` in the gate's Rust filter.
 
-Builtin Graph order or loop changes also include `test(world_recipes::)` in the
-gate's Rust filter, alongside `test(graph::)`. These recipes check the steps
-recorded by real Task runs, including the pursuit that stops at demo.
+Builtin Graph order or loop changes include `test(graph::)` in the gate's
+Rust filter.
 
 Embedded skill Markdown also reaches `binary(golden_prompt)`, even when no Rust
 code changes. Follow the [prompt fixture checks](../rust/loopflow/tests/README.md)
@@ -86,9 +85,10 @@ Changes to Task/Graph membership or execution reads also include
 `test(performance_tests::)` in the gate's Rust filter. Its planning and status
 checks catch per-Task and per-Graph SQL growth beyond focused store tests.
 
-Store-wide schema or trigger changes also run `binary(two_people)`,
-`test(transport::)` and `binary(transport_tests)`: shared planning exchanges,
-viewer holds and held-terminal lifetimes exercise writers beyond the changed store module.
+Store-wide schema or trigger changes also run
+`test(machine_commands::the_later_change_shows_on_both_machines_through_the_hub)`,
+`test(transport::)` and `binary(transport_tests)`: hub exchanges, viewer holds and
+held-terminal lifetimes exercise writers beyond the changed store module.
 Task storage changes also run `binary(session_lifecycle_tests)`: creation and
 promotion cover absent checkouts and primary Sessions. When moving nullable
 columns into separate tables, update fixture reads to handle absent rows and
@@ -96,7 +96,7 @@ direct SQL writes and shared fixture lookups to use the new tables. Run
 `test(server::service::tests::a_plan_watch_refreshes_and_a_task_view_resolves_its_primary_session)`
 for primary Session storage changes: the served watch fixture writes the
 association directly before resolving the Task's conversation. Run
-`scripts/test_desktop.sh --filter 'TaskRowMetadataTests|WaveStandupTests|DTOFixtureTests'`
+`scripts/test_desktop.sh --filter 'TaskRowTests|WaveStandupTests|DTOFixtureTests'`
 when changing Task ownership DTOs; inline Swift fixtures must include required
 nullable keys alongside the shared JSON fixtures. Run
 `test(performance_tests::)` to check that seeded Graphs still belong to their
@@ -113,11 +113,17 @@ Include `test(lf::commands::waves::tests::planning_failure_keeps_the_stored_work
 for Task schema or trigger changes: its missing-column fixture checks that a
 planning read failure still leaves the Wave and stored Workflow readable.
 
-Configuration file loading or filtering changes also run `binary(two_people)`:
-it checks that a shared Wave graph choice reaches another person's Task launch.
-Include `test(configuration_changes_reach_an_existing_subscription)`,
+Configuration file loading or filtering changes also run
+`test(configuration_changes_reach_an_existing_subscription)`,
 `test(graph_defaults_follow_task_wave_and_repository)` and
 `test(wave_setup_tests::)` to cover live reload, invalid defaults and Wave scope.
+
+Store watch changes (`rust/loopflow-storage/src/changes.rs`) and anything the
+server's recovery pass reads also run `test(changes::)` and the three
+`context_launch_tests::` fixtures the pass serves (`a_killed_task_conversation`,
+`a_task_conversation_whose_agent`, `a_task_checkout_starts`) in one invocation:
+they fail together when the pass misses a commit, and a trace that slows the
+watcher hides it.
 
 Terminal-title changes run `test(transport::output::tests::)` and
 `binary(transport_tests)`. Cover attachment before the asynchronous Session-name
@@ -138,6 +144,7 @@ so compilation cannot outlast its process-liveness fixtures.
 
 ```bash
 cargo test -p loopflow-execution --lib skills::catalog::          # one library module
+cargo test -p loopflow-harness claude_decode                      # one decoder or transcript reader; builds no storage or execution
 cargo test -p loopflow --test integration context_tests:: # one integration module
 cargo test -p loopflow --test golden_prompt              # one standalone binary
 uv run pytest python/tests/test_gate_bounded.py          # one Python file
@@ -165,6 +172,10 @@ fix, to reproduce a CI failure, or for a risk no suite covers:
 uv run python scripts/test.py --reuse-passing --rust-filter 'test(skills::catalog::) | test(prompt::) | binary(golden_prompt)'
 ```
 
+A decoder or transcript reader change names its crate, since its tests are not
+under a `harness::` module: `--rust-filter 'package(loopflow-harness) | test(harness::)'`
+runs them with execution's launch matrix and conformance suites.
+
 The runner runs architecture, Python, website and Swift suites when their
 paths changed, then Rust: inventory, `cargo fmt --check`, the filtered nextest
 run with one prepared fixture CLI, then `cargo clippy --all-targets -- -D warnings`.
@@ -190,6 +201,15 @@ talks to the CLI server; GhosttyKit supplies its renderer. Xcode also packages
 the selected helper. The runner's network sandbox blocks SwiftPM fetches; if the Swift suite fails
 with `transport 'https' not allowed`, run `swift package resolve` in `swift/` once
 and rerun.
+
+```bash
+uv run python scripts/loopflow-dev.py run    # open the branch's Swift app on the live Machine
+```
+
+For a visible Swift change, open Loopflow Dev and check it on the installed
+server. For a change to the CLI or server, run the branch's `lf` on a
+[private Machine](../docs/dev/machines.md#one-main-machine).
+
 `--reuse-passing` returns at once for an identical tree and plan. A later pass
 narrows `--rust-filter` to what changed since the last pass.
 
@@ -279,8 +299,10 @@ prepared SQL invariants and migration checks stay in the storage crate.
 
 Cargo rebuilds changed libraries and their dependents. Command help or rendering
 rebuilds `loopflow`; execution and Task shipping edits rebuild `loopflow-execution`
-and `loopflow`; saved-record edits rebuild storage and both callers. Unchanged
-lower libraries can be reused. Binaries and test executables still compile and
+and `loopflow`; saved-record edits rebuild storage and both callers. A decoder
+or transcript reader edit rebuilds `loopflow-harness`, execution and `loopflow`,
+never storage, and neither a storage nor an execution edit rebuilds
+`loopflow-harness`. Unchanged lower libraries can be reused. Binaries and test executables still compile and
 link even when library compilations hit the cache. Use debug builds for local
 verification; never build `--release` to test.
 
@@ -299,52 +321,146 @@ Each worktree keeps its own target directory. Cargo serializes commands sharing
 one target directory, so run one Cargo command at a time in each worktree. Do
 not point sibling worktrees at a shared mutable target directory.
 
-### Optional compilation cache
-
-Machine-local `~/.cargo/config.toml` can set `[build] rustc-wrapper = "sccache"`.
-The repository sets no wrapper; ordinary Cargo builds work without a cache.
-The dev and test profiles disable incremental compilation so library builds can
-use sccache.
-
-Cross-worktree reuse needs sccache with Rust basedir normalization and verbatim
-environment-dependency tracking. Version 0.19.0 does not provide that reuse.
-The cache configuration must list each worktree's absolute root in `basedirs`
-(or `SCCACHE_BASEDIRS`); listing only their shared parent is insufficient. Use
-`SCCACHE_BASEDIRS_VERBATIM_ENV_DEPS` to keep checkout identity values such as
-`CARGO_MANIFEST_DIR`, `CARGO_MANIFEST_PATH` and `LOOPFLOW_BUILD_SOURCE_ROOT`
-verbatim when compiled code reads them.
-
-Cache hits can retain another checkout's absolute debug-source paths. Use the
-isolated build above when those paths no longer resolve. The
-[crate rebuild probe](benchmarks/crate-rebuild/README.md) records source paths
-alongside runtime-identity checks. Use the isolated build for source debugging.
-`scripts/dev-lf` refreshes the derived worktree inventory before building.
-
-Use one machine-wide server for a shared local cache. Before a developer build,
-`scripts/build_cache.py` reads `git worktree list --porcelain -z` and writes
-`~/.cache/loopflow/sccache.json` (under `XDG_CACHE_HOME` when set). Other settings
-follow the Machine's default sccache file. The current canonical root is included, and inventories from other repositories are retained.
-The script selects that file for the build and keeps checkout environment
-dependencies verbatim. It never stops or restarts the daemon: refreshed roots
-apply after its normal idle shutdown, when the next build starts it. Until then,
-a new root can compile with cache misses. Each worktree still owns its target.
-An explicit `SCCACHE_CONF` stays under its caller's control.
-
-Ordinary Cargo uses the Machine's configuration and whichever shared server is
-running; it does not run this inventory refresh. The isolated developer build
-bypasses it. Neither path installs a wrapper or changes the Machine's Cargo
-configuration. The [root upkeep probe](benchmarks/crate-rebuild/README.md) checks
-late-root reuse after an observed idle exit with correct runtime identity.
-
-If the configured wrapper is missing or the cache service fails, build directly:
+### Shared compilation cache
 
 ```bash
-RUSTC_WRAPPER= cargo build -p loopflow --bin lf
+uv run python scripts/build_cache.py install   # run in each repository that shares the cache
+uv run python scripts/build_cache.py status    # in any worktree
 ```
 
-A cache miss costs compilation time. It does not require cleaning the target
-directory or resetting the shared cache. Compare build time and CPU as well as
-cache hits: a high hit rate does not account for linking or test execution.
+```text
+wrapper  ~/.local/share/loopflow/sccache/ca81ec2a…/bin/sccache (pinned)
+daemon   pid 4242, /…/ca81ec2a…/bin/sccache, up 3m; configured idle timeout sccache default (600s) (next start)
+roots    61 of 61 loaded; this checkout loaded
+seed     from ../loopflow.loo-917-theme-cards at 42d8b45944
+Rust     258 hits, 1 miss
+cache    6.2 GiB of 10 GiB
+```
+
+Plain `cargo build` shares eligible libraries across worktrees. Each worktree
+keeps its own target. `cargo test` shares registry dependencies and keeps
+incremental state for workspace crates. The application's `test-support`
+libraries embed checkout paths and also compile in each root.
+
+**New worktrees start warm.** The installed hook seeds the new worktree from
+a sibling's `target/debug`. To see which crates Cargo reuses, run:
+
+```bash
+git worktree add --detach ../loopflow.my-change HEAD && cd ../loopflow.my-change
+cargo build -v -p loopflow --bin lf
+```
+
+Only siblings where Cargo has run can seed a worktree. A freshly seeded
+checkout becomes eligible when Cargo creates its lock files. The hook tries
+built targets in order of `.fingerprint` directory mtime, newest first.
+It holds Cargo's locks while cloning `.fingerprint`, `build` and `deps`;
+Cargo 1.100 keeps each unit under `build/<package>/<hash>/`, so a target it
+built seeds from `build` alone, ranked by that directory's mtime.
+A build starting in the source waits until the clone finishes. The hook skips
+siblings whose build records are as new as any tracked file in the checkout.
+Otherwise Cargo could treat a sibling's workspace code as fresh. Each worktree
+builds its own top-level binaries and keeps its own incremental state. If no
+source qualifies or the filesystem lacks copy-on-write clones, Cargo builds cold.
+
+In the [measured builds](benchmarks/crate-rebuild/results/loo-922.html), Cargo
+reused registry crates, build scripts and proc macros. Two seeded builds compiled
+7 units, all workspace crates. A seed with different dependencies compiled 31.
+Cold builds compiled 256. The first `lf` build wrote 1.7 GiB into a seeded
+target (2.0 GiB cold). After a focused test about half the target still shared
+its original files. Incremental workspace libraries accounted for about 200
+CPU-seconds in a fresh test build.
+
+To build a new worktree cold, `rm -rf target` before the first build. A target
+that already exists is never replaced. `lf wt prune --builds` counts a seeded
+target at full size, so it reports more space freed than the disk gains back.
+
+The installer builds and checks the pin, then writes `build.rustc-wrapper` and
+`SCCACHE_*` entries in the personal Cargo configuration (`~/.cargo/config.toml`,
+or `~/.cargo/config` when it exists). It keeps other settings,
+the existing cache directory and the size cap. Reinstall to update the hook or
+pass `--revision <sha>` to move the pin. The verified binary and stock 0.19.0
+print the same version. The revision in the installation path and socket name
+identifies the pin. Installing registers the checkout like the hook does, so
+a daemon already serving other repositories loads it. CI uses its own Cargo
+configuration.
+
+Git's `post-checkout` hook seeds a new worktree's target, then registers the
+worktree in `~/.cache/loopflow/sccache.json` (under `XDG_CACHE_HOME` when set).
+The hook carries its own script so it works in older checkouts. Rerun
+`install` to refresh an existing hook. Both steps run silently and let Git
+finish checkout on failure. Registration retains other repositories' roots.
+Installation keeps an existing shell hook in place when it can insert the
+registration command. Other hooks move beside it to `post-checkout.before-loopflow`.
+Git runs the saved hook with its original arguments if it is executable.
+
+The daemon reads that list at startup. If the pinned client-side daemon lacks
+this root, registration asks it to stop. The next compile starts its replacement.
+In the two-worktree probe the stop took 11 seconds. The in-flight compiler
+finished, Cargo kept its library and the focused test passed. The cache missed
+that library write. In a separate check, two worktrees built an identical edit
+to `loopflow-definitions`. The first recorded one miss and the second recorded
+one hit and produced a byte-identical library.
+[Run the registration probe](benchmarks/crate-rebuild/README.md#registration-during-a-build).
+
+After a skipped hook, run `status` from the affected worktree. It reads the
+configured roots, the serving executable, its loaded roots and cache counters.
+A stats read resets the idle timer. `status --json` includes both root lists.
+
+| Exit | What status found | Recovery |
+|---|---|---|
+| 0 | The root is listed and any serving daemon has loaded it | Build normally |
+| 3 | The Machine inventory or its pinned client-side daemon lacks the root | `uv run python scripts/build_cache.py register` |
+| 3 | Your `SCCACHE_CONF` or `SCCACHE_BASEDIRS` lacks the root | Add the root and reload your daemon if running |
+| 3 | A caller-owned or server-side daemon lacks a listed root | Restart it with the updated list |
+| 1 | Wrapper, socket owner or configuration error | Check the diagnostic and rerun `install` |
+
+A missing wrapper affects every repository using the personal configuration.
+To build while repairing it, run `RUSTC_WRAPPER= cargo build -p loopflow --bin lf`.
+
+**Edit to passing test.** The test profile enables incremental compilation
+because it won both three-edit comparisons. Times below are median seconds
+across three warm cohorts with two Cargo jobs. Each edit includes a passing
+focused test and its link.
+
+| Workflow | Cache mode | Incremental |
+|---|---:|---:|
+| First application edit in a new worktree | 213 | 210 |
+| Next application edit in that worktree | 40 | 9 |
+| Three application edits, starting in a new worktree | 285 | 228 |
+| First execution edit after the application tests | 90 | 107 |
+| Next execution edit in that worktree | 86 | 15 |
+| Three execution edits after the application tests | 260 | 131 |
+| First execution edit in a new worktree | 272 | Unmeasured |
+
+To use the shared cache for eligible workspace libraries in a focused test:
+
+```bash
+CARGO_INCREMENTAL=0 cargo test -p loopflow-execution --lib skills::catalog::
+```
+
+The installer sets `SCCACHE_ALLOW_INCREMENTAL=1`. Each incremental setting
+uses different registry artifact keys. A fresh cache-mode application test in
+the warm private cache recorded 300 Rust hits and two misses. With incremental
+enabled, it recorded 296 hits, and incremental workspace compiles bypassed the
+cache. The shared Machine cache reached its 10 GiB cap, so entries may be
+evicted between worktrees. The report gives ranges, CPU, memory and compiler
+counters for the warm-cache measurements. Concurrent-worktree capacity is unmeasured.
+[Edit-to-test measurements](benchmarks/crate-rebuild/results/loo-921.html).
+
+**Private cache.** Caller-supplied variables override the installer's Cargo
+settings. Give a build its own directory and socket, then stop that daemon
+using the wrapper path printed by `status`.
+
+```bash
+SCCACHE_DIR=/tmp/my-cache SCCACHE_SERVER_UDS=/tmp/my-cache.sock cargo build -p loopflow --bin lf
+wrapper=$(uv run python scripts/build_cache.py status --json | jq -r .wrapper)
+SCCACHE_SERVER_UDS=/tmp/my-cache.sock "$wrapper" --stop-server
+```
+
+**Source debugging.** Cache hits can retain absolute source paths from another
+checkout. `scripts/dev-lf --isolated-build` compiles in `target/isolated` with
+the cache bypassed. To turn off the Machine cache, remove the installer's
+`rustc-wrapper` and `SCCACHE_*` entries from the personal Cargo configuration.
 
 ## Leave to CI unless the change reaches them
 

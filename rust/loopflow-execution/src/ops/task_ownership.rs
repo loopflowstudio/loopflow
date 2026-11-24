@@ -46,8 +46,10 @@ pub fn resolve_machine(store: &SqliteStore, target: &str) -> OpsResult<MachineId
 pub fn change(repo: &Path, issue: &str, change: OwnershipChange) -> OpsResult<TaskOwnership> {
     super::task::block_on_task(async move {
         let (store, task) = super::task::resolve_saved_task(repo, None, issue).await?;
+        let repository = super::task::repository_for_task(&store, &task)?;
         match &change {
             OwnershipChange::Claim => {
+                super::plan_carriers::before_claim(&store, &repository, &task.id).await;
                 crate::store::ownership::claim_task(&store.sqlite, &task.id).map_err(message)?;
             }
             OwnershipChange::Move(target) => {
@@ -63,18 +65,27 @@ pub fn change(repo: &Path, issue: &str, change: OwnershipChange) -> OpsResult<Ta
                     .map_err(message)?;
             }
         }
-        let repository = super::task::repository_for_task(&store, &task)?;
         // The assignee and its sync run after a served answer, as one job.
         let (repo, id) = (repository.clone(), task.id.clone());
         let now = crate::journal::request::after_reply(move || {
             super::planning_sync::after_reply(|store| async move {
                 assert_assignee(&store.sqlite, &repo, &id).await;
-                super::planning_sync::sync_after_save(&store, &repo.to_string_lossy()).await;
+                super::planning_sync::sync_after_save(
+                    &store,
+                    &repo.to_string_lossy(),
+                    &loopflow_storage::sqlite::tracker_actions::ActionOwner::Task(id),
+                )
+                .await;
             })
         });
         if now.is_some() {
             assert_assignee(&store.sqlite, &repository, &task.id).await;
-            super::planning_sync::sync_after_save(&store, &repository.to_string_lossy()).await;
+            super::planning_sync::sync_after_save(
+                &store,
+                &repository.to_string_lossy(),
+                &loopflow_storage::sqlite::tracker_actions::ActionOwner::Task(task.id.clone()),
+            )
+            .await;
         }
         crate::store::ownership::task_ownership(&store.sqlite, &task.id).map_err(message)
     })
@@ -85,7 +96,9 @@ pub fn change(repo: &Path, issue: &str, change: OwnershipChange) -> OpsResult<Ta
 /// who this Machine belongs to (`people` id `linear:<viewer>`). Without a viewer
 /// the assignee is left alone; ownership is already saved.
 pub(crate) async fn assert_assignee(store: &SqliteStore, repository: &Path, task: &TaskId) {
-    if !super::planning_client::is_linear(&repository.to_string_lossy()) {
+    if crate::ops::tracker::queued_tracker(repository)
+        != Some(loopflow_storage::planning_sync::TrackerKind::Linear)
+    {
         return;
     }
     match store.task_claimed_here(task) {
@@ -288,6 +301,8 @@ mod tests {
                 machine_label: Some("lee-mbp".into()),
                 writer_machine_id: None,
                 at: 1_792_600_000,
+                order: None,
+                seen: None,
             }],
         }
     }

@@ -17,9 +17,10 @@ ordinary focus leaves the primary Session as its face.
 
 Repository scope comes from the current repository or `--repo`/`--repository`.
 The bounded syntax supports `wave:`, `task:`, `query:`, `kind:task|wave`, and
-`state:open|available|busy|blocked|unstarted|idle|active|moving|shipping|backlog|working|autonomous|done`
-(`available`, `busy`, `blocked` read Task Sessions; the rest the Task). `working`,
-`backlog`, `autonomous` and `done` are the board's sections; `open` is any owned
+`state:open|available|busy|blocked|unstarted|idle|active|moving|backlog|working|done|auto`
+(`available`, `busy`, `blocked` read Task Sessions; the rest the Task; `auto` is
+an open Task whose auto setting is on). `working`,
+`backlog` and `done` are the board's sections; `open` is any owned
 or published Task not yet finished, including owned Tasks still in Backlog. Whitespace means
 AND; OR and parentheses compose expressions. Quote values containing spaces.
 Repository is never a predicate. Task IDs, issue identifiers and unambiguous
@@ -93,17 +94,17 @@ lf desktop dashboard rename query:attention Available --revision 3
 lf desktop hide -p query:attention/task:task_33333333333333333333333333333333
 lf desktop move -p query:attention/task:task_33333333333333333333333333333333 --destination task:task_11111111111111111111111111111111
 lf desktop move -p working-tasks/task:task_33333333333333333333333333333333 --destination task:task_11111111111111111111111111111111
-lf desktop layout query:attention --save --revision 6 < slots.json   # null restores the default slots
-lf desktop layout task:task_22222222222222222222222222222222
-lf desktop layout task:task_22222222222222222222222222222222 --save < panes.json
+lf desktop dashboard slots query:attention --revision 6 < slots.json   # null restores the default slots
+lf desktop layout query:attention                                      # read the Dashboard's slots
 ```
 
 A Dashboard has its own `DashboardId`, name, query and arrangement. Two Dashboards
 can select the same Tasks independently while reusing each Task's pane and draft
 record. `query:ID` references that Dashboard's selection, including in nested
 expressions. Repository and Wave defaults remain built in; Dashboard edits never
-replace them. Pane layout selectors use durable Work IDs (`repository`,
-`wave:ID`, `task:ID`).
+replace them. Desktop saves each Work's pane layout itself, under
+`$LF_HOME/desktop-cache/pane-layouts/<Machine>/<kind>/<Work ID>.json`; a
+Session pane naming a Session the Machine no longer lists opens empty.
 Pin/unpin and Dashboard rename require the current Dashboard revision. Task rename uses
 `task:ID` and the Task's revision, writing through the Task update owner.
 Wave renaming remains `lf wave rename`. All saved-intent commands work headless.
@@ -115,26 +116,10 @@ the tile by Work key and need no Desktop; `-p 3` names the third tile of the vie
 on screen. Each edit reads the current revision; `move` gives the tile the
 destination's place, hiding keeps its position and never changes `mode`, and
 `resize` reweights the innermost slot split between two tiles.
-`layout --save` accepts `WorkPaneLayout` JSON with revision zero on creation or the last returned revision on update. It preserves pane IDs,
-content locations, focus, zoom, hidden panes and file drafts together. A draft
-carries its recorded Machine/checkout, relative path, base revision, base text and
-edited text. Saving intent never writes that file or launches a process. Native
-restoration must compare the current file to the base before applying edits;
-unknown locations remain unavailable, never a local fallback.
-
-Observation publishes the saved pane revision and tile face. Draft bodies are
-returned only by the explicit layout read, avoiding repeated buffers in queries.
-
-Shell and Files intent uses one tool pane per Task with ordered, stable tab IDs
-and explicit selection. Shell tabs retain recorded locations and optional Process
-identity; these are not liveness or launch authority. File tabs reference the
-Task/location/path draft owner. Duplicate tools, duplicate documents, missing
-selected tabs and non-Task tools fail before a saved-layout write changes state.
-
 Desktop consumes the same plans in native Dashboards and `desktop view show`.
 `desktop view EXPRESSION` routes through the repository window; `desktop state`
-includes its selected view and actual geometry. Native Task workspaces own
-revision-checked pane/draft saves. Saved shell intent never authorizes a launch.
+includes its selected view and actual geometry. Saved shell intent never
+authorizes a launch.
 
 ## Promote existing work
 
@@ -147,5 +132,5 @@ Select `--session` to keep the chat and linked checkout, or `--worktree` for
 the checkout alone. Plain `lf task create` files new work; `--run` starts it
 without implicitly adopting anything. `lf session list --json` supplies
 conversation IDs. See
-[Work](../../../../docs/work.md#keep-work-already-in-progress) for shared checkouts,
+[Work](../../../../docs/work.md#adopt-work-already-in-progress) for shared checkouts,
 existing-Task continuation and recovery.

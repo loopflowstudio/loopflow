@@ -38,7 +38,7 @@ pub enum Tag {
     Close = 0x07,
     /// JSON carrying an `id`.
     Request = 0x11,
-    /// Keystrokes from the controlling connection.
+    /// Keystrokes from an attached connection.
     Input = 0x12,
 }
 
@@ -145,20 +145,11 @@ pub enum CloseReason {
     Retired,
 }
 
-/// The last frame before an orderly terminal disconnect. No stream offset or
-/// control claim transfers to a replacement terminal.
+/// The last frame before an orderly terminal disconnect. No stream offset
+/// transfers to a replacement terminal.
 #[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct Close {
     pub reason: CloseReason,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Own {
-    /// Become the size and color owner now.
-    Take,
-    /// Queue behind the owner; granted when it leaves.
-    Request,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -171,16 +162,16 @@ pub struct Incoming {
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Request {
+    /// Every attached view may type. The view that most recently received
+    /// focus or input sizes and colors the terminal.
     Attach {
-        control: bool,
-        replace: bool,
-        own: Option<Own>,
         rows: u16,
         cols: u16,
-        /// How this viewer is named to others who lose ownership to it.
+        /// Omitted by older viewers, whose attach takes the size.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        focused: Option<bool>,
+        /// How this viewer is named to others when it sizes the terminal.
         name: Option<String>,
-        /// What a controlling viewer this attachment replaces prints as it leaves.
-        moved: Option<String>,
         /// A held terminal's PTY position this viewer's screen already shows.
         /// The stream continues from there with no snapshot, or begins with
         /// one when the holder's ring no longer reaches back that far. Relays
@@ -196,10 +187,13 @@ pub enum Request {
     CloseNotice {
         text: String,
     },
-    Own {
-        mode: Own,
+    /// The view's terminal gained or lost focus (DEC mode 1004). Gaining it
+    /// gives this view the size; the agent hears it only if it asked for focus
+    /// reports itself.
+    Focus {
+        focused: bool,
     },
-    /// Remember this viewer's colors; relay them while it owns appearance.
+    /// Remember this viewer's colors; relay them while it sizes the terminal.
     Theme {
         theme: serde_json::Value,
     },
@@ -230,13 +224,13 @@ pub enum Request {
     NativeEnded {
         key: String,
     },
-    /// What a controlling viewer can type, shown when it attaches and while the
+    /// What a viewer can type, shown when it attaches and while the
     /// registering connection stays open.
     InputHint {
         key: String,
         hint: String,
     },
-    /// Whether some viewer holds input control, asked before opening another.
+    /// Whether some view is attached and the native client is ready for it.
     /// On an attached connection this also refreshes the viewer's liveness.
     Controlled {
         /// A viewer acknowledges Return on its existing heartbeat protocol.
@@ -272,14 +266,13 @@ pub enum Reply {
     Attached {
         viewer: String,
         nonce: String,
-        /// The input claim, when this connection may type.
-        token: Option<String>,
         terminal: bool,
         owner: Option<String>,
     },
     Busy,
     Controlled {
-        held: bool,
+        /// Some view is attached.
+        viewed: bool,
         /// None means a holder from an earlier build cannot report native readiness.
         ready: Option<bool>,
     },
@@ -304,18 +297,12 @@ pub enum Event {
     Theme {
         theme: serde_json::Value,
     },
-    /// Who sizes and colors the terminal now; `held` is whether the recipient does.
+    /// Who sizes and colors the terminal now: the view that most recently
+    /// attached, typed or gained focus. `held` is whether the recipient does.
     Owner {
         viewer: Option<String>,
         name: Option<String>,
         held: bool,
-    },
-    /// Input control changed hands. A terminal viewer with `held: false`
-    /// restores its terminal, prints `notice` and leaves. Desktop keeps viewing
-    /// read-only until an explicit takeover or the terminal's end.
-    Control {
-        held: bool,
-        notice: Option<String>,
     },
     ChildExited {
         code: u8,
@@ -458,7 +445,6 @@ mod tests {
                 reply: super::Reply::Attached {
                     viewer: "mobile-viewer".into(),
                     nonce: "fixture-nonce".into(),
-                    token: None,
                     terminal: true,
                     owner: Some("desktop-viewer".into()),
                 },
@@ -487,14 +473,7 @@ mod tests {
             },
         ));
         tail.extend(b"live\r\n");
-        tail.extend(event(
-            "other-nonce",
-            3,
-            Event::Control {
-                held: false,
-                notice: None,
-            },
-        ));
+        tail.extend(event("other-nonce", 3, Event::Live));
         bytes.extend(frame(Tag::Out, &tail));
         assert_eq!(
             bytes,
@@ -519,9 +498,10 @@ mod tests {
             &event(
                 "fixture-nonce",
                 4,
-                Event::Control {
-                    held: false,
-                    notice: None,
+                Event::Owner {
+                    viewer: Some("mobile-viewer".into()),
+                    name: None,
+                    held: true,
                 },
             ),
         ));

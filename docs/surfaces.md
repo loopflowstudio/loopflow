@@ -1,305 +1,458 @@
 # Surfaces
 
-Your Tasks and conversations live in `lf`, not in a window. Open them wherever
-you already work: Loopflow Desktop, Rex, cmux, Herdr, tmux or a plain terminal.
+Your Tasks and conversations live in `lf`, not in a window. Open
+them wherever you already work: Loopflow Desktop, Rex, cmux, Herdr, tmux, or
+any plain terminal.
 
-For presentation modes, layouts and recovery, read
-[Open conversations and workspaces](workspaces.md).
+For presentation modes, sibling tabs, and workspace layouts, see
+[Workspaces](workspaces.md).
 
-## Open Work where you are
+## Open Work anywhere
 
 ```bash
 lf open loopflow://loopflow/task/LOO-12       # attach LOO-12's conversation here
-lf open --task LOO-12 --tab                  # attach in a sibling tab
-lf open --task LOO-12 --focus                # reveal its existing view
-lf open --wave product                      # the product Wave's conversation
-lf workspace --wave product                 # the Wave's Task overview
-lf open --task LOO-12 --host desktop --diff   # conversation and Changes in Desktop
+lf open --task LOO-12 --tab                   # attach in a sibling tab
+lf open --task LOO-12 --focus                 # reveal its existing view
+lf open --wave product                        # open the Wave's conversation
+lf open --wave product --workspace            # open the Wave's Task overview
+lf open --task LOO-12 --host desktop          # open in Loopflow Desktop
 ```
 
-Direct CLI opening attaches in the current terminal, including inside Rex.
-An agent call defaults to a sibling tab in its conversation's host. It never
-attaches inside its own tool call. Desktop navigation focuses its existing view.
+- Direct CLI calls attach in the current terminal (including inside Rex). Agent
+  tool calls default to a sibling tab and never attach inside their own tool
+  output.
+- Multiple views of the same conversation can be open at once, and every view
+  can type. `--focus` reveals an existing view without opening a new one (or
+  reports **Not open**).
+- `--host desktop|rex|cmux|herdr|tmux|terminal` picks the host explicitly; a
+  failure never silently falls back to another host.
+- `loopflow://<repo>/task/<ID>` links carry no local path or hostname, so they
+  work on any machine that has the repo. Generate a Markdown link with
+  `lf --task LOO-12 open --link --format markdown` (paste into PRs, Slack, or
+  notes; installing `lf` registers the `loopflow:` URL handler).
 
-Ordinary terminal opening reports an already-open conversation's location and
-offers `--focus`; it does not move input or create a duplicate. `--focus` reports
-**Not open** if there is no live view. A plain terminal without sibling-tab
-support reports that limitation and gives a command to run in a terminal you
-open yourself. `--host desktop|rex|cmux|herdr|tmux|terminal` chooses a host; a
-failure never falls through to another.
-
-`lf open` resolves one conversation, independently of workspace layouts.
-`lf workspace` opens configured arrangements and repository or Wave overviews;
-`lf task view` inspects workflow. Opening a conversation does not advance a Graph
-or replay its prompt. Success means the conversation attached; attachment
-failure reaches the opening command and can be retried.
-
-A Work address names the repository by folder, then the Task or Wave. It never
-carries a path or a host, so the same link works on any machine with the repository.
-
-## Session titles
-
-```bash
-lf session rename SESSION 'Resume repair'
-```
-
-Bare `lf` starts a taskless Session with its directory name until the work is known.
-Renames follow it through the standard OSC terminal-title protocol, including
-reattachment. cmux tabs and tmux windows also receive host-specific renames;
-cmux workspaces follow the Task title while preserving hand-edited names.
-
-Rex can display the program title; its **Prefer generated titles** setting can
-override that display. Loopflow leaves this preference unchanged.
-[Rex settings](https://www.superlogical.com/rex/docs/reference/mac-settings).
-
-Herdr keeps OSC names as `terminal_title` and `terminal_title_stripped`, separate
-from manual pane/tab names. Its default Agent sidebar rows omit these values,
-and its outer title shows the host and workspace. To show Session names, add
-`terminal_title_stripped` to your Agent rows and `{terminal_title}` to your
-`ui.window_title` template. Loopflow leaves those layouts and manual names intact.
-[Herdr title and sidebar settings](https://herdr.dev/tui/docs/configuration/).
-
-## Present documentation in Desktop
+To present docs in Desktop:
 
 ```bash
 lf open --host desktop --file docs/usage.md --file README.md
 ```
 
-Present the original files in an attached Desktop Files view, without starting a
-host or conversation. Paths are relative to the selected checkout. Markdown and
-HTML render in read mode; active edits keep their selection and draft while
-another file becomes a tab. Desktop retains its existing remote Files transport.
+Opens those files in Desktop's Files pane (rendered Markdown/HTML, keeping
+active drafts intact) without launching a conversation or editor.
 
-With no Desktop attached, the command reports paths and opens nothing. A missing
-file, invalid Work selection or unmatched view reports an error; correct the
-path or destination and retry presentation without rewriting the docs. The
-docs-first workflow reports paths and continues when presentation is unavailable.
-It never launches a terminal editor, browser or host as a fallback.
-
-## Share a link
-
-```bash
-lf --task LOO-12 open --link --format markdown   # a Markdown link to LOO-12's conversation
-```
-
-`--link` opens nothing. Paste it in a PR, a chat or a note; clicking it uses
-your registered `loopflow:` handler. From a terminal, pass it to `lf open`.
-Installing `lf` registers a `loopflow:` handler, leaving one you chose in place.
-With Herdr installed, Control-click opens the Work beside the clicked pane.
+`lf session rename SESSION 'Resume repair'` updates the
+terminal title via standard OSC sequences, plus native cmux tabs/workspaces and
+tmux windows. Rex and Herdr users can configure title display in those apps'
+own settings.
 
 ## Loopflow Desktop
 
-The Mac app shows the same records the commands print; it keeps no copy of its own.
+The native macOS app reads the same local store as `lf`; it keeps no copy of its own:
 
-- **Working Tasks**: the sidebar, ⌘1–9 in order.
-- **Task workspace**: three panes, the `session` conversation, a `shell` at the
-  Task's checkout and a `browser` for Files, the Graph log and local pages.
-- **Dashboards**: Tasks side by side, chosen by a query.
-- **Wave view**: the Wave conversation beside a standup board, with the Tasks
-  being worked on three to a page below. The board shows one section at a time:
-  Backlog (unstarted or unassigned), Working (with Task conversation availability),
-  Autonomous (shipping) and Done. The repository page is the same view over every repository Task.
-  Every pane and view part zooms and hides from buttons on hover, its dividers
-  drag, and the header's `Show…` menu brings hidden parts back.
-- **⌘K**: search Waves, Tasks, Sessions and Graphs.
+- **Sidebar (⌘1–9):** your working Tasks in shared order (dragging reorders
+  them for CLI lists too).
+- **Task workspace:** three resizable panes: `session` (conversation), `shell`
+  (at the Task's worktree), and `browser` (Files, Graph log, local dev URLs).
+- **Dashboards:** saved side-by-side grids of Tasks selected by query. Each
+  tile is headed by the Task's sidebar row, with the sentence saying where its
+  workflow stands.
+- **One row for a Task:** the sidebar, a Dashboard tile, the title bar, the
+  Task's own page and the Portfolio show the same status word for a Task, and
+  the same line when it needs someone. The Portfolio's Now list holds the
+  Tasks that need someone; one that waits only to be started is in the
+  backlog. Click the row anywhere and the Task opens.
+- **Wave and repository views:** the scope's conversation beside its
+  [backlog](#the-backlog) and Task tiles below; a Task with auto on carries an
+  Auto badge on its tile.
+  Every pane zooms and hides on hover; the header's `Show…` menu restores
+  hidden parts.
+- **⌘K:** jump to any Wave, Task, Session, or Graph.
+- **⌘,:** [Settings](#settings) for appearance, shortcuts, phone access,
+  Machines, and scoped configuration files.
 
-Task lifecycle, conversation membership and availability agree across the page,
-sidebar, board and pickers. Dragging a sidebar Task changes the shared order used
-by ordinary repository and Wave lists. See the [Desktop guide](../swift/README.md)
-for status, ownership and ordering details.
+Save and open Dashboards from the CLI too:
 
 ```bash
-lf desktop view 'state:available'                       # a Dashboard of every available conversation
-lf desktop dashboard query attention 'state:available or state:blocked'   # save it as "attention"
+lf desktop view 'state:available'
+lf desktop dashboard query attention 'state:available or state:blocked'
 ```
 
-Queries take `wave:`, `task:`, `kind:task|wave` and
-`state:open|available|busy|blocked|unstarted|idle|active|moving|shipping|backlog|working|autonomous|done`;
-whitespace means AND, and `or` and parentheses compose.
+Queries support `wave:`, `task:`, `kind:task|wave`, and
+`state:open|available|busy|blocked|unstarted|idle|active|moving|backlog|working|done|auto`
+(`auto`: an open Task with auto on), combined with whitespace (AND), `or`, and parentheses.
 
 ### Changes show at once
 
-Click **Complete** on the selected Task: its row is gone in that frame, the next
-Task down (else the one above, else the empty state) is selected, and the Wave
-count drops by one. The same holds on a remote Machine and on the phone.
+Actions in Desktop (Complete, Abandon, Reopen, Claim, Unassign, Move, Rename)
+update the UI on the click, including for remote Machines and the phone. If the
+Machine refuses, the row returns and a single bottom Notice explains why
+(auto-dismissing after 6 seconds; the **Auto** toggle's Notice carries **Undo**,
+which turns auto off).
 
-| Change | What you see in the click |
-|---|---|
-| Complete, Abandon | the row leaves every list except Done; selection moves on |
-| Reopen | the Task returns to Working if it is owned and started, else Backlog |
-| Claim | your name as owner; a started Task moves to Working |
-| Unassign | no owner; the Task moves to Backlog |
-| Move | the Task leaves one Wave's list and joins the other |
-| Rename a Session | the new title |
-| Start, Auto-Ship, Stop Auto-Ship | a Notice: "LOO-5 Auto-Ship requested" |
+If the Machine pauses briefly, edits still show immediately and flush once it
+reconnects. After ~10 seconds offline, mutation controls disable until the
+connection returns. See [Connect clients](server.md) for connection recovery.
 
-The Machine's next reading replaces what the click showed. If the Machine
-refuses, the row comes back and one Notice says why:
+### The backlog
+
+Open a Wave and its open work nobody is running is one ranked list, the next
+work first. Click a row and its brief opens under it; nothing starts until you
+press Start.
 
 ```text
-LOO-4 couldn't be completed: its PR #12 is open · Show
+Product
+demo-20260924  Objective ›                                               New
+[All 46] Mine 1  Available 43                                        Search…
+1 selected  [Start with feature ▾]  Claim  Edit  Move ▾  Abandon…  6 of 46 ↑ ↓
+☑ ⌄ LOO-452  Customize terminal chords                 claimed by you      ···
+             Let people rebind chords per repository and drive them from…
+             Show all 412 words
+☐ › LOO-456  Keep briefs readable on narrow windows                        ···
+☐ › LOO-753  Retry provider launches        Infrastructure, claimed by Ana ···
+☐ › LOO-781  Trim the launch prompt         Idle, at demo, PR #1902        ···
 ```
 
-A Notice is one line at the bottom of the window with at most one action. A new
-one replaces the last; it goes after six seconds. Auto-Ship's Notice carries
-**Undo**, which stops Auto-Ship. A read that fails also raises a Notice, once,
-and the view keeps what it last showed. Some Notices stand until what they say
-ends: the Machine away, a Wave with Tasks outside its plan (**Copy recovery**),
-a new Task saved before its Machine answered. They wait under the six-second
-ones.
+A claimed row says whose it is: "claimed by you" or "claimed by Ana". An
+unclaimed row says nothing; the **Available** count already does. A row shows
+its Wave when it isn't the one you're looking at. Most rows have never run. A
+Task someone started and nobody holds now is here too, and says where it
+stands: the status word its sidebar row would show, then its step and its PR.
+A Task that is blocked or waiting adds a line with the reason. The backlog
+doesn't run a started Task: its button reads **Open**.
 
-If the Machine stops answering for a few seconds, keep working: changes still
-show at once and go out when it answers, each sent once. After about ten
-seconds the change controls grey out and lists read as last read until the
-Machine is back; changes made before that go out then. Quitting Desktop drops
-changes the Machine has not answered.
+**Objective ›** opens the Wave's Project: its objective and key results, drawn
+as they are on the Wave's Portfolio page.
 
-### Connection recovery
+- **Find.** Search matches titles and briefs. **Mine** is what you've claimed;
+  **Available** is everything not claimed by someone else. Changing the filter
+  or the search deselects the rows it hides, so an action reaches only rows
+  you can see.
+- **Select.** Click, the checkbox, ↑↓, ⌘-click, ⇧-click and ⇧↑↓ select. One
+  selected Task shows its brief, cut at nine lines past 900 characters, and
+  its chevron points down; click the chevron to close it. Several selected
+  show none. ⌘A selects all and Esc clears.
+- **Act.** The toolbar says what it acts on, "3 selected" or "Nothing
+  selected", then acts on it. `···` at a row's end and right-click open the same actions: Open, Start, Claim,
+  Edit brief, Move to another Wave or to the top, Move up/down, Copy ID and
+  Abandon…. Abandon lists the Tasks it will remove and names the ones with a
+  PR before it writes. The narrowest window drops the position and ↑↓ first.
+- **Order.** Drag rows, press ⌘↑↓, or use Move ▾ › To top. The order is the
+  Task's rank in its Wave, the same one `lf task list --wave product` prints and
+  Linear shows. Over a whole repository, order belongs to each Wave, so
+  reordering is off there.
+- **Claim without starting.** Claim makes a Task yours so nobody else takes it;
+  it runs nothing. Claiming a started Task picks it up where it stopped: it
+  leaves the backlog for Working.
+- **Undo.** ⌘Z undoes a reorder, a claim or a brief edit. If someone changed
+  the brief since your edit, undo leaves it and says so. Start and Abandon
+  aren't undone; an abandoned Task keeps its ID and history.
 
-Desktop uses the local Loopflow server to read Work and attach Session terminals.
-Installation prepares the connection. Check availability with `lf server status`.
-The native connection row shows recovery while keeping the screen and local
-reading actions available; input waits for acknowledgement. **Retry** reconnects;
-**Move here** explicitly requests control when another viewer has it. Recovery
-never replays uncertain input. See [Connect clients](server.md) for updates,
-background access and the distinction from Machine execution destinations.
+| Key | Does |
+|---|---|
+| ⌘↩ | Start, or open a started Task |
+| C | Claim |
+| E | Edit the brief |
+| ⌘⌫ | Abandon… |
+| ⌘↑ ⌘↓ | Move the selection up or down |
 
-## Drive Desktop from a script
+#### New Task
 
-`lf desktop` is Desktop's own pane API, the same kind of thing as tmux's,
-cmux's, Herdr's or Rex's. Use theirs directly in those hosts; use this one in
-Desktop. Every key and menu item is a verb here by the same name. This automation
-endpoint lives with the app; the client server has an independent lifetime.
+Press ⌘N anywhere, or **New** in a backlog, and say what you want:
+
+```text
+What do you want?
+
+  Let people rebind chords per repository
+
+In Product ▾, running feature ▾, Product's default
+
+☺ explore   plan   build   ☺ ship-review   deliver   ☺ verify
+You take part at explore, ship-review and verify.
+
+                                        Cancel   File   Start ⌘↩
+```
+
+The sheet opens on the Wave you were looking at. The first menu moves the Task
+to another Wave or to the repository; the second picks its workflow, from
+[the same list Start offers](#start-picks-a-workflow). After the comma is whose
+choice the workflow is: the default of the Wave or repository named before it,
+your own default, or "for this Task only" once you pick another. Pick the default again to go back.
+
+Under the sentence is the workflow as the Task will show it later: its steps,
+a person before each one where you take part, then the same thing in words. A
+workflow with no such step reads "Runs on its own." Change the menu and both
+lines change with it.
+
+- **Start** (⌘↩) files the Task and runs it.
+- **File** runs `lf task create` without `--run`: the Task lands in that
+  Wave's backlog, selected, and nothing starts.
+- **Cancel** (Esc) closes the sheet.
+
+If the Task can't be filed, the sheet stays open with what you typed, "Not
+filed." and the Machine's reason. If it is filed and its run doesn't start, the
+request stays on screen with "Not started.", the error, **Try again** and
+**Discard**.
+
+#### A Task that has not started
+
+Open a filed Task and it says what Start will do, in the sheet's words:
+
+```text
+feature   ☺ explore   plan   build   ☺ ship-review   deliver   ☺ verify   Start
+
+Not started
+
+It will run feature, Product's default.
+You take part at explore, ship-review and verify.
+
+[Start]   Start with… ▾
+```
+
+**Start** runs that workflow. **Start with…** lists the others; picking one
+starts the Task on it. When the Machine would refuse the run, Start is off and
+its tooltip says why. The brief beside it names the Task. In a Dashboard tile
+it is one line: "Not started" and **Start**.
+
+#### Start picks a workflow
+
+Start runs a Task's Graph, which Desktop calls its workflow. The button names
+the one it will run: `Start with feature`, the Task's own, else its Wave's, else
+the repository's. ▾ lists the others, each with its description and how many
+times it stops for you:
+
+```text
+✓ feature                 Explore, build, deliver and verify      3 stops
+  code                    Build, deliver and verify               2 stops
+  redesign                Rethink a started Task                  1 stop
+  research                Investigate and report, with no PR      1 stop
+  More ›
+  Run without stopping
+  deep-clean              Delete what an area no longer needs     never stops
+  incident                Restore first, then fix the cause       never stops
+  optimize                Move one number                         never stops
+  queue                   Compress, integrate upstream changes    never stops
+  task-design             Draft the Task design                   never stops
+```
+
+Several Tasks whose workflows differ show the split,
+`Start 3: feature 2, code 1`, and the menu opens with "Each Task's own
+workflow"; clicking Start runs each on its own. Pick a workflow below it to run
+all of them on that one. Workflows under "Run without stopping" never wait for
+you. **More ›** holds the pieces other
+Graphs include, such as `build` and `deliver`, and Graphs with no
+`description:` ([describe a Graph](orchestration.md#describe-a-graph)). A
+Graph that runs for a Wave is not offered for a Task. The
+[New Task](#new-task) sheet's workflow menu and an unstarted Task's
+**Start with…** are this list.
+
+Start reaches unstarted Tasks only. Select a started Task and the button reads
+`Open`, with no ▾: it goes to the Task, where its step, its PR and what running
+it would do are shown. A selection of both counts the unstarted,
+`Start 2 with feature`, and the tooltip says "1 started Task: open it to
+continue". Several started Tasks and nothing else leave Start off. When the
+Machine would refuse every unstarted Task selected, Start is off and its
+tooltip says why.
+
+Starting several starts each one in the click. A Task the Machine refuses comes
+back with its own Notice, and the others stay started. Started Tasks leave the
+backlog and appear in the sidebar.
+
+#### When the list is empty
+
+Every empty list says why in one line and offers one step beside it: **Mine**
+with nothing claimed offers **Show available**, a search with no match offers
+**Clear search**, and an empty Wave or repository reads "Nothing is waiting in
+this repository." beside **New**. When a read fails, the last rows you saw stay and
+a Notice says so. A list too large to load at once says
+`Partial: searching the 200 loaded`.
+
+### When nothing is there, or something failed
+
+A pane with nothing to show says what happened in a title, adds one sentence,
+and puts the next step on a button:
+
+| You see | Next step |
+|---|---|
+| **No planned Work in this repository.** Say what you want built, or talk it through first. | **New Task ⌘N**, **Open the repository conversation** |
+| **Conversation not open.** | **Open conversation** |
+| **Choose Work.** Pick a Task or a Wave in the sidebar, or press ⌘K to find one in any repository. | |
+| **Selected Work is unavailable.** The latest plan does not include it. Its workspace and conversations are kept. | **Read the plan again** |
+| **Nothing needs action.** No live or stopped work across these Waves. | **Show roadmap** |
+| **This dashboard is no longer available.** | **Show working Tasks** |
+| **No activity in this window.** Work creation, runs, PRs and steers appear here. | |
+
+A repository with no Waves, no Tasks and no conversation opens on the first
+row alone. **Open the repository conversation** starts the conversation and
+brings the repository's page: the terminal, the backlog and its Tasks.
+
+A failure names what failed, shows the Machine's message as it came, and keeps
+**Retry**:
+
+```text
+This repository did not open
+
+fatal: not a git repository (or any of the parent directories): .git
+
+[Retry]
+```
+
+The message is selectable, so it can be pasted into a conversation. A state gets a button only for something Desktop can do from
+there; one with no next step has none. In a dashboard tile the same state is
+one line: its title and its button.
+
+### Settings
+
+Press **⌘,** to open Settings. Search for a pane, label, configuration key,
+alias or description. Select a result with ↑/↓ and Return to reveal the
+control. A switch in the results edits the destination shown beside it.
+
+**General**, **Appearance**, **Shortcuts**, **Agents**, **Machines**, and
+**Mobile** hold personal preferences. Use **Machines** to check connections
+and set the plan hub. **Open ~/.lf/config.yaml** opens the global file for
+settings such as Machine pools and SSH forwarding.
+
+**Project & Wave Config** holds agent overrides, Context, Git & Release, and
+Machine placement. It opens on the active checkout or the first repository
+in your portfolio. Use **Choose Checkout…** to select another directory.
+**Applies to** selects a checkout or Wave. **Save in** selects your file or
+the shared file. Saving the first setting creates the file. **Open file…**
+opens the current settings document in its associated app. If shared Wave
+settings come from `GOAL.md`, Open shows the goal and **First change saves to**
+shows the path to `config.yaml`. Once an edit creates the YAML file, Open shows it.
+A dot beside the pane means the selected file declares a setting. Switching to
+a personal pane keeps the checkout and destination ready for your return.
+
+Expand **Skill or Graph step** to see launch settings for that target.
+**Inspect general work** returns to all settings. A step needs an `id:` before you can save its
+preferences. Git & Release applies to the repository. While viewing a Wave,
+**Inspect repository settings** returns to its checkout. Opening a search result
+selects general work or the checkout when the setting requires it.
+
+**In effect** appears when the selected file declares a setting or another
+source supplies a value beyond the built-in default. For example, open
+**Project & Wave Config** on a checkout where the shared file sets
+`context.diff: true` and your file sets it to `false`. Choose **Shared
+repository settings**. The switch shows **On**. **In effect** still shows
+**Off · My repository settings**. Expand it to see the candidates and paths.
+
+- **Reset** removes a simple control’s declaration immediately. Clearing a text
+  or number field also resets it. YAML editors preview removal with **Reset…**.
+  For additional documents, **Save empty list** clears inherited entries. Reset lets them
+  apply again.
+- **Move to Shared Repository…** appears when the shared slot is empty. From
+  a private Wave you can move to your repository settings. Review the YAML
+  changes and the projected result before confirming. If either file changes
+  the preview, review it again. **Finish interrupted move…** completes a
+  partial move. If the declarations have diverged, **Dismiss pending move**
+  keeps the current contents of both files.
+- Switches and pickers save immediately. Text fields save on Return or focus
+  loss. Escape discards the text. YAML editors have **Apply** and **Cancel**.
+  **Undo** or **⌘Z** restores a saved edit even after switching destinations.
+  If the declaration changed on disk, use **Refresh** to review it before
+  retrying. A rejected edit leaves its field editable. An unavailable scope
+  keeps the last reading visible and pauses edits. If the local server
+  restarts, Settings reconnects automatically and enables edits when fresh
+  values arrive.
+  Settings and the CLI share the same [configuration files](config.md).
+
+**Appearance** selects themes or opens the color editor. **Shortcuts** shows
+the keyboard reference. **Mobile** shows a green dot and pairing code when
+[phone access](server.md#phone-access) is ready. While **Machines** is open,
+it checks up to four registered identities at once and distinguishes
+connection errors from ended rentals.
+
+## Script Desktop
+
+`lf desktop` is Desktop's pane and window API, the equivalent of tmux's or
+cmux's CLI:
 
 ```bash
-lf desktop run 'cargo test -p loopflow'           # a new shell tab in the Task's checkout; focus stays put
-lf desktop wait -p shell:2 --for 5m               # exits with that test run's status
-lf desktop capture -p shell:2 --trim | tail -3
-lf --task LOO-12 desktop send -p session 'also cover the timeout path'   # into the agent's draft, not sent
+lf desktop run 'cargo test -p loopflow'           # new shell tab in this Task's worktree
+lf desktop wait -p shell:2 --for 5m               # wait and exit with that command's status
+lf desktop capture -p shell:2 --trim | tail -3    # read terminal output
+lf --task LOO-12 desktop send -p session 'also cover the timeout path'   # draft text, not sent
 lf desktop browse http://localhost:5173
 lf desktop move -p browser --destination session --axis vertical
-lf desktop goto 2                                 # what ⌘2 does
-lf desktop do section -p board section=working    # the Wave board: backlog, working, autonomous or done
-lf desktop do filter -p board days=14             # Done covers 14 days; kept on this Mac
-lf desktop zoom --on -p board                     # the board fills the view; --off returns
+lf desktop goto 2                                 # same as ⌘2
+lf desktop capture -p backlog                     # the Wave's backlog as text: counts, then rows in order, each with who claimed it
+lf desktop zoom --on -p backlog                   # zoom a pane; --off restores
 ```
 
-Without `-p`, a command acts on the terminal it runs in, so an agent's own tool
-call reaches its own pane. `-p` is a path on the screen: a pane (`session`,
-`shell`, `browser`), a Wave view part (`board`, `tiles`), a tab (`shell:2`), a
-Dashboard tile (`3`, `LOO-12`) or `TILE/PANE`. `lf desktop state` lists each
-view's parts under `view_parts`, with their ratio, hidden and zoomed state. Each part matches full ID, then label, then position, then an ID
-suffix. Nothing follows focus: an ambiguous target lists the choices and changes nothing.
-
-`send` types without submitting; `send-key enter` submits. `run` types into a
-real shell tab, so the tab outlives the command.
+Without `-p`, commands act on the terminal they ran in. `-p` targets a pane
+(`session`, `shell`, `browser`), Wave view part (`backlog`, `tiles`), tab
+(`shell:2`), or Dashboard tile (`3`, `LOO-12`, `TILE/PANE`). `lf desktop state`
+lists every part. `send` types without submitting; `send-key enter` submits.
 
 ## Build your own view
 
-A herdr, tmux or other GUI pane uses the reads below. Each streams with
-`--subscribe --json`: one JSON line now, another each time its answer changes,
-until stdin closes.
+Every surface, including Desktop, tmux plugins and custom GUIs, reads the
+same `--subscribe --json` streams (NDJSON, one line on every change until stdin
+closes):
 
 ```bash
-lf wave show --all --subscribe --json         # every Wave's plan and Tasks
-lf task list --subscribe --json               # open Tasks, as your sidebar would list them
-lf task status LOO-12 --subscribe --json      # one Task with its conversations, Graph processes and thread
-lf session list --subscribe --json            # conversations, with which ones are available for you
-lf session history --since 7d --subscribe --json   # what Sessions did, tagged with their Task and Wave
-lf process list --subscribe --json                      # live lf call trees
-lf repo plan --subscribe --json         # planning sync; keeps it exchanged while it runs
-lf desktop view list --subscribe --json           # every plan a repository window shows
+lf wave show --all --subscribe --json
+lf task list --subscribe --json
+lf task status LOO-12 --subscribe --json
+lf session list --subscribe --json
+lf session history --since 7d --subscribe --json
+lf repo tracker --subscribe --json
+lf desktop view list --subscribe --json
 ```
 
-```json
-{"answers": null, "unavailable": null, "body": {…}}
-```
+Each line is `{"answers": null, "unavailable": null, "body": {…}}`, where
+`body` matches `--json` alone (send `{"id": 1, "args": {…}}` on stdin to update
+filters; see [Work](work.md#see-where-everything-stands)).
 
-Every Task list read (`lf task list`, `lf wave show`, `lf wave status`,
-`lf plan list`) prints the same Task record the server sends:
+**Task record shape** (shared by `lf task list`, `lf wave show`, `lf wave status`, `lf plan list`):
 
 ```json
-{"task": {"id": "task_…", "identifier": "LOO-12", "name": "Search transcripts", "wave_id": "…", …},
- "runtime": {"status": "active", "reason": "…", "owner": {…}, …},
+{"task": {"id": "task_…", "identifier": "LOO-12", "name": "Search transcripts", "wave_id": "…"},
+ "runtime": {"status": "active", "reason": "…"},
  "next_move": {"owner": "task", "reason": "…"},
- "condition": {"state": "clear", "reason": "…", …},
- "graph_name": "code", "pr": {"phase": "open", …}, "section": "working",
- "lifecycle": "active", "selection_states": ["open", "busy", "active", "working"], …}
+ "condition": {"state": "clear", "reason": "…"},
+ "graph_name": "code", "pr": {"phase": "open"}, "section": "working",
+ "lifecycle": "active", "selection_states": ["open", "busy", "active", "working"]}
 ```
 
-`runtime.status` is one of `unstarted`, `idle`, `active`, `moving`,
-`shipping`, `done` or `abandoned`. `lifecycle` includes completion or cancellation
-of never-started work; `selection_states` supplies the same lifecycle, board
-section and conversation activity used by Dashboard filters;
-`next_move.owner` (`user`, `wave`, `task`, `ci`, `external`) says who moves it
-on. `lf task status <issue> --json` prints one
-Task as a row, each fact once, with its Sessions, Graph processes and
-thread.
-
-A Session record:
+**Session record shape** (`lf session list --json`):
 
 ```json
 {"id": "session_…", "title": "Search transcripts", "provider": "claude", "interactive": true,
  "state": "active", "availability": "available", "work": {"kind": "task", "id": "task_…"},
- "task_ids": ["task_…"], "wave_id": "…", "cwd": "/src/loopflow.loo-12", "actions": [{"kind": "open", …}], …}
+ "cwd": "/src/loopflow.loo-12",
+ "turn": {"id": "5b0c…", "state": "ended", "started_at": "2026-11-10T16:25:37Z",
+          "ended_at": "2026-11-10T16:27:51Z", "model": "claude-opus-5-5",
+          "usage": {"input_tokens": 41200, "cached_input_tokens": 38000, "output_tokens": 1100}}}
 ```
 
-`state` is what its agent process shows (`active`, `detached`, `closed`,
-`unknown`); `availability` is `"available"` when it is ready for your next
-turn and `null` while it works. `lf resume <id>` opens it.
+`availability` is `"available"` when ready for your next turn and `null` while
+working. Raw provider sessions started outside `lf` appear with `"raw": true`
+and their provider conversation ID.
 
-`turn` is its current or last turn, `null` when nothing is known:
-
-```json
-"turn": {"id": "5b0c…", "state": "ended", "started_at": "2026-11-10T16:25:37Z",
-         "ended_at": "2026-11-10T16:27:51Z", "model": "claude-opus-5-5",
-         "usage": {"input_tokens": 41200, "cached_input_tokens": 38000, "output_tokens": 1100}}
-```
-
-It is the last turn in the provider's transcript. `id` is the provider's name
-for it, `state` is `running`, `ended` or `interrupted`, `ended_at` is `null`
-while it runs and `usage` counts its tokens so far. A conversation whose agent
-reports no status is `available` whenever its turn is not `running`.
-A provider process lf isn't holding lists with `"raw": true` and its provider
-conversation ID as `id`.
-
-Desktop reads the same records through `lf plan list`, `lf task show`,
-`lf wave plan`, `lf task list --closed` and `lf session list`, with the
-same `--subscribe`. `lf wave status` and `lf wave show` exchange planning with the
-tracker first; `lf wave plan` and `lf plan list` read what the store
-records, and `lf wave sync` refreshes it.
-
-`body` is what the same command prints with `--json` alone. Write
-`{"id": 1, "args": {"query": "parser"}}` to stdin to change what it reads; the
-next line answers `1`. The protocol is in [Work](work.md#see-where-it-stands).
-A development build with unreleased migrations reads a preview copy; its
-`lf --version` adds `copy: <directory>`.
-
-One-shot reads for everything else:
+One-shot helpers for custom hosts (these work without macOS or Desktop):
 
 ```bash
-lf desktop view show 'wave:product'     # what a Dashboard would show, for your own host; opens nothing
-lf --task LOO-12 open --link --json       # the target, its fallback command and the route it would take
-lf desktop events --json                  # Desktop's window and pane changes, one line each
-lf help desktop --all --json              # every Desktop command's arguments and result schema
+lf desktop view show 'wave:product'       # resolve a Dashboard query for your own host
+lf --task LOO-12 open --link --json       # target, fallback command, and route
+lf desktop events --json                  # stream Desktop window and pane changes
+lf help desktop --all --json              # full schema of every Desktop command
 ```
 
-`desktop view show`, `desktop dashboard` and `desktop layout` work without macOS
-or a running Desktop; they read and write the same saved Dashboards Desktop
-uses. A program running in a Desktop shell can report its own state with
-Program Status (OSC 7501, Rex's protocol); a blocked report marks the pane available.
+Programs running in a Desktop shell can also emit OSC 7501 (Rex's Program
+Status protocol) to mark a pane available when waiting for input.
 
 ## Reference
 
-| `lf desktop` exit | Means |
+| `lf desktop` exit | Meaning |
 |---|---|
 | 0 | Done |
-| 1 | Failed, or Desktop speaks another API version (update it) |
-| 2 | Bad arguments or expression |
-| 3 | Task, window, pane or tab missing or ambiguous; nothing changed |
-| 4 | Desktop unreachable: not running, not macOS, or not answering |
+| 1 | Failed, or Desktop API version mismatch (update Desktop) |
+| 2 | Bad arguments or query |
+| 3 | Target missing or ambiguous; nothing changed |
+| 4 | Desktop unreachable (not running or not macOS) |
 
-`lf desktop actions` lists every verb with its arguments and default keys. Full
-arguments: [`lf open`](lf-reference.md#lf-open), [`lf desktop`](lf-reference.md#lf-desktop).
+Run `lf desktop actions` for every verb and shortcut. Full flags:
+[`lf open`](lf-reference.md#lf-open), [`lf desktop`](lf-reference.md#lf-desktop).
 
-Next: [Telemetry](telemetry.md), what your agents did and what it cost.
+Next: [Telemetry](telemetry.md): cost, context budgets, transcripts, and
+health checks.

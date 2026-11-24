@@ -16,7 +16,6 @@ use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 
 use crate::git::worktrees::{Listing, RemoteOutcome};
-use crate::journal::ReceiptCost;
 
 /// Samples kept after a trim. The file is trimmed when it holds twice as many.
 pub const RETAINED_SAMPLES: usize = 500;
@@ -30,15 +29,13 @@ pub struct Sample {
     pub json: bool,
     pub sync: bool,
     pub outcome: Outcome,
-    /// Process start to process end, including both Process receipts.
+    /// Process start to process end.
     pub total_ms: u64,
-    /// Process start until the listing began: launch, routing, Process admission
-    /// and the start receipt.
+    /// Process start until the listing began: launch, routing and Process
+    /// admission.
     pub startup_ms: u64,
     /// Absent when the command ended before the listing was read.
     pub listing: Option<ListingSample>,
-    /// Absent when the process was interrupted or had no Process.
-    pub receipts: Option<ReceiptSample>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -57,13 +54,6 @@ pub struct ListingSample {
     pub local_git_ms: u64,
     pub remote_ms: u64,
     pub remote: RemoteOutcome,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ReceiptSample {
-    /// Time spent writing the start and finish Process receipts to SQLite.
-    pub wait_ms: u64,
-    pub unrecorded: u32,
 }
 
 #[derive(Debug)]
@@ -94,7 +84,7 @@ pub fn begin(repo: &Path, json: bool, sync: bool) {
         startup,
         listing: None,
     });
-    crate::agent::register_interrupt_cleanup(|| write_pending(Outcome::Interrupted, None));
+    crate::agent::register_interrupt_cleanup(|| write_pending(Outcome::Interrupted));
 }
 
 pub fn listed(listing: &Listing) {
@@ -112,17 +102,17 @@ pub fn listed(listing: &Listing) {
     }
 }
 
-/// Write the sample once the process's finish receipt has been attempted.
-pub fn finish(succeeded: bool, receipts: Option<ReceiptCost>) {
+/// Write the sample once the process has recorded its end.
+pub fn finish(succeeded: bool) {
     let outcome = if succeeded {
         Outcome::Succeeded
     } else {
         Outcome::Failed
     };
-    write_pending(outcome, receipts);
+    write_pending(outcome);
 }
 
-fn write_pending(outcome: Outcome, receipts: Option<ReceiptCost>) {
+fn write_pending(outcome: Outcome) {
     let Some(pending) = PENDING
         .lock()
         .expect("listing timing mutex poisoned")
@@ -140,10 +130,6 @@ fn write_pending(outcome: Outcome, receipts: Option<ReceiptCost>) {
         total_ms: crate::journal::process_elapsed().map_or(0, millis),
         startup_ms: millis(pending.startup),
         listing: pending.listing,
-        receipts: receipts.map(|cost| ReceiptSample {
-            wait_ms: millis(cost.waited),
-            unrecorded: cost.unrecorded,
-        }),
     };
     if let Err(error) = append(&crate::store::lf_home_dir(), &sample) {
         tracing::debug!(%error, "listing timing sample not written");
@@ -217,13 +203,10 @@ pub struct Group {
     /// Over the samples that reached the listing; `None` when none did.
     pub local_git_ms: Option<Spread>,
     pub remote_ms: Option<Spread>,
-    /// Over the samples whose receipts were attempted.
-    pub receipt_ms: Option<Spread>,
     pub failed: usize,
     pub interrupted: usize,
     pub remote_timed_out: usize,
     pub remote_unavailable: usize,
-    pub receipts_unrecorded: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -267,7 +250,6 @@ pub fn report(home: &Path) -> std::io::Result<Report> {
         .into_iter()
         .map(|((repo, version, json, sync), samples)| {
             let listings = || samples.iter().filter_map(|sample| sample.listing);
-            let receipts = || samples.iter().filter_map(|sample| sample.receipts);
             let count = |outcome| {
                 samples
                     .iter()
@@ -289,12 +271,10 @@ pub fn report(home: &Path) -> std::io::Result<Report> {
                 startup_ms: total(|sample| sample.startup_ms),
                 local_git_ms: spread(listings().map(|l| l.local_git_ms).collect()),
                 remote_ms: spread(listings().map(|l| l.remote_ms).collect()),
-                receipt_ms: spread(receipts().map(|r| r.wait_ms).collect()),
                 failed: count(Outcome::Failed),
                 interrupted: count(Outcome::Interrupted),
                 remote_timed_out: remote(RemoteOutcome::TimedOut),
                 remote_unavailable: remote(RemoteOutcome::Unavailable),
-                receipts_unrecorded: receipts().filter(|r| r.unrecorded > 0).count(),
             }
         })
         .collect();
@@ -327,10 +307,6 @@ mod tests {
                 remote_ms: total_ms / 4,
                 remote: RemoteOutcome::Answered,
             }),
-            receipts: Some(ReceiptSample {
-                wait_ms: 20,
-                unrecorded: 0,
-            }),
         }
     }
 
@@ -343,7 +319,6 @@ mod tests {
         let slow = Sample {
             outcome: Outcome::Interrupted,
             listing: None,
-            receipts: None,
             ..sample(44_000)
         };
         append(home.path(), &slow).unwrap();
@@ -354,10 +329,6 @@ mod tests {
                 local_git_ms: 400,
                 remote_ms: 10_000,
                 remote: RemoteOutcome::TimedOut,
-            }),
-            receipts: Some(ReceiptSample {
-                wait_ms: 15_000,
-                unrecorded: 2,
             }),
             ..sample(25_500)
         };
@@ -382,8 +353,7 @@ mod tests {
         // The interrupted run never reached the listing.
         assert_eq!(text.local_git_ms.unwrap().max, 1_000);
         assert!(json.json);
-        assert_eq!((json.remote_timed_out, json.receipts_unrecorded), (1, 1));
-        assert_eq!(json.receipt_ms.unwrap().median, 15_000);
+        assert_eq!(json.remote_timed_out, 1);
     }
 
     #[test]

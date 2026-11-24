@@ -1,4 +1,5 @@
 import SwiftUI
+import CoreText
 
 public enum Spacing {
     public static let xxs: CGFloat = 2
@@ -15,6 +16,12 @@ public enum HitTarget {
     public static let minimum: CGFloat = 24
     public static let comfortable: CGFloat = 32
     public static let touch: CGFloat = 44
+    /// A button's or a row's height on this platform.
+    #if os(iOS)
+    public static let control: CGFloat = touch
+    #else
+    public static let control: CGFloat = minimum
+    #endif
 }
 
 public enum ZIndex {
@@ -26,78 +33,125 @@ public enum ZIndex {
 }
 
 public enum CornerRadius {
-    public static let sm: CGFloat = 4
-    public static let md: CGFloat = 8
-    public static let lg: CGFloat = 12
-    public static let xl: CGFloat = 16
-    public static let full: CGFloat = 9999
+    /// Buttons, fields, chips.
+    public static let control: CGFloat = 4
+    /// Rows and their selection.
+    public static let row: CGFloat = 8
+    /// Panes and cards.
+    public static let pane: CGFloat = 12
+    /// Popovers, palettes, sheets.
+    public static let floating: CGFloat = 16
 }
 
-/// Bundled faces (see `AppFontRegistration`): Cormorant Garamond Regular /
-/// Medium / SemiBold, Lato Regular / Bold, JetBrains Mono Regular. Request only
-/// those weights; `.semibold` or `.medium` on Lato and any weight on the mono
-/// face are synthesized and render heavier than the design.
+/// Bundled faces (see `AppFontRegistration`): Old Standard TT Regular, Atkinson
+/// Hyperlegible Next Regular / Italic / SemiBold / SemiBold Italic, Spline Sans
+/// Mono Regular / Bold / Italic / Bold Italic. Request only those; any other
+/// weight is synthesized by CoreText and renders heavier than the design.
 ///
-/// The workspace ramp has seven steps, serif on three of them and nothing
-/// between 17 and 26 on purpose:
+/// The ramp (DESIGN.md), serif on two steps and applied only with `.serif(_:)`.
+/// The step names are the same on each platform; iPhone steps follow Dynamic Type.
 ///
-/// | step        | face          | size |
-/// |-------------|---------------|------|
-/// | display     | Cormorant 500 | 34   |
-/// | title       | Cormorant 500 | 26   |
-/// | lede        | Cormorant 500 | 17   |
-/// | text        | Lato 400      | 13   |
-/// | textStrong  | Lato 700      | 13   |
-/// | meta        | Lato 400      | 11   |
-/// | label       | Lato 700 caps | 11   |
-/// | mono        | JetBrains     | 12   |
+/// | step        | face                | Mac | iPhone |
+/// |-------------|---------------------|-----|--------|
+/// | display     | Old Standard        | 34  | 34     |
+/// | title       | Old Standard        | 26  | 26     |
+/// | lede        | Atkinson 600        | 17  | 20     |
+/// | text        | Atkinson 400        | 13  | 17     |
+/// | textStrong  | Atkinson 600        | 13  | 17     |
+/// | meta        | Atkinson 400        | 11  | 13     |
+/// | mono        | Spline Sans Mono    | 12  | 14     |
+/// | terminal    | Spline Sans Mono    | 13  | 12     |
 public enum Typography {
-    public static let serifFamily = "Cormorant Garamond"
-    public static let sansFamily = "Lato"
-    public static let monoFamily = "JetBrains Mono"
+    public static let serifFamily = "Old Standard TT"
+    public static let sansFamily = "Atkinson Hyperlegible Next"
+    public static let monoFamily = "Spline Sans Mono"
 
-    /// Wave page title.
-    public static let display = sectionTitle(34)
-    /// Task page title.
-    public static let title = sectionTitle(26)
-    /// Wave objective and other serif reading copy.
-    public static let lede = sectionTitle(17)
+    // Select bundled faces by PostScript name; family/weight matching can choose
+    // an account-installed face that is unavailable inside the app sandbox.
+    // AppKit and UIKit fields name them too.
+    public static let serifFace = "OldStandardTT-Regular"
+    public static let sansFace = "AtkinsonHyperlegibleNext-Regular"
+    public static let sansStrongFace = "AtkinsonHyperlegibleNext-SemiBold"
+    public static let monoFace = "SplineSansMono-Regular"
+
+    /// A document's first heading; the text typed in New Task.
+    public static let lede = step(sansStrongFace, mac: 17, iPhone: 20, .title3)
     /// Everything else.
-    public static let text = body(13)
-    /// Row titles when selected, Session names.
-    public static let textStrong = strong(13)
-    /// Meta, ranks, IDs.
-    public static let meta = caption(11)
-    /// Section headings and table heads; callers add `.textCase(.uppercase)`
-    /// and `.tracking(0.66)` (0.06em).
-    public static let label = strong(11)
-    /// Skill names, IDs, chips, terminal chrome.
-    public static let mono = code(12)
+    public static let text = step(sansFace, mac: textSize, iPhone: 17, .body)
+    /// The selected row's title, a pane's name.
+    public static let textStrong = step(sansStrongFace, mac: textSize, iPhone: 17, .body)
+    /// Counts, times, secondary facts.
+    public static let meta = step(sansFace, mac: 11, iPhone: 13, .footnote)
+    /// Inline IDs, paths, commands.
+    public static let mono = step(monoFace, mac: 12, iPhone: 14, .subheadline)
+    /// The Mac text step in points for AppKit fields.
+    public static let textSize: CGFloat = 13
+    /// Ghostty's `font-size` default; the person's configuration replaces it on the Mac.
+    #if os(iOS)
+    public static let terminalSize: CGFloat = 12
+    #else
+    public static let terminalSize: CGFloat = 13
+    #endif
 
-    // Select bundled faces by name; family/weight matching can choose an
-    // account-installed face that is unavailable inside the app sandbox.
-    public static func heroTitle(_ size: CGFloat = 32) -> Font {
-        .custom("CormorantGaramond-SemiBold", size: size)
+    /// A sans or mono step: fixed on the Mac, following Dynamic Type's `style` on iPhone.
+    private static func step(_ face: String, mac: CGFloat, iPhone: CGFloat, _ style: Font.TextStyle) -> Font {
+        #if os(iOS)
+        .custom(face, size: iPhone, relativeTo: style)
+        #else
+        .custom(face, fixedSize: mac)
+        #endif
+    }
+}
+
+/// The two serif steps. They are not `Font` values: serif is set only through
+/// `.serif(_:)`, which applies the face with common ligatures off ("fl" stays two
+/// letters in "Loopflow") and its −3% tracking together.
+public enum SerifStep: Sendable {
+    /// Wave name, "What do you want?".
+    case display
+    /// Task title in the Brief, dashboard name, state titles.
+    case title
+
+    public var size: CGFloat {
+        switch self {
+        case .display: 34
+        case .title: 26
+        }
     }
 
-    public static func sectionTitle(_ size: CGFloat = 20) -> Font {
-        .custom("CormorantGaramond-Medium", size: size)
+    var textStyle: Font.TextStyle {
+        switch self {
+        case .display: .largeTitle
+        case .title: .title
+        }
+    }
+}
+
+public extension View {
+    /// The serif face at a ramp step, ligatures off and tracked −3%.
+    func serif(_ step: SerifStep) -> some View {
+        modifier(Serif(step))
+    }
+}
+
+private struct Serif: ViewModifier {
+    let step: SerifStep
+    /// Dynamic Type's factor for the step; 1 on the Mac, which has none.
+    @ScaledMetric private var scale: CGFloat
+
+    init(_ step: SerifStep) {
+        self.step = step
+        _scale = ScaledMetric(wrappedValue: 1, relativeTo: step.textStyle)
     }
 
-    public static func body(_ size: CGFloat = 14) -> Font {
-        .custom(sansFamily, size: size)
-    }
-
-    public static func strong(_ size: CGFloat = 14) -> Font {
-        .custom("Lato-Bold", size: size)
-    }
-
-    public static func caption(_ size: CGFloat = 12) -> Font {
-        .custom(sansFamily, size: size)
-    }
-
-    public static func code(_ size: CGFloat = 13) -> Font {
-        .custom(monoFamily, size: size)
+    func body(content: Content) -> some View {
+        let size = step.size * scale
+        let descriptor = CTFontDescriptorCreateCopyWithFeature(
+            CTFontDescriptorCreateWithNameAndSize(Typography.serifFace as CFString, size),
+            NSNumber(value: kLigaturesType),
+            NSNumber(value: kCommonLigaturesOffSelector)
+        )
+        content.font(Font(CTFontCreateWithFontDescriptor(descriptor, size, nil))).tracking(-0.03 * size)
     }
 }
 
@@ -143,7 +197,7 @@ public extension View {
         frame(minWidth: HitTarget.minimum, minHeight: HitTarget.minimum)
     }
 
-    func keyboardFocusRing(_ isFocused: Bool, cornerRadius: CGFloat = CornerRadius.md) -> some View {
+    func keyboardFocusRing(_ isFocused: Bool, cornerRadius: CGFloat = CornerRadius.row) -> some View {
         modifier(KeyboardFocusRing(isFocused: isFocused, cornerRadius: cornerRadius))
     }
 }
@@ -157,71 +211,10 @@ private struct KeyboardFocusRing: ViewModifier {
         content.overlay {
             RoundedRectangle(cornerRadius: cornerRadius)
                 .strokeBorder(palette.keyboardFocus, lineWidth: 2)
-                .padding(-3)
+                .padding(-Spacing.xs)
                 .opacity(isFocused ? 1 : 0)
                 .allowsHitTesting(false)
         }
     }
 }
 
-public struct DarkButtonStyle: ButtonStyle {
-    @Environment(\.isFocused) private var focused
-    @Environment(\.palette) private var palette
-
-    @State private var hovering = false
-
-    public init() {}
-
-    public func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(Typography.body())
-            .foregroundStyle(palette.accentText)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 8)
-            .background(
-                RoundedRectangle(cornerRadius: CornerRadius.md)
-                    .fill(configuration.isPressed ? palette.accentPressed : (hovering ? palette.accentHover : palette.accent))
-            )
-            .onHover { hovering = $0 }
-            .keyboardFocusRing(focused)
-    }
-}
-
-public struct GhostButtonStyle: ButtonStyle {
-    @Environment(\.isFocused) private var focused
-    @Environment(\.palette) private var palette
-
-    public init() {}
-
-    public func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(Typography.body())
-            .foregroundStyle(palette.actionInk)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 8)
-            .background(
-                RoundedRectangle(cornerRadius: CornerRadius.md)
-                    .fill(configuration.isPressed ? palette.surfaceMuted : Color.clear)
-            )
-            .keyboardFocusRing(focused)
-    }
-}
-
-public struct DestructiveButtonStyle: ButtonStyle {
-    @Environment(\.palette) private var palette
-    @Environment(\.isFocused) private var focused
-    public init() {}
-
-    public func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(Typography.body())
-            .foregroundStyle(palette.failure)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 8)
-            .background(
-                RoundedRectangle(cornerRadius: CornerRadius.md)
-                    .strokeBorder(palette.failure.opacity(configuration.isPressed ? 0.8 : 0.5), lineWidth: 1)
-            )
-            .keyboardFocusRing(focused)
-    }
-}

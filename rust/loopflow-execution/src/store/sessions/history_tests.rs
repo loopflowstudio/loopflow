@@ -1,5 +1,4 @@
 //! Projection checks use the application's full capture manifest.
-use crate::session::SessionEventKind;
 pub use loopflow_storage::test_fixture::record_captured_start;
 use rusqlite::params;
 use serde_json::json;
@@ -90,15 +89,13 @@ fn history_limits_precede_payload_reads_and_keep_unfinished_work_and_exact_calle
                 .unwrap();
         record_captured_start(&store, &session.id, &at.to_string());
         if at != 1 {
-            store
-                .record_session_event(
-                    &session.id,
-                    &"thread".into(),
-                    &at.to_string(),
-                    SessionEventKind::Completed,
-                    &json!({"status":"completed"}),
-                )
-                .unwrap();
+            store.record_turn_completion(
+                &session.id,
+                &"thread".into(),
+                &at.to_string(),
+                time::OffsetDateTime::now_utc().unix_timestamp(),
+                &json!({"status":"completed"}),
+            );
         }
     }
     let (recent, truncated) =
@@ -139,10 +136,14 @@ fn history_limits_precede_payload_reads_and_keep_unfinished_work_and_exact_calle
     );
     // Corrupt body evidence outside the selected budget cannot break a list;
     // exact detail still reports that real error instead of hiding it.
-    store.conn.lock().unwrap().execute(
-            "INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload,captured_event)
-             SELECT session_id,'observed',receipt_key||':events.jsonl:1',10,'{',seq FROM session_events
-             WHERE kind='captured' AND session_id='conversation-10'", []).unwrap();
+    store
+        .execute_history(
+            "INSERT INTO session_history(session_id,receipt_key,observed_at,payload,captured_event)
+             SELECT session_id,receipt_key||':events.jsonl:1',10,'{',seq FROM session_events
+             WHERE kind='captured' AND session_id='conversation-10'",
+            [],
+        )
+        .unwrap();
     assert_eq!(
         crate::store::sessions::recent_conversation_history(&store, None, None, None, 0, 5)
             .unwrap()
@@ -160,7 +161,8 @@ fn history_limits_precede_payload_reads_and_keep_unfinished_work_and_exact_calle
             .lock()
             .unwrap()
             .execute(
-                "UPDATE processes SET completed_at=100 WHERE id IN (SELECT lf_process_id FROM session_events WHERE session_id='conversation-1' AND kind='started')",
+                "UPDATE agent_sessions SET agent_launcher_lf_process_id=(SELECT lf_process_id FROM history.turns WHERE session_id='conversation-1' LIMIT 1),
+                    agent_started_at=1,agent_ended_at=100 WHERE id='conversation-1'",
                 [],
             )
             .unwrap();
@@ -185,7 +187,7 @@ fn history_limits_precede_payload_reads_and_keep_unfinished_work_and_exact_calle
     .is_err());
 }
 #[test]
-fn process_completion_ends_inputs_without_exit_events() {
+fn an_agent_end_ends_its_launchers_inputs_without_exit_events() {
     for captured in [true, false] {
         let home = tempfile::tempdir().unwrap();
         let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
@@ -212,9 +214,9 @@ fn process_completion_ends_inputs_without_exit_events() {
             let conn = store.conn.lock().unwrap();
             conn.execute("UPDATE agent_sessions SET input_published=?1", [captured])
                 .unwrap();
-            conn.execute(
-                    "INSERT INTO session_events(session_id,provider_thread,provider_turn,kind,receipt_key,observed_at,payload,captured_event,lf_process_id)
-                     SELECT id,'thread','turn','started','',10,'{}',CASE WHEN ?1 THEN current_capture END,?2 FROM agent_sessions WHERE id='conversation'",
+            store.execute_history(
+"INSERT INTO turns(session_id,provider_thread,provider_turn,started_at,captured_event,lf_process_id)
+                     SELECT id,'thread','turn',10,CASE WHEN ?1 THEN current_capture END,?2 FROM agent_sessions WHERE id='conversation'",
                     rusqlite::params![captured,process],
                 ).unwrap();
         }
@@ -224,23 +226,24 @@ fn process_completion_ends_inputs_without_exit_events() {
         };
         assert!(completed_since().is_empty());
         // A turn with unknown ownership must not fall back to its ended creator.
-        store.conn.lock().unwrap().execute(
-                "UPDATE session_events SET lf_process_id=NULL WHERE session_id='conversation' AND kind='started'",
+        store
+            .execute_history(
+                "UPDATE turns SET lf_process_id=NULL WHERE session_id='conversation'",
                 [],
-            ).unwrap();
+            )
+            .unwrap();
         assert!(completed_since().is_empty());
-        store.conn.lock().unwrap().execute(
-                "UPDATE session_events SET lf_process_id=?1 WHERE session_id='conversation' AND kind='started'",
+        store
+            .execute_history(
+                "UPDATE turns SET lf_process_id=?1 WHERE session_id='conversation'",
                 [&process],
-            ).unwrap();
+            )
+            .unwrap();
         // An unrelated attachment's exit cannot finish this input.
         store
-            .conn
-            .lock()
-            .unwrap()
-            .execute(
-                "INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload)
-                 VALUES('conversation','observed','attachment:other:exit',30,'{}')",
+            .execute_history(
+                "INSERT INTO session_history(session_id,receipt_key,observed_at,payload)
+                 VALUES('conversation','attachment:other:exit',30,'{}')",
                 [],
             )
             .unwrap();
@@ -250,7 +253,8 @@ fn process_completion_ends_inputs_without_exit_events() {
             .lock()
             .unwrap()
             .execute(
-                "UPDATE processes SET completed_at=30 WHERE id=?1",
+                "UPDATE agent_sessions SET agent_launcher_lf_process_id=?1,agent_started_at=1,agent_ended_at=30
+                 WHERE id='conversation'",
                 [&process],
             )
             .unwrap();
@@ -271,34 +275,20 @@ fn aggregate_history_discovers_unattributed_native_receipts_without_a_capture() 
     let counts = json!({"inputTokens":12,"outputTokens":3,
             "cachedInputTokens":0,"reasoningOutputTokens":0});
     for (turn, at) in [("old", 10), ("recent", 100)] {
-        store
-            .record_session_event(
-                "conversation",
-                &"thread".into(),
-                turn,
-                SessionEventKind::Usage,
-                &json!({"total":counts,"last":counts}),
-            )
-            .unwrap();
-        store
-            .record_session_event(
-                "conversation",
-                &"thread".into(),
-                turn,
-                SessionEventKind::Completed,
-                &json!({"status":"completed"}),
-            )
-            .unwrap();
-        // Simulated observation times exercise the public reader's window.
-        store
-            .conn
-            .lock()
-            .unwrap()
-            .execute(
-                "UPDATE session_events SET observed_at=?1 WHERE provider_turn=?2",
-                (at, turn),
-            )
-            .unwrap();
+        store.record_turn_usage(
+            "conversation",
+            &"thread".into(),
+            turn,
+            at,
+            &json!({"total":counts,"last":counts}),
+        );
+        store.record_turn_completion(
+            "conversation",
+            &"thread".into(),
+            turn,
+            at,
+            &json!({"status":"completed"}),
+        );
     }
     let rows =
         crate::store::sessions::conversation_history(&store, None, None, None, None, 50, true)
@@ -362,10 +352,13 @@ fn aggregate_history_discovers_unattributed_native_receipts_without_a_capture() 
     .unwrap();
     // Imported native history can establish Work without a capture. That
     // turn cannot lend its attribution to another unlinked receipt.
-    store.conn.lock().unwrap().execute(
-            "INSERT INTO session_events(session_id,provider_thread,provider_turn,kind,receipt_key,wave_id,observed_at,payload)
-             VALUES('conversation','thread','owned','started','',?1,110,'{}')", [wave.as_str()],
-        ).unwrap();
+    store
+        .execute_history(
+            "INSERT INTO turns(session_id,provider_thread,provider_turn,wave_id,started_at)
+             VALUES('conversation','thread','owned',?1,110)",
+            [wave.as_str()],
+        )
+        .unwrap();
     let scoped = crate::store::sessions::conversation_history(
         &store,
         Some(wave.as_str()),
@@ -389,26 +382,9 @@ fn no_decoded_time_follows_its_inputs_bound() {
     let old = crate::session_record::new_artifact_key();
     let session = store.test_session("old", &old);
     store.test_session("new", &crate::session_record::new_artifact_key());
-    store
-        .record_session_event(
-            "new",
-            &"thread".into(),
-            "turn",
-            SessionEventKind::Started,
-            &json!({}),
-        )
-        .unwrap();
     // Captures are immutable and stamped now; later facts follow them.
     let now = time::OffsetDateTime::now_utc().unix_timestamp();
-    store
-        .conn
-        .lock()
-        .unwrap()
-        .execute(
-            "UPDATE session_events SET observed_at=?1 WHERE session_id='new' AND kind='started'",
-            [now + 100],
-        )
-        .unwrap();
+    store.record_turn_start("new", &"thread".into(), "turn", now + 100);
     let ended_at = time::OffsetDateTime::from_unix_timestamp(now + 200).unwrap();
     store
         .retain_session_observation(
@@ -477,25 +453,21 @@ fn native_usage_cannot_skip_a_turn_without_a_notification_for_its_baseline() {
     for (turn, total, last) in [("a", Some(20), 20), ("b", None, 30), ("c", Some(60), 10)] {
         record_captured_start(&store, "conversation", turn);
         if let Some(total) = total {
-            store
-                .record_session_event(
-                    "conversation",
-                    &"thread".into(),
-                    turn,
-                    SessionEventKind::Usage,
-                    &json!({"total":counts(total),"last":counts(last)}),
-                )
-                .unwrap();
-        }
-        store
-            .record_session_event(
+            store.record_turn_usage(
                 "conversation",
                 &"thread".into(),
                 turn,
-                SessionEventKind::Completed,
-                &json!({"status":"completed"}),
-            )
-            .unwrap();
+                2,
+                &json!({"total":counts(total),"last":counts(last)}),
+            );
+        }
+        store.record_turn_completion(
+            "conversation",
+            &"thread".into(),
+            turn,
+            3,
+            &json!({"status":"completed"}),
+        );
     }
     // B's usage is unknown: 20 for A and C's 10-token suffix.
     let usage = crate::store::sessions::input_history(&store, &input)
@@ -544,9 +516,9 @@ fn history_windows_find_inputs_by_each_start_and_end() {
                 ("terminal.json", terminal, terminal_payload),
             ] {
                 let Some(observed) = observed else { continue };
-                conn.execute(
-                        "INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload,captured_event)
-                         VALUES(?1,'observed',?2,?3,?4,?5)",
+                store.execute_history(
+"INSERT INTO session_history(session_id,receipt_key,observed_at,payload,captured_event)
+                         VALUES(?1,?2,?3,?4,?5)",
                         params![id, format!("{input}:{file}"), observed, payload.to_string(), captured_event],
                     )
                     .unwrap();
@@ -591,6 +563,7 @@ fn task_history_reads_every_row_naming_the_task() {
         let id = loopflow_model::durable::TaskId::new();
         store
             .create_task(&loopflow_storage::work::task::NewTask {
+                parent_task_id: None,
                 repository_id: repository.clone(),
                 id: id.clone(),
                 project_id: None,
@@ -635,17 +608,18 @@ fn task_history_reads_every_row_naming_the_task() {
             if let Some(task) = manifest {
                 let payload = json!({"input_id":input,"source":"manifest.json",
                         "evidence":{"artifact_key":input,"schema_version":1}});
-                conn.execute(
-                        "INSERT INTO session_events(session_id,kind,receipt_key,task_id,observed_at,payload,captured_event)
-                         VALUES(?1,'observed',?2,?3,10,?4,?5)",
+                store.execute_history(
+"INSERT INTO session_history(session_id,receipt_key,task_id,observed_at,payload,captured_event)
+                         VALUES(?1,?2,?3,10,?4,?5)",
                         params![id, format!("{input}:manifest.json"), task.as_str(), payload.to_string(), captured],
                     )
                     .unwrap();
             }
             if let Some(task) = origin {
-                conn.execute(
-                        "INSERT INTO session_events(session_id,provider_thread,provider_turn,kind,receipt_key,
-                         task_id,observed_at,payload,captured_event) VALUES(?1,'thread','turn','started','',?2,10,'{}',?3)",
+                store
+                    .execute_history(
+                        "INSERT INTO turns(session_id,provider_thread,provider_turn,
+                         task_id,started_at,captured_event) VALUES(?1,'thread','turn',?2,10,?3)",
                         params![id, task.as_str(), captured],
                     )
                     .unwrap();
@@ -657,9 +631,10 @@ fn task_history_reads_every_row_naming_the_task() {
                 [],
             )
             .unwrap();
-        conn.execute(
-                "INSERT INTO session_events(session_id,provider_thread,provider_turn,kind,receipt_key,
-                 task_id,observed_at,payload) VALUES('native','thread','turn','started','',?1,10,'{}')",
+        store
+            .execute_history(
+                "INSERT INTO turns(session_id,provider_thread,provider_turn,
+                 task_id,started_at) VALUES('native','thread','turn',?1,10)",
                 [task.as_str()],
             )
             .unwrap();

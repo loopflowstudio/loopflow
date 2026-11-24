@@ -98,9 +98,8 @@ pub fn explain(
     wave: Option<&str>,
     task: Option<&str>,
     session: Option<&str>,
-    process: Option<&str>,
 ) -> Result<loopflow_execution::ops::context::ContextExplanation> {
-    explain_in(&std::env::current_dir()?, wave, task, session, process)
+    explain_in(&std::env::current_dir()?, wave, task, session)
 }
 
 /// [`explain`] as if run in `cwd`.
@@ -109,14 +108,10 @@ pub fn explain_in(
     wave: Option<&str>,
     task: Option<&str>,
     session: Option<&str>,
-    process: Option<&str>,
 ) -> Result<loopflow_execution::ops::context::ContextExplanation> {
     anyhow::ensure!(
-        (wave.is_some() || task.is_some()) as usize
-            + session.is_some() as usize
-            + process.is_some() as usize
-            <= 1,
-        "select Work, a Session, or a Process, not several independent targets"
+        !((wave.is_some() || task.is_some()) && session.is_some()),
+        "select Work or a Session, not both"
     );
     let runtime = tokio::runtime::Runtime::new()?;
     Ok(runtime.block_on(async {
@@ -128,7 +123,6 @@ pub fn explain_in(
                     cwd,
                     loopflow_execution::ops::WorkSelection { task, wave },
                     session,
-                    process,
                 )
                 .await
             }
@@ -264,22 +258,40 @@ pub fn explain_task_checkout(
 /// server, which records it. Every launch then reads its own news from the
 /// store, in this process: the Session's unread steers and what changed on its
 /// Tasks. The context block comes from checkout files.
+/// `harness` names the provider whose hook this is; it reads the callback and
+/// shapes the reply. A hook that names none sends Claude's shape.
 pub fn emit_block(
     delivery: Option<&std::path::Path>,
     moment: loopflow_execution::context_block::ContextMoment,
+    harness: Option<loopflow_harness::HarnessKind>,
 ) -> Result<()> {
     use crate::server::wire::BoundaryMoment;
-    use loopflow_execution::context_block::ContextMoment;
-    let input = read_callback()?;
-    if input.get("agent_id").is_some_and(|id| !id.is_null()) {
+    use loopflow_execution::context_block::{reported_thread_path, ContextMoment};
+    use loopflow_execution::harness::HookCallback;
+    let harness = loopflow_execution::harness::launcher(
+        harness.unwrap_or(loopflow_harness::HarnessKind::Claude),
+    );
+    let raw = read_callback()?;
+    let thread_file = delivery_path(delivery, &raw)
+        .ok()
+        .map(|path| reported_thread_path(&path));
+    let callback = harness.hook_callback(raw, moment, thread_file.as_deref());
+    let Some(HookCallback {
+        moment,
+        payload: input,
+        prompt,
+    }) = callback
+    else {
         return Ok(());
-    }
+    };
     let (path, delivery) = load_delivery(delivery, &input)?;
-    // lf asks only a bare Codex launch for its thread, by creating the file
-    // beside its delivery. Writing it opens no store; a failed write only
-    // leaves the conversation unresumable.
+    // A launch whose provider names the conversation keeps it in the thread
+    // file beside its delivery. A bare Codex launch creates the file to ask,
+    // and the start callback fills it here; Antigravity's `hook_callback`
+    // keeps it on the conversation the person is in. Writing it opens no store; a failed write
+    // only leaves the conversation unresumable.
     if moment == ContextMoment::Start {
-        let reported = loopflow_execution::context_block::reported_thread_path(&path);
+        let reported = reported_thread_path(&path);
         if let (Some(thread), true) = (input["session_id"].as_str(), reported.exists()) {
             if let Err(error) = std::fs::write(&reported, thread) {
                 tracing::warn!(%error, "cannot keep the provider's thread for resume");
@@ -324,6 +336,18 @@ pub fn emit_block(
         }
         _ => false,
     };
+    // The start was also the prompt: the server marks the turn working.
+    if prompt && held.is_some() {
+        let mut opening = input.clone();
+        opening["hook_event_name"] = "UserPromptSubmit".into();
+        ask_server(
+            &path,
+            &delivery.home,
+            BoundaryMoment::Tool,
+            held.as_ref(),
+            &opening,
+        );
+    }
     if moment == ContextMoment::Stop {
         return Ok(());
     }
@@ -359,9 +383,7 @@ pub fn emit_block(
         _ => prefix,
     };
     let event = input["hook_event_name"].as_str().unwrap_or("SessionStart");
-    let output = serde_json::json!({"hookSpecificOutput": {
-        "hookEventName": event, "additionalContext": text,
-    }});
+    let output = harness.hook_reply(event, &text);
     write_output(format!("{output}\n").as_bytes())?;
     // Printed first: a hook that dies between the two leaves a claim that
     // lapses, and a steer that arrives twice beats one that never arrives.
@@ -416,6 +438,19 @@ fn read_news(
     {
         tracing::warn!(session = adapter.session, %error, "Task updates unwritten at this boundary");
     }
+    // A start the server recorded on a conversation it can wake leaves the
+    // waiting steers to that wake, which runs them as a turn. A chat or a
+    // worker reads them here; the next boundary claims what the wake could
+    // not deliver.
+    if !unrecorded && matches!(boundary, NativeBoundary::Select { .. }) {
+        let wakes = store
+            .idle_conversation_candidates(Some(&adapter.session))?
+            .iter()
+            .any(|idle| idle.conversation.adapter.agent_process_id == adapter.agent_process_id);
+        if wakes {
+            return Ok(News::default());
+        }
+    }
     let steers =
         loopflow_execution::steer::claim(&store, &delivery.repo, adapter, thread, boundary)?;
     Ok(News {
@@ -450,13 +485,15 @@ fn ask_server(
             last: span.last_miss,
         }),
         printed: Vec::new(),
-        inbox: adapter.and_then(|_| claude_inbox()),
+        inbox: adapter
+            .and_then(|_| claude_inbox())
+            .map(loopflow_execution::steer::Inbox::Claude),
     }));
     let answered = crate::server::socket_path().and_then(|socket| {
         loopflow_execution::machine::client::hook_request(
             &socket,
             operation,
-            crate::server::boundary::HOOK_DEADLINE,
+            loopflow_execution::machine::client::HOOK_DEADLINE,
         )
     });
     match answered {
@@ -530,10 +567,19 @@ fn load_delivery(
     std::path::PathBuf,
     loopflow_execution::context_block::ContextDelivery,
 )> {
+    let path = delivery_path(path, input)?;
+    let delivery = loopflow_execution::context_block::ContextDelivery::load(&path)?;
+    Ok((path, delivery))
+}
+
+/// The delivery file a callback names.
+fn delivery_path(
+    path: Option<&std::path::Path>,
+    input: &serde_json::Value,
+) -> Result<std::path::PathBuf> {
     // A Codex conversation's own binding wins over its app-server's launch
     // file, which a conversation started there later falls back to.
-    let path = path
-        .map(std::path::Path::to_path_buf)
+    path.map(std::path::Path::to_path_buf)
         .or_else(|| {
             input["session_id"]
                 .as_str()
@@ -551,9 +597,7 @@ fn load_delivery(
         })
         .ok_or_else(|| {
             anyhow::anyhow!("Provider callback has no launch context or native session binding")
-        })?;
-    let delivery = loopflow_execution::context_block::ContextDelivery::load(&path)?;
-    Ok((path, delivery))
+        })
 }
 
 /// A stalled provider cannot retain the takeover fence through an unread pipe.
@@ -619,7 +663,7 @@ fn write_output(mut bytes: &[u8]) -> std::io::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::load_delivery;
+    use super::{load_delivery, read_news};
     use loopflow_execution::context_block::{ContextDelivery, ContextMoment};
 
     #[test]
@@ -714,5 +758,64 @@ mod tests {
             .1;
             assert_eq!(restored, contexts[index]);
         }
+    }
+
+    /// A reopened work session's start leaves its waiting steer to the wake,
+    /// which runs it as a turn; a start no server recorded, a chat's, reads it.
+    #[test]
+    fn a_wakeable_start_leaves_waiting_steers_to_the_wake() {
+        use loopflow_execution::process::attachment;
+        let _lock = loopflow_execution::journal::test_env_lock();
+        let _env = crate::test_ambient::EnvGuard::clear(&["LF_HOME"]);
+        let home = tempfile::tempdir().unwrap();
+        std::env::set_var("LF_HOME", home.path());
+        let store = loopflow_execution::store::opening::open_ephemeral(
+            &loopflow_execution::store::default_db_path(),
+        )
+        .unwrap();
+        store.test_session(
+            "session",
+            &loopflow_execution::session_record::new_artifact_key(),
+        );
+        let process = store.test_lf_process();
+        let claim =
+            attachment::claim_session_attachment(&store, "session", None, &process).unwrap();
+        store
+            .record_agent_process_identity("session", &claim, std::process::id(), 1)
+            .unwrap();
+        let adapter = store.reserve_steer_adapter("session", &claim).unwrap();
+        store
+            .with_provider_context(
+                &adapter,
+                "native",
+                loopflow_execution::steer::NativeBoundary::Activate { source: "startup" },
+                || Ok(()),
+            )
+            .unwrap();
+        store
+            .record_agent_inbox(
+                &adapter,
+                &loopflow_execution::steer::Inbox::Socket("/tmp/lf-wake-fixture/s".into()),
+            )
+            .unwrap();
+        assert!(store.record_first_boundary(&adapter).unwrap());
+        store
+            .save_session_steer("session", "Fixture author", "WAITING")
+            .unwrap();
+        let delivery = ContextDelivery {
+            identity: None,
+            repository: None,
+            repo: home.path().to_owned(),
+            home: home.path().to_owned(),
+            wave: None,
+            skill_file: None,
+            submitted_docs: None,
+            references: Vec::new(),
+        };
+        let start = serde_json::json!({"session_id":"native","hook_event_name":"SessionStart","source":"resume"});
+        let recorded = read_news(&delivery, &adapter, "native", &start, false).unwrap();
+        assert!(recorded.steers.is_none());
+        let chat = read_news(&delivery, &adapter, "native", &start, true).unwrap();
+        assert!(chat.steers.unwrap().1.text.contains("WAITING"));
     }
 }

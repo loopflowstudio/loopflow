@@ -74,7 +74,6 @@ pub fn run(args: &ShellRequest) -> Result<()> {
     );
     if *close {
         store.close_desktop_shell(id)?;
-        // An earlier build's owner ends itself on the recorded Close.
         if let Some(terminal) = &receipt.terminal {
             if store.terminal_running(terminal)? {
                 crate::transport::close_notice(terminal, "Shell closed")?;
@@ -93,7 +92,7 @@ pub fn run(args: &ShellRequest) -> Result<()> {
         None => false,
     };
     match receipt.terminal {
-        Some(terminal) if running => crate::transport::attach(&terminal, None, None, None),
+        Some(terminal) if running => crate::transport::attach(&terminal, None, Default::default()),
         terminal => {
             if let Some(terminal) = &terminal {
                 crate::transport::shell_history(terminal)?;

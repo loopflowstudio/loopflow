@@ -11,23 +11,44 @@ import Loopflow
 #if GHOSTTY_ENABLED
 import GhosttyKit
 
-enum GhosttyTerminalShortcut: String {
-    case copy = "c"
-    case paste = "v"
-    case find = "f"
+private let shortcutModifiers: NSEvent.ModifierFlags = [.command, .control, .option, .shift]
+
+enum GhosttyTerminalShortcut {
+    case copy, paste, find, cycleWindows
 
     init?(characters: String?, modifiers: NSEvent.ModifierFlags) {
-        let keys: NSEvent.ModifierFlags = [.command, .control, .option, .shift]
-        guard modifiers.intersection(keys) == .command,
-              let characters else { return nil }
-        self.init(rawValue: characters.lowercased())
+        switch (modifiers.intersection(shortcutModifiers), characters?.lowercased()) {
+        case (.command, "c"): self = .copy
+        case (.command, "v"): self = .paste
+        case (.command, "f"): self = .find
+        case (.command, "`"), ([.command, .shift], "~"): self = .cycleWindows
+        default: return nil
+        }
     }
 
-    /// ⌘` and ⌘⇧` cycle the app's windows, one per repository, as in every Mac app.
-    /// The terminal hands them back to AppKit instead of sending them to its PTY.
-    static func cyclesWindows(characters: String?, modifiers: NSEvent.ModifierFlags) -> Bool {
-        let held = modifiers.intersection([.command, .control, .option, .shift])
-        return (held == .command && characters == "`") || (held == [.command, .shift] && characters == "~")
+    /// AppKit fires a menu item that requires Shift for the same chord without it:
+    /// ⇧⌘↩ Zoom Pane answers ⌘↩ and ⇧⌘E Toggle Browser answers ⌘E. A chord that
+    /// no menu item names exactly belongs to the terminal. Enabled and hidden
+    /// states don't matter: AppKit validates at dispatch, and a disabled or
+    /// hidden item still consumes its chord.
+    static func shadowedByShiftedMenuItem(characters: String?, modifiers: NSEvent.ModifierFlags, in menu: NSMenu?) -> Bool {
+        let held = modifiers.intersection(shortcutModifiers)
+        guard !held.contains(.shift), let key = characters?.lowercased(), !key.isEmpty, let menu else { return false }
+        var shifted = false
+        func visit(_ menu: NSMenu) -> Bool {
+            for item in menu.items {
+                var required = item.keyEquivalentModifierMask.intersection(shortcutModifiers)
+                // An uppercase equivalent implies Shift.
+                if item.keyEquivalent != item.keyEquivalent.lowercased() { required.insert(.shift) }
+                if item.keyEquivalent.lowercased() == key {
+                    if required == held { return true }
+                    if required == held.union(.shift) { shifted = true }
+                }
+                if let submenu = item.submenu, visit(submenu) { return true }
+            }
+            return false
+        }
+        return !visit(menu) && shifted
     }
 }
 
@@ -193,6 +214,7 @@ final class GhosttyTerminalMount: NSView {
         terminal.frame = NSRect(x: 0, y: 0, width: bounds.width, height: max(0, bounds.height - searchHeight))
         let connectionHeight: CGFloat = terminal.connectionBar.isHidden ? 0 : min(36, terminal.frame.height)
         terminal.connectionBar.frame = NSRect(x: 8, y: terminal.frame.maxY - connectionHeight, width: max(0, bounds.width - 16), height: connectionHeight)
+        terminal.layoutConnectionBar()
         terminal.searchBar.frame = NSRect(x: 0, y: terminal.frame.maxY, width: bounds.width, height: searchHeight)
     }
 }
@@ -361,9 +383,9 @@ final class GhosttySurfacePool {
     }
 
     /// True only while the surface's child is still running. A provider killed
-    /// from another client (Move here in Warp or a second window) leaves the
-    /// surface displaying an exit banner; that must not read as live, and the
-    /// dead surface is freed so an explicit reopen relaunches.
+    /// from another client leaves the surface displaying an exit banner; that
+    /// must not read as live, and the dead surface is freed so an explicit
+    /// reopen relaunches.
     func hasSurface(_ id: TerminalIdentity) -> Bool {
         guard let view = views[id], let surface = view.surface else { return false }
         if ghostty_surface_process_exited(surface) {
@@ -571,18 +593,18 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
     private var copyDismissal: Task<Void, Never>?
     nonisolated(unsafe) var surface: ghostty_surface_t? {
         // A new surface may reuse a freed address; it starts with nothing applied.
-        didSet { if surface != oldValue { appliedScale = nil; appliedFeedback = nil } }
+        didSet { if surface != oldValue { appliedScale = nil; appliedFeedback = nil; appliedFocus = nil } }
     }
 
     private nonisolated(unsafe) var displayLink: CADisplayLink?
     private var trackingArea: NSTrackingArea?
     private var theme = GhosttyManager.shared.theme
     private nonisolated(unsafe) var themeObserver: NSObjectProtocol?
-    private var _markedText = NSMutableAttributedString()
     private var _markedRange = NSRange(location: NSNotFound, length: 0)
     private var _selectedRange = NSRange(location: 0, length: 0)
-    private var _didInsertText = false
-    private var _currentKeyEventModifiers: NSEvent.ModifierFlags = []
+    private var pendingCommandTimestamp: TimeInterval?
+    // AppKit can call insertText several times while interpreting one key.
+    private var keyText: String?
     private var dropHighlight: NSView?
     private let commandBlockOverlay = CALayer()
     private var commandBlocks: [GhosttyCommandBlockLayout] = []
@@ -601,26 +623,33 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
     private var connectionReadonly = false
     var connectionReading: ServerConnectionReading? { serverConnection?.reading }
     var connectionAcceptsInput: Bool { serverConnection?.reading.acceptsInput ?? true }
-    private let connectionLabel = NSTextField(labelWithString: "")
-    private lazy var retryConnection = NSButton(title: "Retry connection", target: self, action: #selector(retryServerConnection))
-    private lazy var moveConnection = NSButton(title: "Move here", target: self, action: #selector(moveServerConnection))
-    lazy var connectionBar: NSStackView = {
-        let bar = NSStackView(views: [connectionLabel, moveConnection, retryConnection])
-        bar.orientation = .horizontal
-        bar.spacing = 8
+    let connectionLabel = NSTextField(labelWithString: "")
+    lazy var retryConnection = NSButton(title: "Retry connection", target: self, action: #selector(retryServerConnection))
+    lazy var connectionBar: NSView = {
+        let bar = NSView()
         bar.isHidden = true
         bar.wantsLayer = true
         connectionLabel.lineBreakMode = .byTruncatingTail
-        connectionLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        bar.addSubview(connectionLabel)
+        bar.addSubview(retryConnection)
         return bar
     }()
 
-    @objc private func retryServerConnection() {
-        serverConnection?.retry()
+    /// A relay's close reason can run longer than the pane: the message
+    /// truncates so Retry connection stays beside it, inside the bar.
+    func layoutConnectionBar() {
+        let bounds = connectionBar.bounds
+        let button = retryConnection.isHidden ? .zero : retryConnection.fittingSize
+        let reserved = button.width > 0 ? button.width + 8 : 0
+        let label = connectionLabel.fittingSize
+        let labelWidth = min(label.width, max(0, bounds.width - reserved))
+        connectionLabel.frame = NSRect(x: 0, y: (bounds.height - label.height) / 2, width: labelWidth, height: label.height)
+        retryConnection.frame = NSRect(x: labelWidth + (button.width > 0 ? 8 : 0), y: (bounds.height - button.height) / 2,
+                                       width: button.width, height: button.height)
     }
 
-    @objc private func moveServerConnection() {
-        serverConnection?.moveHere()
+    @objc private func retryServerConnection() {
+        serverConnection?.retry()
     }
 
     private func showConnection(_ reading: ServerConnectionReading) {
@@ -634,7 +663,6 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
         connectionLabel.toolTip = reading.title
         connectionBar.isHidden = reading.title == nil
         retryConnection.isHidden = !(serverConnection?.canRetry ?? false)
-        moveConnection.isHidden = !reading.canMoveHere
         superview?.needsLayout = true
         if becameUsable {
             restoreInputFocus()
@@ -647,16 +675,31 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
               !hasMarkedText(), let window,
               window.firstResponder == nil || window.firstResponder === window || window.firstResponder === self else { return }
         if window.firstResponder !== self { window.makeFirstResponder(self) }
-        if window.firstResponder === self, let surface {
-            ghostty_surface_set_focus(surface, true)
-            recordInputReadiness()
-        }
+        syncSurfaceFocus()
+        recordInputReadiness()
+    }
+
+    /// Ghostty sees focus only while this view is first responder in the key
+    /// window. A held Session's relay turns the resulting focus reports into
+    /// `focus` requests, so the view the person is looking at sizes the terminal.
+    private func syncSurfaceFocus(firstResponder: Bool? = nil) {
+        guard let surface else { return }
+        let focused = (firstResponder ?? (window?.firstResponder === self)) && window?.isKeyWindow == true
+        if let applied = appliedFocus, applied.surface == surface, applied.focused == focused { return }
+        appliedFocus = (surface, focused)
+        ghostty_surface_set_focus(surface, focused)
+    }
+
+    @objc private func windowKeyChanged(_ notification: Notification) {
+        guard let window, notification.object as? NSWindow === window else { return }
+        syncSurfaceFocus()
     }
 
     /// Last values sent to the current surface. SwiftUI calls updateNSView on every
     /// parent render; unchanged size, scale and feedback must not reach Ghostty.
     private nonisolated(unsafe) var appliedScale: (surface: ghostty_surface_t, scale: CGFloat)?
     private nonisolated(unsafe) var appliedFeedback: (surface: ghostty_surface_t, visible: Bool, reduceMotion: Bool)?
+    private nonisolated(unsafe) var appliedFocus: (surface: ghostty_surface_t, focused: Bool)?
     /// Open from a key press until the next display-link draw.
     private var keyToDraw: OSSignpostIntervalState?
 
@@ -675,6 +718,9 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
             name: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(updateFeedbackPreferences),
             name: NSWindow.didChangeOcclusionStateNotification, object: nil)
+        for name in [NSWindow.didBecomeKeyNotification, NSWindow.didResignKeyNotification] {
+            NotificationCenter.default.addObserver(self, selector: #selector(windowKeyChanged), name: name, object: nil)
+        }
     }
 
     required init?(coder: NSCoder) {
@@ -715,7 +761,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
                 return
             }
             serverConnection = connection
-            let script = "export LF_SERVER_STATUS=\(shellEscape(connection.path)); export LF_SERVER=1; export LF_TERMINAL_ID=\(shellEscape(terminalMarker)); export LF_TERMINAL_TTY=\"$(tty)\"; exec \(command)"
+            let script = "export LF_SERVER_STATUS=\(shellEscape(connection.path)); export LF_SERVER=1; export LF_RELAY_FOCUSED=0; export LF_TERMINAL_ID=\(shellEscape(terminalMarker)); export LF_TERMINAL_TTY=\"$(tty)\"; exec \(command)"
             surfaceCommand = ["/bin/sh", "-c", script].map(shellEscape).joined(separator: " ")
         } else {
             surfaceCommand = command
@@ -737,6 +783,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
             updateFeedbackPreferences()
             if window != nil { setupDisplayLink() }
             setupTrackingArea()
+            syncSurfaceFocus()
             restoreInputFocus()
             onSurfaceCreated()
         } else {
@@ -756,6 +803,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
         super.viewDidMoveToWindow()
         recordMountLifecycle("terminal-window")
         updateFeedbackPreferences()
+        syncSurfaceFocus()
         if window == nil {
             displayLink?.invalidate()
             displayLink = nil
@@ -1092,8 +1140,8 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
     override func becomeFirstResponder() -> Bool {
         guard acceptsFirstResponder else { return false }
         let accepted = super.becomeFirstResponder()
-        if accepted, let surface {
-            ghostty_surface_set_focus(surface, true)
+        if accepted, surface != nil {
+            syncSurfaceFocus(firstResponder: true)
             recordInputReadiness()
         }
         return accepted
@@ -1121,7 +1169,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
 
     private func beginResponseObservation(_ event: NSEvent) {
         guard event.keyCode == 36 || event.keyCode == 76,
-              event.modifierFlags.intersection([.command, .control, .option, .shift]).isEmpty,
+              event.modifierFlags.intersection(shortcutModifiers).isEmpty,
               let record = measuredSession, record.provider == "codex",
               case .available(let before, _) = try? readText(region: .screen, maxBytes: 16384) else { return }
         Perf.userAction(.firstWord, scenario: "send_to_response_observed", id: record.id,
@@ -1147,9 +1195,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
     }
 
     override func resignFirstResponder() -> Bool {
-        if let surface {
-            ghostty_surface_set_focus(surface, false)
-        }
+        syncSurfaceFocus(firstResponder: false)
         return super.resignFirstResponder()
     }
 
@@ -1204,16 +1250,16 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
         // AppKit visits sibling views for key equivalents; only the keyboard
         // responder may consume a terminal shortcut or send it to its PTY.
-        guard window?.firstResponder === self else { return false }
+        guard event.type == .keyDown, window?.firstResponder === self, !hasMarkedText() else { return false }
         guard let surface else { return super.performKeyEquivalent(with: event) }
 
         let mods = event.modifierFlags
-        if GhosttyTerminalShortcut.cyclesWindows(characters: event.charactersIgnoringModifiers, modifiers: mods) {
-            return false
-        }
+        let characters = event.charactersIgnoringModifiers
         // Only the exact host shortcuts belong here. Modified combinations
         // retain Ghostty bindings and the application's terminal key protocol.
-        switch GhosttyTerminalShortcut(characters: event.charactersIgnoringModifiers, modifiers: mods) {
+        switch GhosttyTerminalShortcut(characters: characters, modifiers: mods) {
+        case .cycleWindows:
+            return false
         case .copy:
             return copySelection()
         case .paste:
@@ -1225,15 +1271,32 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
             break
         }
 
-        if !mods.contains(.command) { clearBlockSelection() }
-
         guard connectionAcceptsInput else { return false }
-        // Let other command shortcuts through to the terminal
-        let key = translateKey(event)
-        return ghostty_surface_key(surface, key)
+        let controlReturn = mods.contains(.control) && !mods.contains(.command) && characters == "\r"
+        let controlSlash = mods.intersection(shortcutModifiers) == .control && characters == "/"
+        if controlReturn || controlSlash || event.hasGhosttyBinding(in: surface)
+            || GhosttyTerminalShortcut.shadowedByShiftedMenuItem(characters: characters, modifiers: mods, in: NSApp.mainMenu) {
+            keyDown(with: event)
+            return true
+        }
+
+        // AppKit can turn ⌘. into cancelOperation: after menus decline it.
+        // doCommand re-sends that event. Synthetic events have no timestamp.
+        guard event.timestamp != 0 else { return false }
+        guard !mods.isDisjoint(with: [.command, .control]) else {
+            pendingCommandTimestamp = nil
+            return false
+        }
+        if pendingCommandTimestamp == event.timestamp {
+            keyDown(with: event)
+            return true
+        }
+        pendingCommandTimestamp = event.timestamp
+        return false
     }
 
     override func keyDown(with event: NSEvent) {
+        pendingCommandTimestamp = nil
         // Ghostty uses a key to dismiss an exited child. An ended relay no
         // longer accepts input, but must still let that local close happen.
         let exited = surface.map { ghostty_surface_process_exited($0) } ?? false
@@ -1250,26 +1313,29 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
         }
         if !event.modifierFlags.contains(.command) { clearBlockSelection() }
 
-        if ghosttyShouldHandleKeyDownDirectly(
-            characters: event.characters,
-            modifiers: event.modifierFlags,
-            hasMarkedText: hasMarkedText(),
-            selectedInputSource: inputContext?.selectedKeyboardInputSource
-        ) {
-            sendKeyPress(to: surface, event: event)
+        let translated = event.translatedForText(in: surface)
+        let wasComposing = hasMarkedText()
+        keyText = ""
+        interpretKeyEvents([translated])
+        let inserted = keyText ?? ""
+        keyText = nil
+
+        if wasComposing || hasMarkedText() {
+            // AppKit may return the control character that ended composition.
+            if let first = inserted.utf8.first, first >= 0x20 || inserted.utf8.count > 1 {
+                sendCommittedText(inserted, to: surface)
+            }
             return
         }
 
-        // Reserve interpretKeyEvents for composition-capable input paths.
-        // If insertText or setMarkedText fires, it already sent the text/preedit state.
-        _currentKeyEventModifiers = event.modifierFlags
-        defer { _currentKeyEventModifiers = [] }
-        _didInsertText = false
-        interpretKeyEvents([event])
-
-        if _didInsertText || hasMarkedText() { return }
-
-        sendKeyPress(to: surface, event: event)
+        let key = event.ghosttyKey(translationFlags: translated.modifierFlags)
+        let text = inserted.isEmpty ? translated.characters : inserted
+        if let text, let scalar = text.unicodeScalars.first?.value,
+           scalar >= 0x20, scalar != 0x7f, !(0xf700...0xf8ff).contains(scalar) {
+            key.send(to: surface, text: text)
+        } else {
+            ghostty_surface_key(surface, key)
+        }
     }
 
     override func keyUp(with event: NSEvent) {
@@ -1279,96 +1345,62 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
             return
         }
 
-        var key = translateKey(event)
-        key.action = GHOSTTY_ACTION_RELEASE
-        _ = ghostty_surface_key(surface, key)
+        ghostty_surface_key(surface, event.ghosttyKey(composing: hasMarkedText()))
     }
 
     override func flagsChanged(with event: NSEvent) {
-        guard connectionAcceptsInput else { return }
+        guard connectionAcceptsInput, !hasMarkedText() else { return }
         guard let surface else {
             super.flagsChanged(with: event)
             return
         }
 
-        // Detect which modifier changed and send appropriate key event
-        var key = ghostty_input_key_s()
-        key.mods = translateMods(event.modifierFlags)
-        key.keycode = UInt32(event.keyCode)
-
-        // Determine if this is a press or release based on the specific flag
-        let isPress: Bool
-        switch event.keyCode {
-        case 0x39: // Caps Lock
-            isPress = event.modifierFlags.contains(.capsLock)
-        case 0x38, 0x3C: // Shift
-            isPress = event.modifierFlags.contains(.shift)
-        case 0x3B, 0x3E: // Control
-            isPress = event.modifierFlags.contains(.control)
-        case 0x3A, 0x3D: // Option
-            isPress = event.modifierFlags.contains(.option)
-        case 0x37, 0x36: // Command
-            isPress = event.modifierFlags.contains(.command)
-        default:
-            isPress = true
-        }
-
-        key.action = isPress ? GHOSTTY_ACTION_PRESS : GHOSTTY_ACTION_RELEASE
-        _ = ghostty_surface_key(surface, key)
+        if let key = event.ghosttyModifierKey { ghostty_surface_key(surface, key) }
     }
 
     // MARK: - NSTextInputClient
 
     func insertText(_ string: Any, replacementRange: NSRange) {
-        guard connectionAcceptsInput else { return }
-        guard let surface else { return }
+        guard connectionAcceptsInput, let surface,
+              let text = (string as? NSAttributedString)?.string ?? string as? String else { return }
 
-        let text: String
-        if let attrString = string as? NSAttributedString {
-            text = attrString.string
-        } else if let str = string as? String {
-            text = str
+        if hasMarkedText() { unmarkText() }
+        if keyText != nil {
+            keyText?.append(text)
         } else {
-            return
-        }
-
-        if ghosttyShouldHandleTextAsKeyEvent(text, modifiers: _currentKeyEventModifiers) {
-            return
-        }
-
-        _didInsertText = true
-        unmarkText()
-
-        text.withCString { ptr in
-            ghostty_surface_text(surface, ptr, UInt(text.utf8.count))
+            sendCommittedText(text, to: surface)
         }
     }
 
+    private func sendCommittedText(_ text: String, to surface: ghostty_surface_t) {
+        guard !text.isEmpty else { return }
+        var key = ghostty_input_key_s()
+        key.action = GHOSTTY_ACTION_PRESS
+        key.send(to: surface, text: text)
+    }
+
     override func doCommand(by selector: Selector) {
-        _ = selector
+        if let pendingCommandTimestamp, let event = NSApp.currentEvent,
+           event.timestamp == pendingCommandTimestamp {
+            NSApp.sendEvent(event)
+        }
     }
 
     func setMarkedText(_ string: Any, selectedRange: NSRange, replacementRange: NSRange) {
         guard connectionAcceptsInput else { return }
-        if let attrString = string as? NSAttributedString {
-            _markedText = NSMutableAttributedString(attributedString: attrString)
-        } else if let str = string as? String {
-            _markedText = NSMutableAttributedString(string: str)
-        }
-
+        guard let text = (string as? NSAttributedString)?.string ?? string as? String else { return }
         _selectedRange = selectedRange
-        _markedRange = NSRange(location: 0, length: _markedText.length)
-
-        // Send preedit to Ghostty
-        if let surface, _markedText.length > 0 {
-            _markedText.string.withCString { ptr in
-                ghostty_surface_preedit(surface, ptr, UInt(_markedText.string.utf8.count))
-            }
+        guard !text.isEmpty else {
+            unmarkText()
+            return
+        }
+        _markedRange = NSRange(location: 0, length: text.utf16.count)
+        if let surface {
+            text.withCString { ghostty_surface_preedit(surface, $0, UInt(text.utf8.count)) }
         }
     }
 
     func unmarkText() {
-        _markedText = NSMutableAttributedString()
         _markedRange = NSRange(location: NSNotFound, length: 0)
 
         // Clear preedit
@@ -1423,7 +1455,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
         focusForPointerInput()
         guard let surface else { return }
         let point = convert(event.locationInWindow, from: nil)
-        let mods = translateMods(event.modifierFlags)
+        let mods = event.modifierFlags.ghosttyMods
         clickOrigin = event.clickCount == 1 ? point : nil
         ghostty_surface_mouse_pos(surface, point.x, bounds.height - point.y, mods)
         _ = ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_PRESS, GHOSTTY_MOUSE_LEFT, mods)
@@ -1435,12 +1467,11 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
             surface,
             GHOSTTY_MOUSE_RELEASE,
             GHOSTTY_MOUSE_LEFT,
-            translateMods(event.modifierFlags)
+            event.modifierFlags.ghosttyMods
         )
-        let selectionModifiers: NSEvent.ModifierFlags = [.command, .control, .option, .shift]
         guard isShellPane,
               clickOrigin != nil,
-              event.modifierFlags.intersection(selectionModifiers).isEmpty,
+              event.modifierFlags.intersection(shortcutModifiers).isEmpty,
               !ghostty_surface_has_selection(surface)
         else { return }
         clickOrigin = nil
@@ -1461,7 +1492,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
 
         // Send to terminal first, at the press's own position: Ghostty keeps
         // a text selection the press lands in and otherwise selects the word.
-        let mods = translateMods(event.modifierFlags)
+        let mods = event.modifierFlags.ghosttyMods
         ghostty_surface_mouse_pos(surface, point.x, bounds.height - point.y, mods)
         let consumed = ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_PRESS, GHOSTTY_MOUSE_RIGHT, mods)
         // A word selected by the press ended any block selection.
@@ -1479,7 +1510,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
             surface,
             GHOSTTY_MOUSE_RELEASE,
             GHOSTTY_MOUSE_RIGHT,
-            translateMods(event.modifierFlags)
+            event.modifierFlags.ghosttyMods
         )
     }
 
@@ -1495,7 +1526,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
             }
         }
         let y = bounds.height - point.y
-        ghostty_surface_mouse_pos(surface, point.x, y, translateMods(event.modifierFlags))
+        ghostty_surface_mouse_pos(surface, point.x, y, event.modifierFlags.ghosttyMods)
     }
 
     override func mouseDragged(with event: NSEvent) {
@@ -1516,7 +1547,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
         }
         guard let surface else { return }
         // Send -1, -1 to indicate mouse left the view
-        ghostty_surface_mouse_pos(surface, -1, -1, translateMods(event.modifierFlags))
+        ghostty_surface_mouse_pos(surface, -1, -1, event.modifierFlags.ghosttyMods)
     }
 
     override func scrollWheel(with event: NSEvent) {
@@ -1643,6 +1674,10 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
         action.withCString { _ = ghostty_surface_binding_action(surface, $0, UInt(action.utf8.count)) }
     }
 
+    @objc override func selectAll(_ sender: Any?) {
+        performBinding("select_all")
+    }
+
     private func focusForPointerInput() {
         onFocus()
         window?.makeFirstResponder(self)
@@ -1666,9 +1701,9 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
         key.consumed_mods = GHOSTTY_MODS_NONE
         key.keycode = 0x09 // macOS V key
         key.unshifted_codepoint = 118 // v
-        _ = ghostty_surface_key(surface, key)
+        ghostty_surface_key(surface, key)
         key.action = GHOSTTY_ACTION_RELEASE
-        _ = ghostty_surface_key(surface, key)
+        ghostty_surface_key(surface, key)
         return true
     }
 
@@ -1736,63 +1771,9 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
         key.mods = GHOSTTY_MODS_NONE
         key.consumed_mods = GHOSTTY_MODS_NONE
         key.keycode = input.macKeyCode
-        _ = ghostty_surface_key(surface, key)
+        ghostty_surface_key(surface, key)
         key.action = GHOSTTY_ACTION_RELEASE
-        _ = ghostty_surface_key(surface, key)
-    }
-
-    // MARK: - Key Translation
-
-    private func sendKeyPress(to surface: ghostty_surface_t, event: NSEvent) {
-        var key = translateKey(event)
-        if let chars = ghosttyKeyText(characters: event.characters, modifiers: event.modifierFlags) {
-            chars.withCString { textPtr in
-                key.text = textPtr
-                _ = ghostty_surface_key(surface, key)
-            }
-            return
-        }
-
-        _ = ghostty_surface_key(surface, key)
-    }
-
-    private func translateKey(_ event: NSEvent) -> ghostty_input_key_s {
-        var key = ghostty_input_key_s()
-        key.action = GHOSTTY_ACTION_PRESS
-        key.mods = translateMods(event.modifierFlags)
-        key.consumed_mods = GHOSTTY_MODS_NONE
-        key.keycode = UInt32(event.keyCode)
-        key.text = nil
-        key.composing = hasMarkedText()
-
-        // Get unshifted codepoint for proper key identification
-        if let chars = event.charactersIgnoringModifiers, let scalar = chars.unicodeScalars.first {
-            key.unshifted_codepoint = scalar.value
-        }
-
-        return key
-    }
-
-    private func translateMods(_ flags: NSEvent.ModifierFlags) -> ghostty_input_mods_e {
-        var mods = GHOSTTY_MODS_NONE.rawValue
-
-        if flags.contains(.shift) {
-            mods |= GHOSTTY_MODS_SHIFT.rawValue
-        }
-        if flags.contains(.control) {
-            mods |= GHOSTTY_MODS_CTRL.rawValue
-        }
-        if flags.contains(.option) {
-            mods |= GHOSTTY_MODS_ALT.rawValue
-        }
-        if flags.contains(.command) {
-            mods |= GHOSTTY_MODS_SUPER.rawValue
-        }
-        if flags.contains(.capsLock) {
-            mods |= GHOSTTY_MODS_CAPS.rawValue
-        }
-
-        return ghostty_input_mods_e(rawValue: mods)
+        ghostty_surface_key(surface, key)
     }
 
     deinit {
@@ -1921,12 +1902,12 @@ struct GhosttyTerminalView: View {
     var body: some View {
         VStack {
             Image(systemName: "terminal")
-                .font(Typography.heroTitle())
+                .serif(.title)
                 .foregroundStyle(theme.palette.textSecondary)
             Text("Embedded terminal not available")
-                .font(Typography.sectionTitle())
+                .font(Typography.lede)
             Text("Build GhosttyKit to enable this feature")
-                .font(Typography.caption())
+                .font(Typography.meta)
                 .foregroundStyle(theme.palette.textSecondary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -2011,57 +1992,6 @@ func buildGhosttyShellCommand(argv: [String], env: [String: String]) -> String? 
     }
 
     return ["env", envPrefix, command].joined(separator: " ")
-}
-
-func ghosttyShouldHandleTextAsKeyEvent(_ text: String, modifiers: NSEvent.ModifierFlags) -> Bool {
-    let controlLikeModifiers: NSEvent.ModifierFlags = [.control, .command]
-    guard !modifiers.intersection(controlLikeModifiers).isEmpty else { return false }
-    guard text.unicodeScalars.count == 1, let scalar = text.unicodeScalars.first else { return false }
-    return scalar.value < 0x20
-}
-
-func ghosttyShouldBypassInterpretKeyEvents(modifiers: NSEvent.ModifierFlags) -> Bool {
-    !modifiers.intersection([.control, .command]).isEmpty
-}
-
-func ghosttyShouldHandleKeyDownDirectly(
-    characters: String?,
-    modifiers: NSEvent.ModifierFlags,
-    hasMarkedText: Bool,
-    selectedInputSource: String?
-) -> Bool {
-    if ghosttyShouldBypassInterpretKeyEvents(modifiers: modifiers) {
-        return true
-    }
-
-    guard !hasMarkedText else { return false }
-    guard !modifiers.contains(.option) else { return false }
-    guard ghosttyKeyText(characters: characters, modifiers: modifiers) != nil else { return false }
-    return !ghosttyInputSourceUsesTextComposition(selectedInputSource)
-}
-
-func ghosttyKeyText(characters: String?, modifiers: NSEvent.ModifierFlags) -> String? {
-    let controlLikeModifiers: NSEvent.ModifierFlags = [.control, .command]
-    guard modifiers.intersection(controlLikeModifiers).isEmpty else { return nil }
-    guard let characters, !characters.isEmpty else { return nil }
-    guard ghosttyIsPrintableKeyText(characters) else { return nil }
-    return characters
-}
-
-private func ghosttyInputSourceUsesTextComposition(_ inputSource: String?) -> Bool {
-    guard let inputSource else { return false }
-    return inputSource.localizedCaseInsensitiveContains("inputmethod")
-}
-
-private func ghosttyIsPrintableKeyText(_ text: String) -> Bool {
-    !text.unicodeScalars.contains { scalar in
-        switch scalar.value {
-        case 0x00..<0x20, 0x7F, 0xF700..<0xF900:
-            return true
-        default:
-            return false
-        }
-    }
 }
 
 func shellEscape(_ value: String) -> String {

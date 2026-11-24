@@ -11,14 +11,15 @@
       "due_date": null,
       "state": null,
       "completed_at": null,
-      "linear_id": null,
-      "pm_snapshot_synced_at": null,
-      "pm_writeback": {
+      "tracker_id": null,
+      "tracker_synced_at": null,
+      "tracker_writeback": {
         "state": "current"
       },
       "wave_id": "11111111-1111-4111-8111-111111111111",
       "repo_id": "repo_00000000000040008000000000000001",
       "project_id": "proj_0123456789ab40008000000000000001",
+      "parent_task_id": null,
       "worktree": null,
       "workspace_slug": "",
       "branch": "",
@@ -29,7 +30,154 @@
     },
     "graph": "code",
     "session_id": "0123456789abcdef0123456789abcdef",
-    "milestone": "admitted"
+    "milestone": "admitted",
+    "session": {
+      "id": "0123456789abcdef0123456789abcdef",
+      "work": {
+        "kind": "task",
+        "id": "task_0123456789ab40008000000000000001"
+      },
+      "title": "fix the flaky retry test",
+      "title_source": "generated",
+      "detail": "session",
+      "provider": "claude",
+      "account": null,
+      "model": null,
+      "cwd": "/src/loopflow",
+      "state": "active",
+      "open_argv": [
+        "lf",
+        "session",
+        "resume",
+        "0123456789abcdef0123456789abcdef",
+        "--task",
+        "LOO-1"
+      ],
+      "wave_id": "11111111-1111-4111-8111-111111111111",
+      "task_ids": [
+        "task_0123456789ab40008000000000000001"
+      ],
+      "terminal_ids": [
+        "terminal-1"
+      ],
+      "work_path": "product / LOO-1",
+      "action": {
+        "label": "Open here",
+        "help": "Open this Session in a terminal"
+      },
+      "graph_membership": {
+        "kind": "independent"
+      },
+      "workspace": null,
+      "interactive": true,
+      "primary_scope": null,
+      "availability": null,
+      "task_primary": true,
+      "program_status": null,
+      "agent_process_id": null,
+      "preview": null,
+      "transition": null,
+      "turn": null,
+      "raw": false,
+      "ended": null,
+      "start": null,
+      "outlook": null,
+      "status_line": "running"
+    },
+    "row": {
+      "task": {
+        "id": "task_0123456789ab40008000000000000001",
+        "identifier": "LOO-1",
+        "name": "fix the flaky retry test",
+        "description": "fix the flaky retry test\n\nIt fails one run in ten.",
+        "rank": 0,
+        "repo": "/src/loopflow",
+        "repo_id": "repo_00000000000040008000000000000001",
+        "project_id": "proj_0123456789ab40008000000000000001",
+        "wave_id": "11111111-1111-4111-8111-111111111111",
+        "assignee": null,
+        "due_date": null,
+        "state": null,
+        "completed_at": null,
+        "tracker_id": null,
+        "parent_id": null,
+        "tracker_state": {
+          "state": "available",
+          "synced_at": null
+        },
+        "sync": {
+          "actions": []
+        }
+      },
+      "reference": {
+        "issue_url": null,
+        "workspace": null
+      },
+      "lifecycle": "idle",
+      "selection_states": [
+        "open",
+        "idle",
+        "working"
+      ],
+      "runtime": {
+        "work_id": "task_0123456789ab40008000000000000001",
+        "status": "idle",
+        "completion_pending": null,
+        "reason": "No Task Graph has run; independent Sessions may still be active",
+        "updated_at": "2026-10-28T00:00:00Z",
+        "provider": "claude",
+        "owner": {
+          "person": "Jack Heart",
+          "person_id": null,
+          "person_key": "jack@loopflow.studio",
+          "machine": {
+            "id": "home_00000000000000000000000000000001",
+            "label": null
+          }
+        }
+      },
+      "next_move": {
+        "owner": "user",
+        "reason": "ready"
+      },
+      "condition": {
+        "state": "clear",
+        "reason": "Task is ready",
+        "observed_at": "2026-10-28T00:00:00Z",
+        "evidence_age_secs": 0,
+        "local_progress": {
+          "state": "not_applicable",
+          "unsettled": false,
+          "dirty": null,
+          "authored_commits": null,
+          "recovery_required": null,
+          "reason": null
+        },
+        "unresolved_execution": true
+      },
+      "actions": {
+        "recommended": null,
+        "reason": "No action needed"
+      },
+      "graph_name": "code",
+      "graph_source": "builtin",
+      "latest_graph_process": null,
+      "execution": {
+        "state": "starting",
+        "reason": "Starting code",
+        "step": null,
+        "captured": null,
+        "died": null,
+        "outlook": null
+      },
+      "run_control": {
+        "unavailable": null
+      },
+      "pr": null,
+      "section": "working",
+      "owned_by_you": true
+    },
+    "parent": null
   },
   {
     "task": {
@@ -43,14 +191,15 @@
       "due_date": null,
       "state": null,
       "completed_at": null,
-      "linear_id": null,
-      "pm_snapshot_synced_at": null,
-      "pm_writeback": {
+      "tracker_id": null,
+      "tracker_synced_at": null,
+      "tracker_writeback": {
         "state": "current"
       },
       "wave_id": "11111111-1111-4111-8111-111111111111",
       "repo_id": "repo_00000000000040008000000000000001",
       "project_id": "proj_0123456789ab40008000000000000001",
+      "parent_task_id": null,
       "worktree": null,
       "workspace_slug": "",
       "branch": "",
@@ -59,8 +208,103 @@
       "created_at": "2026-10-28T00:00:00Z",
       "updated_at": "2026-10-28T00:00:00Z"
     },
-    "graph": null,
+    "graph": "code",
     "session_id": null,
-    "milestone": "filed"
+    "milestone": "started",
+    "session": null,
+    "row": {
+      "task": {
+        "id": "task_0123456789ab40008000000000000002",
+        "identifier": "LOO-2",
+        "name": "fails",
+        "description": "fails",
+        "rank": 0,
+        "repo": "/src/loopflow",
+        "repo_id": "repo_00000000000040008000000000000001",
+        "project_id": "proj_0123456789ab40008000000000000001",
+        "wave_id": "11111111-1111-4111-8111-111111111111",
+        "assignee": null,
+        "due_date": null,
+        "state": null,
+        "completed_at": null,
+        "tracker_id": null,
+        "parent_id": null,
+        "tracker_state": {
+          "state": "available",
+          "synced_at": null
+        },
+        "sync": {
+          "actions": []
+        }
+      },
+      "reference": {
+        "issue_url": null,
+        "workspace": null
+      },
+      "lifecycle": "moving",
+      "selection_states": [
+        "open",
+        "moving",
+        "working"
+      ],
+      "runtime": {
+        "work_id": "task_0123456789ab40008000000000000002",
+        "status": "moving",
+        "completion_pending": null,
+        "reason": "ready",
+        "updated_at": "2026-10-28T00:00:00Z",
+        "provider": "claude",
+        "owner": {
+          "person": "Jack Heart",
+          "person_id": null,
+          "person_key": "jack@loopflow.studio",
+          "machine": {
+            "id": "home_00000000000000000000000000000001",
+            "label": null
+          }
+        }
+      },
+      "next_move": {
+        "owner": "user",
+        "reason": "ready"
+      },
+      "condition": {
+        "state": "clear",
+        "reason": "Task is ready",
+        "observed_at": "2026-10-28T00:00:00Z",
+        "evidence_age_secs": 0,
+        "local_progress": {
+          "state": "not_applicable",
+          "unsettled": false,
+          "dirty": null,
+          "authored_commits": null,
+          "recovery_required": null,
+          "reason": null
+        },
+        "unresolved_execution": true
+      },
+      "actions": {
+        "recommended": null,
+        "reason": "No action needed"
+      },
+      "graph_name": "code",
+      "graph_source": "builtin",
+      "latest_graph_process": null,
+      "execution": {
+        "state": "running",
+        "reason": "Worker is running implement",
+        "step": null,
+        "captured": null,
+        "died": null,
+        "outlook": null
+      },
+      "run_control": {
+        "unavailable": null
+      },
+      "pr": null,
+      "section": "working",
+      "owned_by_you": true
+    },
+    "parent": null
   }
 ]

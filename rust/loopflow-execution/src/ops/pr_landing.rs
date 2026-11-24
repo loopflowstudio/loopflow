@@ -139,7 +139,7 @@ pub(crate) fn read_merge_request_removal(
 }
 
 /// The lifetimes of this PR's CI repairs. A repair with no recorded end is
-/// still repairing only while its Process lives.
+/// still repairing only while its run lives.
 fn repair_windows(store: &SharedStore, repo: &str, pr_number: u32) -> OpsResult<Vec<RepairWindow>> {
     let at = |seconds: i64| chrono::DateTime::from_timestamp(seconds, 0);
     Ok(store
@@ -147,15 +147,15 @@ fn repair_windows(store: &SharedStore, repo: &str, pr_number: u32) -> OpsResult<
         .pr_repair_lifetimes(repo, pr_number)
         .map_err(repair_error)?
         .into_iter()
-        .filter_map(|(process, started, ended)| {
-            let start = at(started)?;
-            match ended {
+        .filter_map(|run| {
+            let start = at(run.started_at)?;
+            match run.ended_at {
                 Some(ended) => Some(RepairWindow {
                     start,
                     end: Some(at(ended)?),
                 }),
-                None => (crate::journal::lf_evidence(&store.sqlite, &process)
-                    != crate::journal::ProcessIdentityEvidence::Dead)
+                None => (crate::process::RecordedProcess::from(&run).evidence()
+                    != crate::store::ProcessIdentityEvidence::Dead)
                     .then_some(RepairWindow { start, end: None }),
             }
         })
@@ -281,15 +281,17 @@ fn admit_ci_fix(
             .sqlite
             .repair_reservation(&incident.identity)
             .map_err(repair_error)?;
-        if let Some(finished) = reservation
-            .finished
+        if let Some((finished, error)) = reservation
+            .run
+            .as_ref()
+            .and_then(|run| Some((run.ended_at?, run.error.clone())))
             .filter(|_| reservation.conclusion.is_some())
         {
-            return Err(OpsError::Message(reservation.error.unwrap_or_else(|| {
+            return Err(OpsError::Message(error.unwrap_or_else(|| {
                 format!("repair attempt finished at {finished}; the next check starts another")
             })));
         }
-        if repair_live(&store, reservation.process.as_ref()) {
+        if repair_live(reservation.run.as_ref()) {
             return Ok(());
         }
         if let Some(task_id) = &landing.task_id {
@@ -310,11 +312,12 @@ fn admit_ci_fix(
         // Live work in the checkout, such as the Task's own open Session,
         // writes alongside the repair; only a running sync fences an agent.
         let config = load_config_or_default(Some(&landing.worktree));
-        let retry = reservation.process.is_some();
+        let retry = reservation.run.is_some();
         if retry && reservation.retries >= config.automation.retries {
             return Err(repair_error("repair startup exhausted automatic retries"));
         }
-        let launcher = crate::journal::current_lf_process_id()
+        let (launcher, start) = crate::journal::current_lf_process_id()
+            .zip(crate::journal::current_execution_start())
             .ok_or_else(|| repair_error("repair admission requires a recorded Process"))?;
         if !store
             .sqlite
@@ -322,6 +325,7 @@ fn admit_ci_fix(
                 &incident.identity,
                 landing.generation,
                 &launcher,
+                &start,
                 retry,
                 landing.task_id.as_ref(),
             )
@@ -331,7 +335,7 @@ fn admit_ci_fix(
         }
         drop(lock);
         let context = crate::os_process::execution_context().map_err(repair_error)?;
-        let argv = vec![
+        let mut argv = vec![
             context.lf_bin.to_string_lossy().to_string(),
             "--batch".into(),
             "--output-schema".into(),
@@ -345,14 +349,13 @@ fn admit_ci_fix(
                 &earlier_attempts(&store, &incident.identity)?,
             ),
         ];
-        let work = landing
-            .task_id
-            .as_ref()
-            .map(|id| format!("task:{id}"))
-            .unwrap_or_default();
+        if let Some(task) = &landing.task_id {
+            argv.splice(1..1, ["--task".to_owned(), task.to_string()]);
+        }
         let environment = [
-            (crate::ops::WORK_DECLARATION_ENV, work.as_str()),
+            (crate::ops::WORK_DECLARATION_ENV, ""),
             ("LF_USER_NAME", ""),
+            (crate::journal::GRAPH_STEP_ENV, "worker"),
         ];
         let worker = crate::os_process::detached::start_lf(
             &landing.worktree,
@@ -368,7 +371,17 @@ fn admit_ci_fix(
         .map_err(repair_error)?;
         if !store
             .sqlite
-            .handoff_repair(&incident.identity, &launcher, &worker)
+            .handoff_repair(
+                &incident.identity,
+                &launcher,
+                &worker.id,
+                &loopflow_storage::graph_process::ExecutionStart {
+                    started_at: loopflow_storage::rows::now_unix(),
+                    pid: Some(worker.pid),
+                    os_started_at: worker.os_started_at,
+                    caller_session: None,
+                },
+            )
             .map_err(repair_error)?
         {
             return Err(repair_error("repair reservation changed during startup"));
@@ -428,11 +441,11 @@ fn ci_fix_message(
 
 /// A reservation still held by the caller was never handed to a ci-fix run;
 /// a long-lived watcher must be able to retry its own unacknowledged launch.
-fn repair_live(store: &SharedStore, process: Option<&loopflow_model::id::LfProcessId>) -> bool {
-    process.is_some_and(|process| {
-        Some(process) != crate::journal::current_lf_process_id().as_ref()
-            && crate::journal::lf_evidence(&store.sqlite, process)
-                != crate::journal::ProcessIdentityEvidence::Dead
+fn repair_live(run: Option<&loopflow_storage::graph_process::Execution>) -> bool {
+    run.is_some_and(|run| {
+        Some(&run.id) != crate::journal::current_lf_process_id().as_ref()
+            && crate::process::RecordedProcess::from(run).evidence()
+                != crate::store::ProcessIdentityEvidence::Dead
     })
 }
 
@@ -440,33 +453,31 @@ fn repair_error(error: impl std::fmt::Display) -> OpsError {
     OpsError::Message(error.to_string())
 }
 
-/// A taskless checkout's work is the Processes started in it.
+/// A taskless checkout's work is the Sessions and Graph runs started in it.
 fn checkout_execution_blockers(store: &SharedStore, worktree: &Path) -> OpsResult<Vec<String>> {
-    let processes: Vec<_> = store
+    let work = store
         .sqlite
-        .processes_since(0)
-        .map_err(repair_error)?
-        .into_iter()
-        .filter(|process| process.cwd() == worktree.to_str())
-        .collect();
-    super::task_execution::execution_blockers(&store.sqlite, &processes)
+        .checkout_open_work(worktree)
+        .map_err(repair_error)?;
+    super::task_execution::execution_blockers(&store.sqlite, &work)
 }
 
 /// Record each exited ci-fix run of this PR: the Session it opened and the
 /// conclusion its final answer returned.
 fn settle_repairs(store: &SharedStore, repo: &str, pr_number: u32) -> OpsResult<()> {
     let current = crate::journal::current_lf_process_id();
-    for (identity, owner) in store
+    for (identity, run) in store
         .sqlite
         .pr_repair_processes(repo, pr_number)
         .map_err(repair_error)?
     {
-        if Some(&owner) == current.as_ref()
-            || crate::journal::lf_evidence(&store.sqlite, &owner)
-                != crate::journal::ProcessIdentityEvidence::Dead
+        if Some(&run.id) == current.as_ref()
+            || crate::process::RecordedProcess::from(&run).evidence()
+                != crate::store::ProcessIdentityEvidence::Dead
         {
             continue;
         }
+        let owner = run.id;
         // The Session the run's agent ran in.
         let session = match store.sqlite.process_session(&owner).map_err(repair_error)? {
             Some(id) => store.sqlite.session(&id).map_err(repair_error)?,
@@ -476,10 +487,8 @@ fn settle_repairs(store: &SharedStore, repo: &str, pr_number: u32) -> OpsResult<
             .as_ref()
             .and_then(|session| session.input_key().ok())
         {
-            Some(input) => store
-                .sqlite
-                .input_final_answer(input)
-                .map_err(repair_error)?,
+            Some(input) => crate::transcript::answer::input_final_answer(&store.sqlite, input)
+                .map_err(|error| repair_error(format!("{error:#}")))?,
             None => None,
         };
         let (conclusion, error) = match (&session, answer) {
@@ -534,7 +543,8 @@ fn earlier_attempts(store: &SharedStore, identity: &str) -> OpsResult<Vec<String
                 "- attempt {attempt}: {}{}",
                 reservation.conclusion.as_deref().unwrap_or("failed"),
                 reservation
-                    .error
+                    .run
+                    .and_then(|run| run.error)
                     .map(|error| format!(": {error}"))
                     .unwrap_or_default()
             ))
@@ -1117,9 +1127,8 @@ async fn cleanup_landed_pr(store: &SharedStore, landing: &PrLanding) -> OpsResul
         .map_err(|error| OpsError::Message(error.to_string()))?
         .iter()
         .any(|graph| {
-            graph.process.completed_at.is_none()
-                && crate::journal::lf_evidence(&store.sqlite, graph.id())
-                    != crate::journal::ProcessIdentityEvidence::Dead
+            crate::process::RecordedProcess::from(&graph.run).evidence()
+                != crate::store::ProcessIdentityEvidence::Dead
         })
     {
         eprintln!("PR merged; retained its checkout for the Graph that landed it.");
@@ -1270,7 +1279,7 @@ pub(crate) fn repair_running(store: &SharedStore, repo: &str, pr_number: u32) ->
         .pr_repair_processes(repo, pr_number)
         .map_err(repair_error)?
         .iter()
-        .any(|(_, process)| repair_live(store, Some(process))))
+        .any(|(_, run)| repair_live(Some(run))))
 }
 
 #[derive(
@@ -1681,6 +1690,7 @@ mod tests {
     async fn seed_task(store: &SharedStore, worktree: &Path) -> TaskId {
         let now = OffsetDateTime::now_utc();
         let task = Task {
+            parent_task_id: None,
             repository_id: crate::repository::location::ensure_repository(
                 &store.sqlite,
                 &worktree.display().to_string(),
@@ -1688,12 +1698,12 @@ mod tests {
             .unwrap(),
             id: TaskId::new(),
             revision: 0,
-            linear_id: None,
+            tracker_id: None,
             identifier: "LAND-1".into(),
             title: "Land it".into(),
             description: String::new(),
-            pm_snapshot_synced_at: None,
-            pm_writeback: LinearWritebackState::Current,
+            tracker_synced_at: None,
+            tracker_writeback: LinearWritebackState::Current,
             wave_id: None,
             project_id: None,
             worktree: Some(worktree.to_path_buf()),
@@ -1893,19 +1903,30 @@ mod tests {
             OffsetDateTime::now_utc(),
         );
         store.observe_ci_incident(&incident).await.unwrap();
-        // A reservation whose Process has no recorded death is a live repair.
+        // A repair whose run is this live test process. The journal's row
+        // stands in for the one `ci_incidents` still references.
         {
+            let pid = std::process::id();
+            let born = crate::process::os_process::process_started_at(pid)
+                .unwrap()
+                .unwrap();
             let conn = store.sqlite.conn.lock().unwrap();
             conn.execute(
-                "INSERT INTO processes(id,trace_id,started_at) VALUES('00000000-0000-4000-8000-000000000577','fixture',?1)",
-                [OffsetDateTime::now_utc().unix_timestamp()],
+                "INSERT INTO processes(id,trace_id,started_at) VALUES('00000000-0000-4000-8000-000000000577','fixture',1)",
+                [],
             )
             .unwrap();
             conn.execute(
-                "UPDATE ci_incidents SET repair_lf_process_id='00000000-0000-4000-8000-000000000577' WHERE identity=?1",
-                [&incident.identity],
-            )
-            .unwrap();
+                    "UPDATE ci_incidents SET repair_lf_process_id='00000000-0000-4000-8000-000000000577',
+                        repair_started_at=?2,repair_pid=?3,repair_os_started_at=?4 WHERE identity=?1",
+                    rusqlite::params![
+                        &incident.identity,
+                        OffsetDateTime::now_utc().unix_timestamp(),
+                        pid,
+                        born
+                    ],
+                )
+                .unwrap();
         }
         // The repair's own disarm leaves a green head without a merge request;
         // a check confirms a failure with a second read.

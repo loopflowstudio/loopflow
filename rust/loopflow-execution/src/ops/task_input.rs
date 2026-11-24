@@ -1,5 +1,5 @@
 //! Task context and live input for the ordinary skill command.
-use crate::harness::Harness;
+use crate::harness::Driver;
 use crate::store::SharedStore;
 use anyhow::{anyhow, Result};
 use loopflow_model::durable::WorkRef;
@@ -79,7 +79,7 @@ impl TaskInput {
         }
     }
 
-    pub async fn poll(&self, harness: &mut dyn Harness) -> Result<()> {
+    pub async fn poll(&self, harness: &mut dyn Driver) -> Result<()> {
         let mut controls = self.controls.lock().await;
         let store = &self.store;
         let task = &self.task;
@@ -131,7 +131,7 @@ impl TaskInput {
 async fn handle_attachment(
     store: &SharedStore,
     task: &Task,
-    harness: &mut dyn Harness,
+    harness: &mut dyn Driver,
     line: String,
 ) -> Result<()> {
     let line = line.trim();

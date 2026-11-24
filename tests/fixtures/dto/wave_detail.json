@@ -114,49 +114,79 @@
           "completed_at": null,
           "due_date": null,
           "sync": {
-            "connected": true,
-            "changes": [
+            "actions": [
               {
                 "id": "create-task",
-                "field": "creation",
-                "state": "pending",
+                "seq": 1,
+                "owner_kind": "task",
+                "owner_id": "ts_22222222222222222222222222222222",
+                "kind": "create",
+                "change": "create",
+                "subject": null,
+                "phase": "queued",
+                "tracker": "linear",
+                "error": null,
                 "local_value": {
                   "title": "Saved offline"
                 },
-                "linear_value": null,
-                "error": null
+                "tracker_value": null
               },
               {
                 "id": "order-project",
-                "field": "task_order",
-                "state": "uncertain",
+                "seq": 2,
+                "owner_kind": "project",
+                "owner_id": "ts_22222222222222222222222222222222",
+                "kind": "order",
+                "change": "order",
+                "subject": null,
+                "phase": "sent",
+                "tracker": "linear",
+                "error": "Reply lost; awaiting readback",
                 "local_value": [
                   "task-b",
                   "task-a"
                 ],
-                "linear_value": null,
-                "error": "Reply lost; awaiting readback"
+                "tracker_value": null
               },
               {
                 "id": "title-task",
-                "field": "task_title",
-                "state": "adopted_linear",
+                "seq": 3,
+                "owner_kind": "task",
+                "owner_id": "ts_22222222222222222222222222222222",
+                "kind": "field",
+                "change": "title",
+                "subject": "task_title",
+                "phase": "conflicted",
+                "tracker": "linear",
+                "error": null,
                 "local_value": "Local title",
-                "linear_value": "Linear title",
-                "error": null
+                "tracker_value": "Linear title"
               },
               {
                 "id": "assignee-task",
-                "field": "task_assignee",
-                "state": "adopted_linear",
+                "seq": 4,
+                "owner_kind": "task",
+                "owner_id": "ts_22222222222222222222222222222222",
+                "kind": "field",
+                "change": "assignee",
+                "subject": "task_assignee",
+                "phase": "conflicted",
+                "tracker": "linear",
+                "error": null,
                 "local_value": "person-id",
-                "linear_value": null,
-                "error": null
+                "tracker_value": null
               },
               {
                 "id": "comment-task",
-                "field": "comment",
-                "state": "pending",
+                "seq": 5,
+                "owner_kind": "task",
+                "owner_id": "ts_22222222222222222222222222222222",
+                "kind": "comment",
+                "change": "comment",
+                "subject": null,
+                "phase": "queued",
+                "tracker": "linear",
+                "error": "Offline",
                 "local_value": {
                   "body": "Saved comment",
                   "author": {
@@ -165,15 +195,15 @@
                   },
                   "created_at": "2026-10-08T12:00:00Z"
                 },
-                "linear_value": null,
-                "error": "Offline"
+                "tracker_value": null
               }
             ]
           },
-          "linear_id": "issue-1",
-          "acquisition": {
+          "tracker_id": "issue-1",
+          "parent_id": null,
+          "tracker_state": {
             "state": "available",
-            "observed_at": null
+            "synced_at": null
           },
           "repo_id": "repo_00000000000040008000000000000001",
           "repo": "/src/loopflow",
@@ -403,15 +433,13 @@
           "state": "idle",
           "reason": "Waiting for your review at demo",
           "step": null,
-          "captured": null
+          "captured": null,
+          "died": null,
+          "outlook": null
         },
         "run_control": {
           "unavailable": null
         },
-        "ship_control": {
-          "unavailable": null
-        },
-        "shipping": null,
         "pr": {
           "id": "pr_33333333333333333333333333333333",
           "sequence": 1,
@@ -447,7 +475,8 @@
           "open",
           "unstarted",
           "backlog"
-        ]
+        ],
+        "owned_by_you": false
       },
       {
         "task": {
@@ -461,49 +490,79 @@
           "completed_at": null,
           "due_date": null,
           "sync": {
-            "connected": true,
-            "changes": [
+            "actions": [
               {
                 "id": "create-task",
-                "field": "creation",
-                "state": "pending",
+                "seq": 1,
+                "owner_kind": "task",
+                "owner_id": "issue-2",
+                "kind": "create",
+                "change": "create",
+                "subject": null,
+                "phase": "queued",
+                "tracker": "linear",
+                "error": null,
                 "local_value": {
                   "title": "Saved offline"
                 },
-                "linear_value": null,
-                "error": null
+                "tracker_value": null
               },
               {
                 "id": "order-project",
-                "field": "task_order",
-                "state": "uncertain",
+                "seq": 2,
+                "owner_kind": "project",
+                "owner_id": "issue-2",
+                "kind": "order",
+                "change": "order",
+                "subject": null,
+                "phase": "sent",
+                "tracker": "linear",
+                "error": "Reply lost; awaiting readback",
                 "local_value": [
                   "task-b",
                   "task-a"
                 ],
-                "linear_value": null,
-                "error": "Reply lost; awaiting readback"
+                "tracker_value": null
               },
               {
                 "id": "title-task",
-                "field": "task_title",
-                "state": "adopted_linear",
+                "seq": 3,
+                "owner_kind": "task",
+                "owner_id": "issue-2",
+                "kind": "field",
+                "change": "title",
+                "subject": "task_title",
+                "phase": "conflicted",
+                "tracker": "linear",
+                "error": null,
                 "local_value": "Local title",
-                "linear_value": "Linear title",
-                "error": null
+                "tracker_value": "Linear title"
               },
               {
                 "id": "assignee-task",
-                "field": "task_assignee",
-                "state": "adopted_linear",
+                "seq": 4,
+                "owner_kind": "task",
+                "owner_id": "issue-2",
+                "kind": "field",
+                "change": "assignee",
+                "subject": "task_assignee",
+                "phase": "conflicted",
+                "tracker": "linear",
+                "error": null,
                 "local_value": "person-id",
-                "linear_value": null,
-                "error": null
+                "tracker_value": null
               },
               {
                 "id": "comment-task",
-                "field": "comment",
-                "state": "pending",
+                "seq": 5,
+                "owner_kind": "task",
+                "owner_id": "issue-2",
+                "kind": "comment",
+                "change": "comment",
+                "subject": null,
+                "phase": "queued",
+                "tracker": "linear",
+                "error": "Offline",
                 "local_value": {
                   "body": "Saved comment",
                   "author": {
@@ -512,15 +571,15 @@
                   },
                   "created_at": "2026-10-08T12:00:00Z"
                 },
-                "linear_value": null,
-                "error": "Offline"
+                "tracker_value": null
               }
             ]
           },
-          "linear_id": null,
-          "acquisition": {
+          "tracker_id": null,
+          "parent_id": "ts_22222222222222222222222222222222",
+          "tracker_state": {
             "state": "available",
-            "observed_at": null
+            "synced_at": null
           },
           "repo_id": "repo_00000000000040008000000000000001",
           "repo": "/src/loopflow",
@@ -561,15 +620,13 @@
           "state": "idle",
           "reason": "No active execution",
           "step": null,
-          "captured": null
+          "captured": null,
+          "died": null,
+          "outlook": null
         },
         "run_control": {
           "unavailable": null
         },
-        "ship_control": {
-          "unavailable": null
-        },
-        "shipping": null,
         "pr": null,
         "graph_source": null,
         "section": "backlog",
@@ -577,7 +634,8 @@
         "selection_states": [
           "unstarted",
           "backlog"
-        ]
+        ],
+        "owned_by_you": false
       }
     ],
     "truncated": false
@@ -618,32 +676,43 @@
           }
         ],
         "sync": {
-          "connected": true,
-          "changes": [
+          "actions": [
             {
               "id": "create-task",
-              "field": "creation",
-              "state": "pending",
+              "seq": 1,
+              "owner_kind": "task",
+              "owner_id": "proj_0123456789ab40008000000000000001",
+              "kind": "create",
+              "change": "create",
+              "subject": null,
+              "phase": "queued",
+              "tracker": "linear",
+              "error": null,
               "local_value": {
                 "title": "Saved offline"
               },
-              "linear_value": null,
-              "error": null
+              "tracker_value": null
             },
             {
               "id": "order-project",
-              "field": "task_order",
-              "state": "uncertain",
+              "seq": 2,
+              "owner_kind": "project",
+              "owner_id": "proj_0123456789ab40008000000000000001",
+              "kind": "order",
+              "change": "order",
+              "subject": null,
+              "phase": "sent",
+              "tracker": "linear",
+              "error": "Reply lost; awaiting readback",
               "local_value": [
                 "task-b",
                 "task-a"
               ],
-              "linear_value": null,
-              "error": "Reply lost; awaiting readback"
+              "tracker_value": null
             }
           ]
         },
-        "linear_id": "project-1"
+        "tracker_id": "project-1"
       }
     ],
     "truncated": false
@@ -658,6 +727,12 @@
   "setup": {
     "graph": {
       "value": "code",
+      "source": "repository",
+      "scope": null,
+      "locator": null
+    },
+    "auto": {
+      "value": "on",
       "source": "repository",
       "scope": null,
       "locator": null

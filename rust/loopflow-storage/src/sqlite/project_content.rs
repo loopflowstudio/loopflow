@@ -9,13 +9,15 @@ use crate::work::project::ProjectKR;
 use crate::{StoreError, StoreResult};
 use loopflow_model::durable::ProjectId;
 
-use super::planning_changes::PlanningChanges;
 use super::SqliteStore;
 
 impl SqliteStore {
     pub fn pending_project_changes(&self, project: &ProjectId) -> StoreResult<Vec<PlanningChange>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        PlanningChanges::Project(project).pending(&conn)
+        super::tracker_actions::queued_changes_in(
+            &conn,
+            &super::tracker_actions::ActionOwner::Project(project.clone()),
+        )
     }
 
     pub fn edit_project(
@@ -41,7 +43,11 @@ impl SqliteStore {
                     .map(|description| Edit::ProjectDescription(Some(description.trim().into()))),
             )
             .collect();
-        PlanningChanges::Project(project).save(&tx, &edits)?;
+        super::planning_write::local(
+            &tx,
+            &crate::work::edit::WorkEdit::for_target(project.as_str(), &edits),
+        )
+        .map(|_| ())?;
         tx.commit()?;
         Ok(())
     }
@@ -54,13 +60,17 @@ impl SqliteStore {
     ) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        PlanningChanges::Project(project).save(
+        super::planning_write::local(
             &tx,
-            &[
-                Edit::Krs(krs.to_vec()),
-                Edit::MetricTargets(metric_targets.to_vec()),
-            ],
-        )?;
+            &crate::work::edit::WorkEdit::for_target(
+                project.as_str(),
+                &[
+                    Edit::Krs(krs.to_vec()),
+                    Edit::MetricTargets(metric_targets.to_vec()),
+                ],
+            ),
+        )
+        .map(|_| ())?;
         tx.commit()?;
         Ok(())
     }
@@ -82,12 +92,13 @@ mod tests {
             "id":"linear-project", "revision":"2026-10-10T12:00:00Z", "slug":"product", "name":"Product", "summary":"",
             "workflow":"", "krs":[], "metric_targets":[], "status":"started", "initiative_ids":["initiative"], "team_ids":["team"]
         })).unwrap();
-        crate::sqlite::linear_acceptance::accept_linear_project_in(
+        crate::sqlite::linear_events::accept_linear_project_in(
             &store,
             wave.id(),
             "initiative",
             &observed,
             17,
+            crate::planning_sync::TrackerKind::Linear,
         )
         .unwrap();
         let project = store.list_projects(Some(wave.id())).unwrap().remove(0);
@@ -96,7 +107,7 @@ mod tests {
             .lock()
             .unwrap()
             .execute(
-                "UPDATE pm_projects SET task_order_json='{}' WHERE id='linear-project'",
+                "UPDATE tracker_projects SET task_order_json='{}' WHERE id='linear-project'",
                 [],
             )
             .unwrap();
@@ -111,21 +122,14 @@ mod tests {
             serde_json::to_value(&change.base).unwrap(),
             serde_json::json!({"revision":"2026-10-10T12:00:00Z", "value":{"field":"project_name","value":"Product"}})
         );
-        assert!(store
-            .attempt_planning_field(
-                super::super::planning_changes::PlanningChanges::Project(&project.id),
-                &change,
-                Some("2026-10-10T12:00:00Z"),
-                false,
-            )
-            .unwrap());
+        assert!(store.attempt_tracker_action(&change.id).unwrap());
         assert_eq!(store.project(&project.id).unwrap().unwrap().name, "Renamed");
         let retained: (String, i64) = store
             .conn
             .lock()
             .unwrap()
             .query_row(
-                "SELECT task_order_json,observed_at FROM pm_projects WHERE id='linear-project'",
+                "SELECT task_order_json,observed_at FROM tracker_projects WHERE id='linear-project'",
                 [],
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
@@ -139,16 +143,17 @@ mod tests {
         let store = crate::test_fixture::open(&home.path().join("store.db")).unwrap();
         let wave = Wave::new(WaveId::new(), "product".into(), "/repo".into());
         crate::test_fixture::wave(&store, &wave);
-        let mut observed: crate::linear_records::LinearProject = serde_json::from_value(serde_json::json!({
+        let mut observed: crate::planning::TrackerProject = serde_json::from_value(serde_json::json!({
             "id":"linear-project", "revision":"2026-10-10T12:00:00Z", "slug":"product", "name":"Product", "summary":"",
             "workflow":"", "krs":[], "metric_targets":[], "status":"started", "initiative_ids":["initiative"], "team_ids":["team"]
         })).unwrap();
-        crate::sqlite::linear_acceptance::accept_linear_project_in(
+        crate::sqlite::linear_events::accept_linear_project_in(
             &store,
             wave.id(),
             "initiative",
             &observed,
             1,
+            crate::planning_sync::TrackerKind::Linear,
         )
         .unwrap();
         let project = store.list_projects(Some(wave.id())).unwrap().remove(0);
@@ -161,12 +166,13 @@ mod tests {
             .remove(0);
         assert_eq!(change.base, None);
         observed.description = Some(String::new());
-        crate::sqlite::linear_acceptance::accept_linear_project_in(
+        crate::sqlite::linear_events::accept_linear_project_in(
             &store,
             wave.id(),
             "initiative",
             &observed,
             2,
+            crate::planning_sync::TrackerKind::Linear,
         )
         .unwrap();
         // The unsent save is sent after the observed prose, so it wins and
@@ -178,7 +184,7 @@ mod tests {
         let conn = store.conn.lock().unwrap();
         let (conflict, base): (Option<String>, String) = conn
             .query_row(
-                "SELECT conflict_json,base_json FROM project_changes WHERE id=?1",
+                "SELECT conflict_json,base_json FROM tracker_actions WHERE id=?1",
                 [&change.id],
                 |r| Ok((r.get(0)?, r.get(1)?)),
             )
@@ -196,28 +202,30 @@ mod tests {
         let store = crate::test_fixture::open(&home.path().join("store.db")).unwrap();
         let wave = Wave::new(WaveId::new(), "product".into(), "/repo".into());
         crate::test_fixture::wave(&store, &wave);
-        let mut observed: crate::linear_records::LinearProject = serde_json::from_value(serde_json::json!({
+        let mut observed: crate::planning::TrackerProject = serde_json::from_value(serde_json::json!({
             "id":"linear-project", "revision":"2026-10-10T12:00:00Z", "slug":"product", "name":"Product", "summary":"", "description":"Baseline",
             "workflow":"", "krs":[], "metric_targets":[], "status":"started", "initiative_ids":["initiative"], "team_ids":["team"]
         })).unwrap();
-        crate::sqlite::linear_acceptance::accept_linear_project_in(
+        crate::sqlite::linear_events::accept_linear_project_in(
             &store,
             wave.id(),
             "initiative",
             &observed,
             17,
+            crate::planning_sync::TrackerKind::Linear,
         )
         .unwrap();
         let project = store.list_projects(Some(wave.id())).unwrap().remove(0);
         observed.description = None;
         observed.revision = Some("2026-10-10T12:01:00Z".into());
         observed.summary = "New summary".into();
-        crate::sqlite::linear_acceptance::accept_linear_project_in(
+        crate::sqlite::linear_events::accept_linear_project_in(
             &store,
             wave.id(),
             "initiative",
             &observed,
             29,
+            crate::planning_sync::TrackerKind::Linear,
         )
         .unwrap();
         let saved = store.project(&project.id).unwrap().unwrap();
@@ -239,7 +247,7 @@ mod tests {
             .lock()
             .unwrap()
             .query_row(
-                "SELECT json_object('value',description,'revision',description_revision,'observed_at',description_observed_at) FROM pm_projects WHERE id='linear-project'",
+                "SELECT json_object('value',description,'revision',description_revision,'observed_at',description_observed_at) FROM tracker_projects WHERE id='linear-project'",
                 [],
                 |r| r.get(0),
             )
@@ -249,12 +257,13 @@ mod tests {
             serde_json::json!({"value":"Baseline", "revision":"2026-10-10T12:00:00Z", "observed_at":17})
         );
         observed.description = Some("Baseline".into());
-        crate::sqlite::linear_acceptance::accept_linear_project_in(
+        crate::sqlite::linear_events::accept_linear_project_in(
             &store,
             wave.id(),
             "initiative",
             &observed,
             30,
+            crate::planning_sync::TrackerKind::Linear,
         )
         .unwrap();
         assert_eq!(

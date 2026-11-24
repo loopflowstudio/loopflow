@@ -35,30 +35,22 @@ pub struct ProviderLineage {
     pub original_running: Option<bool>,
 }
 
-// Transitions are the observations whose receipt keys name them; the predicate
-// matches the `session_provider_transitions` partial index word for word.
-macro_rules! transitions {
-    () => {
-        "kind='observed' AND (receipt_key GLOB 'provider-transition:*' OR receipt_key GLOB 'agent-session:*')"
-    };
-}
-
+/// The latest transition, kept on the Session as state.
 pub(crate) fn latest_in(
     conn: &Connection,
     session: &str,
 ) -> StoreResult<Option<ProviderTransition>> {
-    let row = conn
+    let transition: Option<String> = conn
         .query_row(
-            concat!(
-                "SELECT payload,observed_at FROM session_events WHERE session_id=?1 AND ",
-                transitions!(),
-                " ORDER BY seq DESC LIMIT 1"
-            ),
+            "SELECT transition FROM agent_sessions WHERE id=?1",
             [session],
-            |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
+            |row| row.get(0),
         )
-        .optional()?;
-    row.map(|(payload, at)| decode(&payload, at)).transpose()
+        .optional()?
+        .flatten();
+    Ok(transition
+        .map(|transition| serde_json::from_str(&transition))
+        .transpose()?)
 }
 
 // Released history keeps its original payload; only its reader translates it.
@@ -92,8 +84,8 @@ fn live_process(
 ) -> StoreResult<Option<loopflow_model::id::AgentProcessId>> {
     Ok(conn
         .query_row(
-            "SELECT p.id FROM agent_sessions s JOIN processes p ON p.id=s.agent_process_id
-         WHERE s.id=?1 AND p.pid IS NOT NULL AND p.completed_at IS NULL",
+            "SELECT agent_process_id FROM agent_sessions
+         WHERE id=?1 AND agent_pid IS NOT NULL AND agent_ended_at IS NULL",
             [session],
             |row| row.get(0),
         )
@@ -126,19 +118,24 @@ pub(crate) fn observe_in(
     session: &str,
     thread: &str,
     source: &str,
-) -> StoreResult<()> {
+) -> StoreResult<Option<crate::history::Row>> {
     let Some(process) = live_process(conn, session)? else {
-        return Ok(());
+        return Ok(None);
     };
     let previous = latest_in(conn, session)?;
     if is_latest(previous.as_ref(), &process, thread) {
-        return Ok(());
+        return Ok(None);
     }
-    let lineage: Option<String> = conn.query_row(
-        "SELECT e.payload FROM session_events e JOIN agent_sessions s ON s.id=e.session_id
-         WHERE s.id=?1 AND e.captured_event=s.current_capture AND (CASE WHEN json_valid(e.payload) THEN json_extract(e.payload,'$.type') END)='provider_lineage'
-         AND NOT EXISTS(SELECT 1 FROM session_events changed WHERE changed.session_id=s.id AND changed.captured_event=s.current_capture AND (CASE WHEN json_valid(changed.payload) THEN json_extract(changed.payload,'$.type') END)='provider_transition')
-         ORDER BY e.seq DESC LIMIT 1", [session], |row| row.get(0)).optional()?;
+    // The lineage seeds only the input's first transition, which takes it.
+    let lineage: Option<String> = conn
+        .query_row(
+            "SELECT c.provider_lineage FROM agent_sessions s
+             JOIN session_events c ON c.seq=s.current_capture WHERE s.id=?1",
+            [session],
+            |row| row.get(0),
+        )
+        .optional()?
+        .flatten();
     let lineage: Option<ProviderLineage> = lineage.map(|s| serde_json::from_str(&s)).transpose()?;
     let from_thread = lineage
         .as_ref()
@@ -170,11 +167,33 @@ pub(crate) fn observe_in(
         seed: forked.then(|| if source == "fork" { "native" } else { "log" }.into()),
         observed_at: crate::rows::now_unix(),
     };
-    conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,lf_process_id,observed_at,payload,captured_event)
-        SELECT s.id,'observed',?2,p.attached_lf_process_id,?3,?4,s.current_capture FROM agent_sessions s JOIN processes p ON p.id=s.agent_process_id WHERE s.id=?1",
-        params![session,format!("provider-transition:{}:{}",process,uuid::Uuid::new_v4()),transition.observed_at,
-        serde_json::to_string(&serde_json::json!({"type":"provider_transition","source":source,"transition":transition}))?])?;
-    Ok(())
+    conn.execute(
+        "UPDATE agent_sessions SET transition=?2 WHERE id=?1",
+        params![session, serde_json::to_string(&transition)?],
+    )?;
+    if lineage.is_some() {
+        conn.execute(
+            "UPDATE session_events SET provider_lineage=NULL
+             WHERE seq=(SELECT current_capture FROM agent_sessions WHERE id=?1)",
+            [session],
+        )?;
+    }
+    let (attached, captured): (Option<String>, Option<i64>) = conn.query_row(
+        "SELECT attached_lf_process_id,current_capture FROM agent_sessions WHERE id=?1",
+        [session],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )?;
+    let mut row = crate::history::Row::observed(
+        session,
+        format!("provider-transition:{}:{}", process, uuid::Uuid::new_v4()),
+        captured,
+        transition.observed_at,
+        serde_json::to_string(
+            &serde_json::json!({"type":"provider_transition","source":source,"transition":transition}),
+        )?,
+    );
+    row.lf_process_id = attached;
+    Ok(Some(row))
 }
 
 impl SqliteStore {
@@ -182,13 +201,13 @@ impl SqliteStore {
         latest_in(&self.conn.lock().expect("store mutex poisoned"), session)
     }
 
+    /// Every transition `session` made, oldest first, from its history.
     pub fn provider_transitions(&self, session: &str) -> StoreResult<Vec<ProviderTransition>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut statement = conn.prepare(concat!(
-            "SELECT payload,observed_at FROM session_events WHERE session_id=?1 AND ",
-            transitions!(),
-            " ORDER BY seq"
-        ))?;
+        let mut statement = conn.prepare(
+            "SELECT payload,observed_at FROM history.session_history
+             WHERE session_id=?1 AND kind='transition' ORDER BY seq",
+        )?;
         let rows = statement.query_map([session], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
         })?;
@@ -206,11 +225,36 @@ impl SqliteStore {
     ) -> StoreResult<()> {
         let mut payload = serde_json::to_value(source)?;
         payload["type"] = "provider_lineage".into();
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload,captured_event)
-            SELECT id,'observed',?2,unixepoch(),?3,current_capture FROM agent_sessions WHERE id=?1",
-            params![next.id,format!("lineage:{}",next.artifact_key.as_deref().unwrap_or("unknown")),
-                serde_json::to_string(&payload)?])?;
+        let payload = serde_json::to_string(&payload)?;
+        let captured: Option<i64> = {
+            let conn = self.conn.lock().expect("store mutex poisoned");
+            let captured = conn
+                .query_row(
+                    "SELECT current_capture FROM agent_sessions WHERE id=?1",
+                    [&next.id],
+                    |row| row.get(0),
+                )
+                .optional()?
+                .ok_or(crate::StoreError::NotFound)?;
+            conn.execute(
+                "UPDATE session_events SET provider_lineage=?2 WHERE seq=?1 AND kind='captured'",
+                params![captured, payload],
+            )?;
+            captured
+        };
+        self.append_history(
+            "provider lineage",
+            &[crate::history::Row::observed(
+                &next.id,
+                format!(
+                    "lineage:{}",
+                    next.artifact_key.as_deref().unwrap_or("unknown")
+                ),
+                captured,
+                crate::rows::now_unix(),
+                payload,
+            )],
+        );
         Ok(())
     }
 }
@@ -239,29 +283,6 @@ mod tests {
     }
 
     #[test]
-    fn latest_transition_reads_only_indexed_transition_rows() {
-        let home = tempfile::tempdir().unwrap();
-        let store = crate::test_fixture::open(&home.path().join("store.db")).unwrap();
-        let conn = store.conn.lock().unwrap();
-        let mut statement = conn
-            .prepare(concat!(
-                "EXPLAIN QUERY PLAN SELECT payload FROM session_events WHERE session_id=?1 AND ",
-                transitions!(),
-                " ORDER BY seq DESC LIMIT 1"
-            ))
-            .unwrap();
-        let plan: Vec<String> = statement
-            .query_map(["conversation"], |row| row.get::<_, String>(3))
-            .unwrap()
-            .map(Result::unwrap)
-            .collect();
-        assert_eq!(
-            plan,
-            ["SEARCH session_events USING INDEX session_provider_transitions (session_id=?)"]
-        );
-    }
-
-    #[test]
     fn explicit_provider_changes_keep_the_original_thread() {
         let (_home, store, adapter) = crate::test_fixture::steer();
         let attachment = store.session_attachment("session").unwrap().unwrap();
@@ -269,12 +290,16 @@ mod tests {
         store
             .record_session_agent_session("session", &attachment, &"native".into())
             .unwrap();
-        observe_in(&store.conn.lock().unwrap(), "session", "fork", "fork").unwrap();
+        let observe = |thread: &str, source: &str| {
+            let row = observe_in(&store.conn.lock().unwrap(), "session", thread, source).unwrap();
+            store.append_history("transition", &Vec::from_iter(row));
+        };
+        observe("fork", "fork");
         let forked = store.provider_transition("session").unwrap().unwrap();
         assert_eq!(forked.kind, TransitionKind::Forked);
         assert_eq!(forked.seed.as_deref(), Some("native"));
         assert_eq!(forked.from_provider_session.as_deref(), Some("native"));
-        observe_in(&store.conn.lock().unwrap(), "session", "empty", "new").unwrap();
+        observe("empty", "new");
         let empty = store.provider_transition("session").unwrap().unwrap();
         assert_eq!(empty.kind, TransitionKind::Started);
         assert_eq!(empty.from_provider_session.as_deref(), Some("fork"));

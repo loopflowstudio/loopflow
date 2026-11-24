@@ -94,29 +94,6 @@ pub(super) async fn resolve_managed_task(repo: &Path) -> OpsResult<ManagedTask> 
     }
 }
 
-pub fn record_task_pr_repair(
-    repo: &Path,
-    kind: loopflow_storage::work::task::TaskPrRepairKind,
-) -> OpsResult<bool> {
-    block_on_task(async move {
-        let ManagedTask::Managed { store, task } = resolve_managed_task(repo).await? else {
-            return Ok(false);
-        };
-        let Some(pr) = store
-            .active_task_pr(&task.id)
-            .await
-            .map_err(|error| task_error(format!("failed to read active PR: {error}")))?
-        else {
-            return Ok(false);
-        };
-        let occurred_at = time::OffsetDateTime::now_utc();
-        store
-            .record_task_pr_repair_incident(&pr.id, kind, occurred_at)
-            .await
-            .map_err(|error| task_error(format!("failed to record Task PR repair: {error}")))
-    })
-}
-
 pub(super) fn task_pr_for_publication(task: &Task) -> TaskPr {
     TaskPr {
         id: TaskPrId::new(),
@@ -306,7 +283,7 @@ pub fn refresh_task_pr_for_publication(repo: &Path) -> OpsResult<()> {
                 .sync_task_placement(
                     &task.id,
                     &task.base_commit,
-                    true,
+                    None,
                     time::OffsetDateTime::now_utc(),
                 )
                 .await
@@ -326,7 +303,7 @@ pub fn task_pr_context(repo: &Path) -> OpsResult<Option<TaskPrContext>> {
 }
 
 async fn _task_pr_context_from_store(store: &SharedStore, task: &Task) -> OpsResult<TaskPrContext> {
-    let url = if task.linear_id.is_some() {
+    let url = if task.tracker_id.is_some() {
         Some(
             store
                 .sqlite
@@ -626,15 +603,31 @@ pub(super) fn resolve_upstream_base(
     repo: &Path,
     default_branch: &str,
 ) -> OpsResult<(String, String)> {
-    let base = if default_branch == get_default_branch(repo)? {
+    let base = upstream_base(repo, default_branch)?;
+    crate::git::fetch_tracking_ref(repo, &base)
+        .map_err(|error| task_error(format!("failed to fetch task base: {error}")))?;
+    resolve_base(repo, default_branch, base)
+}
+
+/// The same base as the last fetch left it.
+pub(super) fn local_upstream_base(
+    repo: &Path,
+    default_branch: &str,
+) -> OpsResult<(String, String)> {
+    resolve_base(repo, default_branch, upstream_base(repo, default_branch)?)
+}
+
+fn upstream_base(repo: &Path, default_branch: &str) -> OpsResult<String> {
+    Ok(if default_branch == get_default_branch(repo)? {
         crate::git::integration_base(repo)?
     } else if has_remote(repo)? {
         format!("origin/{default_branch}")
     } else {
         default_branch.to_string()
-    };
-    crate::git::fetch_tracking_ref(repo, &base)
-        .map_err(|error| task_error(format!("failed to fetch task base: {error}")))?;
+    })
+}
+
+fn resolve_base(repo: &Path, default_branch: &str, base: String) -> OpsResult<(String, String)> {
     let base_ref = if base == default_branch {
         format!("refs/heads/{default_branch}")
     } else {
@@ -807,12 +800,7 @@ async fn resolve_task_pr_base(
         && merge_base != task.base_commit
     {
         store
-            .sync_task_placement(
-                &task.id,
-                &merge_base,
-                false,
-                time::OffsetDateTime::now_utc(),
-            )
+            .sync_task_placement(&task.id, &merge_base, None, time::OffsetDateTime::now_utc())
             .await
             .map_err(|error| task_error(format!("failed to record Task PR base: {error}")))?;
     }
@@ -885,13 +873,6 @@ pub fn attach_task_github_pr(
         let opened = pr
             .github()
             .is_none_or(|github| github.number != number || github.url != url);
-        // Linked as Open with nothing new to say: another push or refresh
-        // rewrites neither the attachment nor the comment.
-        let linked_open = !opened
-            && pr.phase() == PrPhase::Open
-            && pr.linear_attachment_id.is_some()
-            && pr.linear_comment_id.is_some()
-            && pr.linear_link_error.is_none();
         // An existing GitHub PR may predate local publication. Retain its
         // identity now; reviewer copy is recorded only after promotion succeeds.
         let publication = pr.publication.get_or_insert_with(|| PrPublication {
@@ -928,11 +909,9 @@ pub fn attach_task_github_pr(
                 .await
                 .map_err(task_error)?;
         }
-        // Linear linkage is idempotent. A failed or interrupted writeback cannot
-        // erase the GitHub identity already committed above.
-        if !linked_open {
-            link_pr_to_planning(&store, &task, &mut pr).await;
-        }
+        // A state the tracker already shows queues nothing. A failed or
+        // interrupted writeback cannot erase the GitHub identity committed above.
+        link_pr_to_planning(&store, &task, &mut pr).await;
         pr.updated_at = time::OffsetDateTime::now_utc();
         store
             .update_task_pr(&pr)

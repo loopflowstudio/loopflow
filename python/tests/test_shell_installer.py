@@ -7,6 +7,7 @@ no network, installed apps or production receipts are touched.
 from __future__ import annotations
 
 import os
+import pty
 import subprocess
 from pathlib import Path
 
@@ -211,6 +212,33 @@ def test_latest_release_is_pinned_before_the_archive_download(
     assert "/releases/latest" in downloads
     assert "/releases/download/v9.9.9/SHA256SUMS" in downloads
     assert "/releases/download/v9.9.9/lf-" in downloads
+    assert "Downloading lf-" in result.stderr
+    assert "--progress-bar" not in downloads
+
+
+def test_terminal_shows_progress_for_both_mac_downloads(
+    installer: Path, env: dict[str, str], tmp_path: Path
+) -> None:
+    Path(env["LF_APPLICATIONS_DIR"]).mkdir()
+    master, slave = pty.openpty()
+    try:
+        subprocess.run(
+            ["sh", str(installer), "--version", "0.9.9"],
+            env={**os.environ, **env, "LF_INSTALL_CLI_ONLY": "0", "LFTEST_UNAME_SYSTEM": "Darwin"},
+            stderr=slave,
+            check=True,
+        )
+    finally:
+        os.close(slave)
+        os.close(master)
+    transfers = [
+        line.split()[-1].rsplit("/", 1)[-1]
+        for line in (tmp_path / "curl.log").read_text().splitlines()
+        if "--progress-bar" in line
+    ]
+    assert len(transfers) == 2
+    assert transfers[0].endswith("apple-darwin.tar.gz")
+    assert transfers[1] == "Loopflow.dmg"
 
 
 def test_digest_mismatch_aborts_before_promotion(

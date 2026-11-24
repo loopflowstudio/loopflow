@@ -1,11 +1,10 @@
-# Explore, build, deliver and verify. You choose what to build, review the
-# change and check it on main in the Task conversation; everything
-# between runs on its own.
+description: Explore, build, deliver and verify. You choose what to build, review the change and check it on main.
+steps:
 - interactive: explore
 - graph: plan
 - loop:
     - loop:
         - graph: build
-        - interactive: human-review     # you read the page; iterate goes back to build
+        - interactive: ship-review     # you read the page; iterate goes back to build
     - graph: deliver
     - interactive: verify

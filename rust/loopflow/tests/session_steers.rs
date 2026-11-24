@@ -1,6 +1,5 @@
 //! Public launch proofs for the Session delivery cutover.
 use crate::support;
-use loopflow_execution::process::attachment;
 
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
@@ -8,11 +7,8 @@ use std::process::{Command, Stdio};
 
 use loopflow_test_support::{MachineServer, TestRepo};
 
-/// `lf skill startup-proof` on a stand-in Claude that runs its SessionStart
-/// hook, then answers. With `task` the command names the Task, so the launch
-/// is managed; without, it is a bare `lf` in the checkout and the stand-in
-/// expects no turn hooks and steers its own Session through its tool hook. The stand-in
-/// expects a steer in the hook's block when `expect-steer` exists under `home`.
+/// A bare skill, with optional Task attribution. The stand-in checks context
+/// hooks and claims a steer through its tool hook without a Machine server.
 fn launch_startup_proof(
     repo: &TestRepo,
     home: &std::path::Path,
@@ -28,9 +24,6 @@ fn launch_startup_proof_through(
     lf_bin: &std::path::Path,
     task: Option<&str>,
 ) -> std::process::Output {
-    if task.is_none() {
-        fs::write(home.join("expect-bare"), "").unwrap();
-    }
     let bin = home.join("bin");
     fs::create_dir(&bin).unwrap();
     let skill = repo.path().join(".claude/skills/startup-proof");
@@ -48,56 +41,46 @@ fn launch_startup_proof_through(
         fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
     }
     let provider = bin.join("claude");
-    fs::write(&provider, r#"#!/usr/bin/python3
-import fcntl, hashlib, json, os, pathlib, select, shlex, subprocess, sys
+    fs::write(&provider, support::claude_stand_in(r#"#!/usr/bin/python3
+import json, os, pathlib, shlex, subprocess, sys
 if '--version' in sys.argv:
     print('fixture')
     sys.exit(0)
 home = pathlib.Path(os.environ['LF_HOME'])
 sys.stderr = open(home / 'provider-errors', 'w', buffering=1)
 caller = json.loads(os.environ['LF_AGENT_CALLER'])
-lock = home / 'loopflow.session-locks' / hashlib.sha256(caller['session_id'].encode()).hexdigest()
-# Force a hook/input overlap without draining a byte of the combined seed.
-assert select.select([sys.stdin], [], [], 5)[0], 'no initial input'
-with open(lock, 'r+') as fence:
-    fcntl.flock(fence, fcntl.LOCK_SH)
-    settings = json.load(open(sys.argv[sys.argv.index('--settings') + 1]))
-    hook = settings['hooks']['SessionStart'][0]['hooks'][0]['command']
-    arguments = shlex.split(hook)
-    if (home / 'expect-bare').exists():
-        assert 'LF_PROVIDER_CONTEXT' not in os.environ
-        assert 'Stop' not in settings['hooks'], list(settings['hooks'])
-        commands = [h['command'].split()[-1] for group in settings['hooks']['SessionStart'] for h in group['hooks']]
-        assert commands == ['start', 'compact'], commands
-    else:
-        adapter = json.loads(os.environ['LF_PROVIDER_CONTEXT'])
-        assert adapter['agent_process_id'] == caller['agent_process_id']
-        assert 'Stop' in settings['hooks'] and 'PostToolUse' in settings['hooks']
-    output = subprocess.check_output(hook, shell=True, input=json.dumps({'session_id': 'startup-native', 'hook_event_name': 'SessionStart', 'source': 'startup'}).encode())
-    context_text = json.loads(output)['hookSpecificOutput']['additionalContext']
-    assert len(context_text.encode()) <= 10000
-    if (home / 'expect-steer').exists():
-        assert 'STARTUP_DIRECTION' in context_text
-        assert '[excerpt; full source above]' in context_text
-    (home / 'startup-complete').touch()
-if (home / 'expect-bare').exists():
-    # A bare launch's tool hook reads its steers from the store, with no server.
-    adapter = json.loads(os.environ['LF_BARE_STEER'])
-    assert adapter['agent_process_id'] == caller['agent_process_id']
-    tool = settings['hooks']['PostToolUse'][0]['hooks'][0]['command']
-    def after_tool():
-        callback = {'session_id': 'startup-native', 'hook_event_name': 'PostToolUse'}
-        return subprocess.check_output(tool, shell=True, input=json.dumps(callback).encode()).decode()
-    assert after_tool() == '', 'no steer yet'
-    seen = pathlib.Path(os.environ['LF_STEER_SEEN'])
-    checked = seen.stat().st_mtime_ns
-    assert after_tool() == '' and seen.stat().st_mtime_ns == checked, 'lf ran with no new steer'
-    subprocess.check_call([arguments[2], 'steer', caller['session_id'], 'BARE_DIRECTION'], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
-    steered = json.loads(after_tool())['hookSpecificOutput']
-    assert steered['hookEventName'] == 'PostToolUse' and 'BARE_DIRECTION' in steered['additionalContext'], steered
-    assert after_tool() == '', 'the steer arrived twice'
+# Drain both messages before launching hooks so hook latency cannot block the seed write.
 context = json.loads(sys.stdin.readline())
 query = json.loads(sys.stdin.readline())
+settings = json.load(open(sys.argv[sys.argv.index('--settings') + 1]))
+hook = settings['hooks']['SessionStart'][0]['hooks'][0]['command']
+arguments = shlex.split(hook)
+assert 'LF_PROVIDER_CONTEXT' not in os.environ
+assert 'Stop' not in settings['hooks'], list(settings['hooks'])
+commands = [h['command'].split()[-1] for group in settings['hooks']['SessionStart'] for h in group['hooks']]
+assert commands == ['start', 'compact'], commands
+output = subprocess.check_output(hook, shell=True, input=json.dumps({'session_id': 'startup-native', 'hook_event_name': 'SessionStart', 'source': 'startup'}).encode())
+context_text = json.loads(output)['hookSpecificOutput']['additionalContext']
+assert len(context_text.encode()) <= 10000
+if (home / 'expect-steer').exists():
+    assert 'STARTUP_DIRECTION' in context_text
+    assert '[excerpt; full source above]' in context_text
+(home / 'startup-complete').touch()
+# A bare launch's tool hook reads its steers from the store, with no server.
+adapter = json.loads(os.environ['LF_BARE_STEER'])
+assert adapter['agent_process_id'] == caller['agent_process_id']
+tool = settings['hooks']['PostToolUse'][0]['hooks'][0]['command']
+def after_tool():
+    callback = {'session_id': 'startup-native', 'hook_event_name': 'PostToolUse'}
+    return subprocess.check_output(tool, shell=True, input=json.dumps(callback).encode()).decode()
+assert after_tool() == '', 'no steer yet'
+seen = pathlib.Path(os.environ['LF_STEER_SEEN'])
+checked = seen.stat().st_mtime_ns
+assert after_tool() == '' and seen.stat().st_mtime_ns == checked, 'lf ran with no new steer'
+subprocess.check_call([arguments[2], 'steer', caller['session_id'], 'BARE_DIRECTION'], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
+steered = json.loads(after_tool())['hookSpecificOutput']
+assert steered['hookEventName'] == 'PostToolUse' and 'BARE_DIRECTION' in steered['additionalContext'], steered
+assert after_tool() == '', 'the steer arrived twice'
 assert context['shouldQuery'] is False
 expected = (home / 'clipboard').read_text()
 assert expected in context['message']['content'], 'incomplete non-query context'
@@ -105,11 +88,12 @@ assert query['message']['content'][0]['text'].endswith('QUERY_END'), 'incomplete
 assert len(json.dumps(context).encode()) > 131133
 assert query['uuid']
 query['session_id'] = 'startup-native'
+keep_claude_turn(query, 'CORRELATED_STARTUP_ANSWER')
 print(json.dumps(query), flush=True)
 print(json.dumps({'type': 'system', 'subtype': 'init', 'session_id': 'startup-native'}), flush=True)
 print(json.dumps({'type': 'result', 'uuid': 'answer-id', 'session_id': 'startup-native', 'subtype': 'success', 'is_error': False, 'result': 'CORRELATED_STARTUP_ANSWER'}), flush=True)
 sys.stdin.read()
-"#).unwrap();
+"#)).unwrap();
     fs::set_permissions(provider, fs::Permissions::from_mode(0o755)).unwrap();
     Command::new(env!("CARGO_BIN_EXE_lf"))
         .env_clear()
@@ -163,22 +147,11 @@ fn claude_startup_preserves_large_combined_seed_and_correlated_answer() {
         )
         .unwrap();
     fs::write(home.path().join("expect-steer"), "").unwrap();
-    // The startup hook asks the Machine server for the steer.
+    // The bare startup hook reads the steer directly, even with a server present.
     let _server = MachineServer::start(env!("CARGO_BIN_EXE_lf"), home.path());
     let output = launch_startup_proof(&repo, home.path(), Some("INF-123"));
     assert_launched(&output, home.path());
     let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
-    let (native, answer, turn): (String, String, String) = db
-        .query_row(
-            "SELECT s.provider_thread,json_extract(e.payload,'$.text'),e.provider_turn
-         FROM agent_sessions s JOIN session_events e ON e.session_id=s.id WHERE e.kind='output'",
-            [],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
-        )
-        .unwrap();
-    assert_eq!(native, "startup-native");
-    assert_eq!(answer, "CORRELATED_STARTUP_ANSWER");
-    assert!(!turn.is_empty());
     let session: String = db
         .query_row(
             "SELECT id FROM agent_sessions WHERE provider_thread='startup-native'",
@@ -186,6 +159,21 @@ fn claude_startup_preserves_large_combined_seed_and_correlated_answer() {
             |r| r.get(0),
         )
         .unwrap();
+    // The answer is the one Claude kept for the query's turn.
+    let answer = Command::new(env!("CARGO_BIN_EXE_lf"))
+        .env_clear()
+        .env("HOME", home.path())
+        .env("LF_HOME", home.path())
+        .env("CLAUDE_CONFIG_DIR", home.path().join(".claude"))
+        .args(["history", "show", &session, "--final"])
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    assert!(answer.status.success(), "{answer:?}");
+    assert_eq!(
+        String::from_utf8_lossy(&answer.stdout).trim(),
+        "CORRELATED_STARTUP_ANSWER"
+    );
     let receipts = store.session_steers(&session, 0, 32).unwrap();
     assert_eq!(receipts.items[0].steer.id, steer.id);
     // The startup hook claimed it, printed it and stamped it.
@@ -229,11 +217,9 @@ fn a_bare_skill_in_a_task_checkout_takes_a_steer_and_asks_no_server() {
     assert!(!log.contains("Loopflow server unavailable"), "{log}");
 }
 
-/// Task work starts only with the Machine server: with none running and an
-/// installation that cannot start one, the launch stops before the agent and
-/// says which command brings the server up.
+/// Naming a Task on a direct skill launch requires no Machine server.
 #[test]
-fn a_task_launch_with_no_machine_server_fails_naming_it() {
+fn a_task_attributed_skill_launch_needs_no_machine_server() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
     let _task =
@@ -250,15 +236,8 @@ fn a_task_launch_with_no_machine_server_fails_naming_it() {
     .unwrap();
     fs::set_permissions(&lf, fs::Permissions::from_mode(0o755)).unwrap();
     let output = launch_startup_proof_through(&repo, home.path(), &lf, Some("INF-123"));
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(!output.status.success(), "{stderr}");
-    assert!(
-        stderr.contains("Loopflow server is not running")
-            && stderr.contains("no supervisor here")
-            && stderr.contains("lf install server"),
-        "{stderr}"
-    );
-    assert!(!home.path().join("startup-complete").exists());
+    assert_launched(&output, home.path());
+    assert!(!String::from_utf8_lossy(&output.stderr).contains("no supervisor here"));
 }
 /// A Task checkout with a connected account, a Claude stand-in that marks
 /// `provider-started` (and `provider-resumed` for `--resume`), and an `LF_BIN`
@@ -373,18 +352,20 @@ fn assert_names_missing_server(output: &std::process::Output) {
     );
 }
 
-/// The same holds for a terminal launch: `lf -i --task` with Claude, whose
-/// native command carries no launch configuration, still checks the server.
+/// Interactive direct launches also keep their caller with Task attribution.
 #[test]
-fn an_interactive_task_launch_with_no_machine_server_fails_naming_it() {
+fn an_interactive_task_attributed_launch_needs_no_machine_server() {
     let task = InteractiveTask::new();
-    assert_names_missing_server(
-        &task.run(&["--task", "INF-123", "-i", "-a", "claude", ":", "hello"]),
+    let output = task.run(&["--task", "INF-123", "-i", "-a", "claude", ":", "hello"]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
     );
-    assert!(!task.marked("provider-started"));
+    assert!(task.marked("provider-started"));
 }
 
-/// A Task resume is managed as its launch was: `lf -i --task X resume` of the
+/// A Task resume opens a managed conversation: `lf -i --task X resume` of the
 /// Task's recorded Claude conversation, after the server stopped, fails naming
 /// it instead of continuing unrecorded.
 #[test]
@@ -401,9 +382,9 @@ fn an_interactive_task_resume_with_no_machine_server_fails_naming_it() {
 #[test]
 fn a_prepared_task_resume_opens_managed_and_fails_naming_a_missing_server() {
     let task = InteractiveTask::launched_then_stopped();
-    let (_, argv) = task.prepared(&["session", "resume", "--task", "INF-123"]);
+    let (id, argv) = task.prepared(&["session", "resume", "--task", "INF-123"]);
     assert!(
-        argv.ends_with(&["--task".into(), "INF-123".into()]),
+        argv.ends_with(&["session".into(), "resume".into(), id]),
         "{argv:?}"
     );
     assert_names_missing_server(&task.run_program(&argv[0], &argv[1..]));
@@ -411,14 +392,14 @@ fn a_prepared_task_resume_opens_managed_and_fails_naming_a_missing_server() {
 }
 
 /// Desktop's Task workspace reopens a pane that already has a Session by its
-/// id, naming the Task beside it: the id selects, the Task makes it managed.
+/// id, naming the Task beside it: the id selects the managed conversation.
 #[test]
 fn a_task_pane_reopened_by_session_id_fails_naming_a_missing_server() {
     let task = InteractiveTask::launched_then_stopped();
     let (id, _) = task.prepared(&["session", "resume", "--task", "INF-123"]);
     let (_, argv) = task.prepared(&["session", "resume", &id, "--task", "INF-123"]);
     assert!(
-        argv.ends_with(&[id.clone(), "--task".into(), "INF-123".into()]),
+        argv.ends_with(&["session".into(), "resume".into(), id]),
         "{argv:?}"
     );
     assert_names_missing_server(&task.run_program(&argv[0], &argv[1..]));
@@ -426,16 +407,14 @@ fn a_task_pane_reopened_by_session_id_fails_naming_a_missing_server() {
 }
 
 #[test]
-fn public_context_capability_survives_claim_changes_and_rejects_children_and_replacement() {
-    use loopflow_model::id::LfProcessId;
-
+fn public_context_capability_rejects_children_and_replacement() {
     use std::io::Write;
     use std::time::{Duration, Instant};
 
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
-    // The command names the Task, so the launch is managed: it carries a steer
-    // capability and starts beside the Machine server its hooks call.
+    // Exercise the bare Task launch's steer capability through the Machine
+    // server's callback path as well as through its direct hook.
     let _task =
         support::register_task_without_pr(home.path(), repo.path(), "main", &repo.head_sha());
     let store = loopflow_execution::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
@@ -452,7 +431,7 @@ message['session_id'] = 'handoff-native'
 print(json.dumps(message), flush=True)
 print(json.dumps({'type': 'system', 'subtype': 'init', 'session_id': 'handoff-native'}), flush=True)
 print(json.dumps({'type': 'assistant', 'session_id': 'handoff-native', 'message': {'id': 'held', 'role': 'assistant', 'content': [{'type': 'text', 'text': 'Holding'}]}}), flush=True)
-(home / 'handoff.tmp').write_text(json.dumps({'delivery': os.environ['LF_CONTEXT_DELIVERY'], 'caller': os.environ['LF_AGENT_CALLER'], 'capture': os.environ['LF_CAPTURE_KEY'], 'capability': os.environ['LF_PROVIDER_CONTEXT']}))
+(home / 'handoff.tmp').write_text(json.dumps({'delivery': os.environ['LF_CONTEXT_DELIVERY'], 'caller': os.environ['LF_AGENT_CALLER'], 'capture': os.environ['LF_CAPTURE_KEY'], 'capability': os.environ['LF_BARE_STEER']}))
 os.replace(home / 'handoff.tmp', home / 'handoff.json')
 deadline = time.monotonic() + 15
 while not (home / 'finish').exists() and time.monotonic() < deadline:
@@ -497,6 +476,15 @@ while not (home / 'finish').exists() and time.monotonic() < deadline:
         serde_json::from_str(declaration["caller"].as_str().unwrap()).unwrap();
     let session = caller["session_id"].as_str().unwrap();
     let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    db.execute(
+        "ATTACH ?1 AS history",
+        [
+            loopflow_storage::history::history_path(&home.path().join("loopflow.db"))
+                .to_string_lossy()
+                .as_ref(),
+        ],
+    )
+    .unwrap();
     loop {
         let native: Option<String> = db
             .query_row(
@@ -520,7 +508,7 @@ while not (home / 'finish').exists() and time.monotonic() < deadline:
         let published: bool = db
             .query_row(
                 "SELECT EXISTS(SELECT 1 FROM session_events WHERE session_id=?1
-                 AND json_extract(payload,'$.evidence.provider_session_id')='handoff-native')",
+                 AND kind='captured' AND provider_thread='handoff-native')",
                 [session],
                 |r| r.get(0),
             )
@@ -532,24 +520,6 @@ while not (home / 'finish').exists() and time.monotonic() < deadline:
         std::thread::sleep(Duration::from_millis(10));
     }
     let first = store.session_attachment(session).unwrap().unwrap();
-    let other = LfProcessId::new();
-    db.execute(
-        "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",
-        [&other],
-    )
-    .unwrap();
-    let second =
-        attachment::claim_session_attachment(&store, session, Some(&first), &other, false).unwrap();
-    let third = attachment::claim_session_attachment(
-        &store,
-        session,
-        Some(&second),
-        first.lf_process_id.as_ref().unwrap(),
-        false,
-    )
-    .unwrap();
-    assert_eq!(first.agent_process_id, third.agent_process_id);
-    assert_ne!(first.token, third.token);
     // The Machine server records each boundary; the hook claims its own steers.
     let hook = |payload: serde_json::Value| {
         let mut hook = Command::new(env!("CARGO_BIN_EXE_lf"))
@@ -619,8 +589,7 @@ while not (home / 'finish').exists() and time.monotonic() < deadline:
     assert!(!rejected.contains("NEXT_DIRECTION") && !rejected.contains("HANDOFF_DIRECTION"));
     assert_eq!(store.session_steers(session, 0, 32).unwrap().pending, 1);
     // Exercise the shipped OpenCode plugin against the real Machine server.
-    // Internal stream retries reuse one transformed value; a later callback has
-    // another adapter invocation and must replace that ephemeral context copy.
+    // Later requests retain the steer in the model context without claiming it again.
     let plugin = home.path().join("transform.mjs");
     let delivery_path = declaration["delivery"].as_str().unwrap();
     let delivery: serde_json::Value =
@@ -655,9 +624,9 @@ await hooks.context(output);
 const first = JSON.stringify(output);
 assert(first.includes('NEXT_DIRECTION'));
 assert.equal(JSON.stringify(structuredClone(output)), first);
-const afterLostTransform = {sessionID:'handoff-native',system:[],messages:[]};
-await hooks.context(afterLostTransform);
-assert(!JSON.stringify(afterLostTransform).includes('NEXT_DIRECTION'));
+const later = {sessionID:'handoff-native',system:[],messages:[]};
+await hooks.context(later);
+assert.equal(JSON.stringify(later).match(/NEXT_DIRECTION/g)?.length, 1);
 assert.equal(output.messages.length,0); // stored/native conversation remains untouched
 clearInterval(alive);
 
@@ -756,7 +725,7 @@ clearInterval(alive);
     assert!(answered.status.success());
     let gaps: i64 = db
         .query_row(
-            "SELECT count(*) FROM session_events WHERE session_id=?1
+            "SELECT count(*) FROM history.session_history WHERE session_id=?1
              AND json_extract(payload,'$.source')='store-gap'",
             [session],
             |r| r.get(0),
@@ -773,7 +742,7 @@ clearInterval(alive);
     assert!(!marker.exists(), "the answered hook closes its gap");
     let selected: String = db
         .query_row(
-            "SELECT json_extract(payload,'$.transition.from_provider_session') FROM session_events
+            "SELECT json_extract(payload,'$.transition.from_provider_session') FROM history.session_history
              WHERE session_id=?1 AND json_extract(payload,'$.type')='provider_transition'
              AND json_extract(payload,'$.transition.to_provider_session')='cleared-native'",
             [session],
@@ -901,4 +870,107 @@ fn public_commands_save_steers_without_launching_providers() {
         )
         .unwrap();
     assert_eq!(provider_count, 0);
+}
+
+/// A stopped Claude conversation with a saved thread, and a stand-in Claude
+/// on `bin` that appends each launch's first input to `first-input`.
+fn stopped_claude_conversation(home: &std::path::Path) -> String {
+    let (id, input, _) =
+        support::prepare_conversation(home, home, "claude", "Remember the word mango");
+    let native = uuid::Uuid::new_v4().to_string();
+    support::record_native(home, &id, &input, &native);
+    let transcripts = home.join(".claude/projects/fixture");
+    fs::create_dir_all(&transcripts).unwrap();
+    fs::write(
+        transcripts.join(format!("{native}.jsonl")),
+        r#"{"type":"user","userType":"external","message":{"content":"remember the word mango"}}"#,
+    )
+    .unwrap();
+    fs::write(
+        home.join(".claude.json"),
+        serde_json::json!({"projects": {"/": {"hasTrustDialogAccepted": true}}}).to_string(),
+    )
+    .unwrap();
+    let bin = home.join("bin");
+    fs::create_dir_all(&bin).unwrap();
+    let provider = bin.join("claude");
+    fs::write(
+        &provider,
+        r#"#!/bin/sh
+if [ "$1" = --version ]; then echo '2.1.302'; exit; fi
+{ cat; printf '\n--launch--\n'; } >> "$LF_HOME/first-input"
+"#,
+    )
+    .unwrap();
+    fs::set_permissions(provider, fs::Permissions::from_mode(0o755)).unwrap();
+    id
+}
+
+/// What the stand-in has been given once it has launched `launches` times.
+fn first_inputs(home: &std::path::Path, launches: usize) -> String {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    loop {
+        let text = fs::read_to_string(home.join("first-input")).unwrap_or_default();
+        if text.matches("--launch--").count() >= launches {
+            return text;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "{launches} launches; saw {text:?}\n{}",
+            fs::read_to_string(home.join("logs/lf.log")).unwrap_or_default()
+        );
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+}
+
+/// A steer naming a stopped conversation returns at once; the Machine server
+/// starts the conversation in a held terminal, which takes the steer as its
+/// first input. Steers saved while no server runs start it once, together,
+/// when the server is back.
+#[test]
+fn a_steer_starts_a_stopped_conversation_on_the_machine_server() {
+    let home = tempfile::Builder::new()
+        .prefix("lf-steer-")
+        .tempdir_in("/tmp")
+        .unwrap();
+    let id = stopped_claude_conversation(home.path());
+    let path = format!("{}:/usr/bin:/bin", home.path().join("bin").display());
+    let lf = |args: &[&str]| {
+        let output = Command::new(env!("CARGO_BIN_EXE_lf"))
+            .env_clear()
+            .env("HOME", home.path())
+            .env("LF_HOME", home.path())
+            .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
+            .env("PATH", "/usr/bin:/bin")
+            .current_dir(home.path())
+            .args(args)
+            .stdin(Stdio::null())
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{args:?}: {output:?}");
+        String::from_utf8(output.stdout).unwrap()
+    };
+    let server = MachineServer::start_with_path(env!("CARGO_BIN_EXE_lf"), home.path(), &path);
+    let saved = lf(&["steer", &id, "WHAT_WORD_DIRECTION"]);
+    assert!(
+        saved.contains(&format!("the Machine server starts {id} to read it")),
+        "{saved}"
+    );
+    let given = first_inputs(home.path(), 1);
+    assert!(given.contains("WHAT_WORD_DIRECTION"), "{given}");
+    let page: serde_json::Value =
+        serde_json::from_str(&lf(&["session", "steers", &id, "--json"])).unwrap();
+    assert_eq!(page["pending"], 0, "{page}");
+
+    drop(server);
+    lf(&["steer", &id, "FIRST_WAITING_DIRECTION"]);
+    lf(&["steer", &id, "SECOND_WAITING_DIRECTION"]);
+    let _server = MachineServer::start_with_path(env!("CARGO_BIN_EXE_lf"), home.path(), &path);
+    let given = first_inputs(home.path(), 2);
+    let second = given.split("--launch--").nth(1).unwrap();
+    assert!(
+        second.contains("FIRST_WAITING_DIRECTION") && second.contains("SECOND_WAITING_DIRECTION"),
+        "one start reads both: {given}"
+    );
+    assert!(!second.contains("WHAT_WORD_DIRECTION"), "{given}");
 }

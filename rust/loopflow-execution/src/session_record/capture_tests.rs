@@ -11,57 +11,36 @@ use crate::session_record::{
 use loopflow_model::chat::types::{ConversationEvent, TurnUsage};
 
 #[test]
-fn native_usage_reads_each_providers_counter_once_by_its_shape() {
-    use crate::session::SessionEventKind::{Started, Usage};
-    let event = |seq, thread: &str, kind, payload| crate::session::SessionEvent {
-        seq,
-        session_id: "session".into(),
-        agent_session: Some(loopflow_model::id::AgentSessionId::from(thread)),
-        provider_turn: Some("turn".into()),
-        kind,
-        agent_process_id: None,
-        lf_process_id: None,
-        task_id: None,
-        wave_id: None,
-        observed_at: 1,
-        payload,
+fn a_usage_reading_resolves_to_one_turns_counts_by_its_shape() {
+    use crate::session_record::resolve_usage;
+    let read = |reading: serde_json::Value| {
+        let usage = resolve_usage(&reading, None, 1).unwrap();
+        (
+            usage.usage.input_tokens,
+            usage.usage.output_tokens,
+            usage.final_reading,
+            usage.partial,
+        )
     };
-    let tokens = |id: &str, input: u64, output: u64| {
-        serde_json::json!({"provider":"opencode","message":{"id":id,
-            "tokens":{"input":input,"output":output,"reasoning":0,"cache":{"read":0,"write":0}}}})
-    };
+    assert_eq!(
+        read(
+            serde_json::json!({"provider":"pi","usage":{"input_tokens":20,"output_tokens":6},"final":true})
+        ),
+        (Some(20), Some(6), true, false)
+    );
+    assert_eq!(
+        read(
+            serde_json::json!({"provider":"opencode","message":{"id":"m1",
+            "tokens":{"input":3,"output":1,"reasoning":0,"cache":{"read":0,"write":0}}}})
+        ),
+        (Some(3), Some(1), true, false)
+    );
     let codex = serde_json::json!({"inputTokens":30,"outputTokens":5,"cachedInputTokens":0,"reasoningOutputTokens":0});
-    let history = vec![
-        event(1, "pi", Started, serde_json::json!({})),
-        event(
-            2,
-            "pi",
-            Usage,
-            serde_json::json!({"provider":"pi","usage":{"input_tokens":10},"final":false}),
-        ),
-        event(
-            3,
-            "pi",
-            Usage,
-            serde_json::json!({"provider":"pi","usage":{"input_tokens":20,"output_tokens":6},"final":true}),
-        ),
-        event(4, "opencode", Started, serde_json::json!({})),
-        event(5, "opencode", Usage, tokens("m1", 3, 1)),
-        event(6, "opencode", Usage, tokens("m2", 4, 2)),
-        event(7, "codex", Started, serde_json::json!({})),
-        event(
-            8,
-            "codex",
-            Usage,
-            serde_json::json!({"total":codex,"last":codex}),
-        ),
-    ];
-    let (readings, unread) = crate::session_record::native_usage(&history);
-    assert_eq!(unread, 0);
-    let usage = crate::session_record::reduce_usage(&readings);
-    assert_eq!((usage.streams, usage.final_streams, usage.gaps), (4, 3, 0));
-    assert_eq!(usage.input_tokens, Some(20 + 3 + 4 + 30));
-    assert_eq!(usage.output_tokens, Some(6 + 1 + 2 + 5));
+    assert_eq!(
+        read(serde_json::json!({"total":codex,"last":codex})),
+        (Some(30), Some(5), false, false)
+    );
+    assert!(resolve_usage(&serde_json::json!({"input": 20}), None, 1).is_none());
 }
 
 #[test]
@@ -162,7 +141,7 @@ fn spec(cwd: &std::path::Path) -> SessionCaptureSpec {
 }
 
 #[test]
-fn native_capture_replacement_retains_each_spawn_and_rejects_late_exit() {
+fn a_settled_runtime_cannot_launch_another_native_provider() {
     let ledger = crate::journal::TestLedgerGuard::new();
     let _ambient = crate::test_ambient::EnvGuard::new();
     let home = ledger.home();
@@ -170,62 +149,27 @@ fn native_capture_replacement_retains_each_spawn_and_rejects_late_exit() {
         let capture = crate::session_record::SessionRecorder::begin_at(home, spec(home))
             .map(crate::process::LfProcessRuntime::new)?;
         capture.claim_session_attachment()?;
-        let (session, first) = capture.session_attachment().unwrap();
-        let invocation = crate::journal::current_lf_process_id().unwrap();
-        assert_eq!(first.lf_process_id.as_ref(), Some(&invocation));
-        assert_eq!(first.provider_lf_process_id, invocation);
+        let (session, attachment) = capture.session_attachment().unwrap();
         let store = crate::session_record::row_store(&capture.artifact_dir())?;
-        let command = || {
-            let mut command = std::process::Command::new("/bin/sh");
-            command.env_clear().args(["-c", "exit 42"]);
-            command
-        };
-        let (mut child, snapshot) =
-            capture.spawn_native_agent(command(), crate::session::Holder::Caller)?;
-        assert_eq!(snapshot, first);
-        assert_eq!(child.wait()?.code(), Some(42));
-        // Observed wait, not successful spawn or a finished capture, ends it.
-        capture.record_native_agent_exit(&first)?;
-        let ended = store.agent_process(&first.agent_process_id)?.unwrap();
-        assert_eq!(ended.pid, Some(child.id()));
-        assert!(ended.completed_at.is_some());
-
-        let (mut child, snapshot) =
-            capture.spawn_native_agent(command(), crate::session::Holder::Caller)?;
-        let second = snapshot;
-        assert_ne!(first.agent_process_id, second.agent_process_id);
-        assert_eq!(second.lf_process_id.as_ref(), Some(&invocation));
-        assert_eq!(second.provider_lf_process_id, invocation);
-        for attachment in [&first, &second] {
-            let process = store.agent_process(&attachment.agent_process_id)?.unwrap();
-            assert_eq!(process.parent_lf_process_id.as_ref(), Some(&invocation));
-        }
-        assert_eq!(
-            capture.session_attachment(),
-            Some((session.clone(), second.clone()))
-        );
-        assert_eq!(child.wait()?.code(), Some(42));
-        assert!(capture.record_native_agent_exit(&first).is_err());
-        assert!(store
-            .agent_process(&second.agent_process_id)?
-            .unwrap()
-            .completed_at
-            .is_none());
-        // The child exited but without its wait receipt another launch is refused.
-        assert!(capture
-            .spawn_native_agent(command(), crate::session::Holder::Caller)
-            .is_err());
-        capture.record_native_agent_exit(&second)?;
-        assert_eq!(store.agent_process(&first.agent_process_id)?, Some(ended));
         capture.finish("completed")?;
-        assert!(capture
-            .spawn_native_agent(command(), crate::session::Holder::Caller)
-            .is_err());
-        assert!(store
-            .session_attachment(&session)?
-            .unwrap()
-            .lf_process_id
-            .is_none());
+
+        let marker = home.join("unexpected-provider");
+        let mut command = std::process::Command::new("/bin/sh");
+        command
+            .env_clear()
+            .args(["-c", "touch \"$1\"", "fixture"])
+            .arg(&marker);
+        let result = crate::harness::agent_process::spawn_native(
+            command,
+            &crate::harness::Recording {
+                store,
+                session,
+                attachment,
+            },
+            crate::harness::LaunchKind::Batch,
+        );
+        assert!(result.is_err());
+        assert!(!marker.exists());
         Ok(())
     })
     .unwrap();
@@ -233,74 +177,60 @@ fn native_capture_replacement_retains_each_spawn_and_rejects_late_exit() {
 
 #[test]
 #[cfg(unix)]
-fn a_failed_terminal_receipt_still_closes_only_the_owned_provider() {
+fn a_failed_terminal_receipt_still_closes_the_provider() {
     use std::os::unix::process::CommandExt;
 
     let ledger = crate::journal::TestLedgerGuard::new();
     let _ambient = crate::test_ambient::EnvGuard::new();
     let home = ledger.home();
     crate::journal::with_runtime(home, &["lf".into(), "skill".into()], || {
-        for takeover in [false, true] {
-            let capture = crate::session_record::SessionRecorder::begin_at(home, spec(home))
-                .map(crate::process::LfProcessRuntime::new)?;
-            capture.claim_session_attachment()?;
-            capture.mark_spawn_requested();
-            let (session, attachment) = capture.session_attachment().unwrap();
-            let store = crate::session_record::row_store(&capture.artifact_dir())?;
-            let mut command = std::process::Command::new("/bin/sleep");
-            command.env_clear().arg("60").process_group(0);
-            store.record_agent_process_launch(&session, &attachment, &command, false)?;
-            let mut child = command.spawn()?;
-            let pid = child.id();
-            let birth = crate::journal::process_started_at(pid)?.unwrap();
-            store.record_agent_process_identity(&session, &attachment, pid, birth)?;
-            let replacement = takeover.then(|| {
-                attachment::claim_session_attachment(
-                    &store,
-                    &session,
-                    Some(&attachment),
-                    &store.test_lf_process(),
-                    false,
-                )
-                .unwrap()
-            });
-            // A directory at the receipt path makes the write fail independently
-            // of the store that owns the still-running provider.
-            let receipt = capture.artifact_dir().join("terminal.json");
-            fs::create_dir(&receipt)?;
-            let result = capture.finish("interrupted");
-            let life = crate::journal::process_identity_evidence(pid, birth);
-            let current = store.session_attachment(&session);
-            let _ = child.kill();
-            let _ = child.wait();
+        let capture = crate::session_record::SessionRecorder::begin_at(home, spec(home))
+            .map(crate::process::LfProcessRuntime::new)?;
+        capture.claim_session_attachment()?;
+        capture.mark_spawn_requested();
+        let (session, attachment) = capture.session_attachment().unwrap();
+        let store = crate::session_record::row_store(&capture.artifact_dir())?;
+        let mut command = std::process::Command::new("/bin/sleep");
+        command.env_clear().arg("60").process_group(0);
+        store.record_agent_process_launch(&session, &attachment, &command, false)?;
+        let mut child = command.spawn()?;
+        let pid = child.id();
+        let birth = crate::process::os_process::process_started_at(pid)?.unwrap();
+        store.record_agent_process_identity(&session, &attachment, pid, birth)?;
+        // A directory at the receipt path makes the write fail independently
+        // of the store that owns the still-running provider.
+        let receipt = capture.artifact_dir().join("terminal.json");
+        fs::create_dir(&receipt)?;
+        let result = capture.finish("interrupted");
+        let life = crate::process::os_process::process_identity_evidence(pid, birth);
+        let current = store.session_attachment(&session);
+        let _ = child.kill();
+        let _ = child.wait();
 
-            assert!(
-                result.is_err(),
-                "the missing receipt remains a caller error"
-            );
-            let current = current?.unwrap();
-            if let Some(replacement) = replacement {
-                assert_eq!(life, crate::journal::ProcessIdentityEvidence::Live);
-                assert_eq!(current, replacement);
-            } else {
-                assert_eq!(life, crate::journal::ProcessIdentityEvidence::Dead);
-                assert!(current.lf_process_id.is_none());
-            }
-            assert!(capture.finish("failed").is_err());
-            assert!(capture
-                .spawn_native_agent(
-                    std::process::Command::new("/bin/true"),
-                    crate::session::Holder::Caller
-                )
-                .is_err());
-            fs::remove_dir(&receipt)?;
-            capture.finish("interrupted")?;
-            let recorded: TerminalReceipt = serde_json::from_slice(&fs::read(&receipt)?)?;
-            assert_eq!(recorded.outcome, "interrupted");
-            let history = store.input_events(&capture.artifact_key())?;
-            capture.finish("interrupted")?;
-            assert_eq!(store.input_events(&capture.artifact_key())?, history);
-        }
+        assert!(
+            result.is_err(),
+            "the missing receipt remains a caller error"
+        );
+        assert_eq!(life, crate::store::ProcessIdentityEvidence::Dead);
+        assert!(current?.unwrap().lf_process_id.is_none());
+        assert!(capture.finish("failed").is_err());
+        assert!(crate::harness::agent_process::spawn_native(
+            std::process::Command::new("/bin/true"),
+            &crate::harness::Recording {
+                store: store.clone(),
+                session: session.clone(),
+                attachment: attachment.clone()
+            },
+            crate::harness::LaunchKind::Batch,
+        )
+        .is_err());
+        fs::remove_dir(&receipt)?;
+        capture.finish("interrupted")?;
+        let recorded: TerminalReceipt = serde_json::from_slice(&fs::read(&receipt)?)?;
+        assert_eq!(recorded.outcome, "interrupted");
+        let history = store.input_events(&capture.artifact_key())?;
+        capture.finish("interrupted")?;
+        assert_eq!(store.input_events(&capture.artifact_key())?, history);
         Ok(())
     })
     .unwrap();
@@ -394,7 +324,7 @@ fn helper_capture_admits_a_headless_conversation_with_its_input_and_outcome() {
     let home = tempfile::tempdir().unwrap();
     let process = AgentProcessRequest::from_prepared(&AgentConfig {
         task_prompt: "repair the failed operation".into(),
-        ..Default::default()
+        ..crate::agent::AgentConfig::default()
     })
     .unwrap();
     let capture = crate::session_record::SessionRecorder::begin_at_with_request(
@@ -713,13 +643,13 @@ fn manifest_round_trips_the_exact_prepared_process_without_ambient_authority() {
         codex_service_tier: Some(crate::config::CodexServiceTier::Default),
         system_prompt: "system context\r\nwith unicode λ\n \t".to_string(),
         task_prompt: "authored task\n\nwith trailing space ".to_string(),
-        agent: Some("codex:gpt-5.6".to_string()),
+        agent: crate::config::Agent::parse("codex:gpt-5.6").unwrap(),
         max_turns: Some(7),
         resume_token: Some("resume-secret".into()),
-        skip_permissions: true,
+        yolo: true,
         directive_relay: Some("/tmp/directive-secret".into()),
         env: BTreeMap::from([("TOKEN".to_string(), "ambient-secret".to_string())]),
-        ..AgentConfig::default()
+        ..crate::agent::AgentConfig::default()
     };
     let expected = AgentProcessRequest::from_prepared(&config).unwrap();
     let capture = crate::session_record::SessionRecorder::begin_at_with_request(
@@ -857,14 +787,22 @@ fn history_keeps_only_how_a_turn_ended() {
         },
         final_receipt: true,
     });
+    // A completed turn's row says it all; one that did not complete is kept.
     capture.record_conversation(ConversationEvent::TurnCompleted {
         turn_id: turn(),
         status: loopflow_model::chat::types::Lifecycle::Completed,
     });
+    capture.record_conversation(ConversationEvent::TurnCompleted {
+        turn_id: turn(),
+        status: loopflow_model::chat::types::Lifecycle::Interrupted,
+    });
     capture.finish("completed").unwrap();
 
     // Capture prose remains readable, but cannot substitute for native turn output.
-    assert_eq!(capture.final_answer().unwrap(), None);
+    assert_eq!(
+        crate::session_record::final_answer(&capture.artifact_dir()).unwrap(),
+        None
+    );
     assert!(!capture.artifact_dir().join("events.jsonl").exists());
 
     let history = crate::session_record::row_store(&capture.artifact_dir())
@@ -911,7 +849,7 @@ fn continuation_resumes_the_saved_thread_on_a_fresh_agent_process() {
             &session.id,
             &attachment,
             provider.id(),
-            crate::journal::process_started_at(provider.id())?.unwrap(),
+            crate::process::os_process::process_started_at(provider.id())?.unwrap(),
         )?;
         provider.kill()?;
         provider.wait()?;
@@ -930,7 +868,7 @@ fn continuation_resumes_the_saved_thread_on_a_fresh_agent_process() {
     let manifest = fs::read(original.artifact_dir().join("manifest.json")).unwrap();
     let request = AgentProcessRequest::from_prepared(&AgentConfig {
         task_prompt: "the next instruction".into(),
-        ..AgentConfig::default()
+        ..crate::agent::AgentConfig::default()
     })
     .unwrap();
     let context = crate::trace::PreparedTurnContext::from_prompts("", "the next instruction");
@@ -953,7 +891,7 @@ fn continuation_resumes_the_saved_thread_on_a_fresh_agent_process() {
             attachment.agent_process_id
         );
         assert_eq!(
-            Some(&next_attachment.provider_lf_process_id),
+            Some(&next_attachment.launcher_lf_process_id),
             next_attachment.lf_process_id.as_ref()
         );
         assert!(attachment::session_connection(&store, &session.id)?.is_none());
@@ -1019,7 +957,7 @@ fn continuation_publication_failure_keeps_reservation_without_settling_a_turn() 
             &session.id,
             spec(ledger.home()),
             &crate::trace::PreparedTurnContext::from_prompts("", "next"),
-            AgentProcessRequest::from_prepared(&AgentConfig::default()).unwrap(),
+            AgentProcessRequest::from_prepared(&crate::agent::AgentConfig::default()).unwrap(),
         )
         .is_err());
         let next = store.session(&session.id)?.unwrap();
@@ -1031,16 +969,7 @@ fn continuation_publication_failure_keeps_reservation_without_settling_a_turn() 
             .unwrap()
             .lf_process_id
             .is_none());
-        assert!(!store
-            .session_history(&session.id, 0, 0)?
-            .iter()
-            .any(|event| {
-                matches!(
-                    event.kind,
-                    crate::session::SessionEventKind::Started
-                        | crate::session::SessionEventKind::Completed
-                )
-            }));
+        assert!(store.session_turns(&session.id)?.is_empty());
         Ok(())
     })
     .unwrap();
@@ -1085,24 +1014,16 @@ fn attached_session(
         .arg("30")
         .spawn()
         .unwrap();
-    let receipts = ledger.home().join(crate::journal::PROCESS_RECEIPT_ROOT);
-    fs::create_dir_all(&receipts).unwrap();
-    fs::write(
-        receipts.join(format!("{first}.json")),
-        serde_json::to_vec(&crate::journal::ProcessReceipt {
-            schema_version: 1,
-            trace_id: trace.to_string(),
-            lf_process_id: first.to_string(),
-            pid: process.id(),
-            started_at: crate::journal::process_started_at(process.id())
-                .unwrap()
-                .unwrap(),
-        })
-        .unwrap(),
-    )
-    .unwrap();
     let attachment =
-        attachment::claim_session_attachment(&store, "conversation", None, &first, true).unwrap();
+        attachment::claim_session_attachment(&store, "conversation", None, &first).unwrap();
+    // The `sleep` stands in for the lf holding the attachment.
+    store.test_set_holder(
+        "conversation",
+        process.id(),
+        crate::process::os_process::process_started_at(process.id())
+            .unwrap()
+            .unwrap(),
+    );
     (store, attachment, process, second)
 }
 
@@ -1118,7 +1039,7 @@ fn resume_dead_attachment_ends_its_agent_before_starting_another() {
         .process_group(0)
         .spawn()
         .unwrap();
-    let started = crate::journal::process_started_at(agent_process.id())
+    let started = crate::process::os_process::process_started_at(agent_process.id())
         .unwrap()
         .unwrap();
     store
@@ -1150,13 +1071,13 @@ fn resume_dead_attachment_ends_its_agent_before_starting_another() {
     let replacement =
         crate::process::resume_session_agent_process(&store, "conversation", &next).unwrap();
     assert_eq!(
-        crate::journal::process_identity_evidence(agent_process.id(), started),
-        crate::journal::ProcessIdentityEvidence::Dead,
+        crate::process::os_process::process_identity_evidence(agent_process.id(), started),
+        crate::store::ProcessIdentityEvidence::Dead,
     );
     // Ending the AgentProcess may already have reaped this exact child.
     let _ = agent_process.wait();
     assert_ne!(replacement.agent_process_id, attachment.agent_process_id);
-    assert_eq!(replacement.provider_lf_process_id, next);
+    assert_eq!(replacement.launcher_lf_process_id, next);
     assert!(attachment::session_connection(&store, "conversation")
         .unwrap()
         .is_none());
@@ -1168,59 +1089,6 @@ fn resume_dead_attachment_ends_its_agent_before_starting_another() {
         store.session_thread("conversation").unwrap(),
         Some("saved-thread".into())
     );
-}
-
-#[test]
-#[cfg(unix)]
-fn resume_of_a_bare_conversation_starts_beside_its_running_agent() {
-    use std::os::unix::process::CommandExt;
-
-    let ledger = crate::journal::TestLedgerGuard::new();
-    let (store, attachment, mut process, next) = attached_session(&ledger);
-    // `lf <skill>` in another terminal: an interactive agent, no Work named,
-    // no holder or owner, its lf still waiting.
-    let sql = rusqlite::Connection::open(ledger.home().join("loopflow.db")).unwrap();
-    sql.execute(
-        "UPDATE agent_sessions SET provider='claude',interactive=1,work_source=NULL",
-        [],
-    )
-    .unwrap();
-    sql.execute(
-        "UPDATE processes SET agent_interactive=1 WHERE id=?1",
-        [&attachment.agent_process_id],
-    )
-    .unwrap();
-    let mut agent = std::process::Command::new("sleep")
-        .arg("30")
-        .process_group(0)
-        .spawn()
-        .unwrap();
-    let started = crate::journal::process_started_at(agent.id())
-        .unwrap()
-        .unwrap();
-    store
-        .record_agent_process_identity("conversation", &attachment, agent.id(), started)
-        .unwrap();
-
-    let beside =
-        crate::process::resume_session_agent_process(&store, "conversation", &next).unwrap();
-    let first_running = agent.try_wait().unwrap().is_none();
-    let first_open: Option<i64> = sql
-        .query_row(
-            "SELECT completed_at FROM processes WHERE id=?1",
-            [&attachment.agent_process_id],
-            |row| row.get(0),
-        )
-        .unwrap();
-    agent.kill().unwrap();
-    agent.wait().unwrap();
-    process.kill().unwrap();
-    process.wait().unwrap();
-
-    assert!(first_running, "the first agent keeps running");
-    assert_eq!(first_open, None, "a running agent is not recorded as ended");
-    assert_ne!(beside.agent_process_id, attachment.agent_process_id);
-    assert_eq!(beside.lf_process_id, Some(next));
 }
 
 #[test]
@@ -1241,7 +1109,7 @@ fn resume_refuses_live_agent_that_cannot_be_ended() {
         .arg("30")
         .spawn()
         .unwrap();
-    let started = crate::journal::process_started_at(provider.id())
+    let started = crate::process::os_process::process_started_at(provider.id())
         .unwrap()
         .unwrap();
     store
@@ -1332,13 +1200,31 @@ fn recording_failure_cannot_forget_the_thread_used_by_retry() {
                 "UPDATE agent_sessions SET provider_thread='previous-thread' WHERE id=?1",
                 [&session],
             )?;
-            sql.execute_batch(&format!(
-                "CREATE TRIGGER reject_observation BEFORE INSERT ON session_events
-                 WHEN NEW.kind='observed' AND json_extract(NEW.payload,'$.source') LIKE '{source}'
-                 BEGIN SELECT RAISE(FAIL, 'observation unavailable'); END;"
+            // A resume reference is state on the input's captured row; every
+            // other provider fact is history in the history file.
+            let history = rusqlite::Connection::open(loopflow_storage::history::history_path(
+                &crate::session_record::row_database(&capture.artifact_dir())?,
             ))?;
+            let (target, trigger) = if source.starts_with("provider-session") {
+                (
+                    &sql,
+                    "CREATE TRIGGER reject_observation BEFORE UPDATE OF provider_thread ON session_events
+                     BEGIN SELECT RAISE(FAIL, 'observation unavailable'); END;"
+                        .to_owned(),
+                )
+            } else {
+                (
+                    &history,
+                    format!(
+                        "CREATE TRIGGER reject_observation BEFORE INSERT ON session_history
+                         WHEN json_extract(NEW.payload,'$.source') LIKE '{source}'
+                         BEGIN SELECT RAISE(FAIL, 'observation unavailable'); END;"
+                    ),
+                )
+            };
+            target.execute_batch(&trigger)?;
             capture.observe_provider(Some(thread.clone()));
-            sql.execute_batch("DROP TRIGGER reject_observation")?;
+            target.execute_batch("DROP TRIGGER reject_observation")?;
             let store = crate::session_record::row_store(&capture.artifact_dir())?;
             store.record_agent_process_exit(&session, &original, false)?;
 
@@ -1366,6 +1252,35 @@ fn recording_failure_cannot_forget_the_thread_used_by_retry() {
 }
 
 #[test]
+fn an_input_moved_to_another_provider_is_answered_by_that_provider() {
+    let ledger = crate::journal::TestLedgerGuard::new();
+    let _ambient = crate::test_ambient::EnvGuard::new();
+    let home = ledger.home();
+    crate::journal::with_runtime(home, &["lf".into(), "skill".into()], || {
+        let capture = crate::session_record::SessionRecorder::begin_at(home, spec(home))
+            .map(crate::process::LfProcessRuntime::new)?;
+        capture.claim_session_attachment()?;
+        let (session, refused) = capture.session_attachment().unwrap();
+        let store = crate::session_record::row_store(&capture.artifact_dir())?;
+        store.record_agent_process_exit(&session, &refused, false)?;
+        capture.retry_agent_process("other".into(), None, None)?;
+        let thread = loopflow_model::id::AgentSessionId::from("other-thread");
+        let (_, moved) = capture.session_attachment().unwrap();
+        store.record_session_agent_session(&session, &moved, &thread)?;
+        let captured = store.session(&session)?.unwrap().captured.unwrap();
+        let completed = serde_json::json!({"status":"completed"});
+        store.record_answered_turn_end(captured, &thread, "turn", 3, &completed)?;
+
+        // The capture still says `proof`, which was refused before it answered.
+        let answered = store.input_answered_turn(&capture.artifact_key())?.unwrap();
+        assert_eq!(answered.provider.as_deref(), Some("other"));
+        capture.finish("completed")?;
+        Ok(())
+    })
+    .unwrap();
+}
+
+#[test]
 fn provider_observation_recovers_then_stops_repeating() {
     let home = tempfile::tempdir().unwrap();
     let capture = crate::session_record::SessionRecorder::begin_at(home.path(), spec(home.path()))
@@ -1375,8 +1290,7 @@ fn provider_observation_recovers_then_stops_repeating() {
     let sql =
         rusqlite::Connection::open(crate::session_record::row_database(&dir).unwrap()).unwrap();
     sql.execute_batch(
-        "CREATE TRIGGER reject_observation BEFORE INSERT ON session_events
-         WHEN NEW.kind='observed'
+        "CREATE TRIGGER reject_observation BEFORE UPDATE OF provider_thread ON session_events
          BEGIN SELECT RAISE(FAIL, 'observation unavailable'); END;",
     )
     .unwrap();

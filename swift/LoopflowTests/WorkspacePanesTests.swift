@@ -11,16 +11,14 @@ import ViewInspector
 struct WorkspacePanesTests {
     private let location = WorkspaceIdentity(machineId: "fixture", worktree: "/fixture/task-a")
 
-    private func session(_ id: String) throws -> SessionRecord {
-        let path = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
-            .deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent("tests/fixtures/dto/session.json")
-        var wire = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: path)) as? [String: Any])
+    private func session(_ id: String, _ fields: [String: Any] = [:]) throws -> SessionRecord {
+        var wire = try loadFixture("session.json")
         wire["id"] = id
         wire["task_primary"] = true
         wire["state"] = "unknown"
         wire["workspace"] = ["machine_id": location.machineId, "worktree": location.worktree,
                              "task_id": "task-a", "unavailable": NSNull()]
+        wire.merge(fields) { $1 }
         return try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: wire))
     }
 
@@ -36,6 +34,23 @@ struct WorkspacePanesTests {
         return (workspace, view)
     }
 
+    @Test("A restored Dev board tile leaves its saved shell unmounted")
+    func devBoardRestoresShellWithoutMounting() throws {
+        let registry = SessionsWorkspaceRegistry(localMachineId: location.machineId, opensUnvisitedWork: false)
+        let workspace = fixtureWork(registry, location)
+        let saved = MultiplexerStore(taskId: workspace.key.id)
+        let shell = try #require(saved.newShell(location: location))
+        workspace.multiplexer.restore(saved.paneLayout(files: nil, drafts: []), taskId: workspace.key.id)
+        registry.present(open: [workspace.key], shown: [workspace.key])
+        let query = RegistryQuery { _, _ in throw RegistryQueryError("Rendering cannot open work") }
+        let view = WorkspacePanesView(workspace: workspace, isFocused: true,
+            sessions: workspace.sessionStore(repoPath: location.worktree, query: query),
+            model: WorkModel(query: query, repoPath: location.worktree), onFocus: { _, _ in },
+            face: workspace.multiplexer.layout.pane(for: shell.id))
+        _ = try view.inspect().find(button: "Open shell")
+        #expect(try view.inspect().findAll(GhosttyTerminalView.self).isEmpty)
+    }
+
     @Test("A single visible Session keeps Refresh available")
     func singleSessionOffersRefresh() throws {
         let (workspace, view) = taskPanes()
@@ -46,15 +61,14 @@ struct WorkspacePanesTests {
         _ = try view.inspect().find(viewWithAccessibilityIdentifier: "pane-refresh-session").button()
     }
 
-    @Test("Recovery addresses the Task’s repository rather than the last warm repository",
-          arguments: ["refresh-session", "take-back-session"])
-    func recoveryAddressesRestoredTask(actionName: String) async throws {
+    @Test("Refresh addresses the Task’s repository rather than the last warm repository")
+    func recoveryAddressesRestoredTask() async throws {
         let registry = SessionsWorkspaceRegistry(localMachineId: location.machineId)
         let workspace = registry.workspace(for: .init(repository: "repo", kind: .task, id: "task-a"),
             title: "Task A", location: location)
         let record = try session("main")
         let query = RegistryQuery { args, _ in
-            guard args.contains("--reveal-existing") == (actionName == "refresh-session"), args.contains("main") else {
+            guard args == ["session", "resume", "main", "--prepare", "--json"] else {
                 throw RegistryQueryError("Unexpected refresh: \(args)")
             }
             return String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
@@ -65,14 +79,14 @@ struct WorkspacePanesTests {
         let other = registry.sessionStore(repository: "other", repoPath: "/tmp/other", query: query)
         registry.openWarmConversations(store: other)
         workspace.multiplexer.load(sessionId: record.id, location: location)
-        let action = try DesktopAction.named(actionName)
+        let action = try DesktopAction.named("refresh-session")
         _ = try action.perform(DesktopActionContext(model: WorkModel(query: query), workspaces: registry,
             workspace: workspace, pane: workspace.multiplexer.focusedPane))
         let deadline = ContinuousClock.now + .seconds(3)
         while store.sessions.first?.state != .prepared, ContinuousClock.now < deadline {
             try await Task.sleep(for: .milliseconds(10))
         }
-        if actionName == "refresh-session" { #expect(store.sessions.first?.launchId != previous) }
+        #expect(store.sessions.first?.launchId != previous)
         #expect(store.sessions.first?.state == .prepared)
         #expect(other.sessions.isEmpty)
     }
@@ -254,10 +268,10 @@ struct WorkspacePanesTests {
         return (view, registry, workspace, task, query)
     }
 
-    @Test("A finished Task nobody owns reveals its conversation into visible panes")
+    @Test("A finished Task nobody owns shows its conversation in visible panes once presented")
     func finishedUnownedTaskRevealsIntoPanes() throws {
         let (view, registry, workspace, task, query) = try finishedTaskSurface(owned: false)
-        #expect(task.isCompleted && task.runtime?.owner == nil && task.conversationIntent == .reveal)
+        #expect(task.isCompleted && task.runtime?.owner == nil && !task.opensConversationAutomatically)
         #expect(throws: (any Error).self) { try view.inspect().find(WorkspacePanesView.self) }
         let history = try session("history")
         registry.sessionStore(repository: "repo", repoPath: task.task.repo, query: query).reconcile([history])
@@ -276,6 +290,71 @@ struct WorkspacePanesTests {
         #expect(throws: (any Error).self) { try view.inspect().find(WorkspacePanesView.self) }
         #expect(throws: (any Error).self) { try view.inspect().find(TaskStartOffer.self) }
         #expect(throws: (any Error).self) { try view.inspect().find(viewWithAccessibilityIdentifier: "open-conversation") }
+    }
+
+    @Test(arguments: [
+        ("started", "New conversation"),
+        ("resumed", "Resumed in a new process"),
+    ])
+    func sessionStripShowsProviderWithoutTransitionHeader(kind: String, header: String) throws {
+        let (workspace, view) = taskPanes()
+        let transition: [String: Any] = [
+            "kind": kind, "from_provider_session": kind == "resumed" ? "thread" as Any : NSNull(),
+            "to_provider_session": "thread", "from_agent_process": NSNull(),
+            "to_agent_process": "55555555-5555-4555-8555-555555555555",
+            "original_running": NSNull(), "seed": NSNull(), "observed_at": 1794100000,
+        ]
+        let record = try session("primary", ["provider": "claude", "transition": transition])
+        view.sessions.reconcile([record])
+        workspace.multiplexer.load(sessionId: record.id, location: location)
+        let pane = workspace.multiplexer.focusedPane
+        let program = try view.inspect().find(viewWithAccessibilityIdentifier: "pane-program-\(pane.id)")
+            .find(ViewType.Menu.self).labelView()
+        #expect(try program.text().string() == "Claude")
+        #expect(throws: (any Error).self) { try view.inspect().find(text: header) }
+    }
+
+    @Test func openingSessionShowsCenteredSpinnerWhenEmpty() throws {
+        let delayed = SessionOpeningView(screen: nil)
+        #expect(throws: (any Error).self) { try delayed.inspect().find(ViewType.ProgressView.self) }
+
+        let view = SessionOpeningView(screen: nil, spinnerDelay: .zero)
+        let spinner = try view.inspect().find(ViewType.ProgressView.self)
+        #expect(try spinner.accessibilityLabel().string() == "Opening session")
+        #expect(throws: (any Error).self) { try view.inspect().find(text: "Opening… Input paused.") }
+    }
+
+    @Test func openingSessionKeepsRetainedScreenClearOfSpinner() throws {
+        let view = SessionOpeningView(screen: "Last terminal line", spinnerDelay: .zero)
+        _ = try view.inspect().find(text: "Last terminal line")
+        #expect(throws: (any Error).self) { try view.inspect().find(ViewType.ProgressView.self) }
+        #expect(throws: (any Error).self) { try view.inspect().find(text: "Opening… Input paused.") }
+    }
+
+    @Test func openingSessionShowsOneSpinnerAtATime() throws {
+        let (workspace, view) = taskPanes()
+        let record = try session("primary", ["provider": "claude"])
+        view.sessions.reconcile([record])
+        workspace.multiplexer.load(sessionId: record.id, location: location)
+        workspace.conversationRequest = UUID()
+        // Empty pane: centered placeholder owns the spinner, strip keeps its Refresh icon.
+        let emptyRefresh = try view.inspect().find(viewWithAccessibilityIdentifier: "pane-refresh-session")
+        #expect(throws: (any Error).self) { try emptyRefresh.find(ViewType.ProgressView.self) }
+
+        // Retained scrollback: placeholder stays clear, strip takes the spinner.
+        let terminal = try #require(workspace.multiplexer.focusedPane.terminal)
+        view.sessions.noteSurfaceClosed(terminal, output: "Previous output")
+        _ = view.sessions.release(record.id)
+        let retainedRefresh = try view.inspect().find(viewWithAccessibilityIdentifier: "pane-refresh-session")
+        _ = try retainedRefresh.find(ViewType.ProgressView.self)
+        #expect(try retainedRefresh.accessibilityLabel().string() == "Refresh session")
+        #expect(try retainedRefresh.accessibilityValue().string() == "Opening session")
+
+        view.sessions.noteSurfaceClosed(terminal, output: "  \n")
+        let blankRefresh = try view.inspect().find(viewWithAccessibilityIdentifier: "pane-refresh-session")
+        #expect(throws: (any Error).self) { try blankRefresh.find(ViewType.ProgressView.self) }
+        let opening = try view.inspect().find(SessionOpeningView.self).actualView()
+        #expect(opening.screen == nil)
     }
 
     @Test("Every Task pane hides on hover and the header's Show… restores it")

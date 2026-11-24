@@ -392,3 +392,47 @@ def test_rejected_endpoint_stays_visible_without_becoming_a_latency(tmp_path: Pa
     assert group["outcomes"] == {"rejected": 1}
     assert group["attempts"][0]["journal_outcome"] == "completed"
     assert "Menu activation" in group["attempts"][0]["validation"]["reason"]
+
+
+def test_start_nests_machine_steps_and_splits_by_machine_kind(tmp_path: Path) -> None:
+    journal = tmp_path / "interactions"
+    journal.mkdir()
+    rows = []
+    starts = {
+        "local": "8A0C2C47-6D0B-4F5E-9C55-1F7C0B7A2E01",
+        "remote": "8A0C2C47-6D0B-4F5E-9C55-1F7C0B7A2E02",
+    }
+    for machine, observation in starts.items():
+        journey = _journey("start_task", observation, "candidate", evidence="captured_frame")
+        for row in journey:
+            row["context"] = {**row["context"], "repository": "loopflow", "machine": machine}
+        rows += journey
+    _write(journal / "2026-11-16.ndjson", rows)
+    local = starts["local"].lower()
+    log = tmp_path / "lf.log"
+    log.write_text(
+        "2026-11-16T00:00:00Z  INFO server_request{trace_id=t}:"
+        f'task_creation{{request_id="{local}"}}:creation_step{{step="file_task"}}: '
+        "loopflow_execution::engine::creation: "
+        "Creation step finished elapsed_ms=41.5 pid=1 lf=0.16.0 rev=abc\n"
+        f'2026-11-16T00:00:01Z  INFO conversation_setup{{request_id="{local}" step="checkout"}}: '
+        "loopflow_execution::ops::human_session::setup: Setup step finished "
+        "elapsed_ms=180.25 pid=2 lf=0.16.0 rev=abc\n"
+        "2026-11-16T00:00:01Z  WARN loopflow::server::service: unrelated pid=3 lf=0.16.0 rev=abc\n",
+        encoding="utf-8",
+    )
+    groups = timings.summarize(tmp_path, log)["experiences"]["groups"]
+    by_machine = {g["machine"]: g for g in groups}
+    assert set(by_machine) == {"local", "remote"}
+    assert by_machine["local"]["attempts"][0]["machine_steps"] == [
+        {"source": "server", "step": "file_task", "ms": 41.5},
+        {"source": "conversation", "step": "checkout", "ms": 180.25},
+    ]
+    assert by_machine["local"]["machine_steps"]["conversation checkout"]["median_ms"] == 180.2
+    # A remote Machine's log lives on that Machine.
+    assert by_machine["remote"]["attempts"][0]["machine_steps"] == []
+    report = timings.summarize(tmp_path, log)
+    text = timings.render(report)
+    assert "/ remote Machine" in text
+    assert "server file_task" in text
+    assert "Loopflow · remote" in timings.render_html(report)

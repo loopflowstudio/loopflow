@@ -5,7 +5,9 @@ options:
     macOS: "26.0"
     iOS: "18.0"
   xcodeVersion: "15.0"
-  postGenCommand: "mkdir -p LoopflowSwift.xcodeproj/project.xcworkspace/xcshareddata/swiftpm && cp Package.resolved LoopflowSwift.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved"
+  # Resolving downloads Package.swift's binary targets, which LoopflowMac links
+  # from .build/artifacts; it does nothing more once they are present.
+  postGenCommand: "mkdir -p LoopflowSwift.xcodeproj/project.xcworkspace/xcshareddata/swiftpm && cp Package.resolved LoopflowSwift.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved && swift package resolve"
 
 settings:
   base:
@@ -18,6 +20,9 @@ packages:
   Sparkle:
     url: https://github.com/sparkle-project/Sparkle
     from: 2.7.0
+  SwiftTreeSitter:
+    url: https://github.com/ChimeHQ/SwiftTreeSitter
+    from: 0.25.0
 
 targets:
   Loopflow:
@@ -48,8 +53,12 @@ targets:
         excludes:
           - Info.plist
           - GhosttyResources
+          - Grammars
           - ThirdPartyNotices
       - path: LoopflowMac/GhosttyResources
+        buildPhase: resources
+        type: folder
+      - path: LoopflowMac/Grammars
         buildPhase: resources
         type: folder
       - path: LoopflowMac/ThirdPartyNotices
@@ -58,6 +67,10 @@ targets:
     dependencies:
       - target: Loopflow
       - package: Sparkle
+      - package: SwiftTreeSitter
+      # Package.swift's TreeSitterGrammars pin, resolved by postGenCommand.
+      - framework: .build/artifacts/swift/TreeSitterGrammars/TreeSitterGrammars.xcframework
+        embed: false
     postBuildScripts:
       - name: Stamp app build identity
         script: |

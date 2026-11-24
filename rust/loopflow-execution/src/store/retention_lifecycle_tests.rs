@@ -1,71 +1,99 @@
 use crate::store::retention::prune;
-use rusqlite::Connection;
+use loopflow_storage::execution::TaskState;
+use loopflow_storage::graph_process::ExecutionResult;
+use rusqlite::{params, Connection};
 
+/// A pid that held a process a moment ago and holds none now.
+fn exited_pid() -> u32 {
+    let mut child = std::process::Command::new("true").spawn().unwrap();
+    child.wait().unwrap();
+    child.id()
+}
+
+/// A Graph runner and a Task carrier killed without writing their ends: the
+/// next pass ends the run with no exit, so it reads `unknown`, and clears
+/// the carrier, so its Task stops reading moving and its run reads died. Live and pre-boot work is
+/// told apart by its own record.
 #[test]
-fn prune_closes_dead_processes_and_forgets_those_nothing_needs() {
-    let home = tempfile::tempdir().unwrap();
-    let path = home.path().join("store.db");
-    crate::store::opening::open_ephemeral(&path).unwrap();
+fn a_killed_runner_ends_unknown_and_its_task_stops_moving() {
+    let (_home, store, task) = loopflow_storage::test_fixture::store_with_task();
+    let path = store.path().unwrap();
     let conn = Connection::open(&path).unwrap();
     let now = time::OffsetDateTime::now_utc().unix_timestamp();
-    crate::journal::set_test_machine_booted_at(Some(now - 3_600));
-    let exited = std::process::Command::new("true")
-        .spawn()
-        .and_then(|mut child| child.wait().map(|_| child.id()))
-        .unwrap();
+    crate::process::os_process::set_test_machine_booted_at(Some(now - 3_600));
     let own = std::process::id();
-    let own_start = crate::journal::process_started_at(own).unwrap();
-    let id = |n: u8| format!("00000000-0000-4000-8000-0000000000{n:02}");
-    let process = |n: u8, pid: Option<u32>, os: Option<i64>, at: i64, parent: Option<u8>| {
+    let own_start = crate::process::os_process::process_started_at(own)
+        .unwrap()
+        .unwrap();
+    let dead = exited_pid();
+    let run = |id: &str, pid: Option<u32>, os: Option<i64>, at: i64| {
         conn.execute(
-            "INSERT INTO processes(id,trace_id,pid,os_started_at,started_at,parent_lf_process_id)
-             VALUES(?1,?1,?2,?3,?4,?5)",
-            rusqlite::params![id(n), pid, os, at, parent.map(id)],
+            "INSERT INTO graph_processes(lf_process_id,graph,compiled,task_id,started_at,pid,os_started_at)
+             VALUES(?1,'code','{}',?2,?3,?4,?5)",
+            params![id, task.as_str(), at, pid, os],
         )
         .unwrap();
     };
-    // Crash leftovers: once closed, only the agent-issued one stays.
-    process(1, None, None, now - 7_200, None);
-    process(2, Some(exited), None, now, None);
-    process(3, Some(own), own_start, now, None);
-    process(9, Some(exited), None, now, None);
+    let killed = "00000000-0000-4000-8000-000000000001";
+    let live = "00000000-0000-4000-8000-000000000002";
+    let before_boot = "00000000-0000-4000-8000-000000000003";
+    run(killed, Some(dead), Some(now - 5), now - 5);
+    run(live, Some(own), Some(own_start), now);
+    run(before_boot, None, None, now - 7_200);
+    let carrier = "00000000-0000-4000-8000-000000000004";
     conn.execute(
-        "UPDATE processes SET via_agent=1 WHERE id IN (?1,?2)",
-        [id(1), id(2)],
+        "INSERT INTO task_graphs(task_id,graph,step,run_start,lf_process_id,run_pid,run_os_started_at,updated_at)
+         VALUES(?1,'{\"name\":\"test\",\"steps\":[]}','start','{\"index\":0}',?2,?3,?4,1)",
+        params![task.as_str(), carrier, dead, now - 5],
     )
     .unwrap();
-    let finished = |n: u8, parent: Option<u8>| {
-        process(n, None, None, now, parent);
-        conn.execute(
-            "UPDATE processes SET completed_at=?2,outcome='succeeded' WHERE id=?1",
-            rusqlite::params![id(n), now],
+    conn.execute("DELETE FROM graph_processes WHERE lf_process_id=?1", [live])
+        .unwrap();
+    assert_eq!(store.task_state(&task).unwrap(), TaskState::Moving);
+
+    run(live, Some(own), Some(own_start), now);
+    assert_eq!(prune(&path, now).unwrap().ended_owners, 3);
+
+    let result = |id: &str| {
+        conn.query_row(
+            "SELECT ended_at,exit_code,error,pid FROM graph_processes WHERE lf_process_id=?1",
+            [id],
+            |row| {
+                Ok((
+                    row.get::<_, Option<i64>>(0)?,
+                    ExecutionResult::of(
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get::<_, Option<String>>(2)?.as_deref(),
+                    ),
+                    row.get::<_, Option<u32>>(3)?,
+                ))
+            },
+        )
+        .unwrap()
+    };
+    assert_eq!(result(killed), (Some(now), ExecutionResult::Unknown, None));
+    // A restart bounds when it ended.
+    assert_eq!(
+        result(before_boot),
+        (Some(now - 3_600), ExecutionResult::Unknown, None)
+    );
+    assert_eq!(result(live), (None, ExecutionResult::Running, Some(own)));
+    let carrier_pid: Option<u32> = conn
+        .query_row(
+            "SELECT run_pid FROM task_graphs WHERE task_id=?1",
+            [task.as_str()],
+            |row| row.get(0),
         )
         .unwrap();
-    };
-    finished(4, None);
-    finished(5, None);
-    finished(6, Some(3));
-
-    let report = prune(&path, now).unwrap();
-    assert_eq!(
-        (report.closed_processes, report.forgotten_processes),
-        (3, 3)
-    );
-    let rows: Vec<(String, Option<i64>, Option<String>)> = conn
-        .prepare("SELECT id,completed_at,outcome FROM processes ORDER BY id")
-        .unwrap()
-        .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
-        .unwrap()
-        .collect::<Result<_, _>>()
+    assert_eq!(carrier_pid, None);
+    conn.execute("DELETE FROM graph_processes WHERE lf_process_id=?1", [live])
         .unwrap();
-    assert_eq!(
-        rows,
-        [
-            // A restart bounds the exit; neither exit was observed.
-            (id(1), Some(now - 3_600), None),
-            (id(2), Some(now), None),
-            (id(3), None, None),
-            (id(6), Some(now), Some("succeeded".into())),
-        ]
-    );
+    assert_eq!(store.task_state(&task).unwrap(), TaskState::Idle);
+    // Clearing the carrier kept that it died, so the recovery pass still
+    // carries the run again.
+    let died = crate::ops::task::run_recovery::died_run(&store, &task)
+        .unwrap()
+        .expect("a carrier retention ended died");
+    assert_eq!(died.carrier.as_str(), carrier);
 }

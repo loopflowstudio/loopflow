@@ -25,7 +25,6 @@ TARGETS = (
 GHOSTTY_SCOPE = "GhosttyKit"
 RESOURCE_DIRS = (
     "swift/Loopflow/Fonts",
-    "swift/Loopflow/Themes",
     "swift/LoopflowMac/GhosttyResources",
     "swift/GhosttyKitPatches",
     "third_party",
@@ -68,7 +67,7 @@ def _verify_pin(root: Path, manifest: dict) -> None:
         )
 
 
-def _download(source: dict, cache: Path) -> Path:
+def download(source: dict, cache: Path) -> Path:
     cache.mkdir(parents=True, exist_ok=True)
     destination = cache / source["sha256"]
     if not destination.is_file() or _sha(destination) != source["sha256"]:
@@ -190,18 +189,12 @@ def refresh(root: Path = ROOT) -> None:
         text = "\n\n".join(_reviewed_notice(root, n) for n in component["notices"])
         components.append(component)
         sections.append(f"{component['id']} ({component['scope']})\n" + "-" * 72 + "\n" + text)
-    # Keep existing theme attributions and GPL/MIT script headers, without copying
-    # a second manually maintained list of themes or shell files.
+    # Keep the GPL/MIT shell-integration headers without a second hand-kept list of files.
     resources = []
-    for base in ["swift/Loopflow/Themes", "swift/LoopflowMac/GhosttyResources"]:
-        for path in sorted((root / base).rglob("*")):
-            if path.is_file() and (
-                "Licenses" in path.parts
-                or path.name == "Sources.md"
-                or "shell-integration" in path.parts
-            ):
-                resources.append(str(path.relative_to(root)))
-                sections.append(str(path.relative_to(root)) + "\n\n" + path.read_text())
+    for path in sorted((root / "swift/LoopflowMac/GhosttyResources").rglob("*")):
+        if path.is_file() and "shell-integration" in path.parts:
+            resources.append(str(path.relative_to(root)))
+            sections.append(str(path.relative_to(root)) + "\n\n" + path.read_text())
     components.append({"id": "bundled-resources", "scope": "Desktop", "files": resources})
     sources = _crate_sources(root)
     for package in _crate_packages(root):
@@ -252,7 +245,7 @@ def _package_sources(root: Path, output: Path, inventory: dict, scope: str | Non
     output.mkdir(parents=True, exist_ok=True)
     cache = root / ".lf/tmp/third-party"
     for component in _sourced(inventory, scope):
-        source = _download(component["source"], cache)
+        source = download(component["source"], cache)
         shutil.copyfile(source, output / (component["id"] + ".tar.gz"))
 
 

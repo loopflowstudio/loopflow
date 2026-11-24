@@ -115,7 +115,7 @@ pub fn link_wave_project_in(
         let released = tx
             .prepare(
                 "UPDATE projects SET external_project_id=NULL WHERE external_project_id=?1
-                 RETURNING id",
+                 RETURNING wave_id",
             )?
             .query_map([&project.id], |row| row.get::<_, String>(0))?
             .collect::<Result<Vec<_>, _>>()?;

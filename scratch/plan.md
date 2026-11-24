@@ -515,3 +515,8 @@ default Graph and holds **Workflow**. A historical Project reference selects
 its Wave and opens nothing else. Kept: the inline `WaveProjectView` (name,
 status, tracker sync) in the Wave pane, Backlog objective and roadmap card;
 see `scratch/questions.md`. Swift README updated. `scripts/test_desktop.sh --filter 'WorkModelTests|BacklogViewTests'`: 58 pass.
+
+Compress after slice 10: the stranded-Task retire is keyed by Wave, so
+removal covers every Project a released writer gave the Wave, as its other
+removal statements already did; reclaim passes the released Project's Wave.
+Storage removal/reclaim tests (5) pass; clippy clean.

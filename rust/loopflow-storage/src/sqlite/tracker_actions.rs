@@ -538,10 +538,7 @@ pub(crate) fn retire_wave_in(conn: &Connection, wave: &WaveId) -> StoreResult<()
          FROM moved WHERE tracker_actions.seq=moved.seq",
         [wave],
     )?;
-    match crate::sqlite::children::held_wave_project_in(conn, wave)? {
-        Some(project) => retire_stranded_tasks_in(conn, project.as_str()),
-        None => Ok(()),
-    }
+    retire_stranded_tasks_in(conn, wave.as_str())
 }
 
 /// Holds for a Task `t` the tracker can never create: it has no issue and
@@ -550,17 +547,18 @@ const STRANDED_TASK: &str = "t.external_issue_id IS NULL AND EXISTS(
     SELECT 1 FROM projects p JOIN waves w ON w.id=p.wave_id
     WHERE p.id=t.project_id AND p.external_project_id IS NULL AND w.retired_at IS NOT NULL)";
 
-/// Retire the unsent actions of `project`'s stranded Tasks: the completed
-/// Tasks a removed Wave keeps, once its Project is not (or no longer) the
+/// Retire the unsent actions of `wave`'s stranded Tasks: the completed Tasks
+/// a removed Wave keeps, once its Project is not (or no longer) the
 /// tracker's. They stay readable here.
-pub(crate) fn retire_stranded_tasks_in(conn: &Connection, project: &str) -> StoreResult<()> {
+pub(crate) fn retire_stranded_tasks_in(conn: &Connection, wave: &str) -> StoreResult<()> {
     conn.execute(
         &format!(
             "UPDATE tracker_actions SET phase='retired', error='its Wave was removed'
              WHERE phase='queued' AND task_id IN
-                 (SELECT t.id FROM tasks t WHERE t.project_id=?1 AND {STRANDED_TASK})"
+                 (SELECT t.id FROM projects p JOIN tasks t ON t.project_id=p.id
+                  WHERE p.wave_id=?1 AND {STRANDED_TASK})"
         ),
-        [project],
+        [wave],
     )?;
     Ok(())
 }

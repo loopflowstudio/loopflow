@@ -57,11 +57,14 @@ Live QA steered a stopped repository Session without Codex login. A held termina
 - Tests: `server::wake::tests::a_denied_wakeup_shows_its_start_failure_until_a_later_steer_starts_it` (status line through `human_session::listed`), `ops::human_session::tests::a_restart_without_a_usable_login_leaves_the_running_provider_alone` (fake `codex login status` exiting 1), `…::a_stopped_session_that_is_not_a_tasks_says_why_its_start_failed`. All 36 `ops::human_session::tests::`, `server::wake::tests::` and `server::recovery::tests::` pass; fmt and clippy pass.
 - Not covered here: a provider that starts in the held terminal and then exits with a login error still records nothing beyond its exit; the readiness check is what prevents the QA case. Live: gate's Modal run.
 
-### 4.1 Remaining · Settle a lost rental before SSH and omit ended routes by default
+### 4.1 Built · Settle a lost rental before SSH and omit ended routes by default
 
-Live QA saw `lf machine end` suggest `--force` before background settlement caught up, and saw the ended route in `lf machine list`. Reuse the provider refresh and settlement in `rust/loopflow-execution/src/rental/recovery.rs` (`refresh`, `settle`) in the explicit end command (`rust/loopflow/src/lf/commands/rental.rs::end`) before checking SSH holdings. A gone sandbox settles and releases held Tasks with its ceiling estimate. Keep the existing unpushed-work check for a live sandbox, including one whose SSH is unreachable. Cover the race with background settlement.
+Live QA saw `lf machine end` suggest `--force` before background settlement caught up, and saw the ended route in `lf machine list`. [Live QA](qa.html)
 
-Use the recorded rental state to omit ended rentals from default `lf machine list` and unlabeled CLI `lf machine status` in `rust/loopflow/src/lf/commands/machine.rs`. Explicit label lookup and `lf ondemand list` still resolve them, and copied history still uses their Machine labels. Main’s Desktop Machines settings reports an ended state via its own status read. [Live QA](qa.html)
+- `rental::recovery::end` runs `refresh` before any SSH: a sandbox the provider no longer has settles at its ceiling estimate, releases held Tasks and prints `<label> was already gone (ended; ceiling estimate $…)`. A live sandbox goes through `give_back` unchanged, so unreachable SSH still refuses without `--force`. `refresh` rereads the rental first, so a background settlement between the command's read and its refresh keeps its recorded cost and asks the provider nothing.
+- `lf machine list` and unlabeled `lf machine status` skip Machines whose rental ended. A label, `lf ondemand list`, and copied-history labels still resolve them. Desktop's `machine.list` read (`machines()`) is unfiltered because its status read shows `ended_rental`.
+- Tests: `rental::recovery::tests::ending_a_sandbox_its_provider_already_ended_settles_without_ssh_or_force`, `…::ending_after_background_settlement_keeps_what_it_recorded`, `…::ending_a_running_sandbox_ssh_cannot_reach_still_asks_for_force`, and CLI `machine_commands::ending_a_rental_its_provider_terminated_settles_and_leaves_the_default_listings`. The lost-rental fixture's final `machine end` now has a provider answering "still running", so it still covers an ordinary give-back. `documented_commands::`, fmt and clippy passed. `docs/ops.md` describes it.
+- Live: gate's second Modal rental (below).
 
 ## Gate and demo
 

@@ -175,7 +175,7 @@ fn an_owned_machine_joins_a_pool_with_its_cost_and_leaves_when_the_pool_goes() {
         .is_empty());
 }
 
-fn open_task(store: &SqliteStore) -> TaskId {
+pub(crate) fn open_task(store: &SqliteStore) -> TaskId {
     let now = OffsetDateTime::now_utc();
     let task = Task {
         parent_task_id: None,

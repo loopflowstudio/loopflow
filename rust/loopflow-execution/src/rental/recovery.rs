@@ -77,6 +77,12 @@ fn refresh(
     api: &Sandboxes,
     rental: &Rental,
 ) -> anyhow::Result<Option<Rental>> {
+    // Background settlement may have ended it since the caller read it; its
+    // recorded cost stands.
+    let rental = &sqlite.rental(&rental.id)?;
+    if !rental.state.is_live() {
+        return Ok(None);
+    }
     let id = match &rental.provider_id {
         // Requested or unconfirmed: only the name can find it. A sandbox whose
         // create never answered has no route, so it is given back unused.
@@ -113,6 +119,35 @@ fn refresh(
     }
     sqlite.set_rental_cost(&rental.id, rental.cost_until(now()))?;
     Ok(Some(sqlite.rental(&rental.id)?))
+}
+
+/// `lf machine end`: settle a sandbox its provider already ended, without
+/// asking it over SSH; give back one that still runs.
+///
+/// # Errors
+/// When the provider or the store cannot be read, or a live sandbox holds the
+/// only copy of unpushed work and `force` is not set.
+pub fn end(
+    sqlite: &SqliteStore,
+    api: &Sandboxes,
+    rental: &Rental,
+    machine: &Machine,
+    force: bool,
+) -> anyhow::Result<()> {
+    if let Some(running) = refresh(sqlite, api, rental)? {
+        return give_back(sqlite, api, &running, machine, true, force);
+    }
+    let label = machine.label.as_deref().unwrap_or(machine.id.as_str());
+    let settled = sqlite.rental(&rental.id)?;
+    if settled.state.is_live() {
+        println!("{label} is still {}; nothing was ended", settled.state);
+    } else {
+        println!(
+            "{label} was already gone ({}; {})",
+            settled.state, settled.cost
+        );
+    }
+    Ok(())
 }
 
 pub fn give_back(
@@ -432,12 +467,12 @@ mod tests {
     use std::cell::RefCell;
     use std::rc::Rc;
 
-    use super::{end_rental, read_holdings, reconcile, refresh, Ended};
+    use super::{end, end_rental, read_holdings, reconcile, refresh, Ended};
     use crate::machine_records::CopyCounts;
     use crate::rental::sandbox::Sandboxes;
     use loopflow_model::durable::MachineId;
     use loopflow_storage::rental::{
-        Hardware, OnDemand, Provider, Rental, RentalState, Usd, BOOT_SECONDS,
+        Hardware, OnDemand, Provider, Rental, RentalCost, RentalState, Usd, BOOT_SECONDS,
     };
     use loopflow_storage::sqlite::SqliteStore;
 
@@ -576,6 +611,97 @@ mod tests {
         assert!(refresh(&store, &api, &rental).unwrap().is_none());
         assert!(deleted(&log));
         assert_eq!(store.rental(&rental.id).unwrap().state, RentalState::Ended);
+    }
+
+    /// A provider whose `get` answers `reply`, logging each operation.
+    fn answering(reply: &'static str) -> (Sandboxes, Log) {
+        let log: Log = Rc::default();
+        let kept = log.clone();
+        let api = Sandboxes::with_call(
+            Provider::Daytona,
+            Box::new(move |op, _| {
+                kept.borrow_mut().push(op.to_string());
+                Ok(if op == "get" { reply } else { "null" }.as_bytes().to_vec())
+            }),
+        );
+        (api, log)
+    }
+
+    fn machine(store: &SqliteStore, rental: &Rental) -> loopflow_model::durable::Machine {
+        let id = rental.machine_id.as_ref().unwrap();
+        crate::store::machines::machine_by_id(store, id)
+            .unwrap()
+            .unwrap()
+    }
+
+    #[test]
+    fn ending_a_sandbox_its_provider_already_ended_settles_without_ssh_or_force() {
+        let _env = crate::journal::test_env_lock();
+        let dir = tempfile::tempdir().unwrap();
+        let _home =
+            crate::config::environment::EnvVarGuard::set("LF_HOME", dir.path().to_str().unwrap());
+        // Its route is unroutable: asking it over SSH would refuse without `--force`.
+        let (store, rental, _, _) = running(dir.path());
+        let task = crate::store::rental_lifecycle_tests::open_task(&store);
+        crate::store::ownership::claim_task(&store, &task).unwrap();
+        crate::store::ownership::move_claim(&store, &task, rental.machine_id.as_ref().unwrap())
+            .unwrap();
+        let (api, log) = answering("null");
+
+        end(&store, &api, &rental, &machine(&store, &rental), false).unwrap();
+
+        assert_eq!(*log.borrow(), ["get"]);
+        let settled = store.rental(&rental.id).unwrap();
+        assert_eq!(settled.state, RentalState::Ended);
+        assert!(settled.ended_at.is_some());
+        let local = crate::store::machines::local_machine(&store).unwrap().id;
+        let owner = crate::store::ownership::task_ownership(&store, &task)
+            .unwrap()
+            .owner
+            .unwrap();
+        assert_eq!(owner.machine.id, Some(local));
+    }
+
+    #[test]
+    fn ending_after_background_settlement_keeps_what_it_recorded() {
+        let dir = tempfile::tempdir().unwrap();
+        let (store, rental, _, _) = running(dir.path());
+        // The server's pass settled it between the command's read and its refresh.
+        store
+            .set_rental_cost(&rental.id, Usd::parse("0.17").unwrap())
+            .unwrap();
+        crate::store::ownership::set_rental_state(&store, &rental.id, RentalState::Ended).unwrap();
+        let (api, log) = answering("null");
+
+        end(&store, &api, &rental, &machine(&store, &rental), false).unwrap();
+
+        assert!(log.borrow().is_empty(), "the provider was asked again");
+        let settled = store.rental(&rental.id).unwrap();
+        assert_eq!(settled.state, RentalState::Ended);
+        assert_eq!(
+            settled.cost,
+            RentalCost::CostUsd(Some(Usd::parse("0.17").unwrap()))
+        );
+    }
+
+    #[test]
+    fn ending_a_running_sandbox_ssh_cannot_reach_still_asks_for_force() {
+        let dir = tempfile::tempdir().unwrap();
+        let (store, rental, _, _) = booting(dir.path());
+        let id = MachineId::new();
+        // Nothing listens on port 1: SSH fails at once.
+        crate::store::machines::add_machine(&store, &id, "ssh://lf@127.0.0.1:1", "code-1").unwrap();
+        let rental = store.attach_rental(&rental.id, &id).unwrap();
+        let (api, log) = answering(r#"{"id": "sb-1", "gone": false, "route": null}"#);
+
+        let error = end(&store, &api, &rental, &machine(&store, &rental), false).unwrap_err();
+
+        assert!(format!("{error:#}").contains("--force"), "{error:#}");
+        assert!(!deleted(&log));
+        assert_eq!(
+            store.rental(&rental.id).unwrap().state,
+            RentalState::Running
+        );
     }
 
     #[test]

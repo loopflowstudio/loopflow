@@ -56,19 +56,41 @@ async fn existing_store() -> anyhow::Result<Store> {
 }
 
 /// `lf machine list`: your registered Machines with the defaults naming them.
+/// Desktop lists ended rentals too; its status read shows them as ended.
 pub async fn machines() -> anyhow::Result<Vec<MachineListing>> {
-    listings(&existing_store().await?, None).await
+    let store = existing_store().await?;
+    let machines = store.machines().await?;
+    listings(&store, machines, true).await
 }
 
-async fn listings(store: &Store, label: Option<&str>) -> anyhow::Result<Vec<MachineListing>> {
-    let mut machines = match label {
-        Some(label) => vec![find_machine(store, label).await?],
-        None => store.machines().await?,
-    };
+/// The Machines a command reads: the one labelled, else every registered
+/// Machine but rentals already given back, whose routes lead nowhere.
+async fn selected(store: &Store, label: Option<&str>) -> anyhow::Result<Vec<Machine>> {
+    if let Some(label) = label {
+        return Ok(vec![find_machine(store, label).await?]);
+    }
+    let mut live = Vec::new();
+    for machine in store.machines().await? {
+        let ended = store
+            .sqlite
+            .rental_for_machine(&machine.id)?
+            .is_some_and(|rental| !rental.state.is_live());
+        if !ended {
+            live.push(machine);
+        }
+    }
+    Ok(live)
+}
+
+async fn listings(
+    store: &Store,
+    mut machines: Vec<Machine>,
+    with_local: bool,
+) -> anyhow::Result<Vec<MachineListing>> {
     let defaults = loopflow_execution::store::placement::machine_defaults(&store.sqlite)?;
     // This Machine is listed only when one of your defaults names it.
     let local = store.local_machine().await?;
-    if label.is_none() && defaults.iter().any(|d| d.machine_id == local.id) {
+    if with_local && defaults.iter().any(|d| d.machine_id == local.id) {
         machines.insert(0, local);
     }
     let hub = loopflow_execution::ops::plan_hub::hub(&store.sqlite)?.map(|hub| hub.id);
@@ -259,7 +281,8 @@ async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
             }
         }
         MachineCommand::List { label, json } => {
-            let listings = listings(&store, label.as_deref()).await?;
+            let machines = selected(&store, label.as_deref()).await?;
+            let listings = listings(&store, machines, label.is_none()).await?;
             if *json {
                 println!("{}", serde_json::to_string(&listings)?);
             } else {
@@ -297,10 +320,7 @@ async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
             }
         }
         MachineCommand::Status { label, json } => {
-            let machines = match label {
-                Some(label) => vec![find_machine(&store, label).await?],
-                None => store.machines().await?,
-            };
+            let machines = selected(&store, label.as_deref()).await?;
             let mut statuses = Vec::new();
             for machine in machines {
                 let status = connection_status(&store, machine).await?;

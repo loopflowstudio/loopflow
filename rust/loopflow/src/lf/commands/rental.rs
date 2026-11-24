@@ -17,7 +17,7 @@ use crate::lf::{OndemandCommand, PoolCommand};
 use loopflow_execution::installation::{ArtifactIdentity, ArtifactRole};
 use loopflow_execution::machine_records::CopyCounts;
 use loopflow_execution::rental::recovery::{
-    delete_sandbox, give_back, held_ids, now, open_store, refresh_all,
+    delete_sandbox, end as end_rental, give_back, held_ids, now, open_store, refresh_all,
 };
 use loopflow_execution::rental::sandbox::Sandboxes;
 use loopflow_model::durable::{CapacityDefault, Machine, RepositoryId};
@@ -950,7 +950,7 @@ pub fn end(label: &str, force: bool) -> anyhow::Result<()> {
         return Ok(());
     }
     let api = Sandboxes::from_env(rental.provider)?;
-    give_back(sqlite, &api, &rental, &machine, true, force)
+    end_rental(sqlite, &api, &rental, &machine, force)
 }
 
 #[cfg(test)]

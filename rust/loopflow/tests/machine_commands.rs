@@ -5084,6 +5084,90 @@ read -r answer < /dev/tty
 }
 
 #[test]
+fn ending_a_rental_its_provider_terminated_settles_and_leaves_the_default_listings() {
+    use loopflow_execution::rental::{RentalId, RentalState};
+    use loopflow_execution::store::{machines, open_sqlite};
+    use serde_json::json;
+
+    let fixture = preview_machines();
+    let root = fixture.root.path();
+    assert_success(&fixture.run(&[
+        "ondemand",
+        "add",
+        "modal",
+        "--provider",
+        "modal",
+        "--vcpus",
+        "2",
+        "--memory-gb",
+        "4",
+        "--max",
+        "1",
+        "--max-usd-per-hour",
+        "1.00",
+    ]));
+    let local = open_sqlite(&root.join("local/loopflow.db")).unwrap();
+    let pod = open_sqlite(&root.join("remote/store/loopflow.db")).unwrap();
+    let origin = machines::local_machine(&pod).unwrap().id;
+    drop(pod);
+    let rental = RentalId::new();
+    let created = chrono::Utc::now().timestamp() - 3600;
+    local
+        .conn
+        .lock()
+        .unwrap()
+        .execute(
+            "INSERT INTO rentals(id,ondemand,provider,provider_name,provider_id,by_hand,hardware,
+            usd_per_hour,cap_usd,deadline,state,created_at,machine_id)
+         VALUES(?1,'modal','modal',?1,'sb-fixture',1,
+            '{\"vcpus\":2,\"memory_gb\":4,\"disk_gb\":8,\"spot\":false,\"modal_sizing\":\"burst\"}',
+            '0.24','1.00',?3,'running',?4,?2)",
+            rusqlite::params![
+                rental.as_str(),
+                origin.as_str(),
+                created + 4 * 3600,
+                created
+            ],
+        )
+        .unwrap();
+
+    // Modal terminated the sandbox: SSH reaches nothing and the provider knows no such sandbox.
+    fs::rename(root.join("remote"), root.join("unreachable")).unwrap();
+    executable(
+        &root.join("bin/uv"),
+        "#!/bin/sh\ncat >/dev/null\nprintf 'null\\n'\n",
+    );
+    let ended = fixture
+        .command(&["machine", "end", "mini"])
+        .env("MODAL_TOKEN_ID", "fixture")
+        .output()
+        .unwrap();
+    assert_success(&ended);
+    let said = String::from_utf8_lossy(&ended.stdout);
+    assert!(
+        said.contains("mini was already gone (ended; ceiling estimate $0.24"),
+        "{said}"
+    );
+    assert_eq!(local.rental(&rental).unwrap().state, RentalState::Ended);
+
+    // The default listings leave its dead route out; its label still resolves.
+    assert_eq!(fixture.json(&["machine", "list", "--json"]), json!([]));
+    assert_eq!(fixture.json(&["machine", "status", "--json"]), json!([]));
+    assert_eq!(
+        fixture.json(&["machine", "list", "mini", "--json"])[0]["label"],
+        "mini"
+    );
+    assert_eq!(
+        fixture.json(&["machine", "status", "mini", "--json"])[0]["state"],
+        "ended_rental"
+    );
+    let ondemands = fixture.json(&["ondemand", "list", "--json"]);
+    let rentals = &ondemands[0]["rentals"];
+    assert_eq!(rentals[0]["machine"], "mini", "{ondemands}");
+    assert_eq!(rentals[0]["state"], "ended");
+}
+
+#[test]
 fn a_lost_rentals_transcript_and_usage_survive_on_its_collecting_machine() {
     use loopflow_execution::rental::{recovery, RentalId, RentalState};
     use loopflow_execution::store::{machines, open_sqlite};
@@ -5393,9 +5477,11 @@ fn a_lost_rentals_transcript_and_usage_survive_on_its_collecting_machine() {
     // Restore the route to exercise ordinary give-back on the same records.
     fs::rename(lost, &remote).unwrap();
     recovery::check().unwrap();
+    // The provider still runs it until the give-back deletes it.
     executable(
         &root.join("bin/uv"),
-        "#!/bin/sh\ncat >/dev/null\nprintf 'null\\n'\n",
+        "#!/bin/sh\ncat >/dev/null\nfor op; do :; done\n\
+         [ \"$op\" = get ] && echo '{\"id\":\"sb-fixture\",\"gone\":false,\"route\":null}' || echo null\n",
     );
     let ended = fixture
         .command(&["machine", "end", "mini"])
@@ -5403,6 +5489,7 @@ fn a_lost_rentals_transcript_and_usage_survive_on_its_collecting_machine() {
         .output()
         .unwrap();
     assert_success(&ended);
+    assert!(String::from_utf8_lossy(&ended.stdout).contains("Returned mini"));
     assert_eq!(local.rental(&rental).unwrap().state, RentalState::Ended);
     assert_eq!(usage()["usage"], before["usage"]);
     let transcript = fixture.json(&["session", "history", "show", id, "--transcript", "--json"]);

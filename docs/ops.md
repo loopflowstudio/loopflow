@@ -269,7 +269,12 @@ Returned modal-1 (2 sessions copied; ceiling estimate $0.24)
   Read the last collected transcript with `lf session history show <id> --transcript`
   and its token and cost totals with `lf session usage --session <id>`.
 - Task rentals return 15 minutes after their last Task finishes. Give-back
-  makes a final copy. Unpushed work blocks return unless you pass `--force`.
+  makes a final copy. Unpushed work blocks return unless you pass `--force`,
+  including when SSH cannot reach a sandbox that is still running.
+- If the provider already ended the sandbox, `lf machine end modal-1` settles it
+  without `--force` and brings its Tasks back to your Machine. Ended rentals
+  leave `lf machine list` and `lf machine status`; `lf machine status modal-1`
+  and `lf ondemand list` still show them.
 
 ## Updates and scheduling
 

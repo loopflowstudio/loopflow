@@ -149,11 +149,14 @@ Two disposable Homes (`sandbox-a` and `sandbox-b`, no SSH routes between them) c
 
 ## Acceptance check at gate
 
-Run focused Rust integration tests exercising the full source-of-truth path across CLI, server, fake Linear, and stand-in SSH:
+Run the focused tests that exercise the full path across CLI, server, tracker stand-ins and stand-in SSH:
 
 ```bash
 env $(env | grep '^LF_' | cut -d= -f1 | sed 's/^/-u /') \
-  cargo test -p loopflow --test machine_commands --test session_steers --test served_reads --test dto_fixtures -- cross_machine_steer remote_unreachable inbound_tracker_steer task_detail_says_each_fact_once
+  cargo test -p loopflow --test machine_commands --test dto_fixtures -- \
+  cross_machine_steer a_status_read a_served_status_for_a_task_mini_runs task_detail_ task_steer_receipt < /dev/null
+env $(env | grep '^LF_' | cut -d= -f1 | sed 's/^/-u /') \
+  cargo test -p loopflow-execution --lib owned_tracker_checks_deliver_a_late_comment_to_worker_and_primary_once < /dev/null
 ```
 
 Expected: all tests pass with zero skipped assertions — proving:
@@ -246,6 +249,14 @@ the id (existing labeling; the open question resolves to this, docs say so).
 - Ran: the three `machine_commands::a_status_read…`/`a_served_status…` tests and `dto_fixtures::` (all pass), `cargo fmt`, `cargo clippy --all-targets -- -D warnings`. Gate runs `served_reads`, `binary(lf)` and `test(machine_commands::)`.
 - Gate risk: `a_status_read_for_a_task_mini_runs_shows_a_rename_made_there` once read the local copy when it ran beside ~50 fixtures; alone and with its two neighbours it passed. The 15 s deadline is what changed, so a stand-in SSH round trip slower than 15 s falls back to `unobserved`. Its assertion now selects `reading`, so a repeat prints the reason.
 - Swift decodes `RoadmapTask` with synthesized `Decodable` and ignores `runs_on`; no Swift field until a view reads it.
+
+## Remaining
+
+Every slice is built. What is left belongs to gate and CI:
+
+- Publish so CI runs `served_reads`, `binary(lf)`, `test(machine_commands::)` and the Swift DTO/protocol tests (`DTOFixtureTests`, `ServerProtocolTests`); none ran here.
+- Watch `a_status_read_for_a_task_mini_runs_shows_a_rename_made_there` under CI load (see Slice 3 gate risk). A repeat that prints a timeout reason means the stand-in SSH round trip exceeds 15 s; fix the fixture, not the deadline.
+- Review nit: `waves::task_place` (where a status read comes from) shares its name with `ops::task::task_place` (worktree placement). Rename the `waves` one if review agrees.
 
 ## Done when
 

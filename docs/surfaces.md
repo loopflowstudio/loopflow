@@ -53,7 +53,7 @@ The native macOS app reads the same local store as `lf`; it keeps no copy of its
   shared order (dragging reorders them for Wave views and CLI lists too).
 - **Paused Tasks:** opening a paused Task on Mac or iPhone opens its conversation.
   **Unpause** lifts the Graph hold. **Stop Auto-Ship** remains available when auto is on.
-  **Pause** is available on any open, started Task.
+  On Mac, the workflow bar and the sidebar row’s context menu offer **Pause** on any open, started Task.
 - **Task workspace:** three resizable panes: `session` (conversation), `shell`
   (at the Task's worktree), and `browser` (Files, Graph log, local dev URLs).
 - **Dashboards:** saved side-by-side grids of Tasks selected by query. Each
@@ -81,7 +81,7 @@ lf desktop dashboard query attention 'state:available or state:blocked'
 ```
 
 Queries support `wave:`, `task:`, `kind:task|wave`, and
-`state:open|available|busy|blocked|error|unstarted|idle|active|moving|backlog|working|done|auto`
+`state:open|available|busy|blocked|error|unstarted|idle|active|moving|paused|backlog|working|done|auto`
 (`auto`: an open Task with auto on), combined with whitespace (AND), `or`, and parentheses.
 
 ### Changes show at once
@@ -99,9 +99,12 @@ connection returns. See [Connect clients](server.md) for connection recovery.
 ### Working Tasks in the sidebar
 
 Mac and iPhone show three groups within Working. **Active** holds the ordinary
-working rows. **Shipping** holds Tasks with auto on or no human step left
-before landing. **Paused** holds owned Tasks whose Graph is on hold, including
-those with auto on. Each group keeps the shared Working order.
+working rows, including those waiting for you to land after `lf task auto off`.
+**Shipping** holds Tasks with auto on and Tasks on a landing Graph with no human
+step left before landing. Graphs such as `research` stay Active unless auto is on.
+**Paused** holds owned Tasks whose Graph is on hold, including those with auto on.
+Their rows still show the conversation’s status and fall back to Paused when
+it has none. Each group keeps the shared Working order.
 
 In the default order, open the second Working Task and send a prompt. Its row
 stays second as the conversation turns Busy and then Available again.

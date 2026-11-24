@@ -486,7 +486,7 @@ struct DesktopHeadlessTests {
         }
     }
 
-    @Test("The workflow bar's … lists the sidebar row's Task actions and the bar repeats none of them")
+    @Test("The workflow bar's … lists the sidebar row's Task actions including Pause")
     func workflowBarMenuIsTheSidebarMenu() throws {
         let roadmap = try JSONDecoder().decode(RoadmapSnapshot.self,
             from: Data(contentsOf: fixtures.appendingPathComponent("roadmap_snapshot.json")))
@@ -504,7 +504,7 @@ struct DesktopHeadlessTests {
         // The sidebar row's context menu is the same list over the same reading.
         let sidebar = labels(try TaskActionItems(model: model, task: task, wave: nil, work: work).inspect())
         #expect(menu == sidebar)
-        for action in ["Start from…", "start", "Complete Task", "Abandon…", "Copy Task ID", "Move to Wave"] {
+        for action in ["Pause", "Start from…", "start", "Complete Task", "Abandon…", "Copy Task ID", "Move to Wave"] {
             #expect(menu.contains(action), "missing \(action)")
         }
         #expect(menu.contains("Claim Task") || menu.contains("Unassign Task"))

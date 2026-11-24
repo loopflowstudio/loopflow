@@ -116,6 +116,7 @@ pub enum SelectionState {
     Idle,
     Active,
     Moving,
+    Paused,
     /// Board axis: the Task's `TaskSection`.
     Backlog,
     Working,
@@ -157,6 +158,7 @@ impl SelectionResolution {
 /// Facts from a complete shared Work read. Task state failures fail the read.
 #[derive(Debug, Clone)]
 pub struct SelectionWork {
+    pub auto: Option<crate::sqlite::AutoState>,
     pub lifecycle: Option<crate::execution::TaskState>,
     pub key: WorkWorkspaceKey,
     pub parent_wave: Option<WaveId>,

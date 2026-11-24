@@ -2602,7 +2602,7 @@ async fn snapshot_task_detail(
             observed,
             section,
             runtime.owner.is_some() || pr.as_ref().is_some_and(|pr| pr.publication.is_some()),
-            facts.auto_on.contains(&task.id),
+            facts.auto.get(&task.id).copied(),
             reads.selection_readings[&task.repository_id]
                 .activity
                 .get(&task.id),

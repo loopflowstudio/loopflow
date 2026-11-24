@@ -25,7 +25,7 @@ private actor HeldServer: ServerCarrier {
         for index in contents.indices {
             contents[index]["identifier"] = "LOO-\(index + 1)"
             contents[index]["working_group"] = paused ? "paused" : "active"
-            contents[index]["states"] = paused ? ["open", "working"] : ["open", "working", "idle", "available"]
+            contents[index]["states"] = paused ? ["open", "paused", "working"] : ["open", "working", "idle", "available"]
         }
         plan["contents"] = contents
         self.plan = plan
@@ -131,7 +131,7 @@ final class TaskFeedTests: XCTestCase {
         XCTAssertTrue(feed.shownRepositories.first?.tasks[1].states.contains(.idle) == true)
         try await until { feed.notices.current != nil }
         XCTAssertEqual(feed.shownRepositories.first?.tasks[1].workingGroup, .paused)
-        XCTAssertFalse(feed.shownRepositories.first?.tasks[1].states.contains(.idle) == true)
+        XCTAssertEqual(feed.shownRepositories.first?.tasks[1].status?.word, "Paused")
         XCTAssertEqual(identifiers(feed), ["LOO-1", "LOO-2", "LOO-3"])
     }
 

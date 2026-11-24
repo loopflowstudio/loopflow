@@ -2,7 +2,7 @@
 use super::children::{TaskIdentifiers, TASK_VISIBLE};
 use super::sessions::{SessionProjection, SessionProjectionInputs};
 use super::task_work::{END, START};
-use super::SqliteStore;
+use super::{AutoState, SqliteStore};
 use crate::execution::{TaskSection, TaskState};
 use crate::work::selection::{
     move_into_place, Arrangement, Dashboard, DashboardId, DashboardReading, DropSide, Selection,
@@ -81,7 +81,7 @@ fn work_in(
     let identifiers = TaskIdentifiers::read(conn)?;
     let ids: Vec<_> = tasks.iter().map(|row| row.id.clone()).collect();
     let published = super::task_started::published_in(conn, &ids)?;
-    let auto_on = super::task_details::auto_on_in(
+    let auto = super::task_details::auto_states_in(
         conn,
         &super::children::ids_json(ids.iter().map(TaskId::as_str)),
     )?;
@@ -94,14 +94,17 @@ fn work_in(
     let mut work = Vec::with_capacity(tasks.len());
     for task in tasks {
         let activity = activity.get(&task.id);
+        let lifecycle = task.lifecycle.observed_here(task.runs_elsewhere);
+        let auto = auto.get(&task.id).copied();
         work.push(SelectionWork {
-            lifecycle: task.lifecycle.observed_here(task.runs_elsewhere),
+            lifecycle,
+            auto,
             key: key(WorkWorkspaceKind::Task, task.id.to_string()),
             states: task_selection_states(
-                task.lifecycle.observed_here(task.runs_elsewhere),
+                lifecycle,
                 task.section(),
                 task.owned || published.contains(&task.id),
-                auto_on.contains(&task.id),
+                auto,
                 activity,
             ),
             parent_wave: task.wave_id,
@@ -116,6 +119,7 @@ fn work_in(
     for wave in waves {
         work.push(SelectionWork {
             lifecycle: None,
+            auto: None,
             key: key(WorkWorkspaceKind::Wave, wave.id().to_string()),
             parent_wave: wave.parent_wave_id().cloned(),
             name: wave.name().to_string(),
@@ -125,6 +129,7 @@ fn work_in(
     }
     work.push(SelectionWork {
         lifecycle: None,
+        auto: None,
         key: key(WorkWorkspaceKind::Repository, repository.to_string()),
         parent_wave: None,
         name: repo,
@@ -288,7 +293,7 @@ pub fn task_selection_states(
     state: Option<TaskState>,
     section: TaskSection,
     claimed_or_published: bool,
-    auto: bool,
+    auto: Option<AutoState>,
     activity: Option<&TaskActivity>,
 ) -> BTreeSet<SelectionState> {
     let mut states = activity.map_or_else(BTreeSet::new, |activity| activity.states.clone());
@@ -296,16 +301,16 @@ pub fn task_selection_states(
     if claimed_or_published && open {
         states.insert(SelectionState::Open);
     }
-    if auto && open {
+    if auto == Some(AutoState::On) && open {
         states.insert(SelectionState::Auto);
     }
-    states.extend(state.and_then(|state| match state {
-        TaskState::Unstarted => Some(SelectionState::Unstarted),
-        TaskState::Idle => Some(SelectionState::Idle),
-        TaskState::Active => Some(SelectionState::Active),
-        TaskState::Moving => Some(SelectionState::Moving),
-        TaskState::Paused => None,
-        TaskState::Done | TaskState::Abandoned => Some(SelectionState::Done),
+    states.extend(state.map(|state| match state {
+        TaskState::Unstarted => SelectionState::Unstarted,
+        TaskState::Idle => SelectionState::Idle,
+        TaskState::Active => SelectionState::Active,
+        TaskState::Moving => SelectionState::Moving,
+        TaskState::Paused => SelectionState::Paused,
+        TaskState::Done | TaskState::Abandoned => SelectionState::Done,
     }));
     states.insert(match section {
         TaskSection::Backlog => SelectionState::Backlog,
@@ -461,11 +466,7 @@ impl<'a> RepositoryViews<'a> {
             conn,
             selected.into_iter().map(|key| {
                 let item = self.by_key[key];
-                (
-                    item.key.id.as_str(),
-                    item.lifecycle,
-                    item.states.contains(&SelectionState::Auto),
-                )
+                (item.key.id.as_str(), item.lifecycle, item.auto)
             }),
             ships,
         )?;
@@ -1036,7 +1037,7 @@ impl SqliteStore {
 
 #[cfg(test)]
 mod tests {
-    use super::{task_order_in, task_selection_states};
+    use super::{task_order_in, task_selection_states, AutoState};
     use crate::execution::{TaskSection, TaskState};
     use crate::work::selection::SelectionState;
     use std::collections::BTreeSet;
@@ -1063,7 +1064,7 @@ mod tests {
                 state.observed_here(true),
                 TaskSection::Working,
                 true,
-                true,
+                Some(AutoState::On),
                 None,
             );
             assert_eq!(states, BTreeSet::from([Open, Working, Auto]));
@@ -1074,8 +1075,13 @@ mod tests {
             (TaskState::Abandoned, SelectionState::Done),
         ] {
             let section = TaskSection::of(state, true, true);
-            let states =
-                task_selection_states(state.observed_here(true), section, true, true, None);
+            let states = task_selection_states(
+                state.observed_here(true),
+                section,
+                true,
+                Some(AutoState::On),
+                None,
+            );
             assert!(states.contains(&expected));
         }
     }

@@ -79,7 +79,7 @@ public struct WorkSelection: Codable, Equatable, Sendable {
 }
 
 public enum WorkSelectionState: String, CaseIterable, Codable, Sendable, Hashable {
-    case open, available, busy, blocked, error, unstarted, idle, active, moving, backlog, working, done
+    case open, available, busy, blocked, error, unstarted, idle, active, moving, paused, backlog, working, done
     /// An open Task whose auto setting is on.
     case auto
 }

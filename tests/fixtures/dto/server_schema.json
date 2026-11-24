@@ -9593,6 +9593,7 @@
             "idle",
             "active",
             "moving",
+            "paused",
             "working",
             "done"
           ],

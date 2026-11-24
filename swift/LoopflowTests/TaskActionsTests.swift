@@ -10,7 +10,7 @@ struct TaskActionsTests {
         let root = try #require(JSONSerialization.jsonObject(with: loadFixtureData("roadmap_snapshot.json")) as? [String: Any])
         var row = try #require(((root["tasks"] as? [String: Any])?["items"] as? [[String: Any]])?.first)
         row["lifecycle"] = lifecycle
-        row["selection_states"] = (lifecycle == "paused" ? ["working"] : [lifecycle == "abandoned" ? "done" : lifecycle]) + (auto ? ["auto"] : [])
+        row["selection_states"] = (lifecycle == "paused" ? ["working", "paused"] : [lifecycle == "abandoned" ? "done" : lifecycle]) + (auto ? ["auto"] : [])
         row["run_control"] = ["pausing": pausing, "unavailable": refusal.map { $0 as Any } ?? NSNull()]
         return try JSONDecoder().decode(RoadmapTask.self, from: JSONSerialization.data(withJSONObject: row))
     }

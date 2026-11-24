@@ -52,7 +52,7 @@ struct TaskConceptTests {
         wire["lifecycle"] = "paused"
         wire["section"] = "working"
         wire["working_group"] = "paused"
-        wire["selection_states"] = ["open", "working"]
+        wire["selection_states"] = ["open", "paused", "working"]
         wire["run_control"] = ["pausing": false, "unavailable": "Task is paused"]
         let row = try JSONDecoder().decode(RoadmapTask.self, from: JSONSerialization.data(withJSONObject: wire))
         let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("Passive rendering") }, repoPath: "/repo")
@@ -61,8 +61,12 @@ struct TaskConceptTests {
         ]))
         model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [])
         let key = WorkWorkspaceKey(repository: row.task.repositoryId, kind: .task, id: row.id)
-        let member = WorkViewPlan.Content(work: key, title: row.task.name, states: [.open, .working],
+        let member = WorkViewPlan.Content(work: key, title: row.task.name, states: [.open, .paused, .working],
                                           identifier: row.task.identifier, workingGroup: .paused, graphStep: nil, primarySession: nil, location: nil, argv: nil, unavailable: [])
+        var backlog = member
+        backlog.states = [.backlog, .paused]
+        backlog.workingGroup = nil
+        #expect(backlog.status?.word == "Paused")
         let plan = fixtureViewPlan(owner: .init(repository: key.repository, kind: .repository, id: key.repository), members: [member])
         model.applyTaskList(plan, wave: nil, reason: "")
         #expect(model.sidebarTaskIDs == [row.id])
@@ -77,6 +81,8 @@ struct TaskConceptTests {
         #expect(registry.selectedWork == key && registry.warmWork.contains(key))
         let view = try TaskWorkflowBar(model: model, task: row, work: .available(
             TaskOverview(sessions: [], graphProcesses: [], graph: nil))).inspect()
+        let menu = try TaskActionItems(model: model, task: row, wave: nil, work: nil).inspect()
+        #expect(try !menu.find(button: "Unpause").isDisabled())
         let action = try view.find(viewWithAccessibilityIdentifier: "task-workflow-pause").button()
         #expect(try action.labelView().text().string() == "Unpause")
         #expect(!action.isDisabled())
@@ -88,7 +94,7 @@ struct TaskConceptTests {
     @Test func workingGroupsKeepOrderAndKeyboardSlotsWhenSortedByStatus() throws {
         let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("Passive rendering") }, repoPath: "/repo")
         #expect(model.startedTaskCount(.repository) == nil)
-        var plan = fixtureStartedPlan([("P", [.working]), ("S1", [.working, .busy]), ("A", [.working, .busy]), ("S2", [.working, .available])])
+        var plan = fixtureStartedPlan([("P", [.paused, .working]), ("S1", [.working, .busy]), ("A", [.working, .busy]), ("S2", [.working, .available])])
         for (index, group) in [WorkingGroup.paused, .shipping, .active, .shipping].enumerated() {
             plan.contents[index].workingGroup = group
         }

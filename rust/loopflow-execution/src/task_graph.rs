@@ -233,6 +233,16 @@ impl CapturedGraph {
         }
     }
 
+    fn has_landing(steps: &[ConcreteStep], merges: &mut dyn FnMut(&[String]) -> bool) -> bool {
+        steps.iter().any(|step| match step {
+            ConcreteStep::Xor(branch) => branch
+                .paths
+                .values()
+                .any(|path| Self::has_landing(&path.steps, merges)),
+            _ => landing_name(step, &mut *merges).is_some(),
+        })
+    }
+
     /// Could any remaining path need a person before its next landing?
     fn needs_review(&self, place: &Place, merges: &mut dyn FnMut(&[String]) -> bool) -> bool {
         fn scan(
@@ -614,10 +624,15 @@ impl TaskGraph {
         let TaskGraphPosition::At { step } = &self.position else {
             return None;
         };
-        let ends = step == START || step == END;
         let interactive = self.interactive_steps.iter().any(|s| &s.name == step);
-        (!ends && !interactive).then(|| crate::ops::task::auto::landing_wait(step, off, issue))
+        landing_stop(step, interactive)
+            .then(|| crate::ops::task::auto::landing_wait(step, off, issue))
     }
+}
+
+/// Apart from its endpoints, a Task can stand only at an interactive step or a landing.
+fn landing_stop(step: &str, interactive: bool) -> bool {
+    step != START && step != END && !interactive
 }
 
 /// The Task's captured cursor takes precedence over the stop its run left.
@@ -625,9 +640,13 @@ pub fn ships_before_review(
     graph: &str,
     step: &str,
     cursor: Option<&str>,
+    auto: Option<AutoState>,
     mut merges: impl FnMut(&[String]) -> bool,
 ) -> crate::store::StoreResult<bool> {
     let graph: CapturedGraph = serde_json::from_str(graph)?;
+    if !CapturedGraph::has_landing(&graph.steps, &mut merges) {
+        return Ok(false);
+    }
     let place = if let Some(cursor) = cursor {
         let cursor: ExecutionCursor = serde_json::from_str(cursor)?;
         if cursor.index == graph.steps.len() {
@@ -637,7 +656,11 @@ pub fn ships_before_review(
     } else if step == END {
         return Ok(true);
     } else {
-        graph.interactive_step(step).or_else(|| graph.find(step))
+        let interactive = graph.interactive_step(step);
+        if auto == Some(AutoState::Off) && landing_stop(step, interactive.is_some()) {
+            return Ok(false);
+        }
+        interactive.or_else(|| graph.find(step))
     };
     Ok(place.is_some_and(|place| !graph.needs_review(&place, &mut merges)))
 }
@@ -663,8 +686,9 @@ pub(crate) mod tests {
         graph: &str,
         step: &str,
         cursor: Option<&str>,
+        auto: Option<AutoState>,
     ) -> crate::store::StoreResult<bool> {
-        super::ships_before_review(graph, step, cursor, |args| {
+        super::ships_before_review(graph, step, cursor, auto, |args| {
             args.get(1).is_some_and(|arg| arg == "land")
         })
     }

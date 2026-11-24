@@ -519,7 +519,10 @@ fn started(content: &ViewContent) -> bool {
     content.states.iter().any(|state| {
         matches!(
             state,
-            SelectionState::Idle | SelectionState::Active | SelectionState::Moving
+            SelectionState::Idle
+                | SelectionState::Active
+                | SelectionState::Moving
+                | SelectionState::Paused
         )
     })
 }
@@ -596,6 +599,7 @@ mod tests {
         for (state, expected) in [
             (SelectionState::Unstarted, false),
             (SelectionState::Idle, true),
+            (SelectionState::Paused, true),
             (SelectionState::Moving, true),
             (SelectionState::Done, false),
         ] {

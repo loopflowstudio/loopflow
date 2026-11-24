@@ -370,6 +370,25 @@ fn sidebar_step_follows_the_captured_cursor_and_disappears_without_a_graph() {
     store.set_task_graph_step(&id, "end").unwrap();
     assert_eq!(row().graph_step, None, "after the last step");
     assert_eq!(row().working_group, Some(Shipping));
+    let mark = |state| {
+        store
+            .set_task_auto(
+                &id,
+                &loopflow_storage::sqlite::Auto {
+                    state,
+                    at: 1,
+                    by: crate::process::Starter::Person { name: None },
+                },
+                false,
+            )
+            .unwrap();
+    };
+    store
+        .set_task_graph_step(&id, "land --wait-and-fix")
+        .unwrap();
+    assert_eq!(row().working_group, Some(Shipping));
+    mark(loopflow_storage::sqlite::AutoState::Off);
+    assert_eq!(row().working_group, Some(Active));
     store.set_task_graph_step(&id, "ship-review").unwrap();
     assert_eq!(row().working_group, Some(Active));
     store.set_task_graph_step(&id, "review").unwrap();
@@ -404,7 +423,11 @@ fn sidebar_step_follows_the_captured_cursor_and_disappears_without_a_graph() {
     store.conn.lock().unwrap().execute(
         "INSERT INTO task_pauses(task_id,paused_at,paused_by) VALUES(?1,1,json_object('kind','person','name','Ada'))", [id.as_str()]
     ).unwrap();
+    mark(loopflow_storage::sqlite::AutoState::On);
+    let matched = view_plan(&store, &repo, Some("kind:task state:paused")).unwrap();
+    assert_eq!(matched.contents.len(), 1);
     let held = row();
+    assert_eq!(matched.contents[0], held);
     assert!(held
         .states
         .contains(&loopflow_storage::work::selection::SelectionState::Working));

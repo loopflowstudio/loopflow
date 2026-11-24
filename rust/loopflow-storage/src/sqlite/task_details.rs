@@ -1,6 +1,6 @@
 //! What a plan reads about each of its Tasks, one statement per concern over
 //! every Task in scope, so a reading's cost does not grow a statement per Task.
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use rusqlite::Connection;
 
@@ -8,7 +8,7 @@ use super::children::{
     ids_json, map_task_event_row, map_task_pr_row, tracker_states_in, TASK_PR_COLUMNS,
 };
 use super::task_pause::PauseCleanup;
-use super::SqliteStore;
+use super::{AutoState, SqliteStore};
 use crate::execution::{TaskSection, TaskState, WorkingGroup};
 use crate::planning_sync::TrackerActions;
 use crate::work::task::{Task, TaskEvent, TaskId, TaskPr, TaskPrId};
@@ -37,8 +37,8 @@ pub struct TaskDetailFacts {
     pub graph_names: HashMap<TaskId, String>,
     /// The step each Task stands at on its graph; absent while a run carries it.
     pub steps: HashMap<TaskId, String>,
-    /// Tasks with auto on.
-    pub auto_on: HashSet<TaskId>,
+    /// Auto marks set on these Tasks.
+    pub auto: HashMap<TaskId, AutoState>,
     pub tracker_actions: HashMap<TaskId, TrackerActions>,
     pub repository_paths: HashMap<RepositoryId, String>,
 }
@@ -71,7 +71,7 @@ impl SqliteStore {
             )?
         };
         let (local, ownership) = super::task_ownership::ownerships_in(&snapshot, &ids)?;
-        let auto_on = auto_on_in(&snapshot, &json)?;
+        let auto = auto_states_in(&snapshot, &json)?;
         let working = tasks.iter().filter_map(|task| {
             let state = states.get(&task.id)?.lifecycle(task.state.as_deref());
             let owner = ownership.get(&task.id);
@@ -80,7 +80,7 @@ impl SqliteStore {
                 (
                     task.id.as_str(),
                     state.observed_here(remote),
-                    auto_on.contains(&task.id),
+                    auto.get(&task.id).copied(),
                 )
             })
         });
@@ -163,7 +163,7 @@ impl SqliteStore {
                 &json,
                 |row| Ok((TaskId::from_raw(row.get::<_, String>(0)?), row.get::<_, String>(1)?)),
             )?,
-            auto_on,
+            auto,
             tracker_actions: super::planning_sync::task_tracker_actions_in(&snapshot, &ids)?,
             repository_paths: repository_paths_in(&snapshot)?,
         };
@@ -173,25 +173,25 @@ impl SqliteStore {
 }
 
 /// Execution interprets the cursor and the CLI recognizes commands that land a PR.
-pub type ShipsBeforeReview<'a> = &'a mut dyn FnMut(&str, &str, Option<&str>) -> StoreResult<bool>;
+pub type ShipsBeforeReview<'a> =
+    &'a mut dyn FnMut(&str, &str, Option<&str>, Option<AutoState>) -> StoreResult<bool>;
 
 pub(super) fn working_groups_in<'a>(
     conn: &Connection,
-    working: impl Iterator<Item = (&'a str, Option<TaskState>, bool)>,
+    working: impl Iterator<Item = (&'a str, Option<TaskState>, Option<AutoState>)>,
     ships: ShipsBeforeReview<'_>,
 ) -> StoreResult<HashMap<String, WorkingGroup>> {
     let mut groups = HashMap::new();
-    let mut inspect = Vec::new();
+    let mut inspect = HashMap::new();
     for (id, state, auto) in working {
         let group = match (state, auto) {
             (Some(TaskState::Paused), _) => WorkingGroup::Paused,
-            (_, true) => WorkingGroup::Shipping,
-            (observed, false) => {
-                if observed.is_some() {
-                    inspect.push(id);
-                }
+            (_, Some(AutoState::On)) => WorkingGroup::Shipping,
+            (Some(_), _) => {
+                inspect.insert(id, auto);
                 WorkingGroup::Active
             }
+            (None, _) => WorkingGroup::Active,
         };
         groups.insert(id.to_owned(), group);
     }
@@ -200,28 +200,38 @@ pub(super) fn working_groups_in<'a>(
             "SELECT task_id,graph,step,run_start FROM task_graphs
              WHERE task_id IN (SELECT value FROM json_each(?1))",
         )?;
-        let mut rows = query.query([ids_json(inspect)])?;
+        let mut rows = query.query([ids_json(inspect.keys().copied())])?;
         while let Some(row) = rows.next()? {
+            let id: String = row.get(0)?;
             if ships(
                 &row.get::<_, String>(1)?,
                 &row.get::<_, String>(2)?,
                 row.get::<_, Option<String>>(3)?.as_deref(),
+                inspect[id.as_str()],
             )? {
-                groups.insert(row.get(0)?, WorkingGroup::Shipping);
+                groups.insert(id, WorkingGroup::Shipping);
             }
         }
     }
     Ok(groups)
 }
 
-/// The Tasks among `ids` whose auto setting is on.
-pub(super) fn auto_on_in(conn: &Connection, ids: &str) -> StoreResult<HashSet<TaskId>> {
-    task_set(
-        conn,
-        "SELECT task_id FROM task_auto
-         WHERE task_id IN (SELECT value FROM json_each(?1)) AND state='on'",
-        ids,
-    )
+/// Read only the auto marks on the Tasks in this reading.
+pub(super) fn auto_states_in(
+    conn: &Connection,
+    ids: &str,
+) -> StoreResult<HashMap<TaskId, AutoState>> {
+    let mut statement = conn.prepare(
+        "SELECT task_id,state FROM task_auto WHERE task_id IN (SELECT value FROM json_each(?1))",
+    )?;
+    let rows = statement.query_map([ids], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    })?;
+    rows.map(|row| {
+        let (id, state) = row?;
+        Ok((TaskId::from_raw(id), AutoState::parse(&state)?))
+    })
+    .collect()
 }
 
 fn keyed<K: std::hash::Hash + Eq, V>(
@@ -232,13 +242,6 @@ fn keyed<K: std::hash::Hash + Eq, V>(
 ) -> StoreResult<HashMap<K, V>> {
     let mut statement = conn.prepare(sql)?;
     let rows = statement.query_map([ids], map)?;
-    rows.collect::<rusqlite::Result<_>>()
-        .map_err(StoreError::from)
-}
-
-fn task_set(conn: &Connection, sql: &str, ids: &str) -> StoreResult<HashSet<TaskId>> {
-    let mut statement = conn.prepare(sql)?;
-    let rows = statement.query_map([ids], |row| Ok(TaskId::from_raw(row.get::<_, String>(0)?)))?;
     rows.collect::<rusqlite::Result<_>>()
         .map_err(StoreError::from)
 }

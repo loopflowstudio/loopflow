@@ -50,11 +50,7 @@ extension TaskRowStatus {
     /// it needs, else its lifecycle. Whatever the word, a Task that needs
     /// someone keeps the reason as its line.
     public init(task: RoadmapTask, program: TaskRowStatus? = nil) {
-        let need = task.need
-        if task.lifecycle == .paused {
-            self = .lifecycle(.paused)
-            return
-        }
+        let need = task.lifecycle == .paused ? nil : task.need
         if let program {
             self = program
         } else if let need, need != .unknown {
@@ -252,7 +248,6 @@ extension WorkViewPlan.Content {
     /// no conversation opens from here, which every Task without one lists, so
     /// it is the word only when the reading gives no other.
     public var status: TaskRowStatus? {
-        if workingGroup == .paused && !states.contains(.idle) { return .lifecycle(.paused) }
         if let state = states.programState { return .program(state) }
         if let state = states.lazy.compactMap({ TaskState(rawValue: $0.rawValue) }).first { return .lifecycle(state) }
         return unavailable.isEmpty ? nil : .unavailable(unavailable)

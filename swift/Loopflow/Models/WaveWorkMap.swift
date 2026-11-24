@@ -248,7 +248,7 @@ public struct RoadmapTask: Decodable, Sendable, Identifiable, Hashable {
     public internal(set) var lifecycle: TaskState
     public internal(set) var workingGroup: WorkingGroup?
     /// The same states Rust uses for Task selections and conversation activity.
-    public let selectionStates: Set<WorkSelectionState>
+    public internal(set) var selectionStates: Set<WorkSelectionState>
     public internal(set) var runtime: TaskRuntimeSnapshot?
     public let nextMove: WorkNextMove
     public let condition: TaskConditionSnapshot

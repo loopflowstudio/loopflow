@@ -117,18 +117,22 @@ struct PendingChangesTests {
         changes.setPause(.pause, row: row, directory: "/repo", notices: notices, show: nil) {}
         let held = try #require(changes.apply(to: [row], readAt: at(4)).first)
         #expect(held.section == .working && held.workingGroup == .paused && held.lifecycle == .paused && held.runtime?.owner == row.runtime?.owner)
+        #expect(held.selectionStates.contains(.paused) && !held.selectionStates.contains(.moving))
         let contents = try #require(changes.apply(to: started)?.contents)
-        #expect(Set(contents[1].states) == [.open, .working, .busy, .auto]
+        #expect(Set(contents[1].states) == [.open, .working, .paused, .busy, .auto]
                 && contents[1].workingGroup == .paused)
+        #expect(contents[1].status?.word == "Busy")
         #expect(contents[0].states.contains(.working))
         await machine.fail(ServerError(code: "conflict", message: "Task moved", data: .null))
         #expect(changes.apply(to: started)?.contents == started.value?.contents)
         #expect(changes.apply(to: [row], readAt: at(4)) == [row])
 
         changes.setPause(.unpause, row: held, directory: "/repo", notices: notices, show: nil) {}
-        #expect(changes.apply(to: [held], readAt: at(4)).first?.section == .working)
+        let released = try #require(changes.apply(to: [held], readAt: at(4)).first)
+        #expect(released.section == .working && released.selectionStates.contains(.idle) && !released.selectionStates.contains(.paused))
         let unpaused = changes.apply(to: contents, readAt: at(4))
         #expect(Set(unpaused[1].states) == [.open, .working, .busy, .idle, .auto])
+        #expect(unpaused[1].workingGroup == .paused)
         await machine.answer(nil)
     }
 

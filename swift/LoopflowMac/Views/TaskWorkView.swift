@@ -102,6 +102,22 @@ struct TaskAutoControl: View {
     }
 }
 
+private struct TaskPauseButton: View {
+    let model: WorkModel
+    let task: RoadmapTask
+    let actions: TaskActions
+
+    var body: some View {
+        if let pause = actions.pause {
+            let refusal = model.changeRefusal ?? model.pendingChanges.pauseRequest(for: task.task.identifier) ?? actions.pauseRefusal
+            Button(pause.rawValue) { model.setPause(pause, task: task) }
+                .disabled(refusal != nil)
+                .help(refusal ?? "lf task \(pause.rawValue.lowercased()) \(task.task.identifier)")
+                .accessibilityIdentifier("task-workflow-pause")
+        }
+    }
+}
+
 /// The selected Task's Workflow under the jump bar: the workflow line, the one
 /// step that moves it from here, Auto-Ship, then "…" with every other Task
 /// action. Rust owns the graph, the position, the sentence and whether a run
@@ -141,15 +157,9 @@ struct TaskWorkflowBar: View {
                     .help(refusal ?? run.help)
                     .accessibilityIdentifier(work.value?.graph == nil ? "task-workflow-start" : "task-workflow-run")
             }
-            if let pause = actions.pause {
-                let refusal = model.changeRefusal ?? model.pendingChanges.pauseRequest(for: task.task.identifier) ?? actions.pauseRefusal
-                Button(pause.rawValue) { model.setPause(pause, task: task) }
-                    .buttonStyle(LoopflowButtonStyle(pause == .unpause ? .accent : .neutral))
-                    .fixedSize()
-                    .disabled(refusal != nil)
-                    .help(refusal ?? "lf task \(pause.rawValue.lowercased()) \(task.task.identifier)")
-                    .accessibilityIdentifier("task-workflow-pause")
-            }
+            TaskPauseButton(model: model, task: task, actions: actions)
+                .buttonStyle(LoopflowButtonStyle(actions.pause == .unpause ? .accent : .neutral))
+                .fixedSize()
             TaskAutoControl(model: model, task: task)
             Menu {
                 TaskActionItems(model: model, task: task, wave: model.task(id: task.id)?.wave?.wave,
@@ -249,6 +259,8 @@ struct TaskActionItems: View {
             .disabled(model.runRefusal(task) != nil)
             .accessibilityIdentifier("task-workflow-choose")
         }
+        TaskPauseButton(model: model, task: task,
+                       actions: TaskActions(work: work, row: task, execution: model.taskExecution[task.id].value))
         Button("New conversation") { newConversation?() }.disabled(newConversation == nil || unavailable)
         Menu("Move to Wave") {
             Button("No Wave") { model.moveTask(task, toWave: nil) }

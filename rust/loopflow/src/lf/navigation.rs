@@ -709,11 +709,15 @@ pub fn command_merges(argv: &[String]) -> bool {
 }
 
 /// Tasks in a list often run the same Graph. Resolve each command once per reading.
-pub(crate) fn shipping_reader(
-) -> impl FnMut(&str, &str, Option<&str>) -> loopflow_storage::StoreResult<bool> {
+pub(crate) fn shipping_reader() -> impl FnMut(
+    &str,
+    &str,
+    Option<&str>,
+    Option<loopflow_storage::sqlite::AutoState>,
+) -> loopflow_storage::StoreResult<bool> {
     let mut commands = std::collections::HashMap::<Vec<String>, bool>::new();
-    move |graph, step, cursor| {
-        loopflow_execution::task_graph::ships_before_review(graph, step, cursor, |argv| {
+    move |graph, step, cursor, auto| {
+        loopflow_execution::task_graph::ships_before_review(graph, step, cursor, auto, |argv| {
             if let Some(merges) = commands.get(argv) {
                 return *merges;
             }
@@ -765,14 +769,46 @@ mod landing_tests {
         let graph = CapturedGraph::load("ship", repo.path()).unwrap().unwrap();
         let saved = serde_json::to_string(&graph).unwrap();
         let mut ships = super::shipping_reader();
-        assert!(!ships(&saved, "start", None).unwrap());
+        assert!(!ships(&saved, "start", None, None).unwrap());
         for (step, expected) in [("reflect", true), ("demo", false), ("verify", false)] {
             let cursor = serde_json::to_string(&graph.find(step).unwrap().cursor()).unwrap();
             assert_eq!(
-                ships(&saved, "start", Some(&cursor)).unwrap(),
+                ships(&saved, "start", Some(&cursor), None).unwrap(),
                 expected,
                 "{step}"
             );
+        }
+    }
+
+    #[test]
+    fn only_graphs_that_land_ship_after_the_last_review() {
+        let repo = tempfile::tempdir().unwrap();
+        let mut ships = super::shipping_reader();
+        for (name, expected) in [
+            ("code", true),
+            ("feature", true),
+            ("research", false),
+            ("pursue", false),
+        ] {
+            let graph = CapturedGraph::load(name, repo.path()).unwrap().unwrap();
+            let saved = serde_json::to_string(&graph).unwrap();
+            assert_eq!(
+                ships(&saved, "end", None, None).unwrap(),
+                expected,
+                "{name}"
+            );
+            if expected {
+                for step in ["deliver", "verify"] {
+                    let cursor =
+                        serde_json::to_string(&graph.find(step).unwrap().cursor()).unwrap();
+                    assert!(
+                        ships(&saved, "start", Some(&cursor), None).unwrap(),
+                        "{name}: {step}"
+                    );
+                }
+            } else {
+                assert!(!ships(&saved, "start", None, None).unwrap(), "{name}");
+            }
         }
     }
 

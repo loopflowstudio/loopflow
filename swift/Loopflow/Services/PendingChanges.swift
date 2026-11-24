@@ -329,19 +329,19 @@ public final class PendingChanges {
                     states.inSection(Self.started(states) ? .working : .backlog).union([.open])
                 }
             case .pause:
-                for index in contents.indices where matches.contains(contents[index].work) {
-                    if contents[index].states.contains(.working) { contents[index].workingGroup = .paused }
-                    contents[index].states.removeAll { [.moving, .active, .idle].contains($0) }
-                }
+                contents.updateStates(of: matches) { $0.pausing() }
             case .unpause(_, let owned):
-                contents.updateStates(of: matches) { $0.inSection(owned ? .working : .backlog).union([.idle]) }
+                contents.updateStates(of: matches) { states in
+                    guard states.contains(.paused) else { return states }
+                    return states.unpausing().inSection(owned ? .working : .backlog)
+                }
             case .claim:
                 contents.updateStates(of: matches) { states in
                     Self.started(states) ? states.inSection(.working) : states
                 }
             case .unassign:
                 contents.updateStates(of: matches) { states in
-                    states.inSection(.backlog)
+                    states.unpausing().inSection(.backlog)
                 }
             case .renameSession, .reorder:
                 break
@@ -381,8 +381,11 @@ public final class PendingChanges {
                 tasks[index].section = checkedOut && tasks[index].runtime?.owner != nil ? .working : .backlog
             case .pause:
                 tasks[index].lifecycle = .paused
+                tasks[index].selectionStates = tasks[index].selectionStates.pausing()
                 if tasks[index].section == .working { tasks[index].workingGroup = .paused }
             case .unpause(_, let owned):
+                guard tasks[index].lifecycle == .paused else { continue }
+                tasks[index].selectionStates = tasks[index].selectionStates.unpausing()
                 tasks[index].lifecycle = .idle
                 tasks[index].section = owned ? .working : .backlog
                 // The next reading knows whether the saved Graph returns to Shipping.
@@ -394,7 +397,10 @@ public final class PendingChanges {
                     if tasks[index].lifecycle == .paused { tasks[index].workingGroup = .paused }
                 }
             case .unassign:
-                if tasks[index].lifecycle == .paused { tasks[index].lifecycle = .idle }
+                if tasks[index].lifecycle == .paused {
+                    tasks[index].lifecycle = .idle
+                    tasks[index].selectionStates = tasks[index].selectionStates.unpausing()
+                }
                 tasks[index].workingGroup = nil
                 tasks[index].runtime?.owner = nil
                 tasks[index].section = .backlog
@@ -425,7 +431,7 @@ public final class PendingChanges {
     }
 
     private static func started(_ states: Set<WorkSelectionState>) -> Bool {
-        !states.isDisjoint(with: [.idle, .active, .moving])
+        !states.isDisjoint(with: [.idle, .active, .moving, .paused])
     }
 
     private func prune() {
@@ -442,6 +448,14 @@ private struct WeakNoticeCenter {
 }
 
 private extension Set<WorkSelectionState> {
+    func pausing() -> Self {
+        subtracting([.moving, .active, .idle]).union([.paused])
+    }
+
+    func unpausing() -> Self {
+        contains(.paused) ? subtracting([.paused]).union([.idle]) : self
+    }
+
     func inSection(_ section: WorkSelectionState) -> Self {
         subtracting([.backlog, .working, .done]).union([section])
     }
@@ -453,6 +467,7 @@ private extension [WorkViewPlan.Content] {
         for index in indices where members.contains(self[index].work) {
             let next = update(Set(self[index].states))
             if !next.contains(.working) { self[index].workingGroup = nil }
+            else if next.contains(.paused) { self[index].workingGroup = .paused }
             else if self[index].workingGroup == nil {
                 self[index].workingGroup = next.contains(.auto) ? .shipping : .active
             }

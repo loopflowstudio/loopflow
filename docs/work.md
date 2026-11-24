@@ -58,10 +58,25 @@ lf task interrupt LOO-12                       # stop its running Graph
 lf task unassign LOO-12                        # release ownership; stops CI repair
 ```
 
-Steers save locally first, then reach every Session working on the Task at its
-next provider boundary (before a Graph step or after a turn). An idle Task
+`lf steer` says who will read it:
+
+```console
+$ lf steer LOO-12 "keep the retry budget at 3"
+Saved 0199a2f1; LOO-12's worker reads it at its next boundary
+```
+
+A steer reaches every Session working on the Task at its next provider
+boundary (before a Graph step or after a tool call or turn). An idle Task
 conversation is woken with it. Comments from teammates in Linear or Asana
-arrive the same way.
+arrive the same way. When the Task runs on another Machine, the steer goes to
+that Machine ([Steer and read a Task another Machine runs](dev/machines.md#steer-and-read-a-task-another-machine-runs)).
+
+`lf steer LOO-12 --json` returns the receipt: `delivery.reached` is `owner`
+(the steer is in the store of the Machine running the Task), `shared` (it is
+in Linear, Asana or the plan carrier, waiting for that Machine to sync) or
+`here` (only this Machine has it so far); `delivery.runs_on` names the Machine
+the Task runs on, or `null`; `delivery.sentence` is the line above. The thread
+itself is in `lf task status LOO-12 --json`.
 
 `lf task claim LOO-12` takes ownership without starting a run; `lf task run`
 claims and runs. To jump into the conversation directly, run
@@ -319,8 +334,10 @@ processes stay on the Machine that ran them. Claims follow your Git
 Every command saves on this Machine first, so nothing waits on the network.
 Each Machine pushes its plan to a ref of its own on the remote
 (`refs/loopflow/plan/<machine id>`) as part of the save, for five seconds at
-most, and its server fetches the others' once a minute;
-`lf task sync <issue>` does both now. The refs stay out of
+most. Its server fetches the others’ refs about every 30 seconds while it owns
+open Tasks in the repository and once a minute otherwise. A running Graph step
+keeps checking its repository if the server exits. `lf task sync <issue>` does
+both now. The refs stay out of
 `git branch`, `git status` and a plain clone. A repository with no remote reads
 `Plan: this Machine.` and sends nothing.
 

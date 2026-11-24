@@ -1,8 +1,6 @@
 //! The `session` namespace: direction for conversations. `session.steer`
-//! saves a steer that one Session, every Session of a Wave, every Session of
-//! a Task or every Session of a repository reads at its next provider
-//! boundary, without starting a turn. The Task scope is what `task.steer`
-//! delivers through ([`super::task::steer`]); its entry joins the Task's thread.
+//! saves a steer that one Session, every Session of a Wave, or every Session of
+//! a repository reads at its next provider boundary, without starting a turn.
 
 use std::path::Path;
 
@@ -16,12 +14,6 @@ pub enum SteerScope<'a> {
     Session(&'a str),
     /// Every Session on the Wave, by name.
     Wave(&'a str),
-    /// Every Session on the Task, now or later: the steer is the Task's, and
-    /// its text joins the Task's thread as a comment.
-    Task {
-        issue: &'a str,
-        wave: Option<&'a str>,
-    },
     /// Every Session of the repository containing the directory.
     Repository,
 }
@@ -55,31 +47,6 @@ pub async fn steer(
         SteerScope::Wave(wave) => crate::steer::save_steer(store, wave, &author, message)
             .await
             .map_err(written),
-        SteerScope::Task { issue, wave } => {
-            if message.trim().is_empty() {
-                return Err(Error::new(
-                    ErrorCode::Invalid,
-                    "Task comment cannot be empty",
-                ));
-            }
-            // The comment's transaction derives the Task's steer from the entry.
-            let (store, task) = crate::ops::task::resolve_saved_task(directory, wave, issue)
-                .await
-                .map_err(written)?;
-            let comment = crate::ops::task::append_task_comment_async(&store, &task, message, true)
-                .await
-                .map_err(written)?;
-            store
-                .sqlite
-                .steer_by_source(&format!("comment:{comment}"), "local")
-                .map_err(written)?
-                .ok_or_else(|| {
-                    Error::new(
-                        ErrorCode::OutcomeUnknown,
-                        format!("comment {comment} of {issue} derived no steer"),
-                    )
-                })
-        }
         SteerScope::Repository => {
             let root = crate::repo::discover_repo_root(directory)
                 .map_err(written)?
@@ -95,4 +62,62 @@ pub async fn steer(
 
 fn written(error: impl Into<anyhow::Error>) -> Error {
     Error::written(&error.into())
+}
+
+/// Who reads a steer saved for `session`, with no turn of its own to run it.
+pub fn steer_reader(
+    sqlite: &crate::store::sqlite::SqliteStore,
+    session: &crate::session::LfSession,
+) -> anyhow::Result<String> {
+    let id = &session.id;
+    Ok(
+        if crate::ops::human_session::agent_running(sqlite, session)? {
+            live_reader(id.as_str())
+        } else if session.interactive {
+            format!("the Machine server starts {id} to read it")
+        } else if session.graph_lf_process_id.is_some() {
+            format!("{id} is a finished worker; nothing reads it until its Graph continues it")
+        } else {
+            format!("{id} is a finished batch; nothing reads it")
+        },
+    )
+}
+
+fn live_reader(reader: &str) -> String {
+    format!("{reader} reads it at its next boundary")
+}
+
+/// The first reader a Task steer can reach on this Machine.
+pub(super) fn task_steer_reader(
+    sqlite: &crate::store::sqlite::SqliteStore,
+    task: &crate::work::task::Task,
+) -> anyhow::Result<String> {
+    use loopflow_storage::sqlite::task_work::OpenWork;
+    if sqlite.task_state(&task.id)?.is_terminal() {
+        return Ok(format!("{} is finished", task.identifier));
+    }
+    for work in sqlite.task_open_work(&task.id)? {
+        let OpenWork::Session { id, .. } = work else {
+            continue;
+        };
+        let Some(session) = sqlite.session(id.as_str())? else {
+            continue;
+        };
+        if crate::ops::human_session::agent_running(sqlite, &session)? {
+            let reader = if session.graph_lf_process_id.is_some() && !session.interactive {
+                format!("{}'s worker", task.identifier)
+            } else {
+                session.id.to_string()
+            };
+            return Ok(live_reader(&reader));
+        }
+    }
+    let scope = loopflow_storage::session::PrimaryScope::Task(task.id.clone());
+    if let Some(primary) = sqlite
+        .primary_session(&scope)?
+        .filter(|session| session.completed_at.is_none())
+    {
+        return steer_reader(sqlite, &primary);
+    }
+    Ok(format!("nothing reads it until {} runs", task.identifier))
 }

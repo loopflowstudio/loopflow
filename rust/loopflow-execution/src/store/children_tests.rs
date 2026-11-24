@@ -255,7 +255,11 @@ fn task_labels_and_generated_names_follow_local_identity_and_linear_mapping() {
     assert_eq!(mapped.identifier, "ENG-123");
     assert_eq!(mapped.branch, "old/branch");
     assert_eq!(
-        store.task_checkouts().unwrap()[0].issue_identifier,
+        store
+            .task_checkout(&task.id)
+            .unwrap()
+            .unwrap()
+            .issue_identifier,
         "ENG-123"
     );
     assert_eq!(
@@ -322,7 +326,7 @@ fn local_labels_extend_only_for_collisions_including_completed_tasks() {
         .lock()
         .unwrap()
         .execute(
-            "UPDATE tasks SET planning_completed=1,issue_identifier='ENG-9' WHERE id=?1",
+            "UPDATE tasks SET planning_state='completed',issue_identifier='ENG-9' WHERE id=?1",
             [second.as_str()],
         )
         .unwrap();
@@ -507,7 +511,7 @@ fn local_planning_creation_retry_keeps_identity_after_edit_and_restart() {
     assert!(task.worktree.is_none());
     assert!(task.tracker_id.is_none());
     assert!(store.task_prs(&task.id).unwrap().is_empty());
-    assert!(store.task_checkouts().unwrap().is_empty());
+    assert!(store.task_checkout_paths().unwrap().is_empty());
     let edited = store
         .edit_task(
             &task.id,
@@ -838,13 +842,6 @@ fn local_planning_migration_preserves_released_links() {
         assert_eq!(rows(&conn, sql), expected, "{table}");
     }
     upgrade_from_migration(&conn, "optional_task_pr");
-    let order: String = conn
-        .query_row(
-            "SELECT task_order_json FROM tracker_projects WHERE id='current'",
-            [],
-            |row| row.get(0),
-        )
-        .unwrap();
     let store = SqliteStore::from_fixture_connection(conn, crate::store::token_key::encryption_key);
     let observation: crate::test_linear_input::IssueFixture =
         loopflow_test_support::retained_task_input_in(
@@ -862,10 +859,6 @@ fn local_planning_migration_preserves_released_links() {
     );
     assert_eq!(observation.observed_at, 7);
     let imported = store.task_by_issue("LOO-318").unwrap().unwrap();
-    assert_eq!(
-        serde_json::from_str::<serde_json::Value>(&order).unwrap(),
-        serde_json::json!([imported.id.as_str()])
-    );
     assert_eq!(imported.project_id, Some(imported_project));
     assert!(imported.worktree.is_none());
     assert!(store.task_prs(&imported.id).unwrap().is_empty());
@@ -875,7 +868,7 @@ fn local_planning_migration_preserves_released_links() {
         .lock()
         .unwrap()
         .query_row(
-            "SELECT planning_state,planning_completed FROM tasks WHERE id=?1",
+            "SELECT planning_state,planning_state IS 'completed' FROM tasks WHERE id=?1",
             [imported.id.as_str()],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )

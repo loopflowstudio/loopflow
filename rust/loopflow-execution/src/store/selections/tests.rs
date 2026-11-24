@@ -1,7 +1,7 @@
 use crate::process::attachment;
 use crate::store::selections;
 
-use loopflow_model::durable::RepositoryId;
+use loopflow_model::durable::{RepositoryId, TaskId};
 use loopflow_storage::sqlite::SqliteStore;
 use loopflow_storage::work::selection::{
     Arrangement, ArrangementMode, DashboardId, Selection, SelectionError, SelectionExpression,
@@ -247,6 +247,32 @@ fn owned_unstarted_task_is_open_but_excluded_from_working_queries() {
         );
         assert!(plan.resolution.unavailable.is_empty());
     }
+}
+
+#[test]
+fn a_move_among_equal_ranks_lands_where_the_board_shows_its_target() {
+    let (_dir, store, _) = fixture();
+    let (one, two, three, four) = (
+        "task_11111111111111111111111111111111",
+        "task_22222222222222222222222222222222",
+        "task_33333333333333333333333333333333",
+        "task_44444444444444444444444444444444",
+    );
+    let id = |id: &str| TaskId::parse(id).unwrap();
+    // Older stores hold many Tasks at one rank, created in another order than
+    // their ids; the board breaks the tie by id.
+    store
+        .conn
+        .lock()
+        .unwrap()
+        .execute_batch(
+            "UPDATE tasks SET planning_rank=0, created_at=100-CAST(substr(issue_identifier,5) AS INTEGER)",
+        )
+        .unwrap();
+    assert_eq!(
+        store.reorder_task(&id(four), &id(one)).unwrap(),
+        [four, one, two, three]
+    );
 }
 
 #[test]
@@ -1159,7 +1185,7 @@ fn nested_query_failure_retains_prior_members_but_confirmed_departure_prunes() {
         .lock()
         .unwrap()
         .execute(
-            "UPDATE tasks SET planning_completed=1 WHERE issue_identifier='FIX-2'",
+            "UPDATE tasks SET planning_state='completed' WHERE issue_identifier='FIX-2'",
             [],
         )
         .unwrap();

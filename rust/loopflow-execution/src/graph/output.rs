@@ -8,7 +8,15 @@ use crate::graph::ConcreteStep;
 
 /// What every loop decision means, so a skill placed on a loop edge needs no
 /// loop instructions of its own.
-const DECISION_CRITERIA: &str = "\n\nThis step also decides a loop. Do the step's work first, then judge from results, not from confidence or the number of passes:\n\n- advance when what this step requires is done. Later obligations belong to later steps.\n- iterate when the last pass made real progress and you can name the next action and the result it should produce, inside the scope already set. The loop finishes the work; it never grows it.\n- blocked when the last pass made no real progress, repeated a failure with nothing learned, or needs an input you can't supply.\n\nA check that can't run here belongs to gate, CI or a person later and blocks nothing; never report it as passed. Carry the next action and the paths it needs in the summary.";
+const DECISION_CRITERIA: &str = "
+
+This step also decides a loop. Do the step's work first, then judge from its results.
+
+- advance when what this step requires is done. Later obligations belong to later steps.
+- iterate when the last pass made progress and you can name a substantial next pass within scope and the result it should produce. Aim to finish within five passes. Continue past five when the work warrants it.
+- blocked when passes shrink into small increments that no longer converge, the last pass made no progress, a failure repeats with nothing learned, or you need input you can't supply. The Graph stops here. Give the reason.
+
+Leave checks that can't run here to gate, CI or review. Report them as deferred. Carry the next action and the paths it needs in the summary.";
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -19,32 +27,24 @@ pub enum GraphOutput {
 
 impl GraphOutput {
     pub fn instructions(&self) -> String {
-        format!("\n\nReturn the final answer as the declared JSON value: {}. This output contract supersedes saved instructions to run Graph decision or router commands. The selected successful completion supplies the decision. Return blocked with a reason when a person must resolve the question. That stops the Graph at this position; explain the missing input in the reason.", self.schema())
+        format!("\n\nReturn the final answer as the declared JSON value: {}. This output contract supersedes saved instructions to run Graph decision or router commands.", self.schema())
     }
 
-    pub fn for_step(step: &ConcreteStep) -> Option<Self> {
-        match step {
-            ConcreteStep::Skill(skill) if skill.returns.is_some() => Some(Self::Decision),
-            ConcreteStep::Xor(branch) => {
-                let mut paths: Vec<_> = branch.paths.keys().cloned().collect();
-                paths.sort();
-                Some(Self::Route(paths))
-            }
-            _ => None,
-        }
-    }
-
-    pub fn for_step_instructions(step: &ConcreteStep) -> Option<String> {
-        let output = Self::for_step(step)?;
-        let mut instructions = output.instructions();
-        if output == Self::Decision {
-            instructions.push_str(DECISION_CRITERIA);
-        }
+    /// Append the step's output instructions and return the contract used to decode its answer.
+    pub fn append_step_instructions(step: &ConcreteStep, prompt: &mut String) -> Option<Self> {
+        let output = match step {
+            ConcreteStep::Skill(skill) if skill.returns.is_some() => Self::Decision,
+            ConcreteStep::Xor(branch) => Self::Route(branch.paths.keys().cloned().collect()),
+            _ => return None,
+        };
+        prompt.push_str(&output.instructions());
         if let ConcreteStep::Xor(branch) = step {
-            instructions.push_str("\n\n");
-            instructions.push_str(&crate::graph::build_xor_routing_suffix(branch));
+            prompt.push_str("\n\n");
+            prompt.push_str(&crate::graph::build_xor_routing_suffix(branch));
+        } else {
+            prompt.push_str(DECISION_CRITERIA);
         }
-        Some(instructions)
+        Some(output)
     }
 
     pub fn schema(&self) -> Value {

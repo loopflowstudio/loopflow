@@ -514,20 +514,12 @@ pub fn origin_branch(repo: &Path) -> Result<Option<String>, GitError> {
 /// Reads the filesystem instead of launching Git: Session and Task readers
 /// resolve every recorded checkout on each read.
 pub fn worktree_root(repo: &Path) -> Result<PathBuf, GitError> {
-    let start = repo.canonicalize()?;
-    let root = start.ancestors().find(|dir| {
-        let marker = dir.join(".git");
-        // A linked worktree or submodule has a `.git` file naming its Git dir.
-        marker.join("HEAD").is_file()
-            || std::fs::read(&marker).is_ok_and(|bytes| bytes.starts_with(b"gitdir:"))
-    });
-    match root {
-        Some(root) if !start.starts_with(root.join(".git")) => Ok(root.to_path_buf()),
-        _ => Err(GitError::CommandFailed {
+    loopflow_storage::address::worktree_root(&repo.canonicalize()?).ok_or_else(|| {
+        GitError::CommandFailed {
             command: "git rev-parse --show-toplevel".to_string(),
             stderr: format!("not a git work tree: {}", repo.display()),
-        }),
-    }
+        }
+    })
 }
 
 /// Prefer advertised remote defaults, then existing local branch conventions.
@@ -582,7 +574,10 @@ pub fn get_default_branch(repo: &Path) -> Result<String, GitError> {
 
 /// The default branch's Git upstream, or the local branch when none is configured.
 pub(crate) fn integration_base(repo: &Path) -> Result<String, GitError> {
-    let branch = get_default_branch(repo)?;
+    default_branch_upstream(repo, &get_default_branch(repo)?)
+}
+
+pub(crate) fn default_branch_upstream(repo: &Path, branch: &str) -> Result<String, GitError> {
     let local_ref = format!("refs/heads/{branch}");
     let upstream = git_stdout(
         repo,
@@ -619,7 +614,7 @@ pub(crate) fn integration_base(repo: &Path) -> Result<String, GitError> {
     if candidates.len() == 1 {
         return Ok(candidates[0].clone());
     }
-    Ok(branch)
+    Ok(branch.to_owned())
 }
 
 /// Refresh a remote-tracking ref; local branch and commit targets need no network.
@@ -654,6 +649,19 @@ pub fn is_clean(repo: &Path) -> Result<bool, GitError> {
         });
     }
     Ok(String::from_utf8_lossy(&output.stdout).trim().is_empty())
+}
+
+/// Compare this index to HEAD without interpreting filenames in Git's output.
+pub(crate) fn has_staged_changes(
+    repo: &Path,
+    inherit: &impl Fn(&mut Command),
+) -> Result<bool, GitError> {
+    let args = ["diff", "--cached", "--quiet"];
+    let output = run_git_inheriting(repo, &args, inherit)?;
+    if output.status.code() == Some(1) {
+        return Ok(true);
+    }
+    successful_stdout(&args, output).map(|_| false)
 }
 
 /// Stage all changes.

@@ -255,6 +255,5 @@ pub fn save_dashboard(
 
     store.commit_dashboard(repository, expected_revision, saved)
 }
-
 #[cfg(test)]
 mod tests;

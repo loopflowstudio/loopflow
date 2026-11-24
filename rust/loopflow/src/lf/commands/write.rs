@@ -568,7 +568,7 @@ writes! {
         version, target, ..
     } => loopflow_execution::engine::repo::release(directory, version.as_deref(), target.as_deref())?,
 
-    /// `lf [-a <agent>] commit [-m <message>] [-p] [--no-add] [<path>…] --json`.
+    /// `lf [-a <agent>] commit [-m <message>] [--no-push] [--no-add] [<path>…] --json`.
     #[serde(rename = "checkout.commit")]
     CheckoutCommit {
         directory: PathBuf,
@@ -629,24 +629,27 @@ writes! {
         },
     )?,
 
-    /// `lf wt create <name> [--plan] [--persistent] --json`.
+    /// `lf wt create <name> [--plan] [--persistent] [--stack] --json`.
     #[serde(rename = "checkout.create")]
     CheckoutCreate {
         directory: PathBuf,
         name: String,
         preview: bool,
         persistent: bool,
+        stack: bool,
     } => loopflow_execution::engine::checkout::Checkout;
     {
         name,
         preview,
         persistent,
+        stack,
         ..
     } => loopflow_execution::engine::checkout::create(
         directory,
         name,
         *preview,
         *persistent,
+        *stack,
         &loopflow_execution::engine::Diagnostics,
     )?,
 
@@ -1566,7 +1569,7 @@ mod tests {
             r#"{"kind":"repo.release","directory":"/r","version":"minor","target":null}"#,
             r#"{"kind":"checkout.commit","directory":"/r","message":"Tidy","push":false,"no_add":false,"paths":[],"agent":null}"#,
             r#"{"kind":"checkout.sync","directory":"/r","onto":null,"preview":true,"manual":false,"continue":false,"abort":false,"adopt":false}"#,
-            r#"{"kind":"checkout.create","directory":"/r","name":"spike","preview":false,"persistent":false}"#,
+            r#"{"kind":"checkout.create","directory":"/r","name":"spike","preview":false,"persistent":false,"stack":false}"#,
             r#"{"kind":"account.disconnect","provider":"linear"}"#,
             r#"{"kind":"account.connect","provider":"linear","chrome_profile":"Profile 1","api_key":false}"#,
             r#"{"kind":"graph.run","directory":"/r","name":"code","message":null,"agent":null}"#,

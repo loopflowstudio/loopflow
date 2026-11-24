@@ -905,8 +905,8 @@ fn a_closed_tasks_conversation_resumes_in_the_main_checkout() {
     let database = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
     database
         .execute(
-            "INSERT INTO tasks(id,repository_id,issue_identifier,issue_title,issue_description,created_at,updated_at,workspace_slug,planning_completed,planning_completed_at)
-             VALUES('task_00000000000000000000000000000001',?1,'INF-1','Closed work','',1,1,'closed-work',1,'2026-11-03T00:00:00Z')",
+            "INSERT INTO tasks(id,repository_id,issue_identifier,issue_title,issue_description,created_at,updated_at,workspace_slug,planning_state,planning_completed_at)
+             VALUES('task_00000000000000000000000000000001',?1,'INF-1','Closed work','',1,1,'closed-work','completed','2026-11-03T00:00:00Z')",
             [repository.as_str()],
         )
         .unwrap();

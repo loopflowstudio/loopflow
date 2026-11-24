@@ -100,6 +100,31 @@ struct DashboardWorkspaceTests {
         #expect(model.sidebarTaskIDs == model.workingTaskIDs)
     }
 
+    @Test func aRefusedMoveReturnsTheRowAndSaysWhy() async throws {
+        let ids = ["task_a", "task_b"]
+        var json = try #require(JSONSerialization.jsonObject(with: loadFixtureData("view_plan.json")) as? [String: Any])
+        json["dashboard_id"] = NSNull()
+        json["saved_revision"] = NSNull()
+        json["selection"] = ["id": "repository-default", "expression": ["kind": "repository"]]
+        var resolution = try #require(json["resolution"] as? [String: Any])
+        resolution["members"] = ids.map { ["source": ["repository-default"], "work": ["repository": "repo_11111111111111111111111111111111", "kind": "task", "id": $0]] }
+        json["resolution"] = resolution
+        let plan = String(decoding: try JSONSerialization.data(withJSONObject: json), as: UTF8.self)
+        let reason = "FIX-2 and FIX-1 are in different repositories; nothing changed."
+        let query = RegistryQuery { args, _ in
+            switch args {
+            case ["desktop", "dashboard", "move", "working-tasks/task:task_b", "--destination", "task:task_a"]: throw RegistryQueryError(reason)
+            case ["desktop", "view", "show", "--json"]: return plan
+            default: throw RegistryQueryError("Unexpected command \(args)")
+            }
+        }
+        let model = WorkModel(query: query, repoPath: "/repo")
+        model.applySelectionPlans([try JSONDecoder().decode(WorkViewPlan.self, from: Data(plan.utf8))], reason: "")
+        await model.reorderWorkingTask("task_b", to: "task_a").value
+        #expect(model.workingTaskIDs == ids)
+        #expect(model.navigation.notices.current?.text == reason)
+    }
+
     @Test func workingTasksOpensOnlyTheTasksItsGridShows() throws {
         var json = try #require(JSONSerialization.jsonObject(with: loadFixtureData("view_plan.json")) as? [String: Any])
         json["dashboard_id"] = NSNull()

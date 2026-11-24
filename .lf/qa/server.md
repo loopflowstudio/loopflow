@@ -170,3 +170,56 @@ branch binary there.
 
 Stop the servers by the PID you recorded, after checking its `LF_HOME` with
 `ps eww -p <pid>`: other worktrees run their own `lf server run`.
+
+# Comparing a branch with the installed lf
+
+The live store is for `sqlite3` only (above). When it lacks only the branch's
+migration (`comm -3` of `ls rust/loopflow-storage/src/migrations` against
+`select version from schema_migrations`), snapshot it with
+`sqlite3 "file:$HOME/.lf/loopflow.db?mode=ro" "VACUUM INTO '<copy>'"`
+(`.backup` restarts on every write and may never finish), then feed the copy
+`PRAGMA foreign_keys=OFF; BEGIN; <migration>; COMMIT;` with `.timer on`: the
+runner turns foreign keys off too, and with them on a table rebuild fails.
+Count before and after, then `pragma foreign_key_check` and `integrity_check`.
+
+For what people see, build the earlier state in a private home with the
+released `lf` (`/Applications/Loopflow.app/Contents/MacOS/lf`; `whence -p lf`
+can be another worktree's `target/debug/lf`, so check `lf --version`), then run the branch on that home and
+alternate the two. Unset `LF_*`, close stdin, set `LF_BIN` to the branch
+binary for branch commands only, and put stand-in `claude` and `codex`
+scripts first on `PATH`. `lf task create '<words>' --worktree <path> --json`
+adopts a worktree; inside it `lf -b graph qa` records a run,
+`lf -b default hello` a finished headless Session (the stand-in fails the
+turn; the row stays; it must `exit 1` without reading stdin, since `cat` on
+`-p` stream-json never ends) and `lf session resume --prepare --json` the Task's
+primary. A live Graph for that: `.lf/graphs/live.yaml` holding `- step: default`
+(not `skill:`), committed where the run starts, and `default_agent: claude`
+with the `cat > /dev/null` stand-in. A run started before `lf task create
+--worktree` adopts its directory keeps `task_id` NULL and blocks `lf task run`
+there. To stop it all: list PIDs whose cwd is in the world (`lsof -a -d cwd
+-F pn`); kill a `lf task run` carrier first or it relaunches the step, and
+SIGKILL the stand-in `sh` (it waits on `cat` and ignores TERM). A live taskless conversation is `lf -a claude : 'hello'` under a PTY
+driver in a plain worktree, with a stand-in that `exec sleep 300`.
+`lf task show <id>` piped prints JSON: `execution.work.sessions[].id` and
+`execution.work.graph_processes[].id` are a Task's membership; in SQL, a
+Session's Task is `agent_sessions.task_id`, a run's `graph_processes.task_id`
+(keyed by `lf_process_id`), a primary a `task_primary_sessions` row, and
+`tasks.issue_identifier` holds `lf-<uuid>` for a Task with no tracker. `lf
+session resume --prepare --json` prints more than one JSON document; read the
+first. `lf session list` shows unfinished Sessions only: a prepared primary lists, a finished `lf -b default` row does not, even with `--headless`; read those in SQL. Its `--task` and `--wave` read `agent_sessions.task_id` (a Session under a Wave names the Wave or one of its Tasks), so they match `lf task show` after a move. `lf task show <id>` answers only from the Task's repository (elsewhere "is not registered", on the installed lf too). A Working-board drag is `lf desktop dashboard move
+working-tasks/task:<id> --destination task:<id>`, run from the repository; it
+is the only CLI that changes a Task's rank (`lf task move` changes membership
+or Machine), and `lf task list` and `lf task show` show the result, `lf task
+status --json` carries no rank. A worktree nested inside another Task's checkout (`git worktree add <checkout>/nested`)
+is its own Git root, so it belongs to no Task until adopted with `lf task
+create --worktree`: launches, bare `lf resume`, `lf task status` ("this checkout
+has no Task") and `lf commit` there all answer none, while a plain
+subdirectory of the checkout is the Task's. To act as another Task, set
+`LF_AS=task:<id>` (a bare id is "invalid Work selector"); a checkout's owner
+still wins over it. To move a repository with its checkouts,
+keep the worktrees inside it, `mv` it, `git worktree repair`, then run
+`lf task list` from the new path (the branch follows the move; released lf
+answers "occupied without a Git locator" until `lf config repo --relocate
+<repo id>` runs there). Reuse the old path with `git clone` of the origin and
+a worktree at the old checkout path. Once every writer has exited, `sqlite3
+?mode=ro` cannot open a home's store (no `-shm`); open it read-write.

@@ -93,7 +93,7 @@ pub fn plan_sync(
     let base_ref = if let Some(onto) = onto {
         onto.to_string()
     } else {
-        crate::git::integration_base(repo)?
+        crate::git::default_branch_upstream(repo, &default_branch)?
     };
 
     let comparison_base = fork_base.as_deref().unwrap_or(&base_ref);
@@ -179,7 +179,7 @@ pub fn sync_with_recovery(
 ) -> OpsResult<SyncVerification> {
     let default = get_default_branch(repo)?;
     if current_branch(repo)?.as_deref() == Some(&default)
-        && options.onto == crate::git::integration_base(repo)?
+        && options.onto == crate::git::default_branch_upstream(repo, &default)?
     {
         crate::ops::checkout::refresh_main(repo, progress)?;
         let target_sha = rev_parse(repo, &options.onto)?;
@@ -442,19 +442,29 @@ fn record_control_task_state(repo: &Path, owner: &GitOperationOwner) -> OpsResul
     let Some(target_sha) = owner.target_sha.as_deref() else {
         return Ok(());
     };
+    let default = get_default_branch(repo)?;
+    let onto_default = owner.target_ref == default
+        || owner.target_ref == format!("origin/{default}")
+        || owner.target_ref == crate::git::default_branch_upstream(repo, &default)?;
     if let Some(stacked) = crate::ops::task::task_stack(repo)? {
-        let default = get_default_branch(repo)?;
-        let clear_parent = stacked.parent == crate::ops::task::StackParentPr::Merged
-            || owner.target_ref == default
-            || owner.target_ref == format!("origin/{default}");
+        let clear_parent =
+            stacked.parent == crate::ops::task::StackParentPr::Merged || onto_default;
         if clear_parent {
             let _mutation = crate::ops::task::lock_task_pr_mutation(repo)?;
             crate::ops::task::clear_task_pr_merge_before_head_mutation(repo, false, &|_| {})?;
         }
-        return crate::ops::task::record_stack_sync(&stacked, target_sha, clear_parent);
+        crate::ops::task::record_stack_sync(&stacked, target_sha, clear_parent)?;
+    } else {
+        crate::ops::task::record_task_pr_range_after_integration(
+            repo,
+            &owner.target_ref,
+            target_sha,
+        )?;
     }
-    crate::ops::task::validate_task_pr_range_for_integration(repo, &owner.target_ref, target_sha)?;
-    crate::ops::task::record_task_pr_range_after_integration(repo, &owner.target_ref, target_sha)
+    if onto_default {
+        crate::git::worktrees::clear_stacked_base(repo, &owner.branch)?;
+    }
+    Ok(())
 }
 
 fn fetch_target(repo: &Path, target: &str) -> OpsResult<()> {
@@ -978,7 +988,7 @@ mod tests {
                 crate::ops::commit_workflow(
                     &persistent.path,
                     &crate::ops::CommitOptions {
-                        message: Some("Followup".into()),
+                        message: Some("Followup"),
                         ..crate::ops::CommitOptions::for_task("commit")
                     },
                     &crate::ops::NullProgress,

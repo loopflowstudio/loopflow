@@ -552,23 +552,23 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: Option<PrCommand>,
     },
-    /// Commit changes
+    /// Commit changes and push unless on the default branch
     Commit {
         #[arg(short = 'm', long = "message")]
         message: Option<String>,
-        /// Push the branch after committing
-        #[arg(short = 'p', long = "push")]
-        push: bool,
+        /// Keep the commit local
+        #[arg(long)]
+        no_push: bool,
         #[arg(long = "no-add")]
         no_add: bool,
         /// Commit only these paths, preserving other staged and unstaged edits
-        #[arg(value_name = "PATH", conflicts_with_all = ["no_add", "push"])]
+        #[arg(value_name = "PATH", conflicts_with = "no_add")]
         paths: Vec<String>,
         /// Print what the commit left
         #[arg(long)]
         json: bool,
         /// Commit everything a finished skill step left, titled `lf <SKILL>: …`, and push
-        #[arg(long, value_name = "SKILL", conflicts_with_all = ["message", "no_add", "push", "paths", "json"])]
+        #[arg(long, value_name = "SKILL", conflicts_with_all = ["message", "no_add", "no_push", "paths", "json"])]
         step: Option<String>,
     },
     /// Merge upstream into the current branch (default: main or stack parent)
@@ -1673,7 +1673,7 @@ pub struct SessionListArgs {
     pub after: Option<String>,
     #[arg(long)]
     pub task: Option<String>,
-    /// Conversations attributed to this Wave or inside one of its Tasks' checkouts
+    /// Conversations attributed to this Wave or to one of its Tasks
     #[arg(long, id = "session_wave", value_name = "W")]
     pub wave: Option<String>,
     /// Current primary conversations; omit the value to include all three scopes
@@ -3341,6 +3341,10 @@ pub enum WtCommand {
         /// Keep this workspace after delivery
         #[arg(long)]
         persistent: bool,
+        /// Start the branch from this checkout's branch instead of main, and
+        /// keep following it: `lf sync` merges it and `lf pr` targets it
+        #[arg(long)]
+        stack: bool,
         /// Print the worktree, or the placement with --plan
         #[arg(long)]
         json: bool,
@@ -4337,7 +4341,6 @@ mod tests {
         let loop_cli = Cli::try_parse_from(["lf", "loop", "infrastructure"])
             .expect("unknown names remain eligible for skill discovery");
         assert!(matches!(loop_cli.command, Some(Commands::External(_))));
-        assert!(Cli::try_parse_from(["lf", "wt", "create", "child", "--stack"]).is_err());
         assert!(Cli::try_parse_from(["lf", "wt", "create", "child", "--child"]).is_err());
         assert!(Cli::try_parse_from(["lf", "wt", "up"]).is_err());
         assert!(Cli::try_parse_from(["lf", "wt", "down"]).is_err());

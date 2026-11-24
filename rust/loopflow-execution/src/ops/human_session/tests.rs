@@ -232,10 +232,8 @@ fn summary_fixture() -> crate::session::SessionSummary {
         unviewed: false,
         held: false,
         task_terminal: false,
-        task_primary: false,
         in_task_checkout: false,
         launching: false,
-        task_ids: vec![task.clone()],
         captured: Some(1),
         id: "metadata".into(),
         artifact_key: Some(crate::session_record::new_artifact_key()),
@@ -303,7 +301,7 @@ fn a_task_conversation_says_how_it_ended_and_what_happens_next() {
         })
     };
     let mut summary = summary_fixture();
-    summary.task_primary = true;
+    summary.primary_scope = Some("task".into());
     summary.in_task_checkout = true;
     summary.agent_process_evidence = crate::store::ProcessIdentityEvidence::Dead;
     summary.agent_end = died(1_000);
@@ -517,7 +515,7 @@ fn a_task_conversation_says_how_it_ended_and_what_happens_next() {
     );
     summary.start_failure = None;
 
-    summary.task_primary = false;
+    summary.primary_scope = None;
     summary.agent_process_evidence = crate::store::ProcessIdentityEvidence::Dead;
     summary.agent_end = Some(crate::session::AgentEnd {
         at: 4_000,
@@ -595,12 +593,12 @@ fn the_pass_starts_what_the_outlook_says_the_server_starts() {
         params![task.as_str(), checkout],
     );
     execute(
-        "INSERT INTO task_primary_sessions(task_id,session_id) VALUES(?1,?2)",
-        params![task.as_str(), session.as_str()],
-    );
-    execute(
         "UPDATE agent_sessions SET interactive=1,cwd=?2 WHERE id=?1",
         params![session.as_str(), checkout],
+    );
+    execute(
+        "INSERT OR REPLACE INTO task_primary_sessions(task_id,session_id) VALUES(?1,?2)",
+        params![task.as_str(), session.as_str()],
     );
     // What the Session's outlook says, and whether the pass lists it.
     let read = || {
@@ -1095,7 +1093,7 @@ fn membership_wire_ids_are_derived_from_their_captures() {
     current.push(ConcreteStep::Xor(ConcreteXor {
         router: Skill::named("route"),
         sources: Vec::new(),
-        paths: std::collections::HashMap::from([
+        paths: std::collections::BTreeMap::from([
             (
                 "fix".into(),
                 ConcretePath {
@@ -2047,6 +2045,11 @@ impl ListFilters {
             [repo.path().to_str().unwrap()],
         )
         .unwrap();
+        db.execute(
+            "UPDATE agent_sessions SET task_id=?1,wave_id=?2 WHERE id='bare'",
+            rusqlite::params![task.as_str(), wave],
+        )
+        .unwrap();
         Self {
             home,
             store,
@@ -2095,7 +2098,6 @@ fn list_wave_includes_attribution_and_raw_checkout_conversations_before_paging()
                     "bare",
                     "former",
                     "raw-in-task",
-                    "repository-in-task",
                     "task-primary",
                     "wave-primary"
                 ]
@@ -2105,8 +2107,67 @@ fn list_wave_includes_attribution_and_raw_checkout_conversations_before_paging()
                 limit: 1,
                 ..filter
             };
-            assert_eq!(fixture.ids(filter).await, ["repository-in-task"]);
+            assert_eq!(fixture.ids(filter).await, ["task-primary"]);
         })
+    });
+}
+
+#[test]
+fn list_task_keeps_each_session_with_its_task_after_a_move_and_path_reuse() {
+    let _lock = crate::journal::test_env_lock();
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    runtime.block_on(async {
+        let home = SessionHome::new();
+        let store = home.store().await;
+        let reused = loopflow_test_support::TestRepo::new();
+        let path = reused.path().to_str().unwrap();
+        let db = rusqlite::Connection::open(home.home.path().join("loopflow.db")).unwrap();
+        db.execute(
+            "INSERT INTO repository_plans(id,repo,selected) VALUES('repo_00000000000000000000000000000001','/moved',1)",
+            [],
+        )
+        .unwrap();
+        // Task A's checkout moved with its repository; Task C's clone took the
+        // old path, where A's Session still says it ran.
+        let (a, c) = (
+            loopflow_model::durable::TaskId::new(),
+            loopflow_model::durable::TaskId::new(),
+        );
+        for (task, identifier, worktree) in [(&a, "TEST-1", "/moved/task"), (&c, "TEST-2", path)] {
+            db.execute("INSERT INTO tasks(id,repository_id,issue_identifier,created_at) VALUES(?1,'repo_00000000000000000000000000000001',?2,1)", [task.as_str(), identifier]).unwrap();
+            db.execute(
+                "INSERT INTO task_checkouts(task_id,worktree) VALUES(?1,?2)",
+                [task.as_str(), worktree],
+            )
+            .unwrap();
+        }
+        for (id, task) in [("first", &a), ("second", &c)] {
+            store
+                .sqlite
+                .test_session(id, &crate::session_record::new_artifact_key());
+            db.execute(
+                "UPDATE agent_sessions SET task_id=?1,cwd=?2 WHERE id=?3",
+                [task.as_str(), path, id],
+            )
+            .unwrap();
+        }
+        let listed = |task: &loopflow_model::durable::TaskId| {
+            let filter = crate::session::SessionFilter {
+                task: Some(task.to_string()),
+                ..Default::default()
+            };
+            let store = store.clone();
+            async move {
+                super::list(&store, &filter)
+                    .await
+                    .unwrap()
+                    .into_iter()
+                    .map(|row| (row.id.to_string(), row.task_ids))
+                    .collect::<Vec<_>>()
+            }
+        };
+        assert_eq!(listed(&a).await, [("first".to_owned(), vec![a.clone()])]);
+        assert_eq!(listed(&c).await, [("second".to_owned(), vec![c.clone()])]);
     });
 }
 

@@ -218,8 +218,8 @@ fn preview_graph(
             arguments: message.unwrap_or_default().to_owned(),
         });
         let mut input = message.unwrap_or_default().to_owned();
-        if let Some(instructions) = items.first().and_then(GraphOutput::for_step_instructions) {
-            input.push_str(&instructions);
+        if let Some(step) = items.first() {
+            GraphOutput::append_step_instructions(step, &mut input);
         }
         Some(Box::new(run::preview_prompt(
             repo,

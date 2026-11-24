@@ -322,7 +322,7 @@ fn task_activity_in(
         .iter()
         .filter(|session| session.completed_at.is_none())
     {
-        for task in &session.task_ids {
+        if let Some(task) = session.member_task() {
             let activity = activity
                 .entry(task.clone())
                 .or_insert_with(|| TaskActivity {
@@ -950,7 +950,6 @@ impl SqliteStore {
         tx.commit()?;
         Ok(true)
     }
-
     pub fn delete_dashboard(
         &self,
         repository: &RepositoryId,

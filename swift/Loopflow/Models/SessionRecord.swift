@@ -198,8 +198,8 @@ public struct SessionRecord: Codable, Sendable, Hashable, Identifiable {
     public let programStatus: ProgramStatusRecords?
     /// The provider's current AgentProcess; absent when Loopflow never launched one.
     public let agentProcessId: AgentProcessId?
-    /// Its Task names it as the Task's primary conversation.
-    public let taskPrimary: Bool
+    /// The Task's primary conversation: its row is marked for its Task.
+    public var taskPrimary: Bool { primaryScope == "task" }
     public let taskIds: [String]
     public let id: String
     public let interactive: Bool
@@ -257,7 +257,6 @@ public struct SessionRecord: Codable, Sendable, Hashable, Identifiable {
         case programStatus = "program_status"
         case agentProcessId = "agent_process_id"
         case primaryScope = "primary_scope"
-        case taskPrimary = "task_primary"
         case waveId = "wave_id"
         case taskIds = "task_ids"
         case action
@@ -470,7 +469,6 @@ extension SessionRecord {
         try values.encode(availability, forKey: .availability)
         try values.encode(programStatus, forKey: .programStatus)
         try values.encode(agentProcessId, forKey: .agentProcessId)
-        try values.encode(taskPrimary, forKey: .taskPrimary)
         try values.encode(taskIds, forKey: .taskIds)
         try values.encode(id, forKey: .id)
         try values.encode(interactive, forKey: .interactive)
@@ -506,7 +504,6 @@ extension SessionRecord {
         availability = try values.decodeIfPresent(SessionAvailability.self, forKey: .availability)
         programStatus = try values.decodeIfPresent(ProgramStatusRecords.self, forKey: .programStatus)
         agentProcessId = try values.decodeIfPresent(AgentProcessId.self, forKey: .agentProcessId)
-        taskPrimary = try values.decode(Bool.self, forKey: .taskPrimary)
         taskIds = (try values.decode([String].self, forKey: .taskIds)).map { StructuredIdentity.prefixed($0, "task_") }
         id = StructuredIdentity.session(try values.decode(String.self, forKey: .id))
         interactive = try values.decode(Bool.self, forKey: .interactive)

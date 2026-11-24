@@ -1359,9 +1359,8 @@ fn a_task_primary_is_one_of_its_own_conversations() {
     let sole = converse(&sole_path, 1_000);
     let chosen = primary(&["inf-123"]);
     assert_eq!(chosen["id"], sole.as_str());
-    // It stays an ordinary member of its Task.
-    assert_eq!(chosen["primary_scope"], Value::Null);
-    assert_eq!(chosen["task_primary"], true);
+    // Its row is marked for its Task, and it stays a member of that Task.
+    assert_eq!(chosen["primary_scope"], "task");
     assert_eq!(members("Inf-123"), std::slice::from_ref(&sole));
     for args in [
         vec!["resume", "--task", "inf-123", "--prepare", "--json"],
@@ -1394,7 +1393,7 @@ fn a_task_primary_is_one_of_its_own_conversations() {
         .as_array()
         .unwrap()
         .iter()
-        .filter(|session| session["task_primary"] == true)
+        .filter(|session| session["primary_scope"] == "task")
         .map(|session| session["id"].as_str().unwrap().to_string())
         .collect();
     assert_eq!(marked, std::slice::from_ref(&later));
@@ -2290,6 +2289,28 @@ fn public_taskless_graph_records_distinct_completed_loop_passes() {
         ]
     );
     assert_eq!(fixture.launches().len(), 6);
+    let sessions: std::collections::BTreeMap<String, Vec<Value>> = serde_json::from_slice(
+        &std::fs::read(fixture.home.path().join("native-sessions.json")).unwrap(),
+    )
+    .unwrap();
+    let mut decisions: Vec<_> = sessions
+        .values()
+        .filter_map(|messages| {
+            messages[0]["text"]
+                .as_str()?
+                .lines()
+                .find(|line| line.starts_with("Decision pass "))
+        })
+        .collect();
+    decisions.sort_unstable();
+    assert_eq!(
+        decisions,
+        [
+            "Decision pass 1. Iterating repeats 2 steps, back to work-proof.",
+            "Decision pass 2. Iterating repeats 2 steps, back to work-proof.",
+            "Decision pass 3. Iterating repeats 2 steps, back to work-proof.",
+        ]
+    );
 }
 
 #[test]

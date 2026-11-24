@@ -272,9 +272,11 @@ pub struct SessionWork {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum WorkSource {
+    // History before 2026-10-08 says "inherited" for a Task declared through
+    // the Session that started this one.
+    #[serde(alias = "inherited")]
     Declared,
     Checkout,
-    Inherited,
     Bound,
 }
 
@@ -286,13 +288,13 @@ pub enum SessionPrimary {
     Repository,
 }
 
-/// Inventory selection; SQL filters metadata, then the list resolves checkout membership.
+/// Inventory selection, filtered in SQL before pagination.
 #[derive(Debug, Clone)]
 pub struct SessionFilter {
     pub orphan: bool,
     pub repo: Option<String>,
     pub task: Option<String>,
-    /// Attribution or resolved checkout membership, selected before pagination.
+    /// The Session's Wave, or its Task's.
     pub wave: Option<WaveId>,
     pub primary: Option<SessionPrimary>,
     pub search: Option<String>,
@@ -356,8 +358,6 @@ pub struct SessionSummary {
     /// None for a conversation Loopflow never attached to.
     pub agent_process_id: Option<loopflow_model::id::AgentProcessId>,
     pub task_terminal: bool,
-    /// Its Task names it as the Task's primary conversation.
-    pub task_primary: bool,
     /// It is an open Task's conversation in the Task's checkout on this
     /// Machine: one the server's recovery pass reads. A Task checked out
     /// elsewhere, a completed conversation, or one moved to another Machine,
@@ -366,7 +366,6 @@ pub struct SessionSummary {
     /// Its held terminal is open and its agent's pid is not recorded yet: a
     /// start under way, which has no liveness to read.
     pub launching: bool,
-    pub task_ids: Vec<TaskId>,
     pub captured: Option<i64>,
     pub id: LfSessionId,
     pub artifact_key: Option<String>,
@@ -393,6 +392,16 @@ pub struct SessionSummary {
     pub independent: bool,
     pub wave_name: Option<String>,
     pub task_identifier: Option<String>,
+}
+
+impl SessionSummary {
+    /// Repository and Wave primaries keep their own scope.
+    pub fn member_task(&self) -> Option<&TaskId> {
+        match self.primary_scope.as_deref() {
+            None | Some("task") => self.task_id.as_ref(),
+            _ => None,
+        }
+    }
 }
 
 /// An agent's recorded end.
@@ -498,4 +507,16 @@ pub fn task_session_title(
         .chars()
         .take(80)
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::WorkSource;
+
+    #[test]
+    fn history_that_says_inherited_reads_as_declared() {
+        let source: WorkSource = serde_json::from_str("\"inherited\"").unwrap();
+        assert_eq!(source, WorkSource::Declared);
+        assert_eq!(serde_json::to_string(&source).unwrap(), "\"declared\"");
+    }
 }

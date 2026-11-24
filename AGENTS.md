@@ -365,6 +365,7 @@ Make the choice; don't leave it as a question.
 - Claude's stand-in endpoints (`LF_TEST_CLAUDE_*`) exist only in execution's `cfg(test)`: a real `lf` calls the provider. A detached child that must reach them is the test binary re-executed behind an `LF_BIN` script; its ctor drops `CLAUDE_CONFIG_DIR`, so pass the home in a fixture variable.
 - With `LF_HOME` unset, `lf_home_dir` finds the account's real `~/.lf` even under an isolated `HOME`, so a fixture changing `LF_HOME` holds the env lock.
 - A fixture that launches an agent for a Task or a Wave holds a `loopflow_test_support::MachineServer` for its `LF_HOME`. Without one the launch runs `lf install server`, which registers a launchd or systemd job for the temporary home.
+- To test a peer outage, disconnect the fixture's SSH before stopping its server. A reconnecting `lf server connect` starts the service again.
 - A fixture expecting turn hooks or `LF_PROVIDER_CONTEXT` launches a Task Graph
   worker or resumes a work session, with a `MachineServer` for its home.
   Direct `lf <skill>` and `lf graph <name>` launches are chats or batches, including with

@@ -212,7 +212,10 @@ new owner (or reads locally) under the same `id`. The next reading's
 sends a fresh file revision. Its body carries `task_id`, `machine_id`,
 `checkout` and an opaque `revision`. Refresh the tree when that revision
 changes. File events can coalesce while a client is busy. A checkpoint
-returns the current revision. A draft carries its base revision, and
+returns the current revision. If the peer connection fails, a reading carries
+the reason in `unavailable` and a null body. The same subscription tries the
+current owner again after five seconds or when the planning revision changes.
+A draft carries its base revision, and
 `task.save`'s revision check is the only write guard after a move.
 
 On a Machine that does not own a Task, `task.get`'s `reference.workspace` is
@@ -593,8 +596,8 @@ the phone's `view.select` Task list and its creation destinations all read it.
   pulls. Already admitted reads may finish and release their resources. Reader
   execution remains independent of the server's blocking pool. These readers
   own no provider or terminal lifetime. A subscription's arguments are fixed: new
-  arguments are a new subscription with a complete first reading. A subscription that
-  fails sends its `unavailable` reading, then `error {id, code: unavailable}`
+  arguments are a new subscription with a complete first reading. A terminal
+  reader failure sends its `unavailable` reading, then `error {id, code: unavailable}`
   ends the subscription; the connection stays open. A read with no subscription is
   `invalid`. On reconnect, supply the last applied reading's checkpoint to resume the
   same read without receiving an unchanged complete reading; see

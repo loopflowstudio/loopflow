@@ -37,6 +37,7 @@ impl Machines {
             &root.path().join("bin/ssh"),
             &format!(
                 r#"#!/bin/sh
+[ -e "$0.offline" ] && exit 255
 for arg in "$@"; do remote_command="$arg"; done
 cd '{remote}' || exit 1
 exec env -i HOME='{remote}' PATH='{remote}/bin:/usr/bin:/bin' bash -c "$remote_command"
@@ -4202,6 +4203,26 @@ fn bridged_terminal(socket: &Path, ticket: &str, expected: &str) {
     }
 }
 
+fn available_reading(
+    watches: &mut loopflow_execution::machine::client::Connection,
+    id: &str,
+) -> Value {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    loop {
+        let frame = watches
+            .reading(id)
+            .unwrap()
+            .expect("subscription stays open");
+        let Some(reason) = frame["unavailable"].as_str() else {
+            break frame;
+        };
+        assert!(
+            reason.contains("mini") && std::time::Instant::now() < deadline,
+            "{frame}"
+        );
+    }
+}
+
 #[test]
 fn server_routed_task_workspace() {
     use loopflow::lf::commands::{read::Read, write::Write};
@@ -4209,6 +4230,7 @@ fn server_routed_task_workspace() {
     use loopflow_execution::machine::client::Connection;
 
     let fixture = preview_machines();
+    let offline = fixture.root.path().join("bin/ssh.offline");
     let plan = SharedPlan::new(&fixture);
     // Both Machines imported the same tracker issue under their own Task ID.
     let task = plan.local_task();
@@ -4478,7 +4500,7 @@ fn server_routed_task_workspace() {
         let owner =
             |frame: Value| frame["body"]["row"]["reference"]["workspace"]["machine_id"].clone();
         assert_eq!(
-            owner(watches.reading(&pane_id).unwrap().unwrap()),
+            owner(available_reading(&mut watches, &pane_id)),
             mini.id.as_str()
         );
         let files_id = watches
@@ -4489,13 +4511,13 @@ fn server_routed_task_workspace() {
                 None,
             )
             .unwrap();
-        let initial = watches.reading(&files_id).unwrap().unwrap();
+        let initial = available_reading(&mut watches, &files_id);
         assert_eq!(
             initial["body"]["checkout"],
             other.remote_path.to_str().unwrap()
         );
         fs::write(other.remote_path.join("from-mini.txt"), "hello").unwrap();
-        let modified = watches.reading(&files_id).unwrap().unwrap();
+        let modified = available_reading(&mut watches, &files_id);
         assert_ne!(modified["body"]["revision"], initial["body"]["revision"]);
 
         let status_id = watches
@@ -4507,29 +4529,29 @@ fn server_routed_task_workspace() {
                 Some(vec!["task.title".into()]),
             )
             .unwrap();
-        let _ = watches.reading(&status_id).unwrap().unwrap();
+        let _ = available_reading(&mut watches, &status_id);
         peer.execute(
             "UPDATE tasks SET issue_title='An edit on mini' WHERE id=?1",
             [other_task.as_str()],
         )
         .unwrap();
         assert_eq!(
-            watches.reading(&status_id).unwrap().unwrap()["body"]["task"]["title"],
+            available_reading(&mut watches, &status_id)["body"]["task"]["title"],
             "An edit on mini"
         );
         watches.checkpoint(&pane_id, 17).unwrap();
-        assert_eq!(watches.reading(&pane_id).unwrap().unwrap()["answers"], 17);
+        assert_eq!(available_reading(&mut watches, &pane_id)["answers"], 17);
 
         loopflow_execution::store::ownership::move_claim(&other.remote, &other_task, &laptop.id)
             .unwrap();
         other.to_local();
         assert_eq!(
-            owner(watches.reading(&pane_id).unwrap().unwrap()),
+            owner(available_reading(&mut watches, &pane_id)),
             laptop.id.as_str()
         );
-        let mut frame = watches.reading(&files_id).unwrap().unwrap();
+        let mut frame = available_reading(&mut watches, &files_id);
         while frame["body"]["machine_id"] == mini.id.as_str() {
-            frame = watches.reading(&files_id).unwrap().unwrap();
+            frame = available_reading(&mut watches, &files_id);
         }
         assert_eq!(
             frame["body"]["checkout"],
@@ -4541,19 +4563,28 @@ fn server_routed_task_workspace() {
                 [other_task.as_str()],
             )
             .unwrap();
-        while watches.reading(&status_id).unwrap().unwrap()["body"]["task"]["title"]
+        while available_reading(&mut watches, &status_id)["body"]["task"]["title"]
             != "An edit on laptop"
         {}
+        // The fresh SSH handshake on re-route fails until mini is reachable.
+        fs::write(&offline, "").unwrap();
         loopflow_execution::store::ownership::move_claim(&other.local, &other_task, &mini.id)
             .unwrap();
-        assert_eq!(
-            owner(watches.reading(&pane_id).unwrap().unwrap()),
-            mini.id.as_str()
-        );
         let mut frame = watches.reading(&files_id).unwrap().unwrap();
         while frame["body"]["machine_id"] == laptop.id.as_str() {
             frame = watches.reading(&files_id).unwrap().unwrap();
         }
+        assert!(frame["body"].is_null(), "{frame}");
+        assert!(
+            frame["unavailable"].as_str().unwrap().contains("mini"),
+            "{frame}"
+        );
+        fs::remove_file(&offline).unwrap();
+        assert_eq!(
+            owner(available_reading(&mut watches, &pane_id)),
+            mini.id.as_str()
+        );
+        let frame = available_reading(&mut watches, &files_id);
         assert_eq!(
             frame["body"]["checkout"],
             other.remote_path.to_str().unwrap()
@@ -4658,9 +4689,54 @@ fn server_routed_task_workspace() {
         .unwrap();
     assert_eq!(ended.code, ErrorCode::NotFound, "{ended:?}");
 
-    // Restart the peer under an idle pipe. The next read reconnects once.
+    // Losing an established stream also leaves its subscription alive. A
+    // checkpoint during the outage must receive a reading from a fresh attempt.
+    let mut watches = Connection::open_at(Path::new(&socket)).unwrap();
+    watches
+        .set_read_timeout(Some(std::time::Duration::from_secs(20)))
+        .unwrap();
+    let files = watches
+        .subscribe(
+            Read::TaskFilesWatch {
+                issue: task.to_string(),
+            },
+            None,
+        )
+        .unwrap();
+    let initial = available_reading(&mut watches, &files);
+    watches.checkpoint(&files, 41).unwrap();
+    while available_reading(&mut watches, &files)["answers"] != 41 {}
+    fs::write(&offline, "").unwrap();
     drop(server_on_mini);
+    loop {
+        let frame = watches.reading(&files).unwrap().unwrap();
+        if let Some(reason) = frame["unavailable"].as_str() {
+            assert!(
+                reason.contains("mini") && frame["body"].is_null(),
+                "{frame}"
+            );
+            break;
+        }
+        assert_eq!(frame["body"]["checkout"], initial["body"]["checkout"]);
+    }
+    watches.checkpoint(&files, 42).unwrap();
+    loop {
+        let retry = watches.reading(&files).unwrap().unwrap();
+        assert!(
+            retry["unavailable"].as_str().unwrap().contains("mini"),
+            "{retry}"
+        );
+        if retry["answers"] == 42 {
+            break;
+        }
+    }
     let restarted = served_mini(&fixture);
+    fs::remove_file(&offline).unwrap();
+    let recovered = available_reading(&mut watches, &files);
+    assert_eq!(recovered["body"]["checkout"], initial["body"]["checkout"]);
+    assert_ne!(recovered["body"]["revision"], initial["body"]["revision"]);
+    drop(watches);
+    // Restarting under the idle request pipe also reconnects the next read.
     assert_eq!(
         client.request(&read_file).unwrap().result["content"],
         "edited on mini\n"
@@ -4681,10 +4757,7 @@ fn server_routed_task_workspace() {
         .command_answer("save-after-restart")
         .unwrap()
         .is_some());
-    executable(
-        &fixture.root.path().join("bin/ssh"),
-        "#!/bin/sh\nexit 255\n",
-    );
+    fs::write(offline, "").unwrap();
     drop(restarted);
     let unknown = client
         .request(save(&original))

@@ -17,3 +17,5 @@
 - `session.start` keeps no `task`/`machine`. Its `argv`, `cwd` and `env` are the caller's, so a routed start would run local paths on another Machine. A remote Session starts through `session.continue` or a Task's own launch there. The plan listed it beside attach and continue.
 
 - A routed `session.attach` or `session.continue` waits for the peer inline, as `session.start` already waits for its holder, so other requests on that one control connection wait up to the SSH handshake (10 s). Moving terminal requests onto the request task set would end that.
+
+- A failed peer subscription retries after five seconds without a planning change. Any planning revision wakes it sooner so it can follow a move immediately. The SSH handshake keeps its existing deadline.

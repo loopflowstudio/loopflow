@@ -499,6 +499,7 @@ impl Producer {
         planning.borrow_and_update();
         let mut route = resolve().await??;
         loop {
+            let generation = lock(&self.requested).generation;
             let current = route.clone();
             let active = async {
                 match current {
@@ -511,13 +512,7 @@ impl Producer {
                         .await??;
                         self.peer(&machine, sender, placed, select.clone())
                             .await
-                            .map_err(|error| {
-                                if error.downcast_ref::<Error>().is_some() {
-                                    error
-                                } else {
-                                    client::unavailable_on(&machine, error)
-                                }
-                            })
+                            .map_err(|error| client::unavailable_on(&machine, error))
                     }
                     None => self.here(query.clone(), select.clone()).await,
                 }
@@ -531,11 +526,48 @@ impl Producer {
                         let next = resolve().await??;
                         if next != route { break next; }
                     }
-                    result = &mut active => return result,
+                    result = &mut active => {
+                        let failure = match result {
+                            Err(failure) if route.is_some() => failure,
+                            other => return other,
+                        };
+                        self.peer_unavailable(failure, generation).await?;
+                        tokio::select! {
+                            changed = planning.changed() => changed?,
+                            _ = tokio::time::sleep(Duration::from_secs(5)) => {}
+                        }
+                        break resolve().await??;
+                    }
                 }
             };
             route = next;
         }
+    }
+
+    async fn peer_unavailable(&self, failure: anyhow::Error, generation: u64) -> Result<()> {
+        let frame = loopflow_execution::read_stream::SubscriptionFrame::<Value> {
+            answers: None,
+            unavailable: Some(failure.to_string()),
+            body: None,
+            work: None,
+            read_at: None,
+        };
+        let room = Materializing::reserve().await?;
+        // Keep checkpoints answered by the lost stream. A newer checkpoint
+        // needs a reading from the next attempt.
+        let generation = self
+            .latest
+            .borrow()
+            .reading
+            .as_ref()
+            .map_or(generation, |reading| reading.generation.max(generation));
+        self.latest.send_modify(|latest| latest.ready = true);
+        self.publish(
+            Some(serde_json::to_value(frame)?),
+            Vec::new(),
+            generation,
+            room,
+        )
     }
 
     async fn peer(

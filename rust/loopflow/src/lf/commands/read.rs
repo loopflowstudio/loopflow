@@ -769,10 +769,7 @@ impl Read {
                     }
                 }
                 replace_present(reading, "/row/reference/workspace/machine_label", &label);
-                if let Some(session) = reading
-                    .pointer_mut("/current_session")
-                    .filter(|session| !session.is_null())
-                {
+                if let Some(session) = reading.pointer_mut("/current_session") {
                     super::ssh::localize_remote_session(session, machine, Some(route))?;
                 }
             }
@@ -1321,7 +1318,6 @@ fn value(value: &impl Serialize) -> anyhow::Result<serde_json::Value> {
     Ok(serde_json::to_value(value)?)
 }
 
-/// The Machine a Task route names and the sender its repository sends as.
 /// Set `pointer` in `reading` to `value` when `reading` carries it.
 fn replace_present(reading: &mut serde_json::Value, pointer: &str, value: &serde_json::Value) {
     if let Some(slot) = reading.pointer_mut(pointer) {
@@ -1329,6 +1325,7 @@ fn replace_present(reading: &mut serde_json::Value, pointer: &str, value: &serde
     }
 }
 
+/// The Machine a Task route names and the sender its repository sends as.
 pub(crate) fn peer_of(
     route: &loopflow_execution::durable::TaskExecutionRoute,
 ) -> anyhow::Result<(Machine, Sender)> {

@@ -1,4 +1,4 @@
-at: ce7adf260d5f23ec9b1ee52a317bc18c61e9c670
+at: 8bf881d62c
 first:
   - path: rust/loopflow/src/server/README.md
     why: How clients open and follow a remote Task
@@ -14,16 +14,26 @@ first:
     why: Filesystem events invalidate the checkout’s file tree
   - path: rust/loopflow-execution/src/machine/client.rs
     why: Request identity and disconnect outcomes across Machines
+  - path: rust/loopflow-execution/src/machine/wire.rs
+    why: Session attach and continue name their Task; Task shell operations
+  - path: rust/loopflow/src/lf/commands/work_route.rs
+    why: Which Machine runs a Session's terminal
   - path: rust/loopflow/src/server/peers.rs
-    why: Pooled requests and dedicated subscription connections
+    why: Pooled requests, terminal requests and dedicated subscription connections
   - path: rust/loopflow/src/server/subscriptions.rs
     why: Change readers when ownership moves, retaining subscribers and checkpoints
   - path: rust/loopflow/src/lf/commands/write.rs
     why: The owner checks the file revision before saving
+  - path: rust/loopflow/src/server/ticket.rs
+    why: A remote terminal ticket wraps the peer's ticket
   - path: rust/loopflow/src/server/service.rs
-    why: Peer placement and request IDs for both client transports
+    why: Peer placement, routed terminals and the ssh bridge for both transports
+  - path: rust/loopflow-execution/src/desktop/shells.rs
+    why: The owner starts, finds and closes a Task shell by shell_id
+  - path: rust/loopflow/src/server/remote.rs
+    why: The WebSocket bridge carries a local or remote terminal
   - path: rust/loopflow/tests/machine_commands.rs
-    why: Follow a Task between two live servers
+    why: Follow a Task between two live servers; attach its Session and shell
 hide:
   - path: tests/fixtures/dto/server_schema.json
     why: Generated from the protocol types

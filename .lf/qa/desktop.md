@@ -327,6 +327,13 @@ them. Nothing here needs WindowServer focus.
 - Sidebar row clicks did not select a Task; `open -g -b <bundle id>
   'loopflow://<repo>/task/<id>'` does.
 - `osascript` quit hung with the screen locked; stop the app by PID.
+- Run every command against the private repository through the env wrapper.
+  If the installed `lf` or installed Desktop opens it, the live Machine
+  registers the repository. Its repository and Wave Sessions then run under
+  the live holder, and an installed-Desktop window on that path resumes them
+  within seconds of a kill. Before teardown, check
+  `lf desktop state --json` with `LF_DESKTOP` unset for windows on the
+  private path. Close those windows, then stop the agents.
 - Not reachable: hover, system drags, the jump menu (its shortcut needs
   a key window, and setting `navigation.palette = .search` draws nothing),
   popovers and sheets opened from a "+" (New Wave never appeared) and file

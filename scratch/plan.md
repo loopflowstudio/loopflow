@@ -65,15 +65,16 @@ and the [Swift README](../swift/README.md). Deferred ideas stay in
 - `EXPLAIN QUERY PLAN` confirmed indexed lookups with 10,011 Tasks, 1,000
   Graphs, and 103 saved positions.
 
+- [QA round 6](qa.html) at `f2ffa0863` passed the group checks behind an
+  in-use display: the row stays put with sorting Off, the open Task keeps its
+  group while its status changes, a Busy Task opened with sorting On starts
+  in Busy, the group is released when another Task is selected, and the Wave
+  sidebar shares the toggle.
+
 ## Remaining verification
 
-Run the current build in an unlocked Dev window on a private Machine. Hover
-the toggle in both states. Send a prompt with sorting Off and check the row
-stays in place. Turn sorting On with a Busy Task open and check it starts in
-the Busy group. Open an Available Task, send a prompt, and check that it keeps
-its group while its status changes. Move to another Task and check the former
-selection sorts by its current status. Repeat in a Wave sidebar. Exercise a
-grid drag and the ⌘1–9, ⌃Tab, and ⌘K controls. Use
+In an unlocked key window on an idle display: hover the toggle in both
+states, drag on the Working Tasks grid, and use ⌘1–9, ⌃Tab and ⌘K. Use
 [Desktop QA](../.lf/qa/desktop.md) for the private Machine setup. Earlier
 locked-screen workspace restore and Wave-to-grid findings are in [questions.md](questions.md).
 

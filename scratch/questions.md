@@ -106,3 +106,6 @@
   existing tracker Project) queues no local order; only
   `accept_linear_project_in` does, as the slice named. Linking adopts the
   tracker's order.
+- Sync with #2039 applies read-only authored Wave adoption to the one-Project
+  model. Linear rental preparation uses named connect with the locally linked
+  Project ID. An unbound Wave gives the rental no Project to link.

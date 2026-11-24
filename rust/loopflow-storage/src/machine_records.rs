@@ -6,6 +6,10 @@ use serde::{Deserialize, Serialize};
 pub enum RecordKind {
     Session,
     SessionEvent,
+    History,
+    Turn,
+    Transcript,
+    Checkpoint,
 }
 
 impl RecordKind {
@@ -13,6 +17,10 @@ impl RecordKind {
         match self {
             Self::Session => "session",
             Self::SessionEvent => "session_event",
+            Self::History => "history",
+            Self::Turn => "turn",
+            Self::Transcript => "transcript",
+            Self::Checkpoint => "checkpoint",
         }
     }
 }
@@ -23,6 +31,15 @@ pub struct Record {
     pub kind: RecordKind,
     pub key: String,
     pub row: serde_json::Value,
+}
+
+/// Source positions in loopflow.db and history.db at the same export.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CopyCursor {
+    pub state: i64,
+    pub history: i64,
+    /// Source wall time before reading mutable provider files.
+    pub started_at: i64,
 }
 
 /// One line of `lf history export`.
@@ -50,12 +67,17 @@ pub struct CopyCounts {
 
 impl std::fmt::Display for CopyCounts {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{} Session(s)", self.sessions)
+        let noun = if self.sessions == 1 {
+            "session"
+        } else {
+            "sessions"
+        };
+        write!(f, "{} {noun}", self.sessions)
     }
 }
 
 /// A Session as its origin Machine recorded it.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct CopiedSession {
     pub origin: MachineId,
     /// The origin's label while it is still added here.
@@ -63,6 +85,8 @@ pub struct CopiedSession {
     pub id: String,
     pub title: String,
     pub completed_at: Option<i64>,
+    /// Why the origin's last start of it failed, if it did.
+    pub start_failure: Option<String>,
 }
 
 impl CopiedSession {
@@ -72,7 +96,7 @@ impl CopiedSession {
 }
 
 /// A copied Session with what its origin recorded about it.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct CopiedHistory {
     pub session: CopiedSession,
     pub task_id: Option<String>,
@@ -82,10 +106,12 @@ pub struct CopiedHistory {
     /// When this Machine last copied it.
     pub copied_at: i64,
     pub events: Vec<CopiedEvent>,
+    pub turns: Vec<crate::session::Turn>,
+    pub usage: crate::session_record::SessionUsage,
 }
 
 /// One session event as its origin wrote it.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct CopiedEvent {
     pub kind: String,
     pub observed_at: Option<i64>,

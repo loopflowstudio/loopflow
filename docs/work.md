@@ -428,6 +428,10 @@ lf wave plan connect billing https://linear.app/acme/project/refunds-1a2b3c4d5e6
 You can connect a new Wave directly to an existing Linear Project. A Linear
 Project no Wave links stays out of Loopflow.
 
+Loopflow registers Waves from an existing checkout's `.lf/wave/` files
+without editing those files. When renting a Machine for a Linear Task,
+Loopflow connects the Task's Wave to its linked Project on the rental.
+
 ### Offline queue and conflict resolution
 
 Every tracker edit saves locally first and joins a per-repo outbound queue,

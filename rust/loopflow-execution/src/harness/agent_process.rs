@@ -288,11 +288,10 @@ pub(crate) fn stop_session_agent(
     let Some(attachment) = store.session_attachment(session)? else {
         return Ok(());
     };
-    let agent = store
-        .agent_processes()?
-        .into_iter()
-        .find(|agent| agent.id == attachment.agent_process_id);
-    let Some(agent) = agent else {
+    let Some(agent) = store
+        .agent_state(&attachment.agent_process_id)?
+        .filter(|agent| agent.ended_at.is_none())
+    else {
         return Ok(());
     };
     // Already-dead providers have no observed interruption outcome. Preserve that

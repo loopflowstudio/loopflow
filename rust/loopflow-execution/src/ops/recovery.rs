@@ -61,13 +61,43 @@ pub fn record_start(
     store.record_persons_start(session, at)
 }
 
-/// Why starting `conversation` would fail before any provider runs: its
-/// agent's CLI is not on this Machine's `PATH`. `None` when it can start.
-pub fn launch_failure(conversation: &TaskConversation) -> Option<String> {
-    let provider = conversation.provider.as_deref()?;
-    let installed = loopflow_harness::HarnessKind::parse(provider)
-        .is_some_and(|kind| crate::harness::launcher(kind).installed());
-    (!installed).then(|| format!("{provider} is not installed on this Machine's PATH"))
+/// A prerequisite leaves the provider stopped until a later reading finds it
+/// ready. The prefix distinguishes it from a failed terminal start on disk.
+pub const WAITING_FOR_HARNESS: &str = "Waiting for a harness: ";
+
+/// Why a recorded start failed, as a person reads it: without the prefix.
+pub fn start_failure_reason(failure: &str) -> &str {
+    failure.strip_prefix(WAITING_FOR_HARNESS).unwrap_or(failure)
+}
+
+/// What would stop `session`'s provider starting here: its recorded harness,
+/// or for one that never bound an agent, the harness its skill resolves to,
+/// missing or without a usable login. Every server start of a stopped
+/// interactive Session asks this before spawning: Task recovery, a steer's
+/// wakeup and a provider restart. A Session no longer recorded has nothing
+/// to stop.
+pub fn launch_failure(
+    store: &SqliteStore,
+    session: &LfSessionId,
+    machine: &mut crate::agent::MachineAgents,
+) -> anyhow::Result<Option<String>> {
+    let Some(session) = store.session(session)? else {
+        return Ok(None);
+    };
+    let reason = match session.provider.as_deref() {
+        Some(provider) => match loopflow_harness::HarnessKind::parse(provider) {
+            Some(kind) => machine.failure(kind).map(str::to_owned),
+            None => Some(format!("unknown harness {provider}")),
+        },
+        None => {
+            match crate::session::pending_agent(store, &session, |config| machine.resolve(config)) {
+                Ok(agent) => machine.failure(agent.harness).map(str::to_owned),
+                Err(error) if error.is::<crate::error::LoadError>() => Some(error.to_string()),
+                Err(error) => return Err(error),
+            }
+        }
+    };
+    Ok(reason.map(|reason| format!("{WAITING_FOR_HARNESS}{reason}")))
 }
 
 /// What decides whether this Machine's server starts a conversation that is

@@ -453,7 +453,7 @@ fn execute_target(
                     {
                         // Best-effort: the skill ran whether or not its edits commit.
                         if loopflow_execution::ops::step_commit_pending(&repo_root) {
-                            commit_skill_step(&repo_root, name, cli.agent.as_deref());
+                            commit_skill_step(&repo_root, name);
                         }
                     }
                     Ok(())
@@ -472,15 +472,16 @@ fn execute_target(
 }
 
 /// A child `lf commit --step`, as a Graph runs after each skill step, so the
-/// message-writing agent is a Process of its own. The run's `-a` writes the
-/// message only when `commit-message` has no agent of its own.
-fn commit_skill_step(repo_root: &Path, skill: &str, agent: Option<&str>) {
+/// message-writing agent is a Process of its own.
+fn commit_skill_step(repo_root: &Path, skill: &str) {
     let committed = loopflow_execution::os_process::resolve_lf_binary()
         .map_err(|error| error.to_string())
         .and_then(|lf| {
-            std::process::Command::new(lf)
+            let mut command = std::process::Command::new(lf);
+            loopflow_execution::config::settings::independent_agent(&mut command)
+                .map_err(|e| e.to_string())?;
+            command
                 .args(["commit", "--step", skill])
-                .args(agent.map(|agent| ["--agent", agent]).into_iter().flatten())
                 .current_dir(repo_root)
                 .stdin(std::process::Stdio::null())
                 .status()
@@ -992,6 +993,9 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
             use loopflow::lf::commands::waves::{
                 list_closed_tasks, list_tasks, subscribe_tasks, TaskListArgs,
             };
+            tokio::runtime::Runtime::new()?.block_on(
+                loopflow_execution::ops::plan_carriers::before_first_read(repo),
+            );
             let args = TaskListArgs {
                 query: query.clone(),
                 wave: wave.clone(),
@@ -2023,8 +2027,12 @@ fn run() -> anyhow::Result<()> {
             Some(InstallCommand::Schedule { frequency }) => {
                 loopflow::lf::commands::install::schedule(*frequency)
             }
-            Some(InstallCommand::Server) => {
+            Some(InstallCommand::Server { profile_stdin }) => {
                 loopflow_execution::installation::server::delegate_selected()?;
+                if *profile_stdin {
+                    let profile = std::io::read_to_string(std::io::stdin().lock())?;
+                    loopflow_execution::config::remote::provision(&profile)?;
+                }
                 println!(
                     "{}",
                     serde_json::to_string(&loopflow_execution::installation::server::ensure()?)?

@@ -54,6 +54,7 @@ pub fn change(repo: &Path, issue: &str, change: OwnershipChange) -> OpsResult<Ta
                 crate::store::ownership::claim_task(&store.sqlite, &task.id).map_err(message)?;
             }
             OwnershipChange::Move(target) => {
+                super::plan_carriers::before_claim(&store, &repository, &task.id).await;
                 let target = resolve_machine(&store.sqlite, target)?;
                 crate::store::ownership::move_claim(&store.sqlite, &task.id, &target)
                     .map_err(message)?;

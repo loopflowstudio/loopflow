@@ -73,7 +73,7 @@ mod native_usage_tests;
 #[cfg(test)]
 mod ownership_lifecycle_tests;
 #[cfg(test)]
-mod rental_lifecycle_tests;
+pub(crate) mod rental_lifecycle_tests;
 #[cfg(test)]
 mod state_without_history_tests;
 #[cfg(test)]

@@ -52,6 +52,67 @@ fn connect_links_a_new_wave_without_creating_a_linear_project() {
 }
 
 #[test]
+fn connect_adopts_an_authored_wave_with_one_project() {
+    with_planning_task(|runtime, fixture, repo, _, state| {
+        let id = loopflow_model::id::WaveId::new();
+        let tracker_id = "f5c48a68-d77e-4d73-a02a-c72bb536bf97";
+        let directory = repo.join(".lf/wave/refunds");
+        std::fs::create_dir_all(&directory).unwrap();
+        std::fs::write(directory.join("config.yaml"), format!("id: {id}\n")).unwrap();
+        super::test_fixture::commit_planning_repo(repo);
+        let head = crate::git::git_stdout(repo, &["rev-parse", "HEAD"]).unwrap();
+        runtime.block_on(async {
+            let mut provider = state.lock().await;
+            provider.export_mode = true;
+            provider.extra_projects.push(json!({
+                "id": tracker_id, "name": "Refunds", "description": "", "content": "",
+                "status": {"type": "started"}, "teams": {"nodes": [{"id": "team-1"}]}
+            }));
+            let mut issue = provider.issues[0].clone();
+            issue["id"] = json!("refunds-issue");
+            issue["identifier"] = json!("FIX-2");
+            issue["project"] = json!({"id": tracker_id, "name": "Refunds"});
+            provider.issues.push(issue);
+        });
+
+        let connected = super::connect(
+            repo,
+            &super::LinearInitOptions {
+                wave: Some("refunds".into()),
+                project: Some(tracker_id.into()),
+                ..Default::default()
+            },
+            &NullProgress,
+        )
+        .unwrap();
+        assert_eq!(connected.project_id.as_deref(), Some(tracker_id));
+        let project = fixture.store.sqlite.project_of_wave(&id).unwrap().unwrap();
+        assert_eq!(
+            project.id,
+            loopflow_model::durable::ProjectId::for_wave(&id)
+        );
+        assert_eq!(project.tracker_id.unwrap().as_str(), tracker_id);
+        let task = runtime
+            .block_on(fixture.store.get_task_by_issue("refunds-issue"))
+            .unwrap()
+            .unwrap();
+        assert_eq!(task.project_id.as_ref(), Some(&project.id));
+        assert!(!runtime
+            .block_on(state.lock())
+            .operations
+            .contains_key("DeliverProjectCreation"));
+        assert_eq!(
+            crate::git::git_stdout(repo, &["rev-parse", "HEAD"]).unwrap(),
+            head
+        );
+        assert_eq!(
+            crate::git::git_stdout(repo, &["status", "--porcelain"]).unwrap(),
+            ""
+        );
+    });
+}
+
+#[test]
 fn connect_naming_a_missing_project_adds_no_wave() {
     with_planning_task(|runtime, fixture, repo, _, state| {
         super::test_fixture::commit_planning_repo(repo);

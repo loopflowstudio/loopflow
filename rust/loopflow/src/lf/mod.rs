@@ -1436,6 +1436,7 @@ impl MachineCommand {
             },
             Self::Hub { machine, clear } => machine.is_some() || *clear,
             Self::Prune { .. }
+            | Self::Forward { .. }
             | Self::Login { .. }
             | Self::Logout { .. }
             | Self::Public { .. }
@@ -1469,7 +1470,8 @@ impl SelfCommand {
     pub fn changes_work(&self) -> bool {
         match self {
             Self::Install { cmd, .. } => match cmd {
-                Some(InstallCommand::Server | InstallCommand::Preflight { .. }) => false,
+                Some(InstallCommand::Server { profile_stdin }) => *profile_stdin,
+                Some(InstallCommand::Preflight { .. }) => false,
                 None
                 | Some(
                     InstallCommand::Schedule { .. }
@@ -2580,7 +2582,11 @@ pub enum InstallFrequency {
 pub enum InstallCommand {
     /// Reconcile the selected installation's local server for a client.
     #[command(hide = true)]
-    Server,
+    Server {
+        /// Retain a rental caller’s portable profile from stdin before starting.
+        #[arg(long)]
+        profile_stdin: bool,
+    },
     /// Run `lf install` on your stream on a schedule (launchd, also at login; cron on Linux),
     Schedule {
         /// Weekly: Monday 09:00; daily: 09:00; otherwise on clock boundaries (local time).
@@ -2974,6 +2980,16 @@ pub enum ConfigCommand {
 /// Name and connect to machines.
 #[derive(Debug, Subcommand)]
 pub enum MachineCommand {
+    /// Replace configured forward.files on the named Machine and optionally restart one conversation.
+    Forward {
+        label: String,
+        /// Restart this Task's primary Session after all files arrive
+        #[arg(long, conflicts_with = "session")]
+        task: Option<String>,
+        /// Restart this Session's provider after all files arrive
+        #[arg(long)]
+        session: Option<String>,
+    },
     /// Sign Machines in through each provider's own login, approved in this
     /// Machine's browser; with no Machine named, this one
     Login {
@@ -3142,6 +3158,9 @@ pub enum OndemandCommand {
         /// the provider may end it early, losing unpushed work
         #[arg(long)]
         spot: bool,
+        /// Reserve the full CPU and memory limits on Modal
+        #[arg(long)]
+        reserved: bool,
         /// Hard deadline for each machine it rents, at most 24
         #[arg(long, default_value_t = loopflow_storage::rental::DEFAULT_HOURS)]
         hours: f64,
@@ -3181,6 +3200,14 @@ pub enum OndemandCommand {
 
 #[derive(Debug, Subcommand)]
 pub enum MachineCredentialCommand {
+    /// Resume the selected conversation with the newly delivered files.
+    #[command(hide = true)]
+    Restart {
+        /// Select the Task's primary Session
+        #[arg(long)]
+        task: bool,
+        id: String,
+    },
     /// Receive a fresh login as JSON on stdin; preserve existing accounts.
     Receive,
 }

@@ -183,20 +183,20 @@ fn sum(total: Option<u64>, value: Option<u64>) -> Option<u64> {
 /// Explain one recorded step from its capture and retained turns, flagged
 /// against current budgets.
 pub fn step_context(home: &Path, store: &SqliteStore, history: &SessionHistory) -> StepContext {
-    let input = history.artifact_key.as_deref();
-    let mut measured = match input.and_then(|key| crate::session_record::record_dir(home, key)) {
+    let mut measured = match crate::session_record::history_record_dir(home, history) {
         Some(dir) => read_capture(&dir),
         None => Measured {
             gaps: vec!["this input has no retained capture".to_string()],
             ..Measured::default()
         },
     };
-    match input.map(|input| store.input_turn_context(input)) {
-        Some(Ok(turns)) => measured.read_turns(turns),
-        Some(Err(error)) => measured
-            .gaps
-            .push(format!("provider turns are unreadable: {error}")),
-        None => {}
+    if history.artifact_key.is_some() {
+        match store.history_turn_context(history) {
+            Ok(turns) => measured.read_turns(turns),
+            Err(error) => measured
+                .gaps
+                .push(format!("provider turns are unreadable: {error}")),
+        }
     }
     let mut step = measured.into_step(history);
     if let Some(budgets) = budgets(history) {

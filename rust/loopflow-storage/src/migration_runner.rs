@@ -86,17 +86,25 @@ pub fn unmerged_migrations() -> Vec<&'static str> {
         .collect()
 }
 
-#[cfg(any(test, feature = "test-support"))]
-pub fn migration_is_applied_for_test(conn: &rusqlite::Connection, name: &str) -> StoreResult<bool> {
-    let marker = format!("-- draft: {name}");
-    let Some(migration) = MIGRATIONS.iter().find(|migration| {
-        migration.version == name || migration.sql.lines().any(|line| line == marker)
-    }) else {
+/// Whether the store includes this change, including a draft folded into a release.
+pub(crate) fn migration_is_applied(conn: &rusqlite::Connection, name: &str) -> StoreResult<bool> {
+    let migration = MIGRATIONS
+        .iter()
+        .find(|migration| migration.version == name)
+        .or_else(|| {
+            let marker = format!("-- draft: {name}");
+            MIGRATIONS
+                .iter()
+                .find(|migration| migration.sql.lines().any(|line| line == marker))
+        });
+    let Some(migration) = migration else {
         return Ok(false);
     };
-    Ok(applied_versions(conn)?
-        .iter()
-        .any(|version| version == &migration.version()))
+    Ok(conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE version = ?1)",
+        [migration.version],
+        |row| row.get(0),
+    )?)
 }
 
 #[cfg(any(test, feature = "test-support"))]

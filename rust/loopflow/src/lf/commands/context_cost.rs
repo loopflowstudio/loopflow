@@ -166,10 +166,7 @@ fn read_steps(filter: WorkFilter) -> Result<Vec<Step>> {
     sessions
         .iter()
         .map(|session| {
-            let gaps = match &session.artifact_key {
-                Some(input) => store.input_silences(input)?,
-                None => Vec::new(),
-            };
+            let gaps = store.history_silences(session)?;
             Ok(step(session, &gaps))
         })
         .collect()

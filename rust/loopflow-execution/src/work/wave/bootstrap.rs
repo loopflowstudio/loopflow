@@ -35,7 +35,7 @@ fn ensure_wave_inner(
     store: &SqliteStore,
     repo: &str,
     name: &str,
-    skip_retired: bool,
+    register_only: bool,
 ) -> StoreResult<Option<WaveId>> {
     if name.split('/').any(|part| {
         part.trim().is_empty() || part.contains([':', '\\']) || matches!(part, "." | "..")
@@ -54,9 +54,8 @@ fn ensure_wave_inner(
                 prefix.push('/');
             }
             prefix.push_str(part);
-            let id = crate::work::wave::config::try_read_wave_config(checkout, &prefix)
-                .map_err(invalid)?
-                .and_then(|config| config.id);
+            let id =
+                crate::work::wave::config::authored_wave_id(checkout, &prefix).map_err(invalid)?;
             authored.push((prefix.clone(), part.to_owned(), id));
         }
         let ids: Vec<_> = authored
@@ -83,10 +82,13 @@ fn ensure_wave_inner(
                         .find(|wave| &wave.id == id)
                 })
                 .cloned();
-            if skip_retired
-                && retained
-                    .as_ref()
-                    .is_some_and(|wave| wave.retired_at.is_some())
+            if register_only
+                && retained.as_ref().is_some_and(|wave| {
+                    wave.retired_at.is_some()
+                        || wave.repo != repo
+                        || wave.parent != parent
+                        || wave.name != part
+                })
             {
                 return Ok(None);
             }
@@ -122,6 +124,10 @@ fn ensure_wave_inner(
                 });
                 id
             };
+            if register_only {
+                parent = Some(wave);
+                continue;
+            }
             let directory = checkout.join(".lf/wave").join(&prefix);
             seed_wave_files(&directory, &wave, &prefix)?;
             let current = crate::work::wave::config::try_read_wave_config(checkout, &prefix)
@@ -157,6 +163,9 @@ fn ensure_wave_inner(
             }
             parent = Some(wave);
         }
+        if register_only && additions.is_empty() && registration.is_none() {
+            return Ok(parent);
+        }
         if store.commit_wave_bootstrap(
             &repo,
             &ids,
@@ -169,6 +178,37 @@ fn ensure_wave_inner(
     }
 }
 
+/// Adopt a named directory without authoring files or reviving a retired identity.
+pub(crate) fn find_or_register(
+    store: &SqliteStore,
+    repo: &str,
+    locator: &crate::work::wave::WaveLocator,
+) -> StoreResult<Option<crate::work::wave::Wave>> {
+    let name = locator.slug();
+    let directory = Path::new(repo).join(".lf/wave").join(name);
+    if !directory.join("GOAL.md").is_file() && !directory.join("config.yaml").is_file() {
+        return store.get_wave_at(locator);
+    }
+    // A moved or retired Wave's leftover directory names no Wave here.
+    match ensure_wave_inner(store, repo, name, true)? {
+        Some(id) => store.get_wave(&id),
+        None => Ok(None),
+    }
+}
+
+/// Whether `.lf/wave/<slug>` and each of its ancestors already carry their
+/// authored id, so adopting the Wave needs no file written on the checkout.
+pub(crate) fn names_its_wave(repo: &Path, slug: &str) -> bool {
+    let mut prefix = String::new();
+    slug.split('/').all(|part| {
+        if !prefix.is_empty() {
+            prefix.push('/');
+        }
+        prefix.push_str(part);
+        crate::work::wave::config::authored_wave_id(repo, &prefix).is_ok_and(|id| id.is_some())
+    })
+}
+
 /// Register every authored Wave directory under `<checkout>/.lf/wave/`, matching
 /// by `config.yaml` id first. A directory whose id names a removed Wave is left
 /// alone with its subtree, so a clone or a checkout behind the planning store
@@ -177,16 +217,29 @@ fn ensure_wave_inner(
 pub fn register_authored_waves(store: &SqliteStore, repo: &str) -> StoreResult<()> {
     let checkout = Path::new(repo);
     let root = checkout.join(".lf/wave");
+    let known: std::collections::HashMap<_, _> = store
+        .list_waves(Some(repo))?
+        .into_iter()
+        .map(|wave| (wave.slug().to_owned(), wave.id().clone()))
+        .collect();
     let mut pending = child_directories(&root, "");
     while let Some(slug) = pending.pop() {
         let directory = root.join(&slug);
         if directory.join("GOAL.md").is_file() || directory.join("config.yaml").is_file() {
+            let registered = known.get(&slug).is_some_and(|id| {
+                crate::work::wave::config::authored_wave_id(checkout, &slug)
+                    .is_ok_and(|authored| authored.as_ref().is_none_or(|authored| authored == id))
+            });
+            if registered {
+                pending.extend(child_directories(&root, &slug));
+                continue;
+            }
             match ensure_wave_inner(store, repo, &slug, true) {
                 Ok(Some(_)) => {}
                 Ok(None) => {
                     tracing::info!(
                         slug,
-                        "skipping authored Wave directory whose Wave was removed"
+                        "skipping authored directory whose Wave moved or retired"
                     );
                     continue;
                 }
@@ -214,7 +267,7 @@ fn child_directories(root: &Path, prefix: &str) -> Vec<String> {
     };
     let mut slugs: Vec<String> = entries
         .flatten()
-        .filter(|entry| entry.path().is_dir())
+        .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_dir()))
         .filter_map(|entry| entry.file_name().to_str().map(str::to_string))
         .filter(|name| !name.starts_with('.'))
         .map(|name| {

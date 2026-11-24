@@ -21,8 +21,7 @@ pub struct TaskConversation {
     /// The agent generation that ended, `None` before the first. A start
     /// names it, so one death never starts two providers.
     pub agent: Option<AgentProcessId>,
-    /// The harness the conversation runs, whose CLI a start needs.
-    pub provider: Option<String>,
+    pub start_failure: Option<String>,
     /// When the agent's end was recorded; `None` while its row is unfinished.
     pub ended_at: Option<i64>,
     /// The provider's exit, as its launcher saw it. `None` when nobody saw
@@ -56,7 +55,7 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut statement = conn.prepare_cached(&format!(
             "SELECT s.id,t.id,s.agent_process_id,s.agent_ended_at,s.agent_exit_code,
-                s.agent_pid,s.agent_os_started_at,s.starts_since_turn,s.last_started_at,s.provider
+                s.agent_pid,s.agent_os_started_at,s.starts_since_turn,s.last_started_at,s.start_failure
              FROM task_primary_sessions tp
              JOIN tasks t ON t.id=tp.task_id
              JOIN task_checkouts c ON c.task_id=t.id
@@ -75,7 +74,7 @@ impl SqliteStore {
                 identity: row.get::<_, Option<u32>>(5)?.zip(row.get(6)?),
                 starts_since_turn: row.get(7)?,
                 last_started_at: row.get(8)?,
-                provider: row.get(9)?,
+                start_failure: row.get(9)?,
             })
         })?;
         Ok(rows.collect::<Result<_, _>>()?)

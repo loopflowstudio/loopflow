@@ -1195,8 +1195,7 @@ mod tests {
         repo.create_file(crate::config::files::PRIVATE_FILE, "agent: pi\n");
         let removed = home.path().join("removed");
 
-        let agent =
-            crate::ops::task::resolve_task_agent(&removed, repo.path(), None, None).unwrap();
+        let agent = crate::ops::task::resolve_task_agent(&removed, repo.path(), None).unwrap();
 
         assert_eq!(agent.harness.as_str(), "pi");
     }

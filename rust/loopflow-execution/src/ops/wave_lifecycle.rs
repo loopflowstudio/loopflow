@@ -75,22 +75,30 @@ pub(crate) async fn add_local(
     objective: Option<&str>,
 ) -> OpsResult<WaveAdded> {
     let locator = crate::work::wave::discover(main, name).map_err(lifecycle_error)?;
-    // A clone's authored Waves join the store with the first explicit write here.
-    crate::work::wave::bootstrap::register_authored_waves(&store.sqlite, &main.to_string_lossy())
-        .map_err(lifecycle_error)?;
-    let held = || async {
-        store
-            .get_wave_at(&locator)
-            .await
-            .map(|wave| wave.is_some())
-            .map_err(lifecycle_error)
-    };
-    // Another Machine may have made a Wave of this name: read the plan first,
-    // so this command joins that Wave and does not make a second.
-    let created = !held().await? && {
+    let mut existing = crate::work::wave::bootstrap::find_or_register(
+        &store.sqlite,
+        &main.to_string_lossy(),
+        &locator,
+    )
+    .map_err(lifecycle_error)?;
+    if existing.is_none() {
         super::plan_carriers::look_first(store, main).await;
-        !held().await?
-    };
+        existing = store.get_wave_at(&locator).await.map_err(lifecycle_error)?;
+    }
+    if let Some(wave) = existing
+        .as_ref()
+        .filter(|_| crate::work::wave::bootstrap::names_its_wave(main, locator.slug()))
+    {
+        return Ok(WaveAdded {
+            id: wave.id().clone(),
+            name: wave.slug().to_owned(),
+            created: false,
+            main_checkout: main.to_path_buf(),
+            files: AuthoredFiles::Unchanged,
+            summary: Vec::new(),
+        });
+    }
+    let created = existing.is_none();
     let wave = crate::work::wave::ensure_wave_row(store, main, locator.slug())
         .await
         .map_err(lifecycle_error)?;

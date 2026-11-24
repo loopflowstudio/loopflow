@@ -25,7 +25,7 @@ authority apply to every build; see [Machine selection](machines.md#one-main-mac
 
 ## Process context
 
-Set by lf for its own children. A session shell unsets all of it before
+Loopflow sets these variables for its child processes. A session shell unsets all of it before
 applying its launch's values, and the tmux client that may start the server
 drops it too, so sessions a person opens by hand inherit none of it.
 

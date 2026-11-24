@@ -117,34 +117,75 @@ pub fn wave_graph(repo: &Path, name: &str) -> Result<Option<String>, WaveConfigE
 /// `config.yaml` reads the keys `config.yaml` holds from it. LOO-640 removes
 /// this fallback once a release reading `config.yaml` is installed.
 fn read_wave_file(repo: &Path, name: &str) -> Result<Option<(PathBuf, Mapping)>, WaveConfigError> {
+    let Some((path, content)) = wave_yaml(repo, name)? else {
+        return Ok(None);
+    };
+    let mapping = if path == goal_path(repo, name) {
+        parse_goal_settings(&path, &content)
+    } else {
+        parse_mapping(&path, &content)
+    };
+    Ok(Some((path, mapping)))
+}
+
+/// Registering an identity must distinguish an absent id from unreadable YAML.
+pub(super) fn authored_wave_id(
+    repo: &Path,
+    name: &str,
+) -> Result<Option<loopflow_model::id::WaveId>, WaveConfigError> {
+    let Some((path, content)) = wave_yaml(repo, name)? else {
+        return Ok(None);
+    };
+    let parse_error = |source| WaveConfigError::Parse {
+        path: path.clone(),
+        source,
+    };
+    let mut document = serde_yaml_ng::from_str::<Value>(&content).map_err(parse_error)?;
+    if document.is_null() {
+        return Ok(None);
+    }
+    crate::config::keys::fold(&mut document);
+    let config: WaveConfig = serde_yaml_ng::from_value(document).map_err(parse_error)?;
+    Ok(config.id)
+}
+
+fn wave_yaml(repo: &Path, name: &str) -> Result<Option<(PathBuf, String)>, WaveConfigError> {
     let path = config_path(repo, name);
     match crate::observe::read_to_string(&path) {
-        Ok(content) => {
-            let mapping = parse_mapping(&path, &content);
-            return Ok(Some((path, mapping)));
-        }
+        Ok(content) => return Ok(Some((path, content))),
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
         Err(source) => return Err(WaveConfigError::Read { path, source }),
     }
-    goal_settings(goal_path(repo, name))
+    goal_yaml(goal_path(repo, name))
 }
 
 pub(crate) fn goal_settings(path: PathBuf) -> Result<Option<(PathBuf, Mapping)>, WaveConfigError> {
+    Ok(goal_yaml(path)?.map(|(path, content)| {
+        let mapping = parse_goal_settings(&path, &content);
+        (path, mapping)
+    }))
+}
+
+fn goal_yaml(path: PathBuf) -> Result<Option<(PathBuf, String)>, WaveConfigError> {
     let content = match crate::observe::read_to_string(&path) {
         Ok(content) => content,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(source) => return Err(WaveConfigError::Read { path, source }),
     };
-    let Some((frontmatter, _)) = split_frontmatter(&content) else {
-        return Ok(Some((path, Mapping::new())));
-    };
-    let mut mapping = parse_mapping(&path, &frontmatter);
+    let frontmatter = split_frontmatter(&content)
+        .map(|(yaml, _)| yaml)
+        .unwrap_or_default();
+    Ok(Some((path, frontmatter)))
+}
+
+fn parse_goal_settings(path: &Path, content: &str) -> Mapping {
+    let mut mapping = parse_mapping(path, content);
     let shared = crate::config::wave_config_keys();
     mapping.retain(|key, _| {
         key.as_str()
             .is_some_and(|key| WAVE_ONLY_KEYS.contains(&key) || shared.contains(key))
     });
-    Ok(Some((path, mapping)))
+    mapping
 }
 
 fn parse_mapping(path: &Path, content: &str) -> Mapping {

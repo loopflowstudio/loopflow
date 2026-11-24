@@ -60,6 +60,8 @@ jobs:
         with:
           shared-key: packages-${{ matrix.target }}
       - name: Build package binaries
+        env:
+          LOOPFLOW_MAIN_PACKAGE_RUN: ${{ inputs.revision != '' && github.run_id || '' }}
         run: >-
           cargo build --release --target ${{ matrix.target }} -p loopflow
           --bin lf

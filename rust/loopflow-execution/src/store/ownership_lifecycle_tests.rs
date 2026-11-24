@@ -124,10 +124,15 @@ fn a_move_leaves_from_its_claim_until_it_is_sent_or_handed_back() {
     );
     crate::store::machines::add_machine(&store, &mini, "ssh://mini.example", "mini").unwrap();
 
-    // An unowned Task is claimed here, then its claim moves to mini.
+    // Its first and only claim names mini.
     let claim = crate::store::ownership::begin_task_move(&store, &task, &mini).unwrap();
     let ownership = crate::store::ownership::task_ownership(&store, &task).unwrap();
-    assert_eq!(ownership.log.len(), 2);
+    assert_eq!(ownership.log.len(), 1);
+    assert_eq!(ownership.log[0].id, claim.id);
+    assert_eq!(claim.writer_machine_id.as_ref(), Some(&laptop));
+    let markers = published_bodies(&store, &task);
+    assert_eq!(markers.len(), 1);
+    assert!(markers[0].contains(claim.id.as_str()));
     assert_eq!(ownership.owner.unwrap().machine.id, Some(mini.clone()));
     store
         .record_move_stopped(&task, "{\"step\":\"implement\"}")

@@ -201,7 +201,12 @@ lf machine hub mini                              # exchange this Machine's plan 
 ```
 
 `--machine` runs the entire command on the target host in its saved repository.
-`lf machine remove mini` forgets the connection without stopping work running
+`lf open` is the exception: it always opens here and attaches to the
+conversation on the other Machine
+([Open a Task that runs on another Machine](workspaces.md#open-a-task-that-runs-on-another-machine)).
+A Task that runs on mini needs no `--machine` to inspect: `lf task status`,
+Desktop and the phone read its files, changes, shells and Sessions from mini
+through your local server. `lf machine remove mini` forgets the connection without stopping work running
 there. Machines that clone the same repository share its plan through Git; a
 hub makes that take seconds. See
 [Share the plan](work.md#share-the-plan-with-your-team).

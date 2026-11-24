@@ -34,8 +34,32 @@ lf open --task ENG-123 --tab --host tmux
 `--host desktop|rex|cmux|herdr|tmux|terminal` selects the host explicitly (no
 silent fallback on failure). Plain terminals support `--here`; when `--tab`
 isn't supported by the host, `lf` prints the command to run in a terminal you
-open yourself. `--server <endpoint>` targets a specific Rex Unix socket. Rex
-workspaces can reach a Task's remote Machine; Herdr and cmux stay local.
+open yourself. `--server <endpoint>` targets a specific Rex Unix socket.
+
+## Open a Task that runs on another Machine
+
+```bash
+lf open --task LOO-12 --tab                        # LOO-12 runs on mini; the tab opens here
+lf open --task LOO-12 --session session_9f2 --tab  # one of LOO-12's Sessions, on mini
+lf open --machine code-1 --session session_4ab --tab  # a Session that exists only on code-1
+```
+
+`lf open` always presents on the Machine you type it on. The tab opens in your
+host here and attaches to the conversation where it runs, through this
+Machine's Loopflow server; every host (Desktop, Rex, cmux, Herdr, tmux) works
+the same way. `lf --machine code-1 open …` means the same as
+`lf open --machine code-1 …`: it never runs `lf open` on the other Machine.
+
+The Task names its Machine, so `--task` needs no `--machine`. A checkout of the
+Task left on this Machine from before it moved is never opened in its place.
+Use `--machine` for a Session with no Task here, such as one started on a
+rental.
+
+| What happens | You see |
+|---|---|
+| The Machine doesn't answer | The open fails naming the Machine, with `ssh <route> lf server status` to check it; retry the same command |
+| The Task has no checkout yet | **Not started**; `lf task run LOO-12` starts it |
+| The Task moves while its tab is open | The tab stays on the Session it opened, on the old Machine, until that Session ends; `lf open --task LOO-12` again opens it where it is now |
 
 ## Open a workspace overview
 

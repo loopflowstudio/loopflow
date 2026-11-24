@@ -150,6 +150,20 @@ Passed over: the earlier `expected_owner` compare-and-swap on 14 operations with
 - **Mobile iOS (`swift/LoopflowiOS`):** `TaskWorkspaceView.swift`, `RemoteMobileClient.swift`, `SessionLink.swift`, `SessionView.swift` (shared terminal chrome).
 - **Docs:** `docs/surfaces.md`, `docs/workspaces.md`, `docs/server.md`, `docs/ops.md`, `docs/lf-reference.md`, `rust/loopflow/src/server/README.md`, `docs/dev/machines.md` (updating the client-side SSH note on line 247-252 and server routing description).
 
+## Docs written ahead (write-docs, 2026-11-23)
+
+Describe the intended behavior; implementation must match them or change them.
+
+- `docs/workspaces.md` — new "Open a Task that runs on another Machine" (`lf open --task`, `--task --session`, `--machine --session`, both flag orders, failure table); dropped "Rex can reach remote, Herdr and cmux stay local".
+- `docs/surfaces.md` — new "A Task on another Machine" under Loopflow Desktop (four views, Not started / unreachable / moved / draft-on-move table).
+- `docs/server.md` — server reaches other Machines' Tasks; phone gets Session, Files, Changes, Shell over one pairing.
+- `docs/ops.md` — `--machine` exception for `lf open`; remote Tasks need no `--machine` to inspect.
+- `docs/dev/machines.md` — replaced the client-side transport paragraph with server routing.
+- `rust/loopflow/src/server/README.md` — "Tasks on another Machine" (routed vs local table, portable Task selector, peer pool, subscription re-route, `not_started` / `machine` errors), revision 10, `task.shell.*` + `task.files.watch` rows, routed terminal tickets. Heading is now `## Local protocol` (no revision number); stale `#local-protocol-revision-7` links fixed there and in `docs/dev/server.md`.
+- Slice 2 must make `documented_commands` pass: the `lf open --machine code-1 --session …` example in `docs/workspaces.md` fails Clap until `OpenSelection.machine` exists.
+
+**Open question (from writing the docs):** after a move, a Shell already open keeps running on the old Machine, but reattaching by `shell_id` (Desktop relaunch, phone reopen) routes by Task to the new owner, which answers `not_found`, so a still-running shell becomes unreachable and is never closed. Should `task.shell.attach` reach the Machine that started the shell (record `machine` beside `shell_id` on the client, or keep a local receipt of where each shell started), or should a move close the old Machine's Task shells? The docs currently say "reopened after the move, it shows ended and offers **New shell**".
+
 ## Absent and error states
 
 | State | Wire `code` & `data` | CLI (`lf open` / `lf task ...`) | Desktop | Mobile |

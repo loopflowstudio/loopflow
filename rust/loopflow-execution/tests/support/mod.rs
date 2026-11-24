@@ -28,15 +28,6 @@ pub fn seed_store(home: &Path) {
     test_database::copy(&home.join("loopflow.db")).expect("copy fixture store");
 }
 
-/// A Machine server over the seeded store. Started first, the server would
-/// create and migrate its own store, and a fixture opening it meanwhile waits
-/// on that write until SQLite reports it busy.
-#[allow(dead_code)] // Shared helper compiled into suites without a Machine server.
-pub fn start_machine_server(home: &Path) -> loopflow_test_support::MachineServer {
-    seed_store(home);
-    loopflow_test_support::MachineServer::start(loopflow_test_support::lf_binary(), home)
-}
-
 /// Agent shells such as Codex export the developer's real provider home
 /// (`CODEX_HOME=~/.codex`). An `lf` fixture child that inherits it would swap
 /// fixture logins into that home, so every test binary drops both variables
@@ -625,6 +616,8 @@ fn register_task_fixture(
     base_commit: &str,
 ) -> RegisteredTask {
     let worktree = &recorded_checkout(worktree);
+    // Register fixture Tasks before starting the Machine server so its startup
+    // and this open cannot compete for the migration write lock.
     seed_store(home);
     let runtime = tokio::runtime::Runtime::new().expect("task test runtime");
     let store = runtime

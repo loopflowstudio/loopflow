@@ -416,14 +416,11 @@ async fn project_planning(store: &SharedStore, wave: &Wave) -> Reading<Option<Pr
         let Some(project) = store.project_of_wave(wave.id()).await? else {
             return Ok(None);
         };
-        let unbound = (project.tracker_id.is_none() && !wave.is_retired())
-            .then(|| {
-                loopflow_execution::ops::tracker::unbound_project(
-                    Path::new(wave.repo()),
-                    wave.slug(),
-                )
-            })
-            .flatten();
+        let unbound = if project.tracker_id.is_none() && !wave.is_retired() {
+            loopflow_execution::ops::tracker::unbound_project(Path::new(wave.repo()), wave.slug())
+        } else {
+            None
+        };
         Ok(Some(ProjectSummary {
             unbound,
             sync: store.project_tracker_sync(&project.id)?,

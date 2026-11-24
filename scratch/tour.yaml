@@ -1,0 +1,24 @@
+at: dbe67790d2d51ff4b17a980b4184de020943e4df
+first:
+  - path: docs/work.md
+    why: the refusal, rehome and abandon as people see them
+  - path: rust/loopflow-storage/src/sqlite/children.rs
+    why: ChildPolicy, complete_task_now, rehome, descendant tree
+  - path: rust/loopflow-execution/src/ops/task.rs
+    why: task_complete order of refusals and the live guard
+  - path: rust/loopflow/src/lf/mod.rs
+    why: the --children flag and help
+  - path: rust/loopflow/src/lf/commands/mutation.rs
+  - path: rust/loopflow/src/lf/commands/write.rs
+  - path: swift/LoopflowMac/Views/TaskWorkView.swift
+    why: Desktop Complete… dialog with both layouts
+  - path: swift/LoopflowMac/WorkModel.swift
+  - path: rust/loopflow/tests/session_cli_tests.rs
+    why: end-to-end CLI behavior of every choice
+  - path: rust/loopflow-execution/src/ops/task/tests.rs
+    why: live work blocks abandon; idle conversation does not
+hide:
+  - path: tests/fixtures/dto/server_schema.json
+    why: regenerated from lf server describe
+  - path: scratch/concept-review.html
+    why: earlier design review page

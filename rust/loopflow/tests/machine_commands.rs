@@ -4726,13 +4726,8 @@ fn server_routed_task_workspace() {
     assert_eq!(scoped["entries"][0]["id"], session);
     // Read here, mini's record names this Machine's Task and opens with `lf open`.
     let record = &scoped["entries"][0];
-    assert!(
-        record["task_ids"]
-            .as_array()
-            .unwrap()
-            .contains(&Value::from(task.as_str())),
-        "{record}"
-    );
+    assert_eq!(record["task_ids"][0], task.as_str(), "{record}");
+    assert_eq!(record["work"]["id"], task.as_str(), "{record}");
     assert!(!record.to_string().contains("lf resume"), "{record}");
     let argv = record["open_argv"].as_array().unwrap();
     assert_eq!(argv[1..3], ["open", "--task"], "{record}");
@@ -5948,6 +5943,97 @@ fn a_served_resume_opens_the_session_on_your_session_machine_as_a_typed_operatio
         ]
     );
     assert_eq!(opened["workspace"], record["workspace"]);
+}
+
+/// A served `session.new` or a resume naming a Session and its Task, for a
+/// Task mini runs, is prepared on mini and read here under this Machine's Task.
+#[test]
+fn a_served_task_conversation_write_is_prepared_where_the_task_runs() {
+    use loopflow::lf::commands::write::Write as Mutation;
+    use loopflow::server::wire::Operation;
+    use loopflow_execution::machine::client::Connection;
+
+    let mut answer: Value = serde_json::from_str::<Vec<Value>>(include_str!(
+        "../../../tests/fixtures/dto/sessions.json"
+    ))
+    .unwrap()
+    .remove(0);
+    let session = answer["id"].as_str().unwrap().to_owned();
+    // Mini knows the Task under its own ID.
+    let peer_task = loopflow_execution::durable::TaskId::new().to_string();
+    answer["task_ids"] = serde_json::json!([peer_task]);
+    answer["work"]["id"] = peer_task.as_str().into();
+    answer["workspace"]["task_id"] = peer_task.as_str().into();
+    for (kind, write) in [
+        (
+            "session.new",
+            Box::new(|directory: std::path::PathBuf, task: String, id: String| {
+                Mutation::SessionNew {
+                    directory,
+                    request_id: "reset-on-mini".into(),
+                    id,
+                    task: Some(task),
+                    agent: None,
+                }
+            }) as Box<dyn Fn(std::path::PathBuf, String, String) -> Mutation>,
+        ),
+        (
+            "session.resume",
+            Box::new(|directory, task, id| Mutation::SessionResume {
+                directory,
+                id: Some(id),
+                task: Some(task),
+                wave: None,
+                agent: None,
+            }),
+        ),
+    ] {
+        let fixture = preview_machines();
+        let (plan, task) = task_on_mini(&fixture);
+        let mut answer = answer.clone();
+        answer["workspace"]["machine_id"] =
+            loopflow_execution::store::machines::local_machine(&plan.remote)
+                .unwrap()
+                .id
+                .as_str()
+                .into();
+        let record = fixture.root.path().join("entry");
+        fs::create_dir_all(&record).unwrap();
+        answering_entry(&fixture, &record, &answer);
+        let (server, socket) = served(&fixture);
+        let mut connection = Connection::open_at(Path::new(&socket)).unwrap();
+        connection
+            .set_read_timeout(Some(std::time::Duration::from_secs(20)))
+            .unwrap();
+        let opened = connection
+            .request(Operation::Write(write(
+                plan.local_path.clone(),
+                task.to_string(),
+                session.clone(),
+            )))
+            .unwrap()
+            .result;
+        drop(server);
+
+        let (_, request) = entry_input(&record);
+        assert_eq!(request["operation"]["kind"], kind);
+        assert!(request["operation"]["task"].is_string(), "{request}");
+        assert_eq!(opened["task_ids"][0], task.as_str(), "{kind}: {opened}");
+        assert_eq!(opened["work"]["id"], task.as_str(), "{kind}");
+        assert_eq!(opened["workspace"]["task_id"], task.as_str(), "{kind}");
+        let argv: Vec<&str> = opened["open_argv"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|arg| arg.as_str().unwrap())
+            .collect();
+        assert_eq!(argv[1..3], ["open", "--task"], "{kind}: {opened}");
+        assert_eq!(
+            argv[4..],
+            ["--session", session.as_str(), "--here"],
+            "{kind}"
+        );
+    }
 }
 
 /// The held terminal of `owner` under `home`, as the owner names its socket.

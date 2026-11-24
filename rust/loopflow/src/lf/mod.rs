@@ -506,7 +506,7 @@ pub enum Commands {
         /// A Session or Task ID; omit it with `--wave` or `--repo`
         target: Option<String>,
         message: String,
-        /// Print the saved steer, or for a Task its thread with the entry
+        /// Print the saved steer or the Task delivery receipt
         #[arg(long = "json", id = "steer_json")]
         json: bool,
     },

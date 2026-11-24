@@ -401,8 +401,9 @@ ordinary retry, usage, binding and review behavior belong in
 `planning_reconnect_tests` runs public work-watch and Graph-boundary recovery against
 synthetic Linear on Linux, with disposable TLS trust. It covers lost replies,
 independent acquisition during failed delivery, local buffering and retained execution.
-The peer implements team deltas with current revision timestamps. Graph acquisition
-waits for a turn/step boundary; only watchers retry on the 30–240-second clock.
+The peer implements team deltas with current revision timestamps. During an agent
+step, a Task Graph shares the server’s owner poll and keeps checking if the
+server exits.
 Run these Linux fixtures when changing Linear fetches, even if macOS checks pass.
 `planning_setup_tests` proves tracker selection and that the released `provider: git`
 reads as no tracker. `machine_commands::the_later_change_shows_on_both_machines_through_the_hub`

@@ -82,7 +82,7 @@ where
     }
 }
 
-async fn sync_saved(store: &Store, repo: &str, saved: &ActionOwner) {
+pub(crate) async fn sync_saved(store: &Store, repo: &str, saved: &ActionOwner) {
     let attempt = async {
         if !super::tracker::connected(repo) {
             return super::plan_carriers::send(store, repo)

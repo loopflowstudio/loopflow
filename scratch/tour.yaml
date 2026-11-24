@@ -1,5 +1,7 @@
-at: dbdcbf1d7b8a8ea04bca95ff071c0de1ce5fcdd1
+at: 4185bb97edc2444d0807e7817ea729046bd60fca
 first:
+  - path: docs/telemetry.md
+    why: Search collected conversations after a rental disappears
   - path: docs/ops.md
     why: Rent, price, update and return a Machine
   - path: docs/subscriptions.md
@@ -8,8 +10,6 @@ first:
     why: Which remote settings update and which edits stay
   - path: docs/work.md
     why: Join a Wave and choose its Project
-  - path: docs/telemetry.md
-    why: Read a collected Session’s transcript, origin and token totals
   - path: scratch/plan.md
     why: Built behavior, Linux trials and remaining work
   - path: rust/loopflow/src/lf/commands/machine.rs
@@ -54,16 +54,20 @@ first:
     why: Receive the caller’s profile during server setup
   - path: rust/loopflow-storage/src/sqlite/task_ownership.rs
     why: Write destination ownership and its outgoing marker together
+  - path: rust/loopflow-storage/src/session_record.rs
+    why: Identify the Machine that recorded a search hit
   - path: rust/loopflow-storage/src/migrations/rental_session_history.sql
     why: Keep old copies and track which Sessions changed
   - path: rust/loopflow-storage/src/sqlite/machine_records.rs
-    why: Select changed Sessions across state and history and read copies by origin
+    why: Select copied transcripts by input time and Work
+  - path: rust/loopflow/src/lf/commands/history_transcript.rs
+    why: Search local and copied turns under one limit
   - path: rust/loopflow-execution/src/machine_records.rs
     why: Collect turns and capture files and checkpoint a completed import
   - path: rust/loopflow-execution/src/rental/recovery.rs
     why: Collect on the server’s recovery pass and finish at give-back
   - path: rust/loopflow/tests/machine_commands.rs
-    why: Retry placement after a lost connection and read a lost rental’s transcript after restart
+    why: Exercise placement retries and transcript search after sandbox loss
   - path: rust/loopflow/src/lf/commands/install/published.rs
     why: Find the Linux counterpart and verify its archive
   - path: rust/loopflow-execution/src/installation/server.rs

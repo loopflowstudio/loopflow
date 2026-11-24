@@ -500,10 +500,14 @@ case names one operation, including distinct claim/unassign and pin/unpin writes
 | `graph.run` | `lf graph <name>` (`lf -b`, detached; `task.run` keeps the Task spelling) | write; `engine::graph::run` (the Process carrying the Graph) |
 | `graph.run.get` | `lf graph show <id>` | read |
 | `session.history.get` | `lf session history show <session-id>` | read; rendered history |
+| `machine.status` | `lf machine status <id> --json` | live identity-checked connection or ended rental, up to four concurrent probes |
 | `machine.self`, `.list`, `.doctor` | `lf machine self`, `lf machine list`, `lf machine doctor` (`lf doctor`) | read |
 | `work.resolve` | `lf open <url> --link`; a `work` noun would shadow the builtin `work` skill | read |
 | `config.catalog`, `.settings`, `.get`, `.explain` | `lf config catalog`, `lf config settings`, `lf config get`, `lf config explain` | `engine::config` |
 | `config.set`, `.unset` | `lf config set`, `lf config unset` (`lf set`, `lf unset`) | `engine::config` |
+| `config.scope` | `lf config scope --json` | read or subscribe to Global, a checkout or a Wave |
+| `config.preview`, `config.edit` | Desktop Settings | preview or apply a checked file edit |
+| `config.promote` | Desktop Settings | preview, confirm, resume, dismiss or undo a declaration move |
 | `config.theme` | none; the Machine's `theme:`, read by Desktop and the phone | `engine::config` |
 | `pr.publish`, `.open`, `.submit`, `.arm`, `.abandon`, `.reconcile`, `.request_review` | `lf pr publish`, `lf pr open`, `lf pr submit`, `lf pr arm`, `lf pr abandon`, `lf pr reconcile`, `lf pr request-review` | write; `engine::pr::publish`, `open`, `submit`, `arm`, `abandon`, `reconcile`, `request_review` |
 | `pr.land` | `lf pr land` (`lf land`) | write; `engine::pr::land` (detached; the Process carrying the landing) |
@@ -541,8 +545,19 @@ the phone's `view.select` Task list and its creation destinations all read it.
   {value}`, `config.unset` and `config.explain` take `{destination, key}`, where
   a destination names an owner (`personal_global`, `shared_repo {repo}`,
   …), never a file plus a scope. `config.theme {value}` reads or sets the
-  serving Machine's `theme:`. A failed or uncertain save is never replayed; setting values are
-  omitted from request telemetry.
+  serving Machine's `theme:`. The reply includes the entries for a checked
+  edit and Undo. `config.scope {directory, wave, target}` reads or subscribes
+  to effective values and the authored slots in applicable files.
+  A null directory selects Global. A target selects general work, a Skill or
+  an authored Graph step. Each editable slot names its key and includes the
+  YAML path components and values to pass as `expected` to `config.preview`
+  or `config.edit`. The first renders the patch. The second checks the
+  entries under the file lock and returns the before and after entries.
+  `config.promote` takes the source destination, key, inspected Wave and
+  action. Confirm takes the reviewed patches, projected result and receipt.
+  A changed result returns a fresh preview. Resume finishes an interrupted
+  two-file move if the declarations still match. Dismiss clears the pending
+  move and keeps both files as they are. Request telemetry omits setting values.
 - A read uses the existing `Read` shape and answers with the JSON the command
   prints, serialized once. A command that prints bare text
   (`config repository --path`) answers a JSON string. Every shared read is

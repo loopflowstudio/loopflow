@@ -359,6 +359,78 @@ desktop focus -p session`; `desktop capture -p session` reads the provider.
 - Stand-in providers exit at once here, so a Session pane shows "Process
   exited" under its opening overlay. That is the stand-in, not the pane.
 
+# Settings window on an unlocked display
+
+With the display unlocked, `open -n -g` and the hook still work behind the
+person's windows, and `screencapture -x -o -l <window number>` returns the
+composited Settings window (Forms included) even while it is not frontmost;
+`snap` still comes back white. Get the number from a `swift` script calling
+`CGWindowListCopyWindowInfo` filtered to the app's PID. A pane's window title
+changes a few seconds after `return`; wait about 4 s before capturing. Dark:
+`click 0 898 126` on Appearance at 960x648 is the Dark segment (`theme:` in
+`config.yaml` confirms). `size 0 1400 900` gives the wide layout; the window
+will not go narrower than about 760 pt.
+
+Unlocked, the first switch click lands: don't send it twice, or the row
+toggles back. A Reset under a row moves the rows below it, so read positions
+again from a fresh capture. Release channel is the `stream` key. A Wave
+destination's Applies to menu won't open through the hook, so drive a Wave
+edit over the socket with `config.edit`
+(`{"kind":"shared_wave","repo":…,"wave":…}`, `expected` the entries the
+edit assumes: `[]` for an absent key).
+
+# Settings window with the screen locked
+
+The ⌘, window (`menu Settings…`) is a `NavigationSplitView` of grouped
+Forms. Locked, `snap`, `frame` and a `CALayer.render` of the frame all come
+back white below the title: the rows draw through RenderBox layers. Read it
+as text instead.
+
+- `views <window>` prints each view's window-space center, every text
+  field's value (row values are `SelectionTextField`s) and the form's clip
+  origin. A row whose y exceeds the window height is scrolled off; `click`
+  there lands outside the window.
+- Sidebar rows ignore hook clicks. Navigate with search:
+  `field Search settings|context.paste`, then `return <window title>` opens
+  the first match. An exact catalog key or title ranks first. The form's
+  `NSClipView origin` in `views` shows the scroll in Project & Wave Config.
+- Switch clicks toggle both ways on Settings rows (`yolo` On→Off wrote
+  `yolo: false`). The first click after a launch is often swallowed.
+- Use the placeholder printed by `views` in `field <placeholder>|<text>`,
+  then `return <title>` to commit. A rejected value shows its error below
+  the field.
+- An explicit null in a text row shows as the placeholder `Explicit null`;
+  choice rows put it in a popup, which `views` cannot read.
+- Interrupted moves: with the server stopped, write
+  `$LF_HOME/settings-moves/<sha256 of [destination, key] JSON>.json` holding
+  `{"receipt": <a config.promote preview's review.receipt>, "undo": false}`,
+  then start it again. `config.scope` offers `resume` on that slot.
+- The Undo notice and the Refresh button are missing from `tree`, and the
+  window's `undoManager` is not the one SwiftUI registers with. Click Refresh
+  by position (the first click after a change is often swallowed).
+  `frame` does draw the notice (bottom centre, "Reset <title> · Undo", gone
+  after six seconds), but hook clicks on its Undo do nothing and `menu Undo`
+  answers `refused` (the window is never key). `ContextSettingsWorkflowTests`
+  performs that Undo.
+- `field <placeholder>|` with nothing after the bar empties a field; Return
+  then resets that declaration (a number row included).
+- Killing the private server (by PID) shows "Loopflow server unavailable or
+  owned by another account" at the top of an open Settings pane; the last
+  reading stays and a typed edit is dropped. Start it again and the pane
+  reconnects by itself within about 20 s; poll `tree 1` for that line.
+  The server's PID: `ps -E -p <pid>` shows its `LF_HOME`.
+- Personal config edits are in `$LF_HOME/config.yaml`. Project & Wave Config
+  writes to the selected destination. Hand edits and a broken
+  file reach the open pane within a few seconds.
+- `size 1 700 480` clamps to 760x592. `views 1` then gives the sidebar
+  wrapper (0–228) and each form section's frame (`_NSGraphicsView`), which
+  shows overlap without a display; how it looks still needs one.
+- Project & Wave Config opens on the active checkout. Menus (Applies to,
+  Save in) don't open through the hook. `ContextSettingsWorkflowTests`
+  drives destination changes.
+- The hook's `tree` and `views` block the main thread for seconds; the
+  matching "main thread stalled" lines in `lf.log` are the hook's.
+
 # Driving sheets and captures with the screen locked
 
 One capture per launch is slow. For a run with many states, add a loop to

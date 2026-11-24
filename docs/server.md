@@ -101,6 +101,10 @@ answer. When a Task moves, its views reload from the new Machine. A Shell
 already open keeps running on the old one; reopened after the move, it shows
 ended and offers **New shell**.
 
+In Desktop, open **Settings → Mobile** (**⌘,**) to toggle phone access, check
+readiness, or scan the pairing QR code with your phone. The green sidebar dot
+and pairing code follow the same status while Settings is open.
+
 Setup requires a user-owned, untagged Machine with MagicDNS and HTTPS
 certificates enabled. For a custom daemon socket, set `TS_SOCKET` for the
 setup command and for an `lf server run` you start yourself. Service

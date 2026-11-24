@@ -222,14 +222,16 @@ pub async fn resolve_target(
     }
     let probe = probe(&machine.route, forward_agent).await?;
     report_version(&machine.route, &probe.version);
-    let reached = probe.id?;
-    if reached != machine.id {
-        return Err(anyhow!(
-            "remote machine identity changed: expected {}, reached {reached}; remove and add the connection again",
-            machine.id
-        ));
-    }
+    verify_identity(&machine.id, probe.id?)?;
     Ok(machine)
+}
+
+pub fn verify_identity(expected: &MachineId, reached: MachineId) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        reached == *expected,
+        "remote machine identity changed: expected {expected}, reached {reached}; remove and add the connection again"
+    );
+    Ok(())
 }
 
 /// This Machine's durable identity.

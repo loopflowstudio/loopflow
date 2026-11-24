@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>LOO-1082 Concept Review — Looped Graphs, Task Wakeups, and Commit Push Defaults</title>
+<title>LOO-1082 Concept Review — Looped Graphs, Task Wakeups, Stopped Status, and Commit Push Defaults</title>
 <style>
   :root {
     --bg: #ffffff;
@@ -11,8 +11,6 @@
     --border: #d0d7de;
     --text: #1f2328;
     --muted: #59636e;
-    --accent: #0969da;
-    --accent-bg: #ddf4ff;
     --yes: #1a7f37;
     --yes-bg: #dafbe1;
     --no: #cf222e;
@@ -23,8 +21,6 @@
     --built-bg: #ddf4ff;
     --existing: #59636e;
     --existing-bg: #eaeef2;
-    --proposed: #6639ba;
-    --proposed-bg: #fbefff;
     --code-bg: #f0f3f6;
     --term-bg: #161b22;
     --term-text: #e6edf3;
@@ -42,8 +38,6 @@
       --border: #30363d;
       --text: #e6edf3;
       --muted: #8b949e;
-      --accent: #58a6ff;
-      --accent-bg: rgba(56, 139, 253, 0.15);
       --yes: #3fb950;
       --yes-bg: rgba(46, 160, 67, 0.18);
       --no: #f85149;
@@ -54,8 +48,6 @@
       --built-bg: rgba(56, 139, 253, 0.16);
       --existing: #8b949e;
       --existing-bg: rgba(139, 148, 158, 0.16);
-      --proposed: #d2a8ff;
-      --proposed-bg: rgba(163, 113, 247, 0.18);
       --code-bg: #1c2128;
       --term-bg: #010409;
     }
@@ -69,7 +61,7 @@
     color: var(--text);
     font: 15px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
   }
-  main { max-width: 1060px; margin: 0 auto; }
+  main { max-width: 1080px; margin: 0 auto; }
   header {
     border-bottom: 1px solid var(--border);
     padding-bottom: 1.25rem;
@@ -98,7 +90,7 @@
     padding: 0.12em 0.38em;
     border-radius: 5px;
   }
-  .lead { font-size: 1rem; color: var(--muted); max-width: 82ch; }
+  .lead { font-size: 1rem; color: var(--muted); max-width: 86ch; }
   .status-bar {
     display: flex;
     flex-wrap: wrap;
@@ -117,18 +109,16 @@
   .badge-no { color: var(--no); background: var(--no-bg); }
   .badge-built { color: var(--built); background: var(--built-bg); }
   .badge-existing { color: var(--existing); background: var(--existing-bg); }
-  .badge-proposed { color: var(--proposed); background: var(--proposed-bg); }
   .badge-warn { color: var(--warn); background: var(--warn-bg); }
 
   .callout {
     background: var(--surface);
     border: 1px solid var(--border);
-    border-left: 4px solid var(--no);
+    border-left: 4px solid var(--yes);
     border-radius: 8px;
     padding: 1rem 1.2rem;
     margin: 1rem 0 1.5rem;
   }
-  .callout.proposed { border-left-color: var(--proposed); }
   .callout-title {
     font-weight: 700;
     margin-bottom: 0.35rem;
@@ -241,13 +231,13 @@
   .q-head { font-weight: 700; margin-bottom: 0.4rem; }
   .opts { list-style: none; padding: 0; margin: 0.45rem 0 0; }
   .opts li {
-    padding: 0.3rem 0.5rem;
+    padding: 0.35rem 0.55rem;
     border-radius: 6px;
     margin-bottom: 0.25rem;
   }
   .opts li.chosen {
-    background: var(--proposed-bg);
-    border: 1px solid color-mix(in srgb, var(--proposed) 35%, transparent);
+    background: var(--built-bg);
+    border: 1px solid color-mix(in srgb, var(--built) 35%, transparent);
   }
   .opt-key { font-weight: 700; font-family: ui-monospace, monospace; margin-right: 0.35rem; }
   ul.tight { margin: 0.3rem 0 0.7rem; padding-left: 1.25rem; }
@@ -257,14 +247,14 @@
 <body>
 <main>
   <header>
-    <div class="eyebrow">Concept Review · LOO-1082 · Post-Build (HEAD 2c05f47fc4 vs base 2aa9964894)</div>
-    <h1>Looped Graph Execution, Task Wakeups, and Commit Push Defaults</h1>
+    <div class="eyebrow">Concept Review · LOO-1082 · Full-Branch Review (HEAD d106aacf92 vs base 250e266b4a)</div>
+    <h1>Looped Graph Execution, Task Wakeups, Stopped Status, and Commit Push Defaults</h1>
     <p class="lead">
-      <strong>Area reviewed:</strong> Running looped Graphs on a Task and publishing branch checkpoints — soft pass sizing and loop decision prompts (<code>kickoff</code>, <code>implement</code>, <code>realign</code>, <code>loop-or-next</code>, <code>build.yaml</code>, <code>graph/output.rs</code>, <code>commands/graph.rs</code>), quiet Task conversation wakeups (<code>harness/task_updates.rs</code>, <code>store/task_work.rs</code>), stopped/blocked Graph reporting (<code>ops/task_execution.rs</code>, <code>ops/task_actions.rs</code>, <code>commands/waves.rs</code>), and default-push manual/step commits (<code>ops/commit.rs</code>, <code>engine/checkout.rs</code>, <code>lf/mod.rs</code>, <code>RegistryQuery.swift</code>).
+      <strong>Area reviewed:</strong> Running looped Graphs on a Task, reporting their progress and stops, and publishing branch checkpoints — soft pass sizing and loop decision prompts (<code>kickoff</code>, <code>implement</code>, <code>realign</code>, <code>loop-or-next</code>, <code>build.yaml</code>, <code>graph/output.rs</code>, <code>graph/instructions.rs</code>, <code>commands/graph.rs</code>, <code>task_graph.rs</code>), quiet Task conversation wakeups (<code>harness/task_updates.rs</code>, <code>store/task_work.rs</code>, <code>sqlite/task_work.rs</code>), stopped/blocked Graph status (<code>ops/task_execution.rs</code>, <code>process.rs</code>, <code>ops/task_actions.rs</code>, <code>ops/task/snapshot.rs</code>, <code>commands/waves.rs</code>), and default-push manual/step commits (<code>ops/commit.rs</code>, <code>engine/checkout.rs</code>, <code>git/mod.rs</code>, <code>ops/error.rs</code>, <code>lf/mod.rs</code>, <code>RegistryQuery.swift</code>).
     </p>
     <div class="status-bar">
-      <span class="badge badge-built">Built &amp; QA'd on branch: pass sizing, quiet Task wakeups, default-push lf commit</span>
-      <span class="badge badge-proposed">Proposed next pass in scratch/plan.md: truthful Blocked status in project_execution</span>
+      <span class="badge badge-yes">All 6 pairings align on HEAD</span>
+      <span class="badge badge-built">Built, compressed &amp; QA'd: pass sizing, quiet wakeups, stopped status, default-push commit</span>
       <span class="badge badge-existing">Dropped by steers: max_loop_passes cap &amp; scratch-only commit skip</span>
     </div>
   </header>
@@ -277,49 +267,47 @@
           <th style="width: 24%;">Product concept (person knows &amp; does)</th>
           <th style="width: 31%;">Code concept (types, records, APIs)</th>
           <th style="width: 8%;">Lines up?</th>
-          <th style="width: 37%;">State on HEAD / what is wrong</th>
+          <th style="width: 37%;">State on HEAD (<code>d106aacf92</code>)</th>
         </tr>
       </thead>
       <tbody>
         <tr>
           <td>
-            <strong>Seeing why a Graph blocked or failed after a step succeeded</strong><br>
-            When a loop decider returns <code>blocked</code> (e.g. passes shrank into non-converging micro-increments) or a post-step <code>lf commit --step</code> push fails, <code>task-session</code>, <code>lf task status</code>, <code>lf wave status</code>, and Desktop all report <code>blocked</code> with the recorded reason instead of saying <code>idle</code> and recommending <code>lf task run</code>.
-          </td>
-          <td>
-            <span class="badge badge-built">Built</span> <code>harness::task_updates::RunObservation::report</code> attaches <code>graph.run.error</code> on settled runs.<br>
-            <span class="badge badge-existing">Existing</span> <code>ops::task_execution::project_execution()</code> checks only <code>latest.run.result()</code> when both processes are dead.
-          </td>
-          <td><span class="badge badge-no">No</span></td>
-          <td>
-            <strong>Biggest mismatch — two readers of one settled Graph disagree:</strong><br>
-            When <code>realign</code> exits <code>0</code> with <code>{"decision":"blocked"}</code> (<code>graph.run</code> exits <code>3</code>, <code>error = "Graph is blocked: …"</code>) or <code>lf commit --step</code> fails to push after <code>implement</code> exits <code>0</code> (<code>graph.run</code> exits <code>1</code>, <code>error = "…The commit stays local…"</code>), <code>task-session</code> hears the exact error and is told <em>"Read current Task status before acting"</em> — then <code>lf task status</code> reports <code>execution: idle</code>, drops <code>graph.run.error</code>, and recommends <code>lf task run</code>.
-          </td>
-        </tr>
-        <tr>
-          <td>
             <strong>Substantial end-to-end passes (soft guidance, no hard cap)</strong><br>
-            <code>kickoff</code> plans 2–4 passes (aim ≤ 5); <code>implement</code> keeps building while the next item is the same kind of work, pausing for decisions/review or ~2k non-test lines; <code>realign</code> regroups the rest; deciders see the pass count and how many steps iterating repeats, may continue past 5, and return <code>blocked</code> if passes stop converging.
+            <code>kickoff</code> groups larger changes into 2–4 passes (aim ≤ 5); <code>implement</code> keeps building cohesive work, pausing for decisions/review or ~2k non-test lines; <code>realign</code> regroups the rest; deciders see the pass count and repeated step count, may continue past 5, and return <code>blocked</code> if passes stop converging.
           </td>
           <td>
-            <span class="badge badge-built">Built</span> <code>kickoff.md</code>, <code>implement.md</code>, <code>realign.md</code>, <code>loop-or-next.md</code>, <code>build.yaml</code>, <code>docs/orchestration.md</code>, <code>graph/output.rs</code> (<code>DECISION_CRITERIA</code>), <code>graph/instructions.rs</code>, <code>commands/graph.rs:1270</code> (<code>Decision pass {pass}. Iterating repeats {steps} steps, back to {target}.</code>).
+            <span class="badge badge-built">Built</span> <code>kickoff.md</code>, <code>implement.md</code>, <code>realign.md</code>, <code>loop-or-next.md</code>, <code>build.yaml</code>, <code>docs/orchestration.md</code>, <code>graph/output.rs</code> (<code>DECISION_CRITERIA</code>, <code>append_step_instructions</code>), <code>graph/instructions.rs</code>, <code>commands/graph.rs</code> (<code>Decision pass {pass}. Iterating repeats {steps} steps, back to {target}.</code>), <code>task_graph::step_name</code>.
           </td>
           <td><span class="badge badge-yes">Yes</span></td>
           <td>
-            Built, golden-tested, and QA'd on a 3-pass real Claude Haiku loop. <code>return_target</code> guarantees <code>target &lt; index</code> so <code>steps ≥ 2</code> always, and nested loops flatten cleanly (<code>realign</code> repeats 3 steps; <code>concept-review</code> repeats 6).
+            Built, golden-tested, and QA'd on a 3-pass Claude Haiku loop. <code>return_target</code> guarantees <code>steps ≥ 2</code>; <code>task_graph::step_name</code> shares one naming rule with Graph position; <code>ConcreteXor::paths</code> uses <code>BTreeMap</code> so XOR order matches prompts and saved node numbers everywhere.
           </td>
         </tr>
         <tr>
           <td>
             <strong>Task conversation wakeups</strong><br>
-            An idle <code>task-session</code> stays quiet while its Task takes up a Graph and runs through steps, then wakes once when the Graph settles with its outcome, last step, and any error (or when a comment, steer, PR merge, or close arrives).
+            An idle <code>task-session</code> stays quiet while its Task takes up a Graph and advances through steps, then wakes once when the Graph settles with its outcome, last step, and recorded error (or when a comment, steer, PR merge, or close arrives).
           </td>
           <td>
-            <span class="badge badge-built">Built</span> <code>store::task_work::settled_task_progress</code> holds <code>previous_position</code> while any run lacks an observed outcome or its carrier lives; <code>harness::task_updates::write_task</code> suppresses <code>At { step: "start" }</code> take-up, reports settled runs once with <code>graph.run.error</code>, and keeps saved reading format compatible.
+            <span class="badge badge-built">Built</span> <code>sqlite::task_work::task_progress_records</code> reads position and runs in one snapshot; <code>store::task_work::settled_task_position</code> holds <code>previous</code> while any run is unsettled or its carrier lives; <code>harness::task_updates::write_task</code> suppresses <code>At { step: "start" }</code> take-up, reports settled runs once with <code>graph.run.error</code>, and keeps saved readings compatible.
           </td>
           <td><span class="badge badge-yes">Yes</span></td>
           <td>
-            Built, unit-tested, and QA'd with a live idle Claude inbox (1 enqueue per settled run; 0 wakeups mid-run; SIGKILL'd runs report <code>unknown</code> once). Aligns a Task's own conversation with conducted child notices in the same file.
+            Built, unit-tested, and QA'd with a live idle Claude inbox (0 wakeups mid-run; 1 wake on settlement; SIGKILL'd runs report <code>unknown</code> once). Aligns a Task's own conversation with conducted child notices in the same file.
+          </td>
+        </tr>
+        <tr>
+          <td>
+            <strong>Seeing why a Graph blocked or failed after a step succeeded</strong><br>
+            When a decider returns <code>blocked</code> (e.g. non-converging micro-passes or missing input) or the Graph fails after successful worker turns (e.g. exhausted output validation), <code>task-session</code>, <code>lf task status</code>, <code>lf wave status</code>, and Desktop all report <code>blocked</code> with the recorded reason instead of saying <code>idle</code> and recommending <code>lf task run</code>.
+          </td>
+          <td>
+            <span class="badge badge-built">Built</span> <code>process::GraphHeld::BLOCKED_PREFIX</code> shared by <code>commands/graph.rs</code> and <code>ops::task_execution::stopped_execution</code>; <code>execution_of_latest_graph</code> filters step questions and limit-recovery records to <code>unfinished_step</code>; <code>harness::task_updates::RunObservation::report</code> carries <code>graph.run.error</code>.
+          </td>
+          <td><span class="badge badge-yes">Yes</span></td>
+          <td>
+            Built, unit- and integration-tested, and QA'd on live Codex runs (blocked stand-in at <code>check</code> and exhausted structured-output validation after 3 successful turns). <code>GraphOutcome::Waiting</code> (<code>lf pr land</code>) and unrecorded-exit kills stay <code>Idle</code> so <code>waiting_to_land</code> still projects <code>Waiting</code>.
           </td>
         </tr>
         <tr>
@@ -336,150 +324,140 @@
         <tr>
           <td>
             <strong>Manual &amp; step commits push branch checkpoints by default</strong><br>
-            <code>lf commit</code> commits and pushes on non-default branches (selected paths and clean-checkout retries included); default branch and detached HEAD stay local; <code>--no-push</code> opts out; a failed push leaves the commit local and prints git's error once.
+            <code>lf commit</code> commits and pushes on non-default branches (whole-tree, selected paths, and clean-checkout retries); default branch and detached HEAD stay local; <code>--no-push</code> opts out; a failed push keeps the commit local and prints Git's error once.
           </td>
           <td>
-            <span class="badge badge-built">Built</span> One owner <code>ops::commit::commit_workflow</code> + <code>CommitPush::{Local, OffDefaultBranch, Always}</code> used by CLI <code>lf commit</code>, <code>lf commit --step</code>, <code>engine::checkout::commit</code>, and <code>ops::release</code>; <code>OpsError::PushFailed</code> (served <code>unavailable</code>); Swift <code>ServedWrite.checkoutCommit</code> emits <code>--no-push</code> when <code>!push</code>.
+            <span class="badge badge-built">Built</span> One owner <code>ops::commit::commit_workflow</code> + <code>CommitPush::{Local, OffDefaultBranch, Always}</code> used by CLI <code>lf commit</code>, <code>lf commit --step</code>, <code>engine::checkout::commit</code>, and <code>ops::release</code>; shared <code>git::has_staged_changes</code>; <code>OpsError::PushFailed</code> (served <code>unavailable</code>); Swift <code>ServedWrite.checkoutCommit</code> emits <code>--no-push</code> when <code>!push</code>.
           </td>
           <td><span class="badge badge-yes">Yes</span></td>
           <td>
-            Built, schema-checked, and QA'd across default branch, detached HEAD, branch push, <code>--no-push</code>, selected paths, clean-checkout retry, and unreachable remote. Dead <code>ensure_draft_pr</code> / <code>create_draft_pr</code> / <code>sources</code> fields removed.
+            Built, schema-checked, and QA'd across default branch, detached HEAD, branch push, <code>--no-push</code>, selected paths (including literal filename <code>' '</code>), clean-checkout retry, unreachable remote, and Swift client against both older installed and branch servers.
           </td>
         </tr>
         <tr>
           <td>
             <strong>Step commit messages (<code>lf &lt;step&gt;: …</code>)</strong><br>
-            Finished skill steps commit via <code>commit-message</code> (routed to cheap agents) with the <code>lf &lt;step&gt;:</code> prefix.
+            Finished skill steps commit via <code>commit-message</code> (routed to cheap agents) with the <code>lf &lt;step&gt;:</code> prefix, best-effort so commit failures never halt a Graph.
           </td>
           <td>
-            <span class="badge badge-existing">Existing</span> <code>ops::commit::commit_step</code> + <code>commit-message</code> skill.
+            <span class="badge badge-existing">Existing</span> <code>ops::commit::commit_step</code> + <code>RunningGraph::commit_step</code> + <code>commit-message</code> skill.
           </td>
           <td><span class="badge badge-yes">Yes</span></td>
-          <td>Kept as-is per steer; now routes through <code>commit_workflow</code> with <code>CommitPush::OffDefaultBranch</code> and inherits readable <code>OpsError::PushFailed</code>.</td>
+          <td>Kept per steer; routes through <code>commit_workflow</code> with <code>CommitPush::OffDefaultBranch</code> and inherits readable <code>OpsError::PushFailed</code>.</td>
         </tr>
       </tbody>
     </table>
   </section>
 
   <section>
-    <h2>2. The biggest mismatch: blocked loops and post-step failures vanish in <code>lf task status</code></h2>
+    <h2>2. Before &amp; after across the branch (base <code>250e266b4a</code> → HEAD <code>d106aacf92</code>)</h2>
     <div class="callout">
       <div class="callout-title">
-        <span class="badge badge-no">Biggest Mismatch</span>
-        <span><code>task_updates</code> tells <code>task-session</code> the Graph blocked (or its step push failed) and says "Read current Task status before acting" — then <code>lf task status</code> reports <code>idle</code>, drops the reason, and recommends <code>lf task run</code>.</span>
+        <span class="badge badge-yes">Resolved on HEAD</span>
+        <span>No remaining conceptual mismatch: pass sizing, quiet wakeups, stopped Graph status, and default-push commits each have one owner and agree across CLI, Desktop, and conversations.</span>
       </div>
       <p style="margin-bottom:0;">
-        Without a hard loop cap, LOO-1082's stopping control for non-converging loops is the decider's <code>blocked</code> verdict in <code>DECISION_CRITERIA</code>. Because the deciding skill step itself exits <code>0</code> while <code>graph.run</code> exits <code>3</code> with <code>error = "Graph is blocked: …"</code>, <code>ops::task_execution::project_execution()</code> sees <code>latest.run.result() == Succeeded</code> and hides the stop as <code>TaskExecutionState::Idle</code>. The exact same gap hides a post-step <code>lf commit --step</code> push failure (<code>graph.run</code> exits <code>1</code> with <code>OpsError::PushFailed</code> after the skill exited <code>0</code>).
+        Two key conceptual shifts landed across this branch: (1) replacing micro-pass loops and per-step wakeups with substantial end-to-end passes, pass-aware decision prompts, and settle-only Task updates; and (2) aligning <code>ops::task_execution::project_execution()</code> with <code>task_updates</code> so a Graph that blocks or fails after a step exited <code>0</code> reports <code>Blocked</code> with its exact reason everywhere instead of disappearing as <code>Idle</code>.
       </p>
     </div>
 
     <div class="split">
       <div class="card">
         <div class="card-head">
-          <span>Before (HEAD 2c05f47fc4)</span>
-          <span class="badge badge-warn">Two readers disagree</span>
+          <span>Before (base <code>250e266b4a</code>)</span>
+          <span class="badge badge-warn">Fragmented</span>
         </div>
         <div class="flow">
-          <span class="node">realign (exit 0)</span>
+          <span class="node bad">1-item thin slice</span>
           <span class="arrow">→</span>
-          <span class="node">graph.run (exit 3, "Graph is blocked: …")</span>
+          <span class="node bad">wake on every step</span>
           <span class="arrow">→</span>
-          <span class="node bad">project_execution reads latest.run only</span>
+          <span class="node bad">blocked Graph shows Idle</span>
         </div>
-        <div class="term"><span class="t-dim"># 1. task-session wakes once (LOO-1082):</span>
-<span class="t-green">Task MTG-421: Stopped at realign. Run build (lfp_9a) · failed · realign (lfp_b2): succeeded. Graph is blocked: passes shrank to single-card increments that no longer converge.</span>
-<span class="t-dim">Read current Task status before acting.</span>
+        <div class="term"><span class="t-dim"># 1. Decision prompt hid loop cost:</span>
+Decision pass 2. The backward edge returns to implement.
 
-<span class="t-dim"># 2. task-session (or person / wave-session) reads status:</span>
-$ lf task status MTG-421 --json
-<span class="t-yellow">"execution": {
-  "state": "idle",
-  "reason": "Graph stopped after realign; inspect its history and effects before launching fresh work"
-}</span>
-<span class="t-red">"actions": {
-  "recommended": "run",
-  "reason": "run the next work with `lf task run`; …"
-}</span>
+<span class="t-dim"># 2. task-session woke on take-up + every step (399 turns across 5 Tasks):</span>
+Task MTG-421: At start.
+Task MTG-421: Running at implement. Run coverage · running · implement: running.
+Task MTG-421: Running at compress. Run coverage · running · compress: running.
 
-<span class="t-dim"># 3. Same gap when `lf commit --step` push fails after `implement` exits 0:</span>
-<span class="t-yellow">"execution": { "state": "idle", "reason": "Graph stopped after implement; …" }</span> <span class="t-red">← hides PushFailed!</span></div>
+<span class="t-dim"># 3. Decider returned blocked (step exit 0, graph.run exit 3):</span>
+$ lf task status 4636fe --json
+<span class="t-yellow">"execution": { "state": "idle", "reason": "Graph stopped after check; …" }</span>
+<span class="t-red">"actions":   { "recommended": "run" }</span>  <span class="t-dim">← drops blocked reason</span>
+
+<span class="t-dim"># 4. Manual commit stayed local unless -p passed (rejected on paths):</span>
+$ lf commit -m "checkpoint"           <span class="t-yellow">← local only</span>
+$ lf commit -m "note" -p scratch.md   <span class="t-red">← clap conflict error</span></div>
       </div>
 
       <div class="card">
         <div class="card-head">
-          <span>After (Proposed Next Pass)</span>
-          <span class="badge badge-proposed">Proposed</span>
+          <span>After (HEAD <code>d106aacf92</code>)</span>
+          <span class="badge badge-built">Built &amp; QA'd</span>
         </div>
         <div class="flow">
-          <span class="node">realign (exit 0)</span>
+          <span class="node good">substantial pass (aim ≤ 5)</span>
           <span class="arrow">→</span>
-          <span class="node">graph.run (exit 3 / exit 1)</span>
+          <span class="node good">wake once on settle</span>
           <span class="arrow">→</span>
-          <span class="node good">project_execution reads graph.run when latest.run succeeded</span>
+          <span class="node good">status &amp; wakeups agree</span>
         </div>
-        <div class="term"><span class="t-dim"># 1. task-session wakes once (unchanged):</span>
-<span class="t-green">Task MTG-421: Stopped at realign. Run build (lfp_9a) · failed · realign (lfp_b2): succeeded. Graph is blocked: passes shrank to single-card increments that no longer converge.</span>
+        <div class="term"><span class="t-dim"># 1. Decision prompt names pass, repeated steps, and return target:</span>
+<span class="t-green">Decision pass 3. Iterating repeats 3 steps, back to implement.</span>
+Compare what the preceding pass set out to do with what changed or was learned.
 
-<span class="t-dim"># 2. lf task status, task_actions, lf wave status, and Desktop all agree:</span>
-$ lf task status MTG-421 --json
-<span class="t-green">"execution": {
-  "state": "blocked",
-  "reason": "Graph is blocked: passes shrank to single-card increments that no longer converge",
-  "step": "realign"
-}
-"actions": {
-  "recommended": "no_action",
-  "reason": "Graph is blocked: passes shrank to single-card increments that no longer converge"
-}</span>
+<span class="t-dim"># 2. task-session stays quiet mid-run, wakes once when Graph settles:</span>
+<span class="t-green">Task e185e2: At end (Task completion is separate). Run qa (fa0af52f…) · succeeded · help graph (342bae89…): succeeded.</span>
 
-<span class="t-dim"># 3. Post-step `lf commit --step` PushFailed after `implement` exits 0:</span>
-<span class="t-green">"execution": {
-  "state": "blocked",
-  "reason": "implement: git push: …\nThe commit stays local; the next `lf commit` pushes it. Inspect its history and effects, then launch fresh work"
-}</span></div>
+<span class="t-dim"># 3. Blocked decision or post-step validation failure surfaces everywhere:</span>
+$ lf task status 4636fe
+<span class="t-green">  latest Graph: Graph is blocked: QA report artifact is missing
+  action: no_action  (Graph is blocked: QA report artifact is missing)</span>
+
+<span class="t-dim"># 4. Branch commits push by default; --no-push opts out; failed push stays local:</span>
+$ lf commit -m "checkpoint"           <span class="t-green">← commits &amp; pushes branch</span>
+$ lf commit -m "note" scratch.md      <span class="t-green">← commits path &amp; pushes branch</span>
+$ lf commit --no-push -m "draft"      <span class="t-blue">← stays local</span></div>
       </div>
-    </div>
-
-    <div class="callout proposed">
-      <div class="callout-title">
-        <span class="badge badge-proposed">Single-Place Fix</span>
-        <span>One branch in <code>ops::task_execution::project_execution()</code>; zero schema or wire changes</span>
-      </div>
-      <ul class="tight">
-        <li>Inside <code>(Dead, Dead)</code> when <code>process.result() == ExecutionResult::Succeeded</code> and <code>graph.run.result() == ExecutionResult::Failed</code>:</li>
-        <li>If <code>graph.run.exit_code == Some(i32::from(GraphHeld::EXIT))</code>: return <code>TaskExecutionState::Blocked</code> with <code>error</code> when <code>graph.run.error</code> starts with <code>"Graph is blocked:"</code>; otherwise keep <code>TaskExecutionState::Idle</code> so <code>GraphOutcome::Waiting</code> (<code>lf pr land</code>) still becomes <code>Waiting</code> via <code>snapshot.rs</code>.</li>
-        <li>If <code>graph.run.exit_code != Some(i32::from(GraphHeld::EXIT))</code> (a real post-step Graph failure such as <code>lf commit --step</code> returning <code>OpsError::PushFailed</code>): return <code>TaskExecutionState::Blocked</code> with the recorded <code>graph.run.error</code> (or exit code).</li>
-        <li>Downstream consumers (<code>task_actions::derive_task_actions</code>, <code>commands/waves.rs</code> <code>NextMove</code> / <code>TaskConditionState</code>, <code>ops/task.rs</code> launch admission, and Desktop) already handle <code>TaskExecutionState::Blocked</code> accurately without changes.</li>
-      </ul>
     </div>
   </section>
 
   <section>
-    <h2>3. Counterexamples tested against the built + proposed model</h2>
+    <h2>3. Counterexamples &amp; recovery paths verified on HEAD</h2>
     <div class="grid">
       <div class="cx">
         <strong>1. <code>GraphOutcome::Waiting</code> (<code>lf pr land</code> handoff)</strong>
-        <code>graph.run</code> exits <code>3</code> (<code>GraphHeld::EXIT</code>) with <code>"Graph stopped before its last step; inspect its history and effects"</code> (does not start with <code>"Graph is blocked:"</code>). Stays <code>Idle</code> in <code>project_execution</code>, so <code>snapshot.rs</code> turns it into <code>Waiting</code> via <code>waiting_to_land</code>.
+        <code>graph.run</code> exits <code>3</code> (<code>GraphHeld::EXIT</code>) with <code>"Graph stopped before its last step; inspect its history and effects"</code> (no <code>GraphHeld::BLOCKED_PREFIX</code>). <code>stopped_execution</code> returns <code>Idle</code>, so <code>snapshot.rs</code> still projects <code>Waiting</code> via <code>waiting_to_land</code>.
       </div>
       <div class="cx">
-        <strong>2. Interactive stand-in returns <code>blocked</code></strong>
-        <code>execute()</code> calls <code>arrive_task_graph</code> so position is <code>At { step }</code>; <code>project_execution</code> now shows <code>Blocked</code> with the stand-in's exact reason and <code>actions.recommended = no_action</code>; <code>ops/task.rs:3559</code> still allows <code>lf task run</code> / <code>lf task auto on</code> once resolved.
+        <strong>2. Interactive stand-in returns <code>blocked</code>, then resumes</strong>
+        <code>execute()</code> arrives at the interactive step (<code>At { step: "check" }</code>); <code>lf task status</code> shows <code>Blocked</code> with the stand-in's exact reason and <code>no_action</code>. Once the missing artifact is added, rerunning <code>lf task auto on</code> starts directly at <code>check</code> without re-running earlier steps (QA §6).
       </div>
       <div class="cx">
-        <strong>3. Graph killed with no exit record after a step succeeded</strong>
-        <code>graph.run.result()</code> is <code>Running</code> / <code>Unknown</code> (not <code>Failed</code>), so <code>project_execution</code> keeps <code>Idle("Graph stopped after &lt;step&gt;…")</code> (preserving existing test <code>a_graph_runs_while_its_processes_do_and_blocks_on_a_failed_step</code>), while <code>task_updates</code> reports <code>unknown</code> once.
+        <strong>3. Exhausted structured-output validation after 3 successful turns</strong>
+        All worker turns exited <code>0</code> while <code>graph.run</code> exited <code>1</code> with the validation error. <code>stopped_execution</code> surfaces <code>Blocked</code> with that exact diagnostic; <code>unfinished_step</code> prevents any earlier step limit-recovery record from masking it (QA §7).
       </div>
       <div class="cx">
-        <strong>4. Completed or abandoned Task with a historical <code>Blocked</code> Graph</strong>
-        <code>task_actions.rs:52</code> returns <code>NoAction("Task is terminal")</code> and <code>waves.rs:2607</code> explicitly exempts terminal Tasks with <code>Blocked</code> execution from <code>unresolved_execution</code>, so closed Tasks stay settled.
+        <strong>4. Step commit push failure during a Graph</strong>
+        <code>RunningGraph::commit_step</code> invokes <code>lf commit --step</code> best-effort (logs a warning and continues). Manual <code>lf commit</code> on an unreachable remote keeps the commit local, prints Git's error once via <code>OpsError::PushFailed</code> (served <code>unavailable</code>), and pushes the same SHA on the next <code>lf commit</code> (QA §1, §5).
       </div>
       <div class="cx">
-        <strong>5. <code>arrive_task_graph("end")</code> written before <code>finish_run</code></strong>
-        Built &amp; verified in QA: <code>settled_task_progress</code> checks whether any Task run lacks an observed outcome before returning <code>At { step: "end" }</code>, preventing an empty wakeup a second before the settled run update.
+        <strong>5. Graph killed without recording an exit</strong>
+        <code>graph.run.result()</code> is not <code>Failed</code>, so <code>stopped_execution</code> stays <code>Idle</code> (preserving existing crash semantics), while <code>task_updates</code> reports <code>unknown</code> once after the process dies.
       </div>
       <div class="cx">
-        <strong>6. <code>lf commit --no-add</code> with unstaged edits &amp; clean-checkout retry</strong>
-        Built &amp; tested: <code>--no-add</code> with nothing staged and unstaged edits present returns <code>committed: false, pushed: false</code> without pushing; a clean checkout (including a reverted staged edit) pushes any earlier local branch commit.
+        <strong>6. <code>arrive_task_graph("end")</code> written before <code>finish_run</code></strong>
+        <code>settled_task_position</code> holds the prior position while <code>run_in_progress</code> is true, preventing an empty wakeup a second before the settled run update (QA §3). Readings saved mid-run by older builds stay compatible and still deliver new comments immediately.
+      </div>
+      <div class="cx">
+        <strong>7. <code>lf commit --no-add</code>, reversed edits, and whitespace filenames</strong>
+        <code>--no-add</code> with unstaged edits and nothing staged returns <code>committed: false, pushed: false</code> without pushing; staging a working-tree reversal onto a clean checkout pushes any earlier local branch commit. <code>git::has_staged_changes</code> (<code>git diff --cached --quiet</code>) handles literal filename <code>' '</code> across whole, selected, and sync commits (QA §5).
+      </div>
+      <div class="cx">
+        <strong>8. Swift Desktop client against older &amp; branch servers</strong>
+        <code>checkout.commit</code> keeps <code>push: Bool</code> on the wire and only maps <code>!push</code> to <code>--no-push</code> for CLI argv. Headless Swift probe verified compatibility against both installed server <code>0.16.0+250e266b4</code> and branch build <code>9f863ee93</code> (QA §4, §5).
       </div>
     </div>
   </section>
@@ -488,36 +466,37 @@ $ lf task status MTG-421 --json
     <h2>4. Outside this work (separate outcomes)</h2>
     <ul class="tight">
       <li><strong>Cross-skill provider conversation sharing (LOO-435):</strong> Reusing one warm provider thread across skills inside a Graph requires provider-specific transcript and cache-boundary design.</li>
-      <li><strong>External repository custom Graphs (e.g., <code>manabot/.lf/graphs/coverage-working.yaml</code>):</strong> Benefit automatically from updated builtin skills and quiet Task wakeups; moving heavy reviews into an outer loop is an edit in those repos.</li>
-      <li><strong>PR-less command Graph completing ~1 s after <code>At end</code>:</strong> Observed in QA (<code>scratch/qa.html</code>) — the settled run steer says <em>"At end (Task completion is separate)"</em> and a second steer says <em>"Task completed."</em> a second later (no second wake). Pre-existing server auto-completion timing, not introduced by LOO-1082.</li>
+      <li><strong>External repository custom Graphs (e.g. <code>manabot/.lf/graphs/coverage-working.yaml</code>):</strong> Benefit automatically from updated builtin skills and quiet Task wakeups; moving heavy reviews into an outer loop is an edit in those repos.</li>
+      <li><strong>PR-less command Graph auto-completion timing:</strong> Observed in QA (<code>scratch/qa.html</code>) — the settled run steer says <em>"At end (Task completion is separate)"</em> and a separate <em>"Task completed."</em> steer arrives ~1 s later inside the same woken turn (one wake total). Pre-existing server completion timing, not introduced by LOO-1082.</li>
     </ul>
   </section>
 
   <section>
-    <h2>5. Choices made for review</h2>
+    <h2>5. Choices made for review (all built &amp; committed on <code>HEAD</code>)</h2>
     <p class="lead" style="font-size: 14px;">
-      None of these choices are irreversible once shipped. The highlighted option is built on <code>HEAD</code> (questions 1–2) or queued in <code>scratch/plan.md</code> (question 3); reply with e.g. <code>"2b, 3b"</code> to steer any of them.
+      Nothing remains unbuilt or blocked on an irreversible decision. Every choice below is reversible after merge; the highlighted option is built on <code>HEAD</code>. Reply with e.g. <code>"2b, 3b"</code> if you want to steer any of them.
     </p>
     <ol class="q-list">
       <li class="q-item">
-        <div class="q-head">1. Quiet <code>task-session</code> during running Graph steps <span class="badge badge-built">Built</span></div>
+        <div class="q-head">1. Quiet <code>task-session</code> during running Graph steps <span class="badge badge-built">Built &amp; committed</span></div>
         <ul class="opts">
-          <li class="chosen"><span class="opt-key">1a</span> <strong>Built for review:</strong> Taking up a Graph at <code>start</code> and passing through steps stay quiet for the Task's own conversation (matching conducted children); wake once when a run settles (finished, blocked, failed, crashed, interactive stop), PR merges, Task closes/reopens, or a comment/steer arrives.</li>
+          <li class="chosen"><span class="opt-key">1a</span> <strong>Built:</strong> Taking up a Graph at <code>start</code> and passing through steps stay quiet for the Task's own conversation (matching conducted children); wake once when a run settles (finished, blocked, failed, unknown exit, interactive stop), PR merges, Task closes/reopens, or a comment/steer arrives.</li>
           <li><span class="opt-key">1b</span> Wake once when a Graph run starts, silencing only intermediate step ticks.</li>
         </ul>
       </li>
       <li class="q-item">
-        <div class="q-head">2. Default-push <code>lf commit</code> on selected paths &amp; clean checkouts <span class="badge badge-built">Built</span></div>
+        <div class="q-head">2. Default-push <code>lf commit</code> on selected paths &amp; clean checkouts <span class="badge badge-built">Built &amp; committed</span></div>
         <ul class="opts">
-          <li class="chosen"><span class="opt-key">2a</span> <strong>Built for review:</strong> Branch push default applies uniformly to whole-tree commits, selected-path commits (<code>lf commit -m "…" path</code>), and clean-checkout retries; default branch and detached HEAD stay local; <code>--no-push</code> opts out.</li>
+          <li class="chosen"><span class="opt-key">2a</span> <strong>Built:</strong> Branch push default applies uniformly to whole-tree commits, selected-path commits (<code>lf commit -m "…" path</code>), and clean-checkout retries; default branch and detached HEAD stay local; <code>--no-push</code> opts out.</li>
           <li><span class="opt-key">2b</span> Keep selected-path commits local by default (push only whole-tree <code>lf commit</code>).</li>
         </ul>
       </li>
       <li class="q-item">
-        <div class="q-head">3. Surfacing <code>GraphOutcome::Blocked</code> and post-step failures in <code>lf task status</code> <span class="badge badge-proposed">Proposed next pass</span></div>
+        <div class="q-head">3. Telling a blocked decision from a waiting handoff in Task status <span class="badge badge-built">Built &amp; committed</span></div>
         <ul class="opts">
-          <li class="chosen"><span class="opt-key">3a</span> <strong>Proposed for next pass:</strong> Update <code>ops::task_execution::project_execution()</code> so <code>"Graph is blocked: …"</code> and non-held post-step <code>graph.run</code> failures (such as <code>lf commit --step</code> <code>PushFailed</code>) report <code>TaskExecutionState::Blocked</code> with <code>graph.run.error</code>, aligning <code>lf task status</code>, <code>task_actions</code>, <code>lf wave status</code>, and Desktop with <code>task_updates</code> while keeping <code>GraphOutcome::Waiting</code> and unrecorded-exit kills <code>Idle</code>.</li>
-          <li><span class="opt-key">3b</span> Keep <code>project_execution()</code> returning <code>Idle</code> when the last step exited <code>0</code>, relying on <code>task-session</code> steers and <code>lf history show</code> to surface the reason.</li>
+          <li class="chosen"><span class="opt-key">3a</span> <strong>Built:</strong> Keep <code>GraphHeld::EXIT</code> (3) for both, distinguish blocked decisions in <code>ops::task_execution::stopped_execution</code> via shared constant <code>GraphHeld::BLOCKED_PREFIX</code>, and surface non-held post-step failures as <code>Blocked</code> while keeping <code>GraphOutcome::Waiting</code> and unrecorded-exit kills <code>Idle</code>.</li>
+          <li><span class="opt-key">3b</span> Allocate a separate exit code for <code>GraphOutcome::Blocked</code> instead of matching <code>GraphHeld::BLOCKED_PREFIX</code> (requires updating every caller matching exit 3).</li>
+          <li><span class="opt-key">3c</span> Keep <code>project_execution()</code> returning <code>Idle</code> when the last step exited <code>0</code>, relying on <code>task-session</code> steers and <code>lf history show</code> for the reason.</li>
         </ul>
       </li>
     </ol>

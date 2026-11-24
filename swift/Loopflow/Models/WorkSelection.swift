@@ -227,7 +227,7 @@ extension WorkViewPlan.Content {
                   title: try c.decode(String.self, forKey: .title),
                   states: try c.decode([WorkSelectionState].self, forKey: .states),
                   identifier: try c.decode(String?.self, forKey: .identifier),
-                  graphStep: try c.decode(String?.self, forKey: .graphStep),
+                  graphStep: try c.decodeIfPresent(String.self, forKey: .graphStep),
                   primarySession: try c.decode(String?.self, forKey: .primarySession),
                   location: try c.decode(WorkViewPlan.Location?.self, forKey: .location),
                   argv: try c.decode([String]?.self, forKey: .argv),

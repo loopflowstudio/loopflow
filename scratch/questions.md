@@ -34,6 +34,11 @@
 
 - A returning Desktop launch opened by link stays on saved planning (“Updating…”), highlights the saved selection and ignores sidebar clicks; moving `desktop-cache/workspace.json` aside clears it. Left unfixed here: the stuck read is in workspace restore, not Working order. Worth its own Task if it reproduces unlocked.
 
+## From QA round 5 (2026-11-23)
+
+- The locked-screen restore issue reproduced with the same private workspace. Set its cache aside and used a fresh Dev window for the remaining controls. The saved Machine order survived both launches.
+- The installed `250e266b4` server returns Work rows without `graph_step`. Graph step is optional when reading a row, and current servers still write the key. The installed server refuses `desktop.dashboard.move` with `side` and leaves the shared order intact.
+
 ## From sync onto main (2026-11-23)
 
 - `server_operations_match_their_lf_commands` fails after the merge at `config scope --json`: the server reports the personal config path as `/private/var/folders/…`, the CLI as `/var/folders/…`. The `config scope` read and that test arrived from main; this branch doesn't touch config code. Left for gate/CI to confirm whether main fails the same way.

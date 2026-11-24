@@ -769,7 +769,7 @@ pub struct ViewContent {
     /// A Task's short name, as people say it: `LOO-809`.
     pub identifier: Option<String>,
     /// Where this Task stands on its captured Graph, including a running step.
-    #[serde(deserialize_with = "Option::deserialize")]
+    /// Older Machines omit this field.
     pub graph_step: Option<String>,
     pub primary_session: Option<String>,
     pub location: Option<ViewLocation>,

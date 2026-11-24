@@ -626,7 +626,7 @@ struct SidebarStatusToggle: View {
             Label("Sort by status", systemImage: "arrow.up.arrow.down")
                 .labelStyle(.iconOnly)
                 .padding(Spacing.sm)
-                .foregroundStyle(isOn ? palette.accent : palette.textSecondary)
+                .foregroundStyle(isOn ? palette.accentInk : palette.textSecondary)
                 .background(fill, in: RoundedRectangle(cornerRadius: CornerRadius.control))
                 .contentShape(Rectangle())
         }

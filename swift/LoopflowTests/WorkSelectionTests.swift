@@ -26,13 +26,14 @@ struct WorkSelectionTests {
         #expect(restored == plan)
     }
 
-    @Test func aTaskWithoutAGraphEncodesAnExplicitNullStep() throws {
+    @Test func taskRowsDecodeWithoutGraphMetadataFromAnOlderMachine() throws {
         let content = fixtureViewContent(work: .init(repository: "repo", kind: .task, id: "a"), title: "A")
         let data = try JSONEncoder().encode(content)
         var fields = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
         #expect(fields.removeValue(forKey: "graph_step") is NSNull)
-        let missing = try JSONSerialization.data(withJSONObject: fields)
-        #expect(throws: DecodingError.self) { try JSONDecoder().decode(WorkViewPlan.Content.self, from: missing) }
+        fields["unrecognized_field"] = true
+        let older = try JSONSerialization.data(withJSONObject: fields)
+        #expect(try JSONDecoder().decode(WorkViewPlan.Content.self, from: older) == content)
     }
 
     @Test func everyStateRustSendsDecodes() throws {

@@ -103,7 +103,7 @@ position on this Machine. Wave views, `lf task list`, `lf wave show`, and the
 phone feed follow the same relative order. Working Tasks start newest first,
 with canonical Task ID breaking ties. New arrivals appear above rows you’ve
 arranged. Sidebar and phone rows show the current Graph step beside the status
-while a Task is at a step.
+when the Machine reports it.
 
 Turn on **Sort by status** in the repository sidebar or from **⌘K** to group
 rows by Blocked, Error, Available, Idle and Busy. A Task with both busy and

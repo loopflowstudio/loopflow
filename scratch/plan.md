@@ -38,8 +38,15 @@ served drops and roadmap order. Eight headless Desktop tests passed for
 filtering, status grouping, navigation and drag recovery. `cargo fmt --check`
 passed.
 
-Next at gate: exercise the hover highlight in an unlocked Desktop window,
-then follow the walkthrough below.
+Round five exercised the mounted Desktop toggle, live status changes,
+saved drags, offline sorting, the Wave and Working Tasks grid, and the iPhone
+SE Simulator feed against a private Machine. The active icon now uses the
+theme's contrast-adjusted accent. Older servers can supply Task rows without
+`graph_step`, and current servers still include it. See [QA round five](qa.html).
+
+At gate, check the hover highlight, physical keyboard shortcuts and system
+grid drag in an unlocked Desktop window. A returning locked-screen launch
+still has the workspace restore problem recorded in [questions.md](questions.md).
 
 ## Earlier slices (one-shot sort since replaced by the toggle)
 

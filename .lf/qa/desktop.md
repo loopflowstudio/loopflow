@@ -211,6 +211,10 @@ them. Nothing here needs WindowServer focus.
   `bin/lf` and swap the binary it serves (`kill` the server PID, relink,
   start again on the same `LF_HOME`); the running app reconnects to the new
   one, which is how "update the older one" is checked.
+- For a launch against an older server, point the app's `LF_BIN` at that
+  server's binary too. A launch with a newer helper can replace the older
+  server. Compare `lf server status`'s `executable_sha256` with the copied
+  helper's hash before counting the skew check.
 - `snap <prefix>` writes every window with `cacheDisplay` (no title bar) and
   lists index, title and size. Indices change as windows open: read the list
   before each click.
@@ -220,14 +224,18 @@ them. Nothing here needs WindowServer focus.
   in `trackMouse` and the app hangs. Don't `activate` or `makeKey` in the
   hook: every later click goes dead. The first click after launch can be
   swallowed. Check `lf desktop state --json` for the expected row order before
-  clicking the status toggle again. Use a link to select a Task.
+  clicking the status toggle again. If a SwiftUI button misses `click`, use
+  `drag` with the same start and end point, which sends mouse-down and
+  mouse-up directly to the window. This activated both states of the sidebar
+  status toggle. Use a link to select a Task.
 - Clicks land only in a window whose `lf desktop state` reading is
   `current`. Locked, a launch may mount no window until a
   `loopflow://<repo>/task/<id>` link arrives, and with a saved
   `$LF_HOME/desktop-cache/workspace.json` that window stays `updating`
   (saved planning, highlight on the saved selection) and answers no click.
-  Quit the app, move `workspace.json` aside, relaunch and open the link: the
-  window reaches `current` and the sidebar buttons answer. Otherwise drive
+  Quit the private app, move `workspace.json` aside, relaunch the isolated
+  bundle with `open -F` to skip AppKit window restoration, then open the link.
+  The window reaches `current` and the sidebar buttons answer. Otherwise drive
   through `lf desktop do <action>` (`new-task` opens the New Task sheet) and
   the CLI command behind the button (`lf desktop dashboard move`), and report the click itself as not reached.
 - Stand-in `claude` markers `error` and `blocked` that print

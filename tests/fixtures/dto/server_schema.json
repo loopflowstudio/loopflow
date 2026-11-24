@@ -15944,7 +15944,7 @@
           ]
         },
         "graph_step": {
-          "description": "Where this Task stands on its captured Graph, including a running step.",
+          "description": "Where this Task stands on its captured Graph, including a running step.\nOlder Machines omit this field.",
           "type": [
             "string",
             "null"

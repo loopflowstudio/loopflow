@@ -33,8 +33,8 @@ A private home keeps two SQLite files: `loopflow.db` (state, inputs as
 (`session_history`, observations; `turns`, one row per turn with Task, skill,
 Graph, step, model, token and final-message columns). Read them with `?mode=ro` while a writer may be open:
 `immutable=1` skips the WAL and shows a stale file. For an upgrade check, record
-turns with the installed `lf` (`lf session resume --prepare --json`, then
-`lf -b session resume <id> --message …`), copy the home, then open it with the
+turns with the installed `lf` (`lf -b <skill> '<message>'` records a batch
+Session with one turn; `session resume` takes no `--message`), copy the home, then open it with the
 branch: `lf session history <id>` is empty until `lf machine prune` or the
 branch server's start-up pass moves the old rows. To make a history write fail,
 hold `BEGIN EXCLUSIVE` on `history.db` from Python. A process's first write

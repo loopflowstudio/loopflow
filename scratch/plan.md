@@ -65,6 +65,11 @@ Jack Heart: “my config.yaml should more or less be copied over, crtainly all t
 - The two-Machine CLI fixture `forwarding_a_rotated_login_resumes_only_the_selected_conversation` exercised both selectors. The blocked login resumed its original Claude thread with the synthetic rotated value. Its neighbour kept its PID and agent ID. A cut SSH stream kept the previous file, and a reader that held it open across a successful replacement still read the old bytes. A separate shell run interrupted by SIGHUP removed its temporary file. The ordinary launch fixture kept its own login, and `documented_commands` passed. Gate runs live Modal.
 - **Built — scratch Markdown collection.** Recursive prompt assembly skips AppleDouble entries and hidden Markdown with invalid UTF-8. The focused prompt tests kept a valid hidden note in order, refused symlinks and reported the path of an ordinary binary Markdown file.
 
+## QA on live Modal
+
+- Two real Modal rentals of the branch build (`scratch/qa.html`). Modal refuses `sudo`, so the `LF_RENT_LINUX_BIN` install now uses a `~/.local/bin/lf` wrapper for its private home. The second rental passed burst rent, detached server, retained routes, fallback around `agy`, live collection, reads after an SDK-side terminate, and `lf machine forward`.
+- Open: a steer that starts a stopped repository Session on a Machine with no login leaves no trace.
+
 ## Gate and demo
 
 Use a disposable Linear-backed Task on a fresh Linux Machine. Quote, rent, advance its Graph, inspect the retained skill routes from a direct SSH shell, refresh a login, then give it back with ordinary `lf machine end <label>`. Check one ownership entry, the recorded ceiling estimate and an unchanged main checkout. On a second rental, collect a known transcript and usage sample, cut access, and read them on the surviving Machine.

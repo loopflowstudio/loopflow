@@ -487,14 +487,23 @@ fn forget_host_key(route: &str) {
 }
 
 // Source experiments can carry unmerged migrations; keep their disposable home.
+// Modal sandboxes set no-new-privileges, so no sudo: the `lf` on PATH is a
+// wrapper that gives every SSH command that home.
 const INSTALL_PRIVATE_CLI: &str = r#"set -e
-mkdir -p ~/.local/bin
-candidate=$(mktemp ~/.local/bin/lf.XXXXXXXX)
-trap 'rm -f "$candidate"' EXIT
+mkdir -p ~/.local/bin ~/.local/libexec
+candidate=$(mktemp ~/.local/libexec/lf.XXXXXXXX)
+wrapper=$(mktemp ~/.local/bin/lf.XXXXXXXX)
+trap 'rm -f "$candidate" "$wrapper"' EXIT
 cat > "$candidate"
 chmod 755 "$candidate"
-mv "$candidate" ~/.local/bin/lf
-printf 'LF_HOME=%s/.lf-dev\nLF_BIN=%s/.local/bin/lf\n' "$HOME" "$HOME" | sudo tee -a /etc/environment >/dev/null"#;
+cat > "$wrapper" <<'WRAPPER'
+#!/bin/sh
+export LF_HOME="$HOME/.lf-dev" LF_BIN="$HOME/.local/libexec/lf"
+exec "$LF_BIN" "$@"
+WRAPPER
+chmod 755 "$wrapper"
+mv "$candidate" ~/.local/libexec/lf
+mv "$wrapper" ~/.local/bin/lf"#;
 
 const INSTALL_PACKAGED_CLI: &str = r#"set -e
 dir=$(mktemp -d)

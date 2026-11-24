@@ -19,18 +19,19 @@ pub(super) fn session(id: &str, json: bool) -> Result<()> {
         &loopflow_execution::store::database_path_from_env()?,
         loopflow_execution::store::token_key::encryption_key,
     )?;
-    let (origin, collected_at, usage) = if store.session(id)?.is_some() {
+    let (origin, origin_name, collected_at, usage) = if store.session(id)?.is_some() {
         (
             loopflow_execution::store::machines::local_machine(&store)?.id,
+            "this Machine".to_owned(),
             None,
             loopflow_storage::session_record::reduce_usage(&store.session_turns(id)?),
         )
     } else {
-        let history = store
-            .saved_copied_history(id)?
+        let history = loopflow_execution::store::machines::copied_history(&store, id)?
             .with_context(|| format!("Session {id} was not found"))?;
         (
-            history.session.origin,
+            history.session.origin.clone(),
+            history.session.origin_name().to_owned(),
             Some(history.copied_at),
             history.usage,
         )
@@ -42,7 +43,7 @@ pub(super) fn session(id: &str, json: bool) -> Result<()> {
             "collected_at":collected_at, "usage":usage })
         );
     } else {
-        println!("Session {id} · from {origin}");
+        println!("Session {id} · from {origin_name}");
         if let Some(at) = collected_at {
             println!("Collected {}", loopflow_execution::output::format_time(at));
         }

@@ -460,7 +460,8 @@ a packaged dev build, it downloads the Linux artifact from the same CI run
 using its own GitHub login. The sandbox promotes the uploaded executable.
 The caller checks its revision and waits for the selected server to report ready
 before recording the Machine. For an unpublished build, set `LF_RENT_LINUX_BIN`
-to the Linux executable. It runs with its own disposable Machine home.
+to the Linux executable. A `~/.local/bin/lf` wrapper runs it with its own
+disposable Machine home (`~/.lf-dev`); Modal sandboxes allow no `sudo`.
 
 `lf [--repo REPO] [--wave WAVE] set machine.capacity R`, naming a pool or on-demand, sets the
 scope's personal Tasks capacity preference in place of a Tasks

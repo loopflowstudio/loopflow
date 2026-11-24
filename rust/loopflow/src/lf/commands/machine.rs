@@ -111,7 +111,8 @@ async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
                 &std::env::current_dir()?,
                 &machine,
             )?;
-            println!("Refreshed {count} files on {label}.");
+            let files = if count == 1 { "file" } else { "files" };
+            println!("Refreshed {count} {files} on {label}.");
             if let Some(id) = task.as_ref().or(session.as_ref()) {
                 let mut args = vec!["machine".into(), "credentials".into(), "restart".into()];
                 if task.is_some() {

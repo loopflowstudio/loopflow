@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>LOO-1081 QA — live Modal rental</title>
+<style>
+body{font:15px/1.5 -apple-system,system-ui,sans-serif;max-width:920px;margin:2em auto;padding:0 1em;color:#1d1d1f}
+h1{font-size:1.5em}h2{font-size:1.15em;margin-top:2em;border-bottom:1px solid #ddd}
+pre{background:#f5f5f7;padding:.8em;overflow:auto;font-size:12.5px;border-radius:6px}
+.ok{color:#18794e;font-weight:600}.bug{color:#c4320a;font-weight:600}.open{color:#8a6d00;font-weight:600}
+table{border-collapse:collapse;width:100%}td,th{border:1px solid #ddd;padding:.35em .6em;text-align:left;vertical-align:top}
+</style></head><body>
+<h1>LOO-1081 QA — a branch build on a real Modal sandbox</h1>
+<p>2026-11-23. Caller: branch debug <code>lf 0.16.0+87fd28917</code> with a private <code>LF_HOME</code> holding a copy of the personal
+<code>config.yaml</code> (38 skill routes, the <code>modal</code> on-demand at 8 vCPU / 16 GB, <code>forward.env: [CLAUDE_CODE_OAUTH_TOKEN]</code>,
+plus a probe file in <code>forward.files</code>). Rental: the same revision cross-built for x86_64 Linux, passed in <code>LF_RENT_LINUX_BIN</code>.
+Two real Modal sandboxes, both capped at $0.60; total ceiling estimate $0.146.</p>
+
+<h2>1. Rent — <span class="bug">broke, fixed</span></h2>
+<p>First rent created the sandbox, then failed installing the private build:</p>
+<pre>Renting 8 vCPU 16 GB burst on modal at $0.95184/h ceiling until 20:20
+Error: install lf on lf-rent_e2c543575e1c4bceba39ec8409d5e69c
+Caused by:
+    remote command failed (exit status: 1): sudo: The "no new privileges" flag is set, which prevents sudo from running as root.</pre>
+<p>The <code>LF_RENT_LINUX_BIN</code> install appended <code>LF_HOME</code>/<code>LF_BIN</code> to <code>/etc/environment</code> with <code>sudo</code>; Modal never allows it.
+The earlier Docker container check had root. The failure gave the sandbox back (<code>state: ended</code>, Modal <code>poll()</code> = 137, ceiling estimate $0.032).</p>
+<p><b>Fix</b> (<code>rental.rs</code> <code>INSTALL_PRIVATE_CLI</code>): the binary goes to <code>~/.local/libexec/lf</code>, and <code>~/.local/bin/lf</code> is a wrapper exporting
+<code>LF_HOME=~/.lf-dev</code> and <code>LF_BIN</code>. No root. Second rent:</p>
+<pre>Renting 8 vCPU 16 GB burst on modal at $0.95184/h ceiling until 20:26
+{"machine_id":"home_18d5…","hardware":{…,"modal_sizing":"burst"},"usd_per_hour":"0.95184","cap_usd":"0.60","state":"running",…}
+real 53.9s</pre>
+
+<h2>2. The rental over non-login SSH — <span class="ok">works</span></h2>
+<pre>$ ssh lf@r505.modal.host 'which lf codex claude agy; lf --version; lf server status'
+/home/lf/.local/bin/lf
+/usr/bin/codex
+/usr/bin/claude
+lf 0.16.0+87fd28917
+{"ready":true,"listening":true,"executable_sha256":"baf3705b…",…}
+cpu.cfs_quota_us 400000 (4 cores = 8 vCPU ceiling) · memory.limit 16 GiB · nproc 4</pre>
+<p>No systemd: the server runs detached as <code>~/.local/libexec/lf server run</code>. The cgroup shows the ceilings; the request floor is not visible from inside, so billing at the floor is still unchecked (Modal dashboard).</p>
+
+<h2>3. Retained profile — <span class="ok">works</span></h2>
+<pre>$ lf config show --skill task-session          # on the rental, before any launch
+  agent    agy:gemini-4-neon-high, then claude:opus, then codex:gpt-6.2-sol, …   Personal global · skill task-session
+  yolo     true
+$ grep -c default_agent ~/.lf-dev/config.yaml
+38</pre>
+
+<h2>4. Harness selection on the rental — <span class="ok">works</span></h2>
+<pre>$ lf --machine modal-1 -b default 'Reply with the single word pong and nothing else.'
+pong
+$ lf --machine modal-1 -b commit-message 'Reply with exactly: QA-1081 loss marker'
+QA-1081 loss marker</pre>
+<p>Rental store: <code>default</code> (routed to absent <code>agy</code>) started on <code>claude:opus</code>, the next configured model with a forwarded login;
+<code>commit-message</code> ran on its own route, <code>claude:haiku</code>.</p>
+
+<h2>5. Collection and abrupt loss — <span class="ok">works</span></h2>
+<p>With the caller's server running, both Sessions arrived within about a minute. Then the sandbox was terminated through the Modal SDK, behind lf's back.</p>
+<pre>$ lf session list --all | grep modal
+session_2cfb6a91…  closed  Reply with exactly  from modal-1
+a7b0c9fc…          unknown qa                  from modal-1
+session_db0983b3…  closed  Reply with single   from modal-1
+$ lf session history show session_2cfb… --transcript
+── 2026-11-24 03:54 UTC · claude-haiku-5-5 · 20.6k in (11.9k cached) · 278 out
+injected: Skill commit-message
+Reply with exactly: QA-1081 loss marker
+QA-1081 loss marker
+$ lf ondemand list
+  modal-1 · ended 19:55 · 8 vCPU 16 GB burst · $0.95184/h ceiling · ceiling estimate $0.114485 · by hand · 3 sessions copied</pre>
+<p>The caller noticed the loss on its own and ended the rental. A <code>lf machine end modal-1</code> issued in the same seconds reported
+"unreachable: unpushed work unknown … --force"; repeated, it answered "modal-1 was already given back (ended)".</p>
+<p><b>Fixed:</b> <code>lf session usage --session</code> printed <code>from home_18d59857…</code> while the transcript said <code>from modal-1</code>; it now reads the label too.</p>
+
+<h2>6. <code>lf machine forward</code> — <span class="ok">works</span></h2>
+<pre>rent: ~/.lf-qa-1081-probe  -rw------- "probe v1 …"
+$ lf machine forward modal-1
+Refreshed 1 file on modal-1.           # was "1 files"; fixed
+rental: -rw------- "probe v2 rotated …"
+$ lf machine forward modal-1 --task NOPE-1
+Error: Machine command unavailable: Error: Task NOPE-1 was not found
+$ lf machine forward nosuch
+Error: machine "nosuch" is not added; run `lf machine add nosuch` first</pre>
+
+<h2>7. Reserved sizing quote — <span class="ok">works</span></h2>
+<pre>Added on-demand modalr: 8 vCPU 16 GB reserved on modal at $0.95184/h ceiling; at most 1 at once, 4h each
+Error: daytona does not support Modal sizing; --reserved works only on modal</pre>
+
+<h2>What works now</h2>
+<p>Burst rent of a branch build on real Modal; detached server without systemd; non-login SSH <code>lf</code>; retained skill routes; harness fallback
+around an absent <code>agy</code>; live collection; transcript and usage after the sandbox vanished; file refresh; automatic settlement of a lost rental.</p>
+
+<h2>Not reached</h2>
+<table>
+<tr><th>Scenario</th><th>Why</th></tr>
+<tr><td>Linear-backed <code>lf task run &lt;ID&gt; --rent modal</code>: Wave adoption, one ownership entry, Graph on the rental</td>
+<td>The remote clones the origin from GitHub and plans through Linear. No disposable GitHub repository exists, and the Linear token lives only in the real store. Gate runs it.</td></tr>
+<tr><td>Modal billing at the 0.125-core floor</td><td>Needs the Modal dashboard after a few idle hours.</td></tr>
+<tr><td><code>lf machine forward --session</code> restarting a live provider</td><td>No interactive provider was held on the rental; the two-Machine fixture covers it.</td></tr>
+<tr><td>Packaged (non-<code>LF_RENT_LINUX_BIN</code>) install</td><td>This revision has no CI package.</td></tr>
+</table>
+
+<h2>Still wrong, worst first</h2>
+<ol>
+<li><span class="open">A steer to a stopped repository Session on a Machine with no login does nothing and says nothing.</span>
+<code>lf --machine modal-1 --repo ~/qa steer &lt;id&gt; …</code> printed "the Machine server starts &lt;id&gt; to read it"; the held terminal exited with
+"Error: codex has no usable login…", which no log, Session state or <code>lf session list</code> shows (state stays <code>unknown</code>). The Task-primary path records its wait; this path does not.</li>
+<li><code>lf machine end</code> racing the server's own settlement suggests <code>--force</code> for a sandbox that is already gone.</li>
+<li><code>lf machine list</code> still lists <code>modal-1</code> with its dead route after give-back.</li>
+<li><code>lf session usage</code> shows <code>cost -</code> for subscription Claude turns; the token counts are there.</li>
+</ol>
+</body></html>

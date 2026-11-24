@@ -66,18 +66,29 @@ final class RemoteTaskWorkspaceTests: XCTestCase {
             try terminal.type("pwd\r")
             try await terminal.waitFor(checkout.path)
 
-            // Session: the Task's primary, saved on mini, opens from the phone and takes input.
+            // Session: the Task's primary, prepared on mini, opens from the phone and takes input.
             let prepared = try await world.mini.run(["session", "resume", "--task", task.id, "--prepare", "--json", "-a", "claude"],
                                                     cwd: checkout)
             let session = try JSONDecoder().decode(SessionRecord.self, from: Data(prepared.utf8)).id
             let primary = try await client.primarySession(task: task.id)
             XCTAssertEqual(primary, session)
-            try await client.start(.session(session), task: task.id, request: UUID().uuidString.lowercased(), size: size)
-            let viewer = try await world.redeem(try await client.ticket(.session(session), task: task.id))
-            // Mini's server may start the prepared conversation before the viewer
-            // attaches, so the provider's reply, not its first line, says where it runs.
+            // Mini's server starts a prepared Task conversation itself, so the phone
+            // attaches as the app does, starting nothing: a start racing mini's would
+            // open a second terminal that finds the conversation held and ends.
+            var ticket: String?
+            let deadline = ContinuousClock.now + .seconds(20)
+            while ticket == nil {
+                do { ticket = try await client.ticket(.session(session), task: task.id) } catch is SessionNotRunning {
+                    guard ContinuousClock.now < deadline else { throw RegistryQueryError("Mini never started \(session)") }
+                    try await Task.sleep(for: .milliseconds(100))
+                }
+            }
+            let viewer = try await world.redeem(try XCTUnwrap(ticket))
+            // The provider's first line is on screen, from the snapshot if it printed
+            // before the viewer attached; input typed before it is ready would be lost.
+            try await viewer.waitFor("provider on mini in \(checkout.path)")
             try viewer.type("hello\r")
-            try await viewer.waitFor("mini received hello in \(checkout.path)")
+            try await viewer.waitFor("mini received hello")
             try viewer.type("quit\r")
             try await world.closeShell(task.id, startedOn: nil)
 
@@ -208,12 +219,13 @@ private final class TwoMachines {
             export LF_HOME=\(shellEscape(remote.appendingPathComponent("store").path)) LF_BIN=\(shellEscape(binary))
             exec \(shellEscape(binary)) "$@"
             """)
-        // Mini's provider: it answers each line typed into it with where it runs.
+        // Mini's provider: it names where it runs and answers each line typed into it.
         try Self.executable(remote.appendingPathComponent("bin/claude"), """
             #!/bin/bash
             if [ "$1" = --version ]; then echo '2.1.302'; exit; fi
+            printf 'provider on mini in %s\\n' "$PWD"
             while IFS= read -r -t 60 line < /dev/tty; do
-              printf 'mini received %s in %s\\n' "$line" "$PWD"
+              printf 'mini received %s\\n' "$line"
               [ "$line" = quit ] && exit 0
             done
             """)

@@ -2460,7 +2460,7 @@ async fn snapshot_task_detail(
             plan_terminal_reason: loopflow_execution::linear::terminal_reason(
                 task.state.as_deref(),
             )
-            .filter(|_| matches!(runtime.status, TaskState::Unstarted)),
+            .filter(|_| matches!(status, TaskState::Unstarted)),
             worktree_blocker: worktree_blocker
                 .as_ref()
                 .map(|blocker| blocker.reason.as_str()),

@@ -218,10 +218,10 @@ impl TaskRunStopped {
 /// started again.
 /// `run` names the graph and where the run set out, for messages.
 ///
-/// With `release`, a bare run inside its execution owner lets its launcher go
-/// once the first attempt has registered, and carries on with its output in
-/// that attempt's log. `announce` hears the first registered Graph process
-/// and that log, before the launcher goes.
+/// A bare run inside its execution owner lets its launcher go once the first
+/// attempt has registered, and carries on with its output in that attempt's
+/// log. `announce` hears the first registered Graph process and that log,
+/// before the launcher goes.
 pub fn run_task_graph_for(
     cli: &Cli,
     task: &Task,

@@ -56,7 +56,6 @@ struct WorkNavigator: View {
     }
 
     var body: some View {
-        @Bindable var navigation = model.navigation
         let rows = model.sidebarRows
         let ids = rows.map(\.id)
         let rowOrder = ids.map { WorkReference.task(id: $0) } + model.visibleRoadmaps.map { .wave(id: $0.wave.id) }
@@ -86,11 +85,6 @@ struct WorkNavigator: View {
                             Spacer()
                             Text("\(rows.count)").font(Typography.meta).monospacedDigit()
                         }.foregroundStyle(palette.textTertiary).padding(Spacing.sm)
-                    } else {
-                        Picker("Show Tasks", selection: $navigation.sidebarFilter) {
-                            ForEach(WorkNavigation.SidebarFilter.allCases, id: \.self) { Text($0.rawValue).tag($0) }
-                        }
-                        .pickerStyle(.menu).labelsHidden().accessibilityLabel("Show Tasks")
                     }
                     ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
                         if scope.isWorkingList, let group = row.workingGroup,
@@ -109,11 +103,10 @@ struct WorkNavigator: View {
                        !rows.contains(where: { model.isSelected(.task(id: $0.id)) }) {
                         VStack(alignment: .leading, spacing: Spacing.xs) {
                             Text("Open Task is outside this list")
-                            let target = WorkNavigation.SidebarFilter.working
                             Button("Show working Tasks") {
-                                Perf.userAction(Perf.hierarchyInteraction, scenario: "sidebar_working", id: "outline:\(target.rawValue)",
+                                Perf.userAction(Perf.hierarchyInteraction, scenario: "sidebar_working", id: "outline:\(WorkNavigation.SidebarFilter.working.rawValue)",
                                                 repository: model.repoPath, liveSessions: model.liveSessionCount, owner: model.navigation.performanceOwner) {
-                                    model.navigation.sidebarFilter = target
+                                    model.navigation.sidebarFilter = .working
                                     model.navigation.sidebarWaveID = nil
                                 }
                             }

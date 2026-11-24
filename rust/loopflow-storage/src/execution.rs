@@ -109,11 +109,6 @@ impl TaskState {
         (!runs_elsewhere || self.is_terminal() || self == Self::Moving).then_some(self)
     }
 
-    /// Started, open, and free to continue.
-    pub fn is_working(&self) -> bool {
-        matches!(self, Self::Idle | Self::Active | Self::Moving)
-    }
-
     /// Planning withdraws never-started work; started work follows execution.
     pub fn lifecycle(self, plan_state: Option<&str>) -> Self {
         match (self, plan_state) {

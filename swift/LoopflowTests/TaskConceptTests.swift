@@ -190,7 +190,7 @@ struct TaskConceptTests {
             for filter in WorkNavigation.SidebarFilter.allCases {
                 model.navigation.sidebarFilter = filter
                 let expected = phase.tasks.filter { task in
-                    return task.selectionStates.contains(.working) && (filter == .working
+                    task.selectionStates.contains(.working) && (filter == .working
                         || task.selectionStates.contains(filter == .available ? .available : .busy))
                 }.map(\.id)
                 #expect(model.sidebarTaskIDs == expected)

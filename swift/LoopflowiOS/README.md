@@ -34,8 +34,9 @@ own pair.
 
 The list shows one repository at a time: tap the title to switch, or pick
 **All repositories** to see each under its name. The filter button chooses what
-to show — **Started** (Desktop's sidebar: Working Tasks), **Ready for
-you**, **Working now**, **Paused**, **Backlog** or **Done** — in the Machine's order, within one Wave when you pick it there. Tasks
+to show — **Working** (Desktop's sidebar, grouped into **Active**, **Shipping**,
+and **Paused**), **Ready for you**, **Working now**, **Backlog** or **Done** —
+in the Machine's order, within one Wave when you pick it there. Tasks
 with a conversation come first; started Tasks nobody has opened a conversation
 for fold under "N without a conversation". Search covers title and checkout
 path. Pull to refresh.
@@ -51,7 +52,7 @@ LOO-5  Busy  Auto  implement
 
 The word is the one the Mac shows for that Task: what its conversation reports
 (**Blocked**, **Error**, **Busy**, **Available**), or its lifecycle word (**Unstarted**,
-**Idle**, **Active**, **Moving**, **Done**) while nothing reports. **Auto**
+**Idle**, **Active**, **Moving**, **Paused**, **Done**) while nothing reports. **Auto**
 follows while Auto-Ship is on. A Task whose reading carries
 neither says **Unavailable**. The row carries no stripe: colour is on the word.
 
@@ -87,8 +88,9 @@ Mac. A Task that has not taken up a Graph shows no sentence.
 
 - **Start** before the Task has run, **Run** once its Graph has stopped or is
   waiting at a step. While a run carries the Task, neither is there.
-- **Pause** stops a started Task and keeps your ownership. **Unpause** returns
-  it to the list without running its Graph. While cleanup finishes, Unpause is disabled.
+- **Pause** stops a started Task's Graph and keeps your ownership and
+  conversation. **Unpause** lifts the hold without running the Graph. While
+  cleanup finishes, Unpause is disabled.
 - **Auto-Ship** turns the Task's auto setting on and runs it, as
   `lf task auto on` does; **Stop Auto-Ship** turns it off. Every Task that is
   not completed has one of them.

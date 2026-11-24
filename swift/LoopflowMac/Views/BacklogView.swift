@@ -191,11 +191,10 @@ struct BacklogList {
         self.waveNames = waveNames
         self.state = state
         let needle = state.query.trimmingCharacters(in: .whitespacesAndNewlines)
-        func matches(_ task: RoadmapTask) -> Bool {
+        rows = all.filter { task in
             Self.passes(task, state.filter) && (needle.isEmpty
                 || "\(task.task.identifier) \(task.task.name) \(task.task.description)".localizedCaseInsensitiveContains(needle))
         }
-        rows = all.filter(matches)
         selection = state.selection.intersection(rows.map(\.id))
     }
 

@@ -1433,7 +1433,8 @@ final class WorkModel {
         "task_list-\(repo.normalizedFilePath)-\(wave ?? "")"
     }
 
-    /// Restore the list for the filter and Wave the sidebar opens with.
+    /// The sidebar's first frame: the Working list saved for `repo` under the
+    /// scope its navigation opens with.
     private func restoreTaskList(repo: String, saved: SavedReadings) {
         let wave: String? = if case .wave(let id) = navigationByRepo[repo]?.sidebarScope { id } else { nil }
         let scope = WorkScope(repo: repo, headless: false, task: nil, activity: nil, taskListWave: wave)
@@ -1739,7 +1740,7 @@ final class WorkModel {
         }
         if repoPath != nil {
             applySelectionPlans(nil, reason: reason)
-            applyTaskList(nil, wave: workScope.taskListWave, reason: reason)
+            applyTaskList(nil, wave: taskListWave, reason: reason)
         }
         if repoPath != nil { repositoryPlan = .unavailable(lastGood: repositoryPlan.value, reason: reason) }
         taskExecution.values = taskExecution.values.mapValues { .unavailable(lastGood: $0.value, reason: reason) }
@@ -1944,7 +1945,7 @@ final class WorkModel {
     private func refreshTaskList() async {
         guard !usesFixedFixture, let repo = repoPath else { return }
         let key = repositoryReadingKey(repo)
-        let wave = workScope.taskListWave
+        let wave = taskListWave
         taskListGeneration &+= 1
         let generation = taskListGeneration
         let plan: WorkViewPlan?
@@ -1955,7 +1956,7 @@ final class WorkModel {
             reason = error.localizedDescription
         }
         guard generation == taskListGeneration, repoPath == repo, repositoryReadingKey(repo) == key,
-              workScope.taskListWave == wave else { return }
+              taskListWave == wave else { return }
         applyTaskList(plan, wave: wave, reason: reason)
     }
 

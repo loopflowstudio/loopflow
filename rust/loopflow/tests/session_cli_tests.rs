@@ -913,6 +913,10 @@ fn a_merged_parent_stays_open_until_it_is_completed_with_its_children() {
     // abandoned child alike.
     let reopened = json(lf(&["task", "reopen", &parent, "--json"]));
     assert_eq!(reopened["state"], "started");
+    assert_eq!(
+        json(lf(&["task", "status", &parent, "--json"]))["task"]["pr"]["phase"],
+        "merged"
+    );
     let reopened = json(lf(&["task", "reopen", &reviewing, "--json"]));
     assert_eq!(reopened["state"], "started");
     assert_ne!(state(&reviewing), "abandoned");
@@ -958,15 +962,23 @@ fn a_merged_parent_stays_open_until_it_is_completed_with_its_children() {
 
     // Rehoming moves direct open children up to the nearest open ancestor,
     // skipping a closed one; their own children come along.
-    let (_, top) = file("Rate limits", None);
+    let (top_id, top) = file("Rate limits", None);
     let (closed_id, closed) = file("Rate limit design", Some(&top));
     let (_, middle) = file("Per-host limits", Some(&closed));
-    let (_, moved) = file("Limit config", Some(&middle));
+    let (moved_id, moved) = file("Limit config", Some(&middle));
+    let (_, finished) = file("Previous limit", Some(&middle));
+    lf(&["task", "complete", &finished]);
     let (_, under_moved) = file("Limit config docs", Some(&moved));
     database
         .execute(
             "UPDATE tasks SET planning_state='completed' WHERE id=?1",
             [&closed_id],
+        )
+        .unwrap();
+    database
+        .execute(
+            "UPDATE tasks SET external_issue_id=?2 WHERE id=?1",
+            rusqlite::params![moved_id, uuid::Uuid::new_v4().to_string()],
         )
         .unwrap();
     assert_eq!(
@@ -978,11 +990,30 @@ fn a_merged_parent_stays_open_until_it_is_completed_with_its_children() {
     assert_eq!(status["children"][0]["identifier"], under_moved);
     assert_eq!(state(&moved), "unstarted");
 
+    assert_eq!(
+        json(lf(&["task", "status", &finished, "--json"]))["parent"]["identifier"],
+        middle
+    );
+    let queued_parent: String = database
+        .query_row(
+            "SELECT json_extract(value_json,'$.value') FROM tracker_actions
+         WHERE task_id=?1 AND subject='task_parent' AND phase='queued'",
+            [&moved_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(queued_parent, top_id);
+
     // A parent whose PR has not merged refuses either choice and arms no
     // request that could settle its children later.
     let (unmerged_id, unmerged) = file("Limit headers", None);
     let (_, waiting) = file("Limit header docs", Some(&unmerged));
     publish(&unmerged_id, 1995, false);
+    let refusal = refused(&["task", "complete", &unmerged]);
+    assert!(
+        refusal.contains(&waiting) && refusal.contains("--children rehome"),
+        "{refusal}"
+    );
     for policy in ["rehome", "abandon"] {
         let refusal = refused(&["task", "complete", &unmerged, "--children", policy]);
         assert!(refusal.contains("not merged"), "{refusal}");
@@ -997,9 +1028,19 @@ fn a_merged_parent_stays_open_until_it_is_completed_with_its_children() {
     assert_eq!(request, None);
     assert_eq!(state(&waiting), "unstarted");
 
-    // With no open ancestor, children become top-level.
-    let (_, lone) = file("Burst limits", None);
+    // A deleted Task breaks the visible chain even with an open ancestor above it.
+    let (deleted_id, deleted) = file("Obsolete design", Some(&top));
+    let (_, lone) = file("Burst limits", Some(&deleted));
     let (_, freed) = file("Burst config", Some(&lone));
+    database
+        .execute(
+            "UPDATE tasks SET planning_deleted_at=1 WHERE id=?1",
+            [&deleted_id],
+        )
+        .unwrap();
+    assert!(
+        refused(&["task", "complete", &lone]).contains("direct children become top-level Tasks")
+    );
     let completed = json(lf(&[
         "task",
         "complete",

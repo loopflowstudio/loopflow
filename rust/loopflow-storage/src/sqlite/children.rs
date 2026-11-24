@@ -2870,37 +2870,27 @@ fn rehome_children(conn: &Connection, parent: &TaskId) -> StoreResult<ParentComp
     })
 }
 
-/// The nearest open ancestor above `parent`, skipping closed and deleted
-/// ones; `None` when there is none and children become top-level.
+/// Follow visible parents past closed Tasks, stopping where the tree ends.
 fn rehome_destination_in(conn: &Connection, parent: &TaskId) -> StoreResult<Option<Task>> {
     let mut statement = conn.prepare_cached(&format!(
-        "SELECT up.parent_task_id,
-                (SELECT {} AND {TASK_VISIBLE} FROM tasks t WHERE t.id=up.parent_task_id)
-         FROM tasks up WHERE up.id=?1",
+        "SELECT t.id, {} FROM tasks child JOIN tasks t ON t.id=child.parent_task_id
+         WHERE child.id=?1 AND {TASK_VISIBLE}",
         super::durable::task_open_sql("t")
     ))?;
     let mut current = parent.clone();
     // Parent links never form a cycle: `parent_refusal` refuses one.
-    loop {
-        let Some((ancestor, open)) = statement
-            .query_row([current.as_str()], |row| {
-                Ok((
-                    row.get::<_, Option<String>>(0)?,
-                    row.get::<_, Option<bool>>(1)?,
-                ))
-            })
-            .optional()?
-        else {
-            return Ok(None);
-        };
-        let Some(ancestor) = ancestor.map(TaskId::from_raw) else {
-            return Ok(None);
-        };
-        if open == Some(true) {
-            return task_on(conn, &ancestor);
+    while let Some((ancestor, open)) = statement
+        .query_row([current.as_str()], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, bool>(1)?))
+        })
+        .optional()?
+    {
+        current = TaskId::from_raw(ancestor);
+        if open {
+            return task_on(conn, &current);
         }
-        current = ancestor;
     }
+    Ok(None)
 }
 
 fn open_descendants_in(conn: &Connection, parent: &TaskId) -> StoreResult<Vec<OpenDescendant>> {

@@ -256,9 +256,9 @@ Error: LOO-12 has 3 open children; say what happens to them:
 ```
 
 Pass `--children rehome` to move direct open children up to the nearest open
-ancestor (or make them top-level Tasks when no ancestor is open), keeping each
-child's subtree intact and leaving closed children linked under the done parent
-as history:
+ancestor in the visible tree. When a deleted ancestor ends the chain or no
+ancestor is open, the children become top-level Tasks. Each child keeps its
+subtree. Closed children stay linked to the completed parent.
 
 ```text
 $ lf task complete LOO-12 --children rehome

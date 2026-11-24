@@ -2897,7 +2897,7 @@ pub fn task_complete(
         let completion = store
             .sqlite
             .complete_task_now(&task, note, children)
-            .map_err(task_error)?;
+            .map_err(completion_error)?;
         task = store
             .get_task(&task.id)
             .await
@@ -2918,6 +2918,14 @@ fn refused(message: impl Into<String>) -> OpsError {
     OpsError::Refused(crate::engine::Error::conflict(message))
 }
 
+fn completion_error(error: loopflow_storage::StoreError) -> OpsError {
+    use loopflow_storage::StoreError;
+    match error {
+        StoreError::InvalidData(reason) | StoreError::InvalidAuthority(reason) => refused(reason),
+        other => task_error(other),
+    }
+}
+
 /// Why bare completion refuses: the open tree, then both choices.
 fn open_children_refusal(store: &SharedStore, task: &Task) -> OpsResult<String> {
     use loopflow_storage::sqlite::children::OpenDescendant;
@@ -2930,7 +2938,14 @@ fn open_children_refusal(store: &SharedStore, task: &Task) -> OpsResult<String> 
                     .map(|github| format!("#{} {}", github.number, pr.phase().as_str()))
             });
             let step = descendant.step.as_ref().map(|step| format!("at {step}"));
-            let standing = pr.into_iter().chain(step).collect::<Vec<_>>().join(", ");
+            let running = (descendant.state == TaskState::Moving).then_some("running");
+            let standing = pr
+                .as_deref()
+                .into_iter()
+                .chain(running)
+                .chain(step.as_deref())
+                .collect::<Vec<_>>()
+                .join(", ");
             into.push([
                 format!("{}{}", "  ".repeat(depth), descendant.task.identifier),
                 descendant.task.title.clone(),

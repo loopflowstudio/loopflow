@@ -51,7 +51,7 @@ When a Task is owned by another Machine — whether a reachable peer (`laptop ->
 4. **`delivery.reached` is three places, not four statuses** *(concept review; passed over: `delivered_live | saved_on_owner | queued | local_only` plus a separate `reason`).* The caller acts on one distinction: is the steer on the owner yet. `delivered_live` vs `saved_on_owner` is who reads it there, which only the sentence needs; `delivered_live` also overclaims, since a live worker reads at its next boundary, not on receipt. The reason (not registered, SSH failed, tracker offline) lives in the sentence. One enum, one sentence.
 5. **`runs_on`, not `owner`** *(concept review; passed over: kickoff's `TaskDetail.owner: TaskOwner` and `execution_source`).* "Owner" already names two other things on the same records: `runtime.owner` (the person) and `next_move.owner` (who moves it next). The product's existing words are "Runs on mini since …" (`runs_elsewhere`), so the field takes them. It goes on `TaskRow` and `RoadmapTask`, not only `TaskDetail`: `modal-2`'s `lf task list --json` and the Desktop board show the same Task, and they misreport it the same way today. `reading` drops the machine that `remote`/`remote_unreachable` repeated from the owner.
 6. **Keep `TaskState` at its existing 6 variants and express remote-unobserved state via `runs_on`, `reading`, `task.reason`, and `task.next = null`** *(passed over: adding a 7th `TaskState::RemoteUnknown` variant across Rust, Swift Desktop/iOS, and `TaskSection`).* A Task another Machine runs is still Working; only where it is read from changes.
-7. **Inbound sync cadence: poll while the Machine owns open Tasks, every `max(30 s, linear::delta_fresh_secs())`; never when it owns none; 30 s overlap lookback on `team_changes` `since`** *(concept review; passed over: kickoff's separate 30 s live / 120 s owned-idle tiers, which need a live-process classifier to save quota that `delta_fresh_secs()` already paces; and 10 s unconditional polling).* An owned idle Task has a stopped primary Session the server starts on a steer, so it deserves the same latency. `RunningGraph::spawn` keeps its mid-step poller for containers without `lf server` (Linux `register` has only `systemctl --user`), sharing the `linear_team_checks` lock so the two never double-poll.
+7. **Inbound sync cadence: poll while the Machine owns open Tasks, every `max(30 s, linear::delta_fresh_secs())`; never when it owns none; 30 s overlap lookback on `team_changes` `since`** *(concept review; passed over: kickoff's separate 30 s live / 120 s owned-idle tiers, which need a live-process classifier to save quota that `delta_fresh_secs()` already paces; and 10 s unconditional polling).* An owned idle Task has a stopped primary Session the server starts on a steer, so it deserves the same latency. `RunningGraph::spawn` keeps its mid-step poller for containers without `lf server` (Linux `register` has only `systemctl --user`), sharing the `planning_scope_checks` lock so the two never double-poll.
 
 ## Source of truth
 
@@ -80,7 +80,7 @@ When a Task is owned by another Machine — whether a reachable peer (`laptop ->
 - **Swift / Desktop / Mobile:**
   - `swift/Loopflow/Services/RegistryQuery.swift` already encodes `task.steer` and does not decode its reply into `TaskComments`; `TaskComments` (`swift/Loopflow/Models/TaskComments.swift`) stays unchanged so `TaskStatusReading`, `ScreenReads.TaskDetail`, and `TaskCommentsView` keep decoding cleanly.
   - Desktop/Mobile `Read::TaskStatus` is `Untyped` in `server_schema.json`; `swift/LoopflowTests/ServerProtocolTests.swift` and `DTOFixtureTests.swift` must stay green.
-- **No SQLite migration required:** All required tables (`steers`, `steer_delivered`, `task_comments`, `task_ownership`, `task_linear_ingested_comments`, `linear_team_checks`, `tracker_actions`, `plan_carriers`) already exist.
+- **One SQLite migration:** `planning_scope_checks.sql` renames `linear_team_checks` (it holds Linear, Asana and `plan:` scopes) and marks the released table leaving. Every other table (`steers`, `steer_delivered`, `task_comments`, `task_ownership`, `task_linear_ingested_comments`, `tracker_actions`, `plan_carriers`) already existed.
 
 ## Absent and error states
 
@@ -92,7 +92,7 @@ When a Task is owned by another Machine — whether a reachable peer (`laptop ->
 | **Owned on unregistered peer (`modal-2 -> modal-3`)** | Local planning + `runs_on` + `reading: unobserved { reason: "<machine> is not registered here" }` + `task.reason` naming it + `task.next: null` + `graph: null`; `lf task list` shows the same reason/next | Saves locally + drains to tracker/carrier; `reached: tracker` (synced) or `here` (`pending_sync`); sentence says the owner is not registered here and reads it when it syncs |
 | **Owned on registered remote Machine, SSH/server fails before admission** | Local planning + `reading: unobserved { reason: "<ssh/server error>" }` + `task.next: null` | Local save + tracker/carrier sync; `reached: tracker` (or `here` if sync also failed); sentence names the SSH/server failure |
 | **Remote `task.steer` fails with `OutcomeUnknown` (connection lost after send)** | N/A | Returns `OutcomeUnknown` error without double-writing locally |
-| **Unowned Task** | `runs_on: null`, `reading: here` (or `owner` via the Wave Machine if reachable), normal unowned reason | Saves locally + syncs; `reached: owner` when this Machine is where it would run (nothing else will read it sooner), else `tracker`/`here`; sentence says nothing reads it until someone runs it |
+| **Unowned Task** | `runs_on: null`, `reading: here` (or `owner` via the Wave Machine if reachable), normal unowned reason | Saves locally + syncs; `reached: owner` (this store is where a run would read it); sentence says nothing reads it until the Task runs |
 | **Terminal Task (`done` / `abandoned`) owned elsewhere** | `task.state` remains `done`/`abandoned`; `runs_on` still set | Saves comment/steer as today; sentence says the Task is finished |
 | **Linear rate-limited / offline on owning Machine during periodic sync** | N/A | Existing `Cooldown` / `delta_fresh_secs()` paces or pauses non-urgent polling cleanly, retaining watermark and retrying on next tick; never crashes `lf server` or a running Graph step |
 | **Move in flight from this Machine** | Keeps local move-in-flight status (`moving_here`), never queries unarrived target | Keeps local behavior (same `remote_ownership_writer` guard) |
@@ -107,7 +107,7 @@ When a Task is owned by another Machine — whether a reachable peer (`laptop ->
   - Below 25% remaining hourly quota, `linear::delta_fresh_secs()` automatically stretches the interval; below 10%, polling stops completely to protect `urgent` writes.
 - **Clock skew resilience:** `team_changes` queries `since - 30s` (clamped at epoch) while `task_linear_ingested_comments` (`INSERT OR IGNORE`) and `steers(source, revision)` guarantee at-most-once steer creation.
 - **Server-absent resilience:** A running Graph step (`RunningGraph::spawn`) still ingests inbound steers mid-step even if `lf server` is not running on the container.
-- **No silent drops on restart:** `server/wake.rs` reads `store_revisions` on startup; `linear_team_checks` persists the last successful watermark in SQLite.
+- **No silent drops on restart:** `server/wake.rs` reads `store_revisions` on startup; `planning_scope_checks` persists the last successful watermark in SQLite.
 
 ## Exclusions
 
@@ -115,13 +115,13 @@ When a Task is owned by another Machine — whether a reachable peer (`laptop ->
 - **No Linux container `lf server` supervisor redesign:** Replacing `systemctl --user` in `installation/server.rs` for containers is left to LOO-1081/LOO-1083; LOO-1084 ensures mid-step steer delivery works both with `lf server` and without it (`RunningGraph::spawn`).
 - **No remote workspace/file/diff/shell/session viewer routing:** Owned by sibling Task LOO-1083.
 - **No cross-Machine `lf steer <session-id>` routing:** Sessions remain Machine-local; cross-Machine steering targets Tasks (`lf steer <task>`).
-- **No `TaskState` enum changes and no SQLite schema migrations.**
+- **No `TaskState` enum changes.**
 
 ## What goes
 
 - **Replaced/removed:**
   - `lf steer <task>` printing bare `Saved <id>` (`rust/loopflow/src/lf/commands/session.rs:115`) — replaced by `delivery.sentence`.
-  - `Write::TaskSteer` returning raw `TaskComments` (`rust/loopflow/src/lf/commands/write.rs:278`) — replaced by `TaskSteerReceipt` (flattening `TaskComments` + `steer_id` + `delivery`).
+  - `Write::TaskSteer` returning raw `TaskComments` — replaced by `TaskSteerReceipt { identifier, steer_id, delivery }` (done in Slice 2).
   - `task_machine()` relying solely on `remote_ownership_writer` and hard-failing on SSH error (`rust/loopflow/src/lf/commands/waves.rs:973-1018`) — replaced by owner-aware remote resolution that distinguishes local, reachable remote, and unreachable/unregistered remote.
   - `snapshot_task_detail` falling through to `"No Task Graph has run; independent Sessions may still be active"` and `next: Some("lf task run ...")` for an open Task owned by another Machine (`rust/loopflow/src/lf/commands/waves.rs:2319-2353`, `task_row.rs:237-248`).
   - `maintenance::start_plan_exchange` exchanging only `plan_git` (`rust/loopflow/src/server/maintenance.rs:33-56`) — generalized to inbound sync covering tracker-connected repos (with active/owned Tasks), `plan_hub`, and `plan_git`.
@@ -140,7 +140,7 @@ Two disposable Homes (`sandbox-a` and `sandbox-b`, no SSH routes between them) c
 2. On `sandbox-a`, run `lf task status MTG-419 --json`:
    - Shows `task.runs_on.machine.id` = `sandbox-b`'s Machine ID, `reading.kind == "unobserved"`, `task.reason` = `Runs on sandbox-b since …; sandbox-b is not registered here, so its Graph and Sessions are not read here`, `task.next == null`, and `graph == null`. `lf task list --json` shows the same `runs_on`, `reason` and `next`.
 3. On `sandbox-a`, run `lf steer MTG-419 "stop refactoring foo"`:
-   - Prints `Queued <id> in Linear for sandbox-b; sandbox-b is not registered here and reads it when it next syncs`.
+   - Prints `Queued <id> in Linear for sandbox-b; <reason>. sandbox-b reads it when it next syncs` (sentence built in `engine::task::steer`).
    - `--json` emits `delivery.reached == "tracker"` and `delivery.runs_on.id == <sandbox-b-id>`.
 4. On `sandbox-b`, without any manual command, the server's inbound sync (or `RunningGraph::spawn`'s mid-step sync) pulls the Linear comment, writes the `steers` row, touches `steer_markers::task_marker`, and the running worker's next `PostToolUse` hook receives `<lf:steers>` containing `"stop refactoring foo"` (and an idle/stopped primary Session wakes).
 5. On `laptop`, run `lf task status MTG-419 --json` and `lf steer MTG-419 "also check bar"`:

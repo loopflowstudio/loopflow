@@ -609,19 +609,17 @@ impl SqliteStore {
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let task = task_on(&tx, id)?.ok_or(StoreError::NotFound)?;
         require_task_not_deleted(&tx, &task)?;
-        if super::durable::task_state_in(&tx, id)? == TaskState::Abandoned {
-            return Err(StoreError::InvalidAuthority(
-                "An abandoned Task cannot be reopened".into(),
-            ));
-        }
-        let (completed, pending): (bool, bool) = tx.query_row(
-            "SELECT planning_state IS 'completed',completion_request IS NOT NULL FROM tasks WHERE id=?1",
+        let (completed, abandoned, pending): (bool, bool, bool) = tx.query_row(
+            "SELECT planning_state IS 'completed',
+                    abandoned_at IS NOT NULL OR planning_state IS 'canceled',
+                    completion_request IS NOT NULL
+             FROM tasks WHERE id=?1",
             [id.as_str()],
-            |row| Ok((row.get(0)?, row.get(1)?)),
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )?;
-        if completed || pending {
+        if completed || abandoned || pending {
             tx.execute(
-                "UPDATE tasks SET completion_request=NULL,completion_error=NULL WHERE id=?1",
+                "UPDATE tasks SET abandoned_at=NULL,abandon_reason=NULL,completion_request=NULL,completion_error=NULL WHERE id=?1",
                 [id.as_str()],
             )?;
             let target = if has_prior_work(&tx, id)? {

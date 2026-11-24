@@ -132,28 +132,6 @@ struct WorkModelTests {
         #expect(model.task(id: "issue-now")?.task.task.identifier == "W2-144")
     }
 
-    @Test("The Project sheet opens when planning is unavailable")
-    func projectSheetOpensWhenPlanningIsUnavailable() throws {
-        let fixture = try WorkTestFixture.load()
-        var wire = try #require(JSONSerialization.jsonObject(with: Data(fixture.roadmapJSON.utf8)) as? [String: Any])
-        var waves = try #require(wire["waves"] as? [[String: Any]])
-        waves[0]["project"] = ["state": "unavailable", "reason": "Provider unavailable"]
-        wire["waves"] = waves
-        let roadmap = try JSONDecoder().decode(RoadmapSnapshot.self, from: JSONSerialization.data(withJSONObject: wire))
-        let model = WorkModel(query: fixture.query)
-        model.applyFixture(roadmap: .available(roadmap), waves: .available(fixture.waves),
-            workActivity: .available(fixture.workActivity), repos: [])
-        model.select(.wave(id: "wave-1"))
-
-        let view = WorkSurfaceView(model: model)
-        let button = try view.inspect().find(button: "Project")
-        #expect(try button.accessibilityIdentifier() == "wave-project")
-        try button.tap()
-
-        #expect(model.projectWave?.id == "wave-1")
-        #expect(model.selection == .wave(id: "wave-1"))
-    }
-
     @Test("A delayed historical reference cannot replace newer navigation", arguments: ["history", "task", "repo"])
     func historicalReferenceRespectsNavigation(destination: String) async throws {
         let fixture = try WorkTestFixture.load()
@@ -179,14 +157,11 @@ struct WorkModelTests {
         switch destination {
         case "history":
             #expect(model.selection == .wave(id: "wave-1"))
-            #expect(model.projectWave?.id == "wave-1")
         case "task":
             #expect(model.selection == .task(id: "issue-now"))
-            #expect(model.projectWave == nil)
         default:
             #expect(model.repoPath == "/src/context")
             #expect(model.selection == nil)
-            #expect(model.projectWave == nil)
         }
     }
 

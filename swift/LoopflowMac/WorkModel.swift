@@ -1148,7 +1148,6 @@ final class WorkModel {
             reading: state, reason: reason, observedAt: nil, action: state == "current" ? record?.action : nil)
     }
 
-    var projectWave: WaveSnapshot?
     @ObservationIgnored private(set) var historyLookup: Task<Void, Never>?
     var repoPath: String?
     var selection: WorkReference? { navigation.selection }
@@ -2336,7 +2335,6 @@ final class WorkModel {
             guard !Task.isCancelled else { return }
             if result?.project.present?.matches(reference: reference) == true {
                 select(.wave(id: wave.wave.id))
-                projectWave = wave.wave
                 return
             }
         }

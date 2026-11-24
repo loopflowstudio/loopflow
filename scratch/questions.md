@@ -34,9 +34,12 @@
 - Concept review after slice 3: a queued Task `create` snapshots
   `task_project`; `retire_wave_in` rewrites it on removal. Reading fields at
   send time instead is a tracker-drain redesign, its own Task (page question 5).
-- Slice 4 kept the Backlog Wave menu's **Projects** item and the historical
-  Project reference that open `WaveProjectsView`; only the Wave pane's
-  button went.
+- Slice 6 (second) deleted the Project sheet, as asked ("i dont think we
+  should have a wavesprojectview anymore"). It kept the inline
+  `WaveProjectView` rows (Project status and tracker sync, where a pending
+  create's failure shows) in the Wave pane, Backlog objective and roadmap
+  card; the answer named only the sheet. Deleting those too would leave the
+  header name as the only Project display and hide sync failures.
 - Asana Projects have no URL in the header: Asana project reads don't go
   through `TrackerProject` imports, only mirrored creates.
 - QA 2026-11-23, real-store copy: the upgrade queues Linear Project creates

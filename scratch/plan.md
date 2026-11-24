@@ -494,3 +494,10 @@ everything that opens it, including the Backlog menu's **Project** item; the
 Wave header's Project name and tracker link (slice 4) is the one place a
 Wave's Project shows in Desktop. Question 2 (a queued create's snapshot)
 unanswered: stays as built.
+
+Built: `WaveProjectSheet.swift`, `WorkModel.projectWave` and the sheet in
+`SessionsView` are gone. The Backlog menu appears only for a Wave with a
+default Graph and holds **Workflow**. A historical Project reference selects
+its Wave and opens nothing else. Kept: the inline `WaveProjectView` (name,
+status, tracker sync) in the Wave pane, Backlog objective and roadmap card;
+see `scratch/questions.md`. Swift README updated. `scripts/test_desktop.sh --filter 'WorkModelTests|BacklogViewTests'`: 58 pass.

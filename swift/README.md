@@ -203,9 +203,9 @@ open only a Task's conversation and never read Desktop's layouts.
 Repository and Wave
 entry shows their conversation, opened on load or on selection.
 Waves pair that conversation with their objective, status, planning and
-full Task inventory. In the Wave backlog menu, **Project** shows the Project's
-name, status and tracker sync. **Workflow** opens the
-Wave's default Graph in the catalogue inspector. The sidebar starts at 240 points wide;
+full Task inventory. The Wave header names its Project, linked to the tracker
+when the tracker gave a URL. With a default Graph, the Wave backlog menu's
+**Workflow** opens it in the catalogue inspector. The sidebar starts at 240 points wide;
 drag its edge to resize or use the title-bar button or **⌘\** to toggle it.
 Its scroll position survives Wave and Task navigation. Working order survives
 relaunch; ordinary launch restores the selected Work.

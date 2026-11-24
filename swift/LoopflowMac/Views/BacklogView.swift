@@ -694,7 +694,7 @@ struct BacklogView: View {
             }
             Spacer(minLength: 0)
             ShowHiddenMenu(model: model, view: view)
-            if let roadmap { waveMenu(roadmap) }
+            if let workflow = roadmap?.graph { workflowMenu(workflow) }
             Button { model.navigation.palette = .newTask } label: { Label("New", systemImage: "plus") }
                 .buttonStyle(LoopflowButtonStyle()).fixedSize().help("File a Task (⌘N)")
                 .accessibilityIdentifier("backlog-new")
@@ -717,17 +717,14 @@ struct BacklogView: View {
         .overlay(RoundedRectangle(cornerRadius: CornerRadius.control).strokeBorder(palette.borderStrong))
     }
 
-    private func waveMenu(_ roadmap: WaveRoadmap) -> some View {
+    private func workflowMenu(_ workflow: String) -> some View {
         Menu {
-            Button("Project") { model.projectWave = roadmap.wave }.accessibilityIdentifier("wave-project")
-            if let workflow = roadmap.graph {
-                Button("Workflow: \(workflow)") {
-                    Task {
-                        await model.loadGraphCatalog()
-                        model.navigation.palette = .workflow(workflow)
-                    }
-                }.accessibilityIdentifier("wave-workflow")
-            }
+            Button("Workflow: \(workflow)") {
+                Task {
+                    await model.loadGraphCatalog()
+                    model.navigation.palette = .workflow(workflow)
+                }
+            }.accessibilityIdentifier("wave-workflow")
         } label: { Image(systemName: "ellipsis.circle") }
             .menuStyle(.borderlessButton).fixedSize()
             .accessibilityIdentifier("wave-backlog-menu")

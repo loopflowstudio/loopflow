@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>LOO-995 concept review — a Wave is one Project</title>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>LOO-995 concept review after slice 11</title>
 <style>
 :root {
   --bg: #fbfaf7; --fg: #1d1c1a; --muted: #6b675f; --line: #e2ded5; --card: #ffffff;
@@ -60,62 +60,58 @@ ol.q ol { list-style: lower-alpha; margin-top: 4px; }
 ol.q ol li { margin: 3px 0; }
 .rec { font-weight: 600; color: var(--prop); }
 </style>
-</head><body>
-<main>
-<h1>One Wave, one Project: does the finished branch say so everywhere?</h1>
-<p class="lede">LOO-995 · Concept review after slices 8–10 · 23 November 2026 · Branch <code>9b630876ad</code> against <code>250e266b4a</code></p>
-<p>Area taken: the whole Wave–Project model as it stands with every slice in it, from <code>lf wave create</code> through Task create and move, tracker connect, upgrade of a released store, sync, rename and removal. The last three slices touched upgrade, sync and the index, so those get the closest walk.</p>
+</head><body><main>
+<h1>One Wave, one Project, one tracker Project</h1>
+<p class="lede">LOO-995 · Concept review after slice 11 · 24 November 2026 · Branch a8dbab4b17 against 62a368e5cc</p>
+<p><strong>Area taken:</strong> the whole Wave–Project model with every slice in it: <code>lf wave create</code>, Task create and move, connect, upgrade of a released store, sync, rename, removal. I looked hardest at multi-Machine tracker delivery, the one row the last review marked <span class="mark no">no</span>. Slice 11 changed it.</p>
 
-<h2>Walk: a Wave from creation to removal, with an outage in the middle</h2>
-<pre><code>lf wave create billing                  # Project billing (local), id = Wave UUID
-lf task create --wave billing 'refund'  # Task in billing's Project
-# Linear down
-lf wave plan connect billing            # create queued; receipt says: lf wave sync billing
-lf wave sync billing                    # slice 9: drains this Wave first, shows the queued create and its error
-# Linear back
-lf wave sync billing                    # Project created with the Wave's UUID; refund follows into it
-lf wave rename billing payments         # Project name follows; linked → project_name field action
-lf wave remove payments                 # queued actions retire; completed Tasks stay readable</code></pre>
-<p>Every step names one Project, and every action has one owner. Upgrade adds one wrinkle: a released store can hold several chapter Projects per Wave. The migration keeps one, translates queued destinations onto it (slice 8), and reads pick the Wave's own record when a released writer adds another (slice 10, <code>held_wave_project_in</code>).</p>
+<h2>Walk: two Machines, one Wave, an outage</h2>
+<pre><code># Machine A
+lf wave create ledger            # Project proj_&lt;wave uuid&gt; (local)
+lf task create --wave ledger 'x' # Task in ledger's Project
+# Machine B pulls; the Wave and its Project arrive over Git
+# repo.tracker.linear.team set, pushed, pulled on both
+# A and B each queue one Project create for proj_&lt;wave uuid&gt;
+# Linear down on A; B sends first: Linear Project id = wave uuid
+# A comes back: create refused (id taken) → look up by id → bind → x follows into it
+lf wave sync ledger              # on A: linked, x in the Project, no duplicate
+lf wave rename ledger journal    # Project name follows; linked → project_name action
+lf wave remove journal           # queued actions retire; completed Tasks stay readable</code></pre>
+<p>Every step names one Project. The tracker Project's identity is the Wave's UUID, on every Machine. Whichever Machine creates it first wins, and the others bind to it.</p>
 
 <h2>Do the product and code concepts line up?</h2>
 <div class="table-wrap"><table>
 <tr><th>Fit</th><th>What a person knows or does</th><th>What owns it in the code</th></tr>
-<tr><td><span class="mark yes">yes</span></td><td>A Wave has one Project, made with it, offline too.</td><td><code>ProjectId::for_wave</code>; <code>held_wave_project_in</code> is the one read. CLI and Desktop carry a singular <code>Reading&lt;ProjectSummary&gt;</code>.</td></tr>
-<tr><td><span class="mark yes">yes</span></td><td>A Task in a Wave is in its Project; moving Waves moves Projects.</td><td><code>tasks.project_id → projects.wave_id</code>. No <code>tasks.wave_id</code>, no climb rule.</td></tr>
+<tr><td><span class="mark yes">yes</span></td><td>A Wave has one Project, made with it, offline too.</td><td><code>ProjectId::for_wave</code>; <code>held_wave_project_in</code> is the one read; the wire carries a singular <code>Reading&lt;ProjectSummary&gt;</code>.</td></tr>
+<tr><td><span class="mark yes">yes</span></td><td>A Task in a Wave is in its Project; moving Waves moves Projects.</td><td><code>tasks.project_id → projects.wave_id</code>. No <code>tasks.wave_id</code>, no climb.</td></tr>
 <tr><td><span class="mark yes">yes</span></td><td>Connect a Linear Project, or let the Wave's own be created.</td><td><code>lf wave plan connect</code>; the link is <code>projects.external_project_id</code>, nothing else.</td></tr>
-<tr><td><span class="mark yes">yes</span></td><td>Retry a failed send with <code>lf wave sync</code>.</td><td><code>refresh_status</code> routes by <code>queued_tracker</code> (slice 9), Linear or Asana.</td></tr>
-<tr><td><span class="mark yes">yes</span></td><td>Upgrade without losing queued work.</td><td><code>remove_chapters.sql</code> translates dropped-to-kept destinations in queued creates and <code>task_project</code> edits (slice 8).</td></tr>
-<tr><td><span class="mark part">staged</span></td><td>"Exactly one" is a rule the store enforces.</td><td>Reads enforce it today; the unique index waits for released writers to exit (LOO-1089, filed, unstarted).</td></tr>
-<tr><td><span class="mark no">no</span></td><td>Any Machine can bring a Wave's Project into the tracker.</td><td><code>uncreated</code> skips a Project another Machine stamped. After upgrade, a kept Project from another Machine gets no create here, and this Machine's translated Task creates wait on it.</td></tr>
+<tr><td><span class="mark yes">yes</span></td><td>Retry a failed send with <code>lf wave sync</code>.</td><td><code>refresh_status</code> routes by <code>queued_tracker</code> (slice 9).</td></tr>
+<tr><td><span class="mark yes">yes</span></td><td>Upgrade without losing queued work.</td><td><code>remove_chapters.sql</code> translates dropped destinations to the kept Project (slice 8).</td></tr>
+<tr><td><span class="mark yes">yes</span> <small>was no</small></td><td>Any Machine can bring a Wave's Project into the tracker.</td><td><code>uncreated</code> queues every unbound Project of a live Wave. Linear's refused create looks up its UUID and binds. Asana checks for a footer match before it POSTs (slice 11).</td></tr>
+<tr><td><span class="mark part">staged</span></td><td>"Exactly one" is a rule the store enforces.</td><td>Reads enforce it. The unique index waits for released writers to exit (LOO-1089).</td></tr>
+<tr><td><span class="mark part">race</span></td><td>Two Machines making one Asana Project at the same moment.</td><td>The footer read and the POST are not atomic, so this can make two Asana projects. Linear's client id rules it out. Named in the PR body (plan, Remains 3).</td></tr>
+<tr><td><span class="mark no">no</span></td><td>The Task's name: "a Project is a Wave's optional tracker link".</td><td>The branch builds "a Wave is exactly one Project", and PR #1997's title says so. Only the Task title (LOO-995) still says the superseded thing.</td></tr>
 </table></div>
 
 <div class="callout">
-<p><strong>Biggest mismatch, and it is larger than this Task.</strong> The model says a Wave's Project is one record whoever holds it, keyed by a UUID every Machine agrees on. The tracker queue still says a Project is created by the Machine that made it. Before this branch that was true by construction; the upgrade's "keep one" makes a Machine depend on another Machine's create, which in a tracker-only repository it never hears about except through an inventory of a link it doesn't have.</p>
-<p>Released lf has the same gap for Tasks put in another Machine's Project; the migration widens it to Tasks it moved there. QA run 8 found it on a constructed two-Machine store, not the real one.</p>
+<p><strong>Biggest mismatch: the Task title, not the code.</strong> Since 2026-11-22 ("i think we should just have a wave = exactly 1 project for now"), a Project is not optional and not just a link. It is a local record, made with the Wave, and a tracker Project mirrors it. Anyone who reads LOO-995 in Linear sees the superseded model. The fix is a rename, with no code change.</p>
 </div>
 
 <div class="cols">
-<div class="panel"><h3>Existing</h3>
-<pre><code>uncreated: Project p
-  unless plan_stamps(p, project_wave)
-         from another Machine</code></pre>
-<p>Asana creates have no client identity, so two Machines sending would make two Asana projects. The stamp rule prevents that.</p></div>
-<div class="panel proposed"><h3>What it would take <span class="tag prop">proposed, not here</span></h3>
-<pre><code>uncreated: any unbound Project of a live Wave
-create carries the Project's UUID
-duplicate-id reply → look up by UUID, bind</code></pre>
-<p>Linear accepts a client <code>id</code>, so a second Machine's create meets the first one's Project. That needs a duplicate-id reply handled as a lost-reply lookup, and Asana needs its footer identity searched before creating. A drain change with its own tests; it belongs beside the queued-create snapshot question.</p></div>
+<div class="panel"><h3>Existing</h3><p>LOO-995: "Remove chapters, KRs and metrics; a Project is a Wave’s optional tracker link"</p></div>
+<div class="panel proposed"><h3>Proposed <span class="tag prop">not done here</span></h3><p>"Remove chapters, KRs and metrics; a Wave is exactly one Project" (same as the PR title)</p></div>
 </div>
 
 <h2>Recommendation</h2>
-<p>Nothing in the concept needs to change before gate. The branch's model and the code agree in every place a person meets it; the one disagreement is in multi-Machine tracker delivery and predates the branch. Advance to gate, with the gap written in the PR body and <code>scratch/questions.md</code>.</p>
+<p>Nothing in the concept needs to change before gate. Slice 11 turned the last <span class="mark no">no</span> into <span class="mark yes">yes</span>. What remains is a staged index (LOO-1089), a known Asana race, the open question of create snapshots, and the Task title. Advance to gate.</p>
 
 <h2>Questions for review</h2>
 <ol class="q">
-<li>Who creates a Wave's Project in the tracker when another Machine made the record?
-<ol><li><span class="rec">Leave as released lf does; a follow-up Task makes creates idempotent by Project UUID (chosen for this branch).</span></li><li>Fix it here: let <code>uncreated</code> create any unbound Project and handle duplicate-id replies.</li><li>Have the migration keep a Project this Machine will create. Machines could then keep different Projects for one Wave.</li></ol></li>
+<li>The Task title.
+<ol><li>Rename LOO-995 to match the PR (chosen for review; not done, since it changes the tracker issue).</li><li>Leave it; the PR title is what lands.</li></ol></li>
+<li>The Asana simultaneous-create race.
+<ol><li>Name it in the PR body and leave it (chosen).</li><li>Have the import collapse two footer-matched Asana projects into one, as its own Task.</li></ol></li>
 <li>A queued create's field snapshot (open since slice 3).
-<ol><li><span class="rec">Stays as built.</span></li><li>Read fields at send time, as a tracker-drain redesign Task.</li></ol></li>
+<ol><li>Stays as built (chosen).</li><li>Read fields at send time, in a tracker-drain redesign Task.</li></ol></li>
 </ol>
 </main></body></html>

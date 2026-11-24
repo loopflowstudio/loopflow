@@ -491,9 +491,11 @@ chapter to clear updates that column.
    same moment can still make two (footer read and POST are not atomic);
    Linear's client id rules it out (slice 11).
 
-Concept review after slices 8–10 (`scratch/concept-review.html`): product and
-code concepts line up everywhere a person meets them; the unique index is
-staged under LOO-1089. Nothing in the plan changes before gate.
+Concept review after slice 11 (`scratch/concept-review.html`): product and
+code concepts line up everywhere, multi-Machine Project creation included. Left:
+the staged index (LOO-1089), the Asana race (Remains 3), and the LOO-995 title,
+which still says "optional tracker link"; the PR title is right. Nothing in the
+plan changes before gate.
 
 ## Slice 10 (staging the one-Project index, 2026-11-23)
 

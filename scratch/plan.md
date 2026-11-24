@@ -10,6 +10,11 @@ Reviewed the 760 × 592 pt Settings window on an unlocked display. All seven sid
 
 `LOOPFLOW_NATIVE_TESTS=1 swift test --package-path swift --filter searchScrollsBetweenProjectSectionsInACompactWindow` passed on the unlocked Mac.
 
+## Remaining
+
+- Jack Heart's look at the second beauty pass ("then second lets take a pass to make it more beautiful") on the Dev build, via the tour skill (`scratch/tour.yaml`).
+- Gate: publish so CI runs the full suites on PR #2033 (current checks were skipped).
+
 ## Settings observation
 
 Personal and project scopes keep their last reading visible and pause edits while disconnected. Each retries the catalogue and scope with a 1–30 second delay that resets after a healthy reading. Refresh and scope selection start a fresh observation immediately. A file error stays on its live subscription.
@@ -26,7 +31,7 @@ Personal and project scopes keep their last reading visible and pause edits whil
 - `cargo test -p loopflow-execution --lib config::` passed 114 tests, including `a_settings_write_leaves_only_the_settings_file_in_the_checkout` and shared catalog fixture.
 - `cargo test -p loopflow --test integration documented_commands::` passed all four checks.
 - `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings` passed.
-- `scripts/test_desktop.sh --filter 'SettingsWorkflowTests|ConfigurationSettingsTests|ContextSettingsWorkflowTests|ThemeWorkflowTests|DesignDisciplineTests'` passed all five suites, including a cold start and a server restart with both scopes open. The checkout showed an offline file change and saved a Reset after reconnecting. The compact-window layout diagnostic needs an unlocked display.
-- QA round 4 ([qa.html](qa.html)) drove the branch app on a locked screen and verified Agent Policy fallbacks, emptied number field Reset, gated `In effect`, clean checkout `git status`, and broken-YAML live recovery. Visual review of sidebar chrome and scoped forms on an unlocked display remains for the human demo.
+- `scripts/test_desktop.sh --filter 'SettingsWorkflowTests|ConfigurationSettingsTests|ContextSettingsWorkflowTests|ThemeWorkflowTests|DesignDisciplineTests'` passed all five suites, including a cold start and a server restart with both scopes open. The checkout showed an offline file change and saved a Reset after reconnecting.
+- QA round 4 ([qa.html](qa.html)) drove the branch app on a locked screen and verified Agent Policy fallbacks, emptied number field Reset, gated `In effect`, clean checkout `git status`, and broken-YAML live recovery.
 - After simplifying declaration edits and moves, `scripts/test_desktop.sh --filter 'SettingsWorkflowTests|ConfigurationSettingsTests|ContextSettingsWorkflowTests'` passed all three suites. The compact-window diagnostic was skipped headless.
-- QA round 5 ([qa.html](qa.html)) on a locked screen: both scopes reconnected by themselves 11–16 s after a private server restart, kept their last reading, dropped an edit typed while down, and saved edits afterwards. Compact-window geometry at 760 pt has no overlap; its look still needs an unlocked display.
+- QA round 5 ([qa.html](qa.html)) on a locked screen: both scopes reconnected by themselves 11–16 s after a private server restart, kept their last reading, dropped an edit typed while down, and saved edits afterwards.

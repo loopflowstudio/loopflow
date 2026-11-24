@@ -279,10 +279,7 @@ public actor ServerLink {
     ) -> ServerWatch<Output> {
         let (updates, continuation) = AsyncThrowingStream<Output, any Error>.makeStream(bufferingPolicy: .bufferingOldest(buffer))
         let subscription = ServerSubscription(continuation, query: query, events: events, encode: map, connect: connect)
-        Task {
-            do { try await subscription.start() }
-            catch { subscription.finish(throwing: error) }
-        }
+        subscription.begin()
         return ServerWatch(updates: updates, checkpoint: subscription.checkpoint, cancel: subscription.cancel)
     }
 
@@ -523,7 +520,19 @@ final class ServerSubscription: @unchecked Sendable {
         continuation.onTermination = { [weak self] _ in self?.stop(nil) }
     }
 
-    func start() async throws {
+    /// Connect on a task `stop` cancels, so a cancelled watch never opens a link.
+    func begin() {
+        lock.withLock {
+            guard !stopped else { return }
+            recovery = Task { [self] in
+                do { try await start() }
+                catch is CancellationError { }
+                catch { finish(throwing: error) }
+            }
+        }
+    }
+
+    private func start() async throws {
         try Task.checkCancellation()
         let link = try await connect()
         try Task.checkCancellation()

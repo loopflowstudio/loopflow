@@ -12,7 +12,7 @@ use crate::harness::agent_process;
 use crate::ops::OpsResult;
 use crate::store::ownership::{task_execution_route, task_pause_route, TaskRoute};
 
-fn admission(task: &TaskId) -> OpsResult<File> {
+pub(super) fn admission(task: &TaskId) -> OpsResult<File> {
     lock(&format!("admit-{task}"))
 }
 

@@ -90,6 +90,7 @@ pub fn execution_of_latest_graph(
     let input = step.and_then(|step| facts.inputs.get(&step.id));
     let mut snapshot = project_execution(
         graph,
+        status,
         crate::process::RecordedProcess::from(&graph.run).evidence(),
         step.map_or(ProcessIdentityEvidence::Dead, |step| {
             crate::process::os_process::step_evidence(step, &graph.run)
@@ -145,7 +146,8 @@ pub fn execution_of_latest_graph(
     if matches!(
         snapshot.state,
         TaskExecutionState::Idle | TaskExecutionState::Blocked
-    ) && facts.tasks_with_carrier_records.contains(&task.id)
+    ) && status != TaskState::Paused
+        && facts.tasks_with_carrier_records.contains(&task.id)
     {
         if let Some(died) = crate::ops::task::run_recovery::died_run(sqlite, &task.id)? {
             let start = died.server_start(
@@ -167,19 +169,6 @@ pub fn execution_of_latest_graph(
                 at: died.at.and_then(loopflow_harness::transcript::rfc3339),
             });
             snapshot.outlook = Some(outlook);
-        }
-    }
-    // Keep a live run visible while it drains. A finished Graph has no step.
-    if status == TaskState::Paused
-        && matches!(
-            snapshot.state,
-            TaskExecutionState::Idle | TaskExecutionState::Blocked | TaskExecutionState::Waiting
-        )
-    {
-        if let Some(label) = &snapshot.step {
-            snapshot.reason = format!("{label} stopped when the Task was paused");
-            snapshot.state = TaskExecutionState::Idle;
-            snapshot.outlook = None;
         }
     }
     Ok(snapshot)
@@ -321,6 +310,7 @@ fn apply_limit_recovery(
 /// the step or the Graph can say what ended the run.
 fn project_execution(
     graph: &GraphExecution,
+    status: TaskState,
     graph_process: ProcessIdentityEvidence,
     step: ProcessIdentityEvidence,
 ) -> TaskExecutionSnapshot {
@@ -354,7 +344,7 @@ fn project_execution(
             format!("Graph run at {label} has unknown process identity; inspect its effects before launching further work"),
         ),
         (ProcessIdentityEvidence::Dead, ProcessIdentityEvidence::Dead) => {
-            stopped_execution(&graph.run, process, label)
+            stopped_execution(&graph.run, process, label, status)
         }
     };
     TaskExecutionSnapshot {
@@ -371,8 +361,12 @@ fn stopped_execution(
     graph: &Execution,
     latest: &Execution,
     label: &str,
+    status: TaskState,
 ) -> (TaskExecutionState, String) {
-    if latest.result() != ExecutionResult::Succeeded {
+    let step = latest.result();
+    let interrupted =
+        step == ExecutionResult::Interrupted || graph.result() == ExecutionResult::Interrupted;
+    if step == ExecutionResult::Failed || (!interrupted && step != ExecutionResult::Succeeded) {
         return failed_execution(latest, label);
     }
     if graph.result() == ExecutionResult::Failed {
@@ -389,6 +383,14 @@ fn stopped_execution(
                 reason.trim_end_matches('.').into(),
             );
         }
+    }
+    if interrupted {
+        let reason = if status == TaskState::Paused {
+            format!("{label} is stopped while the Task is paused")
+        } else {
+            format!("{label} was stopped. `lf task run` continues from it.")
+        };
+        return (TaskExecutionState::Idle, reason);
     }
     (
         TaskExecutionState::Idle,
@@ -516,6 +518,7 @@ mod tests {
     use super::{
         apply_limit_recovery, project_execution, TaskExecutionSnapshot, TaskExecutionState,
     };
+    use crate::durable::TaskState;
     use crate::store::ProcessIdentityEvidence::{Dead, Live, Unknown};
     use loopflow_storage::sqlite::AgentLimitRecovery;
 
@@ -627,7 +630,7 @@ mod tests {
         let mut stopped = |exit, error: Option<&str>| {
             graph.run.exit_code = exit;
             graph.run.error = error.map(str::to_owned);
-            project_execution(&graph, Dead, Dead)
+            project_execution(&graph, TaskState::Idle, Dead, Dead)
         };
         let held = Some(super::GraphHeld::EXIT.into());
         let blocked = stopped(held, Some("Graph is blocked: dependency unavailable."));
@@ -650,6 +653,11 @@ mod tests {
         assert_eq!(failed.state, TaskExecutionState::Blocked);
         assert!(failed.reason.contains("process exited with status 7"));
 
+        assert_eq!(stopped(Some(130), None).state, TaskExecutionState::Idle);
+        assert_eq!(
+            stopped(Some(130), Some(error)).state,
+            TaskExecutionState::Blocked
+        );
         assert_eq!(stopped(None, None).state, TaskExecutionState::Idle);
     }
 
@@ -668,31 +676,40 @@ mod tests {
         };
         let running = graph(None, None);
         assert_eq!(
-            project_execution(&running, Live, Live).state,
+            project_execution(&running, TaskState::Idle, Live, Live).state,
             TaskExecutionState::Running
         );
         assert_eq!(
-            project_execution(&running, Live, Dead).state,
+            project_execution(&running, TaskState::Idle, Live, Dead).state,
             TaskExecutionState::Starting
         );
         assert_eq!(
-            project_execution(&running, Unknown, Dead).state,
+            project_execution(&running, TaskState::Idle, Unknown, Dead).state,
             TaskExecutionState::Unknown
         );
         // A Graph process that died is history: nothing is running or resumable.
         let succeeded = graph(Some("succeeded"), None);
-        let stopped = project_execution(&succeeded, Dead, Dead);
+        let stopped = project_execution(&succeeded, TaskState::Idle, Dead, Dead);
         assert_eq!(stopped.state, TaskExecutionState::Idle);
         assert_eq!(stopped.step.as_deref(), Some("implement"));
         let failed = graph(Some("failed"), None);
-        let failed = project_execution(&failed, Dead, Dead);
+        let failed = project_execution(&failed, TaskState::Idle, Dead, Dead);
         assert_eq!(failed.state, TaskExecutionState::Blocked);
         assert!(
             failed.reason.contains("launch fresh work"),
             "{}",
             failed.reason
         );
-        let finished = project_execution(&graph(Some("succeeded"), Some("succeeded")), Dead, Dead);
+        let graph_failure = graph(Some("interrupted"), Some("failed"));
+        let blocked = project_execution(&graph_failure, TaskState::Paused, Dead, Dead);
+        assert_eq!(blocked.state, TaskExecutionState::Blocked);
+        assert!(blocked.reason.contains("it failed"));
+        let finished = project_execution(
+            &graph(Some("succeeded"), Some("succeeded")),
+            TaskState::Idle,
+            Dead,
+            Dead,
+        );
         assert!(finished.step.is_none());
     }
 }

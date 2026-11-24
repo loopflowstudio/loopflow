@@ -2307,6 +2307,7 @@ fn interrupt_worker_build(pause: bool) {
             .unwrap()
             .is_some_and(|p| p.evidence(job.started_at) == ProcessIdentityEvidence::Live)
     };
+    assert_eq!(task.status()["execution"]["state"], "idle");
     assert!(!live(&build), "build survived the worker");
     assert!(live(&daemon), "interrupt stopped a detached service");
     if pause {
@@ -2653,7 +2654,7 @@ if (home / 'hold-turn').exists():
     let status = task.run(&["task", "status", "INF-123"]);
     let status = String::from_utf8_lossy(&status.stdout);
     assert!(
-        status.contains("latest Graph: implement stopped when the Task was paused"),
+        status.contains("latest Graph: implement is stopped while the Task is paused"),
         "{status}"
     );
     assert_eq!(sqlite.task_graph_record(id).unwrap().unwrap(), graph);
@@ -2688,6 +2689,9 @@ if (home / 'hold-turn').exists():
     assert_eq!(last_graph(home), count);
 
     task.ok(&["task", "unpause", "INF-123"]);
+    let status = task.status();
+    assert_eq!(status["execution"]["state"], "idle", "{status}");
+    assert_eq!(status["actions"]["recommended"], "run", "{status}");
     assert_eq!(sqlite.task_graph_record(id).unwrap().unwrap(), graph);
     fs::remove_file(task.repo.path().join("build.pid")).unwrap();
     let restarted = task.run(&["task", "run", "INF-123", "-a", "claude"]);
@@ -2904,6 +2908,12 @@ fn a_failed_command_step_is_started_again() {
         status.contains("Graph held-review: Stopped at graph show late."),
         "{status}"
     );
+    let failure = task.status()["execution"].clone();
+    assert_eq!(failure["state"], "blocked");
+    for command in ["pause", "unpause"] {
+        task.ok(&["task", command, "INF-123"]);
+        assert_eq!(task.status()["execution"], failure);
+    }
 }
 
 #[test]

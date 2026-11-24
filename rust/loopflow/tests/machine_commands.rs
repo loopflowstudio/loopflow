@@ -4520,13 +4520,13 @@ fn served_pause_holds_the_remote_cursor_and_status_names_unpause() {
     assert_success(&status);
     let status: Value = serde_json::from_slice(&status.stdout).unwrap();
     let issue = status["task"]["identifier"].as_str().unwrap();
-    let refusal = format!("Task is paused; run `lf task unpause {issue}` to resume it");
+    let refusal = format!("Task is paused; run `lf task unpause {issue}` to lift the hold");
     assert_eq!(receipt, format!("{issue} paused"));
     assert_eq!(status["task"]["state"], "paused");
     assert_eq!(status["task"]["reason"], refusal);
     assert_eq!(
         status["graph"]["sentence"],
-        "Paused at build. `lf task unpause` resumes it."
+        "Paused at build. `lf task unpause --run` resumes it."
     );
     assert_eq!(status["graph"]["position"]["at"], "implement");
 

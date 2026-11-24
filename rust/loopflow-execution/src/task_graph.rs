@@ -490,10 +490,6 @@ pub struct TaskGraphRun<'a> {
     pub running: bool,
 }
 
-fn paused_sentence(step: &str) -> String {
-    format!("Paused at {step}. `lf task unpause` resumes it.")
-}
-
 impl TaskGraph {
     /// Where the Task stands on `graph`: waiting at `step`, or carried on from
     /// it by `run`. `auto` on names auto, not a person, as the next to take part.
@@ -521,7 +517,9 @@ impl TaskGraph {
                 };
                 let sentence = match pause {
                     Some(PauseStage::Stopping) => format!("Pausing at {step}."),
-                    Some(PauseStage::Held) => paused_sentence(&step),
+                    Some(PauseStage::Held) => {
+                        format!("Paused at {step}. `lf task unpause` lifts the hold.")
+                    }
                     None => sentence,
                 };
                 (
@@ -549,7 +547,7 @@ impl TaskGraph {
                         };
                         format!("Pausing at {label} ({at} is {verb}).")
                     } else {
-                        paused_sentence(label)
+                        format!("Paused at {label}. `lf task unpause --run` resumes it.")
                     }
                 } else if !run.running {
                     format!("Stopped at {label}. `lf task run` starts it again.")
@@ -864,7 +862,7 @@ pub(crate) mod tests {
                 "implement",
                 PauseStage::Held,
                 false,
-                "Paused at build. `lf task unpause` resumes it.",
+                "Paused at build. `lf task unpause --run` resumes it.",
             ),
             (
                 "land --wait-and-fix",
@@ -894,7 +892,7 @@ pub(crate) mod tests {
                 Some(PauseStage::Held)
             )
             .sentence,
-            "Paused at ship-review. `lf task unpause` resumes it."
+            "Paused at ship-review. `lf task unpause` lifts the hold."
         );
     }
 

@@ -50,7 +50,7 @@ pub(super) fn clear_in(conn: &Connection, task: &TaskId) -> StoreResult<bool> {
 }
 
 pub fn run_refusal(issue: &str) -> String {
-    format!("Task is paused; run `lf task unpause {issue}` to resume it")
+    format!("Task is paused; run `lf task unpause {issue}` to lift the hold")
 }
 
 pub(super) fn require_unpaused_in(conn: &Connection, task: &TaskId) -> StoreResult<()> {

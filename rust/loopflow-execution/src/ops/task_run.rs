@@ -91,7 +91,7 @@ mod tests {
         assert!(!task_run_control(&evidence).pausing);
         assert_eq!(
             refusal(&evidence),
-            "Task is paused; run `lf task unpause FIX-1` to resume it"
+            "Task is paused; run `lf task unpause FIX-1` to lift the hold"
         );
     }
 

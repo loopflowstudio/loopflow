@@ -20,3 +20,10 @@ The decisions and exact wording for B1 are in [plan.md](plan.md) and
 - In [round 5](qa.html), navigating from a Wave to the grid stalled twice for
   17–18 seconds with the Machine under load. The sample was in SwiftUI layout.
   The cause and behavior in an unlocked window remain open.
+
+## Compression choices
+
+- Treat the five sidebar status groups as presentation state in the Mac window.
+  Group each row once and keep its incoming order within the group.
+- Read lifecycle, rank and Wave membership directly for Task ordering. Resolve
+  display identifiers only when building rows for a view.

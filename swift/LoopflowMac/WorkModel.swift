@@ -147,7 +147,7 @@ final class WorkModel {
             ?? (kept?.failed(reason) ?? .unavailable(lastGood: nil, reason: reason))
         guard previous?.wave != wave || previous?.reading != next else { return }
         taskListReadings[key] = (wave, next)
-        updateSidebarStatusLatch()
+        holdSelectedStatusGroup()
         endLaunchWhenCurrent()
     }
 
@@ -164,7 +164,10 @@ final class WorkModel {
     private var taskList: WorkViewPlan? {
         let wave = taskListWave
         let reading = taskListReading
-        let plan = shown(reading, wave: wave)
+        guard !pendingChanges.changes.isEmpty else { return reading.value }
+        let plan = pendingChanges.apply(to: reading, wave: wave) { [self] content in
+            content.identifier ?? task(id: content.work.id)?.task.task.identifier
+        }
         guard wave == nil else { return plan }
         return pendingChanges.workingOrder(plan, machine: observingMachineId, readAt: reading.readAt)
     }
@@ -2184,16 +2187,6 @@ final class WorkModel {
         let work: WorkWorkspaceKey
         let states: [WorkSelectionState]
         let graphStep: String?
-
-        var statusOrder: Int {
-            switch states.programState {
-            case .blocked: 0
-            case .error: 1
-            case .idle: 2
-            case .working: 4
-            default: 3
-            }
-        }
     }
 
     var sidebarTaskIDs: [String] { sidebarRows.map(\.id) }
@@ -2230,31 +2223,28 @@ final class WorkModel {
     var sidebarRows: [SidebarTaskRow] {
         let rows = filteredSidebarRows
         guard navigation.sidebarScope.isWorkingList, navigation.sidebarSortByStatus else { return rows }
-        let latch = navigation.sidebarStatusLatch
-        func order(_ row: SidebarTaskRow) -> Int {
-            if let latch, latch.taskID == row.id { return latch.statusOrder }
-            return row.statusOrder
+        let held = navigation.heldStatusGroup
+        // Grouping retains the shared Task order within each status.
+        let groups = Dictionary(grouping: rows) { row in
+            if let held, held.taskID == row.id { return held.group }
+            return WorkNavigation.StatusGroup(row.states)
         }
-        // Swift's stable sort keeps the shared order within each status group.
-        return rows.sorted { order($0) < order($1) }
+        return WorkNavigation.StatusGroup.allCases.flatMap { groups[$0] ?? [] }
     }
 
     func toggleSidebarSortByStatus() {
+        navigation.heldStatusGroup = nil
         navigation.sidebarSortByStatus.toggle()
-        if navigation.sidebarSortByStatus {
-            updateSidebarStatusLatch()
-        } else {
-            navigation.sidebarStatusLatch = nil
-        }
+        holdSelectedStatusGroup()
     }
 
-    private func updateSidebarStatusLatch() {
+    private func holdSelectedStatusGroup() {
         guard navigation.sidebarSortByStatus, navigation.sidebarScope.isWorkingList,
               let selection, selection.kind == .task else { return }
         let id = resolvedTaskID(selection.id)
-        guard navigation.sidebarStatusLatch?.taskID != id else { return }
-        navigation.sidebarStatusLatch = filteredSidebarRows.first { $0.id == id }.map {
-            .init(taskID: id, statusOrder: $0.statusOrder)
+        guard navigation.heldStatusGroup?.taskID != id else { return }
+        navigation.heldStatusGroup = filteredSidebarRows.first { $0.id == id }.map {
+            (id, WorkNavigation.StatusGroup($0.states))
         }
     }
 
@@ -2981,14 +2971,6 @@ final class WorkModel {
     /// This window's subscription named for the Machine's changes, which every window shares.
     private func readingKey(_ part: String) -> String { "\(ObjectIdentifier(self).hashValue)/\(part)" }
 
-    /// `reading`, a Task list, with this Machine's pending changes made.
-    private func shown(_ reading: Reading<WorkViewPlan>, wave: String? = nil) -> WorkViewPlan? {
-        guard !pendingChanges.changes.isEmpty else { return reading.value }
-        return pendingChanges.apply(to: reading, wave: wave) { [self] content in
-            content.identifier ?? task(id: content.work.id)?.task.task.identifier
-        }
-    }
-
     /// Planning rows with this Machine's pending changes made. `wave` filters
     /// them to one Wave; a Task moved into it comes from the inventory.
     private func shown(_ tasks: [RoadmapTask], wave: String? = nil) -> [RoadmapTask] {
@@ -3372,7 +3354,7 @@ final class WorkModel {
     private func setSelection(_ selection: WorkReference?) {
         viewOpening = nil
         selectionOpening = nil
-        defer { updateSidebarStatusLatch() }
+        defer { holdSelectedStatusGroup() }
         guard navigation.destination != .work(selection) else { return }
         workActivityGeneration &+= 1
         navigation.selectedTaskEvidence = selection.flatMap { $0.kind == .task ? task(id: $0.id) : nil }

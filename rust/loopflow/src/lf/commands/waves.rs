@@ -2422,11 +2422,9 @@ async fn snapshot_task_detail(
         .get(&task.id)
         .cloned()
         .ok_or_else(|| anyhow!("Task {} has no graph", task.id))?;
-    let section = TaskSection::of(
-        runtime.status,
-        runtime.owner.is_some(),
-        task.state.as_deref(),
-    );
+    let lifecycle = status.lifecycle(task.state.as_deref());
+    let owned = runtime.owner.is_some();
+    let section = TaskSection::of(lifecycle, owned);
     let owned_by_you = runtime.owner.as_ref().is_some_and(|holder| {
         reads
             .you
@@ -2449,13 +2447,12 @@ async fn snapshot_task_detail(
                 .ok_or_else(|| anyhow!("Task {} repository is unavailable", task.id))?,
         ),
         reference,
-        lifecycle: status.lifecycle(task.state.as_deref()),
+        lifecycle,
         selection_states: task_selection_states(
-            status,
-            runtime.owner.is_some(),
+            lifecycle,
+            owned,
             pr.as_ref().is_some_and(|pr| pr.publication.is_some()),
             facts.auto_on.contains(&task.id),
-            task.state.as_deref(),
             reads.selection_readings[&task.repository_id]
                 .activity
                 .get(&task.id),

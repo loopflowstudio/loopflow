@@ -40,6 +40,15 @@ and the [Swift README](../swift/README.md). Deferred ideas stay in
 
 ## Observed
 
+- After compression, the repository selection SQL returned 2,000 rows from a
+  10,013-Task fixture. `EXPLAIN QUERY PLAN` used `idx_tasks_repository` and
+  the open-Graph index, with no temporary sort.
+- `scripts/test_desktop.sh --skip-build --filter 'WorkNavigationTests|TaskConceptTests'`
+  passed 63 tests after rebuilding Desktop. Unlocked-window QA remains below.
+- 29 focused Rust tests passed across storage lifecycle, selection reads,
+  roadmap membership and concurrent drops. `cargo fmt --all --check` and
+  `cargo clippy --all-targets -- -D warnings` passed.
+
 - `scripts/test_desktop.sh --filter 'WorkNavigationTests'` passed all 56 tests
   after the group hold and Wave toggle landed. The tests cover the first
   reading, changes to nearby rows, repeated keyboard selection, switching Tasks,

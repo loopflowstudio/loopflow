@@ -242,11 +242,20 @@ final class WorkNavigation {
     var backlogs: [Board: BacklogState] = [:]
     var showsSlotHints = false
     var sidebarSortByStatus = false
-    struct SidebarStatusLatch: Equatable {
-        let taskID: String
-        let statusOrder: Int
+    enum StatusGroup: CaseIterable {
+        case blocked, error, available, idle, busy
+
+        init(_ states: [WorkSelectionState]) {
+            self = switch states.programState {
+            case .blocked: .blocked
+            case .error: .error
+            case .idle: .available
+            case .working: .busy
+            default: .idle
+            }
+        }
     }
-    var sidebarStatusLatch: SidebarStatusLatch?
+    var heldStatusGroup: (taskID: String, group: StatusGroup)?
     var canReorderSidebar: Bool { sidebarScope == .repository && !sidebarSortByStatus }
     var sidebarFilter: SidebarFilter = .working {
         willSet {
@@ -254,7 +263,7 @@ final class WorkNavigation {
         }
         didSet {
             if oldValue != sidebarFilter {
-                sidebarStatusLatch = nil
+                heldStatusGroup = nil
                 Perf.acknowledged(Perf.hierarchyInteraction, id: "outline:\(sidebarFilter.rawValue)", owner: performanceOwner)
             }
         }
@@ -346,8 +355,8 @@ final class WorkNavigation {
     static let workingTasksTitle = "Working Tasks"
     var destination: Destination = .work(nil) {
         didSet {
-            if sidebarStatusLatch != nil, selection?.kind != .task || !sidebarScope.isWorkingList {
-                sidebarStatusLatch = nil
+            if heldStatusGroup != nil, selection?.kind != .task || !sidebarScope.isWorkingList {
+                heldStatusGroup = nil
             }
         }
     }

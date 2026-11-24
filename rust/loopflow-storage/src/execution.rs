@@ -138,10 +138,9 @@ pub enum TaskSection {
 }
 
 impl TaskSection {
-    /// `owned`: someone holds the Task's claim. `plan_state` is planning's state
-    /// type; closing a Task there withdraws it only if it never started.
-    pub fn of(state: TaskState, owned: bool, plan_state: Option<&str>) -> Self {
-        match state.lifecycle(plan_state) {
+    /// The Task's effective lifecycle and whether someone holds its claim.
+    pub fn of(lifecycle: TaskState, owned: bool) -> Self {
+        match lifecycle {
             TaskState::Done => Self::Done,
             TaskState::Abandoned => Self::Abandoned,
             TaskState::Unstarted => Self::Backlog,
@@ -245,33 +244,26 @@ mod tests {
             assert_eq!(TaskState::Unstarted.lifecycle(Some(planning)), terminal);
             for runtime in [TaskState::Idle, TaskState::Active, TaskState::Moving] {
                 assert_eq!(runtime.lifecycle(Some(planning)), runtime);
-                assert_eq!(
-                    TaskSection::of(runtime, false, Some(planning)),
-                    TaskSection::Backlog
-                );
             }
         }
     }
 
     #[test]
     fn task_sections_put_unassigned_and_withdrawn_tasks_where_the_board_does() {
-        let of = TaskSection::of;
-        assert_eq!(of(TaskState::Idle, true, None), TaskSection::Working);
-        assert_eq!(
-            of(TaskState::Moving, true, Some("completed")),
-            TaskSection::Working
-        );
-        assert_eq!(of(TaskState::Idle, false, None), TaskSection::Backlog);
-        assert_eq!(of(TaskState::Moving, false, None), TaskSection::Backlog);
-        assert_eq!(of(TaskState::Unstarted, true, None), TaskSection::Backlog);
-        assert_eq!(
-            of(TaskState::Unstarted, false, Some("completed")),
-            TaskSection::Done
-        );
-        assert_eq!(
-            of(TaskState::Unstarted, false, Some("canceled")),
-            TaskSection::Abandoned
-        );
-        assert_eq!(of(TaskState::Abandoned, true, None), TaskSection::Abandoned);
+        for lifecycle in [TaskState::Idle, TaskState::Active, TaskState::Moving] {
+            assert_eq!(TaskSection::of(lifecycle, true), TaskSection::Working);
+            assert_eq!(TaskSection::of(lifecycle, false), TaskSection::Backlog);
+        }
+        for owned in [true, false] {
+            assert_eq!(
+                TaskSection::of(TaskState::Unstarted, owned),
+                TaskSection::Backlog
+            );
+            assert_eq!(TaskSection::of(TaskState::Done, owned), TaskSection::Done);
+            assert_eq!(
+                TaskSection::of(TaskState::Abandoned, owned),
+                TaskSection::Abandoned
+            );
+        }
     }
 }

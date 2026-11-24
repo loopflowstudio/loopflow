@@ -1481,6 +1481,7 @@ impl ConfigCommand {
             Self::User { .. }
             | Self::Settings { .. }
             | Self::Catalog { .. }
+            | Self::Scope { .. }
             | Self::Get { .. }
             | Self::Explain { .. } => false,
             Self::Set { .. } | Self::Unset { .. } => true,
@@ -2972,6 +2973,8 @@ pub enum ConfigCommand {
         #[arg(long)]
         json: bool,
     },
+    /// Inspect effective settings and declarations for Global, a checkout or a Wave
+    Scope(commands::setting::ScopeArgs),
     /// Show effective settings and their sources without launching
     Settings {
         #[arg(long)]

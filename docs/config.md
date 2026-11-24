@@ -145,12 +145,22 @@ lf config settings --skill implement --explain # every candidate, file, and why 
 lf config settings --skill implement --all     # include built-in defaults
 lf config settings --graph release --step write-code --json
 lf config catalog --json                       # every supported key, type, and scope
+lf config scope --json                         # checkout settings and editable declarations
+lf --wave frontend config scope --skill design --json
 lf context --json                              # context budgets and current usage
 ```
 
 `lf set` validates keys and types strictly and preserves comments in YAML
-files. Desktop's **Configuration** panel reads and writes the same files with
-the same Explain and Unset controls.
+files. Desktop's [Settings](surfaces.md#settings) window (`⌘,`) reads and
+writes the same files. **Project & Wave Config** has the **Applies to** and
+**Save in** selectors, a precedence ladder, and Undo. Simple controls reset
+immediately. YAML resets and moves show a preview.
+
+An unset control shows the value in effect and its source, such as
+**On (Default)**. Lists can name several contributing files. Use **Reset** below a
+picker to remove its saved choice and see the inherited value. A picker shows
+**Explicit null** when its file declares a nullable key such as `chrome` as
+`null`. Lower declarations supply its value. **Reset** removes the key.
 
 ## Where settings live
 

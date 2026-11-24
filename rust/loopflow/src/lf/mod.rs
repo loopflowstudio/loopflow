@@ -1496,7 +1496,8 @@ impl SelfCommand {
     pub fn changes_work(&self) -> bool {
         match self {
             Self::Install { cmd, .. } => match cmd {
-                Some(InstallCommand::Server | InstallCommand::Preflight { .. }) => false,
+                Some(InstallCommand::Server { profile_stdin }) => *profile_stdin,
+                Some(InstallCommand::Preflight { .. }) => false,
                 None
                 | Some(
                     InstallCommand::Schedule { .. }
@@ -2656,7 +2657,11 @@ pub enum InstallFrequency {
 pub enum InstallCommand {
     /// Reconcile the selected installation's local server for a client.
     #[command(hide = true)]
-    Server,
+    Server {
+        /// Retain a rental caller’s portable profile from stdin before starting.
+        #[arg(long)]
+        profile_stdin: bool,
+    },
     /// Run `lf install` on your stream on a schedule (launchd, also at login; cron on Linux),
     Schedule {
         /// Weekly: Monday 09:00; daily: 09:00; otherwise on clock boundaries (local time).

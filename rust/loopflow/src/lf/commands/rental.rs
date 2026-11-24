@@ -4,6 +4,7 @@
 //! Provider calls block, so these commands keep a runtime only for the async
 //! store open and SSH probe and talk to SQLite directly.
 
+use std::io::Seek;
 use std::path::Path;
 use std::process::{Command, Stdio};
 use std::time::{Duration, SystemTime};
@@ -553,11 +554,16 @@ fn attach(
             preflight.candidate.source_revision
         );
     }
+    let caller = sqlite.saved_local_machine()?;
+    let profile = loopflow_execution::config::remote::outgoing(None, caller.id.as_str())?;
+    let mut input = tempfile::tempfile()?;
+    serde_json::to_writer(&mut input, &profile)?;
+    input.rewind()?;
     let command = format!(
-        "{}; exec lf install server",
+        "{}; exec lf install server --profile-stdin",
         loopflow_execution::machine::ssh::remote_path()
     );
-    let output = run_bootstrap(route, &command, Stdio::null())
+    let output = run_bootstrap(route, &command, Stdio::from(input))
         .with_context(|| format!("start the server on {}", rental.provider_name))?;
     let status: loopflow_execution::machine::client::Status =
         serde_json::from_slice(&output).context("read rental server readiness")?;

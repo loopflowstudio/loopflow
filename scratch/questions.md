@@ -15,3 +15,5 @@
 - Count In Progress Projects across the complete Initiative before filtering to the repository Team. A second active Project outside that Team makes the automatic choice ambiguous.
 
 - Collection resumes by changed Session in the source state and history databases. Give-back revisits closed Sessions too, because provider and capture files can finish after a database write. `lf session usage --session <id>` totals the selected Session’s turns on its recorded origin. The existing work-scoped input reports keep their Machine-local attribution.
+
+- A first delivery that disagrees on a setting records a conflict for the file and identifies the settings it did save in `applied`. For example, a rental keeps its edited `yolo` while accepting the caller’s agent and skill routes. The installation stream belongs to each Machine.

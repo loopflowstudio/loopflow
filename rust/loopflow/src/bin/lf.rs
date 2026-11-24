@@ -2057,8 +2057,12 @@ fn run() -> anyhow::Result<()> {
             Some(InstallCommand::Schedule { frequency }) => {
                 loopflow::lf::commands::install::schedule(*frequency)
             }
-            Some(InstallCommand::Server) => {
+            Some(InstallCommand::Server { profile_stdin }) => {
                 loopflow_execution::installation::server::delegate_selected()?;
+                if *profile_stdin {
+                    let profile = std::io::read_to_string(std::io::stdin().lock())?;
+                    loopflow_execution::config::remote::provision(&profile)?;
+                }
                 println!(
                     "{}",
                     serde_json::to_string(&loopflow_execution::installation::server::ensure()?)?

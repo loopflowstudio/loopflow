@@ -103,6 +103,97 @@ fn container_connects_share_one_server_and_restart_it_after_exit() {
 }
 
 #[test]
+fn a_dev_rental_keeps_its_stream_and_receives_the_callers_skill_routes() {
+    use loopflow_execution::config::remote;
+
+    let repo = TestRepo::new();
+    let caller = tempfile::tempdir().unwrap();
+    let profile = {
+        let _env = EnvGuard::with_home(&[], Some(caller.path()));
+        std::env::set_var("LF_HOME", caller.path());
+        fs::write(
+            caller.path().join("config.yaml"),
+            "stream: stable\n\
+             forward: {env: [TEST_TOKEN]}\n\
+             default_agent: codex:general\n\
+             skills: {probe: {agents: [codex:small]}}\n\
+             yolo: true\n",
+        )
+        .unwrap();
+        remote::outgoing(None, "caller").unwrap()
+    };
+    assert!(profile.global.get("stream").is_none());
+    assert!(profile.global.get("forward").is_none());
+    repo.create_file(".lf/skills/probe.md", "Probe.");
+
+    for (local, conflict) in [
+        ("", false),
+        ("skill: {probe: {agents: [codex:small]}}\n", false),
+        ("yolo: false\ntheme: Linen\n", true),
+    ] {
+        let home = tempfile::tempdir().unwrap();
+        let _env = EnvGuard::with_home(&[], Some(home.path()));
+        std::env::set_var("LF_HOME", home.path().canonicalize().unwrap());
+        let file = home.path().join("config.yaml");
+        fs::write(&file, format!("stream: dev\n{local}")).unwrap();
+        let _server = Server::start(repo.path(), home.path());
+        let assert_saved = |model: &str| {
+            let show = read(
+                repo.path(),
+                home.path(),
+                &["config", "show", "--skill", "probe", "--json"],
+                None,
+            );
+            let shown: Value = serde_json::from_str(&show).unwrap();
+            assert_eq!(shown[0]["settings"]["agent"]["value"], model);
+            let general = read(repo.path(), home.path(), &["config", "show"], None);
+            assert!(general.contains("codex:general"), "{general}");
+            let records: Value = serde_json::from_str(&read(
+                repo.path(),
+                home.path(),
+                &["config", "retained"],
+                None,
+            ))
+            .unwrap();
+            let receipt = &records[0]["receipt"];
+            assert_eq!(receipt["applied"]["skills"]["probe"]["agents"][0], model);
+            assert_eq!(
+                receipt["status"],
+                if conflict { "conflict" } else { "retained" }
+            );
+            let saved: serde_yaml_ng::Value =
+                serde_yaml_ng::from_str(&fs::read_to_string(&file).unwrap()).unwrap();
+            assert_eq!(saved["stream"], "dev");
+            assert_eq!(saved["yolo"], !conflict);
+            if conflict {
+                assert_eq!(saved["theme"], "Linen");
+            }
+        };
+        let mut profile = profile.clone();
+        let initial = serde_json::to_string(&profile).unwrap();
+        read(
+            repo.path(),
+            home.path(),
+            &["install", "server", "--profile-stdin"],
+            Some(&initial),
+        );
+        assert_saved("codex:small");
+
+        profile.global["skills"]["probe"]["agents"][0] = "codex:updated".into();
+        profile.revision += 1;
+        {
+            let input = serde_json::to_string(&profile).unwrap();
+            let _profile = loopflow_execution::config::environment::EnvVarGuard::set(
+                remote::PROFILE_ENV,
+                &input,
+            );
+            remote::receive(Some(repo.path())).unwrap();
+        }
+        assert_saved("codex:updated");
+    }
+}
+
+#[test]
 fn configuration_readiness_recognizes_an_older_server_for_replacement() {
     use std::io::Read;
     use std::os::unix::net::UnixListener;

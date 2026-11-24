@@ -331,7 +331,7 @@ definitions! {
     pr: bool = "false", Repository, Replace, Portable, DomainAction, Release, "Create a pull request after pushing";
     user: UserConfig = "{}", Personal, Merge, Portable, NextRead, Loopflow, "Display name; never an ownership credential";
     session: SessionConfig = "{}", Personal, Merge, HostLocal, NextRead, Loopflow, "Terminal and detached Session lifetime";
-    stream: Option<String> = "null", Personal, Replace, Portable, DomainAction, Loopflow, "Installation release stream";
+    stream: Option<String> = "null", Personal, Replace, HostLocal, DomainAction, Loopflow, "This Machine’s installation release stream";
     logs: LogConfig = "{linear_requests: false}", Personal, Merge, HostLocal, NextRead, Loopflow, "Local diagnostic logging";
 }
 
@@ -342,6 +342,15 @@ fn all_definitions() -> impl Iterator<Item = &'static Definition> {
         .chain(FORWARD_DEFINITIONS)
         .chain(CODEX_DEFINITIONS)
         .chain(CLAUDE_DEFINITIONS)
+}
+
+pub(super) fn has_child_settings(key: &str) -> bool {
+    all_definitions().any(|child| {
+        child
+            .key
+            .strip_prefix(key)
+            .is_some_and(|rest| rest.starts_with('.'))
+    })
 }
 
 /// The definition owning `key`, in any spelling `config::keys` accepts.

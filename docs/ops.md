@@ -249,6 +249,9 @@ Returned modal-1 (2 sessions copied; ceiling estimate $0.24)
 - A rental runs the Linux build matching the caller. Your Machine fetches the
   release or dev package before forwarding logins. For a local build or an
   expired CI artifact, set `LF_RENT_LINUX_BIN` to the Linux executable.
+- From the first SSH shell, `lf config show` reports the caller’s global agent
+  preferences. Use `lf config show --skill <name>` to see a skill’s route.
+  The rental keeps its own installation stream.
 - **Credentials on rentals:** Owned SSH machines use their own native logins.
   For unattended rentals, forward explicitly named tokens or auth files via
   `forward.env` / `forward.files`, and push rotated files to a live Machine

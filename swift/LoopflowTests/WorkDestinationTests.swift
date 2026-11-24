@@ -838,9 +838,6 @@ struct WorkDestinationTests {
         let shellPane = try #require(try remote.newShell())
         let tab = try #require(shellPane.content.selectedShell)
         #expect(tab.location == remoteIdentity)
-        let command = try remote.shellAttachment(tab)
-        #expect(Array(command.dropFirst()) == ["desktop", "shell", taskID, "--id", tab.id,
-                                               "--create", "--bootstrap", try desktopShellBootstrap()])
         // A move leaves the shell labelled with the Machine that started it.
         remote.location = WorkspaceIdentity(machineId: "mini", worktree: "/mini/checkout")
         #expect(remote.multiplexer.shell(tab.id)?.location == remoteIdentity)

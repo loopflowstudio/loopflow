@@ -41,6 +41,8 @@ def _terminate(signum: int, _frame: object) -> None:
 
 def main() -> int:
     env = {key: value for key, value in os.environ.items() if not key.startswith("LF_")}
+    # Fixtures with Machines run this source's `lf` through the host below.
+    subprocess.run(["cargo", "build", "-p", "loopflow", "--bin", "lf"], cwd=ROOT, env=env, check=True)
     # The project links the GhosttyKit archive Package.swift pins.
     subprocess.run(["swift", "package", "resolve"], cwd=ROOT / "swift", env=env, check=True)
     subprocess.run(

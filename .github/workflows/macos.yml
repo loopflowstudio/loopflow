@@ -196,7 +196,9 @@ jobs:
         with:
           key: loopflow-ui-test-${{ steps.rust-profiles.outputs.key }}
           save-if: ${{ github.ref == 'refs/heads/main' || github.event_name == 'pull_request' }}
-          workspaces: . -> target/dev-app-control
+          workspaces: |
+            . -> target
+            . -> target/dev-app-control
       - name: Install XcodeGen
         run: brew install xcodegen
       - name: Fingerprint Xcode build inputs
@@ -231,6 +233,8 @@ jobs:
       - name: Record Xcode source timestamps
         if: github.ref == 'refs/heads/main' && steps.xcode-cache.outputs.cache-hit != 'true'
         run: uv run python scripts/swift_cache.py save --build-system xcode
+      - name: Build CLI for iOS Machine fixtures
+        run: /usr/bin/time -l cargo build -p loopflow --bin lf
       - name: Test the iOS app on Simulator
         run: uv run python scripts/test_ios.py -resultBundlePath "$RUNNER_TEMP/ios-tests.xcresult"
         timeout-minutes: 20

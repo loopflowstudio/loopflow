@@ -221,8 +221,8 @@ The suite covers pairing, Task creation, the terminal and a Task on another
 Machine; the shared protocol decoders, view stream included, run with the macOS
 Swift tests. A process the Simulator starts cannot look up the OS account, so
 fixtures that need Machines (`RemoteTaskWorkspaceTests`) ask
-`scripts/ios_fixture_host.py`, which `test_ios.py` starts, to run `lf`; they
-need a built `target/debug/lf`. Whether a
+`scripts/ios_fixture_host.py`, which `test_ios.py` starts, to run the
+`target/debug/lf` it builds first. Whether a
 Session works is checked on a physical phone against a real Machine.
 Website checks generate command reference pages from `LF_BIN` or `lf` on PATH.
 After building the candidate, prepend its directory to `PATH` for the gate or

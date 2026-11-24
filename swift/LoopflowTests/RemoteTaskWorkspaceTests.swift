@@ -297,13 +297,14 @@ private final class TwoMachines {
         }
     }
 
-    /// Register mini, then start both servers; their first opens migrate each store.
+    /// Start both servers, whose first opens migrate each store, then register
+    /// mini: its reachability probe must not wait out a migration.
     func serve() async throws {
         struct Identity: Decodable { let id: String }
-        miniID = try await laptop.json(["machine", "add", "mini", "--json"], as: Identity.self).id
-        laptopID = try await laptop.json(["machine", "id", "--json"], as: Identity.self).id
         _ = try await miniServer.status()
         _ = try await laptopServer.status()
+        miniID = try await laptop.json(["machine", "add", "mini", "--json"], as: Identity.self).id
+        laptopID = try await laptop.json(["machine", "id", "--json"], as: Identity.self).id
     }
 
     func createTask(_ title: String) async throws -> String {

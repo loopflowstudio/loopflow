@@ -1,6 +1,6 @@
 //! `lf history usage` — direct provider-authored usage from recorded Session inputs.
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use time::OffsetDateTime;
 
 use crate::lf::commands::WorkFilter;
@@ -12,6 +12,53 @@ const REPO_WIDTH: usize = 18;
 const WORK_WIDTH: usize = 22;
 const SESSION_WIDTH: usize = 22;
 const NUM_WIDTH: usize = 12;
+
+/// Read all turns of one Session, including a rental's last collected reading.
+pub(super) fn session(id: &str, json: bool) -> Result<()> {
+    let store = loopflow_storage::sqlite::SqliteStore::open_read_only(
+        &loopflow_execution::store::database_path_from_env()?,
+        loopflow_execution::store::token_key::encryption_key,
+    )?;
+    let (origin, collected_at, usage) = if store.session(id)?.is_some() {
+        (
+            loopflow_execution::store::machines::local_machine(&store)?.id,
+            None,
+            loopflow_storage::session_record::reduce_usage(&store.session_turns(id)?),
+        )
+    } else {
+        let history = store
+            .saved_copied_history(id)?
+            .with_context(|| format!("Session {id} was not found"))?;
+        (
+            history.session.origin,
+            Some(history.copied_at),
+            history.usage,
+        )
+    };
+    if json {
+        println!(
+            "{}",
+            serde_json::json!({ "session_id":id, "origin_machine_id":origin,
+            "collected_at":collected_at, "usage":usage })
+        );
+    } else {
+        println!("Session {id} · from {origin}");
+        if let Some(at) = collected_at {
+            println!("Collected {}", loopflow_execution::output::format_time(at));
+        }
+        println!(
+            "Input {} · output {} · cache read {} · cost {}",
+            format_optional(usage.input_tokens),
+            format_optional(usage.output_tokens),
+            format_optional(usage.cache_read_tokens),
+            usage
+                .cost_usd
+                .map(format_cost)
+                .unwrap_or_else(|| "-".into())
+        );
+    }
+    Ok(())
+}
 
 /// Print Session input usage without inventing completeness or provider finality.
 pub fn run(

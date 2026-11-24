@@ -496,17 +496,24 @@ the soft deadline (15 minutes before the hard one), or on `lf machine end`; any
 of them refuses while the sandbox holds uncommitted or unpushed work. Owned
 machines are never deleted.
 
-Before it deletes, the laptop pulls `lf session history export --since <rental start>`:
-the worker's Process, Session, session-event and Graph rows as JSON lines, origin
-first, plus capture files. They land in `machine_records` keyed by origin and
-row, and captures under `~/.lf/machines/<origin>/runs`, never in this Machine's
-own tables, so no reconciler, attachment or Task judgment acts on a copy. An
-export from any Machine but the one expected is refused; a failed copy deletes
-nothing. `lf session list` and `lf task status` name copies "from <machine>"
-after the sandbox is gone, and `lf session history show <session>` opens one. The give-back
-pass runs at the end of a forwarded `lf task run` for its rented Machine and in
-the Machine server's recovery pass for every rental; `lf ondemand list` only
-refreshes provider state and never ends a machine.
+The renting Machine’s server collects Session history over SSH on its recovery
+pass, including when the server has no provider API credentials. The first
+export covers the rental’s lifetime. Subsequent exports revisit Sessions
+changed in either the state or history database and check open provider
+transcripts. A clean give-back reads the full window once more to catch late
+file writes.
+
+Copied Session events, history observations, provider text and recorded turns
+live in `machine_records`, keyed by origin Machine and source identity. Capture
+files live under `~/.lf/machines/<origin>/runs`. A successful SSH export and
+import advances the checkpoint. An interrupted exchange leaves the previous
+checkpoint available after restart. Giving back a Machine requires a
+successful copy unless forced.
+
+`lf session list` and `lf task status` identify copies by origin. Read a
+Session with `lf session history show <session> --json`, its saved text with
+`--transcript`, and its totals with `lf session usage --session <session>`.
+The collection time shows how far the laptop saw before losing contact.
 
 ## Process topology
 

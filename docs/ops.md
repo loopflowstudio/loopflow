@@ -256,10 +256,12 @@ Returned modal-1 (2 sessions copied; ceiling estimate $0.24)
   ([Remote Machines and rentals](subscriptions.md#remote-machines-and-rentals)).
   Linear receives a short-lived access token refreshed from your laptop (the
   refresh grant stays local).
-- **Automatic cleanup:** Rented machines return 15 minutes after their last
-  Task finishes, copying Sessions and Graph runs back home first so
-  `lf session list` shows them (`from modal-1`). Unpushed work blocks return
-  unless you pass `--force`.
+- Your Machine collects rental Session history while its server runs. After a
+  sandbox disappears, `lf session list` names the origin (`from modal-1`).
+  Read the last collected transcript with `lf session history show <id> --transcript`
+  and its token and cost totals with `lf session usage --session <id>`.
+- Task rentals return 15 minutes after their last Task finishes. Give-back
+  makes a final copy. Unpushed work blocks return unless you pass `--force`.
 
 ## Updates and scheduling
 

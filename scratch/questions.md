@@ -13,3 +13,5 @@
 
 - A repeated explicit placement treats an existing Graph run on the recorded owner as an acknowledgement. Plain `lf task run` remains the command to advance it. If the owner cannot be reached, placement stops before admitting another rental.
 - Count In Progress Projects across the complete Initiative before filtering to the repository Team. A second active Project outside that Team makes the automatic choice ambiguous.
+
+- Collection resumes by changed Session in the source state and history databases. Give-back revisits closed Sessions too, because provider and capture files can finish after a database write. `lf session usage --session <id>` totals the selected Session’s turns on its recorded origin. The existing work-scoped input reports keep their Machine-local attribution.

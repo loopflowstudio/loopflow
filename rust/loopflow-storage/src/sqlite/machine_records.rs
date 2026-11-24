@@ -1,10 +1,11 @@
 //! Rows exported for another Machine and the copies this Machine keeps.
-//! Export reads every table inside one savepoint, so a copy is one snapshot.
+//! Both databases are read in a pinned snapshot for each Session.
 use rusqlite::types::ValueRef;
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
+use serde::de::DeserializeOwned;
 
 use crate::machine_records::{
-    CopiedEvent, CopiedHistory, CopiedSession, CopyCounts, Record, RecordKind,
+    CopiedEvent, CopiedHistory, CopiedSession, CopyCounts, CopyCursor, Record, RecordKind,
 };
 use crate::rows::now_unix;
 use crate::{StoreError, StoreResult};
@@ -12,12 +13,13 @@ use loopflow_model::durable::{MachineId, RepositoryId, TaskId};
 
 use super::SqliteStore;
 
-/// Every column the table has in this Machine's schema, by name: a copy
-/// carries what its origin wrote, whatever release that was.
+/// A copy carries the columns its origin actually has, including generated history kinds.
 fn columns_in(conn: &Connection, table: &str) -> StoreResult<String> {
-    let mut statement = conn.prepare("SELECT name FROM pragma_table_info(?1) ORDER BY cid")?;
+    let (schema, table) = table.split_once('.').unwrap_or(("main", table));
+    let mut statement =
+        conn.prepare_cached("SELECT name FROM pragma_table_xinfo(?1,?2) ORDER BY cid")?;
     let names = statement
-        .query_map([table], |row| row.get::<_, String>(0))?
+        .query_map([table, schema], |row| row.get::<_, String>(0))?
         .map(|name| name.map(|name| format!("\"{}\"", name.replace('"', "\"\""))))
         .collect::<Result<Vec<_>, _>>()?;
     Ok(names.join(","))
@@ -29,19 +31,17 @@ fn rows_in(
     key: &str,
     table: &str,
     filter: &str,
-    since: i64,
+    session: &str,
 ) -> StoreResult<Vec<Record>> {
-    let sql = format!(
-        "SELECT {} FROM {table} WHERE {filter}",
-        columns_in(conn, table)?
-    );
+    let columns = columns_in(conn, table)?;
+    let sql = format!("SELECT {columns} FROM {table} WHERE {filter}");
     let mut statement = conn.prepare(&sql)?;
     let names: Vec<String> = statement
         .column_names()
         .into_iter()
         .map(str::to_string)
         .collect();
-    let mut rows = statement.query([since])?;
+    let mut rows = statement.query([session])?;
     let mut records = Vec::new();
     while let Some(row) = rows.next()? {
         let mut object = serde_json::Map::new();
@@ -70,6 +70,11 @@ fn rows_in(
                 )))
             }
         };
+        let key = if kind == RecordKind::History {
+            serde_json::to_string(&(session, &object["receipt_key"]))?
+        } else {
+            key
+        };
         records.push(Record {
             kind,
             key,
@@ -79,40 +84,144 @@ fn rows_in(
     Ok(records)
 }
 
+fn copied_rows<T: DeserializeOwned>(
+    conn: &Connection,
+    origin: &MachineId,
+    kind: RecordKind,
+    session: &str,
+) -> StoreResult<Vec<T>> {
+    let mut stmt = conn.prepare(
+        "SELECT row FROM machine_records WHERE origin_machine_id=?1 AND kind=?2
+        AND json_extract(row,'$.session_id')=?3",
+    )?;
+    let rows = stmt.query_map(params![origin.as_str(), kind.as_str(), session], |row| {
+        row.get::<_, String>(0)
+    })?;
+    rows.map(|row| Ok(serde_json::from_str(&row?)?)).collect()
+}
+
 impl SqliteStore {
-    /// This Machine's Sessions and session events touched since `since`, and
-    /// the artifact keys of their captures.
-    pub fn export_records(&self, since: i64) -> StoreResult<(Vec<Record>, Vec<String>)> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let conn = conn.savepoint()?;
+    /// Upgrade an older history file before taking the export snapshot.
+    /// Normal reads tolerate a missing history file. A final copy must see the real one.
+    pub fn prepare_history_export(&self) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let file: String = conn.query_row(
+            "SELECT file FROM pragma_database_list WHERE name='history'",
+            [],
+            |row| row.get(0),
+        )?;
+        if file.is_empty() {
+            return Err(StoreError::InvalidData(
+                "history.db is unavailable for export".into(),
+            ));
+        }
+        let current: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM history.sqlite_schema WHERE name='session_export_changes')",
+            [], |row| row.get(0),
+        )?;
+        if !current {
+            let store = conn.path().expect("the exporter uses a file-backed store");
+            crate::history::open_writer(std::path::Path::new(store))?;
+        }
+        Ok(())
+    }
+
+    pub fn export_cursor(&self) -> StoreResult<CopyCursor> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn.query_row(
+            "SELECT
+            COALESCE((SELECT MAX(position) FROM session_export_changes),0),
+            COALESCE((SELECT MAX(position) FROM history.session_export_changes),0)",
+            [],
+            |row| {
+                Ok(CopyCursor {
+                    state: row.get(0)?,
+                    history: row.get(1)?,
+                    started_at: now_unix(),
+                })
+            },
+        )?)
+    }
+
+    /// The first copy includes Sessions touched in the requested window.
+    /// Thereafter positions track writes, even to a turn dated before that window.
+    pub fn export_sessions(
+        &self,
+        since: i64,
+        after: Option<CopyCursor>,
+    ) -> StoreResult<Vec<String>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let (sql, bounds) = match after {
+            Some(after) => ("SELECT session_id FROM session_export_changes WHERE position>?1
+                UNION SELECT session_id FROM history.session_export_changes WHERE position>?2",
+                vec![after.state, after.history]),
+            None => ("SELECT id FROM agent_sessions WHERE created_at>=?1 OR completed_at>=?1
+                UNION SELECT session_id FROM session_events WHERE observed_at>=?1
+                UNION SELECT session_id FROM history.session_history WHERE observed_at>=?1
+                UNION SELECT session_id FROM history.turns WHERE started_at>=?1 OR ended_at>=?1 OR usage_at>=?1",
+                vec![since]),
+        };
+        let mut statement = conn.prepare(sql)?;
+        let sessions = statement
+            .query_map(rusqlite::params_from_iter(bounds), |row| row.get(0))?
+            .collect::<Result<_, _>>()?;
+        Ok(sessions)
+    }
+
+    pub fn open_transcripts(&self) -> StoreResult<Vec<String>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut statement = conn.prepare("SELECT id FROM agent_sessions WHERE completed_at IS NULL AND provider_thread IS NOT NULL")?;
+        let ids = statement
+            .query_map([], |row| row.get(0))?
+            .collect::<Result<_, _>>()?;
+        Ok(ids)
+    }
+
+    pub fn export_session_records(&self, session: &str) -> StoreResult<Vec<Record>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
         let mut records = Vec::new();
         for (kind, key, table, filter) in [
-            (
-                RecordKind::Session,
-                "id",
-                "agent_sessions",
-                "created_at>=?1
-                    OR id IN (SELECT session_id FROM session_events WHERE observed_at>=?1)"
-                    .to_string(),
-            ),
+            (RecordKind::Session, "id", "agent_sessions", "id=?1"),
             (
                 RecordKind::SessionEvent,
                 "seq",
                 "session_events",
-                "observed_at>=?1".to_string(),
+                "session_id=?1",
+            ),
+            (
+                RecordKind::History,
+                "seq",
+                "history.session_history",
+                "session_id=?1",
             ),
         ] {
-            records.extend(rows_in(&conn, kind, key, table, &filter, since)?);
+            records.extend(rows_in(&conn, kind, key, table, filter, session)?);
         }
-        let mut statement = conn.prepare(
-            "SELECT DISTINCT json_extract(payload,'$.artifact_key') FROM session_events
-             WHERE kind='captured' AND observed_at>=?1
-               AND json_extract(payload,'$.artifact_key') IS NOT NULL",
-        )?;
-        let keys = statement
-            .query_map([since], |row| row.get::<_, String>(0))?
-            .collect::<Result<Vec<_>, _>>()?;
-        Ok((records, keys))
+        Ok(records)
+    }
+
+    pub fn copied_cursor(&self, origin: &MachineId) -> StoreResult<Option<CopyCursor>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let row: Option<String> = conn
+            .query_row(
+                "SELECT row FROM machine_records
+            WHERE origin_machine_id=?1 AND kind='checkpoint' AND key='export'",
+                [origin.as_str()],
+                |row| row.get(0),
+            )
+            .optional()?;
+        row.map(|row| serde_json::from_str(&row).map_err(Into::into))
+            .transpose()
+    }
+
+    pub fn copied_session_rows<T: DeserializeOwned>(
+        &self,
+        origin: &MachineId,
+        kind: RecordKind,
+        session: &str,
+    ) -> StoreResult<Vec<T>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        copied_rows(&conn, origin, kind, session)
     }
 
     /// Keep `origin`'s rows as copies, replacing older copies of the same rows.
@@ -130,7 +239,8 @@ impl SqliteStore {
                 "INSERT INTO machine_records(origin_machine_id,kind,key,row,observed_at)
                  VALUES(?1,?2,?3,?4,?5)
                  ON CONFLICT(origin_machine_id,kind,key)
-                 DO UPDATE SET row=excluded.row, observed_at=excluded.observed_at",
+                 DO UPDATE SET row=excluded.row, observed_at=excluded.observed_at
+                 WHERE machine_records.row<>excluded.row OR excluded.kind='checkpoint'",
                 params![
                     origin.as_str(),
                     record.kind.as_str(),
@@ -224,9 +334,9 @@ impl SqliteStore {
         let row: serde_json::Value = serde_json::from_str(&row)?;
         let mut statement = conn.prepare(
             "SELECT row FROM machine_records
-             WHERE origin_machine_id=?1 AND kind='session_event'
+             WHERE origin_machine_id=?1 AND kind IN ('session_event','history')
                AND json_extract(row,'$.session_id')=?2
-             ORDER BY CAST(key AS INTEGER)",
+             ORDER BY json_extract(row,'$.observed_at'), kind, json_extract(row,'$.seq')",
         )?;
         let events = statement
             .query_map(params![origin.as_str(), session], |row| {
@@ -249,7 +359,20 @@ impl SqliteStore {
             })
             .collect::<StoreResult<Vec<_>>>()?;
         let text = |name: &str| row[name].as_str().map(str::to_string);
+        let mut turns: Vec<crate::session::Turn> =
+            copied_rows(&conn, &origin, RecordKind::Turn, session)?;
+        turns.sort_by_key(|turn| turn.id);
+        let last_collection: Option<i64> = conn
+            .query_row(
+                "SELECT observed_at FROM machine_records
+             WHERE origin_machine_id=?1 AND kind='checkpoint' AND key='export'",
+                [origin.as_str()],
+                |row| row.get(0),
+            )
+            .optional()?;
         Ok(Some(CopiedHistory {
+            usage: crate::session_record::reduce_usage(&turns),
+            turns,
             session: CopiedSession {
                 origin,
                 origin_label: None,
@@ -260,7 +383,7 @@ impl SqliteStore {
             task_id: text("task_id"),
             cwd: text("cwd"),
             created_at: row["created_at"].as_i64(),
-            copied_at,
+            copied_at: last_collection.unwrap_or(copied_at),
             events,
         }))
     }

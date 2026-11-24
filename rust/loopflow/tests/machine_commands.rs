@@ -5045,3 +5045,158 @@ read -r answer < /dev/tty
     assert_success(&moved);
     assert!(shown.contains(&notice), "{notice:?} missing from:\n{shown}");
 }
+
+#[test]
+fn a_lost_rentals_transcript_and_usage_survive_on_its_collecting_machine() {
+    use loopflow_execution::rental::{recovery, RentalId, RentalState};
+    use loopflow_execution::store::{machines, open_sqlite};
+    use serde_json::json;
+
+    let fixture = preview_machines();
+    let root = fixture.root.path();
+    let remote = root.join("remote");
+    let local = open_sqlite(&root.join("local/loopflow.db")).unwrap();
+    let pod = open_sqlite(&remote.join("store/loopflow.db")).unwrap();
+    let origin = machines::local_machine(&pod).unwrap().id;
+    let rental = RentalId::new();
+    local
+        .conn
+        .lock()
+        .unwrap()
+        .execute(
+            "INSERT INTO rentals(id,ondemand,provider,provider_name,provider_id,by_hand,hardware,
+            usd_per_hour,cap_usd,deadline,state,created_at,machine_id)
+         VALUES(?1,'modal','modal',?1,'sb-fixture',1,
+            '{\"vcpus\":2,\"memory_gb\":4,\"disk_gb\":8,\"spot\":false}',
+            '0.24','1.00',4000000000,'running',1,?2)",
+            [rental.as_str(), origin.as_str()],
+        )
+        .unwrap();
+
+    let id = "ee47b779adc741ca89d6c3ae288cc68c";
+    let thread = "0199a213-81c0-4800-8aa1-bbab2a035a01";
+    let session = pod.test_session(id, "64f34281b74d4594ac53ec251cb05619");
+    pod.conn
+        .lock()
+        .unwrap()
+        .execute(
+            "UPDATE agent_sessions SET provider='claude',provider_thread=?2 WHERE id=?1",
+            [id, thread],
+        )
+        .unwrap();
+    let project = remote.join(".claude/projects/-fixture");
+    fs::create_dir_all(&project).unwrap();
+    let transcript = project.join(format!("{thread}.jsonl"));
+    fs::write(
+        &transcript,
+        json!({"type":"user","userType":"external","uuid":"first-turn",
+        "timestamp":"2026-10-16T10:00:00Z","message":{"role":"user","content":"Count the marbles"}})
+        .to_string(),
+    )
+    .unwrap();
+    pod.record_turn_start(id, &thread.into(), "first-turn", 100);
+    pod.retain_session_observation(
+        &session,
+        &loopflow_storage::session::SessionObservation {
+            artifact_key: session.artifact_key.clone().unwrap(),
+            source: "silence:sample".into(),
+            observed_at: 101,
+            task_id: None,
+            wave_id: None,
+            payload: json!({"source":"silence","detail":"waiting for the count"}),
+        },
+    )
+    .unwrap();
+
+    let _env = support::ambient::EnvGuard::clear(&["PATH", "MODAL_TOKEN_ID"]);
+    std::env::set_var(
+        "PATH",
+        format!("{}:/usr/bin:/bin", root.join("bin").display()),
+    );
+    let (server, _) = served(&fixture);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    let first = loop {
+        if let Some(cursor) = local.copied_cursor(&origin).unwrap() {
+            break cursor;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the server did not collect its running rental"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    };
+    drop(server);
+    let ssh = root.join("bin/ssh");
+    let relay = fs::read_to_string(&ssh).unwrap();
+    // SSH delivers valid lines, then loses the connection before confirming the export.
+    executable(
+        &ssh,
+        &format!("{}\nexit 255\n", relay.replace("exec env -i", "env -i")),
+    );
+    assert!(pod.record_turn_usage(
+        id,
+        &thread.into(),
+        "first-turn",
+        100,
+        &json!({
+            "final":true,"usage":{"input_tokens":31,"output_tokens":7,"cost_usd":0.25}
+        })
+    ));
+    recovery::check().unwrap();
+    assert_eq!(local.copied_cursor(&origin).unwrap(), Some(first));
+    assert_eq!(
+        local
+            .saved_copied_history(id)
+            .unwrap()
+            .unwrap()
+            .usage
+            .input_tokens,
+        None
+    );
+    executable(&ssh, &relay);
+    recovery::check().unwrap();
+    let latest = local.copied_cursor(&origin).unwrap().unwrap();
+    assert!(latest.history > first.history);
+
+    // Nothing on the origin can answer these reads, including after a server restart.
+    let lost = root.join("unreachable");
+    fs::rename(&remote, &lost).unwrap();
+    let (server, _) = served(&fixture);
+    let history = fixture.json(&["session", "history", "show", id, "--json"]);
+    assert_eq!(history["session"]["origin"], origin.as_str());
+    assert_eq!(history["turns"].as_array().unwrap().len(), 1);
+    assert!(history["events"]
+        .to_string()
+        .contains("waiting for the count"));
+    let text = fixture.run(&["session", "history", "show", id, "--transcript"]);
+    assert_success(&text);
+    assert!(String::from_utf8_lossy(&text.stdout).contains("Count the marbles"));
+    let usage = || fixture.json(&["session", "usage", "--session", id, "--json"]);
+    let before = usage();
+    assert_eq!(before["origin_machine_id"], origin.as_str());
+    assert!(before["collected_at"].is_number());
+    assert_eq!(before["usage"]["input_tokens"], 31);
+    assert_eq!(before["usage"]["output_tokens"], 7);
+    assert_eq!(before["usage"]["cost_usd"], 0.25);
+    assert_eq!(local.rental(&rental).unwrap().state, RentalState::Running);
+    drop(server);
+
+    // Restore the route to exercise ordinary give-back on the same records.
+    fs::rename(lost, &remote).unwrap();
+    recovery::check().unwrap();
+    executable(
+        &root.join("bin/uv"),
+        "#!/bin/sh\ncat >/dev/null\nprintf 'null\\n'\n",
+    );
+    let ended = fixture
+        .command(&["machine", "end", "mini"])
+        .env("MODAL_TOKEN_ID", "fixture")
+        .output()
+        .unwrap();
+    assert_success(&ended);
+    assert_eq!(local.rental(&rental).unwrap().state, RentalState::Ended);
+    assert_eq!(usage()["usage"], before["usage"]);
+    let transcript = fixture.json(&["session", "history", "show", id, "--transcript", "--json"]);
+    assert_eq!(transcript["turns"].as_array().unwrap().len(), 1);
+    assert_eq!(transcript["origin_machine_id"], origin.as_str());
+}

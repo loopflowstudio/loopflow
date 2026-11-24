@@ -68,6 +68,41 @@ pub(crate) fn render(transcript: &SessionTranscript) -> String {
     out
 }
 
+pub(super) fn copied(
+    store: &SqliteStore,
+    history: &loopflow_execution::machine_records::CopiedHistory,
+    json: bool,
+) -> Result<String> {
+    use loopflow_execution::machine_records::{RecordKind, TranscriptTurn};
+    let session = &history.session;
+    let mut turns: Vec<TranscriptTurn> =
+        store.copied_session_rows(&session.origin, RecordKind::Transcript, &session.id)?;
+    turns.sort_by_key(|row| (row.thread_position, row.position));
+    if json {
+        let transcript = serde_json::json!({ "session_id":session.id, "origin_machine_id":session.origin,
+            "collected_at":history.copied_at, "turns":turns });
+        return Ok(format!("{transcript}\n"));
+    }
+    let mut out = format!(
+        "Conversation {} · from {} · collected {}\n",
+        session.id,
+        session.origin_name(),
+        minute(history.copied_at)
+    );
+    if turns.is_empty() {
+        out.push_str("  No transcript text was collected.\n");
+    }
+    let mut thread = None;
+    for row in &turns {
+        if thread != Some(&row.thread) {
+            out.push_str(&format!("\n{} {}\n", row.harness, row.thread));
+            thread = Some(&row.thread);
+        }
+        render_turn(&mut out, &row.turn);
+    }
+    Ok(out)
+}
+
 fn render_conversation(out: &mut String, conversation: &Conversation) {
     let retention = &conversation.retention;
     out.push_str(&format!(

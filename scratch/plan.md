@@ -42,9 +42,11 @@ Run the normal rent path through quote, create, non-login SSH, installation, and
 
 Jack Heart: “we need some way to capture session history / usage data for analytics for sandboxes that we lose acces to”
 
-- **Next slice.** Collect while the sandbox is running, then finish the same collection on ordinary give-back. The current recovery path calls `copy_up` only on give-back. Its export copies Sessions, events and capture files. The local usage and transcript readers still need the originating turn and usage records.
-- Reuse the origin Machine and Session identities in `machine_records`. Capture observed turns, transcripts and token/cost facts on a durable Machine outside the sandbox. Resume incrementally after disconnection and deduplicate across live collection and the final copy. Surface the last successful collection when a sandbox disappears mid-turn.
-- Exercise two Machines with a live Session. Observe a turn and known usage on the collecting Machine, interrupt transport, then remove access to the sandbox without running `lf machine end`. Verify local history, transcript and usage totals after restart, including their origin. Repeated collection and clean teardown must count the same turn once.
+- **Built.** The recovery pass collects over SSH while the rental is live, including when the server lacks provider API credentials. State and history each keep one change position per Session. A successful import saves both positions on the renting Machine. Open conversations are checked for newly written provider text. Give-back revisits the whole rental window to catch late file writes.
+- Collected Session events, history observations, provider text and usage retain the origin Machine and Session. `lf session history show <id> --transcript` opens the saved text. `lf session usage --session <id> --json` totals the observed turns and gives the origin and last collection time.
+- With 10,000 Session positions in each database and 100,000 copied turns, SQLite used two primary-key ranges for ten changed Sessions (9.6 µs) and the origin/kind/Session expression index for ten copied turns (7.6 µs). Advancing one position averaged 3.3 µs across 1,000 warm in-memory writes.
+- The two-Machine fixture `a_lost_rentals_transcript_and_usage_survive_on_its_collecting_machine` passed. The server collected a live conversation, a truncated SSH export left its checkpoint intact, and a reconnect picked up a late usage sample. After losing the route and restarting, the collecting Machine displayed the text, observation and origin. Clean give-back still showed one turn, 31 input tokens, 7 output tokens and $0.25. Gate owns the live Modal run.
+- Next implement slice is §3’s first forwarded profile on a dev rental.
 
 ## 3. Run on available harnesses and refresh forwarded logins
 

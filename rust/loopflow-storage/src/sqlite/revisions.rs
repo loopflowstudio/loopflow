@@ -164,6 +164,7 @@ mod tests {
         "machines",
         // Copies from rented Machines are read by explicit CLI listings only.
         "machine_records",
+        "session_export_changes",
         // Owned Machines' pools are read by `lf machine pool`, not workspace surfaces.
         "pool_machines",
         "provider_account_limits",

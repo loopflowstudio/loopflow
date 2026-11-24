@@ -24,6 +24,10 @@ report tokens, plus Claude's running `total_cost_usd`; an Antigravity row
 counts the conversation lf started, not its subagents'), finished streams (`FINAL`),
 and any recording gaps (`GAPS`).
 
+For one Session, `lf session usage --session <id> --json` gives its recorded
+turn totals and origin Machine. For a rental copy it also gives the last
+successful collection time. The work-scoped reports above cover local inputs.
+
 For work sessions and workers, turn-end hooks ask the server to record each
 turn from the provider's transcript; at exit, the launching process catches any
 missed turns (and covers bare chats and batches without needing the server).
@@ -59,9 +63,10 @@ lf session history search "cleanupPeriodDays" --since 30d     # search recent co
 lf session retention                                          # what providers still keep and what expires next
 ```
 
-Conversation text stays in each provider's native store (Claude, Codex, Pi
-or Antigravity files, or OpenCode's SQLite DB); Loopflow reads it on demand rather than
-duplicating it. Claude removes conversations idle longer than
+On the execution Machine, Loopflow reads conversations on demand from Claude,
+Codex, Pi or Antigravity files, or from OpenCode’s SQLite database. A rental’s
+collecting Machine keeps the turns it saw. The same transcript command reads
+them after the rental disappears. Claude removes conversations idle longer than
 `cleanupPeriodDays` (30 days by default in Claude's `settings.json`); Codex,
 OpenCode, and Pi keep everything.
 

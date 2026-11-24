@@ -6,6 +6,7 @@ use anyhow::{anyhow, Context};
 use loopflow_model::durable::{Machine, MachineId};
 use loopflow_storage::rental::{self, GiveBack, Holdings, Rental, RentalState, Resolution};
 use loopflow_storage::sqlite::SqliteStore;
+use std::io::{BufReader, Seek};
 use std::process::{Command, Stdio};
 use time::OffsetDateTime;
 
@@ -155,12 +156,13 @@ pub fn give_back(
             }
         }
         GiveBack::End => {
-            let copied = match end_rental(sqlite, api, rental, || copy_up(sqlite, rental, machine))?
-            {
+            let copied = match end_rental(sqlite, api, rental, || {
+                copy_up(sqlite, rental, machine, true)
+            })? {
                 Ended::Copied(counts) => Some(counts),
                 Ended::Uncopied(error) if !force => {
                     let message = format!(
-                        "{label} stays: its Session and Process records could not be copied ({error:#}); \
+                        "{label} stays: its Session records could not be copied ({error:#}); \
                          `lf machine end {label} --force` deletes it without them"
                     );
                     return if explicit {
@@ -171,7 +173,7 @@ pub fn give_back(
                     };
                 }
                 Ended::Uncopied(error) => {
-                    eprintln!("Discarded on {label}: Session and Process records ({error:#})");
+                    eprintln!("Discarded on {label}: Session records ({error:#})");
                     delete_sandbox(sqlite, api, rental)?;
                     None
                 }
@@ -245,15 +247,46 @@ fn mark_ended(sqlite: &SqliteStore, rental: &Rental) -> anyhow::Result<()> {
 }
 
 /// Pull the machine's records since its rental began (`lf history export`).
-fn copy_up(sqlite: &SqliteStore, rental: &Rental, machine: &Machine) -> anyhow::Result<CopyCounts> {
+fn copy_up(
+    sqlite: &SqliteStore,
+    rental: &Rental,
+    machine: &Machine,
+    final_copy: bool,
+) -> anyhow::Result<CopyCounts> {
+    let home = crate::store::lf_home_dir();
+    let root = crate::machine_records::copies_home(&home, &machine.id);
+    std::fs::create_dir_all(&root)?;
+    let lock = std::fs::File::options()
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(root.join("collection.lock"))?;
+    fs2::FileExt::lock_exclusive(&lock)?;
+    // On give-back revisit even closed Sessions: a provider or capture file can
+    // finish writing after its Session's last database change.
+    let after = if final_copy {
+        None
+    } else {
+        sqlite.copied_cursor(&machine.id)?
+    };
     // An hour early absorbs clock skew between the laptop and the sandbox.
     let since = (rental.created_at - time::Duration::hours(1))
         .format(&time::format_description::well_known::Rfc3339)?;
-    let script = format!(
-        "{}; lf history export --since {}",
-        crate::machine::ssh::remote_path(),
-        crate::machine::ssh::sh_quote(&since)
-    );
+    let mut args = vec![
+        "lf".into(),
+        "session".into(),
+        "history".into(),
+        "export".into(),
+        "--since".into(),
+        since,
+    ];
+    if let Some(after) = after {
+        args.extend(["--after".into(), serde_json::to_string(&after)?]);
+    }
+    let script = crate::machine::ssh::build_preamble(&args, &[]);
+    // A disconnected SSH may leave valid-looking JSON lines. Only import a
+    // successful command; spool stdout so the rental's size does not set RAM.
+    let mut spool = tempfile::tempfile()?;
     let output = Command::new("ssh")
         .args(crate::machine_route::bounded_ssh_args(
             &machine.route,
@@ -261,6 +294,8 @@ fn copy_up(sqlite: &SqliteStore, rental: &Rental, machine: &Machine) -> anyhow::
         )?)
         .arg(script)
         .stdin(Stdio::null())
+        .stdout(spool.try_clone()?)
+        .stderr(Stdio::piped())
         .output()
         .context("could not run ssh")?;
     if !output.status.success() {
@@ -269,12 +304,8 @@ fn copy_up(sqlite: &SqliteStore, rental: &Rental, machine: &Machine) -> anyhow::
             String::from_utf8_lossy(&output.stderr).trim(),
         ));
     }
-    crate::machine_records::import(
-        sqlite,
-        &crate::store::lf_home_dir(),
-        &machine.id,
-        output.stdout.as_slice(),
-    )
+    spool.rewind()?;
+    crate::machine_records::import(sqlite, &home, &machine.id, BufReader::new(spool))
 }
 
 /// After a run forwarded to `machine` returns: if it is a live rental, give
@@ -300,6 +331,16 @@ pub fn settle(machine: &MachineId) {
     }
 }
 
+/// SSH collection can run even when the server has no provider API credentials.
+fn collect_running(sqlite: &SqliteStore, rental: &Rental) -> anyhow::Result<()> {
+    if let Some(id) = &rental.machine_id {
+        if let Some(machine) = crate::store::machines::machine_by_id(sqlite, id)? {
+            copy_up(sqlite, rental, &machine, false)?;
+        }
+    }
+    Ok(())
+}
+
 /// The server recovery pass's give-back. A rental whose provider this process
 /// cannot reach is reported only once its soft deadline passes; its provider
 /// deletes it at the hard deadline either way.
@@ -312,6 +353,9 @@ pub fn check() -> anyhow::Result<()> {
     let sqlite = &store.sqlite;
     let mut due = Vec::new();
     for rental in live_rentals(sqlite)? {
+        if let Err(error) = collect_running(sqlite, &rental) {
+            tracing::warn!(rental=%rental.id, "rental history collection: {error:#}");
+        }
         let api = match Sandboxes::from_env(rental.provider) {
             Ok(api) => api,
             Err(error) => {

@@ -1,55 +1,49 @@
-at: 67f5cc60ca2d6236e0d29f9c3a6cbd251916ea20
+at: bd6b685a85aea1bd5a15e737bbdbbbaf5c82cb18
 first:
   - path: docs/work.md
     why: Pause and resume from the saved step
-  - path: scratch/plan.md
-    why: Codex probes and move timing limits
+  - path: docs/surfaces.md
+    why: How Working looks across surfaces
+  - path: rust/loopflow-storage/src/execution.rs
+    why: Lifecycle, board membership and Working groups
   - path: rust/loopflow-storage/src/migrations/task_pauses.sql
-    why: Store one hold and its stopping sessions per Task
+    why: One hold and its stopping sessions per Task
   - path: rust/loopflow-storage/src/sqlite/task_pause.rs
-    why: Record the hold, worker sessions and Graph stop together
-  - path: rust/loopflow/src/lf/commands/write.rs
-    why: Route both writes to the execution Machine
+    why: Commit the hold and Graph stop together
   - path: rust/loopflow-execution/src/ops/task/pause.rs
-    why: Serialize launches, stop work, and retry cleanup
-  - path: rust/loopflow-storage/src/sqlite/processes.rs
-    why: Find the Task’s workers and competing identity claims
+    why: Stop workers while the primary conversation stays open
   - path: rust/loopflow-execution/src/harness/agent_process.rs
     why: Capture worker sessions under their attachment locks
   - path: rust/loopflow-execution/src/os_process.rs
     why: Stop verified jobs after their launching shell exits
-  - path: rust/loopflow/src/lf/commands/graph.rs
-    why: Stop the Graph at its saved cursor
   - path: rust/loopflow-execution/src/ops/human_session/moves.rs
     why: Carry a hold across Machines once
   - path: rust/loopflow-execution/src/task_graph.rs
-    why: Name the held step
-  - path: rust/loopflow-execution/src/ops/task_execution.rs
-    why: Describe the latest Graph using the Task’s state
-  - path: rust/loopflow-execution/src/ops/task_run.rs
-    why: Explain when Unpause becomes available
-  - path: swift/Loopflow/Design/TaskActions.swift
-    why: Choose actions on Mac and iPhone
-  - path: swift/Loopflow/Services/PendingChanges.swift
-    why: Update both lists while a write settles
+    why: Follow the captured cursor to review or landing
+  - path: rust/loopflow-storage/src/sqlite/task_details.rs
+    why: Group only the Working Tasks being read
+  - path: rust/loopflow-storage/src/sqlite/selections.rs
+    why: Supply each selected row with its group
+  - path: rust/loopflow/src/lf/commands/waves.rs
+    why: Share roadmap membership with the CLI
+  - path: rust/loopflow-definitions/src/builtins/task/graph/code.yaml
+    why: Keep ship-review interactive and verify automatic
+  - path: rust/loopflow-definitions/src/builtins/task/skill/verify.md
+    why: Check the merge promptly and record follow-ups
   - path: swift/LoopflowMac/WorkModel.swift
-    why: Read the selected Task list
-  - path: swift/LoopflowiOS/TaskWorkspaceView.swift
-    why: Keep the iPhone conversation attached
+    why: Order sidebar rows and their keyboard shortcuts together
+  - path: swift/LoopflowiOS/TaskListView.swift
+    why: Group each repository’s Working Tasks on iPhone
+  - path: swift/Loopflow/Services/PendingChanges.swift
+    why: Keep rows visible while a write settles
   - path: rust/loopflow/tests/work/task_graph_launch_tests.rs
-    why: Stop one worker while its conversation survives
-  - path: rust/loopflow/src/server/wake.rs
-    why: Deliver steers during a Graph hold
-  - path: rust/loopflow/tests/context_launch_tests.rs
-    why: Recover the conversation during a Graph hold
+    why: Stop the worker while its conversation survives
   - path: rust/loopflow/tests/machine_commands.rs
     why: Exercise pause during a two-Machine move
   - path: swift/LoopflowTests/TaskConceptTests.swift
-    why: Open and unpause a Task on Mac
+    why: Exercise group order, keyboard selection and paused conversations
   - path: swift/LoopflowiOSTests/TaskFeedTests.swift
-    why: Open the live conversation from a paused row
-  - path: rust/loopflow/src/server/schema.rs
-    why: Embedded requests drive examples and wire round trips
+    why: Open the Session and handle a refused unpause
 hide:
   - path: tests/fixtures/dto/server_schema.json
-    why: Generated from the Rust protocol and request fixtures
+    why: Generated from the protocol and request fixtures

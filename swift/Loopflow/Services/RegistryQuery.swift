@@ -328,7 +328,8 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
     /// Start the Session's provider process as its own `lf` process, assigning nothing.
     /// The repository's conversation when it names no Session, Task or Wave.
     case sessionResume(directory: String, id: String?, task: String?, wave: String?, agent: String?)
-    case sessionNew(directory: String, requestID: String, id: String, agent: String?)
+    /// `task` names the Task the conversation belongs to; it is prepared where that Task runs.
+    case sessionNew(directory: String, requestID: String, id: String, task: String?, agent: String?)
     case waveRename(directory: String, wave: String, name: String)
     case waveRemove(directory: String, wave: String, preview: Bool)
     case waveMachine(directory: String, wave: String, machine: String)
@@ -437,7 +438,7 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
             return Self.prepared(agent, ["session", "resume"] + [id].compactMap { $0 }
                 + argument("--task", task) + argument("--wave", wave),
                 repo: id == nil && task == nil && wave == nil ? directory : nil)
-        case .sessionNew(_, let requestID, let id, let agent):
+        case .sessionNew(_, let requestID, let id, _, let agent):
             return Self.prepared(agent, ["session", "new", id, "--request-id", requestID], repo: nil)
         case .waveRename(_, let wave, let name): return ["wave", "rename", wave, name, "--json"]
         case .waveRemove(_, let wave, let preview): return ["wave", "remove", wave, "--json"] + (preview ? ["--preview"] : [])
@@ -626,8 +627,8 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
         case .sessionResume(let directory, let id, let task, let wave, let agent):
             TaggedFields("session.resume", ["directory": directory, "id": id, "task": task, "wave": wave,
                                             "agent": agent])
-        case .sessionNew(let directory, let requestID, let id, let agent):
-            TaggedFields("session.new", ["directory": directory, "request_id": requestID, "id": id, "agent": agent])
+        case .sessionNew(let directory, let requestID, let id, let task, let agent):
+            TaggedFields("session.new", ["directory": directory, "request_id": requestID, "id": id, "task": task, "agent": agent])
         case .waveRename(let directory, let wave, let name):
             TaggedFields("wave.rename", ["directory": directory, "wave": wave, "name": name])
         case .waveRemove(let directory, let wave, let preview):
@@ -1218,10 +1219,18 @@ public struct RegistryQuery: Sendable {
     }
 
     /// Restart the conversation on a fresh provider thread seeded with what the
-    /// last thread knew; the same Session keeps its history.
-    public func resetSession(_ session: SessionRecord, agent: String?, cwd: String?, requestID: String = UUID().uuidString) async throws -> SessionRecord {
+    /// last thread knew; the same Session keeps its history. A Task as `work`
+    /// restarts it where that Task runs.
+    public func resetSession(
+        _ session: SessionRecord,
+        work: WorkReference?,
+        agent: String?,
+        cwd: String?,
+        requestID: String = UUID().uuidString
+    ) async throws -> SessionRecord {
         try Self.decode(SessionRecord.self, from: await write(
-            .sessionNew(directory: cwd ?? "/", requestID: requestID, id: session.id, agent: agent)))
+            .sessionNew(directory: cwd ?? "/", requestID: requestID, id: session.id,
+                        task: work?.kind == .task ? work?.id : nil, agent: agent)))
     }
 
     /// Create a Task around the selected conversation without launching work.

@@ -12,7 +12,7 @@ enum RegistryQueryLocal {
         try await ServerClient.read(query)
     }, write: { change in
         switch change {
-        case .taskCreate(_, let requestID, _, _, _, _, _, _, _), .sessionNew(_, let requestID, _, _):
+        case .taskCreate(_, let requestID, _, _, _, _, _, _, _), .sessionNew(_, let requestID, _, _, _):
             let answer = try await CreationSubmissions.shared.submit(change, requestID: requestID)
             do {
                 switch change {

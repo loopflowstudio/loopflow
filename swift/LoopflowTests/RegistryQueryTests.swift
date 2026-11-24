@@ -139,9 +139,9 @@ struct RegistryQueryTests {
         #expect(try object(task) == object(
             #"{"kind":"session.resume","directory":"/r","id":null,"task":"FIX-1","wave":null,"agent":null}"#))
         #expect(task.argv == ["session", "resume", "--task", "FIX-1", "--prepare", "--json"])
-        let restart = ServedWrite.sessionNew(directory: "/r", requestID: "fixture-thread", id: "session_1", agent: "codex")
+        let restart = ServedWrite.sessionNew(directory: "/r", requestID: "fixture-thread", id: "session_1", task: "FIX-1", agent: "codex")
         #expect(try object(restart) == object(
-            #"{"kind":"session.new","directory":"/r","request_id":"fixture-thread","id":"session_1","agent":"codex"}"#))
+            #"{"kind":"session.new","directory":"/r","request_id":"fixture-thread","id":"session_1","task":"FIX-1","agent":"codex"}"#))
         #expect(restart.argv == ["--agent", "codex", "session", "new", "session_1", "--request-id", "fixture-thread", "--prepare", "--json"])
     }
 

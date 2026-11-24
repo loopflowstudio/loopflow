@@ -993,11 +993,11 @@ struct SessionPaneView: View {
     }
 
     /// A pane placed apart from its Task names where it is. A Task's Browser
-    /// before this Mac knows the checkout says nothing: Files names its own
-    /// Machine and checkout, and a recorded place may be one the Task left.
+    /// says nothing: Files names its own Machine and checkout, and the pane's
+    /// recorded place may be one the Task left.
     private var showsContext: Bool {
         guard workspace.key.kind == .task else { return true }
-        if case .browser = pane.content, workspace.location == nil { return false }
+        if case .browser = pane.content { return false }
         return pane.content.location != workspace.location
     }
 

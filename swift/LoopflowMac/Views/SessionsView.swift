@@ -1330,7 +1330,8 @@ final class SessionsStore {
         // The same Session continues on a new thread; its old terminal ends.
         let requestID = UUID().uuidString
         let restarted = try await query.resetSession(
-            previous.record, agent: previous.record.provider, cwd: repoPath, requestID: requestID)
+            previous.record, work: preparationWork(previous.record), agent: previous.record.provider,
+            cwd: repoPath, requestID: requestID)
         guard let current = _index(id) else { throw RegistryQueryError("Session is unavailable.") }
         if let terminal = localTerminal(for: previous.record) { surfaces.release(terminal) }
         sessions[current].record = restarted

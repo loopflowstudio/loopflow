@@ -30,162 +30,118 @@ ol.q li{margin:.55rem 0}
 </head>
 <body>
 <h1>LOO-1084: where a Task runs, and where a steer went</h1>
-<p class="lead">Post-build concept review of <code>HEAD</code> (<code>8092a8ef19</code>) against base <code>250e266b4a</code>. Core delivery, <code>runs_on</code>, <code>reading</code>, and <code>TaskSteerReceipt</code> are <span class="tag b">built</span>; four conceptual mismatches remain in the built code and are <span class="tag p">proposed</span> in <code>scratch/plan.md</code> (Slice 4) for one clean pass before gate.</p>
+<p class="lead">Post-build concept review of <code>HEAD</code> (<code>04557f20b4</code>) against base <code>origin/main</code> (<code>00d14c493b</code>). Outcome: <b>nothing to change in this Task</b>. Every mismatch from the first review is <span class="tag b">built</span> and committed (Slice 4, <code>19d2e4e0a5</code>..<code>04557f20b4</code>). One wire/UI mismatch remains on <code>RoadmapTask.lifecycle</code> for Desktop's board and is called out below as <span class="tag p">outside this work</span> for the Desktop DTO/UI pass.</p>
 
-<p><b>Area taken:</b> how one Machine sees and steers a Task another Machine runs — Task ownership as surfaces read it (<code>lf task status</code>, <code>lf task list</code>, <code>lf wave show</code>, selection states, Desktop rows), peer resolution (<code>TaskPeer</code>), Task steers and their receipts (<code>lf steer</code>, <code>task.steer</code>), and how inbound tracker/hub/Git direction reaches the owning Machine (<code>watch_owned_work</code>, <code>planning_scope_checks</code>). Excludes container <code>lf server</code> supervision (LOO-1081/1083), remote file/shell/session viewers (LOO-1083), and Desktop Swift badge UI.</p>
+<p><b>Area taken:</b> how one Machine sees and steers a Task another Machine runs — Task ownership as surfaces read it (<code>lf task status</code>, <code>lf task list</code>, <code>lf wave show</code>, selection states, Desktop rows), peer resolution (<code>TaskPeer</code>), Task steers and their receipts (<code>lf steer</code>, <code>task.steer</code>), and how inbound tracker/hub/Git direction reaches the owning Machine (<code>watch_owned_work</code>, <code>planning_scope_checks</code>). Excludes container <code>lf server</code> supervision (LOO-1081/1083), remote file/shell/session viewers (LOO-1083), and Desktop SwiftUI badge rendering.</p>
 
-<h2>One interaction on HEAD: what works, and where the model still lies</h2>
-<p>First, the sibling-sandbox path that motivated LOO-1084 works end to end <span class="tag b">built</span>: <code>modal-3</code> polls Linear/Asana/hub/Git every 30 s while it holds open claims and delivers incoming steers to live workers and stopped primary Sessions once. <code>laptop</code> reaches registered <code>mini</code> directly over SSH and never replays a lost reply.</p>
-<p>Now walk two ordinary interactions on <code>HEAD</code> that break because the code's concepts still disagree with the product:</p>
-<div class="term"><span class="d"># 1. Wave "infra" has `set machine mini`. MTG-500 is UNOWNED (in Backlog, never started).</span>
-<span class="d">#    mini is reachable:</span>
-<span class="d">laptop$</span> lf task status MTG-500
-Check timeout · MTG-500
-<span class="r">Runs on mini; read from its server.</span>             <span class="d">← lie: nobody owns MTG-500; task.runs_on is null</span>
-<span class="d">laptop$</span> lf task status MTG-500 --json | jq '{reading, runs_on: .task.runs_on}'
-<span class="r">{"reading":{"kind":"owner"},"runs_on":null}</span>     <span class="d">← contradicts TaskReading::Owner's own contract</span>
+<h2>One interaction on HEAD: reachable peer, sibling sandbox, and failure recovery</h2>
+<p>Every path below is <span class="tag b">built</span> on <code>04557f20b4</code> and verified in integration tests and three-Machine loopback SSH + Git QA (<code>scratch/qa.html</code>):</p>
+<div class="term"><span class="d"># 1. Reachable peer: laptop (with `lf machine add sandbox-b`) reads and steers 041ed1 running on sandbox-b</span>
+<span class="d">laptop$</span> lf task status 041ed1
+Parse remote claims · 041ed1
+<span class="g">Runs on sandbox-b since Nov 23 22:21; read from its server.</span>
+State: active · ready
+Graph: qa · demo
+Waiting for you at demo.
+  Session: 48567fd31e8648c886f9b29d71f01efa  041ed1 Parse remote claims  closed
+  child: 142a92  Child of the claim parser  unstarted
+Next: lf task run 041ed1
 
-<span class="d">#    mini is offline (laptop on airplane):</span>
-<span class="d">laptop$</span> lf steer MTG-500 "use 15s timeout"
-<span class="d">… waits 15 s for SSH to fail …</span>
-<span class="r">Queued steer_4a… in Linear for mini; ssh: unreachable. mini reads it when it next syncs</span>
-<span class="d">↑ double lie: mini does NOT own MTG-500, and idle mini makes 0 Linear requests</span>
+<span class="d">laptop$</span> lf steer 041ed1 "Use the same parser on the SSH path."
+<span class="g">sandbox-b · Saved 85a371f4-…; the Machine server starts 48567fd3… to read it</span>
+<span class="d"># --json: {"delivery":{"reached":"owner","runs_on":{"id":"home_1e50…","label":"sandbox-b"},…}}</span>
 
-<span class="d"># 2. MTG-419 IS claimed and running on modal-3 (Git-carried repo, no Linear). On modal-2:</span>
-<span class="d">modal-2$</span> lf task list --state unstarted
-<span class="r">MTG-419 · Jack · Runs on modal-3 since Nov 23 14:02 · Fix import</span>   <span class="d">← Working, yet matches --state unstarted</span>
-<span class="d">modal-2$</span> lf task list --json | jq '.[0] | {section, selection_states, recommended: .actions.recommended}'
-<span class="r">{"section":"working","selection_states":["open","unstarted","working"],"recommended":"run"}</span>
-<span class="d">modal-2$</span> lf steer MTG-419 "stop refactoring" --json | jq '.delivery | {reached, sentence}'
-<span class="r">{"reached":"tracker","sentence":"Queued … in Git for modal-3; …"}</span>   <span class="d">← Git is a carrier, not a tracker</span></div>
+<span class="d"># 2. Sibling sandbox (no SSH route to sandbox-b): honest unobserved status, Working list, shared steer</span>
+<span class="d">sibling$</span> lf task status 041ed1 --json | jq '{reading, runs_on: .task.runs_on, state: .task.state, next: .task.next}'
+<span class="g">{"reading":{"kind":"unobserved","reason":"sandbox-b is not registered here"},"runs_on":{"machine":{"id":"home_1e50…","label":"sandbox-b"},"since":1795501265},"state":null,"next":null}</span>
+
+<span class="d">sibling$</span> lf task list --state unstarted          <span class="d"># 041ed1 absent; sits in Working with actions: no_action</span>
+<span class="d">sibling$</span> lf steer 041ed1 "Keep the sibling direction from Git."
+<span class="g">Queued f8ad905f-… in Git for sandbox-b; sandbox-b is not registered here. sandbox-b reads it when it next syncs</span>
+<span class="d"># --json: {"delivery":{"reached":"shared",…}}  → arrives in sandbox-b's SQLite steers within 30 s</span>
+
+<span class="d"># 3. Failure &amp; recovery: sandbox-b offline, plus unowned Task on a Wave placed on sandbox-b</span>
+<span class="d">laptop$</span> lf steer 041ed1 "Direction while offline."      <span class="d"># SSH fails pre-admission → falls back to shared carrier</span>
+<span class="g">Queued 9dcc828f-… in Git for sandbox-b; machine "ssh://…": unreachable… sandbox-b reads it when it next syncs</span>
+<span class="d">laptop$</span> lf steer b6f18e "check timeout"                 <span class="d"># unowned Task with `set machine sandbox-b` (offline)</span>
+<span class="g">Saved 7cd88ae9-…; nothing reads it until b6f18e runs</span>    <span class="d"># local &amp; instant; never dials placement Machine</span>
+
+<span class="d"># 4. Finished Task last owned by sandbox-b:</span>
+<span class="d">laptop$</span> lf task status 041ed1
+Parse remote claims · 041ed1
+<span class="g">Read from sandbox-b's server.</span>                           <span class="d"># never says "Runs on …" for done/abandoned</span>
+State: done · done</div>
 
 <h2>Product concepts vs code concepts on HEAD</h2>
 <table>
-<tr><th>What a person knows / does</th><th>Code on HEAD (<code>8092a8ef19</code>)</th><th></th><th>Status / what is wrong</th></tr>
-<tr><td>"The owner hears steers from anywhere"</td><td><code>tracker_events::watch_owned_work</code> + <code>planning_scope_checks</code> + <code>plan_carriers::poll_owned</code> (server &amp; <code>RunningGraph::spawn</code>)</td><td class="y">yes</td><td><span class="tag b">built</span> One watcher for Linear, Asana, hub, and Git; 0 requests when idle; 30 s Linear overlap + Asana project-GID watermark; server and Graph share attempt window.</td></tr>
-<tr><td>"Steer a Task running on a reachable Machine"</td><td><code>write::steer_task</code> shared by CLI and served <code>Write::TaskSteer</code>; pre-admission fallback; no double-write after send</td><td class="y">yes</td><td><span class="tag b">built</span> One owner for steering. Small defect in Slice 4: validate non-empty message before SSH and keep remote <code>ErrorCode</code> refusals instead of turning them into <code>OutcomeUnknown</code>.</td></tr>
-<tr><td>"Here's my steer receipt"</td><td><code>TaskSteerReceipt { identifier, steer_id, delivery }</code>; <code>steer_reader</code> + <code>task_steer_reader</code> in <code>engine::session</code></td><td class="y">yes</td><td><span class="tag b">built</span> Drops unused thread; one author for Session and Task reader sentences.</td></tr>
-<tr><td>"Where did my steer get to?"</td><td><code>SteerReached { Owner, Tracker, Here }</code></td><td class="n">no</td><td><span class="tag p">proposed</span> <code>Tracker</code> lies when the plan travels by Git or a hub (<code>docs/dev/planning.md</code> explicitly defines a carrier as <em>not</em> a tracker), forcing docs to apologize in parentheses. Rename to <code>Shared</code> (<code>owner | shared | here</code>).</td></tr>
-<tr><td>"A Wave Machine chooses where new Tasks start, not where unowned Tasks run"</td><td><code>TaskPeer::resolve</code> falls back to <code>task_execution_route</code> for unowned Tasks, carrying <code>since: Option&lt;i64&gt;</code></td><td class="n">no</td><td><span class="tag p">proposed</span> <b>Biggest mismatch.</b> Conflates placement preference with active ownership. Makes unowned Tasks dial SSH for 15 s, print "Runs on mini", emit <code>reading: owner</code> with <code>runs_on: null</code>, and claim offline <code>mini</code> will poll for a Task it doesn't own.</td></tr>
-<tr><td>"This Task runs on modal-3, so its live state isn't observed here"</td><td><code>TaskRow.state: Option&lt;TaskState&gt;</code> (<code>null</code>), <code>TaskSection::Working</code>; yet <code>RoadmapTask.selection_states</code> has <code>unstarted</code> + <code>working</code>, <code>--state unstarted</code> matches it, and <code>actions.recommended</code> is <code>run</code></td><td class="n">no</td><td><span class="tag p">proposed</span> One remote Task gives two opposite answers across status vs lists/views. Omit unobserved local state from <code>selection_states</code> and <code>--state</code> filter, and set <code>actions</code> to <code>NoAction</code> when running elsewhere.</td></tr>
-<tr><td>"See the owner's live status in text"</td><td><code>print_remote_detail</code> in <code>waves.rs</code> vs local printer in <code>bin/lf.rs</code></td><td class="n">no</td><td><span class="tag p">proposed</span> Remote text drops <code>graph.sentence</code>, <code>sessions</code>, and <code>parent</code>/<code>children</code> (contradicting <code>docs/dev/machines.md</code>), and local text still prints "Runs on …" for a finished Task whose last owner is unregistered.</td></tr>
-<tr><td>"A Task another Machine runs is in Working"</td><td><code>TaskState</code> unchanged (6 variants); <code>TaskSection::of(lifecycle, owned, runs_elsewhere)</code></td><td class="y">yes</td><td><span class="tag b">built</span> Right call; board placement and state stay clean without a 7th <code>TaskState</code>.</td></tr>
+<tr><th>What a person knows / does</th><th>Code on HEAD (<code>04557f20b4</code>)</th><th></th><th>Status / notes</th></tr>
+<tr><td>"The owner hears steers from anywhere"</td><td><code>tracker_events::watch_owned_work</code> + <code>planning_scope_checks</code> + <code>plan_carriers::poll_owned</code> (<code>lf server</code> &amp; <code>RunningGraph::spawn</code>)</td><td class="y">yes</td><td><span class="tag b">built</span> One watcher for Linear, Asana, hub, and Git; 0 requests when idle; 30 s Linear overlap + Asana project-GID watermark; server and Graph share one attempt window.</td></tr>
+<tr><td>"Steer a Task running on another Machine"</td><td><code>write::steer_task</code> shared by CLI and served <code>Write::TaskSteer</code>; validates non-empty input before SSH; pre-admission fallback; preserves remote <code>ErrorCode</code>; no double-write on <code>OutcomeUnknown</code></td><td class="y">yes</td><td><span class="tag b">built</span> Single owner across CLI and server; honest receipt whether direct or via carrier.</td></tr>
+<tr><td>"Here's my steer receipt"</td><td><code>TaskSteerReceipt { identifier, steer_id, delivery }</code>; <code>SteerReached { Owner, Shared, Here }</code>; <code>steer_reader</code> + <code>task_steer_reader</code> in <code>engine::session</code></td><td class="y">yes</td><td><span class="tag b">built</span> <code>Shared</code> is truthful for Linear, Asana, Git, and hub; one Rust author for Session and Task reader sentences.</td></tr>
+<tr><td>"A Wave Machine chooses where new Tasks start, not where unowned Tasks run"</td><td><code>TaskPeer { runs_on: TaskRunsOn, registered: Option&lt;Machine&gt; }</code> in <code>work_route.rs</code> resolves active <code>ownership.runs_on(&amp;local)</code> only</td><td class="y">yes</td><td><span class="tag b">built</span> Placement stays on launch/claim paths only; unowned Tasks read and steer locally without dialing SSH; <code>TaskReading::Owner</code> always carries <code>runs_on</code>.</td></tr>
+<tr><td>"Where does this Task run, and whose store answered?"</td><td><code>TaskRow.runs_on: Option&lt;TaskRunsOn&gt;</code>, <code>TaskDetail.reading: TaskReading { Here, Owner, Unobserved { reason } }</code>, <code>TaskRow.state: Option&lt;TaskState&gt;</code></td><td class="y">yes</td><td><span class="tag b">built</span> Live owner reads print <code>graph.sentence</code>, <code>sessions</code>, and family, and open with "Read from …'s server." for finished Tasks. Unobserved open work nulls <code>state</code>, <code>next</code>, and local execution fields.</td></tr>
+<tr><td>"A Task another Machine runs is in Working, with no local run state"</td><td><code>TaskState</code> unchanged (6 variants); <code>TaskState::observed_here(runs_elsewhere)</code> shared by <code>TaskRow</code>, <code>open_tasks</code> (<code>--state</code>), <code>selections.rs</code>, and <code>snapshot_task_detail</code>; <code>actions: NoAction</code></td><td class="y">yes</td><td><span class="tag b">built</span> One predicate governs status, list filters, selection states, and recommended actions.</td></tr>
+<tr><td>"Desktop board shows a remote Task's status accurately"</td><td><code>RoadmapTask.lifecycle: TaskState</code> stays <code>unstarted</code> (and <code>runtime</code>/<code>execution</code> keep local "No Task Graph has run" reasons); Swift <code>TaskRowStatus(task:)</code> falls back to <code>task.lifecycle</code> and ignores <code>runs_on</code></td><td class="n">no</td><td><span class="tag p">outside this work</span> Required non-null wire field shared with Swift and <code>screens::PlanBoardTask</code>. On Desktop, a remote Task sits in Working with <code>no_action</code>, yet <code>TaskRowStatus</code> labels it "Unstarted" and <code>awaitsStart</code> stays <code>true</code>. Needs the coordinated Rust+Swift Desktop DTO/badge pass.</td></tr>
 </table>
 
-<h2>Biggest mismatch: <code>TaskPeer</code> turns a placement preference into a running owner</h2>
-<p>Loopflow's boundary contract (<code>docs/dev/machines.md</code>) is explicit: <em>placement selects where Work belongs, not whether it is currently running</em>. When a Task is unowned, nothing runs anywhere — it is in Backlog. Because <code>TaskPeer::resolve</code> falls back to <code>task_execution_route</code> for unowned Tasks, it creates a synthetic peer with <code>since: None</code>. Every downstream caller then has to cope with a peer that has no claim, and three of them produce false output.</p>
+<h2>Biggest remaining mismatch (outside LOO-1084): <code>RoadmapTask.lifecycle</code> on Desktop</h2>
+<p>On the CLI and in <code>TaskRow</code> (<code>lf task status --json</code>), an unobserved remote Task already has <code>state: null</code> and never claims to be unstarted. On <code>RoadmapTask</code> (<code>lf task list --json</code>, <code>lf wave show --json</code>, Desktop board), <code>section</code> is <code>working</code>, <code>selection_states</code> omits <code>unstarted</code>, <code>actions</code> is <code>no_action</code>, and <code>runs_on</code> names the remote Machine — yet <code>lifecycle</code> is still a required non-null <code>TaskState</code> carrying <code>"unstarted"</code>, because making it nullable is a coordinated Rust + Swift wire change and Desktop badge redesign.</p>
 <div class="cols">
-<div class="card old"><b>On HEAD (<code>work_route.rs:18-64</code>)</b> <span class="tag e">current</span>
-<pre>struct TaskPeer {
-  machine: MachineRef,
-  since: Option&lt;i64&gt;,       // None for unowned Tasks!
-  registered: Option&lt;Machine&gt;,
-}
-// resolve():
-//   ownership.runs_on(&amp;local) =&gt; Some(claim)
-//   ownership.owner.is_some() =&gt; None (owned here)
-//   None =&gt; task_execution_route()  // Wave pref!
-//
-// Consequence:
-// - status prints "Runs on mini; read from its server."
-// - status JSON: reading=owner, runs_on=null
-// - steer offline: waits 15s, lies "mini reads it
-//   when it next syncs" with runs_on=null</pre></div>
-<div class="card new"><b>Proposed (Slice 4)</b> <span class="tag p">in plan</span>
-<pre>struct TaskPeer {
-  runs_on: TaskRunsOn,       // always a real claim
-  registered: Option&lt;Machine&gt;,
-}
-// resolve():
-//   let runs_on = ownership.runs_on(&amp;local)?;
-//   if move_awaiting_arrival() { return None; }
-//   ...
-//
-// Consequence:
-// - unowned Tasks read &amp; steer locally, instantly
-// - TaskReading::Owner ALWAYS has runs_on: Some(...)
-// - print_remote_detail drops its None branch
-// - steer fallback only fires for a real remote owner</pre></div>
-</div>
-<div class="term"><span class="d"># After Slice 4 (Wave has `set machine mini`, MTG-500 is unowned, mini is offline):</span>
-<span class="d">laptop$</span> lf task status MTG-500 --json | jq '{reading, runs_on: .task.runs_on, state: .task.state}'
-<span class="g">{"reading":{"kind":"here"},"runs_on":null,"state":"unstarted"}</span>
-<span class="d">laptop$</span> lf steer MTG-500 "use 15s timeout"
-<span class="g">Saved steer_4a…; nothing reads it until MTG-500 runs</span>    <span class="d">← instant, saved here + synced, no false promise</span></div>
+<div class="card built"><b>Built on HEAD (<code>waves.rs</code>, <code>task_row.rs</code>)</b> <span class="tag b">committed</span>
+<pre>// TaskRow (`lf task status --json`):
+runs_on:          modal-3
+reading:          { kind: "unobserved", reason: … }
+state:            null
+next:             null
 
-<h2>Secondary mismatches fixed in the same pass</h2>
-
-<h3>1. Remote Task lists, selections, and actions agree with <code>Working</code></h3>
-<div class="cols">
-<div class="card old"><b>On HEAD (<code>waves.rs</code>, <code>selections.rs</code>)</b> <span class="tag e">current</span>
-<pre>// MTG-419 runs on modal-3; read on modal-2:
+// RoadmapTask (`lf task list --json` / Desktop):
 section:          "working"
 runs_on:          modal-3
-next_move.reason: "Runs on modal-3 since …"
-selection_states: ["open", "unstarted", "working"]
-actions:          { recommended: "run", … }
-// `lf task list --state unstarted` returns MTG-419</pre></div>
-<div class="card new"><b>Proposed (Slice 4)</b> <span class="tag p">in plan</span>
-<pre>// MTG-419 runs on modal-3; read on modal-2:
-section:          "working"
-runs_on:          modal-3
-next_move.reason: "Runs on modal-3 since …"
 selection_states: ["open", "working"]
-actions:          { recommended: "no_action",
-                    reason: "Runs on modal-3 since …" }
-// `lf task list --state unstarted` excludes MTG-419</pre></div>
-</div>
+actions:          { recommended: "no_action", … }
+lifecycle:        "unstarted"  // ← local projection
+// Swift TaskRowStatus(task:) → "Unstarted"
+// Swift awaitsStart (lifecycle == .unstarted) → true</pre></div>
+<div class="card new"><b>Next Desktop pass (outside LOO-1084)</b> <span class="tag p">separate Task</span>
+<pre>// Option A: nullable lifecycle + Swift runs_on badge
+RoadmapTask.lifecycle: Option&lt;TaskState&gt; // null when unobserved
+screens::PlanBoardTask.state: Option&lt;TaskState&gt;
+// Swift RoadmapTask decodes `runs_on: TaskRunsOn?`
+// Swift TaskRowStatus shows "Runs on modal-3"
+// Swift awaitsStart checks `lifecycle == .unstarted &amp;&amp; runsOn == nil`
 
-<h3>2. Honest steer reach across trackers and carriers, plus remote text parity</h3>
-<div class="cols">
-<div class="card old"><b>On HEAD (<code>engine/task.rs</code>, <code>waves.rs</code>, <code>bin/lf.rs</code>)</b> <span class="tag e">current</span>
-<pre>// Git-carried sibling steer:
-delivery.reached:  "tracker"
-delivery.sentence: "Queued … in Git for modal-3…"
-
-// Remote `lf task status` text (reachable mini):
-// omits graph.sentence, sessions, parent, children
-
-// Unobserved `lf task status` text on DONE Task:
-// still prints "Runs on modal-3 since …; so its
-// Graph and Sessions are not read here"</pre></div>
-<div class="card new"><b>Proposed (Slice 4)</b> <span class="tag p">in plan</span>
-<pre>// Git-carried or Linear sibling steer:
-delivery.reached:  "shared"    // owner | shared | here
-delivery.sentence: "Queued … in Git for modal-3…"
-
-// Remote `lf task status` text (reachable mini):
-// prints graph.sentence, sessions, parent, children
-
-// Unobserved `lf task status` text on DONE Task:
-// keeps terminal status; no "Runs on …" line</pre></div>
+// Option B: keep lifecycle non-null; Swift checks runsOn first
+// Simpler wire diff, but `lifecycle: "unstarted"` still
+// contradicts `section: "working"` in raw JSON.</pre></div>
 </div>
 
 <h2>Tested against</h2>
 <table>
-<tr><th>Path</th><th>Holds?</th></tr>
-<tr><td><b>Normal:</b> laptop → reachable mini (claimed open Task)</td><td><code>TaskPeer</code> resolves the claim (<code>runs_on</code> always present). Status prints mini's <code>graph.sentence</code>, Sessions, and family; JSON has <code>reading: owner</code> and <code>runs_on</code>. Steer validates message locally first, routes to mini, returns <code>reached: owner</code>.</td></tr>
-<tr><td><b>Normal:</b> unowned Task with Wave <code>set machine mini</code></td><td><code>TaskPeer::resolve</code> returns <code>None</code>. Status answers locally in &lt;10 ms (<code>reading: here</code>, <code>state: unstarted</code>); steer saves locally and syncs (<code>reached: owner</code>, "nothing reads it until … runs"). No 15 s SSH stall when mini is offline.</td></tr>
-<tr><td><b>Failure:</b> sibling sandbox steers Git-carried or Linear Task owned by modal-3</td><td><code>delivery.reached</code> is <code>"shared"</code> (never calling Git a tracker) when acknowledged by Linear, Asana, Git, or hub; <code>"here"</code> when sync fails. <code>modal-3</code> polls within 30 s and delivers once.</td></tr>
-<tr><td><b>Failure:</b> remote steer gets explicit server refusal (e.g. <code>NotFound</code>) vs lost SSH reply</td><td>Empty message rejected locally as <code>Invalid</code> before SSH. Explicit remote <code>Error</code> keeps its <code>ErrorCode</code>. Lost reply after send stays <code>OutcomeUnknown</code> with zero local double-write.</td></tr>
-<tr><td><b>Counterexample:</b> finished (<code>done</code>/<code>abandoned</code>) Task last owned by mini or modal-3</td><td>When mini is reachable, <code>lf task status</code> can still read mini's summary and Graph history (<code>reading: owner</code>); when mini/modal-3 cannot answer, <code>task.state</code> stays <code>done</code>/<code>abandoned</code>, text omits "Runs on …", and steer says "&lt;id&gt; is finished".</td></tr>
-<tr><td><b>Counterexample:</b> Desktop decodes <code>RoadmapTask</code> for a Task running on modal-3</td><td>Existing Swift <code>RoadmapTask</code> already decodes <code>section: .working</code> and <code>actions.recommended: .noAction</code> without breaking any fixture. (Showing a <code>Runs on modal-3</code> badge in SwiftUI is separate Desktop UI scope.)</td></tr>
+<tr><th>Path</th><th>Holds on HEAD?</th></tr>
+<tr><td><b>Normal:</b> laptop → reachable registered owner (claimed open Task)</td><td>Yes. <code>TaskPeer</code> resolves the active claim (<code>runs_on</code> always set). Status prints owner's <code>graph.sentence</code>, Sessions, and family; JSON has <code>reading: owner</code> and <code>runs_on</code>. Steer validates locally first, routes over SSH, returns <code>reached: owner</code>.</td></tr>
+<tr><td><b>Normal:</b> unowned Task with Wave <code>set machine sandbox-b</code> (offline)</td><td>Yes. <code>TaskPeer::resolve</code> returns <code>None</code>. Status answers locally (&lt;1 s, <code>reading: here</code>, <code>runs_on: null</code>, <code>state: unstarted</code>); steer saves locally and syncs (<code>reached: owner</code>, <code>runs_on: null</code>, "nothing reads it until … runs").</td></tr>
+<tr><td><b>Failure:</b> sibling sandbox steers Git-carried or Linear Task owned by <code>sandbox-b</code></td><td>Yes. <code>delivery.reached</code> is <code>"shared"</code> when acknowledged by Linear, Asana, Git, or hub; <code>"here"</code> when sync fails. <code>sandbox-b</code> polls within 30 s (via <code>lf server</code> or <code>RunningGraph::spawn</code>) and delivers once via <code>steer_markers::task_marker</code> and <code>store_revisions</code>.</td></tr>
+<tr><td><b>Failure:</b> registered owner offline vs explicit remote refusal vs lost reply</td><td>Yes. Pre-admission SSH failure degrades status to <code>reading: unobserved</code> and falls back steer to <code>reached: shared</code>/<code>here</code>. Empty message fails locally as <code>Invalid</code> before SSH. Explicit remote refusal preserves its <code>ErrorCode</code>; lost reply after send returns <code>OutcomeUnknown</code> without double-writing.</td></tr>
+<tr><td><b>Counterexample:</b> finished (<code>done</code>/<code>abandoned</code>) Task last owned elsewhere</td><td>Mostly holds. Reachable remote status opens with "Read from &lt;machine&gt;'s server."; unobserved status keeps terminal <code>state</code> without "Runs on …". Minor edge: a Task abandoned on another Machine replicates <code>planning_state = "canceled"</code> without local <code>abandoned_at</code>, so <code>task_state()</code> in <code>engine/task.rs</code> still sees it as non-terminal (same pre-existing <code>task_state</code> vs <code>lifecycle</code> split QA noted on <code>lf task list</code>).</td></tr>
+<tr><td><b>Counterexample:</b> unowned Task steered with <code>delivery.reached == "owner"</code></td><td>Holds. With <code>runs_on: null</code> and sentence "nothing reads it until &lt;id&gt; runs", <code>owner</code> means "in the only store that holds it; no remote owner to forward to", avoiding a 4th enum variant.</td></tr>
+<tr><td><b>Counterexample:</b> move in flight from this Machine</td><td>Holds. <code>TaskPeer::resolve</code> returns <code>None</code> when <code>move_awaiting_arrival</code> is true; local status keeps <code>Moving to …</code> and steer keeps local guard behavior.</td></tr>
 </table>
 
 <h2>Outside this work</h2>
 <ul>
-<li><b>Desktop Swift UI badge &amp; screen DTOs:</b> decoding <code>RoadmapTask.runs_on</code> in <code>swift/Loopflow/Models/WaveWorkMap.swift</code>, displaying a "Runs on …" badge on the board, and propagating <code>runs_on</code>/<code>reading</code> to <code>screens::PlanBoardTask</code> / <code>screens::TaskDetail</code>. (Separate UI pass; existing Swift decoding stays green.)</li>
+<li><b>Desktop SwiftUI remote-Task status &amp; <code>RoadmapTask.lifecycle</code> DTO:</b> decode <code>RoadmapTask.runs_on</code> in <code>swift/Loopflow/Models/WaveWorkMap.swift</code>, decide whether <code>RoadmapTask.lifecycle</code> / <code>screens::PlanBoardTask.state</code> become nullable (Option A) or Swift checks <code>runsOn</code> before <code>lifecycle</code> (Option B), update <code>TaskRowStatus(task:)</code> and <code>awaitsStart</code>, and render a "Runs on …" row label. Touches ~10 DTO fixtures plus Rust <code>waves.rs</code>/<code>screens.rs</code> and Swift models/views/tests.</li>
+<li><b>Planning-abandoned Tasks in local SQL <code>task_state()</code>:</b> Tasks canceled on another Machine carry <code>planning_state = "canceled"</code> without local <code>abandoned_at</code>, affecting default <code>lf task list</code> membership (pre-existing) and the terminal-Task clause of fallback steer receipts on abandoned remote Tasks.</li>
 <li><b>Container <code>lf server</code> supervisor:</b> replacing <code>systemctl --user</code> in containers (LOO-1081/1083). <code>RunningGraph::spawn</code> already covers mid-step steer ingestion without a server.</li>
 <li><b>Remote workspace/file/diff/shell/session viewer routing:</b> LOO-1083.</li>
-<li><b>Live hosted tracker &amp; provider-turn verification:</b> QA ran against real loopback OpenSSH + Git; live Linear/Asana and real provider turn delivery remain open for gate/verification.</li>
 </ul>
 
-<h2>Questions (open for review)</h2>
+<h2>Questions (choices built into HEAD for review)</h2>
 <ol class="q">
-<li>Unowned Tasks when Wave has <code>set machine mini</code>: <b>a</b> read and steer locally — <code>TaskPeer</code> follows claims only (chosen for Slice 4) · <b>b</b> keep dialing the Wave placement Machine on status and steer.</li>
-<li>Middle value of <code>delivery.reached</code> (in Linear, Asana, Git, or hub): <b>a</b> <code>shared</code> (chosen for Slice 4: <code>owner | shared | here</code>) · <b>b</b> <code>plan</code> (<code>owner | plan | here</code>) · <b>c</b> keep <code>tracker</code> even for Git/hub.</li>
-<li>Remote Task <code>actions</code> on <code>RoadmapTask</code>: <b>a</b> <code>no_action</code> with "Runs on …" reason (chosen for Slice 4, matches <code>TaskRow.next: null</code>) · <b>b</b> keep recommending <code>run</code> so Desktop offers Start/Run forwarding to the remote Machine.</li>
-<li>Remote <code>lf task status</code> on a finished (<code>done</code>/<code>abandoned</code>) Task: <b>a</b> still read reachable owner for summary/Graph history, but never print "Runs on …" when unobserved (chosen for Slice 4) · <b>b</b> never dial a peer for a terminal Task.</li>
+<li>Unowned Tasks when Wave has <code>set machine mini</code>: <b>a</b> read and steer locally — <code>TaskPeer</code> follows active claims only <span class="tag b">built</span> · <b>b</b> dial the Wave placement Machine on status and steer.</li>
+<li>Middle value of <code>delivery.reached</code> (in Linear, Asana, Git, or hub): <b>a</b> <code>shared</code> (<code>owner | shared | here</code>) <span class="tag b">built</span> · <b>b</b> <code>plan</code> (<code>owner | plan | here</code>).</li>
+<li>Remote Task <code>actions</code> on <code>RoadmapTask</code>: <b>a</b> <code>no_action</code> with "Runs on …" reason <span class="tag b">built</span> · <b>b</b> keep recommending <code>run</code> so Desktop offers Start/Run forwarding.</li>
+<li>Follow-up Desktop pass for remote Tasks in Working: <b>a</b> make <code>RoadmapTask.lifecycle</code> and <code>screens::PlanBoardTask.state</code> nullable (matching <code>TaskRow.state</code>) and render <code>runs_on</code> in Swift · <b>b</b> keep <code>lifecycle</code> non-null and have Swift check <code>runsOn</code> first.</li>
+<li>Shortening registered-peer SSH error reasons in <code>lf task status</code> text (currently ~300 chars with the full <code>ssh -o ControlPath=none …</code> hint): <b>a</b> keep the full actionable error <span class="tag b">built</span> · <b>b</b> summarize to "unreachable" in the one-line status and put the repair command below.</li>
 </ol>
 </body>
 </html>

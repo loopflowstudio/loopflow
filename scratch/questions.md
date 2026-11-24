@@ -26,3 +26,5 @@
 - Each editor keeps the selected declaration’s slot and file address. Search and the form use the titles from the same ordered sections.
 - Review the compact window in the background so the current app keeps keyboard focus.
 - Keep the CLI checkpoint line format at the subprocess. Desktop Settings and Work pass its number directly to the server subscription.
+- Open the document supplying the selected Wave's slots. Where it differs, show the first-edit save path until a write creates it. Requiring a write to inspect existing frontmatter changes the checkout just to read it.
+- Use the existing Reset button for saved picker choices. Display an effective-value placeholder only when no choice is saved in the selected file. A second Reset inside the menu duplicates the same checked edit.

@@ -3,379 +3,61 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="color-scheme" content="light dark">
-<title>Settings concept review (pass 3) · LOO-1066</title>
+<title>Which file am I editing? · LOO-1066 Settings review</title>
 <style>
-  :root {
-    color-scheme: light dark;
-    --bg: #f4f5f7;
-    --panel: #ffffff;
-    --well: #f8f9fb;
-    --ink: #17191d;
-    --muted: #555e6b;
-    --line: #d6dbe2;
-    --blue: #184f9b;
-    --accent: #e6effd;
-    --green: #176047;
-    --green-bg: #e7f5ef;
-    --red: #942f28;
-    --red-bg: #fcebe9;
-    --amber: #8a5300;
-    --amber-bg: #fdf3e1;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --bg: #131518;
-      --panel: #1c2026;
-      --well: #16191e;
-      --ink: #f3f5f8;
-      --muted: #adb6c4;
-      --line: #3b424d;
-      --blue: #a4c8ff;
-      --accent: #202f47;
-      --green: #8fddbe;
-      --green-bg: #173026;
-      --red: #ffaea6;
-      --red-bg: #3b1d1b;
-      --amber: #f7c97e;
-      --amber-bg: #362814;
-    }
-  }
-  * { box-sizing: border-box; }
-  body { margin: 0; background: var(--bg); color: var(--ink); font: 1rem/1.55 system-ui, -apple-system, sans-serif; }
-  main { max-width: 76rem; margin: auto; padding: clamp(1rem, 4vw, 3rem); }
-  h1, h2, h3, p, pre, dl { margin: 0; }
-  h1, h2, h3 { line-height: 1.25; }
-  h1 { font-size: clamp(1.85rem, 4.2vw, 2.8rem); max-width: 28ch; }
-  h2 { font-size: 1.4rem; margin-bottom: .75rem; }
-  h3 { font-size: 1.05rem; }
-  section { margin-top: 2.5rem; }
-  .overline { color: var(--blue); font-weight: 650; font-size: .86rem; letter-spacing: .02em; margin-bottom: .35rem; }
-  .lede { font-size: 1.08rem; max-width: 76ch; margin-top: .8rem; }
-  .note { color: var(--muted); font-size: .92rem; }
-  .tag { display: inline-block; font-size: .76rem; font-weight: 700; padding: .1rem .45rem; border-radius: .35rem; vertical-align: middle; }
-  .tag-prior { background: var(--red-bg); color: var(--red); }
-  .tag-existing { background: var(--green-bg); color: var(--green); }
-  .tag-choice { background: var(--amber-bg); color: var(--amber); }
-  button {
-    font: inherit; color: var(--ink); background: var(--panel); border: 1px solid var(--line);
-    border-radius: .45rem; padding: .24rem .6rem; max-width: 100%;
-  }
-  button:enabled { cursor: pointer; }
-  button.active { background: var(--accent); color: var(--blue); border-color: var(--blue); font-weight: 650; }
-  button.small { font-size: .84rem; padding: .16rem .5rem; }
-  :focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
-  .compare { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; align-items: start; }
-  .cases { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .9rem; }
-  .card { padding: 1rem 1.1rem; border: 1px solid var(--line); background: var(--panel); border-radius: .85rem; min-width: 0; }
-  .card > * + * { margin-top: .65rem; }
-  .form-card { border: 1px solid var(--line); border-radius: .65rem; background: var(--well); overflow: hidden; }
-  .form-title { font-size: .85rem; font-weight: 650; color: var(--muted); margin-bottom: .3rem; }
-  .form-row { display: flex; justify-content: space-between; align-items: center; gap: .6rem 1rem; padding: .55rem .8rem; border-top: 1px solid var(--line); flex-wrap: wrap; }
-  .form-row:first-child { border-top: 0; }
-  .val { color: var(--muted); font-size: .92rem; }
-  .val-strong { color: var(--ink); font-size: .92rem; }
-  .banner { border: 1px solid var(--line); border-radius: .55rem; padding: .55rem .75rem; font-size: .9rem; display: flex; justify-content: space-between; align-items: center; gap: .6rem; flex-wrap: wrap; }
-  .banner-bad { border-color: var(--red); background: var(--red-bg); color: var(--red); }
-  .banner-warn { border-color: var(--amber); background: var(--amber-bg); color: var(--amber); }
-  .callout { border: 1px solid var(--line); border-radius: .65rem; padding: .75rem .9rem; background: var(--well); }
-  .callout-bad { border-color: var(--red); background: var(--red-bg); }
-  .callout-good { border-color: var(--green); background: var(--green-bg); }
-  .disabled-form { opacity: .52; }
-  code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .87em; }
-  table { width: 100%; border-collapse: collapse; background: var(--panel); border: 1px solid var(--line); border-radius: .75rem; overflow: hidden; }
-  th, td { text-align: left; vertical-align: top; padding: .65rem .8rem; border-top: 1px solid var(--line); }
-  thead th { border-top: 0; background: var(--well); font-size: .86rem; color: var(--muted); }
-  .yes { color: var(--green); font-weight: 700; white-space: nowrap; }
-  .choices { padding-left: 1.35rem; }
-  .choices > li { margin-bottom: 1rem; }
-  .choices ul { list-style: none; padding: 0; margin-top: .3rem; }
-  .choices li li + li { margin-top: .25rem; }
-  a { color: var(--blue); text-underline-offset: .15em; }
-  [hidden] { display: none !important; }
-  @media (max-width: 54rem) {
-    .compare, .cases { grid-template-columns: 1fr; }
-    table, thead, tbody, tr, th, td { display: block; }
-    thead { display: none; }
-    td { border-top: 0; padding: .35rem .8rem; }
-    tr { border-top: 1px solid var(--line); padding: .45rem 0; }
-  }
+:root { color-scheme:light dark; --ink:#192522; --muted:#495c55; --bg:#f7f8f5; --card:#fff; --line:#c9d3cb; --accent:#16654a; --warn:#8a4119 }
+@media(prefers-color-scheme:dark){:root{--ink:#ebf2eb;--muted:#bbcbc2;--bg:#151b19;--card:#202824;--line:#46564b;--accent:#8bdab0;--warn:#ffb489}}
+*{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--ink);font:1rem/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+main{max-width:62rem;margin:auto;padding:2.5rem clamp(1rem,4vw,3rem) 4rem} h1,h2,h3{line-height:1.17;text-wrap:balance} h1{font-size:clamp(2rem,6vw,3.5rem);max-width:21ch;margin:.4rem 0 1rem} h2{margin-top:2.6rem} h3{font-size:1.02rem;margin:.4rem 0}
+p{max-width:78ch} small,figcaption{color:var(--muted)} code{font: .91em ui-monospace,monospace;overflow-wrap:anywhere} .pair{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,20rem),1fr));gap:.85rem}
+figure{margin:0;padding:1.2rem;border:1px solid var(--line);border-radius:.7rem;background:var(--card)} figcaption{font-weight:650;margin-bottom:.7rem} dl{margin:0} dt{color:var(--muted);font-size:.9rem} dd{margin:0 0 .6rem} .note{border-top:1px solid var(--line);padding-top:.65rem;margin-bottom:0}
+table{border-collapse:collapse;width:100%;text-align:left} th,td{padding:.65rem .5rem;vertical-align:top;border-bottom:1px solid var(--line)} th{font-size:.92rem} .yes{color:var(--accent)} .no{color:var(--warn)} ol,ul{padding-left:1.4rem} li+li{margin-top:.6rem}
+@media(max-width:38rem){table,tbody,tr,td{display:block} thead{position:absolute;clip-path:inset(50%)} tr{padding:.5rem 0;border-bottom:1px solid var(--line)} td{border:0;padding:.1rem 0}}
 </style>
 </head>
-<body>
-<main>
-  <header>
-    <p class="overline">LOO-1066 · Concept review pass 3 · macOS Settings &amp; Configuration Scope</p>
-    <h1>Do the product’s concepts and the code’s concepts line up?</h1>
-    <p class="lede">
-      <strong>Yes — all ten product-to-code pairings line up across the full Settings &amp; Configuration Scope area.</strong>
-      Reviewed from checkout base <code>2aa9964894</code> through <code>bfd4664da3</code> across the macOS Settings window, scoped configuration models, search, theme/mobile/machine surfaces, and the Rust config scope, writer, and move engine.
-      Pass 2’s live-observation lifecycle mismatch is resolved in <code>a74b556a22</code> and verified in both unit tests and live QA round 5 (<a href="qa.html">qa.html</a>).
-      <code>e753cd0c45</code> tightened edit, undo, error, and move addressing around one <code>SettingDeclaration</code> snapshot so every mutation speaks in the exact slot the user saw.
-      No plan changes remain; visual inspection of the compact Settings window on an unlocked display stays with the human demo.
-    </p>
-  </header>
+<body><main>
+<header><small>Loopflow for macOS · LOO-1066 · 23 November 2026</small>
+<h1>Do the Settings concepts line up?</h1>
+<p>The sidebar makes the first choice straightforward. Personal defaults live in six panes. Project &amp; Wave Config asks which work to inspect and where to save. Two controls lose that distinction between inspecting a value and changing it.</p></header>
 
-  <section aria-labelledby="resolved-heading">
-    <h2 id="resolved-heading">Resolved mismatch: Prior (<code>3dd087e8</code>) vs Built (<code>bfd4664da3</code>)</h2>
-    <p class="note">Walk a routine local server restart and a post-reconnect edit while Settings is open. Left is the one-shot stream from pass 2; right is the self-healing observation and declaration-bound edit flow now built and verified on this branch.</p>
+<section><h2>Open the file behind a Wave preference</h2>
+<p>Choose the <strong>scan</strong> Wave and <strong>Shared Wave preferences</strong>. Its goal already declares <code>agent: codex</code> in frontmatter. Reading through to that declaration should take one click, even before the first Settings edit.</p>
+<div class="pair">
+<figure><figcaption>Existing · before the first edit</figcaption><dl><dt>Primary agent</dt><dd>codex</dd><dt>Path beside Open file…</dt><dd><code>…/scan/config.yaml</code></dd><dt>Click Open file…</dt><dd>“Save a setting here to create …/scan/config.yaml.”</dd></dl><p class="note">The only file on disk is <code>GOAL.md</code>. The form asks for a write to inspect an existing declaration.</p></figure>
+<figure><figcaption>Proposed · same Wave and declaration</figcaption><dl><dt>Primary agent</dt><dd>codex</dd><dt>Open file…</dt><dd><code>…/scan/GOAL.md</code></dd><dt>First change saves to</dt><dd><code>…/scan/config.yaml</code></dd></dl><p class="note">Open shows the frontmatter. After a real edit creates the YAML file, the next reading shows a single path and Open follows it.</p></figure>
+</div>
+<p><strong>Where the distinction disappears.</strong> Rust’s <code>settings_source</code> already reads a path and text together. <code>config.scope</code> returns the declared slots with only the destination path. Swift’s <code>prepareForOpening()</code> uses that path. Carry the read path from the same Rust reading alongside the save path. Keep checked edits, Reset, Undo and moves addressed by destination and key.</p>
+<p><strong>What the run showed.</strong> The branch CLI reported a present <code>codex</code> slot, selected candidate <code>GOAL.md</code>, and a missing shared Wave <code>config.yaml</code>. After setting <code>yolo: true</code>, the slot still held <code>codex</code>, the YAML file existed, and the selected candidate moved to it. The Open outcome above follows the Swift file-opening code. This pass exercised the CLI and inspected the view source.</p>
+<ul>
+<li><strong>No-op.</strong> Saving the same agent leaves the Wave in frontmatter. Open must still lead there. QA round 6 saw exactly one file after this save.</li>
+<li><strong>Competing edit.</strong> Keep the writer’s source recheck. If another editor changes the source during the write, refresh before retrying. An external edit that creates the YAML file changes the next reading’s Open target.</li>
+<li><strong>Empty private destination.</strong> A value inherited from the shared file cannot make that file the source of a private slot. Keep the missing-file behavior for that destination. Only the file that supplied the selected destination’s document counts.</li>
+<li><strong>Restart.</strong> Both scopes retain their last reading and pause edits until a fresh frame. Round 6 saw an external edit reach the open project pane after restart and a subsequent Reset reach disk.</li>
+</ul></section>
 
-    <div style="display:flex; gap:.45rem; flex-wrap:wrap; margin:.85rem 0;">
-      <button type="button" class="small active" data-step="running">1 · Server running</button>
-      <button type="button" class="small" data-step="restarting">2 · Server restarts</button>
-      <button type="button" class="small" data-step="back">3 · Server is back up</button>
-      <button type="button" class="small" data-step="switch">4 · Switch to Project &amp; edit</button>
-    </div>
+<section><h2>A picker value can conceal a Reset</h2>
+<div class="pair">
+<figure><figcaption>Existing · Merge method menu</figcaption><dl><dt>My repository settings</dt><dd>✓ Rebase</dd><dt>Another selectable item</dt><dd>Rebase (from My repository settings)</dd><dt>Choose that item</dt><dd>The private declaration is removed. The shared <strong>Squash</strong> setting takes effect.</dd></dl></figure>
+<figure><figcaption>Proposed · one way to remove the declaration</figcaption><dl><dt>My repository settings</dt><dd>✓ Rebase</dd><dt>Choose Reset below the picker</dt><dd>Remove this file’s declaration.</dd><dt>Next reading</dt><dd>Squash (from Shared repository settings). Undo restores the original private entry.</dd></dl></figure>
+</div>
+<p><code>ScopedSettingRow</code> always tags <code>unsetText</code> as <code>.absent</code>, even when the selected file supplies the effective value. The CLI returned <code>rebase</code> from the private file before unset and <code>squash</code> from shared afterwards. Show the sourced label in the picker only when the slot is already absent. Keep a hand-authored null visible and resettable. A shared declaration shadowed by a private one still shows its own selection and the separate <strong>In effect</strong> reading.</p>
+</section>
 
-    <div class="compare">
-      <article class="card">
-        <p class="overline"><span class="tag tag-prior">Before · 3dd087e8</span> · One-shot <code>observe()</code> &amp; re-read slots</p>
-        <h3 id="old-title">Live subscription connected</h3>
-        <div id="old-banner" class="banner banner-bad" hidden>
-          <span>Loopflow server unavailable or owned by another account</span>
-          <button type="button" class="small" disabled>Refresh</button>
-        </div>
-        <div id="old-form">
-          <p class="form-title" id="old-pane">Agents · ~/.lf/config.yaml</p>
-          <div class="form-card">
-            <div class="form-row"><span>Primary agent</span><span class="val" id="old-agent">Use starting preference (Default)</span></div>
-            <div class="form-row"><span>Starting preference</span><span class="val-strong" id="old-default">claude</span></div>
-            <div class="form-row"><span>Run without asking</span><span class="val-strong">On</span></div>
-          </div>
-        </div>
-        <div class="callout callout-bad" id="old-why">
-          <strong>Normal state:</strong> Both <code>personal</code> and <code>project</code> subscriptions are active.
-        </div>
-      </article>
-
-      <article class="card">
-        <p class="overline"><span class="tag tag-existing">Built · bfd4664da3</span> · Self-healing <code>observe()</code> &amp; <code>SettingDeclaration</code></p>
-        <h3 id="new-title">Live subscription connected</h3>
-        <div id="new-banner" class="banner banner-warn" hidden>
-          <span id="new-banner-text"></span>
-          <button type="button" class="small" disabled>Refresh</button>
-        </div>
-        <div id="new-form">
-          <p class="form-title" id="new-pane">Agents · ~/.lf/config.yaml</p>
-          <div class="form-card">
-            <div class="form-row"><span>Primary agent</span><span class="val" id="new-agent">Use starting preference (Default)</span></div>
-            <div class="form-row"><span>Starting preference</span><span class="val-strong" id="new-default">claude</span></div>
-            <div class="form-row"><span>Run without asking</span><span class="val-strong">On</span></div>
-          </div>
-        </div>
-        <div class="callout callout-good" id="new-why">
-          <strong>Normal state:</strong> Zero polling while healthy; push updates arrive over live <code>config.scope</code> streams for both scopes.
-        </div>
-      </article>
-    </div>
-  </section>
-
-  <section aria-labelledby="map-heading">
-    <h2 id="map-heading">Product concepts vs code concepts (<code>2aa9964894</code> → <code>bfd4664da3</code>)</h2>
-    <table>
-      <thead>
-        <tr>
-          <th style="width:20%;">Product concept</th>
-          <th style="width:32%;">Code concept</th>
-          <th style="width:8%;">Match?</th>
-          <th>Assessment</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr>
-          <td><strong>Live Settings across server restarts &amp; broken files</strong></td>
-          <td><code>ScopedSettingsModel.observe()</code> runs a <code>1 s → 30 s</code> exponential backoff loop, refreshes <code>config.catalog</code> after failures, stays on the live stream for file-level <code>unavailable</code> frames, cancels streams and releases <code>confirmations</code> before sleeping, and resets delay on a healthy frame.</td>
-          <td class="yes">Yes</td>
-          <td>Resolved in <code>a74b556a22</code> and verified in <code>SettingsWorkflowTests</code> plus QA round 5 (both scopes reconnected in 11–16 s, preserved last readings, dropped edits while down, and saved edits afterwards). Matches <code>WorkModel</code>, <code>AppearanceStore</code>, <code>MobileSetup</code>, and <code>MachineConnections</code>.</td>
-        </tr>
-        <tr>
-          <td><strong>Personal preferences vs Project &amp; Wave Config</strong> (Policy B)</td>
-          <td><code>SettingsWindow</code> owns independent <code>personal</code> and <code>project</code> <code>ScopedSettingsModel</code>s; 7-pane monochrome sidebar (6 personal + 1 project), 2 unselectable dividers, capsule search, removed sidebar-toggle toolbar.</td>
-          <td class="yes">Yes</td>
-          <td>Clean 1:1 split matching Jack Heart’s demo direction (<code>1b 2a</code>). Switching panes preserves checkout, Wave, target, and destination independently; duplicate search read errors collapse to one refresh action.</td>
-        </tr>
-        <tr>
-          <td><strong>Declaration-bound edits, Undo &amp; conflict recovery</strong></td>
-          <td><code>SettingDeclaration</code> carries <code>destination</code>, <code>catalogKey</code>, <code>owner</code>, and the slot snapshot at edit time; <code>ScopedSettingsModel</code> keys edits, Undo, moves, and <code>errors[SettingDeclaration.ID]</code> on it; <code>confirmReading()</code> synchronizes rapid clicks; Rust <code>config::files::edit</code> preserves comments and isolates locks under <code>$LF_HOME/locks/config/</code>.</td>
-          <td class="yes">Yes</td>
-          <td>Tightened in <code>e753cd0c45</code>. Stale drafts cannot pass as current slots, Undo targets the original file even after switching destinations, and checkouts keep a clean <code>git status</code>.</td>
-        </tr>
-        <tr>
-          <td><strong>Three Agent Policy keys + combined order</strong></td>
-          <td><code>catalog.rs</code> provides <code>unset</code> fallbacks for <code>agent</code> and <code>default_agent</code>; <code>ScopedSettingRow.unsetText</code> filters <code>effective.candidates.last(where: { $0.key == key })</code> uniformly for all three <code>.policy</code> keys; <code>Effective agent order</code> sits at the foot of Project’s Agent Policy section.</td>
-          <td class="yes">Yes</td>
-          <td>Each row reflects its own key and origin without leaking <code>default_agent</code> onto unset <code>Primary agent</code>.</td>
-        </tr>
-        <tr>
-          <td><strong>Default values vs active overrides</strong></td>
-          <td><code>ScopedSettingRow</code> gates <code>SettingProvenance("In effect", …)</code> on <code>declared != .absent || candidates.contains { $0.source != "builtin" }</code>; <code>ScopedSettings</code> renders <code>file.path</code> once above <strong>Open file…</strong>.</td>
-          <td class="yes">Yes</td>
-          <td>Clean checkouts stay calm; provenance appears as soon as this file or another non-builtin layer participates.</td>
-        </tr>
-        <tr>
-          <td><strong>Nullable choices, enum labels, instant Reset &amp; Undo</strong></td>
-          <td><code>ConfigurationDefinition.displayText</code> maps enum tokens; Picker includes <code>Explicit null</code> only when <code>declared == .present(.null)</code>; simple controls reset immediately via checked <code>config.edit</code> with human-titled Undo; emptied text/number fields reset; <code>.yaml</code> disclosures keep previewed <code>Reset…</code>.</td>
-          <td class="yes">Yes</td>
-          <td>One consistent immediate-edit + Undo model for simple controls, and explicit Apply/Cancel/previewed Reset for multi-line YAML editors.</td>
-        </tr>
-        <tr>
-          <td><strong>Skill &amp; Graph-step targeting</strong></td>
-          <td><code>SettingsTargetPicker</code> labeled <strong>Skill or Graph step</strong>; one shared <code>SettingsWork.scope(for:)</code> predicate drives both form filtering and Search jump scope adjustment; read-only steps without an <code>id:</code> explain why.</td>
-          <td class="yes">Yes</td>
-          <td>Search and form filtering cannot drift; changing only the Skill or Graph step keeps the selected file.</td>
-        </tr>
-        <tr>
-          <td><strong>Move (Promote) &amp; interrupted move recovery</strong></td>
-          <td><code>engine::config::promotion</code> uses ordered locks, requires an empty receiving slot, reads source entries once for both Reset and Undo restore, shows projected <code>In effect after move</code> + audience notice, journals under <code>$LF_HOME/settings-moves/</code>, and offers <code>Action::Resume</code> and idempotent <code>Action::Dismiss</code>.</td>
-          <td class="yes">Yes</td>
-          <td>Honest 2-file move with safe conflict refusal, inverse-move Undo, and non-destructive Dismiss.</td>
-        </tr>
-        <tr>
-          <td><strong>Appearance, Shortcuts, Mobile &amp; Machines</strong></td>
-          <td><code>AppearanceStore</code> (instant apply + Undo via checked <code>config.edit</code> + staged <code>ThemeEditor</code> + direct configuration path), shared <code>KeyboardShortcutsView</code>, lifted <code>MobileSetup</code>, and <code>MachineConnections</code> with 4-way concurrent <code>machine.status</code> probes.</td>
-          <td class="yes">Yes</td>
-          <td>Each surface matches its domain owner and self-heals across server or connectivity interruptions.</td>
-        </tr>
-        <tr>
-          <td><strong>Cross-pane Search</strong></td>
-          <td><code>SettingsMatch</code> + <code>SettingsNavigation.matches</code> + <code>SettingsSearchRow</code> + <code>settingsForm(highlighted:)</code>.</td>
-          <td class="yes">Yes</td>
-          <td>Exact matches lead, agent personal defaults precede project overrides, inline switches show their exact destination (including Wave and Skill/step key) and write through <code>SettingDeclaration</code>, and file-only global keys highlight <strong>Open ~/.lf/config.yaml</strong>.</td>
-        </tr>
-      </tbody>
-    </table>
-  </section>
-
-  <section aria-labelledby="survival-heading">
-    <h2 id="survival-heading">Failure, recovery &amp; counterexamples checked</h2>
-    <div class="cases">
-      <article class="card">
-        <h3>Invalid YAML on disk</h3>
-        <p><strong>No reconnect churn.</strong> The server keeps the <code>config.scope</code> stream open and emits <code>SubscriptionFrame(body: nil, unavailable: …)</code>. Edits pause while last readings stay visible; fixing the YAML pushes a healthy frame immediately without backoff.</p>
-      </article>
-      <article class="card">
-        <h3>Manual Refresh or scope change during backoff</h3>
-        <p><strong>Immediate recovery.</strong> Clicking <strong>Refresh</strong> or switching checkout, Wave, or target rotates <code>observation = UUID()</code>, canceling the sleeping <code>.task(id:)</code> and opening a fresh stream right away with a 1 s backoff.</p>
-      </article>
-      <article class="card">
-        <h3>Disconnect mid-edit or rapid double-click</h3>
-        <p><strong>No hang, no stale conflict.</strong> <code>apply()</code> waits on <code>confirmReading()</code> when the stream lags a frame behind <code>receipt.after</code>. If the connection drops while waiting, <code>observe()</code> releases all pending confirmations before sleeping so the UI never deadlocks.</p>
-      </article>
-      <article class="card">
-        <h3>External file edit while typing</h3>
-        <p><strong>Draft preserved, conflict surfaced.</strong> <code>Draft</code> holds the <code>SettingDeclaration</code> captured when typing started. Checked writes refuse stale entries and show <strong>Refresh</strong>, which calls <code>model.refresh(declaration)</code> to re-bind the draft to the new slot.</p>
-      </article>
-    </div>
-  </section>
-
-  <section aria-labelledby="outside-heading">
-    <h2 id="outside-heading">Noted outside conceptual alignment</h2>
-    <p class="note">
-      <strong>Human visual check remaining (<a href="plan.md">plan.md</a>):</strong> verify sidebar chrome and scoped forms visually in a compact (760 pt) Settings window on an unlocked display (geometry checked headless in <a href="qa.html">qa.html</a>; pixels require an unlocked screen).<br>
-      <strong>Minor polish / shared outside Settings:</strong> shared disconnect wording in <code>ServerClient.swift:305</code> (“Loopflow server unavailable or owned by another account”), serde wording on rejected block fields, empty <code>{}</code> left when resetting a file’s last key (shared with <code>lf unset</code>), and <code>Empty list (Default)</code> wording on <code>agents</code>.
-    </p>
-  </section>
-
-  <section aria-labelledby="choices-heading">
-    <h2 id="choices-heading">Choices made for review</h2>
-    <p class="note">All reversible choices are built and recorded in <a href="questions.md">scratch/questions.md</a>. Reply with a number and letter (e.g. <code>2b</code>) to steer any of them during demo.</p>
-    <ol class="choices">
-      <li><strong>How open Settings panes recover after a local server restart</strong>
-        <ul>
-          <li><span class="tag tag-choice">1a · Built</span> Reconnect automatically inside <code>ScopedSettingsModel.observe()</code> with 1–30 s backoff (reset on healthy reading) while keeping manual <strong>Refresh</strong> immediate.</li>
-          <li><strong>1b.</strong> Keep Settings streams one-shot and require manual <strong>Refresh</strong> or reopening Settings.</li>
-        </ul>
-      </li>
-      <li><strong>How simple controls vs YAML editors apply and reset changes</strong>
-        <ul>
-          <li><span class="tag tag-choice">2a · Built</span> Switches, pickers, text/number fields, and simple-control <strong>Reset</strong> apply immediately with checked writes and Undo; <code>ThemeEditor</code> and raw <code>.yaml</code> disclosures keep Apply/Cancel and previewed <code>Reset…</code>.</li>
-          <li><strong>2b.</strong> Require confirmation or YAML preview before resetting simple controls too.</li>
-        </ul>
-      </li>
-      <li><strong>Disconnect banner wording during a plain server restart</strong>
-        <ul>
-          <li><span class="tag tag-choice">3a · Built</span> Keep the shared <code>ServerClient</code> message (“Loopflow server unavailable or owned by another account”) so Settings does not fork transport errors.</li>
-          <li><strong>3b.</strong> Split socket-connect refusal from peer-UID mismatch in <code>ServerClient</code> so a routine restart says the server is unavailable and reconnecting.</li>
-        </ul>
-      </li>
-    </ol>
-  </section>
-</main>
-<script>
-  const stepBtns = [...document.querySelectorAll('[data-step]')];
-  const oldTitle = document.getElementById('old-title');
-  const oldBanner = document.getElementById('old-banner');
-  const oldForm = document.getElementById('old-form');
-  const oldPane = document.getElementById('old-pane');
-  const oldAgent = document.getElementById('old-agent');
-  const oldDefault = document.getElementById('old-default');
-  const oldWhy = document.getElementById('old-why');
-  const newTitle = document.getElementById('new-title');
-  const newBanner = document.getElementById('new-banner');
-  const newBannerText = document.getElementById('new-banner-text');
-  const newForm = document.getElementById('new-form');
-  const newPane = document.getElementById('new-pane');
-  const newAgent = document.getElementById('new-agent');
-  const newDefault = document.getElementById('new-default');
-  const newWhy = document.getElementById('new-why');
-
-  const steps = {
-    running: {
-      old: { title: 'Live subscription connected', banner: false, disabled: false, pane: 'Agents · ~/.lf/config.yaml',
-             agent: 'Use starting preference (Default)', def: 'claude',
-             why: '<strong>Normal state:</strong> Both <code>personal</code> and <code>project</code> subscriptions are active.' },
-      next: { title: 'Live subscription connected', banner: null, disabled: false, pane: 'Agents · ~/.lf/config.yaml',
-              agent: 'Use starting preference (Default)', def: 'claude',
-              why: '<strong>Normal state:</strong> Zero polling while healthy; push updates arrive over live <code>config.scope</code> streams for both scopes.' }
-    },
-    restarting: {
-      old: { title: 'Subscription throws and observe() exits forever', banner: true, disabled: true, pane: 'Agents · ~/.lf/config.yaml',
-             agent: 'Use starting preference (Default)', def: 'claude',
-             why: '<strong>What broke:</strong> <code>observe()</code> set <code>reading.failed(...)</code> and returned permanently, freezing both scopes.' },
-      next: { title: 'Edits pause while backoff retries (1 s → 30 s)', banner: 'Loopflow server unavailable or owned by another account', disabled: true, pane: 'Agents · ~/.lf/config.yaml',
-              agent: 'Use starting preference (Default)', def: 'claude',
-              why: '<strong>Safe pause:</strong> Last good values stay visible, edits pause (typed input while down is dropped cleanly), pending confirmations release, and backoff retries automatically.' }
-    },
-    back: {
-      old: { title: 'Still frozen even though server is healthy', banner: true, disabled: true, pane: 'Agents · ~/.lf/config.yaml',
-             agent: 'Use starting preference (Default)', def: 'claude',
-             why: '<strong>Stuck dead:</strong> Server is back up, but <code>personal</code> and <code>project</code> stay disabled until manual Refresh or reopening Settings.' },
-      next: { title: 'Automatically reconnected & editable again', banner: null, disabled: false, pane: 'Agents · ~/.lf/config.yaml',
-              agent: 'Use starting preference (Default)', def: 'claude',
-              why: '<strong>Self-healed (verified in QA round 5):</strong> Next backoff tick refreshes <code>config.catalog</code> and opens a fresh <code>config.scope</code> stream, clearing the banner and resetting delay to 1 s.' }
-    },
-    switch: {
-      old: { title: 'Project & Wave Config is also permanently dead', banner: true, disabled: true, pane: 'Project & Wave Config · loopflow',
-             agent: 'Use starting preference (Default)', def: 'codex (from Shared repository settings)',
-             why: '<strong>Two dead scopes:</strong> Switching panes reveals a second frozen form that also needs a separate manual Refresh.' },
-      next: { title: 'Project scope live; edit saves via SettingDeclaration', banner: null, disabled: false, pane: 'Project & Wave Config · loopflow',
-              agent: 'claude (from My repository settings)', def: 'codex (from Shared repository settings)',
-              why: '<strong>Live & synchronized:</strong> <code>project</code> reconnected in parallel; editing <code>Primary agent</code> writes <code>agent: claude</code> against its captured <code>SettingDeclaration</code>, keeps <code>git status</code> clean, and awaits <code>confirmReading()</code> before the next click.' }
-    }
-  };
-
-  function show(key) {
-    stepBtns.forEach(b => b.classList.toggle('active', b.dataset.step === key));
-    const s = steps[key];
-    oldTitle.textContent = s.old.title;
-    oldBanner.hidden = !s.old.banner;
-    oldForm.classList.toggle('disabled-form', s.old.disabled);
-    oldPane.textContent = s.old.pane;
-    oldAgent.textContent = s.old.agent;
-    oldDefault.textContent = s.old.def;
-    oldWhy.innerHTML = s.old.why;
-
-    newTitle.textContent = s.next.title;
-    newBanner.hidden = !s.next.banner;
-    if (s.next.banner) newBannerText.textContent = s.next.banner;
-    newForm.classList.toggle('disabled-form', s.next.disabled);
-    newPane.textContent = s.next.pane;
-    newAgent.textContent = s.next.agent;
-    newDefault.textContent = s.next.def;
-    newWhy.innerHTML = s.next.why;
-  }
-
-  stepBtns.forEach(b => b.addEventListener('click', () => show(b.dataset.step)));
-</script>
-</body>
-</html>
+<section><h2>The window and its owners</h2><p>Reviewed the built branch from <code>2aa9964894</code> to <code>488806b34f</code>. The compact-window captures show all seven destinations and the result of searching for <code>merge_method</code> at 760 × 592 pt.</p>
+<table><thead><tr><th>What the person does</th><th>Code responsible</th><th>Aligned?</th></tr></thead><tbody>
+<tr><td>Choose personal defaults or project overrides</td><td><code>SettingsWindow</code> retains independent personal and project scope models. <code>SettingsWork</code> selects checkout, Wave and launch target. Save in selects the destination.</td><td class="yes">Yes</td></tr>
+<tr><td>Find a setting and jump to its control</td><td><code>SettingsNavigation</code> searches catalog keys and titles. Form and search share the applicability rule. The compact-window test reached the matching row.</td><td class="yes">Yes</td></tr>
+<tr><td>Inspect the file supplying this declaration</td><td><code>ScopeFile.path</code> names where the writer saves. A legacy Wave’s existing document may live elsewhere.</td><td class="no">No</td></tr>
+<tr><td>Choose a value or remove it</td><td><code>Slot.declared</code> represents absence, null or value. The picker labels a removal with the current effective value.</td><td class="no">No</td></tr>
+<tr><td>See what applies to a launch</td><td>Rust resolves candidates and the combined agent order. The form shows provenance for participating layers and the policy rows identify each key’s contribution.</td><td class="yes">Yes</td></tr>
+<tr><td>Save, Undo or recover a stale draft</td><td><code>SettingDeclaration</code> binds edits to a destination, key and expected entries. <code>config.edit</code> returns the before and after entries. A conflict keeps the draft for Refresh.</td><td class="yes">Yes</td></tr>
+<tr><td>Move a preference to a wider audience</td><td><code>config.promote</code> previews both files, journals the move, and checks the receiving slot. Resume finishes an interrupted move. Dismiss leaves diverged files intact.</td><td class="yes">Yes</td></tr>
+<tr><td>Keep editing after a server restart</td><td><code>ScopedSettingsModel.observe()</code> retries and checkpoints its subscription before a later write needs the saved value.</td><td class="yes">Yes</td></tr>
+<tr><td>Change appearance or a Task file preference, look up a shortcut</td><td><code>AppearanceStore</code> applies a theme and stages custom colors in <code>ThemeEditor</code>. <code>AutosaveToggle</code> edits the Task file preference. <code>KeyboardShortcutsView</code> serves both shortcut surfaces.</td><td class="yes">Yes</td></tr>
+<tr><td>Check Machines or pair a phone</td><td><code>MachineConnections</code> reads reachability through <code>machine.status</code>. <code>MobileSetup</code> supplies pairing state to both the sidebar and Mobile pane.</td><td class="yes">Yes</td></tr>
+</tbody></table></section>
+<section><h2>Choices for review</h2><ol>
+<li><strong>Which file should Open show before a Wave’s first edit?</strong><br><b>1a · Chosen.</b> Open the existing goal, identify where the first edit will save, then follow the YAML file once it exists.<br><b>1b.</b> Keep Open tied to the future destination and require a first edit.</li>
+<li><strong>How should a picker remove a saved choice?</strong><br><b>2a · Chosen.</b> Use the existing Reset below the picker. An empty picker still shows the effective value and source.<br><b>2b.</b> Also offer a menu item labeled “Reset in this file”. That gives the same write two entry points.</li>
+</ol></section>
+</main></body></html>

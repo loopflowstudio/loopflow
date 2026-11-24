@@ -3157,13 +3157,24 @@ final class WorkModel {
 
     private typealias TaskRecord = (wave: WaveRoadmap?, task: RoadmapTask, context: String?)
 
+    /// The plan lists only this Machine's store, which never sees a Graph that
+    /// ran elsewhere; for a Task another Machine runs, its routed reading says
+    /// whether it has started.
+    private func ownerStanding(_ task: RoadmapTask) -> RoadmapTask {
+        guard let owner = task.ownerMachineId, let local = localMachineId,
+              owner != StructuredIdentity.prefixed(local, "home_"),
+              let reading = subscribedTaskRow.value,
+              reading.task.identifier == task.task.identifier else { return task }
+        return task.standing(as: reading)
+    }
+
     /// Every record naming the Task, in authority order (roadmap, subscription, retained selection),
     /// each with its own reading's freshness.
     private func taskRecords(id: String) -> [TaskRecord] {
         var records: [TaskRecord] = []
         if let current = currentTask(id: id) {
             let context: String? = roadmap.failure != nil ? "Last known" : showsSavedPlanning ? "Updating…" : nil
-            records.append((current.wave, current.task, context))
+            records.append((current.wave, ownerStanding(current.task), context))
         }
         if let row = subscribedTaskRow.value, row.id == id || row.runtime?.workId == id,
            repoPath.map({ repoIdentity(row.task.repo) == repoIdentity($0) }) ?? true {

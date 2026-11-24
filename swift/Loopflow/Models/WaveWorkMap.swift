@@ -280,6 +280,15 @@ public struct RoadmapTask: Decodable, Sendable, Identifiable, Hashable {
     /// open, and its Session slot offers Start instead.
     public var awaitsStart: Bool { lifecycle == .unstarted }
 
+    /// This Machine's row, standing where `owner` (the Task's own reading from
+    /// the Machine that runs it) says: whether it has started is known there.
+    public func standing(as owner: RoadmapTask) -> RoadmapTask {
+        var row = self
+        row.lifecycle = owner.lifecycle
+        row.section = owner.section
+        return row
+    }
+
     /// The Machine this plan says runs the Task, as `WorkspaceIdentity` names it.
     public var ownerMachineId: String? {
         runtime?.owner?.machine.id.map { StructuredIdentity.prefixed($0, "home_") }

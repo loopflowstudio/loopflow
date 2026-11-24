@@ -1712,8 +1712,12 @@ fn attach_with_terminal(
     )
 }
 
-/// View a terminal ticket redeemed on this Machine's server.
+/// View a terminal ticket redeemed on this Machine's server. A viewer on
+/// another Machine (`LF_VIEWER_STREAM`) receives the protocol itself.
 pub fn relay_socket(socket: UnixStream) -> Result<()> {
+    if std::env::var_os(STREAM_ENV).is_some() {
+        return stream::bridge_socket(socket);
+    }
     view(
         stream::Stream::socket(socket)?,
         None,

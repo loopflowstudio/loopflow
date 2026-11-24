@@ -624,8 +624,25 @@ fn ssh_prepared_viewer_reuses_held_terminal_without_an_extra_pty_and_releases_on
         .iter()
         .map(|value| value.as_str().unwrap())
         .collect();
-    assert_eq!(&argv[1..4], &["session", "attach", "--"]);
+    // The viewer opens here, and this Machine's server attaches it there.
+    assert_eq!(
+        &argv[1..],
+        &[
+            "open",
+            "--machine",
+            &fixture.machine,
+            "--session",
+            session,
+            "--here"
+        ]
+    );
     assert_eq!(record["workspace"]["machine_id"], fixture.machine);
+    // The source's server reaches the destination through the fixture's SSH.
+    let _source_server = loopflow_test_support::MachineServer::start_with_path(
+        env!("CARGO_BIN_EXE_lf"),
+        fixture.source.home.path(),
+        &format!("{}:/usr/bin:/bin:/usr/sbin:/sbin", fixture.bin.display()),
+    );
     let mut pane = Pane::spawn(fixture.source_command(&argv[1..]));
     pane.until("provider-ready");
     let terminal = fixture.destination.terminal_of(session);

@@ -174,8 +174,14 @@ fn flush(output: &mut impl Write, pending: &mut VecDeque<u8>) -> io::Result<()> 
 }
 
 pub fn bridge(id: &loopflow_model::id::TerminalId) -> Result<()> {
-    let mut socket =
-        super::registry::connect(id).context("Execution is unavailable; nothing was restarted")?;
+    bridge_socket(
+        super::registry::connect(id).context("Execution is unavailable; nothing was restarted")?,
+    )
+}
+
+/// [`bridge`] over a connection that already speaks the viewer protocol, such
+/// as a redeemed terminal ticket.
+pub fn bridge_socket(mut socket: UnixStream) -> Result<()> {
     socket.set_nonblocking(true)?;
     let _input_flags = BorrowedFlags::new(0)?;
     let _output_flags = BorrowedFlags::new(1)?;

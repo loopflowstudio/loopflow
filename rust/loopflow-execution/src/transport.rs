@@ -1093,7 +1093,7 @@ fn deliver(
     place_events(output, viewers, false);
 }
 
-fn size() -> (u16, u16) {
+pub fn size() -> (u16, u16) {
     let mut size = libc::winsize {
         ws_row: 24,
         ws_col: 80,
@@ -1709,6 +1709,18 @@ fn attach_with_terminal(
         terminal,
         ATTACH_TIMEOUT,
         input,
+    )
+}
+
+/// View a terminal ticket redeemed on this Machine's server.
+pub fn relay_socket(socket: UnixStream) -> Result<()> {
+    view(
+        stream::Stream::socket(socket)?,
+        None,
+        None,
+        None,
+        COMMAND_ATTACH_TIMEOUT,
+        &mut RelayInput::new(initial_focus(false)),
     )
 }
 
@@ -2347,7 +2359,7 @@ fn answer_open(answer: &str) {
 /// Answer an opening this command failed without attaching, with its own
 /// error. The pane waits; the receipt says why. A viewer whose conversation
 /// exited leaves the answer to the launcher, or to the pane's status line.
-pub fn end_open(result: &Result<()>) {
+pub fn end_open<T>(result: &Result<T>) {
     let (Err(error), Some(_)) = (result, open_receipt()) else {
         return;
     };

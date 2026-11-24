@@ -853,6 +853,7 @@ fn view_plan(
         let args = super::open::OpenArgs::overview(super::open::OpenSelection {
             url: None,
             host: super::open::OpenHost::Desktop,
+            machine: None,
             session: None,
             link: false,
             format: None,

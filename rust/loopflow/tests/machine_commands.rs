@@ -4368,6 +4368,172 @@ fn available_reading(
     }
 }
 
+/// The local host runs the pane command and keeps its stdin open. Only the
+/// peer has the provider threads whose output and input we see in those tabs.
+#[test]
+fn open_remote_workspace() {
+    let fixture = preview_machines();
+    let (plan, task) = task_on_mini(&fixture);
+    let local = fixture.root.path().join("local");
+    let remote = fixture.root.path().join("remote");
+    let peer = rusqlite::Connection::open(remote.join("store/loopflow.db")).unwrap();
+    let laptop = rusqlite::Connection::open(local.join("loopflow.db")).unwrap();
+    let stale = local.join("former checkout");
+    fs::create_dir(&stale).unwrap();
+    for (db, path) in [(&peer, &plan.remote_path), (&laptop, &stale)] {
+        db.execute(
+            "INSERT INTO task_checkouts(task_id,worktree) VALUES(?1,?2)",
+            [task.as_str(), path.to_str().unwrap()],
+        )
+        .unwrap();
+    }
+    let _peer = served_mini(&fixture);
+    let (_server, _) = served(&fixture);
+    let _ended = EndRecorded(vec![local.clone(), remote.join("store")]);
+
+    let threads = [
+        "0199a213-81c0-7800-8aa1-bbab2a035a61",
+        "0199a213-81c0-7800-8aa1-bbab2a035a62",
+        "0199a213-81c0-7800-8aa1-bbab2a035a63",
+    ];
+    let unrelated = loopflow_test_support::TestRepo::new();
+    let sessions = threads.map(|thread| {
+        let cwd = if thread == threads[2] {
+            unrelated.path()
+        } else {
+            &plan.remote_path
+        };
+        import_claude_conversation(&remote, cwd, thread, mini_command(&fixture, &[]))
+    });
+    for session in &sessions[..2] {
+        peer.execute(
+            "UPDATE agent_sessions SET task_id=?1,wave_id=?2 WHERE id=?3",
+            rusqlite::params![
+                task.as_str(),
+                plan.remote.task(&task).unwrap().unwrap().wave_id,
+                session
+            ],
+        )
+        .unwrap();
+    }
+    peer.execute(
+        "INSERT INTO task_primary_sessions(task_id,session_id) VALUES(?1,?2)",
+        [task.as_str(), &sessions[0]],
+    )
+    .unwrap();
+    fs::write(
+        remote.join(".claude.json"),
+        r#"{"projects":{"/":{"hasTrustDialogAccepted":true}}}"#,
+    )
+    .unwrap();
+    executable(
+        &remote.join(".local/bin/claude"),
+        r#"#!/bin/bash
+if [ "$1" = --version ]; then echo '2.1.302'; exit; fi
+while [ "$#" -ge 2 ]; do
+  if [ "$1" = --resume ]; then
+    printf 'mini %s\n' "$2"
+    if read -r -t 60 answer < /dev/tty; then printf 'mini %s received %s\n' "$2" "$answer"; fi
+    exit
+  fi
+  shift
+done
+exit 1
+"#,
+    );
+    // The first tab adds a view to a running primary. The other Sessions
+    // have only saved history and must continue before the tab can type.
+    loopflow_execution::machine::client::Connection::open_at(&server_socket(
+        &remote.join("store"),
+        "machine",
+    ))
+    .unwrap()
+    .request(loopflow::server::wire::ServerOperation::SessionContinue {
+        session: sessions[0].as_str().into(),
+        task: None,
+        machine: None,
+        request: "existing-primary".into(),
+        rows: 24,
+        cols: 80,
+    })
+    .unwrap();
+    executable(
+        &fixture.root.path().join("bin/tmux"),
+        r#"#!/bin/sh
+[ "$1" = new-window ] || exit 1
+while [ "$1" != -c ]; do shift; done
+cd "$2" || exit 1
+(pwd -P; /bin/sh -c "$3"; touch "$HOME/tab-closed") < "$HOME/tab-input" > "$HOME/tab-output" 2>&1 &
+echo %local-tab
+"#,
+    );
+    let fifo = local.join("tab-input");
+    assert!(Command::new("mkfifo")
+        .arg(&fifo)
+        .status()
+        .unwrap()
+        .success());
+    let mut input = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(fifo)
+        .unwrap();
+    for (index, mut args) in [
+        vec!["open", "--task", task.as_str()],
+        vec!["open", "--task", task.as_str(), "--session", &sessions[1]],
+        vec!["open", "--machine", "mini", "--session", &sessions[2]],
+        vec!["--machine", "mini", "open", "--session", &sessions[2]],
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        args.extend(["--host", "tmux", "--tab", "--json"]);
+        let cwd = if index < 2 { &plan.local_path } else { &local };
+        let opened = fixture.command(&args).current_dir(cwd).output().unwrap();
+        let tab = || fs::read_to_string(local.join("tab-output")).unwrap_or_default();
+        assert!(
+            opened.status.success(),
+            "{args:?}: {opened:?}, tab: {}",
+            tab()
+        );
+        let report: Value = serde_json::from_slice(&opened.stdout).unwrap();
+        let receipt = &report["receipts"][0];
+        assert_eq!(receipt["status"], "usable", "{receipt}");
+        assert_eq!(receipt["destination"], "%local-tab");
+        let expected_retry = if index < 2 {
+            let mut retry = vec!["lf", "open", "--task", task.as_str()];
+            if index == 1 {
+                retry.extend(["--session", &sessions[1]]);
+            }
+            serde_json::json!(retry)
+        } else {
+            let mini = loopflow_execution::store::machines::local_machine(&plan.remote).unwrap();
+            serde_json::json!(["lf", "open", "--machine", mini.id, "--session", sessions[2]])
+        };
+        assert_eq!(receipt["fallback_argv"], expected_retry);
+        writeln!(input, "tab-{index}").unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        while !local.join("tab-closed").exists() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "tab did not close: {}",
+                tab()
+            );
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        let text = tab();
+        assert_eq!(text.lines().next(), cwd.canonicalize().unwrap().to_str());
+        assert!(
+            text.contains(&format!(
+                "mini {} received tab-{index}",
+                threads[index.min(2)]
+            )),
+            "{text}"
+        );
+        fs::remove_file(local.join("tab-closed")).unwrap();
+    }
+}
+
 #[test]
 fn server_routed_task_workspace() {
     use loopflow::lf::commands::{read::Read, write::Write};

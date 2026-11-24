@@ -320,6 +320,25 @@ impl Cli {
     /// Reject argument combinations the derive cannot express, as the usage
     /// errors they are, before anything runs.
     pub fn checked(mut self) -> Result<Self, clap::Error> {
+        if let Some(Commands::Open(open)) = &mut self.command {
+            if let Some(machine) = self.machine.take() {
+                if open.selection.machine.replace(machine).is_some() {
+                    return Err(clap::Error::raw(
+                        clap::error::ErrorKind::ArgumentConflict,
+                        "select a Machine only once",
+                    ));
+                }
+            }
+            if open.selection.machine.is_some()
+                && (open.selection.session.is_none()
+                    || self.task.is_some()
+                    || self.wave.is_some()
+                    || open.selection.url.is_some())
+            {
+                return Err(clap::Error::raw(clap::error::ErrorKind::ArgumentConflict,
+                    "use --machine with --session for a Session on that Machine; a Task selects its own Machine"));
+            }
+        }
         if let Some(Commands::Session { cmd }) = &self.command {
             let selected = match cmd {
                 SessionCommand::Resume { id, connection, .. }

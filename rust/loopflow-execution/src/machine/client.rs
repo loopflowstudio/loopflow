@@ -194,6 +194,25 @@ pub struct Connection {
 }
 
 impl Connection {
+    /// A ticket for a running Session, addressed by Task or Machine when
+    /// its record lives on a peer.
+    pub fn session_ticket(
+        &mut self,
+        session: &LfSessionId,
+        terminal_id: Option<loopflow_model::id::TerminalId>,
+        task: Option<&str>,
+        machine: Option<&loopflow_model::durable::MachineId>,
+    ) -> Result<SessionAttached> {
+        let answer = self.query(ServerOperation::SessionAttach {
+            session: session.clone(),
+            terminal_id,
+            task: task.map(str::to_owned),
+            machine: machine.cloned(),
+        })?;
+        serde_json::from_value(answer.result)
+            .context("Loopflow server answered session.attach without a ticket")
+    }
+
     /// The selected Machine's server.
     pub fn open() -> Result<Self> {
         Self::open_at(&super::socket_path()?)
@@ -634,18 +653,16 @@ fn accepted(message: ServerMessage) -> Result<ServerMessage> {
 /// so no terminal byte is left in a buffer.
 pub fn attach(path: &Path, session: &LfSessionId) -> Result<UnixStream> {
     let carrier = Carrier::Socket(path.to_path_buf());
-    let mut connection = Connection::start(carrier.clone(), identity("cli", "lf"), HANDSHAKE)?;
+    let mut connection = Connection::start(carrier, identity("cli", "lf"), HANDSHAKE)?;
     let issued = connection
-        .request(ServerOperation::SessionAttach {
-            session: session.clone(),
-            terminal_id: None,
-            task: None,
-            machine: None,
-        })
+        .session_ticket(session, None, None, None)
         .map_err(|error| stalled(error, "issue the attach ticket", HANDSHAKE))?;
-    let issued: SessionAttached = serde_json::from_value(issued.result)
-        .context("Loopflow server answered session.attach without a ticket")?;
-    drop(connection);
+    redeem_terminal(path, issued)
+}
+
+/// Open a single-use terminal ticket at the server that issued it.
+pub fn redeem_terminal(path: &Path, issued: SessionAttached) -> Result<UnixStream> {
+    let carrier = Carrier::Socket(path.to_path_buf());
     let mut socket = carrier.open(1)?;
     socket.set_read_timeout(Some(HANDSHAKE))?;
     socket.send(&ClientMessage::Attach {

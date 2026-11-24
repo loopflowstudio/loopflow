@@ -64,7 +64,7 @@ The server shares idle peer connections across repositories, passing a `Sender` 
   - Unsaved drafts stay keyed by `(Task, path, base revision)`. Saving after a move goes to the new owner; a revision mismatch shows the existing save conflict with both versions and keeps the draft.
   - Render **Not started** for `not_found` with `reason == "not_started"`. On peer outages, show the Machine named in the routed error or the subscription's `unavailable` reading and offer **Retry**.
   - For Task shells: `SessionsWorkspace.shellAttachment` runs local `lf desktop shell <issue> --id <tab.id> [--create --bootstrap <json>]` (no `--machine`, no `--checkout` local path assumptions), and `closePane` calls `task.shell.close` through `ServerClient` instead of spawning `lf --machine ... desktop shell --close`.
-  - For Task Sessions, give Desktop's `SessionRecord.open_argv` the local terminal attachment path from Slice 2. Remove the raw `ssh` argv that `prepared_remotely` builds for Desktop.
+  - For Task Sessions, give Desktop's `SessionRecord.open_argv` the local terminal attachment path from Slice 2. Remove the raw `ssh` argv that `prepared_remotely` builds for Desktop. When opening a Machine-only Session link, carry its `machine` query to the attachment.
 
 ### 6. Mobile (`swift/LoopflowiOS/TaskWorkspaceView.swift`, `RemoteMobileClient.swift`, `SessionLink.swift`)
 
@@ -82,11 +82,11 @@ The server shares idle peer connections across repositories, passing a `Sender` 
   - On peer outages, show the Machine named in the routed error or the subscription's `unavailable` reading and offer **Try again**.
   - Task moved: the routed `task.get` subscription names the new Machine when it receives its checkout. Keep following through an intermediate null workspace. The workspace header updates and Files/Changes reload. Reattaching an old shell answers ended and offers **New shell**.
 
-### 7. CLI `lf open` (`rust/loopflow/src/lf/commands/open.rs`, `commands/open/conversation.rs`, `lf/navigation.rs`, `bin/lf.rs`)
+### 7. CLI `lf open`
 
-- `navigation::machine_invocation` currently forwards the leading `--machine` form over SSH. Give `OpenSelection` a distinct Clap ID for `--machine`, normalize both flag positions, and run presentation locally. Keep `--machine` transport for commands other than `open`.
-- `Resolved::resume_argv` currently drops the Task when a Session is named. Preserve it through the local tab child and its retry command. For `--task` alone, resolve the primary through the owning Machine. For an exact Session on a Task, pass both selectors through the local server to attach or continue. Use the existing `Attachment` receipt to report the result.
-- For `--machine <label> --session <sid>`, resolve the registered Machine and pass its ID with the exact Session. The remote-only Session may be absent from local SQLite. Use a local directory for the presentation process and let the server resolve the terminal. A stale local checkout or Session record must never select the attachment. Preserve the Machine and Session on retry.
+Both positions of `--machine` select the same registered Machine for `open`. A remote tab starts local `lf open --here` with the Task or Machine and exact Session selectors. Its host uses a local presentation directory. On a Task, the routed pane supplies the checkout and Session membership. For a primary, the owner prepares its conversation through `session.resume`.
+
+The viewer requests `session.attach` first. A typed refusal identifying the Session as having no running terminal allows `session.continue`. The next attach names the terminal it started. The tab reports usable when the peer terminal's native client acknowledges readiness. Its retry command retains the selectors.
 
 ## Affected surfaces and consumers
 
@@ -107,7 +107,7 @@ Describe the intended behavior; implementation must match them or change them.
 - `docs/ops.md` — `--machine` exception for `lf open`; remote Tasks need no `--machine` to inspect.
 - `docs/dev/machines.md` — replaced the client-side transport paragraph with server routing.
 - `rust/loopflow/src/server/README.md` — "Tasks on another Machine" (routed vs local table, portable Task selector, peer pool, subscription re-route, `not_started` / `machine` errors), revision 10, `task.shell.*` + `task.files.watch` rows, routed terminal tickets. Heading is now `## Local protocol` (no revision number); stale `#local-protocol-revision-7` links fixed there and in `docs/dev/server.md`.
-- Slice 2 must make `documented_commands` pass: the `lf open --machine code-1 --session …` example in `docs/workspaces.md` fails Clap until `OpenSelection.machine` exists.
+- The remote-open examples in `docs/workspaces.md` pass `documented_commands` (four checks).
 
 After a move, an open shell continues on its original Machine. Reattaching by `shell_id` reaches the new owner, which answers `not_found`. Desktop and Mobile offer **New shell**.
 
@@ -173,11 +173,13 @@ Build thinly end to end in four slices; each slice runs and proves itself before
 
    The wire, generated schema, server fixtures, and Swift mirror all speak revision 10 only. Ten focused Rust schema, handshake and checkout tests passed. The Swift protocol and compatible-build client checks passed (24 tests). `cargo fmt --all` and `cargo clippy --all-targets -- -D warnings` passed.
 
-   **Next:** Slice 2. Migration of `lf desktop shell` and `prepared_remotely` stays with the Desktop consumers in Slice 3.
+2. **Slice 2. CLI opens a remote conversation locally.**
 
-2. **Slice 2: CLI `lf open` always local + remote Task/Session attachment.**
-   - Follow §7 through `open.rs`, `open/conversation.rs`, `navigation.rs`, and `bin/lf.rs`. Resolve a Task's primary with the existing Session resolver on the owner. Use the local server's `session.attach` / `session.continue` bridge for the tab. The server routes by the Task selector or by the explicit Machine for a remote-only Session.
-   - **Proves:** `open_remote_workspace` opens a remote Task with a stale local checkout, its exact Session, and a remote-only Session in both `--machine` flag positions. Each tab presents locally and its attachment receipt comes from the peer terminal. Run `documented_commands` for the new examples.
+   `open_remote_workspace` exercises a local tab host with two Machine servers. The Task primary, an exact secondary Session and a Machine-only Session in both flag positions each answer typed input from the expected provider thread. The receipt carries the selectors for retry.
+
+   `cargo test -p loopflow --test integration open_remote_workspace` passed in 21.92 s. The fixture prestarted the primary on mini, retained a separate stale checkout on the laptop, and opened the Machine-only Session from outside Git. All four receipts reported usable and kept their retry selectors. The existing local cmux Task-tab check passed in 4.05 s. `cargo fmt --all` and `cargo clippy --all-targets -- -D warnings` passed.
+
+   **Next** is Slice 3. Use the local attachment from the Desktop pane and carry the Machine that issued the ticket in the attachment receipt. Move `lf desktop shell` and `prepared_remotely` with their Desktop consumers.
 
 3. **Slice 3: Desktop migration + deletion of `RegistryQuery.onMachine` / `pinTaskLocation`.**
    - Switch Desktop Files, Changes, Diff, Save, Watch, Graph log, Shell, and Session onto local `ServerClient` routed operations addressed by Task id alone.

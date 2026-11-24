@@ -60,7 +60,7 @@ macro_rules! writes {
                 if let Some(directory) = self.directory_mut() {
                     *directory = super::work_route::repository_path(&sender.repository)?;
                 }
-                if let Self::TaskSave { issue, .. } = &mut self {
+                if let Self::TaskSave { issue, .. } | Self::SessionResume { id: None, task: Some(issue), .. } = &mut self {
                     *issue = super::work_route::peer_task_id(&sender.repository, issue)?;
                 }
                 let environment = sender.selection.environment(&sender.secrets)?;
@@ -1291,7 +1291,7 @@ impl Write {
             directory: directory.clone(),
             id: id.clone(),
             task: match (&forward.route, id) {
-                (Some(route), None) => Some(route.task_id.to_string()),
+                (Some(route), None) => Some(route.peer_selector.clone()),
                 _ => task.clone(),
             },
             wave: wave.clone().or(forward.wave),

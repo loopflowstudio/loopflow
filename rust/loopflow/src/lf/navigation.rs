@@ -184,6 +184,10 @@ pub fn machine_invocation(args: &[String]) -> Result<Option<(Cli, Vec<String>)>,
         }
         index += 1;
     }
+    // Open always presents on the caller. Its Machine selects the Session.
+    if path.first().is_some_and(|command| command == "open") {
+        return Ok(None);
+    }
     let cli = Cli::try_parse_from(transport)?;
     Ok(cli.machine.is_some().then_some((cli, remote)))
 }

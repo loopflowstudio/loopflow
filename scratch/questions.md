@@ -21,3 +21,7 @@
 - A failed peer subscription retries after five seconds without a planning change. Any planning revision wakes it sooner so it can follow a move immediately. The SSH handshake keeps its existing deadline.
 
 - For the terminal label during a move, carry the Machine selected at attach time in the server receipt during the Desktop migration. `SessionAttached` currently carries only the ticket, terminal ID and expiry. Using the latest workspace reading for the label would let a move change the label on an existing terminal.
+
+- A remote tab launches the public `lf open --here` with its selectors. The tab resolves the Session at startup, so the tab command can be replayed and never contains a single-use ticket. For a Machine-only Session, the retry command and Work link carry the registered Machine ID even after a rename.
+
+- A routed continuation uses the peer Session’s harness. Revision 10 `session.continue` carries Session, request, geometry and routing selectors. Switching harnesses on a remote exact Session with `lf open -a` would need a continuation operation that carries the override.

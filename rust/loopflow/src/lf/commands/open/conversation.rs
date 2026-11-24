@@ -1,4 +1,5 @@
 //! One Session, presented as one more view: every view of it types.
+use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 use std::process::Command;
 use std::time::{Duration, SystemTime};
@@ -10,9 +11,11 @@ use super::{
     OpenHost, OpenReceipt, OpenRoute, OpenStatus, Opening, Resolved,
 };
 use crate::lf::commands::desktop::{self, DesktopOpeningStatus};
+use loopflow_execution::machine::client::Connection;
 use loopflow_execution::ops::human_session::{
     existing_connection, select_connection, SessionTarget,
 };
+use loopflow_model::id::LfSessionId;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Mode {
@@ -65,7 +68,9 @@ pub(super) fn presentation(args: &OpenArgs) -> Result<OpenRoute> {
 }
 
 pub(super) fn open(mut target: Resolved, args: &OpenArgs, focus_new: bool) -> OpenReceipt {
-    match present(&mut target, args, focus_new) {
+    let result = present(&mut target, args, focus_new);
+    loopflow_execution::transport::end_open(&result);
+    match result {
         Ok(receipt) => receipt,
         Err(error) => target.receipt(
             None,
@@ -103,6 +108,25 @@ fn present(target: &mut Resolved, args: &OpenArgs, focus_new: bool) -> Result<Op
     }
     if let Some(reason) = &target.execution_unavailable {
         anyhow::bail!("{reason}");
+    }
+    if mode == Mode::Tab && matches!(host, OpenHost::Terminal | OpenHost::Desktop) {
+        anyhow::bail!(
+            "{} has no sibling-tab support. Open a terminal and run: {} --here",
+            host.label(),
+            fallback_text(&target.fallback_argv())
+        );
+    }
+    let routed = target.execution_machine.is_some();
+    if routed && mode == Mode::Here {
+        let opening = Opening::lock(target)?;
+        let socket = routed_terminal(target)?;
+        drop(opening);
+        loopflow_execution::transport::relay_socket(socket)?;
+        return Ok(target.receipt(Some(host), None, OpenStatus::Usable, None));
+    }
+    if routed && mode == Mode::Tab {
+        // The local tab resolves and locks its selection when --here runs.
+        return open_tab(target, args, host, focus_new);
     }
     // Read-only focus must not prepare a first Session or recreate its checkout.
     resolve(target, false)?;
@@ -142,24 +166,15 @@ fn present(target: &mut Resolved, args: &OpenArgs, focus_new: bool) -> Result<Op
         }
     }
     anyhow::ensure!(mode != Mode::Focus, "Not open");
-    if mode == Mode::Tab && matches!(host, OpenHost::Terminal | OpenHost::Desktop) {
-        anyhow::bail!(
-            "{} has no sibling-tab support. Open a terminal and run: {} --here",
-            host.label(),
-            fallback_text(&target.fallback_argv())
-        );
-    }
     resolve(target, true)?;
     if mode == Mode::Desktop {
         return desktop_open(target, focus_new);
     }
 
-    let lf = loopflow_execution::os_process::resolve_lf_binary()?
-        .to_string_lossy()
-        .into_owned();
     if mode == Mode::Here {
         drop(opening);
-        let argv = target.resume_argv(&lf);
+        let argv = target
+            .resume_argv(&loopflow_execution::os_process::resolve_lf_binary()?.to_string_lossy());
         let mut command = Command::new(&argv[0]);
         command
             .args(&argv[1..])
@@ -171,8 +186,18 @@ fn present(target: &mut Resolved, args: &OpenArgs, focus_new: bool) -> Result<Op
         anyhow::ensure!(status.success(), "Conversation exited with {status}");
         return Ok(target.receipt(Some(host), None, OpenStatus::Usable, None));
     }
+    open_tab(target, args, host, focus_new)
+}
+
+fn open_tab(
+    target: &Resolved,
+    args: &OpenArgs,
+    host: OpenHost,
+    focus_new: bool,
+) -> Result<OpenReceipt> {
+    let lf = loopflow_execution::os_process::resolve_lf_binary()?;
     let attachment = Attachment::new()?;
-    let argv = attachment.argv(target.resume_argv(&lf));
+    let argv = attachment.argv(target.resume_argv(&lf.to_string_lossy()));
     let mut receipt = if host == OpenHost::Tmux {
         let pane = super::tmux::open(target, focus_new, &argv)?;
         target.receipt(Some(host), Some(pane), OpenStatus::Opening, None)
@@ -187,6 +212,107 @@ fn present(target: &mut Resolved, args: &OpenArgs, focus_new: bool) -> Result<Op
     };
     attachment.settle(&mut receipt);
     Ok(receipt)
+}
+
+/// Select the conversation on the owner. Only a missing running terminal
+/// calls for a continuation; a peer outage leaves the Session alone.
+fn routed_terminal(target: &Resolved) -> Result<UnixStream> {
+    use loopflow_execution::engine::{Error, ErrorCode};
+    use loopflow_execution::machine::{
+        client,
+        wire::{ServerOperation, SessionStarted},
+    };
+
+    let socket = loopflow_execution::machine::socket_path()?;
+    let mut client = Connection::open_at(&socket)?;
+    let task = target.task.as_ref().map(|task| task.id.as_str());
+    let machine = target.url.machine.as_ref();
+    let session = match task {
+        Some(task) => routed_task_session(&mut client, target, task)?,
+        None => target
+            .session
+            .as_deref()
+            .context("select an exact Session on this Machine")?
+            .into(),
+    };
+    let issued = match client.session_ticket(&session, None, task, machine) {
+        Err(error)
+            if error.downcast_ref::<Error>().is_some_and(|e| {
+                e.code == ErrorCode::NotFound
+                    && e.data.as_ref().and_then(|data| data["session"].as_str())
+                        == Some(session.as_str())
+            }) =>
+        {
+            let (rows, cols) = loopflow_execution::transport::size();
+            let started: SessionStarted = serde_json::from_value(
+                client
+                    .request(ServerOperation::SessionContinue {
+                        session: session.clone(),
+                        request: uuid::Uuid::new_v4().to_string(),
+                        rows,
+                        cols,
+                        task: task.map(str::to_owned),
+                        machine: machine.cloned(),
+                    })?
+                    .result,
+            )?;
+            client.session_ticket(&session, Some(started.terminal_id), task, machine)?
+        }
+        answer => answer?,
+    };
+    client::redeem_terminal(&socket, issued)
+}
+
+fn routed_task_session(
+    client: &mut Connection,
+    target: &Resolved,
+    task: &str,
+) -> Result<LfSessionId> {
+    use crate::lf::commands::{read::Read, waves::DesktopTaskPane, write::Write};
+    use loopflow_execution::ops::human_session::SessionRecord;
+    let pane: DesktopTaskPane = serde_json::from_value(
+        client
+            .query(Read::TaskGet {
+                directory: target.repository_path.clone(),
+                issue: task.to_owned(),
+            })?
+            .result,
+    )?;
+    let row = pane.row.context("Task is unavailable on its Machine")?;
+    if row.reference.workspace.is_none() {
+        anyhow::ensure!(
+            row.lifecycle != loopflow_execution::durable::TaskState::Unstarted,
+            "Not started; run lf task run {}",
+            row.task.identifier
+        );
+        anyhow::bail!(
+            "The checkout for {} is unavailable on its Machine",
+            row.task.identifier
+        );
+    }
+    if let Some(exact) = &target.url.session {
+        let id = loopflow_model::id::LfSessionId::from(exact.as_str());
+        anyhow::ensure!(
+            pane.status
+                .overview
+                .is_some_and(|overview| overview.sessions.iter().any(|s| s.id == id)),
+            "Session does not belong to the selected Work. Nothing was opened."
+        );
+        Ok(id)
+    } else {
+        let record: SessionRecord = serde_json::from_value(
+            client
+                .request(Write::SessionResume {
+                    directory: target.repository_path.clone(),
+                    id: None,
+                    task: Some(task.to_owned()),
+                    wave: None,
+                    agent: loopflow_execution::config::agent_override(),
+                })?
+                .result,
+        )?;
+        Ok(record.id)
+    }
 }
 
 fn desktop_open(target: &mut Resolved, focus: bool) -> Result<OpenReceipt> {

@@ -158,6 +158,19 @@ impl WorkingGroup {
             Self::Paused => "Paused",
         }
     }
+
+    /// Classify a Working Task before inspecting its Graph.
+    /// Returns `(group, inspect)` where `inspect` is true when a local captured
+    /// Graph can still place the Task in Shipping.
+    pub fn before_graph(paused: bool, auto_on: bool, observed_here: bool) -> (Self, bool) {
+        if paused {
+            (Self::Paused, false)
+        } else if auto_on {
+            (Self::Shipping, false)
+        } else {
+            (Self::Active, observed_here)
+        }
+    }
 }
 
 impl TaskSection {
@@ -259,7 +272,7 @@ impl GraphStepProcess {
 
 #[cfg(test)]
 mod tests {
-    use super::{TaskSection, TaskState};
+    use super::{TaskSection, TaskState, WorkingGroup};
 
     #[test]
     fn lifecycle_withdraws_only_never_started_work() {
@@ -292,5 +305,25 @@ mod tests {
         assert_eq!(of(TaskState::Unstarted, true, true), TaskSection::Working);
         assert_eq!(of(TaskState::Done, false, false), TaskSection::Done);
         assert_eq!(of(TaskState::Abandoned, true, true), TaskSection::Abandoned);
+    }
+
+    #[test]
+    fn working_group_before_graph_prioritizes_pause_then_auto() {
+        assert_eq!(
+            WorkingGroup::before_graph(true, true, true),
+            (WorkingGroup::Paused, false)
+        );
+        assert_eq!(
+            WorkingGroup::before_graph(false, true, true),
+            (WorkingGroup::Shipping, false)
+        );
+        assert_eq!(
+            WorkingGroup::before_graph(false, false, true),
+            (WorkingGroup::Active, true)
+        );
+        assert_eq!(
+            WorkingGroup::before_graph(false, false, false),
+            (WorkingGroup::Active, false)
+        );
     }
 }

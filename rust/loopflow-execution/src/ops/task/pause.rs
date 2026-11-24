@@ -13,7 +13,7 @@ use crate::ops::OpsResult;
 use crate::store::ownership::{task_execution_route, task_pause_route, TaskRoute};
 
 pub(super) fn admission(task: &TaskId) -> OpsResult<File> {
-    lock(&format!("admit-{task}"))
+    lock(retirement::lock_file(&format!("admit-{task}"))?)
 }
 
 /// Hold through placement or provider registration so pause sees the admitted work.
@@ -23,8 +23,7 @@ pub(crate) fn admit_launch(store: &SqliteStore, task: &TaskId) -> OpsResult<File
     Ok(lock)
 }
 
-fn lock(name: &str) -> OpsResult<File> {
-    let file = retirement::lock_file(name)?;
+fn lock(file: File) -> OpsResult<File> {
     file.lock_exclusive()?;
     Ok(file)
 }
@@ -34,9 +33,7 @@ fn cleanup_lock_file(task: &TaskId) -> OpsResult<File> {
 }
 
 pub(crate) fn cleanup_lock(task: &TaskId) -> OpsResult<File> {
-    let file = cleanup_lock_file(task)?;
-    file.lock_exclusive()?;
-    Ok(file)
+    lock(cleanup_lock_file(task)?)
 }
 
 async fn resolve(issue: &str, route: TaskRoute) -> OpsResult<(SharedStore, Task, File)> {

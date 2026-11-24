@@ -656,15 +656,10 @@ impl TaskGraph {
         let TaskGraphPosition::At { step } = &self.position else {
             return None;
         };
+        let ends = step == START || step == END;
         let interactive = self.interactive_steps.iter().any(|s| &s.name == step);
-        landing_stop(step, interactive)
-            .then(|| crate::ops::task::auto::landing_wait(step, off, issue))
+        (!ends && !interactive).then(|| crate::ops::task::auto::landing_wait(step, off, issue))
     }
-}
-
-/// Apart from its endpoints, a Task can stand only at an interactive step or a landing.
-fn landing_stop(step: &str, interactive: bool) -> bool {
-    step != START && step != END && !interactive
 }
 
 /// Tasks in a list often share a Graph. Parse each command's argv once per reading.

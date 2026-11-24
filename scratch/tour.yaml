@@ -1,4 +1,4 @@
-at: 5c520fcfe6d060603eb3f324173bd04d0357aed9
+at: f74e62eb8c1e44aeac9551ee27b617d716e9eab7
 first:
   - path: docs/work.md
     why: Pause and resume from the saved step
@@ -25,7 +25,7 @@ first:
   - path: rust/loopflow-execution/src/task_graph.rs
     why: Follow the captured cursor to review or landing
   - path: rust/loopflow-storage/src/sqlite/task_details.rs
-    why: Group only the Working Tasks being read
+    why: Read Graph names, steps and Working groups together
   - path: rust/loopflow-storage/src/work/selection.rs
     why: Select a held Task in either board section
   - path: rust/loopflow-storage/src/sqlite/selections.rs

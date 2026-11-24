@@ -551,22 +551,20 @@ fn fill_task_contents_in(
     for content in plans.iter_mut().flat_map(|plan| &mut plan.contents) {
         if content.identifier.is_some() {
             if content.states.contains(&SelectionState::Working) {
-                let group = if content.states.contains(&SelectionState::Paused) {
-                    WorkingGroup::Paused
-                } else if content.states.contains(&SelectionState::Auto) {
-                    WorkingGroup::Shipping
-                } else {
-                    if content.states.iter().any(|state| {
+                let (group, check_graph) = WorkingGroup::before_graph(
+                    content.states.contains(&SelectionState::Paused),
+                    content.states.contains(&SelectionState::Auto),
+                    content.states.iter().any(|state| {
                         matches!(
                             state,
                             SelectionState::Idle | SelectionState::Active | SelectionState::Moving
                         )
-                    }) {
-                        inspect.insert(content.work.id.clone());
-                    }
-                    WorkingGroup::Active
-                };
+                    }),
+                );
                 content.working_group = Some(group);
+                if check_graph {
+                    inspect.insert(content.work.id.clone());
+                }
             }
             tasks
                 .entry(content.work.id.clone())

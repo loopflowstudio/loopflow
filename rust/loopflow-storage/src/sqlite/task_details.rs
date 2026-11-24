@@ -1,8 +1,8 @@
 //! What a plan reads about each of its Tasks, one statement per concern over
 //! every Task in scope, so a reading's cost does not grow a statement per Task.
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
-use rusqlite::Connection;
+use rusqlite::{params, Connection};
 
 use super::children::{
     ids_json, map_task_event_row, map_task_pr_row, tracker_states_in, TASK_PR_COLUMNS,
@@ -72,20 +72,55 @@ impl SqliteStore {
         };
         let (local, ownership) = super::task_ownership::ownerships_in(&snapshot, &ids)?;
         let auto = auto_states_in(&snapshot, &json)?;
-        let working = tasks.iter().filter_map(|task| {
-            let state = states.get(&task.id)?.lifecycle(task.state.as_deref());
+        let mut working_groups = HashMap::new();
+        let mut inspect = HashSet::new();
+        for task in tasks {
+            let Some(state) = states.get(&task.id) else {
+                continue;
+            };
+            let state = state.lifecycle(task.state.as_deref());
             let owner = ownership.get(&task.id);
             let remote = owner.is_some_and(|owner| owner.runs_on(&local).is_some());
-            (TaskSection::of(state, owner.is_some(), remote) == TaskSection::Working).then(|| {
-                (
-                    &task.id,
-                    state.observed_here(remote),
-                    auto.get(&task.id).copied(),
-                )
-            })
-        });
+            if TaskSection::of(state, owner.is_some(), remote) != TaskSection::Working {
+                continue;
+            }
+            let observed = state.observed_here(remote);
+            let (group, check_graph) = WorkingGroup::before_graph(
+                observed == Some(TaskState::Paused),
+                auto.get(&task.id).copied() == Some(AutoState::On),
+                observed.is_some(),
+            );
+            working_groups.insert(task.id.clone(), group);
+            if check_graph {
+                inspect.insert(task.id.as_str());
+            }
+        }
+        let mut graph_names = HashMap::new();
+        let mut steps = HashMap::new();
+        {
+            let mut query = snapshot.prepare(
+                "SELECT task_id,json_extract(graph,'$.name'),step,run_start,
+                        CASE WHEN task_id IN (SELECT value FROM json_each(?2)) THEN graph END
+                 FROM task_graphs WHERE task_id IN (SELECT value FROM json_each(?1))",
+            )?;
+            let mut rows = query.query(params![&json, ids_json(inspect.iter().copied())])?;
+            while let Some(row) = rows.next()? {
+                let id = TaskId::from_raw(row.get::<_, String>(0)?);
+                graph_names.insert(id.clone(), row.get::<_, String>(1)?);
+                let step: String = row.get(2)?;
+                let run_start: Option<String> = row.get(3)?;
+                if let Some(graph) = row.get::<_, Option<String>>(4)? {
+                    if ships(&graph, &step, run_start.as_deref(), auto.get(&id).copied())? {
+                        working_groups.insert(id.clone(), WorkingGroup::Shipping);
+                    }
+                }
+                if run_start.is_none() {
+                    steps.insert(id, step);
+                }
+            }
+        }
         let facts = TaskDetailFacts {
-            working_groups: working_groups_in(&snapshot, working, ships)?,
+            working_groups,
             states,
             pause_cleanup,
             open_children: keyed(
@@ -149,20 +184,8 @@ impl SqliteStore {
                     Ok((event.task_id.clone(), event))
                 },
             )?,
-            graph_names: keyed(
-                &snapshot,
-                "SELECT task_id,json_extract(graph,'$.name') FROM task_graphs
-                 WHERE task_id IN (SELECT value FROM json_each(?1))",
-                &json,
-                |row| Ok((TaskId::from_raw(row.get::<_, String>(0)?), row.get::<_, String>(1)?)),
-            )?,
-            steps: keyed(
-                &snapshot,
-                "SELECT task_id,step FROM task_graphs
-                 WHERE task_id IN (SELECT value FROM json_each(?1)) AND run_start IS NULL",
-                &json,
-                |row| Ok((TaskId::from_raw(row.get::<_, String>(0)?), row.get::<_, String>(1)?)),
-            )?,
+            graph_names,
+            steps,
             auto,
             tracker_actions: super::planning_sync::task_tracker_actions_in(&snapshot, &ids)?,
             repository_paths: repository_paths_in(&snapshot)?,
@@ -175,47 +198,6 @@ impl SqliteStore {
 /// Execution interprets the cursor and the CLI recognizes commands that land a PR.
 pub type ShipsBeforeReview<'a> =
     &'a mut dyn FnMut(&str, &str, Option<&str>, Option<AutoState>) -> StoreResult<bool>;
-
-fn working_groups_in<'a>(
-    conn: &Connection,
-    working: impl Iterator<Item = (&'a TaskId, Option<TaskState>, Option<AutoState>)>,
-    ships: ShipsBeforeReview<'_>,
-) -> StoreResult<HashMap<TaskId, WorkingGroup>> {
-    let mut groups = HashMap::new();
-    let mut inspect = HashMap::new();
-    for (id, state, auto) in working {
-        let group = match (state, auto) {
-            (Some(TaskState::Paused), _) => WorkingGroup::Paused,
-            (_, Some(AutoState::On)) => WorkingGroup::Shipping,
-            (Some(_), _) => {
-                inspect.insert(id.as_str(), (id.clone(), auto));
-                WorkingGroup::Active
-            }
-            (None, _) => WorkingGroup::Active,
-        };
-        groups.insert(id.clone(), group);
-    }
-    if !inspect.is_empty() {
-        let mut query = conn.prepare(
-            "SELECT task_id,graph,step,run_start FROM task_graphs
-             WHERE task_id IN (SELECT value FROM json_each(?1))",
-        )?;
-        let mut rows = query.query([ids_json(inspect.keys().copied())])?;
-        while let Some(row) = rows.next()? {
-            let id: String = row.get(0)?;
-            let (task_id, auto) = &inspect[id.as_str()];
-            if ships(
-                &row.get::<_, String>(1)?,
-                &row.get::<_, String>(2)?,
-                row.get::<_, Option<String>>(3)?.as_deref(),
-                *auto,
-            )? {
-                groups.insert(task_id.clone(), WorkingGroup::Shipping);
-            }
-        }
-    }
-    Ok(groups)
-}
 
 /// Read only the auto marks on the Tasks in this reading.
 pub(super) fn auto_states_in(

@@ -394,7 +394,7 @@ struct ServerClientTests {
         }
         #expect(try await ServerClient.read(.repoPath(id: "repo_1"), location: peer.location).decode(String.self) == big)
         let output = try await ServerClient.configuration(.configTheme(value: big), location: peer.location)
-        #expect(String(decoding: output, as: UTF8.self) == "\(big.utf8.count)")
+        #expect(try output.decode(Int.self) == big.utf8.count)
     }
 
     @Test func oversizedControlResponseIsRefusedEvenWhenItsLastReadContainsTheNewline() async throws {

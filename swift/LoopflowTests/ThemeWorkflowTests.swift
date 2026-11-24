@@ -96,7 +96,7 @@ struct ThemeWorkflowTests {
             await store.applyMode(.dark, notices: notices)
             try #require(notices.current?.action).perform()
             try await waitFor { store.selection.mode == .system }
-            let restored = try await ServerClient.configuration(.configTheme(value: nil), as: ThemeDeclaration.self, location: location)
+            let restored = try await ServerClient.configuration(.configTheme(value: nil), location: location).decode(ThemeDeclaration.self)
             #expect(restored.entries?.map(\.value) == [.null])
         }
     }

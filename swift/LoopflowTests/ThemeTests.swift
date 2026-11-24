@@ -35,8 +35,7 @@ extension ThemePaths {
 
 /// The server's `theme:` text, as `config.theme` answers it.
 func savedTheme(_ location: ServerLocation) async throws -> String? {
-    let answer = try await ServerClient.configuration(.configTheme(value: nil), location: location)
-    return try JSONDecoder().decode(ConfigurationFileValue.self, from: answer).text
+    try await ServerClient.configuration(.configTheme(value: nil), location: location).decode(ConfigurationFileValue.self).text
 }
 
 /// A server whose `LF_HOME` holds the test's theme files and `config.yaml`.

@@ -28,3 +28,4 @@
 - Keep the CLI checkpoint line format at the subprocess. Desktop Settings and Work pass its number directly to the server subscription.
 - Open the document supplying the selected Wave's slots. Where it differs, show the first-edit save path until a write creates it. Requiring a write to inspect existing frontmatter changes the checkout just to read it.
 - Use the existing Reset button for saved picker choices. Display an effective-value placeholder only when no choice is saved in the selected file. A second Reset inside the menu duplicates the same checked edit.
+- Moving a declaration uses the same source-document check as editing it. The Graph step menu reads occurrence addresses from the existing settings response.

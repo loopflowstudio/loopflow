@@ -36,19 +36,14 @@ enum ServerClient {
         return String(decoding: try await request(.submittedCreation(value), location: .shared).bytes, as: UTF8.self)
     }
 
-    static func configuration(_ operation: ConfigOperation, location: ServerLocation = .shared) async throws -> Data {
-        Data(try await request(.config(operation), location: location).bytes)
-    }
-
-    static func configuration<T: Decodable>(_ operation: ConfigOperation, as type: T.Type,
-                                            location: ServerLocation = .shared) async throws -> T {
-        try JSONDecoder().decode(type, from: await configuration(operation, location: location))
+    static func configuration(_ operation: ConfigOperation, location: ServerLocation = .shared) async throws -> RawJSON {
+        try await request(.config(operation), location: location)
     }
 
     static func edit(_ change: ConfigurationChange, destination: JSONValue, key: String,
                      expected: [ConfigurationEntry], location: ServerLocation) async throws -> ConfigurationEditReceipt {
         try await configuration(.edit(destination: destination, key: key, expected: expected, change: change),
-                                as: ConfigurationEditReceipt.self, location: location)
+                                location: location).decode()
     }
 
     private static func request(_ operation: ServerOperation, location: ServerLocation) async throws -> RawJSON {
@@ -57,7 +52,7 @@ enum ServerClient {
         return try await link.request(operation)
     }
 
-    /// A subscription on the location's connection; `send` carries checkpoints,
+    /// A subscription on the location's connection; `checkpoint` confirms a reading,
     /// `cancel` ends it. After a reading, connection loss resumes the same stream.
     static func subscribe(_ query: ServedRead, location: ServerLocation = .shared) -> LineSubscription {
         // The newest link's sentence for a reading this build can't decode; nil before one connects.
@@ -221,7 +216,7 @@ private final class UnixSocketCarrier: ServerCarrier, @unchecked Sendable {
         var line = message
         line.append(10)
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, any Error>) in
-            writes.async { [self] in
+            writes.async { [self, line] in
                 do {
                     try Self.write(fd, line)
                     continuation.resume()

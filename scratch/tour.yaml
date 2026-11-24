@@ -1,55 +1,49 @@
-at: 991e370deb0e56407cbbfd5f8b1193a5bfc2625e
+at: f48b0cb058a12359edc7e8b81d5468a35fec4079
 first:
   - path: docs/surfaces.md
-    why: Follow a setting from search through Undo
+    why: Follow search, editing, Reset and Undo
   - path: scratch/qa.html
     why: See the sidebar and project form at minimum width
   - path: docs/config.md
-    why: File ownership, defaults and Reset
+    why: Inspect file ownership and effective settings
   - path: rust/loopflow-execution/src/config/catalog.rs
-    why: Each setting’s schema, applicability and fallback
+    why: Define applicable settings, controls and defaults
   - path: rust/loopflow-execution/src/engine/config/scope.rs
-    why: Read paths, save destinations and editable slots
+    why: Pair effective values with editable file declarations
   - path: swift/LoopflowMac/Services/ConfigurationScope.swift
-    why: Open the current document and address its declaration
+    why: Address each declaration and open its source document
   - path: swift/Loopflow/Models/ConfigurationEdit.swift
     why: Checked edits, move previews and receipts
-  - path: swift/LoopflowMac/Views/SettingsWindow.swift
-    why: Navigate between personal and project settings
-  - path: swift/LoopflowMac/Views/ScopedSettings.swift
-    why: Form sections and search share row titles
-  - path: swift/LoopflowMac/Views/ScopedSettingRow.swift
-    why: Inspect sources, edit, reset or move a declaration
-  - path: swift/LoopflowMac/Views/SettingsSearch.swift
-    why: Open matching rows and edit switches
-  - path: swift/LoopflowMac/Services/ScopedSettingsModel.swift
-    why: Reconnect readings and confirm edits before another write
-  - path: swift/Loopflow/Services/WorkObservation.swift
-    why: Settings and Work confirm readings with numbered checkpoints
-  - path: swift/LoopflowMac/Services/ServerClient.swift
-    why: Deliver checkpoints directly to server subscriptions
-  - path: rust/loopflow-execution/src/engine/config.rs
-    why: Inspect resolved settings and check edits
   - path: rust/loopflow-execution/src/config/files.rs
-    why: Lock, recheck and write personal, project and Wave settings
+    why: Recheck the source document before installing an edit
   - path: rust/loopflow-execution/src/config/files/edit.rs
-    why: Restore exact entries including legacy spellings
+    why: Preserve comments and restore exact authored entries
   - path: rust/loopflow-execution/src/engine/config/promotion.rs
-    why: Move declarations and recover interrupted writes
-  - path: rust/loopflow-execution/src/observe.rs
-    why: Deliver writes to live Settings readers
+    why: Install moves in order and recover interrupted writes
+  - path: swift/LoopflowMac/Views/SettingsWindow.swift
+    why: Navigate personal panes and project configuration
+  - path: swift/LoopflowMac/Views/ScopedSettings.swift
+    why: Group controls and select their destination
+  - path: swift/LoopflowMac/Views/SettingsTargetPicker.swift
+    why: Select a Skill or an addressed Graph step
+  - path: swift/LoopflowMac/Views/ScopedSettingRow.swift
+    why: Edit, reset or move the selected declaration
+  - path: swift/LoopflowMac/Views/SettingsSearch.swift
+    why: Reveal matching controls or toggle them directly
+  - path: swift/LoopflowMac/Services/ScopedSettingsModel.swift
+    why: Reconnect subscriptions and confirm saved values
   - path: swift/LoopflowMac/Design/AppearanceStore.swift
-    why: Apply themes and stage color edits
+    why: Apply themes and stage palette edits
   - path: swift/LoopflowMac/Views/MachineConnections.swift
     why: Check registered Machines while their pane is open
   - path: swift/LoopflowMac/Views/MobileSettings.swift
-    why: Pairing and sidebar readiness share a status
+    why: Pair a phone and report connection readiness
   - path: swift/LoopflowTests/ContextSettingsWorkflowTests.swift
-    why: Follow a checkout edit through an agent launch
+    why: Exercise launch settings, Graph addresses and moves
   - path: swift/LoopflowTests/SettingsWorkflowTests.swift
-    why: Exercise Open, picker Reset, Undo and reconnect
+    why: Verify Open, picker Reset, Undo and reconnect
   - path: swift/LoopflowTests/ThemeWorkflowTests.swift
     why: Exercise theme changes and checked Undo
 hide:
   - path: tests/fixtures/dto/server_schema.json
-    why: Regenerated from typed server operations
+    why: Generated from typed server operations

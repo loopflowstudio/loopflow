@@ -374,25 +374,61 @@ pub fn read_text(path: &Path) -> Result<String> {
 }
 
 pub(crate) fn settings_text(path: &Path, root: Root) -> Result<String> {
-    Ok(settings_source(path, root)?.1)
+    Ok(SettingsSource::read(path, root)?.text)
 }
 
-/// Keep the source path so a config.yaml created during a first Wave edit
-/// is detected even when it contains the same text as the GOAL.md settings.
-fn settings_source(path: &Path, root: Root) -> Result<(PathBuf, String)> {
-    match crate::observe::read_to_string(path) {
-        Ok(text) => return Ok((path.into(), text)),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        Err(error) => return Err(error).with_context(|| format!("Read {}", path.display())),
+#[derive(Debug)]
+pub(crate) struct SettingsSource {
+    pub path: PathBuf,
+    pub text: String,
+}
+
+impl SettingsSource {
+    fn read(path: &Path, root: Root) -> Result<Self> {
+        let text = match crate::observe::read_to_string(path) {
+            Ok(text) => text,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                if root == Root::Wave {
+                    if let Some((goal, mapping)) =
+                        crate::work::wave::config::goal_settings(path.with_file_name("GOAL.md"))?
+                    {
+                        return Ok(Self {
+                            path: goal,
+                            text: serde_yaml_ng::to_string(&mapping)?,
+                        });
+                    }
+                }
+                String::new()
+            }
+            Err(error) => return Err(error).with_context(|| format!("Read {}", path.display())),
+        };
+        Ok(Self {
+            path: path.into(),
+            text,
+        })
     }
-    if root == Root::Wave {
-        if let Some((goal, mapping)) =
-            crate::work::wave::config::goal_settings(path.with_file_name("GOAL.md"))?
-        {
-            return Ok((goal, serde_yaml_ng::to_string(&mapping)?));
+
+    pub(crate) fn verify(&self, path: &Path, root: Root, text: &str) -> Result<()> {
+        // A no-op keeps GOAL.md as the source. A changed edit writes config.yaml.
+        let expected_path = if text == self.text { &self.path } else { path };
+        let current = Self::read(path, root)?;
+        ensure!(
+            current.path == expected_path && current.text == text,
+            Error::conflict(format!(
+                "{} changed during this edit; retry with the current file",
+                path.display()
+            ))
+        );
+        Ok(())
+    }
+
+    pub(crate) fn write(&self, path: &Path, root: Root, text: &str) -> Result<()> {
+        self.verify(path, root, &self.text)?;
+        if text != self.text {
+            atomic_write(path, text)?;
         }
+        Ok(())
     }
-    Ok((path.into(), String::new()))
 }
 
 /// Read an authored configuration mapping in the typed layout, whichever
@@ -536,19 +572,9 @@ impl LockedFile {
         root: Root,
         change: impl FnOnce(&str) -> Result<(String, T)>,
     ) -> Result<T> {
-        let (source, original) = settings_source(&self.path, root)?;
-        let (text, result) = change(&original)?;
-        let (current_source, current) = settings_source(&self.path, root)?;
-        ensure!(
-            current_source == source && current == original,
-            Error::conflict(format!(
-                "{} changed during this edit; retry with the current file",
-                self.path.display()
-            ))
-        );
-        if text != original {
-            atomic_write(&self.path, &text)?;
-        }
+        let original = SettingsSource::read(&self.path, root)?;
+        let (text, result) = change(&original.text)?;
+        original.write(&self.path, root, &text)?;
         Ok(result)
     }
 }

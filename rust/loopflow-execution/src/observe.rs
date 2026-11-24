@@ -2,7 +2,7 @@
 //! inline; only a bounded reading scope retains answers and dependencies.
 use std::any::Any;
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
@@ -493,7 +493,7 @@ pub fn active() -> bool {
 
 /// Resolve a proposed file edit through the ordinary readers without publishing
 /// the draft in the serving Machine's observation cache.
-pub(crate) fn preview_files<T>(files: &[(PathBuf, String)], read: impl FnOnce() -> T) -> T {
+pub(crate) fn preview_files<T>(files: &BTreeMap<PathBuf, String>, read: impl FnOnce() -> T) -> T {
     let cache = Cache::default();
     for (path, text) in files {
         cache.entries.lock().expect("private preview cache").insert(

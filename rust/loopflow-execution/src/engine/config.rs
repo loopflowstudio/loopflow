@@ -46,8 +46,8 @@ pub fn preview_edit(
     let mut document = edit::Document::read(&address)?;
     edit::Setting::catalogued(&address, key).prepare(&mut document.value, expected, change)?;
     Ok(edit::preview(
-        &document.original,
-        &crate::config::files::edited_text(&document.original, &document.value)?,
+        &document.original.text,
+        &document.edited_text()?,
     ))
 }
 

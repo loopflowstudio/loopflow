@@ -1,13 +1,13 @@
 ---
 extends: builtin
 ---
-## Desktop on the live Machine
+## Desktop demos
 
-For Loopflow Desktop changes that work with the installed server, demo against
-live data instead of building `lf` and a fixture repo. Run
-`uv run python scripts/loopflow-dev.py run` (or an isolated `.dev` bundle
-against `~/.lf` when `Loopflow Dev` is already running), and note any
-server-side change that waits for the branch `lf`.
+Build an isolated `.dev` bundle (`.lf/qa/desktop.md#loopflow-dev-on-the-live-machine`),
+not the shared `~/Applications/Loopflow Dev.app` that other worktrees overwrite,
+and confirm its stamped revision matches `HEAD` before launching or relaunching.
+When the change works with the installed server, point it at `~/.lf` instead of
+building `lf` and a fixture repo, noting any server change waiting on branch `lf`.
 
 ## Disposable Loopflow demos
 

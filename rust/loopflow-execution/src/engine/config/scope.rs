@@ -156,7 +156,7 @@ pub fn scope(directory: Option<&Path>, wave: Option<&str>, target: &ScopeTarget)
                     let document = edit::Document::read(&address)?;
                     let mut normalized = document.value.clone();
                     crate::config::normalize_preferences(&mut normalized);
-                    entry.insert((document.read_path, document.value, normalized))
+                    entry.insert((document.original.path, document.value, normalized))
                 }
             };
             let mut slots = BTreeMap::new();

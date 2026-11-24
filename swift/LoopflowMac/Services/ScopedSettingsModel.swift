@@ -100,7 +100,7 @@ final class ScopedSettingsModel {
             var opened: LineSubscription?
             do {
                 if catalogue.isEmpty || reading.failure != nil {
-                    let definitions = try await ServerClient.configuration(.configCatalog, as: [ConfigurationDefinition].self, location: location)
+                    let definitions = try await ServerClient.configuration(.configCatalog, location: location).decode([ConfigurationDefinition].self)
                     guard !Task.isCancelled, observation == id else { return }
                     catalogue = definitions
                 }
@@ -218,12 +218,12 @@ final class ScopedSettingsModel {
 
     private func move(_ address: SettingDeclaration.ID, wave: String?, action: MoveAction) async throws -> MoveResult {
         try await ServerClient.configuration(.promote(destination: address.destination, key: address.key, wave: wave, action: action),
-                                             as: MoveResult.self, location: location)
+                                             location: location).decode()
     }
 
     func preview(_ change: ConfigurationChange, for declaration: SettingDeclaration) async throws -> String {
         try await ServerClient.configuration(.preview(destination: declaration.destination, key: declaration.slot.key,
-            expected: declaration.slot.entries, change: change), as: String.self, location: location)
+            expected: declaration.slot.entries, change: change), location: location).decode()
     }
 
     private func report(_ error: Error, id: UUID, declaration: SettingDeclaration, notices: NoticeCenter?, move: MoveAction? = nil) {

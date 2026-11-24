@@ -130,12 +130,6 @@ struct ConfigurationDefinition: Decodable {
     }
 }
 
-struct ConfigurationInspection: Decodable {
-    let skill: String?
-    let occurrence: JSONValue?
-    let settings: [String: ConfigurationValue]
-}
-
 /// A checked edit carries the addressed slot as it was when editing began.
 struct SettingDeclaration: Identifiable {
     struct ID: Hashable {

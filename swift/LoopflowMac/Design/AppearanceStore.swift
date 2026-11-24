@@ -143,7 +143,7 @@ final class AppearanceStore {
         var problems = library.problems
         let answer: ThemeDeclaration
         do {
-            answer = try await ServerClient.configuration(.configTheme(value: nil), as: ThemeDeclaration.self, location: location)
+            answer = try await ServerClient.configuration(.configTheme(value: nil), location: location).decode(ThemeDeclaration.self)
         } catch {
             if reading == generation { readFailure = error.localizedDescription }
             return

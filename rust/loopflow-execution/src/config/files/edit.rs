@@ -1,12 +1,10 @@
 //! A checked edit carries the authored YAML entries its writer can change.
 //! Paths stay in components, including literal keys containing dots.
-use std::path::PathBuf;
-
 use anyhow::{ensure, Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_yaml_ng::Value;
 
-use super::{parse_document, remove, ResolvedDestination};
+use super::{edited_text, parse_document, remove, ResolvedDestination, SettingsSource};
 use crate::config::{
     keys::{self, Root},
     settings,
@@ -334,21 +332,20 @@ pub fn preview(original: &str, after: &str) -> String {
 
 #[derive(Debug)]
 pub(crate) struct Document {
-    pub read_path: PathBuf,
-    pub original: String,
+    pub original: SettingsSource,
     pub value: Value,
 }
 
 impl Document {
     pub fn read(destination: &ResolvedDestination) -> Result<Self> {
-        let (read_path, original) = super::settings_source(&destination.path, destination.root())?;
-        let value = parse_document(&original, &read_path)
-            .with_context(|| format!("Read {}", read_path.display()))?;
-        Ok(Self {
-            read_path,
-            original,
-            value,
-        })
+        let original = SettingsSource::read(&destination.path, destination.root())?;
+        let value = parse_document(&original.text, &original.path)
+            .with_context(|| format!("Read {}", original.path.display()))?;
+        Ok(Self { original, value })
+    }
+
+    pub fn edited_text(&self) -> Result<String> {
+        edited_text(&self.original.text, &self.value)
     }
 }
 

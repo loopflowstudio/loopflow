@@ -180,8 +180,9 @@ struct TaskChangesView: View {
         // A checkout on another Machine keeps the defaults for this window only.
         guard store.query.remoteMachine == nil else { return }
         do {
+            struct Inspection: Decodable { let settings: [String: ConfigurationValue] }
             let work = ServedRead.configSettings(directory: store.cwd, wave: nil, skill: nil, graph: nil, step: nil)
-            let settings = try await ServerClient.read(work).decode([ConfigurationInspection].self).first?.settings
+            let settings = try await ServerClient.read(work).decode([Inspection].self).first?.settings
             if let groups = settings?["diff_groups"].flatMap({ DiffGroupSetting.parse($0.value) }) {
                 store.diffGroups = groups
             }

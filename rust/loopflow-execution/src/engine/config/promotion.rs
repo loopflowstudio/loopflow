@@ -258,10 +258,10 @@ impl<'a> Move<'a> {
         Ok(())
     }
 
-    fn patches(&self) -> Result<Vec<(PathBuf, String)>> {
+    fn patches(&self) -> Result<BTreeMap<PathBuf, String>> {
         self.documents
             .iter()
-            .map(|(path, doc)| Ok((path.clone(), files::edited_text(&doc.original, &doc.value)?)))
+            .map(|(path, doc)| Ok((path.clone(), doc.edited_text()?)))
             .collect()
     }
 
@@ -269,7 +269,7 @@ impl<'a> Move<'a> {
         &self,
         repository: &Path,
         wave: Option<&str>,
-        patches: &[(PathBuf, String)],
+        patches: &BTreeMap<PathBuf, String>,
         receipt: Receipt,
     ) -> Result<Review> {
         let effective = crate::observe::preview_files(patches, || {
@@ -279,7 +279,7 @@ impl<'a> Move<'a> {
             .iter()
             .map(|(path, after)| FilePreview {
                 path: path.clone(),
-                patch: edit::preview(&self.documents[path].original, after),
+                patch: edit::preview(&self.documents[path].original.text, after),
             })
             .collect();
         Ok(Review {
@@ -289,35 +289,27 @@ impl<'a> Move<'a> {
         })
     }
 
-    fn install(&self, patches: &[(PathBuf, String)], undo: bool) -> Result<()> {
-        let mut addresses = vec![self.receiving, self.source];
-        if undo {
-            addresses.reverse();
-        }
-        addresses.dedup_by_key(|address| &address.path);
-        let mut installed: Option<(&PathBuf, &str)> = None;
-        for address in addresses {
-            if let Some((path, text)) = installed {
-                ensure!(
-                    files::read_text(path)? == text,
-                    "{} changed during the move; review both files",
-                    path.display()
-                );
-            }
-            let before = &self.documents[&address.path].original;
-            let (_, after) = patches
-                .iter()
-                .find(|(path, _)| *path == address.path)
-                .expect("prepared both files");
-            ensure!(
-                files::settings_text(&address.path, address.root())? == *before,
-                "{} changed; review the pending move",
-                address.path.display()
-            );
-            if before != after {
-                files::atomic_write(&address.path, after)?;
-            }
-            installed = Some((&address.path, after));
+    fn install(&self, patches: &BTreeMap<PathBuf, String>, undo: bool) -> Result<()> {
+        let write = |address: &ResolvedDestination| {
+            self.documents[&address.path].original.write(
+                &address.path,
+                address.root(),
+                &patches[&address.path],
+            )
+        };
+        let (first, second) = if undo {
+            (self.source, self.receiving)
+        } else {
+            (self.receiving, self.source)
+        };
+        write(first)?;
+        if first.path != second.path {
+            self.documents[&first.path].original.verify(
+                &first.path,
+                first.root(),
+                &patches[&first.path],
+            )?;
+            write(second)?;
         }
         Ok(())
     }
@@ -430,6 +422,35 @@ mod tests {
     use crate::config::files::Destination;
     use crate::engine::config::{get, set};
     use loopflow_test_support::TestRepo;
+
+    #[test]
+    fn a_move_rechecks_which_wave_document_supplied_the_declaration() {
+        let _lock = loopflow_test_support::env_lock().lock().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let _home = EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
+        let repo = TestRepo::new();
+        repo.create_file(".lf/wave/scan/GOAL.md", "---\nagent: codex\n---\n");
+        let wave = Destination::SharedWave {
+            repository: repo.path().into(),
+            wave: "scan".into(),
+        };
+        let shared = super::broader(&wave).unwrap().resolve().unwrap();
+        let wave = wave.resolve().unwrap();
+        let mut operation = super::Move::read(&wave, &shared, "agent").unwrap();
+        operation.forward().unwrap();
+        let patches = operation.patches().unwrap();
+
+        std::fs::write(&wave.path, "agent: codex\n").unwrap();
+        let error = operation.install(&patches, false).unwrap_err();
+        assert_eq!(
+            error.downcast_ref::<crate::engine::Error>().unwrap().code,
+            crate::engine::ErrorCode::Conflict
+        );
+        assert_eq!(
+            std::fs::read_to_string(wave.path).unwrap(),
+            "agent: codex\n"
+        );
+    }
 
     #[test]
     fn finish_an_interrupted_move_only_if_both_declarations_still_match() {

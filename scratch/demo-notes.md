@@ -10,3 +10,8 @@
 - "icon colors are a little all over the place and ugly. if were not going to invest in super beautiful icons then maybe more minimalist and simple"
 - "i think i like policy b. maybe look at rune the ide or other versions of vs code done right"
 - "1b 2a" *(Policy B: clean personal global panes in Settings + one dedicated Project & Wave Config pane; 1b: quiet dividers instead of sidebar section text headers; 2a: Context and Git & Release live inside Project & Wave Config)*
+
+## 2026-11-23 · Second demo (481507410f) · Jack Heart
+
+- "i guess this is good enough for now lets ship it"
+- "the agents pane kinda still reads as confused with config.yaml"

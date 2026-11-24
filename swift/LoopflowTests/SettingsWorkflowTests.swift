@@ -231,30 +231,24 @@ struct SettingsWorkflowTests {
     }
 
     @Test func sharedCheckoutKeepsItsDestinationThroughValidationAndGlobalMachineEdits() async throws {
-        let root = URL(fileURLWithPath: "/tmp/lf-form-\(UUID().uuidString.prefix(8))").resolvingSymlinksInPath()
-        let repo = root.appending(path: "project")
-        let home = root.appending(path: "home")
-        for folder in [repo.appending(path: ".lf"), home] {
+        try await withThemeServer { location, paths in
+            let home = paths.config.deletingLastPathComponent().resolvingSymlinksInPath()
+            let repo = home.appending(path: "project")
+            let folder = repo.appending(path: ".lf")
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        }
-        defer { try? FileManager.default.removeItem(at: root) }
-        try Data("chrome: null\n".utf8).write(to: repo.appending(path: ".lf/config.yaml"))
-        let lf = try BuiltLf(home: home, cwd: repo)
-        _ = try await lf.run(["desktop", "portfolio", "--json"])
-        let server = LocalServerFixture(lf)
-        let model = ScopedSettingsModel(location: server.location())
-        model.select(checkout: repo.path)
-        let notices = NoticeCenter()
-        let personal = ScopedSettingsModel(location: server.location())
-        var navigation = SettingsNavigation()
-        let window = SettingsWindow(navigation: Binding(get: { navigation }, set: { navigation = $0 }),
-            appearance: AppearanceStore(paths: .temporary(), systemDark: false), checkout: repo.path,
-            portfolio: PortfolioService(), personal: personal, project: model)
-        func pane(_ pane: SettingsPane) throws -> ScopedSettings {
-            navigation.open(pane)
-            return try window.inspect().find(ScopedSettings.self).actualView()
-        }
-        do {
+            try Data("chrome: null\n".utf8).write(to: folder.appending(path: "config.yaml"))
+            let model = ScopedSettingsModel(location: location)
+            model.select(checkout: repo.path)
+            let notices = NoticeCenter()
+            let personal = ScopedSettingsModel(location: location)
+            var navigation = SettingsNavigation()
+            let window = SettingsWindow(navigation: Binding(get: { navigation }, set: { navigation = $0 }),
+                appearance: AppearanceStore(paths: .temporary(), systemDark: false), checkout: repo.path,
+                portfolio: PortfolioService(), personal: personal, project: model)
+            func pane(_ pane: SettingsPane) throws -> ScopedSettings {
+                navigation.open(pane)
+                return try window.inspect().find(ScopedSettings.self).actualView()
+            }
             async let _: Void = model.observe()
             async let _: Void = personal.observe()
             let deadline = ContinuousClock.now + .seconds(10)
@@ -296,10 +290,8 @@ struct SettingsWorkflowTests {
             let logResult = try window.inspect().find(viewWithId: "logs").find(ViewType.Toggle.self)
             #expect(try !logResult.isOn())
             try logResult.tap()
-            let logDeadline = ContinuousClock.now + .seconds(10)
-            while personal.saving || personal.file?.slots["logs"]?.declared.value?["linear_requests"] != .bool(true) {
-                try #require(ContinuousClock.now < logDeadline)
-                try await Task.sleep(for: .milliseconds(20))
+            try await waitFor {
+                !personal.saving && personal.file?.slots["logs"]?.declared.value?["linear_requests"] == .bool(true)
             }
             #expect(try pane(.general).inspect().find(viewWithId: "logs").find(ViewType.Toggle.self).isOn())
             navigation.search = "yolo"
@@ -366,8 +358,7 @@ struct SettingsWorkflowTests {
                 #expect(rows.allSatisfy { !$0.unsetText.contains("Inherited") })
                 #expect(throws: (any Error).self) { try pane(settings).inspect().find(text: "Inherited") }
             }
-        } catch { await server.stop(); throw error }
-        await server.stop()
+        }
     }
 
     @Test(.requiresDisplay) func searchScrollsBetweenProjectSectionsInACompactWindow() async throws {

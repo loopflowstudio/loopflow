@@ -255,7 +255,7 @@ struct ContextSettingsWorkflowTests {
         }
         defer { try? fm.removeItem(at: root) }
         try Data("---\nid: \(waveID)\nagent: codex\n---\nA Wave.\n".utf8).write(to: wave.appending(path: "GOAL.md"))
-        try Data("- step: {name: probe, id: work}\n".utf8).write(to: repo.appending(path: ".lf/graphs/review.yaml"))
+        try Data("- step: {name: probe, id: work}\n- probe\n".utf8).write(to: repo.appending(path: ".lf/graphs/review.yaml"))
         try Data("Probe.\n".utf8).write(to: repo.appending(path: ".lf/skills/probe.md"))
         try Data("context: [README.md] # include\nrepo: {tracker: git}\n".utf8)
             .write(to: repo.appending(path: ".lf/config.yaml"))
@@ -307,6 +307,10 @@ struct ContextSettingsWorkflowTests {
             try await set("diff_hidden", "[generated/**]", .personalRepository)
             let hidden = try #require(try await scope().settings["diff_hidden"])
             #expect(TaskFilesStore.hidden(from: hidden)?.contains(.init(pattern: "generated/**", source: nil)) == true)
+            let graph = ServedRead.configSettings(directory: repo.path, wave: nil, skill: nil, graph: "review", step: nil)
+            let steps = try await ServerClient.read(graph, location: model.location).decode([SettingsTargetPicker.Step].self)
+            #expect(steps.compactMap { $0.choice?.target } == [.step(graph: "review", step: "work"),
+                                                              .step(graph: "review", step: "position:/1")])
             for (target, key) in [(["--skill", "probe"], "skill.probe.context.diff"),
                                   (["--graph", "review", "--step", "work"], "graphs.review.steps.work.context.diff")] {
                 let reading = try await scope(target: target)

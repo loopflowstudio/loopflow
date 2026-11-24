@@ -220,11 +220,12 @@ Build thinly end to end in four slices; each slice runs and proves itself before
    - **7B (Desktop & shared Swift):**
      - Add `task: String?` to `ServedWrite.sessionNew` (`swift/Loopflow/Services/RegistryQuery.swift`), update `RegistryQuery.resetSession(..., work: WorkReference?)` and `RegistryQueryLocal.swift`, and pass `work: preparationWork(previous.record)` from `SessionsStore.reset` (`swift/LoopflowMac/Views/SessionsView.swift`). Update `RegistryQueryTests.swift` and `write.rs` encoding tests.
      - Simplify `WorkspacePanesView.showsContext` (`swift/LoopflowMac/Views/WorkspacePanesView.swift`): return `false` for any Task `.browser` pane (Files already shows `mini origin.…` in `files-location`; eliminates the duplicate `"Files"` label in `scratch/qa/s6-final-move.png`).
+   - **Built (2026-11-24):** all of 7A and 7B. `Write::remote_session` takes one path for both writes: a named `task` resolves through `remote_task` (Task-first, moved Session ignored), else the CLI spelling goes through `work_route::forward`; `forward` now checks `moved_session` only when no Task selector is present, so `lf resume <sid> --task X` follows the Task too. `session.new`'s `task` routes only: the peer's `lf session new <id>` takes no `--task` (Clap conflict), so `run_here` translates it but preparation ignores it. Tests: `ssh::tests::a_routed_*`, `write::tests::desktop_encodings_name_their_writes`, `machine_commands::a_served_task_conversation_write_is_prepared_where_the_task_runs` (new; both writes on a Task mini runs), `server_routed_task_workspace` (now asserts `task_ids[0]` and `work.id`), Swift `RegistryQueryTests` + `WorkspacePanesTests.movedTaskStripContext` (new). Not run here: `RemoteTaskWorkspaceTests` (Desktop/iOS) → gate.
    - **Proves:** Rust unit tests for `localize_remote_session` (local `task_id` at index 0, `work.id`, `workspace.task_id`, non-task `work`, selected readings) and `Write::SessionNew` schema/encoding; `machine_commands::server_routed_task_workspace` verifying routed `session.new` on a remote Task (including `open_argv` / `task_ids` / `work.id`) and a moved Session's `session.resume { id, task }` keeping `--task` in `open_argv` and `action.help`; Swift `RegistryQueryTests` + `RemoteTaskWorkspaceTests` + `WorkspacePanesTests` passing.
 
 ## Remaining before merge
 
-- Slice 7 above, then QA verification of Reset session on a remote Task and (if reachable) **New conversation** on a mini-owned Task (`scratch/qa.html`).
+- QA verification of Reset session on a remote Task and (if reachable) **New conversation** on a mini-owned Task (`scratch/qa.html`).
 - Gate: the four acceptance commands below, then CI.
 
 ## Acceptance check at gate

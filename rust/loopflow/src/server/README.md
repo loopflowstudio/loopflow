@@ -638,9 +638,11 @@ the phone's `view.select` Task list and its creation destinations all read it.
   A null `wave` selects the repository. Both paths return the same creation
   receipt, described below. A write whose Work
   lives on another Machine (`task.run`, `task.auto.on`, `task.auto.off`,
-  `task.claim`, `task.unassign`, `session.resume`) goes to that Machine's
-  server over SSH and returns its answer; it never falls back to
-  local execution. Requests create no Process rows; diagnostics the shared
+  `task.claim`, `task.unassign`, `session.resume`, `session.new`) goes to that
+  Machine's server over SSH and returns its answer; it never falls back to
+  local execution. A Session write naming a `task` goes where that Task runs,
+  even when the Session last moved elsewhere, and the record it returns names
+  this Machine's Task first in `task_ids`, `work` and `workspace`. Requests create no Process rows; diagnostics the shared
   functions print go to the request's log. A refusal the shared code names
   (an empty name is `invalid`, a stale Dashboard revision `conflict`, a missing
   record `not_found`) answers that code; any other failure is

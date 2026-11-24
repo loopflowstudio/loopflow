@@ -62,70 +62,60 @@ ol.q ol li { margin: 3px 0; }
 </style>
 </head><body>
 <main>
-<h1>Can a Wave’s work still be sent after recovery?</h1>
-<p class="lede">LOO-995 · Decision pass 3 · 23 November 2026 · Branch <code>ca8b46bc20</code> against <code>2aa9964894</code></p>
-<p>A Wave and its Project share one lifetime in the plan. A tracker can receive that work later. This review follows a Task from an older chapter through upgrade and reconnect, because those are the moments when the Project saved on the Task and the Project sent to a coworker can diverge.</p>
+<h1>One Wave, one Project: does the finished branch say so everywhere?</h1>
+<p class="lede">LOO-995 · Concept review after slices 8–10 · 23 November 2026 · Branch <code>9b630876ad</code> against <code>250e266b4a</code></p>
+<p>Area taken: the whole Wave–Project model as it stands with every slice in it, from <code>lf wave create</code> through Task create and move, tracker connect, upgrade of a released store, sync, rename and removal. The last three slices touched upgrade, sync and the index, so those get the closest walk.</p>
 
-<h2>One Task, two destinations after upgrade</h2>
-<div class="cols">
-<section class="panel"><h3>Existing</h3>
-<pre><code>Before upgrade
-billing → November → Task T
-        → December
-queued create(T, November)
-
-After upgrade
-billing → December → Task T
-queued create(T, November)
-                  ↑ Project deleted</code></pre>
-<p>On a temporary Machine initialized by the installed app’s <code>lf</code>, I seeded two started Projects and an unsent Task create under the older one. Running the branch’s complete <code>remove_chapters.sql</code> moved T to December. Its queued action still held November’s ID. The foreign-key check found zero violations.</p>
-</section>
-<section class="panel proposed"><h3>Proposed</h3>
-<pre><code>After upgrade
-billing → December → Task T
-queued create(T, December)
-
-After tracker recovery
-December → one issue for T</code></pre>
-<p>Translate the destination in the existing request during consolidation. The action keeps its place in the queue, the Task keeps its identity, and the sender can resolve December. An issue already delivered to November gets no move merely because Loopflow upgraded.</p>
-</section></div>
-<p><strong>Biggest mismatch.</strong> The migration updates <code>tasks.project_id</code>, while delivery uses <code>WorkValue::TaskProject</code> inside <code>tracker_actions.value_json</code>. Both providers resolve that saved local ID before sending. Once its Project row is gone, <code>remote_project</code> returns “Project is missing”. Reconnecting cannot repair this reference.</p>
-
-<h2>What does “sync this Wave” do?</h2>
-<p>In a separate private repository bound to Linear, I created <code>billing</code> without a login. Its Project create stayed queued. I cleared only the action’s recorded credential error so a new attempt would be visible, then ran the branch CLI.</p>
-<pre><code>$ lf wave sync billing
-billing: links no Linear Project; showing local planning (lf wave plan connect billing)
-…
-Project   billing (local) · started
-  create · queued</code></pre>
-<p>The command exited 0 and the error stayed empty. The connect receipt directs people to this command for a retry. <code>refresh_status</code> checks the external ID before calling the exchange that could obtain it. In a second fixture with an Asana Team and a seeded, acknowledged Asana link, the same command exited 1 asking for <code>repo.tracker.linear.team</code>.</p>
-<div class="cols">
-<section class="panel"><h3>Existing</h3><p>Check for a Project ID. If absent, show local status. If present, exchange with the repository’s tracker, then request a Linear inventory for that ID.</p></section>
-<section class="panel proposed"><h3>Proposed</h3><p>Use the repository’s selected transport. Exchange once, prioritizing this Wave’s stored Project. Read its link again. Fetch a Linear inventory only for a linked Linear Project. For Asana, use its existing exchange. Show any still-pending create and its recorded reason in the status.</p></section></div>
-<p><strong>Recovery check.</strong> Restore the simulated provider and run the same sync twice. The first call should acknowledge the original create and show the link. The second should show the same remote Project. A busy queue, a still-offline provider and a repository syncing through Git or a hub each exercise a different branch of that promise.</p>
+<h2>Walk: a Wave from creation to removal, with an outage in the middle</h2>
+<pre><code>lf wave create billing                  # Project billing (local), id = Wave UUID
+lf task create --wave billing 'refund'  # Task in billing's Project
+# Linear down
+lf wave plan connect billing            # create queued; receipt says: lf wave sync billing
+lf wave sync billing                    # slice 9: drains this Wave first, shows the queued create and its error
+# Linear back
+lf wave sync billing                    # Project created with the Wave's UUID; refund follows into it
+lf wave rename billing payments         # Project name follows; linked → project_name field action
+lf wave remove payments                 # queued actions retire; completed Tasks stay readable</code></pre>
+<p>Every step names one Project, and every action has one owner. Upgrade adds one wrinkle: a released store can hold several chapter Projects per Wave. The migration keeps one, translates queued destinations onto it (slice 8), and reads pick the Wave's own record when a released writer adds another (slice 10, <code>held_wave_project_in</code>).</p>
 
 <h2>Do the product and code concepts line up?</h2>
-<div class="table-wrap"><table><thead><tr><th scope="col">Fit</th><th scope="col">What a person does</th><th scope="col">What owns it in the branch</th></tr></thead><tbody>
-<tr><td><span class="mark yes">Yes</span></td><td>Create a Wave and see its one Project, even offline.</td><td><code>ProjectId::for_wave</code> and the unique <code>projects.wave_id</code> index. CLI and Desktop read a singular Project with distinct missing and unavailable states.</td></tr>
-<tr><td><span class="mark yes">Yes</span></td><td>Create or move a Task. Keep its Graph and PR when its Wave changes.</td><td><code>tasks.project_id → projects.wave_id</code> owns membership. Execution stays on the Task. A Project’s completion does not require a successor.</td></tr>
-<tr><td><span class="mark yes">Yes</span></td><td>Track the Project’s name, summary and status without managing chapters or KRs.</td><td>The Project record carries those fields. Chapter activation, rollover, KR and metric controls have gone from the commands and Desktop. Released columns remain for staged removal.</td></tr>
-<tr><td><span class="mark yes">Yes</span></td><td>Connect an existing Linear Project. Retry a collision or an offline rename without overwriting the adopted Project.</td><td><code>connect_async</code> resolves the target first. The lifecycle lock covers the holder check, registration and binding. <code>link_wave_project_in</code> settles superseded edits when the link changes.</td></tr>
-<tr><td><span class="mark yes">Yes</span></td><td>Remove a Wave, read its finished work, then reuse its tracker Project.</td><td>Issue admission checks the live holder. Reclaim releases the retired holder’s link. The lost-reply check can still distinguish a Project from no Project. An unsent completed Task in a retired, untracked Project stays readable locally.</td></tr>
-<tr><td><span class="mark no">No</span></td><td>Upgrade and deliver work already saved offline.</td><td><code>remove_chapters.sql</code> moves the Task row. The queue can retain a deleted destination inside its create. The fixture in <code>sqlite/children.rs</code> checks Task rows but seeds no queued create.</td></tr>
-<tr><td><span class="mark no">No</span></td><td>Run the advertised retry after a failed Project create.</td><td><code>refresh_status</code> returns <code>Unconnected</code> before <code>tracker_events::refresh_repository</code> drains the queue. CLI, the JSON mutation and Desktop share this path.</td></tr>
-<tr><td><span class="mark no">No</span></td><td>Sync a Wave in a repository using Asana.</td><td><code>tracker::queued_tracker</code> knows the transport. A populated <code>external_project_id</code> nevertheless routes the final inventory request to <code>linear::refresh_wave</code>.</td></tr>
-</tbody></table></div>
+<div class="table-wrap"><table>
+<tr><th>Fit</th><th>What a person knows or does</th><th>What owns it in the code</th></tr>
+<tr><td><span class="mark yes">yes</span></td><td>A Wave has one Project, made with it, offline too.</td><td><code>ProjectId::for_wave</code>; <code>held_wave_project_in</code> is the one read. CLI and Desktop carry a singular <code>Reading&lt;ProjectSummary&gt;</code>.</td></tr>
+<tr><td><span class="mark yes">yes</span></td><td>A Task in a Wave is in its Project; moving Waves moves Projects.</td><td><code>tasks.project_id → projects.wave_id</code>. No <code>tasks.wave_id</code>, no climb rule.</td></tr>
+<tr><td><span class="mark yes">yes</span></td><td>Connect a Linear Project, or let the Wave's own be created.</td><td><code>lf wave plan connect</code>; the link is <code>projects.external_project_id</code>, nothing else.</td></tr>
+<tr><td><span class="mark yes">yes</span></td><td>Retry a failed send with <code>lf wave sync</code>.</td><td><code>refresh_status</code> routes by <code>queued_tracker</code> (slice 9), Linear or Asana.</td></tr>
+<tr><td><span class="mark yes">yes</span></td><td>Upgrade without losing queued work.</td><td><code>remove_chapters.sql</code> translates dropped-to-kept destinations in queued creates and <code>task_project</code> edits (slice 8).</td></tr>
+<tr><td><span class="mark part">staged</span></td><td>"Exactly one" is a rule the store enforces.</td><td>Reads enforce it today; the unique index waits for released writers to exit (LOO-1089, filed, unstarted).</td></tr>
+<tr><td><span class="mark no">no</span></td><td>Any Machine can bring a Wave's Project into the tracker.</td><td><code>uncreated</code> skips a Project another Machine stamped. After upgrade, a kept Project from another Machine gets no create here, and this Machine's translated Task creates wait on it.</td></tr>
+</table></div>
 
-<h2>What the previous pass established</h2>
-<p>Slice 7 set out to make removal release the tracker Project for reuse and keep earlier edits from renaming a newly linked Project. Its simulated-Linear checks recorded one winner from concurrent connects and zero stray Project creates or renames. QA also removed an offline Wave and read its completed Task after its queued work retired. These results cover the earlier recommendation. Successful reconnect against live Linear was outside that QA run.</p>
-<p><strong>Counterexamples to keep.</strong> A lost reply may mean a tracker already created T under November. Recovery must recognize that same issue before any retry that could duplicate or move it. A pending move to a different, surviving Wave still names its intended destination. On removal, a completed Task that never reached the tracker and whose retired Project has no link stays local. Running sync must respect all three.</p>
-<p>Reading every create’s fields at send time would change the meaning of other queued edits and lost replies. That broader queue redesign would require a separate decision about baselines and action order. The two repairs here can use the existing queue and its stored identities.</p>
+<div class="callout">
+<p><strong>Biggest mismatch, and it is larger than this Task.</strong> The model says a Wave's Project is one record whoever holds it, keyed by a UUID every Machine agrees on. The tracker queue still says a Project is created by the Machine that made it. Before this branch that was true by construction; the upgrade's "keep one" makes a Machine depend on another Machine's create, which in a tracker-only repository it never hears about except through an inventory of a link it doesn't have.</p>
+<p>Released lf has the same gap for Tasks put in another Machine's Project; the migration widens it to Tasks it moved there. QA run 8 found it on a constructed two-Machine store, not the real one.</p>
+</div>
+
+<div class="cols">
+<div class="panel"><h3>Existing</h3>
+<pre><code>uncreated: Project p
+  unless plan_stamps(p, project_wave)
+         from another Machine</code></pre>
+<p>Asana creates have no client identity, so two Machines sending would make two Asana projects. The stamp rule prevents that.</p></div>
+<div class="panel proposed"><h3>What it would take <span class="tag prop">proposed, not here</span></h3>
+<pre><code>uncreated: any unbound Project of a live Wave
+create carries the Project's UUID
+duplicate-id reply → look up by UUID, bind</code></pre>
+<p>Linear accepts a client <code>id</code>, so a second Machine's create meets the first one's Project. That needs a duplicate-id reply handled as a lost-reply lookup, and Asana needs its footer identity searched before creating. A drain change with its own tests; it belongs beside the queued-create snapshot question.</p></div>
+</div>
+
+<h2>Recommendation</h2>
+<p>Nothing in the concept needs to change before gate. The branch's model and the code agree in every place a person meets it; the one disagreement is in multi-Machine tracker delivery and predates the branch. Advance to gate, with the gap written in the PR body and <code>scratch/questions.md</code>.</p>
 
 <h2>Questions for review</h2>
 <ol class="q">
-<li>Where should an unsent create in an older chapter go after upgrade?
-<ol><li><span class="rec">Use the kept Project in the same Wave (chosen).</span> Keep the Task and its pending delivery.</li><li>Create a Team issue outside the Wave. A later import could move the work out of its Wave.</li></ol></li>
-<li>What should explicit Wave sync do when the Project create is pending?
-<ol><li><span class="rec">Attempt it on the configured tracker and show the result (chosen).</span></li><li>Show local status and require another command to send it. This would change the recovery promised by connect.</li></ol></li>
+<li>Who creates a Wave's Project in the tracker when another Machine made the record?
+<ol><li><span class="rec">Leave as released lf does; a follow-up Task makes creates idempotent by Project UUID (chosen for this branch).</span></li><li>Fix it here: let <code>uncreated</code> create any unbound Project and handle duplicate-id replies.</li><li>Have the migration keep a Project this Machine will create. Machines could then keep different Projects for one Wave.</li></ol></li>
+<li>A queued create's field snapshot (open since slice 3).
+<ol><li><span class="rec">Stays as built.</span></li><li>Read fields at send time, as a tracker-drain redesign Task.</li></ol></li>
 </ol>
 </main></body></html>

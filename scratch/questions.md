@@ -80,3 +80,6 @@
   carry its UUID), or have the migration keep a Project this Machine will
   create. Released lf had the same gap for Tasks it put in another Machine's
   Project; the migration widens it to Tasks it moves there.
+- Concept review after slices 8–10 chose to leave the QA run 8 gap (a kept
+  Project from another Machine gets no create here) as released lf does and
+  name it in the PR body; page question 1.

@@ -487,6 +487,17 @@ chapter to clear updates that column.
    in CI, and check the `oauth_tests` contention failure on the base.
 2. Open, not this Task: a queued create's field snapshot (`scratch/concept-review.html`
    discussion of create snapshots).
+3. Open, not this Task (concept review after slices 8–10): `uncreated` skips a
+   Project another Machine stamped, so after upgrade a kept Project from
+   another Machine gets no create here (QA run 8, `scratch/questions.md`).
+   Released lf has the same gap. Chosen for review: leave it as released lf
+   does; the fix is a drain change (any Machine creates an unbound Project by
+   its UUID; a duplicate-id reply becomes a lost-reply lookup; Asana searches
+   its footer identity first). Name the gap in the PR body.
+
+Concept review after slices 8–10 (`scratch/concept-review.html`): product and
+code concepts line up everywhere a person meets them; the unique index is
+staged under LOO-1089. Nothing in the plan changes before gate.
 
 ## Slice 10 (staging the one-Project index, 2026-11-23)
 

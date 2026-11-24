@@ -395,9 +395,17 @@ final class SessionsWorkspace {
         return files
     }
 
-    /// Resolve Files from its content: the Task and the checkout it was read
-    /// in. A newer reading moves the retained store there with its drafts.
-    func files(for content: PaneContent, task: RoadmapTask?, query: RegistryQuery) throws -> TaskFilesStore {
+    /// Where a browser's Files reads: the Machine (nil for this Mac), its name
+    /// and the checkout there; an empty checkout keeps the one already read.
+    struct FilesPlace: Equatable {
+        let taskId: String
+        let machine: String?
+        let label: String?
+        let cwd: String
+    }
+
+    /// Place Files from its content: the Task and the checkout it was read in.
+    func filesPlace(for content: PaneContent, task: RoadmapTask?) throws -> FilesPlace {
         guard case .browser(let taskId, _, _, let location) = content else {
             throw RegistryQueryError("The addressed pane is not the browser.")
         }
@@ -413,14 +421,28 @@ final class SessionsWorkspace {
             if task?.lifecycle == .unstarted { throw TaskNotStarted() }
             throw RegistryQueryError("Where this Task runs is not known yet; open its conversation.")
         }
-        let cwd = (place?.machineId == machine ? place?.worktree : nil) ?? ""
-        let remote = machine == localMachineId ? nil : machine
-        let label = owner == machine ? task?.runtime?.owner?.machine.label : nil
+        return FilesPlace(taskId: task?.runtime?.workId ?? taskId,
+                          machine: machine == localMachineId ? nil : machine,
+                          label: owner == machine ? task?.runtime?.owner?.machine.label : nil,
+                          cwd: (place?.machineId == machine ? place?.worktree : nil) ?? "")
+    }
+
+    /// The Task's Files store. `follow` moves a retained store to this content's
+    /// place; a view body passes false and follows from `onChange`, because two
+    /// windows reading the Task differently would otherwise move it on every render.
+    func files(for content: PaneContent, task: RoadmapTask?, query: RegistryQuery,
+               follow: Bool = true) throws -> TaskFilesStore {
+        let place = try filesPlace(for: content, task: task)
         if let retained = taskFiles {
-            retained.relocate(machine: remote, label: label, cwd: cwd.isEmpty ? retained.cwd : cwd)
+            if follow { self.follow(place) }
             return retained
         }
-        return files(issue: task?.runtime?.workId ?? taskId, cwd: cwd, machine: remote, machineLabel: label, query: query)
+        return files(issue: place.taskId, cwd: place.cwd, machine: place.machine, machineLabel: place.label, query: query)
+    }
+
+    func follow(_ place: FilesPlace) {
+        guard let retained = taskFiles else { return }
+        retained.relocate(machine: place.machine, label: place.label, cwd: place.cwd.isEmpty ? retained.cwd : place.cwd)
     }
     let surfaces: GhosttySurfacePool
     let pages = BrowserPages()
@@ -1176,6 +1198,14 @@ final class SessionsStore {
         surfaces.associateProgramStatus(sessions.map(\.record))
     }
 
+    /// This Mac's server knows a Session born on another Machine only through
+    /// its Task, so a repository-wide store names it for those.
+    private func preparationWork(_ record: SessionRecord) -> WorkReference? {
+        guard work == nil, let local = localMachineId, let machine = record.workspace?.machineId, machine != local,
+              let task = record.taskIds.first else { return work }
+        return WorkReference(kind: .task, id: task)
+    }
+
     private func prepare(_ id: String) async {
         guard let index = _index(id) else { return }
         switch sessions[index].state {
@@ -1188,7 +1218,7 @@ final class SessionsStore {
         let generation = sessions[index].launchId
         do {
             Perf.agentInput("connect_prepare_begin", session: id)
-            let surface = try await query.prepareSession(id: id, work: work, cwd: repoPath)
+            let surface = try await query.prepareSession(id: id, work: preparationWork(sessions[index].record), cwd: repoPath)
             try Task.checkCancellation()
             Perf.agentInput("connect_prepare_returned", session: id)
             guard let latest = _index(id), sessions[latest].launchId == generation else { return }
@@ -1282,7 +1312,7 @@ final class SessionsStore {
         let previous = sessions[index]
         // Preparation checks the requested provider's continuation before releasing
         // the retained terminal. Failed reads leave current drafts and updates intact.
-        let prepared = try await query.prepareSession(id: id, work: work, agent: agent, cwd: repoPath)
+        let prepared = try await query.prepareSession(id: id, work: preparationWork(previous.record), agent: agent, cwd: repoPath)
         guard let current = _index(id) else { throw RegistryQueryError("Session is unavailable.") }
         if let terminal = localTerminal(for: previous.record) { surfaces.release(terminal) }
         sessions[current].record = prepared
@@ -1506,8 +1536,14 @@ struct SessionsContentView: View {
     }
     private func title(for key: WorkWorkspaceKey) -> String { model.workspaceTitle(key) }
     private var workspace: SessionsWorkspace {
-        workspaces.workspace(for: currentKey, title: title(for: currentKey),
-            location: currentKey.kind == .task ? taskIdentity : rootIdentity)
+        workspaces.workspace(for: currentKey, title: title(for: currentKey), location: location(for: currentKey))
+    }
+    /// One reading per workspace: the getter above and `workspacePanel` both
+    /// write it during a render, so they must agree or each undoes the other.
+    private func location(for key: WorkWorkspaceKey) -> WorkspaceIdentity? {
+        guard key.kind == .task else { return rootIdentity }
+        if let task = model.task(id: key.id) { return model.taskWorkspaceIdentity(task.task) }
+        return key == currentKey ? taskIdentity : nil
     }
     @Bindable var model: WorkModel
     private let workspaces: SessionsWorkspaceRegistry
@@ -1706,9 +1742,7 @@ struct SessionsContentView: View {
 
     private func workspacePanel(_ key: WorkWorkspaceKey) -> some View {
         let task = key.kind == .task ? model.task(id: key.id) : nil
-        let location = task.flatMap { model.taskWorkspaceIdentity($0.task) }
-        let entry = workspaces.workspace(for: key, title: title(for: key),
-            location: key.kind == .task ? location : rootIdentity)
+        let entry = workspaces.workspace(for: key, title: title(for: key), location: location(for: key))
         let active = currentKey == key
         let terminals = showsTerminals(key, task?.task, entry)
         return VStack(spacing: 0) {

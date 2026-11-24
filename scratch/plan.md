@@ -214,7 +214,7 @@ Build thinly end to end in four slices; each slice runs and proves itself before
 
 ## Remaining before merge
 
-- QA on the Dev build: move an open Task laptop → mini (Session reattaches on mini, Browser strip shows no laptop path) and **New conversation** on a mini-owned Task (shell on mini, no Mac checkout).
+- **New conversation** on a mini-owned Task (shell on mini, no Mac checkout) is still unchecked by hand: the hook cannot open the "…" menu or the ⌘/ popover while the screen is locked (`scratch/qa.html`). The move laptop → mini passed on the Dev build after three fixes.
 - Gate: the four acceptance commands below, then CI.
 
 ## Acceptance check at gate

@@ -84,3 +84,30 @@ see SwiftUI buttons (`press Retry` answers "not found"), so a `click` on
 Retry cannot be confirmed except by the next snap. Quit with `osascript -e
 'quit app id "<bundle id>"'`, `lsregister -u` and delete the bundle, then
 remove `QAHook.swift` and its `LoopflowApp.swift` line.
+
+# Desktop panes across a move (Slice 6 run)
+
+- Launch the bundle without a URL (`open -n -g --env … "$APP"`), then
+  `open -g -b <bundle id> 'loopflow://repo/task/<id>'`. A URL passed to the
+  first `open -n` went to `/Applications/Loopflow.app`, which started with the
+  private `LF_HOME`; stop that one by PID.
+- A pane is ready for input only when `lf desktop state --json` shows its
+  `attachment: "usable"`; `desktop send` refuses while it says `opening`.
+  `desktop send` never submits: follow it with `desktop send-key -p session enter`.
+- To see what a bridged relay tells Desktop, bind a Unix listener in a short
+  `/tmp` path and run `lf open --task <id> --session <sid> --here` in a PTY with
+  `LF_SERVER_STATUS` pointing at it: a working relay writes `connected`, then
+  `native_ready: true`. Kill a PTY relay with care: it takes the viewer from
+  Desktop.
+- Relaunching without `defaults delete` restores a second window stuck on
+  "Updating…" that shares the repository's workspaces. Keep it for a move: it
+  is how two windows reading a Task differently show up. A crash leaves no
+  `.ips`; `/usr/bin/log show --predicate 'processID == <pid>'` (zsh's `log` is a
+  builtin) has the DisplayCycle stack, and `sample <pid> 3` shows a spin.
+- The Session header's `plus.bubble` is **Reset session**, not New conversation.
+  New conversation lives in the "…" menu and the ⌘/ Task actions popover; the
+  hook reaches neither while locked. A link to an unstarted mini Task starts
+  its conversation on mini, so the Not started page with **New session** is gone
+  by the time the window draws.
+- A Session with no viewer ends after two minutes (idle owners); its pane then
+  says "Session ended." Refresh or focus reopens it on mini.

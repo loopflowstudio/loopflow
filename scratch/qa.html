@@ -1,6 +1,6 @@
 <!doctype html>
-<meta charset="utf-8">
-<title>LOO-1083 QA · Slice 5 on two Machines</title>
+<html lang="en"><head><meta charset="utf-8">
+<title>LOO-1083 QA · Slice 6 on the Dev build</title>
 <style>
 body{font:15px/1.5 -apple-system,system-ui,sans-serif;max-width:980px;margin:2rem auto;padding:0 1rem;color:#222}
 h1{font-size:1.5rem}h2{margin-top:2.2rem;border-bottom:1px solid #ddd}
@@ -8,59 +8,59 @@ pre{background:#f5f5f5;padding:.7rem;overflow:auto;font-size:13px;white-space:pr
 img{max-width:100%;border:1px solid #ccc;margin:.4rem 0}
 table{border-collapse:collapse;width:100%}td,th{border:1px solid #ddd;padding:.35rem .5rem;vertical-align:top;text-align:left}
 .ok{color:#16702e}.fix{color:#8a4b00}.open{color:#a01818}
-</style>
-<h1>LOO-1083 QA: Slice 5 on two Machines (2026-11-24, second run)</h1>
-<p>Laptop and mini as two private homes on this Mac, mini reached through a stand-in <code>ssh</code>, each running the branch <code>lf server run</code>. Set up with the CLI only (<code>machine add</code>, <code>task create</code>, <code>task move --machine mini</code>, <code>--machine mini task checkout</code>). Then the branch CLI in a PTY, the laptop's socket, and an isolated Dev bundle of Desktop with the QA hook (screen locked). Recipe: <code>.lf/qa/remote-task-workspace.md</code>. The first run's report is in git history (<code>e348359e59:scratch/qa.html</code>).</p>
+</style></head><body>
+<h1>LOO-1083 QA: Slice 6 on the Dev build (2026-11-24)</h1>
+<p>Laptop and mini as two private homes on this Mac, mini reached through a stand-in <code>ssh</code>, each running the branch <code>lf server run</code>. An isolated Dev bundle of Desktop with the QA hook, screen locked, on the laptop's home. Stand-in <code>claude</code> on each Machine prints where it runs and echoes lines read from its tty. Recipe: <code>.lf/qa/remote-task-workspace.md</code>. Earlier runs' reports are in git history (<code>44e0611b51:scratch/qa.html</code>).</p>
 
 <h2>Scenarios</h2>
 <table>
 <tr><th>Scenario</th><th>What I did</th><th>What I saw</th></tr>
-<tr><td>Unstarted Task on mini, then checkout</td><td><code>task.files.watch</code> + <code>task.files</code> on the laptop socket; then <code>lf --machine mini task checkout</code>; then an edit on mini</td><td><code>task.files</code>: <code>not_found {reason: not_started}</code>. The watch read <code>{checkout: null, machine_label: "mini"}</code> and went live under its id. <span class="fix">But between the two it published <code>unavailable: "mini is unavailable: io error: No such file or directory (os error 2); check `ssh mini lf server status`"</code>.</span> Mini writes the <code>task_checkouts</code> row ~100 ms before Git makes the directory (sampled: <code>row=… dir=no</code>, then <code>dir=yes</code>). Fixed: the watch treats a recorded checkout without <code>.git</code> as not yet arrived; its <code>CheckoutReady</code> event is the next planning write. After: null → mini's checkout, no outage frame.</td></tr>
-<tr><td><code>lf open --task -a claude</code>, owner with no <code>default_agent</code></td><td>PTY, typed <code>hello</code></td><td class="ok"><code>provider on mini in …/origin.64c080-fix-the-remote</code>, <code>mini received hello</code>. (First QA's #1 is gone.)</td></tr>
-<tr><td>Detach from a bridged Session</td><td><code>Ctrl+]</code></td><td class="ok"><code>Detached from “64c080 Fix the remote notes”; it keeps running. Return with: lf open --task task_64c0…</code></td></tr>
-<tr><td>Leave (provider exits)</td><td>typed <code>quit</code></td><td><span class="fix">Before: <code>Left “64c080 …”. Continue with: lf resume c7ae330b…</code>, which fails on the laptop.</span> The compress step dropped the output-byte rewrite: the owner's leave line is terminal output, not a Return event. Restored, with a unit test. After: <code>Continue with: lf open --task task_64c0…</code>.</td></tr>
-<tr><td>Machine-only Session, both flag orders</td><td><code>lf open --machine mini --session &lt;sid&gt; --here</code>, <code>lf --machine mini open …</code></td><td class="ok">Input answered; detach and leave lines both say <code>lf open --machine home_1b89… --session c7ae…</code> (the Machine id, by design, so a rename keeps it working).</td></tr>
-<tr><td>Shell on mini</td><td><code>lf desktop shell &lt;task&gt; --id qa-shell --create -- /bin/sh -c 'hostname; pwd; echo HOME=$HOME'</code></td><td class="ok"><code>/private/tmp/lfq83/w/remote/src/origin.64c080-…</code>, <code>HOME=/tmp/lfq83/w/remote</code>.</td></tr>
-<tr><td>Unstarted Task, CLI</td><td><code>lf task files</code>, <code>lf desktop shell</code></td><td class="ok"><code>Error: Task task_8e90… is not started</code>, once each.</td></tr>
-<tr><td>Mini unreachable, then back</td><td><code>touch bin/ssh.offline</code>; <code>lf task files|changes</code>; remove it</td><td class="ok">One line naming mini and the ssh check (0.17 s). After: <code>unstaged notes.txt</code>, mini's bytes; the laptop clone untouched.</td></tr>
-<tr><td>Desktop: move with Files open</td><td>Laptop Task with a checkout and a prepared Session, Files on <code>notes.txt</code> (laptop's copy edited “STALE bytes on laptop”); <code>lf task move --machine mini</code>; edit on mini</td><td class="ok">Files re-read on its own: <code>mini origin.dc5441-move-me-with</code>, “edited on mini after move”. Row went from “Blocked · Task has uncommitted work” to “Idle”.</td></tr>
-<tr><td>Desktop: Session pane after the move</td><td>Snapshot; then <code>lf --task … desktop focus -p session</code></td><td><span class="open">Before a visit the pane says <b>Session location unavailable</b>, and its strip still names the laptop checkout <code>repo.dc5441-move-me-with</code>.</span> After the visit it attaches on mini (<code>desktop capture</code>: <code>provider on mini in …/origin.dc5441-…</code>). Desktop's Session reading for it offers <i>Open here</i> with help “lf resume b3bc…”, a command that fails on the laptop.</td></tr>
-<tr><td>Desktop: Diff chip</td><td><code>desktop do details page=diff</code></td><td class="ok">“No pull request yet. Changes below are on mini.” (was “local”).</td></tr>
-<tr><td>Desktop: laptop server restart with Files open</td><td>Kill and restart the laptop server; 35 s later edit on mini</td><td class="ok">During: “Live file observation unavailable … Retry”, row “Last known”. After: the new bytes, no error, row “Idle”, with no click. (First QA's #2 is gone.)</td></tr>
+<tr><td>Move an open Task laptop → mini</td><td>Laptop Task with a running Session, shown in Desktop (pane <code>usable</code>, laptop provider). <code>lf task move … --machine mini</code>, no visit.</td>
+<td class="ok">Strip and Files switched to <code>origin.d1d217-move-me-with</code> on mini; no "Session location unavailable"; the pane showed <code>provider on mini in …</code>. (First run, before fixes: see the three rows below.)</td></tr>
+<tr><td>Type into the moved pane</td><td><code>desktop send -p session</code></td>
+<td class="fix">Before: pane stuck at <code>attachment: opening</code>, input refused ("Session input is paused or held by another viewer"); same for a Task that was on mini from the start. A local Session reached <code>usable</code>. Cause: <code>transport::relay_socket</code>, the viewer for a ticket bridged to another Machine, passed no <code>connection::Status</code>, so Desktop never got a <code>connected</code>/<code>native_ready</code> reading. After: <code>usable</code>; mini printed <code>mini received after the move</code>.</td></tr>
+<tr><td>Close and reopen a pane whose Session was born on mini</td><td><code>desktop close -p session</code>, then <code>focus</code></td>
+<td class="fix">Before: pane <code>failed</code>; the laptop server logged <code>session.resume {id, task: null}</code> → "Session 55a57e… was not found", and the Task fell back to its Not started page. Desktop's shared repository store prepared by bare id. After: the store names the Session's Task when the record is on another Machine; reopened <code>usable</code>, input reached mini, no "not found".</td></tr>
+<tr><td>Move with a second window on the same repository</td><td>Relaunch restored a stale window ("Updating…") beside the live one; move a Task shown in both</td>
+<td class="fix">Before, run 1: Desktop died at the move (AppKit DisplayCycle loop). Stack: <code>SessionPaneView.browserTabs</code> → <code>SessionsWorkspace.files(for:)</code> → <code>TaskFilesStore.relocate</code> during render; the two windows read the Task differently and moved the shared store back and forth. Run 2, after moving that relocation to <code>onChange</code>: main thread spun at 86% CPU until the app died; <code>sample</code> showed the <code>workspace</code> getter and <code>workspacePanel</code> both writing <code>SessionsWorkspace.location</code> during render from different readings. After both fixes: move completes, CPU 0.2%, pane <code>usable</code> on mini, input reaches mini.</td></tr>
+<tr><td>Files after the move</td><td><code>desktop do files path=notes.txt</code></td><td class="ok">Header <code>mini origin.341d8f-fourth-move</code>.</td></tr>
+<tr><td>Diff chip on a mini Task</td><td>Brief on Talk on mini</td><td class="ok">"No pull request yet. Changes below are on mini."</td></tr>
+<tr><td>New conversation on a mini-owned Task</td><td>Tried the Session header icon, the ⌘/ popover, a fresh unstarted mini Task</td>
+<td class="open">Not reached. The header's <code>plus.bubble</code> is Reset session (two clicks on Talk on mini; no reset request reached the server). New conversation sits in the "…" menu and the ⌘/ popover, which the locked-screen hook cannot open; the ⌘/ key went to the stale window. A link to an unstarted mini Task starts its conversation on mini first, so the Not started page's New session button was never on screen.</td></tr>
 </table>
 
 <h2>Screens</h2>
-<p>Local Files before the move, then the same pane after it (Files on mini; Session pane not yet visited):</p>
-<img src="qa/s5-f5a.png"><img src="qa/s5-f5b.png">
-<p>Diff chip names mini:</p><img src="qa/s5-d5.png">
-<p>Laptop server down, then recovered with mini's new edit (the terminal area is Ghostty drawn through <code>cacheDisplay</code> while locked; not a judgment of the pane):</p>
-<img src="qa/s5-r1.png"><img src="qa/s5-r2.png">
+<p>Moved Task, no visit: strip names mini's checkout (<code>origin.d1d217-move-me-with</code>), Files says mini. The terminal draws blank through <code>cacheDisplay</code> while locked; <code>desktop capture</code> read <code>provider on mini in …</code>.</p>
+<img src="qa/s6-moved-strip.png" alt="Moved Task strip naming mini's checkout">
+<p>The final build after a move with two windows open:</p>
+<img src="qa/s6-final-move.png" alt="Final move on mini">
+<p>The stale restored window that shares workspaces with the live one (the second reader in the render loops):</p>
+<img src="qa/s6-stale-window.png" alt="Stale Updating window">
+<p>Brief on a mini Task:</p>
+<img src="qa/s6-mini-brief.png" alt="Brief says changes are on mini">
 
 <h2>Fixed in this run</h2>
 <ul>
-<li><code>TaskFilesWatch</code> waits for <code>.git</code> before watching a recorded checkout (<code>ops/task/workspace.rs</code>), so a Task's checkout arriving on mini never reads as “mini is unavailable”.</li>
-<li><code>ReturnCommand::rewrite_bytes</code> rewrites the owner's leave line in terminal output again (<code>transport.rs</code>), with <code>transport::tests::a_remote_leave_line_names_this_machines_command</code>.</li>
+<li><code>transport::relay_socket</code> reports to Desktop through <code>connection::Status</code>; <code>view</code> decides reconnecting by whether it knows the held terminal (<code>id</code>), not by having a route. Test: <code>open_remote_workspace</code> now opens a bridged <code>--here</code> relay with <code>LF_SERVER_STATUS</code> and waits for <code>connected</code> + <code>native_ready</code>; it fails at that check without the fix.</li>
+<li><code>SessionsStore.preparationWork</code>: a repository-wide store names the Session's Task when the record is on another Machine (only once this Mac's ID is known), for prepare and provider switch.</li>
+<li><code>SessionsWorkspace.filesPlace</code> / <code>follow</code>: view bodies read Files with <code>follow: false</code>; <code>browserTabs</code> follows its window's reading with <code>onChange</code>.</li>
+<li><code>SessionsContentView.location(for:)</code>: the <code>workspace</code> getter and <code>workspacePanel</code> compute one location per workspace.</li>
 </ul>
 
 <h2>Checks</h2>
-<pre>cargo test -p loopflow-execution --lib transport::tests::a_remote_leave_line   ok (new)
-cargo test -p loopflow --test integration machine_commands::server_routed_task_workspace   ok, 36.6 s
-cargo test -p loopflow --test integration open_remote_workspace   ok, 17.1 s
-cargo clippy -p loopflow-execution --all-targets -- -D warnings   clean; cargo fmt
-Desktop/iOS RemoteTaskWorkspaceTests: not rerun (no Swift change); gate runs them.</pre>
+<pre>cargo test -p loopflow --test integration machine_commands::open_remote_workspace   ok, 13.8 s (fails without the transport fix, 46 s)
+cargo clippy -p loopflow-execution -p loopflow --all-targets -- -D warnings   clean; cargo fmt
+scripts/test_desktop.sh --filter 'RemoteTaskWorkspaceTests|TaskFilesTests|WorkspacePanesTests|SessionsStoreTests|WarmPaneMountTests'   107 passed
+  (first run 16 issues: preparationWork treated every Session as remote while localMachineId was unset; fixed)
+Dev build: move laptop → mini with two windows; close/reopen a mini-born Session; input reaches mini in both</pre>
 
 <h2>Still wrong, worst first</h2>
-<ol>
-<li class="open">Desktop Session pane after its Task (and Session) moves: “Session location unavailable” and the old checkout in the strip until a deliberate visit. <code>WorkspacePanesView._terminal</code> compares the pane's saved location with the Session record's, and nothing updates the pane, because the unscoped local Session list no longer has the moved Session. Seen only with the screen locked; whether a click on the pane counts as the visit there is unchecked.</li>
-<li class="open">Desktop's <i>Open here</i> help for a Session on mini says <code>lf resume &lt;id&gt;</code>, which fails on the laptop (same class as the leave line).</li>
-<li>Routed reads lag an edit on mini by a few seconds (mini's Git observation). Unchanged.</li>
-<li>Skewed peer: “mini did not answer within 10s” loses mini's own reason. Unchanged.</li>
-</ol>
-
-<h2>Not reached</h2>
 <ul>
-<li>Typing into the Desktop Session pane: with the screen locked, <code>desktop send</code> answered “Session input is paused or held by another viewer”.</li>
-<li>Mobile: no Simulator or phone run; iOS <code>RemoteTaskWorkspaceTests</code> are gate's.</li>
-<li>Switching harness on a running remote Session (needs a second harness stand-in on mini).</li>
-<li>A real second Machine or Modal rental.</li>
+<li class="open">New conversation on a mini-owned Task is unchecked on the Dev build (see above). Needs an unlocked display, or a <code>desktop do</code> action for it.</li>
+<li class="open">The bridged-viewer status bug went unseen by Desktop's <code>RemoteTaskWorkspaceTests</code> ("Session input ack" passed before the fix); that fixture does not exercise the pane's <code>LF_SERVER_STATUS</code> gate.</li>
+<li class="open">Reset session on a remote Session: the provider on mini exited 1 around the second click, mini's recovery restarted it, and the pane kept "command exited with status 1; retry with lf open --task … --session …" until refreshed. No reset request appeared in the laptop server log, so what the click did is unclear. Outside this slice.</li>
+<li class="open">With the stale second window present, the live window's sidebar kept highlighting "Third move" while the panes showed other Tasks, and a moved Task's row sometimes read "Open Task is outside this list". Known two-window behavior (desktop.md); cosmetic here.</li>
+<li class="open">During the third move the laptop server logged <code>unavailable: failed to run git rev-parse --verify 6e2f466…^{commit}: No such file or directory</code> once; a read hit the moved checkout's old directory. It did not recur after the fixes.</li>
+<li class="open">The Files tab row sometimes shows a second "Files…" title beside the Files tab after a move (see final screenshot).</li>
 </ul>
+</body></html>

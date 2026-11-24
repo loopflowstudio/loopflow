@@ -4471,6 +4471,37 @@ echo %local-tab
         assert!(!text.contains("lf resume"), "{text}");
         fs::remove_file(local.join("tab-closed")).unwrap();
     }
+
+    // A Desktop pane on mini's terminal reads its readiness from the bridged
+    // viewer, as it does from a local one; without it the pane takes no input.
+    let short = tempfile::tempdir_in("/tmp").unwrap();
+    let status = short.path().join("status.sock");
+    let listener = std::os::unix::net::UnixListener::bind(&status).unwrap();
+    let (ready, readings) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        use std::io::BufRead as _;
+        let (stream, _) = listener.accept().unwrap();
+        for line in std::io::BufReader::new(stream).lines() {
+            let reading: Value = serde_json::from_str(&line.unwrap()).unwrap();
+            let usable = reading["state"] == "connected" && reading["native_ready"] == true;
+            if usable && ready.send(reading).is_err() {
+                return;
+            }
+        }
+    });
+    let mut pane = fixture
+        .command(&["open", "--task", task.as_str(), "--here"])
+        .current_dir(&plan.local_path)
+        .env("LF_SERVER_STATUS", &status)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let reading = readings.recv_timeout(std::time::Duration::from_secs(30));
+    pane.kill().unwrap();
+    pane.wait().unwrap();
+    reading.expect("the bridged viewer reports a connected, ready terminal");
 }
 
 #[test]

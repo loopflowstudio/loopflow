@@ -1721,10 +1721,16 @@ pub fn relay_socket(socket: UnixStream, returns: Option<&ReturnCommand>) -> Resu
     if std::env::var_os(STREAM_ENV).is_some() {
         return stream::bridge_socket(socket);
     }
+    // A Desktop pane on a terminal of another Machine reads its readiness
+    // here, as it does from a local viewer; only the reconnect route differs.
     view(
         stream::Stream::socket(socket)?,
         None,
-        None,
+        Some(RelayRoute {
+            session: None,
+            status: connection::Status::from_env(),
+            recovering: false,
+        }),
         None,
         COMMAND_ATTACH_TIMEOUT,
         &mut RelayInput::new(initial_focus(false)),
@@ -1820,8 +1826,9 @@ pub fn relay_over(argv: &[String], unfocused: bool) -> Result<()> {
     result
 }
 
-/// A viewer of one known held terminal, which reconnects through the server.
-/// Command pipes (including SSH) have no local route to reconnect.
+/// How a viewer reports to Desktop and recovers. Only a known held terminal
+/// reconnects through the server; a redeemed ticket and a command pipe
+/// (including SSH) have no local route back.
 struct RelayRoute<'a> {
     session: Option<&'a LfSessionId>,
     status: Option<connection::Status>,
@@ -1844,7 +1851,7 @@ fn view(
     input: &mut RelayInput,
     returns: Option<&ReturnCommand>,
 ) -> Result<()> {
-    let server = route.is_some();
+    let server = id.is_some();
     let (session, mut status, mut recovering) = match route {
         Some(route) => (route.session, route.status, route.recovering),
         None => (None, None, false),

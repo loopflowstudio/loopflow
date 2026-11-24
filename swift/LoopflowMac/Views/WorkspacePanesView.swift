@@ -740,7 +740,7 @@ struct SessionPaneView: View {
     @ViewBuilder private var browserTabs: some View {
         if case .browser(let taskId, let tabs, let selected, _) = pane.content {
             let task = model.task(id: taskId)?.task
-            let files = try? workspace.files(for: pane.content, task: task, query: sessions.query)
+            let files = try? workspace.files(for: pane.content, task: task, query: sessions.query, follow: false)
             ScrollView(.horizontal) {
                 HStack(spacing: Spacing.xs) {
                     if let files {
@@ -762,6 +762,10 @@ struct SessionPaneView: View {
                 }.buttonStyle(.plain).font(Typography.meta)
             }.fixedSize(horizontal: false, vertical: true)
             .help("Brief ⌥⌘1 · Diff ⌥⌘2 · Files ⌥⌘3")
+            // Files follows this window's reading of the Task when it changes.
+            .onChange(of: try? workspace.filesPlace(for: pane.content, task: task), initial: true) { _, place in
+                if let place { workspace.follow(place) }
+            }
         }
     }
 
@@ -845,7 +849,7 @@ struct SessionPaneView: View {
                         .simultaneousGesture(TapGesture().onEnded { focusPane() })
                 case .files, .changes:
                     let task = model.task(id: taskId)?.task
-                    switch Result(catching: { try workspace.files(for: pane.content, task: task, query: sessions.query) }) {
+                    switch Result(catching: { try workspace.files(for: pane.content, task: task, query: sessions.query, follow: false) }) {
                     case .success(let files) where files.notStarted:
                         EmptyState(title: "Not started", sentence: "This Task has no checkout on its Machine yet.") {
                             Button("Retry") { Task { await files.retry() } }

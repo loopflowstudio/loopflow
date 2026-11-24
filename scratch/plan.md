@@ -198,6 +198,7 @@ without a local claim.
 - Branch CLI build, six focused execution tests, the hub-only server test, four documented-command checks, `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings` passed. CI covers the full matrix.
 
 ### Slice 2: Honest `lf steer <task>` routing and `TaskSteerReceipt` (next)
+- Rename `linear_team_checks` (and `linear_team_current`, `team_id`) for what it now holds: Linear teams, `asana:<team>/<project>` and `plan:<repo>` scopes. This Task's migration does the rename and carries a `-- leaving:` mark if the column goes. Asana and carrier rows are written to the table already (`rust/loopflow-storage/src/sqlite/linear_team_checks.rs`).
 - Define `TaskSteerReceipt { identifier, steer_id, delivery }` and `SteerDelivery { reached: SteerReached (owner | tracker | here), runs_on: Option<MachineRef>, sentence }` with strict required/nullable wire fields and the single Rust-authored `sentence`.
 - Generalize `steer_reader` (`commands/session.rs:142`) from one Session to a Task (its live workers, its conversation, or nothing) and move it beside `engine::session::steer`, so Session and Task steers word their reader the same way and the owner's server can author it.
 - Wire `Write::TaskSteer` into `Write::remote()` (bounded 15 s SSH timeout) with pre-admission fallback to local save + synchronous tracker/carrier sync for remote-owned Tasks (no fallback on `OutcomeUnknown`).

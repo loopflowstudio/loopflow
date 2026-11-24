@@ -221,6 +221,7 @@ Build thinly end to end in four slices; each slice runs and proves itself before
    - The same fixture imported a saved provider thread on mini, continued it by Task from the laptop, and repeated the request from the paired phone. Both connections received the same terminal ID. Its Session and Task shell showed mini’s checkout over the Unix socket and TLS WebSocket. The provider answered “received hello on mini” to input from the phone. The focused test passed in 134.53 s. `cargo fmt` and `cargo clippy --all-targets -- -D warnings` passed.
 
    **Remains in Slice 1:**
+   - `Producer::follow` (`server/subscriptions.rs`) now retries every routed `Err` as an outage, so a peer's typed refusal (`not_found`/`not_started`, `invalid`) would be relabelled `unavailable` and retried every 5 s instead of ending the subscription. Retry only when `Error::refused(&failure, ErrorCode::Unavailable).code == ErrorCode::Unavailable`; cover it with a `task.files.watch` on an unstarted Task owned by mini in `server_routed_task_workspace`.
    - Fix `waves.rs::task_reference` and `ops/task/snapshot.rs` so stale local checkouts never masquerade as active when another Machine owns the Task (§4).
    - Bump protocol to revision 10, regenerate `tests/fixtures/dto/server_schema.json`, update server fixtures and `ServerProtocol.swift` / `ServerProtocolTests.swift`.
    - Moves to Slice 3: `lf desktop shell` and `prepared_remotely` onto `task.shell.*` and `session.attach`.

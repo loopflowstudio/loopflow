@@ -51,6 +51,7 @@ public enum ServedRead: Equatable, Sendable, Encodable {
     case waveList
     case machineSelf
     case desktopPortfolio
+    case configScope(directory: String?, wave: String?, target: ConfigurationTarget)
     case configSettings(directory: String, wave: String?, skill: String?, graph: String?, step: String?)
     case graphList(directory: String)
     case desktopViewGet(directory: String, expression: String?)
@@ -61,6 +62,7 @@ public enum ServedRead: Equatable, Sendable, Encodable {
     case wavePlan(directory: String, wave: String)
     case taskList(directory: String, wave: String, after: String?)
     case machineList
+    case machineStatus(machine: String)
     case sessionHistory(since: String, limit: Int, wave: String?, project: String?, task: String?)
     case planList(directory: String, wave: String?, task: String?, all: Bool)
     case repoTracker(directory: String)
@@ -130,6 +132,8 @@ public enum ServedRead: Equatable, Sendable, Encodable {
             return ["desktop", "view", "list", "--all", "--json"] + (expression.map { ["--expression", $0] } ?? [])
         case .desktopPortfolio:
             return ["desktop", "portfolio", "--json"]
+        case .configScope(let directory, let wave, let target):
+            return ["config", "scope", "--json"] + target.arguments + (directory == nil ? ["--global"] : []) + (wave.map { ["--wave", $0] } ?? [])
         case .configSettings(_, let wave, let skill, let graph, let step):
             return ["config", "settings", "--json"] + (wave.map { ["--wave", $0] } ?? [])
                 + (skill.map { ["--skill", $0] } ?? []) + (graph.map { ["--graph", $0] } ?? [])
@@ -150,6 +154,7 @@ public enum ServedRead: Equatable, Sendable, Encodable {
             return ["wave", "plan", wave, "--json"]
         case .taskList(_, let wave, let after):
             return ["task", "list", "--closed", "--wave", wave, "--json"] + (after.map { ["--after", $0] } ?? [])
+        case .machineStatus(let machine): return ["machine", "status", machine, "--json"]
         case .machineList:
             return ["machine", "list", "--json"]
         case .sessionHistory(let since, let limit, let wave, let project, let task):
@@ -230,6 +235,7 @@ public enum ServedRead: Equatable, Sendable, Encodable {
         case .viewSelect(let expression):
             TaggedFields("view.select", ["expression": expression])
         case .desktopPortfolio: TaggedFields("desktop.portfolio")
+        case .configScope(let directory, let wave, let target): TaggedFields("config.scope", ["directory": directory, "wave": wave, "target": target])
         case .configSettings(let directory, let wave, let skill, let graph, let step):
             TaggedFields("config.settings", ["directory": directory, "wave": wave, "skill": skill, "graph": graph, "step": step])
         case .graphList(let directory): TaggedFields("graph.list", ["directory": directory])
@@ -245,6 +251,7 @@ public enum ServedRead: Equatable, Sendable, Encodable {
             TaggedFields("wave.plan", ["directory": directory, "wave": wave])
         case .taskList(let directory, let wave, let after):
             TaggedFields("task.list", ["directory": directory, "wave": wave, "after": after, "closed": true])
+        case .machineStatus(let machine): TaggedFields("machine.status", ["machine": machine])
         case .machineList: TaggedFields("machine.list")
         case .sessionHistory(let since, let limit, let wave, let project, let task):
             TaggedFields("session.history", ["since": since, "limit": limit, "wave": wave, "project": project, "task": task])
@@ -946,7 +953,7 @@ public struct RegistryQuery: Sendable {
                     }
                     continuation.onTermination = { _ in reader.cancel() }
                 }
-                return LineSubscription(lines: lines, send: subscription.send, cancel: subscription.cancel,
+                return LineSubscription(lines: lines, checkpoint: subscription.checkpoint, cancel: subscription.cancel,
                                         unreadable: subscription.unreadable)
             }
         }

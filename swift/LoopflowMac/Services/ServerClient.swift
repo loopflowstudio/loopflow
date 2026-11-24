@@ -36,8 +36,14 @@ enum ServerClient {
         return String(decoding: try await request(.submittedCreation(value), location: .shared).bytes, as: UTF8.self)
     }
 
-    static func configuration(_ operation: ConfigOperation, location: ServerLocation = .shared) async throws -> Data {
-        Data(try await request(.config(operation), location: location).bytes)
+    static func configuration(_ operation: ConfigOperation, location: ServerLocation = .shared) async throws -> RawJSON {
+        try await request(.config(operation), location: location)
+    }
+
+    static func edit(_ change: ConfigurationChange, destination: JSONValue, key: String,
+                     expected: [ConfigurationEntry], location: ServerLocation) async throws -> ConfigurationEditReceipt {
+        try await configuration(.configEdit(destination: destination, key: key, expected: expected, change: change),
+                                location: location).decode()
     }
 
     private static func request(_ operation: ServerOperation, location: ServerLocation) async throws -> RawJSON {
@@ -46,7 +52,7 @@ enum ServerClient {
         return try await link.request(operation)
     }
 
-    /// A subscription on the location's connection; `send` carries checkpoints,
+    /// A subscription on the location's connection; `checkpoint` confirms a reading,
     /// `cancel` ends it. After a reading, connection loss resumes the same stream.
     static func subscribe(_ query: ServedRead, location: ServerLocation = .shared) -> LineSubscription {
         // The newest link's sentence for a reading this build can't decode; nil before one connects.
@@ -59,48 +65,19 @@ enum ServerClient {
             guard case .reading(let frame) = update else { return nil }
             return Data(frame.bytes)
         }
-        return LineSubscription(lines: watch.updates, send: checkpoints(watch), cancel: watch.cancel,
-                                unreadable: { unreadable.withLock { $0 } })
+        return LineSubscription(lines: watch.updates, checkpoint: { id in
+            guard let number = UInt64(exactly: id) else { watch.cancel(); return }
+            watch.checkpoint(number)
+        }, cancel: watch.cancel, unreadable: { unreadable.withLock { $0 } })
     }
 
     /// Readings and occurrences share one stream so the consumer applies its
     /// baseline before events. Reconnect replaces state without replaying events.
-    static func subscribeEvents(_ query: ServedRead, location: ServerLocation = .shared) -> ServerEventSubscription {
-        let watch = ServerLink.subscribe(query, events: true, connect: { try await links.link(for: location) }) { $0 }
-        return ServerEventSubscription(updates: watch.updates, send: checkpoints(watch), cancel: watch.cancel)
-    }
-
-    /// A subscription's stdin line, `{"id": n}`: a checkpoint. A subscription's
-    /// arguments are fixed; new arguments are a new subscription.
-    private static func checkpoints<Output>(_ watch: ServerWatch<Output>) -> @Sendable (Data) -> Void {
-        { line in
-            guard let checkpoint = try? JSONDecoder().decode(SubscriptionCheckpoint.self, from: line) else {
-                watch.cancel()
-                return
-            }
-            watch.checkpoint(checkpoint.id)
-        }
+    static func subscribeEvents(_ query: ServedRead, location: ServerLocation = .shared) -> ServerWatch<ServerSubscriptionUpdate> {
+        ServerLink.subscribe(query, events: true, connect: { try await links.link(for: location) }) { $0 }
     }
 
     private static let links = ServerLinks()
-}
-
-private struct SubscriptionCheckpoint: Decodable {
-    let id: UInt64
-    init(from decoder: Decoder) throws {
-        let box = try decoder.container(keyedBy: Keys.self)
-        guard box.allKeys == [.id] else {
-            throw DecodingError.dataCorrupted(.init(codingPath: [], debugDescription: "a subscription takes only checkpoints"))
-        }
-        id = try box.decode(UInt64.self, forKey: .id)
-    }
-    private enum Keys: String, CodingKey { case id, args }
-}
-
-struct ServerEventSubscription: Sendable {
-    let updates: AsyncThrowingStream<ServerSubscriptionUpdate, any Error>
-    let send: @Sendable (Data) -> Void
-    let cancel: @Sendable () async -> Void
 }
 
 /// One live connection per server location, reopened on demand with bounded
@@ -239,7 +216,7 @@ private final class UnixSocketCarrier: ServerCarrier, @unchecked Sendable {
         var line = message
         line.append(10)
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, any Error>) in
-            writes.async { [self] in
+            writes.async { [self, line] in
                 do {
                     try Self.write(fd, line)
                     continuation.resume()

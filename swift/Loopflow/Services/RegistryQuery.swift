@@ -322,7 +322,7 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
     case sessionMove(directory: String, on: String?, agent: String)
     case waveCreate(directory: String, wave: String, objective: String?)
     case waveSync(directory: String, wave: String)
-    case wavePlanBind(directory: String, wave: String, project: String)
+    case wavePlanBind(directory: String, wave: String, project: String, replace: Bool)
     case wavePlanConnect(directory: String, wave: String?, all: Bool, teamKey: String?, teamName: String?)
     /// Without `apply`, the plan: nothing moves.
     case wavePlanReteam(directory: String, apply: Bool)
@@ -433,7 +433,7 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
                 + argument("--on", on) + ["--json"]
         case .waveCreate(_, let wave, let objective): return ["wave", "create", wave] + argument("--objective", objective) + ["--json"]
         case .waveSync(_, let wave): return ["wave", "sync", wave, "--json"]
-        case .wavePlanBind(_, let wave, let project): return ["wave", "plan", "bind", wave, project, "--json"]
+        case .wavePlanBind(_, let wave, let project, let replace): return ["wave", "plan", "bind", wave, project, "--json"] + (replace ? ["--replace"] : [])
         case .wavePlanConnect(_, let wave, let all, let teamKey, let teamName):
             return ["wave", "plan", "connect"] + [wave].compactMap { $0 } + (all ? ["--all"] : [])
                 + argument("--team-key", teamKey) + argument("--team-name", teamName) + ["--json"]
@@ -625,8 +625,8 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
             TaggedFields("wave.create", ["directory": directory, "wave": wave, "objective": objective])
         case .waveSync(let directory, let wave):
             TaggedFields("wave.sync", ["directory": directory, "wave": wave])
-        case .wavePlanBind(let directory, let wave, let project):
-            TaggedFields("wave.plan.bind", ["directory": directory, "wave": wave, "project": project])
+        case .wavePlanBind(let directory, let wave, let project, let replace):
+            TaggedFields("wave.plan.bind", ["directory": directory, "wave": wave, "project": project, "replace": replace])
         case .wavePlanConnect(let directory, let wave, let all, let teamKey, let teamName):
             TaggedFields("wave.plan.connect", ["directory": directory, "wave": wave, "all": all,
                                                    "team_key": teamKey, "team_name": teamName])

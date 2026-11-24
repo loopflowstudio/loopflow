@@ -11,12 +11,41 @@ fn project_error(message: impl ToString) -> OpsError {
     OpsError::Message(message.to_string())
 }
 
+pub(super) fn unconfigured(store: &Store, wave: &Wave) -> OpsResult<String> {
+    let projects = store
+        .sqlite
+        .list_projects(Some(wave.id()))
+        .map_err(project_error)?;
+    let choices = projects
+        .iter()
+        .map(|p| {
+            format!(
+                "{} ({}, {})",
+                p.name,
+                p.tracker_id
+                    .as_ref()
+                    .map_or(p.id.as_str(), |id| id.as_str()),
+                p.status.as_str()
+            )
+        })
+        .collect::<Vec<_>>();
+    let choices = if choices.is_empty() {
+        "none".to_owned()
+    } else {
+        choices.join(", ")
+    };
+    let name = wave.slug();
+    Ok(format!("Wave {name} has no configured Project. Available Projects: {choices}. Select one with `lf wave plan bind {name} <project-id>`."))
+}
+
 pub fn current_project(store: &Store, wave: &Wave) -> OpsResult<Project> {
-    let project = store
+    let Some(project) = store
         .sqlite
         .selected_project(wave.id())
         .map_err(project_error)?
-        .ok_or_else(|| project_error(format!("Wave {} has no configured Project", wave.slug())))?;
+    else {
+        return Err(project_error(unconfigured(store, wave)?));
+    };
     if matches!(
         project.status,
         ProjectStatus::Completed | ProjectStatus::Canceled
@@ -30,7 +59,13 @@ pub fn current_project(store: &Store, wave: &Wave) -> OpsResult<Project> {
 }
 
 /// Select an existing non-terminal Project as the Wave's current Project.
-pub async fn bind_project(repo: &Path, name: &str, project_id: &str) -> OpsResult<Project> {
+pub async fn bind_project(
+    repo: &Path,
+    name: &str,
+    project_id: &str,
+    replace: bool,
+) -> OpsResult<Project> {
+    super::linear::acquire_authored_plan(repo, Some(name)).await?;
     let store = super::planning_sync::planning_store().await?;
     let wave = crate::work::wave::context::resolve_managed_wave(
         Some(&store),
@@ -40,10 +75,17 @@ pub async fn bind_project(repo: &Path, name: &str, project_id: &str) -> OpsResul
     )
     .await
     .map_err(project_error)?;
+    let expected = if replace {
+        readiness(&store.sqlite, wave.id())
+            .map_err(project_error)?
+            .project_id
+    } else {
+        None
+    };
     let _acquisition = super::planning_sync::lock_wave_planning(&wave).await?;
     store
         .sqlite
-        .bind_project(wave.id(), project_id)
+        .bind_project(wave.id(), project_id, expected.as_deref())
         .map_err(project_error)
 }
 

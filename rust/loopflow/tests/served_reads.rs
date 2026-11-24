@@ -2452,10 +2452,14 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
             directory,
             wave,
             project,
-        } => (
-            path(directory),
-            words(&["wave", "plan", "bind", wave, project, "--json"]),
-        ),
+            replace,
+        } => {
+            let mut args = words(&["wave", "plan", "bind", wave, project, "--json"]);
+            if *replace {
+                args.push("--replace".into());
+            }
+            (path(directory), args)
+        }
         Write::WavePlanConnect {
             directory,
             wave,

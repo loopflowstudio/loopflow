@@ -15487,7 +15487,14 @@
           "type": "string"
         },
         "project": {
-          "$ref": "#/$defs/Project"
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Project"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "summary": {
           "items": {
@@ -17626,6 +17633,7 @@
               "directory": "/repo",
               "kind": "wave.plan.bind",
               "project": "5e55105e-0000-4000-8000-000000000042",
+              "replace": false,
               "wave": "product"
             }
           ],
@@ -17640,12 +17648,16 @@
             "project": {
               "type": "string"
             },
+            "replace": {
+              "type": "boolean"
+            },
             "wave": {
               "type": "string"
             }
           },
           "required": [
             "kind",
+            "replace",
             "directory",
             "wave",
             "project"

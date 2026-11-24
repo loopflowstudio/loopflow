@@ -2055,6 +2055,9 @@ pub enum WavePlanCommand {
     Bind {
         wave: String,
         project: String,
+        /// Replace the current selection, retaining its Project and Tasks.
+        #[arg(long)]
+        replace: bool,
         #[arg(long)]
         json: bool,
     },

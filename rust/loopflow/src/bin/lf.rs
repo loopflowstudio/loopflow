@@ -899,12 +899,14 @@ fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
                     loopflow::lf::commands::ops::reteam(repo, *apply, *json)
                 }
                 WavePlanCommand::Bind {
+                    replace,
                     wave,
                     project,
                     json,
                 } => {
-                    let result =
-                        loopflow_execution::engine::wave::planning_bind(repo, wave, project)?;
+                    let result = loopflow_execution::engine::wave::planning_bind(
+                        repo, wave, project, *replace,
+                    )?;
                     if *json {
                         println!("{}", serde_json::to_string_pretty(&result)?);
                     } else {
@@ -1038,6 +1040,10 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
             use loopflow::lf::commands::waves::{
                 list_closed_tasks, list_tasks, subscribe_tasks, TaskListArgs,
             };
+            tokio::runtime::Runtime::new()?.block_on(async {
+                loopflow_execution::ops::plan_carriers::before_first_read(repo).await;
+                loopflow_execution::ops::linear::acquire_authored_plan(repo, wave.as_deref()).await
+            })?;
             let args = TaskListArgs {
                 query: query.clone(),
                 wave: wave.clone(),

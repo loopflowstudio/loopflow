@@ -1335,8 +1335,11 @@ fn wave_added_receipt_round_trips_with_its_leftover() {
     use loopflow_execution::ops::wave_lifecycle::WaveAdded;
     let json = include_str!("../../../tests/fixtures/dto/wave_added.json");
     let added: WaveAdded = serde_json::from_str(json).unwrap();
+    let joined = include_str!("../../../tests/fixtures/dto/wave_joined.json");
+    let joined: WaveAdded = serde_json::from_str(joined).unwrap();
+    assert!(!joined.created && joined.project.is_none());
     assert!(added.created);
-    assert_eq!(added.project.wave_id, added.id);
+    assert_eq!(added.project.as_ref().unwrap().wave_id, added.id);
     assert_eq!(added.summary.len(), 1);
     assert_eq!(
         serde_json::to_value(&added).unwrap(),

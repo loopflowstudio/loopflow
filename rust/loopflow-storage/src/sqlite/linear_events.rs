@@ -2,7 +2,7 @@
 
 use super::tracker_actions::{self, ActionKind, Resolution, TrackerAction};
 use super::{self as sqlite, planning_write, SqliteStore};
-use crate::planning::{revision_nanos, TrackerItem, TrackerProject};
+use crate::planning::{revision_nanos, InitiativeProjects, TrackerItem, TrackerProject};
 use crate::planning_sync::TrackerKind;
 use crate::work::edit::{Disposition, WorkValue as Edit};
 use crate::{StoreError, StoreResult};
@@ -164,11 +164,12 @@ pub fn accept_linear_inventory_in(
     store: &SqliteStore,
     wave: &WaveId,
     initiative: &str,
-    projects: &[TrackerProject],
+    inventory: &InitiativeProjects,
     issues: &[TrackerItem],
     observed_at: i64,
 ) -> StoreResult<()> {
     // Linear-only: Teams, Initiative inventories and ordered issues.
+    let projects = &inventory.managed;
     let tracker = TrackerKind::Linear.as_str();
     let mut conn = store.conn.lock().expect("store mutex poisoned");
     let repo: String = conn.query_row(
@@ -238,6 +239,32 @@ pub fn accept_linear_inventory_in(
                 .collect::<Vec<_>>(),
             tracker,
         )?;
+    }
+    // Choose only from accepted Linear facts in a complete Initiative read.
+    if let Some(started) = &inventory.sole_started {
+        let candidate: Option<String> = tx
+            .query_row(
+                "SELECT MIN(p.id) FROM tracker_wave_projects m
+                 JOIN tracker_projects t ON t.repo=?2 AND t.tracker=?3 AND t.id=m.project_id
+                 JOIN projects p ON p.external_project_id=t.id AND p.wave_id=m.wave_id
+                 WHERE m.wave_id=?1 AND t.status='started' AND t.archived=0 AND t.membership_unresolved=0
+                 HAVING COUNT(*)=1 AND MIN(t.id)=?4 AND MIN(p.status)='started'
+                    AND MIN(p.description) IS NOT NULL
+                    AND (SELECT current_project_id FROM waves WHERE id=?1) IS NULL
+                    AND NOT EXISTS(SELECT 1 FROM project_transitions WHERE wave_id=?1 AND settled_at IS NULL)",
+                params![wave, repo, tracker, started],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if let Some(id) = candidate {
+            planning_write::local(
+                &tx,
+                &crate::work::edit::WorkEdit::for_target(
+                    wave.as_str(),
+                    &[Edit::WaveProject(Some(id))],
+                ),
+            )?;
+        }
     }
     tx.commit()?;
     Ok(())

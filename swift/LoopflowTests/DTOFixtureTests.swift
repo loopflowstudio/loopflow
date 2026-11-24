@@ -106,7 +106,10 @@ struct DTOFixtureTests {
         let added = try RegistryQuery.decode(
             WaveAdded.self, from: String(decoding: loadFixtureData("wave_added.json"), as: UTF8.self))
         #expect(added.created)
-        #expect(added.project.id == "proj_283eee0d35124e709d4bd0ecadce83f3")
+        let joined = try RegistryQuery.decode(
+            WaveAdded.self, from: String(decoding: loadFixtureData("wave_joined.json"), as: UTF8.self))
+        #expect(!joined.created && joined.project == nil)
+        #expect(added.project?.id == "proj_283eee0d35124e709d4bd0ecadce83f3")
         #expect(added.files == .uncommitted(reason: "HEAD is detached"))
         #expect(added.summary.count == 1)
     }

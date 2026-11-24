@@ -1283,6 +1283,21 @@ fn prepare_task(
                 task.identifier
             )));
         }
+        // A carrier or an exact issue lookup can deliver the Task before its Initiative inventory.
+        if let Some(wave) = wave.as_ref().filter(|_| {
+            task.worktree.is_none() && task.tracker_id.is_some() && !options.from_last_fetch
+        }) {
+            if super::tracker::queued_tracker(&main)
+                == Some(loopflow_storage::planning_sync::TrackerKind::Linear)
+            {
+                if let Err(error) = super::linear::acquire_wave_inventory(&store, wave).await {
+                    crate::journal::request::diagnostic(format_args!(
+                        "Wave {}: {error}",
+                        wave.slug()
+                    ));
+                }
+            }
+        }
         validate_task_preparation(&store, &task).await?;
         options.validate_directive((!fetched).then_some(&task))?;
         options.validate_workspace_name(&task)?;

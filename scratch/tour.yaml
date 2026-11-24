@@ -1,4 +1,4 @@
-at: bc400538c4273058b610368db56c8b015b5f2a3d
+at: a5e40623f78e64d6b2ddf7af2b13eb577e5beb43
 first:
   - path: docs/telemetry.md
     why: Read a lost rental’s inputs, turns and usage
@@ -31,7 +31,7 @@ first:
   - path: swift/LoopflowMac/Views/TelemetryDashboardView.swift
     why: Attribute usage in Desktop Telemetry
   - path: rust/loopflow/src/lf/commands/machine.rs
-    why: Refresh credentials and select the conversation to resume
+    why: Refresh files, resume a Session, hide ended rentals
   - path: rust/loopflow-execution/src/machine/forward.rs
     why: Send configured files on the registered SSH connection
   - path: rust/loopflow-execution/src/machine/forward.sh
@@ -77,9 +77,9 @@ first:
   - path: rust/loopflow-execution/src/machine_records.rs
     why: Collect turns and capture files and checkpoint a completed import
   - path: rust/loopflow-execution/src/rental/recovery.rs
-    why: Collect on the server’s recovery pass and finish at give-back
+    why: Collect, settle a gone sandbox before SSH, give back
   - path: rust/loopflow/tests/machine_commands.rs
-    why: Read usage after loss and continue the Session locally
+    why: Read usage after loss; end a terminated rental
   - path: rust/loopflow/src/lf/commands/install/published.rs
     why: Find the Linux counterpart and verify its archive
   - path: rust/loopflow-execution/src/installation/server.rs

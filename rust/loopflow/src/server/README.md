@@ -631,7 +631,7 @@ the phone's `view.select` Task list and its creation destinations all read it.
   `outcome_unknown`, and repeating the same `request` settles it. It creates
   a process and, with `session.continue`, the only operation here that does;
   attaching never does.
-- `session.continue {session, request, rows, cols}` starts `lf session resume`
+- `session.continue {session, request, rows, cols, task, machine}` starts `lf session resume`
   of exactly that Session in a held terminal, in its recorded directory, with
   the server's environment and its own `LF_HOME` and `LF_BIN`, for a client
   with no environment to send (the phone). It answers and repeats like
@@ -671,8 +671,11 @@ an unknown, spent, expired or foreign ticket is `not_found {ticket}` with a null
 `bridged`, request a new ticket and bridge. Bridges read no Work and do not
 occupy the 64 client slots.
 
-`session.attach {session}` attaches to the Session's held terminal, and
-`{session, terminal_id}` only to that terminal. Either answers a ticket
+`session.attach {session, terminal_id: null, task, machine}` attaches to the
+Session's held terminal, and a non-null `terminal_id` only to that terminal.
+`task` and `machine` say where it runs: the Task's owner when `task` is named,
+else `machine`, else this Machine's record of the Session's Task or move; both
+null on a Session this Machine runs. `session.continue` routes the same way. Either answers a ticket
 `{ticket, terminal_id, expires_in_ms}`, and its bridge answers
 `bridged {terminal_id}`, then carries the
 [view protocol](../transport/README.md#view-protocol): raw bytes locally,
@@ -718,7 +721,7 @@ Connect to the host's `/v1/machine` WebSocket, complete
 with a Session ID from `session.list`:
 
 ```text
-→ {"type":"request","id":"attach-1","operation":{"kind":"session.attach","session":"<session ID>","terminal_id":null},"select":null,"request_id":null}
+→ {"type":"request","id":"attach-1","operation":{"kind":"session.attach","session":"<session ID>","terminal_id":null,"task":null,"machine":null},"select":null,"request_id":null}
 ← {"type":"response","id":"attach-1","trace_id":"<trace ID>","result":{"ticket":"<ticket>","terminal_id":"<terminal ID>","expires_in_ms":60000}}
 ```
 

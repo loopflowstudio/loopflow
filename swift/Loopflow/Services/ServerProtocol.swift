@@ -208,8 +208,8 @@ public enum ServerOperation: Encodable, Sendable {
     /// The unchanged payload of a submitted creation; never arbitrary command replay.
     case submittedCreation(JSONValue)
     /// A ticket for the Session's held terminal, answered `{ticket, terminal_id,
-    /// expires_in_ms}`.
-    case sessionAttach(session: String)
+    /// expires_in_ms}`. Naming the Task attaches wherever it runs.
+    case sessionAttach(session: String, task: String?)
     case requestUpload(bytes: Int)
     /// Start `argv` in a terminal held beside the server, answered `{terminal_id}`.
     /// Repeating `request` answers the same terminal and starts nothing. `placement` is the
@@ -217,14 +217,15 @@ public enum ServerOperation: Encodable, Sendable {
     case sessionStart(session: String?, request: String, argv: [String], cwd: String, env: [(String, String)], rows: Int, cols: Int, placement: String?)
     /// Continue an existing Session in a held terminal the server starts with its own
     /// environment, answered `{terminal_id}`. Repeating `request` starts nothing.
-    case sessionContinue(session: String, request: String, rows: Int, cols: Int)
+    /// Naming the Task continues it wherever it runs.
+    case sessionContinue(session: String, request: String, rows: Int, cols: Int, task: String?)
     /// A provider hook's turn or tool boundary, answered `{steers, update, waiting}`.
     /// Desktop never sends it; `lf __context-block` and the OpenCode and Pi plugins do.
     case sessionBoundary(moment: String, delivery: String, adapter: JSONValue, callback: JSONValue, gap: JSONValue?,
                          printed: [String], inbox: JSONValue?)
 
     private enum Keys: String, CodingKey {
-        case kind, bytes, session, request, argv, cwd, env, rows, cols, placement, terminalID = "terminal_id"
+        case kind, bytes, session, request, argv, cwd, env, rows, cols, placement, task, machine, terminalID = "terminal_id"
         case moment, delivery, adapter, callback, gap, printed, inbox, query, change
     }
     public func encode(to encoder: Encoder) throws {
@@ -249,12 +250,14 @@ public enum ServerOperation: Encodable, Sendable {
             try box.encode(bytes, forKey: .bytes)
         case .submittedCreation(let payload): try payload.encode(to: encoder)
         case .config(let operation): try operation.encode(to: encoder)
-        case .sessionAttach(let session):
+        case .sessionAttach(let session, let task):
             var box = encoder.container(keyedBy: Keys.self)
             try box.encode("session.attach", forKey: .kind)
             try box.encode(session, forKey: .session)
             // Any of the Session's held terminals; naming one pins it.
             try box.encodeNil(forKey: .terminalID)
+            try box.encode(task, forKey: .task)
+            try box.encodeNil(forKey: .machine)
         case .sessionStart(let session, let request, let argv, let cwd, let env, let rows, let cols, let placement):
             var box = encoder.container(keyedBy: Keys.self)
             try box.encode("session.start", forKey: .kind)
@@ -266,13 +269,15 @@ public enum ServerOperation: Encodable, Sendable {
             try box.encode(rows, forKey: .rows)
             try box.encode(cols, forKey: .cols)
             try box.encode(placement, forKey: .placement)
-        case .sessionContinue(let session, let request, let rows, let cols):
+        case .sessionContinue(let session, let request, let rows, let cols, let task):
             var box = encoder.container(keyedBy: Keys.self)
             try box.encode("session.continue", forKey: .kind)
             try box.encode(session, forKey: .session)
             try box.encode(request, forKey: .request)
             try box.encode(rows, forKey: .rows)
             try box.encode(cols, forKey: .cols)
+            try box.encode(task, forKey: .task)
+            try box.encodeNil(forKey: .machine)
         case .sessionBoundary(let moment, let delivery, let adapter, let callback, let gap, let printed, let inbox):
             var box = encoder.container(keyedBy: Keys.self)
             try box.encode("session.boundary", forKey: .kind)

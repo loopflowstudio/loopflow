@@ -9389,11 +9389,13 @@
       "oneOf": [
         {
           "additionalProperties": false,
-          "description": "A ticket for the Session's held terminal, answered `{ticket,\nterminal_id, expires_in_ms}`. A new connection presents the ticket as\nits first message (`attach`) and becomes the bridge; this connection\nstays a client. An orderly terminal sends a final `0x07` frame with\nJSON `{reason: replaced|finished|retired}` (see `x-terminal-close`).\nAfter `replaced`, attaching by the same Session reaches its next terminal.\nBare EOF leaves the reason unknown. A Session no terminal\nruns is `not_found`; attaching never starts a provider.",
+          "description": "A ticket for the Session's held terminal, answered `{ticket,\nterminal_id, expires_in_ms}`. A new connection presents the ticket as\nits first message (`attach`) and becomes the bridge; this connection\nstays a client. An orderly terminal sends a final `0x07` frame with\nJSON `{reason: replaced|finished|retired}` (see `x-terminal-close`).\nAfter `replaced`, attaching by the same Session reaches its next terminal.\nBare EOF leaves the reason unknown. A Session no terminal\nruns is `not_found`; attaching never starts a provider. A Session\nanother Machine runs is attached there and bridged through here.",
           "examples": [
             {
               "kind": "session.attach",
+              "machine": null,
               "session": "session_5e55105e000040008000000000000001",
+              "task": null,
               "terminal_id": null
             }
           ],
@@ -9402,8 +9404,22 @@
               "const": "session.attach",
               "type": "string"
             },
+            "machine": {
+              "description": "For a Session with no Task here, the Machine that runs it.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "session": {
               "$ref": "#/$defs/LfSessionId"
+            },
+            "task": {
+              "description": "The Session's Task: the server attaches wherever the Task runs.",
+              "type": [
+                "string",
+                "null"
+              ]
             },
             "terminal_id": {
               "anyOf": [
@@ -9420,7 +9436,9 @@
           "required": [
             "kind",
             "session",
-            "terminal_id"
+            "terminal_id",
+            "task",
+            "machine"
           ],
           "type": "object",
           "x-result": {
@@ -9546,14 +9564,16 @@
         },
         {
           "additionalProperties": false,
-          "description": "Continue an existing Session in a held terminal: `lf session resume`\nof exactly `session`, in its directory, with the server's environment.\nAnswers `{terminal_id}`; repeating `request` answers the terminal it\nstarted. For a client with no environment of its own to send.",
+          "description": "Continue an existing Session in a held terminal: `lf session resume`\nof exactly `session`, in its directory, with the server's environment.\nAnswers `{terminal_id}`; repeating `request` answers the terminal it\nstarted. For a client with no environment of its own to send. A\nSession another Machine runs continues there.",
           "examples": [
             {
               "cols": 60,
               "kind": "session.continue",
+              "machine": null,
               "request": "3f2a7c1e-9b4d-4e8a-a1c6-5d0e7f9b2c34",
               "rows": 40,
-              "session": "session_5e55105e000040008000000000000001"
+              "session": "session_5e55105e000040008000000000000001",
+              "task": null
             }
           ],
           "properties": {
@@ -9567,6 +9587,13 @@
               "const": "session.continue",
               "type": "string"
             },
+            "machine": {
+              "description": "For a Session with no Task here, the Machine that runs it.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "request": {
               "type": "string"
             },
@@ -9578,6 +9605,13 @@
             },
             "session": {
               "$ref": "#/$defs/LfSessionId"
+            },
+            "task": {
+              "description": "The Session's Task: the server attaches wherever the Task runs.",
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           "required": [
@@ -9585,7 +9619,9 @@
             "session",
             "request",
             "rows",
-            "cols"
+            "cols",
+            "task",
+            "machine"
           ],
           "type": "object",
           "x-result": {

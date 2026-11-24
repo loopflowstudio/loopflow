@@ -82,7 +82,7 @@ final class RemoteMobileClient: MobileTaskCreationClient {
     /// Attaching fits the terminal to `size`.
     func attach(sessionID: String, size: TerminalGeometry) async throws -> RemoteAttachment {
         let ticket: String
-        do { ticket = try decode(Ticket.self, await request(.sessionAttach(session: sessionID))).ticket }
+        do { ticket = try decode(Ticket.self, await request(.sessionAttach(session: sessionID, task: nil))).ticket }
         catch let error as ServerError where error.code == .notFound { throw SessionNotRunning() }
         let terminal = try await MachineSocket.terminal(endpoint: savedMachine.endpoint, ticket: ticket)
         do { return try await RemoteAttachment.open(sessionID: sessionID, socket: terminal, size: size) }
@@ -98,7 +98,7 @@ final class RemoteMobileClient: MobileTaskCreationClient {
     /// terminal the Machine holds; repeating `request` starts nothing.
     func startSession(sessionID: String, request: String, size: TerminalGeometry) async throws {
         _ = try decode(Started.self, await self.request(.sessionContinue(
-            session: sessionID, request: request, rows: size.rows, cols: size.columns)))
+            session: sessionID, request: request, rows: size.rows, cols: size.columns, task: nil)))
     }
 
     func creationContext() async throws -> MobileCreationContext {

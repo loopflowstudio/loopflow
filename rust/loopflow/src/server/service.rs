@@ -531,6 +531,22 @@ enum Start {
     Subscribe(Read, Option<Vec<String>>, Option<String>),
 }
 
+impl Start {
+    /// A request for a Session's held terminal, which runs wherever it arrives.
+    fn names_a_terminal(&self) -> bool {
+        matches!(
+            self,
+            Self::Request(
+                Operation::Server(
+                    ServerOperation::SessionAttach { .. } | ServerOperation::SessionContinue { .. }
+                ),
+                None,
+                _
+            )
+        )
+    }
+}
+
 /// Where a connection's operations run.
 #[derive(Debug, Clone)]
 enum Origin {
@@ -700,7 +716,9 @@ pub(super) async fn session<C: Carrier>(
             continue;
         }
         let origin = match (listed.machine, sender) {
-            (true, Some(sender)) => Origin::Machine(Box::new(sender)),
+            (true, Some(sender)) => Some(Origin::Machine(Box::new(sender))),
+            // A held terminal is named by its Session; it needs no repository.
+            (true, None) if start.names_a_terminal() => None,
             (true, None) => {
                 send(
                     lines,
@@ -713,7 +731,12 @@ pub(super) async fn session<C: Carrier>(
                 .await?;
                 continue;
             }
-            (false, _) => Origin::Local(listed.clients.peers.clone()),
+            (false, _) => Some(Origin::Local(listed.clients.peers.clone())),
+        };
+        // Where a local client's terminal request is sent on; never a peer's.
+        let peers = match &origin {
+            Some(Origin::Local(peers)) => Some(peers.clone()),
+            _ => None,
         };
         if inflight.contains_key(&id) {
             send(
@@ -779,26 +802,82 @@ pub(super) async fn session<C: Carrier>(
                     request,
                     rows,
                     cols,
+                    task,
+                    machine,
                 }),
                 None,
                 _,
             ) => {
-                let start =
-                    tokio::task::spawn_blocking(move || continuing(session, request, rows, cols))
+                let message = match terminal_machine(peers.is_some(), &session, task, machine).await
+                {
+                    Err(refusal) => ServerMessage::error(Some(id), refusal),
+                    Ok(Some(machine)) => {
+                        let peers = peers.expect("only a local client's request is sent on");
+                        let operation = ServerOperation::SessionContinue {
+                            session,
+                            request: request.clone(),
+                            rows,
+                            cols,
+                            task: None,
+                            machine: None,
+                        };
+                        // Repeating `request` starts nothing, so a lost pipe retries once.
+                        let answer = tokio::task::spawn_blocking(move || {
+                            peers.terminal(&machine, &operation, Some(request))
+                        })
+                        .await
+                        .map_err(unavailable)
+                        .and_then(|answer| answer.map_err(unavailable));
+                        match answer {
+                            Ok(started) => response(id, started.result),
+                            Err(refusal) => ServerMessage::error(Some(id), refusal),
+                        }
+                    }
+                    Ok(None) => {
+                        let start = tokio::task::spawn_blocking(move || {
+                            continuing(session, request, rows, cols)
+                        })
                         .await
                         .map_err(unavailable)
                         .and_then(|start| start);
-                send(lines, &start_held(id, terminals.clone(), start).await).await?;
+                        start_held(id, terminals.clone(), start).await
+                    }
+                };
+                send(lines, &message).await?;
                 continue;
             }
             Start::Request(
                 Operation::Server(ServerOperation::SessionAttach {
                     session,
                     terminal_id,
+                    task,
+                    machine,
                 }),
                 None,
                 _,
             ) => {
+                match terminal_machine(peers.is_some(), &session, task, machine).await {
+                    Err(refusal) => {
+                        send(lines, &ServerMessage::error(Some(id), refusal)).await?;
+                        continue;
+                    }
+                    Ok(Some(machine)) => {
+                        let peers = peers.expect("only a local client's request is sent on");
+                        let message = attach_there(
+                            id,
+                            peers,
+                            machine,
+                            session,
+                            terminal_id,
+                            &tickets,
+                            &admission,
+                        )
+                        .await;
+                        send(lines, &message).await?;
+                        continue;
+                    }
+                    Ok(None) => {}
+                }
                 let held = terminals
                     .as_ref()
                     .and_then(|terminals| terminals.session_terminal(&session));
@@ -809,17 +888,12 @@ pub(super) async fn session<C: Carrier>(
                 let message = match (terminal_id, held, pending) {
                     (wanted, Some(held), _) if wanted.as_ref().is_none_or(|wanted| *wanted == held) => {
                         let ticket = tickets.issue(admission.clone(), Purpose::Terminal(held.clone()));
-                        ServerMessage::Response {
-                            id,
-                            trace_id: loopflow_model::id::TraceId::default(),
-                            result: serde_json::to_value(SessionAttached {
-                                ticket,
-                                terminal_id: held,
-                                expires_in_ms: TICKET_LIFETIME.as_millis() as u64,
-                            })
-                            .expect("a ticket serializes"),
-                            revisions: None,
-                        }
+                        response(id, serde_json::to_value(SessionAttached {
+                            ticket,
+                            terminal_id: held,
+                            expires_in_ms: TICKET_LIFETIME.as_millis() as u64,
+                        })
+                        .expect("a ticket serializes"))
                     }
                     // Nothing ended; asking again later attaches.
                     (_, _, Some(pending)) => ServerMessage::error(Some(id), loopflow_execution::transport::registry::waiting(&pending)),
@@ -870,6 +944,7 @@ pub(super) async fn session<C: Carrier>(
                 continue;
             }
             Start::Subscribe(query, select, resume) => {
+                let origin = origin.expect("only terminal requests run without an origin");
                 let follow = matches!(origin, Origin::Local(_)) && query.follows_task();
                 let placed = match origin {
                     Origin::Machine(_) => tokio::task::spawn_blocking(move || origin.place(query))
@@ -906,6 +981,7 @@ pub(super) async fn session<C: Carrier>(
                 }
             }
             Start::Request(operation, select, named) => {
+                let origin = origin.expect("only terminal requests run without an origin");
                 let write = if operation.is_write() {
                     let Ok(write) = writes.clone().try_acquire_owned() else {
                         send(lines, &busy(&id, "writes", MAX_WRITES)).await?;
@@ -1066,6 +1142,154 @@ fn ticket_response(id: String, ticket: String) -> ServerMessage {
     }
 }
 
+fn response(id: String, result: serde_json::Value) -> ServerMessage {
+    ServerMessage::Response {
+        id,
+        trace_id: loopflow_model::id::TraceId::default(),
+        result,
+        revisions: None,
+    }
+}
+
+/// The other Machine that runs `session`'s terminal, for a local client: the
+/// Task's owner when the client names one, else the Machine it names, else
+/// where this Machine's records say the Session went. A peer's request runs here.
+async fn terminal_machine(
+    local: bool,
+    session: &loopflow_model::id::LfSessionId,
+    task: Option<String>,
+    machine: Option<loopflow_model::durable::MachineId>,
+) -> Result<Option<loopflow_model::durable::Machine>, Error> {
+    if !local {
+        return Ok(None);
+    }
+    let session = session.clone();
+    tokio::task::spawn_blocking(move || {
+        crate::lf::commands::work_route::terminal_machine(&session, task.as_deref(), machine)
+    })
+    .await
+    .map_err(unavailable)?
+    .map_err(unavailable)
+}
+
+/// Attach on `machine` and answer with a ticket here that bridges to it.
+async fn attach_there(
+    id: String,
+    peers: Arc<PeerPool>,
+    machine: loopflow_model::durable::Machine,
+    session: loopflow_model::id::LfSessionId,
+    terminal_id: Option<loopflow_model::id::TerminalId>,
+    tickets: &Tickets,
+    admission: &Admission,
+) -> ServerMessage {
+    let operation = ServerOperation::SessionAttach {
+        session,
+        terminal_id,
+        task: None,
+        machine: None,
+    };
+    let there = machine.clone();
+    let answer = tokio::task::spawn_blocking(move || peers.terminal(&there, &operation, None))
+        .await
+        .map_err(unavailable)
+        .and_then(|answer| answer.map_err(unavailable))
+        .and_then(|answer| {
+            serde_json::from_value::<SessionAttached>(answer.result).map_err(unavailable)
+        });
+    let issued = match answer {
+        Ok(issued) => issued,
+        Err(refusal) => return ServerMessage::error(Some(id), refusal),
+    };
+    let ticket = tickets.issue(
+        admission.clone(),
+        Purpose::RemoteTerminal {
+            machine,
+            ticket: issued.ticket,
+            terminal_id: issued.terminal_id.clone(),
+        },
+    );
+    response(
+        id,
+        serde_json::to_value(SessionAttached {
+            ticket,
+            terminal_id: issued.terminal_id,
+            expires_in_ms: issued.expires_in_ms,
+        })
+        .expect("a ticket serializes"),
+    )
+}
+
+/// A ticketed connection's held terminal: here, or another Machine's through
+/// `lf server connect` there. Dropping it ends the bridge and that SSH process.
+pub(super) enum TerminalStream {
+    Here(UnixStream),
+    There {
+        _ssh: tokio::process::Child,
+        stream: tokio::io::Join<tokio::process::ChildStdout, tokio::process::ChildStdin>,
+    },
+}
+
+/// Present `ticket` to `machine`'s server and wait for its bridge. Read one
+/// byte at a time so no terminal byte stays in a buffer here.
+async fn bridge_there(
+    machine: &loopflow_model::durable::Machine,
+    ticket: String,
+) -> Result<Result<TerminalStream, Error>> {
+    let mut ssh =
+        tokio::process::Command::from(loopflow_execution::machine::ssh::Pipe::command(machine)?)
+            .kill_on_drop(true)
+            .spawn()
+            .context("could not start ssh")?;
+    let mut output = ssh.stdout.take().expect("piped SSH stdout");
+    let mut input = ssh.stdin.take().expect("piped SSH stdin");
+    let mut line = serde_json::to_vec(&ClientMessage::Attach { ticket })?;
+    line.push(b'\n');
+    let answer = tokio::time::timeout(loopflow_execution::machine::client::HANDSHAKE, async {
+        input.write_all(&line).await?;
+        let mut answer = Vec::new();
+        loop {
+            match output.read_u8().await? {
+                b'\n' => return std::io::Result::Ok(answer),
+                byte => answer.push(byte),
+            }
+        }
+    })
+    .await;
+    let answer = match answer {
+        Ok(Ok(answer)) => answer,
+        Ok(Err(failure)) => return Ok(Err(unavailable_on(machine, anyhow::Error::from(failure)))),
+        Err(_) => {
+            return Ok(Err(unavailable_on(
+                machine,
+                anyhow::anyhow!("its server did not open the terminal bridge in time"),
+            )))
+        }
+    };
+    match serde_json::from_slice::<ServerMessage>(&answer)? {
+        ServerMessage::Bridged { .. } => Ok(Ok(TerminalStream::There {
+            _ssh: ssh,
+            stream: tokio::io::join(output, input),
+        })),
+        ServerMessage::Error {
+            code,
+            message,
+            data,
+            ..
+        } => Ok(Err(Error {
+            code,
+            message,
+            data,
+        })),
+        other => anyhow::bail!("unexpected peer message before bridging: {other:?}"),
+    }
+}
+
+fn unavailable_on(machine: &loopflow_model::durable::Machine, failure: anyhow::Error) -> Error {
+    unavailable(loopflow_execution::machine::client::unavailable_on(
+        machine, failure,
+    ))
+}
+
 /// Redeem a ticketed connection's ticket. A terminal ticket returns the held
 /// terminal to bridge to once `admitted` was sent; the other purposes complete here.
 pub(super) async fn ticketed<C: Carrier>(
@@ -1073,7 +1297,7 @@ pub(super) async fn ticketed<C: Carrier>(
     ticket: &str,
     admission: &Admission,
     tickets: &Tickets,
-) -> Result<Option<UnixStream>> {
+) -> Result<Option<TerminalStream>> {
     let Some(purpose) = tickets.redeem(ticket, admission) else {
         send(
             carrier,
@@ -1123,8 +1347,22 @@ pub(super) async fn ticketed<C: Carrier>(
                 },
             )
             .await?;
-            Ok(Some(destination))
+            Ok(Some(TerminalStream::Here(destination)))
         }
+        Purpose::RemoteTerminal {
+            machine,
+            ticket,
+            terminal_id,
+        } => match bridge_there(&machine, ticket).await? {
+            Ok(stream) => {
+                send(carrier, &ServerMessage::Bridged { terminal_id }).await?;
+                Ok(Some(stream))
+            }
+            Err(refusal) => {
+                send(carrier, &ServerMessage::error(None, refusal)).await?;
+                Ok(None)
+            }
+        },
         Purpose::Download {
             message,
             reservation,
@@ -1257,7 +1495,17 @@ fn refused_operation(line: &str) -> Option<(String, Error)> {
 /// Hand the connection to the owner protocol. Tokio uses bounded copy buffers;
 /// closing either side releases the owner claim, and no service state can
 /// restore it on another connection.
-async fn bridge(lines: Lines, mut destination: UnixStream) -> Result<()> {
+async fn bridge(lines: Lines, terminal: TerminalStream) -> Result<()> {
+    match terminal {
+        TerminalStream::Here(destination) => copy(lines, destination).await,
+        TerminalStream::There { _ssh, stream } => copy(lines, stream).await,
+    }
+}
+
+async fn copy(
+    lines: Lines,
+    mut destination: impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+) -> Result<()> {
     let parts = lines.into_parts();
     let mut socket = parts.io;
     // Owner-protocol bytes the client pipelined behind its ticket.

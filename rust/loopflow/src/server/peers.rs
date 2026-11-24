@@ -17,7 +17,8 @@ use tokio_util::codec::{FramedRead, LinesCodec};
 
 use super::service::lock;
 use super::wire::{
-    ClientMessage, Hello, ServerMessage, MACHINE_CLIENT, MAX_MESSAGE, MIN_REVISION, REVISION,
+    ClientMessage, Hello, ServerMessage, ServerOperation, MACHINE_CLIENT, MAX_MESSAGE,
+    MIN_REVISION, REVISION,
 };
 use crate::lf::commands::{read::Read, write::Write};
 
@@ -43,7 +44,23 @@ struct Idle {
 
 impl PeerPool {
     pub fn query(&self, machine: &Machine, sender: Sender, read: &Read) -> Result<Response> {
-        self.request(machine, sender, read, None, ErrorCode::Unavailable)
+        self.request(machine, Some(sender), read, None, ErrorCode::Unavailable)
+    }
+
+    /// A Session's held terminal there, which runs in no repository. A named
+    /// request repeats once on a fresh pipe.
+    pub fn terminal(
+        &self,
+        machine: &Machine,
+        operation: &ServerOperation,
+        request_id: Option<String>,
+    ) -> Result<Response> {
+        let disconnected = if request_id.is_some() {
+            ErrorCode::OutcomeUnknown
+        } else {
+            ErrorCode::Unavailable
+        };
+        self.request(machine, None, operation, request_id, disconnected)
     }
 
     pub fn save(
@@ -55,7 +72,7 @@ impl PeerPool {
     ) -> Result<Response> {
         self.request(
             machine,
-            sender,
+            Some(sender),
             change,
             request_id,
             ErrorCode::OutcomeUnknown,
@@ -65,7 +82,7 @@ impl PeerPool {
     fn request(
         &self,
         machine: &Machine,
-        sender: Sender,
+        sender: Option<Sender>,
         operation: &impl serde::Serialize,
         request_id: Option<String>,
         disconnected: ErrorCode,
@@ -94,12 +111,7 @@ impl PeerPool {
         drop(expired);
 
         let send = |connection: &mut Connection| {
-            connection.request_as(
-                operation,
-                Some(sender.clone()),
-                request_id.clone(),
-                disconnected,
-            )
+            connection.request_as(operation, sender.clone(), request_id.clone(), disconnected)
         };
         let reused = warm.is_some();
         let mut connection = match warm {

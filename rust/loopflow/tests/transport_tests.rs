@@ -3696,6 +3696,8 @@ fn continuing_a_session_starts_one_held_terminal() {
                     request: "phone-continue".into(),
                     rows: 40,
                     cols: 60,
+                    task: None,
+                    machine: None,
                 },
             ))
     };
@@ -4121,6 +4123,8 @@ fn session_attach_waits_for_a_holder_stopped_at_server_startup() {
             .request(Operation::Server(ServerOperation::SessionAttach {
                 session: session.clone(),
                 terminal_id: terminal_id.map(|id| serde_json::from_value(json!(id)).unwrap()),
+                task: None,
+                machine: None,
             }))
     };
     let refused = |failure: anyhow::Error| failure.downcast::<Error>().unwrap();

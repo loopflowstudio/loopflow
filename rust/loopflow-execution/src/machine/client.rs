@@ -639,6 +639,8 @@ pub fn attach(path: &Path, session: &LfSessionId) -> Result<UnixStream> {
         .request(ServerOperation::SessionAttach {
             session: session.clone(),
             terminal_id: None,
+            task: None,
+            machine: None,
         })
         .map_err(|error| stalled(error, "issue the attach ticket", HANDSHAKE))?;
     let issued: SessionAttached = serde_json::from_value(issued.result)

@@ -395,17 +395,7 @@ fn moved_session(cli: &Cli, args: &[String]) -> Result<Option<Forward>> {
     let Some(store) = read_registry()? else {
         return Ok(None);
     };
-    let id = loopflow_model::id::canonical_session(id);
-    let machine = match conversation_task(&store, &id)? {
-        Some(task) => {
-            let runs_on =
-                loopflow_execution::store::ownership::task_execution_route(&store, &task)?
-                    .machine_id;
-            (runs_on != loopflow_execution::store::machines::local_machine(&store)?.id)
-                .then_some(runs_on)
-        }
-        None => store.session_moved_to(&id)?,
-    };
+    let machine = session_machine(&store, id)?;
     Ok(machine.map(|machine| Forward {
         machine,
         args: args[1..].to_vec(),
@@ -413,6 +403,49 @@ fn moved_session(cli: &Cli, args: &[String]) -> Result<Option<Forward>> {
         wave: None,
         repository: None,
     }))
+}
+
+/// The other Machine a Session recorded here runs on: where its Task runs,
+/// else where the Session moved.
+fn session_machine(store: &SqliteStore, id: &str) -> Result<Option<MachineId>> {
+    let id = loopflow_model::id::canonical_session(id);
+    Ok(match conversation_task(store, &id)? {
+        Some(task) => {
+            let runs_on = loopflow_execution::store::ownership::task_execution_route(store, &task)?
+                .machine_id;
+            (runs_on != loopflow_execution::store::machines::local_machine(store)?.id)
+                .then_some(runs_on)
+        }
+        None => store.session_moved_to(&id)?,
+    })
+}
+
+/// The other Machine whose held terminal runs `session`: the Task's owner
+/// when `task` is named, else `machine`, else what this Machine's records say.
+/// `None` runs it here.
+pub(crate) fn terminal_machine(
+    session: &loopflow_model::id::LfSessionId,
+    task: Option<&str>,
+    machine: Option<MachineId>,
+) -> Result<Option<loopflow_model::durable::Machine>> {
+    let runs_on = match (task, machine) {
+        (Some(task), _) => loopflow_execution::machine::task::remote_task(task, None)?
+            .map(|route| route.machine_id),
+        (None, Some(machine)) => {
+            let here = match read_registry()? {
+                Some(store) => Some(loopflow_execution::store::machines::local_machine(&store)?.id),
+                None => None,
+            };
+            (here.as_ref() != Some(&machine)).then_some(machine)
+        }
+        (None, None) => match read_registry()? {
+            Some(store) => session_machine(&store, session.as_str())?,
+            None => None,
+        },
+    };
+    runs_on
+        .map(|machine| super::write::find_machine(machine.as_str()))
+        .transpose()
 }
 
 /// `lf task run`'s `--pool`, `--rent` and `--quote`, removed before `--`.

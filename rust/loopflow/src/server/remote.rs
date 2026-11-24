@@ -17,7 +17,7 @@ use anyhow::{Context, Result};
 use futures_util::{Sink, SinkExt, Stream, StreamExt};
 use loopflow_execution::transport::registry::Registry;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
-use tokio::net::{TcpListener, UnixStream};
+use tokio::net::TcpListener;
 use tokio::sync::{mpsc, oneshot, Semaphore};
 use tokio::task::JoinSet;
 use tokio_rustls::TlsAcceptor;
@@ -472,12 +472,25 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send> Carrier for Messages<S> {
 
 /// A plain byte copy between the held terminal and the WebSocket's binary frames.
 /// Closing either side releases the owner claim.
-async fn bridge<S>(socket: WebSocketStream<S>, mut destination: UnixStream) -> Result<()>
+async fn bridge<S>(socket: WebSocketStream<S>, terminal: service::TerminalStream) -> Result<()>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    match terminal {
+        service::TerminalStream::Here(destination) => copy(socket, destination).await,
+        service::TerminalStream::There { _ssh, stream } => copy(socket, stream).await,
+    }
+}
+
+async fn copy<S>(
+    socket: WebSocketStream<S>,
+    destination: impl AsyncRead + AsyncWrite + Unpin,
+) -> Result<()>
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
     let (mut sender, mut receiver) = socket.split();
-    let (mut reader, mut writer) = destination.split();
+    let (mut reader, mut writer) = tokio::io::split(destination);
     let upstream = async {
         while let Some(message) = receiver.next().await {
             match message? {
@@ -692,7 +705,12 @@ mod tests {
         let server = tokio::spawn(async move {
             let (socket, _) = listener.accept().await.unwrap();
             let websocket = tokio_tungstenite::accept_async(socket).await.unwrap();
-            bridge(websocket, owner).await.unwrap();
+            bridge(
+                websocket,
+                crate::server::service::TerminalStream::Here(owner),
+            )
+            .await
+            .unwrap();
         });
         let (mut client, _) = tokio_tungstenite::connect_async(format!("ws://{address}"))
             .await
@@ -889,6 +907,8 @@ mod tests {
                     operation: Operation::Server(ServerOperation::SessionAttach {
                         session: loopflow_model::id::LfSessionId::from("session_missing"),
                         terminal_id: None,
+                        task: None,
+                        machine: None,
                     }),
                     sender: None,
                     request_id: None,

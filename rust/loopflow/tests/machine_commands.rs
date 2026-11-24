@@ -4163,6 +4163,45 @@ fn served(fixture: &Machines) -> (Child, String) {
     }
 }
 
+/// Open a held terminal through a ticket the laptop's server issued: its
+/// `bridged` answer, then the viewer protocol until the terminal shows `expected`.
+fn bridged_terminal(socket: &Path, ticket: &str, expected: &str) {
+    use std::io::Read as _;
+    let mut stream = std::os::unix::net::UnixStream::connect(socket).unwrap();
+    stream
+        .set_read_timeout(Some(std::time::Duration::from_secs(20)))
+        .unwrap();
+    stream
+        .write_all(format!("{}\n", serde_json::json!({"type":"attach","ticket":ticket})).as_bytes())
+        .unwrap();
+    let mut answer = Vec::new();
+    let mut byte = [0];
+    while {
+        stream.read_exact(&mut byte).unwrap();
+        byte[0] != b'\n'
+    } {
+        answer.push(byte[0]);
+    }
+    let answer: Value = serde_json::from_slice(&answer).unwrap();
+    assert_eq!(answer["type"], "bridged", "{answer}");
+    let request = serde_json::json!({"kind":"attach","rows":24,"cols":400,"id":1}).to_string();
+    let mut frame = vec![0x11];
+    frame.extend((request.len() as u32).to_be_bytes());
+    frame.extend(request.as_bytes());
+    stream.write_all(&frame).unwrap();
+    let mut shown = String::new();
+    // Snapshot (0x02) and output (0x03) carry what the terminal shows.
+    while !shown.contains(expected) {
+        let mut header = [0; 5];
+        stream.read_exact(&mut header).unwrap();
+        let mut payload = vec![0; u32::from_be_bytes(header[1..].try_into().unwrap()) as usize];
+        stream.read_exact(&mut payload).unwrap();
+        if matches!(header[0], 0x02 | 0x03) {
+            shown.push_str(&String::from_utf8_lossy(&payload));
+        }
+    }
+}
+
 #[test]
 fn server_routed_task_workspace() {
     use loopflow::lf::commands::{read::Read, write::Write};
@@ -4520,6 +4559,58 @@ fn server_routed_task_workspace() {
             other.remote_path.to_str().unwrap()
         );
     }
+    // Mini holds the Session's terminal. The laptop has no record of it, so
+    // the attach names the Task; the laptop's ticket bridges through to mini.
+    let mini_socket: Value = serde_json::from_slice(
+        &mini_command(&fixture, &["server", "status"])
+            .output()
+            .unwrap()
+            .stdout,
+    )
+    .unwrap();
+    let held = Connection::open_at(Path::new(mini_socket["socket"].as_str().unwrap()))
+        .unwrap()
+        .request(loopflow::server::wire::ServerOperation::SessionStart {
+            session: Some(session.into()),
+            request: uuid::Uuid::new_v4().to_string(),
+            argv: [
+                "/bin/sh",
+                "-c",
+                "printf 'on mini: %s\\n' \"$(pwd -P)\"; exec cat",
+            ]
+            .map(str::to_owned)
+            .to_vec(),
+            cwd: plan.remote_path.clone(),
+            env: vec![("PATH".into(), "/usr/bin:/bin".into())],
+            rows: 24,
+            cols: 400,
+            placement: None,
+        })
+        .unwrap()
+        .result["terminal_id"]
+        .clone();
+    let mut attach = |task: Option<String>| {
+        client.request(loopflow::server::wire::ServerOperation::SessionAttach {
+            session: session.into(),
+            terminal_id: None,
+            task,
+            machine: None,
+        })
+    };
+    let unrouted = attach(None).unwrap_err().downcast::<Error>().unwrap();
+    assert_eq!(unrouted.code, ErrorCode::NotFound, "{unrouted:?}");
+    let issued = attach(Some(task.to_string())).unwrap().result;
+    assert_eq!(issued["terminal_id"], held);
+    let expected = format!(
+        "on mini: {}",
+        plan.remote_path.canonicalize().unwrap().display()
+    );
+    bridged_terminal(
+        Path::new(&socket),
+        issued["ticket"].as_str().unwrap(),
+        &expected,
+    );
+
     // Restart the peer under an idle pipe. The next read reconnects once.
     drop(server_on_mini);
     let restarted = served_mini(&fixture);

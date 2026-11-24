@@ -196,13 +196,20 @@ pub enum ServerOperation {
     /// JSON `{reason: replaced|finished|retired}` (see `x-terminal-close`).
     /// After `replaced`, attaching by the same Session reaches its next terminal.
     /// Bare EOF leaves the reason unknown. A Session no terminal
-    /// runs is `not_found`; attaching never starts a provider.
+    /// runs is `not_found`; attaching never starts a provider. A Session
+    /// another Machine runs is attached there and bridged through here.
     #[serde(rename = "session.attach")]
     #[schemars(extend("x-result" = generator.subschema_for::<SessionAttached>()))]
     SessionAttach {
         session: loopflow_model::id::LfSessionId,
         /// Attach only to this held terminal.
         terminal_id: Option<loopflow_model::id::TerminalId>,
+        /// The Session's Task: the server attaches wherever the Task runs.
+        #[serde(deserialize_with = "Option::deserialize")]
+        task: Option<String>,
+        /// For a Session with no Task here, the Machine that runs it.
+        #[serde(deserialize_with = "Option::deserialize")]
+        machine: Option<loopflow_model::durable::MachineId>,
     },
     /// Start the Session's agent in this build's holder and answer
     /// `{terminal_id}`. `env` is the caller's whole environment; the server's
@@ -227,7 +234,8 @@ pub enum ServerOperation {
     /// Continue an existing Session in a held terminal: `lf session resume`
     /// of exactly `session`, in its directory, with the server's environment.
     /// Answers `{terminal_id}`; repeating `request` answers the terminal it
-    /// started. For a client with no environment of its own to send.
+    /// started. For a client with no environment of its own to send. A
+    /// Session another Machine runs continues there.
     #[serde(rename = "session.continue")]
     #[schemars(extend("x-result" = generator.subschema_for::<SessionStarted>()))]
     SessionContinue {
@@ -235,6 +243,12 @@ pub enum ServerOperation {
         request: String,
         rows: u16,
         cols: u16,
+        /// The Session's Task: the server attaches wherever the Task runs.
+        #[serde(deserialize_with = "Option::deserialize")]
+        task: Option<String>,
+        /// For a Session with no Task here, the Machine that runs it.
+        #[serde(deserialize_with = "Option::deserialize")]
+        machine: Option<loopflow_model::durable::MachineId>,
     },
     /// Mobile access readiness; same-user local socket only.
     #[serde(rename = "mobile.status")]

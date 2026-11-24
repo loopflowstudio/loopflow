@@ -11,3 +11,4 @@ The loop cap (`max_loop_passes`) and the scratch-only commit-message skip were d
 - Truthful `Blocked` status in `ops::task_execution::project_execution()` for `GraphOutcome::Blocked` and post-step `graph.run` failures (such as exhausted output validation), keeping `GraphOutcome::Waiting` and unrecorded-exit kills `Idle`. Passed over: leaving `project_execution()` as `Idle` when the last step exited `0`.
 - A blocked decision and a waiting handoff both exit `GraphHeld::EXIT` (3); Task status tells them apart by the recorded error's `GraphHeld::BLOCKED_PREFIX`. Passed over: a separate exit code for blocked, which would touch every caller matching exit 3.
 - Captured XOR paths use name order, which prompts and saved node numbers already share. Existing captures keep their JSON object shape.
+- The QA recheck uses Codex for the blocked Graph after Claude hit its weekly limit. It drives Desktop's production Swift commands and wire messages from a headless probe.

@@ -1,7 +1,7 @@
 <!doctype html><meta charset="utf-8"><title>LOO-1082 QA</title>
 <style>body{font:15px/1.5 -apple-system,sans-serif;max-width:900px;margin:2em auto;padding:0 1em;color:#222}pre{background:#f5f5f2;padding:.8em;overflow:auto;font-size:12.5px;white-space:pre-wrap}h2{margin-top:2em}.fix{border-left:4px solid #c60;padding-left:.8em}td,th{padding:.3em .6em;text-align:left;vertical-align:top}table{border-collapse:collapse}tr{border-bottom:1px solid #ddd}</style>
 <h1>LOO-1082 QA: pass sizing, manual push, Task wakeups</h1>
-<p>Branch <code>lf</code> (debug build) on a private Machine (<code>LF_HOME=/tmp/lf-qa-1082/home/lf</code>), a disposable repository with a bare <code>origin</code>, real Claude Haiku for every agent turn.</p>
+<p>The first three scenarios used a debug build on a private Machine (<code>LF_HOME=/tmp/lf-qa-1082/home/lf</code>), a disposable repository with a bare <code>origin</code>, and Claude Haiku. The recheck used build <code>9f863ee93</code>, a fresh private Machine and Codex for the Graph decisions.</p>
 
 <h2>1. Manual <code>lf commit</code> pushes by default</h2>
 <table>
@@ -69,7 +69,7 @@ Task c1a4da: At end (Task completion is separate).
 0 pending. Inspect: lf session steers 438df3a60db44232bee009501f4d8984 --json
 &amp;lt;/lf:steers&amp;gt;
 &lt;/cross-session-message&gt;
-QUEUE 2026-11-24T02:29:51.999Z dequeue 
+QUEUE 2026-11-24T02:29:51.999Z dequeue
 USER 2026-11-24T02:29:52.015Z Another Claude session sent a message:
 &lt;cross-session-message from=&quot;loopflow&quot; from-name=&quot;Loopflow&quot;&gt;
 &amp;lt;lf:steers&amp;gt;
@@ -95,15 +95,71 @@ ASSISTANT 2026-11-24T02:29:57.735Z The Task is done. The `qa` run succeeded, wit
 
 </pre></div>
 
+<h2>4. Swift client against the installed server</h2>
+<p>Built the current <code>Loopflow</code> Swift library and used a command-line probe to send its <code>ServedWrite.checkoutCommit</code> message to the installed server on the disposable Machine. An unsupported operation returned an error, then the commit succeeded on the same connection. The new commit existed locally and the branch stayed unpublished.</p>
+<pre>Older server build 0.16.0+250e266b4 revision 9
+error unknown-qa invalid
+response commit-qa
+The same reply decodes with an added envelope field</pre>
+<p>The probe decoded the real reply with <code>ServerMessage(line:)</code>, then decoded it again with a field added to the envelope.</p>
+
+<h2>5. Swift commit requests and selected paths on the branch build</h2>
+<p>On branch build <code>9f863ee93</code>, sent both Swift requests to the private server and checked the local and remote Git refs. Repeated the pair with the equivalent commands produced by Swift.</p>
+<pre>checkout.commit push=false → committed=true, pushed=false, head=7bc05f50…
+checkout.commit push=true  → committed=false, pushed=true, head=7bc05f50…
+lf commit --message 'Keep argv checkpoint local' --no-push --json → committed=true, pushed=false
+lf commit --message 'Push argv checkpoint' --json                → committed=false, pushed=true</pre>
+<p>With <code>origin</code> missing, the served write returned <code>unavailable</code> with the Git error and “The commit stays local.” Restoring the remote and running <code>lf commit</code> pushed the saved SHA <code>31867a01…</code>. A selected-path commit with the literal filename <code>' '</code> pushed a tree that contained that file.</p>
+
+<h2>6. A returning Task reports a blocked verification and resumes at it</h2>
+<p>Created Task <code>4636fe</code> with the installed CLI, then reopened its private Machine with the branch build. A Graph ran <code>help commit</code> and waited for review at <code>check</code>. Codex stood in at that step and found a missing artifact.</p>
+<pre>$ lf task status 4636fe
+  Graph verify-artifact: Waiting for you at check.
+  latest Graph: Graph verify-artifact finished; nothing further is launched · started by Loopflow QA
+$ lf -b task auto on 4636fe
+4636fe: standing in at check
+Error: Graph is blocked: QA report artifact is missing
+exit 3
+$ lf task status 4636fe
+  latest Graph: Graph is blocked: QA report artifact is missing · started by Loopflow QA
+  action: no_action  (Graph is blocked: QA report artifact is missing)</pre>
+<p>After putting the artifact in the checkout, the same command started at <code>check</code> and finished the Task. The saved Graph runs confirm which steps ran.</p>
+<pre>$ lf graph show 2e0e76b4-6575-48d0-8f36-d56b695cf6b9
+Completed  verify-artifact
+  help commit  succeeded
+$ lf graph show a5b9f154-800f-47d5-bbd5-cce9a969844e
+Stopped  verify-artifact
+  inspect-artifact  succeeded
+$ lf graph show 5a50aeff-b698-4812-8b48-54251509adae
+Completed  verify-artifact
+  inspect-artifact  succeeded
+Task state: done · position: end</pre>
+
+<h2>7. A Graph reports a validation failure after successful turns</h2>
+<p>Asked a disposable Graph decider to repeat a report with both <code>summary</code> and <code>reason</code> filled. A normal Task run exhausted validation after three turns, retried from <code>check</code>, and completed when Codex produced a valid decision. A direct Graph run in a second Task checkout exposed the stopped state, with all worker turns recorded as successful.</p>
+<pre>$ lf -b --task 0a1501 graph reject-summary
+Error: structured output validation exhausted after 3 successful turns: expected exactly decision and its summary or blocked reason
+exit 1
+$ lf task status 0a1501
+  latest Graph: reject-summary: structured output validation exhausted after 3 successful turns: expected exactly decision and its summary or blocked reason. Inspect its history and effects, then launch fresh work · started by Loopflow QA
+$ lf graph show 2e628a5e-5080-4ba9-bfca-773cb2d44bd1
+Stopped  reject-summary
+  help commit     succeeded
+  reject-summary  succeeded
+  reject-summary  succeeded
+  reject-summary  succeeded</pre>
+
 <h2>Checks</h2>
 <ul>
 <li><code>cargo nextest run -p loopflow-execution --lib -E 'test(harness::task_updates::tests::)'</code>: 15 passed</li>
-<li><code>cargo clippy --all-targets -- -D warnings</code>: see commit; CI runs the suites</li>
+<li><code>cargo clippy --all-targets -- -D warnings</code> passed before the recheck.</li>
+<li><code>cargo build -p loopflow --bin lf</code> and <code>swift build --package-path swift --target Loopflow</code> built the binaries and library used in the recheck.</li>
 </ul>
 
-<h2>What works, what's left</h2>
+<h2>Open checks and results</h2>
 <ul>
-<li>Works: manual commit push default and <code>--no-push</code>, push failure recovery, decision pass line on a real loop, one wake per settled Task run with its outcome.</li>
-<li>Still rough: a Graph that completes the Task at <code>end</code> sends "Task completed." as a second steer a second later. It doesn't wake the conversation again, but the first update says "Task completion is separate" just before it does.</li>
-<li>Not reached: Desktop's served <code>push</code> boolean (checked only by the schema fixture in an earlier pass); the builtin kickoff/implement/realign guidance on a real multi-pass Task (prose; golden tests cover rendering).</li>
+<li>When a Graph finishes a Task, a separate “Task completed.” steer follows the Graph outcome. It was delivered within the same woken turn, which first saw “Task completion is separate.”</li>
+<li>The live loop checked routing and decision prompts across three passes. The effect of the builtin sizing guidance on a larger change remains unmeasured.</li>
+<li>Desktop coverage used the production Swift library in a headless probe. Visual checks require the isolated app on an available display.</li>
+<li>The real runs verified default pushes and opt-out, retry after a push failure, loop pass numbering, one wake per settled Task run, and a blocked verification that retries from the same step.</li>
 </ul>

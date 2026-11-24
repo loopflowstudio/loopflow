@@ -41,6 +41,8 @@ Field case behind this: five `manabot` `coverage-working` Tasks (MTG-418..422) r
 
 **Final compression.** The focused nextest run passed all 25 tests. It covered captured XOR node numbers and routing, the three-pass decision prompt, settled Task wakeups, and manual, selected, step and sync commits. With a staged filename consisting of one space, Git emitted the bytes `20 0a` for `--name-only` and exit 1 for `--quiet`. Whole and selected commits saved that file. Formatting, `git diff --check` and `cargo clippy --all-targets -- -D warnings` passed.
 
+**QA recheck (2026-11-23).** The branch CLI reopened a Task created by the installed CLI, waited at `check`, and reported Codex's blocked reason after the worker exited successfully. Adding the missing artifact and rerunning completed the Task from `check`. A Graph with three successful worker turns and invalid decisions left the validation diagnostic in Task status. A probe built against the production Swift library exercised both `checkout.commit` push values and their CLI arguments. The installed server accepted the same Swift request after an unsupported operation, and the current library decoded its reply with an extra field. Transcripts are in `scratch/qa.html`.
+
 ## Remaining
 
 Gate runs branch CI.

@@ -63,6 +63,14 @@ holding `implement`, then `wait`; every exit is 0, every output names the same
 Graph run, and `graph_processes` holds one row for the Task. Two bare
 `lf task run` at once leave one run and one "is running graph …" refusal.
 
+To check a blocked decision after a successful step, give the Graph a loop with
+`cmd: help commit` followed by an interactive decision skill. Ask the skill to
+check for an ignored artifact in the Task checkout and block with a reason if
+it is missing. With a real provider, `lf task run <id>` waits at the interactive
+step. `lf -b task auto on <id>` then exits 3, and `lf task status <id>` shows the
+reason. Put the artifact in the checkout and repeat `lf -b task auto on <id>`.
+`lf graph show <run-id>` lists the decision alone in both auto runs.
+
 Both `--reason`s are Task comments (`lf task show <id> --json` at
 `comments.comments`), and a person's comment is a steer: every later step's
 Session lists it in `lf session steers <session> --json`, the off reason too.

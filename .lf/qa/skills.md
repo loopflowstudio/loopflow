@@ -15,7 +15,7 @@ To see a message written, use a throwaway repository skill that edits a file and
 is told not to run git. Don't name it `note`: `lf -b note '<text>'` fails with
 "invalid version format". A two-step Graph of that skill
 (`.lf/graphs/<name>.yaml` with `- <skill>` twice) checks the Graph path in
-under a minute; `lf process show <graph>` lists each step commit as a second
+under a minute; `lf graph show <id>` lists each step commit as a second
 row under the skill's label.
 
 A loop Graph shows the decision prompt: `- loop:` over a skill that appends a
@@ -26,3 +26,9 @@ in `~/.claude/projects/<cwd>/*.jsonl` carries `Decision pass N. Iterating
 repeats 2 steps, back to <first step>.` and the loop criteria. Manual
 `lf commit` on that branch pushes; point `origin` at a missing path to see a
 push failure keep the commit.
+
+For a stopped Graph with successful worker turns, give its decider an exact
+invalid report to repeat even on correction, such as
+`{"decision":"advance","summary":"passed","reason":"failed"}`. With Codex,
+run `lf -b --task <id> graph <name>` from the disposable Task checkout. Three
+rejected turns leave the Graph's diagnostic in `lf task status <id>`.

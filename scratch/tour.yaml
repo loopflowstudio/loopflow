@@ -1,5 +1,7 @@
-at: ceb818f5a08ad2cb2943abf8fdce2462b9e95986
+at: 63d2f817d3cbcb965ab956c2b14553d2b3c22cab
 first:
+  - path: docs/workspaces.md
+    why: Open another Machine’s Session in a local tab
   - path: rust/loopflow/src/server/README.md
     why: How clients open and follow a remote Task
   - path: scratch/plan.md
@@ -8,6 +10,12 @@ first:
     why: Revision 10 addresses remote Sessions and Task shells
   - path: swift/Loopflow/Services/ServerProtocol.swift
     why: Desktop and phone negotiate the same revision
+  - path: rust/loopflow/src/lf/navigation.rs
+    why: Keep open on the calling Machine
+  - path: rust/loopflow/src/lf/commands/open.rs
+    why: Keep the selectors through launch and retry
+  - path: rust/loopflow/src/lf/commands/open/conversation.rs
+    why: Select the owner’s Session and attach the tab
   - path: rust/loopflow/src/lf/commands/waves.rs
     why: Plan rows expose a checkout only on its Machine
   - path: rust/loopflow-execution/src/ops/task/snapshot.rs
@@ -39,7 +47,7 @@ first:
   - path: rust/loopflow/src/server/remote.rs
     why: The WebSocket bridge carries a local or remote terminal
   - path: rust/loopflow/tests/machine_commands.rs
-    why: Follow a move, recover mini, and type remotely
+    why: Open local tabs and type into mini’s Sessions
   - path: rust/loopflow/tests/support/tailscale.rs
     why: Isolated phone identity and TLS WebSocket connections
 hide:

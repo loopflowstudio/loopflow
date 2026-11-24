@@ -1053,7 +1053,7 @@ fn a_wave_is_made_with_one_project_and_every_task_joins_it() {
         .unwrap();
         assert!(status.contains("· completed"), "{status}");
         assert_eq!(
-            status.contains("not in Linear yet; `lf wave sync product` makes it"),
+            status.contains("not in Linear yet; `lf wave plan connect product` makes it"),
             connected,
             "{status}"
         );
@@ -1444,8 +1444,8 @@ fn task_creation_and_edits_save_offline_in_both_connection_modes() {
         assert_eq!(task["task"]["sync"], status["sync"]);
         assert!(task["reference"]["workspace"].is_null());
         if connected && !mapped {
-            // `lf wave sync` makes the Project and binds it: the reorder made
-            // meanwhile is sent then, behind the Tasks' creates.
+            // `lf wave plan connect` makes the Project and binds it: the
+            // reorder made meanwhile is sent then, behind the Tasks' creates.
             loopflow_execution::store::sqlite::linear_events::accept_linear_project_in(
                 &store,
                 wave.id(),
@@ -2159,7 +2159,7 @@ fn ordinary_task_creation_returns_resolvable_identifier_without_a_public_retry_t
 }
 
 #[test]
-fn wave_sync_offline_fails_with_the_tracker_error_and_queues_no_project() {
+fn wave_sync_offline_leaves_the_project_unbound_and_queues_no_create() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
     lf(
@@ -2175,9 +2175,12 @@ fn wave_sync_offline_fails_with_the_tracker_error_and_queues_no_project() {
         .stdin(std::process::Stdio::null())
         .output()
         .unwrap();
-    assert!(!output.status.success());
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("No Linear credential found"), "{stderr}");
+    // Sync never makes a Project, so no credential is asked for.
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
     let queued: i64 = db
         .query_row(
@@ -2196,10 +2199,14 @@ fn wave_sync_offline_fails_with_the_tracker_error_and_queues_no_project() {
         status["project"]["value"]["tracker_id"].is_null(),
         "{status}"
     );
+    assert_eq!(
+        status["project"]["value"]["unbound"],
+        "not in Linear yet; `lf wave plan connect inbox` makes it"
+    );
 }
 
 #[test]
-fn wave_sync_makes_only_its_own_project() {
+fn wave_sync_makes_no_project_and_connect_makes_only_its_own() {
     use crate::lf::commands::write::Write;
     use loopflow_execution::test_support::planning_tasks::with_planning_task;
     use loopflow_execution::work::wave::Wave;
@@ -2217,21 +2224,41 @@ fn wave_sync_makes_only_its_own_project() {
         runtime
             .block_on(fixture.store.create_wave(&billing))
             .unwrap();
-        let sync = || {
+        runtime.block_on(state.lock()).export_mode = true;
+        let connect = || {
+            Write::WavePlanConnect {
+                directory: repo.into(),
+                wave: Some("billing".into()),
+                project: None,
+                all: false,
+                team_key: None,
+                team_name: None,
+            }
+            .run()
+        };
+        // Desktop's planning clock runs this; it reads, never makes a Project.
+        let status = serde_json::to_value(
             Write::WaveSync {
                 directory: repo.into(),
                 wave: "billing".into(),
             }
             .run()
-            .map(|status| serde_json::to_value(status).unwrap())
-        };
+            .unwrap(),
+        )
+        .unwrap();
+        assert!(
+            status["project"]["value"]["tracker_id"].is_null(),
+            "{status}"
+        );
+        assert_eq!(
+            status["project"]["value"]["unbound"],
+            "not in Linear yet; `lf wave plan connect billing` makes it"
+        );
+        assert!(runtime.block_on(state.lock()).extra_projects.is_empty());
+
         runtime.block_on(state.lock()).field_outage = true;
-        assert!(sync().is_err());
-        {
-            let mut linear = runtime.block_on(state.lock());
-            linear.field_outage = false;
-            linear.export_mode = true;
-        }
+        assert!(connect().is_err());
+        runtime.block_on(state.lock()).field_outage = false;
         let id = runtime
             .block_on(fixture.store.project_of_wave(billing.id()))
             .unwrap()
@@ -2241,10 +2268,8 @@ fn wave_sync_makes_only_its_own_project() {
             .unwrap()
             .to_string();
         for _ in 0..2 {
-            let status = sync().unwrap();
-            assert_eq!(status["project"]["value"]["id"], id.as_str());
-            assert_eq!(status["project"]["value"]["tracker_id"], external);
-            assert!(fixture.wave_refresh_at(&billing).is_some());
+            let receipts = serde_json::to_value(connect().unwrap()).unwrap();
+            assert_eq!(receipts[0]["project_id"], external);
         }
         let linear = runtime.block_on(state.lock());
         let names: Vec<_> = linear

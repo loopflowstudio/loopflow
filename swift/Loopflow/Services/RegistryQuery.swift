@@ -1006,9 +1006,9 @@ public struct RegistryQuery: Sendable {
         _ = try await write(.waveSync(directory: cwd, wave: wave))
     }
 
-    /// `lf wave create`: registers the Wave and commits its files on the main
-    /// checkout; its first Task makes its first Project. Adding an existing Wave changes nothing, so this
-    /// is also the explicit opening/retry operation; periodic reads stay observational.
+    /// `lf wave create`: registers the Wave with its Project, commits its files on the main
+    /// checkout and, in a repository with a tracker, makes the Project there. Adding an existing
+    /// Wave changes nothing but a Project the tracker does not hold yet.
     /// The receipt's `summary` names anything left to finish.
     @discardableResult
     public func addWave(name: String, objective: String? = nil, cwd: String) async throws -> WaveAdded {

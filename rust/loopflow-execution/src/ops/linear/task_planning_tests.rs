@@ -359,7 +359,7 @@ fn adding_a_wave_offline_fails_and_a_second_add_makes_its_project() {
                 .unwrap_err()
                 .to_string();
             assert!(
-                error.contains("Run `lf wave sync billing` to make it"),
+                error.contains("Run `lf wave plan connect billing` to make it"),
                 "{error}"
             );
             let wave = fixture
@@ -1540,12 +1540,13 @@ fn linear_on_demand_adopts_new_open_issues_without_allocating_execution() {
 }
 
 #[test]
-fn a_wave_sync_binds_the_linear_project_a_lost_create_reply_left() {
+fn connect_binds_the_linear_project_a_lost_create_reply_left() {
     with_export_plan(|runtime, fixture, repo, task, state| {
+        super::test_fixture::commit_planning_repo(repo);
         let project = task.project_id.clone().unwrap();
         let id = crate::ops::tracker::creation_id(project.as_str()).unwrap();
         // A create whose reply was lost landed under the Project's own UUID;
-        // Linear refuses that id again, so the sync finds it instead.
+        // Linear refuses that id again, so connect finds it instead.
         let mut landed = planning_project(&id);
         landed["name"] = json!("Product");
         runtime.block_on(state.lock()).extra_projects.push(landed);
@@ -1553,12 +1554,16 @@ fn a_wave_sync_binds_the_linear_project_a_lost_create_reply_left() {
             .block_on(fixture.store.get_wave(task.wave_id.as_ref().unwrap()))
             .unwrap()
             .unwrap();
-        runtime
-            .block_on(crate::ops::planning_sync::refresh_wave(
-                &wave,
-                loopflow_storage::planning_sync::TrackerKind::Linear,
-            ))
-            .unwrap();
+        let connected = super::connect(
+            repo,
+            &super::LinearInitOptions {
+                wave: Some(wave.slug().into()),
+                ..Default::default()
+            },
+            &NullProgress,
+        )
+        .unwrap();
+        assert_eq!(connected.project_id.as_deref(), Some(id.as_str()));
         let saved = crate::ops::task::task_create(
             repo,
             Some(wave.slug()),

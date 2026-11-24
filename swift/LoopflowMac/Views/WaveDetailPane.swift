@@ -296,6 +296,10 @@ struct WaveProjectView: View {
                 Text(project.status.rawValue.capitalized)
                     .font(Typography.meta).foregroundStyle(palette.textSecondary)
             }
+            if let unbound = project.unbound {
+                Text(unbound).font(Typography.meta).foregroundStyle(palette.textSecondary)
+                    .textSelection(.enabled)
+            }
             TrackerSyncView(sync: project.sync, repo: repo)
         }.accessibilityIdentifier("wave-project")
     }

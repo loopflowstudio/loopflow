@@ -33,7 +33,8 @@
             "actions": []
           },
           "tracker_id": "project-1",
-          "url": "https://linear.app/loopflow/project/current-1a2b3c4d5e6f"
+          "url": "https://linear.app/loopflow/project/current-1a2b3c4d5e6f",
+          "unbound": null
         }
       },
       "graph": "feature"

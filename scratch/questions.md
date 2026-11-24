@@ -114,3 +114,11 @@
   goes on the wire (`ProjectSummary.unbound`) so Desktop shows it. Found
   because Desktop's planning clock calls `wave.sync` every five minutes.
   Page questions 1–3.
+- Slice 14: in an Asana repository the unbound sentence and the create
+  failure name `lf wave create <wave>`, not `lf wave plan connect <wave>`:
+  connect is Linear's (it writes `repo.tracker.linear.team` and claims a
+  Linear Team), so in an Asana repository it would move the repository to
+  Linear. `tracker::make_project_command` holds the choice. Making connect
+  tracker-neutral is the alternative.
+- Slice 14: `lf wave sync` on an unbound Wave offline now succeeds (nothing
+  it does needs the tracker); before it failed with the credential error.

@@ -57,11 +57,13 @@ pub async fn add(repo: &Path, name: &str, objective: Option<&str>) -> OpsResult<
     super::tracker::create_wave_project(&store, &added.main_checkout, &added.id)
         .await
         .map_err(|error| {
+            let retry = super::tracker::queued_tracker(&added.main_checkout)
+                .map(|tracker| super::tracker::make_project_command(tracker, &added.name))
+                .unwrap_or_else(|| format!("lf wave create {}", added.name));
             lifecycle_error(format!(
-                "wave/{} has no tracker Project yet: {}. Run `lf wave sync {}` to make it.",
+                "wave/{} has no tracker Project yet: {}. Run `{retry}` to make it.",
                 added.name,
                 error.to_string().trim_end_matches('.'),
-                added.name
             ))
         })?;
     Ok(added)

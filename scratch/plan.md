@@ -714,9 +714,21 @@ Chosen for review (`scratch/concept-review.html`, questions 1–3):
   (`dto_fixtures::`, `server::schema::tests::`, `status_tests::`, Swift
   `DTOFixtureTests|WaveDetailReadingTests`).
 
+Built: `refresh_wave` makes no Project. `tracker::make_project_command`
+names the maker (`lf wave plan connect <wave>`; Asana: `lf wave create
+<wave>`, see questions), used by the create error, the connect receipt and
+`tracker::unbound_project`, which fills `ProjectSummary.unbound` (Rust, Swift
+`ProjectPlanningSnapshot`, three DTO fixtures, inline Swift fixtures).
+`print_project` and `WaveProjectView` print it. Tests:
+`wave_sync_makes_no_project_and_connect_makes_only_its_own`,
+`wave_sync_offline_leaves_the_project_unbound_and_queues_no_create`,
+`connect_binds_the_linear_project_a_lost_create_reply_left`,
+`adding_the_wave_again_binds_the_asana_project_a_lost_create_reply_left`.
+Execution `task_planning_tests::`, `asana_planning_tests::`, `wave_lifecycle`
+pass.
+
 ## Remains
 
-0. Slice 14 above.
 1. Gate: sync main, Swift DTO and desktop suites (`scripts/test_desktop.sh`),
    the full matrix in CI, and the `oauth_tests::…sqlite_contention…` failure
    checked on the base. `check_migrations.py` passes since the base merge

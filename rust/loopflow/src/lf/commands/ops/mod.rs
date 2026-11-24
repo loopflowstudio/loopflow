@@ -428,8 +428,12 @@ pub fn connect_wave(
             (Some(id), false) => format!("Linear Project `{}` ({id}) linked", result.project_name),
             (Some(id), true) => format!("Linear Project `{}` ({id}) made", result.project_name),
             (None, _) => format!(
-                "Linear Project `{}` is being made; `lf wave sync` retries it",
-                result.project_name
+                "Linear Project `{}` is not made yet; `{}` makes it",
+                result.project_name,
+                loopflow_execution::ops::tracker::make_project_command(
+                    loopflow_execution::store::planning_sync::TrackerKind::Linear,
+                    &result.wave
+                )
             ),
         };
         let team_state = if result.team_created {

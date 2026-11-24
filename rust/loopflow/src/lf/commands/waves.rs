@@ -404,6 +404,11 @@ pub struct ProjectSummary {
     /// Where the tracker shows the Project; `None` until a read sees it.
     #[serde(deserialize_with = "Option::deserialize")]
     pub url: Option<String>,
+    /// A live Wave's Project the repository's tracker does not hold yet: what
+    /// that means and the command that makes it. `None` once bound, for a
+    /// removed Wave, or without a tracker.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub unbound: Option<String>,
 }
 
 async fn project_planning(store: &SharedStore, wave: &Wave) -> Reading<Option<ProjectSummary>> {
@@ -411,7 +416,16 @@ async fn project_planning(store: &SharedStore, wave: &Wave) -> Reading<Option<Pr
         let Some(project) = store.project_of_wave(wave.id()).await? else {
             return Ok(None);
         };
+        let unbound = (project.tracker_id.is_none() && !wave.is_retired())
+            .then(|| {
+                loopflow_execution::ops::tracker::unbound_project(
+                    Path::new(wave.repo()),
+                    wave.slug(),
+                )
+            })
+            .flatten();
         Ok(Some(ProjectSummary {
+            unbound,
             sync: store.project_tracker_sync(&project.id)?,
             url: store.sqlite.project_url(&project.id)?,
             tracker_id: project.tracker_id.map(|id| id.as_str().to_owned()),
@@ -425,7 +439,7 @@ async fn project_planning(store: &SharedStore, wave: &Wave) -> Reading<Option<Pr
     Reading::from_result(result)
 }
 
-fn print_project(wave: &WaveSnapshot, project: &Reading<Option<ProjectSummary>>) {
+fn print_project(project: &Reading<Option<ProjectSummary>>) {
     let project = match project {
         Reading::Unavailable { reason } => {
             println!("  project unavailable: {reason}");
@@ -452,13 +466,8 @@ fn print_project(wave: &WaveSnapshot, project: &Reading<Option<ProjectSummary>>)
     if let Some(url) = &project.url {
         println!("            {url}");
     }
-    let tracker = loopflow_execution::ops::tracker::queued_tracker(Path::new(&wave.repo));
-    if let (None, Some(tracker), None) = (&project.tracker_id, tracker, &wave.retired_at) {
-        println!(
-            "    not in {} yet; `lf wave sync {}` makes it",
-            tracker.display_name(),
-            wave.name
-        );
+    if let Some(unbound) = &project.unbound {
+        println!("    {unbound}");
     }
     for line in project.sync.lines() {
         println!("    {line}");
@@ -2947,7 +2956,7 @@ fn print_status(status: &WaveDetailSnapshot) {
         None => println!("  machine      unplaced"),
     }
     print_setup(&status.setup);
-    print_project(wave, &status.project);
+    print_project(&status.project);
     match &status.tasks {
         Evidence::Unavailable { reason } => println!("  tasks unavailable: {reason}"),
         Evidence::Ok { items, .. } => {
@@ -3167,7 +3176,7 @@ fn print_roadmap(roadmap: &RoadmapSnapshot) {
     let now = now();
     for wave in &roadmap.waves {
         print_wave_heading(&wave.wave);
-        print_project(&wave.wave, &wave.project);
+        print_project(&wave.project);
         let tasks = match roadmap.wave_tasks(wave) {
             Evidence::Unavailable { reason } => {
                 println!("  tasks unavailable: {reason}");

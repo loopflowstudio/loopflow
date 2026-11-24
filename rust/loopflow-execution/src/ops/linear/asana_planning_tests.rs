@@ -692,7 +692,7 @@ fn asana_wave_projects_become_team_projects_holding_their_tasks() {
 }
 
 #[test]
-fn a_wave_sync_binds_the_asana_project_a_lost_create_reply_left() {
+fn adding_the_wave_again_binds_the_asana_project_a_lost_create_reply_left() {
     with_asana(|runtime, fixture, repo, state| {
         let wave = fixture
             .store
@@ -712,10 +712,7 @@ fn a_wave_sync_binds_the_asana_project_a_lost_create_reply_left() {
             "modified_at": "2026-10-19T11:00:00.000Z",
         }));
         runtime
-            .block_on(crate::ops::planning_sync::refresh_wave(
-                &wave,
-                crate::ops::tracker::queued_tracker(repo).unwrap(),
-            ))
+            .block_on(crate::ops::wave_lifecycle::add(repo, "product", None))
             .unwrap();
         let saved = crate::ops::task::task_create(
             repo,

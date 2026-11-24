@@ -97,10 +97,32 @@ pub fn connected(repo: &str) -> bool {
     queued_tracker(Path::new(repo)).is_some()
 }
 
+/// The command that makes `wave`'s Project in `tracker`: connecting a Linear
+/// repository's Wave, or adding an Asana repository's Wave again (connect
+/// would move the repository to Linear).
+pub fn make_project_command(tracker: TrackerKind, wave: &str) -> String {
+    match tracker {
+        TrackerKind::Asana => format!("lf wave create {wave}"),
+        _ => format!("lf wave plan connect {wave}"),
+    }
+}
+
+/// What a live Wave's Project the tracker does not hold yet says, and the
+/// command that makes it; `None` once it is bound or without a tracker.
+pub fn unbound_project(repo: &Path, wave: &str) -> Option<String> {
+    let tracker = queued_tracker(repo)?;
+    Some(format!(
+        "not in {} yet; `{}` makes it",
+        tracker.display_name(),
+        make_project_command(tracker, wave)
+    ))
+}
+
 /// Give `wave`'s Project its tracker id, creating it in the repository's
-/// tracker on this Machine when it has none: the command that makes, connects
-/// or syncs a Wave does this before it returns. True when it created one; a
-/// tracker error fails the caller and leaves the Project unbound.
+/// tracker on this Machine when it has none: the command that makes or
+/// connects a Wave does this before it returns, and so does a drain sending a
+/// Task into it. True when it created one; a tracker error fails the caller
+/// and leaves the Project unbound.
 pub async fn create_wave_project(store: &Store, repo: &Path, wave: &WaveId) -> OpsResult<bool> {
     if queued_tracker(repo).is_none() {
         return Ok(false);

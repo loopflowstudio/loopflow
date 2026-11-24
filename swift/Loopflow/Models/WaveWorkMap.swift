@@ -25,13 +25,16 @@ public struct ProjectPlanningSnapshot: Decodable, Sendable, Identifiable, Hashab
     public let status: ProjectStatus
     /// Where the tracker shows this Project, once a read has seen it.
     public let url: URL?
+    /// Set while the repository's tracker does not hold this Project yet: what
+    /// that means and the command that makes it, as the CLI prints it.
+    public let unbound: String?
 
     public func matches(reference: String) -> Bool {
         id == reference || slug == reference || trackerId == reference
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, slug, name, status, sync, url
+        case id, slug, name, status, sync, url, unbound
         case trackerId = "tracker_id"
     }
 
@@ -44,6 +47,7 @@ public struct ProjectPlanningSnapshot: Decodable, Sendable, Identifiable, Hashab
         name = try values.decode(String.self, forKey: .name)
         status = try values.decode(ProjectStatus.self, forKey: .status)
         url = try values.decode(URL?.self, forKey: .url)
+        unbound = try values.decode(String?.self, forKey: .unbound)
     }
 }
 

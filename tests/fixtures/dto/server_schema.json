@@ -5864,6 +5864,13 @@
             "null"
           ]
         },
+        "unbound": {
+          "description": "A live Wave's Project the repository's tracker does not hold yet: what\nthat means and the command that makes it. `None` once bound, for a\nremoved Wave, or without a tracker.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "url": {
           "description": "Where the tracker shows the Project; `None` until a read sees it.",
           "type": [
@@ -5879,7 +5886,8 @@
         "slug",
         "name",
         "status",
-        "url"
+        "url",
+        "unbound"
       ],
       "type": "object"
     },

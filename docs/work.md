@@ -567,11 +567,12 @@ $ lf wave status billing/refunds
 A Wave is one Project, made with the Wave: `lf wave create billing/refunds`
 makes the Project `refunds`, and in a repository with Linear or Asana makes it
 there too before it returns. Can't reach the tracker? The command fails and
-names `lf wave sync billing/refunds`, which makes it. A Wave that arrived
-without one (from an upgrade) gets its tracker Project from `lf wave sync`,
-`lf wave plan connect`, or the first Task sent into it. Until then `lf wave
-status` says the Project is not in the tracker yet and names the `lf wave
-sync` that makes it. Tasks reordered meanwhile keep that order in the
+names `lf wave plan connect billing/refunds`, which makes it (in Asana, `lf
+wave create billing/refunds` again). A Wave that arrived without one (from an
+upgrade) gets its tracker Project from that command or the first Task sent
+into it; `lf wave sync` and Desktop's refresh never make one. Until then `lf
+wave status` and Desktop say the Project is not in the tracker yet and name
+the command that makes it. Tasks reordered meanwhile keep that order in the
 tracker. A Task
 in a Wave is in its Project, and lists under that Wave only. A Task in no
 Wave is in no Project.
@@ -679,9 +680,8 @@ if setup fails, `lf resume --task <ID>` retries it). See
 
 **Tracker sync notes.** `lf task sync LOO-12` exchanges one Task now;
 `lf wave sync billing` reads tracker changes, then gives billing’s Project
-priority among pending saves. If its create succeeds, status shows the link.
-If it stays queued, status shows the pending action and its last error when
-available. A linked Linear Wave also reads its Project and issues. Without a
+priority among pending saves. A save that stays queued shows in status with
+its last error when available. A linked Linear Wave also reads its Project and issues. Without a
 tracker, both commands exchange the repository’s plan through Git and its
 configured hub. `lf task sync` also shows what each still has unsent. If Linear updates an issue or
 Project without bumping `updatedAt`, Loopflow adopts the fresh reading and

@@ -401,7 +401,12 @@ edits, and readable completed history. Two independent failures still break
 the promise that saved Wave work can reach the configured tracker. The
 current walkthrough and both review choices are in `scratch/concept-review.html`.
 
-### Slice 8 — keep pending Task delivery usable through upgrade
+### Slice 8 — keep pending Task delivery usable through upgrade (built)
+
+Built: `remove_chapters.sql` maps dropped to kept Projects (`one_project_dropped`)
+and translates queued creates and `task_project` edits;
+`planning_action_tests::a_released_queue_delivers_after_its_chapter_projects_collapse`
+over `tests/fixtures/migrations/chapter_deliveries.sql`.
 
 Use the released-schema fixture in
 `rust/loopflow-storage/src/sqlite/children.rs`
@@ -433,7 +438,11 @@ create referencing the deleted ID. The foreign-key check was clean.
   move to a surviving destination still reaches it. Additional unrecognized
   fields in a queued create survive translation.
 
-### Slice 9 — make the advertised Wave sync retry work
+### Slice 9 — make the advertised Wave sync retry work (built)
+
+Built: `ops/mod.rs::refresh_status` routes by `queued_tracker`; with a
+tracker it runs `planning_sync::refresh_wave` for the selected Wave, else the
+carrier refresh (`asana_planning_tests`, `task_planning_tests`).
 
 A private checkout with a Linear Team and no login had a queued Project
 create for `billing`. After clearing its recorded error as a probe,
@@ -474,13 +483,20 @@ chapter to clear updates that column.
 
 ## Remains
 
-1. Release staging is blocked. `uv run python scripts/check_migrations.py` rejects
-   `CREATE UNIQUE INDEX projects_wave ON projects(wave_id)`. The same
-   check fails on the migration at 9d6b93a125, before the delivery fixes.
-   A released writer can still add another chapter. The earlier plan's
-   suggestion that keeping every column makes this additive is contradicted
-   by that writer. Before landing, stage the one-Project representation in
-   a shape that accepts released writes.
+1. Next slice: stage the unique index. `uv run python scripts/check_migrations.py`
+   still fails (2026-11-23): "unique index projects_wave on projects; an older
+   writer may violate it". A released writer can add another chapter Project.
+   Shape to build: `remove_chapters.sql` keeps the collapse and fill but
+   creates `projects_wave` as a plain (non-unique) index on `wave_id`
+   (replace `idx_projects_wave`; update `query_plans.rs` `MEASURED` row if
+   needed). `project_of_wave` and the import binding read one Project
+   deterministically when a released writer has added another (the Wave's
+   `ProjectId::for_wave` record first, else oldest), and a Task joining its
+   Wave goes to that one. A contract migration, filed as its own Task with
+   `-- expand: remove_chapters`, repeats the collapse and adds the unique
+   index after `STAGING_DAYS`. Done when `check_migrations.py` passes and a
+   test seeds a second Project on a Wave after migration and shows reads,
+   Task create and import still use the first.
 2. Gate: Swift DTO and desktop suites (`scripts/test_desktop.sh`), full matrix
    in CI, and check the `oauth_tests` contention failure on the base.
 3. Open, not this Task: a queued create's field snapshot (`scratch/concept-review.html`

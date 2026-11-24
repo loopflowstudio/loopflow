@@ -2205,6 +2205,19 @@ async fn snapshot_task_detail(
         .get(&task.id)
         .map(|reason| loopflow_execution::ops::task::completion_pending_text(task, reason));
     let owner = facts.owners.get(&task.id).cloned();
+    // A Task another Machine runs has no checkout here; one left from before
+    // it moved is history, never its workspace or its progress.
+    let elsewhere;
+    let task = match &owner {
+        Some(owner) if owner.machine_elsewhere(&shared.local_machine).is_some() => {
+            elsewhere = Task {
+                worktree: None,
+                ..task.clone()
+            };
+            &elsewhere
+        }
+        _ => task,
+    };
     let wave = task
         .wave_id
         .as_ref()
@@ -2226,7 +2239,6 @@ async fn snapshot_task_detail(
     let reference = task_reference(
         facts.issue_urls.get(&task.id).cloned(),
         task,
-        runtime.owner.as_ref(),
         &shared.machines,
         &shared.local_machine,
     );
@@ -2650,39 +2662,33 @@ fn derive_task_condition(
 fn task_reference(
     issue_url: Option<String>,
     task: &Task,
-    owner: Option<&loopflow_model::durable::TaskOwner>,
     machines: &[loopflow_model::durable::Machine],
     local_machine: &loopflow_model::durable::MachineId,
 ) -> TaskReferenceSnapshot {
-    let remote = owner.and_then(|owner| owner.machine_elsewhere(local_machine));
-    let workspace = task
-        .worktree
-        .as_ref()
-        .filter(|_| remote.is_none())
-        .map(|task_worktree| {
-            let branch = Some(task.branch.clone());
-            // A removed checkout has no root to resolve.
-            let worktree = if loopflow_execution::observe::is_dir(task_worktree) {
-                loopflow_execution::git::worktree_root(task_worktree)
-                    .ok()
-                    .and_then(|root| root.canonicalize().ok())
-                    .unwrap_or_else(|| task_worktree.clone())
-            } else {
-                task_worktree.clone()
-            };
-            TaskWorktreeSnapshot {
-                machine_label: machines
-                    .iter()
-                    .find(|machine| &machine.id == local_machine)
-                    .and_then(|machine| machine.label.clone()),
-                machine_id: Some(local_machine.clone()),
-                slug: task.workspace_slug.clone(),
-                branch,
-                base_commit: task.base_commit.clone(),
-                worktree: worktree.display().to_string(),
-                local_exists: loopflow_execution::observe::try_exists(&worktree).ok(),
-            }
-        });
+    let workspace = task.worktree.as_ref().map(|task_worktree| {
+        let branch = Some(task.branch.clone());
+        // A removed checkout has no root to resolve.
+        let worktree = if loopflow_execution::observe::is_dir(task_worktree) {
+            loopflow_execution::git::worktree_root(task_worktree)
+                .ok()
+                .and_then(|root| root.canonicalize().ok())
+                .unwrap_or_else(|| task_worktree.clone())
+        } else {
+            task_worktree.clone()
+        };
+        TaskWorktreeSnapshot {
+            machine_label: machines
+                .iter()
+                .find(|machine| &machine.id == local_machine)
+                .and_then(|machine| machine.label.clone()),
+            machine_id: Some(local_machine.clone()),
+            slug: task.workspace_slug.clone(),
+            branch,
+            base_commit: task.base_commit.clone(),
+            worktree: worktree.display().to_string(),
+            local_exists: loopflow_execution::observe::try_exists(&worktree).ok(),
+        }
+    });
     TaskReferenceSnapshot {
         issue_url,
         workspace,
@@ -3861,6 +3867,10 @@ mod tests {
         );
         assert_eq!(workspace.worktree, "/local/checkout");
         assert_eq!(workspace.local_exists, Some(false));
+        assert_ne!(
+            detail.condition.local_progress.state,
+            super::LocalProgressEvidenceState::NotApplicable
+        );
 
         db.execute(
             "INSERT INTO task_ownership(id,task_id,kind,machine_id,at,ordered_at,writer_machine_id,written_here)
@@ -3877,6 +3887,11 @@ mod tests {
             Some(peer)
         );
         assert!(detail.reference.workspace.is_none());
+        // The checkout left here is not the Task's progress either.
+        assert_eq!(
+            detail.condition.local_progress.state,
+            super::LocalProgressEvidenceState::NotApplicable
+        );
     }
 
     #[tokio::test]

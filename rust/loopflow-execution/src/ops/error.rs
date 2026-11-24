@@ -6,7 +6,7 @@ pub type OpsResult<T> = Result<T, OpsError>;
 
 #[derive(Debug, Error)]
 pub enum OpsError {
-    #[error("{0}")]
+    #[error(transparent)]
     Refused(#[from] crate::engine::Error),
     #[error(transparent)]
     Planning(#[from] crate::linear::LinearBindingError),

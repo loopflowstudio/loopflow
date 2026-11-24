@@ -713,22 +713,26 @@ pub fn unavailable_on(machine: &Machine, error: anyhow::Error) -> anyhow::Error 
     if refusal.code != ErrorCode::Unavailable || refusal.data.is_some() {
         return error;
     }
-    Error::new(
-        ErrorCode::Unavailable,
+    // A message that already names an `ssh` check (SSH's own failure,
+    // `unanswered`, an exited `lf` there) names the Machine too.
+    let message = if refusal.message.contains("`ssh ") {
+        refusal.message
+    } else {
         format!(
             "{} is unavailable: {}; check `ssh {} lf server status`",
             machine.name(),
             refusal.message,
             machine.route,
-        ),
-    )
-    .with(serde_json::json!({
-        "resource": "machine",
-        "machine_id": machine.id,
-        "machine_label": machine.label,
-        "machine_name": machine.name(),
-    }))
-    .into()
+        )
+    };
+    Error::new(ErrorCode::Unavailable, message)
+        .with(serde_json::json!({
+            "resource": "machine",
+            "machine_id": machine.id,
+            "machine_label": machine.label,
+            "machine_name": machine.name(),
+        }))
+        .into()
 }
 
 fn unanswered(

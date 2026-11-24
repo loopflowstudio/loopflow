@@ -5685,6 +5685,77 @@ fn an_lf_that_dies_before_answering_says_so_and_what_it_printed() {
     );
 }
 
+/// `lf task file`, `files` and `save` on the laptop reach mini's checkout,
+/// never the one left on the laptop.
+#[test]
+fn task_file_commands_read_and_save_on_the_owning_machine() {
+    let fixture = preview_machines();
+    let (plan, task) = task_on_mini(&fixture);
+    let local = fixture.root.path().join("local");
+    let stale = local.join("former checkout");
+    fs::create_dir(&stale).unwrap();
+    fs::write(stale.join("notes.txt"), "stale on the laptop\n").unwrap();
+    fs::write(plan.remote_path.join("notes.txt"), "written on mini\n").unwrap();
+    for (db, path) in [
+        (
+            &fixture.root.path().join("remote/store/loopflow.db"),
+            &plan.remote_path,
+        ),
+        (&local.join("loopflow.db"), &stale),
+    ] {
+        rusqlite::Connection::open(db)
+            .unwrap()
+            .execute(
+                "INSERT INTO task_checkouts(task_id,worktree) VALUES(?1,?2)",
+                [task.as_str(), path.to_str().unwrap()],
+            )
+            .unwrap();
+    }
+    let _peer = served_mini(&fixture);
+    let _ended = EndRecorded(vec![fixture.root.path().join("remote/store")]);
+
+    let listed = fixture.run(&["task", "files", task.as_str()]);
+    assert!(listed.status.success(), "{listed:?}");
+    assert!(String::from_utf8_lossy(&listed.stdout)
+        .lines()
+        .any(|path| path == "notes.txt"));
+    let read = fixture.run(&["task", "file", task.as_str(), "notes.txt", "--json"]);
+    assert!(read.status.success(), "{read:?}");
+    let read: Value = serde_json::from_slice(&read.stdout).unwrap();
+    assert_eq!(read["content"], "written on mini\n");
+
+    let mut save = fixture.command(&[
+        "task",
+        "save",
+        task.as_str(),
+        "notes.txt",
+        "--revision",
+        read["revision"].as_str().unwrap(),
+    ]);
+    let mut child = save
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(b"saved from the laptop\n")
+        .unwrap();
+    let saved = child.wait_with_output().unwrap();
+    assert!(saved.status.success(), "{saved:?}");
+    assert_eq!(
+        fs::read_to_string(plan.remote_path.join("notes.txt")).unwrap(),
+        "saved from the laptop\n"
+    );
+    assert_eq!(
+        fs::read_to_string(stale.join("notes.txt")).unwrap(),
+        "stale on the laptop\n"
+    );
+}
+
 #[test]
 fn an_unreachable_destination_names_the_ssh_check_not_its_server() {
     let fixture = preview_machines();

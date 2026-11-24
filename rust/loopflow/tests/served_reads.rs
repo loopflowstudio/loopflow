@@ -1404,6 +1404,7 @@ fn server_operations_match_their_lf_commands() {
                 Write::TaskComplete {
                     directory: directory.clone(),
                     issue: unpublished.clone(),
+                    children: None,
                 },
                 Write::TaskReopen {
                     directory: directory.clone(),
@@ -2079,10 +2080,25 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
             }
             (path(directory), args)
         }
-        Write::TaskComplete { directory, issue } => (
-            path(directory),
-            words(&["task", "complete", issue, "--json"]),
-        ),
+        Write::TaskComplete {
+            directory,
+            issue,
+            children,
+        } => {
+            let mut args = words(&["task", "complete", issue]);
+            if let Some(children) = children {
+                args.push("--children".into());
+                args.push(
+                    serde_json::to_value(children)
+                        .unwrap()
+                        .as_str()
+                        .unwrap()
+                        .into(),
+                );
+            }
+            args.push("--json".into());
+            (path(directory), args)
+        }
         Write::TaskReopen { directory, issue } => {
             (path(directory), words(&["task", "reopen", issue, "--json"]))
         }

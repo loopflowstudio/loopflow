@@ -316,6 +316,39 @@ names the running one without leaving a pending completion; `--children rehome`
 finishes the parent and `lf wave show` lists both children top-level. In
 Desktop, right-click the parent → `Complete Task…` → the two-choice dialog.
 
+## Status
+
+Built (pass 1 and the Desktop half of pass 2):
+- Storage: `ChildPolicy`, `ChildOutcome::Rehomed`, `OpenDescendant`,
+  `ParentCompletion`, `complete_task_now`, `rehome_destination`,
+  `open_descendants`; `request_family_completion` and the `family` flag gone;
+  pending completion always waits for children; `CompletionSettlement::Settled`
+  carries nothing.
+- Execution: `task_complete(repo, issue, note, children)`, open-tree refusal
+  (counts direct children, lists the whole tree), `live_abandon_blockers`,
+  `settle_children`. `--reason` lands on `Completed { summary }`.
+- CLI `--children`, `task.complete.children` on the wire, schema fixture,
+  rehome text output.
+- Desktop: `TaskChildPolicy`, `ServedWrite.taskComplete(children:)`, dialog
+  with both button layouts, `WorkModel.rehomeDestination`.
+- Tests: `session_cli_tests::a_merged_parent_stays_open_until_it_is_completed_with_its_children`
+  (refusal writes nothing, abandon, reopen abandoned, rehome past a closed
+  ancestor, top-level rehome, unmerged parent arms nothing);
+  `ops::task::tests::abandoning_children_waits_for_live_work_but_not_an_idle_conversation`;
+  Swift `TaskCompleteConfirmationTests`, `ServerProtocolTests.taskCompletionNamesWhatHappensToOpenChildren`.
+
+Learned: tracker parent actions for rehome come from `planning_write::local`,
+the same path as `lf task update --parent`; no separate queueing needed. A
+Task with no tracker object queues none, so the CLI fixture cannot see one.
+
+Remaining (pass 2, iOS):
+- `ViewContent.open_children` in Rust + Swift + DTO fixtures.
+- iOS confirmation dialog on swipe for parents. Until then an iOS swipe on a
+  parent sends `children: null` and the refusal comes back as a Notice
+  (docs/surfaces.md already describes the dialog).
+- Swift `rehomeDestination` cannot see deleted ancestors, so it can say "Top
+  Level" where Rust continues past a deleted one to an open ancestor.
+
 ## Passes
 
 1. **Storage + execution + CLI + docs** (validates the core model first:

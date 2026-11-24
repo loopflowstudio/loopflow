@@ -36,3 +36,10 @@
   and offering destructive choice from a Notice button.
 - **Live-child guard refuses the whole completion** rather than abandoning idle
   children and skipping the live one (kickoff).
+- **Refusal counts direct children** (implement): "LOO-12 has 3 open children"
+  counts direct children, as the plan's example does, while the list shows the
+  whole tree. Passed over: counting every descendant.
+- **Leaf with an unmerged PR keeps the pending request** (implement): bare
+  `lf task complete` on a childless Task with an unmerged PR still writes
+  `CompletionRequested`; any `--children` or open child refuses with the
+  unmerged-PR error and writes nothing.

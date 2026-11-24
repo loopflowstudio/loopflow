@@ -219,6 +219,13 @@ final class WorkNavigation {
         case repository
         case wave(String)
         case dashboard(String)
+
+        var isWorkingList: Bool {
+            switch self {
+            case .repository, .wave: true
+            case .dashboard: false
+            }
+        }
     }
     var sidebarScope: SidebarScope {
         if case .saved(let id) = trailBoard { return .dashboard(id) }
@@ -235,14 +242,19 @@ final class WorkNavigation {
     var backlogs: [Board: BacklogState] = [:]
     var showsSlotHints = false
     var sidebarSortByStatus = false
-    var selectedSidebarSlot: Int?
+    struct SidebarStatusLatch: Equatable {
+        let taskID: String
+        let statusOrder: Int
+    }
+    var sidebarStatusLatch: SidebarStatusLatch?
+    var canReorderSidebar: Bool { sidebarScope == .repository && !sidebarSortByStatus }
     var sidebarFilter: SidebarFilter = .working {
         willSet {
             if newValue != sidebarFilter { Perf.begin(Perf.hierarchyInteraction, "filter", id: "outline:\(newValue.rawValue)", liveSessions: liveSessionCount, owner: performanceOwner) }
         }
         didSet {
             if oldValue != sidebarFilter {
-                selectedSidebarSlot = nil
+                sidebarStatusLatch = nil
                 Perf.acknowledged(Perf.hierarchyInteraction, id: "outline:\(sidebarFilter.rawValue)", owner: performanceOwner)
             }
         }
@@ -332,7 +344,13 @@ final class WorkNavigation {
         case repository
     }
     static let workingTasksTitle = "Working Tasks"
-    var destination: Destination = .work(nil)
+    var destination: Destination = .work(nil) {
+        didSet {
+            if sidebarStatusLatch != nil, selection?.kind != .task || !sidebarScope.isWorkingList {
+                sidebarStatusLatch = nil
+            }
+        }
+    }
     var selection: WorkReference? {
         get {
             switch destination {

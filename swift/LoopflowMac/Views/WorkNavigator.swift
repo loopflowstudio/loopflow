@@ -68,11 +68,11 @@ struct WorkNavigator: View {
             }.padding([.horizontal, .top], Spacing.sm)
             WorkTaskList(navigation: model.navigation) {
                 let scope = model.navigation.sidebarScope
-                let dragOrder = scope == .repository && !model.navigation.sidebarSortByStatus ? rows.map(\.work.id) : []
+                let dragOrder = model.navigation.canReorderSidebar ? rows.map(\.work.id) : []
                 VStack(alignment: .leading, spacing: Spacing.xs) {
                     HStack {
                         NewTaskRow(model: model)
-                        if scope == .repository {
+                        if scope.isWorkingList {
                             SidebarStatusToggle(isOn: model.navigation.sidebarSortByStatus, toggle: model.toggleSidebarSortByStatus)
                         }
                     }

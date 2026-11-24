@@ -19,7 +19,7 @@ extension WorkModel {
         var rows: [WorkPaletteRow] = []
         if let repoPath {
             let name = URL(fileURLWithPath: repoIdentity(repoPath)).lastPathComponent
-            if navigation.sidebarScope == .repository {
+            if navigation.sidebarScope.isWorkingList {
                 rows.append(.init(id: .sortWorkingTasks, title: "Sort by status",
                                   detail: navigation.sidebarSortByStatus ? "On · Restore saved order" : "Off · Group Working Tasks",
                                   key: "Sort by status"))

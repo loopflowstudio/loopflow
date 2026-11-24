@@ -95,8 +95,8 @@ connection returns. See [Connect clients](server.md) for connection recovery.
 
 ### Working Tasks in the sidebar
 
-Open the second Working Task and send a prompt. Its row stays second as the
-conversation turns Busy and then Available again.
+In the default order, open the second Working Task and send a prompt. Its row
+stays second as the conversation turns Busy and then Available again.
 
 Drag a row in the repository sidebar or the Working Tasks grid to save its
 position on this Machine. Wave views, `lf task list`, `lf wave show`, and the
@@ -105,19 +105,22 @@ with canonical Task ID breaking ties. New arrivals appear above rows you’ve
 arranged. Sidebar and phone rows show the current Graph step beside the status
 when the Machine reports it.
 
-Turn on **Sort by status** in the repository sidebar or from **⌘K** to group
-rows by Blocked, Error, Available, Idle and Busy. A Task with both busy and
-available conversations sorts as Busy. Each group keeps its saved order.
-As statuses change, the open Task holds its slot until you leave it.
-Turn the toggle off to return to the shared order and drag sidebar rows again.
-The Working Tasks grid always uses the shared order.
+Turn on **Sort by status** in a repository or Wave sidebar, or from **⌘K**,
+to group rows by Blocked, Error, Available, Idle and Busy. A Task with both
+busy and available conversations sorts as Busy. Each group keeps its saved order.
+Sending a prompt updates the open Task’s status, but its row stays in the
+group it occupied when you opened it or turned sorting on. Other rows can
+move above or below it. Leaving the Task or changing the filter releases
+its group. Turn sorting off to restore the shared order and drag rows in
+the repository sidebar. The Working Tasks grid uses the shared order, and
+saved Dashboards use their own arrangement.
 
 A drop shows immediately. If another window has already reordered the list,
 the Task still lands on the side of the target you chose. A refused drop
 restores the last confirmed order in both lists and shows a Notice.
 
 In **⌘K → Sidebar shows**, choose **Working tasks**, **Available**, or **Busy**.
-The filter keeps the list's order. A Task with both available and busy
+Filters use current activity. A Task with both available and busy
 conversations appears in both filters. **⌘1–9** and **⌃Tab / ⌃⇧Tab** follow
 the visible rows. The open conversation stays selected if its row leaves the
 filter.

@@ -12,38 +12,9 @@ Latest exploration page: [Explore Round 2](explore.html).
 Latest concept review: [Concept review at 14f44821e8](concept-review.html).
 Latest demo notes: [Demo notes](demo-notes.md).
 
-## Next pass (from concept review)
-
-Two mismatches remain in the Mac sidebar’s **Sort by status** toggle (`swift/LoopflowMac/`):
-
-1. **Replace `selectedSidebarSlot: Int?` with a latched status bucket (`sidebarStatusLatch`).**
-   - *Why:* Pinning an integer array index breaks status order in three normal interactions:
-     - Leaving a latched Busy Task at slot 0 for the Available Task at slot 1 captures slot 1 before the old row releases, splicing the newly selected Available row into slot 1 and pushing an **Idle** row into slot 0 above it (`WorkNavigationTests.swift:301` currently asserts `["idle", "other", "open"]`).
-     - When a Blocked Task above an open Available Task completes or turns Busy, the pinned index pulls a **Busy** row into slot 0 above the unchanged Available row.
-     - Turning **Sort by status** On while a Busy Task is open at slot 0 glues it to slot 0 above Blocked and Available rows.
-   - *Model to build:*
-     - In `swift/LoopflowMac/WorkProjection.swift`, replace `var selectedSidebarSlot: Int?` with `var sidebarStatusLatch: SidebarStatusLatch?` (`struct SidebarStatusLatch: Equatable { let taskID: String; let statusOrder: Int }`). Clear it in `sidebarFilter.didSet` so switching filters (e.g. to Busy) starts fresh in true status order.
-     - In `swift/LoopflowMac/WorkModel.swift`:
-       - When `isWorkingSidebarScope && navigation.sidebarSortByStatus`, `sidebarRows` stably sorts `filteredSidebarRows` using the latched `statusOrder` for the currently selected Task (when its resolved ID matches `sidebarStatusLatch.taskID`) and `row.statusOrder` for every other row. Saved drag order still breaks ties within each group.
-       - `toggleSidebarSortByStatus()`: turning On latches the currently selected Task’s current `statusOrder` from `filteredSidebarRows` (so all rows sort cleanly immediately, and subsequent turns in the open Task hold its bucket); turning Off clears `sidebarStatusLatch = nil`.
-       - `setSelection(_:)`: while `sidebarSortByStatus` is On, if the new selection is a Task whose resolved ID differs from the current `sidebarStatusLatch?.taskID`, latch that Task’s `statusOrder` from `filteredSidebarRows` (if present, else `nil`); if it is the same Task already latched (e.g. re-selecting via ⌘1 while `.entered`), preserve the existing latch; if not a Task, set `sidebarStatusLatch = nil`.
-       - `selectDestination(_:)` for non-Task destinations (`.dashboard`, `.view`, `.workingTasks`): clear `sidebarStatusLatch = nil`.
-       - `applyTaskList(_:wave:reason:readAt:)`: update `taskListReadings[key]` first; then if `isWorkingSidebarScope && navigation.sidebarSortByStatus`, and `selection` is a Task whose resolved ID does not yet match `sidebarStatusLatch?.taskID`, latch its initial `statusOrder` from the newly updated `filteredSidebarRows`.
-2. **Apply Sort by status to every Working sidebar scope (`.repository` and `.wave`), not only `.repository`.**
-   - *Why:* Restricting the toggle to `scope == .repository` is a leftover from the deleted one-shot `task_orders` write. Both Repository and Wave sidebars show Working Tasks from `taskList`, and the toggle is now a local view sort that writes nothing. Clicking a Wave should keep the toggle visible and active instead of hiding it and silently unsorting while `sidebarSortByStatus` stays `true`.
-   - *What follows across files:*
-     - Add one predicate on `WorkNavigation.SidebarScope` (e.g. `var isWorkingList: Bool { if case .dashboard = self { false } else { true } }`) and use it in `WorkModel.sidebarRows`, `WorkNavigator` (showing `SidebarStatusToggle`), and `WorkPalette` (showing the `Sort by status` action in ⌘K).
-     - Saved Dashboards (`.dashboard`) continue to keep their own arrangement order and hide the toggle.
-     - Sidebar drag-to-reorder stays `scope == .repository && !model.navigation.sidebarSortByStatus` (dragging mutates the repository’s shared `task_orders`).
-     - Update `docs/surfaces.md` so the sidebar toggle paragraph reflects repository and Wave sidebars and status-group latching.
-   - *Tests to update / add in `swift/LoopflowTests/WorkNavigationTests.swift`:*
-     - Update `statusToggleKeepsTheOpenTaskInItsSlotUntilNavigation`: leaving a latched Busy Task for an Available Task puts Available at slot 0 above Idle and Busy (`["other", "idle", "open"]`, never `["idle", "other", "open"]`); turning Sort On while Busy is at slot 0 sorts Blocked/Available to the top and latches Busy.
-     - Add coverage for: (a) a Blocked Task completing or turning Busy above an open Available Task never pulls Busy above Available; (b) re-selecting the already-open Task (including `.entered` via ⌘1) keeps its latch; (c) switching to a Wave scope keeps the toggle visible, keeps sorting its Working Tasks, and keeps drag disabled; switching to a saved Dashboard hides the toggle and preserves Dashboard order.
-
-Choices made for review (recorded in [concept-review.html](concept-review.html#questions)): latch status bucket instead of integer slot (`1a`), apply toggle to Repository and Wave Working sidebars (`2a`), sort cleanly on toggle-on before latching (`3a`).
-
 ## Built and aligned
 
+- **Mac sidebar status sort:** The repository and Wave sidebars share a window-local toggle in the header and ⌘K. The selected Task keeps its status group across activity updates and repeated visits to the open row. Rows within each group follow shared order. Changing the filter releases the group. Saved Dashboards use arrangement order. Sidebar drags save order only in the repository with sorting off.
 - **Shared Working order (Start-Time Stack):** Repository, Wave, roadmap, CLI (`lf task list`, `lf wave show`), Working Tasks grid, and iOS share `ordered_tasks_in` + `TaskOrder` (`New(Reverse(started_at)) < Saved(pos) < Planning(rank)`). `start_times_in` reads first non-unclaim ownership, then first `started` event, then `created_at` (preserving original start time across handoffs). Backlog keeps its planning rank.
 - **Side-aware drags & recovery:** Sidebar (repository scope, sort Off) and Working Tasks grid drags route through `WorkModel.reorderWorkingTask` → `PendingChanges` (`orderWrites` serialized per repository across reconnects) → `desktop.dashboard.move` with `DropSide` (`before`/`after`) → `SqliteStore::reorder_working_task` CAS loop. Absent targets refuse as `not_found` naming the Task; `NoticeCenter.reread(keeping:)` protects refusal Notices across failed rereads.
 - **One-shot sort deleted:** `desktop.view.sort`, `TaskOrderEdit::SortByStatus`, `status_bucket`, and pending-sort preview are removed; `server_schema.json` regenerated.
@@ -60,9 +31,13 @@ Choices made for review (recorded in [concept-review.html](concept-review.html#q
 
 ## Docs
 
-- `docs/surfaces.md` (update sidebar toggle scope & latching description in the next pass)
+- `docs/surfaces.md`
 - `docs/work.md`
 - `swift/README.md`
+
+## Verification
+
+`scripts/test_desktop.sh --filter 'WorkNavigationTests'` passed all 56 tests, including the Wave toggle and open-Task group across navigation and list updates. The display was locked for this pass. Live hover and keyboard input remain for QA.
 
 ## Gate
 

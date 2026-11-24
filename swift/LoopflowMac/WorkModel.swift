@@ -146,10 +146,8 @@ final class WorkModel {
         let next: Reading<WorkViewPlan> = plan.map { .available($0, readAt: readAt) }
             ?? (kept?.failed(reason) ?? .unavailable(lastGood: nil, reason: reason))
         guard previous?.wave != wave || previous?.reading != next else { return }
-        if navigation.selectedSidebarSlot == nil, navigation.sidebarSortByStatus {
-            navigation.selectedSidebarSlot = sidebarSlot(for: selection)
-        }
         taskListReadings[key] = (wave, next)
+        updateSidebarStatusLatch()
         endLaunchWhenCurrent()
     }
 
@@ -2230,29 +2228,34 @@ final class WorkModel {
     }
 
     var sidebarRows: [SidebarTaskRow] {
-        var rows = filteredSidebarRows
-        guard navigation.sidebarScope == .repository, navigation.sidebarSortByStatus else { return rows }
-        // Stable sorting keeps saved drag order within each status group.
-        rows.sort { $0.statusOrder < $1.statusOrder }
-        if let slot = navigation.selectedSidebarSlot, let selection, selection.kind == .task {
-            let id = resolvedTaskID(selection.id)
-            if let index = rows.firstIndex(where: { $0.id == id }), slot != index {
-                let row = rows.remove(at: index)
-                rows.insert(row, at: min(slot, rows.count))
-            }
+        let rows = filteredSidebarRows
+        guard navigation.sidebarScope.isWorkingList, navigation.sidebarSortByStatus else { return rows }
+        let latch = navigation.sidebarStatusLatch
+        func order(_ row: SidebarTaskRow) -> Int {
+            if let latch, latch.taskID == row.id { return latch.statusOrder }
+            return row.statusOrder
         }
-        return rows
+        // Swift's stable sort keeps the shared order within each status group.
+        return rows.sorted { order($0) < order($1) }
     }
 
     func toggleSidebarSortByStatus() {
-        navigation.selectedSidebarSlot = navigation.sidebarSortByStatus ? nil : sidebarSlot(for: selection)
         navigation.sidebarSortByStatus.toggle()
+        if navigation.sidebarSortByStatus {
+            updateSidebarStatusLatch()
+        } else {
+            navigation.sidebarStatusLatch = nil
+        }
     }
 
-    private func sidebarSlot(for work: WorkReference?) -> Int? {
-        guard navigation.sidebarScope == .repository, let work, work.kind == .task else { return nil }
-        let id = resolvedTaskID(work.id)
-        return sidebarRows.firstIndex { $0.id == id }
+    private func updateSidebarStatusLatch() {
+        guard navigation.sidebarSortByStatus, navigation.sidebarScope.isWorkingList,
+              let selection, selection.kind == .task else { return }
+        let id = resolvedTaskID(selection.id)
+        guard navigation.sidebarStatusLatch?.taskID != id else { return }
+        navigation.sidebarStatusLatch = filteredSidebarRows.first { $0.id == id }.map {
+            .init(taskID: id, statusOrder: $0.statusOrder)
+        }
     }
 
     /// A Wave or repository row's count: its Working Tasks.
@@ -3369,11 +3372,9 @@ final class WorkModel {
     private func setSelection(_ selection: WorkReference?) {
         viewOpening = nil
         selectionOpening = nil
+        defer { updateSidebarStatusLatch() }
         guard navigation.destination != .work(selection) else { return }
         workActivityGeneration &+= 1
-        if navigation.sidebarSortByStatus {
-            navigation.selectedSidebarSlot = sidebarSlot(for: selection)
-        }
         navigation.selectedTaskEvidence = selection.flatMap { $0.kind == .task ? task(id: $0.id) : nil }
         navigation.selection = selection
         cache?.saveSelection(selection, repo: repoPath ?? "")
@@ -3492,7 +3493,6 @@ extension WorkModel {
             dismissTaskLink()
             viewOpening = nil
             selectionOpening = nil
-            navigation.selectedSidebarSlot = nil
             navigation.destination = destination
             navigation.palette = nil
             navigation.selectedSessionId = nil

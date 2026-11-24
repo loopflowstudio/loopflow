@@ -94,8 +94,9 @@ Working Tasks lists owned, started, unfinished Tasks on any Machine this store
 records. Drag a row in the repository sidebar or Working Tasks grid to change
 its place. The [sidebar guide](../docs/surfaces.md#working-tasks-in-the-sidebar)
 describes the shared order and drop feedback. Turn on **Sort by status** in the
-repository sidebar or ⌘K to group that window’s rows. The open Task keeps its
-place through status changes. Turn it off to restore your order and drag again.
+repository or Wave sidebar, or from ⌘K. The open Task stays in its status
+group until you leave it or change filters. Turn sorting off to restore your
+order and drag rows in the repository sidebar.
 
 Click a Wave to see its Working Tasks and subwaves. Its backlog holds the open
 work nobody is running. **‹ Repo** returns to Working Tasks. Unstarted Tasks

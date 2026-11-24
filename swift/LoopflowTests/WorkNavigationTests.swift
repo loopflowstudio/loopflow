@@ -280,27 +280,80 @@ struct WorkNavigationTests {
         #expect(model.pendingChanges.changes.isEmpty)
     }
 
-    @Test func statusToggleKeepsTheOpenTaskInItsSlotUntilNavigation() {
+    @Test func openTaskKeepsItsStatusGroupUntilAnotherTaskIsSelected() {
         let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("Unexpected command") }, repoPath: "/repo")
-        func report(_ state: WorkSelectionState, other: WorkSelectionState = .available) {
-            model.applyStartedFixture([("idle", [.working]), ("open", [.working, state]), ("other", [.working, other])])
+        func report(_ state: WorkSelectionState) {
+            model.applyStartedFixture([("idle", [.working]), ("open", [.working, state]), ("other", [.working, .available])])
         }
+        model.applySelectionPlans([fixtureWorkingPlan(["idle", "open", "other"])], reason: "")
+        model.selectWorkingTasksDashboard()
         report(.available)
         model.selectSidebarTask(slot: 1)
         model.toggleSidebarSortByStatus()
-        #expect(model.sidebarTaskIDs == ["other", "open", "idle"])
-        model.select(nil)
-        model.selectSidebarTask(slot: 0)
-        #expect(model.selection == .task(id: "open"))
-        report(.busy, other: .busy)
-        #expect(model.sidebarTaskIDs == ["open", "idle", "other"])
+        #expect(model.sidebarTaskIDs == ["open", "other", "idle"])
         report(.busy)
+        model.selectSidebarTask(slot: 0)
+        #expect(model.navigation.destination == .entered(from: .workingTasks, work: .task(id: "open")))
         #expect(model.sidebarTaskIDs == ["open", "other", "idle"])
         model.cycleSidebarTask(1)
         #expect(model.selection == .task(id: "other"))
-        #expect(model.sidebarTaskIDs == ["idle", "other", "open"])
-        model.select(nil)
         #expect(model.sidebarTaskIDs == ["other", "idle", "open"])
+    }
+
+    @Test func sortingAnOpenBusyTaskStartsItInTheBusyGroup() {
+        let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("Unexpected command") }, repoPath: "/repo")
+        func report(_ state: WorkSelectionState) {
+            model.applyStartedFixture([("open", [.working, state]), ("ready", [.working, .available]), ("blocked", [.working, .blocked])])
+        }
+        report(.busy)
+        model.selectSidebarTask(slot: 0)
+        model.toggleSidebarSortByStatus()
+        #expect(model.sidebarTaskIDs == ["blocked", "ready", "open"])
+        report(.available)
+        #expect(model.sidebarTaskIDs == ["blocked", "ready", "open"])
+        model.navigation.sidebarFilter = .available
+        #expect(model.sidebarTaskIDs == ["open", "ready"])
+    }
+
+    @Test func firstReadingHoldsTheGroupWhenRowsAboveTheOpenTaskLeave() {
+        let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("Unexpected command") }, repoPath: "/repo")
+        model.applySelectionPlans([fixtureWorkingPlan(["open"])], reason: "")
+        model.select(.task(id: "open"))
+        #expect(model.selection == .task(id: "open"))
+        model.toggleSidebarSortByStatus()
+        model.applyStartedFixture([("busy", [.working, .busy]), ("blocked", [.working, .blocked]), ("open", [.working, .available])])
+        #expect(model.sidebarTaskIDs == ["blocked", "open", "busy"])
+        model.applyStartedFixture([("busy", [.working, .busy]), ("open", [.working, .available])])
+        #expect(model.sidebarTaskIDs == ["open", "busy"])
+        model.applyStartedFixture([("busy", [.working, .busy]), ("open", [.working, .busy])])
+        #expect(model.sidebarTaskIDs == ["open", "busy"])
+        model.selectWorkingTasksDashboard()
+        #expect(model.sidebarTaskIDs == ["busy", "open"])
+    }
+
+    @Test func waveSidebarOffersStatusSortingAndSavedDashboardUsesItsArrangement() throws {
+        let model = try dashboardModel()
+        let sidebar = WorkNavigator(model: model, onOpenSession: { _ in })
+        model.toggleSidebarSortByStatus()
+        model.select(.wave(id: "wave-1"))
+        model.applyStartedFixture([("busy", [.working, .busy]), ("ready", [.working, .available])], wave: "wave-1")
+        let button = try sidebar.inspect().find(SidebarStatusToggle.self).find(ViewType.Button.self)
+        #expect(try button.accessibilityValue().string() == "On")
+        #expect(model.searchDestinations("Sort by status").first?.id == .sortWorkingTasks)
+        #expect(model.sidebarTaskIDs == ["ready", "busy"])
+        #expect(!model.navigation.canReorderSidebar)
+        try button.tap()
+        #expect(model.sidebarTaskIDs == ["busy", "ready"])
+        #expect(!model.navigation.canReorderSidebar)
+
+        model.toggleSidebarSortByStatus()
+        var dashboard = try #require(model.dashboard("review"))
+        dashboard.contents[0].states.append(.busy)
+        model.applySelectionPlans([dashboard], reason: "")
+        model.selectDashboard("review")
+        #expect(model.sidebarTaskIDs == ["issue-now", "issue-later", "issue-review"])
+        #expect(model.searchDestinations("Sort by status").isEmpty)
+        #expect(throws: (any Error).self) { try sidebar.inspect().find(SidebarStatusToggle.self) }
     }
 
     private func dropModel(machine: HeldMachine, feed: WorkFeed, side: DropSide) -> WorkModel {

@@ -308,6 +308,22 @@ fn configuration_edits_use_the_server_without_work_processes() {
     assert!(refused.message.contains("does not apply"), "{refused:?}");
     assert!(!repo.path().join(".lf/config.yaml").exists());
     let theme = request(Operation::Write(Write::ConfigTheme { value: None })).unwrap();
+    let id = connection
+        .subscribe(
+            Read::ConfigScope {
+                target: loopflow_execution::engine::config::ScopeTarget::General,
+                directory: Some(repo.path().to_owned()),
+                wave: None,
+            },
+            None,
+        )
+        .unwrap();
+    let frame = connection.reading(&id).unwrap().unwrap();
+    assert_eq!(
+        frame["body"]["settings"]["context.diff"]["value"], false,
+        "{frame}"
+    );
+    assert!(frame["read_at"].is_null());
     assert_eq!(theme["value"], "Hearth");
     assert_eq!(fs::read(&database).unwrap(), before);
 }
@@ -1080,6 +1096,7 @@ fn server_operations_match_their_lf_commands() {
         | Read::MachineSelf
         | Read::DesktopPortfolio
         | Read::ConfigSettings { .. }
+        | Read::ConfigScope { .. }
         | Read::ConfigCatalog
         | Read::ConfigGet { .. }
         | Read::ConfigExplain { .. }
@@ -1094,6 +1111,7 @@ fn server_operations_match_their_lf_commands() {
         | Read::WavePlan { .. }
         | Read::TaskList { .. }
         | Read::MachineList
+        | Read::MachineStatus { .. }
         | Read::SessionHistory(_)
         | Read::PlanList { .. }
         | Read::RepoTracker { .. }
@@ -1163,6 +1181,11 @@ fn server_operations_match_their_lf_commands() {
                     skill: Some("implement".into()),
                     graph: None,
                     step: None,
+                },
+                Read::ConfigScope {
+                    target: loopflow_execution::engine::config::ScopeTarget::General,
+                    directory: Some(repo.path().to_owned()),
+                    wave: None,
                 },
                 Read::ConfigCatalog,
                 Read::ConfigGet {
@@ -1496,6 +1519,9 @@ fn server_operations_match_their_lf_commands() {
         | Write::DesktopDashboardMove { .. }
         // configuration_edits_use_the_server_without_work_processes covers settings.
         | Write::ConfigSet { .. }
+        | Write::ConfigPromote { .. }
+        | Write::ConfigPreview { .. }
+        | Write::ConfigEdit { .. }
         | Write::ConfigUnset { .. }
         | Write::ConfigTheme { .. } => (
             [
@@ -3005,7 +3031,12 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
                 destination,
             ]),
         ),
-        Write::ConfigSet { .. } | Write::ConfigUnset { .. } | Write::ConfigTheme { .. } => {
+        Write::ConfigSet { .. }
+        | Write::ConfigPromote { .. }
+        | Write::ConfigPreview { .. }
+        | Write::ConfigEdit { .. }
+        | Write::ConfigUnset { .. }
+        | Write::ConfigTheme { .. } => {
             unreachable!("settings writes are compared on their own")
         }
     };

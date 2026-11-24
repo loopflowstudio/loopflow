@@ -20,6 +20,9 @@ pub enum LoadError {
     InvalidGraph(String),
     #[error("invalid skill: {0}")]
     InvalidSkill(String),
+    /// A setting key, value or destination the catalog refuses; the message names the key.
+    #[error("{0}")]
+    InvalidSetting(String),
     #[error("io error: {0}")]
     Io(String),
 }

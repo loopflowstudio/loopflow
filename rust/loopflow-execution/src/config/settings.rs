@@ -109,7 +109,7 @@ pub struct ResolvedSettings {
 }
 
 fn invalid(message: impl Into<String>) -> LoadError {
-    LoadError::InvalidGraph(message.into())
+    LoadError::InvalidSetting(message.into())
 }
 
 pub fn validate_scope(
@@ -182,9 +182,15 @@ fn _list_agents(value: &mut Value) {
 
 pub(crate) fn validate_value(path: &[&str], value: &Value) -> Result<(), LoadError> {
     if value.is_null() {
-        return Err(invalid(
-            "omit a file value or use unset to remove a preference",
-        ));
+        // YAML deserializes null into an empty mapping too. Use JSON's strict
+        // null here so only a nullable field can retain the declaration.
+        let mut check = Value::Mapping(Default::default());
+        insert(&mut check, path, Value::Null);
+        return serde_json::from_value::<Config>(
+            serde_json::to_value(check).expect("string keys and null"),
+        )
+        .map(|_| ())
+        .map_err(|error| invalid(format!("{}: {error}", path.join("."))));
     }
     if ["agent", "default_agent"].contains(&path[0]) {
         let agent = value
@@ -231,9 +237,6 @@ pub(crate) fn validate_value(path: &[&str], value: &Value) -> Result<(), LoadErr
         if !["stable", "preview", "dev"].contains(&stream) {
             return Err(invalid("stream must be stable, preview or dev"));
         }
-    }
-    if !["gh", "local"].contains(&parsed.land.as_str()) {
-        return Err(invalid("land must be gh or local"));
     }
     if parsed.machine.tasks.is_some() && parsed.machine.capacity.is_some() {
         return Err(invalid(
@@ -473,17 +476,8 @@ pub(super) fn filter_file_preferences(
         super::reader::warn(file, None, "skipping settings that are not a mapping");
         *value = Value::Mapping(Default::default());
     }
-    _normalize_preferences(value);
+    super::normalize_preferences(value);
     _filter_file_settings(value, &mut Vec::new(), file, source, scope);
-}
-
-fn _normalize_preferences(value: &mut Value) {
-    super::normalize_context(value);
-    if let Some(map) = value.as_mapping_mut() {
-        if let Some(graph) = map.remove(super::GRAPH_ALIAS) {
-            map.entry(Value::String("graph".into())).or_insert(graph);
-        }
-    }
 }
 
 /// Account routing preferences the released lf still reads from personal
@@ -711,7 +705,7 @@ pub(crate) fn resolve_with(
         ) {
             filter_file_preferences(&mut layer.value, &layer.path, layer.source, layer.scope);
         } else {
-            _normalize_preferences(&mut layer.value);
+            super::normalize_preferences(&mut layer.value);
         }
         if layer.value.is_null() {
             continue;
@@ -1360,6 +1354,16 @@ mod tests {
     }
 
     #[test]
+    fn explicit_null_requires_a_nullable_declaration() {
+        for key in ["chrome", "codex.service_tier", "merge_method", "agent"] {
+            assert_eq!(super::parse_value(key, "null").unwrap(), Value::Null);
+        }
+        for key in ["yolo", "land", "context.diff", "agents", "machines", "logs"] {
+            assert!(super::parse_value(key, "null").is_err(), "{key}");
+        }
+    }
+
+    #[test]
     fn claude_model_uses_normal_precedence_without_selecting_a_harness() {
         let _env = loopflow_test_support::env_lock().lock().unwrap();
         let layers = [
@@ -1391,7 +1395,8 @@ mod tests {
                 .unwrap(),
             "claude:fable"
         );
-        for invalid in ["''", "' '", "null", "{}"] {
+        assert!(super::parse_value("claude.model", "null").is_ok());
+        for invalid in ["''", "' '", "{}"] {
             assert!(
                 super::parse_value("claude.model", invalid).is_err(),
                 "{invalid}"
@@ -1424,7 +1429,8 @@ mod tests {
             .unwrap();
             assert_eq!(resolved.config.codex.service_tier, Some(expected));
         }
-        for value in ["slow", "true", "null", "42"] {
+        assert!(super::parse_value("codex.service_tier", "null").is_ok());
+        for value in ["slow", "true", "42"] {
             assert!(super::parse_value("codex.service_tier", value).is_err());
         }
     }

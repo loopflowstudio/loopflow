@@ -168,7 +168,10 @@ fn wave_yaml(repo: &Path, name: &str) -> Result<Option<(PathBuf, String)>, WaveC
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
         Err(source) => return Err(WaveConfigError::Read { path, source }),
     }
-    let path = goal_path(repo, name);
+    goal_settings(goal_path(repo, name))
+}
+
+pub(crate) fn goal_settings(path: PathBuf) -> Result<Option<(PathBuf, Mapping)>, WaveConfigError> {
     let content = match crate::observe::read_to_string(&path) {
         Ok(content) => content,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
@@ -282,21 +285,16 @@ pub(crate) fn update_wave_config(
     name: &str,
     update: impl FnOnce(&mut Mapping) -> Result<(), String>,
 ) -> Result<(), String> {
-    let initial = read_wave_file(repo, name)
-        .map_err(|error| error.to_string())?
-        .map(|(_, mapping)| mapping)
-        .unwrap_or_default();
-    let path = config_path(repo, name);
-    let missing = !path.exists();
-    crate::config::files::update(&path, |document| {
-        if missing {
-            *document = Value::Mapping(initial);
-        }
-        let values = document
-            .as_mapping_mut()
-            .ok_or_else(|| anyhow::anyhow!("Wave config must be a mapping"))?;
-        update(values).map_err(anyhow::Error::msg)
-    })
+    crate::config::files::update_settings(
+        &config_path(repo, name),
+        crate::config::keys::Root::Wave,
+        |document| {
+            let values = document
+                .as_mapping_mut()
+                .ok_or_else(|| anyhow::anyhow!("Wave config must be a mapping"))?;
+            update(values).map_err(anyhow::Error::msg)
+        },
+    )
     .map_err(|error| error.to_string())
 }
 
@@ -384,6 +382,8 @@ mod tests {
             "---\nagent: codex\nlinear:\n  initiative: lin-123\n---\n{body}"
         ))
         .unwrap();
+        update_wave_config(repo.path(), "scan", |_| Ok(())).unwrap();
+        assert!(!repo.path().join(".lf/wave/scan/config.yaml").exists());
         update_wave_config(repo.path(), "scan", |map| {
             map.insert("graph".into(), "code".into());
             Ok(())
@@ -402,6 +402,29 @@ mod tests {
                 .as_deref(),
             Some("lin-123")
         );
+    }
+
+    #[test]
+    fn first_edit_rechecks_the_source_of_the_wave_settings() {
+        for creates_config in [false, true] {
+            let repo = ConfigRepo::new();
+            repo.write("---\nagent: codex\n---\n").unwrap();
+            let result = update_wave_config(repo.path(), "scan", |map| {
+                if creates_config {
+                    repo.write_config("agent: codex\n");
+                } else {
+                    repo.write("---\nagent: claude\n---\n").unwrap();
+                }
+                map.insert("graph".into(), "code".into());
+                Ok(())
+            });
+            assert!(result.unwrap_err().contains("changed during this edit"));
+            assert_eq!(
+                repo.path().join(".lf/wave/scan/config.yaml").exists(),
+                creates_config
+            );
+            assert!(repo.layer().get("graph").is_none());
+        }
     }
 
     #[test]

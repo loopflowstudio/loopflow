@@ -18,6 +18,47 @@ fn saved_check(
 }
 
 impl SqliteStore {
+    /// Paths with linked Tasks, including records under another Machine's
+    /// repository alias. Resolve the tracker scope once per path.
+    pub fn tracked_repositories(&self) -> StoreResult<Vec<String>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut query = conn.prepare(
+            "SELECT DISTINCT r.repo FROM repository_plans r WHERE EXISTS (
+                SELECT 1 FROM tasks t WHERE t.repository_id=r.id AND t.external_issue_id IS NOT NULL)",
+        )?;
+        let rows = query.query_map([], |row| row.get(0))?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    /// Open and finished issue IDs for a tracker's delta filter.
+    pub fn tracked_issue_ids(&self, repo: &str) -> StoreResult<(Vec<String>, Vec<String>)> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut query = conn.prepare(&format!(
+            "SELECT t.external_issue_id,{} FROM repository_plans r
+             CROSS JOIN tasks t ON t.repository_id=r.id WHERE r.repo=?1
+             AND t.external_issue_id IS NOT NULL AND {}",
+            super::durable::task_open_sql("t"),
+            super::children::TASK_VISIBLE
+        ))?;
+        let mut open = Vec::new();
+        let mut finished = Vec::new();
+        let mut rows = query.query([repo])?;
+        while let Some(row) = rows.next()? {
+            let ids = if row.get::<_, bool>(1)? {
+                &mut open
+            } else {
+                &mut finished
+            };
+            ids.push(row.get(0)?);
+        }
+        Ok((open, finished))
+    }
+
+    pub fn last_team_attempt(&self, team: &str) -> StoreResult<Option<i64>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(saved_check(&conn, team)?.map(|(at, _)| at))
+    }
+
     // The acquisition file lock spans network/ingestion; this transaction only
     // claims freshness. A crash leaves a bounded delay and the old watermark.
     pub fn begin_linear_team_check(

@@ -20,7 +20,7 @@ When a Task is owned by another Machine — whether a reachable peer (`laptop ->
 
 ## Findings and design choices
 
-### Root causes verified in source
+### Root causes at kickoff
 
 1. **Why `modal-2` saw `MTG-419..422` as locally idle with no `sentence`:**
    - `rust/loopflow-storage/src/sqlite/task_ownership.rs:413-427` (`writer_in`) only treats an owning Machine as remote when `is_my_machine_in(conn, me, machine)` is true — i.e., the owning Machine is in `declared_machines` (`lf machine add`). Ephemeral Modal sandboxes (`rust/loopflow-execution/src/rental/sandbox.py`, `rust/loopflow/src/lf/commands/rental.rs`) receive only the laptop's public key in `authorized_keys` and add no peer Machines.
@@ -31,9 +31,9 @@ When a Task is owned by another Machine — whether a reachable peer (`laptop ->
    - All five harnesses (Claude, Codex, OpenCode, Pi, Antigravity) already pick up local SQLite `steers` mid-turn via `steer_markers::task_marker` and `PostToolUse` (`rust/loopflow-execution/src/context_block.rs:301-345`, `harness/context.rs`, `harness/server_connection.js`, `harness/antigravity.rs`), and `rust/loopflow/src/server/wake.rs` already wakes idle interactive Sessions and starts stopped primary Sessions whenever `store_revisions` advances for `steers`.
    - However, **nothing on the owning Machine periodically ingests inbound Linear/Asana comments or `plan_hub` records while work is running or idle:**
      - `rust/loopflow/src/server/maintenance.rs:42-56` (`start_plan_exchange`) only runs `plan_git::exchange_all` (60 s) and skips both tracker-connected repositories (`ops::tracker::connected`) and `plan_hub::exchange`.
-     - `rust/loopflow/src/server/boundary.rs:194-207` (`turn_end`) calls `tracker_events::sync_repository` only on `BoundaryMoment::Stop` — which headless Graph workers never send (`!kind.is_managed()` in `context_block.rs:331`), and idle/stopped Sessions never send.
+     - `rust/loopflow/src/server/boundary.rs:194-207` (`turn_end`) calls `tracker_events::sync_repository` on `BoundaryMoment::Stop`. Managed workers can send Stop, but a long turn, an idle Session and a stopped Session supply no timely boundary.
      - `rust/loopflow/src/lf/commands/graph.rs:1254,1365` calls `sync_repository` only between Graph steps, never during a long step.
-   - **Clock-skew / in-flight race in `team_changes`:** `rust/loopflow-execution/src/ops/tracker_events.rs:170-185,243` queries `updatedAt <= through` (`now`) and advances the watermark `since` to `through`. If the owning Machine's clock is ahead of Linear's server clock, or a comment lands on Linear concurrently with the query, a comment stamped before `through` after the query executes is skipped by the next `updatedAt >= through` window. Because `task_linear_ingested_comments` (`rust/loopflow-storage/src/sqlite/children.rs:1900`) and `steers(source, revision)` are strictly idempotent, overlapping `since` backward by 30 s eliminates dropped comments with zero duplicate steers.
+   - **Clock-skew / in-flight race in `team_changes`:** `rust/loopflow-execution/src/ops/tracker_events.rs:170-185,243` queries `updatedAt <= through` (`now`) and advances the watermark `since` to `through`. If the owning Machine's clock is ahead of Linear's server clock, or a comment lands on Linear concurrently with the query, a comment stamped before `through` after the query executes is skipped by the next `updatedAt >= through` window. Because `task_linear_ingested_comments` (`rust/loopflow-storage/src/sqlite/children.rs:1900`) and `steers(source, revision)` are strictly idempotent, a 30 s overlap recovers revisions stamped within that window. Larger clock skew is outside this guarantee.
    - **Linux container server gap:** `rust/loopflow-execution/src/installation/server.rs:195-237` starts `lf server` via `systemctl --user`, which is absent in Modal/Daytona/RunPod containers. Because `RunningGraph::spawn` (`rust/loopflow/src/lf/commands/graph.rs:1061-1076`) already runs a `tokio::select!` watch loop while an agent step executes, sharing the exact same `linear_team_checks` lock and freshness window lets `RunningGraph::spawn` ingest steers mid-step even when `lf server` is not running, with zero extra Linear requests when `lf server` is running.
 
 ### Mechanisms compared
@@ -164,11 +164,24 @@ Expected: all tests pass with zero skipped assertions — proving:
 
 ## Slices
 
-### Slice 1 (de-risks the hardest part first): Live inbound steer ingestion & wake on the owning Machine
-- Add the 30 s overlap lookback on `team_changes` `since` (`rust/loopflow-execution/src/ops/tracker_events.rs`) and verify idempotent deduplication in `task_linear_ingested_comments` + `own_echo`.
-- Add one shared inbound-sync entry point (`ops::planning_sync::sync_owned_work` / `ops::tracker_events`) that finds repositories where this Machine owns open Tasks, runs `sync_repository` for tracker-connected repos (respecting `delta_fresh_secs()` and `locks/linear-teams`), and runs `plan_hub::exchange` (alongside existing `plan_git::exchange_all`) for non-tracker repos.
-- Wire it into `rust/loopflow/src/server/maintenance.rs` (every `max(30 s, delta_fresh_secs())` while the Machine owns open Tasks; nothing otherwise) **and** into `RunningGraph::spawn`'s `tokio::select!` watch loop (`rust/loopflow/src/lf/commands/graph.rs:1061`, same interval during `StepKind::Agent`, non-blocking to interrupt checks).
-- **Proves:** A steer comment posted to Linear (or hub) from an isolated sibling sandbox reaches a running headless worker's `PostToolUse` hook AND wakes an idle/stopped primary Session on the owning Machine automatically, with zero extra Linear requests when idle or when `lf server` and a Graph run coexist.
+### Slice 1a: Incoming Linear direction on the owning Machine (implemented)
+
+The server checks teams for its open, locally owned Tasks. During an agent step the Graph checks only its own Task's repository. Both share the team lock and last-attempt window. A tick inside that window wakes at its expiry, so staggered readers do not postpone a due read by another 30 s. A managed worker needs the server at launch. After launch its tool hook reads the store directly, even if the server has exited. Starting a stopped conversation still requires the server.
+
+Team reads acquire freshness before collecting issue IDs. The two ID lists come from indexed reads of linked Tasks by repository. Linear overlaps the saved watermark by 30 s. Comment revisions continue through the existing store, hook marker and wake reader.
+
+The two-Home fixture sent a steer through the sibling's Task comment command. A comment timestamped 15 s before the owner's watermark reached the worker's tool-boundary reader and the stopped primary's startup input. Replaying the window produced no second delivery. The server and Graph made one team read between them, and made zero before the claim.
+
+- `cargo test -p loopflow-execution --lib owned_tracker_checks_deliver_a_late_comment_to_worker_and_primary_once` passed.
+- On a private Machine with outbound networking disabled, the branch CLI created and claimed a Task. Its resident server attempted two Linear reads 30 seconds apart without a foreground read. The two-Home fixture above covers the delivery itself.
+- `cargo build -p loopflow --bin lf`, `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings` passed.
+- SQLite on 10,000 synthetic Tasks across four repositories, median of 21 warm reads: repository discovery 0.008 ms, issue IDs for one repository (2,500 rows) 1.903 ms. Both plans used `idx_tasks_repository` for Task lookups.
+
+### Slice 1b: Other carriers and the two-Machine demo (next)
+
+- Asana reads a repository-named project within a team. Two repositories in the same team currently share a team watermark even though their project feeds differ. Key delta admission and scope matching by the project's identity before enabling periodic Asana reads. Exercise two projects in one team.
+- Add bounded hub/Git exchange for owned work. Keep the existing minute Git exchange for repositories with no local claims, which receives new plans there. Share background exchange attempts across Graphs and the server.
+- Exercise the timer in a two-Home demo with a running worker and an idle or stopped primary Session. Include loss of the server after a managed worker has started.
 
 ### Slice 2: Honest `lf steer <task>` routing and `TaskSteerReceipt`
 - Define `TaskSteerReceipt { identifier, steer_id, delivery }` and `SteerDelivery { reached: SteerReached (owner | tracker | here), runs_on: Option<MachineRef>, sentence }` with strict required/nullable wire fields and the single Rust-authored `sentence`.

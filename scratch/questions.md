@@ -1,0 +1,1 @@
+This pass takes the sibling-sandbox Linear path first. Asana needs a project-scoped watermark. Hub and Git need to share background exchanges without losing the minute Git read that brings a new plan to a Machine with no claims.

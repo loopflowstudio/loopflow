@@ -6,16 +6,19 @@
 //! Exactly-once, the baseline, and the monotonic-revision guard all live in the
 //! store; refresh supplies events without proposing a second write.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::path::Path;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
+use futures_util::{stream, StreamExt};
 use sha2::{Digest, Sha256};
 use time::OffsetDateTime;
 
 use super::tracker::message;
 use super::OpsResult;
 use crate::store::{SharedStore, Store};
+use loopflow_model::durable::TaskId;
+use loopflow_storage::planning_sync::TrackerKind;
 use loopflow_storage::work::task::Task;
 
 pub(crate) async fn refresh_task_comments(store: &SharedStore, task: &Task) -> OpsResult<()> {
@@ -123,40 +126,6 @@ async fn check_scope(store: &Store, repository: &str, fresh_for: i64) -> OpsResu
     }
     let repo = Path::new(repository);
     let team = super::tracker::repository_scope(repo)?;
-    let mut scope_matches = HashMap::from([(repo.to_path_buf(), true)]);
-    let mut same_scope = |repo: &Path| {
-        *scope_matches.entry(repo.to_path_buf()).or_insert_with(|| {
-            super::tracker::repository_scope(repo).is_ok_and(|scope| scope == team)
-        })
-    };
-    let mut live = Vec::new();
-    let mut finished = Vec::new();
-    let waves: Vec<_> = store
-        .list_waves(None)
-        .await
-        .map_err(message)?
-        .into_iter()
-        .filter(|wave| same_scope(Path::new(wave.repo())))
-        .collect();
-    for task in store.list_tasks(None).await.map_err(message)? {
-        let task_repo = super::task::repository_for_task(store, &task)?;
-        if !same_scope(&task_repo) {
-            continue;
-        }
-        let Some(issue) = task.tracker_id else {
-            continue;
-        };
-        if store
-            .task_state(&task.id)
-            .await
-            .map_err(message)?
-            .is_terminal()
-        {
-            finished.push(issue.as_str().to_owned());
-        } else {
-            live.push(issue.as_str().to_owned());
-        }
-    }
     let key = format!("{:x}", Sha256::digest(team.as_bytes()));
     let path = store
         .sqlite
@@ -175,6 +144,28 @@ async fn check_scope(store: &Store, repository: &str, fresh_for: i64) -> OpsResu
     else {
         return Ok(false);
     };
+    let mut scope_matches = HashMap::from([(repo.to_path_buf(), true)]);
+    let mut same_scope = |repo: &Path| {
+        *scope_matches.entry(repo.to_path_buf()).or_insert_with(|| {
+            super::tracker::repository_scope(repo).is_ok_and(|scope| scope == team)
+        })
+    };
+    let mut live = Vec::new();
+    let mut finished = Vec::new();
+    let waves: Vec<_> = store
+        .list_waves(None)
+        .await
+        .map_err(message)?
+        .into_iter()
+        .filter(|wave| same_scope(Path::new(wave.repo())))
+        .collect();
+    for path in store.sqlite.tracked_repositories().map_err(message)? {
+        if same_scope(Path::new(&path)) {
+            let (open, closed) = store.sqlite.tracked_issue_ids(&path).map_err(message)?;
+            live.extend(open);
+            finished.extend(closed);
+        }
+    }
     let through = now
         .format(&time::format_description::well_known::Rfc3339)
         .map_err(message)?;
@@ -257,6 +248,103 @@ fn fresh_for(repository: &str) -> i64 {
     }
 }
 
+/// The owner checks for incoming direction even between provider boundaries.
+const OWNER_CHECK_INTERVAL: Duration = Duration::from_secs(30);
+
+/// Check the server's owned work, or a Graph's one Task for the life of
+/// its agent step. A busy database must leave the Graph free to interrupt
+/// its child. Only the bounded check occupies a blocking thread.
+pub async fn watch_owned_work(graph_task: Option<TaskId>) {
+    if graph_task.is_some() {
+        // The Graph already refreshed planning before launching this step.
+        tokio::time::sleep(OWNER_CHECK_INTERVAL).await;
+    }
+    loop {
+        let task = graph_task.clone();
+        let checked = crate::journal::request::spawn_blocking(move || {
+            tokio::runtime::Handle::current().block_on(async move {
+                match crate::store::open_existing_store().await.map_err(message)? {
+                    Some(store) => check_owned_work(&store, task.as_ref()).await,
+                    None => Ok(SystemTime::now() + OWNER_CHECK_INTERVAL),
+                }
+            })
+        })
+        .await;
+        let delay = match checked {
+            Ok(Ok(due)) => due.duration_since(SystemTime::now()).unwrap_or_default(),
+            failed => {
+                tracing::warn!(?failed, "could not check owned work for incoming direction");
+                OWNER_CHECK_INTERVAL
+            }
+        };
+        tokio::time::sleep(delay).await;
+    }
+}
+
+/// Read Linear for this Machine's open work. A running Graph needs only
+/// its Task's repository. All readers share the scope lock and last attempt.
+pub(crate) async fn check_owned_work(
+    store: &Store,
+    task: Option<&TaskId>,
+) -> OpsResult<SystemTime> {
+    let next_inventory = SystemTime::now() + OWNER_CHECK_INTERVAL;
+    let repositories = if let Some(task) = task {
+        if !store.sqlite.task_claimed_here(task).map_err(message)?
+            || store.task_state(task).await.map_err(message)?.is_terminal()
+        {
+            return Ok(next_inventory);
+        }
+        let scope = store.sqlite.task_scope(task).map_err(message)?;
+        store
+            .sqlite
+            .repository_path(&scope.repository)
+            .map_err(message)?
+            .into_iter()
+            .collect::<BTreeSet<_>>()
+    } else {
+        let machine = store.sqlite.saved_local_machine().map_err(message)?;
+        store
+            .sqlite
+            .held_planning_scope(&machine.id)
+            .map_err(message)?
+            .repositories
+            .into_values()
+            .map(|(_, repo)| repo)
+            .collect()
+    };
+    let next_check = stream::iter(repositories)
+        .map(|repo| async move {
+            if super::tracker::queued_tracker(Path::new(&repo)) != Some(TrackerKind::Linear) {
+                return next_inventory;
+            }
+            let window =
+                crate::linear::delta_fresh_secs().max(OWNER_CHECK_INTERVAL.as_secs() as i64);
+            check_repository_bounded(store, &repo, window).await;
+            // Another reader may have checked just before this tick. Wake when
+            // its window ends, rather than missing a whole polling interval.
+            let next = super::tracker::repository_scope(Path::new(&repo))
+                .and_then(|team| store.sqlite.last_team_attempt(&team).map_err(message));
+            match next {
+                Ok(Some(at)) => OffsetDateTime::from_unix_timestamp(at.saturating_add(window))
+                    .ok()
+                    .map(SystemTime::from)
+                    .filter(|due| *due > SystemTime::now())
+                    .unwrap_or(next_inventory),
+                Ok(None) => next_inventory,
+                Err(error) => {
+                    tracing::debug!(%repo, %error, "team check time unavailable");
+                    next_inventory
+                }
+            }
+        })
+        .buffer_unordered(4)
+        .fold(next_inventory, |earliest, due| {
+            std::future::ready(earliest.min(due))
+        })
+        .await;
+    Ok(next_check)
+}
+
 /// The one freshness check for Linear reads: bring the repository's Team
 /// delta up to date (a no-op inside its window), then report whether local
 /// state is current enough to answer in place of a per-item read.
@@ -291,7 +379,7 @@ async fn check_repository_bounded(store: &Store, repository: &str, fresh_for: i6
     match check {
         Ok(Ok(changed)) => changed,
         result => {
-            tracing::debug!(?result, "Linear team check pending");
+            tracing::debug!(%repository, ?result, "tracker check pending");
             false
         }
     }

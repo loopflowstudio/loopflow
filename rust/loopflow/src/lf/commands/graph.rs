@@ -18,8 +18,8 @@ use loopflow_execution::graph::ConcreteStep;
 use loopflow_execution::graph::ConcreteXor;
 use loopflow_execution::graph::GraphDefinition;
 use loopflow_execution::journal::{self, LfEventFields, LfEventType, LfNode};
-use loopflow_execution::ops::graph_process;
 use loopflow_execution::ops::WorkBinding;
+use loopflow_execution::ops::{graph_process, tracker_events};
 use loopflow_execution::output::Colors;
 use loopflow_execution::process::launch_log::{release_launcher, PendingLog};
 use loopflow_execution::store::SharedStore;
@@ -1060,6 +1060,10 @@ impl RunningGraph<'_> {
         }
         let mut watch = tokio::time::interval(std::time::Duration::from_secs(1));
         watch.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        let mut tracker = tokio::task::JoinSet::new();
+        if let (StepKind::Agent, Some(task)) = (kind, self.task.clone()) {
+            tracker.spawn(tracker_events::watch_owned_work(Some(task)));
+        }
         let mut signalled = false;
         let status = loop {
             tokio::select! {
@@ -1074,6 +1078,7 @@ impl RunningGraph<'_> {
                 }
             }
         };
+        drop(tracker);
         drop(output);
         // A step that died before writing its end leaves what this Graph saw.
         if let Some(step) = &step {

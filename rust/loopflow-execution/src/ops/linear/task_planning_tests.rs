@@ -881,6 +881,139 @@ fn linear_on_demand_shares_checks_and_excludes_finished_tasks() {
     });
 }
 
+/// A sibling Home sends direction through the same tracker as the owner.
+async fn steer_from_sibling(selector: &str, text: &str) {
+    let url = LINEAR_TEST_CONTEXT.with(|context| context.graphql_url.clone());
+    let sibling = Fixture::new().await;
+    let _home = crate::config::environment::EnvVarGuard::set(
+        "LF_HOME",
+        sibling.directory.path().to_str().unwrap(),
+    );
+    let (repo, _) = planning_repo(&sibling).await;
+    sibling.seed(now() + 86_400).await;
+    LINEAR_TEST_CONTEXT
+        .scope(sibling.context(&url), async {
+            super::refresh_wave(&repo, "product").await.unwrap();
+            let thread =
+                crate::ops::task::task_comment_async(&repo, None, selector, Some(text), true)
+                    .await
+                    .unwrap();
+            assert!(thread.pending_sync.is_empty());
+        })
+        .await;
+}
+
+#[test]
+fn owned_tracker_checks_deliver_a_late_comment_to_worker_and_primary_once() {
+    use crate::ops::tracker_events::check_owned_work;
+    use crate::steer::{claim, delivered, NativeBoundary};
+    use time::format_description::well_known::Rfc3339;
+
+    with_planning_task(|runtime, fixture, repo, task, state| {
+        runtime.block_on(async {
+            let store = &fixture.store;
+            let db = &store.sqlite;
+            let conn = rusqlite::Connection::open(&fixture.database).unwrap();
+            // The previous check finished before Linear made this comment visible.
+            steer_from_sibling(&task.identifier, "Keep the saved identity").await;
+            let published = state.lock().await.comments.last().unwrap()["updatedAt"]
+                .as_str()
+                .unwrap()
+                .to_owned();
+            let through = (time::OffsetDateTime::parse(&published, &Rfc3339).unwrap()
+                + time::Duration::seconds(15))
+            .format(&Rfc3339)
+            .unwrap();
+            let previous_check = || {
+                conn.execute(
+                    "INSERT OR REPLACE INTO linear_team_checks
+                    (team_id,attempted_at,synced_through) VALUES('team-1',0,?1)",
+                    [&through],
+                )
+                .unwrap();
+            };
+            previous_check();
+            state.lock().await.operations.clear();
+            check_owned_work(store, None).await.unwrap();
+            check_owned_work(store, Some(&task.id)).await.unwrap();
+            assert_eq!(state.lock().await.sent("TeamChanges"), 0);
+
+            crate::git::git_stdout(repo, &["config", "user.email", "owner@example.test"]).unwrap();
+            crate::store::ownership::claim_task(db, &task.id).unwrap();
+            let worker = loopflow_storage::test_fixture::start_steer_session(db, "worker");
+            db.test_session(
+                "primary",
+                &loopflow_storage::session_record::new_artifact_key(),
+            );
+            conn.execute(
+                "UPDATE agent_sessions SET task_id=?1,wave_id=?2,interactive=(id='primary')
+                 WHERE id IN ('primary','worker')",
+                rusqlite::params![
+                    task.id.as_str(),
+                    task.wave_id.as_ref().map(|id| id.as_str())
+                ],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO task_primary_sessions(task_id,session_id) VALUES(?1,'primary')",
+                [task.id.as_str()],
+            )
+            .unwrap();
+            db.read_steer_wakes().unwrap();
+            let marker = loopflow_storage::steer_markers::task_marker(
+                fixture.directory.path(),
+                task.id.as_str(),
+            );
+            if marker.exists() {
+                std::fs::remove_file(&marker).unwrap();
+            }
+
+            check_owned_work(store, None).await.unwrap();
+            // A staggered Graph tick shares the server's next deadline.
+            conn.execute(
+                "UPDATE linear_team_checks SET attempted_at=attempted_at-10",
+                [],
+            )
+            .unwrap();
+            let attempted = db.last_team_attempt("team-1").unwrap().unwrap();
+            let due = check_owned_work(store, Some(&task.id)).await.unwrap();
+            assert_eq!(
+                due,
+                std::time::SystemTime::from(
+                    time::OffsetDateTime::from_unix_timestamp(attempted + 30).unwrap()
+                )
+            );
+            assert_eq!(state.lock().await.sent("TeamChanges"), 1);
+            assert!(marker.is_file());
+            let news = claim(db, repo, &worker, "native", NativeBoundary::Turn)
+                .unwrap()
+                .unwrap();
+            assert!(
+                news.text.contains("Keep the saved identity"),
+                "{}",
+                news.text
+            );
+            delivered(db, "worker", &news);
+            assert_eq!(
+                crate::steer::sessions_to_start(db).unwrap()[0].session,
+                "primary"
+            );
+            let input = db.take_steers_to_start("primary").unwrap();
+            assert!(input
+                .iter()
+                .any(|steer| steer.text.contains("Keep the saved identity")));
+
+            previous_check();
+            check_owned_work(store, Some(&task.id)).await.unwrap();
+            assert_eq!(state.lock().await.sent("TeamChanges"), 2);
+            assert!(claim(db, repo, &worker, "native", NativeBoundary::Turn)
+                .unwrap()
+                .is_none());
+            assert!(crate::steer::sessions_to_start(db).unwrap().is_empty());
+        });
+    });
+}
+
 #[test]
 fn linear_on_demand_acquires_comment_only_changes_and_completion() {
     with_planning_task(|runtime, fixture, repo, task, state| {

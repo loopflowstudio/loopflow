@@ -459,11 +459,11 @@ MTG-419  Runs on modal-3 since Nov 23 09:05; modal-3 is not registered here, so 
 ```
 
 A Machine that owns open Tasks reads its tracker, hub or Git plan about every
-30 seconds, from `lf server` or, in a container without one, from the running
-Graph step. A steer that arrives is delivered like a local one: a running
-worker reads it after its next tool call, and an idle or stopped Task
-conversation wakes. A Machine with no open Tasks makes no such requests, and
-a low Linear budget stretches the interval.
+30 seconds. A managed Graph worker needs `lf server` to start. If the server
+exits during a step, the running Graph keeps checking and the worker reads
+incoming steers after its next tool call. With the server running, a steer
+also wakes an idle or stopped Task conversation. With no open Tasks owned
+here, background tracker reads stop. A low Linear budget stretches the interval.
 
 When mini is added but can't be reached, the steer takes the same tracker
 route and its sentence names the SSH or server failure; status shows what this

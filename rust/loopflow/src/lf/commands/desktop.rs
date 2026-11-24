@@ -1931,7 +1931,7 @@ impl TileEdit {
 #[serde(untagged)]
 pub(crate) enum DesktopTileRecord {
     Dashboard(Box<loopflow_storage::work::selection::Dashboard>),
-    /// The repository's Task order.
+    /// The moved Task's order among its Project's Tasks.
     Tasks(Vec<String>),
 }
 
@@ -2066,13 +2066,20 @@ fn edit_tiles(
                 )
                 .into());
             }
+            let task = |work: &WorkWorkspaceKey| {
+                loopflow_model::durable::TaskId::from_raw(work.id.clone())
+            };
             return Ok(DesktopTileRecord::Tasks(
-                selections::reorder_task(&store, repository, &member.id, &to.id).map_err(
-                    |error| match error {
+                store
+                    .reorder_task(&task(member), &task(to))
+                    .map_err(|error| match error {
                         loopflow_execution::store::StoreError::NotFound => absent(member),
+                        // Tasks in different repositories share no order.
+                        loopflow_execution::store::StoreError::InvalidData(reason) => {
+                            DesktopError::Argument(reason).into()
+                        }
                         error => error.into(),
-                    },
-                )?,
+                    })?,
             ));
         }
         TileBoard::Dashboard(id) => id,

@@ -2328,7 +2328,7 @@
           "$ref": "#/$defs/Dashboard"
         },
         {
-          "description": "The repository's Task order.",
+          "description": "The moved Task's order among its Project's Tasks.",
           "items": {
             "type": "string"
           },
@@ -11332,10 +11332,6 @@
           },
           "type": "array"
         },
-        "task_primary": {
-          "description": "Its Task names it as the Task's primary conversation.",
-          "type": "boolean"
-        },
         "terminal_ids": {
           "items": {
             "type": "string"
@@ -11413,7 +11409,6 @@
         "availability",
         "program_status",
         "agent_process_id",
-        "task_primary",
         "task_ids",
         "id",
         "workspace",
@@ -17145,7 +17140,6 @@
       "enum": [
         "declared",
         "checkout",
-        "inherited",
         "bound"
       ],
       "type": "string"
@@ -18044,7 +18038,6 @@
             "task_ids": [
               "task_00000000000000000000000000000001"
             ],
-            "task_primary": false,
             "terminal_ids": [],
             "title": "Served name",
             "title_source": "generated",
@@ -18834,14 +18827,15 @@
         },
         {
           "additionalProperties": false,
-          "description": "`lf wt create <name> [--plan] [--persistent] --json`.",
+          "description": "`lf wt create <name> [--plan] [--persistent] [--stack] --json`.",
           "examples": [
             {
               "directory": "/repo",
               "kind": "checkout.create",
               "name": "spike",
               "persistent": false,
-              "preview": false
+              "preview": false,
+              "stack": false
             }
           ],
           "properties": {
@@ -18860,6 +18854,9 @@
             },
             "preview": {
               "type": "boolean"
+            },
+            "stack": {
+              "type": "boolean"
             }
           },
           "required": [
@@ -18867,7 +18864,8 @@
             "directory",
             "name",
             "preview",
-            "persistent"
+            "persistent",
+            "stack"
           ],
           "type": "object",
           "x-result": {

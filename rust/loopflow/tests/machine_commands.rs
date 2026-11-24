@@ -1025,6 +1025,11 @@ fn task_run_open_resolves_remote_selectors_before_opening_locally() {
         [target.task.id.as_str()],
     )
     .unwrap();
+    db.execute(
+        "UPDATE agent_sessions SET task_id=?1,wave_id=(SELECT p.wave_id FROM tasks t LEFT JOIN projects p ON p.id=t.project_id WHERE t.id=?1) WHERE id='remote-selected-primary'",
+        [target.task.id.as_str()],
+    )
+    .unwrap();
     let resolution = fixture
         .command(&["--task", target.task.id.as_str(), "--explain", "--json"])
         .current_dir(selected.path())

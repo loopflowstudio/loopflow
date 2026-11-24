@@ -82,7 +82,7 @@ impl Fixture {
         Connection::open(self.database())
             .unwrap()
             .execute(
-                "UPDATE tasks SET planning_completed=?2 WHERE id=?1",
+                "UPDATE tasks SET planning_state=CASE WHEN ?2 THEN 'completed' ELSE 'started' END WHERE id=?1",
                 params![self.task, done],
             )
             .unwrap();
@@ -151,7 +151,7 @@ impl Fixture {
         let conn = Connection::open(self.database()).unwrap();
         assert_eq!(
             conn.query_row(
-                "SELECT planning_completed FROM tasks WHERE id=?1",
+                "SELECT planning_state IS 'completed' FROM tasks WHERE id=?1",
                 [&self.task],
                 |r| r.get::<_, i32>(0)
             )
@@ -484,7 +484,7 @@ fn build_cleanup_retains_unfinished_association_and_unknown_execution() {
     let fixture = Fixture::new();
     let conn = Connection::open(fixture.database()).unwrap();
     let pending = loopflow_execution::durable::TaskId::new();
-    conn.execute("INSERT INTO tasks(id,repository_id,project_id,issue_identifier,created_at,planning_completed) SELECT ?1,repository_id,project_id,'PROOF-2',1,0 FROM tasks WHERE id=?2",params![pending.as_str(),fixture.task]).unwrap();
+    conn.execute("INSERT INTO tasks(id,repository_id,project_id,issue_identifier,created_at,planning_state) SELECT ?1,repository_id,project_id,'PROOF-2',1,'started' FROM tasks WHERE id=?2",params![pending.as_str(),fixture.task]).unwrap();
     conn.execute("INSERT INTO task_checkouts(task_id,worktree) SELECT ?1,worktree || '/.' FROM task_checkouts WHERE task_id=?2",params![pending.as_str(),fixture.task]).unwrap();
     let retained = fixture.entry(&fixture.prune(&[]));
     assert!(

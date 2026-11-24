@@ -124,7 +124,10 @@ fn task_wait_reuses_its_store_and_builds_status_only_on_return() {
     }
     assert_eq!(waited["connections"], immediate["connections"]);
     connection
-        .execute("UPDATE tasks SET planning_completed=1 WHERE id=?1", [id])
+        .execute(
+            "UPDATE tasks SET planning_state='completed' WHERE id=?1",
+            [id],
+        )
         .unwrap();
     let (_, body) = volume(home.path(), repo.path(), &args("2s"));
     assert_eq!(

@@ -199,7 +199,7 @@ provider generation in caller provenance, turn origin and Program Status.
 | Owner | Authoritative fields and operations |
 | --- | --- |
 | `processes` | Leaving (LOO-965). Written only by a released lf during the upgrade window; triggers copy its rows onto the owning Session, Graph run or step, and agent rows are copied back for a released holder's fence. No reader in this lf except the released-lf skew inventory. |
-| `agent_sessions` | Stable ID, purpose and independent interactive flag; title/provenance, request/feedback, typed Task/Wave ancestry, native identity, the current AgentProcess and its attachment; reserve, attach, resume, bind and rename; historical feedback/completion retained |
+| `agent_sessions` | Stable ID, purpose and independent interactive flag; title/provenance, request/feedback, typed Task/Wave ancestry, the scope it is primary for (`primary_scope`: repository or Wave), native identity, the current AgentProcess and its attachment; reserve, attach, resume, bind and rename; historical feedback/completion retained |
 | `tasks` | Shared planning row: identity, repository, project, title, description, state, rank and tracker revision; no Machine-local column |
 | `task_checkouts` | This Machine's checkout of a Task (worktree path, branch, base commit, parent PR); absent on every other Machine |
 | `task_primary_sessions` | The conversation this Machine opens for a Task, with or without a checkout; absent on every other Machine |
@@ -259,7 +259,7 @@ completion nor Graph authority.
 
 A primary Session is the one ongoing conversation of a scope. It is an ordinary
 interactive conversation whose row names that scope; a repository and each
-Wave have at most one uncompleted primary. The repository's needs no Wave,
+Wave have at most one uncompleted primary, and a Task one primary. The repository's needs no Wave,
 Task or tracker. `lf resume` finds or admits it, prepares its
 workspace, reserves the first input and owns the foreground launch; `--prepare`
 stops before launch. Task primaries are admitted lazily on the owner Machine, on first resume;
@@ -273,9 +273,10 @@ row, seeded with a log of its current AgentSession, which stays in its history.
 Scope locks serialize admission. Primary grants no Graph, review or process authority, and
 the Wave's goal and memory reach it as ordinary Wave context.
 
-A Task's primary is one of its own conversations, named by its
-Machine-local `task_primary_sessions` row; the Session row carries no scope mark and it stays a Task
-member. `lf resume --task ISSUE` keeps the selected primary. Without one, it
+A Task's primary is one of its own conversations, named by its row in
+`task_primary_sessions`, so it stays a Task member; reads report its scope as
+`task`. Choosing another replaces the row. Released lf reads the same table;
+LOO-877 moves the mark onto `primary_scope='task'`. `lf resume --task ISSUE` keeps the selected primary. Without one, it
 selects an unfinished interactive member by latest native human input, falling
 back to interactive opening and creation time; it creates one when none exists.
 `lf session bind` selects the primary explicitly. Opening an exact Session leaves
@@ -398,16 +399,11 @@ admission requires its Session row before provider launch.
 A Graph run is one `lf graph <graph>`, `lf <graph>` or
 `lf task run ISSUE [GRAPH]` invocation and the steps it starts as child
 processes; `graph_processes` holds the run, `graph_process_steps` its steps.
-Task and taskless execution share the Graph runner. A Task observes every
-LfSession and Graph run associated with its checkout, plus explicitly bound work.
-The shared Rust association reader includes checkout descendants at path component
-boundaries and retained paths after removal. It neither follows causal ancestry
-nor rewrites recorded work or usage. Session inventory exposes `task_ids` so
-Desktop navigation uses the same membership as Task status.
+Task and taskless execution share the Graph runner. A Session or Graph run
+records its Task at launch. Moving the checkout or reusing its path leaves
+that history intact. Session inventory exposes the recorded membership in
+`task_ids`, which Desktop uses for navigation.
 
-No Graph is privileged: every one started for the Task, by naming it or in its
-checkout, is equally its work. The Graph records that Task when it starts, so
-reading a Task's Graphs costs the same however many other Graphs ran.
 `task status`'s `work` contains all Sessions and Graph runs, including
 headless and closed history. Its Task Graph record observes the most recently
 launched Graph: `none`, `latest` or `finished`. Execution also reports an open
@@ -473,7 +469,7 @@ Task requires a repository and may belong to a Wave through its planning row.
 Session constructors use the Task’s current membership and reject explicit disagreements.
 A Session links to its Graph run through the step that captured its input
 (`graph_lf_process_id`), and shares that Graph's nullable Task. `work_source`
-is declared, checkout, inherited or bound when known. Historical unknown membership
+is declared, checkout or bound when known. Historical unknown membership
 stays Unknown; absence of evidence does not become Independent.
 
 A Session's permanent assignment is write-once: null to a Task, validating any

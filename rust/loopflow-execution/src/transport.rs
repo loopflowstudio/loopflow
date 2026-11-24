@@ -3050,13 +3050,6 @@ mod launch_mode_tests {
                 ),
                 (
                     "interactive",
-                    Some(WorkSource::Inherited),
-                    false,
-                    false,
-                    LaunchKind::Chat,
-                ),
-                (
-                    "interactive",
                     Some(WorkSource::Bound),
                     true,
                     false,

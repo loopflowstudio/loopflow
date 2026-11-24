@@ -789,8 +789,7 @@ fn available_target(
     if let Some(id) = store.sqlite.repository_id(&repo)? {
         context.repository = ContextFact::bound(id, "selected_plan");
     }
-    let primary = record.task_primary
-        || matches!(record.primary_scope.as_deref(), Some("repository" | "wave"));
+    let primary = record.primary_scope.is_some();
     match (&session.task_id, &session.wave_id) {
         (Some(task), _) => context.task = ContextFact::bound(task, "session"),
         (None, Some(wave)) if record.primary_scope.as_deref() == Some("wave") => {
@@ -806,9 +805,12 @@ fn available_target(
         exact.as_ref().map(|_| session.cwd.clone()),
     )?;
     if exact.is_some() {
+        // A generated title already names its Task.
         resolved.label = match &resolved.task {
-            Some(task) => format!("{} · {}", session.title, task.identifier),
-            None => session.title.clone(),
+            Some(task) if !session.title.contains(&task.identifier) => {
+                format!("{} · {}", session.title, task.identifier)
+            }
+            _ => session.title.clone(),
         };
     }
     Ok(resolved)

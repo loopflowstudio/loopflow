@@ -1912,7 +1912,7 @@ fn completed_task_cleanup_ends_its_held_shell_and_settles_jobs() {
     let mut viewer = fixture.held_viewer(&owner);
     viewer.input("sleep 60 & printf '%s\\n' $! > \"$HOME/job\"\r");
     let job = fixture.wait_file("job").trim().parse::<u32>().unwrap();
-    fixture.sql().execute("UPDATE tasks SET issue_title='Completed shell',issue_description='',workspace_slug='task',updated_at=1,planning_completed=1,planning_completed_at='2000-01-01T00:00:00Z' WHERE id=?1", [task]).unwrap();
+    fixture.sql().execute("UPDATE tasks SET issue_title='Completed shell',issue_description='',workspace_slug='task',updated_at=1,planning_state='completed',planning_completed_at='2000-01-01T00:00:00Z' WHERE id=?1", [task]).unwrap();
     fixture
         .sql()
         .execute(

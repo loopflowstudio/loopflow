@@ -173,6 +173,18 @@ pub async fn execution_of_latest_graph(
             snapshot.outlook = Some(outlook);
         }
     }
+    // A step that pause stopped is held on purpose; nothing is blocked or
+    // owed a fresh launch. A finished Graph stopped nothing.
+    if let (true, Some(label)) = (facts.paused.contains(&task.id), &snapshot.step) {
+        if matches!(
+            snapshot.state,
+            TaskExecutionState::Idle | TaskExecutionState::Blocked | TaskExecutionState::Waiting
+        ) {
+            snapshot.reason = format!("{label} stopped when the Task was paused");
+            snapshot.state = TaskExecutionState::Idle;
+            snapshot.outlook = None;
+        }
+    }
     Ok((snapshot, Some(graph.detail(entry))))
 }
 

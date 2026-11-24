@@ -184,6 +184,8 @@ pub struct GraphExecutionFacts {
     pub inputs: HashMap<LfProcessId, (String, String, i64)>,
     pub unanswered_questions: HashMap<LfProcessId, String>,
     pub limit_recoveries: HashMap<LfProcessId, AgentLimitRecovery>,
+    /// Selected Tasks held by `lf task pause`.
+    pub paused: HashSet<TaskId>,
 }
 
 /// The Graph a Task took up and never ran: it stands at `start`, no run
@@ -671,8 +673,16 @@ impl SqliteStore {
             .query_map([&ids], |row| row.get::<_, String>(0))?
             .map(|id| TaskId::parse(&id?).map_err(invalid))
             .collect::<StoreResult<_>>()?;
+        let mut holds = conn.prepare(
+            "SELECT task_id FROM task_pauses WHERE task_id IN (SELECT value FROM json_each(?1))",
+        )?;
+        let paused = holds
+            .query_map([&ids], |row| row.get::<_, String>(0))?
+            .map(|id| TaskId::parse(&id?).map_err(invalid))
+            .collect::<StoreResult<_>>()?;
         Ok(GraphExecutionFacts {
             open_graphs,
+            paused,
             unrun,
             tasks_with_carrier_records,
             inputs,

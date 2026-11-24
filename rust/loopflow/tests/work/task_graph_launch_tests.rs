@@ -2685,6 +2685,12 @@ if (home / 'hold-turn').exists():
     );
     assert!(living(&neighbor));
     assert_eq!(task.state(), "paused");
+    let status = task.run(&["task", "status", "INF-123"]);
+    let status = String::from_utf8_lossy(&status.stdout);
+    assert!(
+        status.contains("latest Graph: implement stopped when the Task was paused"),
+        "{status}"
+    );
     assert_eq!(sqlite.task_graph_record(id).unwrap().unwrap(), graph);
     assert_eq!(owner, claim());
     assert_eq!(published.id, pr().unwrap().id);

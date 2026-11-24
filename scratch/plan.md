@@ -65,6 +65,12 @@ Remaining:
 
 Next: gate. Every implement item has a passing check; what remains is the two review choices above and CI.
 
+## QA on a private Machine
+
+- Two real Claude workers each ran a real `cargo build`. Pausing one stopped its worker, shell, `cargo`, `build-script-build` and primary in 2.3 s; the other build finished. A server restart and a comment left the held Task quiet, and `unpause --run` restarted the build in the same checkout (`scratch/qa.html`).
+- Fixed during QA: the paused run refusal named `lf-<hex>` and the cleanup refusal named `task_<hex>`; both now use the short identifier. Status called a paused step Blocked ("launch fresh work"); it now reads "<step> stopped when the Task was paused".
+- Mac and iPhone Paused views had no live walkthrough; headless Swift and Simulator tests cover them.
+
 ## Pause during interrupt and move
 
 - A worker attachment held across `lf task interrupt` kept the build alive until the pause caller entered cleanup. The Graph exited 130 at its original cursor and the separately detached service survived.

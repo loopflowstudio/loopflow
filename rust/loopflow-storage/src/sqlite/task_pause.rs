@@ -44,8 +44,9 @@ pub(super) fn require_settled_in(conn: &Connection, task: &TaskId) -> StoreResul
         "SELECT EXISTS(SELECT 1 FROM task_pauses WHERE task_id=?1 AND stopping_processes IS NOT NULL)",
         [task.as_str()], |row| row.get(0))?;
     if pending {
+        let issue = children::short_task_id(conn, task)?.unwrap_or_else(|| task.to_string());
         return Err(StoreError::InvalidData(format!(
-            "Task is still stopping; repeat `lf task pause {task}` to finish cleanup"
+            "Task is still stopping; repeat `lf task pause {issue}` to finish cleanup"
         )));
     }
     Ok(())
@@ -61,10 +62,13 @@ pub fn run_refusal(issue: &str) -> String {
 }
 
 pub(super) fn require_unpaused_in(conn: &Connection, task: &TaskId) -> StoreResult<()> {
-    let issue: Option<String> = conn.query_row(
-        "SELECT t.issue_identifier FROM task_pauses p JOIN tasks t ON t.id=p.task_id WHERE p.task_id=?1",
-        [task.as_str()], |row| row.get(0)).optional()?;
-    if let Some(issue) = issue {
+    let paused: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM task_pauses WHERE task_id=?1)",
+        [task.as_str()],
+        |row| row.get(0),
+    )?;
+    if paused {
+        let issue = children::short_task_id(conn, task)?.unwrap_or_else(|| task.to_string());
         return Err(StoreError::InvalidData(run_refusal(&issue)));
     }
     Ok(())
@@ -195,6 +199,7 @@ impl SqliteStore {
 
 #[cfg(test)]
 mod tests {
+    use super::run_refusal;
     use crate::sqlite::durable::task_state_sql;
 
     #[test]
@@ -226,6 +231,12 @@ mod tests {
             store.settle_task_pause(&id, false).unwrap();
         };
         pause();
+        // The refusal names the Task the way people type it, not its stored key.
+        let refusal = store.require_task_unpaused(&id).unwrap_err().to_string();
+        assert!(
+            refusal.ends_with(&run_refusal(&task.identifier)),
+            "{refusal}"
+        );
         store.reopen_task(&id, None).unwrap();
         assert!(store.task_pause(&id).unwrap().is_none());
 

@@ -1,0 +1,47 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>QA · LOO-1078 lf task pause</title>
+<style>
+body{font:15px/1.5 -apple-system,system-ui,sans-serif;max-width:900px;margin:2em auto;padding:0 1em;color:#222}
+pre{background:#f5f5f2;padding:.8em;overflow:auto;font-size:12.5px}
+h2{margin-top:2em}.ok{color:#1a7f37}.fix{color:#9a6700}.open{color:#b42318}
+td,th{padding:.3em .6em;vertical-align:top;border-bottom:1px solid #ddd;text-align:left}
+</style>
+<h1>QA: <code>lf task pause</code></h1>
+<p>The branch <code>lf</code> ran on a private Machine (<code>LF_HOME=/tmp/lfqp/home</code>, foreground <code>lf server run</code>). It used a disposable Git repository with a local bare origin. Two Tasks each ran a real Claude worker, and each worker ran a real <code>cargo build</code> of a crate whose <code>build.rs</code> sleeps for 240 s.</p>
+
+<h2>Scenarios</h2>
+<table>
+<tr><th>Scenario</th><th>What happened</th></tr>
+<tr><td>Pause an unstarted Task</td><td class="ok">Refused: <code>Error: invalid data: Task has not started; nothing to pause</code></td></tr>
+<tr><td>Two builds side by side; pause one</td><td class="ok">The pause returned in 2.3 s. The target's worker <code>claude -p</code>, its <code>zsh -c</code>, <code>cargo build</code>, <code>build-script-build</code> and the primary <code>claude --name 6ad693</code> were all gone. All five of the neighbor's processes were still running, and its build finished and reached <code>demo</code>.</td></tr>
+<tr><td>What pause leaves</td><td class="ok">The owner, worktree, untracked <code>Cargo.lock</code>, <code>target/</code> and branch were unchanged. <code>lf task list --state paused</code> listed only the target. Status showed <code>Paused at compile. `lf task unpause` resumes it.</code>, <code>Conversation: paused; `lf task unpause 6ad693` resumes it</code> and <code>action: no_action (Task is paused)</code>.</td></tr>
+<tr><td><code>task run</code> / <code>task auto on</code> while paused</td><td class="fix">Both were refused, but the message named the stored key: <code>run `lf task unpause lf-6ad693fd6c99467f8355db5351ea1fba`</code>. <b>Fixed:</b> it now reads <code>run `lf task unpause 6ad693` to resume it</code>. The "still stopping" refusal named the raw <code>task_…</code> ID and was fixed the same way.</td></tr>
+<tr><td>Status <code>latest Graph:</code> line</td><td class="fix">The line read <code>compile: process exited with status 130. Inspect its history and effects, then launch fresh work</code>, in the Blocked state, directly under "Paused at compile". <b>Fixed:</b> it now reads <code>compile stopped when the Task was paused</code> in the Idle state. A Graph that finished before the pause keeps <code>Graph qa finished; nothing further is launched</code>.</td></tr>
+<tr><td>Comment while paused</td><td class="ok"><code>lf comment 6ad693 'please keep going'</code> saved the steer and launched nothing. It had no delivery row until unpause, then went to the new worker's Session.</td></tr>
+<tr><td>Restart the Machine server while paused</td><td class="ok">Nothing relaunched for the paused Task, and its state stayed <code>paused</code>.</td></tr>
+<tr><td><code>lf task unpause 6ad693 --run</code></td><td class="ok">The command printed <code>6ad693 unpaused</code> and then the run receipt. A new worker ran <code>cargo</code> in the same checkout, and the primary conversation started again under the same Session (capture key <code>855cc19a…</code>).</td></tr>
+<tr><td>Pause at the interactive stop (<code>demo</code>)</td><td class="ok">The primary closed and status showed <code>Paused at demo.</code> A second pause was a no-op. <code>--json</code> pause printed <code>"e9b525 paused"</code> and unpause printed <code>null</code>. After plain unpause the primary came back and the Task was waiting at <code>demo</code> again.</td></tr>
+<tr><td>Served <code>task.pause</code>/<code>task.unpause</code> over the socket</td><td class="ok">Pause answered <code>"e9b525 paused"</code>. Repeating it gave the same answer. Unpause with <code>run:false</code> answered <code>null</code>. An unknown Task returned <code>not_found</code>. Pausing a running Task answered <code>6ad693 pausing (Graph run … is finishing)</code>, and status read paused a moment later.</td></tr>
+<tr><td>Unassign while paused</td><td class="ok">The Task became unowned and was off the paused list.</td></tr>
+</table>
+
+<h2>Checks</h2>
+<ul>
+<li><code>cargo test -p loopflow-storage --lib completing_reopening_and_abandoning_a_task_clear_its_hold</code>: passed. It now asserts the refusal names the short identifier.</li>
+<li><code>task_graph_launch_tests::pause_stops_owned_build_and_keeps_claim</code>: now asserts the paused <code>latest Graph:</code> line. The result is in the final report.</li>
+</ul>
+
+<h2>Not reached</h2>
+<ul>
+<li>Mac and iPhone Paused views: no Dev bundle or Simulator walkthrough ran in this headless pass. Headless Swift and iOS Simulator tests from implement cover them. A visual check is still open.</li>
+<li>A Codex worker whose tool runs in its own OS session, and Linux. These are known gaps in the plan, left for gate and CI.</li>
+<li>A pause during a two-Machine move. It was not repeated live because the fixtures in <code>machine_commands.rs</code> cover it.</li>
+</ul>
+
+<h2>Still wrong (worst first)</h2>
+<ol>
+<li>Every refusal is prefixed <code>Error: invalid data:</code>, for example <code>invalid data: Task has not started; nothing to pause</code>. This comes from <code>StoreError::InvalidData</code> and is not limited to pause.</li>
+<li>After unassign, a Task at <code>demo</code> reads <code>active</code> with <code>Conversation: died … (no exit recorded)</code>. The same happens without pause, so it is older behavior.</li>
+<li>Status still shows <code>Planning: unstarted</code> for a started git-planning Task. This is also older behavior.</li>
+</ol>

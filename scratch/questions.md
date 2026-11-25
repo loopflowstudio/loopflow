@@ -1,6 +1,29 @@
 # Questions
 
-- Chosen headless (concept review): hold every interactive `lf` launch in `lf holder run` whenever the Machine server is running, with 15-minute idle-unviewed retirement for standalone chats and automatic direct-terminal fallback when no server is running. Opening any running `lf` session in Desktop or another Rex pane is always a lossless `View` (**Open here**), never a `SIGTERM`/`SIGKILL` restart. Tradeoff: Rex sees `lf` instead of the provider as the foreground program (same as Task sessions) and `Ctrl+]` detaches instead of `Ctrl+Z` suspending. Passed over: promote-on-second-open with a follower relay (still kills mid-turn and disguises a kill as **Open here**), holding standalone chats forever without cleanup (leaks idle providers on closed tabs), and hard-requiring the server (breaks bare CLI without a server). See `scratch/concept-review.html` for numbered review questions (`1a`–`3b`).
+- Chosen headless (pre-implementation concept review, built on `HEAD`): hold
+  every interactive `lf` launch in `lf holder run` whenever the Machine server
+  is running, with 15-minute idle-unviewed retirement for standalone chats and
+  automatic direct-terminal fallback when no server is running. Opening any
+  running `lf` session in Desktop or another Rex pane is always a lossless
+  `View` (**Open here**), never a `SIGTERM`/`SIGKILL` restart. Tradeoff: Rex
+  sees `lf` instead of the provider as the foreground program (same as Task
+  sessions) and `Ctrl+]` detaches instead of `Ctrl+Z` suspending. Passed over:
+  promote-on-second-open with a follower relay, holding standalone chats
+  forever without cleanup, and hard-requiring the server.
+
+- Chosen headless (post-build concept review, planned for Pass 2): record
+  intentional retirement in `agent_sessions.agent_end_reason` (additive
+  migration, cleared in `attach_in`) and record `agent_exit_code` on waited
+  native launches (`spawn_native` in `native_session.rs`). Retired chats,
+  retired Skills, and retired completed/abandoned Task conversations report
+  `closed HH:MM (<reason>)` (`WaitingForYou`, capture `"completed"`, no
+  `"<provider> exited with 137."` on the saved screen) and never auto-restart
+  as crashes; cleanly quit Skills and fallback chats report `quit HH:MM`
+  instead of `died (no exit recorded)`. Passed over: leaving retired chats
+  showing `died (exit 137)` (~64% of everyday chats), storing `close_reason`
+  only on `held_terminals` (leaks across unheld fallback resumes), and
+  renaming `WorkSession`/`Chat` across the whole product. See
+  `scratch/concept-review.html` for numbered review questions (`1a`–`4b`).
 
 - The direct launcher uses the connection that welcomed it. An unanswered
   `session.start` can already have started the provider, so report its error
@@ -9,10 +32,3 @@
 - A delegated Skill keeps its launcher inside the held PTY to run its ordinary
   completion and checkpoint. The original invocation carries whether it owns
   that checkpoint across the relay, which otherwise looks like a new caller.
-
-- A retired chat reads `died 20:47 (exit 137); lf resume … opens it` in
-  `lf session list`: retirement SIGKILLs the held group (`held.rs` `retire`,
-  shared with shell Close and Task cleanup) and `session_ending` calls every
-  non-0/130 exit a death. Saying "closed after 15 minutes without a viewer"
-  needs the end's reason recorded with the Session; left for a decision, not
-  patched in QA.

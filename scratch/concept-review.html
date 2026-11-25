@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Concept Review — LOO-1097: Interactive Session Hosting &amp; Opening</title>
+<title>Concept Review — LOO-1097: Interactive Session Hosting, Lifetime &amp; Endings</title>
 <style>
   :root {
     --bg: #fafaf9;
@@ -27,9 +27,9 @@
     --proposed: #6d28d9;
     --proposed-bg: #f5f3ff;
     --proposed-border: #ddd6fe;
-    --existing: #475569;
-    --existing-bg: #f1f5f9;
-    --existing-border: #cbd5e1;
+    --built: #0f766e;
+    --built-bg: #f0fdfa;
+    --built-border: #99f6e4;
     --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
     --sans: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif;
   }
@@ -56,9 +56,9 @@
       --proposed: #c4b5fd;
       --proposed-bg: #24163b;
       --proposed-border: #5b21b6;
-      --existing: #cbd5e1;
-      --existing-bg: #1e293b;
-      --existing-border: #475569;
+      --built: #5eead4;
+      --built-bg: #042f2e;
+      --built-border: #115e59;
     }
   }
   * { box-sizing: border-box; }
@@ -140,16 +140,16 @@
     border: 1px solid transparent;
     vertical-align: middle;
   }
-  .badge.existing { color: var(--existing); background: var(--existing-bg); border-color: var(--existing-border); }
+  .badge.built { color: var(--built); background: var(--built-bg); border-color: var(--built-border); }
   .badge.proposed { color: var(--proposed); background: var(--proposed-bg); border-color: var(--proposed-border); }
-  .badge.superseded { color: var(--warn); background: var(--warn-bg); border-color: var(--warn-border); }
   .badge.yes { color: var(--yes); background: var(--yes-bg); border-color: var(--yes-border); }
   .badge.no { color: var(--no); background: var(--no-bg); border-color: var(--no-border); }
+  .badge.warn { color: var(--warn); background: var(--warn-bg); border-color: var(--warn-border); }
 
   .status-strip {
     display: flex;
     flex-wrap: wrap;
-    gap: 10px;
+    gap: 12px;
     margin-top: 14px;
     font-size: 13px;
     color: var(--muted);
@@ -170,9 +170,9 @@
     border-color: var(--proposed-border);
     background: var(--proposed-bg);
   }
-  .callout.warn {
-    border-color: var(--warn-border);
-    background: var(--warn-bg);
+  .callout.good {
+    border-color: var(--built-border);
+    background: var(--built-bg);
   }
   .callout-title {
     font-weight: 700;
@@ -210,13 +210,7 @@
 
   .grid-2 {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-    gap: 16px;
-    margin: 16px 0;
-  }
-  .grid-3 {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(290px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
     gap: 16px;
     margin: 16px 0;
   }
@@ -226,78 +220,26 @@
     border-radius: 10px;
     padding: 16px 18px;
   }
-  .card.existing-card { border-top: 3px solid var(--existing-border); }
-  .card.superseded-card { border-top: 3px solid var(--warn); }
+  .card.head-card { border-top: 3px solid var(--no); }
   .card.proposed-card { border-top: 3px solid var(--proposed); }
+  .card.built-card { border-top: 3px solid var(--built); }
 
-  .diagram {
+  .terminal {
     font-family: var(--mono);
     font-size: 12.5px;
-    line-height: 1.5;
+    line-height: 1.55;
     background: var(--surface-2);
-    border: 1px solid var(--border);
+    border: 1px solid var(--border-strong);
     border-radius: 8px;
-    padding: 14px 16px;
+    padding: 13px 15px;
     overflow-x: auto;
     white-space: pre;
-    margin: 12px 0;
-  }
-
-  .ui-mock {
-    background: var(--surface-2);
-    border: 1px solid var(--border-strong);
-    border-radius: 8px;
-    padding: 12px 14px;
     margin: 10px 0;
-    font-size: 13px;
   }
-  .ui-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    padding: 7px 0;
-    border-bottom: 1px solid var(--border);
-  }
-  .ui-row:last-child { border-bottom: none; }
-  .ui-btn {
-    font: 600 12px/1 var(--sans);
-    padding: 5px 10px;
-    border-radius: 6px;
-    border: 1px solid var(--border-strong);
-    background: var(--surface);
-    color: var(--text);
-    white-space: nowrap;
-  }
-  .ui-btn.danger { border-color: var(--no-border); color: var(--no); background: var(--no-bg); }
-  .ui-btn.safe { border-color: var(--yes-border); color: var(--yes); background: var(--yes-bg); }
-  .ui-sub { font-size: 12px; color: var(--muted); }
-
-  .timeline {
-    list-style: none;
-    padding: 0;
-    margin: 12px 0;
-  }
-  .timeline li {
-    position: relative;
-    padding: 6px 0 10px 20px;
-    border-left: 2px solid var(--border-strong);
-    margin-left: 6px;
-    font-size: 13.5px;
-  }
-  .timeline li::before {
-    content: "";
-    position: absolute;
-    left: -6px;
-    top: 11px;
-    width: 10px;
-    height: 10px;
-    border-radius: 50%;
-    background: var(--border-strong);
-  }
-  .timeline li.bad::before { background: var(--no); }
-  .timeline li.good::before { background: var(--yes); }
-  .timeline li.warn::before { background: var(--warn); }
+  .t-muted { color: var(--muted); }
+  .t-bad { color: var(--no); font-weight: 600; }
+  .t-good { color: var(--yes); font-weight: 600; }
+  .t-warn { color: var(--warn); font-weight: 600; }
 
   .question {
     background: var(--surface);
@@ -338,285 +280,242 @@
 <body>
 <main>
   <header>
-    <div class="eyebrow">Concept Review · LOO-1097 · Pre-implementation</div>
+    <div class="eyebrow">Concept Review · LOO-1097 · Post-build review of HEAD (979b150c16) vs main (80cced1bd4)</div>
     <h1>Do the product's concepts and the code's concepts line up?</h1>
     <div class="area-box">
-      <strong>Area reviewed:</strong> Interactive Session hosting, launch lifetime, and opening across viewers (<code>LaunchKind::Chat</code> vs <code>LaunchKind::WorkSession</code>, held terminals, <code>session_kind</code> / <code>is_bare</code>, <code>human_session::open</code>, and <code>TakeOver</code>).<br>
-      <span class="small">Why this area: the report and the initial plan both stem from a single split—direct terminal launches run unheld while work sessions run in the holder, so opening a running chat from another viewer kills its provider.</span>
+      <strong>Area reviewed:</strong> Interactive Session hosting, launch lifetime, cross-viewer opening, and how Sessions end (<code>delegate_chat</code>, <code>session_host</code>, held Skills, <code>CloseReason::Retired</code>, <code>native_exit::settle</code>, <code>native_session::run_client</code>, and <code>human_session::session_ending</code>).<br>
+      <span class="small">Why this area: LOO-1097 moved direct terminal chats and Skills into held terminals and added 15-minute unviewed retirement. Reviewing the whole area as built shows that live hosting and cross-viewer opening now line up cleanly—but how Sessions end and report their endings is broken across retired chats, delegated Skills, and closed Tasks.</span>
       <div class="quote">“whenever i open an agy session in a different viewer Eg Rex or Loopflow Desktop it seems to close thea gy client... is agy not being held in the the holder the same way as other clients”</div>
     </div>
     <div class="status-strip">
-      <span><span class="badge existing">Existing</span> Current <code>HEAD</code> (no code built yet)</span>
-      <span><span class="badge superseded">Superseded Plan</span> Initial kickoff plan (promote-on-second-open)</span>
-      <span><span class="badge proposed">Proposed</span> Updated <code>scratch/plan.md</code> (chosen headless for review as built)</span>
+      <span><span class="badge built">Built on HEAD</span> Committed in <code>979b150c16</code> (held chats, delegated Skills, 15m idle retirement, fallback without server)</span>
+      <span><span class="badge proposed">Proposed</span> Next pass written into <code>scratch/plan.md</code> (honest Session endings: <code>quit</code> vs <code>closed</code> vs <code>died</code>)</span>
     </div>
   </header>
 
   <section>
-    <h2>1. Concept Alignment: Product vs. Code <span class="badge existing">Existing HEAD</span></h2>
-    <p>Every row pairs what a person thinks exists and does against the types, records, and code paths currently on <code>main</code>.</p>
+    <h2>1. Concept Alignment: Product vs. Code on Current <code>HEAD</code></h2>
+    <p>Every row pairs what a person sees and expects against the types, records, and code paths currently committed on <code>HEAD</code> (<code>979b150c16</code>).</p>
     <table>
       <thead>
         <tr>
-          <th style="width:24%">Product concept</th>
-          <th style="width:28%">Code concept (existing)</th>
+          <th style="width:23%">Product concept</th>
+          <th style="width:29%">Code concept (built on <code>HEAD</code>)</th>
           <th style="width:9%">Lines up?</th>
-          <th style="width:39%">What is wrong</th>
+          <th style="width:39%">Status / What is wrong</th>
         </tr>
       </thead>
       <tbody>
         <tr>
-          <td><strong>Interactive conversation</strong><br><span class="small">Any interactive agent you started with <code>lf</code> (<code>lf -a agy</code>, <code>lf implement</code>, <code>lf resume --task</code>, Desktop)</span></td>
-          <td>Split into two incompatible runtimes: <code>LaunchKind::Chat</code> (direct child via <code>os_process::foreground</code>, unheld) vs <code>LaunchKind::WorkSession</code> (PTY in <code>lf holder run</code>, hosted by server). Re-guessed every launch by <code>LaunchInput::kind()</code> and <code>transport::session_kind()</code>.</td>
-          <td><span class="badge no">No</span></td>
-          <td><strong>One idea under two names, switching unpredictably.</strong> Typing <code>lf -a agy</code> in Rex creates an unheld <code>Chat</code> even in a Task worktree or with <code>--task</code>. Opening that exact Session in Desktop turns it into a held <code>WorkSession</code>. Quitting and running <code>lf resume</code> in Rex flips it back to an unheld <code>Chat</code>.</td>
-        </tr>
-        <tr>
-          <td><strong>Open a running conversation in another viewer</strong><br><span class="small">Click the Session in Desktop, or run <code>lf resume</code> / <code>lf open</code> in another Rex pane</span></td>
-          <td><code>SessionResumeIntent::View</code> (lossless: attaches another viewer to the held PTY) vs <code>SessionResumeIntent::TakeOver</code> (destructive: <code>stop_session_agent</code> sends <code>SIGTERM</code> → <code>SIGKILL</code>, cold-restarts provider from disk).</td>
-          <td><span class="badge no">No</span></td>
-          <td><strong>One action with two opposite outcomes.</strong> A person sees “my running agy session” and opens it elsewhere expecting a second view. Instead, if it started as a chat, Loopflow kills the running agent mid-turn, discards drafts, and drops the original pane to the shell.</td>
-        </tr>
-        <tr>
-          <td><strong>Hosting vs. Unviewed lifetime vs. Server hooks</strong><br><span class="small">Can two viewers share it? Does closing a tab leak an idle process? Does it report turns &amp; wake on steers?</span></td>
-          <td>All three conflated into one check: <code>SqliteStore::is_bare(session)</code> (<code>bound_at IS NULL</code> and no <code>primary_scope</code>), overridden by viewer env vars (<code>LF_SERVER_STATUS</code>, <code>LF_VIEWER_STREAM</code>).</td>
-          <td><span class="badge no">No</span></td>
-          <td><strong>Three separate questions collapsed into one flag.</strong> Because a quick chat shouldn't live forever after you close its tab (#1877), the code also strips it of the holder, multi-viewer sharing, <code>lf install</code> survival, live availability, and idle steer waking.</td>
-        </tr>
-        <tr>
-          <td><strong>Desktop / CLI open action label</strong><br><span class="small">What the button says before you click it</span></td>
-          <td><code>ops::human_session::opening()</code> → <code>SessionAction { label, help }</code> (<strong>Open here</strong>, <strong>Reconnect</strong>, <strong>Take over</strong>, <strong>Try again</strong>, <strong>Start conversation</strong>).</td>
-          <td><span class="badge no">No</span></td>
-          <td>In <code>HEAD</code>, every Rex <code>lf -a agy</code> shows <strong>Take over</strong> for no obvious reason. In the superseded kickoff plan, relabeling <code>TakeOver</code> as <strong>Open here</strong> made it worse: a name that hides a destructive <code>SIGTERM</code>/<code>SIGKILL</code> restart under the same label as a lossless view.</td>
-        </tr>
-        <tr>
-          <td><strong>Headless run</strong><br><span class="small"><code>lf -b &lt;skill&gt;</code> or a Graph step worker</span></td>
-          <td><code>LaunchKind::Batch</code> and <code>LaunchKind::Worker</code>; <code>run_refusal()</code> rejects <code>lf resume</code>.</td>
+          <td><strong>Start an interactive conversation</strong><br><span class="small"><code>lf</code>, <code>lf -a agy</code>, <code>lf &lt;skill&gt;</code>, <code>lf : …</code>, bare <code>lf resume</code></span></td>
+          <td><code>delegate_chat</code> + <code>session_host</code> probe <code>Connection::open()</code>. If reachable, starts in <code>lf holder run</code> (<code>WorkSession</code>) and relays via <code>lf session attach</code>; if stopped or non-TTY, runs directly in the terminal (<code>Chat</code>).</td>
           <td><span class="badge yes">Yes</span></td>
-          <td>Clean: headless runs never use a PTY or holder and clearly refuse interactive resume.</td>
+          <td><span class="badge built">Built</span> One interactive hosting path whenever the server runs, with automatic direct fallback when it does not.</td>
         </tr>
         <tr>
-          <td><strong>Shared views on a held terminal</strong><br><span class="small">Multiple terminals + Desktop viewing and typing into one live agent</span></td>
-          <td><code>lf holder run</code> + <code>MachineServer</code> <code>Registry</code> + <code>held.sock</code> + <code>lf session attach</code> relay + <code>held_terminals.viewer_hold</code>.</td>
+          <td><strong>Open a running conversation in another viewer</strong><br><span class="small">Desktop <strong>Open here</strong> / <strong>Reconnect</strong>, or Rex <code>lf resume</code></span></td>
+          <td><code>resume_intent</code> → <code>View</code> for held terminals; <code>Registry::live</code> + <code>meta.json</code> bind the Session on <code>ExitRecord</code> or <code>BindSession</code> so every viewer joins the same PTY and survives server restarts. <code>TakeOver</code> remains honest for unheld fallback.</td>
           <td><span class="badge yes">Yes</span></td>
-          <td>Already works across all five harnesses (Claude, Codex, OpenCode, Pi, Antigravity), survives <code>lf install</code>, and tracks viewer absence cleanly.</td>
+          <td><span class="badge built">Built</span> Verified in PTY tests and real-<code>agy</code> QA: drafts, streaming turns, detach, and server restarts stay lossless across viewers.</td>
+        </tr>
+        <tr>
+          <td><strong>Standalone idle cleanup</strong><br><span class="small">Closing all tabs on a quick chat frees its agent after 15 idle minutes without killing active turns</span></td>
+          <td><code>unviewed_chat_candidates</code> + <code>terminal_has_scoped_session</code> + <code>terminal_retention</code> + <code>Request::RetireChat</code> (host rechecks live views &amp; grace before closing). Binding to a Task moves it to open-Task lifetime without restarting.</td>
+          <td><span class="badge yes">Yes</span></td>
+          <td><span class="badge built">Built</span> Hosting and unviewed lifetime are cleanly separated; active turns and pending requests hold off retirement.</td>
+        </tr>
+        <tr>
+          <td><strong>Loopflow closes an idle chat or done Task</strong><br><span class="small">Intentional retirement after 15 minutes unviewed, or when a Task completes/abandons</span></td>
+          <td><code>hosted.rs</code> sets <code>CloseReason::Retired</code>, prints the notice, then calls <code>child.retire()</code> (<code>SIGKILL</code>) and drops <code>CloseReason::Retired</code> before settlement. <code>native_exit::settle</code> sees <code>SIGKILL</code> → exit 137 → <code>failed</code>; <code>session_ending</code> only checks <code>quit_by_person(0 | 130)</code>.</td>
+          <td><span class="badge no">No</span></td>
+          <td><strong>Biggest mismatch on <code>HEAD</code>.</strong> One concept (intentional cleanup) is erased into a crash: records <code>agent_exit_code = 137</code>, capture <code>outcome = "failed"</code>, OSC <code>State::Error</code>, appends <code>agy exited with 137.</code> onto the saved screen, and prints <code>died 20:47 (exit 137)</code> in <code>lf session list</code> and Desktop. Hits ~64% of everyday chats (37/58 in telemetry close their tab without <code>/exit</code>) and every retired done Task.</td>
+        </tr>
+        <tr>
+          <td><strong>Cleanly quit a Skill or no-server chat</strong><br><span class="small">Type <code>/exit</code> or <code>Ctrl+C</code> in <code>lf default '…'</code>, <code>lf implement</code>, or a direct fallback chat</span></td>
+          <td><code>native_session::run_client</code> (<code>spawn_native</code> path) calls <code>native_exit::record_exit(owner)</code>, which writes <code>agent_ended_at</code> and <strong>never calls <code>record_agent_exit_code</code></strong> (only <code>native_exit::settle</code> on the <code>exec_native</code> path writes it).</td>
+          <td><span class="badge no">No</span></td>
+          <td><strong>Split exit-recording ownership.</strong> Because <code>agent_exit_code</code> stays <code>NULL</code>, <code>quit_by_person(None)</code> is <code>false</code>. Every cleanly quit delegated Skill and no-server chat shows <code>died HH:MM (no exit recorded)</code> in <code>lf session list</code> even after exit 0.</td>
+        </tr>
+        <tr>
+          <td><strong>Idle retirement of a delegated Skill</strong><br><span class="small">Close the tab on <code>lf default '…'</code> and leave it idle for 15 minutes</span></td>
+          <td>Delegated Skills send <code>Request::BindSession</code> instead of <code>Request::ExitRecord</code> so <code>lf &lt;skill&gt;</code> stays alive to checkpoint. On retirement, <code>child.retire()</code> <code>SIGKILL</code>s both <code>lf</code> and the provider; <code>hosted.exit_record</code> is <code>None</code>, so nothing settles until <code>reap_agent_processes</code> sweeps up to 10s later with <code>exit_code = NULL</code>.</td>
+          <td><span class="badge no">No</span></td>
+          <td><strong>No owner settles a retired Skill.</strong> Session stays <code>detached</code> until the reaper runs, then reports <code>died HH:MM (no exit recorded)</code> instead of closing immediately with the retirement reason.</td>
+        </tr>
+        <tr>
+          <td><strong>Launch names</strong><br><span class="small">Docs call <code>lf -a agy</code> a “work session” when the server runs and a “chat” when it doesn't</span></td>
+          <td><code>LaunchKind::WorkSession</code> (= held + server-managed interactive) vs <code>LaunchKind::Chat</code> (= direct unheld interactive), while internal helpers still say <code>delegate_chat</code> / <code>RetireChat</code> / <code>unviewed_chat_candidates</code>.</td>
+          <td><span class="badge warn">Mild</span></td>
+          <td>Minor vocabulary overlap: “work session” now covers standalone held chats with no Work attached. Keeping the 4-kind matrix avoids repo-wide churn; noted here as an explicit review choice outside this pass.</td>
         </tr>
       </tbody>
     </table>
   </section>
 
   <section>
-    <h2>2. The Biggest Mismatch</h2>
+    <h2>2. The Biggest Remaining Mismatch on <code>HEAD</code></h2>
     <div class="callout mismatch">
-      <div class="callout-title"><span class="badge no">Biggest Mismatch</span> Chats are unheld only because pre-holder Loopflow leaked per-session processes</div>
-      <p>Direct <code>lf</code> launches became unheld in <code>#1877</code> when every held conversation spawned its own <code>lf session serve</code> process (281 <code>lf</code> processes / 11.6 GB RAM on one Machine) and had no cleanup for closed tabs. Today Loopflow has <strong>one shared <code>lf holder run</code> per build</strong>, <code>exec_native</code> leaves <strong>zero</strong> <code>lf</code> process beside the provider, and <code>held_terminals.viewer_hold</code> already drives <strong>15-minute unviewed retirement</strong> for done Tasks.</p>
-      <p style="margin-bottom:0">Keeping <code>lf -a agy</code> outside the holder forces people to hit <code>TakeOver</code> whenever they move between Rex and Desktop—which is why the creator saw <code>agy</code> close and assumed <code>agy</code> wasn't wired into the holder.</p>
+      <div class="callout-title"><span class="badge no">Biggest Mismatch</span> Three distinct endings are collapsed into one integer (<code>agent_exit_code</code>)—and only half the launchers even write it</div>
+      <p>When an interactive conversation stops running, a person cares about three completely different facts: <strong>I quit it</strong>, <strong>Loopflow closed it</strong> (15-minute unviewed cleanup or Task closed), or <strong>it died</strong> (crash, OOM, reboot). On <code>HEAD</code>, the store only records <code>agent_exit_code</code>—and <code>hosted.rs</code> knows <code>CloseReason::Retired</code> yet throws it away right before <code>SIGKILL</code>ing the process group.</p>
+      <p style="margin-bottom:0">Because LOO-1097 moved everyday terminal chats (64% of which end by tab close) and delegated Skills into held terminals, this turns normal daily usage into a wall of false <code>died (exit 137)</code> and <code>died (no exit recorded)</code> errors across <code>lf session list</code>, Desktop <code>status_line</code>, saved screens, and capture outcomes.</p>
     </div>
 
-    <h3>Why the earlier kickoff plan is a patch on the wrong concept <span class="badge superseded">Superseded Plan</span></h3>
-    <p>The first plan left chats unheld and tried to hide the seam when a second viewer opened them: kill the chat's provider, restart it in the holder, make the old pane follow-attach, and relabel <strong>Take over</strong> to <strong>Open here</strong>.</p>
-    <div class="grid-3">
-      <div class="card existing-card">
-        <div style="margin-bottom:8px"><span class="badge existing">Existing HEAD</span></div>
-        <strong>Kill &amp; drop to shell</strong>
-        <ul class="timeline">
-          <li>Rex pane 1: <code>lf -a agy</code> runs unheld in pane 1's PTY.</li>
-          <li class="bad">Desktop clicks <strong>Take over</strong> (or Rex pane 2 runs <code>lf resume</code>).</li>
-          <li class="bad"><code>stop_session_agent</code> sends <code>SIGTERM</code> → <code>SIGKILL</code>. Active turn aborted; draft lost.</li>
-          <li class="bad">Pane 1 prints <em>“This conversation moved to Desktop”</em> and exits to zsh.</li>
-          <li class="warn">Rex-to-Rex stays unheld, so a third open kills it again.</li>
-        </ul>
+    <div class="grid-2">
+      <div class="card head-card">
+        <h3><span class="badge no">Before · Current HEAD</span> What people see today</h3>
+        <p class="small"><strong>1. Standalone chat closes after 15m unviewed (saved screen &amp; list):</strong></p>
+        <div class="terminal"><span class="t-muted"># Saved screen (ghostsnp) painted on next lf resume:</span>
+Session closed after 15 minutes without a viewer
+<span class="t-bad">agy exited with 137.</span>
+
+<span class="t-muted"># lf session list / Desktop status_line:</span>
+session_9a3f…  closed   repo.agent  Chat
+  <span class="t-bad">died 20:47 (exit 137); `lf resume session_9a3f…` opens it</span>
+<span class="t-muted"># terminal.json: { "outcome": "failed" } · OSC 7501: Error</span></div>
+
+        <p class="small"><strong>2. Delegated Skill (<code>lf default '…'</code>) cleanly quit with <code>/exit</code> or <code>Ctrl+C</code>:</strong></p>
+        <div class="terminal">session_4c1e…  closed   repo.wt     Create file NOTE.txt
+  <span class="t-bad">died 20:36 (no exit recorded); `lf resume session_4c1e…` opens it</span></div>
+
+        <p class="small"><strong>3. Delegated Skill retired after 15m unviewed:</strong></p>
+        <div class="terminal"><span class="t-muted"># Up to 10s lag while still showing detached, then:</span>
+session_8b02…  closed   repo.wt     Create file NOTE.txt
+  <span class="t-bad">died 20:51 (no exit recorded); `lf resume session_8b02…` opens it</span></div>
       </div>
-      <div class="card superseded-card">
-        <div style="margin-bottom:8px"><span class="badge superseded">Superseded Plan</span></div>
-        <strong>Kill, cold-restart, &amp; follow</strong>
-        <ul class="timeline">
-          <li>Rex pane 1: <code>lf -a agy</code> still runs unheld.</li>
-          <li class="bad">Desktop clicks <strong>Open here</strong> — same label as a lossless view, hiding a kill.</li>
-          <li class="bad"><code>stop_session_agent</code> still sends <code>SIGTERM</code> → <code>SIGKILL</code>! Mid-turn work &amp; drafts still destroyed; <code>agy</code> cold-restarts.</li>
-          <li class="warn">Pane 1 waits on lock &amp; execs relay (<code>foreground::Drop</code> doesn't reset raw <code>termios</code> after <code>SIGKILL</code>).</li>
-          <li class="bad">Quit + <code>lf resume</code> in Rex flips it <em>back</em> to unheld <code>Chat</code>; next Desktop open kills it again.</li>
-        </ul>
-      </div>
+
       <div class="card proposed-card">
-        <div style="margin-bottom:8px"><span class="badge proposed">Proposed</span></div>
-        <strong>Held from the start (fallback if no server)</strong>
-        <ul class="timeline">
-          <li class="good">Rex pane 1: <code>lf -a agy</code> sees <code>lf server</code> running → starts in <code>lf holder run</code>, pane 1 relays it.</li>
-          <li class="good">Desktop clicks <strong>Open here</strong> (or Rex pane 2 runs <code>lf resume</code>) → <code>View</code>.</li>
-          <li class="good"><code>agy</code> never stops. Mid-turn tools, streaming output, and unsent drafts stay intact. Both views type.</li>
-          <li class="good"><code>lf install</code> never interrupts it; live status &amp; idle steers work.</li>
-          <li class="good">Close all views → stays warm 15 min, then retires cleanly when idle (no zombie leak).</li>
-        </ul>
+        <h3><span class="badge proposed">After · Proposed</span> Honest endings across every path</h3>
+        <p class="small"><strong>1. Standalone chat closes after 15m unviewed (saved screen &amp; list):</strong></p>
+        <div class="terminal"><span class="t-muted"># Saved screen (ghostsnp) painted on next lf resume:</span>
+Session closed after 15 minutes without a viewer
+<span class="t-good">(clean end — no “agy exited with 137.” error line)</span>
+
+<span class="t-muted"># lf session list / Desktop status_line:</span>
+session_9a3f…  closed   repo.agent  Chat
+  <span class="t-good">closed 20:47 (15 minutes without a viewer); `lf resume session_9a3f…` opens it</span>
+<span class="t-muted"># terminal.json: { "outcome": "completed" } · OSC 7501: Done</span></div>
+
+        <p class="small"><strong>2. Delegated Skill (<code>lf default '…'</code>) cleanly quit with <code>/exit</code> or <code>Ctrl+C</code>:</strong></p>
+        <div class="terminal">session_4c1e…  closed   repo.wt     Create file NOTE.txt
+  <span class="t-good">quit 20:36; `lf resume session_4c1e…` opens it</span></div>
+
+        <p class="small"><strong>3. Delegated Skill retired after 15m unviewed:</strong></p>
+        <div class="terminal"><span class="t-muted"># Closed immediately on terminal end, no reaper lag:</span>
+session_8b02…  closed   repo.wt     Create file NOTE.txt
+  <span class="t-good">closed 20:51 (15 minutes without a viewer); `lf resume session_8b02…` opens it</span></div>
       </div>
     </div>
   </section>
 
   <section>
-    <h2>3. Before &amp; After: Architecture and User Experience</h2>
-
-    <div class="grid-2">
-      <div class="card existing-card">
-        <h3><span class="badge existing">Before · Existing</span> Two interactive paths</h3>
-        <div class="diagram">lf -a agy (Rex) ──► lf ──► agy  [Chat: unheld]
-                              ▲
-Desktop "Take over" ── SIGTERM/SIGKILL!
-  └─► MachineServer ─► holder ─► agy (cold restart)
-
-lf resume --task ──► relay ─► MachineServer ─► holder ─► agy
-Desktop "Open here" ──► view ─┘  (lossless, both type)</div>
-        <div class="ui-mock">
-          <div class="ui-row">
-            <div><strong>agy chat in Rex</strong><div class="ui-sub">active · unheld · kills client if opened</div></div>
-            <span class="ui-btn danger">Take over</span>
-          </div>
-          <div class="ui-row">
-            <div><strong>LOO-472 · agy</strong><div class="ui-sub">active · held · shares terminal</div></div>
-            <span class="ui-btn safe">Open here</span>
-          </div>
-        </div>
-      </div>
-
-      <div class="card proposed-card">
-        <h3><span class="badge proposed">After · Proposed</span> One interactive path + honest fallback</h3>
-        <div class="diagram">When MachineServer is running (normal):
-  Rex pane 1 (lf -a agy) ─ view ─┐
-  Desktop pane           ─ view ─┼─► MachineServer ─► holder ─► agy
-  Rex pane 2 (lf resume) ─ view ─┘   (never killed; 15m idle-unviewed retire if bare)
-
-When MachineServer is NOT running (CI / container / stopped):
-  lf -a agy ──► lf ──► agy  [direct fallback, never refuses]</div>
-        <div class="ui-mock">
-          <div class="ui-row">
-            <div><strong>agy chat in Rex</strong><div class="ui-sub">active · held · shares terminal, 15m unviewed grace</div></div>
-            <span class="ui-btn safe">Open here</span>
-          </div>
-          <div class="ui-row">
-            <div><strong>LOO-472 · agy</strong><div class="ui-sub">active · held · open-Task lifetime</div></div>
-            <span class="ui-btn safe">Open here</span>
-          </div>
-          <div class="ui-row">
-            <div><strong>Rare: started with server stopped</strong><div class="ui-sub">active · unheld fallback · honest label kept</div></div>
-            <span class="ui-btn danger">Take over</span>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <h3>What changes across every layer <span class="badge proposed">Proposed</span></h3>
+    <h2>3. What Changes Across Layers <span class="badge proposed">Proposed Next Pass</span></h2>
     <table>
       <thead>
         <tr>
           <th style="width:20%">Layer</th>
-          <th style="width:40%">Before (Existing)</th>
-          <th style="width:40%">After (Proposed)</th>
+          <th style="width:38%">On current <code>HEAD</code></th>
+          <th style="width:42%">Proposed</th>
         </tr>
       </thead>
       <tbody>
         <tr>
-          <td><strong>Direct launch</strong><br><code>bin/lf.rs</code>, <code>transport.rs</code></td>
-          <td><code>LaunchInput::kind()</code> always returns <code>Chat</code> outside a holder. Never delegates to the holder.</td>
-          <td>Interactive TTY launch checks <code>server_reachable()</code> (<code>Connection::open().is_ok()</code>, &lt;1 ms). If up, delegates <code>argv</code> to <code>start_held</code> and relays; inside the holder, <code>current().is_some()</code> runs as <code>WorkSession</code> and <code>exec_native</code> replaces <code>lf</code> with the provider. If server is down, falls back directly to <code>Chat</code>.</td>
+          <td><strong>Storage</strong><br><code>agent_sessions</code> + additive migration</td>
+          <td>Stores only <code>agent_ended_at</code> and <code>agent_exit_code</code>. No place to record intentional retirement.</td>
+          <td>Add nullable <code>agent_end_reason TEXT</code> on <code>agent_sessions</code> (cleared in <code>attach_in</code> right beside <code>agent_ended_at</code> and <code>agent_exit_code</code>). Add <code>record_agent_end_reason</code> and <code>record_terminal_retirement</code> helpers. Read it in <code>session_summary</code> and <code>task_conversations_here</code>.</td>
         </tr>
         <tr>
-          <td><strong>Session resume</strong><br><code>transport::session_kind</code></td>
-          <td><code>is_bare == true</code> → <code>Chat</code> in terminals, <code>WorkSession</code> only when <code>LF_SERVER_STATUS</code> or <code>LF_VIEWER_STREAM</code> is set.</td>
-          <td><code>is_bare == true</code> → <code>WorkSession</code> whenever the server is reachable, else <code>Chat</code> fallback. Bound/primary Sessions and relayed viewers still require the server.</td>
+          <td><strong>Waited native launches</strong><br><code>harness/native_session.rs</code></td>
+          <td><code>run_client</code> (delegated Skills, Graph steps, fallback Chats) calls <code>record_exit</code> and never writes <code>agent_exit_code</code>.</td>
+          <td>Record <code>agent_exit_code</code> beside <code>record_exit</code> (<code>0</code> on success, <code>130</code> on interrupt, else provider exit code). Every cleanly quit Skill or fallback Chat now reads <code>quit HH:MM</code>.</td>
         </tr>
         <tr>
-          <td><strong>Registry mapping</strong><br><code>transport/registry.rs</code>, <code>hosted.rs</code></td>
-          <td><code>Registry::live</code> records <code>session</code> only from <code>SessionStart.session</code> (known only when resuming an existing Session).</td>
-          <td>When a newly launched held child sends existing <code>Request::ExitRecord</code> (which already carries <code>record.session</code> on all 5 harnesses before <code>exec</code>), <code>Registry</code> records <code>live[terminal] = Some(session)</code> and persists it in <code>meta.json</code> (with <code>exit-record.json</code> fallback on server restart). Zero wire revision bump; zero SQLite migration.</td>
+          <td><strong>Held retirement &amp; settlement</strong><br><code>transport/hosted.rs</code>, <code>registry.rs</code>, <code>native_exit.rs</code></td>
+          <td><code>hosted.rs</code> sets <code>CloseReason::Retired</code> and drops the reason before <code>child.retire()</code>. <code>native_exit::settle</code> treats <code>SIGKILL</code> as failure (exit 137, <code>outcome="failed"</code>, <code>State::Error</code>, prints <code>exited with 137.</code>). Retired Skills with no <code>exit_record</code> wait for <code>reap_agent_processes</code>.</td>
+          <td>Keep <code>retire_reason: Option&lt;String&gt;</code> on <code>Hosted</code> (persisted in <code>retire-reason.json</code> beside the terminal before <code>child.retire()</code> so a server crash mid-retire keeps it). Pass it into <code>Settling</code> → <code>native_exit::settle</code>: retirement settles as <code>outcome="completed"</code>, <code>code=0</code>, no <code>exited with 137.</code> line, OSC <code>State::Done</code>, and writes <code>agent_end_reason</code> (leaving <code>agent_exit_code = NULL</code>). When <code>exit_record</code> is absent (delegated Skills), <code>registry::settle</code> calls <code>record_terminal_retirement</code> immediately.</td>
         </tr>
         <tr>
-          <td><strong>Unviewed lifetime</strong><br><code>ops/task/retirement.rs</code>, <code>server/recovery.rs</code></td>
-          <td>Bare chats end on <code>SIGHUP</code> when their terminal closes. Held sessions only retire on Task Done/Abandon.</td>
-          <td>Hosting and lifetime are separated. Standalone held sessions (<code>is_bare</code>) retire via existing <code>held_terminals.viewer_hold</code> + <code>WORKSPACE_GRACE</code> (15 min unviewed, never mid-turn via <code>terminal_retention</code>) in the 1-minute retire/server pass. History &amp; saved screen stay resumable.</td>
-        </tr>
-        <tr>
-          <td><strong><code>TakeOver</code> &amp; UI labels</strong><br><code>ops/human_session.rs</code></td>
-          <td>Every Rex chat shows <strong>Take over</strong>; Rex-to-Rex takeover stays unheld.</td>
-          <td><strong>Take over</strong> stays honest (never disguised as <strong>Open here</strong>), fires only for no-server fallback or pre-holder builds, and lands in the holder when taken over while the server runs.</td>
+          <td><strong>Session ending &amp; recovery</strong><br><code>ops/human_session.rs</code>, <code>ops/recovery.rs</code></td>
+          <td>Binary split: <code>quit_by_person(0 | 130)</code> vs <code>died</code>. Both retired chats and retired completed Tasks show <code>died (exit 137)</code>.</td>
+          <td><code>AgentEnd</code> carries <code>reason: Option&lt;String&gt;</code>. Intentional retirement produces <code>closed HH:MM (&lt;reason&gt;); `lf resume …` opens it</code> with <code>outlook.kind = WaitingForYou</code> and <code>outlook.reason = Some(reason)</code>. <code>server_start</code> never treats an intentional close as a death (no wire/DTO break needed; Desktop and CLI already display <code>status_line</code>).</td>
         </tr>
       </tbody>
     </table>
   </section>
 
   <section>
-    <h2>4. Counterexamples &amp; Failure / Recovery Tests</h2>
+    <h2>4. Counterexamples &amp; Failure / Recovery Checks</h2>
     <table>
       <thead>
         <tr>
-          <th style="width:24%">Scenario / Counterexample</th>
-          <th style="width:76%">How the proposed model handles it</th>
+          <th style="width:26%">Scenario / Counterexample</th>
+          <th style="width:74%">How the model handles it</th>
         </tr>
       </thead>
       <tbody>
         <tr>
-          <td><strong>Closed-tab zombie leak</strong><br><span class="small">Observed: 37 of 58 chats over 4 days ended via closed tab without <code>/exit</code></span></td>
-          <td>When the last viewer closes, the server marks <code>viewer_hold = Absent(now)</code>. If a viewer returns within 15 minutes (e.g., closed Rex tab, switched to Desktop), it attaches live with zero restart. If unviewed for 15 minutes and no turn/request is active, the 1-minute sweep closes the held terminal cleanly, freeing PTY and RAM while preserving transcript and saved screen.</td>
+          <td><strong>Resume a retired chat without a server, then it crashes</strong><br><span class="small">Counterexample against storing <code>close_reason</code> on <code>held_terminals</code></span></td>
+          <td>An unheld fallback <code>Chat</code> does not replace <code>agent_sessions.held_terminal_id</code>. Storing <code>agent_end_reason</code> on <code>agent_sessions</code> and clearing it in <code>attach_in</code> alongside <code>agent_ended_at</code>/<code>agent_exit_code</code> ensures a later crash in fallback mode reads <code>died HH:MM (exit 1)</code>, never the stale retirement reason.</td>
         </tr>
         <tr>
-          <td><strong>Mid-turn viewer close or switch</strong></td>
-          <td>Opening a second viewer mid-turn attaches a <code>View</code> without touching the provider. Closing the only viewer mid-turn leaves the turn running; <code>terminal_retention</code> holds off retirement until the turn finishes, then starts the 15-minute grace.</td>
+          <td><strong>Server crashes between <code>child.retire()</code> and settlement</strong></td>
+          <td><code>hosted.rs</code> writes <code>retire-reason.json</code> beside the terminal before sending <code>SIGKILL</code>. The next server's <code>registry::settle</code> reads both <code>exit-record.json</code> and <code>retire-reason.json</code>, settles it as retired (not died), and removes both with the terminal receipt.</td>
         </tr>
         <tr>
-          <td><strong><code>lf server</code> is stopped / CI / container</strong></td>
-          <td><code>Connection::open()</code> fails in &lt;1 ms without spawning a surprise daemon. Direct <code>lf</code> and bare <code>lf resume</code> immediately fall back to foreground <code>Chat</code>. Loopflow never refuses to let you talk to your agent because its server is down.</td>
+          <td><strong>Real crash, external <code>kill -9</code>, OOM, or reboot</strong></td>
+          <td><code>retire_reason</code> is absent. Settlement still records <code>agent_exit_code = 137</code> (or <code>NULL</code> on reboot/holder death), <code>agent_end_reason = NULL</code>, capture <code>outcome = "failed"</code>, and <code>session_ending</code> still reports <code>died HH:MM (exit 137)</code> and triggers Task auto-recovery.</td>
         </tr>
         <tr>
-          <td><strong><code>lf install</code> / server restart mid-chat</strong></td>
-          <td><code>lf holder run</code> keeps the provider running. The new server takes up the terminal, reads <code>session</code> from <code>meta.json</code> / <code>exit-record.json</code>, rebuilds <code>Registry::live</code>, and all views reconnect from their byte offset.</td>
+          <td><strong>Completed Task retires, then person reopens the Task</strong></td>
+          <td>While closed, it reads <code>closed HH:MM (Task completed); `lf resume --task …` opens it</code>. Reopening the Task keeps that honest status rather than claiming it died with exit 137; <code>lf resume --task …</code> reopens it cleanly.</td>
         </tr>
         <tr>
-          <td><strong>Bind a running chat to a Task</strong><br><code>lf session bind &lt;id&gt; --task</code></td>
-          <td><code>bound_at</code> is now set, so the Session automatically leaves the bare-retirement set and keeps open-Task lifetime with zero restart.</td>
-        </tr>
-        <tr>
-          <td><strong>Piped stdin / headless batch</strong><br><code>echo … | lf -i</code>, <code>lf -b</code></td>
-          <td><code>lf -b</code> is <code>Batch</code> (never held). Piped stdin (<code>!stdin.is_terminal()</code>) stays direct so piped prompts aren't lost before parsing.</td>
-        </tr>
-        <tr>
-          <td><strong>Tradeoff: Rex foreground icon &amp; <code>Ctrl+Z</code></strong></td>
-          <td>In Rex, a held session's foreground process is the <code>lf session attach</code> relay (identical to every Task, Wave, and Repository session today), so Rex shows <code>lf</code> instead of <code>agy</code>/<code>claude</code>, and <code>Ctrl+]</code> detaches instead of <code>Ctrl+Z</code> suspending. OSC titles and OSC 7501 Program Status still pass through unchanged.</td>
+          <td><strong>Delegated Skill quits normally vs. retires unviewed</strong></td>
+          <td>Normal <code>/exit</code> or <code>Ctrl+C</code> runs checkpoint, emits <code>Skill::Completed</code>, writes <code>agent_exit_code = 0|130</code> → <code>quit HH:MM</code>. 15-minute unviewed retirement writes <code>agent_end_reason = "15 minutes without a viewer"</code> immediately on terminal end → <code>closed HH:MM (15 minutes without a viewer)</code>.</td>
         </tr>
       </tbody>
     </table>
 
     <div class="callout decision">
-      <div class="callout-title"><span class="badge proposed">Choice Made for Review</span> Written into <code>scratch/plan.md</code></div>
-      <p><strong>Chosen:</strong> Hold every interactive <code>lf</code> launch when the Machine server is running, with automatic 15-minute idle-unviewed retirement for standalone chats and automatic direct-foreground fallback when the server is unreachable. This is fully reversible (no schema migration, no protocol break) and fixes the root concept mismatch rather than patching over a mid-turn kill.</p>
-      <p style="margin-bottom:0"><strong>Passed over:</strong> (1) <em>Promote-on-second-open + follower attaches</em> — still kills the provider mid-turn on first cross-viewer open, hides a kill behind <strong>Open here</strong>, and flips Sessions back to unheld on next Rex resume. (2) <em>Hold forever without unviewed cleanup</em> — would leak dozens of idle providers and PTYs from closed tabs. (3) <em>Hard-require the server for bare <code>lf</code></em> — breaks bare CLI in containers, CI, and stopped-server setups.</p>
+      <div class="callout-title"><span class="badge proposed">Choices Made for Review</span> Written into <code>scratch/plan.md</code></div>
+      <p><strong>Built on <code>HEAD</code>:</strong> Hold every interactive <code>lf</code> launch (chats, Skills, bare resumes) in <code>lf holder run</code> whenever the Machine server is running, with 15-minute idle-unviewed retirement for standalone conversations and automatic direct-terminal fallback when no server is running.</p>
+      <p style="margin-bottom:0"><strong>Proposed for Pass 2:</strong> Record intentional retirement as a first-class end reason on <code>agent_sessions</code> (<code>agent_end_reason</code>) and record <code>agent_exit_code</code> on waited native launches (<code>spawn_native</code>) so <code>quit</code>, <code>closed (&lt;reason&gt;)</code>, and <code>died</code> stay distinct across CLI, Desktop, saved screens, and captures—with no breaking wire/DTO change. <strong>Passed over:</strong> (1) Leaving retired chats reading <code>died (exit 137)</code> — makes 64% of everyday chats look crashed. (2) Putting <code>close_reason</code> only on <code>held_terminals</code> — breaks when a retired Session later resumes unheld without a server. (3) Renaming <code>WorkSession</code>/<code>Chat</code> across the whole product — separate scope outside LOO-1097.</p>
     </div>
   </section>
 
   <section>
     <h2>5. Open Questions for Review</h2>
-    <p class="small">Reply with a number and letter (for example, <code>1a 2a</code>). Highlighted options are what <code>scratch/plan.md</code> is building for review.</p>
+    <p class="small">Reply with a number and letter (for example, <code>1a 2a 4a</code>). Highlighted options are what this branch builds for review.</p>
 
     <div class="question">
-      <div class="question-num">Question 1 — What should happen when you run <code>lf -a agy</code> (or <code>lf &lt;skill&gt;</code>) in a terminal and later open it in Desktop or another Rex pane?</div>
+      <div class="question-num">Question 1 (Built on <code>HEAD</code>) — When you run <code>lf -a agy</code> or <code>lf &lt;skill&gt;</code> in a terminal and later open it in Desktop or another Rex pane:</div>
       <ul class="options">
-        <li class="chosen"><span class="opt-key">1a.</span> <strong>Always held when the server is running (chosen).</strong> Opening it in Desktop or another Rex pane always attaches a second live view without closing or restarting the agent. Tradeoff: Rex sees <code>lf</code> instead of <code>agy</code> as the foreground program (same as Task sessions), and <code>Ctrl+]</code> detaches instead of <code>Ctrl+Z</code> suspending.</li>
-        <li><span class="opt-key">1b.</span> <strong>Keep chats directly in your terminal, promote on second open.</strong> Rex keeps showing <code>agy</code> and <code>Ctrl+Z</code> works while only one pane is open. Tradeoff: the first time you open it in Desktop or another Rex pane, Loopflow stops and restarts the agent (aborting any active turn and losing unsent input), and the original pane reconnects to the restarted session.</li>
-        <li><span class="opt-key">1c.</span> <strong>Keep chats directly in your terminal and keep “Take over” as today.</strong> Direct chats stay completely separate from held work sessions; moving one to Desktop closes the original pane with a notice.</li>
+        <li class="chosen"><span class="opt-key">1a.</span> <strong>Always held when the server is running (built).</strong> Opening it elsewhere always attaches a second live view without stopping or restarting the agent. Tradeoff: Rex sees <code>lf</code> instead of <code>agy</code> as the foreground program (same as Task sessions), and <code>Ctrl+]</code> detaches instead of <code>Ctrl+Z</code> suspending.</li>
+        <li><span class="opt-key">1b.</span> <strong>Keep chats directly in your terminal, restart into the holder on second open.</strong> Rex keeps showing <code>agy</code> while only one pane is open, but the first cross-viewer open stops and restarts the agent (aborting active turns and losing unsent input).</li>
       </ul>
     </div>
 
     <div class="question">
-      <div class="question-num">Question 2 — When you close the last tab/window showing a standalone chat (not bound to a Task, Wave, or Repo), how long should its agent stay alive in the holder?</div>
+      <div class="question-num">Question 2 (Built on <code>HEAD</code>) — After you close the last tab showing a standalone chat (not bound to a Task, Wave, or Repo), how long should its agent stay running?</div>
       <ul class="options">
-        <li class="chosen"><span class="opt-key">2a.</span> <strong>15 minutes after it goes idle with no viewer (chosen).</strong> Matches completed-Task cleanup: closing Rex and opening Desktop a few minutes later attaches with zero restart, active turns finish instead of being killed on tab close, and forgotten tabs don't pile up idle agents or exhaust PTYs.</li>
-        <li><span class="opt-key">2b.</span> <strong>Stay alive indefinitely until you type <code>/exit</code></strong> (same as Wave and Repository sessions). Tradeoff: closing chat tabs with Cmd+W leaves live agents running in the background until reboot or manual quit.</li>
-        <li><span class="opt-key">2c.</span> <strong>Close immediately when the last viewer closes</strong> (once any active turn finishes). Tradeoff: closing Rex and then opening Desktop 10 seconds later has to restart the agent from history.</li>
+        <li class="chosen"><span class="opt-key">2a.</span> <strong>15 minutes after it goes idle with no viewer (built).</strong> Closing Rex and switching to Desktop attaches with zero restart, active turns finish first, and forgotten tabs don't pile up idle agents.</li>
+        <li><span class="opt-key">2b.</span> <strong>Stay alive indefinitely until you type <code>/exit</code></strong> (same as Wave and Repo conversations; closing tabs leaves idle agents running).</li>
+        <li><span class="opt-key">2c.</span> <strong>Close as soon as the last tab closes</strong> (once any active turn finishes; switching from Rex to Desktop restarts from history).</li>
       </ul>
     </div>
 
     <div class="question">
-      <div class="question-num">Question 3 — If you start a direct <code>lf</code> chat while the Machine server is stopped, should it start the server or run directly in your terminal?</div>
+      <div class="question-num">Question 3 (Built on <code>HEAD</code>) — When you run <code>lf -a agy</code> while the Machine server is stopped:</div>
       <ul class="options">
-        <li class="chosen"><span class="opt-key">3a.</span> <strong>Fall back to running directly in your terminal (chosen).</strong> Instant startup when the server isn't running (containers, CI, stopped server) and never refuses to let you talk to an agent; on any Machine where the server is already running, it uses the holder automatically.</li>
-        <li><span class="opt-key">3b.</span> <strong>Auto-start the installed server first, then fall back only if unavailable.</strong> Even right after manually stopping the server, <code>lf -a agy</code> brings the server back up so the chat is held from turn one.</li>
+        <li class="chosen"><span class="opt-key">3a.</span> <strong>Run directly in your terminal (built).</strong> Instant fallback in containers, CI, or when the server is intentionally stopped; uses the holder automatically whenever the server is running.</li>
+        <li><span class="opt-key">3b.</span> <strong>Start the server first</strong> so even after stopping the server, direct <code>lf</code> starts it back up and runs held.</li>
+      </ul>
+    </div>
+
+    <div class="question">
+      <div class="question-num">Question 4 (Proposed next pass) — After Loopflow closes an idle chat (or a completed Task's conversation) for having no viewer, how should it read in <code>lf session list</code> and Desktop, and what if you later reopen a completed Task?</div>
+      <ul class="options">
+        <li class="chosen"><span class="opt-key">4a.</span> <strong>Show <code>closed HH:MM (15 minutes without a viewer)</code> / <code>closed HH:MM (Task completed)</code> and never auto-restart it as a crash (chosen).</strong> Clearly separates intentional cleanup from real crashes (<code>died</code>) and manual exits (<code>quit</code>), and drops the misleading <code>agy exited with 137.</code> line from the saved screen.</li>
+        <li><span class="opt-key">4b.</span> <strong>Show <code>closed HH:MM (…)</code>, but auto-restart a completed Task's conversation if the Task is later reopened</strong> so reopening a Task immediately brings its agent back without running <code>lf resume</code>.</li>
       </ul>
     </div>
   </section>

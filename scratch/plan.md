@@ -2,7 +2,7 @@
 
 > i think we need a 'paused' state / action for tasks -- stops the task worker - and ideally e.g. any rust compiling happening becasue of it - , maybe closes the tasks session for now as well, but oesnt unassign
 
-Later direction, word for word, is in `scratch/demo-notes.md`. `scratch/explore.html` (`C1 · No Outer Pill`) is the visual reference for the Task bar. `scratch/concept-review.html` is the current concept review at `1a8c2450bd`.
+Later direction, word for word, is in `scratch/demo-notes.md`. `scratch/explore.html` (`C1 · No Outer Pill`) is the visual reference for the Task bar. `scratch/concept-review.html` is the current concept review at `d2af88d30b`.
 
 ## Done when
 

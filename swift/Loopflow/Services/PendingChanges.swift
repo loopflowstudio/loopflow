@@ -97,8 +97,8 @@ public final class PendingChanges {
     public func pauseRequest(for issue: String) -> String? {
         for change in changes where change.answer == nil && change.command.task == issue {
             switch change.command {
-            case .pause: return "Pause requested"
-            case .unpause: return "Unpause requested"
+            case .pause: return "Pausing…"
+            case .unpause: return "Unpausing…"
             default: continue
             }
         }
@@ -110,8 +110,8 @@ public final class PendingChanges {
         let change: (command: PendingCommand, write: ServedWrite, verb: String) = switch action {
         case .pause:
             (.pause(task: issue), .taskPause(directory: directory, issue: issue), "paused")
-        case .unpause, .resume:
-            (.unpause(task: issue), .taskUnpause(directory: directory, issue: issue, run: action == .resume), "unpaused")
+        case .unpause, .unpauseWithoutRunning:
+            (.unpause(task: issue), .taskUnpause(directory: directory, issue: issue, run: action == .unpause), "unpaused")
         }
         make(change.command, subject: issue, verb: change.verb, write: change.write,
              notices: notices, show: show, answered: answered)

@@ -124,9 +124,8 @@ final class TaskFeedTests: XCTestCase {
         let expression = await server.expression
         XCTAssertEqual(expression, "kind:task state:working")
         await server.refuse("land is still finishing")
-        feed.pendingChanges.make(.unpause(task: "LOO-2"), subject: "LOO-2", verb: "unpaused",
-                                 write: .taskUnpause(directory: "/repo", issue: "LOO-2", run: false),
-                                 notices: feed.notices, show: nil)
+        feed.pendingChanges.setPause(.unpause, issue: "LOO-2", directory: "/repo", notices: feed.notices, show: nil) {}
+        XCTAssertEqual(feed.pendingChanges.pauseRequest(for: "LOO-2"), "Unpausing…")
         XCTAssertEqual(identifiers(feed), ["LOO-1", "LOO-2", "LOO-3"])
         XCTAssertTrue(feed.shownRepositories.first?.tasks[1].states.contains(.idle) == true)
         try await until { feed.notices.current != nil }
@@ -145,7 +144,8 @@ final class TaskFeedTests: XCTestCase {
         try await until { feed.loaded }
         let row = try XCTUnwrap(feed.shownRepositories.first?.tasks.first)
         let workspace = TaskWorkspaceView(client: client, feed: feed, task: MobileTask(row), draft: .constant(""))
-        XCTAssertNoThrow(try workspace.inspect().find(SessionView.self))
+        let terminal = try workspace.inspect().find(SessionTerminal.self).actualView()
+        XCTAssertEqual(terminal.link.target, .session(try XCTUnwrap(row.primarySession)))
     }
 
     func testTaskRowShowsItsCurrentGraphStep() async throws {

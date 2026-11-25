@@ -1,6 +1,7 @@
 import Foundation
 import Loopflow
 import SwiftUI
+import ViewInspector
 import XCTest
 @testable import LoopflowiOS
 
@@ -17,18 +18,19 @@ final class TaskActionsTests: XCTestCase {
     }
 
     /// The Task's reading, with the fixture's Sessions or with none yet.
-    private func reading(sessions: Bool, paused: Bool = false) throws -> Loaded<TaskWorkspaceView.Reading> {
+    private func reading(sessions: Bool, pausedAt: (action: WorkflowControl.Action, label: String)? = nil) throws -> Loaded<TaskWorkspaceView.Reading> {
         var work = try fixture("task_work.json")
         if !sessions { work["sessions"] = [Any]() }
         let roadmap = try fixture("roadmap_snapshot.json")
         var row = try XCTUnwrap(((roadmap["tasks"] as? [String: Any])?["items"] as? [[String: Any]])?.first)
-        if paused {
+        if let pausedAt {
             var graph = try XCTUnwrap(work["graph"] as? [String: Any])
-            graph["control"] = ["action": "resume", "label": "Paused: implement"]
+            graph["control"] = ["action": pausedAt.action.rawValue, "label": pausedAt.label]
             work["graph"] = graph
             row["lifecycle"] = "paused"
             row["section"] = "working"
             row["working_group"] = "paused"
+            row["selection_states"] = ["open", "working", "paused"]
             row["run_control"] = ["pausing": false, "unavailable": "Task is paused"]
         }
         return .value(TaskWorkspaceView.Reading(
@@ -38,16 +40,24 @@ final class TaskActionsTests: XCTestCase {
     }
 
     func testPausedTaskOffersUnpauseInWorking() throws {
-        guard case .value(let held) = try reading(sessions: true, paused: true) else { return XCTFail("missing Task") }
-        let actions = held.actions(for: try XCTUnwrap(held.row))
-        XCTAssertEqual(actions.pause, .resume)
-        XCTAssertEqual(actions.control?.label, "Paused: implement")
-        XCTAssertNil(actions.pauseRefusal)
+        for control in [(action: WorkflowControl.Action.resume, label: "Paused: implement"),
+                        (action: .unpause, label: "Paused: ship-review")] {
+            guard case .value(let held) = try reading(sessions: true, pausedAt: control) else { return XCTFail("missing Task") }
+            let row = try XCTUnwrap(held.row)
+            var requested: TaskActions.Pause?
+            let bar = TaskWorkflowControls(task: row, actions: held.actions(for: row), pending: nil,
+                run: { _ in XCTFail("Play should lift the hold") }, pause: { requested = $0 },
+                interrupt: {}, toggleAuto: {}, complete: {}) { EmptyView() }
+            let view = try bar.inspect()
+            XCTAssertEqual(try view.find(text: control.label).string(), control.label)
+            try view.find(viewWithAccessibilityIdentifier: "task-workflow-primary").button().tap()
+            XCTAssertEqual(requested, .unpause)
+        }
     }
 
     func testPausingKeepsTheWorkflowControlsTheSameWidth() throws {
         func width(paused: Bool) throws -> CGFloat {
-            guard case .value(let reading) = try reading(sessions: true, paused: paused) else {
+            guard case .value(let reading) = try reading(sessions: true, pausedAt: paused ? (.resume, "Paused: implement") : nil) else {
                 XCTFail("Task fixture is unavailable")
                 return 0
             }

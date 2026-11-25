@@ -78,8 +78,9 @@ pause the worker while keeping the conversation open. Tap ▶ to resume the
 interrupted step. At a human step such as ship-review, ▶ lifts the hold and
 waits for you. The next tap runs the step named on the button.
 
-Tap the step label to pick a starting point, pause at review, interrupt the worker,
-or **Unpause without running**. Cleanup disables unpause until the worker stops.
+Tap the step label to pick a starting point, pause at review, or interrupt the worker.
+When ▶ would start work, the menu also offers **Unpause without running**.
+Cleanup disables unpause until the worker stops.
 The **Auto** switch stays armed during a hold and can be switched off.
 Tap ✓ to complete the Task. **…** opens its PR, Sessions, Wave moves and copy actions.
 

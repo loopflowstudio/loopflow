@@ -1,7 +1,7 @@
 /// The actions offered by the Task workspace on both Mac and iPhone.
 public struct TaskActions: Equatable {
     public enum Pause: Equatable, Sendable {
-        case pause, unpause, resume
+        case pause, unpause, unpauseWithoutRunning
     }
 
     public let control: WorkflowControl?
@@ -40,13 +40,7 @@ public struct TaskActions: Equatable {
         } else if let graph {
             // A pending lifecycle edit can reach the row before its new Graph reading.
             let graphHeld = graph.control.action == .unpause || graph.control.action == .resume
-            if graphHeld != held {
-                control = nil
-            } else if completeReady && graph.control.action == .run {
-                control = WorkflowControl(action: .done, label: "Done")
-            } else {
-                control = graph.control
-            }
+            control = graphHeld == held ? graph.control : nil
         } else if work == nil {
             control = nil
         } else if held {
@@ -56,15 +50,7 @@ public struct TaskActions: Equatable {
         } else {
             control = outline?.start ?? WorkflowControl(action: .run, label: "Run")
         }
-        if held {
-            pause = switch control?.action {
-            case .resume: .resume
-            case .unpause: .unpause
-            default: nil
-            }
-        } else {
-            pause = row.lifecycle.isWorking ? .pause : nil
-        }
+        pause = held ? .unpause : row.lifecycle.isWorking ? .pause : nil
 
         var seen = Set<String>()
         let stages = graph?.steps ?? outline?.steps ?? []

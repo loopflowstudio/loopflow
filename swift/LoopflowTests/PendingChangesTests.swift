@@ -115,6 +115,7 @@ struct PendingChangesTests {
         let row = try task("LOO-2")
         let started = try plan(["open", "working", "moving", "busy", "auto"])
         changes.setPause(.pause, issue: row.task.identifier, directory: "/repo", notices: notices, show: nil) {}
+        #expect(changes.pauseRequest(for: row.task.identifier) == "Pausing…")
         let held = try #require(changes.apply(to: [row], readAt: at(4)).first)
         #expect(held.section == .working && held.workingGroup == .paused && held.lifecycle == .paused && held.runtime?.owner == row.runtime?.owner)
         #expect(held.selectionStates.contains(.paused) && !held.selectionStates.contains(.moving))

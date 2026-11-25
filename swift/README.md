@@ -404,11 +404,13 @@ the interrupted step. At a human stop, ▶ first lifts the hold. Once you finish
 review, **Run** names the step that will follow it. A failed or interrupted run
 offers its saved step again.
 
-Click the step label to pick a starting point, interrupt a running step, pause at
-review, or **Unpause without running**. The same menu has Claim or Unassign and
+Click the step label to pick a starting point, interrupt a running step, or pause at
+review. When ▶ would start work, the menu offers **Unpause without running**.
+The same menu has Claim or Unassign and
 **Abandon…**. The Auto switch runs through the remaining human steps when armed.
 You can switch it off while paused. The checkmark completes the Task and lights
-up when its PR merges or its Graph reaches the end. **…** holds conversations,
+up when its PR merges or its Graph reaches the end. If verify stops after merge,
+**Run: verify** is still available beside the checkmark. **…** holds conversations,
 Wave moves, links and copy actions.
 
 ```text

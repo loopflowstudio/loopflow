@@ -116,7 +116,8 @@ failed before pause, its failure stays in the execution history and shows
 in the Task’s condition again on unpause.
 Use `lf task unpause LOO-12 --run` to resume interrupted work or start a Graph that has yet to run.
 At a human step, at a landing step with auto off, or at the end, the command lifts
-the hold and leaves the Task there. Turn on Auto to continue from the landing stop.
+the hold and leaves the Task there. Unpause on Mac and iPhone follows the same
+rule. Turn on Auto to continue from the landing stop.
 
 Unassign clears the hold once cleanup settles. Complete, abandon, and reopen
 also clear it. A move carries the hold to the destination, including a pause

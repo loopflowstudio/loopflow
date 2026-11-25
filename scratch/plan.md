@@ -40,7 +40,7 @@ Stacked on `LOO-1063` (Working sidebar order + status sort). Keep the `stopping_
           - Paused mid-step: `▶ | Paused: <step> ▾` (left click unpauses & resumes)
           - Paused at human step: `▶ | Paused: <human step> ▾` (left click unpauses back to waiting)
           - Failed / stopped before end: `▶ | Run: <step> ▾`
-          - Merged / at `end`: `✓ | Done ▾` (or `Verified`)
+          - At `end`: `✓ | Done ▾`. After merge the pill still follows the Graph, including `▶ | Run: verify ▾` for an interrupted verify.
        2. **Compact physical `Auto` toggle switch** (fixed width; lit green when armed, dimmed/held while paused; never shifts layout width).
        3. **First-class `Complete` (`✓`)** (quiet ghost icon while open, accented burgundy `✓ Complete` when ready/merged; fixed or balanced layout without jumping).
        4. **`···`** for secondary metadata actions (`New conversation`, `Move to Wave`, copy ID/link/branch, open PR/Wave, sessions).
@@ -110,20 +110,10 @@ predicate in `task_graph.rs` shared by `TaskGraph::read` and `unpause(run: true)
 shape rather than a third mode; `lf task unpause && lf task run` stays the
 explicit way past a human step.
 
-The Swift halves remain (Remaining 1):
-
-- `swift/LoopflowMac/WorkModel.swift:2769`: `WorkModel.unpause(_:)` still
-  pre-fetches `query.taskPane`. Delete it; sidebar menu, Dashboard tile menu
-  and `⌘/` send unpause with `run: true` straight through `PendingChanges`.
-  Rust now decides whether it runs.
-- `swift/Loopflow/Design/TaskActions.swift:45`: delete the
-  `completeReady && graph.control.action == .run` override. `completeReady`
-  owns the accented Complete; Rust's `graph.control` owns the pill, so a
-  failed or interrupted post-merge verify stays `▶ | Run: verify`.
-- `swift/Loopflow/Design/TaskWorkflowControls.swift:47`: show
-  "Unpause without running" only when `actions.control?.action == .resume`.
-- `TaskWorkflowControls.swift:58`: while a pause/unpause write is pending,
-  show "Pausing…" / "Unpausing…" instead of `Reading…`.
+Mac and iPhone send smart unpause from ▶. The Mac sidebar, Dashboard tile
+and ⌘/ use the same write with an unopened Task. Only the menu at a resumable
+step offers plain unpause. Both apps show the pending write in the pill.
+After merge, Complete lights up while a stopped verify keeps its Run action.
 
 ## Position-aware unpause
 
@@ -153,12 +143,17 @@ decoding).
   map and Swift module checks passed. The live app walkthrough and broader
   suites remain with walkthrough and gate.
 
+## Swift interaction checks
+
+- `scripts/test_desktop.sh --skip-build --filter 'primaryUnpauseLetsTheMachineChoose|aMergedPRKeepsTheStoppedVerifyAction|sidebarUnpausesBeforeOpeningTheTask|pauseKeepsTheWorkingRow|waitingAtLandLeavesAutoAndStartFromAvailable|pausedTaskKeepsItsConversationWarm'` passed six headless Mac tests. The unopened row showed Unpausing immediately and returned to Paused on refusal.
+- `scripts/test_ios.py` passed four selected tests on iOS 26.2. Play requested smart unpause at implement and ship-review, the bar kept its width, a refusal restored the Working row, and the paused workspace opened its primary Session. The last check now inspects the session target of the shared terminal view.
+- The four `documented_commands::` checks and the Swift multiplatform boundary check passed. Gate and CI cover the wider suites.
+
 ## Remaining, in order
 
-1. **Swift control and sidebar.** Send smart unpause from the play button and sidebar through PendingChanges. Delete the sidebar pane pre-fetch and the merged-PR override, gate “Unpause without running” on `.resume`, and show “Pausing…” or “Unpausing…” during a pending write. Update the Mac and iPhone interaction tests.
-2. **V4c walkthrough.** Try the split control live on a paused worker, at `ship-review`, at a landing stop with auto off, and after merge with an interrupted verify.
-3. **Named gaps for the PR.** Separate-session Codex 0.171.0 tool jobs can survive. A pause after a move’s payload is sent can require a retry on arrival.
-4. **Gate / CI.** Five-harness worker matrix, Linux session enumeration, lifeline/attachment/hosted-terminal suites.
+1. **V4c walkthrough.** Try the split control live on a paused worker, at `ship-review`, at a landing stop with auto off, and after merge with an interrupted verify.
+2. **Named gaps for the PR.** Separate-session Codex 0.171.0 tool jobs can survive. A pause after a move’s payload is sent can require a retry on arrival.
+3. **Gate / CI.** Five-harness worker matrix, Linux session enumeration, lifeline/attachment/hosted-terminal suites.
 
 ## QA on a private Machine
 

@@ -29,11 +29,12 @@ struct TaskActionsTests {
         return try JSONDecoder().decode(TaskOverview.self, from: JSONSerialization.data(withJSONObject: wire))
     }
 
-    @MainActor @Test func unpauseSendsTheRunChoiceFromTheCapturedGraph() async throws {
+    @MainActor @Test func primaryUnpauseLetsTheMachineChooseAndOnlyResumeOffersAnOverride() async throws {
         for (action, label, menu, runs) in [(WorkflowControl.Action.resume, "Paused: implement", false, true),
                                              (.resume, "Paused: implement", true, false),
-                                             (.unpause, "Paused: ship-review", false, false),
-                                             (.unpause, "Paused: end", false, false)] {
+                                             (.unpause, "Paused: ship-review", false, true),
+                                             (.unpause, "Paused: land", false, true),
+                                             (.unpause, "Paused: end", false, true)] {
             let control = WorkflowControl(action: action, label: label)
             let row = try row(lifecycle: "paused", refusal: "Task is paused")
             let actions = TaskActions(work: try work(control), row: row, execution: nil)
@@ -48,6 +49,9 @@ struct TaskActionsTests {
                 pause: { requested = $0 },
                 interrupt: {}, toggleAuto: {}, complete: {}) { EmptyView() }
             _ = try bar.inspect().find(text: label)
+            if action == .unpause {
+                #expect(throws: (any Error).self) { try bar.inspect().find(button: "Unpause without running") }
+            }
             if menu {
                 try bar.inspect().find(button: "Unpause without running").tap()
             } else {
@@ -56,6 +60,14 @@ struct TaskActionsTests {
             changes.setPause(try #require(requested), issue: row.task.identifier, directory: "/repo", notices: NoticeCenter(), show: nil) {}
             await machine.answer(nil)
         }
+    }
+
+    @Test func aMergedPRKeepsTheStoppedVerifyActionBesideComplete() throws {
+        let rows = try JSONDecoder().decode([String: RoadmapTask].self, from: loadFixtureData("task_delivery_rows.json"))
+        let row = try #require(rows["pending"])
+        let verify = WorkflowControl(action: .run, label: "Run: verify")
+        let actions = TaskActions(work: try work(verify), row: row, execution: nil)
+        #expect(actions.completeReady && actions.control == verify && actions.primaryRefusal == nil)
     }
 
     @MainActor @Test func waitingAtLandLeavesAutoAndStartFromAvailable() throws {

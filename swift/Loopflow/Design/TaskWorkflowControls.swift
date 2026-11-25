@@ -43,8 +43,8 @@ public struct TaskWorkflowControls<Items: View>: View {
                                 }
                             }
                         }
-                        if task.lifecycle == .paused {
-                            Button("Unpause without running") { pause(.unpause) }
+                        if actions.control?.action == .resume {
+                            Button("Unpause without running") { pause(.unpauseWithoutRunning) }
                                 .disabled(pending != nil || actions.pauseRefusal != nil)
                         } else if actions.control?.action == .pause {
                             Button("Interrupt step") { interrupt() }.disabled(pending != nil)
@@ -55,7 +55,7 @@ public struct TaskWorkflowControls<Items: View>: View {
                     items()
                 } label: {
                     HStack(spacing: 4) {
-                        Text(actions.control?.label ?? "Reading…").lineLimit(1)
+                        Text(pending ?? actions.control?.label ?? "Reading…").lineLimit(1)
                         Spacer(minLength: 0)
                         Image(systemName: "chevron.down").imageScale(.small)
                     }
@@ -127,8 +127,7 @@ public struct TaskWorkflowControls<Items: View>: View {
             switch control?.action {
             case .run: run(nil)
             case .pause: pause(.pause)
-            case .unpause: pause(.unpause)
-            case .resume: pause(.resume)
+            case .unpause, .resume: pause(.unpause)
             case .done, .wait, nil: break
             }
         } label: {
@@ -137,7 +136,7 @@ public struct TaskWorkflowControls<Items: View>: View {
         }
         .disabled(control == nil || control?.action == .done || control?.action == .wait || pending != nil || actions.primaryRefusal != nil)
         .help(pending ?? actions.primaryRefusal ?? title)
-        .accessibilityLabel(title)
+        .accessibilityLabel(pending ?? title)
         .accessibilityIdentifier("task-workflow-primary")
     }
 }

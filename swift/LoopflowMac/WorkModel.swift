@@ -2762,20 +2762,6 @@ final class WorkModel {
         request(task, "Interrupt step", .taskInterrupt(directory: directory(task), issue: task.task.identifier))
     }
 
-    /// A sidebar row can be unpaused before its Task workspace has been read.
-    func unpause(_ task: RoadmapTask) {
-        Task {
-            do {
-                let reading = try await query.taskPane(issue: task.task.identifier, directory: directory(task))
-                guard let row = reading.row, row.lifecycle == .paused,
-                      let action = TaskActions(work: reading.overview, row: row, execution: reading.execution).pause else { return }
-                setPause(action, task: row)
-            } catch {
-                navigation.notices.post(Notice("Couldn’t read the saved step for \(task.task.identifier): \(error.localizedDescription)"))
-            }
-        }
-    }
-
     func setPause(_ action: TaskActions.Pause, task: RoadmapTask) {
         pendingChanges.setPause(action, issue: task.task.identifier, directory: directory(task), notices: navigation.notices,
                                 show: Notice.Action("Show") { [weak self] in self?.select(.task(id: task.id)) }) { [weak self] in

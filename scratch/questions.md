@@ -58,7 +58,7 @@ On unpause the action and lifecycle update immediately. The list keeps the row i
 
 Keep the fixed checkmark from the V4c prototype. A merged PR accents Complete immediately. A post-merge step that is still running or paused keeps its own control.
 
-Bare CLI unpause still lifts the hold. The apps choose the existing served write from the saved Graph. If a sidebar row has no cursor reading, fetch it when Unpause is clicked.
+Bare CLI unpause still lifts the hold. The apps send smart unpause from the row or the workflow control. Only the menu’s “Unpause without running” sends a plain unpause.
 
 The phone’s metadata menu opens recorded conversations. The Mac’s independent New conversation starts a local Task shell. The phone’s held-terminal API can continue a recorded Session, but it has no matching independent-chat preparation operation.
 

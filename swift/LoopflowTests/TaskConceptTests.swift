@@ -47,13 +47,39 @@ struct TaskConceptTests {
         return try #require((phases[0]["tasks"] as? [[String: Any]])?.first { $0["lifecycle"] as? String == "active" })
     }
 
-    @Test func pausedTaskKeepsItsConversationWarm() throws {
+    private func pausedTaskWire() throws -> [String: Any] {
         var wire = try activeTaskWire()
         wire["lifecycle"] = "paused"
         wire["section"] = "working"
         wire["working_group"] = "paused"
         wire["selection_states"] = ["open", "paused", "working"]
         wire["run_control"] = ["pausing": false, "unavailable": "Task is paused"]
+        return wire
+    }
+
+    @Test func sidebarUnpausesBeforeOpeningTheTaskAndShowsThePendingWrite() async throws {
+        let row = try JSONDecoder().decode(RoadmapTask.self, from: JSONSerialization.data(withJSONObject: pausedTaskWire()))
+        let machine = HeldMachine()
+        let changes = PendingChanges { write, id in
+            #expect(write == .taskUnpause(directory: row.task.repo, issue: row.task.identifier, run: true))
+            return try await machine.send(write, id)
+        }
+        let query = RegistryQuery { _, _ in throw RegistryQueryError("Task pane is unavailable") }
+        let model = WorkModel(query: query, launchCandidates: [], cache: nil, paneLayouts: nil, pendingChanges: changes)
+        let menu = TaskActionItems(model: model, task: row, wave: nil, work: nil)
+        try menu.inspect().find(button: "Unpause").tap()
+        try #require(changes.changes.first?.command == .unpause(task: row.task.identifier))
+        let preview = try #require(changes.apply(to: [row], readAt: nil).first)
+        #expect(preview.lifecycle == .idle)
+        let bar = try TaskWorkflowBar(model: model, task: preview, work: .loading).inspect()
+        _ = try bar.find(text: "Unpausing…")
+        #expect(try bar.find(viewWithAccessibilityIdentifier: "task-workflow-primary").isDisabled())
+        await machine.fail(ServerError(code: "conflict", message: "land is finishing", data: .null))
+        #expect(changes.apply(to: [row], readAt: nil).first?.lifecycle == .paused)
+    }
+
+    @Test func pausedTaskKeepsItsConversationWarm() throws {
+        let wire = try pausedTaskWire()
         let row = try JSONDecoder().decode(RoadmapTask.self, from: JSONSerialization.data(withJSONObject: wire))
         let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("Passive rendering") }, repoPath: "/repo")
         let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: JSONSerialization.data(withJSONObject: [

@@ -216,9 +216,9 @@ struct TaskActionItems: View {
         } else if work != nil, !task.isCompleted {
             TaskStartGraphMenu(model: model, task: task)
         }
-        if task.lifecycle.isWorking {
-            Button(task.lifecycle == .paused ? "Unpause" : "Pause") {
-                if let action = actions.pause { model.setPause(action, task: task) } else { model.unpause(task) }
+        if let action = actions.pause {
+            Button(action == .pause ? "Pause" : "Unpause") {
+                model.setPause(action, task: task)
             }
             .disabled(model.changeRefusal != nil || model.pendingChanges.pauseRequest(for: task.task.identifier) != nil || task.runControl.pausing)
         }

@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>LOO-1096 · A reply at a Graph breakpoint</title>
+<style>
+:root{color-scheme:light dark;--bg:#f6f5f0;--paper:#fffefa;--ink:#1b2420;--muted:#4f5c56;--line:#c2c9bf;--accent:#1c604a;--wash:#e5efe7;--warn:#8e3f22;--warnwash:#f6e8df;font-family:"Instrument Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+@media(prefers-color-scheme:dark){:root{--bg:#151b19;--paper:#1d2521;--ink:#edf2e9;--muted:#b5c3b9;--line:#48574d;--accent:#99dbb5;--wash:#243c30;--warn:#ffb694;--warnwash:#3a2a23}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font-size:16px;line-height:1.52}main{max-width:1000px;padding:clamp(20px,5vw,54px);margin:auto}
+header{border-top:5px solid var(--accent);padding-top:14px}header small,.label,.speaker{color:var(--accent);font-size:.78rem;font-weight:720;letter-spacing:.06em}header small,.label{text-transform:uppercase}
+h1,h2,h3,p{margin:0}h1,h2{font-family:"Iowan Old Style",Georgia,serif;font-weight:500;line-height:1.1;text-wrap:balance}h1{font-size:clamp(2.55rem,6vw,4.6rem);margin:.28em 0}h2{font-size:clamp(1.65rem,3.6vw,2.4rem);margin-bottom:.62em}h3{font-size:1.07rem;line-height:1.3;margin:.3em 0 .5em}header p{max-width:68ch}section{margin-top:2.7rem}a{color:var(--accent);text-underline-offset:.19em}code{font: .9em ui-monospace,"SFMono-Regular",Consolas,monospace;overflow-wrap:anywhere}p+p{margin-top:.75em}
+.pair,.trail{display:grid;gap:1rem}.pair{grid-template-columns:repeat(2,minmax(0,1fr))}.trail{grid-template-columns:repeat(3,minmax(0,1fr))}article,figure{margin:0;background:var(--paper);border:1px solid var(--line);padding:1.15rem;border-radius:5px}.before{border-top:3px solid var(--warn)}.before .label{color:var(--warn)}.after{border-top:3px solid var(--accent)}
+figure{margin-top:1rem;padding:0}figcaption,.turn{padding:.8rem 1.2rem}figcaption{color:var(--muted);border-bottom:1px solid var(--line);font-size:.9rem}.turn{display:grid;grid-template-columns:125px 1fr;gap:.8rem}.turn+.turn{border-top:1px solid var(--line)}.reply{background:var(--wash)}.speaker{letter-spacing:normal}.note{color:var(--muted);font-size:.9rem;margin-top:.7rem}
+table{border-collapse:collapse;width:100%}th,td{text-align:left;vertical-align:top;padding:.75rem .5rem;border-bottom:1px solid var(--line)}th{font-size:.85rem;color:var(--muted)}td:first-child{width:23%;font-weight:600}.yes,.no{font-weight:750}.yes{color:var(--accent)}.no{color:var(--warn)}ol{padding-left:1.4rem}li{padding:.25rem 0 .65rem .25rem}li p{margin:.28rem 0}.rail{padding:1rem 1.2rem;border-left:3px solid var(--accent);background:var(--wash);margin-top:1rem}
+@media(max-width:680px){.pair,.trail{grid-template-columns:1fr}.turn{grid-template-columns:1fr;gap:.2rem}td,th{padding:.6rem .25rem}td:first-child{width:26%}main{padding:20px 14px 40px}table{font-size:.9rem}}
+</style>
+</head>
+<body><main>
+<header>
+<small>LOO-1096 · Concept review</small>
+<h1>What does “2b” continue?</h1>
+<p>Do the product’s concepts and the code’s concepts line up when a Task stops for review? The decisive case is a person choosing a different next pass from the one the worker recommended.</p>
+<p class="note">Reviewed <code>7a8ecaa96b</code> against <code>80cced1bd4</code>. The kickoff committed the design and exploration. Breakpoints, result delivery and the reply action below are proposed.</p>
+</header>
+
+<section aria-labelledby="mismatch"><h2 id="mismatch">A repeat can restart the wrong build</h2>
+<div class="pair">
+<article class="before"><div class="label">Before · kickoff design</div><h3>“Go back to build.”</h3><p>The plan saves the worker’s default. For a different route, the conversation writes notes and uses <code>--from build</code>. Today that lookup takes the first matching place and constructs a fresh cursor. With two build occurrences, it can enter another branch. Even the right occurrence starts a fresh pass count.</p></article>
+<article class="after"><div class="label">After · proposed</div><h3>“Repeat this pass.”</h3><p>The reply belongs to one visit to the breakpoint. Its saved loop already knows which build to repeat. The Task applies the chosen decision there and carries the reply to the next worker. A deliberate request to start elsewhere still uses <code>--from</code>.</p></article>
+</div>
+<figure><figcaption>Proposed interaction · ship-review finished while the primary conversation was closed</figcaption>
+<div class="turn"><span class="speaker">Task conversation</span><div>Ship-review ran the keyboard checks. <code>scratch/ship-review.html</code> shows where focus jumps to the first row after refresh. I recommend delivering this pass.
+<br><strong>1.</strong> Which finding needs discussion? <strong>2.</strong> Deliver this pass (a), or fix focus in build first (b)?</div></div>
+<div class="turn reply"><span class="speaker">You</span><div>2b — keep focus on the selected Task.</div></div>
+<div class="turn"><span class="speaker">Next build pass</span><div>On the same selected Graph path, the worker receives the focus finding and your exact reply. Ship-review will run again after the fix.</div></div>
+</figure></section>
+
+<section aria-labelledby="pairings"><h2 id="pairings">Where the concepts line up today</h2>
+<table><thead><tr><th scope="col">In the product</th><th scope="col">Fit at HEAD</th><th scope="col">What the code represents</th></tr></thead><tbody>
+<tr><td>A worker does the review</td><td class="no">No</td><td><code>ConcreteSkill.interactive</code> and <code>RunningGraph::stands_in</code> can stop before the review or ask a worker to speak for someone. Give the configured worker the work, then let an authored <code>break</code> stop the Graph. Direct skill sessions still collaborate.</td></tr>
+<tr><td>A recommendation to finish or repeat</td><td class="yes">Yes</td><td><code>GraphVerdict</code> pairs the decision with a summary or blocked reason. <code>finish_step</code> applies the loop edge. Reuse both for the default and the chosen continuation.</td></tr>
+<tr><td>One visit awaiting an answer</td><td class="no">No</td><td><code>TaskGraphPosition::At { step }</code> names a place. The same place can be visited twice. Keep the full <code>ExecutionCursor</code>, its pending verdict, the actual producer reference and a fresh arrival identity together on <code>task_graphs</code>.</td></tr>
+<tr><td>The finished worker’s answer</td><td class="yes">Yes</td><td>A step process names its Session input. Transcript and recorded-history readers can show the answer to that input. Carry the successful input through any correction. A command contributes its own recorded result.</td></tr>
+<tr><td>Discuss the result here</td><td class="no">No</td><td>The primary can receive steers and resume in a held terminal. Today a Task update and the <code>task-session</code> skill can merely name the waiting step. Deliver the result once per arrival to the primary, including its links, questions and default.</td></tr>
+<tr><td>Act on this answer</td><td class="no">No</td><td><code>lf task run</code> selects a start. <code>Place::cursor</code> rebuilds it for <code>--from</code>. Extend the run action to consume the presented arrival, keeping its route and applying the selected edge with the reply.</td></tr>
+<tr><td>A Task ready to discuss</td><td class="no">No</td><td>The shared workflow sentence and Now’s condition describe different aspects of the Task. Project both from the parked visit. Show the review at the top of active work and in Now. Deliberate shelving is separate.</td></tr>
+</tbody></table>
+<p class="note">Repository references · <a href="../rust/loopflow-execution/src/task_graph.rs">Task position and navigation</a> · <a href="../rust/loopflow-execution/src/graph/transitions.rs">Loop decisions</a> · <a href="../rust/loopflow/src/lf/commands/graph.rs">Worker launch and readback</a> · <a href="../rust/loopflow-execution/src/transcript/answer.rs">Answer history</a> · <a href="../rust/loopflow/src/server/wake.rs">Conversation wake</a> · <a href="../swift/Loopflow/Models/NowProjection.swift">Now</a></p>
+</section>
+
+<section aria-labelledby="lifecycle"><h2 id="lifecycle">What survives a closed conversation?</h2>
+<div class="trail"><article><h3>Finish and park</h3><p>The worker finishes. The carrier saves the cursor at the marker and the producing step, then relinquishes ownership in the same write. The breakpoint launches zero processes. Auto and batch take the saved default directly.</p></article>
+<article><h3>Reopen and discuss</h3><p>The Machine wakes the primary for this arrival. If launch fails, the Task stays ready and its result remains readable on reopen. A missing provider transcript can fall back to the saved turn. Missing artifacts are identified by path.</p></article>
+<article><h3>Continue once</h3><p>The run action compares the arrival, saves accepted direction and installs the next cursor together. A worker launch failure can retry there. A competing continue sees where the Task moved. A question or a closed pane leaves the visit open.</p></article></div>
+<div class="rail"><strong>Counterexample.</strong> Auto carries pass one through the marker. Pass two stops at the identically named marker before a delayed “2b” arrives. Comparing the marker name would accept it. Comparing the visit leaves pass two untouched. The old words remain visible in the conversation.</div>
+<p class="note">A blocked default retains its reason. A leading break or a direct jump to a marker has no finished worker to quote and shows its forward destination. A legacy Task parked before an interactive worker still runs that worker on its next continuation. LOO-1100 covers retiring the old reader. Idle Antigravity wake belongs to LOO-1098. Until then an open idle Antigravity conversation receives pending input at its next turn.</p>
+</section>
+
+<section aria-labelledby="slice"><h2 id="slice">Build the smallest complete interaction first</h2>
+<p>Run <code>loop: [research, break]</code> with separate worker and primary harnesses. Close the primary before research finishes, restart the Machine server after the Task parks, and read the numbered alternatives in the original conversation. Change “finish” to “research again”. The second worker must see pass two and the exact words. Replay the old reply at the second visit. It must still be waiting. This is the proposed first implementation check. <a href="plan.md">Implementation plan</a></p>
+</section>
+
+<section aria-labelledby="questions"><h2 id="questions">Choices for review</h2>
+<ol><li><strong>If you pick “fix it first”, how should build resume?</strong>
+<p><b>1a · Chosen.</b> Repeat the current build pass with your reply. Keep the branch and earlier pass count.</p>
+<p><b>1b.</b> Start build again from a named step. This gives you a fresh start and requires identifying which build you intended.</p></li>
+<li><strong>If a reply arrives after its review has passed, what should the conversation do?</strong>
+<p><b>2a · Chosen.</b> Show where the Task is now and leave your words in the original discussion. You can give fresh direction if they still apply.</p>
+<p><b>2b.</b> Show where the Task is now and immediately ask whether to send those same words to the current work. This adds a decision each time an old reply arrives.</p></li></ol>
+</section></main></body></html>

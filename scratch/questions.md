@@ -1,2 +1,3 @@
 - Choice for review, LOO-1096: worker verdicts survive the stop and plain continue accepts that default. A foreground ad hoc Graph can review the result at its terminal; direct skill invocations retain full interactive collaboration.
 - An old Task parked before an interactive skill runs that worker on its next continuation. A newly authored bare break takes its navigation name from the preceding occurrence, with a stable suffix where necessary.
+- Choice for review: a reply can change advance to iterate or iterate to advance on the presented visit. Continue carries the accepted words through a restart. A late reply stays in the conversation for discussion. The first slice exercises this through a quit primary.

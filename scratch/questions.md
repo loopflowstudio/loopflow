@@ -29,3 +29,7 @@
 - When adopting a worktree with `--run`, choose the last-opened conversation
   eligible for that Task. This follows the existing checkout selection rule
   even when a more recently opened Session stayed there after binding elsewhere.
+- `lf resume -a <agent>` on a held, running conversation with no provider
+  history (the agent never reported a thread) attaches to the running agent
+  and says nothing about the ignored `-a`. Existed before this change; seen
+  with the stand-in agy in QA.

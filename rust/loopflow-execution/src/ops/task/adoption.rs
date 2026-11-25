@@ -277,6 +277,10 @@ pub async fn bind_session(store: &SharedStore, session: &LfSession, task: &Task)
         None,
     )
     .await?;
+    crate::journal::request::diagnostic(format_args!(
+        "Binding {} to {} ({}). Permanent.",
+        session.id, task.identifier, task.title
+    ));
     if let Some(worktree) = task.worktree.as_ref() {
         let root = worktree.canonicalize().unwrap_or_else(|_| worktree.clone());
         if checkout.as_ref() != Some(&root) {

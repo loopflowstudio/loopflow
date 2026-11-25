@@ -63,9 +63,42 @@ Fresh Task primaries still land in their checkout.</p>
 <li>Whether the branch's recovery pass ever restarts a dead bound conversation on its own: scenario 7 didn't trigger one, so I only checked where an explicit reopen lands.</li>
 </ul>
 
+<h2>Second pass: recovery and re-selecting (ece47f22c0)</h2>
+<p>Branch <code>lf</code> on a private Machine (<code>LF_HOME=/tmp/lfq1101/lfhome</code>, isolated <code>HOME</code>), with stand-ins
+<code>agy</code> and <code>claude</code> that log their pwd and then sleep. Worktrees <code>repo.task</code> (Task 03361d) and <code>repo.split</code> (no Task at first).</p>
+<table>
+<tr><th>#</th><th>What I did</th><th>What I saw</th></tr>
+<tr><td>8</td><td><code>lf -a agy</code> in <code>repo.split</code> under a PTY, with the branch server running; <code>lf session bind S --task 03361d</code></td>
+<td><pre>Session session_d472… belongs to 03361d.
+Binding session_d472… to 03361d (Seat table). Permanent.
+Conversation stays in /private/tmp/lfq1101/repo.split; 03361d's checkout is /private/tmp/lfq1101/repo.task.</pre>
+<code>lf task status 03361d</code> from the main checkout: <code>Conversation: running</code>.</td></tr>
+<tr><td>9</td><td><code>kill -9</code> the agy stand-in, then polled <code>lf task status</code> once a second</td>
+<td><span class="ok"><code>starting</code>, then <code>running (started again 02:49, attempt 1)</code>.</span> The new agy's pwd is <code>repo.split</code>.
+In the first pass (scenario 7) and on the installed lf this either never restarted or restarted in <code>repo.task</code>.</td></tr>
+<tr><td>10</td><td><code>lf resume -a claude:fable</code> from <code>repo.split</code> while the recovered agy runs in a held terminal</td>
+<td>Attached to the held agy, and no claude started. The stand-in agy never reports a conversation (<code>agy reported no conversation; it cannot be resumed</code>), so the Session has no provider history and <code>-a</code> has nothing to hand off (<code>invocation_intent</code> only picks a new thread when there is history). Real agy records one. This doesn't come from this change; see below.</td></tr>
+<tr><td>11</td><td><code>lf task create 'Adopt split' --worktree ../repo.split</code> (Task 352af2), then <code>lf session bind S --task 03361d</code> again</td>
+<td><span class="ok">exit 0</span>, same three lines. Store: 03361d keeps <code>repo.task</code>, 352af2 keeps <code>repo.split</code>, primary of 03361d is still S, <code>S.cwd = repo.split</code>.</td></tr>
+<tr><td>12</td><td><code>lf session bind S --task 352af2</code> (moving it to another Task)</td>
+<td>Refused, exit 1: <code>Error: The Session and checkout belong to different Tasks; permanent bindings are unchanged</code>.
+Before the fix it printed <code>Binding S to 352af2 (Adopt split). Permanent.</code> first.</td></tr>
+<tr><td>13</td><td>Reboot: SIGKILL the server, holder and agy, start a new server</td>
+<td>While the server was down: <code>closed; `lf resume --task 03361d` opens it</code>. After the restart: <code>died 02:54 (exit 137) · starting again</code>, then <code>starting</code>, then <code>running (started again 02:54, attempt 1)</code>. The agy pwd is still <code>repo.split</code>.</td></tr>
+</table>
+<h3>Fixed</h3>
+<p><code>lf session bind</code> printed "Binding S to T. Permanent." before the bind ran, so a refused bind announced a permanent binding and then failed.
+The line now prints after the bind succeeds, just before the "Conversation stays…" note, from <code>adoption::bind_session</code>.
+Base printed it after the bind too. The first QA pass had moved it ahead of the bind.</p>
+<h3>Not reached in this pass</h3>
+<ul>
+<li>A Task with no checkout on this Machine staying down with "its Task is not checked out here". The only way to get there with a bound primary is to delete a <code>task_checkouts</code> row, so I left it to <code>the_pass_starts_what_the_outlook_says_the_server_starts</code> and the server recovery test.</li>
+<li>Switching the recovered, held conversation to claude:fable with real agy history (scenario 10).</li>
+</ul>
 <h2>Still odd, worst first</h2>
 <ul>
-<li><code>lf task status</code> from the main checkout says "its Task is not checked out here" for a Task that is checked out on this Machine. "here" means this directory, but it reads as this Machine. This existed before the change.</li>
+<li><span class="ok">Fixed in the second pass:</span> <code>lf task status</code> said "its Task is not checked out here" for a Task checked out on this Machine whose conversation ran elsewhere. Now it shows <code>starting again</code> / <code>running</code> (scenarios 9, 13).</li>
+<li>When a held conversation has no provider history, <code>lf resume -a &lt;agent&gt;</code> attaches to it without saying the agent request was ignored (scenario 10). This existed before the change.</li>
 <li>After another Task adopts the conversation's worktree (scenario 6), bare <code>lf resume</code> there no longer finds the bound conversation. That follows the rule that the checkout's owner wins, and nothing in it says so.</li>
 </ul>
 </body></html>

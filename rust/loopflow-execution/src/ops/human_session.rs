@@ -1983,10 +1983,6 @@ pub async fn rename(
 /// Bind and select the Task conversation without changing its live attachment.
 pub async fn bind(store: &SharedStore, id: &str, task: &str) -> Result<SessionRecord> {
     let (session, task) = binding_target(store, id, task).await?;
-    crate::journal::request::diagnostic(format_args!(
-        "Binding {} to {} ({}). Permanent.",
-        session.id, task.identifier, task.title
-    ));
     crate::ops::task::adoption::bind_session(store, &session, &task).await?;
     let session = store
         .session(&session.id)

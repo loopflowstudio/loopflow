@@ -48,6 +48,15 @@ read `agent_sessions.cwd`, `task_primary_sessions` and the stand-in's `pwd`.
 attaches to it and replays that line from the held screen. pyte renders the
 `ESC[<u` keyboard pop as `65535u`; it is not lf output.
 
+With the branch's `lf server run` up (detached, stdin `/dev/null`), the bound
+chat is a recovered Task conversation: `kill -9` the stand-in `agy` and
+`lf task status <task>` reads `starting`, then `running (started again …)`;
+the new `agy` (child of `lf holder run`, not of the PTY's `lf -a agy`) logs
+the conversation's own worktree. The stand-in never reports a conversation,
+so the Session has no provider history: `lf resume -a claude:fable` against
+that held terminal just attaches to agy and starts no claude. Check the
+harness switch against the live bare chat, before any recovery.
+
 For the released behavior, run the same script on a second home with
 `/Applications/Loopflow.app/Contents/MacOS/lf` copied into its `bin/`. Ending
 that chat (kill the driver, the stand-in and `lf -a agy`) registers

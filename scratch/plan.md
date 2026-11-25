@@ -715,8 +715,7 @@ Chosen for review (`scratch/concept-review.html`, questions 1–3):
   `DTOFixtureTests|WaveDetailReadingTests`).
 
 Built: `refresh_wave` makes no Project. `tracker::make_project_command`
-names the maker (`lf wave plan connect <wave>`; Asana: `lf wave create
-<wave>`, see questions), used by the create error, the connect receipt and
+names the maker (slice 15 made it `lf wave create <wave>` everywhere), used by the create error, the connect receipt and
 `tracker::unbound_project`, which fills `ProjectSummary.unbound` (Rust, Swift
 `ProjectPlanningSnapshot`, three DTO fixtures, inline Swift fixtures).
 `print_project` and `WaveProjectView` print it. Tests:
@@ -771,3 +770,8 @@ name it. `wave_sync_makes_no_project_and_wave_create_makes_only_its_own`
 retries through `Write::WaveCreate`. `lf wave plan connect <wave>` with no
 Project still makes one; it stays Linear's setup and attach verb.
 `refresh_wave`'s comment names its drain as the exception.
+Checks 2026-11-24: `cargo test -p loopflow --lib local_planning::` (30) and
+execution `task_planning_tests:: asana_planning_tests:: wave_lifecycle` (44)
+pass. Swift `WaveDetailReadingTests` and the rest go to gate (Remains 1).
+
+Next: gate, then ship ("just ship this").

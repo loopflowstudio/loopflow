@@ -10,7 +10,7 @@ inline in zsh: `env $(env | grep '^LF_' | cut -d= -f1 | sed 's/^/-u /') <cmd> < 
 
 ```bash
 cargo test -p loopflow-execution --lib skills::catalog::          # one library module
-cargo test -p loopflow-harness claude_decode                      # one decoder or transcript reader; builds no storage or execution
+cargo test -p loopflow-harness claude_decode                      # one decoder or transcript reader
 cargo test -p loopflow --test integration context_tests::         # one integration module
 cargo test -p loopflow --test golden_prompt                       # one standalone binary
 uv run pytest python/tests/test_gate_bounded.py                   # one Python file

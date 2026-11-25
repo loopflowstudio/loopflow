@@ -12,7 +12,7 @@ Connect over the Unix socket with newline-delimited JSON: send the current
 hello from `rust/loopflow-execution/tests/fixtures/dto/server/hello.json`, then requests shaped like
 the adjacent `graph_run.json` or `task_run.json`. A local Graph containing
 `- cmd: help` needs no provider-backed step; Task checkout may still warm a
-primary conversation as described above. For disposable
+primary conversation. For disposable
 Tasks, use a local bare Git origin, `planning: {provider: git, personal: true}`
 and `graph: qa-normal` in `.lf/config.yaml`. Commit and push those definitions,
 then `lf task create --title "Launch QA" --json` creates local planning data.

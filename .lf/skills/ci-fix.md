@@ -18,7 +18,7 @@ Run local reproductions from the checkout root with inherited `LF_*` unset and
 | `macos / loopflow-ui-test` | Desktop Xcode compile: `(cd swift && xcodegen generate) && uv run python scripts/build_xcode_ci.py`. iOS Simulator tests: `uv run python scripts/test_ios.py` (pass `-only-testing:LoopflowiOSTests/<Suite>` to focus). |
 | `macos / macos-process-test` | `uv run python scripts/test_network.py cargo test --offline -p loopflow --lib <app_process_tests \| journal::os_process:: \| server::mobile::tailscale::macos::>`. |
 | `task-installation` | `uv run python scripts/test_task_installation.py` (CI passes `--container` and `--repository-upgrade`; see `scripts/README.md` for local usage). |
-| `e2e-smoke` | Two steps: `planning_reconnect_tests` (Linux only — read CI log on macOS), then `cargo build -p loopflow --bin lf` and `uv run python scripts/test_network.py tests/e2e/test_smoke.sh`. |
+| `e2e-smoke` | Two steps: `planning_reconnect_tests` (Linux only — read CI log on macOS), then `cargo build -p loopflow --bins` and `uv run python scripts/test_network.py tests/e2e/test_smoke.sh`. |
 
 When reproducing a failing Rust or macOS test locally hits `syspolicyd`,
 `TMPDIR`, `fseventsd`, `has no resident login`, `No agent selected`, or needs

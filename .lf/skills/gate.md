@@ -10,8 +10,8 @@ repository's preparation, at the first publish and after review fixes, is:
 
 ```bash
 lf commit -m "gate: checkpoint"     # working notes are in history here
-lf sync                             # last thing before checks & publish (after review fixes too)
-# When Rust changed (fix & commit if either fails):
+lf sync                             # last thing before checks & publish
+# When Rust changed:
 cargo fmt --all -- --check && cargo clippy --all-targets -- -D warnings
 # When scripts/test.py --list selects ios, or rust/loopflow-model/ changed:
 scripts/test_desktop.sh --filter DTOFixtureTests
@@ -23,10 +23,10 @@ lf pr publish                       # ready PR, no merge request
 lf pr checks                        # rust-test, tests-result: not skipping
 ```
 
-If lint or a local check fails, fix and commit before `lf pr publish`. After
-pass-2 review fixes, run `lf sync`, re-run the applicable local checks above,
-confirm `scratch/` still contains only `.gitkeep` (a sync can restore notes),
-commit, then `lf pr publish`.
+If a local check fails, fix and commit before `lf pr publish`. After review
+fixes, commit, run `lf sync`, re-run the applicable checks above, confirm
+`scratch/` still holds only `.gitkeep` (a sync can restore notes), and
+`lf pr publish`.
 
 Before clearing, put what a later reader needs into the PR body: what people
 said, what a run showed, open decisions, deferred checks and the checkpoint

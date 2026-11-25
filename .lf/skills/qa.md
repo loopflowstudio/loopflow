@@ -3,21 +3,10 @@ extends: builtin
 ---
 ## Desktop
 
-Check whether the display is locked before launching a GUI or calling
-WindowServer:
-
-```bash
-ioreg -n Root -d1 | grep -oE '"(IOConsoleLocked|CGSSessionScreenIsLocked)"\s*=\s*\w+'
-```
-
-- **Locked** (either key reads `Yes`): skip interactive GUI/WindowServer clicks
-  and go straight to headless `scripts/test_desktop.sh`,
-  `lf desktop state --json`, `-ui-test-mode live` snapshots, or production
-  `QAHook` (which covers windows, clicks, views, and Ghostty/keyboard via
-  `key post`/`key send`). Report hover, system drags, menus/`⌘` chords, `+`
-  popovers/sheets, file panels, Settings pixels, and visual terminal-face checks
-  as open instead of retrying them.
-- **Unlocked** (`No` or absent): proceed with isolated Dev bundle checks.
+Check whether the display is locked first
+([display lock preflight](../qa/desktop.md#display-lock-preflight)): when
+locked, skip interactive GUI/WindowServer clicks and use the headless checks
+there instead of retrying.
 
 Use the [isolated Dev bundle](../qa/desktop.md#loopflow-dev-on-the-live-machine)
 and disposable Work. Check whether launch can attach to or resize personal

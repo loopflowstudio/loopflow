@@ -697,7 +697,8 @@ relaunch. "could not create image from window" means the display slept:
 `caffeinate -u -t 1` wakes it.
 
 The Diff can't be scrolled without input, so put the scenario first. Use a
-disposable repository with a `qa` Graph (see the Task setup in the qa skill), run
+disposable repository with a `qa` Graph (see
+[Starting a Task on a private Machine](served-launches.md#starting-a-task-on-a-private-machine)), run
 the Task once for a checkout, then edit its working tree. The Diff includes
 uncommitted changes, so one edited file at a time is the whole stream. The
 store reads again on file events. Twice a list stayed stale after a `git

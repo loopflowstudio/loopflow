@@ -281,7 +281,7 @@ through its own clone. The carrier is `ssh <hub> lf server connect`
 (`ops/plan_hub.rs`). Clearing the hub deletes its carrier rows and loses
 nothing.
 
-**When they run.** `ops/plan_carriers.rs` has two verbs. `send` follows every
+**When they run.** `plan_carriers::send` follows every
 save, from the CLI or the server: the hub takes the records past its cursor and
 Git pushes this Machine's ref as last fetched, with no fetch, both within five
 seconds. While Git holds something not taken the save fetches and reads as
@@ -292,10 +292,11 @@ claim, before `lf wave create` or `lf task create --wave` makes a Wave (five
 seconds at most, so a Wave of that name made elsewhere is joined, not made
 twice), on a Task lookup that misses, and after each command the server
 answers, one exchange per repository at a time and at most one every five
-seconds after the last. One server task runs the Git exchange for
-every repository that has a remote and no tracker every 60 s, which is how
-another Machine's change arrives with no hub; with no server it waits for
-`lf task sync`. The first `lf task list` or `lf repo tracker` in a clone the Machine
+seconds after the last. While this Machine owns open Tasks, the server and
+running Graph steps share one background attempt per repository every 30 s.
+The hub and Git run concurrently, each with a five-second deadline. The
+server fetches Git refs every minute for repositories with no local claims.
+The first `lf task list` or `lf repo tracker` in a clone the Machine
 has saved nothing in does one exchange before it reads, which registers the
 clone for the server's minute. A served read of such a clone answers with an
 empty plan once and exchanges after its reply. Task creation reads
@@ -406,10 +407,13 @@ attempt stamp per team across repositories and processes; a refresh lock
 covers the short request/ingestion operation, with no resident owner or hand-off.
 Failed checks keep the prior watermark and local planning.
 
-Teams without live Tasks are not checked. Locally finished/abandoned identities
-are excluded from refresh. Explicit detail reads remain available. Desktop and
-`--subscribe` alone own a clock: 30–60 seconds initially, backing off to four minutes
-while unchanged. Closing the watcher stops it; idle agents own no Linear timer. Hub exchange has no clock of its own; the Git fetch is the server's one 60 s timer.
+The owner polls a Linear team or an Asana repository project while it holds an
+open Task there. Linear's budget can extend the 30 s interval. Asana checks
+the repository-named project in its team and starts a fresh delta if its gid
+changes. The server and the running Graph share the last attempt. Locally
+finished Tasks stay out of the delta. Desktop and `--subscribe` also refresh
+the plan, starting at 30–60 seconds and backing off to four minutes while
+unchanged.
 Projection functions remain local; command boundaries acquire before projecting.
 
 Linear HTTP 400 rate-limit errors, 429 and exhausted request/endpoint/complexity
@@ -434,8 +438,8 @@ lf wave create product --json
 ```
 
 Validate one existing Project and select its accepted local record on the Wave's
-SQLite row (`waves.current_project_id`). Repeating the same binding preserves it;
-a different existing binding is left unchanged. Setup preserves tracker status,
+SQLite row (`waves.current_project_id`). Repeating the same binding keeps it.
+Use `--replace` to switch an existing selection. Setup preserves tracker status,
 content and identity, including a Backlog Project. It does not
 activate the Project. Operation routing and status select this exact ID; the JSON
 Project summary carries a required `current` boolean for Desktop. Status and
@@ -486,7 +490,7 @@ its terminal outcome and error. Swift retains command transport feedback only.
 ```bash
 lf wave edit-project product --name "2026-10 — customer work"
 lf wave update-project --wave product --file scratch/product-project.json
-lf wave plan bind product <Project UUID>     # select another existing Project
+lf wave plan bind product <Project UUID> --replace
 ```
 
 `update-project` replaces the current Project's KRs and metric targets with the

@@ -55,8 +55,8 @@ own settings.
 
 The native macOS app reads the same local store as `lf`; it keeps no copy of its own:
 
-- **Sidebar (⌘1–9):** your working Tasks in shared order (dragging reorders
-  them for CLI lists too).
+- **Sidebar (⌘1–9):** your [Working Tasks](#working-tasks-in-the-sidebar) in
+  shared order (dragging reorders them for Wave views and CLI lists too).
 - **Task workspace:** three resizable panes: `session` (conversation), `shell`
   (at the Task's worktree), and `browser` (**Brief**, **Diff**, **Files**, Graph
   log, local dev URLs). **Files** opens files read-only by default with one-key
@@ -78,6 +78,25 @@ The native macOS app reads the same local store as `lf`; it keeps no copy of its
   Every pane zooms and hides on hover; the header's `Show…` menu restores
   hidden parts.
 - **⌘K:** jump to any Wave, Task, Session, or Graph.
+- **⌘,:** [Settings](#settings) for appearance, shortcuts, phone access,
+  Machines, and scoped configuration files.
+
+### A Task on another Machine
+
+Open a Task that runs on mini, a pool Machine or a rental, and its workspace
+is mini's: **Files** browses and saves mini's working copy, **Changes** and
+**Diff** show mini's uncommitted work, **Shell** starts in mini's checkout, and
+**Session** attaches to the conversation running there. The workspace header
+and each terminal name the Machine. Desktop asks your local Loopflow server,
+which reaches mini over SSH; Desktop itself runs no `ssh`. A checkout of the
+Task left on your Mac from before it moved is never shown in its place.
+
+| When | Desktop shows |
+|---|---|
+| The Task has no checkout yet | **Not started** in Files, Changes and Shell |
+| mini doesn't answer | An error naming mini, with **Retry**; never an empty diff or a shell on your Mac |
+| The Task moves to code-1 | The header names code-1 and Files and Changes reload from it. Shells and Sessions already open stay on mini, labelled, until they end; **New shell** starts one on code-1 |
+| You have unsaved edits when it moves | Save writes them to code-1 if the file there is unchanged since you opened it; otherwise Desktop shows both versions and keeps your edit |
 
 Save and open Dashboards from the CLI too:
 
@@ -87,7 +106,7 @@ lf desktop dashboard query attention 'state:available or state:blocked'
 ```
 
 Queries support `wave:`, `task:`, `kind:task|wave`, and
-`state:open|available|busy|blocked|unstarted|idle|active|moving|backlog|working|done|auto`
+`state:open|available|busy|blocked|error|unstarted|idle|active|moving|backlog|working|done|auto`
 (`auto`: an open Task with auto on), combined with whitespace (AND), `or`, and parentheses.
 
 ### Changes show at once
@@ -101,6 +120,39 @@ which turns auto off).
 If the Machine pauses briefly, edits still show immediately and flush once it
 reconnects. After ~10 seconds offline, mutation controls disable until the
 connection returns. See [Connect clients](server.md) for connection recovery.
+
+### Working Tasks in the sidebar
+
+In the default order, open the second Working Task and send a prompt. Its row
+stays second as the conversation turns Busy and then Available again.
+
+Drag a row in the repository sidebar or the Working Tasks grid to save its
+position on this Machine. Wave views, `lf task list`, `lf wave show`, and the
+phone feed follow the same relative order. Working Tasks start newest first,
+with canonical Task ID breaking ties. New arrivals appear above rows you’ve
+arranged. Sidebar and phone rows show the current Graph step beside the status
+when the Machine reports it.
+
+Turn on **Sort by status** in a repository or Wave sidebar, or from **⌘K**,
+to group rows by Blocked, Error, Available, Idle and Busy. A Task with both
+busy and available conversations sorts as Busy. Each group follows the shared
+Working order.
+Sending a prompt updates the open Task’s status, but its row stays in the
+group it occupied when you opened it or turned sorting on. Other rows can
+move above or below it. Leaving the Task or changing the filter releases
+its group. Turn sorting off to restore the shared order and drag rows in
+the repository sidebar. The Working Tasks grid uses the shared order, and
+saved Dashboards use their own arrangement.
+
+A drop shows immediately. If another window has already reordered the list,
+the Task still lands on the side of the target you chose. A refused drop
+restores the last confirmed order in both lists and shows a Notice.
+
+In **⌘K → Sidebar shows**, choose **Working tasks**, **Available**, or **Busy**.
+Filters use current activity. A Task with both available and busy
+conversations appears in both filters. **⌘1–9** and **⌃Tab / ⌃⇧Tab** follow
+the visible rows. The open conversation stays selected if its row leaves the
+filter.
 
 ### The backlog
 
@@ -309,6 +361,67 @@ The message is selectable, so it can be pasted into a conversation. A state gets
 there; one with no next step has none. In a dashboard tile the same state is
 one line: its title and its button.
 
+### Settings
+
+Press **⌘,** to open Settings. Search for a pane, label, configuration key,
+alias or description. Select a result with ↑/↓ and Return to reveal the
+control. A switch in the results edits the destination shown beside it.
+
+**General**, **Appearance**, **Shortcuts**, **Agents**, **Machines**, and
+**Mobile** hold personal preferences. Use **Machines** to check connections
+and set the plan hub. **Open ~/.lf/config.yaml** opens the global file for
+settings such as Machine pools and SSH forwarding.
+
+**Project & Wave Config** holds agent overrides, Context, Git & Release, and
+Machine placement. It opens on the active checkout or the first repository
+in your portfolio. Use **Choose Checkout…** to select another directory.
+**Applies to** selects a checkout or Wave. **Save in** selects your file or
+the shared file. Saving the first setting creates the file. **Open file…**
+opens the current settings document in its associated app. If shared Wave
+settings come from `GOAL.md`, Open shows the goal and **First change saves to**
+shows the path to `config.yaml`. Once an edit creates the YAML file, Open shows it.
+A dot beside the pane means the selected file declares a setting. Switching to
+a personal pane keeps the checkout and destination ready for your return.
+
+Expand **Skill or Graph step** to see launch settings for that target.
+**Inspect general work** returns to all settings. A step needs an `id:` before you can save its
+preferences. Git & Release applies to the repository. While viewing a Wave,
+**Inspect repository settings** returns to its checkout. Opening a search result
+selects general work or the checkout when the setting requires it.
+
+**In effect** appears when the selected file declares a setting or another
+source supplies a value beyond the built-in default. For example, open
+**Project & Wave Config** on a checkout where the shared file sets
+`context.diff: true` and your file sets it to `false`. Choose **Shared
+repository settings**. The switch shows **On**. **In effect** still shows
+**Off · My repository settings**. Expand it to see the candidates and paths.
+
+- **Reset** removes a simple control’s declaration immediately. Clearing a text
+  or number field also resets it. YAML editors preview removal with **Reset…**.
+  For additional documents, **Save empty list** clears inherited entries. Reset lets them
+  apply again.
+- **Move to Shared Repository…** appears when the shared slot is empty. From
+  a private Wave you can move to your repository settings. Review the YAML
+  changes and the projected result before confirming. If either file changes
+  the preview, review it again. **Finish interrupted move…** completes a
+  partial move. If the declarations have diverged, **Dismiss pending move**
+  keeps the current contents of both files.
+- Switches and pickers save immediately. Text fields save on Return or focus
+  loss. Escape discards the text. YAML editors have **Apply** and **Cancel**.
+  **Undo** or **⌘Z** restores a saved edit even after switching destinations.
+  If the declaration changed on disk, use **Refresh** to review it before
+  retrying. A rejected edit leaves its field editable. An unavailable scope
+  keeps the last reading visible and pauses edits. If the local server
+  restarts, Settings reconnects automatically and enables edits when fresh
+  values arrive.
+  Settings and the CLI share the same [configuration files](config.md).
+
+**Appearance** selects themes or opens the color editor. **Shortcuts** shows
+the keyboard reference. **Mobile** shows a green dot and pairing code when
+[phone access](server.md#phone-access) is ready. While **Machines** is open,
+it checks up to four registered identities at once and distinguishes
+connection errors from ended rentals.
+
 ## Script Desktop
 
 `lf desktop` is Desktop's pane and window API, the equivalent of tmux's or
@@ -388,6 +501,8 @@ lf help desktop --all --json              # full schema of every Desktop command
 
 Programs running in a Desktop shell can also emit OSC 7501 (Rex's Program
 Status protocol) to mark a pane available when waiting for input.
+A live interactive Session that reports a finished turn is Available once
+its last working report clears. Typing dismisses finished and error reports.
 
 ## Reference
 

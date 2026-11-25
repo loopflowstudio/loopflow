@@ -4,6 +4,14 @@ import Combine
 import Loopflow
 import Observation
 
+extension UserDefaults {
+    static let taskFileAutosaveKey = "taskFilesAutosave"
+
+    var savesTaskFilesAutomatically: Bool {
+        object(forKey: Self.taskFileAutosaveKey) as? Bool ?? true
+    }
+}
+
 /// The working document. Its native editor stays with it after the first edit.
 @MainActor
 @Observable
@@ -112,6 +120,14 @@ final class TaskFileDocument: NSObject, NSTextViewDelegate, @preconcurrency NSTe
         }
         saveMessage = "Updated from disk"
         onEdit?()
+    }
+
+    /// The file where the Task runs now, after a move. A draft on another
+    /// revision stays whole beside it, never merged: only a save at the
+    /// draft's base revision may write it there.
+    func arrive(_ next: TaskFileSnapshot) async {
+        guard dirty, next.revision != snapshot?.revision else { return await reconcile(next) }
+        external = next
     }
 
     private func applyIncoming(_ value: String, edits: [TaskTextEdit]? = nil) {

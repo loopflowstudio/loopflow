@@ -56,8 +56,11 @@ moves to the next entry in `agents` and logs why:
 codex: provider usage limit; continuing on claude:fable
 ```
 
-- **Graph steps** also skip entries whose CLI isn't installed on this Machine.
-  If every entry hits a usage limit, a Graph step waits 5, 15, 30, then 60
+- A new Session or worker walks the Skill’s model order on its execution Machine.
+  It checks the launcher and, for Claude and Codex, the native login. The first
+  usable entry keeps its configured model. If the whole list is unavailable,
+  Loopflow checks the other installed harnesses.
+- **Graph steps** that exhaust the order on a usage limit wait 5, 15, 30, then 60
   minutes, retrying from the first entry after each wait before stopping.
 - **Other headless commands** stop once the list is exhausted (commit message
   generation falls back to a default title).
@@ -145,12 +148,22 @@ lf config settings --skill implement --explain # every candidate, file, and why 
 lf config settings --skill implement --all     # include built-in defaults
 lf config settings --graph release --step write-code --json
 lf config catalog --json                       # every supported key, type, and scope
+lf config scope --json                         # checkout settings and editable declarations
+lf --wave frontend config scope --skill design --json
 lf context --json                              # context budgets and current usage
 ```
 
 `lf set` validates keys and types strictly and preserves comments in YAML
-files. Desktop's **Configuration** panel reads and writes the same files with
-the same Explain and Unset controls.
+files. Desktop's [Settings](surfaces.md#settings) window (`⌘,`) reads and
+writes the same files. **Project & Wave Config** has the **Applies to** and
+**Save in** selectors, a precedence ladder, and Undo. Simple controls reset
+immediately. YAML resets and moves show a preview.
+
+An unset control shows the value in effect and its source, such as
+**On (Default)**. Lists can name several contributing files. Use **Reset** below a
+picker to remove its saved choice and see the inherited value. A picker shows
+**Explicit null** when its file declares a nullable key such as `chrome` as
+`null`. Lower declarations supply its value. **Reset** removes the key.
 
 ## Where settings live
 
@@ -420,7 +433,24 @@ Work launched from your laptop onto a remote Machine carries your laptop's
 personal preferences; work started directly on the remote uses the remote's
 saved preferences. Credentials never forward automatically; opt in per
 variable or home file with `forward.env` and `forward.files`
-([Remote Machines and rentals](subscriptions.md#remote-machines-and-rentals)).
+([Per-run secrets](subscriptions.md#per-run-secrets)). Sign a Machine in with
+`lf machine login <provider> <machine>`.
+
+### Sign-in approvers
+
+```yaml
+# personal global configuration
+approvers:
+  codex: {chrome: Work}
+  github: {command: "my-approver"}
+```
+
+`approvers.<provider>` says where `lf machine login` sends a provider's
+approval page: unset opens the default browser, `chrome` a Chrome profile,
+`command` a program that approves on its own. It applies to Codex, GitHub,
+Linear, Asana and OpenCode, and is personal to this Machine.
+See [Choose who approves](subscriptions.md#choose-who-approves) for the
+command's environment.
 
 ## Releases
 

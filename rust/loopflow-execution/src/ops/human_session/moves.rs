@@ -174,9 +174,17 @@ pub fn conversation_task(store: &SqliteStore, session: &str) -> Result<Option<Ta
     if let Some(PrimaryScope::Task(task)) = store.primary_scope(session)? {
         return Ok(Some(task));
     }
-    Ok(match store.session_task_ids(session)?.as_slice() {
-        [task] => Some(task.clone()),
-        _ => None,
+    Ok(store.session_task(session)?)
+}
+
+/// Where the conversation runs if it moved or its Task runs elsewhere.
+pub fn other_machine(store: &SqliteStore, id: &str) -> Result<Option<MachineId>> {
+    Ok(match conversation_task(store, id)? {
+        Some(task) => {
+            let owner = crate::store::ownership::task_execution_route(store, &task)?.machine_id;
+            (owner != crate::store::machines::local_machine(store)?.id).then_some(owner)
+        }
+        None => store.session_moved_to(id)?,
     })
 }
 

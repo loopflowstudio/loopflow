@@ -36,7 +36,7 @@ struct WorkObservationTransportTests {
         let first = try #require(try await lines.next())
         let frame = try #require(try JSONSerialization.jsonObject(with: first) as? [String: Any])
         #expect(frame.keys.contains("body"))
-        subscription.send(Data(#"{"id":7}"#.utf8 + [10]))
+        subscription.checkpoint(7)
         let answered = try #require(try await lines.next())
         #expect((try JSONSerialization.jsonObject(with: answered) as? [String: Any])?["answers"] as? Int == 7)
         await subscription.cancel()
@@ -66,7 +66,7 @@ struct WorkObservationTransportTests {
         let subscriptions = FakeSubscriptions()
         let observation = try WorkSubscriptions.observe(launch: subscriptions.launch)
         var frames = observation.frames.makeAsyncIterator()
-        try await subscriptions.answer(.allPlans, 0)
+        try subscriptions.answer(.allPlans, 0)
         #expect(try await frames.next()?.sequence == 1)
         observation.request(.scope(id: 2, WorkScope(repo: "/src/loopflow", headless: false, task: "LOO-1", activity: nil, taskListWave: nil)))
         // The plan answers from its last reading.
@@ -81,17 +81,16 @@ struct WorkObservationTransportTests {
         let subscriptions = FakeSubscriptions()
         let observation = try WorkSubscriptions.observe(launch: subscriptions.launch)
         var frames = observation.frames.makeAsyncIterator()
-        try await subscriptions.answer(.allPlans, 0)
+        try subscriptions.answer(.allPlans, 0)
         #expect(try await frames.next()?.sequence == 1)
         observation.request(.scope(id: 2, WorkScope(repo: nil, headless: false, task: "LOO-1", activity: nil, taskListWave: nil)))
         #expect(try await frames.next()?.answers == 2)
         let task = ServedRead.taskGet(directory: "/", issue: "LOO-1")
         observation.request(.checkpoint(id: 5, replay: []))
-        try await subscriptions.answer(.allPlans, 5)
+        try subscriptions.answer(.allPlans, 5)
         #expect(try await frames.next()?.answers == 5)
-        #expect(subscriptions.requests(task).contains(#"{"id":5}"#))
         // The Task subscription has not answered, so nothing is confirmed yet.
-        try await subscriptions.answer(task, 5)
+        try subscriptions.answer(task, 5)
         let answered = try await frames.next()
         #expect(answered?.content.part == "task")
         let checkpoint = try await frames.next()
@@ -123,45 +122,6 @@ struct WorkObservationTransportTests {
         await observation.cancel()
     }
 
-    @Test("The line reader accepts its frame limit and rejects the next byte", arguments: [false, true])
-    func frameLimit(terminated: Bool) async throws {
-        let allowed = String(repeating: "x", count: 32)
-        let oversized = allowed + "x" + (terminated ? "\n" : "")
-        let process = shell("printf '%s\\n' '\(allowed)'; printf '%s' '\(oversized)'; IFS= read -r request")
-        let reader = try LocalLineObservation<Data>.start(
-            name: "Workspace", process: process, frameLimit: 32,
-            configurationChanged: { false }, decode: { $0 }
-        )
-        var frames = reader.frames.makeAsyncIterator()
-        #expect(try await frames.next() == Data(allowed.utf8))
-        do {
-            _ = try await frames.next()
-            Issue.record("Oversized frame was accepted")
-        } catch {
-            #expect(error.localizedDescription.contains("frame exceeds"))
-        }
-        await reader.cancel()
-        #expect(!process.isRunning)
-    }
-
-    @Test("Silence after the first frame expires a reader that must speak, not a subscription")
-    func stalled() async throws {
-        let process = shell("echo ready; exec /bin/sleep 30")
-        let reader = try LocalLineObservation<Data>.start(
-            name: "Task files", process: process, frameLimit: 32,
-            configurationChanged: { false }, decode: { $0 })
-        var iterator = reader.frames.makeAsyncIterator()
-        #expect(try await iterator.next() == Data("ready".utf8))
-        do {
-            _ = try await iterator.next()
-            Issue.record("A stalled pipe was accepted")
-        } catch {
-            #expect(error.localizedDescription.contains("10 seconds"))
-        }
-        await reader.cancel()
-        #expect(!process.isRunning)
-    }
-
     /// One private Machine for this serialized suite.
     private static let home: URL = {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
@@ -173,22 +133,21 @@ struct WorkObservationTransportTests {
 /// Subscriptions with no reader: a test sends each line a subscription would.
 private final class FakeSubscriptions: @unchecked Sendable {
     private let lock = NSLock()
-    private var subscriptions: [(read: ServedRead, lines: AsyncThrowingStream<Data, any Error>.Continuation, sent: [String])] = []
+    private var subscriptions: [(read: ServedRead, lines: AsyncThrowingStream<Data, any Error>.Continuation, sent: [Int])] = []
 
     var launch: WorkSubscriptions.Launch {
         { [self] read in
             let (lines, continuation) = AsyncThrowingStream<Data, any Error>.makeStream()
             let index = lock.withLock { subscriptions.append((read, continuation, [])); return subscriptions.count - 1 }
-            return LineSubscription(lines: lines, send: { [self] line in
-                lock.withLock { subscriptions[index].sent.append(String(decoding: line, as: UTF8.self)
-                    .trimmingCharacters(in: .newlines)) }
+            return LineSubscription(lines: lines, checkpoint: { [self] id in
+                lock.withLock { subscriptions[index].sent.append(id) }
             }, cancel: { continuation.finish() }, unreadable: { nil })
         }
     }
 
     var launched: [ServedRead] { lock.withLock { subscriptions.map(\.read) } }
 
-    func requests(_ read: ServedRead) -> [String] {
+    func requests(_ read: ServedRead) -> [Int] {
         lock.withLock { subscriptions.first { $0.read == read }?.sent ?? [] }
     }
 
@@ -201,21 +160,11 @@ private final class FakeSubscriptions: @unchecked Sendable {
     }
 
     /// Answer request `id` (0 answers none) with a failed reading.
-    func answer(_ read: ServedRead, _ id: Int) async throws {
-        for _ in 0..<400 where id != 0 && !requests(read).contains(#"{"id":\#(id)}"#) {
-            try await Task.sleep(for: .milliseconds(5))
-        }
+    func answer(_ read: ServedRead, _ id: Int) throws {
+        try #require(id == 0 || requests(read).contains(id))
         send(read, id == 0 ? #"{"answers":null,"unavailable":"gone","body":null,"read_at":null}"#
              : #"{"answers":\#(id),"unavailable":"gone","body":null,"read_at":null}"#)
     }
 }
 
-private func shell(_ script: String, cwd: URL? = nil) -> Process {
-    let process = Process()
-    process.executableURL = URL(fileURLWithPath: "/bin/sh")
-    process.arguments = ["-c", script]
-    process.currentDirectoryURL = cwd
-    process.environment = ["PATH": "/usr/bin:/bin"]
-    return process
-}
 #endif

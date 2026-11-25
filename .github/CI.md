@@ -51,7 +51,7 @@ queue, and only where its changes reach them (`scripts/macos_inputs.py`):
 |-----|----------|
 | `loopflow-ui-test` | `swift/` (Desktop and iOS), its build scripts, DTO fixtures, server protocol and Read/Write types, Rust `build.rs` and libghostty-vt pin/patches |
 | `swift-test` | Swift sources, shared DTO fixtures and server types, Desktop build inputs, the scripts and Python check it runs |
-| `macos-process-test` | Rust files containing `target_os = "macos"`, data clones, store copy, OS process identity, `lf install` |
+| `macos-process-test` | Rust files containing `target_os = "macos"`, data clones, store copy, OS process identity, Tailscale endpoint discovery, `lf install` |
 
 CI changes, the classifier, an unknown diff or a failed classifier run all
 three. Ordinary Rust changes reach Swift through the `lf --json` wire, which the
@@ -133,7 +133,7 @@ Rust partitions wait for one shared build; the other suites run independently.
 | `website-test` | ubuntu-latest | `cd website && uv run python dev.py test` |
 | `e2e-smoke` | ubuntu-latest | both planning-reconnect proofs, then `tests/e2e/test_smoke.sh` |
 | `task-installation` | ubuntu-latest | `uv run python scripts/test_task_installation.py` |
-| `swift-test` | macos-26 | app build, complementary headless model/view and transport/CLI groups (six minutes each on PRs), launch-and-quit check, boundary check |
+| `swift-test` | macos-26 | app build, complementary headless model/view, transport/CLI and two-Machine groups (six minutes each on PRs), launch-and-quit check, boundary check |
 | `macos-process-test` | macos-15, macos-26 | deleted-executable and exact process-authority regression |
 | `loopflow-ui-test` | macos-26 | Desktop app/test-runner compile; native iOS model tests on a disposable Simulator |
 

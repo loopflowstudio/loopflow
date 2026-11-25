@@ -10,6 +10,7 @@ use super::SqliteStore;
 /// Saved execution destination; configuration explains an unclaimed destination above SQL.
 #[derive(Debug)]
 pub struct SavedTaskRoute {
+    pub peer_selector: String,
     pub checkout: Option<String>,
     pub repository_id: RepositoryId,
     pub machine_id: loopflow_model::durable::MachineId,
@@ -230,17 +231,20 @@ impl SqliteStore {
         if !me.matches_task_in(&tx, task)? {
             return Ok(None);
         }
-        let (repo, checkout): (String, Option<String>) = tx.query_row(
-            "SELECT w.repo,c.worktree FROM tasks t JOIN repository_plans w ON w.id=t.repository_id
+        let (repo, checkout, peer_selector): (String, Option<String>, String) = tx.query_row(
+            "SELECT w.repo,c.worktree,
+                    COALESCE(t.external_issue_id,NULLIF(t.issue_identifier,'lf-'||substr(t.id,6)),t.id)
+             FROM tasks t JOIN repository_plans w ON w.id=t.repository_id
              LEFT JOIN task_checkouts c ON c.task_id=t.id WHERE t.id=?1",
             [task.as_str()],
-            |row| Ok((row.get(0)?, row.get(1)?)),
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )?;
         let repository_id = repository_id_in(&tx, &repo)?.ok_or_else(|| {
             StoreError::InvalidData(format!("repository {repo} has no selected plan identity"))
         })?;
         let (machine_id, claimed) = super::task_ownership::writer_in(&tx, task, me)?;
         Ok(Some(SavedTaskRoute {
+            peer_selector,
             checkout,
             repository_id,
             machine_id,
@@ -346,6 +350,24 @@ impl SqliteStore {
             |row| row.get(0),
         )
         .optional()
+        .map_err(Into::into)
+    }
+
+    /// This Machine's path for the repository a Task or Wave belongs to.
+    pub fn work_repository_path(
+        &self,
+        task: Option<&TaskId>,
+        wave: Option<&loopflow_model::id::WaveId>,
+    ) -> StoreResult<Option<String>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.query_row(
+            "SELECT coalesce(
+                (SELECT r.repo FROM tasks t JOIN repository_plans r ON r.id=t.repository_id
+                 WHERE t.id=?1),
+                (SELECT repo FROM waves WHERE id=?2))",
+            params![task.map(TaskId::as_str), wave.map(|wave| wave.as_str())],
+            |row| row.get(0),
+        )
         .map_err(Into::into)
     }
 }

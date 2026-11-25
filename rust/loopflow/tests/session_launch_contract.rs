@@ -155,7 +155,14 @@ if '--version' in args:
     print('fixture'); sys.exit(0)
 if '--dangerously-bypass-hook-trust' in args:
     sys.exit(2)
-record = {'args': args, 'cwd': os.getcwd(), 'opencode': os.environ.get('OPENCODE_CONFIG_CONTENT'), 'participant': os.environ.get('LF_USER_NAME'), 'account': os.environ.get('LF_PROVIDER_ACCOUNT_ID'), 'codex_home': os.environ.get('CODEX_HOME'), 'forwarded': os.environ.get('CLAUDE_CODE_OAUTH_TOKEN')}
+# The launch's login probe; `HOME/signed-out` models a Machine with no login
+# of its own, which a forwarded Claude setup token signs in for the run.
+signed_out = os.path.exists(os.environ['HOME']+'/signed-out') and not os.environ.get('CLAUDE_CODE_OAUTH_TOKEN')
+if args[:2] == ['auth', 'status']:
+    print(json.dumps({'loggedIn': not signed_out})); sys.exit(1 if signed_out else 0)
+if args[:2] == ['login', 'status']:
+    print('Not logged in' if signed_out else 'Logged in using ChatGPT'); sys.exit(1 if signed_out else 0)
+record = {'args': args, 'cwd': os.getcwd(), 'opencode': os.environ.get('OPENCODE_CONFIG_CONTENT'), 'participant': os.environ.get('LF_USER_NAME'), 'account': os.environ.get('LF_PROVIDER_ACCOUNT_ID'), 'codex_home': os.environ.get('CODEX_HOME'), 'forwarded': os.environ.get('DEPLOY_TOKEN')}
 if os.path.basename(sys.argv[0]) in ('claude','codex'):
     provider = os.path.basename(sys.argv[0])
     native = os.environ['CLAUDE_CONFIG_DIR' if provider == 'claude' else 'CODEX_HOME']
@@ -724,22 +731,9 @@ fn machine_dispatch_resolves_destination_policy_and_forwards_launch_and_resume_o
     assert_eq!(remote.session(), session);
 }
 
-/// Rentals authenticate from names: Claude's `claude setup-token` value as
-/// `CLAUDE_CODE_OAUTH_TOKEN`, and a Plus/Pro Codex login as `~/.codex/auth.json`
-/// (Codex access tokens exist only for Business and Enterprise workspaces).
-#[test]
-fn setup_token_and_codex_auth_json_reach_a_remote_launch_only_by_name() {
-    const TOKEN: &str = "fixture-setup-token-secret";
-    const AUTH: &str = r#"{"tokens":{"refresh_token":"fixture-auth-json-secret"}}"#;
-    let local = Fixture::new("claude:opus");
-    let remote = Fixture::new("claude:opus");
-    fs::write(
-        local.home.path().join("machine/config.yaml"),
-        "forward:\n  env: [CLAUDE_CODE_OAUTH_TOKEN]\n  files: [~/.codex/auth.json]\n",
-    )
-    .unwrap();
-    fs::create_dir_all(local.home.path().join(".codex")).unwrap();
-    fs::write(local.home.path().join(".codex/auth.json"), AUTH).unwrap();
+/// `remote` as the Machine `fixture` of `local`, behind a stand-in `ssh` that
+/// logs its argv; returns the log.
+fn remote_machine(local: &Fixture, remote: &Fixture) -> std::path::PathBuf {
     let remote_bin = remote.home.path().join(".local/bin");
     fs::create_dir_all(&remote_bin).unwrap();
     std::os::unix::fs::symlink(env!("CARGO_BIN_EXE_lf"), remote_bin.join("lf")).unwrap();
@@ -749,6 +743,7 @@ fn setup_token_and_codex_auth_json_reach_a_remote_launch_only_by_name() {
         "LF_BIN": env!("CARGO_BIN_EXE_lf"),
         "PATH": format!("{}:/usr/bin:/bin", remote.home.path().join("bin").display()),
         "CLAUDE_CONFIG_DIR": remote.home.path().join(".claude"),
+        "CODEX_HOME": remote.home.path().join(".codex"),
     });
     let argv_log = local.home.path().join("ssh-argv");
     let ssh = local.home.path().join("bin/ssh");
@@ -770,10 +765,29 @@ fn setup_token_and_codex_auth_json_reach_a_remote_launch_only_by_name() {
             .output()
             .unwrap(),
     );
+    argv_log
+}
+
+/// Per-run secrets `forward` names reach a remote launch by name only: never
+/// in argv, logs or either store.
+#[test]
+fn forwarded_secrets_reach_a_remote_launch_only_by_name() {
+    const TOKEN: &str = "fixture-deploy-token-secret";
+    const AUTH: &str = r#"{"refresh_token":"fixture-auth-json-secret"}"#;
+    let local = Fixture::new("claude:opus");
+    let remote = Fixture::new("claude:opus");
+    fs::write(
+        local.home.path().join("machine/config.yaml"),
+        "forward:\n  env: [DEPLOY_TOKEN]\n  files: [~/.config/deploy/auth.json]\n",
+    )
+    .unwrap();
+    fs::create_dir_all(local.home.path().join(".config/deploy")).unwrap();
+    fs::write(local.home.path().join(".config/deploy/auth.json"), AUTH).unwrap();
+    let argv_log = remote_machine(&local, &remote);
     let launch = |token: Option<&str>| {
         let mut command = local.command();
         if let Some(token) = token {
-            command.env("CLAUDE_CODE_OAUTH_TOKEN", token);
+            command.env("DEPLOY_TOKEN", token);
         }
         command
             .args(["--machine", "fixture", "-b", ":", "say done"])
@@ -784,7 +798,7 @@ fn setup_token_and_codex_auth_json_reach_a_remote_launch_only_by_name() {
     // An environment file a failed launch never read is swept by the next delivery.
     let stale = remote.home.path().join(".lf/forward/unread");
     fs::create_dir_all(stale.parent().unwrap()).unwrap();
-    fs::write(&stale, "export CLAUDE_CODE_OAUTH_TOKEN=old\n").unwrap();
+    fs::write(&stale, "export DEPLOY_TOKEN=old\n").unwrap();
     fs::File::options()
         .write(true)
         .open(&stale)
@@ -794,7 +808,7 @@ fn setup_token_and_codex_auth_json_reach_a_remote_launch_only_by_name() {
     let output = launch(Some(TOKEN));
     success(&output);
     assert_eq!(remote.received()["forwarded"], TOKEN);
-    let copied = remote.home.path().join(".codex/auth.json");
+    let copied = remote.home.path().join(".config/deploy/auth.json");
     assert_eq!(fs::read_to_string(&copied).unwrap(), AUTH);
     assert_eq!(
         fs::metadata(&copied).unwrap().permissions().mode() & 0o777,
@@ -855,15 +869,15 @@ fn setup_token_and_codex_auth_json_reach_a_remote_launch_only_by_name() {
     let output = launch(Some(TOKEN));
     success(&output);
     assert_eq!(fs::read_to_string(&copied).unwrap(), "destination login");
-    assert!(String::from_utf8_lossy(&output.stderr).contains("keeps its own ~/.codex/auth.json"));
+    assert!(String::from_utf8_lossy(&output.stderr)
+        .contains("keeps its own ~/.config/deploy/auth.json"));
 
     // A named value this Machine cannot supply stops before anything reaches SSH.
     fs::remove_file(&argv_log).unwrap();
     let output = launch(None);
     assert!(!output.status.success());
     assert!(
-        String::from_utf8_lossy(&output.stderr)
-            .contains("forward.env names CLAUDE_CODE_OAUTH_TOKEN"),
+        String::from_utf8_lossy(&output.stderr).contains("forward.env names DEPLOY_TOKEN"),
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
@@ -878,6 +892,105 @@ fn setup_token_and_codex_auth_json_reach_a_remote_launch_only_by_name() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(!stderr.contains("forward.env"), "{stderr}");
     assert!(argv_log.exists(), "{stderr}");
+}
+
+/// A Machine whose client reports no login refuses the launch before any agent
+/// starts, naming the command that signs it in where the person reads it.
+#[test]
+fn a_signed_out_machine_refuses_the_launch_with_the_command_that_signs_it_in() {
+    let local = Fixture::new("codex");
+    let remote = Fixture::new("codex");
+    remote_machine(&local, &remote);
+    fs::write(remote.home.path().join("signed-out"), "").unwrap();
+    let output = local
+        .command()
+        .args(["--machine", "fixture", "-b", "-a", "codex", ":", "say done"])
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success(), "{stderr}");
+    assert!(
+        stderr.contains("fixture has no Codex login; run `lf machine login codex fixture`"),
+        "{stderr}"
+    );
+    assert!(!remote.home.path().join("received.json").exists());
+
+    // Claude on another Machine is the forwarded token; with it, the launch goes ahead.
+    let config = local.home.path().join("machine/config.yaml");
+    let registered = fs::read_to_string(&config).unwrap();
+    fs::write(
+        &config,
+        format!("{registered}forward:\n  env: [CLAUDE_CODE_OAUTH_TOKEN]\n"),
+    )
+    .unwrap();
+    let claude = |token: &str| {
+        local
+            .command()
+            .env("CLAUDE_CODE_OAUTH_TOKEN", token)
+            .args([
+                "--machine",
+                "fixture",
+                "-b",
+                "-a",
+                "claude",
+                ":",
+                "say done",
+            ])
+            .output()
+            .unwrap()
+    };
+    // Named but with no value here, Claude reads signed out there.
+    let output = claude("");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success(), "{stderr}");
+    assert!(
+        stderr.contains(
+            "fixture has no Claude login; launch where CLAUDE_CODE_OAUTH_TOKEN has a value \
+             (`doppler secrets set CLAUDE_CODE_OAUTH_TOKEN`, or run under `doppler run`) \
+             and `forward.env` names it (`lf set --global forward.env`)"
+        ),
+        "{stderr}"
+    );
+    assert!(!remote.home.path().join("received.json").exists());
+    success(&claude("fixture-setup-token"));
+    fs::remove_file(remote.home.path().join("received.json")).unwrap();
+
+    // A missing Claude token is Claude's login, so Codex launches still run.
+    fs::remove_file(remote.home.path().join("signed-out")).unwrap();
+    success(
+        &local
+            .command()
+            .env("CLAUDE_CODE_OAUTH_TOKEN", "")
+            .args(["--machine", "fixture", "-b", "-a", "codex", ":", "say done"])
+            .output()
+            .unwrap(),
+    );
+    fs::write(&config, registered).unwrap();
+
+    // Here, the same check names this Machine's own sign-in.
+    fs::write(local.home.path().join("signed-out"), "").unwrap();
+    let output = local
+        .command()
+        .args(["-b", "-a", "codex", ":", "say done"])
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success(), "{stderr}");
+    assert!(
+        stderr.contains("This Machine has no Codex login; run `lf machine login codex`"),
+        "{stderr}"
+    );
+    assert!(!local.home.path().join("received.json").exists());
+
+    // Signed in, the launch goes ahead.
+    fs::remove_file(local.home.path().join("signed-out")).unwrap();
+    success(
+        &local
+            .command()
+            .args(["-b", "-a", "codex", ":", "say done"])
+            .output()
+            .unwrap(),
+    );
 }
 
 #[path = "support/mod.rs"]

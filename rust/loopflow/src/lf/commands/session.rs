@@ -70,7 +70,7 @@ fn run_command(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Result
 /// `lf steer`: save `message` for a Session or a Task named by `target`, or
 /// with none for the Wave or repository the invocation selected. A target
 /// that names no Session is a Task. `--json` prints what the server answers:
-/// `task.steer` the Task's thread with the entry, `session.steer` the steer.
+/// `task.steer` the Task's delivery receipt, `session.steer` the steer.
 pub fn steer(
     cli: &crate::lf::Cli,
     target: Option<&str>,
@@ -99,20 +99,10 @@ pub fn steer(
             let unknown = || format!("{issue} names no Session and no Task");
             let repo = super::mutation::selected_task_repository(cli, &directory, Some(issue))
                 .with_context(unknown)?;
-            let thread = runtime.block_on(async {
-                let (store, task) =
-                    loopflow_execution::ops::task::resolve_saved_task(&repo, wave, issue)
-                        .await
-                        .with_context(unknown)?;
-                let scope = SteerScope::Task { issue, wave };
-                let steer =
-                    loopflow_execution::engine::session::steer(&store, &repo, scope, message)
-                        .await?;
-                anyhow::Ok((steer, store.task_comments(&task.id)?))
-            })?;
+            let receipt = super::write::steer_task(&repo, issue, wave, message, None)?;
             match json {
-                true => println!("{}", serde_json::to_string(&thread.1)?),
-                false => println!("Saved {}", thread.0.id),
+                true => println!("{}", serde_json::to_string(&receipt)?),
+                false => println!("{}", receipt.delivery.sentence),
             }
             return Ok(());
         }
@@ -131,30 +121,11 @@ pub fn steer(
         (false, Some(session)) => println!(
             "Saved {}; {}",
             steer.id,
-            steer_reader(&store.sqlite, session)?
+            loopflow_execution::engine::session::steer_reader(&store.sqlite, session)?
         ),
         (false, None) => println!("Saved {}", steer.id),
     }
     Ok(())
-}
-
-/// Who reads a steer saved for `session`, with no turn of its own to run it.
-fn steer_reader(
-    sqlite: &loopflow_execution::store::sqlite::SqliteStore,
-    session: &loopflow_execution::session::LfSession,
-) -> anyhow::Result<String> {
-    let id = &session.id;
-    Ok(
-        if loopflow_execution::ops::human_session::agent_running(sqlite, session)? {
-            format!("{id} reads it at its next boundary")
-        } else if session.interactive {
-            format!("the Machine server starts {id} to read it")
-        } else if session.graph_lf_process_id.is_some() {
-            format!("{id} is a finished worker; nothing reads it until its Graph continues it")
-        } else {
-            format!("{id} is a finished batch; nothing reads it")
-        },
-    )
 }
 
 /// `lf -b steer SESSION TEXT`: a Session whose agent is stopped reads its
@@ -508,7 +479,11 @@ impl SessionFacts {
 
 /// `lf session list`.
 pub fn list_sessions(args: &SessionListArgs) -> anyhow::Result<()> {
-    let filter = list_filter(args, &std::env::current_dir()?)?;
+    let directory = std::env::current_dir()?;
+    if !args.subscribe && list_remote_task(args, &directory)? {
+        return Ok(());
+    }
+    let filter = list_filter(args, &directory)?;
     if args.subscribe {
         // This process reads the subscription itself, so it watches
         // transcripts the way the Machine server does.
@@ -771,6 +746,45 @@ async fn list(
     } else {
         copied_sessions(store, filter)?
     };
+    print_sessions(sessions, copied);
+    Ok(())
+}
+
+/// `lf session list --task <task>` for a Task another Machine runs, from that
+/// Machine's server, opening with this Machine's `lf open`. `false` when the
+/// Task runs here.
+fn list_remote_task(args: &SessionListArgs, directory: &std::path::Path) -> anyhow::Result<bool> {
+    let Some(task) = &args.task else {
+        return Ok(false);
+    };
+    let mut read = super::read::Read::SessionList {
+        directory: directory.to_owned(),
+        headless: args.headless,
+        after: args.page.then(|| args.after.clone().unwrap_or_default()),
+        limit: args.page.then_some(u32::try_from(args.limit)?),
+        task: Some(task.clone()),
+    };
+    if read.peer_route()?.is_none() {
+        return Ok(false);
+    }
+    let reading = read.read()?;
+    if args.json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&loopflow_execution::read_stream::selected_answer(
+                &reading
+            )?)?
+        );
+    } else {
+        print_sessions(serde_json::from_value(reading)?, Vec::new());
+    }
+    Ok(true)
+}
+
+fn print_sessions(
+    sessions: Vec<loopflow_execution::ops::human_session::SessionRecord>,
+    copied: Vec<loopflow_execution::machine_records::CopiedSession>,
+) {
     if sessions.is_empty() && copied.is_empty() {
         println!("No Sessions.");
     } else {
@@ -788,12 +802,10 @@ async fn list(
             let mut line = format!(
                 "{}  {:<7} {}  {}",
                 session.id,
-                match session.state {
-                    _ if session.availability.is_some() => "available",
-                    SessionState::Unknown => "unknown",
-                    SessionState::Active => "active",
-                    SessionState::Detached => "detached",
-                    SessionState::Closed => "closed",
+                if session.availability.is_some() {
+                    "available"
+                } else {
+                    session.state.label()
                 },
                 place,
                 match &session.account {
@@ -805,6 +817,14 @@ async fn list(
                 line.push_str(&format!("  {}", turn.describe(now)));
             }
             println!("{line}");
+            // A stopped Session says why it is down and what brings it back.
+            if let Some(status) = session
+                .status_line
+                .as_ref()
+                .filter(|_| session.outlook.is_some())
+            {
+                println!("  {status}");
+            }
             if let Some(action) = session.action {
                 println!("  {} — {}", action.label, action.help);
             }
@@ -821,9 +841,18 @@ async fn list(
                 session.title,
                 session.origin_name()
             );
+            if let Some(failure) = session
+                .start_failure
+                .as_deref()
+                .filter(|_| session.completed_at.is_none())
+            {
+                println!(
+                    "  could not start: {}",
+                    loopflow_execution::ops::recovery::start_failure_reason(failure)
+                );
+            }
         }
     }
-    Ok(())
 }
 
 /// Copied Sessions the filter's Task or repository selects; none when it names
@@ -955,6 +984,9 @@ pub(crate) fn prepared(cli: &crate::lf::Cli, directory: &Path) -> anyhow::Result
     let Some(crate::lf::Commands::Session { cmd }) = &cli.command else {
         bail!("not a Session command");
     };
+    // A served request carries its `--agent` here; a new conversation
+    // resolves its harness from the invocation's settings.
+    let _settings = loopflow_execution::config::settings::select_invocation(cli.setting_values()?);
     tokio::runtime::Runtime::new()?.block_on(async {
         let store = open_shared_store().await?;
         match cmd {

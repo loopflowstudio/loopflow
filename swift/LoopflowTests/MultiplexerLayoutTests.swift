@@ -6,33 +6,20 @@ import Testing
 // resize, and round-trip must hold, because focus/color/persistence all read it.
 @Suite("Multiplexer layout")
 struct MultiplexerLayoutTests {
-    @Test("Pane locations preserve terminal capture and refuse unavailable file owners")
+    @Test("Terminals keep the location they started in; the browser keeps its reading")
     func contentLocations() {
         let captured = WorkspaceIdentity(machineId: "local", worktree: "/captured")
-        let remote = WorkspaceIdentity(machineId: "peer", worktree: "/remote")
-        let readings: [(TaskLocation, WorkspaceIdentity?)] = [
-            (.recorded(taskID: "task", checkout: "/remote"), remote),
-            (.recorded(taskID: "task", checkout: nil), nil),
-            (.unrecorded, nil),
-            (.unavailable(reason: "offline"), nil),
+        let contents: [(PaneContent, WorkspaceIdentity?)] = [
+            (.session(id: nil), nil),
+            (.session(id: "session", location: captured), captured),
+            (.shell(tabs: [ShellTab(id: "tab", location: captured)], selected: "tab"), captured),
+            (.browser(taskId: "task", tabs: [.files], selected: "files", location: captured), captured),
+            (.browser(taskId: "task", tabs: [.graphLog], selected: "graph-log"), nil),
         ]
-        for (reading, expected) in readings {
-            let owner = TaskLocationObservation(request: "read", repositoryID: "repo",
-                taskID: "task", machineID: "peer", observedAt: 1, location: reading)
-            let contents: [(PaneContent, WorkspaceIdentity?)] = [
-                (.session(id: nil), nil),
-                (.session(id: "session", location: captured, execution: owner), captured),
-                (.shell(tabs: [ShellTab(id: "tab", location: captured, execution: owner)], selected: "tab"), captured),
-                (.browser(taskId: "task", tabs: [.files], selected: "files", location: captured, execution: owner), expected),
-                (.browser(taskId: "task", tabs: [.graphLog], selected: "graph-log", location: captured, execution: owner), expected),
-                (.browser(taskId: "task", tabs: [.files], selected: "files", location: captured), captured),
-                (.browser(taskId: "task", tabs: [.graphLog], selected: "graph-log", location: captured), captured),
-            ]
-            for (content, location) in contents {
-                #expect(content.location == location)
-                let inspected = DesktopLayoutInspection(.leaf(PaneState(content: content)), surface: { _ in nil }, commands: { _ in nil }, attachment: { _ in nil })
-                #expect(inspected.location == location)
-            }
+        for (content, location) in contents {
+            #expect(content.location == location)
+            let inspected = DesktopLayoutInspection(.leaf(PaneState(content: content)), surface: { _ in nil }, commands: { _ in nil }, attachment: { _ in nil })
+            #expect(inspected.location == location)
         }
     }
 

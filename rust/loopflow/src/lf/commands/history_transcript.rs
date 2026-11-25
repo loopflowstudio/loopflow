@@ -2,11 +2,14 @@
 //! providers kept them, what is retained across Sessions, and search.
 
 use std::collections::BTreeSet;
+use std::ops::ControlFlow;
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
 use crate::lf::commands::WorkFilter;
+use loopflow_execution::machine_records::TranscriptTurn;
+use loopflow_execution::session_record::SessionOrigin;
 use loopflow_execution::store::ProviderAccountId;
 use loopflow_execution::transcript::summary::{summarize, RetentionSummary};
 use loopflow_execution::transcript::{
@@ -66,6 +69,41 @@ pub(crate) fn render(transcript: &SessionTranscript) -> String {
         render_conversation(&mut out, conversation);
     }
     out
+}
+
+pub(super) fn copied(
+    store: &SqliteStore,
+    history: &loopflow_execution::machine_records::CopiedHistory,
+    json: bool,
+) -> Result<String> {
+    use loopflow_execution::machine_records::RecordKind;
+    let session = &history.session;
+    let mut turns: Vec<TranscriptTurn> =
+        store.copied_session_rows(&session.origin, RecordKind::Transcript, &session.id)?;
+    turns.sort_by_key(|row| (row.thread_position, row.position));
+    if json {
+        let transcript = serde_json::json!({ "session_id":session.id, "origin_machine_id":session.origin,
+            "collected_at":history.copied_at, "turns":turns });
+        return Ok(format!("{transcript}\n"));
+    }
+    let mut out = format!(
+        "Conversation {} · from {} · collected {}\n",
+        session.id,
+        session.origin_name(),
+        minute(history.copied_at)
+    );
+    if turns.is_empty() {
+        out.push_str("  No transcript text was collected.\n");
+    }
+    let mut thread = None;
+    for row in &turns {
+        if thread != Some(&row.thread) {
+            out.push_str(&format!("\n{} {}\n", row.harness, row.thread));
+            thread = Some(&row.thread);
+        }
+        render_turn(&mut out, &row.turn);
+    }
+    Ok(out)
 }
 
 fn render_conversation(out: &mut String, conversation: &Conversation) {
@@ -334,11 +372,138 @@ pub struct SearchResults {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SearchHit {
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub origin: Option<SessionOrigin>,
     pub session_id: String,
     pub harness: String,
     pub agent_session: String,
     pub at: Option<i64>,
     pub snippet: String,
+}
+
+struct TranscriptSearch {
+    results: SearchResults,
+    needle: String,
+    prefilter: regex::bytes::Regex,
+    limit: usize,
+}
+
+impl TranscriptSearch {
+    fn scan(&mut self, bytes: &[u8]) -> bool {
+        self.results.scanned_bytes += bytes.len() as u64;
+        self.prefilter.is_match(bytes)
+    }
+
+    fn read_turn(
+        &mut self,
+        session: &str,
+        origin: Option<&SessionOrigin>,
+        harness: &str,
+        thread: &str,
+        turn: &Turn,
+    ) -> ControlFlow<()> {
+        for text in texts(turn) {
+            if let Some(snippet) = snippet(text, &self.needle) {
+                self.results.hits.push(SearchHit {
+                    session_id: session.into(),
+                    origin: origin.cloned(),
+                    harness: harness.into(),
+                    agent_session: thread.into(),
+                    at: turn.at(),
+                    snippet,
+                });
+                if self.results.hits.len() == self.limit {
+                    return ControlFlow::Break(());
+                }
+            }
+        }
+        ControlFlow::Continue(())
+    }
+
+    fn read(&mut self, store: &SqliteStore, filter: WorkFilter) -> Result<()> {
+        if self.limit == 0 {
+            return Ok(());
+        }
+        let pending = store.pending_inputs(
+            filter.wave,
+            filter.project,
+            filter.task,
+            None,
+            (self.results.since, false, None),
+            loopflow_storage::sqlite::sessions::HistorySelection::Local,
+        )?;
+        let sessions: BTreeSet<_> = pending
+            .inputs
+            .into_iter()
+            .map(|input| input.session_id)
+            .collect();
+        for session in sessions {
+            for thread in threads(store, &session)? {
+                let Ok((harness, Located::Found { source, .. })) = thread.located else {
+                    continue;
+                };
+                if let Source::File(path) = &source {
+                    let Ok(bytes) = std::fs::read(path) else {
+                        continue;
+                    };
+                    if !self.scan(&bytes) {
+                        continue;
+                    }
+                }
+                let Ok(turns) = transcript::read(harness, &source) else {
+                    continue;
+                };
+                for turn in &turns {
+                    if self
+                        .read_turn(
+                            &session,
+                            None,
+                            harness.as_str(),
+                            thread.facts.thread.as_str(),
+                            turn,
+                        )
+                        .is_break()
+                    {
+                        return Ok(());
+                    }
+                }
+            }
+        }
+
+        let local_hits = self.results.hits.len();
+        store.visit_copied_transcripts(
+            self.results.since,
+            filter.wave,
+            filter.project,
+            filter.task,
+            |machine_id, bytes| {
+                if !self.scan(bytes) {
+                    return Ok(ControlFlow::Continue(()));
+                }
+                let row: TranscriptTurn = serde_json::from_slice(bytes)?;
+                Ok(self.read_turn(
+                    &row.session_id,
+                    Some(&SessionOrigin {
+                        machine_id,
+                        label: None,
+                    }),
+                    &row.harness,
+                    &row.thread,
+                    &row.turn,
+                ))
+            },
+        )?;
+        if self.results.hits.len() > local_hits {
+            let labels = loopflow_execution::store::machines::origin_labels(store)?;
+            for origin in self.results.hits[local_hits..]
+                .iter_mut()
+                .filter_map(|hit| hit.origin.as_mut())
+            {
+                origin.label = labels.get(&origin.machine_id).cloned();
+            }
+        }
+        Ok(())
+    }
 }
 
 pub(crate) fn search(
@@ -351,66 +516,40 @@ pub(crate) fn search(
     anyhow::ensure!(!query.trim().is_empty(), "Search text is empty");
     let since = loopflow_execution::output::parse_since(since, time::OffsetDateTime::now_utc())?
         .unix_timestamp();
-    let mut results = SearchResults {
-        query: query.to_owned(),
-        since,
-        scanned_bytes: 0,
-        hits: Vec::new(),
+    // Search a literal that survives JSON quoting before decoding the full text.
+    let literal = query
+        .split(|c: char| c.is_control() || c == '"' || c == '\\')
+        .max_by_key(|part| part.len())
+        .unwrap_or_default();
+    let mut search = TranscriptSearch {
+        results: SearchResults {
+            query: query.into(),
+            since,
+            scanned_bytes: 0,
+            hits: Vec::new(),
+        },
+        needle: query.to_lowercase(),
+        prefilter: regex::bytes::RegexBuilder::new(&regex::escape(literal))
+            .case_insensitive(true)
+            .build()?,
+        limit,
     };
     if let Some(store) = read_only_store()? {
-        let sessions = super::session_history::collect_history(filter, None, since)?
-            .into_iter()
-            .map(|history| history.session_id.to_string())
-            .collect::<BTreeSet<_>>();
-        let needle = query.to_lowercase();
-        // A raw byte prefilter, so only transcripts that mention it are parsed.
-        let prefilter = regex::bytes::RegexBuilder::new(&regex::escape(query))
-            .case_insensitive(true)
-            .build()?;
-        'sessions: for session in sessions {
-            for thread in threads(&store, &session)? {
-                let Ok((harness, Located::Found { source, .. })) = thread.located else {
-                    continue;
-                };
-                if let Source::File(path) = &source {
-                    let Ok(bytes) = std::fs::read(path) else {
-                        continue;
-                    };
-                    results.scanned_bytes += bytes.len() as u64;
-                    if !prefilter.is_match(&bytes) {
-                        continue;
-                    }
-                }
-                let Ok(turns) = transcript::read(harness, &source) else {
-                    continue;
-                };
-                for turn in &turns {
-                    for text in texts(turn) {
-                        if let Some(snippet) = snippet(text, &needle) {
-                            results.hits.push(SearchHit {
-                                session_id: session.clone(),
-                                harness: harness.as_str().to_owned(),
-                                agent_session: thread.facts.thread.as_str().to_owned(),
-                                at: turn.at(),
-                                snippet,
-                            });
-                            if results.hits.len() >= limit {
-                                break 'sessions;
-                            }
-                        }
-                    }
-                }
-            }
-        }
+        search.read(&store, filter)?;
     }
+    let results = search.results;
     if json {
         println!("{}", serde_json::to_string_pretty(&results)?);
         return Ok(());
     }
     for hit in &results.hits {
         println!(
-            "{} · {} · {}",
+            "{}{} · {} · {}",
             hit.session_id,
+            hit.origin
+                .as_ref()
+                .map(|origin| format!(" · from {}", origin.name()))
+                .unwrap_or_default(),
             hit.at.map(minute).unwrap_or_else(|| "unknown time".into()),
             hit.snippet
         );

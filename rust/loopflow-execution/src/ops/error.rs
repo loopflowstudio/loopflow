@@ -7,13 +7,15 @@ pub type OpsResult<T> = Result<T, OpsError>;
 #[derive(Debug, Error)]
 pub enum OpsError {
     #[error(transparent)]
+    Refused(#[from] crate::engine::Error),
+    #[error(transparent)]
     Planning(#[from] crate::linear::LinearBindingError),
     /// A tracker request that failed in the tracker's terms (a rate limit).
     #[error(transparent)]
     Tracker(#[from] crate::ops::tracker::TrackerError),
     #[error(transparent)]
     TaskData(#[from] loopflow_storage::work::task::TaskDataError),
-    #[error("git error: {0}")]
+    #[error(transparent)]
     Git(#[from] GitError),
     #[error("core error: {0}")]
     Core(#[from] CoreError),
@@ -29,6 +31,9 @@ pub enum OpsError {
     Message(String),
     #[error("{0}")]
     DeliveryHeld(String),
+    /// The commit landed in the checkout; only its push failed.
+    #[error("{0}\nThe commit stays local; the next `lf commit` pushes it")]
+    PushFailed(String),
     #[error("release deferred: {reason}; continuation: {continuation}")]
     ReleaseDeferred {
         reason: String,

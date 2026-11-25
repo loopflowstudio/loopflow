@@ -149,7 +149,18 @@ final class TaskFilesStore {
 
     var measurementRepository: String?
     let issue: String
-    let cwd: String
+    /// The checkout on the Machine that runs the Task, as last read.
+    private(set) var cwd: String { didSet { diffReview.cwd = cwd } }
+    /// That Machine when it is not this one; nil while it is this Mac.
+    private(set) var machine: String? { didSet { diffReview.machine = machine } }
+    /// What the Files header calls that Machine: its label when the plan names
+    /// one, else its ID.
+    var machineName: String? { machine.map { machineLabel ?? $0 } }
+    @ObservationIgnored private var machineLabel: String?
+    /// This Mac, which watches its own checkouts directly.
+    @ObservationIgnored private let localMachineID: String?
+    /// Documents to read where the Task has moved, before their next ordinary read.
+    @ObservationIgnored private var arriving: Set<String> = []
     let query: RegistryQuery
     var tabs: [WorkFileTab] { browser.tabs }
     var selection: String? {
@@ -173,8 +184,10 @@ final class TaskFilesStore {
         selection = retained.first { $0.id == selected }?.path
     }
 
-    func restoreDrafts(_ drafts: [WorkFileDraft], location: WorkViewPlan.Location) {
-        for draft in drafts where draft.location == location {
+    /// A draft belongs to the Task, its path and its base revision; saving it
+    /// wherever the Task runs now succeeds only while that file is at its base.
+    func restoreDrafts(_ drafts: [WorkFileDraft]) {
+        for draft in drafts {
             document(draft.path).restore(draft, task: issue)
         }
     }
@@ -203,11 +216,17 @@ final class TaskFilesStore {
 
     var documents: [String: TaskFileDocument] { browser.documents }
     private(set) var error: String?
+    /// The Task has no checkout on its Machine yet: Files and Changes say
+    /// **Not started** until a read finds one.
+    var notStarted: Bool { watchNotStarted || workingTree.notStarted || tree.notStarted }
+    private var watchNotStarted = false
     private var fileGeneration = 0
     private var savedPreference = true
     private var preferenceChanges: AnyCancellable?
     private var observation: TaskFileObservation?
-    @ObservationIgnored private var remoteObservation: Task<Void, Never>?
+    @ObservationIgnored private var servedObservation: Task<Void, Never>?
+    /// What the served watch last answered, so a repeat after a reconnect reads nothing.
+    @ObservationIgnored private var servedRevision: String?
 
     private var invalidation: Task<Void, Never>?
     private var pendingPaths: Set<String> = []
@@ -218,11 +237,13 @@ final class TaskFilesStore {
         didSet { for document in documents.values { scheduleSave(document) } }
     }
 
-    deinit { remoteObservation?.cancel() }
+    deinit { servedObservation?.cancel() }
 
+    /// This Mac's checkout through FSEvents; any other Machine's through the
+    /// server's `task.files.watch`, which follows the Task when it moves.
     func observeFiles() {
-        if let machine = query.remoteMachine {
-            observeRemoteFiles(machine: machine)
+        if machine != nil {
+            observeServedFiles()
             return
         }
         guard observation == nil else { return }
@@ -233,42 +254,99 @@ final class TaskFilesStore {
         } catch { self.error = "Live file observation unavailable: \(error.localizedDescription)" }
     }
 
-    private func observeRemoteFiles(machine: String) {
-        guard remoteObservation == nil else { return }
-        let request = UUID().uuidString
-        remoteObservation = Task { [weak self, query, issue, cwd] in
-            var observation: TaskFilesObservation?
-            do {
-                let opened = try await query.watchTaskFiles(issue: issue, checkout: cwd, request: request)
-                observation = opened
-                for try await frame in opened.frames {
-                    try Task.checkCancellation()
-                    guard frame.request == request, frame.taskID == issue,
-                          frame.machineID == machine, frame.checkout == cwd else {
-                        throw RegistryQueryError("Stale or mismatched file observation; drafts retained. Reopen the Task.")
-                    }
-                    guard let self else { break }
-                    if !frame.paths.isEmpty || !frame.ignoredScratch.isEmpty {
+    /// The Task's reading names another Machine or checkout: watch that one and
+    /// re-read everything open there. Documents and their drafts stay.
+    func relocate(machine: String?, label: String? = nil, cwd: String) {
+        if machine == self.machine, let label { machineLabel = label }
+        guard machine != self.machine || cwd != self.cwd else { return }
+        machineLabel = label
+        let observing = observation != nil || servedObservation != nil
+        observation = nil
+        servedObservation?.cancel()
+        servedObservation = nil
+        servedRevision = nil
+        self.machine = machine
+        self.cwd = cwd
+        arriving = Set(documents.keys)
+        if observing { observeFiles() }
+        invalidate([""])
+    }
+
+    /// The served watch follows the Task: a reading with no checkout is **Not
+    /// started**, and the same watch goes live once one exists. A lost local
+    /// server is subscribed to again with a growing pause.
+    private func observeServedFiles() {
+        guard servedObservation == nil else { return }
+        servedObservation = Task { [weak self, query, issue] in
+            var delay = Duration.seconds(1)
+            // A watch that ends lets the next `observeFiles` start another;
+            // a cancelled one was already replaced.
+            defer { if !Task.isCancelled { self?.servedObservation = nil } }
+            while !Task.isCancelled {
+                do {
+                    let subscription = try query.watchTaskFiles(issue: issue)
+                    defer { Task { await subscription.cancel() } }
+                    for try await line in subscription.lines {
+                        try Task.checkCancellation()
+                        let frame = try JSONDecoder().decode(SubscriptionFrame<TaskFilesRevision>.self, from: line)
+                        guard let self else { return }
+                        delay = .seconds(1)
+                        guard let revision = frame.body else {
+                            self.error = frame.unavailable ?? "Live file observation unavailable"
+                            continue
+                        }
                         self.error = nil
-                        self.invalidate(frame.paths, ignoredScratch: frame.ignoredScratch)
+                        // Back on this Mac, its own checkout is watched directly.
+                        if revision.machineID == self.localMachineID, let checkout = revision.checkout {
+                            self.relocate(machine: nil, cwd: checkout)
+                            return
+                        }
+                        self.receive(revision)
                     }
-                }
-                if !Task.isCancelled { throw RegistryQueryError("Live file observation disconnected; drafts retained. Refresh to reconnect.") }
-            } catch {
-                if let self, !Task.isCancelled {
+                    // The local server went away mid-stream; subscribe again.
+                    guard let self, !Task.isCancelled else { return }
+                    self.error = "Live file observation unavailable: the Loopflow server stopped answering"
+                } catch is CancellationError {
+                    return
+                } catch {
+                    guard let self, !Task.isCancelled else { return }
                     self.invalidation?.cancel()
                     self.error = "Live file observation unavailable: \(error.localizedDescription)"
                 }
+                do { try await Task.sleep(for: delay) } catch { return }
+                delay = min(delay * 2, .seconds(30))
             }
-            await observation?.cancel()
-            self?.remoteObservation = nil
         }
     }
 
-    private var pendingIgnoredScratch: Set<String> = []
+    /// Apply a served reading. A peer sends a revision, never paths: a new one
+    /// rescans what Files shows, including scratch pages an ignored `scratch/` holds.
+    private func receive(_ revision: TaskFilesRevision) {
+        let wasNotStarted = watchNotStarted
+        watchNotStarted = revision.notStarted
+        if revision.machineID != machine {
+            arriving = Set(documents.keys)
+            machine = revision.machineID
+        }
+        machineLabel = revision.machineLabel
+        if let checkout = revision.checkout, checkout != cwd {
+            cwd = checkout
+        } else if revision.revision == servedRevision {
+            return
+        }
+        let first = servedRevision == nil
+        servedRevision = revision.revision
+        guard !revision.notStarted else { return }
+        if wasNotStarted {
+            // The checkout appeared: read what Not started hid.
+            Task { await retry() }
+        } else if !first {
+            // The first reading is the tree already read; later ones mean it changed.
+            invalidate([""])
+        }
+    }
 
-    func invalidate(_ paths: [String], ignoredScratch: [String] = []) {
-        pendingIgnoredScratch.formUnion(ignoredScratch)
+    func invalidate(_ paths: [String]) {
         for path in paths {
             if path == ".git" || path.hasPrefix(".git/") {
                 // Git and lf write other files here on every read. A commit,
@@ -292,18 +370,16 @@ final class TaskFilesStore {
         }
     }
 
-    private var hasPendingWrites: Bool { !pendingIgnoredScratch.isEmpty || !pendingPaths.isEmpty || pendingComparison }
+    private var hasPendingWrites: Bool { !pendingPaths.isEmpty || pendingComparison }
 
     private func applyWrites() async {
-        let peerIgnored = pendingIgnoredScratch
-        pendingIgnoredScratch.removeAll()
-        let changed = pendingPaths.union(peerIgnored)
+        let changed = pendingPaths
         let committed = pendingComparison
         pendingPaths.removeAll()
         pendingComparison = false
         // Every lf read journals under the checkout and builds write ignored
         // output; those writes never move the comparison. A peer filters its own.
-        let ignored = query.remoteMachine == nil ? await ignoredPaths(changed) : peerIgnored
+        let ignored = machine == nil ? await ignoredPaths(changed) : []
         guard !Task.isCancelled else { return }
         let visible = changed.filter { !ignored.contains($0) }
         let comparisonChanged = committed || !visible.isEmpty
@@ -325,7 +401,11 @@ final class TaskFilesStore {
                     invalidate([path])
                     continue
                 }
-                await document.reconcile(next)
+                if arriving.remove(path) != nil {
+                    await document.arrive(next)
+                } else {
+                    await document.reconcile(next)
+                }
             } catch is CancellationError {
                 return
             } catch { self.error = error.localizedDescription }
@@ -419,20 +499,24 @@ final class TaskFilesStore {
         }
     }
 
-    init(issue: String, cwd: String, query: RegistryQuery = RegistryQueryLocal.shared) {
+    init(issue: String, cwd: String, machine: String? = nil, machineLabel: String? = nil,
+         localMachineID: String? = nil, query: RegistryQuery = RegistryQueryLocal.shared) {
         workingTree = ComparisonReading(issue: issue, query: query, comparison: .workingTree(base: "parent"))
-        diffReview = DiffReviewState(cwd: cwd, workingTree: workingTree, browser: browser, pullRequest: pullRequest, comments: comments)
+        diffReview = DiffReviewState(cwd: cwd, machine: machine, workingTree: workingTree, browser: browser, pullRequest: pullRequest, comments: comments)
         tree = CheckoutTree(issue: issue, query: query)
         self.issue = issue
         self.cwd = cwd
+        self.machine = machine
+        self.machineLabel = machineLabel
+        self.localMachineID = localMachineID.map { StructuredIdentity.prefixed($0, "home_") }
         self.query = query
-        autosave = UserDefaults.standard.object(forKey: "taskFilesAutosave") as? Bool ?? true
+        autosave = UserDefaults.standard.savesTaskFilesAutomatically
         savedPreference = autosave
         preferenceChanges = NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)
             .sink { [weak self] _ in
                 Task { @MainActor [weak self] in
                     guard let self else { return }
-                    let enabled = UserDefaults.standard.object(forKey: "taskFilesAutosave") as? Bool ?? true
+                    let enabled = UserDefaults.standard.savesTaskFilesAutomatically
                     if self.savedPreference != enabled {
                         self.savedPreference = enabled
                         self.autosave = enabled
@@ -461,9 +545,22 @@ final class TaskFilesStore {
 
     /// Refresh navigation only; selection and filesystem events own document reads.
     func refresh() async {
-        if query.remoteMachine != nil { observeFiles() }
+        if machine != nil { observeFiles() }
         await workingTree.refresh()
         if page == .changes, diffReview.comparison != workingTree.comparison { await diffReview.reviewReading.refresh() }
+    }
+
+    /// Try the Machine again after an outage or before a checkout existed:
+    /// watch, re-read the open directories, the selected file and the comparison.
+    func retry() async {
+        error = nil
+        observeFiles()
+        await refresh()
+        await refreshScratch()
+        for directory in Set(tree.listings.keys).union([""]).sorted() {
+            await tree.readDirectory(directory, more: false)
+        }
+        await loadFile()
     }
 
     private var appliedDiffVisit: UUID?

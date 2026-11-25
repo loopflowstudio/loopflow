@@ -2,7 +2,7 @@
 //! inline; only a bounded reading scope retains answers and dependencies.
 use std::any::Any;
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
@@ -177,6 +177,18 @@ struct Entry {
     used: SystemTime,
 }
 
+impl Entry {
+    fn update(&mut self, answer: Answer) -> bool {
+        let changed = self.answer.as_ref() != Some(&answer);
+        if changed {
+            self.answer = Some(answer);
+            self.revision += 1;
+        }
+        self.checked = SystemTime::now();
+        changed
+    }
+}
+
 type SharedEntry = Arc<Mutex<Entry>>;
 
 /// A value computed from observed facts. Each variant is the whole identity
@@ -313,27 +325,19 @@ impl Cache {
                 .collect::<Vec<_>>()
         };
         for (fact, entry) in entries {
-            let checked = {
-                let Ok(entry) = entry.try_lock() else {
-                    continue;
-                };
-                if entry.answer.is_none()
-                    || entry.checked.elapsed().unwrap_or_default() < fact.interval()
-                {
-                    continue;
-                }
-                entry.checked
+            let Some(checked) = entry.try_lock().ok().and_then(|entry| {
+                (entry.answer.is_some()
+                    && entry.checked.elapsed().unwrap_or_default() >= fact.interval())
+                .then_some(entry.checked)
+            }) else {
+                continue;
             };
             let answer = fact.observe();
             let mut entry = entry.lock().expect("observed fact");
-            if entry.checked != checked {
-                continue; // A request refreshed this checkout during the scan.
+            // A write can publish a newer observation while this poll is in flight.
+            if entry.checked == checked {
+                entry.update(answer);
             }
-            if entry.answer.as_ref() != Some(&answer) {
-                entry.answer = Some(answer);
-                entry.revision += 1;
-            }
-            entry.checked = SystemTime::now();
         }
     }
 
@@ -505,8 +509,55 @@ fn scope<T>(reading: Option<Reading>, read: impl FnOnce() -> T) -> T {
     read()
 }
 
+/// Publish a file change to existing served reads before returning to the writer.
+pub(crate) fn invalidate_path(path: &Path) {
+    let cache = SHARED.lock().expect("observation cache").upgrade();
+    let Some(cache) = cache else { return };
+    let path = absolute(path);
+    let facts = [
+        Some(Fact::File(path.clone())),
+        Some(Fact::Metadata(path.clone())),
+        path.parent()
+            .map(|parent| Fact::Directory(parent.to_owned())),
+    ];
+    let mut changed = false;
+    for fact in facts.into_iter().flatten() {
+        let entry = cache
+            .entries
+            .lock()
+            .expect("observation cache")
+            .get(&fact)
+            .cloned();
+        if let Some(entry) = entry {
+            let mut entry = entry.lock().expect("observed fact");
+            changed |= entry.update(fact.observe());
+        }
+    }
+    if changed {
+        crate::read_stream::wake_file_readers();
+    }
+}
+
 pub fn active() -> bool {
     READING.with(|reading| reading.borrow().is_some())
+}
+
+/// Resolve a proposed file edit through the ordinary readers without publishing
+/// the draft in the serving Machine's observation cache.
+pub(crate) fn preview_files<T>(files: &BTreeMap<PathBuf, String>, read: impl FnOnce() -> T) -> T {
+    let cache = Cache::default();
+    for (path, text) in files {
+        cache.entries.lock().expect("private preview cache").insert(
+            Fact::File(absolute(path)),
+            Arc::new(Mutex::new(Entry {
+                answer: Some(Answer::File(Ok(text.clone()))),
+                revision: 0,
+                used: SystemTime::now(),
+                checked: SystemTime::now(),
+            })),
+        );
+    }
+    Arc::new(cache).capture(read).0
 }
 
 /// Run `read` as one reading: the served reading already active, else one

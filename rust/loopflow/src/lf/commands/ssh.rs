@@ -100,7 +100,6 @@ pub(super) fn run_with_io(
             cmd: crate::lf::TaskCommand::Location { .. }
                 | crate::lf::TaskCommand::Claim { .. }
                 | crate::lf::TaskCommand::Unassign { .. }
-                | crate::lf::TaskCommand::WatchFiles { .. }
                 | crate::lf::TaskCommand::Find { .. }
                 | crate::lf::TaskCommand::Grep { .. }
                 | crate::lf::TaskCommand::Symbols { .. }
@@ -130,12 +129,7 @@ pub(super) fn run_with_io(
     let runtime = tokio::runtime::Runtime::new()?;
     if let Some(id) = super::work_route::resumed_session(cli).filter(|_| !preview) {
         // Resuming a Session that lives here, or moved elsewhere, moves it (or its Task) there first.
-        loopflow_execution::ops::session_move::move_session(
-            id,
-            target,
-            forward_agent,
-            super::write::run_task,
-        )?;
+        loopflow_execution::ops::session_move::move_session(id, target, super::write::run_task)?;
     }
     let source = if preview || resident_operation {
         None
@@ -218,6 +212,10 @@ pub(super) fn run_with_io(
         loopflow_execution::machine::ssh::EXPECTED_MACHINE_ID_ENV.into(),
         target.id.to_string(),
     ));
+    environment.push((
+        loopflow_execution::machine::login::MACHINE_NAME_ENV.into(),
+        target.name(),
+    ));
     let mut extra_env: Vec<(&str, &str)> = environment
         .iter()
         .map(|(name, value)| (name.as_str(), value.as_str()))
@@ -299,7 +297,7 @@ pub(super) fn run_with_io(
             output(&mut io, &String::from_utf8(bytes)?)?;
             return Ok(());
         }
-        let record = prepared_remotely(record, &target, forward_agent)?;
+        let record = prepared_remotely(record, &target, None)?;
         if connection.json || cli.json {
             output(&mut io, &format!("{}\n", serde_json::to_string(&record)?))?;
         } else {
@@ -392,25 +390,120 @@ fn viewed_remotely(
     Ok(record)
 }
 
-/// A Session `target` prepared, opened from here through `lf session attach`.
+/// A Session `target` prepared, opened here by `lf open --here`, which this
+/// Machine's server attaches where it runs. `route` is the Task this Machine
+/// routed the resume for.
 pub(super) fn prepared_remotely(
     record: SessionRecord,
     target: &Machine,
-    forward_agent: bool,
+    route: Option<&TaskExecutionRoute>,
 ) -> anyhow::Result<SessionRecord> {
-    let mut record = viewed_remotely(record, target, forward_agent)?;
-    if !record.open_argv.is_empty() {
-        record.open_argv.splice(
-            0..0,
-            [
-                std::env::current_exe()?.to_string_lossy().into_owned(),
-                "session".into(),
-                "attach".into(),
-                "--".into(),
-            ],
-        );
+    anyhow::ensure!(
+        record
+            .workspace
+            .as_ref()
+            .is_some_and(|workspace| workspace.machine_id == target.id),
+        "Session reply does not belong to the addressed Machine"
+    );
+    let mut value = serde_json::to_value(record)?;
+    localize_remote_session(&mut value, target, route)?;
+    Ok(serde_json::from_value(value)?)
+}
+
+/// A Session record `machine` sent, as this Machine opens it: every command it
+/// names is this Machine's `lf open`, which attaches where the Session runs,
+/// and a record read for a Task carries this Machine's ID for that Task.
+/// `record` may be a selected reading; fields it lacks stay absent.
+pub(crate) fn localize_remote_session(
+    record: &mut serde_json::Value,
+    machine: &Machine,
+    route: Option<&TaskExecutionRoute>,
+) -> anyhow::Result<()> {
+    static TASK_RESUME: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(r"lf resume --task [^\s`]+").expect("the pattern is valid")
+    });
+    let Some(id) = record
+        .get("id")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_owned)
+    else {
+        return Ok(());
+    };
+    let [flag, selector] = match route {
+        Some(route) => ["--task".to_owned(), route.peer_selector.clone()],
+        None => ["--machine".to_owned(), machine.id.to_string()],
+    };
+    let session = format!("lf open {flag} {selector} --session {id}");
+    let primary = match route {
+        Some(_) => format!("lf open {flag} {selector}"),
+        None => session.clone(),
+    };
+    let session_resume = format!("lf resume {id}");
+    for pointer in ["/action/help", "/outlook/command", "/status_line"] {
+        if let Some(text) = record.pointer_mut(pointer) {
+            if let Some(line) = text.as_str() {
+                let line = TASK_RESUME.replace_all(line, primary.as_str());
+                *text = line.replace(&session_resume, &session).into();
+            }
+        }
     }
-    Ok(record)
+    if let Some(argv) = record.get_mut("open_argv") {
+        if argv.as_array().is_some_and(|argv| !argv.is_empty()) {
+            let exe = std::env::current_exe()?.to_string_lossy().into_owned();
+            *argv = vec![
+                exe,
+                "open".into(),
+                flag,
+                selector,
+                "--session".into(),
+                id,
+                "--here".into(),
+            ]
+            .into();
+        }
+    }
+    let Some(route) = route else {
+        return Ok(());
+    };
+    // Readers take a record's Task from its first ID, its Work and its
+    // workspace; each names the Task as this Machine knows it.
+    let local = serde_json::Value::from(route.task_id.to_string());
+    if let Some(task_ids) = record
+        .get_mut("task_ids")
+        .and_then(serde_json::Value::as_array_mut)
+    {
+        task_ids.retain(|id| id != &local);
+        task_ids.insert(0, local.clone());
+    }
+    if let Some(work) = record.get_mut("work").filter(|work| work["kind"] == "task") {
+        work["id"] = local.clone();
+    }
+    if let Some(task_id) = record
+        .pointer_mut("/workspace/task_id")
+        .filter(|task_id| !task_id.is_null())
+    {
+        *task_id = local;
+    }
+    Ok(())
+}
+
+/// A Session list `machine` answered for a Task: an array of records, or a
+/// page of them.
+pub(crate) fn localize_remote_sessions(
+    list: &mut serde_json::Value,
+    machine: &Machine,
+    route: &TaskExecutionRoute,
+) -> anyhow::Result<()> {
+    let records = match list.get_mut("entries") {
+        Some(entries) => entries,
+        None => list,
+    };
+    if let Some(records) = records.as_array_mut() {
+        for record in records {
+            localize_remote_session(record, machine, Some(route))?;
+        }
+    }
+    Ok(())
 }
 
 fn checkout_search(
@@ -509,8 +602,131 @@ mod dispatch_tests;
 
 #[cfg(test)]
 mod tests {
-    use super::parse_remote_command;
+    use super::{localize_remote_session, localize_remote_sessions, parse_remote_command};
+    use loopflow_execution::durable::{TaskExecutionRoute, TaskExecutionSource};
     use loopflow_execution::machine::task::resident_args;
+    use loopflow_model::durable::{Machine, MachineId, RepositoryId, TaskId};
+    use serde_json::json;
+
+    fn mini() -> Machine {
+        Machine {
+            label: Some("mini".into()),
+            id: MachineId::new(),
+            route: "mini.local".into(),
+            created_at: time::OffsetDateTime::UNIX_EPOCH,
+            observed_at: time::OffsetDateTime::UNIX_EPOCH,
+        }
+    }
+
+    fn route_on(machine: &Machine) -> TaskExecutionRoute {
+        TaskExecutionRoute {
+            task_id: TaskId::new(),
+            peer_selector: "LOO-7".into(),
+            checkout: None,
+            repository_id: RepositoryId::from_raw("github.com/acme/app"),
+            machine_id: machine.id.clone(),
+            source: TaskExecutionSource::Owner,
+        }
+    }
+
+    fn remote_record(peer_task: &str) -> serde_json::Value {
+        json!({
+            "id": "session_1",
+            "task_ids": [peer_task],
+            "work": { "kind": "task", "id": peer_task },
+            "workspace": { "machine_id": "MACHINE_PEER", "worktree": "/src/app", "task_id": peer_task, "unavailable": null },
+            "open_argv": ["/opt/lf", "resume", "session_1"],
+            "action": {
+                "label": "Open here",
+                "help": "View the running conversation here: lf resume session_1",
+            },
+            "outlook": { "kind": "waiting", "at": null, "reason": null, "command": "lf resume --task LOO-7" },
+            "status_line": "died 12:01 (exit 137); `lf resume --task LOO-7` opens it",
+        })
+    }
+
+    #[test]
+    fn a_routed_task_session_opens_with_this_machines_lf_open() {
+        let machine = mini();
+        let route = route_on(&machine);
+        let mut record = remote_record("TASK_PEER");
+        localize_remote_session(&mut record, &machine, Some(&route)).unwrap();
+        assert_eq!(
+            record["action"]["help"],
+            "View the running conversation here: lf open --task LOO-7 --session session_1"
+        );
+        assert_eq!(record["outlook"]["command"], "lf open --task LOO-7");
+        assert_eq!(
+            record["status_line"],
+            "died 12:01 (exit 137); `lf open --task LOO-7` opens it"
+        );
+        let argv = record["open_argv"].as_array().unwrap();
+        assert_eq!(
+            argv[1..],
+            [
+                "open",
+                "--task",
+                "LOO-7",
+                "--session",
+                "session_1",
+                "--here"
+            ]
+        );
+        let local = route.task_id.to_string();
+        assert_eq!(record["task_ids"], json!([local, "TASK_PEER"]));
+        assert_eq!(record["work"], json!({ "kind": "task", "id": local }));
+        assert_eq!(record["workspace"]["task_id"], local.as_str());
+    }
+
+    #[test]
+    fn a_routed_record_keeps_other_work_and_an_unowned_workspace() {
+        let machine = mini();
+        let route = route_on(&machine);
+        let mut record = remote_record("TASK_PEER");
+        record["work"] = json!({ "kind": "wave", "id": "WAVE_PEER" });
+        record["workspace"]["task_id"] = serde_json::Value::Null;
+        record["task_ids"] = json!(["TASK_OTHER", route.task_id.to_string()]);
+        localize_remote_session(&mut record, &machine, Some(&route)).unwrap();
+        assert_eq!(record["work"], json!({ "kind": "wave", "id": "WAVE_PEER" }));
+        assert!(record["workspace"]["task_id"].is_null());
+        assert_eq!(
+            record["task_ids"],
+            json!([route.task_id.to_string(), "TASK_OTHER"])
+        );
+    }
+
+    #[test]
+    fn a_machine_only_session_opens_by_machine_and_keeps_its_task_ids() {
+        let machine = mini();
+        let mut record = remote_record("TASK_PEER");
+        localize_remote_session(&mut record, &machine, None).unwrap();
+        let session = format!("lf open --machine {} --session session_1", machine.id);
+        assert_eq!(record["outlook"]["command"], session.as_str());
+        assert_eq!(
+            record["action"]["help"],
+            format!("View the running conversation here: {session}")
+        );
+        assert_eq!(record["task_ids"], json!(["TASK_PEER"]));
+    }
+
+    #[test]
+    fn a_routed_page_and_a_selected_reading_localize_what_they_carry() {
+        let machine = mini();
+        let route = route_on(&machine);
+        let mut page = json!({
+            "entries": [remote_record("TASK_PEER"), { "id": "session_2", "status_line": "closed; `lf resume session_2` opens it" }],
+            "next": null,
+        });
+        localize_remote_sessions(&mut page, &machine, &route).unwrap();
+        assert_eq!(
+            page["entries"][0]["outlook"]["command"],
+            "lf open --task LOO-7"
+        );
+        assert_eq!(
+            page["entries"][1],
+            json!({ "id": "session_2", "status_line": "closed; `lf open --task LOO-7 --session session_2` opens it" })
+        );
+    }
 
     #[test]
     fn repository_paths_stay_on_explicit_machine_but_not_automatic_work_routes() {

@@ -4,8 +4,8 @@ use crate::store::selections;
 use loopflow_model::durable::RepositoryId;
 use loopflow_storage::sqlite::SqliteStore;
 use loopflow_storage::work::selection::{
-    Arrangement, ArrangementMode, DashboardId, Selection, SelectionExpression, SelectionId,
-    WorkWorkspaceKind,
+    Arrangement, ArrangementMode, DashboardId, Selection, SelectionError, SelectionExpression,
+    SelectionId, WorkWorkspaceKind,
 };
 
 fn fixture() -> (tempfile::TempDir, SqliteStore, RepositoryId) {
@@ -184,18 +184,25 @@ fn dashboard_order_moves_under_its_revision_and_only_reordering_touches() {
     .unwrap();
     assert_eq!(restored.arrangement.mode, ArrangementMode::Auto);
 
-    let moved =
-        selections::reorder_dashboard(&store, &repo, &id, restored.revision, &c.work, &a.work)
-            .unwrap();
+    let mut edit = restored.arrangement.to_edit();
+    edit.order.rotate_right(1);
+    let save_order = || {
+        selections::save_dashboard(
+            &store,
+            &repo,
+            &id,
+            Some(restored.revision),
+            &restored.selection,
+            &edit,
+        )
+    };
+    let moved = save_order().unwrap();
     assert_eq!(moved.arrangement.order, [c.clone(), a.clone(), b.clone()]);
     assert_eq!(moved.arrangement.mode, ArrangementMode::Touched);
     assert_eq!(moved.revision, restored.revision + 1);
 
     let revisions = store.revisions().unwrap();
-    assert!(
-        selections::reorder_dashboard(&store, &repo, &id, restored.revision, &a.work, &c.work)
-            .is_err()
-    );
+    assert!(save_order().is_err());
     assert_eq!(store.revisions().unwrap(), revisions);
     assert_eq!(
         selections::read_dashboard(&store, &repo, &id)
@@ -243,7 +250,7 @@ fn owned_unstarted_task_is_open_but_excluded_from_working_queries() {
 }
 
 #[test]
-fn one_task_order_reorders_working_tasks_and_every_plan_and_arrivals_append() {
+fn one_task_order_reorders_working_tasks_and_every_plan_and_arrivals_prepend() {
     let (_dir, store, repo) = fixture();
     let (one, two, three) = (
         "task_11111111111111111111111111111111",
@@ -260,6 +267,12 @@ fn one_task_order_reorders_working_tasks_and_every_plan_and_arrivals_append() {
             [],
         )
         .unwrap();
+    store
+        .conn
+        .lock()
+        .unwrap()
+        .execute("UPDATE tasks SET planning_rank=0 WHERE id=?1", [two])
+        .unwrap();
     assert_eq!(
         selections::view_plan(&store, &repo, None)
             .unwrap()
@@ -268,7 +281,7 @@ fn one_task_order_reorders_working_tasks_and_every_plan_and_arrivals_append() {
         [one, two]
     );
     assert_eq!(
-        selections::reorder_task(&store, &repo, two, one).unwrap(),
+        store.reorder_working_task(&repo, two, one, None).unwrap(),
         [two, one]
     );
     assert_eq!(
@@ -301,19 +314,16 @@ fn one_task_order_reorders_working_tasks_and_every_plan_and_arrivals_append() {
             .unwrap()
             .resolution
             .task_ids(),
-        [two, one, three]
-    );
-    assert_eq!(
-        selections::reorder_task(&store, &repo, three, two).unwrap(),
         [three, two, one]
     );
-
     let revisions = store.revisions().unwrap();
-    // A done Task is not a Working Tasks member; nothing is written.
-    assert!(
-        selections::reorder_task(&store, &repo, "task_44444444444444444444444444444444", one)
-            .is_err()
-    );
+    // A done Task is not a Working Tasks member, as either side of a drop; the
+    // refusal names it and nothing is written.
+    let done = "task_44444444444444444444444444444444";
+    for (task, to) in [(done, one), (one, done)] {
+        assert!(matches!(store.reorder_working_task(&repo, task, to, None),
+            Err(crate::store::StoreError::Selection(SelectionError::NotWorking(id))) if id == done));
+    }
     assert_eq!(store.revisions().unwrap(), revisions);
     assert_eq!(
         selections::view_plan(&store, &repo, None)
@@ -322,6 +332,100 @@ fn one_task_order_reorders_working_tasks_and_every_plan_and_arrivals_append() {
             .task_ids(),
         [three, two, one]
     );
+}
+
+#[test]
+fn sidebar_step_follows_the_captured_cursor_and_disappears_without_a_graph() {
+    let (_dir, store, repo) = fixture();
+    let id =
+        loopflow_model::durable::TaskId::parse("task_22222222222222222222222222222222").unwrap();
+    let step = || {
+        selections::view_plan(&store, &repo, None)
+            .unwrap()
+            .contents
+            .into_iter()
+            .find(|content| content.work.id == id.as_str())
+            .unwrap()
+            .graph_step
+    };
+    assert_eq!(step(), None);
+    let graph = crate::task_graph::CapturedGraph::load("code", _dir.path())
+        .unwrap()
+        .unwrap();
+    let cursor = graph.find("implement").unwrap().cursor();
+    store
+        .take_up_task_graph(&id, &serde_json::to_string(&graph).unwrap())
+        .unwrap();
+    assert_eq!(step(), None, "before the first step");
+    store.set_task_graph_step(&id, "end").unwrap();
+    assert_eq!(step(), None, "after the last step");
+    store.set_task_graph_step(&id, "review").unwrap();
+    assert_eq!(step().as_deref(), Some("review"));
+    let carrier = store.test_lf_process();
+    let started = loopflow_storage::graph_process::ExecutionStart::reserved(1);
+    let run_from = |step: &str, cursor: &str| {
+        assert!(store
+            .start_task_graph_run(&id, step, None, cursor, (&carrier, &started))
+            .unwrap());
+    };
+    run_from("review", &serde_json::to_string(&cursor).unwrap());
+    assert_eq!(step().as_deref(), Some("implement"));
+    let past_end = serde_json::to_string(&crate::graph::runner::ExecutionCursor {
+        index: graph.steps.len(),
+        ..Default::default()
+    })
+    .unwrap();
+    store
+        .advance_task_graph_run(&id, &carrier, &past_end)
+        .unwrap();
+    assert_eq!(step().as_deref(), Some("review"));
+    store.set_task_graph_step(&id, "end").unwrap();
+    run_from("end", &past_end);
+    assert_eq!(step(), None);
+}
+
+#[test]
+fn repository_and_wave_tiles_open_only_the_unfinished_primary() {
+    let (_dir, store, repo) = fixture();
+    // A tile's resume argv names an `lf`; pin it rather than find the Machine's install.
+    let _lock = crate::journal::test_env_lock();
+    let _env = crate::test_ambient::EnvGuard::clear(&["LF_HOME", "LF_BIN"]);
+    std::env::set_var("LF_HOME", _dir.path());
+    std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
+    let session = store.test_session("conversation", &crate::session_record::new_artifact_key());
+    let db = || store.conn.lock().unwrap();
+    db().execute(
+        "INSERT INTO task_primary_sessions(task_id,session_id)
+        SELECT id,?1 FROM tasks WHERE issue_identifier='FIX-2'",
+        [&session.id],
+    )
+    .unwrap();
+
+    let check = |primary: Option<&str>| {
+        let tiles: Vec<_> = selections::selection_plans(&store, &repo)
+            .unwrap()
+            .into_iter()
+            .flat_map(|plan| plan.contents)
+            .filter(|content| content.identifier.as_deref() == Some("FIX-2"))
+            .collect();
+        assert_eq!(tiles.len(), 2);
+        for tile in tiles {
+            assert_eq!(tile.title, "Idle");
+            assert_eq!(tile.location.unwrap().cwd, "/repo/fix-2");
+            assert_eq!(tile.primary_session.as_deref(), primary);
+            assert_eq!(
+                tile.argv.and_then(|args| args.last().cloned()).as_deref(),
+                primary
+            );
+        }
+    };
+    check(Some("conversation"));
+    db().execute(
+        "UPDATE agent_sessions SET completed_at=2 WHERE id=?1",
+        [&session.id],
+    )
+    .unwrap();
+    check(None);
 }
 
 #[test]
@@ -1060,7 +1164,7 @@ fn nested_query_failure_retains_prior_members_but_confirmed_departure_prunes() {
         .lock()
         .unwrap()
         .execute(
-            "UPDATE tasks SET planning_completed=1 WHERE issue_identifier='FIX-2'",
+            "UPDATE tasks SET planning_state='completed' WHERE issue_identifier='FIX-2'",
             [],
         )
         .unwrap();
@@ -1104,29 +1208,6 @@ fn a_dashboard_changed_after_preparation_rejects_the_prepared_write() {
         .saved;
     assert_eq!(saved.name.as_deref(), Some("later"));
     assert_eq!(saved.revision, 2);
-}
-
-#[test]
-fn a_task_order_changed_after_preparation_keeps_the_new_order() {
-    let (_dir, store, repo) = fixture();
-    let reading = crate::store::session_projection::Reading::acquire(&store, 500, None).unwrap();
-    let (read, work) = store
-        .task_order_inputs(&repo, &reading.inputs, &reading.values)
-        .unwrap()
-        .unwrap();
-    let later: Vec<_> = work
-        .into_iter()
-        .filter(|item| item.key.kind == WorkWorkspaceKind::Task)
-        .map(|item| item.key.id)
-        .collect();
-    assert!(!later.is_empty());
-    assert!(store.commit_task_order(&repo, &read, &later).unwrap());
-    assert!(!store.commit_task_order(&repo, &read, &[]).unwrap());
-    let (retained, _) = store
-        .task_order_inputs(&repo, &reading.inputs, &reading.values)
-        .unwrap()
-        .unwrap();
-    assert_eq!(retained, later);
 }
 
 #[test]

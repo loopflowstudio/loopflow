@@ -165,6 +165,9 @@ pub struct OnDemandDeclaration {
     pub max_machines: u32,
     pub max_usd_per_hour: loopflow_storage::rental::Usd,
     pub hours: f64,
+    /// Written only when set, so a released lf that lacks it still reads the file.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub logins: Vec<loopflow_storage::provider::Provider>,
 }
 
 impl Default for OnDemandDeclaration {
@@ -177,19 +180,25 @@ impl Default for OnDemandDeclaration {
                 disk_gb: 20,
                 gpu: None,
                 spot: false,
+                modal_sizing: None,
             },
             max_machines: 0,
             max_usd_per_hour: loopflow_storage::rental::Usd::ZERO,
             hours: loopflow_storage::rental::DEFAULT_HOURS,
+            logins: Vec::new(),
         }
     }
 }
 
-#[derive(schemars::JsonSchema, Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
-pub struct AuthBrowsers {
-    pub default: Vec<String>,
-    pub accounts: std::collections::BTreeMap<String, Vec<String>>,
+/// Where `lf machine login` sends one provider's approval page; with none set,
+/// the default browser.
+#[derive(schemars::JsonSchema, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged, deny_unknown_fields)]
+pub enum Approver {
+    /// A Chrome profile, by name or directory; a person approves.
+    Chrome { chrome: String },
+    /// `sh -c` with `LF_APPROVE_*` set; exit 0 means approved.
+    Command { command: String },
 }
 
 #[cfg(test)]

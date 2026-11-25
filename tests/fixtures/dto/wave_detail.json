@@ -81,6 +81,7 @@
         "harness": "codex",
         "model": "gpt-5",
         "surface": "headless",
+        "origin": null,
         "first_provider_attempt_at": 1784052010,
         "task_pr_id": "pr_33333333333333333333333333333333",
         "session_id": "run_00000000000000000000000000000001",
@@ -476,7 +477,8 @@
           "unstarted",
           "backlog"
         ],
-        "owned_by_you": false
+        "owned_by_you": false,
+        "runs_on": null
       },
       {
         "task": {
@@ -635,7 +637,8 @@
           "unstarted",
           "backlog"
         ],
-        "owned_by_you": false
+        "owned_by_you": false,
+        "runs_on": null
       }
     ],
     "truncated": false

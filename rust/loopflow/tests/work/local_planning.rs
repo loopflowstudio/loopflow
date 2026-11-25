@@ -1565,7 +1565,7 @@ fn project_edits_save_offline_in_both_connection_modes() {
             let revision: String = rusqlite::Connection::open(home.path().join("loopflow.db"))
                 .unwrap()
                 .query_row(
-                    "SELECT planning_provider_revision FROM projects WHERE id=?1",
+                    "SELECT o.revision FROM tracker_projects o JOIN projects p ON o.id=p.external_project_id WHERE p.id=?1",
                     [id.as_str()],
                     |row| row.get(0),
                 )

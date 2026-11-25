@@ -141,7 +141,7 @@ pub fn claude_stand_in(script: &str) -> String {
         .split_once('\n')
         .expect("a stand-in script starts with its shebang line");
     format!(
-        "{shebang}\n{}\n{body}",
+        "{shebang}\nimport sys\nif sys.argv[1:] == ['auth', 'status']: sys.exit(0)\n{}\n{body}",
         include_str!("claude_transcript.py")
     )
 }
@@ -250,6 +250,8 @@ pub fn codex_app_server_script(output: &str, setup: &str) -> String {
     let rollout = codex_rollout_script();
     // Codex names threads and turns with UUIDs; a resumed thread keeps its id.
     codex_socket_script(&r#"#!/bin/sh
+# The launch's login probe.
+if [ "$1 $2" = "login status" ]; then echo 'Logged in using ChatGPT'; exit 0; fi
 __SETUP__
 read -r initialize
 echo '{"jsonrpc":"2.0","id":1,"result":{}}'
@@ -301,6 +303,7 @@ pub fn codex_socket_script(script: &str) -> String {
         .replace('\'', r#"'"'"'"#);
     format!(
         r#"#!/bin/sh
+if [ "$*" = "login status" ]; then exit 0; fi
 if [ -z "$LF_TEST_CODEX_STDIO" ]; then
     case "$*" in
         *--listen*) exec python3 '{bridge}' "$0" "$@" ;;
@@ -348,6 +351,7 @@ while read -r line; do :; done
 pub fn answering_claude_script(answer: &str, received: &Path) -> String {
     r#"#!/usr/bin/python3
 import json, sys
+if sys.argv[1:] == ['auth', 'status']: sys.exit(0)
 if '--version' in sys.argv:
     print('fixture')
     sys.exit(0)
@@ -590,6 +594,15 @@ pub fn register_task_with_pr(
     registered
 }
 
+/// The checkout path as `lf` records it: Git resolves symlinks, so a Task
+/// checkout under macOS's `/var` temp directory is stored as `/private/var`.
+/// A path that does not exist yet stays as spelled.
+fn recorded_checkout(worktree: &Path) -> PathBuf {
+    worktree
+        .canonicalize()
+        .unwrap_or_else(|_| worktree.to_path_buf())
+}
+
 #[allow(dead_code)] // Shared helper compiled into suites with published Tasks only.
 pub fn register_task_without_pr(
     home: &Path,
@@ -606,6 +619,9 @@ fn register_task_fixture(
     branch: &str,
     base_commit: &str,
 ) -> RegisteredTask {
+    let worktree = &recorded_checkout(worktree);
+    // Register fixture Tasks before starting the Machine server so its startup
+    // and this open cannot compete for the migration write lock.
     seed_store(home);
     let runtime = tokio::runtime::Runtime::new().expect("task test runtime");
     let store = runtime
@@ -746,6 +762,7 @@ pub fn register_sibling_task(
     branch: &str,
     worktree: &Path,
 ) -> Task {
+    let worktree = &recorded_checkout(worktree);
     let runtime = tokio::runtime::Runtime::new().expect("task test runtime");
     let now = OffsetDateTime::now_utc();
     let mut task = registered.task.clone();
@@ -863,8 +880,8 @@ pub fn record_graph(home: &Path, cwd: &Path, graph: &str, label: &str, outcome: 
             sources: Vec::new(),
         })],
     );
-    // A Graph launched in a Task's checkout records that Task, the deepest
-    // checkout holding `cwd`.
+    // A Graph launched in a Task's checkout records that Task; fixture
+    // checkouts nest no Git worktrees, so the deepest one holding `cwd` is it.
     db.execute(
         "INSERT INTO graph_processes(lf_process_id,graph,compiled,task_id) VALUES(?1,?2,?3,
             (SELECT task_id FROM task_checkouts
@@ -976,31 +993,24 @@ pub fn prepare_native_conversation(
     session.request = Some(request.into());
     session.interactive = true;
     let session = crate::store::sessions::create_session(&store, session, None).unwrap();
-    let cwd = cwd.canonicalize().unwrap();
-    let task = store
-        .task_checkouts()
-        .unwrap()
-        .into_iter()
-        .find(|checkout| checkout.worktree.canonicalize().unwrap() == cwd)
-        .map(|checkout| checkout.task_id)
-        .unwrap_or_else(|| {
-            store
-                .create_task(&loopflow_storage::work::task::NewTask {
-                    parent_task_id: None,
-                    id: loopflow_model::durable::TaskId::new(),
-                    repository_id: crate::repository::location::ensure_repository(
-                        &store,
-                        &crate::repository::discover(&cwd).unwrap().to_string(),
-                    )
-                    .unwrap(),
-                    project_id: None,
-                    title: "Native conversation".into(),
-                    description: String::new(),
-                    due_date: None,
-                })
-                .unwrap()
-                .id
-        });
+    let task = store.task_checkout_owner(cwd).unwrap().unwrap_or_else(|| {
+        store
+            .create_task(&loopflow_storage::work::task::NewTask {
+                parent_task_id: None,
+                id: loopflow_model::durable::TaskId::new(),
+                repository_id: crate::repository::location::ensure_repository(
+                    &store,
+                    &crate::repository::discover(cwd).unwrap().to_string(),
+                )
+                .unwrap(),
+                project_id: None,
+                title: "Native conversation".into(),
+                description: String::new(),
+                due_date: None,
+            })
+            .unwrap()
+            .id
+    });
     store
         .bind_session_prepared(
             &session.id,

@@ -14,7 +14,7 @@ struct WorkspacePanesTests {
     private func session(_ id: String, _ fields: [String: Any] = [:]) throws -> SessionRecord {
         var wire = try loadFixture("session.json")
         wire["id"] = id
-        wire["task_primary"] = true
+        wire["primary_scope"] = "task"
         wire["state"] = "unknown"
         wire["workspace"] = ["machine_id": location.machineId, "worktree": location.worktree,
                              "task_id": "task-a", "unavailable": NSNull()]
@@ -124,6 +124,24 @@ struct WorkspacePanesTests {
         store.setCollapsed(paneId: pane.id, collapsed: true)
         #expect(store.visibleLayout == nil)
         _ = try view.inspect().find(viewWithAccessibilityIdentifier: "open-conversation").button()
+    }
+
+    @Test("After a move, a Task's Files pane names no place in its strip; a shell left behind still does")
+    func movedTaskStripContext() throws {
+        let (workspace, view) = taskPanes()
+        let mini = WorkspaceIdentity(machineId: "mini", worktree: "/mini/task-a")
+        let store = workspace.multiplexer
+        let shell = try #require(store.newShell(location: location))
+        store.showBrowser(.files, location: location)
+        let files = store.focusedPane
+        workspace.location = mini
+        func strip(_ pane: String) throws -> SessionPaneView? {
+            try view.inspect().findAll(SessionPaneView.self).first { try $0.actualView().pane.id == pane }?.actualView()
+        }
+        let filesView = try #require(try strip(files.id))
+        #expect((try? filesView.inspect().find(viewWithAccessibilityIdentifier: "pane-context-\(files.id)")) == nil)
+        let shellView = try #require(try strip(shell.id))
+        #expect((try? shellView.inspect().find(viewWithAccessibilityIdentifier: "pane-context-\(shell.id)")) != nil)
     }
 
     @Test("Rendering borrows Task A while B is selected, retaining Files and caller-owned focus")

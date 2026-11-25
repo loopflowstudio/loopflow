@@ -1,13 +1,75 @@
 //! Work chooses execution; SSH transports the ordinary command unchanged.
 use std::path::Path;
+use std::time::{Duration, Instant};
 
 use crate::lf::{Cli, Commands, SessionCommand, TaskCommand};
 use anyhow::{anyhow, Result};
 use loopflow_execution::durable::TaskExecutionRoute;
 use loopflow_execution::machine::task::{read_registry, resolve_task_id};
-use loopflow_execution::ops::human_session::moves::conversation_task;
-use loopflow_model::durable::{MachineId, RepositoryId, RepositoryIdentity, TaskId};
+use loopflow_execution::ops::human_session::moves::other_machine;
+use loopflow_model::durable::{
+    Machine, MachineId, RepositoryId, RepositoryIdentity, TaskId, TaskRunsOn,
+};
 use loopflow_storage::sqlite::SqliteStore;
+use loopflow_storage::work::task::Task;
+
+/// The Machine claiming a Task elsewhere and its SSH route, when registered.
+pub(super) struct TaskPeer {
+    pub runs_on: TaskRunsOn,
+    pub registered: Option<Machine>,
+}
+
+impl TaskPeer {
+    pub fn resolve(store: &SqliteStore, task: &TaskId) -> Result<Option<Self>> {
+        let (local, ownership) = store.saved_task_ownership(task)?;
+        let Some(mut runs_on) = ownership.runs_on(&local) else {
+            return Ok(None);
+        };
+        if loopflow_execution::machine::task::move_awaiting_arrival(store, task)? {
+            return Ok(None);
+        }
+        let registered =
+            loopflow_execution::store::machines::registered_machine(store, &runs_on.machine)?;
+        if let Some(peer) = &registered {
+            runs_on.machine.label.clone_from(&peer.label);
+        }
+        Ok(Some(Self {
+            runs_on,
+            registered,
+        }))
+    }
+
+    pub fn connect(
+        &self,
+        repo: &Path,
+        task: &Task,
+        until: Option<Instant>,
+    ) -> Result<loopflow_execution::machine::client::Connection> {
+        use loopflow_execution::machine::wire::{Secrets, Selection, Sender};
+        let machine = self
+            .registered
+            .as_ref()
+            .ok_or_else(|| anyhow!("{} is not registered here", self.runs_on.machine.name()))?;
+        let sender = Sender {
+            repository: task.repository_id.clone(),
+            selection: Selection::capture(repo, None)?,
+            secrets: Secrets::default(),
+        };
+        loopflow_execution::machine::client::Connection::open_on(machine, sender, until)
+    }
+
+    pub fn deadline() -> Instant {
+        Instant::now() + Duration::from_secs(15)
+    }
+}
+
+/// Tracker peers can retain different local Task IDs for the same issue.
+pub(super) fn peer_issue(task: &Task) -> String {
+    task.tracker_id
+        .as_ref()
+        .map_or(task.id.as_str(), |id| id.as_str())
+        .to_owned()
+}
 
 pub fn identity(
     bind: Option<&RepositoryId>,
@@ -60,6 +122,21 @@ pub fn repository_path(id: &RepositoryId) -> Result<std::path::PathBuf> {
         .flatten()
         .ok_or_else(|| anyhow!("repository plan {id} has no local checkout; run `lf config repo --bind {id}` in its repository on this Machine"))?;
     Ok(path.into())
+}
+
+/// Translate a peer's portable Task selector to this repository's local Task ID.
+pub(crate) fn peer_task_id(repository: &RepositoryId, issue: &str) -> Result<String> {
+    let missing = || {
+        loopflow_execution::engine::Error::new(
+            loopflow_execution::engine::ErrorCode::NotFound,
+            format!("Task {issue} was not found in repository {repository}"),
+        )
+    };
+    let store = read_registry()?.ok_or_else(missing)?;
+    let id = store
+        .repository_task_id(repository, issue)?
+        .ok_or_else(missing)?;
+    Ok(id.to_string())
 }
 
 /// Resolve scoped selectors once, carrying exact IDs to downstream consumers.
@@ -133,14 +210,10 @@ fn launch_task(cli: &Cli) -> Option<&str> {
         Some(Commands::Task {
             cmd: TaskCommand::Run { issue, .. } | TaskCommand::Checkout { issue, .. },
         }) => issue.as_deref().or(cli.task.as_deref()),
-        // `resume --task X` opens the Task's conversation where the Task runs.
+        // `resume [<session>] --task X` opens the Task's conversation where
+        // the Task runs, wherever that Session last moved.
         Some(Commands::Session {
-            cmd:
-                SessionCommand::Resume {
-                    id: None,
-                    connection,
-                    ..
-                },
+            cmd: SessionCommand::Resume { connection, .. },
         }) if connection.task.is_some() => connection.task.as_deref(),
         Some(Commands::Task {
             cmd:
@@ -148,6 +221,10 @@ fn launch_task(cli: &Cli) -> Option<&str> {
                 | TaskCommand::Grep { issue, .. }
                 | TaskCommand::Symbols { issue, .. },
         }) => Some(issue),
+        Some(Commands::Steer {
+            target: Some(target),
+            ..
+        }) if cli.task.as_ref() == Some(target) => None,
         // Ownership is written only on the Task's writer.
         Some(Commands::Task {
             cmd: TaskCommand::Claim { issue, .. } | TaskCommand::Unassign { issue, .. },
@@ -157,7 +234,8 @@ fn launch_task(cli: &Cli) -> Option<&str> {
 }
 
 /// Bare `lf resume` in a Task's worktree acts on that Task, so it routes to
-/// its Machine exactly as `--task` does.
+/// its Machine exactly as `--task` does. A worktree nested inside the Task's
+/// checkout is not the Task's.
 fn worktree_task(cli: &Cli, directory: &Path) -> Result<Option<String>> {
     let bare = match &cli.command {
         Some(Commands::Session {
@@ -171,20 +249,9 @@ fn worktree_task(cli: &Cli, directory: &Path) -> Result<Option<String>> {
     let Some(store) = read_registry()? else {
         return Ok(None);
     };
-    let cwd = directory
-        .canonicalize()
-        .unwrap_or_else(|_| directory.to_path_buf());
     Ok(store
-        .task_checkouts()?
-        .into_iter()
-        .find(|checkout| {
-            let worktree = checkout
-                .worktree
-                .canonicalize()
-                .unwrap_or_else(|_| checkout.worktree.clone());
-            cwd.starts_with(worktree)
-        })
-        .map(|checkout| checkout.task_id.to_string()))
+        .task_checkout_owner(directory)?
+        .map(|task| task.to_string()))
 }
 
 /// A command `lf` sends to another Machine instead of running here.
@@ -264,11 +331,11 @@ pub fn dispatch(cli: &Cli, args: &[String]) -> Result<bool> {
 /// Where `lf <args>` run from `directory` goes instead of running here, if
 /// anywhere. Reads records only; nothing is sent.
 pub fn forward(cli: &Cli, args: &[String], directory: &Path) -> Result<Option<Forward>> {
-    if let Some(forward) = moved_session(cli, args)? {
-        return Ok(Some(forward));
-    }
     let worktree_task = worktree_task(cli, directory)?;
     let Some(selector) = launch_task(cli).or(worktree_task.as_deref()) else {
+        if let Some(forward) = moved_session(cli, args)? {
+            return Ok(Some(forward));
+        }
         return primary_session(cli, args, directory);
     };
     let Some(store) = read_registry()? else {
@@ -386,17 +453,7 @@ fn moved_session(cli: &Cli, args: &[String]) -> Result<Option<Forward>> {
     let Some(store) = read_registry()? else {
         return Ok(None);
     };
-    let id = loopflow_model::id::canonical_session(id);
-    let machine = match conversation_task(&store, &id)? {
-        Some(task) => {
-            let runs_on =
-                loopflow_execution::store::ownership::task_execution_route(&store, &task)?
-                    .machine_id;
-            (runs_on != loopflow_execution::store::machines::local_machine(&store)?.id)
-                .then_some(runs_on)
-        }
-        None => store.session_moved_to(&id)?,
-    };
+    let machine = session_machine(&store, id)?;
     Ok(machine.map(|machine| Forward {
         machine,
         args: args[1..].to_vec(),
@@ -404,6 +461,41 @@ fn moved_session(cli: &Cli, args: &[String]) -> Result<Option<Forward>> {
         wave: None,
         repository: None,
     }))
+}
+
+/// The other Machine a Session recorded here runs on: where its Task runs,
+/// else where the Session moved.
+fn session_machine(store: &SqliteStore, id: &str) -> Result<Option<MachineId>> {
+    let id = loopflow_model::id::canonical_session(id);
+    other_machine(store, &id)
+}
+
+/// The other Machine whose held terminal runs `session`: the Task's owner
+/// when `task` is named, else `machine`, else what this Machine's records say.
+/// `None` runs it here.
+pub(crate) fn terminal_machine(
+    session: &loopflow_model::id::LfSessionId,
+    task: Option<&str>,
+    machine: Option<MachineId>,
+) -> Result<Option<loopflow_model::durable::Machine>> {
+    let runs_on = match (task, machine) {
+        (Some(task), _) => loopflow_execution::machine::task::remote_task(task, None)?
+            .map(|route| route.machine_id),
+        (None, Some(machine)) => {
+            let here = match read_registry()? {
+                Some(store) => Some(loopflow_execution::store::machines::local_machine(&store)?.id),
+                None => None,
+            };
+            (here.as_ref() != Some(&machine)).then_some(machine)
+        }
+        (None, None) => match read_registry()? {
+            Some(store) => session_machine(&store, session.as_str())?,
+            None => None,
+        },
+    };
+    runs_on
+        .map(|machine| super::write::find_machine(machine.as_str()))
+        .transpose()
 }
 
 /// `lf task run`'s `--pool`, `--rent` and `--quote`, removed before `--`.

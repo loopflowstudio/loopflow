@@ -8,8 +8,15 @@ use std::process::Command;
 use loopflow_execution::graph::compile_graph;
 use loopflow_execution::graph::load_graph;
 use loopflow_execution::graph::{ConcreteStep, Step};
+use loopflow_test_support::{lf_binary, MachineServer};
 use support::codex_app_server_script;
 use tempfile::TempDir;
+
+fn start_codex_fixture_server(home: &Path) -> MachineServer {
+    // These Graphs exercise the Codex stand-in even when other harnesses are installed.
+    fs::write(home.join("config.yaml"), "default_agent: codex\n").unwrap();
+    MachineServer::start(lf_binary(), home)
+}
 
 fn session_id_for_capture(home: &Path, artifact: &str) -> String {
     rusqlite::Connection::open_with_flags(
@@ -633,13 +640,10 @@ fn checkout_task_identity_ignores_main_and_parent_upstreams() {
         let repo = loopflow_test_support::TestRepo::new();
         support::bind_task_planning(&repo);
         let home = TempDir::new().unwrap();
-        let _server = loopflow_test_support::MachineServer::start(
-            loopflow_test_support::lf_binary(),
-            home.path(),
-        );
         let checkout = repo.path().canonicalize().unwrap();
         let child =
             support::register_task_with_pr(home.path(), &checkout, "child-task", &repo.head_sha());
+        let _server = start_codex_fixture_server(home.path());
         observe_planning(&child, &checkout);
         let parent_path = repo.create_named_worktree("parent-task");
         let parent = support::register_sibling_task(&child, "INF-124", "parent-task", &parent_path);
@@ -831,6 +835,24 @@ printf '%s' "$answer" > "$LF_HOME/$step.answer"
 "#,
         );
 
+        let path = format!("{}:/usr/bin:/bin", bin.display());
+        // First-open migrations in a debug build take most of the deadline;
+        // finish them before the clock starts.
+        let migrated = lf_command(
+            repo.path(),
+            home.path(),
+            &["desktop", "portfolio", "--json"],
+            Some(&path),
+        )
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+        assert!(
+            migrated.status.success(),
+            "{}",
+            String::from_utf8_lossy(&migrated.stderr)
+        );
+
         let mut master = -1;
         let mut slave = -1;
         // SAFETY: valid output pointers; null selects default terminal settings.
@@ -852,7 +874,6 @@ printf '%s' "$answer" > "$LF_HOME/$step.answer"
         let slave = unsafe { fs::File::from_raw_fd(slave) };
         let log_path = home.path().join("output");
         let log = fs::File::create(&log_path).unwrap();
-        let path = format!("{}:/usr/bin:/bin", bin.display());
         let mut command = lf_command(repo.path(), home.path(), &flags, Some(&path));
         command
             .args(["-a", "claude"])
@@ -1198,12 +1219,9 @@ fn task_run_history_reads_only_that_tasks_runs_without_starting_it() {
     let repo = loopflow_test_support::TestRepo::new();
     repo.create_branch("task-history");
     let home = TempDir::new().unwrap();
-    let _server = loopflow_test_support::MachineServer::start(
-        loopflow_test_support::lf_binary(),
-        home.path(),
-    );
     let task =
         support::register_task_with_pr(home.path(), repo.path(), "task-history", &repo.head_sha());
+    let _server = start_codex_fixture_server(home.path());
     let runtime = tokio::runtime::Runtime::new().unwrap();
     let events = || {
         runtime
@@ -1309,12 +1327,9 @@ fn task_run_history_reads_only_that_tasks_runs_without_starting_it() {
 fn lf_launches_inside_a_task_checkout_bind_to_that_task() {
     let repo = loopflow_test_support::TestRepo::new();
     let home = TempDir::new().unwrap();
-    let _server = loopflow_test_support::MachineServer::start(
-        loopflow_test_support::lf_binary(),
-        home.path(),
-    );
     let task =
         support::register_task_with_pr(home.path(), repo.path(), "task-binding", &repo.head_sha());
+    let _server = start_codex_fixture_server(home.path());
     let sibling_worktree = repo.create_named_worktree("task-sibling");
     let sibling =
         support::register_sibling_task(&task, "INF-124", "task-sibling", &sibling_worktree);
@@ -1480,10 +1495,6 @@ fn bound_graphs_keep_task_context_and_leave_other_graphs_and_shared_edits_alone(
     support::bind_task_planning(&repo);
     let caller = TestRepo::new();
     let home = TempDir::new().unwrap();
-    let _server = loopflow_test_support::MachineServer::start(
-        loopflow_test_support::lf_binary(),
-        home.path(),
-    );
     let checkout = repo.path().canonicalize().unwrap();
     let task = support::register_task_with_pr(
         home.path(),
@@ -1491,6 +1502,7 @@ fn bound_graphs_keep_task_context_and_leave_other_graphs_and_shared_edits_alone(
         "task-contribution",
         &repo.head_sha(),
     );
+    let _server = start_codex_fixture_server(home.path());
     observe_planning(&task, &checkout);
     for skill in ["first", "second"] {
         write_skill(repo.path(), skill, &format!("Execute {skill}."));
@@ -1946,15 +1958,12 @@ fn task_graph_read_keeps_captured_topology_and_counts_both_returns() {
     let repo = loopflow_test_support::TestRepo::new();
     support::bind_task_planning(&repo);
     let home = TempDir::new().unwrap();
-    let _server = loopflow_test_support::MachineServer::start(
-        loopflow_test_support::lf_binary(),
-        home.path(),
-    );
     // A Task's Graphs are those whose Processes ran in its checkout, as Processes name it.
     let checkout = repo.path().canonicalize().unwrap();
     repo.create_branch("task-graph-read");
     let task =
         support::register_task_with_pr(home.path(), &checkout, "task-graph-read", &repo.head_sha());
+    let _server = start_codex_fixture_server(home.path());
     observe_planning(&task, &checkout);
     support::select_wave_graph(
         &checkout,
@@ -2143,13 +2152,10 @@ fn three_nested_loops_each_return_to_their_own_first_step() {
     let repo = loopflow_test_support::TestRepo::new();
     support::bind_task_planning(&repo);
     let home = TempDir::new().unwrap();
-    let _server = loopflow_test_support::MachineServer::start(
-        loopflow_test_support::lf_binary(),
-        home.path(),
-    );
     let checkout = repo.path().canonicalize().unwrap();
     let task =
         support::register_task_with_pr(home.path(), &checkout, "nested-loops", &repo.head_sha());
+    let _server = start_codex_fixture_server(home.path());
     observe_planning(&task, &checkout);
     repo.create_branch("nested-loops");
     write_skill(repo.path(), "work-proof", "Fixture step.");
@@ -2234,13 +2240,10 @@ fn the_research_graph_stops_at_its_findings_then_reaches_end() {
     let repo = loopflow_test_support::TestRepo::new();
     support::bind_task_planning(&repo);
     let home = TempDir::new().unwrap();
-    let _server = loopflow_test_support::MachineServer::start(
-        loopflow_test_support::lf_binary(),
-        home.path(),
-    );
     let checkout = repo.path().canonicalize().unwrap();
     let task =
         support::register_task_without_pr(home.path(), &checkout, "research-end", &repo.head_sha());
+    let _server = start_codex_fixture_server(home.path());
     observe_planning(&task, &checkout);
     repo.create_branch("research-end");
     let (_bin, path) = scripted_provider(home.path(), &[WORK]);

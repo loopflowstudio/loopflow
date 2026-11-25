@@ -285,6 +285,14 @@ impl Terminal {
         &self.effects.status
     }
 
+    /// A key or paste acknowledges completed and failed program reports.
+    pub fn acknowledge_results(&mut self) {
+        self.effects
+            .status
+            .records
+            .retain(|report| !matches!(report.state, State::Done | State::Error));
+    }
+
     /// The current OSC 0/2 title, borrowed until the next terminal mutation.
     pub fn title(&self) -> Option<&str> {
         let title = self.data::<ffi::String>(ffi::DATA_TITLE, "title").ok()?;

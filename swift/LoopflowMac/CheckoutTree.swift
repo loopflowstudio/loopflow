@@ -48,6 +48,8 @@ final class CheckoutTree {
 
     private(set) var listings: [String: Listing] = [:]
     private(set) var expanded: Set<String> = []
+    /// The Task has no checkout on its Machine yet.
+    private(set) var notStarted = false
     /// The row the arrow keys move from; opening a file is a separate act.
     var selection: String?
 
@@ -145,7 +147,9 @@ final class CheckoutTree {
                 result.entries = more ? listing.entries + page.entries : page.entries
                 result.nextCursor = page.nextCursor
                 result.pages = more ? listing.pages + 1 : 1
+                notStarted = false
             } catch {
+                if (error as? ServerError)?.notStarted == true { notStarted = true }
                 result.error = error.localizedDescription
             }
             // Toggling Show Ignored discards every page and its cursor.

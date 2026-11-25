@@ -545,7 +545,7 @@ public struct DesktopLayoutInspection: Codable, Sendable, Equatable {
                         surface: surface(content), location: tab.location, url: nil, commands: commands(content))
                 }
                 selectedTab = selected
-            case .browser(_, let pages, let selected, _, _):
+            case .browser(_, let pages, let selected, _):
                 tabs = pages.map { page in
                     let kind: DesktopTabInspection.Kind
                     let url: String?
@@ -567,8 +567,8 @@ public struct DesktopLayoutInspection: Codable, Sendable, Equatable {
             pane = state.id; incarnation = state.incarnation; self.surface = surface(state.content); axis = nil; ratio = nil; children = []
             switch state.content {
             case .shell: content = "shell"; subject = nil
-            case .session(let id, _, _): content = "session"; subject = id
-            case .browser(let id, _, _, _, _): content = "browser"; subject = id
+            case .session(let id, _): content = "session"; subject = id
+            case .browser(let id, _, _, _): content = "browser"; subject = id
             }
         case .split(let splitAxis, let first, let second, let splitRatio):
             tabs = []; selectedTab = nil

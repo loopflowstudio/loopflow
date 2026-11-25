@@ -67,7 +67,7 @@ struct MultiplexerStoreTests {
         #expect(web.incarnation == files.incarnation)
         #expect(web.content.location == here)
         let again = try #require(store.showBrowser(.files))
-        guard case .browser(_, let tabs, let selected, _, _) = again.content else { throw TestFailure() }
+        guard case .browser(_, let tabs, let selected, _) = again.content else { throw TestFailure() }
         #expect(tabs.map(\.id) == ["files", page.id])
         #expect(selected == "files")
         let moved = WorkspaceIdentity(machineId: "local", worktree: "/moved")

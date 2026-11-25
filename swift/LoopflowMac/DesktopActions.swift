@@ -313,7 +313,7 @@ struct DesktopAction {
             let model = context.model
             let id = try context.string("tile")
             let tiles: [WorkMemberRef]? = switch model.navigation.destination {
-            case .workingTasks: model.workingTaskMembers
+            case .workingTasks: model.boardTiles(.workingTasks)
             case .dashboard, .view: model.selectedViewPlan?.projection.visible
             case .work: model.navigation.waveView.map { model.boardTiles($0) }
             case .entered: nil
@@ -331,7 +331,7 @@ struct DesktopAction {
             guard let wave = model.navigation.waveView, let plan = model.boardPlan(wave) else {
                 throw DesktopTargetError("This window shows no Wave view. Nothing changed.")
             }
-            let pages = plan.slots.pages(model.boardTiles(wave)).count
+            let pages = plan.slots.pages(plan.taskTiles).count
             guard let page = Int(try context.string("page")), (1...pages).contains(page) else {
                 throw DesktopArgumentError("page must be 1 to \(pages); nothing changed.")
             }
@@ -688,7 +688,7 @@ struct DesktopAction {
     /// The addressed browser tab when it is a web page; Files and Graph processes are not.
     private static func webTab(_ context: DesktopActionContext) throws -> (SessionsWorkspace, id: String, url: URL) {
         let (workspace, pane) = try context.addressed
-        guard case .browser(_, let tabs, let selected, _, _) = pane.content,
+        guard case .browser(_, let tabs, let selected, _) = pane.content,
               case .url(let id, let url)? = tabs.first(where: { $0.id == (context.tab ?? selected) }) else {
             throw DesktopTargetError("The addressed tab is not a web page; nothing changed.")
         }
@@ -763,7 +763,7 @@ struct DesktopActionMonitor: NSViewRepresentable {
             monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
                 guard let self, let window = self.view?.window,
                       event.window === window, window.isKeyWindow, window.attachedSheet == nil,
-                      (window.firstResponder as? NSTextView)?.hasMarkedText() != true else {
+                      (window.firstResponder as? NSTextInputClient)?.hasMarkedText() != true else {
                     self?.chordTarget = nil
                     return event
                 }

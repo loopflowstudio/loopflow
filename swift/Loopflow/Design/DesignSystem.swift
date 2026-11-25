@@ -99,7 +99,9 @@ public enum Typography {
         #if os(iOS)
         .custom(face, size: iPhone, relativeTo: style)
         #else
-        .custom(face, fixedSize: mac)
+        if let font = AppFontRegistration.font(face, size: mac) { return Font(font) }
+        return .system(size: mac, weight: face == sansStrongFace ? .semibold : .regular,
+                       design: face == monoFace ? .monospaced : .default)
         #endif
     }
 }
@@ -147,12 +149,8 @@ private struct Serif: ViewModifier {
 
     func body(content: Content) -> some View {
         let size = step.size * scale
-        let descriptor = CTFontDescriptorCreateCopyWithFeature(
-            CTFontDescriptorCreateWithNameAndSize(Typography.serifFace as CFString, size),
-            NSNumber(value: kLigaturesType),
-            NSNumber(value: kCommonLigaturesOffSelector)
-        )
-        content.font(Font(CTFontCreateWithFontDescriptor(descriptor, size, nil))).tracking(-0.03 * size)
+        let font = AppFontRegistration.font(Typography.serifFace, size: size, commonLigaturesOff: true)
+        content.font(font.map { Font($0) } ?? .system(size: size, design: .serif)).tracking(-0.03 * size)
     }
 }
 

@@ -19,6 +19,11 @@ extension WorkModel {
         var rows: [WorkPaletteRow] = []
         if let repoPath {
             let name = URL(fileURLWithPath: repoIdentity(repoPath)).lastPathComponent
+            if navigation.sidebarScope.isWorkingList {
+                rows.append(.init(id: .sortWorkingTasks, title: "Sort by status",
+                                  detail: navigation.sidebarSortByStatus ? "On · Restore saved order" : "Off · Group Working Tasks",
+                                  key: "Sort by status"))
+            }
             rows.append(.init(id: .repository, title: name, detail: "Repository", key: name))
         }
         for repo in repos where repo.path.normalizedFilePath != repoPath?.normalizedFilePath {
@@ -313,7 +318,7 @@ struct WorkPaletteShortcut: NSViewRepresentable {
         context.coordinator.monitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .flagsChanged]) { [weak coordinator = context.coordinator] event in
             guard let coordinator, let window = coordinator.view?.window,
                   event.window === window, window.isKeyWindow, window.attachedSheet == nil,
-                  (window.firstResponder as? NSTextView)?.hasMarkedText() != true
+                  (window.firstResponder as? NSTextInputClient)?.hasMarkedText() != true
             else { return event }
             if event.type == .flagsChanged {
                 coordinator.modifiersChanged(event.modifierFlags.intersection([.command, .control, .option, .shift]) == [.command])

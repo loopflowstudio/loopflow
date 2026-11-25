@@ -147,6 +147,54 @@ struct DesktopHeadlessTests {
         #expect(TaskCommentsView.readableBody(proof.comments.comments[0].body) == "Preserve the escaped quote")
     }
 
+    @Test("A Task another Machine runs has started when its own reading says so, though this plan never saw its Graph")
+    func remoteTaskStandsWhereItsOwnerSays() async throws {
+        func object(_ name: String) throws -> [String: Any] {
+            try #require(JSONSerialization.jsonObject(
+                with: Data(contentsOf: fixtures.appendingPathComponent(name))) as? [String: Any])
+        }
+        func frame(_ part: String, sequence: Int, answers: Int, task: String? = nil, body: Any) throws -> WorkFrame {
+            let line: [String: Any] = ["answers": answers, "unavailable": NSNull(), "body": body, "read_at": NSNull()]
+            return try WorkFrame.decode(part: try #require(WorkPart(rawValue: part)),
+                                        scope: WorkScope(repo: nil, headless: false, task: task, activity: nil, taskListWave: nil),
+                                        sequence: sequence, line: JSONSerialization.data(withJSONObject: line))
+        }
+        let planning = try object("roadmap_snapshot.json")
+        let feed = Feed()
+        let model = WorkModel(query: RegistryQuery(subscribeWork: { await feed.open() }) { _, _ in "" })
+        model.bindWorkspaces(SessionsWorkspaceRegistry(localMachineId: fixtureMachineId), repository: "repo")
+        model.confirmMachine(fixtureMachineId)
+        let keeping = Task { await model.keepWorkCurrent() }
+        defer { keeping.cancel() }
+        func eventually(_ condition: @MainActor () -> Bool) async throws {
+            for _ in 0..<600 where !condition() { try await Task.sleep(for: .milliseconds(5)) }
+            try #require(condition())
+        }
+
+        try await eventually { feed.isOpen }
+        feed.send(try frame("planning", sequence: 1, answers: 0, body: planning))
+        // mini runs it; this Machine's plan has no Graph for it.
+        try await eventually { model.task(id: "issue-review") != nil }
+        let planned = try #require(model.task(id: "issue-review")?.task)
+        #expect(planned.ownerMachineId != fixtureMachineId)
+        #expect(planned.awaitsStart)
+        model.select(.task(id: planned.id))
+        model.syncWorkScope()
+        try await eventually { feed.requests.last?.id == 2 }
+
+        let rows = try #require((planning["tasks"] as? [String: Any])?["items"] as? [[String: Any]])
+        var row = try #require(rows.first { ($0["task"] as? [String: Any])?["id"] as? String == "issue-review" })
+        row["lifecycle"] = "active"
+        row["section"] = "working"
+        var comments = try object("task_comments.json")
+        comments["identifier"] = planned.task.identifier
+        feed.send(try frame("task", sequence: 2, answers: 2, task: planned.task.identifier,
+                            body: ["overview": try object("task_work.json"), "graph_processes": [], "execution": NSNull(),
+                                   "comments": comments, "row": row]))
+        try await eventually { model.task(id: planned.id)?.task.awaitsStart == false }
+        #expect(model.task(id: planned.id)?.task.section == .working)
+    }
+
     @Test("A Task's work, comments and pending delivery arrive from the stream, with no lf read")
     func taskWorkFollowsTheStream() async throws {
         func object(_ name: String) throws -> [String: Any] {
@@ -544,7 +592,7 @@ struct DesktopHeadlessTests {
             value["id"] = id
             value["state"] = state
             value["availability"] = available ? "available" : NSNull()
-            value["task_primary"] = primary
+            value["primary_scope"] = primary ? "task" : nil
             return try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: value))
         }
         let groups = TaskSessionGroups([

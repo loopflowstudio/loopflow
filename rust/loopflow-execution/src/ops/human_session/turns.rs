@@ -155,8 +155,8 @@ pub fn raw(store: &SqliteStore, repo: Option<&str>) -> Result<Vec<SessionRecord>
             }
         }
         let turn = crate::observe::transcript_turn(conversation.harness, &conversation.source);
-        // A checkout two Tasks claim lists under neither.
-        let task = crate::ops::task::counted_task(store, &conversation.cwd).unwrap_or(None);
+        // Listed under the Task whose checkout holds it; no Session counts it.
+        let task = store.task_checkout_owner(&conversation.cwd).unwrap_or(None);
         records.push(record(
             conversation.harness,
             &conversation.id,
@@ -185,7 +185,6 @@ fn record(
         availability: handed_back(&turn).then_some(SessionAvailability::Available),
         program_status: None,
         agent_process_id: None,
-        task_primary: false,
         task_ids: task.into_iter().collect(),
         id: id.into(),
         workspace: None,

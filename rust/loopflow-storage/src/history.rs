@@ -18,7 +18,7 @@ use crate::{RecordingGap, StoreResult};
 const FILE: &str = "history.db";
 /// The schema store connections attach the file as.
 const ALIAS: &str = "history";
-const VERSION: i64 = 1;
+const VERSION: i64 = 2;
 
 /// The file's schema. It only adds: a new version creates what it lacks and
 /// nothing migrates old rows. `{p}` names the schema the objects go in: empty
@@ -114,6 +114,25 @@ CREATE INDEX IF NOT EXISTS {p}turns_process ON turns(lf_process_id, session_id)
     WHERE lf_process_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS {p}turns_task ON turns(task_id) WHERE task_id IS NOT NULL;
 
+CREATE TABLE IF NOT EXISTS {p}session_export_changes (
+    position INTEGER PRIMARY KEY,
+    session_id TEXT NOT NULL UNIQUE
+);
+CREATE TRIGGER IF NOT EXISTS {p}export_turns_insert AFTER INSERT ON turns
+BEGIN
+    INSERT INTO session_export_changes(session_id) VALUES(NEW.session_id)
+        ON CONFLICT(session_id) DO UPDATE SET position=(SELECT MAX(position)+1 FROM session_export_changes);
+END;
+CREATE TRIGGER IF NOT EXISTS {p}export_turns_update AFTER UPDATE ON turns
+BEGIN
+    INSERT INTO session_export_changes(session_id) VALUES(NEW.session_id)
+        ON CONFLICT(session_id) DO UPDATE SET position=(SELECT MAX(position)+1 FROM session_export_changes);
+END;
+CREATE TRIGGER IF NOT EXISTS {p}export_session_history_insert AFTER INSERT ON session_history
+BEGIN
+    INSERT INTO session_export_changes(session_id) VALUES(NEW.session_id)
+        ON CONFLICT(session_id) DO UPDATE SET position=(SELECT MAX(position)+1 FROM session_export_changes);
+END;
 CREATE TABLE IF NOT EXISTS {p}history_revision (
     id INTEGER PRIMARY KEY CHECK(id = 1),
     revision INTEGER NOT NULL

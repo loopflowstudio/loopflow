@@ -188,13 +188,25 @@ impl Resolved {
     }
 
     fn resume_argv(&self, lf: &str) -> Vec<String> {
-        let mut argv = vec![lf.to_string(), "session".into(), "resume".into()];
-        match (&self.session, &self.url.target) {
-            (Some(session), _) => argv.push(session.clone()),
-            (None, WorkTarget::Task(id)) => argv.extend(["--task".into(), id.clone()]),
-            (None, WorkTarget::Wave(name)) => argv.extend(["--wave".into(), name.clone()]),
-            (None, WorkTarget::Repository) => {}
-        }
+        let mut argv = if self.execution_machine.is_some() {
+            let mut argv = self.fallback_argv();
+            argv[0] = lf.into();
+            argv.push("--here".into());
+            argv
+        } else {
+            let mut argv = vec![lf.to_string(), "session".into(), "resume".into()];
+            if let Some(session) = &self.session {
+                argv.push(session.clone());
+            }
+            match &self.url.target {
+                WorkTarget::Task(id) => argv.extend(["--task".into(), id.clone()]),
+                WorkTarget::Wave(name) if self.session.is_none() => {
+                    argv.extend(["--wave".into(), name.clone()])
+                }
+                _ => {}
+            }
+            argv
+        };
         // Only the invocation's own choice: a recorded harness named here
         // would move the conversation back each time this command replays.
         if let Some(agent) = loopflow_execution::config::agent_override() {
@@ -211,6 +223,32 @@ impl Resolved {
     }
 
     fn fallback_argv(&self) -> Vec<String> {
+        if let (Some(machine), Some(session)) = (&self.url.machine, &self.session) {
+            return vec![
+                "lf".into(),
+                "open".into(),
+                "--machine".into(),
+                machine.to_string(),
+                "--session".into(),
+                session.clone(),
+            ];
+        }
+        if let Some(task) = self
+            .task
+            .as_ref()
+            .filter(|_| self.execution_machine.is_some())
+        {
+            let mut argv = vec![
+                "lf".into(),
+                "open".into(),
+                "--task".into(),
+                task.id.to_string(),
+            ];
+            if let Some(session) = &self.url.session {
+                argv.extend(["--session".into(), session.clone()]);
+            }
+            return argv;
+        }
         if self.session.is_some() && !matches!(self.url.target, WorkTarget::Task(_)) {
             return vec![
                 "lf".into(),
@@ -750,8 +788,7 @@ fn available_target(
     if let Some(id) = store.sqlite.repository_id(&repo)? {
         context.repository = ContextFact::bound(id, "selected_plan");
     }
-    let primary = record.task_primary
-        || matches!(record.primary_scope.as_deref(), Some("repository" | "wave"));
+    let primary = record.primary_scope.is_some();
     match (&session.task_id, &session.wave_id) {
         (Some(task), _) => context.task = ContextFact::bound(task, "session"),
         (None, Some(wave)) if record.primary_scope.as_deref() == Some("wave") => {
@@ -767,9 +804,12 @@ fn available_target(
         exact.as_ref().map(|_| session.cwd.clone()),
     )?;
     if exact.is_some() {
+        // A generated title already names its Task.
         resolved.label = match &resolved.task {
-            Some(task) => format!("{} · {}", session.title, task.identifier),
-            None => session.title.clone(),
+            Some(task) if !session.title.contains(&task.identifier) => {
+                format!("{} · {}", session.title, task.identifier)
+            }
+            _ => session.title.clone(),
         };
     }
     Ok(resolved)
@@ -1084,6 +1124,9 @@ pub struct OpenSelection {
     /// Open this exact Session rather than its scope's primary
     #[arg(long)]
     pub session: Option<String>,
+    /// Machine holding an exact Session with no local Task
+    #[arg(long, id = "open_machine", value_name = "MACHINE")]
+    pub machine: Option<String>,
     /// Print a link without opening or preparing anything
     #[arg(long)]
     pub link: bool,
@@ -1158,9 +1201,16 @@ impl OpenArgs {
 
 /// The one conversation named by an address, root selectors or checkout.
 fn target(cli: &crate::lf::Cli, args: &OpenSelection) -> Result<Resolved> {
+    let session = args.session.clone();
+    if let Some(machine) = &args.machine {
+        return machine_session(
+            machine,
+            session.context("--machine requires --session")?,
+            &std::env::current_dir()?,
+        );
+    }
     let store = loopflow_execution::store::read_existing_registry()?;
     let store = store.as_ref();
-    let session = args.session.clone();
     let resolved = match &args.url {
         Some(text) => {
             anyhow::ensure!(
@@ -1177,6 +1227,32 @@ fn target(cli: &crate::lf::Cli, args: &OpenSelection) -> Result<Resolved> {
     Ok(resolved)
 }
 
+/// A remote-only Session needs only a local presentation directory.
+fn machine_session(selector: &str, session: String, directory: &Path) -> Result<Resolved> {
+    let machine = super::write::find_machine(selector)?;
+    let mut url = WorkUrl::new(
+        folder_name(directory).unwrap_or("work"),
+        WorkTarget::Repository,
+    );
+    url.session = Some(session.clone());
+    url.machine = Some(machine.id.clone());
+    Ok(Resolved {
+        url,
+        label: format!("{session} · {}", machine.name()),
+        repository_path: directory.to_owned(),
+        repository_id: None,
+        task: None,
+        wave: None,
+        session: Some(session),
+        session_cwd: None,
+        primary: None,
+        primary_machine: None,
+        execution_machine: Some(machine.id.to_string()),
+        execution_unavailable: None,
+        overview: false,
+    })
+}
+
 /// The Work a link names, resolved as if `lf open` ran in `directory`.
 fn url_target(
     store: Option<&Store>,
@@ -1186,6 +1262,13 @@ fn url_target(
 ) -> Result<Resolved> {
     let url = WorkUrl::parse(text)?;
     let session = session.or_else(|| url.session.clone());
+    if let Some(machine) = &url.machine {
+        return machine_session(
+            machine.as_str(),
+            session.context("Machine link requires a Session")?,
+            directory,
+        );
+    }
     let repository = repository_for(store, &url, directory)?;
     let (task, wave) = match &url.target {
         WorkTarget::Task(id) => (Some(id.as_str()), None),
@@ -1489,7 +1572,7 @@ mod tests {
         std::env::remove_var(env);
         assert_eq!(
             resolved.resume_argv("lf"),
-            ["lf", "session", "resume", "session_1"]
+            ["lf", "session", "resume", "session_1", "--task", "LOO-1"]
         );
         std::env::set_var(env, "codex");
         let moved = resolved.resume_argv("lf");
@@ -1499,7 +1582,16 @@ mod tests {
         }
         assert_eq!(
             moved,
-            ["lf", "session", "resume", "session_1", "--agent", "codex"]
+            [
+                "lf",
+                "session",
+                "resume",
+                "session_1",
+                "--task",
+                "LOO-1",
+                "--agent",
+                "codex"
+            ]
         );
     }
 

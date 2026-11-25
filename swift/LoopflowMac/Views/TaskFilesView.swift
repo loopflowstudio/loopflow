@@ -144,7 +144,7 @@ struct TaskFilesView: View {
                     if let document = store.selectedDocument { saveButton(document) }
                 }
                 Divider()
-                Text(store.query.remoteMachine ?? "This Mac")
+                Text(store.machineName ?? "This Mac")
                 Text(store.cwd + (store.selection.map { "/" + $0 } ?? ""))
                 Button("Refresh") { Task { await store.refresh(); await store.refreshScratch(); await store.loadFile() } }
             } label: { Image(systemName: "ellipsis") }
@@ -165,7 +165,7 @@ struct TaskFilesView: View {
             }
         } label: {
             Text((path as NSString).lastPathComponent).font(Typography.mono).lineLimit(1).truncationMode(.middle)
-        }.menuStyle(.borderlessButton).help((store.query.remoteMachine ?? "This Mac") + " · " + store.cwd + "/" + path)
+        }.menuStyle(.borderlessButton).help((store.machineName ?? "This Mac") + " · " + store.cwd + "/" + path)
             .accessibilityIdentifier("files-open")
     }
 
@@ -366,7 +366,10 @@ struct TaskFilesView: View {
     private var documentPane: some View {
         VStack(spacing: 0) {
             if let error = store.error {
-                FailureLine("Latest read failed.", machine: error).padding(Spacing.sm)
+                FailureLine("Latest read failed.", machine: error) {
+                    Button("Retry") { Task { await store.retry() } }
+                        .accessibilityIdentifier("files-retry")
+                }.padding(Spacing.sm)
             }
             if let reason = store.selectedDocument?.readOnlyReason {
                 Text(reason).font(Typography.meta).padding(Spacing.sm)
@@ -511,7 +514,7 @@ struct TaskFileReadingView: View {
     var body: some View {
         switch (document.path as NSString).pathExtension.lowercased() {
         case "html" where store.visit == nil:
-            let baseURL = store.query.remoteMachine == nil
+            let baseURL = store.machine == nil
                 ? URL(fileURLWithPath: store.cwd).appendingPathComponent(document.path) : nil
             TaskHTMLView(html: document.text, baseURL: baseURL, find: store.find, ready: ready)
                 .accessibilityIdentifier("files-rendered-html")

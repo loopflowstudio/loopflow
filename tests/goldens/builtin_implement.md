@@ -74,8 +74,11 @@ read is unknown, not an empty plan. To build on another open Task, `lf sync
 
 A child agent takes one piece of your work: `lf -b <skill> '<brief>'` runs
 one headless in this checkout on any model (`-a codex`), and your harness's
-own subagent is fine too. You answer for what it returns; check it before
-you use it.
+own subagent is fine too, working in this checkout. A separate checkout
+comes from `lf wt create <name>` beside this one (`--stack` when its piece
+builds on this branch), never from the harness's own worktree tools, which
+nest one inside this checkout where it belongs to no Task. You answer for
+what it returns; check it before you use it.
 
 Present a finished file beside the conversation with `lf desktop files <path>`.
 Exit 4 means Desktop is unattached. Give the path and continue.
@@ -129,10 +132,14 @@ corrections.
 
 ## Choose the slice
 
-**Build end to end, thinly.** Take the next piece of the plan that runs
-through every layer it touches, from what a person does to what gets stored.
-The test: when this slice is done, can you run it and see whether the pieces
-fit?
+**Build a substantial end-to-end pass.** Carry the change from what a person
+does to what gets stored, then run it. Keep building while the next item is
+the same kind of work. Pause when the next item needs a decision or review,
+or when what you learned could change the plan.
+
+Size the diff so one person can review it in a sitting. Around 2,000 lines
+of non-test change is a soft ceiling. Stop earlier when the work is ready
+for review.
 
 **Pick the slice that teaches the most.** Build first what could prove the
 plan wrong: the join between two parts, the data shape everything depends on,

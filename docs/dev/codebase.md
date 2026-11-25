@@ -78,7 +78,7 @@ Graphs may invoke the named internal operations that own their exact boundary.
 | `lf machine doctor` | local OS observation: strays, live lf binaries, store contention |
 | `lf machine`, `lf --machine` | Machine identity and execution-destination routing |
 | `lf server` | Client API serving and observational readiness |
-| `lf account` | service authentication and browser consent |
+| `lf machine login\|logins\|logout` | each provider's own sign-in on any Machine, approved here |
 | `lf install`, `release` | Artifact selection, server registration/update and release workflow |
 
 Argument-level behavior belongs in the [`lf` reference](../lf-reference.md). Wire DTOs

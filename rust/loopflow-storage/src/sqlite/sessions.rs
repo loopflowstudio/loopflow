@@ -5,7 +5,7 @@ use std::path::Path;
 
 use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
 
-use crate::session::{LfSession, PrimaryScope, TitleSource};
+use crate::session::{LfSession, PrimaryScope, TitleSource, WorkSource};
 use crate::{StoreError, StoreResult};
 use loopflow_model::durable::TaskId;
 
@@ -240,10 +240,20 @@ const TURN_LIVE: &str = "EXISTS(SELECT 1 FROM session_activity act
             AND NOT EXISTS(SELECT 1 FROM json_each(act.program_status,'$.records') r
                 WHERE json_extract(r.value,'$.state') IN ('idle','blocked','done')))))";
 
+/// SQL: which scope Session row `s` is primary for. A Task's primary is its
+/// row in `task_primary_sessions`, which released lf also reads and writes;
+/// LOO-877 moves it onto `primary_scope`.
+pub(super) fn primary_scope_sql(s: &str) -> String {
+    format!(
+        "coalesce({s}.primary_scope,
+            (SELECT 'task' FROM task_primary_sessions tp WHERE tp.session_id={s}.id))"
+    )
+}
+
 const SESSION_SELECT: &str = concat!("SELECT s.id,c.receipt_key AS artifact_key,s.title,s.title_source,
     s.completed_at,s.created_at,s.request,s.interactive,s.repo,
     s.task_id,s.wave_id,", session_graph!(), " AS graph_lf_process_id,s.work_source,s.bound_at,
-    s.input_published,s.cwd,s.skill,s.provider,s.model,", session_step!("node"), " AS node,", session_step!("iterations"), " AS iterations,json_extract(c.payload,'$.caller_key') AS caller_artifact_key,s.current_capture FROM agent_sessions s LEFT JOIN session_events c ON c.seq=s.current_capture");
+    s.input_published,s.cwd,s.skill,s.provider,s.model,", session_step!("node"), " AS node,", session_step!("iterations"), " AS iterations,json_extract(c.payload,'$.caller_key') AS caller_artifact_key,s.current_capture,s.opened_at FROM agent_sessions s LEFT JOIN session_events c ON c.seq=s.current_capture");
 
 fn read_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoreResult<LfSession>> {
     Ok((|| {
@@ -341,7 +351,10 @@ fn available_sql(session: &str, now: i64) -> String {
             AND CASE WHEN act.program_status IS NOT NULL THEN
                 EXISTS(SELECT 1 FROM json_each(act.program_status,'$.records') r
                     WHERE json_extract(r.value,'$.state')='blocked'
-                    OR ({session}.interactive=1 AND json_extract(r.value,'$.state')='idle'))
+                    OR ({session}.interactive=1 AND (json_extract(r.value,'$.state')='idle'
+                        OR (json_extract(r.value,'$.state')='done' AND NOT EXISTS(
+                            SELECT 1 FROM json_each(act.program_status,'$.records') other
+                            WHERE json_extract(other.value,'$.state')='working')))))
             ELSE act.attachment_token={session}.attachment_token
                 AND (act.pending_input>0 OR (act.open_tools=0 AND (({session}.interactive=1 AND act.yielded=1)
                     OR {now}-act.observed_at>={quiet}))) END)",
@@ -380,29 +393,41 @@ fn inventory_query(
         ));
     }
     if let Some(task) = &filter.task {
-        let task = bind(Value::Text(task.clone()));
+        let value = bind(Value::Text(task.clone()));
+        if TaskId::parse(task).is_ok() {
+            sql.push_str(&format!(
+                " AND {}",
+                super::task_work::session_in_task("s", &value)
+            ));
+        } else {
+            sql.push_str(&format!(
+                " AND {} AND s.task_id IN (SELECT id FROM tasks WHERE id={value} OR issue_identifier={value} OR external_issue_id={value})",
+                super::task_work::counts_for_task("s")
+            ));
+        }
+    }
+    if let Some(wave) = &filter.wave {
+        let wave = bind(Value::Text(wave.to_string()));
         sql.push_str(&format!(
-            " AND s.id IN ({})",
-            super::task_work::session_ids(&task)
+            " AND (s.wave_id={wave} OR ({} AND s.task_id IN (
+                SELECT t.id FROM projects p JOIN tasks t ON t.project_id=p.id WHERE p.wave_id={wave})))",
+            super::task_work::counts_for_task("s")
         ));
     }
     if let Some(primary) = filter.primary {
         use crate::session::SessionPrimary;
-        let task = "EXISTS (SELECT 1 FROM task_primary_sessions t WHERE t.session_id=s.id)";
+        let scope = primary_scope_sql("s");
         sql.push_str(&match primary {
-            SessionPrimary::All => {
-                format!(" AND (s.primary_scope IN ('wave','repository') OR {task})")
-            }
-            SessionPrimary::Task => format!(" AND {task}"),
+            SessionPrimary::All => format!(" AND {scope} IS NOT NULL"),
+            SessionPrimary::Task => format!(" AND {scope}='task'"),
             SessionPrimary::Wave => " AND s.primary_scope='wave'".into(),
             SessionPrimary::Repository => " AND s.primary_scope='repository'".into(),
         });
     }
     if filter.orphan {
-        sql.push_str(&format!(
-            " AND s.wave_id IS NULL AND NOT EXISTS ({})",
-            super::task_work::session_tasks("s")
-        ));
+        sql.push_str(
+            " AND s.wave_id IS NULL AND (s.task_id IS NULL OR s.primary_scope IS NOT NULL)",
+        );
     }
     if let Some(search) = &filter.search {
         let search = bind(Value::Text(search.clone()));
@@ -449,11 +474,9 @@ fn summary_query(page: &str, by_id: bool, now: i64) -> String {
         (gs.seq=(SELECT MAX(later.seq) FROM graph_process_steps later WHERE later.graph_lf_process_id=gs.graph_lf_process_id)),
         w.slug,
         COALESCE(captured.independent=1,0),
-        (SELECT json_group_array(id) FROM ({})),
-        a.primary_scope,
+        {scope},
         {available},
         COALESCE(({task_state}) IN ('done','abandoned'),0),
-        s.id IN (SELECT session_id FROM task_primary_sessions),
         (SELECT act.program_status FROM session_activity act WHERE act.session_id=s.id AND act.agent_process_id IS a.agent_process_id),a.agent_process_id,CASE WHEN a.attached_lf_process_id IS NOT NULL THEN a.attached_terminal_id END,
         (SELECT act.preview FROM session_activity act WHERE act.session_id=s.id AND act.agent_process_id IS a.agent_process_id
          AND json_extract(act.preview,'$.provider_thread')=a.provider_thread
@@ -465,10 +488,7 @@ fn summary_query(page: &str, by_id: bool, now: i64) -> String {
         graph.pid,graph.os_started_at,graph.exit_code,graph.error,a.agent_ended_at IS NOT NULL,
         a.agent_ended_at,a.agent_exit_code,
         a.starts_since_turn,a.last_started_at,a.start_failure,
-        EXISTS(SELECT 1 FROM task_primary_sessions tp
-         JOIN tasks pt ON pt.id=tp.task_id
-         JOIN task_checkouts pc ON pc.task_id=tp.task_id
-         WHERE tp.session_id=a.id AND {here}),
+        EXISTS(SELECT 1 FROM task_checkouts pc WHERE pc.task_id=t.id AND {here}),
         a.agent_pid IS NULL AND a.agent_ended_at IS NULL
          AND EXISTS(SELECT 1 FROM held_terminals t WHERE t.id=a.held_terminal_id AND t.ended_at IS NULL)
         FROM page s JOIN agent_sessions a ON a.id=s.id
@@ -477,9 +497,10 @@ fn summary_query(page: &str, by_id: bool, now: i64) -> String {
         LEFT JOIN graph_processes graph ON graph.lf_process_id=gs.graph_lf_process_id
         LEFT JOIN wave_addresses w ON w.id=s.wave_id
         LEFT JOIN tasks t ON t.id=s.task_id
-        ORDER BY {order}", super::task_work::session_tasks("a"),
+        ORDER BY {order}",
+        scope = primary_scope_sql("a"),
         task_state = super::durable::task_state_sql("t"),
-        here = super::session_recovery::task_conversation_here_sql("a", "pt", "pc"))
+        here = super::session_recovery::task_conversation_here_sql("a", "t", "pc"))
 }
 
 fn read_summary(
@@ -505,10 +526,10 @@ fn read_summary(
                     id,
                     started_at: row.get::<_, Option<i64>>(18)?.unwrap_or_default(),
                     ended_at: row.get(19)?,
-                    pid: row.get(37)?,
-                    os_started_at: row.get(38)?,
-                    exit_code: row.get(39)?,
-                    error: row.get(40)?,
+                    pid: row.get(35)?,
+                    os_started_at: row.get(36)?,
+                    exit_code: row.get(37)?,
+                    error: row.get(38)?,
                 };
                 Some(crate::session::GraphProcessSummary {
                     id: run.id.to_string(),
@@ -526,15 +547,15 @@ fn read_summary(
             }
             None => None,
         };
-        let agent_process_id: Option<loopflow_model::id::AgentProcessId> = row.get(30)?;
+        let agent_process_id: Option<loopflow_model::id::AgentProcessId> = row.get(28)?;
         // An agent whose end is recorded is dead by its row; the OS is asked about the rest.
-        let agent_process_evidence = if row.get(41)? {
+        let agent_process_evidence = if row.get(39)? {
             crate::ProcessIdentityEvidence::Dead
         } else {
             projection.evidence(agent_process_id.as_ref())
         };
         let live = agent_process_evidence == crate::ProcessIdentityEvidence::Live;
-        let unviewed: bool = row.get(33)?;
+        let unviewed: bool = row.get(31)?;
         let task_identifier = task_id
             .as_ref()
             .map(|id| super::children::cached_short_task_id(conn, labels, id))
@@ -542,44 +563,42 @@ fn read_summary(
             .flatten();
         Ok(crate::session::SessionSummary {
             transition: super::provider_transitions::latest_in(conn, &row.get::<_, String>(0)?)?,
-            has_provider_history: row.get(35)?,
+            has_provider_history: row.get(33)?,
             preview: row
-                .get::<_, Option<String>>(32)?
+                .get::<_, Option<String>>(30)?
                 .map(|json| serde_json::from_str(&json))
                 .transpose()?
                 .filter(|_| live),
             // A terminal no viewer occupies is gone, whatever its launch recorded.
-            terminal_id: row.get::<_, Option<String>>(31)?.filter(|_| {
+            terminal_id: row.get::<_, Option<String>>(29)?.filter(|_| {
                 live && !unviewed
                     && projection.holder(agent_process_id.as_ref())
                         != crate::ProcessIdentityEvidence::Dead
             }),
             unviewed,
-            held: live && row.get(36)?,
+            held: live && row.get(34)?,
             agent_end: row
-                .get::<_, Option<i64>>(42)?
+                .get::<_, Option<i64>>(40)?
                 .map(|at| {
-                    row.get(43)
+                    row.get(41)
                         .map(|exit_code| crate::session::AgentEnd { at, exit_code })
                 })
                 .transpose()?,
-            starts_since_turn: row.get(44)?,
-            last_started_at: row.get(45)?,
-            start_failure: row.get(46)?,
-            task_ids: serde_json::from_str(&row.get::<_, String>(24)?)?,
-            primary_scope: row.get(25)?,
+            starts_since_turn: row.get(42)?,
+            last_started_at: row.get(43)?,
+            start_failure: row.get(44)?,
+            primary_scope: row.get(24)?,
             agent_process_evidence,
-            available: live && row.get(26)?,
+            available: live && row.get(25)?,
             program_status: row
-                .get::<_, Option<String>>(29)?
+                .get::<_, Option<String>>(27)?
                 .map(|json| serde_json::from_str(&json))
                 .transpose()?
                 .filter(|_| live),
             agent_process_id,
-            task_terminal: row.get(27)?,
-            task_primary: row.get(28)?,
-            in_task_checkout: row.get(47)?,
-            launching: row.get(48)?,
+            task_terminal: row.get(26)?,
+            in_task_checkout: row.get(45)?,
+            launching: row.get(46)?,
             captured: row.get(15)?,
             id: row.get(0)?,
             artifact_key: row
@@ -598,7 +617,7 @@ fn read_summary(
             skill: row.get(10)?,
             provider: row.get(11)?,
             account: row
-                .get::<_, Option<String>>(34)?
+                .get::<_, Option<String>>(32)?
                 .map(|id| crate::ProviderAccountId::parse(&id))
                 .transpose()
                 .map_err(invalid)?,
@@ -615,19 +634,6 @@ fn read_summary(
             independent: row.get::<_, Option<bool>>(23)?.unwrap_or(false),
         })
     })())
-}
-
-fn task_primary_in(conn: &Connection, task: &TaskId) -> StoreResult<Option<LfSession>> {
-    conn.query_row(
-        &format!(
-            "{SESSION_SELECT} WHERE s.id=(SELECT session_id FROM task_primary_sessions WHERE task_id=?1)
-             AND s.completed_at IS NULL"
-        ),
-        [task.as_str()],
-        read_session,
-    )
-    .optional()?
-    .transpose()
 }
 
 pub(super) fn primary_session_in(
@@ -649,7 +655,17 @@ pub(super) fn primary_session_in(
     match scope {
         PrimaryScope::Repository(repo) => marked("repository", "repo", repo.to_string()),
         PrimaryScope::Wave(wave) => marked("wave", "wave_id", wave.to_string()),
-        PrimaryScope::Task(task) => task_primary_in(conn, task),
+        PrimaryScope::Task(task) => conn
+            .query_row(
+                &format!(
+                    "{SESSION_SELECT} WHERE s.id=(SELECT session_id FROM task_primary_sessions WHERE task_id=?1)
+                     AND s.completed_at IS NULL"
+                ),
+                [task.as_str()],
+                read_session,
+            )
+            .optional()?
+            .transpose(),
     }
 }
 
@@ -711,7 +727,9 @@ pub(super) fn complete_primary_session_in(
 }
 
 /// A Task's primary when it has one, else `session`: chosen when it is
-/// already one of the Task's conversations, admitted as new otherwise.
+/// already one of the Task's conversations, admitted as new otherwise. A
+/// conversation that began before its checkout became the Task's takes the
+/// Task now, by the rule a new Session would.
 pub(super) fn admit_task_primary_in(
     conn: &Connection,
     task: &TaskId,
@@ -719,10 +737,17 @@ pub(super) fn admit_task_primary_in(
     caller_process: Option<&loopflow_model::id::LfProcessId>,
 ) -> StoreResult<LfSession> {
     let scope = PrimaryScope::Task(task.clone());
-    if primary_session_in(conn, &scope)?.is_none()
-        && session_in(conn, session.id.as_str())?.is_some()
-    {
-        choose_task_primary_in(conn, task, session.id.as_str())?;
+    if primary_session_in(conn, &scope)?.is_none() {
+        if let Some(current) = session_in(conn, session.id.as_str())? {
+            if current.task_id.is_none()
+                && super::task_work::starting_task_in(conn, None, Some(&current.cwd), None)?
+                    .as_ref()
+                    == Some(task)
+            {
+                bind_session_in(conn, &current, task)?;
+            }
+            choose_task_primary_in(conn, task, session.id.as_str())?;
+        }
     }
     ensure_primary_session_in(conn, &scope, session.clone(), caller_process)
 }
@@ -737,9 +762,7 @@ fn ensure_primary_session_in(
         return Ok(current);
     }
     let session = reserve_session_in(conn, session, caller_process)?;
-    // A Task's primary stays an ordinary member conversation; its Task
-    // names it. A repository's or Wave's is marked on its own row.
-    match scope {
+    let marked = match scope {
         PrimaryScope::Repository(_) => conn.execute(
             "UPDATE agent_sessions SET primary_scope='repository' WHERE id=?1",
             [&session.id],
@@ -748,13 +771,22 @@ fn ensure_primary_session_in(
             "UPDATE agent_sessions SET primary_scope='wave' WHERE id=?1",
             [&session.id],
         )?,
-        PrimaryScope::Task(task) => conn.execute(
-            "INSERT INTO task_primary_sessions(task_id,session_id) VALUES(?1,?2)
-             ON CONFLICT(task_id) DO UPDATE SET session_id=excluded.session_id",
-            params![task.as_str(), session.id],
-        )?,
+        PrimaryScope::Task(task) => mark_task_primary_in(conn, task, &session.id, "")?,
     };
+    if marked != 1 {
+        return Err(StoreError::InvalidData(format!(
+            "Session {} did not become its scope's primary",
+            session.id
+        )));
+    }
     Ok(session)
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum HistorySelection<'a> {
+    All,
+    Local,
+    Input(&'a str),
 }
 
 /// The inputs a history read selected, before their history is decoded.
@@ -769,7 +801,10 @@ pub struct PendingHistory {
 /// One selected input: a captured input, or a native turn no input captured.
 #[derive(Debug, Clone)]
 pub struct PendingInput {
-    session_id: String,
+    /// The Machine whose copy holds this input. A copied native turn keeps
+    /// its row from this snapshot until the projection needs it.
+    copy: Option<(loopflow_model::durable::MachineId, Option<String>)>,
+    pub session_id: String,
     input: Option<String>,
     caller: Option<String>,
     started: i64,
@@ -793,6 +828,12 @@ pub struct PendingInput {
     /// decoded history reports is a row's `observed_at` or a payload time its
     /// writer also stored as that row's `observed_at`, so none is later.
     pub latest: i64,
+}
+
+impl PendingInput {
+    pub fn origin(&self) -> Option<&loopflow_model::durable::MachineId> {
+        self.copy.as_ref().map(|(origin, _)| origin)
+    }
 }
 
 /// Saved evidence for one selected input, before application projection.
@@ -843,15 +884,11 @@ pub(super) fn choose_task_primary_in(
     task: &TaskId,
     session: &str,
 ) -> StoreResult<()> {
-    let chosen = conn.execute(
-        &format!(
-            "INSERT INTO task_primary_sessions(task_id,session_id) SELECT ?1,?2 WHERE ?2 IN (
-                    SELECT s.id FROM agent_sessions s WHERE s.interactive=1
-                    AND s.completed_at IS NULL AND s.id IN ({}))
-                 ON CONFLICT(task_id) DO UPDATE SET session_id=excluded.session_id",
-            super::task_work::session_ids("?1")
-        ),
-        params![task.as_str(), session],
+    let chosen = mark_task_primary_in(
+        conn,
+        task,
+        session,
+        "AND interactive=1 AND completed_at IS NULL",
     )?;
     if chosen != 1 {
         return Err(StoreError::InvalidAuthority(format!(
@@ -859,6 +896,27 @@ pub(super) fn choose_task_primary_in(
         )));
     }
     Ok(())
+}
+
+/// Move the Task's primary mark to `session`, one of its conversations that
+/// meets `condition`. Answers how many Sessions took the mark.
+fn mark_task_primary_in(
+    conn: &Connection,
+    task: &TaskId,
+    session: &str,
+    condition: &str,
+) -> StoreResult<usize> {
+    // REPLACE also clears a row an older lf left naming this Session for
+    // another Task.
+    Ok(conn.execute(
+        &format!(
+            "INSERT OR REPLACE INTO task_primary_sessions(task_id,session_id)
+             SELECT ?1,?2 WHERE EXISTS(SELECT 1 FROM agent_sessions
+                 WHERE id=?2 AND task_id=?1 AND {} {condition})",
+            super::task_work::counts_for_task("agent_sessions")
+        ),
+        params![task.as_str(), session],
+    )?)
 }
 
 impl SqliteStore {
@@ -975,11 +1033,8 @@ impl SqliteStore {
     pub fn task_conversations(&self, task: &TaskId) -> StoreResult<Vec<(LfSession, Option<i64>)>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut query = conn.prepare(&format!(
-            "SELECT candidates.id,candidates.artifact_key,candidates.title,candidates.title_source,candidates.completed_at,candidates.created_at,candidates.request,candidates.interactive,candidates.repo,candidates.task_id,candidates.wave_id,candidates.graph_lf_process_id,candidates.work_source,candidates.bound_at,candidates.input_published,candidates.cwd,candidates.skill,candidates.provider,candidates.model,candidates.node,candidates.iterations,candidates.caller_artifact_key,candidates.current_capture,
-                (SELECT opened_at FROM agent_sessions WHERE id=candidates.id) AS opened_at FROM ({SESSION_SELECT}
-            WHERE s.interactive=1 AND s.completed_at IS NULL
-            AND s.id IN ({})) AS candidates",
-            super::task_work::session_ids("?1")
+            "{SESSION_SELECT} WHERE s.interactive=1 AND s.completed_at IS NULL AND {}",
+            super::task_work::session_in_task("s", "?1")
         ))?;
         let rows = query.query_map([task.as_str()], |row| {
             Ok((read_session(row)?, row.get("opened_at")?))
@@ -1019,10 +1074,10 @@ impl SqliteStore {
         Ok(())
     }
 
-    /// The conversation a Task's primary pointer names, while it is unfinished.
+    /// The Task's primary conversation, while it is unfinished.
     pub fn task_primary(&self, task: &TaskId) -> StoreResult<Option<LfSession>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        task_primary_in(&conn, task)
+        primary_session_in(&conn, &PrimaryScope::Task(task.clone()))
     }
 
     /// Name one of the Task's own unfinished interactive conversations its
@@ -1030,7 +1085,7 @@ impl SqliteStore {
     pub fn choose_task_primary(&self, task: &TaskId, session: &str) -> StoreResult<LfSession> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         choose_task_primary_in(&conn, task, session)?;
-        task_primary_in(&conn, task)?
+        primary_session_in(&conn, &PrimaryScope::Task(task.clone()))?
             .ok_or_else(|| invalid(format!("Session {session} disappeared while being chosen")))
     }
 
@@ -1158,7 +1213,7 @@ impl SqliteStore {
             task,
             None,
             (since, include_finished, None),
-            None,
+            HistorySelection::All,
         )
     }
 
@@ -1169,8 +1224,12 @@ impl SqliteStore {
         task: Option<&str>,
         caller: Option<&str>,
         window: (i64, bool, Option<usize>),
-        input: Option<&str>,
+        selection: HistorySelection<'_>,
     ) -> StoreResult<PendingHistory> {
+        let input = match selection {
+            HistorySelection::Input(input) => Some(input),
+            _ => None,
+        };
         let task_id = task
             .map(|selector| self.resolve_task_id(selector, None))
             .transpose()?
@@ -1193,7 +1252,7 @@ impl SqliteStore {
             // them, and `CROSS JOIN` keeps the window as the outer loop. A `+`
             // on an arm's output stops SQLite merging the UNION in index order,
             // which it would get by scanning the whole index instead of the range.
-            let mut query = conn.prepare("WITH windowed(seq) AS (
+            let mut query = conn.prepare(&format!("WITH windowed(seq) AS (
                 SELECT seq FROM session_events WHERE kind='captured' AND receipt_key=?7
                 UNION SELECT seq FROM session_events WHERE ?7 IS NULL AND task_id=?3 AND kind='captured'
                 UNION SELECT captured_event FROM history.session_history
@@ -1223,6 +1282,73 @@ impl SqliteStore {
                     WHERE ?7 IS NULL AND ?3 IS NULL AND ?5>0 AND ?6 AND exited.agent_ended_at>=?5 AND ran.captured_event IS NULL
                 UNION SELECT id FROM history.turns
                     WHERE ?7 IS NULL AND task_id=?3 AND captured_event IS NULL),
+            copies AS NOT MATERIALIZED ({}),
+            -- Copied rows that start or end an input in the window, name the Task, or are the input.
+            copied_window(record_id) AS (
+                SELECT record_id FROM machine_record_inputs WHERE ?13 AND ?4 IS NULL AND ?3 IS NULL AND started>=?5
+                UNION SELECT rowid FROM machine_records INDEXED BY machine_record_turn_end WHERE kind='turn' AND ?13 AND ?4 IS NULL AND ?3 IS NULL AND ?6
+                    AND ?5>0 AND json_extract(row,'$.ended_at')>=?5
+                UNION SELECT record_id FROM machine_record_inputs WHERE ?13 AND ?4 IS NULL AND task_id=?3
+                UNION SELECT rowid FROM machine_records INDEXED BY machine_record_capture_key
+                    WHERE kind='session_event' AND json_extract(row,'$.kind')='captured' AND json_extract(row,'$.receipt_key')=?7),
+            -- A copied capture, found from itself, its manifest or its turns.
+            -- The local input keeps its copies out; among copies the lowest origin wins.
+            copied_captures AS MATERIALIZED (
+                SELECT cap.rowid AS record_id,cap.origin_machine_id AS origin,
+                    json_extract(cap.row,'$.session_id') AS session_id,json_extract(cap.row,'$.seq') AS seq,
+                    json_extract(cap.row,'$.receipt_key') AS input_id,cap.row
+                FROM (SELECT DISTINCT r.origin_machine_id AS origin,
+                        CAST(CASE r.kind WHEN 'session_event' THEN json_extract(r.row,'$.seq')
+                            ELSE json_extract(r.row,'$.captured_event') END AS TEXT) AS key
+                    FROM copied_window w CROSS JOIN machine_records r ON r.rowid=w.record_id) k
+                CROSS JOIN machine_records cap ON cap.origin_machine_id=k.origin AND cap.kind='session_event' AND cap.key=k.key
+                WHERE json_extract(cap.row,'$.kind')='captured'
+                  AND NOT EXISTS (SELECT 1 FROM session_events l WHERE l.kind='captured' AND l.receipt_key=json_extract(cap.row,'$.receipt_key'))
+                  AND cap.origin_machine_id=(SELECT o.origin_machine_id FROM machine_records o
+                      WHERE o.kind='session_event' AND json_extract(o.row,'$.kind')='captured'
+                        AND json_extract(o.row,'$.receipt_key')=json_extract(cap.row,'$.receipt_key')
+                      ORDER BY o.origin_machine_id LIMIT 1)),
+            -- Each copied input's turns and observations, read once.
+            copied_turns AS MATERIALIZED (
+                SELECT c.record_id,SUM(json_extract(t.row,'$.ended_at') IS NULL) AS open,
+                    MAX(json_extract(t.row,'$.ended_at')) AS last_end,
+                    MAX(MAX(coalesce(json_extract(t.row,'$.started_at'),0),coalesce(json_extract(t.row,'$.usage.observed_at'),0),
+                        coalesce(json_extract(t.row,'$.ended_at'),0))) AS latest
+                FROM copied_captures c CROSS JOIN machine_records t ON t.origin_machine_id=c.origin AND t.kind='turn'
+                    AND json_extract(t.row,'$.session_id')=c.session_id
+                WHERE json_extract(t.row,'$.captured_event')=c.seq GROUP BY c.record_id),
+            copied_observations AS MATERIALIZED (
+                SELECT c.record_id,MAX(json_extract(h.row,'$.observed_at')) AS latest
+                FROM copied_captures c CROSS JOIN machine_records h ON h.origin_machine_id=c.origin AND h.kind='history'
+                    AND json_extract(h.row,'$.session_id')=c.session_id
+                WHERE json_extract(h.row,'$.captured_event')=c.seq GROUP BY c.record_id),
+            -- The same reading as `inputs`, from the origin's copied Session, manifest,
+            -- terminal receipt and turns.
+            copied_inputs AS (
+                SELECT c.origin,c.seq AS captured,c.input_id,c.session_id,
+                    json_extract(json_extract(c.row,'$.payload'),'$.caller_key') AS caller_input_id,
+                    coalesce(json_extract(m.row,'$.observed_at'),json_extract(c.row,'$.observed_at')) AS started,
+                    CASE WHEN m.rowid IS NOT NULL THEN json_extract(m.row,'$.task_id') ELSE json_extract(c.row,'$.task_id') END AS task_id,
+                    CASE WHEN m.rowid IS NOT NULL THEN json_extract(m.row,'$.wave_id') ELSE json_extract(c.row,'$.wave_id') END AS wave_id,
+                    CASE WHEN json_extract(c.row,'$.lf_process_id') IS NOT NULL
+                        AND (json_extract(s.row,'$.agent_launcher_lf_process_id') IS NOT json_extract(c.row,'$.lf_process_id')
+                            OR json_extract(s.row,'$.agent_ended_at') IS NOT NULL)
+                    THEN CASE WHEN json_extract(s.row,'$.agent_launcher_lf_process_id') IS json_extract(c.row,'$.lf_process_id')
+                        THEN json_extract(s.row,'$.agent_ended_at') ELSE json_extract(s.row,'$.agent_started_at') END
+                    WHEN t.open>0 THEN NULL
+                    ELSE coalesce(json_extract(term.row,'$.observed_at'),t.last_end) END AS ended,
+                    MAX(json_extract(c.row,'$.observed_at'),coalesce(h.latest,0),coalesce(t.latest,0)) AS latest,
+                    c.record_id
+                FROM copied_captures c
+                LEFT JOIN copied_turns t ON t.record_id=c.record_id
+                LEFT JOIN copied_observations h ON h.record_id=c.record_id
+                LEFT JOIN machine_records s ON s.origin_machine_id=c.origin AND s.kind='session' AND s.key=c.session_id
+                LEFT JOIN machine_records m ON m.origin_machine_id=c.origin AND m.kind='history'
+                    AND m.key=json_array(c.session_id,c.input_id||':manifest.json')
+                LEFT JOIN machine_records term ON term.origin_machine_id=c.origin AND term.kind='history'
+                    AND term.key=json_array(c.session_id,c.input_id||':terminal.json')
+                WHERE m.rowid IS NOT NULL OR t.record_id IS NOT NULL
+                    OR (json_extract(s.row,'$.current_capture')=c.seq AND json_extract(s.row,'$.input_published')=1)),
             inputs AS (
                 SELECT i.seq AS captured,i.receipt_key AS input_id,i.session_id,json_extract(i.payload,'$.caller_key') AS caller_input_id,
                     COALESCE(m.observed_at,i.observed_at) AS started,
@@ -1275,11 +1401,11 @@ impl SqliteStore {
                     MAX(COALESCE(t.started_at,0),COALESCE(t.usage_at,0),COALESCE(t.ended_at,0))
                 FROM turns CROSS JOIN history.turns t ON t.id=turns.id
                 LEFT JOIN agent_sessions ts ON ts.id=t.session_id
-                WHERE t.captured_event IS NULL AND (?6 OR COALESCE(t.started_at,t.usage_at,t.ended_at)>=?5))
-                , eligible AS MATERIALIZED (
-                SELECT captured,input_id,session_id,caller_input_id,started,task_id,wave_id,ended,thread,turn,latest, SUM(ended IS NULL) OVER () AS unfinished,
-                    ROW_NUMBER() OVER (PARTITION BY ended IS NULL ORDER BY started DESC,input_id DESC,session_id,thread,turn) AS ordinal,
-                    COUNT(*) OVER () AS total
+                WHERE ts.id IS NOT NULL AND t.captured_event IS NULL AND (?6 OR COALESCE(t.started_at,t.usage_at,t.ended_at)>=?5)
+                    AND (NOT ?13 OR t.lf_process_id IS NOT NULL OR NOT EXISTS (SELECT 1 FROM copies c
+                        WHERE c.key=json_array(t.session_id,t.provider_thread,t.provider_turn))))
+                , scoped AS (
+                SELECT captured,input_id,session_id,caller_input_id,started,task_id,wave_id,ended,thread,turn,latest,NULL AS copied_record
                 FROM inputs
                 WHERE (?1 IS NULL OR wave_id IN (SELECT id FROM wave_addresses WHERE id=?9 OR slug=?1)
                     OR EXISTS (SELECT 1 FROM history.turns origin WHERE origin.session_id=inputs.session_id
@@ -1296,17 +1422,58 @@ impl SqliteStore {
                         AND inputs.captured IS NOT NULL AND origin.captured_event=inputs.captured
                         AND origin.task_id=?3))
                 AND (?4 IS NULL OR caller_input_id=?4 OR caller_input_id IN (SELECT receipt_key FROM session_events WHERE kind='captured' AND session_id=?12))
-                AND (started>=?5 OR (?6 AND ended>=?5)))
+                AND (started>=?5 OR (?6 AND ended>=?5))
+                UNION ALL
+                SELECT NULL,NULL,c.session_id,NULL,c.started,c.task_id,c.wave_id,
+                    json_extract(c.row,'$.ended_at'),json_extract(c.row,'$.thread'),json_extract(c.row,'$.turn'),
+                    MAX(c.started,coalesce(json_extract(c.row,'$.ended_at'),0),
+                        coalesce(json_extract(c.row,'$.usage.observed_at'),0)),c.record_id
+                FROM copied_window w CROSS JOIN copies c ON c.record_id=w.record_id
+                WHERE ?7 IS NULL AND ?4 IS NULL AND c.kind='turn' AND json_extract(c.row,'$.captured_event') IS NULL
+                  AND (c.started>=?5 OR (?6 AND json_extract(c.row,'$.ended_at')>=?5))
+                  AND (?1 IS NULL OR c.scope_wave IN (SELECT id FROM wave_addresses WHERE id=?9 OR slug=?1))
+                  AND (?2 IS NULL OR c.project_id=?10 OR c.project_slug=?2 OR c.external_project_id=?11)
+                UNION ALL
+                SELECT captured,input_id,session_id,caller_input_id,started,task_id,wave_id,ended,NULL,NULL,latest,record_id
+                FROM copied_inputs ci
+                WHERE (started>=?5 OR (?6 AND ended>=?5))
+                AND (?1 IS NULL OR wave_id IN (SELECT id FROM wave_addresses WHERE id=?9 OR slug=?1)
+                    OR EXISTS (SELECT 1 FROM machine_record_inputs t WHERE t.origin_machine_id=ci.origin AND t.kind='turn'
+                        AND t.session_id=ci.session_id AND json_extract(t.row,'$.captured_event')=ci.captured
+                        AND t.scope_wave IN (SELECT id FROM wave_addresses WHERE id=?9 OR slug=?1)))
+                AND (?2 IS NULL OR task_id IN (SELECT t.id FROM projects p CROSS JOIN tasks t ON t.project_id=p.id
+                    WHERE p.id=?10 OR p.project_slug=?2 OR p.external_project_id=?11)
+                    OR EXISTS (SELECT 1 FROM machine_record_inputs t WHERE t.origin_machine_id=ci.origin AND t.kind='turn'
+                        AND t.session_id=ci.session_id AND json_extract(t.row,'$.captured_event')=ci.captured
+                        AND (t.project_id=?10 OR t.project_slug=?2 OR t.external_project_id=?11)))
+                AND (?3 IS NULL OR task_id=?3
+                    OR EXISTS (SELECT 1 FROM machine_record_inputs t WHERE t.origin_machine_id=ci.origin AND t.kind='turn'
+                        AND t.session_id=ci.session_id AND json_extract(t.row,'$.captured_event')=ci.captured
+                        AND t.task_id=?3))),
+                eligible AS MATERIALIZED (
+                SELECT captured,input_id,session_id,caller_input_id,started,task_id,wave_id,ended,thread,turn,latest,copied_record, SUM(ended IS NULL) OVER () AS unfinished,
+                    ROW_NUMBER() OVER (PARTITION BY ended IS NULL ORDER BY started DESC,input_id DESC,session_id,thread,turn) AS ordinal,
+                    COUNT(*) OVER () AS total FROM scoped)
                 SELECT eligible.session_id,eligible.input_id,eligible.caller_input_id,started,eligible.task_id,eligible.wave_id,
                     (SELECT slug FROM wave_addresses WHERE id=eligible.wave_id),
-                    s.current_capture,s.cwd,s.repo,s.skill,s.provider,s.model,s.interactive,
-                    total > MAX(?8,unfinished),COALESCE((SELECT json_extract(payload,'$.work_source') FROM session_events WHERE seq=eligible.captured),
-                        CASE WHEN eligible.captured=s.current_capture AND s.bound_at IS NULL THEN s.work_source END),
+                    coalesce(s.current_capture,json_extract(cs.row,'$.current_capture')),
+                    coalesce(s.cwd,json_extract(cs.row,'$.cwd'),''),coalesce(s.repo,json_extract(cs.row,'$.repo')),
+                    coalesce(s.skill,json_extract(cs.row,'$.skill')),coalesce(s.provider,json_extract(cs.row,'$.provider')),
+                    coalesce(s.model,json_extract(cs.row,'$.model')),coalesce(s.interactive,json_extract(cs.row,'$.interactive'),0),
+                    total > MAX(?8,unfinished),CASE WHEN copy.rowid IS NULL THEN COALESCE((SELECT json_extract(payload,'$.work_source') FROM session_events WHERE seq=eligible.captured),
+                        CASE WHEN eligible.captured=s.current_capture AND s.bound_at IS NULL THEN s.work_source END)
+                    WHEN copy.kind='session_event' THEN COALESCE(json_extract(json_extract(copy.row,'$.payload'),'$.work_source'),
+                        CASE WHEN eligible.captured=json_extract(cs.row,'$.current_capture') AND json_extract(cs.row,'$.bound_at') IS NULL
+                        THEN json_extract(cs.row,'$.work_source') END) END,
                     eligible.captured,eligible.thread,eligible.turn,eligible.latest,
-                    CASE WHEN eligible.captured=s.current_capture THEN s.skill_version END
-                FROM eligible CROSS JOIN agent_sessions s ON s.id=eligible.session_id
+                    CASE WHEN eligible.captured=coalesce(s.current_capture,json_extract(cs.row,'$.current_capture'))
+                        THEN coalesce(s.skill_version,json_extract(cs.row,'$.skill_version')) END,
+                    copy.origin_machine_id,CASE WHEN copy.kind='turn' THEN copy.row END
+                FROM eligible LEFT JOIN agent_sessions s ON eligible.copied_record IS NULL AND s.id=eligible.session_id
+                LEFT JOIN machine_records copy ON copy.rowid=eligible.copied_record
+                LEFT JOIN machine_records cs ON cs.origin_machine_id=copy.origin_machine_id AND cs.kind='session' AND cs.key=eligible.session_id
                 WHERE (?8 IS NULL OR ended IS NULL OR ordinal<=MAX(?8-unfinished,0))
-                ORDER BY started DESC,eligible.input_id DESC,eligible.session_id,eligible.thread,eligible.turn")?;
+                ORDER BY started DESC,eligible.input_id DESC,eligible.session_id,eligible.thread,eligible.turn",super::machine_records::COLLECTED_TURNS))?;
             // Names, slugs and capture locators keep their bytes; identities are canonical.
             let mut rows = query.query(params![
                 wave,
@@ -1321,6 +1488,7 @@ impl SqliteStore {
                 project.map(|project| loopflow_model::id::canonical_prefixed(project, "proj_")),
                 project.map(loopflow_model::id::canonical_uuid),
                 caller.map(loopflow_model::id::canonical_session),
+                matches!(selection, HistorySelection::All),
             ])?;
             let mut inputs = Vec::new();
             let mut labels = std::collections::HashMap::new();
@@ -1338,6 +1506,15 @@ impl SqliteStore {
                     .transpose()?
                     .flatten();
                 inputs.push(PendingInput {
+                    copy: row
+                        .get::<_, Option<String>>(21)?
+                        .map(|origin| -> rusqlite::Result<_> {
+                            Ok((
+                                loopflow_model::durable::MachineId::from_raw(origin),
+                                row.get(22)?,
+                            ))
+                        })
+                        .transpose()?,
                     session_id: row.get(0)?,
                     input: row.get(1)?,
                     caller: row.get(2)?,
@@ -1407,6 +1584,7 @@ impl SqliteStore {
             turn,
             skill_version,
             latest: _,
+            copy,
         } = input.clone();
         let input = input
             .as_deref()
@@ -1444,16 +1622,26 @@ impl SqliteStore {
                 .map(|source| serde_json::from_value(serde_json::Value::String(source)))
                 .transpose()?,
         };
+        let origin = copy.as_ref().map(|(origin, _)| origin);
         let history = match input.as_deref() {
-            Some(input) => self.summary_for_input_matching(&session_id, input, scope)?,
+            Some(input) => self.summary_for_input_matching(&session_id, input, scope, origin)?,
             None => Vec::new(),
         };
-        let turns = self.turns_matching(
-            &session_id,
-            input.as_deref(),
-            (thread.as_ref(), turn.as_deref()),
-            scope,
-        )?;
+        let turns = match &copy {
+            Some((_, Some(row))) => vec![serde_json::from_str(row)?],
+            Some((origin, None)) => self.copied_input_turns(
+                origin,
+                &session_id,
+                captured.ok_or_else(|| invalid("a copied input has no capture"))?,
+                scope,
+            )?,
+            None => self.turns_matching(
+                &session_id,
+                input.as_deref(),
+                (thread.as_ref(), turn.as_deref()),
+                scope,
+            )?,
+        };
         Ok(HistoryInput {
             session,
             artifact_key: input,
@@ -1565,7 +1753,7 @@ impl SqliteStore {
         // Binding may have selected a directory while an opening prepared the
         // old scope's workspace. Its explicit choice wins over that preparation.
         let updated = tx.execute(
-            "UPDATE agent_sessions SET cwd=CASE WHEN work_source='bound' THEN cwd ELSE ?3 END WHERE id=?1 AND current_capture IS ?2 AND completed_at IS NULL AND (primary_scope IS NOT NULL OR EXISTS(SELECT 1 FROM task_primary_sessions WHERE session_id=agent_sessions.id))",
+            &format!("UPDATE agent_sessions SET cwd=CASE WHEN work_source='bound' THEN cwd ELSE ?3 END WHERE id=?1 AND current_capture IS ?2 AND completed_at IS NULL AND {} IS NOT NULL", primary_scope_sql("agent_sessions")),
             params![session.id, session.captured, cwd.to_string_lossy()],
         )?;
         if updated != 1 {
@@ -1578,43 +1766,36 @@ impl SqliteStore {
         Ok(admitted)
     }
 
-    /// The Task a Session is primary for, else the repository or Wave it is or
-    /// was primary for.
+    /// The repository, Wave or Task a Session is or was primary for.
     pub fn primary_scope(&self, id: &str) -> StoreResult<Option<PrimaryScope>> {
-        let mut connection = self.conn.lock().expect("store mutex poisoned");
-        let conn = connection.savepoint()?;
-        let task: Option<String> = conn
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let row: Option<(Option<String>, Option<String>)> = conn
             .query_row(
-                "SELECT task_id FROM task_primary_sessions WHERE session_id=?1",
+                "SELECT s.primary_scope, CASE s.primary_scope
+                     WHEN 'wave' THEN s.wave_id WHEN 'repository' THEN s.repo END
+                 FROM agent_sessions s WHERE s.id=?1 AND s.primary_scope IS NOT NULL
+                 UNION ALL SELECT 'task', tp.task_id FROM task_primary_sessions tp
+                 WHERE tp.session_id=?1",
                 [id],
-                |row| row.get(0),
+                |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .optional()?;
-        if let Some(task) = task {
-            return Ok(Some(PrimaryScope::Task(
+        let Some((Some(kind), scope)) = row else {
+            return Ok(None);
+        };
+        match (kind.as_str(), scope) {
+            ("task", Some(task)) => Ok(Some(PrimaryScope::Task(
                 TaskId::parse(&task).map_err(invalid)?,
-            )));
-        }
-        let row: Option<(Option<String>, Option<String>, Option<String>)> = conn
-            .query_row(
-                "SELECT primary_scope,wave_id,repo FROM agent_sessions WHERE id=?1",
-                [id],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-            )
-            .optional()?;
-        match row {
-            Some((Some(kind), Some(wave), _)) if kind == "wave" => Ok(Some(PrimaryScope::Wave(
+            ))),
+            ("wave", Some(wave)) => Ok(Some(PrimaryScope::Wave(
                 loopflow_model::id::WaveId::parse(&wave).map_err(invalid)?,
             ))),
-            Some((Some(kind), _, Some(repo))) if kind == "repository" => {
-                Ok(Some(PrimaryScope::Repository(
-                    crate::address::CanonicalRepo::from_canonical_path(repo.into()),
-                )))
-            }
-            Some((Some(kind), _, _)) => Err(invalid(format!(
+            ("repository", Some(repo)) => Ok(Some(PrimaryScope::Repository(
+                crate::address::CanonicalRepo::from_canonical_path(repo.into()),
+            ))),
+            _ => Err(invalid(format!(
                 "Session {id} has unsupported primary scope {kind:?}"
             ))),
-            _ => Ok(None),
         }
     }
 
@@ -2009,7 +2190,21 @@ pub(super) fn reserve_session_in(
     Ok(session)
 }
 
+/// A Session that names no Task or Wave takes its Task by the rule a Graph run
+/// does ([`super::task_work::starting_task_in`]), recorded now so a later move
+/// or a reused path changes nothing; the Task of the Session that started it
+/// arrives named, as declared. A primary for a repository or Wave declares
+/// its scope.
 fn resolve_ancestry_in(conn: &Connection, session: &mut LfSession) -> StoreResult<()> {
+    if session.task_id.is_none()
+        && session.wave_id.is_none()
+        && matches!(session.work_source, None | Some(WorkSource::Checkout))
+    {
+        session.task_id = super::task_work::starting_task_in(conn, None, Some(&session.cwd), None)?;
+        if session.task_id.is_some() {
+            session.work_source = Some(WorkSource::Checkout);
+        }
+    }
     if let Some(task) = &session.task_id {
         let wave = super::durable::task_wave_in(conn, task)?;
         if session
@@ -2220,6 +2415,11 @@ pub fn test_capture(conn: &Connection, session: &str, artifact: &str) {
 #[cfg(any(test, feature = "test-support"))]
 impl SqliteStore {
     pub fn test_session(&self, id: &str, artifact: &str) -> LfSession {
+        self.test_session_at(id, artifact, 1)
+    }
+
+    /// A Session whose input was captured at `created_at`.
+    pub fn test_session_at(&self, id: &str, artifact: &str, created_at: i64) -> LfSession {
         self.create_session_prepared(
             LfSession {
                 captured: None,
@@ -2244,7 +2444,7 @@ impl SqliteStore {
                 title_source: TitleSource::Human,
                 request: None,
                 completed_at: None,
-                created_at: 1,
+                created_at,
             },
             None,
         )
@@ -2410,6 +2610,93 @@ mod metadata_tests {
         assert_eq!(legacy.from_provider_session.as_deref(), Some("earlier"));
         assert_eq!(legacy.seed.as_deref(), Some("native"));
         assert_eq!(legacy.observed_at, 7);
+    }
+
+    #[test]
+    fn released_lf_sees_the_primary_this_build_chose() {
+        use crate::migration_runner::{apply_before_migration, migration_section_sql};
+
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        apply_before_migration(
+            &crate::test_fixture::observers(),
+            &crate::test_fixture::build(),
+            &conn,
+            "task_facts_once",
+        );
+        let task = loopflow_model::durable::TaskId::new();
+        conn.execute_batch(&format!(
+            "INSERT INTO repository_plans(id,repo,selected) VALUES('repo_1','/repo',1);
+             INSERT INTO tasks(id,repository_id,issue_identifier,created_at)
+             VALUES('{task}','repo_1','FIX-1',1);
+             INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,starts_since_turn,last_started_at,start_failure)
+             VALUES('chosen','Chosen','human',1,0,'/elsewhere',3,100,'provider unavailable');
+             INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,task_id)
+             VALUES('other','Other','human',1,0,'/elsewhere','{task}');
+             INSERT INTO task_primary_sessions(task_id,session_id) VALUES('{task}','chosen');"
+        ))
+        .unwrap();
+        // As the runner migrates: the rebuild's DROP would otherwise cascade.
+        conn.pragma_update(None, "foreign_keys", "OFF").unwrap();
+        conn.execute_batch(&migration_section_sql("task_facts_once"))
+            .unwrap();
+        // What this build reads: each Session's scope, and its Task.
+        let scopes = || {
+            conn.prepare(&format!(
+                "SELECT s.id,{},s.task_id FROM agent_sessions s ORDER BY s.id",
+                super::primary_scope_sql("s")
+            ))
+            .unwrap()
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<(String, Option<String>, Option<String>)>>>()
+            .unwrap()
+        };
+        // What released lf reads: the Task's row.
+        let released = || -> String {
+            conn.query_row(
+                "SELECT session_id FROM task_primary_sessions WHERE task_id=?1",
+                [task.as_str()],
+                |row| row.get(0),
+            )
+            .unwrap()
+        };
+        let owned = Some(task.to_string());
+        assert_eq!(
+            scopes(),
+            [
+                ("chosen".into(), Some("task".into()), owned.clone()),
+                ("other".into(), None, owned.clone()),
+            ]
+        );
+        let recovery: (u32, i64, String) = conn
+            .query_row(
+                "SELECT starts_since_turn,last_started_at,start_failure FROM agent_sessions WHERE id='chosen'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(recovery, (3, 100, "provider unavailable".to_owned()));
+
+        super::choose_task_primary_in(&conn, &task, "other").unwrap();
+        assert_eq!(released(), "other");
+        assert_eq!(
+            scopes(),
+            [
+                ("chosen".into(), None, owned.clone()),
+                ("other".into(), Some("task".into()), owned),
+            ]
+        );
+        let marked: u32 = conn
+            .query_row(
+                "SELECT count(*) FROM agent_sessions WHERE primary_scope IS NOT NULL",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            marked, 0,
+            "released lf would count a marked Session as no Task's"
+        );
     }
 
     #[test]

@@ -95,7 +95,18 @@ impl Watcher {
             Ok(revision) if self.seen != Some(revision) => {
                 self.seen = Some(revision);
                 if let Some(terminals) = &self.terminals {
-                    start_stopped(store, |session, request| hold(terminals, session, request));
+                    let mut agents = loopflow_execution::agent::MachineAgents::default();
+                    start_stopped(
+                        store,
+                        |session| {
+                            loopflow_execution::ops::recovery::launch_failure(
+                                store,
+                                session,
+                                &mut agents,
+                            )
+                        },
+                        |session, request| hold(terminals, session, request),
+                    );
                 }
                 wake_idle(store, None);
             }
@@ -110,9 +121,14 @@ impl Watcher {
 
 /// Start each stopped Session the steers saved since the last reading name,
 /// once, with `start(session, request)`: the request is the first steer that
-/// named it. A start that fails is not retried; its steers wait, unread, for
-/// the Session's next start.
-fn start_stopped(store: &SqliteStore, mut start: impl FnMut(&LfSessionId, String) -> Result<()>) {
+/// named it. A Session whose harness cannot start here is not spawned; that,
+/// or a start that fails, is recorded as its `start_failure`, and its steers
+/// wait, unread, for its next start. A later steer tries again.
+fn start_stopped(
+    store: &SqliteStore,
+    mut readiness: impl FnMut(&LfSessionId) -> Result<Option<String>>,
+    mut start: impl FnMut(&LfSessionId, String) -> Result<()>,
+) {
     let wakes = match loopflow_execution::steer::sessions_to_start(store) {
         Ok(wakes) => wakes,
         Err(error) => {
@@ -121,11 +137,23 @@ fn start_stopped(store: &SqliteStore, mut start: impl FnMut(&LfSessionId, String
         }
     };
     for wake in wakes {
-        if let Err(error) = start(
-            &LfSessionId::from(wake.session.as_str()),
-            wake.steer.clone(),
-        ) {
-            tracing::warn!(session = wake.session, steer = wake.steer, error = %format!("{error:#}"), "stopped Session not started; its steers wait for its next start");
+        let session = LfSessionId::from(wake.session.as_str());
+        let ready = readiness(&session).unwrap_or_else(|error| {
+            // An unreadable harness check does not cost the steer its start.
+            tracing::warn!(%session, error = %format!("{error:#}"), "could not check this Session’s harness");
+            None
+        });
+        let failure = match ready {
+            Some(failure) => Some(failure),
+            None => start(&session, wake.steer.clone())
+                .err()
+                .map(|error| format!("{error:#}")),
+        };
+        if let Some(failure) = &failure {
+            tracing::warn!(%session, steer = wake.steer, %failure, "stopped Session not started; its steers wait for its next start");
+        }
+        if let Err(error) = store.record_start_failure(&session, failure.as_deref()) {
+            tracing::warn!(%session, %error, "start failure unrecorded");
         }
     }
 }
@@ -135,7 +163,7 @@ fn hold(terminals: &Registry, session: &LfSessionId, request: String) -> Result<
     if terminals.session_terminal(session).is_some() {
         return Ok(());
     }
-    let start = super::service::continuing(session.clone(), request, 0, 0)
+    let start = super::service::continuing(session.clone(), request, 0, 0, None)
         .map_err(|error| anyhow!("{}", error.message))?;
     terminals.start(start)?;
     Ok(())
@@ -572,6 +600,51 @@ mod tests {
         messages
     }
 
+    /// A Codex app-server that answers one client's `turn/start`: the request
+    /// it took.
+    fn codex_app_server(endpoint: &Path) -> std::thread::JoinHandle<serde_json::Value> {
+        use futures_util::{SinkExt, StreamExt};
+        use tokio_tungstenite::tungstenite::Message;
+        let listener = UnixListener::bind(endpoint).unwrap();
+        listener.set_nonblocking(true).unwrap();
+        std::thread::spawn(move || {
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap()
+                .block_on(async move {
+                    let listener = tokio::net::UnixListener::from_std(listener).unwrap();
+                    let (stream, _) = listener.accept().await.unwrap();
+                    let mut socket = tokio_tungstenite::accept_async(stream).await.unwrap();
+                    async fn receive(
+                        socket: &mut tokio_tungstenite::WebSocketStream<tokio::net::UnixStream>,
+                    ) -> serde_json::Value {
+                        loop {
+                            if let Message::Text(text) = socket.next().await.unwrap().unwrap() {
+                                return serde_json::from_str(&text).unwrap();
+                            }
+                        }
+                    }
+                    let initialize = receive(&mut socket).await;
+                    let answer = serde_json::json!({"id":initialize["id"],"result":{}});
+                    socket
+                        .send(Message::Text(answer.to_string().into()))
+                        .await
+                        .unwrap();
+                    assert_eq!(receive(&mut socket).await["method"], "initialized");
+                    let start = receive(&mut socket).await;
+                    let answer =
+                        serde_json::json!({"id":start["id"],"result":{"turn":{"id":"woken"}}});
+                    socket
+                        .send(Message::Text(answer.to_string().into()))
+                        .await
+                        .unwrap();
+                    let _ = socket.next().await;
+                    start
+                })
+        })
+    }
+
     #[test]
     fn an_idle_opencode_or_pi_work_session_starts_a_turn_on_its_direction_once() {
         for (provider, thread) in [("opencode", "native"), ("pi", "/pi/session.jsonl")] {
@@ -604,6 +677,64 @@ mod tests {
             assert!(text.contains("and the eu region"));
             assert!(!text.contains("staging bucket"), "{text}");
         }
+    }
+
+    /// Codex runs no hook before its first turn: the launch reports a
+    /// reopened conversation's start, and the wake runs the waiting steer as
+    /// a turn on its app-server before anyone types.
+    #[test]
+    fn a_reopened_codex_work_session_starts_a_turn_on_its_waiting_steer() {
+        let session = "wake-codex";
+        let fixture = fixture(session);
+        let endpoint = fixture.home.path().join("codex.sock");
+        let report = |moment, event: &str| {
+            super::super::boundary::answer(
+                &fixture.store,
+                &SessionBoundary {
+                    moment,
+                    delivery: fixture.delivery.clone(),
+                    adapter: Some(fixture.adapter.clone()),
+                    callback: serde_json::json!({"hook_event_name":event,"session_id":"native","source":"resume"}),
+                    gap: None,
+                    printed: Vec::new(),
+                    inbox: None,
+                },
+            )
+            .unwrap()
+            .1
+        };
+        // The Codex before it was quit mid-turn.
+        report(BoundaryMoment::Tool, "UserPromptSubmit");
+        {
+            let conn = fixture.store.conn.lock().unwrap();
+            conn.execute("UPDATE session_activity SET agent_process_id='earlier'", [])
+                .unwrap();
+            conn.execute(
+                "UPDATE agent_sessions SET provider='codex',agent_endpoint=?2 WHERE id=?1",
+                rusqlite::params![session, endpoint.to_string_lossy()],
+            )
+            .unwrap();
+        }
+        fixture
+            .store
+            .save_session_steer(session, "Fixture author", "use the other table")
+            .unwrap();
+        let provider = codex_app_server(&endpoint);
+        let Some(super::super::boundary::After::Reachable(woken)) =
+            report(BoundaryMoment::Start, "SessionStart")
+        else {
+            panic!("a reopened Codex start leaves no wake");
+        };
+        after_turn(&fixture.store, &woken);
+        let start = provider.join().unwrap();
+        assert_eq!(start["method"], "turn/start");
+        assert_eq!(start["params"]["threadId"], "native");
+        let output = start["params"]["toolOutput"]["output"].to_string();
+        assert!(output.contains("use the other table"), "{output}");
+        assert_eq!(
+            fixture.store.session_steers(session, 0, 8).unwrap().pending,
+            0
+        );
     }
 
     #[test]
@@ -725,6 +856,53 @@ mod tests {
         );
     }
 
+    #[test]
+    fn an_idle_task_conversation_wakes_only_when_its_graph_settles() {
+        use loopflow_storage::graph_process::RunOwner;
+
+        let fixture = fixture("wake-graph");
+        let (listener, inbox) = fixture.idle_claude();
+        listener.set_nonblocking(true).unwrap();
+        let store = &fixture.store;
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "INSERT INTO task_checkouts(task_id,worktree) VALUES(?1,'/wake')",
+                [fixture.task.as_str()],
+            )
+            .unwrap();
+        let run = store.test_graph(
+            "feature",
+            "/wake",
+            &[("implement", Some("succeeded")), ("gate", None)],
+            None,
+        );
+        let path = fixture.store_path();
+        let mut watcher = Watcher::default();
+        watcher.read(&path);
+        assert_eq!(
+            listener.accept().unwrap_err().kind(),
+            std::io::ErrorKind::WouldBlock
+        );
+
+        store
+            .finish_run(RunOwner::GraphRun, &run, 20, Some(1), Some("lint failed"))
+            .unwrap();
+        watcher.read(&path);
+        let content = received(&listener)[1]["message"]["content"].to_string();
+        assert!(content.contains(&format!("Run feature ({run}) · failed")));
+        assert!(content.contains("lint failed"));
+
+        fixture.stop(store, &inbox);
+        after_turn(store, "wake-graph");
+        assert_eq!(
+            listener.accept().unwrap_err().kind(),
+            std::io::ErrorKind::WouldBlock
+        );
+    }
+
     /// A bare interactive `lf <skill>` in the Task's checkout: never woken,
     /// it hears the update at its next prompt.
     #[test]
@@ -814,10 +992,14 @@ mod tests {
         let fixture = fixture("wake-stopped");
         let started = |store: &SqliteStore| {
             let mut starts = Vec::new();
-            start_stopped(store, |session, request| {
-                starts.push((session.to_string(), request));
-                Ok(())
-            });
+            start_stopped(
+                store,
+                |_| Ok(None),
+                |session, request| {
+                    starts.push((session.to_string(), request));
+                    Ok(())
+                },
+            );
             starts
         };
         let running = fixture
@@ -862,5 +1044,76 @@ mod tests {
             3,
             "unread until the started conversation takes them"
         );
+    }
+
+    /// A steer naming a stopped Session whose harness has no login spawns
+    /// nothing, and `lf session list` says why. After a login, the next
+    /// steer starts it and the failure is gone.
+    #[test]
+    fn a_denied_wakeup_shows_its_start_failure_until_a_later_steer_starts_it() {
+        let fixture = fixture("wake-denied");
+        fixture
+            .store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE agent_sessions SET agent_ended_at=unixepoch(), agent_pid=NULL, agent_os_started_at=NULL WHERE agent_process_id=?1",
+                [&fixture.adapter.agent_process_id],
+            )
+            .unwrap();
+        let listed = || {
+            let shared = std::sync::Arc::new(loopflow_execution::store::Store {
+                sqlite: fixture.store.clone(),
+            });
+            loopflow_execution::ops::human_session::listed(&shared, "wake-denied")
+                .unwrap()
+                .unwrap()
+                .status_line
+                .unwrap()
+        };
+        let login = "codex has no usable login on this Machine; run `codex login`";
+        let mut starts = Vec::new();
+        let read = |ready: Option<&str>, starts: &mut Vec<String>| {
+            start_stopped(
+                &fixture.store,
+                |_| {
+                    Ok(ready.map(|reason| {
+                        format!(
+                            "{}{reason}",
+                            loopflow_execution::ops::recovery::WAITING_FOR_HARNESS
+                        )
+                    }))
+                },
+                |_, request| {
+                    starts.push(request);
+                    Ok(())
+                },
+            )
+        };
+
+        fixture
+            .store
+            .save_session_steer("wake-denied", "jack", "are you there?")
+            .unwrap();
+        read(Some(login), &mut starts);
+        assert!(starts.is_empty(), "an unavailable harness is not spawned");
+        let line = listed();
+        assert!(
+            line.starts_with(&format!("could not start: {login}")),
+            "{line}"
+        );
+
+        // The same steer is not read twice; a new one, after a login, starts it.
+        read(None, &mut starts);
+        assert!(starts.is_empty());
+        let next = fixture
+            .store
+            .save_session_steer("wake-denied", "jack", "logged in now")
+            .unwrap();
+        read(None, &mut starts);
+        assert_eq!(starts, [next.id.to_string()]);
+        let line = listed();
+        assert!(!line.contains("could not start"), "{line}");
     }
 }

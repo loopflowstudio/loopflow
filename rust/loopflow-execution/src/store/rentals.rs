@@ -32,7 +32,7 @@ fn edit(
     keys: &[&str],
     value: Option<serde_yaml_ng::Value>,
 ) -> StoreResult<bool> {
-    file.update(|document| {
+    file.update(crate::config::keys::Root::General, |document| {
         if let Some(value) = value {
             crate::config::settings::insert(document, keys, value);
             Ok(true)
@@ -109,6 +109,7 @@ pub fn ondemands(store: &SqliteStore) -> StoreResult<Vec<OnDemand>> {
             max_machines: declaration.max_machines,
             max_usd_per_hour: declaration.max_usd_per_hour,
             hours: declaration.hours,
+            logins: declaration.logins,
         })
         .collect())
 }
@@ -122,10 +123,11 @@ pub fn add_ondemand(store: &SqliteStore, ondemand: &OnDemand) -> StoreResult<()>
     require_free_name(store, &ondemand.name)?;
     let declaration = crate::config::placement::OnDemandDeclaration {
         provider: ondemand.provider,
-        hardware: ondemand.hardware.clone(),
+        hardware: ondemand.rental_hardware(),
         max_machines: ondemand.max_machines,
         max_usd_per_hour: ondemand.max_usd_per_hour,
         hours: ondemand.hours,
+        logins: ondemand.logins.clone(),
     };
     edit(
         &file,

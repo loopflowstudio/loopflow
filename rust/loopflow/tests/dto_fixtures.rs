@@ -7,6 +7,26 @@ const ROADMAP: &str = include_str!("../../../tests/fixtures/dto/roadmap_snapshot
 const METRIC_PORTFOLIO: &str = include_str!("../../../tests/fixtures/dto/metric_portfolio.json");
 
 #[test]
+fn task_steer_receipt_requires_its_delivery_and_nullable_machine() {
+    use loopflow_execution::engine::task::TaskSteerReceipt;
+    let wire: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../tests/fixtures/dto/task_steer_receipt.json"
+    ))
+    .unwrap();
+    assert_eq!(
+        serde_json::to_value(serde_json::from_value::<TaskSteerReceipt>(wire.clone()).unwrap())
+            .unwrap(),
+        wire
+    );
+    let mut missing = wire;
+    missing["delivery"]
+        .as_object_mut()
+        .unwrap()
+        .remove("runs_on");
+    assert!(serde_json::from_value::<TaskSteerReceipt>(missing).is_err());
+}
+
+#[test]
 fn roadmap_requires_shared_lifecycle_and_selection_states() {
     use loopflow::lf::commands::waves::RoadmapTask;
     let wire: serde_json::Value = serde_json::from_str(include_str!(
@@ -324,6 +344,7 @@ fn session_input_history_retains_distinct_native_results_and_unknown_process() {
         include_str!("../../../tests/fixtures/dto/session_history_summary.json"),
     )
     .unwrap();
+    assert_eq!(value.origin.as_ref().unwrap().name(), "mini");
     assert_eq!(value.providers.len(), 2);
     assert_eq!(value.providers[0].outcome.as_deref(), Some("failed"));
     assert!(value.providers[0].lf_process_id.is_none());
@@ -331,6 +352,12 @@ fn session_input_history_retains_distinct_native_results_and_unknown_process() {
     assert_eq!(value.providers[1].usage.input_tokens, Some(0));
     assert_eq!(value.status(), "failed → completed");
     let encoded = serde_json::to_value(&value).unwrap();
+    let mut missing = encoded.clone();
+    missing.as_object_mut().unwrap().remove("origin");
+    assert!(
+        serde_json::from_value::<loopflow::lf::commands::session_history::SessionHistory>(missing)
+            .is_err()
+    );
     assert!(encoded.get("subjects").is_none());
     assert!(encoded.get("outcome").is_none());
     assert_eq!(
@@ -347,7 +374,7 @@ fn task_detail_says_each_fact_once() {
     let detail: TaskDetail = serde_json::from_str(json).unwrap();
     assert_eq!(
         detail.task.state,
-        loopflow_execution::durable::TaskState::Active
+        Some(loopflow_execution::durable::TaskState::Active)
     );
     assert_eq!(
         detail.task.graph.as_ref().unwrap().step.as_deref(),
@@ -375,6 +402,44 @@ fn task_detail_says_each_fact_once() {
         serde_json::to_value(&detail).unwrap(),
         serde_json::from_str::<serde_json::Value>(json).unwrap()
     );
+}
+
+#[test]
+fn task_detail_requires_where_it_runs_and_whose_reading_it_is() {
+    use loopflow::lf::commands::task_row::{TaskDetail, TaskReading};
+    let wire: serde_json::Value =
+        serde_json::from_str(include_str!("../../../tests/fixtures/dto/task_detail.json")).unwrap();
+    let mut missing = wire.clone();
+    missing.as_object_mut().unwrap().remove("reading");
+    assert!(serde_json::from_value::<TaskDetail>(missing).is_err());
+    let mut missing = wire.clone();
+    missing["task"].as_object_mut().unwrap().remove("runs_on");
+    assert!(serde_json::from_value::<TaskDetail>(missing).is_err());
+    let mut missing = wire.clone();
+    missing["task"].as_object_mut().unwrap().remove("state");
+    assert!(serde_json::from_value::<TaskDetail>(missing).is_err());
+
+    let mut elsewhere = wire;
+    elsewhere["task"]["state"] = serde_json::Value::Null;
+    elsewhere["task"]["runs_on"] = serde_json::json!({
+        "machine": {"id": "home_0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b", "label": "modal-3"},
+        "since": 1_763_900_000
+    });
+    elsewhere["reading"] =
+        serde_json::json!({"kind": "unobserved", "reason": "modal-3 is not registered here"});
+    let detail: TaskDetail = serde_json::from_value(elsewhere.clone()).unwrap();
+    assert!(detail.task.state.is_none());
+    assert_eq!(
+        detail.reading,
+        TaskReading::Unobserved {
+            reason: "modal-3 is not registered here".into()
+        }
+    );
+    assert_eq!(
+        detail.task.runs_on.as_ref().unwrap().machine.name(),
+        "modal-3"
+    );
+    assert_eq!(serde_json::to_value(&detail).unwrap(), elsewhere);
 }
 
 #[test]
@@ -1187,33 +1252,6 @@ fn task_locations_preserve_owner_freshness_and_unavailable_evidence() {
 }
 
 #[test]
-fn task_files_frames_preserve_checkout_identity_and_heartbeat() {
-    use loopflow_execution::ops::task::TaskFilesFrame;
-    let wire: serde_json::Value = serde_json::from_str(include_str!(
-        "../../../tests/fixtures/dto/task_files_frames.json"
-    ))
-    .unwrap();
-    let frames: Vec<TaskFilesFrame> = serde_json::from_value(wire.clone()).unwrap();
-    assert_eq!(frames[0].paths, ["note.txt", ".git/index", ""]);
-    assert!(frames[1].paths.is_empty());
-    assert_eq!(frames[0].ignored_scratch, ["scratch/explore.html"]);
-    assert_eq!(frames[0].request, frames[1].request);
-    assert_eq!(serde_json::to_value(frames).unwrap(), wire);
-    for field in [
-        "request",
-        "task_id",
-        "machine_id",
-        "checkout",
-        "paths",
-        "ignored_scratch",
-    ] {
-        let mut missing = wire[0].clone();
-        missing.as_object_mut().unwrap().remove(field);
-        assert!(serde_json::from_value::<TaskFilesFrame>(missing).is_err());
-    }
-}
-
-#[test]
 fn task_overview_excludes_diagnostic_process_history() {
     let input = include_str!("../../../tests/fixtures/dto/task_overview.json");
     let overview: loopflow_execution::task_work::TaskOverview =
@@ -1346,8 +1384,11 @@ fn wave_added_receipt_round_trips_with_its_leftover() {
     use loopflow_execution::ops::wave_lifecycle::WaveAdded;
     let json = include_str!("../../../tests/fixtures/dto/wave_added.json");
     let added: WaveAdded = serde_json::from_str(json).unwrap();
+    let joined = include_str!("../../../tests/fixtures/dto/wave_joined.json");
+    let joined: WaveAdded = serde_json::from_str(joined).unwrap();
+    assert!(!joined.created && joined.project.is_none());
     assert!(added.created);
-    assert_eq!(added.project.wave_id, added.id);
+    assert_eq!(added.project.as_ref().unwrap().wave_id, added.id);
     assert_eq!(added.summary.len(), 1);
     assert_eq!(
         serde_json::to_value(&added).unwrap(),

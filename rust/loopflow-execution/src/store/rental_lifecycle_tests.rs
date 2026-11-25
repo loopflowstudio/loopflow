@@ -22,10 +22,12 @@ fn code(max: u32) -> OnDemand {
             disk_gb: 10,
             gpu: None,
             spot: false,
+            modal_sizing: None,
         },
         max_machines: max,
         max_usd_per_hour: usd("0.40"),
         hours: 4.0,
+        logins: Vec::new(),
     }
 }
 
@@ -143,7 +145,10 @@ fn a_rental_moves_from_confirmed_to_running_to_ended() {
     assert!(returned.is_empty());
     assert!(ended.ended_at.is_some());
     crate::store::rentals::remove_ondemand(&store, "code").unwrap();
-    assert_eq!(store.rentals(None).unwrap()[0].cost_usd, Some(usd("0.25")));
+    assert_eq!(
+        store.rentals(None).unwrap()[0].cost,
+        loopflow_storage::rental::RentalCost::CostUsd(Some(usd("0.25")))
+    );
 }
 
 #[test]
@@ -171,7 +176,7 @@ fn an_owned_machine_joins_a_pool_with_its_cost_and_leaves_when_the_pool_goes() {
         .is_empty());
 }
 
-fn open_task(store: &SqliteStore) -> TaskId {
+pub(crate) fn open_task(store: &SqliteStore) -> TaskId {
     let now = OffsetDateTime::now_utc();
     let task = Task {
         parent_task_id: None,

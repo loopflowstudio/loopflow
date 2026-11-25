@@ -157,8 +157,9 @@ Claude's inbox, Codex's app-server, and for OpenCode and Pi a socket their
 plugin or extension listens on, which asks the provider to start the turn.
 An OpenCode work session reports each turn's first request and its end, so the
 server knows when it is idle; Pi reports every event. Both name their socket
-as they start, so a work session reopened idle takes the steers saved while it
-was closed.
+as they start. A work session reopened on any of the four takes the steers
+saved while it was closed as a turn; Codex's launch reports the start its
+app-server's hook would only report inside a turn.
 Antigravity takes queued steers on its next turn.
 
 Each harness's decoder reports a provider failure as an error event, and
@@ -266,9 +267,10 @@ at the next turn end or launch.
 
 Keep several Task conversations open while a Graph finishes and a teammate adds
 a comment. Each work session hears what changed on its Tasks: a Graph
-run or step that settled, its Graph position, a comment from anyone else. A
-comment with direction is a steer (source `comment:<id>`) and arrives only as
-one.
+run that settled, with its error when it failed or blocked, the Task stopping
+at an interactive step or the end, a merged PR, the Task closing, or a
+comment from anyone else. A comment with direction arrives once as a steer
+(source `comment:<id>`).
 
 A Task update is a steer lf writes (source `update:…`), owned by the Task. No
 writer sits at each fact: `task_updates::write` compares the Task with its
@@ -285,9 +287,12 @@ Only interactive conversations read updates, never the Session whose comment
 it is, and only they look: a worker Run rebuilds no Task history. The Task's
 first reading is a baseline, and a conversation that just started marks the
 updates written before it as read. The steer is rendered as an observation,
-not direction. A run between steps keeps its last report until its next step
-or its end. The server caches the revision at which a Task had nothing new; a
-hook's process is too short-lived to.
+not direction. While a Graph runs, the reading keeps its last settled position.
+Desktop and `lf task status` show each live step. Comments and steers can still
+wake the conversation. A reading saved mid-run stays quiet about that run until
+it settles. If the process died before it recorded an exit, the update gives
+its outcome as unknown. The server caches the revision at which a Task had
+nothing new.
 
 A Task with a parent is conducted by its parent's interactive conversations.
 The same reading writes them one notice (source `notice:<Task>:<key>`, owned

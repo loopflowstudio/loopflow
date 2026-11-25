@@ -108,7 +108,7 @@ struct TaskChangesView: View {
             }
             if showsDelivery {
                 DeliveryCard(store: store.pullRequest, record: task?.pr, taskOpen: task?.isCompleted == false,
-                             url: prURL, localHead: store.workingChanges?.headCommit)
+                             url: prURL, localHead: store.workingChanges?.headCommit, runsOn: store.machineName)
                     .clipShape(RoundedRectangle(cornerRadius: CornerRadius.row))
             }
         }
@@ -170,25 +170,21 @@ struct TaskChangesView: View {
     // MARK: Hidden paths and groups
 
     /// Your own settings for this repository, in its `.lf/config.local.yaml`.
-    /// Reading through it resolves every layer: built-in, the repository's
-    /// `.lf/config.yaml`, your global preferences, then yours here.
     private var personalFile: JSONValue {
-        ConfigurationDestination.personalRepository.address(repository: store.cwd, wave: "")
-    }
-
-    private func explain(_ key: String) async throws -> ConfigurationValue? {
-        let data = try await ServerClient.configuration(.configExplain(destination: personalFile, key: key))
-        return try JSONDecoder().decode(ConfigurationExplanation.self, from: data).inspections.first?.settings[key]
+        .object(["kind": .string(ConfigurationDestination.personalRepository.rawValue), "repo": .string(store.cwd)])
     }
 
     private func readSettings() async {
         // A checkout on another Machine keeps the defaults for this window only.
-        guard store.query.remoteMachine == nil else { return }
+        guard store.machine == nil else { return }
         do {
-            if let groups = try await explain("diff_groups").flatMap({ DiffGroupSetting.parse($0.value) }) {
+            struct Inspection: Decodable { let settings: [String: ConfigurationValue] }
+            let work = ServedRead.configSettings(directory: store.cwd, wave: nil, skill: nil, graph: nil, step: nil)
+            let settings = try await ServerClient.read(work).decode([Inspection].self).first?.settings
+            if let groups = settings?["diff_groups"].flatMap({ DiffGroupSetting.parse($0.value) }) {
                 store.diffReview.diffGroups = groups
             }
-            if let hidden = try await explain("diff_hidden").flatMap(DiffReviewState.hidden(from:)) {
+            if let hidden = settings?["diff_hidden"].flatMap(DiffReviewState.hidden(from:)) {
                 savedHidden = hidden.filter { $0.source == nil }.map(\.pattern)
                 store.diffReview.hidden = hidden
             }
@@ -223,7 +219,7 @@ struct TaskChangesView: View {
             let pullRequest = store.pullRequest
             let delivery = TaskDelivery.describe(record: task?.pr, taskOpen: task?.isCompleted == false,
                 reading: pullRequest.pullRequest, error: pullRequest.error, readAt: pullRequest.readAt,
-                localHead: store.workingChanges?.headCommit, now: context.date)
+                localHead: store.workingChanges?.headCommit, runsOn: store.machineName, now: context.date)
             let checks = pullRequest.pullRequest?.statusCheckRollup ?? []
             let dot: Color = delivery.warning ? palette.warning
                 : !delivery.readingIsCurrent ? palette.textTertiary
@@ -514,7 +510,7 @@ struct TaskChangesView: View {
                 }
                 .buttonStyle(WorkPlainButtonStyle()).font(Typography.meta)
             }
-            if store.query.remoteMachine == nil, let directory = store.diffReview.changes?.recoveryDirectory {
+            if store.machine == nil, let directory = store.diffReview.changes?.recoveryDirectory {
                 Button("Open saved versions") { NSWorkspace.shared.open(URL(fileURLWithPath: directory)) }
                     .buttonStyle(WorkPlainButtonStyle()).font(Typography.meta)
             }
@@ -773,6 +769,7 @@ struct DeliveryCard: View {
     let taskOpen: Bool
     let url: URL?
     let localHead: String?
+    let runsOn: String?
     @Environment(\.palette) private var palette
     @State private var showsChecks = false
     @State private var showsDescription = false
@@ -780,7 +777,7 @@ struct DeliveryCard: View {
     var body: some View {
         TimelineView(.periodic(from: .now, by: 10)) { context in
             let delivery = TaskDelivery.describe(record: record, taskOpen: taskOpen, reading: store.pullRequest,
-                error: store.error, readAt: store.readAt, localHead: localHead, now: context.date)
+                error: store.error, readAt: store.readAt, localHead: localHead, runsOn: runsOn, now: context.date)
             VStack(alignment: .leading, spacing: Spacing.xs) {
                 HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
                     Image(systemName: record?.publication?.github == nil ? "arrow.triangle.branch" : "arrow.triangle.pull")

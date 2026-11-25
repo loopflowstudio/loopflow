@@ -384,10 +384,6 @@ def release() -> int:
     _copy_bundled_tools(app_dir / "MacOS")
     (app_dir / "PkgInfo").write_text("APPL????")
 
-    # Copy SPM resource bundles (fonts, etc.) into Contents/Resources/
-    for bundle in build_dir.glob("*.bundle"):
-        shutil.copytree(bundle, app_dir / "Resources" / bundle.name)
-
     run(
         [
             sys.executable,

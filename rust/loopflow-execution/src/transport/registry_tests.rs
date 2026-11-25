@@ -146,6 +146,45 @@ fn wait_until(what: &str, mut done: impl FnMut() -> bool) {
 }
 
 #[test]
+fn held_children_get_terminal_colors_when_the_caller_leaves_them_unset() {
+    let _ledger = TestLedgerGuard::new();
+    let place = holder();
+    let registry = Registry::open(BUILD).unwrap();
+    for (request, caller, expected) in [
+        ("missing", vec![], "xterm-256color:truecolor"),
+        (
+            "empty",
+            vec![("TERM", ""), ("COLORTERM", "")],
+            "xterm-256color:truecolor",
+        ),
+        (
+            "custom",
+            vec![("TERM", "screen-256color"), ("COLORTERM", "24bit")],
+            "screen-256color:24bit",
+        ),
+        ("partial", vec![("TERM", "dumb")], "dumb:truecolor"),
+    ] {
+        let mut start = shell(
+            None,
+            request,
+            r#"printf 'colors=%s:%s\n' "$TERM" "$COLORTERM"; read line"#,
+        );
+        start
+            .env
+            .extend(caller.into_iter().map(|(k, v)| (k.into(), v.into())));
+        let terminal = registry.start(start).unwrap();
+        let mut view = View::attach(&terminal);
+        view.wait_for(&format!("colors={expected}"));
+        view.type_in(b"\n");
+        drop(view);
+        wait_until("color probe settled", || {
+            !place.terminal(terminal.as_str()).exists()
+        });
+    }
+    registry.close();
+}
+
+#[test]
 fn an_interrupted_paste_ends_before_the_next_view_types() {
     let ledger = TestLedgerGuard::new();
     let place = holder();
@@ -671,7 +710,9 @@ fn a_held_terminal_with_no_view_reports_that_it_waits() {
         r"printf '\033]7501;state=working:app=claude-code\033\\'
 while [ ! -e '{ask}' ]; do sleep 0.02; done
 printf 'May I?\r\n\033]7501;state=blocked:app=claude-code\033\\'
-read answer",
+read answer
+printf '\033]7501;state=done:app=claude-code\033\\\033]7501;id=child:state=error\033\\'
+read next",
         ask = ask.display()
     );
     let terminal = registry
@@ -694,7 +735,7 @@ read answer",
     store
         .record_agent_process_identity(session.id.as_str(), &attachment, pid, started)
         .unwrap();
-    let available = || {
+    let summary = || {
         session_projection::session_summary(
             &store,
             session.id.as_str(),
@@ -702,11 +743,36 @@ read answer",
         )
         .unwrap()
         .unwrap()
-        .available
     };
-    assert!(!available(), "a working agent waits on nobody");
+    assert!(!summary().available, "a working agent waits on nobody");
     std::fs::write(&ask, "").unwrap();
-    wait_until("the unviewed question to read as waiting", available);
+    wait_until("the unviewed question to read as waiting", || {
+        summary().available
+    });
+    let mut view = View::attach(&terminal);
+    view.wait_for("May I?");
+    view.type_in(b"yes\n");
+    wait_until("the finished turn to read as available", || {
+        let row = summary();
+        row.available
+            && row.program_status.is_some_and(|status| {
+                status
+                    .records
+                    .iter()
+                    .any(|r| r.state == loopflow_model::program_status::State::Done)
+            })
+    });
+    view.type_in(b"x");
+    wait_until(
+        "typing to dismiss the stored done and error reports",
+        || {
+            let row = summary();
+            !row.available
+                && row
+                    .program_status
+                    .is_some_and(|status| status.seen && status.records.is_empty())
+        },
+    );
     registry.close();
     kill(&place, &terminal);
 }

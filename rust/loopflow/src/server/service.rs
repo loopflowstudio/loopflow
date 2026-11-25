@@ -19,6 +19,7 @@ use tokio_util::codec::{Framed, LinesCodec, LinesCodecError};
 
 use super::answers::{Answer, Remembered};
 use super::outbox::{Outbox, Reservation, MAX_OPEN, MAX_RETAINED, MAX_WRITES};
+use super::peers::PeerPool;
 use super::remote::Control;
 use super::subscriptions::{Member, Subscriptions};
 use super::ticket::{Admission, Purpose, Tickets};
@@ -58,8 +59,12 @@ impl Carrier for Lines {
     type Failure = LinesCodecError;
 }
 
-/// Welcomed connections by client ID, as `lf server status` lists them.
-pub(super) type Clients = Arc<Mutex<HashMap<String, ClientState>>>;
+/// Connections to this server and from it to other Machines.
+#[derive(Clone, Default)]
+pub(super) struct Clients {
+    listed: Arc<Mutex<HashMap<String, ClientState>>>,
+    peers: Arc<PeerPool>,
+}
 
 pub(super) struct ClientState {
     row: ConnectedClient,
@@ -91,7 +96,7 @@ impl Listed {
         let connected_at = time::OffsetDateTime::now_utc()
             .format(&time::format_description::well_known::Rfc3339)
             .expect("the current time formats as RFC 3339");
-        lock(clients).insert(
+        lock(&clients.listed).insert(
             id.clone(),
             ClientState {
                 row: ConnectedClient {
@@ -117,7 +122,7 @@ impl Listed {
     }
 
     fn requested(&self) {
-        if let Some(row) = lock(&self.clients).get_mut(&self.id) {
+        if let Some(row) = lock(&self.clients.listed).get_mut(&self.id) {
             row.row.requests += 1;
         }
     }
@@ -125,7 +130,7 @@ impl Listed {
 
 impl Drop for Listed {
     fn drop(&mut self) {
-        lock(&self.clients).remove(&self.id);
+        lock(&self.clients.listed).remove(&self.id);
     }
 }
 
@@ -135,7 +140,7 @@ pub(super) fn lock<T>(shared: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 
 /// Oldest connection first.
 fn connected(clients: &Clients) -> Vec<ConnectedClient> {
-    let mut rows: Vec<_> = lock(clients)
+    let mut rows: Vec<_> = lock(&clients.listed)
         .values()
         .map(|state| {
             let mut row = state.row.clone();
@@ -177,6 +182,7 @@ pub(super) async fn run() -> Result<()> {
     let instance: Arc<str> = uuid::Uuid::new_v4().to_string().into();
     let slots = Arc::new(Semaphore::new(MAX_CONNECTIONS));
     let clients = Clients::default();
+    let peers = clients.peers.clone();
     // One ticket store: a terminal or bulk connection on either carrier
     // redeems what a control connection on the same carrier requested.
     let tickets = Arc::new(Tickets::default());
@@ -184,6 +190,9 @@ pub(super) async fn run() -> Result<()> {
     let (remote_control, remote_requests) = mpsc::channel(8);
     super::maintenance::start();
     super::maintenance::start_plan_exchange();
+    tokio::spawn(loopflow_execution::ops::tracker_events::watch_owned_work(
+        None,
+    ));
     // Held terminals keep running in their holders whether or not this server
     // can host them; without a registry their views wait for the next server.
     let terminals = match Registry::open(&executable_sha256) {
@@ -211,6 +220,7 @@ pub(super) async fn run() -> Result<()> {
     tracing::info!(%instance, socket = %path.display(), "Loopflow server ready");
     tokio::select! {
         result = remote => result,
+        _ = peers.expiring() => unreachable!("peer expiry runs until shutdown"),
         _ = tickets.expiring() => unreachable!("ticket expiry runs until shutdown"),
         result = local(listener, instance, executable_sha256, slots, clients, remote_control, tickets.clone(), subscriptions, terminals) => result,
     }
@@ -524,12 +534,28 @@ enum Start {
     Subscribe(Read, Option<Vec<String>>, Option<String>),
 }
 
+impl Start {
+    /// A request for a Session's held terminal, which runs wherever it arrives.
+    fn names_a_terminal(&self) -> bool {
+        matches!(
+            self,
+            Self::Request(
+                Operation::Server(
+                    ServerOperation::SessionAttach { .. } | ServerOperation::SessionContinue { .. }
+                ),
+                None,
+                _
+            )
+        )
+    }
+}
+
 /// Where a connection's operations run.
 #[derive(Debug, Clone)]
 enum Origin {
     /// A client on this Machine: a write for Work another Machine runs is
     /// sent there.
-    Local,
+    Local(Arc<PeerPool>),
     /// Another Machine's `lf`: every operation runs here and is never sent
     /// on, in this Machine's checkout of the sender's repository.
     Machine(Box<Sender>),
@@ -538,9 +564,16 @@ enum Origin {
 impl Origin {
     /// `read` where it runs: in the sender's repository here.
     fn place(&self, mut read: Read) -> Result<Read, Error> {
-        if let (Self::Machine(sender), Some(directory)) = (self, read.directory_mut()) {
-            *directory = crate::lf::commands::work_route::repository_path(&sender.repository)
-                .map_err(|error| Error::new(ErrorCode::NotFound, format!("{error:#}")))?;
+        if let Self::Machine(sender) = self {
+            if let Some(issue) = read.workspace_task_mut() {
+                *issue = crate::lf::commands::work_route::peer_task_id(&sender.repository, issue)
+                    .map_err(unavailable)?;
+            }
+            if let Some(directory) = read.directory_mut() {
+                *directory =
+                    crate::lf::commands::work_route::repository_path(&sender.repository)
+                        .map_err(|error| Error::new(ErrorCode::NotFound, format!("{error:#}")))?;
+            }
         }
         Ok(read)
     }
@@ -686,7 +719,9 @@ pub(super) async fn session<C: Carrier>(
             continue;
         }
         let origin = match (listed.machine, sender) {
-            (true, Some(sender)) => Origin::Machine(Box::new(sender)),
+            (true, Some(sender)) => Some(Origin::Machine(Box::new(sender))),
+            // A held terminal is named by its Session; it needs no repository.
+            (true, None) if start.names_a_terminal() => None,
             (true, None) => {
                 send(
                     lines,
@@ -699,7 +734,12 @@ pub(super) async fn session<C: Carrier>(
                 .await?;
                 continue;
             }
-            (false, _) => Origin::Local,
+            (false, _) => Some(Origin::Local(listed.clients.peers.clone())),
+        };
+        // Where a local client's terminal request is sent on; never a peer's.
+        let peers = match &origin {
+            Some(Origin::Local(peers)) => Some(peers.clone()),
+            _ => None,
         };
         if inflight.contains_key(&id) {
             send(
@@ -765,26 +805,77 @@ pub(super) async fn session<C: Carrier>(
                     request,
                     rows,
                     cols,
+                    task,
+                    machine,
+                    agent,
                 }),
                 None,
                 _,
             ) => {
-                let start =
-                    tokio::task::spawn_blocking(move || continuing(session, request, rows, cols))
+                let message = match terminal_machine(peers.is_some(), &session, task, machine).await
+                {
+                    Err(refusal) => ServerMessage::error(Some(id), refusal),
+                    Ok(Some(machine)) => {
+                        let peers = peers.expect("only a local client's request is sent on");
+                        let operation = ServerOperation::SessionContinue {
+                            session,
+                            request: request.clone(),
+                            rows,
+                            cols,
+                            task: None,
+                            machine: None,
+                            agent,
+                        };
+                        // Repeating `request` starts nothing, so a lost pipe retries once.
+                        answered(
+                            id,
+                            ask_there(peers, machine, None, operation, Some(request)).await,
+                        )
+                    }
+                    Ok(None) => {
+                        let start = tokio::task::spawn_blocking(move || {
+                            continuing(session, request, rows, cols, agent)
+                        })
                         .await
                         .map_err(unavailable)
                         .and_then(|start| start);
-                send(lines, &start_held(id, terminals.clone(), start).await).await?;
+                        start_held(id, terminals.clone(), start).await
+                    }
+                };
+                send(lines, &message).await?;
                 continue;
             }
             Start::Request(
                 Operation::Server(ServerOperation::SessionAttach {
                     session,
                     terminal_id,
+                    task,
+                    machine,
                 }),
                 None,
                 _,
             ) => {
+                match terminal_machine(peers.is_some(), &session, task, machine).await {
+                    Err(refusal) => {
+                        send(lines, &ServerMessage::error(Some(id), refusal)).await?;
+                        continue;
+                    }
+                    Ok(Some(machine)) => {
+                        let peers = peers.expect("only a local client's request is sent on");
+                        let operation = ServerOperation::SessionAttach {
+                            session,
+                            terminal_id,
+                            task: None,
+                            machine: None,
+                        };
+                        let message =
+                            attach_there(id, peers, machine, None, operation, &tickets, &admission)
+                                .await;
+                        send(lines, &message).await?;
+                        continue;
+                    }
+                    Ok(None) => {}
+                }
                 let held = terminals
                     .as_ref()
                     .and_then(|terminals| terminals.session_terminal(&session));
@@ -795,17 +886,12 @@ pub(super) async fn session<C: Carrier>(
                 let message = match (terminal_id, held, pending) {
                     (wanted, Some(held), _) if wanted.as_ref().is_none_or(|wanted| *wanted == held) => {
                         let ticket = tickets.issue(admission.clone(), Purpose::Terminal(held.clone()));
-                        ServerMessage::Response {
-                            id,
-                            trace_id: loopflow_model::id::TraceId::default(),
-                            result: serde_json::to_value(SessionAttached {
-                                ticket,
-                                terminal_id: held,
-                                expires_in_ms: TICKET_LIFETIME.as_millis() as u64,
-                            })
-                            .expect("a ticket serializes"),
-                            revisions: None,
-                        }
+                        response(id, serde_json::to_value(SessionAttached {
+                            ticket,
+                            terminal_id: held,
+                            expires_in_ms: TICKET_LIFETIME.as_millis() as u64,
+                        })
+                        .expect("a ticket serializes"))
                     }
                     // Nothing ended; asking again later attaches.
                     (_, _, Some(pending)) => ServerMessage::error(Some(id), loopflow_execution::transport::registry::waiting(&pending)),
@@ -817,6 +903,21 @@ pub(super) async fn session<C: Carrier>(
                         "terminal has ended; nothing was started and no input replayed",
                     ).with(serde_json::json!({ "terminal_id": wanted, "current_terminal_id": current }))),
                 };
+                send(lines, &message).await?;
+                continue;
+            }
+            Start::Request(
+                Operation::Server(
+                    shell @ (ServerOperation::TaskShellStart { .. }
+                    | ServerOperation::TaskShellAttach { .. }
+                    | ServerOperation::TaskShellClose { .. }),
+                ),
+                None,
+                _,
+            ) => {
+                let origin = origin.expect("a Task shell request carries its sender");
+                let message =
+                    task_shell(id, shell, origin, terminals.clone(), &tickets, &admission).await;
                 send(lines, &message).await?;
                 continue;
             }
@@ -856,13 +957,14 @@ pub(super) async fn session<C: Carrier>(
                 continue;
             }
             Start::Subscribe(query, select, resume) => {
-                // Only a sender's repository costs a store read.
+                let origin = origin.expect("only terminal requests run without an origin");
+                let follow = matches!(origin, Origin::Local(_)) && query.follows_task();
                 let placed = match origin {
                     Origin::Machine(_) => tokio::task::spawn_blocking(move || origin.place(query))
                         .await
                         .map_err(unavailable)
                         .and_then(|placed| placed),
-                    Origin::Local => Ok(query),
+                    Origin::Local(_) => Ok(query),
                 };
                 let query = match placed {
                     Ok(query) => query,
@@ -872,7 +974,7 @@ pub(super) async fn session<C: Carrier>(
                     }
                 };
                 let (member, delivery) =
-                    match subscriptions.join(&id, query.clone(), select.clone()) {
+                    match subscriptions.join(&id, query.clone(), select.clone(), follow) {
                         Ok(joined) => joined,
                         Err(failure) => {
                             send(lines, &ServerMessage::error(Some(id), unavailable(failure)))
@@ -892,6 +994,7 @@ pub(super) async fn session<C: Carrier>(
                 }
             }
             Start::Request(operation, select, named) => {
+                let origin = origin.expect("only terminal requests run without an origin");
                 let write = if operation.is_write() {
                     let Ok(write) = writes.clone().try_acquire_owned() else {
                         send(lines, &busy(&id, "writes", MAX_WRITES)).await?;
@@ -952,9 +1055,7 @@ async fn start_held(
     start: Result<loopflow_execution::transport::registry::Start, Error>,
 ) -> ServerMessage {
     let Some(terminals) = terminals else {
-        return ServerMessage::error(Some(id), Error::new(ErrorCode::Unavailable,
-            "this server hosts no held terminals; see logs/lf.log and restart it with lf server restart",
-        ).with(serde_json::json!({ "resource": "held_terminals" })));
+        return ServerMessage::error(Some(id), no_held_terminals());
     };
     let start = match start {
         Ok(start) => start,
@@ -989,6 +1090,7 @@ pub(super) fn continuing(
     request: String,
     rows: u16,
     cols: u16,
+    agent: Option<String>,
 ) -> Result<loopflow_execution::transport::registry::Start, Error> {
     let registry = loopflow_execution::store::read_existing_registry()
         .map_err(unavailable)?
@@ -1010,8 +1112,34 @@ pub(super) fn continuing(
     {
         return Err(Error::new(ErrorCode::Conflict, reason));
     }
+    let (lf_bin, env) = held_env()?;
+    let mut argv = vec![lf_bin.to_string_lossy().into_owned()];
+    if let Some(agent) = agent {
+        argv.extend(["--agent".into(), agent]);
+    }
+    argv.extend([
+        "session".into(),
+        "resume".into(),
+        "--".into(),
+        session.to_string(),
+    ]);
+    Ok(loopflow_execution::transport::registry::Start {
+        argv,
+        cwd: record.cwd.clone(),
+        session: Some(session),
+        request,
+        env,
+        rows,
+        cols,
+        placement: None,
+    })
+}
+
+/// A held child's environment: this server's, with its own `LF_HOME` and
+/// `LF_BIN`, and that `lf`. The child, not the service's launcher, owns what
+/// it starts.
+fn held_env() -> Result<(std::path::PathBuf, Vec<(String, String)>), Error> {
     let context = loopflow_execution::os_process::execution_context().map_err(unavailable)?;
-    // This exact Session owns its child, not the service's launcher.
     let mut env: Vec<(String, String)> = std::env::vars()
         .filter(|(name, _)| !name.starts_with("LF_"))
         .collect();
@@ -1023,22 +1151,137 @@ pub(super) fn continuing(
         "LF_BIN".into(),
         context.lf_bin.to_string_lossy().into_owned(),
     ));
-    Ok(loopflow_execution::transport::registry::Start {
-        argv: vec![
-            context.lf_bin.to_string_lossy().into_owned(),
-            "session".into(),
-            "resume".into(),
-            "--".into(),
-            session.to_string(),
-        ],
-        cwd: record.cwd.clone(),
-        session: Some(session),
-        request,
-        env,
-        rows,
-        cols,
-        placement: None,
+    Ok((context.lf_bin, env))
+}
+
+/// The Task a shell request names. Another Machine's request names it as
+/// that repository knows it here.
+fn shell_issue(shell: &mut ServerOperation) -> &mut String {
+    match shell {
+        ServerOperation::TaskShellStart { issue, .. }
+        | ServerOperation::TaskShellAttach { issue, .. }
+        | ServerOperation::TaskShellClose { issue, .. } => issue,
+        _ => unreachable!("only Task shell requests name a shell"),
+    }
+}
+
+/// A Task shell request, here or on the Machine that runs the Task.
+async fn task_shell(
+    id: String,
+    mut shell: ServerOperation,
+    origin: Origin,
+    terminals: Option<Arc<Registry>>,
+    tickets: &Tickets,
+    admission: &Admission,
+) -> ServerMessage {
+    let issue = shell_issue(&mut shell).clone();
+    let started_on = match &mut shell {
+        ServerOperation::TaskShellClose { machine, .. } => machine.take(),
+        _ => None,
+    };
+    let placing = origin.clone();
+    let placed = tokio::task::spawn_blocking(move || -> anyhow::Result<_> {
+        use loopflow_execution::machine::task::{remote_task, task_on};
+        Ok(match placing {
+            Origin::Machine(sender) => (
+                crate::lf::commands::work_route::peer_task_id(&sender.repository, &issue)?,
+                None,
+            ),
+            Origin::Local(_) => {
+                let route = match &started_on {
+                    Some(machine) => task_on(&issue, machine)?,
+                    None => remote_task(&issue, None)?,
+                };
+                match route {
+                    Some(route) => {
+                        let peer = crate::lf::commands::read::peer_of(&route)?;
+                        (route.peer_selector, Some(peer))
+                    }
+                    None => (issue, None),
+                }
+            }
+        })
     })
+    .await
+    .map_err(unavailable)
+    .and_then(|placed| placed.map_err(unavailable));
+    let (task, there) = match placed {
+        Ok(placed) => placed,
+        Err(refusal) => return ServerMessage::error(Some(id), refusal),
+    };
+    *shell_issue(&mut shell) = task;
+    if let Some((machine, sender)) = there {
+        let Origin::Local(peers) = origin else {
+            unreachable!("only a local client's request is sent on")
+        };
+        if matches!(shell, ServerOperation::TaskShellAttach { .. }) {
+            return attach_there(id, peers, machine, Some(sender), shell, tickets, admission).await;
+        }
+        // A start repeats by its `shell_id`, so a lost pipe retries once.
+        let repeat = match &shell {
+            ServerOperation::TaskShellStart { shell_id, .. } => Some(format!("shell-{shell_id}")),
+            _ => None,
+        };
+        return answered(
+            id,
+            ask_there(peers, machine, Some(sender), shell, repeat).await,
+        );
+    }
+    // What the shell here answered; an attach is answered with a ticket.
+    enum Shell {
+        Started(loopflow_model::id::TerminalId),
+        Running(loopflow_model::id::TerminalId),
+        Closed,
+    }
+    let answer = tokio::task::spawn_blocking(move || -> Result<Shell, Error> {
+        use loopflow_execution::desktop::shells::served;
+        Ok(match shell {
+            ServerOperation::TaskShellStart {
+                issue,
+                shell_id,
+                rows,
+                cols,
+                bootstrap,
+                command,
+            } => {
+                let terminals = terminals.ok_or_else(no_held_terminals)?;
+                let (_, env) = held_env()?;
+                Shell::Started(served::start(
+                    &terminals, &issue, &shell_id, rows, cols, &bootstrap, &command, env,
+                )?)
+            }
+            ServerOperation::TaskShellAttach { shell_id, .. } => {
+                Shell::Running(served::running(&shell_id)?)
+            }
+            ServerOperation::TaskShellClose { shell_id, .. } => {
+                served::close(&shell_id)?;
+                Shell::Closed
+            }
+            _ => unreachable!("only Task shell requests reach here"),
+        })
+    })
+    .await
+    .map_err(unavailable)
+    .and_then(|answer| answer);
+    let result = match answer {
+        Ok(Shell::Started(terminal_id)) => serde_json::to_value(SessionStarted { terminal_id }),
+        Ok(Shell::Running(terminal_id)) => serde_json::to_value(SessionAttached {
+            ticket: tickets.issue(admission.clone(), Purpose::Terminal(terminal_id.clone())),
+            terminal_id,
+            expires_in_ms: TICKET_LIFETIME.as_millis() as u64,
+        }),
+        Ok(Shell::Closed) => Ok(serde_json::json!({})),
+        Err(refusal) => return ServerMessage::error(Some(id), refusal),
+    };
+    response(id, result.expect("a shell answer serializes"))
+}
+
+fn no_held_terminals() -> Error {
+    Error::new(
+        ErrorCode::Unavailable,
+        "this server hosts no held terminals; see logs/lf.log and restart it with lf server restart",
+    )
+    .with(serde_json::json!({ "resource": "held_terminals" }))
 }
 
 /// `{ticket}`: single use, bound to this connection's admission, expiring in
@@ -1052,6 +1295,165 @@ fn ticket_response(id: String, ticket: String) -> ServerMessage {
     }
 }
 
+fn response(id: String, result: serde_json::Value) -> ServerMessage {
+    ServerMessage::Response {
+        id,
+        trace_id: loopflow_model::id::TraceId::default(),
+        result,
+        revisions: None,
+    }
+}
+
+fn answered(id: String, answer: Result<serde_json::Value, Error>) -> ServerMessage {
+    match answer {
+        Ok(result) => response(id, result),
+        Err(refusal) => ServerMessage::error(Some(id), refusal),
+    }
+}
+
+/// `operation`'s answer from `machine`'s server.
+async fn ask_there(
+    peers: Arc<PeerPool>,
+    machine: loopflow_model::durable::Machine,
+    sender: Option<Sender>,
+    operation: ServerOperation,
+    request_id: Option<String>,
+) -> Result<serde_json::Value, Error> {
+    tokio::task::spawn_blocking(move || peers.terminal(&machine, sender, &operation, request_id))
+        .await
+        .map_err(unavailable)?
+        .map(|answer| answer.result)
+        .map_err(unavailable)
+}
+
+/// The other Machine that runs `session`'s terminal, for a local client: the
+/// Task's owner when the client names one, else the Machine it names, else
+/// where this Machine's records say the Session went. A peer's request runs here.
+async fn terminal_machine(
+    local: bool,
+    session: &loopflow_model::id::LfSessionId,
+    task: Option<String>,
+    machine: Option<loopflow_model::durable::MachineId>,
+) -> Result<Option<loopflow_model::durable::Machine>, Error> {
+    if !local {
+        return Ok(None);
+    }
+    let session = session.clone();
+    tokio::task::spawn_blocking(move || {
+        crate::lf::commands::work_route::terminal_machine(&session, task.as_deref(), machine)
+    })
+    .await
+    .map_err(unavailable)?
+    .map_err(unavailable)
+}
+
+/// Attach on `machine` and answer with a ticket here that bridges to it.
+async fn attach_there(
+    id: String,
+    peers: Arc<PeerPool>,
+    machine: loopflow_model::durable::Machine,
+    sender: Option<Sender>,
+    operation: ServerOperation,
+    tickets: &Tickets,
+    admission: &Admission,
+) -> ServerMessage {
+    let answer = ask_there(peers, machine.clone(), sender, operation, None)
+        .await
+        .and_then(|result| serde_json::from_value::<SessionAttached>(result).map_err(unavailable));
+    let issued = match answer {
+        Ok(issued) => issued,
+        Err(refusal) => return ServerMessage::error(Some(id), refusal),
+    };
+    let ticket = tickets.issue(
+        admission.clone(),
+        Purpose::RemoteTerminal {
+            machine,
+            ticket: issued.ticket,
+            terminal_id: issued.terminal_id.clone(),
+        },
+    );
+    response(
+        id,
+        serde_json::to_value(SessionAttached {
+            ticket,
+            terminal_id: issued.terminal_id,
+            expires_in_ms: issued.expires_in_ms,
+        })
+        .expect("a ticket serializes"),
+    )
+}
+
+/// A ticketed connection's held terminal: here, or another Machine's through
+/// `lf server connect` there. Dropping it ends the bridge and that SSH process.
+pub(super) enum TerminalStream {
+    Here(UnixStream),
+    There {
+        _ssh: tokio::process::Child,
+        stream: tokio::io::Join<tokio::process::ChildStdout, tokio::process::ChildStdin>,
+    },
+}
+
+/// Present `ticket` to `machine`'s server and wait for its bridge. Read one
+/// byte at a time so no terminal byte stays in a buffer here.
+async fn bridge_there(
+    machine: &loopflow_model::durable::Machine,
+    ticket: String,
+) -> Result<Result<TerminalStream, Error>> {
+    let mut ssh =
+        tokio::process::Command::from(loopflow_execution::machine::ssh::Pipe::command(machine)?)
+            .kill_on_drop(true)
+            .spawn()
+            .context("could not start ssh")?;
+    let mut output = ssh.stdout.take().expect("piped SSH stdout");
+    let mut input = ssh.stdin.take().expect("piped SSH stdin");
+    let mut line = serde_json::to_vec(&ClientMessage::Attach { ticket })?;
+    line.push(b'\n');
+    let answer = tokio::time::timeout(loopflow_execution::machine::client::HANDSHAKE, async {
+        input.write_all(&line).await?;
+        let mut answer = Vec::new();
+        loop {
+            match output.read_u8().await? {
+                b'\n' => return std::io::Result::Ok(answer),
+                byte => answer.push(byte),
+            }
+        }
+    })
+    .await;
+    let answer = match answer {
+        Ok(Ok(answer)) => answer,
+        Ok(Err(failure)) => return Ok(Err(unavailable_on(machine, anyhow::Error::from(failure)))),
+        Err(_) => {
+            return Ok(Err(unavailable_on(
+                machine,
+                anyhow::anyhow!("its server did not open the terminal bridge in time"),
+            )))
+        }
+    };
+    match serde_json::from_slice::<ServerMessage>(&answer)? {
+        ServerMessage::Bridged { .. } => Ok(Ok(TerminalStream::There {
+            _ssh: ssh,
+            stream: tokio::io::join(output, input),
+        })),
+        ServerMessage::Error {
+            code,
+            message,
+            data,
+            ..
+        } => Ok(Err(Error {
+            code,
+            message,
+            data,
+        })),
+        other => anyhow::bail!("unexpected peer message before bridging: {other:?}"),
+    }
+}
+
+fn unavailable_on(machine: &loopflow_model::durable::Machine, failure: anyhow::Error) -> Error {
+    unavailable(loopflow_execution::machine::client::unavailable_on(
+        machine, failure,
+    ))
+}
+
 /// Redeem a ticketed connection's ticket. A terminal ticket returns the held
 /// terminal to bridge to once `admitted` was sent; the other purposes complete here.
 pub(super) async fn ticketed<C: Carrier>(
@@ -1059,7 +1461,7 @@ pub(super) async fn ticketed<C: Carrier>(
     ticket: &str,
     admission: &Admission,
     tickets: &Tickets,
-) -> Result<Option<UnixStream>> {
+) -> Result<Option<TerminalStream>> {
     let Some(purpose) = tickets.redeem(ticket, admission) else {
         send(
             carrier,
@@ -1109,8 +1511,22 @@ pub(super) async fn ticketed<C: Carrier>(
                 },
             )
             .await?;
-            Ok(Some(destination))
+            Ok(Some(TerminalStream::Here(destination)))
         }
+        Purpose::RemoteTerminal {
+            machine,
+            ticket,
+            terminal_id,
+        } => match bridge_there(&machine, ticket).await? {
+            Ok(stream) => {
+                send(carrier, &ServerMessage::Bridged { terminal_id }).await?;
+                Ok(Some(stream))
+            }
+            Err(refusal) => {
+                send(carrier, &ServerMessage::error(None, refusal)).await?;
+                Ok(None)
+            }
+        },
         Purpose::Download {
             message,
             reservation,
@@ -1243,7 +1659,17 @@ fn refused_operation(line: &str) -> Option<(String, Error)> {
 /// Hand the connection to the owner protocol. Tokio uses bounded copy buffers;
 /// closing either side releases the owner claim, and no service state can
 /// restore it on another connection.
-async fn bridge(lines: Lines, mut destination: UnixStream) -> Result<()> {
+async fn bridge(lines: Lines, terminal: TerminalStream) -> Result<()> {
+    match terminal {
+        TerminalStream::Here(destination) => copy(lines, destination).await,
+        TerminalStream::There { _ssh, stream } => copy(lines, stream).await,
+    }
+}
+
+async fn copy(
+    lines: Lines,
+    mut destination: impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+) -> Result<()> {
     let parts = lines.into_parts();
     let mut socket = parts.io;
     // Owner-protocol bytes the client pipelined behind its ticket.
@@ -1279,7 +1705,7 @@ async fn request(
     let write = operation.is_write();
     let mut operation = operation;
     // A command run here is followed by one exchange by each plan carrier.
-    let planned = matches!(origin, Origin::Local)
+    let planned = matches!(origin, Origin::Local(_))
         .then(|| operation.directory())
         .flatten();
     let started = Instant::now();
@@ -1370,6 +1796,7 @@ async fn operate(
 ) -> Answer {
     let measured = matches!(&operation, Operation::Measured(_));
     let remembered = request_id
+        .clone()
         .filter(|_| operation.is_write())
         .map(|request_id| Remembered::new(request_id, &operation));
     let operation = match operation {
@@ -1388,12 +1815,12 @@ async fn operate(
                 measured,
                 move || {
                     let _held = reservation;
-                    loopflow_execution::provider_auth::operations::served(|| {
-                        Ok(serde_json::to_value(match origin {
-                            Origin::Local => change.run()?,
-                            Origin::Machine(sender) => change.run_here(&sender)?,
-                        })?)
-                    })
+                    Ok(serde_json::to_value(match origin {
+                        Origin::Local(peers) => change.run_with(|machine, sender, write| {
+                            peers.save(machine, sender, write, request_id)
+                        })?,
+                        Origin::Machine(sender) => change.run_here(&sender)?,
+                    })?)
                 },
             )
             .await;
@@ -1446,9 +1873,10 @@ async fn served(
                     loopflow_execution::journal::request::isolate(|| {
                         loopflow_execution::observe::Cache::shared()
                             .capture(|| match origin {
-                                Origin::Local => {
-                                    query.read_until(&|| requester.strong_count() == 0)
-                                }
+                                Origin::Local(peers) => query.read_with(
+                                    &|| requester.strong_count() == 0,
+                                    |machine, sender, read| peers.query(machine, sender, read),
+                                ),
                                 Origin::Machine(_) => {
                                     query.read_here_until(&|| requester.strong_count() == 0)
                                 }
@@ -1465,9 +1893,12 @@ async fn served(
             ServerOperation::SessionAttach { .. }
             | ServerOperation::SessionStart { .. }
             | ServerOperation::SessionContinue { .. }
+            | ServerOperation::TaskShellStart { .. }
+            | ServerOperation::TaskShellAttach { .. }
+            | ServerOperation::TaskShellClose { .. }
             | ServerOperation::RequestUpload { .. },
         ) => {
-            unreachable!("the session dispatches attachment, starts and uploads")
+            unreachable!("the session dispatches terminals and uploads")
         }
         Operation::Server(ServerOperation::SessionBoundary(_)) => {
             unreachable!("request dispatches boundaries")
@@ -1500,6 +1931,34 @@ async fn served(
 /// A write as request telemetry records it: setting values and authored text
 /// stay out.
 fn telemetry(change: &crate::lf::commands::write::Write) -> anyhow::Result<serde_json::Value> {
+    use crate::lf::commands::write::Write;
+
+    // Checked writes also carry previous values, and a move review includes
+    // file patches. Record only the setting address for these operations.
+    let address = match change {
+        Write::ConfigEdit {
+            destination, key, ..
+        } => {
+            Some(serde_json::json!({"kind": "config.edit", "destination": destination, "key": key}))
+        }
+        Write::ConfigPreview {
+            destination, key, ..
+        } => Some(
+            serde_json::json!({"kind": "config.preview", "destination": destination, "key": key}),
+        ),
+        Write::ConfigPromote {
+            destination,
+            key,
+            wave,
+            ..
+        } => Some(
+            serde_json::json!({"kind": "config.promote", "destination": destination, "key": key, "wave": wave}),
+        ),
+        _ => None,
+    };
+    if let Some(address) = address {
+        return Ok(address);
+    }
     let mut target = serde_json::to_value(change)?;
     if let Some(fields) = target.as_object_mut() {
         for field in [
@@ -1614,7 +2073,12 @@ async fn effect(
                 tracing::info!(request = %id, %trace_id, diagnostic = line, "Server command diagnostic");
             }
             tracing::info!(request = %id, %instance, %trace_id, ok = result.is_ok(), "Server command finished");
-            result.map_err(|error| Error::written(&error))
+            result.map_err(|error| {
+                match crate::lf::commands::desktop::DesktopError::refusal(&error) {
+                    Some(code) => Error::new(code, format!("{error:#}")),
+                    None => Error::written(&error),
+                }
+            })
         })
     })
     .await
@@ -1924,6 +2388,30 @@ mod tests {
                 .unwrap()
                 .contains("codex"));
         });
+    }
+
+    #[test]
+    fn checked_config_requests_record_only_the_setting_address() {
+        use crate::lf::commands::write::Write;
+        use serde_json::{from_str, from_value, json, Value};
+
+        let fixture: Value = from_str(include_str!(
+            "../../../../tests/fixtures/dto/configuration_scope.json"
+        ))
+        .unwrap();
+        for name in ["write", "preview", "promote"] {
+            let request = &fixture[name];
+            let change: Write = from_value(request.clone()).unwrap();
+            let mut expected = json!({
+                "kind": request["kind"],
+                "destination": request["destination"],
+                "key": request["key"],
+            });
+            if let Some(wave) = request.get("wave") {
+                expected["wave"] = wave.clone();
+            }
+            assert_eq!(super::telemetry(&change).unwrap(), expected);
+        }
     }
 
     /// Serialize the tests that read an empty Machine registry through env.
@@ -3277,7 +3765,7 @@ mod tests {
                 .lock()
                 .unwrap()
                 .execute(
-                    "UPDATE tasks SET planning_completed=1 WHERE id=?1",
+                    "UPDATE tasks SET planning_state='completed' WHERE id=?1",
                     [task.as_str()],
                 )
                 .unwrap();
@@ -3768,7 +4256,7 @@ mod tests {
             );
             let id = session.id.clone();
             let start = tokio::task::spawn_blocking(move || {
-                super::continuing(id, "phone-continue".into(), 40, 60)
+                super::continuing(id, "phone-continue".into(), 40, 60, None)
             })
             .await
             .unwrap()
@@ -3799,6 +4287,7 @@ mod tests {
                     "phone-continue".into(),
                     40,
                     60,
+                    None,
                 )
             })
             .await
@@ -3846,7 +4335,12 @@ mod tests {
                 )
                 .unwrap();
                 tx.execute(
-                    "INSERT INTO task_primary_sessions(task_id,session_id) VALUES(?1,?2)",
+                    "UPDATE agent_sessions SET task_id=?1,wave_id=(SELECT p.wave_id FROM tasks t LEFT JOIN projects p ON p.id=t.project_id WHERE t.id=?1) WHERE id=?2",
+                    [task.id.as_str(), session.id.as_str()],
+                )
+                .unwrap();
+                tx.execute(
+                    "INSERT OR REPLACE INTO task_primary_sessions(task_id,session_id) VALUES(?1,?2)",
                     [task.id.as_str(), session.id.as_str()],
                 )
                 .unwrap();

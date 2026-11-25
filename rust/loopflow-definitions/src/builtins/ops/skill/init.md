@@ -11,7 +11,7 @@ logins, personal config, Machines and anything created in an outside service
 wait for a person, so report the command that would do it.
 
 Never show credential values or read tokens from dotfiles or the environment;
-use `lf account` for services. Claude and Codex own native sign-in.
+`lf machine login <provider>` runs each provider's own sign-in.
 
 ## 1. Look at what is there
 
@@ -21,7 +21,7 @@ Read-only. A missing optional command is a fact, not a failure, and no
 ```bash
 git rev-parse --show-toplevel
 lf --version
-lf account --json            # service authentication status; no provider request
+lf machine logins --json     # what this Machine is signed in to
 lf machine self --json
 lf wave list --json
 command -v claude codex opencode pi agy
@@ -65,9 +65,9 @@ The path is an existing Wave, a new Wave, an existing Task, or Skills and
 Graphs only. Offer only the missing accounts:
 
 ```bash
-lf account connect github
-lf account connect linear
-claude                         # native sign-in; codex login for Codex
+lf machine login github
+lf machine login linear
+lf machine login claude        # or codex
 ```
 
 A connection counts only after the provider flow completes.
@@ -98,20 +98,19 @@ one:
 
 ```bash
 lf machine add <ssh-target> --label <label>
-lf --machine <machine-id> account --json
+lf machine logins <machine-label> --json
 lf --wave <wave> set machine <machine-label>   # this Wave's new Tasks
 lf --repo <repo> set machine <machine-label>   # this repository's new Tasks
 lf task move <issue> --machine <machine-label> # one existing Task
 ```
 
 The Machine choice is personal and never committed. Check the remote has `lf`,
-the repository, service access and native agent authentication before
-pointing work at it, and run logins in
-a foreground terminal with `lf machine connect`.
+the repository and its logins before pointing work at it; sign it in with
+`lf machine login <provider> <machine-label>` from a foreground terminal.
 
 ## 6. Check it works
 
-Run the smallest reads that show the chosen path works: `lf account --json`,
+Run the smallest reads that show the chosen path works: `lf machine logins --json`,
 `lf machine self --json`, plus `lf wave status <wave> --json` or
 `lf task status <ISSUE-ID> --json`. Don't start work as a test.
 

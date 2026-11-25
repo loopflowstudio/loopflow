@@ -109,7 +109,7 @@ pub struct ResolvedSettings {
 }
 
 fn invalid(message: impl Into<String>) -> LoadError {
-    LoadError::InvalidGraph(message.into())
+    LoadError::InvalidSetting(message.into())
 }
 
 pub fn validate_scope(
@@ -182,9 +182,15 @@ fn _list_agents(value: &mut Value) {
 
 pub(crate) fn validate_value(path: &[&str], value: &Value) -> Result<(), LoadError> {
     if value.is_null() {
-        return Err(invalid(
-            "omit a file value or use unset to remove a preference",
-        ));
+        // YAML deserializes null into an empty mapping too. Use JSON's strict
+        // null here so only a nullable field can retain the declaration.
+        let mut check = Value::Mapping(Default::default());
+        insert(&mut check, path, Value::Null);
+        return serde_json::from_value::<Config>(
+            serde_json::to_value(check).expect("string keys and null"),
+        )
+        .map(|_| ())
+        .map_err(|error| invalid(format!("{}: {error}", path.join("."))));
     }
     if ["agent", "default_agent"].contains(&path[0]) {
         let agent = value
@@ -232,26 +238,19 @@ pub(crate) fn validate_value(path: &[&str], value: &Value) -> Result<(), LoadErr
             return Err(invalid("stream must be stable, preview or dev"));
         }
     }
-    if !["gh", "local"].contains(&parsed.land.as_str()) {
-        return Err(invalid("land must be gh or local"));
-    }
     if parsed.machine.tasks.is_some() && parsed.machine.capacity.is_some() {
         return Err(invalid(
             "choose machine.tasks or machine.capacity in one declaration",
         ));
     }
-    for (provider, browsers) in &parsed.auth_browsers {
+    for (provider, approver) in &parsed.approvers {
         provider
             .parse::<crate::provider_auth::Provider>()
             .map_err(|error| invalid(error.to_string()))?;
-        for profiles in std::iter::once(&browsers.default).chain(browsers.accounts.values()) {
-            let mut seen = std::collections::HashSet::new();
-            for profile in profiles {
-                crate::profile::ProfileId::parse(profile).map_err(invalid)?;
-                if !seen.insert(profile) {
-                    return Err(invalid("browser profiles must be unique"));
-                }
-            }
+        let (crate::config::placement::Approver::Chrome { chrome: value }
+        | crate::config::placement::Approver::Command { command: value }) = approver;
+        if value.trim().is_empty() {
+            return Err(invalid(format!("approvers.{provider} cannot be empty")));
         }
     }
     for (name, template) in &parsed.ondemands {
@@ -473,17 +472,8 @@ pub(super) fn filter_file_preferences(
         super::reader::warn(file, None, "skipping settings that are not a mapping");
         *value = Value::Mapping(Default::default());
     }
-    _normalize_preferences(value);
+    super::normalize_preferences(value);
     _filter_file_settings(value, &mut Vec::new(), file, source, scope);
-}
-
-fn _normalize_preferences(value: &mut Value) {
-    super::normalize_context(value);
-    if let Some(map) = value.as_mapping_mut() {
-        if let Some(graph) = map.remove(super::GRAPH_ALIAS) {
-            map.entry(Value::String("graph".into())).or_insert(graph);
-        }
-    }
 }
 
 /// Account routing preferences the released lf still reads from personal
@@ -711,7 +701,7 @@ pub(crate) fn resolve_with(
         ) {
             filter_file_preferences(&mut layer.value, &layer.path, layer.source, layer.scope);
         } else {
-            _normalize_preferences(&mut layer.value);
+            super::normalize_preferences(&mut layer.value);
         }
         if layer.value.is_null() {
             continue;
@@ -1070,6 +1060,24 @@ pub(super) fn explicit_agent() -> Result<Option<String>, LoadError> {
         .map(str::to_owned))
 }
 
+/// A separately launched helper resolves its own agent. Other invocation
+/// settings (for example `yolo`) still reach its process.
+pub fn independent_agent(command: &mut std::process::Command) -> Result<(), LoadError> {
+    command.env_remove(super::AGENT_OVERRIDE_ENV);
+    if let Ok(text) = std::env::var("LF_SETTINGS") {
+        let mut values: Value =
+            serde_yaml_ng::from_str(&text).map_err(|e| invalid(format!("LF_SETTINGS: {e}")))?;
+        if let Some(map) = values.as_mapping_mut() {
+            map.remove("agent");
+        }
+        command.env(
+            "LF_SETTINGS",
+            serde_yaml_ng::to_string(&values).expect("settings serialize"),
+        );
+    }
+    Ok(())
+}
+
 fn environment() -> Result<Value, LoadError> {
     if crate::journal::request::active() {
         return Ok(Value::Mapping(Default::default()));
@@ -1342,6 +1350,16 @@ mod tests {
     }
 
     #[test]
+    fn explicit_null_requires_a_nullable_declaration() {
+        for key in ["chrome", "codex.service_tier", "merge_method", "agent"] {
+            assert_eq!(super::parse_value(key, "null").unwrap(), Value::Null);
+        }
+        for key in ["yolo", "land", "context.diff", "agents", "machines", "logs"] {
+            assert!(super::parse_value(key, "null").is_err(), "{key}");
+        }
+    }
+
+    #[test]
     fn claude_model_uses_normal_precedence_without_selecting_a_harness() {
         let _env = loopflow_test_support::env_lock().lock().unwrap();
         let layers = [
@@ -1373,7 +1391,8 @@ mod tests {
                 .unwrap(),
             "claude:fable"
         );
-        for invalid in ["''", "' '", "null", "{}"] {
+        assert!(super::parse_value("claude.model", "null").is_ok());
+        for invalid in ["''", "' '", "{}"] {
             assert!(
                 super::parse_value("claude.model", invalid).is_err(),
                 "{invalid}"
@@ -1406,7 +1425,8 @@ mod tests {
             .unwrap();
             assert_eq!(resolved.config.codex.service_tier, Some(expected));
         }
-        for value in ["slow", "true", "null", "42"] {
+        assert!(super::parse_value("codex.service_tier", "null").is_ok());
+        for value in ["slow", "true", "42"] {
             assert!(super::parse_value("codex.service_tier", value).is_err());
         }
     }

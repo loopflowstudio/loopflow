@@ -54,7 +54,7 @@ struct ToolTabTests {
             Issue.record("Missing Files tab"); return
         }
         reopenedFiles.restoreTabs(retained, selected: selected)
-        reopenedFiles.restoreDrafts(decoded.drafts, location: portableLocation)
+        reopenedFiles.restoreDrafts(decoded.drafts)
         #expect(reopenedFiles.tabs == tabs)
         #expect(reopenedFiles.selection == "first.txt")
         let recovered = try #require(reopenedFiles.selectedDocument)

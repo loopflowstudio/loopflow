@@ -161,9 +161,9 @@ mod tests {
         "github_people",
         // Refresh attempts and watermarks do not change displayed Work.
         "linear_team_checks",
+        "planning_scope_checks",
         "machines",
-        // Copies from rented Machines are read by explicit CLI listings only.
-        "machine_records",
+        "session_export_changes",
         // Owned Machines' pools are read by `lf machine pool`, not workspace surfaces.
         "pool_machines",
         "provider_account_limits",
@@ -435,8 +435,9 @@ mod tests {
     /// tracker names; each sees the other's writes, counted once.
     #[test]
     fn tracker_table_mirror_keeps_released_writers_and_readers_in_step() {
-        let (_dir, store) = store();
-        let conn = store.conn.lock().unwrap();
+        let (dir, _store) = store();
+        // Released writers still use the retiring Git journal tables.
+        let conn = rusqlite::Connection::open(dir.path().join("db")).unwrap();
         let issue = uuid::Uuid::new_v4().to_string();
         let read = |sql: &str| -> Option<String> {
             conn.query_row(sql, [&issue], |row| row.get(0))
@@ -551,8 +552,9 @@ mod tests {
 
     #[test]
     fn tracker_table_mirror_carries_project_membership_events_and_git_conflicts() {
-        let (_dir, store) = store();
-        let conn = store.conn.lock().unwrap();
+        let (dir, _store) = store();
+        // Released writers still use the retiring Git journal tables.
+        let conn = rusqlite::Connection::open(dir.path().join("db")).unwrap();
         conn.execute_batch(
             "INSERT INTO waves(id,name,repo,created_at) VALUES('wave','work','/repo',1);
              INSERT INTO pm_projects(repo,provider,id,observed_at) VALUES('/repo','linear','p',1);

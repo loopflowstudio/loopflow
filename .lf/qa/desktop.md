@@ -211,6 +211,10 @@ them. Nothing here needs WindowServer focus.
   `bin/lf` and swap the binary it serves (`kill` the server PID, relink,
   start again on the same `LF_HOME`); the running app reconnects to the new
   one, which is how "update the older one" is checked.
+- For a launch against an older server, point the app's `LF_BIN` at that
+  server's binary too. A launch with a newer helper can replace the older
+  server. Compare `lf server status`'s `executable_sha256` with the copied
+  helper's hash before counting the skew check.
 - `snap <prefix>` writes every window with `cacheDisplay` (no title bar) and
   lists index, title and size. Indices change as windows open: read the list
   before each click.
@@ -218,8 +222,36 @@ them. Nothing here needs WindowServer focus.
   PNG: a 1280 pt window is 2560 px. The hook posts the mouse-up to the queue
   before sending the mouse-down; sent the other way a segmented control spins
   in `trackMouse` and the app hangs. Don't `activate` or `makeKey` in the
-  hook: every later click goes dead. The first click after a launch is often
-  swallowed; send it twice and look.
+  hook: every later click goes dead. The first click after launch can be
+  swallowed. Check `lf desktop state --json` for the expected row order before
+  clicking the status toggle again. If a SwiftUI button misses `click`, use
+  `drag` with the same start and end point, which sends mouse-down and
+  mouse-up directly to the window. This activated both states of the sidebar
+  status toggle. To select a Task, `click` its sidebar row: points are PNG
+  pixels ÷ 2, and the `.out` echoes y flipped from the bottom. An `open -g`
+  `loopflow://` link may reach the installed app instead of the QA bundle,
+  and `lf desktop view 'task:<id>'` opens a filtered view, not the Task.
+- Restarting the private server resumes each Task's conversation in a new
+  holder, so stand-ins come back and `$QA_MK/<checkout>/{prompt,stop,error,blocked}`
+  markers drive Busy, Available, Error and Blocked again without relaunching.
+- Clicks land only in a window whose `lf desktop state` reading is
+  `current`. Locked, a launch may mount no window until a
+  `loopflow://<repo>/task/<id>` link arrives, and with a saved
+  `$LF_HOME/desktop-cache/workspace.json` that window stays `updating`
+  (saved planning, highlight on the saved selection) and answers no click.
+  Quit the private app, move `workspace.json` aside, relaunch the isolated
+  bundle with `open -F` to skip AppKit window restoration, then open the link.
+  The window reaches `current` and the sidebar buttons answer. Otherwise drive
+  through `lf desktop do <action>` (`new-task` opens the New Task sheet) and
+  the CLI command behind the button (`lf desktop dashboard move`), and report the click itself as not reached.
+- Stand-in `claude` markers `error` and `blocked` that print
+  `\x1b]7501;id=turn:state=error\x1b\\` (or `blocked`) give rows Error and
+  Blocked beside the Busy and Available described below.
+- `snap` with two windows can block the main thread for minutes while
+  `cacheDisplay` renders; wait for the `.out` rather than timing out. Quit
+  a restored second window first: one left on “Updating…” after killed
+  reads keeps a stale list. `lf desktop state --json` lists each window's
+  sidebar rows under `list`, which reads order without a snapshot.
 - `frame <prefix>` writes each window's frame view, title bar and toolbar
   included; `snap` and a locked-screen `screencapture -l` ("could not create
   image from window") both miss the title bar. The hook's windows are never
@@ -285,11 +317,68 @@ them. Nothing here needs WindowServer focus.
   with "could not create image from window".
 - `tree <window>` prints the window's accessibility elements with frames;
   a lazy grid's cards appear there only once drawn.
-- Not reachable: hover, drag, the jump menu (its shortcut needs
+- `drag <window> <x> <y> <x2> <y2>` sends down, twelve moves and up straight
+  to the window, which drives a SwiftUI `DragGesture`: sidebar Task rows
+  reorder this way. A system drag (`.draggable`/`.dropDestination`, the
+  Working Tasks grid) starts no dragging session from synthesized events.
+  What a drop sent is in the private home's `logs/lf.log`: grep
+  `desktop.dashboard.move` for its `member`, `destination` and `side`, and
+  `ok=` for the answer. To drop from a stale order, start a CLI
+  `lf desktop dashboard move working-tasks/task:<id> --destination task:<id>`
+  in the background and send the hook `drag` in the same command; the tiles
+  take full `task_…` IDs.
+- The hook directory is the one passed in `LOOPFLOW_QA_HOOK_DIR`; a leftover
+  `open` can start a second instance polling it, so check `pgrep -f` for one
+  app PID before sending commands.
+- Sidebar row clicks did not select a Task; `open -g -b <bundle id>
+  'loopflow://<repo>/task/<id>'` does.
+- `osascript` quit hung with the screen locked; stop the app by PID.
+- Run every command against the private repository through the env wrapper.
+  If the installed `lf` or installed Desktop opens it, the live Machine
+  registers the repository. Its repository and Wave Sessions then run under
+  the live holder, and an installed-Desktop window on that path resumes them
+  within seconds of a kill. Before teardown, check
+  `lf desktop state --json` with `LF_DESKTOP` unset for windows on the
+  private path. Close those windows, then stop the agents.
+- Not reachable: hover, system drags, the jump menu (its shortcut needs
   a key window, and setting `navigation.palette = .search` draws nothing),
-  popovers and sheets opened from a "+" (New Wave never appeared), file panels
-  and Ghostty faces. The in-process accessibility tree is empty, so there is no
-  finding a control by name.
+  popovers and sheets opened from a "+" (New Wave never appeared) and file
+  panels. The in-process accessibility tree is empty, so there is no finding a
+  control by name.
+
+## Typing into a Session pane with the screen locked
+
+In production mode a Session pane does get a Ghostty surface while locked.
+Prepare a Session for a disposable Task (`lf resume --task <id> --prepare
+--json`) with a stand-in `claude` that sets `/dev/tty` raw and prints each
+`x`-terminated batch as hex. Select the Task by link, then `lf --task <id>
+desktop focus -p session`; `desktop capture -p session` reads the provider.
+
+- `terminal` (hook) makes the pane first responder and prints its screen.
+- `key post <keyCode> <flags> <chars> [unmodified]` posts a keyDown/keyUp
+  pair through the app's event queue; `key send …` hands it to the window
+  instead. Flags are letters `s c o m`, plus raw device bits
+  (`o+0x20` left Option, `o+0x40` right). Write `\r` and `\t` literally,
+  with `printf '%s\n'`: zsh's `echo` turns `\r` into a carriage return,
+  which the hook trims away.
+- Locked, the window is never key, so AppKit skips `performKeyEquivalent`
+  on the view and offers ⌘ chords straight to the main menu; Desktop's key
+  monitor (which checks `isKeyWindow`) does not act either. `claims` asks the
+  window first, as AppKit does for a key window, then names the menu that
+  takes ⌘↩. `equivalents` lists every menu key equivalent with its mask
+  and its `isEnabled`/`isHidden` as read before AppKit validates. SwiftUI
+  command items read disabled there yet still fire, and a disabled or hidden
+  item still consumes its chord, so neither state says who owns a key.
+- A locked relaunch can leave both windows on "Updating…" and drop every
+  `key post` while `key send` still reaches the pane. This happened while other agents
+  kept the Machine busy and the main thread stalled every second (`main
+  thread stalled` in the private `lf.log`). Run key scenarios on the first
+  launch, before any relaunch, and use `key send` to confirm the responder.
+- A Settings window opened under lock stalls the main thread for several
+  seconds in AppKit's window snapshotter; hook answers then arrive late and
+  out of order. Close it and send the next command once the last answer is in.
+- Quitting and relaunching the app keeps the held provider: reopening the
+  Task and focusing the pane again reattaches to the same process.
 - A private Machine can be kept for the next run: `rm` its `lf` copy, copy
   the new build in and start `lf server run` again. A Task whose held step
   was running when the old server stopped comes back blocked ("process left
@@ -324,6 +413,90 @@ them. Nothing here needs WindowServer focus.
   with `lf --task <id> desktop capture -p session`.
 - Stand-in providers exit at once here, so a Session pane shows "Process
   exited" under its opening overlay. That is the stand-in, not the pane.
+- Rows show Available and Busy from live conversations. Start each Task's
+  work session with `lf checkout <id>` and a stand-in `claude` that stays
+  running (see [session reads](session-reads.md)); attach a viewer
+  (`script -q <log> lf resume --task <id>` fed by `sleep 3000 |`). Available
+  follows the `Stop` hook. Busy comes only from the provider's terminal: the
+  stand-in prints `\x1b]7501;id=turn:state=working\x1b\\` on a prompt and
+  `state=idle` before `Stop` (Program Status, OSC 7501). A provider started
+  before the stand-in learned that keeps the old code: quit it and reopen with
+  `lf resume --task <id>`.
+- The installed `lf` reads a branch private home when the branch adds no
+  migration, so `lf desktop view show [state:busy|state:available]` from both
+  binaries compares old and new order on one store.
+
+# Settings window on an unlocked display
+
+With the display unlocked, `open -n -g` and the hook still work behind the
+person's windows, and `screencapture -x -o -l <window number>` returns the
+composited Settings window (Forms included) even while it is not frontmost;
+`snap` still comes back white. Get the number from a `swift` script calling
+`CGWindowListCopyWindowInfo` filtered to the app's PID. A pane's window title
+changes a few seconds after `return`; wait about 4 s before capturing. Dark:
+`click 0 898 126` on Appearance at 960x648 is the Dark segment (`theme:` in
+`config.yaml` confirms). `size 0 1400 900` gives the wide layout; the window
+will not go narrower than about 760 pt.
+
+Unlocked, the first switch click lands: don't send it twice, or the row
+toggles back. A Reset under a row moves the rows below it, so read positions
+again from a fresh capture. Release channel is the `stream` key. A Wave
+destination's Applies to menu won't open through the hook, so drive a Wave
+edit over the socket with `config.edit`
+(`{"kind":"shared_wave","repo":…,"wave":…}`, `expected` the entries the
+edit assumes: `[]` for an absent key).
+
+# Settings window with the screen locked
+
+The ⌘, window (`menu Settings…`) is a `NavigationSplitView` of grouped
+Forms. Locked, `snap`, `frame` and a `CALayer.render` of the frame all come
+back white below the title: the rows draw through RenderBox layers. Read it
+as text instead.
+
+- `views <window>` prints each view's window-space center, every text
+  field's value (row values are `SelectionTextField`s) and the form's clip
+  origin. A row whose y exceeds the window height is scrolled off; `click`
+  there lands outside the window.
+- Sidebar rows ignore hook clicks. Navigate with search:
+  `field Search settings|context.paste`, then `return <window title>` opens
+  the first match. An exact catalog key or title ranks first. The form's
+  `NSClipView origin` in `views` shows the scroll in Project & Wave Config.
+- Switch clicks toggle both ways on Settings rows (`yolo` On→Off wrote
+  `yolo: false`). The first click after a launch is often swallowed.
+- Use the placeholder printed by `views` in `field <placeholder>|<text>`,
+  then `return <title>` to commit. A rejected value shows its error below
+  the field.
+- An explicit null in a text row shows as the placeholder `Explicit null`;
+  choice rows put it in a popup, which `views` cannot read.
+- Interrupted moves: with the server stopped, write
+  `$LF_HOME/settings-moves/<sha256 of [destination, key] JSON>.json` holding
+  `{"receipt": <a config.promote preview's review.receipt>, "undo": false}`,
+  then start it again. `config.scope` offers `resume` on that slot.
+- The Undo notice and the Refresh button are missing from `tree`, and the
+  window's `undoManager` is not the one SwiftUI registers with. Click Refresh
+  by position (the first click after a change is often swallowed).
+  `frame` does draw the notice (bottom centre, "Reset <title> · Undo", gone
+  after six seconds), but hook clicks on its Undo do nothing and `menu Undo`
+  answers `refused` (the window is never key). `ContextSettingsWorkflowTests`
+  performs that Undo.
+- `field <placeholder>|` with nothing after the bar empties a field; Return
+  then resets that declaration (a number row included).
+- Killing the private server (by PID) shows "Loopflow server unavailable or
+  owned by another account" at the top of an open Settings pane; the last
+  reading stays and a typed edit is dropped. Start it again and the pane
+  reconnects by itself within about 20 s; poll `tree 1` for that line.
+  The server's PID: `ps -E -p <pid>` shows its `LF_HOME`.
+- Personal config edits are in `$LF_HOME/config.yaml`. Project & Wave Config
+  writes to the selected destination. Hand edits and a broken
+  file reach the open pane within a few seconds.
+- `size 1 700 480` clamps to 760x592. `views 1` then gives the sidebar
+  wrapper (0–228) and each form section's frame (`_NSGraphicsView`), which
+  shows overlap without a display; how it looks still needs one.
+- Project & Wave Config opens on the active checkout. Menus (Applies to,
+  Save in) don't open through the hook. `ContextSettingsWorkflowTests`
+  drives destination changes.
+- The hook's `tree` and `views` block the main thread for seconds; the
+  matching "main thread stalled" lines in `lf.log` are the hook's.
 
 # Driving sheets and captures with the screen locked
 
@@ -515,7 +688,7 @@ without it the command answers "Several panes are eligible". `lf desktop files
 `files-forward`. A relaunch can restore with the session pane zoomed, which hides
 Files while `desktop files` still answers `files`: `desktop zoom --off -p session`.
 With the QA hook (see above): `fill Find file|<text>` (or `Find in file`, `Search
-checkout text`) types into the picker or Find bar, and `key 0 - down|return|escape`
+checkout text`) types into the picker or Find bar, and `windowkey 0 - down|return|escape`
 drives the focused field. `click` presses Buttons (Read, Edit, Diff, the sidebar
 toggle; it toggles, so send it once). SwiftUI tap gestures never fire from the
 hook in a window that isn't key: code-reader word taps (`gd`, ⌘-click), gutter

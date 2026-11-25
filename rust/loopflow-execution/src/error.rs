@@ -6,6 +6,8 @@ use serde::Serialize;
 pub enum LoadError {
     #[error("No agent selected. Use `-a <harness>` for this command or `lf set --global default_agent <harness>` to save a preference (claude, codex, opencode, pi, agy). Without a preference, exactly one supported harness must be installed.")]
     AgentSelection,
+    #[error("{0}")]
+    HarnessUnavailable(String),
     #[error("unsupported agent: {0}; choose claude, codex, opencode, pi, or agy")]
     InvalidAgent(String),
     #[error("skill or graph not found: {0}. Run `lf list skill` or `lf list graph` to discover definitions, or `lf : <message>` to send a message")]
@@ -18,6 +20,9 @@ pub enum LoadError {
     InvalidGraph(String),
     #[error("invalid skill: {0}")]
     InvalidSkill(String),
+    /// A setting key, value or destination the catalog refuses; the message names the key.
+    #[error("{0}")]
+    InvalidSetting(String),
     #[error("io error: {0}")]
     Io(String),
 }

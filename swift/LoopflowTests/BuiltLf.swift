@@ -36,16 +36,16 @@ struct BuiltLf: Sendable {
     }
 
     /// Desktop reads and subscriptions over this Machine's private server.
-    var query: RegistryQuery {
-        query(server: LocalServerFixture(self))
-    }
+    var query: RegistryQuery { query(LocalServerFixture(self)) }
 
-    func query(server: LocalServerFixture) -> RegistryQuery {
+    /// Desktop reads and subscriptions over `server`, already running or not.
+    func query(_ server: LocalServerFixture) -> RegistryQuery {
         let location = server.location()
         return RegistryQuery(runWithInput: { args, cwd, input in
             try await run(args, cwd: cwd.map(URL.init(fileURLWithPath:)), input: input)
         }, serve: { try await ServerClient.read($0, location: location)
         }, write: { try await ServerClient.write($0, location: location)
+        }, subscribeRead: { ServerClient.subscribe($0, location: location)
         }, subscribeWork: {
             try WorkSubscriptions.observe { ServerClient.subscribe($0, location: location) }
         }) { args, cwd in

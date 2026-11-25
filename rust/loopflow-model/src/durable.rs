@@ -228,6 +228,15 @@ pub fn person_text<'a>(person: Option<&'a str>, person_key: Option<&'a str>) -> 
 }
 
 impl TaskOwner {
+    pub fn machine_elsewhere(&self, local: &MachineId) -> Option<&MachineRef> {
+        let machine = &self.machine;
+        machine
+            .id
+            .as_ref()
+            .is_some_and(|id| id != local)
+            .then_some(machine)
+    }
+
     pub fn who(&self) -> &str {
         person_text(self.person.as_deref(), self.person_key.as_deref())
     }
@@ -271,12 +280,7 @@ pub struct TaskOwnership {
 impl TaskOwnership {
     /// The Machine that owns the Task when it is not `local`.
     pub fn owner_elsewhere(&self, local: &MachineId) -> Option<&MachineRef> {
-        let machine = &self.owner.as_ref()?.machine;
-        machine
-            .id
-            .as_ref()
-            .is_some_and(|id| id != local)
-            .then_some(machine)
+        self.owner.as_ref()?.machine_elsewhere(local)
     }
 
     /// When the latest entry naming `machine` was written.
@@ -287,6 +291,26 @@ impl TaskOwnership {
             .find(|entry| entry.machine_id.as_ref() == Some(machine))
             .map(|entry| entry.at)
     }
+
+    /// Where the Task runs when another Machine than `local` owns it.
+    pub fn runs_on(&self, local: &MachineId) -> Option<TaskRunsOn> {
+        let machine = self.owner_elsewhere(local)?;
+        Some(TaskRunsOn {
+            since: self.since(machine.id.as_ref()?)?,
+            machine: machine.clone(),
+        })
+    }
+}
+
+/// The Machine that runs a Task another Machine owns, and since when: the
+/// latest ownership entry naming it. Wire type; no defaults.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct TaskRunsOn {
+    /// Named as this Machine's preferences name it, else as the claim
+    /// published it, else by its id.
+    pub machine: MachineRef,
+    /// Unix seconds.
+    pub since: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]

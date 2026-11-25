@@ -14,8 +14,7 @@ use serde::{Deserialize, Serialize};
 use crate::command::{run_command, CommandError};
 use crate::config::{load_config_or_default, Config, ReleaseCompletion, ReleaseTargetConfig};
 use crate::git::worktrees::{
-    branch_exists, create_named_worktree, list_porcelain, main_repo_root, worktree_path,
-    CreateWorktreeResult,
+    branch_exists, create_named_worktree, list_porcelain, main_repo_root, worktree_path, Worktree,
 };
 use crate::git::{
     acquire_worktree_lease, acquire_worktree_lease_wait, current_branch,
@@ -23,7 +22,7 @@ use crate::git::{
     rev_parse, worktree_remove_owned, WorktreeLease,
 };
 use crate::naming::{git_user, sanitize_for_branch};
-use crate::ops::commit::{commit_workflow, CommitOptions};
+use crate::ops::commit::{commit_workflow, CommitOptions, CommitPush};
 use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::land::{finish_arm_after_sync, LandOptions};
 use crate::ops::pr::{current_pr, merge_gate_state, PrCopy};
@@ -1249,7 +1248,7 @@ fn materialize_exact_source_worktree(
     revision: &str,
     lease: &WorktreeLease,
     lock: &ReleaseLock,
-) -> OpsResult<CreateWorktreeResult> {
+) -> OpsResult<Worktree> {
     let inherit = |command: &mut Command| {
         lock.inherit(command);
         lease.inherit(command);
@@ -1354,12 +1353,7 @@ fn materialize_exact_source_worktree(
                 &format!("worktree is dirty: {status}"),
             ));
         }
-        return Ok(CreateWorktreeResult {
-            path,
-            branch,
-            base_branch: None,
-            base_commit: Some(expected_commit),
-        });
+        return Ok(Worktree { path, branch });
     }
 
     if registered_at_path.is_none() && path.exists() && !publisher_path_is_empty(&path)? {
@@ -1686,13 +1680,12 @@ fn prepare_release_in_worktree(
     )?;
 
     progress.status("Committing release changes...");
-    let _ = commit_workflow(
+    commit_workflow(
         wt_path,
         &CommitOptions {
             add: true,
-            push: true,
-            create_draft_pr: false,
-            message: Some(release_commit_message(target, version)),
+            push: CommitPush::Always,
+            message: Some(&release_commit_message(target, version)),
             ..CommitOptions::for_task("release")
         },
         progress,

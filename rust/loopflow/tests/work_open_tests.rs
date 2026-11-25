@@ -825,6 +825,11 @@ fn available_conversations_need_no_question_and_are_never_taken_over() {
         rusqlite::params![registered.task.id.as_str(), primary],
     )
     .unwrap();
+    db.execute(
+        "UPDATE agent_sessions SET task_id=?1,wave_id=(SELECT p.wave_id FROM tasks t LEFT JOIN projects p ON p.id=t.project_id WHERE t.id=?1) WHERE id=?2",
+        rusqlite::params![registered.task.id.as_str(), primary],
+    )
+    .unwrap();
     let secondary = live_conversation(
         home.path(),
         &provider.0,
@@ -875,10 +880,11 @@ fn available_conversations_need_no_question_and_are_never_taken_over() {
         .iter()
         .find(|link| link["target"]["session"] == secondary.as_str())
         .unwrap();
-    assert_eq!(side["label"], "Side question");
+    // A conversation begun in the Task's checkout is the Task's.
+    assert_eq!(side["label"], "INF-123 Side question");
     assert_eq!(
         side["fallback_argv"],
-        serde_json::json!(["lf", "open", "--session", secondary])
+        serde_json::json!(["lf", "open", format!("{task_url}?session={secondary}")])
     );
 }
 
@@ -903,6 +909,11 @@ fn focus_reveals_the_existing_view_and_creates_nothing() {
     let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
     db.execute(
         "INSERT OR REPLACE INTO task_primary_sessions(task_id,session_id) VALUES(?1,?2)",
+        rusqlite::params![registered.task.id.as_str(), primary],
+    )
+    .unwrap();
+    db.execute(
+        "UPDATE agent_sessions SET task_id=?1,wave_id=(SELECT p.wave_id FROM tasks t LEFT JOIN projects p ON p.id=t.project_id WHERE t.id=?1) WHERE id=?2",
         rusqlite::params![registered.task.id.as_str(), primary],
     )
     .unwrap();
@@ -984,6 +995,11 @@ fn links_tell_the_current_conversation_from_another_on_the_same_task() {
     let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
     db.execute(
         "INSERT OR REPLACE INTO task_primary_sessions(task_id,session_id) VALUES(?1,?2)",
+        rusqlite::params![registered.task.id.as_str(), primary],
+    )
+    .unwrap();
+    db.execute(
+        "UPDATE agent_sessions SET task_id=?1,wave_id=(SELECT p.wave_id FROM tasks t LEFT JOIN projects p ON p.id=t.project_id WHERE t.id=?1) WHERE id=?2",
         rusqlite::params![registered.task.id.as_str(), primary],
     )
     .unwrap();
@@ -1073,6 +1089,11 @@ fn a_task_identifier_connects_and_a_viewerless_terminal_reads_detached() {
     let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
     db.execute(
         "INSERT OR REPLACE INTO task_primary_sessions(task_id,session_id) VALUES(?1,?2)",
+        rusqlite::params![registered.task.id.as_str(), primary],
+    )
+    .unwrap();
+    db.execute(
+        "UPDATE agent_sessions SET task_id=?1,wave_id=(SELECT p.wave_id FROM tasks t LEFT JOIN projects p ON p.id=t.project_id WHERE t.id=?1) WHERE id=?2",
         rusqlite::params![registered.task.id.as_str(), primary],
     )
     .unwrap();

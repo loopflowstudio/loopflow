@@ -115,8 +115,6 @@ append versus provider refresh, effects and explicit refused input.
 pathless execution, local absence and unavailable peers. Negative readings grant
 no ownership; execution locations never enter planning exchange.
 
-`task_files_frames.json` preserves request/Task/Machine/checkout identity and distinguishes filesystem invalidation from heartbeat.
-
 `dashboard.json` pins an independently identified Dashboard and its expression
 and arrangement; pane layouts and drafts stay on each Mac. Rust and Swift round-trip
 it without manufacturing defaults.

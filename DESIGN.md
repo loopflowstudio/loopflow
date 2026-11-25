@@ -154,7 +154,9 @@ Symbols. Use the icon set, or a word.
 - Glass and blur as decoration. Blur is for a layer that sits over live
   content (the QR scanner caption over the camera is the model).
 - Cards inside cards; a border and a wide shadow on the same surface.
-- Grids of identical icon, heading and sentence cards; icon tiles.
+- Grids of identical icon, heading and sentence cards; icon tiles and colored
+  category icon badges (icons stay monochrome in neutral ink unless carrying
+  status).
 - Hero metrics, logo walls, testimonials, anything nobody can check.
 - Emoji as icons.
 - A pill or badge above a headline; "New", "Beta", "AI".

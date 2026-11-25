@@ -47,8 +47,8 @@ struct TaskFileBrowserJourneyTests {
         let issue = try JSONDecoder().decode(TaskCreateReceipt.self, from: Data(created.utf8)).task.id
         _ = try await fixture.run(["checkout", issue, "--json"])
         let location = try await fixture.run(["task", "location", issue, "--json"])
-        let owner = try #require(JSONDecoder().decode([TaskLocationObservation].self, from: Data(location.utf8)).first)
-        guard case .recorded(_, let checkout?) = owner.location else { Issue.record("Missing checkout"); return }
+        let owner = try #require(JSONDecoder().decode([Owner].self, from: Data(location.utf8)).first)
+        let checkout = try #require(owner.location.checkout, "Missing checkout")
         let root = URL(fileURLWithPath: checkout)
         try write(source, to: call, in: root)
         try write("<p>Report</p>", to: page, in: root)
@@ -66,16 +66,16 @@ struct TaskFileBrowserJourneyTests {
         let definitions = try await cli(TaskSymbols.self, ["symbols", "read"])
         #expect(definitions.hits.compactMap(\.container) == ["A", "B"])
 
+        // A peer's checkout path names nothing here; every read goes by Task through the server.
         let displayedPath = peer ? "/peer/\(issue)" : checkout
-        let query = peer ? peerQuery(owner: owner, checkout: displayedPath, fixture: fixture) : lf.query(server: server)
+        let query = lf.query(server)
         if peer { #expect(!FileManager.default.fileExists(atPath: displayedPath)) }
-        let observed = Self.displayedOwner(owner, checkout: displayedPath)
         let place = WorkspaceIdentity(machineId: owner.machineID, worktree: displayedPath)
         let registry = SessionsWorkspaceRegistry(localMachineId: peer ? fixtureMachineId : owner.machineID)
         defer { registry.prepareForQuit() }
         let key = WorkWorkspaceKey(repository: owner.repositoryID, kind: .task, id: issue)
         let workspace = registry.open(key, title: "Reader", location: place)
-        let pane = try #require(workspace.multiplexer.showBrowser(.files, location: place, execution: observed))
+        let pane = try #require(workspace.multiplexer.showBrowser(.files, location: place))
         let files = try workspace.files(for: pane.content, task: nil, query: query)
         files.autosave = false
         let model = WorkModel(query: query)
@@ -189,7 +189,7 @@ struct TaskFileBrowserJourneyTests {
             let path = "scratch/\(panePage.rawValue)-\(mode.rawValue).html"
             for text in ["first", "settled"] {
                 try write(text, to: path, in: checkout)
-                files.invalidate([path], ignoredScratch: files.query.remoteMachine == nil ? [] : [path])
+                files.invalidate([path])
             }
             // Wait for the watcher batch to reach the rail before checking what stayed in place.
             for await updates in Observations({ files.browser.updated }) where updates.contains(path) { break }
@@ -222,25 +222,15 @@ struct TaskFileBrowserJourneyTests {
         #expect(files.selection == page && workspace.multiplexer.focusedPane.id == terminal.id)
     }
 
-    // Stand in for SSH. Only the checkout path changes between the two filesystem namespaces.
-    private func peerQuery(owner: TaskLocationObservation, checkout: String, fixture: WorkCLIFixture) -> RegistryQuery {
-        RegistryQuery { args, cwd in
-            guard cwd == nil, args.starts(with: ["--machine", owner.machineID, "--repo-id", owner.repositoryID]) else {
-                throw RegistryQueryError("Expected a read addressed to the checkout owner")
-            }
-            let output = try await fixture.lf.run(Array(args.dropFirst(2)), cwd: fixture.root)
-            guard args.dropFirst(4).starts(with: ["task", "location"]) else { return output }
-            let readings = try JSONDecoder().decode([TaskLocationObservation].self, from: Data(output.utf8))
-            return String(decoding: try JSONEncoder().encode(readings.map {
-                Self.displayedOwner($0, checkout: checkout)
-            }), as: UTF8.self)
+    /// `lf task location`'s reading: who runs the Task and where its checkout is.
+    private struct Owner: Decodable {
+        struct Location: Decodable { let checkout: String? }
+        let machineID: String
+        let repositoryID: String
+        let location: Location
+        enum CodingKeys: String, CodingKey {
+            case machineID = "machine_id", repositoryID = "repository_id", location
         }
-    }
-
-    nonisolated private static func displayedOwner(_ owner: TaskLocationObservation, checkout: String) -> TaskLocationObservation {
-        guard case .recorded(let task, _) = owner.location else { return owner }
-        return TaskLocationObservation(request: owner.request, repositoryID: owner.repositoryID, taskID: owner.taskID,
-            machineID: owner.machineID, observedAt: owner.observedAt, location: .recorded(taskID: task, checkout: checkout))
     }
 }
 #endif

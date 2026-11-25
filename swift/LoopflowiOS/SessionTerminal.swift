@@ -66,7 +66,7 @@ final class TerminalActions {
 }
 
 struct SessionTerminal: UIViewControllerRepresentable {
-    let link: SessionLink
+    let link: TerminalLink
     let actions: TerminalActions
 
     func makeUIViewController(context: Context) -> SessionTerminalController {
@@ -92,7 +92,7 @@ struct SessionTerminal: UIViewControllerRepresentable {
 /// into it: replies go through the reply field, so a stray touch sends nothing.
 /// A hardware keyboard types directly once the terminal is tapped.
 final class SessionTerminalController: UIViewController, UIScrollViewDelegate {
-    let link: SessionLink
+    let link: TerminalLink
     let terminal = GhosttySurfaceView(frame: .zero)
     /// Carries the finger: native scrolling over the terminal's rows, which Ghostty draws.
     private let scroller = UIScrollView()
@@ -101,7 +101,7 @@ final class SessionTerminalController: UIViewController, UIScrollViewDelegate {
     private var scroll = GhosttySurfaceView.Scroll()
     private var placing = false
 
-    init(link: SessionLink) {
+    init(link: TerminalLink) {
         self.link = link
         super.init(nibName: nil, bundle: nil)
     }

@@ -74,8 +74,11 @@ read is unknown, not an empty plan. To build on another open Task, `lf sync
 
 A child agent takes one piece of your work: `lf -b <skill> '<brief>'` runs
 one headless in this checkout on any model (`-a codex`), and your harness's
-own subagent is fine too. You answer for what it returns; check it before
-you use it.
+own subagent is fine too, working in this checkout. A separate checkout
+comes from `lf wt create <name>` beside this one (`--stack` when its piece
+builds on this branch), never from the harness's own worktree tools, which
+nest one inside this checkout where it belongs to no Task. You answer for
+what it returns; check it before you use it.
 
 Present a finished file beside the conversation with `lf desktop files <path>`.
 Exit 4 means Desktop is unattached. Give the path and continue.
@@ -144,8 +147,9 @@ without, or a simpler form of what it built? Write what you find into the
 plan as remaining work. Correct small, clear mismatches in code, tests and
 docs yourself; leave a substantial code change as remaining work.
 
-**What is next?** Name the next slice: the one that teaches the most from
-here, running end to end. If nothing remains, say so.
+**What is next?** Regroup what remains into end-to-end passes, aiming for
+five or fewer across the Task. Name what the next pass will deliver and
+what it will teach. If nothing remains, say so.
 
 When you finish, the plan separates what exists from what remains, and the
 code backs every claim of finished behavior. Keep blockers, contrary findings

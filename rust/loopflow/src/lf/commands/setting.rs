@@ -1,8 +1,9 @@
-//! `lf config get|set|unset|explain`: the CLI adapter for the `config.*`
-//! operations Desktop's Settings pane reaches through the server.
-use std::path::Path;
+//! Inspect and edit configuration from the CLI using the same operations as Desktop.
+use std::path::{Path, PathBuf};
 
 use loopflow_execution::config::files::Destination;
+use loopflow_execution::engine::config::{scope, ScopeTarget};
+use loopflow_execution::read_stream::{self, Subscription, Transport, Watch};
 
 /// Which file a setting is declared in; `lf --wave <name>` selects a Wave's.
 #[derive(clap::Args, Debug, Clone, Copy)]
@@ -69,4 +70,70 @@ pub fn explain(destination: &Destination, key: &str) -> anyhow::Result<()> {
     let explained = loopflow_execution::engine::config::explain(destination, key)?;
     println!("{}", serde_json::to_string_pretty(&explained)?);
     Ok(())
+}
+
+#[derive(clap::Args, Debug)]
+pub struct ScopeArgs {
+    /// Read only your global preferences, outside any checkout
+    #[arg(long)]
+    global: bool,
+    /// Resolve the settings a launch of this Skill gets
+    #[arg(long, conflicts_with = "graph")]
+    skill: Option<String>,
+    /// Resolve the settings this Graph's --step gets
+    #[arg(long, requires = "step")]
+    graph: Option<String>,
+    /// The Graph step to resolve
+    #[arg(long, requires = "graph")]
+    step: Option<String>,
+    /// Print JSON (the only format; required by --subscribe)
+    #[arg(long)]
+    json: bool,
+    /// Print a reading whenever a settings file changes, until stdin closes
+    #[arg(short = 's', long, requires = "json")]
+    subscribe: bool,
+    #[command(flatten)]
+    selection: crate::lf::Selection,
+}
+
+impl ScopeArgs {
+    pub fn run(
+        &self,
+        wave: Option<&str>,
+        checkout: impl FnOnce() -> anyhow::Result<PathBuf>,
+    ) -> anyhow::Result<()> {
+        let directory = (!self.global).then(checkout).transpose()?;
+        let target = ScopeTarget::from_options(
+            self.skill.as_deref(),
+            self.graph.as_deref(),
+            self.step.as_deref(),
+        )?;
+        read_stream::select_output(
+            (!self.selection.select.is_empty()).then(|| self.selection.select.clone()),
+        );
+        if self.subscribe {
+            return subscribe_scope(directory, wave.map(str::to_owned), target, Transport::Stdio)
+                .map(drop);
+        }
+        let reading = scope(directory.as_deref(), wave, &target)?;
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&read_stream::selected_answer(&reading)?)?
+        );
+        Ok(())
+    }
+}
+
+pub(super) fn subscribe_scope(
+    directory: Option<PathBuf>,
+    wave: Option<String>,
+    target: ScopeTarget,
+    transport: Transport,
+) -> anyhow::Result<Option<Subscription>> {
+    read_stream::start(
+        Watch::Files,
+        (),
+        move |_, ()| std::future::ready(scope(directory.as_deref(), wave.as_deref(), &target)),
+        transport,
+    )
 }

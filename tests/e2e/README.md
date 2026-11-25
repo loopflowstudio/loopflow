@@ -133,12 +133,14 @@ Each run opens a Task's work session on the real TUI in a PTY, against a
 private Machine and a scripted local model named in the provider's own config
 files under a disposable `HOME`. After the first turn ends nothing is typed:
 `lf steer <task>` must produce a model request carrying the steer, and a typed
-prompt afterwards must still run a turn. `requests.json`, `screen.txt` and the
+prompt afterwards must still run a turn. Then the TUI quits, `lf steer` runs
+while nothing is open, and `lf resume --task` must start a turn on that steer
+with nothing typed; `lf session steers` must read it delivered and the model
+must see it once. `requests.json`, the screens, `steers.json` and the
 Machine's logs land in `--output`. It needs the provider CLI installed and no
-account. Run it with inherited `LF_*` unset. It passed on OpenCode 2.2.1 and
-Pi 1.3.0. On OpenCode 2.0.32 the scripted model's config is refused ("Reconnect
-OpenCode Console to continue") and the first turn never reaches the model, so
-the wake is not exercised there.
+account. Run it with inherited `LF_*` unset. It passed on OpenCode 2.0.32 and
+Pi 1.6.0. The OpenCode model sits on its own provider id: OpenCode 2 asks for a
+Console login before any request on its built-in `opencode` provider.
 
 `tests/e2e/hold_tui.py <dir> <cwd> <command…>` holds any TUI in a PTY for a
 walkthrough from another shell: keys go in through `<dir>/in`, the rendered

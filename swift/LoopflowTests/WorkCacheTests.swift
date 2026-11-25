@@ -57,8 +57,8 @@ struct WorkCacheTests {
         #expect(try Data(contentsOf: cacheURL) == savedBytes)
     }
 
-    @Test("Restart keeps the selected Task but does not retain stale completion or location", arguments: [false, true])
-    func restartWaitsForFreshEvidence(machineUnavailable: Bool) async throws {
+    @Test("Restart keeps the selected Task but does not retain stale completion or location")
+    func restartWaitsForFreshEvidence() async throws {
         let directory = try temporaryDirectory()
         let source = try Source()
         let cache = WorkCache(directory: directory)
@@ -80,7 +80,7 @@ struct WorkCacheTests {
         previous.prepareForQuit()
 
         try await source.completeTask("issue-now")
-        await source.setLocationFailure(machineUnavailable ? "Machine unavailable" : "Recorded checkout changed")
+        await source.setPreparationFailure("mini did not answer; run `ssh mini lf server status`")
         let returning = WorkModel(query: source.query, repoPath: Self.repo, cache: WorkCache(directory: directory))
         returning.confirmMachine("home-a")
         let registry = SessionsWorkspaceRegistry(localMachineId: "home-a")
@@ -89,7 +89,6 @@ struct WorkCacheTests {
         #expect(registry.selectedWork == selected)
         #expect(registry.retained(other) == nil)
         #expect(registry.retained(selected)?.location == nil)
-        #expect(registry.retained(selected)?.presented == false)
         await source.hold(["plan", "list"])
         let refresh = Task { await returning.refresh() }
         await source.waitForHeldRead()
@@ -100,8 +99,8 @@ struct WorkCacheTests {
         await refresh.value
         await spin { registry.retained(selected)?.conversationError == nil }
         #expect(returning.selection == .task(id: "issue-review"))
-        #expect(registry.retained(selected)?.presented == false)
-        #expect(registry.retained(selected)?.conversationError?.contains(machineUnavailable ? "Machine unavailable" : "location changed") == true)
+        // The server's refusal names the Machine; nothing falls back to this Mac.
+        #expect(registry.retained(selected)?.conversationError?.contains("mini did not answer") == true)
         #expect(registry.retained(other) == nil)
         #expect(!registry.recentTasks.contains(other))
         registry.prepareForQuit()
@@ -129,7 +128,6 @@ struct WorkCacheTests {
         let selectedWorkspace = previous.open(selected, title: "Selected", location: selectedTask.reference.workspace?.identity)
         if closed { selectedWorkspace.closePane(selectedWorkspace.multiplexer.focusedPaneId) }
         previous.prepareForQuit()
-        await source.setLocationFailure(nil)
         let returning = WorkModel(query: source.query, repoPath: Self.repo, cache: WorkCache(directory: directory))
         returning.confirmMachine("home-a")
         let registry = SessionsWorkspaceRegistry(localMachineId: "home-a")
@@ -152,7 +150,6 @@ struct WorkCacheTests {
     func loadPrefetchesWorkingTasks(closed: Bool) async throws {
         let source = try Source()
         try await source.populateWorkingTasks(owned: Prefetch.owned)
-        await source.setLocationFailure(nil)
         await source.holdPreparations()
         let repository = "repo_" + UUID().uuidString
         defer { UserDefaults.standard.removeObject(forKey: "warm-conversations-home-a-\(repository.lowercased())") }
@@ -210,7 +207,6 @@ struct WorkCacheTests {
         let registry = SessionsWorkspaceRegistry(localMachineId: "home-a", opensUnvisitedWork: false)
         defer { registry.prepareForQuit() }
         model.bindWorkspaces(registry, repository: repository)
-        await source.setLocationFailure(nil)
         await model.refresh()
         let selected = try #require(registry.selectedWork)
         let workspace = try #require(registry.retained(selected))
@@ -313,7 +309,7 @@ struct WorkCacheTests {
         #expect(atLoad.count <= limit + 1) // Sixteen and a one-slot page, not the whole board.
         #expect(registry.openWork.count == Prefetch.working.count)
 
-        let tiles = model.workingTaskMembers.map(\.work.id)
+        let tiles = model.boardTiles(.workingTasks).map(\.work.id)
         let page = try #require(tiles.firstIndex { !atLoad.contains($0) })
         model.turnPage(.workingTasks, to: page)
         await spin { await !source.preparedTasks.contains(tiles[page]) }
@@ -339,7 +335,7 @@ struct WorkCacheTests {
         model.selectWorkingTasksDashboard()
         await spin { registry.preparationCount > 0 }
         let prepared = await source.preparedTasks
-        let cold = try #require(model.workingTaskMembers.map(\.work.id).first { !prepared.contains($0) })
+        let cold = try #require(model.boardTiles(.workingTasks).map(\.work.id).first { !prepared.contains($0) })
 
         let pane = try #require(registry.retained(key(cold))).multiplexer.focusedPane
         let target = DesktopPaneTarget(repository: key(cold).repository, window: UUID().uuidString, work: key(cold),
@@ -482,7 +478,6 @@ struct WorkCacheTests {
     func primaryPaneNeverOffersAnOpenGate() async throws {
         let source = try Source()
         try await source.populateWorkingTasks(owned: Prefetch.owned)
-        await source.setLocationFailure(nil)
         let repository = "repo_" + UUID().uuidString
         defer { UserDefaults.standard.removeObject(forKey: "warm-conversations-home-a-\(repository.lowercased())") }
         let registry = SessionsWorkspaceRegistry(localMachineId: "home-a")
@@ -520,7 +515,6 @@ struct WorkCacheTests {
 
     private func loadWorkingTasks(from source: Source, repository: String) async throws -> (SessionsWorkspaceRegistry, WorkModel) {
         try await source.populateWorkingTasks(owned: Prefetch.owned)
-        await source.setLocationFailure(nil)
         let registry = SessionsWorkspaceRegistry(localMachineId: "home-a")
         let model = WorkModel(query: source.query, repoPath: Self.repo)
         model.confirmMachine("home-a")
@@ -823,7 +817,6 @@ private actor Source {
     private var roadmap: String
     private let sessions: String
     private var failed = false
-    private var locationFailure: String? = "Location unavailable"
     private var preparationFailure: String?
     private(set) var preparedTasks: [String] = []
     /// Repository and Wave primaries prepared on load: "repository" or "wave:<id>".
@@ -894,7 +887,6 @@ private actor Source {
         roadmap = String(decoding: try JSONSerialization.data(withJSONObject: wire), as: UTF8.self)
     }
 
-    func setLocationFailure(_ reason: String?) { locationFailure = reason }
     func setPreparationFailure(_ reason: String?) { preparationFailure = reason }
 
     /// The Task's checkout was placed: it is now idle, a working Task.
@@ -960,16 +952,6 @@ private actor Source {
                 arrived = nil
             }
         }
-        if command.starts(with: ["task", "location"]) {
-            if let locationFailure, locationFailure != "Recorded checkout changed" { throw RegistryQueryError(locationFailure) }
-            let snapshot = try RegistryQuery.decode(RoadmapSnapshot.self, from: roadmap)
-            let task = try #require(snapshot.tasks.items.first { $0.runtime?.workId == command[2] })
-            let location = try #require(task.reference.workspace?.identity)
-            let request = command[try #require(command.firstIndex(of: "--request")) + 1]
-            return String(decoding: try JSONEncoder().encode([TaskLocationObservation(request: request,
-                repositoryID: args[3], taskID: command[2], machineID: location.machineId, observedAt: 1,
-                location: .recorded(taskID: command[2], checkout: location.worktree + (locationFailure == nil ? "" : "/moved")))]), as: UTF8.self)
-        }
         if command.starts(with: ["session", "resume"]), let preparationFailure {
             throw RegistryQueryError(preparationFailure)
         }
@@ -986,7 +968,6 @@ private actor Source {
             record["primary_scope"] = wave == nil ? "repository" : "wave"
             record["wave_id"] = waveId ?? NSNull()
             record["task_ids"] = []
-            record["task_primary"] = false
             record["workspace"] = ["machine_id": "home-a", "worktree": "/src/loopflow." + (wave ?? "repo"), "task_id": NSNull()]
             record["state"] = "closed"
             record["action"] = sessionActionFixture(state: "closed")
@@ -1003,7 +984,7 @@ private actor Source {
             var record = (page["entries"] as! [[String: Any]])[0]
             record["id"] = "conversation-" + id
             record["task_ids"] = [id]
-            record["task_primary"] = true
+            record["primary_scope"] = "task"
             record["workspace"] = ["machine_id": location.machineId, "worktree": location.worktree, "task_id": id]
             record["state"] = "closed"
             record["action"] = sessionActionFixture(state: "closed")

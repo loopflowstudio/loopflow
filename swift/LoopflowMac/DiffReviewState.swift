@@ -6,7 +6,9 @@ import Observation
 @MainActor @Observable
 final class DiffReviewState {
     private var issue: String { workingTree.issue }
-    let cwd: String
+    /// The Task's checkout and its Machine (nil for this Mac); Files moves both.
+    var cwd: String
+    var machine: String?
     private var query: RegistryQuery { workingTree.query }
     let workingTree: ComparisonReading
     let browser: FilesBrowserState
@@ -14,10 +16,11 @@ final class DiffReviewState {
 
     let comments: ReviewComments
 
-    init(cwd: String, workingTree: ComparisonReading,
+    init(cwd: String, machine: String?, workingTree: ComparisonReading,
          browser: FilesBrowserState, pullRequest: PullRequestStore, comments: ReviewComments) {
         self.comments = comments
         self.cwd = cwd
+        self.machine = machine
         self.taskReading = workingTree
         self.workingTree = workingTree
         self.browser = browser
@@ -492,7 +495,7 @@ final class DiffReviewState {
     /// Machine. Offered again once the launch answers: a click during a
     /// healthy run starts a second one that rewrites the same file.
     var tourAction: String? {
-        guard query.remoteMachine == nil, tourWriting != .launching else { return nil }
+        guard machine == nil, tourWriting != .launching else { return nil }
         if diffTour == nil { return "Write tour" }
         return tourAge != nil ? "Update tour" : nil
     }

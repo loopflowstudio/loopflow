@@ -4,17 +4,24 @@
 //! Provider calls block, so these commands keep a runtime only for the async
 //! store open and SSH probe and talk to SQLite directly.
 
+use std::io::Seek;
+use std::path::Path;
 use std::process::{Command, Stdio};
-use std::time::{Duration, Instant};
+use std::time::{Duration, SystemTime};
 
 use anyhow::{anyhow, Context};
 use serde::Serialize;
 use time::OffsetDateTime;
 
+use super::task_row::TaskReading;
+use super::work_route::TaskPeer;
 use crate::lf::{OndemandCommand, PoolCommand};
+use loopflow_execution::installation::{ArtifactIdentity, ArtifactRole};
+use loopflow_execution::machine::{forward, login};
 use loopflow_execution::machine_records::CopyCounts;
+use loopflow_execution::provider_auth::Provider as LoginProvider;
 use loopflow_execution::rental::recovery::{
-    delete_sandbox, give_back, held_ids, now, open_store, refresh_all,
+    delete_sandbox, end as end_rental, give_back, held_ids, now, open_store, refresh_all,
 };
 use loopflow_execution::rental::sandbox::Sandboxes;
 use loopflow_model::durable::{CapacityDefault, Machine, RepositoryId};
@@ -168,10 +175,15 @@ pub fn run_ondemand(cmd: &OndemandCommand, batch: bool) -> anyhow::Result<()> {
             disk_gb,
             gpu,
             spot,
+            reserved,
             hours,
             max,
             max_usd_per_hour,
+            logins,
         } => {
+            for provider in logins {
+                login::require_reach(*provider, Some("a rental"))?;
+            }
             let ondemand = OnDemand {
                 name: name.clone(),
                 provider: *provider,
@@ -181,17 +193,21 @@ pub fn run_ondemand(cmd: &OndemandCommand, batch: bool) -> anyhow::Result<()> {
                     disk_gb: *disk_gb,
                     gpu: gpu.clone(),
                     spot: *spot,
+                    modal_sizing: reserved.then_some(rental::ModalSizing::Reserved),
                 },
                 max_machines: *max,
                 max_usd_per_hour: *max_usd_per_hour,
                 hours: hours.min(rental::MAX_HOURS),
+                logins: logins.clone(),
             };
             let price = ondemand.usd_per_hour().map_err(|reason| anyhow!(reason))?;
             loopflow_execution::store::rentals::add_ondemand(sqlite, &ondemand)?;
+            let hardware = ondemand.rental_hardware();
             println!(
-                "Added on-demand {name}: {} on {} at {price}/h; at most {max} at once, {}h each",
-                ondemand.hardware,
+                "Added on-demand {name}: {} on {} at {}; at most {max} at once, {}h each",
+                hardware,
                 where_rented(*provider),
+                hardware.format_hourly_rate(price),
                 ondemand.hours
             );
             if *spot {
@@ -246,22 +262,22 @@ pub fn run_ondemand(cmd: &OndemandCommand, batch: bool) -> anyhow::Result<()> {
             max_usd,
             json,
         } => {
-            loopflow_execution::machine::forward::read_for_rental(&std::env::current_dir()?)?;
             let (rental, machine) = rent(&runtime, sqlite, name, *hours, *max_usd, true)?;
             if *json {
                 println!("{}", serde_json::to_string(&rental)?);
             } else {
                 let label = machine.label.as_deref().unwrap_or(machine.id.as_str());
                 println!(
-                    "Rented {label}: {} at {}/h, at most {} until {}",
+                    "Rented {label}: {} at {}, at most {} until {}",
                     rental.hardware,
-                    rental.usd_per_hour,
+                    rental.hardware.format_hourly_rate(rental.usd_per_hour),
                     rental.cap_usd,
                     clock(rental.deadline)
                 );
                 if !batch {
                     println!(
-                        "Next: `lf machine connect {label} github`; launches carry `forward`; \
+                        "Next: `lf machine login <provider> {label}` for each login it needs; \
+                         launches carry `forward`; \
                          `lf machine end {label}` gives it back"
                     );
                 }
@@ -309,7 +325,8 @@ fn listing(sqlite: &SqliteStore, rental: Rental) -> anyhow::Result<RentalListing
 
 fn print_ondemand(listing: &OndemandListing) {
     let ondemand = &listing.ondemand;
-    let shape = format!("{} on {}", ondemand.hardware, ondemand.provider);
+    let hardware = ondemand.rental_hardware();
+    let shape = format!("{hardware} on {}", ondemand.provider);
     let live = listing
         .rentals
         .iter()
@@ -317,10 +334,21 @@ fn print_ondemand(listing: &OndemandListing) {
         .count();
     let price = ondemand.usd_per_hour().map_or_else(
         |reason| format!("unpriced ({reason})"),
-        |usd| usd.to_string(),
+        |usd| hardware.format_hourly_rate(usd),
     );
+    let logins = match ondemand.logins.as_slice() {
+        [] => String::new(),
+        logins => format!(
+            " · signs in {}",
+            logins
+                .iter()
+                .map(|provider| provider.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+    };
     println!(
-        "{} · {shape} · {live}/{} · {price}/h ≤ {}/h · {}h",
+        "{} · {shape} · {live}/{} · {price} ≤ {}/h · {}h{logins}",
         ondemand.name, ondemand.max_machines, ondemand.max_usd_per_hour, ondemand.hours
     );
     print_defaults(&listing.defaults);
@@ -331,9 +359,7 @@ fn print_ondemand(listing: &OndemandListing) {
             Some(at) => format!("{} {}", rental.state, clock(at)),
             None => format!("{} until {}", rental.state, clock(rental.deadline)),
         };
-        let cost = rental
-            .cost_usd
-            .map_or_else(|| "cost unknown".into(), |cost| cost.to_string());
+        let cost = rental.cost;
         let tasks = entry
             .tasks
             .iter()
@@ -345,9 +371,9 @@ fn print_ondemand(listing: &OndemandListing) {
             .copied
             .map_or_else(String::new, |counts| format!(" · {counts} copied"));
         println!(
-            "  {name} · {when} · {} · {}/h · {cost}{how}{}{copied}",
+            "  {name} · {when} · {} · {} · {cost}{how}{}{copied}",
             rental.hardware,
-            rental.usd_per_hour,
+            rental.hardware.format_hourly_rate(rental.usd_per_hour),
             if tasks.is_empty() {
                 String::new()
             } else {
@@ -377,10 +403,10 @@ pub(crate) fn rent(
     let rental =
         loopflow_execution::store::rentals::admit_rental(sqlite, name, hours, max_usd, by_hand)?;
     eprintln!(
-        "Renting {} on {} at {}/h until {}",
+        "Renting {} on {} at {} until {}",
         rental.hardware,
         where_rented(ondemand.provider),
-        rental.usd_per_hour,
+        rental.hardware.format_hourly_rate(rental.usd_per_hour),
         clock(rental.deadline)
     );
     let sandbox = match api.create(&rental, &public_key) {
@@ -434,23 +460,34 @@ const LINUX_LF_ENV: &str = "LF_RENT_LINUX_BIN";
 
 /// SSH that trusts a sandbox's fresh host key once; Machine routes then
 /// check it strictly like any other.
-fn first_contact(route: &str, script: &str, stdin: Stdio) -> std::io::Result<bool> {
-    Command::new("ssh")
-        .args([
-            "-o",
-            "StrictHostKeyChecking=accept-new",
-            "-o",
-            "BatchMode=yes",
-            "-o",
-            "ConnectTimeout=10",
-            route,
-            script,
-        ])
-        .stdin(stdin)
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .map(|status| status.success())
+fn first_contact(route: &str, script: &str) -> Command {
+    let mut ssh = Command::new("ssh");
+    ssh.args([
+        "-o",
+        "StrictHostKeyChecking=accept-new",
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "ConnectTimeout=10",
+        "--",
+        route,
+        script,
+    ])
+    .stdin(Stdio::null());
+    ssh
+}
+
+fn run_bootstrap(route: &str, script: &str, stdin: Stdio) -> anyhow::Result<Vec<u8>> {
+    let output = first_contact(route, script).stdin(stdin).output()?;
+    // SSH diagnostics can contain Daytona's access token in the destination.
+    anyhow::ensure!(output.status.code() != Some(255), "SSH connection failed");
+    anyhow::ensure!(
+        output.status.success(),
+        "remote command failed ({}): {}",
+        output.status,
+        String::from_utf8_lossy(&output.stderr).trim()
+    );
+    Ok(output.stdout)
 }
 
 /// A tunnel port may be reused by a later sandbox with another host key.
@@ -469,6 +506,33 @@ fn forget_host_key(route: &str) {
         .status();
 }
 
+// Source experiments can carry unmerged migrations; keep their disposable home.
+// Modal sandboxes set no-new-privileges, so no sudo: the `lf` on PATH is a
+// wrapper that gives every SSH command that home.
+const INSTALL_PRIVATE_CLI: &str = r#"set -e
+mkdir -p ~/.local/bin ~/.local/libexec
+candidate=$(mktemp ~/.local/libexec/lf.XXXXXXXX)
+wrapper=$(mktemp ~/.local/bin/lf.XXXXXXXX)
+trap 'rm -f "$candidate" "$wrapper"' EXIT
+cat > "$candidate"
+chmod 755 "$candidate"
+cat > "$wrapper" <<'WRAPPER'
+#!/bin/sh
+export LF_HOME="$HOME/.lf-dev" LF_BIN="$HOME/.local/libexec/lf"
+exec "$LF_BIN" "$@"
+WRAPPER
+chmod 755 "$wrapper"
+mv "$candidate" ~/.local/libexec/lf
+mv "$wrapper" ~/.local/bin/lf"#;
+
+const INSTALL_PACKAGED_CLI: &str = r#"set -e
+dir=$(mktemp -d)
+trap 'rm -rf "$dir"' EXIT
+cat > "$dir/lf"
+chmod 755 "$dir/lf"
+"$dir/lf" install promote --cli-target "$HOME/.local/bin/lf" --sync-skills >&2
+"$HOME/.local/bin/lf" install preflight --json"#;
+
 /// Wait for SSH, install lf (published, or `LF_RENT_LINUX_BIN`), then add it
 /// as a Machine.
 fn attach(
@@ -476,12 +540,16 @@ fn attach(
     sqlite: &SqliteStore,
     rental: &Rental,
     route: &str,
-    linux_lf: Option<&std::path::Path>,
+    linux_lf: Option<&Path>,
 ) -> anyhow::Result<Machine> {
     forget_host_key(route);
-    let started = Instant::now();
-    while !first_contact(route, "true", Stdio::null())? {
-        if started.elapsed() > SSH_WAIT {
+    let deadline = SystemTime::now() + SSH_WAIT;
+    let arch = loop {
+        let output = first_contact(route, "uname -m").output()?;
+        if output.status.success() {
+            break String::from_utf8(output.stdout)?;
+        }
+        if SystemTime::now() >= deadline {
             return Err(anyhow!(
                 "{} does not answer SSH after {} minutes; it is deleted by {}",
                 rental.provider_name,
@@ -490,33 +558,49 @@ fn attach(
             ));
         }
         std::thread::sleep(Duration::from_secs(2));
-    }
-    let installed = match linux_lf {
-        // A development build runs as one does anywhere: on its own disposable
-        // home, which it may create and which the published install never
-        // claims. sshd sessions read the selection from /etc/environment.
-        Some(binary) => {
-            println!("Uploading {} as its lf", binary.display());
-            first_contact(
-                route,
-                "mkdir -p ~/.local/bin && cat > ~/.local/bin/lf.new && chmod 755 ~/.local/bin/lf.new && mv ~/.local/bin/lf.new ~/.local/bin/lf \
-                 && printf 'LF_HOME=%s/.lf-dev\\nLF_BIN=%s/.local/bin/lf\\n' \"$HOME\" \"$HOME\" | sudo tee -a /etc/environment >/dev/null",
-                Stdio::from(std::fs::File::open(binary)?),
-            )?
-        }
-        None => first_contact(
-            route,
-            loopflow_execution::machine::connection::INSTALL_COMMAND,
-            Stdio::null(),
-        )?,
     };
-    if !installed {
-        return Err(anyhow!(
-            "could not install lf on {}; it is deleted by {}",
-            rental.provider_name,
-            clock(rental.deadline)
-        ));
+    let temporary = tempfile::tempdir()?;
+    let revision = crate::build_info::source_revision();
+    let (binary, script) = match linux_lf {
+        Some(path) => (path.to_path_buf(), INSTALL_PRIVATE_CLI),
+        None => {
+            let binary = super::install::rental_cli(arch.trim(), temporary.path())
+                .with_context(|| format!(
+                    "could not fetch Linux lf for revision {revision}; set {LINUX_LF_ENV} to its Linux executable"
+                ))?;
+            (binary, INSTALL_PACKAGED_CLI)
+        }
+    };
+    let expected = ArtifactIdentity::capture(ArtifactRole::Cli, &binary)?;
+    let output = run_bootstrap(route, script, Stdio::from(std::fs::File::open(&binary)?))
+        .with_context(|| format!("install lf on {}", rental.provider_name))?;
+    if linux_lf.is_none() {
+        let preflight: super::install::PromotionPreview =
+            serde_json::from_slice(&output).context("read the installed Linux build's identity")?;
+        anyhow::ensure!(
+            preflight.candidate.source_revision == revision,
+            "rental installed revision {}, expected {revision}; set {LINUX_LF_ENV} to its Linux executable",
+            preflight.candidate.source_revision
+        );
     }
+    let caller = sqlite.saved_local_machine()?;
+    let profile = loopflow_execution::config::remote::outgoing(None, caller.id.as_str())?;
+    let mut input = tempfile::tempfile()?;
+    serde_json::to_writer(&mut input, &profile)?;
+    input.rewind()?;
+    let command = format!(
+        "{}; exec lf install server --profile-stdin",
+        loopflow_execution::machine::ssh::remote_path()
+    );
+    let output = run_bootstrap(route, &command, Stdio::from(input))
+        .with_context(|| format!("start the server on {}", rental.provider_name))?;
+    let status: loopflow_execution::machine::client::Status =
+        serde_json::from_slice(&output).context("read rental server readiness")?;
+    anyhow::ensure!(
+        status.ready && status.executable_sha256.as_ref() == Some(&expected.sha256),
+        "the selected Linux lf is not serving {}",
+        rental.provider_name
+    );
     let probe = runtime.block_on(loopflow_execution::machine::connection::probe(route, false))?;
     let label = next_label(sqlite, &rental.ondemand)?;
     let machine =
@@ -580,50 +664,50 @@ pub fn place(
     let runtime = tokio::runtime::Runtime::new()?;
     let store = open_store(&runtime)?;
     let sqlite = &store.sqlite;
-    if let Some(pool) = placement.pool {
-        let record = loopflow_execution::store::rentals::pool(sqlite, pool)?
-            .ok_or_else(|| anyhow!("no pool {pool}; `lf machine pool add {pool}` creates it"))?;
-        let machines = loopflow_execution::store::machines::pool_machines(sqlite, pool)?;
-        match rental::free_machine(&record, &machines, now()) {
-            Ok(free) if placement.quote => {
-                println!(
-                    "would run on {} (pool {pool}, owned); runs nothing",
-                    free.label()
-                );
-                return Ok(true);
-            }
-            Ok(free) => {
-                hand_off(&runtime, repo, issue, free.label())?;
-                return Ok(false);
-            }
-            Err(refusal) if placement.rent.is_some() => eprintln!("{refusal}; renting instead"),
-            Err(refusal) => return Err(refusal.into()),
-        }
-    }
-    let name = placement.rent.expect("checked: a pool or an on-demand");
     if placement.quote {
-        let ondemand = require_ondemand(sqlite, name)?;
-        let live = sqlite.live_rentals(name)?;
-        let admission = rental::admit(&ondemand, live, None, None, now())?;
-        println!(
-            "would rent {} on {} at {}/h, ≤ {} until {}; runs nothing",
-            admission.hardware,
-            where_rented(ondemand.provider),
-            admission.usd_per_hour,
-            admission.cap_usd,
-            clock(admission.deadline)
-        );
+        quote(sqlite, placement)?;
         return Ok(true);
     }
-    // The Task's own repository, wherever this checkout was first recorded.
     let (_, task) = runtime.block_on(loopflow_execution::ops::task::resolve_saved_task(
         repo, None, issue,
     ))?;
-    // A rental that could not authenticate its launch is money for nothing.
-    loopflow_execution::machine::forward::read_for_rental(repo)?;
+    let local = loopflow_execution::store::machines::local_machine(sqlite)?.id;
+    let ownership = loopflow_execution::store::ownership::task_ownership(sqlite, &task.id)?;
+    if let Some(owner) = ownership.owner_elsewhere(&local) {
+        let name = owner.name();
+        // Only the owner can tell whether an interrupted launch started its Graph.
+        let peer = TaskPeer::resolve(sqlite, &task.id)
+            .with_context(|| format!("could not read {issue} on {name}"))?
+            .ok_or_else(|| {
+                anyhow!("{issue} is owned on {name}; check its move before running it")
+            })?;
+        let detail = super::waves::owner_detail(&peer, repo, &task)
+            .with_context(|| format!("could not read {issue} on {name}"))?;
+        if let TaskReading::Unobserved { reason } = &detail.reading {
+            return Err(anyhow!("could not read {issue} on {name}: {reason}"));
+        }
+        eprintln!("{issue} on {name}: {}", detail.task.standing());
+        return Ok(detail.task.state.is_some_and(|state| state.is_terminal())
+            || !detail.graph_processes.is_empty());
+    }
+    if let Some(label) = free_pool_machine(sqlite, placement)? {
+        hand_off(repo, task.id.as_str(), &label)?;
+        return Ok(false);
+    }
+    let name = placement.rent.expect("checked: a pool or an on-demand");
+    let forwarded = forward::read(repo)?;
+    let logins = sign_ins(&runtime, &require_ondemand(sqlite, name)?.logins)?;
+    if !forwarded.carries_env(login::CLAUDE_TOKEN_ENV) && !logins.contains(&LoginProvider::Codex) {
+        return Err(anyhow!(
+            "a rental from {name} would have no agent login: forward {token} \
+             (`lf set --global forward.env '[{token}]'` after `claude setup-token` and \
+             `doppler secrets set {token}`), or sign it in to Codex (`lf machine login codex` here)",
+            token = login::CLAUDE_TOKEN_ENV,
+        ));
+    }
     let (rental, machine) = rent(&runtime, sqlite, name, None, None, false)?;
     let label = machine.name();
-    if let Err(error) = prepare(&runtime, &label, repo, &task.repository_id, batch) {
+    if let Err(error) = prepare(&runtime, &machine, &logins, repo, &task, sqlite, batch) {
         // Nothing ran on it yet, so nothing is lost by giving it back now.
         let cleanup = Sandboxes::from_env(rental.provider)
             .and_then(|api| delete_sandbox(sqlite, &api, &rental));
@@ -632,8 +716,61 @@ pub fn place(
         }
         return Err(error);
     }
-    hand_off(&runtime, repo, issue, &label)?;
+    if let Err(error) = hand_off(repo, task.id.as_str(), &label) {
+        // A failure reading the receipt can follow a committed handoff.
+        if !sqlite.machine_ever_held(&machine.id)? {
+            let api = Sandboxes::from_env(rental.provider)?;
+            give_back(sqlite, &api, &rental, &machine, true, false)?;
+        }
+        return Err(error);
+    }
     Ok(false)
+}
+
+/// A free owned Machine in the placement's pool. Without one, `None` when an
+/// on-demand can be rented instead.
+fn free_pool_machine(
+    sqlite: &SqliteStore,
+    placement: &Placement<'_>,
+) -> anyhow::Result<Option<String>> {
+    let Some(pool) = placement.pool else {
+        return Ok(None);
+    };
+    let record = loopflow_execution::store::rentals::pool(sqlite, pool)?
+        .ok_or_else(|| anyhow!("no pool {pool}; `lf machine pool add {pool}` creates it"))?;
+    let machines = loopflow_execution::store::machines::pool_machines(sqlite, pool)?;
+    match rental::free_machine(&record, &machines, now()) {
+        Ok(free) => Ok(Some(free.label().to_owned())),
+        Err(refusal) if placement.rent.is_some() => {
+            eprintln!("{refusal}; renting instead");
+            Ok(None)
+        }
+        Err(refusal) => Err(refusal.into()),
+    }
+}
+
+/// Say where the placement would run and what it would cost.
+fn quote(sqlite: &SqliteStore, placement: &Placement<'_>) -> anyhow::Result<()> {
+    if let Some(label) = free_pool_machine(sqlite, placement)? {
+        let pool = placement.pool.expect("a free pool Machine has a pool");
+        println!("would run on {label} (pool {pool}, owned); runs nothing");
+        return Ok(());
+    }
+    let name = placement.rent.expect("checked: a pool or an on-demand");
+    let ondemand = require_ondemand(sqlite, name)?;
+    let live = sqlite.live_rentals(name)?;
+    let admission = rental::admit(&ondemand, live, None, None, now())?;
+    println!(
+        "would rent {} on {} at {}, ≤ {} until {}; runs nothing",
+        admission.hardware,
+        where_rented(ondemand.provider),
+        admission
+            .hardware
+            .format_hourly_rate(admission.usd_per_hour),
+        admission.cap_usd,
+        clock(admission.deadline)
+    );
+    Ok(())
 }
 
 /// The value Git resolves for `key` in `repo`, when one is set.
@@ -685,23 +822,9 @@ pub fn place_by_default(repo: &std::path::Path, issue: &str, batch: bool) -> any
     place(repo, issue, &placement, batch).map(|_| ())
 }
 
-/// Your claim moves to the Machine; an unowned Task is claimed first.
-fn hand_off(
-    runtime: &tokio::runtime::Runtime,
-    repo: &std::path::Path,
-    issue: &str,
-    label: &str,
-) -> anyhow::Result<()> {
+/// Place the Task with one claim naming the destination.
+fn hand_off(repo: &Path, issue: &str, label: &str) -> anyhow::Result<()> {
     use loopflow_execution::ops::task_ownership::{change, OwnershipChange};
-    let (store, task) = runtime.block_on(loopflow_execution::ops::task::resolve_saved_task(
-        repo, None, issue,
-    ))?;
-    if loopflow_execution::store::ownership::task_ownership(&store.sqlite, &task.id)?
-        .owner
-        .is_none()
-    {
-        change(repo, issue, OwnershipChange::Claim)?;
-    }
     let ownership = change(repo, issue, OwnershipChange::Move(label.to_string()))?;
     eprintln!(
         "{}",
@@ -713,43 +836,56 @@ fn hand_off(
     Ok(())
 }
 
-/// Logins (Linear too when it holds the plan), then this repository cloned
-/// and bound to the Task's repository identity, so the forwarded run finds its
-/// plan there.
+/// What a rental signs in to at prepare: the template's `logins`, else every
+/// provider signed in here, in `sign_in_order`.
+fn sign_ins(
+    runtime: &tokio::runtime::Runtime,
+    logins: &[LoginProvider],
+) -> anyhow::Result<Vec<LoginProvider>> {
+    if !logins.is_empty() {
+        return Ok(sign_in_order(logins.iter().copied()));
+    }
+    let here = runtime.block_on(loopflow_execution::machine::connection::local_machine())?;
+    Ok(sign_in_order(
+        runtime
+            .block_on(login::logins(&here))?
+            .into_iter()
+            .filter(|row| row.state == login::LoginState::SignedIn)
+            .map(|row| row.provider),
+    ))
+}
+
+/// Sign in to the selected providers and the services checkout and planning
+/// need, then prepare the Task's repository and Wave on the rental.
 fn prepare(
     runtime: &tokio::runtime::Runtime,
-    label: &str,
-    repo: &std::path::Path,
-    repository: &RepositoryId,
+    machine: &Machine,
+    logins: &[LoginProvider],
+    repo: &Path,
+    task: &loopflow_storage::work::task::Task,
+    sqlite: &SqliteStore,
     batch: bool,
 ) -> anyhow::Result<()> {
-    use loopflow_execution::provider_auth::Provider as Login;
-    let machine = runtime.block_on(loopflow_execution::machine::connection::resolve_target(
-        label, false,
-    ))?;
-    runtime.block_on(loopflow_execution::machine::credentials::connect(
-        &machine,
-        Login::GitHub,
-        None,
-        None,
-        batch,
-    ))?;
+    let (origin, mut script) = checkout_script(repo, &task.repository_id)?;
     let planning = loopflow_execution::config::load_config(Some(repo))?
         .unwrap_or_default()
         .planning_transport();
-    if matches!(
+    let linear = matches!(
         planning,
         Some(loopflow_execution::config::TrackerConfig::Linear { .. })
-    ) {
-        runtime.block_on(loopflow_execution::machine::credentials::connect(
-            &machine,
-            Login::Linear,
-            None,
-            None,
-            batch,
-        ))?;
+    );
+    let required = [
+        loopflow_execution::git::worktrees::github_nwo(&origin).map(|_| LoginProvider::GitHub),
+        linear.then_some(LoginProvider::Linear),
+    ];
+    for provider in sign_in_order(logins.iter().copied().chain(required.into_iter().flatten())) {
+        runtime.block_on(login::login(machine, provider, None, false, batch))?;
     }
-    let (origin, script) = checkout_script(repo, repository)?;
+    let wave = task.wave_id.as_ref().filter(|_| linear);
+    if let Some(wave) = wave {
+        let id = loopflow_execution::machine::ssh::sh_quote(wave.as_str());
+        script.push_str(&format!(" && lf task list --wave {id} --json >/dev/null"));
+    }
     let status = Command::new("ssh")
         .args(loopflow_execution::machine_route::bounded_ssh_args(
             &machine.route,
@@ -760,9 +896,57 @@ fn prepare(
         .status()
         .context("could not run ssh")?;
     if !status.success() {
-        return Err(anyhow!("could not clone {origin} on {label}"));
+        return Err(anyhow!("could not prepare {origin} on {}", machine.name()));
+    }
+    if let Some(wave) = wave {
+        use crate::server::wire::Operation;
+        use loopflow_execution::machine::wire::{Secrets, Selection, Sender};
+        let sender = Sender {
+            repository: task.repository_id.clone(),
+            selection: Selection::capture(repo, None)?,
+            secrets: Secrets::default(),
+        };
+        let mut connection =
+            loopflow_execution::machine::client::Connection::open_on(machine, sender, None)?;
+        let plan = connection.request(Operation::Read(super::read::Read::WavePlan {
+            directory: repo.to_owned(),
+            wave: wave.to_string(),
+        }))?;
+        let plan: super::waves::WaveDetailSnapshot = serde_json::from_value(plan.result)?;
+        if plan.project_readiness.state
+            == loopflow_storage::sqlite::ProjectReadinessState::Unconfigured
+        {
+            let project = sqlite
+                .selected_project(wave)?
+                .and_then(|p| p.tracker_id)
+                .with_context(|| {
+                    format!(
+                        "Wave {} needs a Linear Project. Select one with `lf wave plan bind`.",
+                        plan.wave.name
+                    )
+                })?;
+            connection.request(Operation::Write(super::write::Write::WavePlanBind {
+                directory: repo.to_owned(),
+                wave: wave.to_string(),
+                project: project.as_str().to_owned(),
+                replace: false,
+            }))?;
+        }
     }
     Ok(())
+}
+
+/// The providers a rental signs in to, once each: those that reach another
+/// Machine, GitHub first because the checkout clones with it.
+fn sign_in_order(providers: impl IntoIterator<Item = LoginProvider>) -> Vec<LoginProvider> {
+    let mut order = Vec::new();
+    for provider in providers {
+        if login::reaches_other_machines(provider) && !order.contains(&provider) {
+            order.push(provider);
+        }
+    }
+    order.sort_by_key(|provider| *provider != LoginProvider::GitHub);
+    order
 }
 
 /// The origin, and the remote script that clones it and binds `repository`.
@@ -821,12 +1005,30 @@ pub fn end(label: &str, force: bool) -> anyhow::Result<()> {
         return Ok(());
     }
     let api = Sandboxes::from_env(rental.provider)?;
-    give_back(sqlite, &api, &rental, &machine, true, force)
+    end_rental(sqlite, &api, &rental, &machine, force)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::checkout_script;
+    use super::{checkout_script, sign_in_order};
+    use loopflow_execution::provider_auth::Provider;
+
+    #[test]
+    fn a_rental_signs_in_once_to_each_provider_that_reaches_it_github_first() {
+        let signed_in_here = [
+            Provider::Claude,
+            Provider::Asana,
+            Provider::Linear,
+            Provider::GitHub,
+            Provider::Doppler,
+            Provider::Claude,
+        ];
+        assert_eq!(
+            sign_in_order(signed_in_here),
+            [Provider::GitHub, Provider::Linear]
+        );
+    }
+
     #[test]
     fn a_worktree_checkout_binds_its_tasks_repository_on_a_fresh_home() {
         let _env = loopflow_execution::journal::test_env_lock();

@@ -18,7 +18,7 @@ use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::session::{LfSession, WorkSource};
+use crate::session::LfSession;
 use crate::session_record::SessionTitleSource;
 use crate::store::SharedStore;
 use loopflow_model::durable::WorkRef;
@@ -214,7 +214,7 @@ pub(crate) async fn checkout_scope(
         return Ok(Some(PrimaryScope::Repository(repo)));
     }
     let root = crate::git::worktree_root(cwd)?;
-    if let Some(task) = crate::ops::task::task_for_checkout(store, &root).await? {
+    if let Some(task) = crate::ops::task::checkout_owner(store, &root).await? {
         return Ok(Some(PrimaryScope::Task(task.id)));
     }
     if root == repo.as_path() {
@@ -311,6 +311,17 @@ pub enum SessionState {
     /// Its agent runs, but no terminal shows it.
     Detached,
     Closed,
+}
+
+impl SessionState {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Unknown => "unknown",
+            Self::Active => "active",
+            Self::Detached => "detached",
+            Self::Closed => "closed",
+        }
+    }
 }
 
 /// What opening a Session does here, as a person reads it. Every opening is
@@ -411,8 +422,6 @@ pub struct SessionRecord {
     pub program_status: Option<loopflow_model::program_status::Records>,
     /// The provider's current AgentProcess; absent when Loopflow never launched one.
     pub agent_process_id: Option<loopflow_model::id::AgentProcessId>,
-    /// Its Task names it as the Task's primary conversation.
-    pub task_primary: bool,
     pub task_ids: Vec<loopflow_model::durable::TaskId>,
     pub id: loopflow_model::id::LfSessionId,
     pub workspace: Option<SessionWorkspace>,
@@ -558,8 +567,8 @@ fn session_ending(
         })
     });
     let quit = end.is_some_and(|end| quit_by_person(end.exit_code));
-    let conversation =
-        session.task_primary && !session.task_terminal && session.completed_at.is_none();
+    let task_primary = session.primary_scope.as_deref() == Some("task");
+    let conversation = task_primary && !session.task_terminal && session.completed_at.is_none();
     let attempts = session.starts_since_turn;
     let start = (conversation && !quit && attempts > 0).then(|| SessionStarts {
         attempts,
@@ -593,11 +602,17 @@ fn session_ending(
             status_line: Some("starting".to_string()),
         };
     }
-    let command = match (&session.task_identifier, session.task_primary) {
+    let command = match (&session.task_identifier, task_primary) {
         (Some(task), true) => format!("lf resume --task {task}"),
         _ => format!("lf resume {}", session.id),
     };
-    let failure = session.start_failure.as_deref().filter(|_| conversation);
+    // Any stopped interactive Session's last start can fail: the recovery
+    // pass's, a steer's wakeup or a provider restart. A finished Task's
+    // conversation is not started again, so its last failure is history.
+    let failure = session
+        .start_failure
+        .as_deref()
+        .filter(|_| conversation || !task_primary);
     // One that never had an agent has no liveness to read: it is not Closed.
     let never_ran = session.agent_process_id.is_none() && ended.is_none();
     let ending = match end {
@@ -623,6 +638,28 @@ fn session_ending(
             ended,
             start,
             outlook: None,
+            status_line: Some(status_line),
+        };
+    }
+    if let Some(reason) =
+        failure.and_then(|failure| failure.strip_prefix(crate::ops::recovery::WAITING_FOR_HARNESS))
+    {
+        // The pass tries a Task's conversation again once the harness is
+        // ready; any other Session waits for its next steer or command.
+        let command = (!conversation).then_some(command);
+        let status_line = match &command {
+            Some(command) => format!("could not start: {reason}; `{command}` opens it"),
+            None => format!("could not start: {reason}"),
+        };
+        return SessionEnding {
+            ended,
+            start,
+            outlook: Some(SessionOutlook {
+                kind: SessionOutlookKind::CouldNotStart,
+                at: None,
+                reason: Some(reason.to_owned()),
+                command,
+            }),
             status_line: Some(status_line),
         };
     }
@@ -681,7 +718,8 @@ fn session_ending(
                 (Some(left), Some(failure)) => {
                     Some(format!("{left}; last start failed: {failure}"))
                 }
-                (left, _) => left,
+                (None, Some(failure)) => Some(format!("last start failed: {failure}")),
+                (left, None) => left,
             };
             let line = format!("{ending}{}", printed(&reason));
             (SessionOutlookKind::WaitingForYou, None, reason, line)
@@ -853,18 +891,6 @@ pub async fn list(
     store: &SharedStore,
     filter: &crate::session::SessionFilter,
 ) -> Result<Vec<SessionRecord>> {
-    // Checkout resolution must precede Task filtering and pagination: SQL path
-    // prefixes cannot recognize symlink aliases or nested repositories.
-    let association_filter =
-        filter.orphan || filter.task.is_some() || filter.wave.is_some() || filter.on.is_some();
-    let mut selection = filter.clone();
-    if association_filter {
-        selection.task = None;
-        selection.wave = None;
-        selection.orphan = false;
-        selection.on = None;
-        selection.limit = 0;
-    }
     let on = match &filter.on {
         Some(raw) => Some(
             crate::config::Agent::parse(raw)
@@ -872,60 +898,52 @@ pub async fn list(
         ),
         None => None,
     };
-    let mut sessions = Vec::new();
-    let now = time::OffsetDateTime::now_utc().unix_timestamp();
-    for session in store.session_summaries(&selection, now).await? {
-        sessions.push(summary_surface(
-            &session,
-            ending_here(&store.sqlite, &session, now),
-        ));
-    }
-    let mut workspaces = workspace::associate(store, &mut sessions).await?;
-    turns::read(&store.sqlite, &mut sessions)?;
+    let mut selection = filter.clone();
     let task = match &filter.task {
-        Some(selector) => crate::store::children::resolve_task_id(&store.sqlite, selector, None)?,
+        Some(selector) => {
+            let Some(id) = crate::store::children::resolve_task_id(&store.sqlite, selector, None)?
+            else {
+                return Ok(Vec::new());
+            };
+            selection.task = Some(id.to_string());
+            Some(id)
+        }
         None => None,
     };
-    let in_task = |session: &SessionRecord| {
-        filter.task.is_none()
-            || task
-                .as_ref()
-                .is_some_and(|task| session.task_ids.contains(task))
-    };
-    let wave_tasks = match &filter.wave {
-        Some(wave) => store.sqlite.task_ids_in_wave(wave)?,
-        None => Default::default(),
-    };
-    let mut in_work = |session: &SessionRecord| {
-        (!filter.orphan || (session.task_ids.is_empty() && session.wave_id.is_none()))
-            && in_task(session)
-            && (filter.wave.is_none()
-                || session.wave_id == filter.wave
-                || session
-                    .task_ids
-                    .iter()
-                    .any(|task| wave_tasks.contains(task))
-                || workspaces.in_task_checkout(Path::new(&session.cwd), &wave_tasks))
-    };
-    if association_filter {
-        sessions.retain(|session| {
-            in_work(session) && on.as_ref().is_none_or(|on| runs_on(on, session))
-        });
-        sessions = sessions
-            .into_iter()
-            .take(if filter.limit == 0 {
-                usize::MAX
-            } else {
-                filter.limit
-            })
-            .collect();
+    // Harness selection uses the parsed agent below, before taking the page.
+    if on.is_some() {
+        selection.limit = 0;
     }
+    let now = time::OffsetDateTime::now_utc().unix_timestamp();
+    let mut sessions = Vec::new();
+    for summary in store.session_summaries(&selection, now).await? {
+        if on.as_ref().is_some_and(|agent| !runs_on(agent, &summary)) {
+            continue;
+        }
+        sessions.push(summary_surface(
+            &summary,
+            ending_here(&store.sqlite, &summary, now),
+        ));
+        if sessions.len() == filter.limit {
+            break;
+        }
+    }
+    workspace::associate(store, &mut sessions).await?;
+    turns::read(&store.sqlite, &mut sessions)?;
     if lists_raw(filter) {
+        let wave_tasks = match &filter.wave {
+            Some(wave) => Some(store.sqlite.task_ids_in_wave(wave)?),
+            None => None,
+        };
         let raw = turns::raw(&store.sqlite, filter.repo.as_deref())?;
-        sessions.extend(
-            raw.into_iter()
-                .filter(|raw| (!filter.available || raw.availability.is_some()) && in_work(raw)),
-        );
+        sessions.extend(raw.into_iter().filter(|raw| {
+            (!filter.available || raw.availability.is_some())
+                && (!filter.orphan || raw.task_ids.is_empty())
+                && task.as_ref().is_none_or(|id| raw.task_ids.contains(id))
+                && wave_tasks
+                    .as_ref()
+                    .is_none_or(|ids| raw.task_ids.iter().any(|id| ids.contains(id)))
+        }));
     }
     Ok(sessions)
 }
@@ -974,7 +992,7 @@ pub fn listed(store: &SharedStore, id: &str) -> Result<Option<SessionRecord>> {
 }
 
 /// Whether `session` ran on the `--on` harness, and on its model when one is named.
-fn runs_on(on: &crate::config::Agent, session: &SessionRecord) -> bool {
+fn runs_on(on: &crate::config::Agent, session: &crate::session::SessionSummary) -> bool {
     session.provider.as_deref() == Some(on.harness.as_str())
         && (on.model.is_none() || on.model == session.model)
 }
@@ -1043,8 +1061,7 @@ fn summary_surface(
         availability: session_availability(session),
         program_status: session.program_status.clone(),
         agent_process_id: session.agent_process_id.clone(),
-        task_primary: session.task_primary,
-        task_ids: session.task_ids.clone(),
+        task_ids: session.member_task().cloned().into_iter().collect(),
         id: session.id.clone(),
         workspace: None,
         interactive: session.interactive,
@@ -1155,11 +1172,7 @@ pub(crate) fn capture_subjects(
     work_selector(session)
         .map(|selector| crate::session_record::SubjectAttribution {
             selector,
-            source: if session.work_source == Some(WorkSource::Inherited) {
-                crate::session_record::AttributionSource::Inherited
-            } else {
-                crate::session_record::AttributionSource::Declared
-            },
+            source: crate::session_record::AttributionSource::Declared,
         })
         .into_iter()
         .collect()
@@ -1488,6 +1501,44 @@ pub fn run_refusal(store: &SqliteStore, session: &LfSession) -> Result<Option<St
     )))
 }
 
+/// Restart just the recorded provider, continuing through the same held-terminal
+/// resume path used after a provider exits on its own. A harness that could
+/// not start here leaves the running provider alone.
+pub fn restart_provider(store: &SqliteStore, session: &LfSession) -> Result<()> {
+    let _launch = lock_session_process(&session.id)?;
+    if let Some(owner) = moves::other_machine(store, &session.id)? {
+        bail!("Session {} is on {owner}", session.id);
+    }
+    if let Some(reason) = run_refusal(store, session)? {
+        bail!(reason);
+    }
+    let mut agents = crate::agent::MachineAgents::default();
+    if let Some(failure) = crate::ops::recovery::launch_failure(store, &session.id, &mut agents)? {
+        bail!(
+            "Session {} was not restarted: {}",
+            session.id,
+            crate::ops::recovery::start_failure_reason(&failure)
+        );
+    }
+    crate::harness::agent_process::require_server()?;
+    let mut server = crate::machine::client::Connection::open()?;
+    crate::harness::agent_process::stop_session_agent(
+        store,
+        &session.id,
+        crate::process::Departure::Terminal { to: None },
+    )?;
+    server.request(crate::machine::wire::ServerOperation::SessionContinue {
+        session: session.id.clone(),
+        request: uuid::Uuid::new_v4().to_string(),
+        rows: 0,
+        cols: 0,
+        task: None,
+        machine: None,
+        agent: None,
+    })?;
+    Ok(())
+}
+
 /// The terminal this process runs in, named for the one a move leaves.
 fn departure_here() -> crate::process::Departure {
     let to = if crate::session_record::current_terminal_id().is_some() {
@@ -1730,7 +1781,13 @@ async fn finish_thread_creation(
 /// selected moves the Session to it.
 pub async fn append_input(store: &SharedStore, mut next: LfSession) -> Result<LfSession> {
     let replaced = next.captured;
-    if let Some(agent) = handoff_agent(&next) {
+    if next.provider.is_none() && replaced.is_none() {
+        let agent = crate::session::pending_agent(&store.sqlite, &next, |config| {
+            crate::agent::MachineAgents::default().choose(config)
+        })?;
+        next.provider = Some(agent.harness.as_str().to_owned());
+        next.model = agent.model;
+    } else if let Some(agent) = handoff_agent(&next) {
         switch_agent(&mut next, &agent);
     }
     next.artifact_key = Some(crate::session_record::new_artifact_key());
@@ -1822,8 +1879,7 @@ pub async fn surface(store: &SharedStore, session: &LfSession) -> Result<Session
         availability: session_availability(&metadata),
         program_status: metadata.program_status.clone(),
         agent_process_id: metadata.agent_process_id.clone(),
-        task_primary: metadata.task_primary,
-        task_ids: store.sqlite.session_task_ids(&session.id)?,
+        task_ids: metadata.member_task().cloned().into_iter().collect(),
         id: session.id.clone(),
         workspace: None,
         interactive: session.interactive,

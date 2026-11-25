@@ -1211,14 +1211,18 @@ async fn open_native(launch: &super::Launch<'_>) -> Result<OpenedCodex> {
         .unwrap_or_else(|| "Loopflow".to_string());
     let thread = codex_connection::open_thread(&endpoint, params, &title).await?;
     store.record_session_connection(session, attachment, &endpoint.to_string_lossy(), &thread)?;
+    let opening = turns == 0 && !launch.config.task_prompt.is_empty();
     if let Some(context) = &launch.config.conversation_context {
         // Hooks run on the app-server, which never inherits the terminal's
         // launch file. Bind before the client can send a turn.
         let mut context = context.clone();
         context.identify(store, session)?;
         context.bind_codex_session(thread.as_str())?;
+        let adapter = store.reserve_steer_adapter(session, attachment)?;
+        let delivery = crate::context_block::native_delivery_path(&context.home, thread.as_str());
+        report_first_boundary(adapter, delivery, &thread, opening, saved.is_some());
     }
-    if turns == 0 && !launch.config.task_prompt.is_empty() {
+    if opening {
         // Provider history settles on the next read whether it ran, so a
         // broken store cannot stop the turn.
         codex_connection::start_turn(
@@ -1233,6 +1237,61 @@ async fn open_native(launch: &super::Launch<'_>) -> Result<OpenedCodex> {
         .context("Codex first turn was not sent")?;
     }
     Ok(OpenedCodex { thread, endpoint })
+}
+
+/// Codex runs its start hook only inside a turn, so a reopened conversation
+/// would report nothing until someone types. The launch reports the process's
+/// first boundary itself: a start, which lets the server wake the idle
+/// conversation with steers saved while it was closed, or the opening prompt,
+/// sent before its turn so the wake leaves a working conversation alone. A
+/// server that does not answer is a recording gap: the steers wait for the
+/// first typed turn.
+fn report_first_boundary(
+    adapter: crate::steer::SteerAdapter,
+    delivery: std::path::PathBuf,
+    thread: &AgentSessionId,
+    opening: bool,
+    resumed: bool,
+) {
+    use crate::machine::client::{hook_request, HOOK_DEADLINE};
+    use crate::machine::wire::{ServerOperation, SessionBoundary};
+    let (moment, callback) = first_boundary(thread, opening, resumed);
+    let operation = ServerOperation::SessionBoundary(SessionBoundary {
+        moment,
+        delivery,
+        adapter: Some(adapter),
+        callback,
+        gap: None,
+        printed: Vec::new(),
+        inbox: None,
+    });
+    let answered = crate::machine::socket_path()
+        .and_then(|socket| hook_request(&socket, operation, HOOK_DEADLINE));
+    if let Err(error) = answered {
+        tracing::warn!(error = %format!("{error:#}"), "Codex's first boundary unrecorded; waiting steers wait for its first turn");
+    }
+}
+
+/// The boundary a Codex launch reports for its first moment, shaped as the
+/// hook would send it. A start names the source Codex's own start hook
+/// would: `resume` for a saved thread, `startup` for a new one.
+fn first_boundary(
+    thread: &AgentSessionId,
+    opening: bool,
+    resumed: bool,
+) -> (crate::machine::wire::BoundaryMoment, serde_json::Value) {
+    use crate::machine::wire::BoundaryMoment;
+    if opening {
+        return (
+            BoundaryMoment::Tool,
+            json!({"hook_event_name":"UserPromptSubmit","session_id":thread.as_str()}),
+        );
+    }
+    let source = if resumed { "resume" } else { "startup" };
+    (
+        BoundaryMoment::Start,
+        json!({"hook_event_name":"SessionStart","session_id":thread.as_str(),"source":source}),
+    )
 }
 
 #[cfg(test)]
@@ -1430,6 +1489,22 @@ mod tests {
             .unwrap()
             .iter()
             .all(|turn| turn.ended_at.is_none()));
+    }
+
+    #[test]
+    fn a_launch_reports_its_first_boundary_as_codex_would() {
+        use crate::machine::wire::BoundaryMoment;
+        let thread: AgentSessionId = "thread_1".into();
+        let start = |resumed| {
+            let (moment, callback) = first_boundary(&thread, false, resumed);
+            assert!(matches!(moment, BoundaryMoment::Start), "{moment:?}");
+            callback["source"].as_str().unwrap().to_string()
+        };
+        assert_eq!(start(true), "resume");
+        assert_eq!(start(false), "startup");
+        let (moment, callback) = first_boundary(&thread, true, true);
+        assert!(matches!(moment, BoundaryMoment::Tool), "{moment:?}");
+        assert_eq!(callback["hook_event_name"], "UserPromptSubmit");
     }
 
     #[test]

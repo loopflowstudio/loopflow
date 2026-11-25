@@ -1,13 +1,16 @@
-"""The rental bridge's requests to RunPod and AWS, over mocked HTTP and SDKs."""
+"""The rental bridge's requests to providers, over mocked HTTP and SDKs."""
 
 import base64
 import importlib.util
 import io
 import json
+import shlex
+import subprocess
 import sys
 import types
 import urllib.error
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -267,3 +270,63 @@ def test_daytona_deletes_only_a_sandbox_not_yet_destroyed(monkeypatch, state, de
     monkeypatch.setitem(sys.modules, "daytona", daytona)
     assert bridge._daytona("delete", {"id": "sb-1"}) is None
     assert bool(deleted) == deletes
+
+
+# --- Modal ----------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "mode,cpu,memory",
+    [("burst", (0.125, 4.0), (128, 16384)), ("reserved", (4.0, 4.0), (16384, 16384))],
+)
+def test_modal_caps_both_resources_and_stops_at_the_admitted_deadline(
+    monkeypatch, mode, cpu, memory
+):
+    modal = MagicMock()
+    monkeypatch.setitem(sys.modules, "modal", modal)
+    sandbox = modal.Sandbox.create.return_value
+    sandbox.poll.return_value = None
+    sandbox.tunnels.return_value = {22: types.SimpleNamespace(tcp_socket=("modal.test", 4321))}
+    monkeypatch.setattr(bridge.time, "time", lambda: 100.5)
+    reply = bridge._modal(
+        "create",
+        {
+            **REQUEST,
+            "vcpus": 8,
+            "modal_sizing": mode,
+            "type": "L4",
+            "deadline": "1970-01-01T00:02:00Z",
+        },
+    )
+    args = modal.Sandbox.create.call_args.kwargs
+    assert (args["cpu"], args["memory"], args["gpu"], args["timeout"]) == (cpu, memory, "L4", 19)
+    assert reply["route"] == "ssh://lf@modal.test:4321"
+
+
+def test_non_login_ssh_finds_the_uploaded_cli_and_provider_tools(tmp_path):
+    environment = tmp_path / "environment"
+    for command in bridge.TOOLS:
+        if "/etc/environment" in command:
+            subprocess.run(
+                ["sh", "-ec", command.replace("/etc/environment", shlex.quote(str(environment)))],
+                check=True,
+            )
+    settings = dict(line.split("=", 1) for line in environment.read_text().splitlines())
+    assert {"/root/.local/bin", "/home/lf/.local/bin"} <= set(settings["PATH"].split(":"))
+    packages = next(
+        command.split("npm install -g ")[1].split()
+        for command in bridge.TOOLS
+        if "npm install -g " in command
+    )
+    assert {"@openai/codex", "@anthropic-ai/claude-code"} <= set(packages)
+
+
+def test_modal_skips_create_when_the_budget_window_has_elapsed(monkeypatch):
+    modal = MagicMock()
+    monkeypatch.setitem(sys.modules, "modal", modal)
+    monkeypatch.setattr(bridge.time, "time", lambda: 121)
+    with pytest.raises(ValueError, match="deadline passed"):
+        bridge._modal(
+            "create", {**REQUEST, "modal_sizing": "burst", "deadline": "1970-01-01T00:02:00Z"}
+        )
+    modal.Sandbox.create.assert_not_called()

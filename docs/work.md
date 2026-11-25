@@ -58,10 +58,25 @@ lf task interrupt LOO-12                       # stop its running Graph
 lf task unassign LOO-12                        # release ownership; stops CI repair
 ```
 
-Steers save locally first, then reach every Session working on the Task at its
-next provider boundary (before a Graph step or after a turn). An idle Task
+`lf steer` says who will read it:
+
+```console
+$ lf steer LOO-12 "keep the retry budget at 3"
+Saved 0199a2f1; LOO-12's worker reads it at its next boundary
+```
+
+A steer reaches every Session working on the Task at its next provider
+boundary (before a Graph step or after a tool call or turn). An idle Task
 conversation is woken with it. Comments from teammates in Linear or Asana
-arrive the same way.
+arrive the same way. When the Task runs on another Machine, the steer goes to
+that Machine ([Steer and read a Task another Machine runs](dev/machines.md#steer-and-read-a-task-another-machine-runs)).
+
+`lf steer LOO-12 --json` returns the receipt: `delivery.reached` is `owner`
+(the steer is in the store of the Machine running the Task), `shared` (it is
+in Linear, Asana or the plan carrier, waiting for that Machine to sync) or
+`here` (only this Machine has it so far); `delivery.runs_on` names the Machine
+the Task runs on, or `null`; `delivery.sentence` is the line above. The thread
+itself is in `lf task status LOO-12 --json`.
 
 `lf task claim LOO-12` takes ownership without starting a run; `lf task run`
 claims and runs. To jump into the conversation directly, run
@@ -70,7 +85,7 @@ claims and runs. To jump into the conversation directly, run
 ## See where everything stands
 
 ```bash
-lf wave show                                   # each Wave's plan and Tasks, sorted by what needs attention
+lf wave show                                   # each Wave's plan and Tasks in shared order
 lf task status LOO-12                          # state, Graph step, PR, Sessions, and Graph runs
 lf task changes LOO-12                         # diff summary so far
 lf task wait LOO-13                            # block until done or abandoned
@@ -278,8 +293,10 @@ processes stay on the Machine that ran them. Claims follow your Git
 Every command saves on this Machine first, so nothing waits on the network.
 Each Machine pushes its plan to a ref of its own on the remote
 (`refs/loopflow/plan/<machine id>`) as part of the save, for five seconds at
-most, and its server fetches the others' once a minute;
-`lf task sync <issue>` does both now. The refs stay out of
+most. Its server fetches the others’ refs about every 30 seconds while it owns
+open Tasks in the repository and once a minute otherwise. A running Graph step
+keeps checking its repository if the server exits. `lf task sync <issue>` does
+both now. The refs stay out of
 `git branch`, `git status` and a plain clone. A repository with no remote reads
 `Plan: this Machine.` and sends nothing.
 
@@ -371,7 +388,7 @@ Coworkers do not need to install `lf`: they keep working in Linear or Asana,
 and changes stay synchronized both ways:
 
 ```bash
-lf account connect linear                       # or: lf account connect asana
+lf machine login linear                         # or: lf machine login asana
 lf wave plan connect --all --team-key LOO       # Linear: one Team per repo; Tasks become LOO-12
 ```
 
@@ -401,6 +418,21 @@ tracker:
 
 In Linear, a Wave maps to an Initiative and its current Project maps to a
 Linear Project. In Asana, it maps to a team project.
+
+Cloning a repository with existing `.lf/wave/` files onto a new Machine (or
+rental) registers those Waves read-only without editing `.lf/wave/` or
+committing to `main`. When a Wave's Linear Initiative has one In Progress
+Project, Loopflow binds it automatically. If the Initiative has none or
+several, or Linear is unreachable, the Wave stays unbound and lists its
+available Projects so you can pick one explicitly:
+
+```bash
+lf wave plan bind coverage <project-uuid>            # bind an unbound Wave to a Linear Project
+lf wave plan bind coverage <project-uuid> --replace  # switch a misselected Wave without losing prior work or history
+```
+
+Re-running `lf wave plan connect` on an already-bound Team and Initiative is a
+no-op that leaves `.lf/config.yaml`, `.lf/wave/`, and `main` untouched.
 
 ### Offline queue and conflict resolution
 

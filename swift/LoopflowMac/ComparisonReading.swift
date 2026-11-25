@@ -19,6 +19,8 @@ final class ComparisonReading {
     }
     private(set) var filesByPath: [String: TaskChangedFile] = [:]
     private(set) var error: String?
+    /// The Task has no checkout on its Machine yet.
+    private(set) var notStarted = false
     var loading: Bool { pending != nil }
     private var pending: Task<Void, Never>?
 
@@ -41,9 +43,11 @@ final class ComparisonReading {
                 changes = next
                 filesByPath = Dictionary(next.files.map { ($0.path, $0) }, uniquingKeysWith: { first, _ in first })
                 error = nil
+                notStarted = false
             } catch {
                 changes = nil
                 filesByPath = [:]
+                notStarted = (error as? ServerError)?.notStarted == true
                 self.error = error.localizedDescription
             }
         }

@@ -23,9 +23,13 @@ asking; `executable_sha256` names the server's own executable.
 | Focus a Desktop window or script its panes | `lf desktop` |
 
 Machine commands choose **where work runs**. The client server lets local
-clients (Desktop, `lf open`, `lf resume`) reach Work and held conversations on
-this Machine. Ordinary CLI commands work without the server; opening a Task or
-Wave conversation is the exception because the server starts its held agent.
+clients (Desktop, `lf open`, `lf resume`, the phone) reach Work and held
+conversations on this Machine, and the Tasks that run on your other Machines:
+it opens a Task's files, changes, shells and Sessions on the Machine that owns
+it, over SSH connections it keeps open for a minute after use. Lists and the
+board read only this Machine. Ordinary CLI commands work without the server;
+opening a Task or Wave conversation is the exception because the server starts
+its held agent.
 
 Connected views share the server's live observations of processes, Git state,
 PR/CI status, and repository files, updating automatically as things change on
@@ -83,14 +87,35 @@ setting and never re-register it behind your back.
 ## Phone access
 
 ```bash
-lf server mobile            # enable private remote access over this host's Tailscale
-lf server mobile --status   # check approval and live readiness
-lf server mobile --off      # disable remote access; local Sessions keep running
+lf server mobile            # approve this Machine and print its HTTPS address
+lf server mobile --status   # show the saved approval and current readiness
+lf server mobile --off      # close phone connections
 ```
 
-A phone signed into the same Tailscale user can attach to running Sessions on
-this Machine. Enabling local server access or adding SSH Machines does not
-enable phone access. For local-only use, no network port is opened; keep the
-local Unix socket private.
+A phone signed into the same Tailscale account opens your Tasks with four
+views: **Session**, **Files** (the whole tree, changed or not), **Changes** and
+**Shell**. One pairing covers every Machine: a Task running on mini or a rental
+opens through this server, with **Not started** before it has a checkout and
+an error naming the Machine, with **Try again**, when that Machine doesn't
+answer. When a Task moves, its views reload from the new Machine. A Shell
+already open keeps running on the old one; reopened after the move, it shows
+ended and offers **New shell**.
+
+In Desktop, open **Settings → Mobile** (**⌘,**) to toggle phone access, check
+readiness, or scan the pairing QR code with your phone. The green sidebar dot
+and pairing code follow the same status while Settings is open.
+
+Setup requires a user-owned, untagged Machine with MagicDNS and HTTPS
+certificates enabled. For a custom daemon socket, set `TS_SOCKET` for the
+setup command and for an `lf server run` you start yourself. Service
+installation does not forward the setup command's `TS_SOCKET`.
+
+The server checks Tailscale directly through its LocalAPI. If Tailscale stops,
+signs out, or changes owner, phone connections close and local Sessions keep
+running. When the approved account returns, the saved QR address works again.
+Retries start after five seconds and back off to once every 30 seconds.
+
+Local server access and SSH Machines work independently of phone access.
+Local-only access uses the private Unix socket without opening a network port.
 
 Next: [Surfaces](surfaces.md) · [Connection troubleshooting](troubleshooting.md#desktop-cannot-connect).

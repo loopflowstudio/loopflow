@@ -8,7 +8,7 @@ use std::sync::Arc;
 use std::task::{ready, Poll};
 use std::time::{Duration, SystemTime};
 
-use super::mobile::{Configuration, Host, Status};
+use super::mobile::{Configuration, Status, Tailscale};
 use super::service::{self, Carrier, Clients, Greeting};
 use super::subscriptions::Subscriptions;
 use super::ticket::{Admission, Tickets};
@@ -17,7 +17,7 @@ use anyhow::{Context, Result};
 use futures_util::{Sink, SinkExt, Stream, StreamExt};
 use loopflow_execution::transport::registry::Registry;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
-use tokio::net::{TcpListener, UnixStream};
+use tokio::net::TcpListener;
 use tokio::sync::{mpsc, oneshot, Semaphore};
 use tokio::task::JoinSet;
 use tokio_rustls::TlsAcceptor;
@@ -68,77 +68,110 @@ pub(super) async fn manage(
         },
     };
     let mut listeners = JoinSet::new();
-    let mut reported_failure = false;
-    let mut retry = tokio::time::interval(Duration::from_secs(5));
+    let mut bindings = JoinSet::new();
+    let mut setup: Option<oneshot::Sender<Result<Option<Configuration>, String>>> = None;
+    let mut retry = Duration::from_secs(5);
+    if let Some(saved) = status.configuration.as_ref().filter(|c| c.enabled) {
+        bindings.spawn(bind(saved.clone(), false));
+    }
+
     loop {
-        tokio::select! {
+        let result = tokio::select! {
             request = requests.recv() => {
                 let Some(request) = request else { return Ok(()) };
                 let (requested, reply) = match request {
                     Control::Status { reply } => { let _ = reply.send(status.clone()); continue; }
                     Control::Configure { configuration, reply } => (configuration, reply),
                 };
-                if status.ready {
-                    if let (Some(requested), Some(current)) = (&requested, &status.configuration) {
-                        if requested.owner == current.owner && requested.endpoint == current.endpoint {
-                            let _ = reply.send(Ok(status.configuration.clone()));
-                            continue;
-                        }
-                    }
+                if status.ready && requested.as_ref().zip(status.configuration.as_ref())
+                    .is_some_and(|(requested, current)| requested.owner == current.owner && requested.endpoint == current.endpoint) {
+                    let _ = reply.send(Ok(status.configuration.clone()));
+                    continue;
                 }
-                // Persist off before replacing a listener. Close admission even
-                // if persistence fails, and report that failure to the caller.
-                let disabled = tokio::task::spawn_blocking(super::mobile::save_disabled).await?;
-                listeners.abort_all();
-                while listeners.join_next().await.is_some() {}
+                bindings.shutdown().await;
+                if let Some(previous) = setup.take() {
+                    let _ = previous.send(Err("Mobile setup was superseded".into()));
+                }
+                listeners.shutdown().await;
                 status.ready = false;
+                status.error = None;
                 if let Some(config) = &mut status.configuration { config.enabled = false; }
-                reported_failure = false;
-                let result: Result<Option<Configuration>> = async {
-                    status.configuration = disabled.context("Mobile access stopped, but disabled state could not be saved")?;
-                    let Some(requested) = requested else { return Ok(None) };
-                    let bound = bind(requested, true).await?;
-                    let selected = bound.config.clone();
-                    tokio::task::spawn_blocking(move || super::mobile::save(&selected)).await?
-                        .context("Could not save mobile access; no listener was enabled")?;
-                    status.configuration = Some(bound.config.clone());
-                    status.ready = true;
-                    listeners.spawn(run(bound, instance.clone(), executable.clone(), slots.clone(), clients.clone(), tickets.clone(), subscriptions.clone(), terminals.clone()));
-                    Ok(status.configuration.clone())
-                }.await;
-                status.error = result.as_ref().err().map(|error| format!("{error:#}"));
-                let _ = reply.send(result.map_err(|error| format!("{error:#}")));
-            }
-            ended = listeners.join_next(), if !listeners.is_empty() => {
-                let error = match ended {
-                    Some(Ok(Err(error))) => error.to_string(),
-                    Some(Err(error)) => error.to_string(),
-                    _ => "Mobile connection stopped; reconnecting".into(),
-                };
-                tracing::warn!(%error, "Mobile listener stopped; local service remains ready");
-                status.ready = false;
-                status.error = Some(error);
-                reported_failure = false;
-            }
-            _ = retry.tick(), if !status.ready && status.configuration.as_ref().is_some_and(|config| config.enabled) => {
-                if let Some(config) = status.configuration.clone() {
-                    match bind(config, false).await {
-                        Ok(bound) => {
-                            status.configuration = Some(bound.config.clone());
-                            status.ready = true;
-                            status.error = None;
-                            reported_failure = false;
-                            listeners.spawn(run(bound, instance.clone(), executable.clone(), slots.clone(), clients.clone(), tickets.clone(), subscriptions.clone(), terminals.clone()));
-                        }
-                        Err(error) => {
-                            if !reported_failure {
-                                tracing::warn!(%error, "Mobile listener could not start; retrying the saved approval");
-                                reported_failure = true;
-                            }
-                            status.error = Some(error.to_string());
-                        }
+                match tokio::task::spawn_blocking(super::mobile::save_disabled).await? {
+                    Ok(disabled) => status.configuration = disabled,
+                    Err(error) => {
+                        let error = format!("Mobile access stopped, but disabled state could not be saved: {error:#}");
+                        status.error = Some(error.clone());
+                        let _ = reply.send(Err(error));
+                        continue;
                     }
                 }
+                if let Some(config) = requested {
+                    bindings.spawn(bind(config, true));
+                    setup = Some(reply);
+                } else {
+                    let _ = reply.send(Ok(None));
+                }
+                continue;
+            }
+            Some(bound) = bindings.join_next() => bound.map_err(anyhow::Error::from).and_then(|r| r),
+            Some(ended) = listeners.join_next() => {
+                status.ready = false;
+                Err(match ended {
+                    Ok(Err(error)) => error,
+                    Err(error) => error.into(),
+                    Ok(Ok(())) => anyhow::anyhow!("Mobile connection stopped; reconnecting"),
+                })
+            }
+        };
+        // Save only on explicit setup. Completing disk writes here serializes
+        // them with --off, even when the CLI that requested setup has gone.
+        let reply = setup.take();
+        let result = match result {
+            Ok(bound) if reply.is_some() => {
+                let config = bound.config.clone();
+                tokio::task::spawn_blocking(move || super::mobile::save(&config))
+                    .await?
+                    .context("Could not save mobile access; no listener was enabled")
+                    .map(|()| bound)
+            }
+            other => other,
+        };
+        match result {
+            Ok(bound) => {
+                status.configuration = Some(bound.config.clone());
+                status.ready = true;
+                status.error = None;
+                retry = Duration::from_secs(5);
+                listeners.spawn(run(
+                    bound,
+                    instance.clone(),
+                    executable.clone(),
+                    slots.clone(),
+                    clients.clone(),
+                    tickets.clone(),
+                    subscriptions.clone(),
+                    terminals.clone(),
+                ));
+                if let Some(reply) = reply {
+                    let _ = reply.send(Ok(status.configuration.clone()));
+                }
+            }
+            Err(error) => {
+                let message = format!("{error:#}");
+                if let Some(reply) = reply {
+                    let _ = reply.send(Err(message.clone()));
+                } else if let Some(saved) = &status.configuration {
+                    if status.error.as_ref() != Some(&message) {
+                        tracing::warn!(%error, "Mobile listener unavailable; retrying the saved approval");
+                    }
+                    let saved = saved.clone();
+                    bindings.spawn(async move {
+                        tokio::time::sleep(retry).await;
+                        bind(saved, false).await
+                    });
+                    retry = (2 * retry).min(Duration::from_secs(30));
+                }
+                status.error = Some(message);
             }
         }
     }
@@ -146,30 +179,17 @@ pub(super) async fn manage(
 
 struct Listener {
     sockets: Vec<TcpListener>,
-    host: Host,
+    host: Arc<Tailscale>,
     config: Configuration,
     tls: TlsAcceptor,
 }
 
 async fn bind(mut config: Configuration, allow_port_change: bool) -> Result<Listener> {
-    let expected = config.clone();
-    let (host, addresses, tls) = tokio::task::spawn_blocking(move || {
-        let host = Host::discover()?;
-        let (owner, addresses) = host.identity()?;
-        anyhow::ensure!(
-            owner == expected.owner,
-            "Tailscale account changed. Restore the intended account, or choose Set up again to approve the current account."
-        );
-        anyhow::ensure!(
-            reqwest::Url::parse(&expected.endpoint)?.host_str() == Some(&host.dns),
-            "Tailscale address changed. Choose Set up again, then scan the new QR code."
-        );
-        let tls = host.certificate()?;
-        Ok::<_, anyhow::Error>((host, addresses, tls))
-    })
-    .await??;
+    let (host, observed) = Tailscale::discover().await?;
+    observed.verify(&config)?;
+    let tls = host.certificate(&observed.dns).await?;
     let port = config.port()?;
-    let sockets = match bind_sockets(&addresses, port).await {
+    let sockets = match bind_sockets(&observed.addresses, port).await {
         Ok(sockets) => sockets,
         Err(error)
             if allow_port_change
@@ -180,16 +200,16 @@ async fn bind(mut config: Configuration, allow_port_change: bool) -> Result<List
         {
             // Only explicit setup can change the saved address. Restoration
             // keeps retrying the original port so existing phones can recover.
-            bind_sockets(&addresses, 0).await?
+            bind_sockets(&observed.addresses, 0).await?
         }
         Err(error) => return Err(error),
     };
     let port = sockets[0].local_addr()?.port();
-    config.endpoint = format!("https://{}:{port}", host.dns);
+    config.endpoint = format!("https://{}:{port}", observed.dns);
     config.enabled = true;
     Ok(Listener {
         sockets,
-        host,
+        host: Arc::new(host),
         config,
         tls,
     })
@@ -219,31 +239,11 @@ async fn bind_sockets(addresses: &[IpAddr], mut port: u16) -> Result<Vec<TcpList
     Ok(sockets)
 }
 
-async fn maintain(host: Host, config: Configuration, tls: mpsc::Sender<TlsAcceptor>) -> Result<()> {
-    let mut renewed = SystemTime::now();
-    loop {
-        tokio::time::sleep(Duration::from_secs(5)).await;
-        let host = host.clone();
-        let refresh = renewed.elapsed().unwrap_or_default() >= Duration::from_secs(6 * 60 * 60);
-        let (owner, certificate) = tokio::task::spawn_blocking(move || {
-            let (owner, _) = host.identity()?;
-            let certificate = if refresh {
-                Some(host.certificate()?)
-            } else {
-                None
-            };
-            Ok::<_, anyhow::Error>((owner, certificate))
-        })
-        .await??;
-        anyhow::ensure!(
-            owner == config.owner,
-            "Tailscale account changed. Restore the intended account, or choose Set up again to approve the current account."
-        );
-        if let Some(certificate) = certificate {
-            tls.send(certificate).await?;
-            renewed = SystemTime::now();
-        }
-    }
+async fn check_owner(host: &Tailscale, config: &Configuration) -> Result<String> {
+    tokio::time::sleep(Duration::from_secs(5)).await;
+    let observed = host.status_without_peers().await?;
+    observed.verify(config)?;
+    Ok(observed.dns)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -259,9 +259,10 @@ async fn run(
 ) -> Result<()> {
     tracing::info!(endpoint = %bound.config.endpoint, "Mobile HTTPS ready on host Tailscale");
     let mut connections = JoinSet::new();
-    let (renewed, mut renewals) = mpsc::channel(1);
-    let maintenance = maintain(bound.host.clone(), bound.config.clone(), renewed);
-    tokio::pin!(maintenance);
+    let mut renewed = SystemTime::now();
+    let mut renewals = JoinSet::new();
+    let owner = check_owner(&bound.host, &bound.config);
+    tokio::pin!(owner);
     let mut tls = bound.tls;
     loop {
         let accepted = futures_util::future::select_all(
@@ -270,8 +271,20 @@ async fn run(
         let (socket, peer) = tokio::select! {
             (accepted, _, _) = accepted => accepted?,
             _ = connections.join_next(), if !connections.is_empty() => continue,
-            result = &mut maintenance => return result,
-            Some(certificate) = renewals.recv() => { tls = certificate; continue; }
+            checked = &mut owner => {
+                let dns = checked?;
+                owner.set(check_owner(&bound.host, &bound.config));
+                if renewals.is_empty() && renewed.elapsed().unwrap_or_default() >= Duration::from_secs(6 * 60 * 60) {
+                    let host = bound.host.clone();
+                    renewals.spawn(async move { host.certificate(&dns).await });
+                }
+                continue;
+            }
+            Some(certificate) = renewals.join_next() => {
+                tls = certificate??;
+                renewed = SystemTime::now();
+                continue;
+            }
         };
         let slots = slots.clone();
         let subscriptions = subscriptions.clone();
@@ -287,8 +300,7 @@ async fn run(
         );
         connections.spawn(async move {
             let result = async {
-                let admission =
-                    tokio::task::spawn_blocking(move || host.permits(peer, &owner)).await??;
+                let admission = host.permits(peer, &owner).await?;
                 let socket =
                     tokio::time::timeout(Duration::from_secs(5), tls.accept(socket)).await??;
                 connection(
@@ -460,12 +472,25 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send> Carrier for Messages<S> {
 
 /// A plain byte copy between the held terminal and the WebSocket's binary frames.
 /// Closing either side releases the owner claim.
-async fn bridge<S>(socket: WebSocketStream<S>, mut destination: UnixStream) -> Result<()>
+async fn bridge<S>(socket: WebSocketStream<S>, terminal: service::TerminalStream) -> Result<()>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    match terminal {
+        service::TerminalStream::Here(destination) => copy(socket, destination).await,
+        service::TerminalStream::There { _ssh, stream } => copy(socket, stream).await,
+    }
+}
+
+async fn copy<S>(
+    socket: WebSocketStream<S>,
+    destination: impl AsyncRead + AsyncWrite + Unpin,
+) -> Result<()>
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
     let (mut sender, mut receiver) = socket.split();
-    let (mut reader, mut writer) = destination.split();
+    let (mut reader, mut writer) = tokio::io::split(destination);
     let upstream = async {
         while let Some(message) = receiver.next().await {
             match message? {
@@ -524,6 +549,154 @@ mod tests {
     use tokio::net::{TcpListener, UnixStream};
     use tokio_tungstenite::tungstenite::{client::IntoClientRequest, Message};
 
+    // Kernel socket I/O and the manager's control replies should finish at the
+    // current tick. Keep Tokio from auto-advancing to an HTTP timeout meanwhile.
+    async fn at_current_tick<T>(event: impl std::future::Future<Output = T>) -> T {
+        let (release, held) = std::sync::mpsc::channel::<()>();
+        let mut watchdog =
+            tokio::task::spawn_blocking(move || held.recv_timeout(Duration::from_secs(5)));
+        let result = tokio::select! {
+            result = event => result,
+            _ = &mut watchdog => panic!("expected progress without advancing the clock"),
+        };
+        drop(release);
+        let _ = watchdog.await.unwrap();
+        result
+    }
+
+    async fn mobile_status(
+        requests: &tokio::sync::mpsc::Sender<super::Control>,
+    ) -> crate::server::mobile::Status {
+        let (reply, answer) = tokio::sync::oneshot::channel();
+        requests
+            .send(super::Control::Status { reply })
+            .await
+            .unwrap();
+        answer.await.unwrap()
+    }
+
+    async fn next_restore_error(
+        requests: &tokio::sync::mpsc::Sender<super::Control>,
+        previous: Option<&str>,
+    ) -> String {
+        at_current_tick(async {
+            loop {
+                if let Some(error) = mobile_status(requests).await.error {
+                    if Some(error.as_str()) != previous {
+                        return error;
+                    }
+                }
+            }
+        })
+        .await
+    }
+
+    #[test]
+    fn saved_restores_back_off_from_completion_and_off_cancels_a_pending_request() {
+        use crate::server::mobile::{configured, localapi_fixture::approval, save};
+        use axum::{routing::get, Json, Router};
+        use loopflow_execution::config::environment::EnvVarGuard;
+        use serde_json::{json, Value};
+        use tokio::net::UnixListener;
+        use tokio::sync::{mpsc, oneshot};
+        use tokio::time::{advance, timeout};
+
+        let _env = loopflow_test_support::env_lock().lock().unwrap();
+        let dir = tempfile::tempdir_in("/tmp").unwrap();
+        let path = dir.path().join("tailscaled.sock");
+        let _home = EnvVarGuard::set("LF_HOME", dir.path().to_str().unwrap());
+        let _socket = EnvVarGuard::set("TS_SOCKET", path.to_str().unwrap());
+        save(&approval(8443)).unwrap();
+
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .start_paused(true)
+            .build()
+            .unwrap()
+            .block_on(async {
+                let (requests, received) = mpsc::channel(4);
+                let manager = tokio::spawn(super::manage(
+                    configured(),
+                    received,
+                    Arc::from("instance"),
+                    Arc::new("executable".to_owned()),
+                    Arc::new(tokio::sync::Semaphore::new(
+                        crate::server::wire::MAX_CONNECTIONS,
+                    )),
+                    Default::default(),
+                    Default::default(),
+                    Default::default(),
+                    None,
+                ));
+                let mut previous = next_restore_error(&requests, None).await;
+                // The first attempt found no socket. Hold each subsequent status
+                // request at the same address until the test supplies its answer.
+                let daemon = UnixListener::bind(path).unwrap();
+                let (incoming, mut attempts) = mpsc::unbounded_channel();
+                let status = Router::new().route(
+                    "/localapi/v0/status",
+                    get(move || {
+                        let (respond, answer) = oneshot::channel::<Value>();
+                        incoming.send(respond).unwrap();
+                        async move { Json(answer.await.unwrap_or_default()) }
+                    }),
+                );
+                let server =
+                    tokio::spawn(async move { axum::serve(daemon, status).await.unwrap() });
+                let tick = Duration::from_millis(1);
+                for (i, seconds) in [5, 10, 20, 30, 30].into_iter().enumerate() {
+                    assert!(
+                        timeout(Duration::from_secs(seconds) - tick, attempts.recv())
+                            .await
+                            .is_err(),
+                        "retried before {seconds}s"
+                    );
+                    advance(tick).await;
+                    let mut respond = at_current_tick(attempts.recv()).await.unwrap();
+                    advance(Duration::from_secs(2)).await;
+                    let pending = at_current_tick(mobile_status(&requests)).await;
+                    assert!(!pending.ready);
+                    assert_eq!(pending.error.as_deref(), Some(previous.as_str()));
+
+                    if i == 4 {
+                        let (reply, answer) = tokio::sync::oneshot::channel();
+                        requests
+                            .send(super::Control::Configure {
+                                configuration: None,
+                                reply,
+                            })
+                            .await
+                            .unwrap();
+                        assert!(at_current_tick(answer).await.unwrap().unwrap().is_none());
+                        at_current_tick(respond.closed()).await;
+                        break;
+                    }
+
+                    // Distinct errors acknowledge completion before timing the next retry.
+                    let node = if i % 2 == 0 {
+                        json!({"Tags":["tag:ci"]})
+                    } else {
+                        json!({})
+                    };
+                    respond
+                        .send(json!({"BackendState":"Running", "Self":node}))
+                        .unwrap();
+                    previous = next_restore_error(&requests, Some(&previous)).await;
+                }
+                assert!(!configured().unwrap().unwrap().enabled);
+                assert!(
+                    timeout(Duration::from_secs(60), attempts.recv())
+                        .await
+                        .is_err(),
+                    "disable cancels future retries"
+                );
+                drop(requests);
+                manager.await.unwrap().unwrap();
+                server.abort();
+                assert!(server.await.unwrap_err().is_cancelled());
+            });
+    }
+
     #[tokio::test]
     async fn completed_terminal_stream_sends_websocket_close_after_its_last_bytes() {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -532,7 +705,12 @@ mod tests {
         let server = tokio::spawn(async move {
             let (socket, _) = listener.accept().await.unwrap();
             let websocket = tokio_tungstenite::accept_async(socket).await.unwrap();
-            bridge(websocket, owner).await.unwrap();
+            bridge(
+                websocket,
+                crate::server::service::TerminalStream::Here(owner),
+            )
+            .await
+            .unwrap();
         });
         let (mut client, _) = tokio_tungstenite::connect_async(format!("ws://{address}"))
             .await
@@ -729,6 +907,8 @@ mod tests {
                     operation: Operation::Server(ServerOperation::SessionAttach {
                         session: loopflow_model::id::LfSessionId::from("session_missing"),
                         terminal_id: None,
+                        task: None,
+                        machine: None,
                     }),
                     sender: None,
                     request_id: None,

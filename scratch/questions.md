@@ -33,3 +33,8 @@
 - An explicit presentation keeps its banner through passive writes. Later writes still mark their files in Open & Scratch. Grep returns the byte offset of its cropped excerpt so Desktop can distinguish repeated occurrences after a Unicode prefix.
 
 - Choosing a pending presentation by filename accepts its latest line range and mode with either a click or Return in the navigator. Back returns to the prior reading line.
+
+## Sync onto main (#2040 remote Task workspace), 2026-11-24
+
+- Main replaced the `lf task watch-files` path stream (and its `ignored_scratch` list) with the served `task.files.watch` revision. An ignored scratch page now bumps that revision (`invalidates_tree`), so a peer's page reaches Files' rail through a full rescan, but a peer write no longer raises the **Updated** notice: the revision carries no paths. Local checkouts keep the notice (FSEvents paths). Assumed acceptable; adding paths to `TaskFilesRevision` would bring it back.
+- The QA hook's branch `key <window> <mods> <chars>` is now `windowkey`; main's `key post|send …` keeps the name.

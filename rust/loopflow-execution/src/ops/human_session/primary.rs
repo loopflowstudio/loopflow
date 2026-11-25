@@ -87,7 +87,14 @@ pub(crate) async fn ensure_task(
         None if open => repo.to_path_buf(),
         _ => crate::ops::task::task_directory(store, &task).await?,
     };
-    let (session, started) = record_task_primary(store, &cwd, &task, request).await?;
+    let (session, started) = record_task_primary(
+        store,
+        &cwd,
+        &task,
+        selected.wave.as_ref().map(|w| w.slug()),
+        request,
+    )
+    .await?;
     Ok((prepare(store, &session.id).await?, started))
 }
 
@@ -95,6 +102,7 @@ async fn record_task_primary(
     store: &SharedStore,
     cwd: &Path,
     task: &loopflow_storage::work::task::Task,
+    wave: Option<&str>,
     request: Option<String>,
 ) -> Result<(LfSession, bool)> {
     if let Some(session) = task_conversation(store, &task.id).await? {
@@ -108,7 +116,7 @@ async fn record_task_primary(
         wave_id: task.wave_id.clone(),
         work_source: Some(WorkSource::Declared),
         request,
-        ..conversation(cwd, "task/session", task.title.clone())?
+        ..conversation(cwd, "task/session", task.title.clone(), wave)?
     };
     let scope = PrimaryScope::Task(task.id.clone());
     Ok((store.ensure_primary_session(&scope, candidate).await?, true))
@@ -237,7 +245,7 @@ pub(super) fn scope_worktree(
 pub fn ensure_scope_worktree(
     repo: &Path,
     scope: &PrimaryScope,
-) -> Result<crate::git::worktrees::AgentWorktree> {
+) -> Result<crate::git::worktrees::Worktree> {
     Ok(crate::git::worktrees::ensure_agent_worktree(
         repo,
         scope_segment(scope)?,
@@ -374,6 +382,7 @@ fn wave_session(binding: &crate::ops::WorkBinding) -> Result<LfSession> {
             &binding.cwd,
             "wave/session",
             binding.wave_name.clone().expect("Wave primary has a Wave"),
+            binding.wave_name.as_deref(),
         )?
     })
 }
@@ -387,7 +396,7 @@ fn repository_session(repo: &crate::repository::CanonicalRepo) -> Result<LfSessi
     Ok(LfSession {
         repo: Some(repo.to_string()),
         work_source: Some(WorkSource::Declared),
-        ..conversation(repo.as_path(), "repo/session", title)?
+        ..conversation(repo.as_path(), "repo/session", title, None)?
     })
 }
 

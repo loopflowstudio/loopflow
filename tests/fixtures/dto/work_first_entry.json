@@ -38,7 +38,6 @@
     "model": null,
     "state": "unknown",
     "task_ids": [],
-    "task_primary": false,
     "terminal_ids": [],
     "title": ".tmpRKKNhK",
     "title_source": "generated",
@@ -90,7 +89,6 @@
     "model": null,
     "state": "unknown",
     "task_ids": [],
-    "task_primary": false,
     "terminal_ids": [],
     "title": ".tmpRKKNhK",
     "title_source": "generated",
@@ -208,6 +206,7 @@
             "reason": "Agent execution unavailable: agent \"opencode:opencode/test-model\" uses harness \"opencode\", which does not support a managed execution boundary; select codex or claude"
           },
           "owned_by_you": false,
+          "runs_on": null,
           "pr": null,
           "reference": {
             "issue_url": "https://linear.app/loopflow/issue/INF-123/prove-task-pr-transitions",
@@ -311,7 +310,6 @@
       "model": null,
       "state": "unknown",
       "task_ids": [],
-      "task_primary": false,
       "terminal_ids": [],
       "title": ".tmpRKKNhK",
       "title_source": "generated",
@@ -357,7 +355,7 @@
         "resume",
         "480d8ca67cdb41ffa963f79fdb34637c"
       ],
-      "primary_scope": null,
+      "primary_scope": "task",
       "program_status": null,
       "provider": "opencode",
       "model": null,
@@ -365,7 +363,6 @@
       "task_ids": [
         "task_ab8d3359dc7053bda4afd24ff7e7a7d7"
       ],
-      "task_primary": true,
       "terminal_ids": [],
       "title": "Prove Task PR",
       "title_source": "generated",
@@ -419,7 +416,6 @@
       "model": null,
       "state": "closed",
       "task_ids": [],
-      "task_primary": false,
       "terminal_ids": [],
       "title": "Review parser",
       "title_source": "generated",
@@ -466,7 +462,7 @@
       "resume",
       "480d8ca67cdb41ffa963f79fdb34637c"
     ],
-    "primary_scope": null,
+    "primary_scope": "task",
     "program_status": null,
     "provider": "opencode",
     "model": null,
@@ -474,7 +470,6 @@
     "task_ids": [
       "task_ab8d3359dc7053bda4afd24ff7e7a7d7"
     ],
-    "task_primary": true,
     "terminal_ids": [],
     "title": "Prove Task PR",
     "title_source": "generated",

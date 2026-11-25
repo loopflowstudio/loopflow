@@ -22,7 +22,9 @@ whether the change is right. This is not a code review and not a go/no-go.
 write it as `lf help tour` describes.
 
 **Write `scratch/ship-review.html`.** One self-contained file, readable in
-light and dark, in this order:
+light and dark, borrowing the repository's palette, type and layout when it
+has a visual language (a design system, the app, its docs, internal tools), in
+this order:
 
 1. What ships, in the person's terms: what they will do differently and what
    they will see, with real output.

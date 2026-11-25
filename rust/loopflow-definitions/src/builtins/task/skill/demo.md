@@ -11,7 +11,7 @@ flow, is it the thing they wanted.
 
 ## Set the stage
 
-Hand over the real product in the state a person would meet it: built,
+Hand over the real thing in the state a person would meet it: built,
 running, with realistic data, signed in, at the place to start. For a CLI the
 command is ready to type; for an app the window is open. Say in a sentence or
 two what changed and where to begin. Don't script their steps or narrate what
@@ -32,7 +32,9 @@ where you expected it?". Never "does this look good?".
 
 A page helps when there's something to compare. Write `scratch/demo.html` with
 before and after, or two variants side by side, and the numbered questions:
-one self-contained file, light and dark. Say its path.
+one self-contained file, light and dark. When the repository has a visual
+language (a design system, the app, its docs, internal tools), borrow its
+palette, type and layout. Say its path.
 
 ## Keep their words
 

@@ -37,7 +37,9 @@ day in the life of the system, the failure each one avoids.
 network, readable in light and dark and at narrow widths. Lead with the
 decision needed and mark proposed apart from existing. One reading column, no
 dashboard chrome. End with numbered questions so "2b" is a complete answer.
-Say its path, and regenerate the same file each round.
+When the repository has a visual language (a design system, the app, its docs,
+internal tools), borrow its palette, type and layout. Say its path, and
+regenerate the same file each round.
 
 ## Follow their lead
 

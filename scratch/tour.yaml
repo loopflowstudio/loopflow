@@ -1,0 +1,17 @@
+at: 201172c7798578d83c4b8b11376605e9571c59d8
+first:
+  - path: docs/sessions.md
+    why: Opening a running conversation from another terminal
+  - path: scratch/plan.md
+    why: Implemented launches and remaining work
+  - path: rust/loopflow-execution/src/transport.rs
+    why: Choose the holder or the caller's terminal
+  - path: rust/loopflow/src/bin/lf.rs
+    why: Default and inline chat entry points
+  - path: rust/loopflow-execution/src/transport/registry.rs
+    why: Associate new Sessions with running terminals
+  - path: rust/loopflow/tests/transport_tests.rs
+    why: Two viewers share an unfinished agy draft
+hide:
+  - path: docs/dev/index.html
+    why: Generated from the architecture guide

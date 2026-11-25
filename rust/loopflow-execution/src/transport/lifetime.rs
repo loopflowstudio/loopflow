@@ -201,7 +201,10 @@ impl Watch {
             && report_result(
                 &mut self.hold_failure,
                 "Session viewer hold",
-                store.record_viewer_hold(&self.terminal, self.hold),
+                match self.hold {
+                    Some(hold) => store.record_viewer_hold(&self.terminal, Some(hold)),
+                    None => store.release_disconnected_viewers(&self.terminal),
+                },
             )
             .is_some()
         {

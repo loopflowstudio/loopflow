@@ -12,6 +12,7 @@ use crate::store::{
 use fs2::FileExt;
 use loopflow_model::durable::{TaskId, WorkStatus};
 use loopflow_model::id::TerminalId;
+use loopflow_storage::sqlite::VIEWER_OBSERVATION_GRACE;
 use loopflow_storage::work::task::Task;
 
 fn now() -> i64 {
@@ -37,9 +38,25 @@ fn lock_file(name: &str) -> OpsResult<File> {
         .open(directory.join(format!("{name}.lock")))?)
 }
 
-/// The server refreshes live viewing evidence every ten seconds. A stopped
-/// server cannot keep a completed checkout forever with its last cached boolean.
-pub(crate) const VIEWER_OBSERVATION_GRACE: i64 = 30;
+/// The host decides whether the last view is still absent when it receives the request.
+pub fn close_unviewed_chats(store: &SqliteStore) -> OpsResult<()> {
+    for terminal in store.unviewed_chat_candidates(now()).map_err(task_error)? {
+        if store
+            .terminal_has_scoped_session(&terminal)
+            .map_err(task_error)?
+            || store
+                .terminal_retention(&terminal)
+                .map_err(task_error)?
+                .is_some()
+        {
+            continue;
+        }
+        if let Err(error) = crate::transport::retire_chat(&terminal) {
+            tracing::warn!(%terminal, %error, "standalone chat retirement unavailable");
+        }
+    }
+    Ok(())
+}
 
 fn viewer_hold(store: &SqliteStore, task: &TaskId, now: i64) -> OpsResult<Option<ViewerHold>> {
     let mut absent_since = None;
@@ -134,7 +151,10 @@ pub fn run(issue: Option<&str>) -> OpsResult<()> {
                         .ok_or_else(|| task_error("Task is unknown"))?,
                 ]
             }
-            None => store.sqlite.pending_retirements().map_err(task_error)?,
+            None => {
+                close_unviewed_chats(&store.sqlite)?;
+                store.sqlite.pending_retirements().map_err(task_error)?
+            }
         };
         sweep(&store, &tasks).await
     })

@@ -82,8 +82,6 @@ pub(super) struct Hosted {
     announced: bool,
     attached: bool,
     viewing: lifetime::Viewing,
-    /// Task cleanup's notice: the viewer that asked, its request and the text.
-    close_notice: Option<(String, u64, String)>,
     close_reason: CloseReason,
     /// Wakes the host's descriptor wait from another thread.
     waker: UnixStream,
@@ -154,7 +152,6 @@ impl Hosted {
             announced: false,
             attached: false,
             viewing,
-            close_notice: None,
             close_reason: CloseReason::Finished,
             waker,
             settling: None,
@@ -225,6 +222,7 @@ impl Hosted {
         let mut size_change = false;
         let mut theme_change = false;
         let mut attaching = Vec::new();
+        let mut closes = Vec::new();
         // Observe every connection before reading its requests.
         self.viewers.retain_mut(|viewer| {
             !viewer.heartbeat_expired(Instant::now()) && viewer.read().is_ok()
@@ -255,7 +253,6 @@ impl Hosted {
                 departure,
                 kept,
                 execution_directory_reported,
-                close_notice,
                 ..
             } = self;
             for index in 0..viewers.len() {
@@ -335,7 +332,10 @@ impl Hosted {
                                 viewer.ending = Some(answers);
                             }
                             Request::CloseNotice { text } => {
-                                *close_notice = Some((viewer.id.clone(), answers, text));
+                                closes.push((viewer.id.clone(), answers, Some(text)));
+                            }
+                            Request::RetireChat => {
+                                closes.push((viewer.id.clone(), answers, None));
                             }
                             Request::InputHint { key, hint } if key == *control_key => {
                                 viewer.input_hint = Some(hint);
@@ -732,16 +732,29 @@ impl Hosted {
                 return Ok(Pass::Ended(code, self.settling.take()));
             }
         }
-        let hold = viewer_hold(
-            &self.viewers,
-            self.observed_hold,
-            time::OffsetDateTime::now_utc().unix_timestamp(),
-        );
+        let now = time::OffsetDateTime::now_utc().unix_timestamp();
+        let hold = viewer_hold(&self.viewers, self.observed_hold, now);
         if hold != self.observed_hold {
             self.observed_hold = hold;
             self.viewing.send(hold);
         }
-        if let Some((requester, answers, text)) = self.close_notice.take() {
+        // Decide after all attaches and departures in this pass. The store's
+        // observation can lag either, including a brief visit between sweeps.
+        let grace_elapsed = match hold {
+            Some(ViewerHold::Viewed(_)) => false,
+            Some(ViewerHold::Absent(at)) => now >= at + loopflow_storage::sqlite::WORKSPACE_GRACE,
+            None => true,
+        };
+        let notice = closes
+            .iter()
+            .rev()
+            .find_map(|(_, _, text)| text.as_deref())
+            .or_else(|| {
+                (grace_elapsed && !closes.is_empty())
+                    .then_some("Session closed after 15 minutes without a viewer")
+            });
+        let retiring = notice.is_some();
+        if let Some(text) = notice {
             self.close_reason = CloseReason::Retired;
             self.deliver(
                 1,
@@ -750,6 +763,8 @@ impl Hosted {
                 Span::Aside { through: None },
             );
             snapshot::leave(&self.id, &self.output);
+        }
+        for (requester, answers, _) in closes {
             if let Some(viewer) = self
                 .viewers
                 .iter_mut()
@@ -758,6 +773,8 @@ impl Hosted {
                 viewer.reply(answers, Reply::Accepted);
                 let _ = viewer.flush();
             }
+        }
+        if retiring {
             // A held terminal has no process to signal: the notice ends it.
             release_viewer_hold(&self.id, self.observed_hold);
             child.retire();

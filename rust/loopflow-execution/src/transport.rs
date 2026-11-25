@@ -2571,10 +2571,18 @@ pub fn viewed(id: &TerminalId) -> Result<bool> {
 
 /// End a held terminal with `text` for its viewers. No decision is stored.
 pub(crate) fn close_notice(id: &TerminalId, text: &str) -> Result<()> {
+    request_close(id, Request::CloseNotice { text: text.into() })
+}
+
+pub(crate) fn retire_chat(id: &TerminalId) -> Result<()> {
+    request_close(id, Request::RetireChat)
+}
+
+fn request_close(id: &TerminalId, request: Request) -> Result<()> {
     let mut socket = registry::connect(id)?;
     socket.set_read_timeout(Some(Duration::from_secs(1)))?;
     socket.set_write_timeout(Some(Duration::from_secs(1)))?;
-    send(&mut socket, Request::CloseNotice { text: text.into() })?;
+    send(&mut socket, request)?;
     match receive_reply(&mut socket)? {
         Reply::Accepted => Ok(()),
         other => bail!("unexpected close notice reply {other:?}"),

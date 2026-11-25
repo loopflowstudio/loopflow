@@ -780,6 +780,97 @@ fn direct_chat_keeps_one_agy_and_its_draft_across_viewers_and_server_restart() {
 }
 
 #[test]
+fn standalone_chat_retires_only_after_detach_and_turn_completion() {
+    let fixture = Fixture::new();
+    let server = fixture.machine_server();
+    let mut pane = fixture.chat(&fixture.agy(), &["-a", "agy", ":", "idle retirement"]);
+    pane.wait_text("provider ready");
+    let session = session_of(&fixture.sql(), &fixture.launches(1)[0]);
+    let held = fixture.terminal_of(&session);
+    let sql = fixture.sql();
+    let expire = || {
+        sql.execute(
+            "UPDATE held_terminals SET viewer_hold='absent',
+             viewer_hold_at=unixepoch()-960,viewed=0 WHERE id=?1",
+            [&held],
+        )
+        .unwrap();
+    };
+    let sweep = || {
+        let output = fixture.command(&["task", "retire"]).output().unwrap();
+        assert!(output.status.success(), "{output:?}");
+    };
+    // Deliver an already-issued sweep request after a viewer returned. The
+    // same request just after detach must honor the new grace as well.
+    let delayed_close = || {
+        let (mut socket, _) = fixture.held_entrance(&held);
+        socket
+            .write_all(&frame(REQUEST, br#"{"id":1,"kind":"retire_chat"}"#))
+            .unwrap();
+        let (tag, reply) = read_frame(&mut socket).unwrap();
+        assert_eq!(tag, REPLY);
+        assert_eq!(
+            serde_json::from_slice::<Value>(&reply).unwrap()["kind"],
+            "accepted"
+        );
+    };
+    delayed_close();
+    pane.type_keys(b"still here\n");
+    pane.wait_text("received still here");
+    pane.type_keys(b"\x1d");
+    assert!(pane.wait_exit().success());
+    delayed_close();
+    fixture.assert_held_hosted(&held);
+    drop(server);
+    // Model an elapsed grace while the host was down. The new host sees
+    // the saved deadline, but a pending native request still owns this turn.
+    sql.execute("INSERT OR REPLACE INTO session_activity
+        (session_id,agent_process_id,attachment_token,observed_at,open_tools,pending_input,yielded)
+        SELECT id,agent_process_id,attachment_token,unixepoch(),0,1,0 FROM agent_sessions WHERE id=?1",
+        [&session]).unwrap();
+    expire();
+    let _restarted = fixture.machine_server();
+    sweep();
+    fixture.assert_held_hosted(&held);
+    sql.execute(
+        "UPDATE session_activity SET pending_input=0,yielded=1 WHERE session_id=?1",
+        [&session],
+    )
+    .unwrap();
+    sweep();
+    fixture.held_ends(&held);
+}
+
+#[test]
+fn standalone_chat_past_its_grace_is_retired_by_server_recovery() {
+    let fixture = Fixture::new();
+    let server = fixture.machine_server();
+    // A held chat can start without ever receiving its first view.
+    let path = format!("PATH={}", fixture.agy());
+    let held = fixture.start_held(&[
+        "/usr/bin/env",
+        &path,
+        env!("CARGO_BIN_EXE_lf"),
+        "-a",
+        "agy",
+        ":",
+        "unviewed",
+    ]);
+    let session = session_of(&fixture.sql(), &fixture.launches(1)[0]);
+    assert_eq!(fixture.terminal_of(&session), held);
+    drop(server);
+    fixture
+        .sql()
+        .execute(
+            "UPDATE held_terminals SET created_at=unixepoch()-960 WHERE id=?1",
+            [&held],
+        )
+        .unwrap();
+    let _restarted = fixture.machine_server();
+    fixture.held_ends(&held);
+}
+
+#[test]
 fn direct_chat_with_desktop_status_attaches_before_the_session_is_named() {
     let fixture = Fixture::new();
     let _server = fixture.machine_server();

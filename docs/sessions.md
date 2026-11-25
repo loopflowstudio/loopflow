@@ -9,32 +9,42 @@ running through an update, and what comes back after a crash.
 ## Resume or open another view
 
 ```bash
-lf resume                          # this checkout's ongoing conversation (Task, Wave, or repo)
+lf -a agy                          # terminal 1: starts in a held terminal when the server is running
+lf resume <session>                # terminal 2: attaches a second live view; terminal 1 stays open
+lf resume                          # this checkout's ongoing conversation (Task, Wave, repo, or last chat)
 lf resume LOO-12                   # a Task's conversation, from anywhere
-lf resume <session>                # an exact Session or provider conversation ID
 lf resume LOO-12 --unfocused       # attach without assuming this terminal has focus
 lf open --task LOO-12 --tab        # attach a second view in a sibling tab
 lf open --task LOO-12 --focus      # reveal an existing view without opening a new one
 ```
 
-A conversation can be open in multiple terminals (and Desktop) at once, and
-every view can type: a draft started in one appears in the others. Size, colors,
-and the agent's focus follow the view you are using: the live view you most
-recently focused or typed in. Running `lf resume` in a terminal takes the size
-right away. Desktop panes start in the background. Views with piped stdin and
-terminals opened with `--unfocused` also attach without assuming focus. They take the size when the terminal reports
-focus, you type, or the current owner leaves and they are next in line.
-Ghostty reports focus on attach if its pane is already focused. A reconnecting
-view uses the last focus it observed. See [Workspaces](workspaces.md) for host
-support (`desktop`, `rex`, `cmux`, `herdr`, `tmux`, `terminal`).
+Whenever the local Machine server is running, every interactive `lf` launch
+(`lf`, `lf -a agy`, `lf <skill>`, `lf -i`, and `lf resume`) runs in a held
+terminal. Opening a running conversation from Loopflow Desktop (**Open here**)
+or another terminal (`lf resume <session>`) attaches another live view without
+stopping or restarting the agent: mid-turn output and unsent drafts stay
+intact, and every view can type. Press `Ctrl+]` to detach a terminal view while
+leaving the conversation running (`lf session list` shows it as `detached`).
+When no server is running (or stdin/stdout is piped), direct `lf` launches fall
+back to running straight in your terminal without error.
+
+Size, colors, and the agent's focus follow the view you are using: the live
+view you most recently focused or typed in. Running `lf resume` in a terminal
+takes the size right away. Desktop panes start in the background. Views with
+piped stdin and terminals opened with `--unfocused` also attach without
+assuming focus. They take the size when the terminal reports focus, you type,
+or the current owner leaves and they are next in line. Ghostty reports focus on
+attach if its pane is already focused. A reconnecting view uses the last focus
+it observed. See [Workspaces](workspaces.md) for host support (`desktop`,
+`rex`, `cmux`, `herdr`, `tmux`, `terminal`).
 
 | If the conversation is… | `lf resume` does… |
 |---|---|
 | Missing for this scope | Starts a new one |
-| Running in a held terminal (shown or hidden) | Attaches another view here; existing views stay open |
+| Running in a held terminal (shown or hidden) | Attaches another view here (**Open here** in Desktop); existing views stay open |
 | Ended or crashed | Continues the provider thread it saved (paints last screen while reopening), or starts again from its first request |
 | Recorded in a directory that is gone (a done Task's retired checkout) | Continues it in the repository's main checkout |
-| Running in an unshared terminal (`lf <skill>` elsewhere) | Takes it over: ends the other client and continues here |
+| Running outside a held terminal (started while the server was stopped, or on an earlier build) | Takes it over (**Take over** in Desktop): ends the other client and resumes from saved history (in a held terminal if the server is running) |
 
 Need a parallel branch of the same conversation, or a fresh context window?
 
@@ -43,11 +53,19 @@ lf resume <session> --fork         # new Session in the same Work from this conv
 lf session new                     # fresh provider thread for this scope, seeded with what the last one knew
 ```
 
-Wave and repository conversations run until you
-quit their agent. Task conversations stay alive while the Task is open. Once a
-Task completes, its unviewed conversation closes about 15 minutes after live
-work settles (returning later continues from saved history without reopening
-the Task). Abandoning a Task stops unviewed conversations immediately.
+Wave and repository conversations run until you quit their agent. Task
+conversations stay alive while the Task is open. Once a Task completes, its
+unviewed conversation closes about 15 minutes after live work settles
+(returning later continues from saved history without reopening the Task).
+Abandoning a Task stops unviewed conversations immediately.
+
+Standalone held conversations (not bound to a Task or a Wave/repository primary
+scope) stay alive after you detach or close their tab, and close about 15
+minutes after their last view leaves once any active turn finishes. Reattach
+before then to pick up live, or run `lf resume <session>` later to continue
+from saved history. Binding a running standalone conversation to a Task
+(`lf session bind <session> --task LOO-12`) moves it onto the Task's lifetime
+without restarting it.
 
 ## Four kinds of launch
 
@@ -56,13 +74,15 @@ managed by the local server vs. bare:
 
 | Kind | Started by | Terminal & lifetime | Server involvement |
 |---|---|---|---|
-| **Work session** | `lf resume --task`, interactive Graph steps, Wave/repo sessions, Desktop panes | Runs in a **holder** process; outlives windows and `lf install` | Records turns, wakes idle conversations on steers/updates |
+| **Work session** | `lf`, `lf <skill>`, `lf -i`, `lf resume` (while the server is running), `lf resume --task`, interactive Graph steps, Wave/repo sessions, Desktop panes | Runs in a **holder** process; outlives windows and `lf install`; `Ctrl+]` detaches a terminal view. Standalone conversations close ~15 minutes after their last view leaves when idle | Records turns, wakes idle conversations on steers/updates |
 | **Worker** | Headless steps of `lf task run` / `lf task auto on`, Discord Wave replies | Headless; runs in its own process | Records turns; keeps running if server stops |
-| **Chat** | `lf`, `lf <skill>`, `lf -i`, interactive `lf graph` | Runs directly in your terminal (`Ctrl+C`/`Ctrl+Z` go straight to the agent); ends with the terminal | None; reads transcript at exit |
+| **Chat** | `lf`, `lf <skill>`, `lf -i`, or bare `lf resume` when no local server is running (or stdin/stdout is not a terminal) | Runs directly in your terminal (`Ctrl+C`/`Ctrl+Z` go straight to the agent); ends with the terminal | None; reads transcript at exit |
 | **Batch** | `lf -b <skill>` | Headless child of its caller; prints output and exits | None; reads transcript at exit |
 
-A Session can change kind between launches: for example, binding a chat to a
-Task reopens it as a work session next time.
+A Session can change kind between launches: starting `lf` while the server is
+stopped runs a chat, and resuming it once the server is running opens it in a
+held work session. Binding a standalone conversation to a Task changes its
+lifetime to the Task's without restarting it.
 
 Running `lf` from inside an existing Claude Code or Codex conversation always
 starts an independent Session (never a nested child), inheriting your
@@ -134,8 +154,8 @@ In `--json`, each Session carries its `outlook` (`starting`, `coming_back`,
 `waiting_for_you`, `quit`, `could_not_start`) and a ready-to-display
 `status_line`.
 
-Chats, batches, and Wave/repo conversations do not auto-restart; reopen them
-with `lf resume`.
+Standalone conversations, chats, batches, and Wave/repo conversations do not
+auto-restart; reopen them with `lf resume`.
 
 ## See what every conversation is doing
 
@@ -213,8 +233,8 @@ lf session steers <session>                          # pending vs. delivered
   [follow-ups filed from it](work.md#file-follow-ups-from-a-task) when one
   stops at an interactive step, fails, merges or closes, not at each step. A
   steer for a child stays with the child.
-- **Chats** are never woken while idle; in a Task checkout they receive updates
-  on their next turn.
+- **Chats** (running directly without the server) are never woken while idle;
+  in a Task checkout they receive updates on their next turn.
 - **Stopped interactive Sessions** start in a held terminal when steered by
   name. A Task steer starts its stopped primary conversation and reaches each
   running Session on the Task; the next Graph step reads it too. Wave and repository steers wait for the next

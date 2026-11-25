@@ -147,7 +147,7 @@ data flow, and ends with the contracts that neighboring areas may rely on.
 ## What runs on a Machine
 
 ```bash
-lf implement                 # the agent is this command's child
+lf implement                 # runs in a holder when the server is up; direct child otherwise
 lf resume --task LOO-12      # a view of a terminal the holder keeps
 lf task run LOO-12           # starts a Graph process and returns
 ps -axo command | grep '^lf '
@@ -161,7 +161,7 @@ still has agents, and a Graph process for each running Graph. Every other `lf`
 is a command that ends.
 
 ```text
-your terminal            lf <skill> ──────────────────────────► agent        chat
+terminal (no server)     lf <skill> ──────────────────────────► agent        chat
 script or pipe           lf -b <skill> ───────────────────────► agent        batch
 
 your terminal ─ view ─┐
@@ -175,14 +175,16 @@ lf task run / lf task auto on ──────────► Graph process �
 ```
 
 Transport selects one of the [four launch kinds](../glossary.md#loopflows-words)
-before delegation. Managed launches report turns to the Machine server and
-require it at startup.
+before delegation. Interactive launches delegate to a held work session whenever
+the Machine server is reachable, and fall back to a direct foreground chat when
+no server is running (or stdin/stdout is not a terminal). Bound/primary
+conversations and Desktop panes require the server at startup.
 
 | Launch | Reports turns | Where the agent runs | Examples |
 | --- | --- | --- | --- |
-| Chat | No | In the caller's terminal, which owns its lifetime | `lf <skill>` at a terminal, including `lf research --task LOO-12` |
+| Chat | No | In the caller's terminal, which owns its lifetime | Direct interactive `lf` / `lf <skill>` / bare `lf resume` when no Machine server is running, or without a TTY |
 | Batch | No | Headless under the caller, returning output to it | `lf -b <skill>` |
-| Work session | Yes | On a PTY in a holder, independent of its viewers | Task, Wave and repository conversations, or a conversation opened in a held terminal through Desktop or a framed `lf --machine` view |
+| Work session | Yes | On a PTY in a holder, independent of its viewers (standalone chats retire 15 minutes after their last view leaves when idle) | Interactive `lf` / `lf <skill>` / bare `lf resume` when the Machine server is running; Task, Wave and repository conversations; Desktop panes and framed `lf --machine` views |
 | Worker | Yes | Headless, with its lifetime set by the step or caller | Headless steps of `lf task run` or `lf task auto on`, landing's `ci-fix`, or a Discord Wave answer |
 
 The checkout, `--task` and `LF_AS` supply Task attribution. Usage counts toward
@@ -219,8 +221,9 @@ Conversations started by a build from before held terminals run under an
 starts one now, and nothing sweeps them. `lf resume` of one, or opening its
 Desktop pane, restarts it: lf ends that process by its verified pid and birth,
 waits for it to exit and resumes the thread from provider history where any
-resume of it would run: in a held terminal for a work session, in the caller's
-terminal for a chat. One it cannot verify, or that does not exit, keeps running
+resume of it would run: in a held terminal when the server is running (always
+for a bound or primary work session), or in the caller's terminal for a bare
+chat without a server. One it cannot verify, or that does not exit, keeps running
 and the message names its pid.
 
 The [transport README](../../rust/loopflow-execution/src/transport/README.md) owns the

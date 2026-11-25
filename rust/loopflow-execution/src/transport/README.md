@@ -22,16 +22,18 @@ registry, one libghostty-vt terminal per held terminal, views, viewing
 records, queued input, the child's control requests and exit settlement.
 
 `local_session_kind` answers which `LaunchKind` runs in this process;
-`delegate` starts a held terminal for the rest and relays its view. Launches
-are bare or managed, with [four launch names](../../../../docs/glossary.md#loopflows-words).
-Only a work session goes to a held terminal; every other kind runs in its
-caller's process.
+`delegate` and `delegate_launch` start a held terminal for the rest and relay
+its view. Launches are bare or managed, with
+[four launch names](../../../../docs/glossary.md#loopflows-words). Only a work
+session goes to a held terminal; every other kind runs in its caller's process.
 
 | Command | Launch | Lifetime |
 |---|---|---|
-| Direct `lf`, skill or Graph launch in the caller's terminal or pipe, with or without `--task`, `--wave` or `LF_AS` | chat or batch | its caller or terminal |
+| Direct interactive `lf`, inline prompt, or Skill in a TTY (`lf`, `lf -a agy`, `lf <skill>`) while the Machine server is reachable | work session | held interactive terminal, independent of its viewer; standalone chats retire 15 minutes after their last view leaves when idle |
+| Direct interactive `lf`, inline prompt, Skill, or bare `lf resume` when no Machine server is reachable (or stdin/stdout is not a TTY) | chat | its caller or terminal |
+| Direct `lf -b <skill>` or piped headless launch | batch | its caller |
 | `lf -b steer <ID> TEXT` | batch; a Graph's correction turn inside a Task run is a worker | one turn, then exits |
-| Resume a chat with no message | chat | its terminal |
+| Bare `lf resume <session>` while the Machine server is reachable | work session | held interactive terminal; standalone chats retire 15 minutes after their last view leaves when idle |
 | Resume a bound or primary Session, or open a Task, Wave or repository conversation | work session | held interactive terminal, independent of its viewer |
 | Open a conversation in a held terminal through a Desktop pane or framed `lf --machine` view | work session | held interactive terminal, independent of its viewer |
 | Headless steps of `lf task run` or `lf task auto on`, and the `ci-fix` run landing starts | worker | headless until the step or repair ends |
@@ -42,11 +44,16 @@ caller's process.
 reruns them detached from their terminal so the Graph outlives the caller;
 `lf -b task run` waits for it.
 
-To open a work session from the CLI, `lf` calls `session.start` and becomes
-a view of the returned terminal. With the server unreachable it fails with
-`Loopflow server is not running; run lf server status`. The one launch
-nobody views, a Task's background conversation, goes unstarted instead and its
-Graph runs on.
+To open a held work session from the CLI, `lf` calls `session.start` and becomes
+a view of the returned terminal. Direct interactive launches and bare
+`lf resume` probe whether the Machine server accepts a connection
+(`Connection::open().is_ok()`): when it is unreachable they do not start a
+server or fail, and instead fall back directly to a foreground `Chat`. Bound
+and primary Sessions, Desktop panes, and framed `lf --machine` views still
+require the server and fail with
+`Loopflow server is not running; run lf server status` when it is unreachable.
+The one launch nobody views, a Task's background conversation, goes unstarted
+instead and its Graph runs on.
 
 In a terminal the view is a small `lf` relay, so a host that shows the
 foreground program, such as Rex, shows `lf` there, not the agent. Attaching
@@ -55,29 +62,41 @@ resume.
 
 ### Launch lifetime and Task membership
 
-A command chooses the launch kind; the checkout, `--task` and `LF_AS` choose which
-Task it belongs to. Every launch belonging to a Task counts toward its usage
-and receives its steers. Work sessions and workers report turn
-boundaries to the Machine server; chats and batches read their steers directly.
+Hosting (held PTY vs. direct foreground TTY) is separate from unviewed lifetime
+(scope-owned vs. standalone) and Task attribution (checkout, `--task`, `LF_AS`).
+Every launch belonging to a Task counts toward its usage and receives its
+steers. Work sessions and workers report turn boundaries to the Machine server;
+chats and batches read their steers directly.
+
+Direct interactive TTY launches (`lf`, `lf -a <agent>`, inline prompts, and
+Skills — after resolving the target and `move_default_agent_to_worktree`, and
+excluding Graphs, which spawn their own steps) delegate to `start_held` when
+outside a holder (`current().is_none()`), not detached, and the Machine server
+is reachable. Inside the holder `current().is_some()`, so `LaunchInput::kind()`
+returns `LaunchKind::WorkSession`, hooks run managed, and the launcher hands its
+exit record to the server and execs the provider directly. When the server is
+unreachable or stdin/stdout is not a terminal, direct launches run locally:
+`--batch` selects a batch, otherwise `--interactive`, a terminal, or no prompt
+selects a foreground chat.
 
 A Session reopened in this process runs as the kind `local_session_kind`
-returns; any other goes to a held terminal through `delegate`. Direct
-launches outside a held terminal or worker step choose between a chat and a
-batch. `--batch` selects a batch. Otherwise `--interactive`, a terminal or no
-prompt selects a chat. Reopening a Session with no message reads its binding
-and primary scope once to choose its kind. Chats reopen as chats, and bound and
-primary conversations reopen as work sessions. A Desktop pane or a framed
-`lf --machine` viewer is no terminal a chat can own, so a Session it reopens
-is a work session the holder keeps.
-An unreadable store falls back to a work session and logs a recording gap.
+returns; any other goes to a held terminal through `delegate`. Reopening a
+Session with no message reads its binding and primary scope once to choose its
+kind: bound and primary conversations always require a held work session (as do
+Desktop panes and framed `lf --machine` viewers), while bare Sessions
+(`store.is_bare`) resolve to a held work session whenever the server is
+reachable and fall back to a foreground chat only when the server is
+unreachable. An unreadable store falls back to a work session and logs a
+recording gap.
 
-### Chats at a terminal
+### Chats at a terminal (no-server fallback)
 
-Chats started with `lf` or a skill run as the terminal's foreground process-group
-leader. Closing the terminal ends them. `os_process::foreground` hands over
-the terminal before exec and takes it back after; Ctrl+Z stops lf with its
-provider and `fg` continues both. `lf resume` reopens a chat in
-its terminal too.
+When no Machine server is running (or stdin/stdout is not a terminal), direct
+`lf` launches and bare `lf resume` run as a foreground `Chat` — the terminal's
+foreground process-group leader. Closing the terminal ends them.
+`os_process::foreground` hands over the terminal before exec and takes it back
+after; Ctrl+Z stops lf with its provider and `fg` continues both. (In a held
+work session, `Ctrl+]` detaches the view instead and leaves the agent running.)
 
 ### Identity
 
@@ -267,12 +286,17 @@ replaced.
 
 ### Server restart
 
-Before `start` the server writes `<terminal>/meta.json`: the Session, the
-start's `request`, and the control key the child's requests are checked
-against. That is what lets another server instance answer the same child.
-An exit record the launcher hands over is kept beside it in
-`exit-record.json` until it is settled, and its native client's announcement
-in `native-client.json` until that client ends. A launcher that execs its
+Before `start` the server writes `<terminal>/meta.json`: the Session (when
+known at start), the start's `request`, and the control key the child's
+requests are checked against. For direct interactive launches (`lf -a agy`,
+`lf <skill>`), the `LfSession` is created inside the held child, so
+`Start.session` is `None`. Right before execing into the provider, the launcher
+sends `exit_record` over `held.sock` with the created Session ID; the server
+binds that Session in `Registry::live`, updates `meta.json`, and keeps the
+record in `exit-record.json` until settlement (so `session.attach`, `lf open`,
+and server restarts all resolve the Session, falling back to `exit-record.json`
+when `meta.session` is absent). The native client's announcement stays in
+`native-client.json` until that client ends. A launcher that execs its
 provider never announces it again, so a server that takes the terminal up
 reads it there; without it a Desktop pane would stay paused waiting for
 readiness after a restart.
@@ -558,15 +582,18 @@ unfinished native turn. Headless runs never end for want of views.
 
 Nothing else ends a conversation on its own. Removing, rebuilding or
 replacing its lf executable leaves it running on the build it started with;
-the only endings are the person quitting, Task closure, or an explicit end.
+the only endings are the person quitting, Task closure, 15-minute unviewed
+idle retirement for standalone held conversations, or an explicit end.
 Wave and repository conversations run until their agent quits. `lf resume`
 reopens provider history without starting a turn.
 
 ## Task shells and completed workspaces
 
 Desktop creates a shell once, on the Task's recorded Machine, in a terminal
-that Machine's holder keeps. The shell is plain: no hooks, no steers, and an
-`lf` typed in it starts a chat. Its private runtime in `desktop::shells` owns
+that Machine's holder keeps. The shell is plain: no hooks and no steers; an
+interactive `lf` typed in it has `held_in()` set and `current()` unset, so it
+starts its own held conversation when the server is running (or a foreground
+chat otherwise). Its private runtime in `desktop::shells` owns
 execution receipts, startup, reconnect and Close. A Linux Machine runs the
 same server and holder under systemd; no Desktop app is needed there. Machine
 routing carries the same view protocol across SSH. There is no Task shell
@@ -610,7 +637,15 @@ a completed workspace indefinitely. The Machine's scheduled cleanup pass
 reconciles viewed Tasks with that same absence window.
 
 A done Task ends its eligible conversations after fifteen minutes without
-viewing, independently of checkout retirement. The grace starts no earlier than
+viewing, independently of checkout retirement. Standalone held conversations
+(bare interactive `agent_sessions` with `bound_at IS NULL` and not a primary
+scope conversation) use the same fifteen-minute unviewed grace: when no view
+has been attached for fifteen minutes and `terminal_retention` is clear (never
+interrupting an active turn or pending request), both `lf task retire` and the
+server's one-minute recovery pass close the held terminal with the notice
+“Session closed after 15 minutes without a viewer”. Binding a running
+standalone conversation to a Task (`lf session bind`) sets `bound_at` and moves
+it onto open-Task lifetime without restarting it. For done Tasks, the grace starts no earlier than
 completion; a newly resumed, never-viewed conversation starts it at launch. A
 returning view cancels closure; leaving again starts a new grace. The cleanup
 pass checks current Task membership, completion and viewing, then ends each

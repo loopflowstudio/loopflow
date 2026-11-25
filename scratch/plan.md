@@ -271,10 +271,16 @@ delegation seam, `native_session::run_client`, `Request::ExitRecord`, and
    - Add unit + integration tests covering due bare retirement, active-turn
      protection, bound/primary exclusion, and viewer return canceling closure.
 3. **Docs & consistency sweep.**
-   - Update `docs/glossary.md`, `docs/sessions.md`, `docs/dev/index.md`, and
-     `rust/loopflow-execution/src/transport/README.md` so every reference
-     matches the held-by-default + 15-minute unviewed grace + no-server
-     fallback model.
+   - User and architecture docs drafted ahead of implementation in:
+     - `docs/sessions.md`
+     - `docs/glossary.md`
+     - `docs/server.md`
+     - `docs/dev/index.md` (and rendered `docs/dev/index.html`)
+     - `rust/loopflow-execution/src/harness/README.md`
+     - `rust/loopflow-execution/src/transport/README.md`
+     - `rust/loopflow-execution/src/harness/README.md`
+     - `rust/loopflow/src/server/README.md`
+   - Verify every reference matches the shipped implementation (especially exact close-notice text and direct `lf graph` interactive-step behavior: confirm whether interactive steps spawned by a direct terminal `lf graph` inherit held delegation or stay in the caller's terminal).
 
 ## Passed over
 

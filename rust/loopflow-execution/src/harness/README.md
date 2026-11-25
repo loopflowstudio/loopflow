@@ -31,12 +31,13 @@ The four `LaunchKind` variants match the [glossary's launch names](../../../../d
 
 Work sessions and workers report turns to the Machine server. Chats and
 batches read their steers directly and report no turn boundaries.
-Transport selects `LaunchKind` once before `delegate` carries it out. Workers run
+Transport selects `LaunchKind` once before delegation. Direct interactive TTY
+launches and bare `lf resume` run as work sessions in a holder when the Machine
+server is reachable, falling back to chats in the caller's terminal when it is
+not. Bound and primary conversations always run as work sessions. Workers run
 `lf task run` steps, the `ci-fix` run landing starts, and Discord answers for a
 Wave. In-process callers such as commit messages, PR text and replay are
-batches. Task attribution never changes this choice. Resume reads the
-Session's binding and primary scope before delegation: a chat reopens as a
-chat; a bound or primary conversation reopens as a work session.
+batches. Task attribution never changes this choice.
 `admit` creates the capture and claims its attachment before a native launch;
 headless admission claims the runtime's attachment before constructing `Launch`.
 

@@ -5,7 +5,7 @@ lf server status   # check local client server readiness and any connection erro
 lf install         # update Loopflow and keep its server registration in sync
 ```
 
-Loopflow Desktop and held Task conversations connect through a local client
+Loopflow Desktop and held conversations connect through a local client
 server on your Machine. `lf install` registers and updates it automatically:
 no manual daemon setup or Tailscale configuration needed for local use.
 `lf server status` is read-only: it reports readiness, the socket path, and the
@@ -24,8 +24,12 @@ asking; `executable_sha256` names the server's own executable.
 
 Machine commands choose **where work runs**. The client server lets local
 clients (Desktop, `lf open`, `lf resume`) reach Work and held conversations on
-this Machine. Ordinary CLI commands work without the server; opening a Task or
-Wave conversation is the exception because the server starts its held agent.
+this Machine. When the server is running, interactive `lf` launches (`lf`,
+`lf -a agy`, `lf <skill>`, and bare `lf resume`) also run in a holder so
+Desktop and other terminals can attach live without restarting the agent. When
+the server is stopped, direct interactive launches fall back to running straight
+in your terminal without error; only Task, Wave, and repository conversations
+require the server.
 
 Connected views share the server's live observations of processes, Git state,
 PR/CI status, and repository files, updating automatically as things change on

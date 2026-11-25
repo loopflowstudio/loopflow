@@ -83,3 +83,21 @@ primaries, and their hooks restart the server. Run `launchctl bootout
 gui/$UID/com.loopflow.server.<hash>`. Then check each PID's `LF_HOME` with
 `ps eww` and `kill -STOP` the holder, the server and every
 `claude --name <id>` together before sending TERM and CONT.
+
+# Reading the workflow control
+
+The Mac and iPhone bar read `task.get`: `result.overview.graph.control`
+(`{action, label}`, e.g. `resume` / `Paused: compile`) and `.sentence`, beside
+`result.row.lifecycle` and `.working_group`. Send it over the socket from
+`lf server status` with the full envelope (see
+[served launches](served-launches.md)); `task.unpause` takes `run`, and
+`task.run` needs `approve`. A Task with no Graph has `overview.graph: null`,
+and the apps show `Paused: start`, which sends `run: true`. Put the first step
+in a sub-Graph (`- inner`, with `inner.yaml` holding `- compile`,
+`- interactive: demo`) to see the grouped name: `graph.list` gives
+`workflow.start` `Run: inner`. A refusal should come back `conflict`;
+`outcome_unknown` makes the apps add "It may have happened".
+
+A private home last migrated by an earlier branch build refuses a build whose
+merge from main added a migration ("migration history or schema differs").
+Make a new home rather than reusing it.

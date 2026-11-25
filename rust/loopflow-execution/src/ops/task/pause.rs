@@ -8,9 +8,11 @@ use loopflow_storage::sqlite::{task_pause::StoppingSession, SqliteStore};
 use loopflow_storage::work::task::Task;
 
 use super::{auto, block_on_task, retirement, task_error, task_store, SharedStore};
+use crate::engine::Error;
 use crate::harness::agent_process;
-use crate::ops::OpsResult;
+use crate::ops::{OpsError, OpsResult};
 use crate::store::ownership::{task_execution_route, task_pause_route, TaskRoute};
+use crate::store::StoreError;
 
 pub(super) fn admission(task: &TaskId) -> OpsResult<File> {
     lock(retirement::lock_file(&format!("admit-{task}"))?)
@@ -19,8 +21,17 @@ pub(super) fn admission(task: &TaskId) -> OpsResult<File> {
 /// Hold through placement or provider registration so pause sees the admitted work.
 pub(crate) fn admit_launch(store: &SqliteStore, task: &TaskId) -> OpsResult<File> {
     let lock = admission(task)?;
-    store.require_task_unpaused(task).map_err(task_error)?;
+    store.require_task_unpaused(task).map_err(refused)?;
     Ok(lock)
+}
+
+/// The hold's own refusals (paused, not paused, closed) change nothing, so
+/// they carry `conflict` rather than an unknown outcome.
+fn refused(error: StoreError) -> OpsError {
+    match error {
+        StoreError::InvalidData(message) => Error::conflict(message).into(),
+        error => task_error(error),
+    }
 }
 
 fn lock(file: File) -> OpsResult<File> {
@@ -89,7 +100,7 @@ pub fn pause(issue: &str) -> OpsResult<String> {
                 agent_process::capture_worker_sessions(sqlite, &task.id).map_err(task_error)?;
             sqlite
                 .begin_task_pause(&task.id, &by, sessions)
-                .map_err(task_error)?
+                .map_err(refused)?
         };
         let finishing = finish(sqlite, &task, &sessions)?;
         Ok(match finishing {
@@ -145,10 +156,11 @@ fn finish_if_jobs_exited(store: &SqliteStore, task: &Task) -> OpsResult<()> {
             .map_err(task_error)?
             .first()
         {
-            return Err(task_error(format!(
+            return Err(Error::conflict(format!(
                 "{} is still stopping process {}; repeat `lf task pause {}` to finish cleanup",
                 task.identifier, live.pid, task.identifier
-            )));
+            ))
+            .into());
         }
     }
     settle(store, task)?;
@@ -180,14 +192,10 @@ pub fn unpause(issue: &str) -> OpsResult<()> {
         finish_if_jobs_exited(&store.sqlite, &task)?;
         let _admission = admission(&task.id)?;
         if let Some(run) = draining(&store.sqlite, &task.id)? {
-            return Err(task_error(format!(
-                "{} is still finishing {run}",
-                task.identifier
-            )));
+            return Err(
+                Error::conflict(format!("{} is still finishing {run}", task.identifier)).into(),
+            );
         }
-        store
-            .sqlite
-            .release_task_pause(&task.id)
-            .map_err(task_error)
+        store.sqlite.release_task_pause(&task.id).map_err(refused)
     })
 }

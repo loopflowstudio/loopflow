@@ -5999,6 +5999,13 @@ fn served_pause_holds_the_remote_cursor_and_status_names_unpause() {
     assert!(plan.local.task_pause(&task).unwrap().is_none());
     assert!(send(unpause()).unwrap().result.is_null());
     assert!(plan.remote.task_pause(&task).unwrap().is_none());
+    // A refusal changes nothing, so clients don't warn that it may have happened.
+    let again = send(unpause())
+        .unwrap_err()
+        .downcast::<loopflow_execution::engine::Error>()
+        .unwrap();
+    assert_eq!(again.code, loopflow_execution::engine::ErrorCode::Conflict);
+    assert_eq!(again.message, "Task is not paused");
 
     send(pause(task.as_str())).unwrap();
     executable(

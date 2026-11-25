@@ -2,7 +2,7 @@
 
 > i think we need a 'paused' state / action for tasks -- stops the task worker - and ideally e.g. any rust compiling happening becasue of it - , maybe closes the tasks session for now as well, but oesnt unassign
 
-Later direction, word for word, is in `scratch/demo-notes.md`. `scratch/explore.html` (`C1 · No Outer Pill`) is the visual reference for the Task bar.
+Later direction, word for word, is in `scratch/demo-notes.md`. `scratch/explore.html` (`C1 · No Outer Pill`) is the visual reference for the Task bar. `scratch/concept-review.html` is the current concept review at `8ad26dbb89`.
 
 ## Done when
 
@@ -10,21 +10,74 @@ During a build, `lf task pause INF-123` stops the worker, every subprocess in th
 
 ## Remaining, in order
 
-1. **C1 walkthrough on the Mac Dev app: done** (`scratch/qa.html`). ▶/⏸, a step button, the fold, Auto and ✓ with `completed · Undo` all worked on a private Machine. The chip menu and hover can't be driven from the hook, and the interrupted verify after a real GitHub merge wasn't reached. Both stay with the headless tests.
-2. **Gate.** `test(lifecycle_tests::)` (its frozen fixture's labels changed); a test for `ops::task::pause::parked` covering `lf task unpause --run` at ship-review, at a landing stop with auto off, and at end; then CI: five-harness worker matrix, Linux session enumeration, lifeline/attachment/hosted-terminal suites.
-3. **Named gaps for the PR.** Separate-session Codex 0.171.0 tool jobs can survive pause. A pause first issued after a move's payload is sent can need a retry on arrival.
-4. **Kept by decision:** paused sidebar rows may still show `Available`; the Task Session and the worker are separate (`scratch/questions.md`).
+### 1. Concept-review alignment pass (`scratch/concept-review.html`)
+
+Four conceptual mismatches remain from the C1 bar and draining-pause work. Build in three slices, starting with the Rust model slice that validates the wire and execution contracts soonest:
+
+#### Slice 1 — Rust workflow control & draining `cmd:` advancement
+- **Top-level step in every C1 chip label (`rust/loopflow-execution/src/task_graph.rs`):**
+  In C1, the chip replaces the current top-level step in the track (and stands alone when folded). Make `WorkflowControl.label` consistently name the top-level step first, appending ` · <at>` only when the inner step differs from the top-level step:
+  - Running: `build · implement` (or `verify` when top-level) — unchanged.
+  - Paused: `Paused: build · implement` (or `Paused: ship-review`, `Paused: plan` at `start` using the first step name, `Paused: end` at `end`).
+  - Pausing: `Pausing: deliver · land` (or `Pausing: verify`).
+  - Stopped/retry (`!run.running`, unpaused): `Run: build · implement` (or `Run: verify`, `Run: plan` at `start`).
+  - Waiting (`auto == Off` landing stop): `Waiting: deliver · land` (or `Waiting: land`).
+  - Interactive waiting: `ship-review · next: deliver` — unchanged.
+  - Done: `Done` — unchanged.
+  Also handle `graph == nil && held` in `TaskActions.swift` using `outline?.steps.first?.name ?? "start"` so `Paused: plan` matches `Run: plan`.
+- **`WorkflowAction::Pausing` (`task_graph.rs`, DTO fixtures, Swift `TaskWork.swift`, `TaskActions.swift`, `TaskWorkflowControls.swift`):**
+  Add `WorkflowAction::Pausing` (`"pausing"` on the wire). `TaskGraph::read` returns `WorkflowAction::Pausing` whenever `pausing == true` (`PauseStage::Stopping || (pause.is_some() && run.running)`), instead of emitting `Resume`/`Unpause`.
+  - In Swift, `TaskActions` treats `.pausing` as held (`graphHeld`) and disables the primary button directly on `control?.action == .pausing` (no cross-stream reliance on `roadmap.runControl.pausing` when `TaskGraph` is present; keep `TaskRunControl.pausing` for unopened sidebar rows / `TaskActionItems`).
+  - `TaskWorkflowControls` draws `.pausing` as a disabled amber `pause.fill` (never flipping `⏸ → ▶` while draining), and hides both `Interrupt step` and `Pause` in the chip menu while pausing.
+  - Update DTO fixtures (`tests/fixtures/dto/`), `rust/loopflow-execution/src/ops/task/lifecycle_tests.rs` (frozen labels), and Swift `DTOFixtureTests` / `TaskActionsTests`.
+  - Add unit tests for `ops::task::pause::parked` covering `lf task unpause --run` at `ship-review`, at a landing stop with auto off, and at `end`.
+- **Draining `cmd:` step advancement (`rust/loopflow/src/lf/commands/graph.rs`):**
+  In `RunningGraph::spawn` (around line 1130), check `if signalled` (killed agent) before inspecting `status.code()`. For a non-signalled draining step (such as `cmd: land`) that finishes while `self.interrupted()` is true:
+  - Exit `0` returns `StepExit::Finished` so `runner.rs` runs `settle_step`, checkpoints the cursor on the next step (or `end`), and then stops cleanly with `GraphOutcome::Interrupted` before launching the next step (check `self.interrupted()` before `sync_repository` / spawning the next step). If the drained command was the last step, `GraphOutcome::Completed` arrives at `end` while keeping `task_pauses`.
+  - Non-zero exit preserves the real step failure instead of masking it as `Interrupted`.
+  - Update `pause_during_land_finishes_the_merge_and_stops_before_the_next_step` in `rust/loopflow/tests/work/task_graph_launch_tests.rs` to assert the cursor advanced past `pr land --local` to `task sync --plan` and `unpause --run` runs only `task sync --plan`.
+
+#### Slice 2 — Swift `PendingChanges`, `Complete · Undo`, and iPhone bar parity
+- **Track `.task` stream `readAt` in `PendingChanges`:**
+  - Mac (`swift/LoopflowMac/WorkModel.swift`): store `readAt: frame.readAt` on `taskWork.values[task.id]`, call `pendingChanges.read(readingKey(part), ...)` for `case .task` frames, and call `pendingChanges.ended(...)` when the task stream ends or switches Tasks. Prevents `PendingChanges.prune()` from dropping `.pause`/`.unpause`/`.run`/`.interrupt`/`.auto` before `taskWork` catches up (eliminating the `"Reading workflow…"` chip flash).
+  - iPhone (`swift/LoopflowiOS/TaskWorkspaceView.swift`): carry `readAt: Revisions?` on `TaskWorkspaceView.Reading`, report it to `feed.pendingChanges.read("task-\(task.id)", ...)` on every frame and `feed.pendingChanges.ended("task-\(task.id)")` on `watchTask` teardown.
+- **Patch iPhone `TaskWorkspaceView` row & unify `Complete · Undo`:**
+  - In `TaskWorkspaceView`, apply `feed.pendingChanges.apply(to: [row], readAt: reading.readAt).first ?? row` before constructing `TaskActions`, so Complete/Pause/Unpause update the iPhone workflow bar immediately (preventing double-click on `✓`).
+  - On Mac (`WorkModel.swift:2911`), make the `Complete` notice's `Undo` action call `reopenTask(task)` **and** reselect `select(.task(id: task.id))` so undoing returns the window to the reopened Task.
+  - On iPhone (`TaskListView.swift:77`), post the same `"\(issue) completed · Undo"` Notice on swipe-to-complete as `TaskWorkspaceView` posts on `✓`.
+- **Move iPhone `···` out of the workflow bar (`swift/LoopflowiOS/TaskWorkspaceView.swift`):**
+  Move `metadata(row, sessions:)` from the `HStack` beside `TaskWorkflowControls` into `.toolbar { ToolbarItem(placement: .topBarTrailing) { ... } }`, giving `TaskWorkflowControls` full width on 375 pt screens and matching Mac's bar with no `···` beside `✓`.
+- Add headless Mac and iPhone Simulator tests for: `.pausing` amber `pause.fill`, `.task` stream holding `PendingChanges` until `taskWork` covers `answer`, Mac `Complete → Undo` reselection, and iPhone patched `✓` + toolbar metadata + swipe Undo.
+
+#### Slice 3 — Docs & design spec alignment
+- `docs/surfaces.md`: fix line 113 (Auto no longer carries an Undo notice; Complete carries Undo) and line 269 (update the pre-C1 pill diagram to match the C1 track).
+- `DESIGN.md`: align lines 79–82 (`Workflow line`) with C1 `TaskWorkflowControls` (lines 260–266).
+
+### 2. Gate & CI
+- Focused Rust tests (`task_graph::tests::`, `lifecycle_tests::`, `pause_during_land`, `ops::task::pause::parked`, `dto_fixtures`, `documented_commands`), `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `scripts/check_architecture.py`.
+- Focused headless Mac and iOS Simulator tests (`TaskActionsTests`, `PendingChangesTests`, `DTOFixtureTests`, `DesktopHeadlessTests`, `LoopflowiOSTests`).
+- CI covers the five-harness worker matrix, Linux session enumeration, and full lifeline/attachment/hosted-terminal suites.
+
+### 3. Named gaps for the PR
+Separate-session Codex 0.171.0 tool jobs can survive pause (`osPid: null` in app-server). A pause first issued after a move's payload is sent and before the destination checkout exists can need a retry on arrival.
+
+### 4. Kept by decision (outside LOO-1078)
+Paused sidebar rows may still show `Available · inferred` from the open primary Task Session; holistic session-vs-worker availability semantics belong to a dedicated design pass (`scratch/questions.md`). Pre-existing `task_complete` leaving a running Graph step alive until exit and the raw step UUID in `task_execution.rs:336` (#1974) remain outside this Task.
 
 ## What exists
 - **Hold.** `task_pauses(task_id PK, paused_at, paused_by, stopping_sessions)` on the execution Machine; `TaskState::Paused` derived in `sqlite/durable.rs::task_state_sql`. Pause applies only to open, started Tasks. Unpause, complete, abandon, reopen and unassign clear it; unassign refuses while `stopping_sessions` has live members. `lf task move` carries the hold in `MovedTask`; the source keeps it until arrival.
 - **Stop.** Headless workers get their own OS session; pause, interrupt and the reaper stop its verified members, including reparented jobs. Pause records the hold, the session members and a Graph stop in one transaction, then signals outside the admission and SQLite locks; a separate per-Task cleanup lock serializes cleanup with unpause and move send. In-flight mutations (`lf land`) drain; the receipt and `TaskGraph.sentence` name them.
 - **Gates.** `lf task run`, `lf task auto on`, carrier and limit recovery, and operator recommendations (`TaskActionModel` NoAction) respect the hold. Conversations do not: steers, child-Task updates and primary recovery reach the open Task Session as usual.
 - **Surfaces.** `lf task pause`, `lf task unpause [--run]` (a parked `--run` prints the Graph's sentence and the command that moves it), `lf task list --state paused`, served `task.pause` / `task.unpause` routed to the execution Machine, `TaskRunControl` refusal and `pausing` flag, Swift DTOs. Docs: `docs/work.md`, `surfaces.md`, `orchestration.md`, `sessions.md`, `troubleshooting.md`, `agent-api.md`.
-- **Task bar (C1).** `TaskWorkflowControls` on Mac and iPhone: fixed ▶/⏸, a borderless step track whose buttons start from their step, the current step grown into the menu chip, Auto and ✓ at the far end; it folds to ▶ + chip when narrow. Rust words the chip (`WorkflowControl.label`: `build · implement`, `ship-review · next: deliver`, `Paused`, `Pausing`, `Waiting: land`). ▶ sends smart unpause; the apps have no plain-unpause control. The Mac bar has no `···`. Run, Interrupt, Auto, Complete and the iPhone lifecycle actions go through `PendingChanges.make`; Complete posts `<ID> completed · Undo`.
+- **Task bar (C1).** `TaskWorkflowControls` on Mac and iPhone: fixed ▶/⏸, a borderless step track whose buttons start from their step, the current step grown into the menu chip, Auto and ✓ at the far end; it folds to ▶ + chip when narrow. Rust words the chip (`WorkflowControl.label`), ▶ sends smart unpause (no plain-unpause control in apps), the Mac bar has no `···`, and Run, Interrupt, Auto, Complete and iPhone lifecycle actions go through `PendingChanges.make`; Complete posts `<ID> completed · Undo`. (Slice 1–2 above align chip labels, `WorkflowAction::Pausing`, `.task` stream tracking, Mac Undo reselection, and iPhone toolbar parity.)
 - **Working.** Owned held Tasks stay in Working. Roadmap rows and view contents carry the same `working_group` from Rust. Active, Shipping and Paused keep their saved order, with the Mac status sort inside each group. The CLI prints the group; the iPhone Working feed shows it within the repository.
 - **Verify.** New code and feature Graphs end with automatic verify after deliver. Previously captured Graphs keep their own steps. A post-merge check that fails gets a linked fix-forward Task.
 
 ## What runs showed
+
+### C1 walkthrough on the Mac Dev app (`8ad26dbb89`, `scratch/qa.html`)
+- ▶/⏸, step buttons, narrow fold (1000/700/560 pt), Auto on/off, and ✓ with `completed · Undo` all worked on a private Machine.
+- Surfaced the gaps folded into Remaining §1: `Paused: help graph` dropped the top-level step (`forge`/`finish`/`settle`), `Pausing` showed a dimmed ▶, draining `cmd:` stayed on the finished step and ran twice on `unpause --run`, and `Complete → Undo` did not reselect the reopened Task.
 
 ### V4c Task controls (since replaced by C1)
 

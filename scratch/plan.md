@@ -2,7 +2,7 @@
 
 ## Outcome
 
-Status: built (`78bde1d766`), compressed (`c6eab6e222`), QA'd (`73abaa380c`), reviewed (`scratch/concept-review.html`), post-build review findings applied (`02b9cf8f62`), and ship-review revisions applied (`fix` renamed to `quick`; builtin `ui` removed).
+Status: built (`78bde1d766`), compressed (`c6eab6e222`), QA'd (`73abaa380c`), reviewed (`scratch/concept-review.html`), post-build review findings applied (`02b9cf8f62`), and ship-review revisions applied (`fix` renamed to `quick`; builtin `ui` removed). Remaining: the generic-wording pass under `## Passes`.
 
 
 A Task on `code`, `feature`, `pursue` or `redesign` runs `compress` and `qa`
@@ -385,7 +385,24 @@ One pass; it is prose, three YAML files, docs, and test expectations.
   - QA (`scratch/qa.html`) verified `lf graph show`, `lf list graph`, Desktop `StartFlow` labels, `lf help`, and real Claude haiku decider runs for `build`'s inner loop, bounded brief, read-only `concept-review`, and oversized brief (caught and fixed in `73abaa380c`: no-plan `implement` now blocks oversized briefs before writing any plan or code).
 - Post-build review (`02b9cf8f62`): clarified `realign.md` reversible-choice handoff and `verify.md` `<qa head>` pointer.
 - Ship-review revision: renamed `fix.yaml` to `quick.yaml` ("Build a small, clear change and land it."), removed builtin `ui.yaml` and reverted `demo.md`, and updated tests, docs, and PR #2047 copy.
-- Remaining: none.
+- Remaining: one wording pass (below).
+
+### Next pass: generic "design" wording
+
+Steer from a comment on the Task (Jack Heart, 2026-11-25), word for word:
+
+> Additional wording edit in builtin `concept-review.md` (and update its golden): remove "the product" / "product" wording (currently ~10 occurrences) so `concept-review` fits libraries, engines, compilers, protocols, and research pipelines as well as user-facing apps.
+>
+> Replace with generic framing: e.g. "the system" / "the domain" / "the concepts people work with" / "a design choice" instead of "the product", "product concepts", "product choice", and "what the product should be". Align the matching "product choice/decision" phrases in `realign.md`, `kickoff.md`, and `write-docs.md` to "design choice/decision" too.
+
+Where the words are (`rust/loopflow-definitions/src/builtins/task/skill/`):
+- `concept-review.md`: lines 2, 3, 6 (the `description`, which skill listings show), 14, 16, 48, 53, 55, 80.
+- `realign.md:25, 58, 74`; `kickoff.md:14`; `write-docs.md:28`.
+- Goldens: no `concept-review` golden exists (`tests/goldens/`); regenerate `builtin_realign.md` with `uv run python tests/goldens/update_goldens.py`.
+- `concept-review.md`'s "product concepts / code concepts" pairing (line 53–55) is the skill's core frame; keep the two-sided comparison, renamed (e.g. "the concepts people work with" vs "the code's concepts").
+- Then update this plan's prose that says "product choice" (Ownership/skills sections) to match.
+
+Done when `grep -niE "product" rust/loopflow-definitions/src/builtins/task/skill/{concept-review,realign,kickoff,write-docs}.md` prints nothing and `binary(golden_prompt)` passes.
 
 ## Post-build review findings
 

@@ -345,7 +345,7 @@ th {
   margin: 10px 0 2px;
 }
 
-.lf-decision [data-choice]::before {
+.lf-decision [data-choice][data-label]::before {
   content: none;
 }
 
@@ -763,7 +763,7 @@ button.lf-btn-quiet {
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">284</td><td class="lf-sign">+</td><td>  margin: 10px 0 2px;</td></tr>
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">285</td><td class="lf-sign">+</td><td>}</td></tr>
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">286</td><td class="lf-sign">+</td><td></td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">287</td><td class="lf-sign">+</td><td>.lf-decision [data-choice]::before {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">287</td><td class="lf-sign">+</td><td>.lf-decision [data-choice][data-label]::before {</td></tr>
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">288</td><td class="lf-sign">+</td><td>  content: none;</td></tr>
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">289</td><td class="lf-sign">+</td><td>}</td></tr>
 </tbody></table></div></div>
@@ -800,66 +800,66 @@ button.lf-btn-quiet {
 <p>Walking failure and recovery: when <code>wire::REVISION</code> bumps from 10 to 11 (or a person reloads a stale loopback tab after <code>lf server</code> restarts or stops), the WebSocket closes before <code>welcome</code>. Today <code>runtime.js</code> hardcodes <code>10</code>, drops un-ID'd <code>error</code> frames, and hides the banner unless <code>welcomed</code> was already true — so the page silently falls back to clipboard copy with no explanation.</p>
 
 <div class="lf-codeblock" data-path="rust/loopflow-definitions/src/builtins/page/runtime.js"><div class="lf-codeblock-header"><span class="lf-codeblock-path">rust/loopflow-definitions/src/builtins/page/runtime.js:239-294</span><button type="button" class="lf-btn-quiet" data-notes-toggle>Hide line notes</button></div><div class="lf-codeblock-scroll"><table class="lf-code-table"><tbody>
-<tr class="lf-hunk"><td colspan="4">@@ -0,0 +1,894 @@</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">239</td><td class="lf-sign">+</td><td>      ws = new WebSocket(url);</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">240</td><td class="lf-sign">+</td><td>    } catch (_) {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">241</td><td class="lf-sign">+</td><td>      markDisconnected(&quot;&quot;);</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">242</td><td class="lf-sign">+</td><td>      return;</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">243</td><td class="lf-sign">+</td><td>    }</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">244</td><td class="lf-sign">+</td><td>    let handshakeError = &quot;&quot;;</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">245</td><td class="lf-sign">+</td><td>    let closingForUnload = false;</td></tr>
+<tr class="lf-hunk"><td colspan="4">@@ -0,0 +1,899 @@</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">239</td><td class="lf-sign">+</td><td>      markDisconnected(&quot;Review page is missing server protocol version — rebuild with lf page build&quot;);</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">240</td><td class="lf-sign">+</td><td>      return;</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">241</td><td class="lf-sign">+</td><td>    }</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">242</td><td class="lf-sign">+</td><td>    let ws;</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">243</td><td class="lf-sign">+</td><td>    try {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">244</td><td class="lf-sign">+</td><td>      ws = new WebSocket(url);</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">245</td><td class="lf-sign">+</td><td>    } catch (_) {</td></tr>
 <tr class="lf-line-note" data-notes><td colspan="4">Reads wire::REVISION / wire::MIN_REVISION stamped by lf page build into #lf-page.</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">246</td><td class="lf-sign">+</td><td>    ws.addEventListener(&quot;open&quot;, () =&gt; {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">247</td><td class="lf-sign">+</td><td>      ws.send(</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">248</td><td class="lf-sign">+</td><td>        JSON.stringify({</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">249</td><td class="lf-sign">+</td><td>          type: &quot;hello&quot;,</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">250</td><td class="lf-sign">+</td><td>          revision: protocolRevision,</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">251</td><td class="lf-sign">+</td><td>          min_revision: protocolMinRevision,</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">252</td><td class="lf-sign">+</td><td>          client: {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">253</td><td class="lf-sign">+</td><td>            kind: &quot;page&quot;,</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">254</td><td class="lf-sign">+</td><td>            platform: &quot;browser&quot;,</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">255</td><td class="lf-sign">+</td><td>            name: &quot;review-page&quot;,</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">256</td><td class="lf-sign">+</td><td>            version: &quot;1&quot;,</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">257</td><td class="lf-sign">+</td><td>          },</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">258</td><td class="lf-sign">+</td><td>        })</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">259</td><td class="lf-sign">+</td><td>      );</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">260</td><td class="lf-sign">+</td><td>    });</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">261</td><td class="lf-sign">+</td><td>    ws.addEventListener(&quot;message&quot;, (event) =&gt; {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">262</td><td class="lf-sign">+</td><td>      let msg;</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">263</td><td class="lf-sign">+</td><td>      try {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">264</td><td class="lf-sign">+</td><td>        msg = JSON.parse(event.data);</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">265</td><td class="lf-sign">+</td><td>      } catch (_) {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">266</td><td class="lf-sign">+</td><td>        return;</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">267</td><td class="lf-sign">+</td><td>      }</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">268</td><td class="lf-sign">+</td><td>      if (msg.type === &quot;welcome&quot;) {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">269</td><td class="lf-sign">+</td><td>        socket = ws;</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">270</td><td class="lf-sign">+</td><td>        hostMode = &quot;loopback&quot;;</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">271</td><td class="lf-sign">+</td><td>        serverDisconnected = false;</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">246</td><td class="lf-sign">+</td><td>      markDisconnected(&quot;&quot;);</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">247</td><td class="lf-sign">+</td><td>      return;</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">248</td><td class="lf-sign">+</td><td>    }</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">249</td><td class="lf-sign">+</td><td>    let handshakeError = &quot;&quot;;</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">250</td><td class="lf-sign">+</td><td>    let closingForUnload = false;</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">251</td><td class="lf-sign">+</td><td>    ws.addEventListener(&quot;open&quot;, () =&gt; {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">252</td><td class="lf-sign">+</td><td>      ws.send(</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">253</td><td class="lf-sign">+</td><td>        JSON.stringify({</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">254</td><td class="lf-sign">+</td><td>          type: &quot;hello&quot;,</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">255</td><td class="lf-sign">+</td><td>          revision: protocolRevision,</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">256</td><td class="lf-sign">+</td><td>          min_revision: protocolMinRevision,</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">257</td><td class="lf-sign">+</td><td>          client: {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">258</td><td class="lf-sign">+</td><td>            kind: &quot;page&quot;,</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">259</td><td class="lf-sign">+</td><td>            platform: &quot;browser&quot;,</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">260</td><td class="lf-sign">+</td><td>            name: &quot;review-page&quot;,</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">261</td><td class="lf-sign">+</td><td>            version: &quot;1&quot;,</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">262</td><td class="lf-sign">+</td><td>          },</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">263</td><td class="lf-sign">+</td><td>        })</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">264</td><td class="lf-sign">+</td><td>      );</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">265</td><td class="lf-sign">+</td><td>    });</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">266</td><td class="lf-sign">+</td><td>    ws.addEventListener(&quot;message&quot;, (event) =&gt; {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">267</td><td class="lf-sign">+</td><td>      let msg;</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">268</td><td class="lf-sign">+</td><td>      try {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">269</td><td class="lf-sign">+</td><td>        msg = JSON.parse(event.data);</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">270</td><td class="lf-sign">+</td><td>      } catch (_) {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">271</td><td class="lf-sign">+</td><td>        return;</td></tr>
 <tr class="lf-line-note" data-notes><td colspan="4">Captures un-ID'd handshake error frames and shows the server message immediately.</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">272</td><td class="lf-sign">+</td><td>        hideBanner();</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">273</td><td class="lf-sign">+</td><td>        renderStrip();</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">274</td><td class="lf-sign">+</td><td>        return;</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">275</td><td class="lf-sign">+</td><td>      }</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">276</td><td class="lf-sign">+</td><td>      if (msg.type === &quot;error&quot; &amp;&amp; !msg.id) {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">277</td><td class="lf-sign">+</td><td>        handshakeError = msg.message || msg.code || &quot;Loopflow server rejected connection&quot;;</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">278</td><td class="lf-sign">+</td><td>        showBanner(handshakeError);</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">272</td><td class="lf-sign">+</td><td>      }</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">273</td><td class="lf-sign">+</td><td>      if (msg.type === &quot;welcome&quot;) {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">274</td><td class="lf-sign">+</td><td>        socket = ws;</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">275</td><td class="lf-sign">+</td><td>        hostMode = &quot;loopback&quot;;</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">276</td><td class="lf-sign">+</td><td>        serverDisconnected = false;</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">277</td><td class="lf-sign">+</td><td>        hideBanner();</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">278</td><td class="lf-sign">+</td><td>        renderStrip();</td></tr>
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">279</td><td class="lf-sign">+</td><td>        return;</td></tr>
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">280</td><td class="lf-sign">+</td><td>      }</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">281</td><td class="lf-sign">+</td><td>      if ((msg.type === &quot;response&quot; || msg.type === &quot;error&quot;) &amp;&amp; msg.id &amp;&amp; pending.has(msg.id)) {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">282</td><td class="lf-sign">+</td><td>        const entry = pending.get(msg.id);</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">283</td><td class="lf-sign">+</td><td>        pending.delete(msg.id);</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">284</td><td class="lf-sign">+</td><td>        if (msg.type === &quot;response&quot;) entry.resolve(msg.result);</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">285</td><td class="lf-sign">+</td><td>        else entry.reject(new Error(msg.message || msg.code || &quot;Server error&quot;));</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">286</td><td class="lf-sign">+</td><td>      }</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">287</td><td class="lf-sign">+</td><td>    });</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">288</td><td class="lf-sign">+</td><td>    ws.addEventListener(&quot;close&quot;, () =&gt; {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">289</td><td class="lf-sign">+</td><td>      if (socket === ws) socket = null;</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">290</td><td class="lf-sign">+</td><td>      for (const [, entry] of pending) {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">291</td><td class="lf-sign">+</td><td>        entry.reject(new Error(&quot;Connection closed&quot;));</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">292</td><td class="lf-sign">+</td><td>      }</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">281</td><td class="lf-sign">+</td><td>      if (msg.type === &quot;error&quot; &amp;&amp; !msg.id) {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">282</td><td class="lf-sign">+</td><td>        handshakeError = msg.message || msg.code || &quot;Loopflow server rejected connection&quot;;</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">283</td><td class="lf-sign">+</td><td>        showBanner(handshakeError);</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">284</td><td class="lf-sign">+</td><td>        return;</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">285</td><td class="lf-sign">+</td><td>      }</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">286</td><td class="lf-sign">+</td><td>      if ((msg.type === &quot;response&quot; || msg.type === &quot;error&quot;) &amp;&amp; msg.id &amp;&amp; pending.has(msg.id)) {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">287</td><td class="lf-sign">+</td><td>        const entry = pending.get(msg.id);</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">288</td><td class="lf-sign">+</td><td>        pending.delete(msg.id);</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">289</td><td class="lf-sign">+</td><td>        if (msg.type === &quot;response&quot;) entry.resolve(msg.result);</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">290</td><td class="lf-sign">+</td><td>        else entry.reject(new Error(msg.message || msg.code || &quot;Server error&quot;));</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">291</td><td class="lf-sign">+</td><td>      }</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">292</td><td class="lf-sign">+</td><td>    });</td></tr>
 <tr class="lf-line-note" data-notes><td colspan="4">Shows handshake error or truthful disconnect banner on any loopback close, even before welcome.</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">293</td><td class="lf-sign">+</td><td>      pending.clear();</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">294</td><td class="lf-sign">+</td><td>      if (closingForUnload) return;</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">293</td><td class="lf-sign">+</td><td>    ws.addEventListener(&quot;close&quot;, () =&gt; {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">294</td><td class="lf-sign">+</td><td>      if (socket === ws) socket = null;</td></tr>
 </tbody></table></div></div>
 
 <div class="lf-before-after">
@@ -883,18 +883,18 @@ button.lf-btn-quiet {
 <p>Walking recovery: a reviewer clicks <strong>File Task now</strong> (<code>Filed LOO-1200</code>), adds a note, hits <strong>Clear</strong> to rewrite the note, and then presses <code>⌘↩</code>. Because <strong>Clear</strong> shares <code>clearDrafts()</code> with <code>submitReply()</code>, it flips <code>reported: true</code> on the receipt even though nothing was sent — so <code>[already ran: task.create → LOO-1200]</code> disappears from the steer.</p>
 
 <div class="lf-codeblock" data-path="rust/loopflow-definitions/src/builtins/page/runtime.js"><div class="lf-codeblock-header"><span class="lf-codeblock-path">rust/loopflow-definitions/src/builtins/page/runtime.js:801-810</span><button type="button" class="lf-btn-quiet" data-notes-toggle>Hide line notes</button></div><div class="lf-codeblock-scroll"><table class="lf-code-table"><tbody>
-<tr class="lf-hunk"><td colspan="4">@@ -0,0 +1,894 @@</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">801</td><td class="lf-sign">+</td><td>      () =&gt; {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">802</td><td class="lf-sign">+</td><td>        stripStatusText = serverDisconnected</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">803</td><td class="lf-sign">+</td><td>          ? &quot;Copied reply (server disconnected)&quot;</td></tr>
+<tr class="lf-hunk"><td colspan="4">@@ -0,0 +1,899 @@</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">801</td><td class="lf-sign">+</td><td>          renderStrip();</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">802</td><td class="lf-sign">+</td><td>        }</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">803</td><td class="lf-sign">+</td><td>      );</td></tr>
 <tr class="lf-line-note" data-notes><td colspan="4">Marks receipts reported only when markReported is true (actual send), leaving Clear drafts separate.</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">804</td><td class="lf-sign">+</td><td>          : &quot;Copied reply&quot;;</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">805</td><td class="lf-sign">+</td><td>        stripStatusKind = &quot;ok&quot;;</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">806</td><td class="lf-sign">+</td><td>        renderStrip();</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">807</td><td class="lf-sign">+</td><td>      },</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">808</td><td class="lf-sign">+</td><td>      (err) =&gt; {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">809</td><td class="lf-sign">+</td><td>        stripStatusText = &quot;Copy failed: &quot; + errorMessage(err);</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">810</td><td class="lf-sign">+</td><td>        stripStatusKind = &quot;error&quot;;</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">804</td><td class="lf-sign">+</td><td>      return;</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">805</td><td class="lf-sign">+</td><td>    }</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">806</td><td class="lf-sign">+</td><td></td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">807</td><td class="lf-sign">+</td><td>    copyText(message).then(</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">808</td><td class="lf-sign">+</td><td>      () =&gt; {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">809</td><td class="lf-sign">+</td><td>        stripStatusText = serverDisconnected</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">810</td><td class="lf-sign">+</td><td>          ? &quot;Copied reply (server disconnected)&quot;</td></tr>
 </tbody></table></div></div>
 
 <div class="lf-before-after">
@@ -940,7 +940,7 @@ button.lf-btn-quiet {
   <textarea rows="3" placeholder="Optional notes…"></textarea>
 </div>
 </main>
-<script type="application/json" id="lf-page">{"work":{"kind":"task","issue":"LOO-1109"},"directory":"/Users/jack/src/loopflow.loo-1109-human-comprehension-review","base":"6d617de68638439a144601b3cb8cbaf6ec678630","head":"89be14c594","path":"scratch/concept-review.html","build_id":"66438615d395874d","protocol":{"revision":10,"min_revision":10}}</script>
+<script type="application/json" id="lf-page">{"work":{"kind":"task","issue":"LOO-1109"},"directory":"/Users/jack/src/loopflow.loo-1109-human-comprehension-review","base":"6d617de68638439a144601b3cb8cbaf6ec678630","head":"7f5a53a745","path":"scratch/concept-review.html","build_id":"83a8f896a7e0b6ae","protocol":{"revision":10,"min_revision":10}}</script>
 <script>
 (function () {
   "use strict";
@@ -1118,7 +1118,12 @@ button.lf-btn-quiet {
     } catch (_) {}
   }
 
+  // `persist` marks an edit: the last send's sentence no longer describes the queue.
   function refresh(persist) {
+    if (persist) {
+      stripStatusText = "";
+      stripStatusKind = "";
+    }
     syncControlsFromState();
     renderNotesTray();
     renderHighlights();
@@ -1357,6 +1362,7 @@ button.lf-btn-quiet {
         const answer = input.value;
         if (!oneLine(answer)) delete state.questions[qid];
         else state.questions[qid] = { label, answer };
+        stripStatusText = "";
         saveState();
         renderStrip();
       });
@@ -1728,9 +1734,10 @@ button.lf-btn-quiet {
           const sentence =
             (result && result.delivery && result.delivery.sentence) ||
             "Steer saved.";
+          clearDrafts({ markReported: true });
           stripStatusText = sentence;
           stripStatusKind = "ok";
-          clearDrafts({ markReported: true });
+          renderStrip();
         },
         (err) => {
           stripStatusText = errorMessage(err);
@@ -1795,8 +1802,6 @@ button.lf-btn-quiet {
 
     if (items.length > 0) {
       const clearBtn = makeButton("Clear", () => {
-        stripStatusText = "";
-        stripStatusKind = "";
         clearDrafts({ markReported: false });
       }, "lf-btn-quiet");
       const sendLabel =

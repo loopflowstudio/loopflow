@@ -556,10 +556,10 @@ button).
 
 ### Remaining (later Graph steps)
 
-- **qa (Chrome pass 2 + Dev Desktop):** verify Pass 5 fixes in Chrome (plain
-  `data-label` control + rich `<p>` question without duplicate heading, `Clear`
-  preserving `[already ran: …]`, truthful disconnect/stale-token banner) and
-  Dev Desktop live if reachable.
+- **Dev Desktop live run:** not reached by qa pass 2 (headless). Chrome pass 2
+  (`scratch/qa.html`) verified the Pass 5 fixes and fixed three more: decision
+  title drawn twice (CSS specificity), restarts losing drafts and receipts
+  (loopback port now stable per lf home), and a stale "Saved …" strip sentence.
 - **gate:** `cargo test -p loopflow --test page_tests` and the `page.rs` unit
   tests added in Pass 5 were not rerun at realign; gate/CI runs them.
 - Open questions 1–8 in `scratch/questions.md` stay for review (notably which

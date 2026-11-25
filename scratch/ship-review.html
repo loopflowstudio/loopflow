@@ -345,7 +345,7 @@ th {
   margin: 10px 0 2px;
 }
 
-.lf-decision [data-choice]::before {
+.lf-decision [data-choice][data-label]::before {
   content: none;
 }
 
@@ -591,66 +591,66 @@ button.lf-btn-quiet {
 <p>The loopback carrier in <code>lf server</code> reuses the existing Machine WebSocket protocol (<code>Messages&lt;S&gt;</code> and <code>service::session</code>) behind a per-server 32-byte random in-memory token, exact <code>Host</code> verification, and same-origin <code>Origin</code> verification on upgrades:</p>
 
 <div class="lf-codeblock" data-path="rust/loopflow/src/server/loopback.rs"><div class="lf-codeblock-header"><span class="lf-codeblock-path">rust/loopflow/src/server/loopback.rs:209-264</span><button type="button" class="lf-btn-quiet" data-notes-toggle>Hide line notes</button></div><div class="lf-codeblock-scroll"><table class="lf-code-table"><tbody>
-<tr class="lf-hunk"><td colspan="4">@@ -0,0 +1,701 @@</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">209</td><td class="lf-sign">+</td><td>fn header_str(req: &amp;Request&lt;Incoming&gt;, name: hyper::header::HeaderName) -&gt; Option&lt;&amp;str&gt; {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">210</td><td class="lf-sign">+</td><td>    req.headers()</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">211</td><td class="lf-sign">+</td><td>        .get(name)</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">212</td><td class="lf-sign">+</td><td>        .and_then(|value| value.to_str().ok())</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">213</td><td class="lf-sign">+</td><td>}</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">214</td><td class="lf-sign">+</td><td></td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">215</td><td class="lf-sign">+</td><td>async fn handle_request(req: Request&lt;Incoming&gt;, state: Arc&lt;State&gt;) -&gt; Response&lt;Full&lt;Bytes&gt;&gt; {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">216</td><td class="lf-sign">+</td><td>    if req.method() != Method::GET {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">217</td><td class="lf-sign">+</td><td>        return empty(StatusCode::NOT_FOUND);</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">218</td><td class="lf-sign">+</td><td>    }</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">219</td><td class="lf-sign">+</td><td>    // DNS rebinding defense: Host must be exactly `127.0.0.1:&lt;port&gt;`.</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">220</td><td class="lf-sign">+</td><td>    if header_str(&amp;req, HOST) != Some(state.handle.expected_host().as_str()) {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">221</td><td class="lf-sign">+</td><td>        return empty(StatusCode::NOT_FOUND);</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">222</td><td class="lf-sign">+</td><td>    }</td></tr>
+<tr class="lf-hunk"><td colspan="4">@@ -0,0 +1,740 @@</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">209</td><td class="lf-sign">+</td><td>    executable: Arc&lt;String&gt;,</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">210</td><td class="lf-sign">+</td><td>    slots: Arc&lt;Semaphore&gt;,</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">211</td><td class="lf-sign">+</td><td>    clients: Clients,</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">212</td><td class="lf-sign">+</td><td>    tickets: Arc&lt;Tickets&gt;,</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">213</td><td class="lf-sign">+</td><td>    subscriptions: Arc&lt;Subscriptions&gt;,</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">214</td><td class="lf-sign">+</td><td>    terminals: Option&lt;Arc&lt;Registry&gt;&gt;,</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">215</td><td class="lf-sign">+</td><td>}</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">216</td><td class="lf-sign">+</td><td></td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">217</td><td class="lf-sign">+</td><td>fn empty(status: StatusCode) -&gt; Response&lt;Full&lt;Bytes&gt;&gt; {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">218</td><td class="lf-sign">+</td><td>    Response::builder()</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">219</td><td class="lf-sign">+</td><td>        .status(status)</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">220</td><td class="lf-sign">+</td><td>        .body(Full::new(Bytes::new()))</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">221</td><td class="lf-sign">+</td><td>        .expect(&quot;empty HTTP response is valid&quot;)</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">222</td><td class="lf-sign">+</td><td>}</td></tr>
 <tr class="lf-line-note" data-notes><td colspan="4">DNS rebinding defense: every request must carry Host: 127.0.0.1:&lt;port&gt;, otherwise 404 with empty body.</td></tr>
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">223</td><td class="lf-sign">+</td><td></td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">224</td><td class="lf-sign">+</td><td>    // Route structure: `/&lt;token&gt;/machine` or `/&lt;token&gt;/f/&lt;absolute path&gt;`.</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">225</td><td class="lf-sign">+</td><td>    let path = req.uri().path();</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">226</td><td class="lf-sign">+</td><td>    let Some(without_leading) = path.strip_prefix(&#39;/&#39;) else {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">227</td><td class="lf-sign">+</td><td>        return empty(StatusCode::NOT_FOUND);</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">228</td><td class="lf-sign">+</td><td>    };</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">229</td><td class="lf-sign">+</td><td>    let Some((token, rest)) = without_leading.split_once(&#39;/&#39;) else {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">230</td><td class="lf-sign">+</td><td>        return empty(StatusCode::NOT_FOUND);</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">231</td><td class="lf-sign">+</td><td>    };</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">232</td><td class="lf-sign">+</td><td>    if !state.handle.matches_token(token) {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">233</td><td class="lf-sign">+</td><td>        return empty(StatusCode::NOT_FOUND);</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">234</td><td class="lf-sign">+</td><td>    }</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">224</td><td class="lf-sign">+</td><td>fn header_str(req: &amp;Request&lt;Incoming&gt;, name: hyper::header::HeaderName) -&gt; Option&lt;&amp;str&gt; {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">225</td><td class="lf-sign">+</td><td>    req.headers()</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">226</td><td class="lf-sign">+</td><td>        .get(name)</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">227</td><td class="lf-sign">+</td><td>        .and_then(|value| value.to_str().ok())</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">228</td><td class="lf-sign">+</td><td>}</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">229</td><td class="lf-sign">+</td><td></td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">230</td><td class="lf-sign">+</td><td>async fn handle_request(req: Request&lt;Incoming&gt;, state: Arc&lt;State&gt;) -&gt; Response&lt;Full&lt;Bytes&gt;&gt; {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">231</td><td class="lf-sign">+</td><td>    if req.method() != Method::GET {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">232</td><td class="lf-sign">+</td><td>        return empty(StatusCode::NOT_FOUND);</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">233</td><td class="lf-sign">+</td><td>    }</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">234</td><td class="lf-sign">+</td><td>    // DNS rebinding defense: Host must be exactly `127.0.0.1:&lt;port&gt;`.</td></tr>
 <tr class="lf-line-note" data-notes><td colspan="4">Constant-time token check; the token lives only in memory and is never printed by lf server status.</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">235</td><td class="lf-sign">+</td><td></td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">236</td><td class="lf-sign">+</td><td>    if rest == &quot;machine&quot; {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">237</td><td class="lf-sign">+</td><td>        return handle_websocket(req, state);</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">238</td><td class="lf-sign">+</td><td>    }</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">239</td><td class="lf-sign">+</td><td>    if let Some(encoded_file) = rest.strip_prefix(&quot;f/&quot;) {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">240</td><td class="lf-sign">+</td><td>        return handle_file(encoded_file).await;</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">241</td><td class="lf-sign">+</td><td>    }</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">242</td><td class="lf-sign">+</td><td></td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">243</td><td class="lf-sign">+</td><td>    empty(StatusCode::NOT_FOUND)</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">244</td><td class="lf-sign">+</td><td>}</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">245</td><td class="lf-sign">+</td><td></td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">246</td><td class="lf-sign">+</td><td>fn handle_websocket(req: Request&lt;Incoming&gt;, state: Arc&lt;State&gt;) -&gt; Response&lt;Full&lt;Bytes&gt;&gt; {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">247</td><td class="lf-sign">+</td><td>    if req.uri().query().is_some() {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">235</td><td class="lf-sign">+</td><td>    if header_str(&amp;req, HOST) != Some(state.handle.expected_host().as_str()) {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">236</td><td class="lf-sign">+</td><td>        return empty(StatusCode::NOT_FOUND);</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">237</td><td class="lf-sign">+</td><td>    }</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">238</td><td class="lf-sign">+</td><td></td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">239</td><td class="lf-sign">+</td><td>    // Route structure: `/&lt;token&gt;/machine` or `/&lt;token&gt;/f/&lt;absolute path&gt;`.</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">240</td><td class="lf-sign">+</td><td>    let path = req.uri().path();</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">241</td><td class="lf-sign">+</td><td>    let Some(without_leading) = path.strip_prefix(&#39;/&#39;) else {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">242</td><td class="lf-sign">+</td><td>        return empty(StatusCode::NOT_FOUND);</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">243</td><td class="lf-sign">+</td><td>    };</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">244</td><td class="lf-sign">+</td><td>    let Some((token, rest)) = without_leading.split_once(&#39;/&#39;) else {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">245</td><td class="lf-sign">+</td><td>        return empty(StatusCode::NOT_FOUND);</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">246</td><td class="lf-sign">+</td><td>    };</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">247</td><td class="lf-sign">+</td><td>    if !state.handle.matches_token(token) {</td></tr>
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">248</td><td class="lf-sign">+</td><td>        return empty(StatusCode::NOT_FOUND);</td></tr>
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">249</td><td class="lf-sign">+</td><td>    }</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">250</td><td class="lf-sign">+</td><td>    // Browser cross-origin WebSocket defense: Origin must be exact same-origin.</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">251</td><td class="lf-sign">+</td><td>    if header_str(&amp;req, ORIGIN) != Some(state.handle.expected_origin().as_str()) {</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">252</td><td class="lf-sign">+</td><td>        return empty(StatusCode::NOT_FOUND);</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">250</td><td class="lf-sign">+</td><td></td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">251</td><td class="lf-sign">+</td><td>    if rest == &quot;machine&quot; {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">252</td><td class="lf-sign">+</td><td>        return handle_websocket(req, state);</td></tr>
 <tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">253</td><td class="lf-sign">+</td><td>    }</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">254</td><td class="lf-sign">+</td><td></td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">255</td><td class="lf-sign">+</td><td>    let is_upgrade =</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">256</td><td class="lf-sign">+</td><td>        header_str(&amp;req, UPGRADE).is_some_and(|value| value.eq_ignore_ascii_case(&quot;websocket&quot;));</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">257</td><td class="lf-sign">+</td><td>    let has_connection_upgrade = req</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">258</td><td class="lf-sign">+</td><td>        .headers()</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">259</td><td class="lf-sign">+</td><td>        .get_all(CONNECTION)</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">260</td><td class="lf-sign">+</td><td>        .iter()</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">261</td><td class="lf-sign">+</td><td>        .filter_map(|value| value.to_str().ok())</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">254</td><td class="lf-sign">+</td><td>    if let Some(encoded_file) = rest.strip_prefix(&quot;f/&quot;) {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">255</td><td class="lf-sign">+</td><td>        return handle_file(encoded_file).await;</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">256</td><td class="lf-sign">+</td><td>    }</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">257</td><td class="lf-sign">+</td><td></td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">258</td><td class="lf-sign">+</td><td>    empty(StatusCode::NOT_FOUND)</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">259</td><td class="lf-sign">+</td><td>}</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">260</td><td class="lf-sign">+</td><td></td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">261</td><td class="lf-sign">+</td><td>fn handle_websocket(req: Request&lt;Incoming&gt;, state: Arc&lt;State&gt;) -&gt; Response&lt;Full&lt;Bytes&gt;&gt; {</td></tr>
 <tr class="lf-line-note" data-notes><td colspan="4">Browser cross-origin WebSocket defense: foreign origins cannot upgrade even if they guess a port.</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">262</td><td class="lf-sign">+</td><td>        .flat_map(|value| value.split(&#39;,&#39;))</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">263</td><td class="lf-sign">+</td><td>        .any(|token| token.trim().eq_ignore_ascii_case(&quot;upgrade&quot;));</td></tr>
-<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">264</td><td class="lf-sign">+</td><td>    let valid_version = header_str(&amp;req, SEC_WEBSOCKET_VERSION) == Some(&quot;13&quot;);</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">262</td><td class="lf-sign">+</td><td>    if req.uri().query().is_some() {</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">263</td><td class="lf-sign">+</td><td>        return empty(StatusCode::NOT_FOUND);</td></tr>
+<tr class="lf-add"><td class="lf-ln"></td><td class="lf-ln">264</td><td class="lf-sign">+</td><td>    }</td></tr>
 </tbody></table></div></div>
 
 <p><code>lf page open</code> routes by caller context so headless Graph steps never pop browser windows while interactive Rex and Desktop sessions land where you already work:</p>
@@ -967,7 +967,7 @@ button.lf-btn-quiet {
   <textarea rows="3" placeholder="Optional notes…"></textarea>
 </div>
 </main>
-<script type="application/json" id="lf-page">{"work":{"kind":"task","issue":"LOO-1109"},"directory":"/Users/jack/src/loopflow.loo-1109-human-comprehension-review","base":"6d617de68638439a144601b3cb8cbaf6ec678630","head":"89be14c594","path":"scratch/ship-review.html","build_id":"7d3e90edbabbfea7","protocol":{"revision":10,"min_revision":10}}</script>
+<script type="application/json" id="lf-page">{"work":{"kind":"task","issue":"LOO-1109"},"directory":"/Users/jack/src/loopflow.loo-1109-human-comprehension-review","base":"6d617de68638439a144601b3cb8cbaf6ec678630","head":"7f5a53a745","path":"scratch/ship-review.html","build_id":"24c6b4da38dd190d","protocol":{"revision":10,"min_revision":10}}</script>
 <script>
 (function () {
   "use strict";
@@ -1145,7 +1145,12 @@ button.lf-btn-quiet {
     } catch (_) {}
   }
 
+  // `persist` marks an edit: the last send's sentence no longer describes the queue.
   function refresh(persist) {
+    if (persist) {
+      stripStatusText = "";
+      stripStatusKind = "";
+    }
     syncControlsFromState();
     renderNotesTray();
     renderHighlights();
@@ -1384,6 +1389,7 @@ button.lf-btn-quiet {
         const answer = input.value;
         if (!oneLine(answer)) delete state.questions[qid];
         else state.questions[qid] = { label, answer };
+        stripStatusText = "";
         saveState();
         renderStrip();
       });
@@ -1755,9 +1761,10 @@ button.lf-btn-quiet {
           const sentence =
             (result && result.delivery && result.delivery.sentence) ||
             "Steer saved.";
+          clearDrafts({ markReported: true });
           stripStatusText = sentence;
           stripStatusKind = "ok";
-          clearDrafts({ markReported: true });
+          renderStrip();
         },
         (err) => {
           stripStatusText = errorMessage(err);
@@ -1822,8 +1829,6 @@ button.lf-btn-quiet {
 
     if (items.length > 0) {
       const clearBtn = makeButton("Clear", () => {
-        stripStatusText = "";
-        stripStatusKind = "";
         clearDrafts({ markReported: false });
       }, "lf-btn-quiet");
       const sendLabel =

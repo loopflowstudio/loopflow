@@ -252,7 +252,7 @@ pub(super) async fn run() -> Result<()> {
     let tickets = Arc::new(Tickets::default());
     let subscriptions = Arc::new(Subscriptions::default());
     let (remote_control, remote_requests) = mpsc::channel(8);
-    let (loopback_server, loopback_handle) = super::loopback::Loopback::bind().await?;
+    let (loopback_server, loopback_handle) = super::loopback::Loopback::bind(&path).await?;
     let local_authority = LocalAuthority {
         remote: remote_control,
         loopback: loopback_handle,
@@ -2528,7 +2528,8 @@ mod tests {
         drop(UnixStream::connect(&path).await.unwrap());
         let mut probe = UnixStream::connect(&path).await.unwrap();
         let (remote_control, _remote_requests) = mpsc::channel(1);
-        let (_loopback, loopback_handle) = super::super::loopback::Loopback::bind().await.unwrap();
+        let (_loopback, loopback_handle) =
+            super::super::loopback::Loopback::bind(&path).await.unwrap();
         let serving = local(
             listener,
             "incarnation".into(),

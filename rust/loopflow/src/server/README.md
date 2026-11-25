@@ -133,8 +133,9 @@ over WebSocket on the host's Tailscale address: one text frame per message on
 bytes. Setup saves the endpoint, owner and enabled choice in Machine-local
 `mobile.yaml`.
 
-The loopback carrier (`loopback.rs`, `lf page open`) binds an ephemeral
-`127.0.0.1:0` listener with a 32-byte random token held only in memory (never
+The loopback carrier (`loopback.rs`, `lf page open`) binds a `127.0.0.1`
+listener (a port derived from the socket path, so pages keep their origin and
+`localStorage` across restarts; ephemeral when taken) with a 32-byte random token held only in memory (never
 written to disk or printed by `lf server status`). `GET /<token>/f/<absolute path>`
 serves files capped at `MAX_BULK` with `Referrer-Policy: no-referrer`,
 `Cache-Control: no-store`, `X-Content-Type-Options: nosniff`, and (for HTML)

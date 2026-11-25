@@ -82,7 +82,7 @@ lf --machine mini -a codex implement
 ## Local client server
 
 The local Loopflow server listens on a private Unix socket accessible only to
-your OS user, plus a loopback-only HTTP/WebSocket listener (`127.0.0.1:0`) for
+your OS user, plus a loopback-only HTTP/WebSocket listener (`127.0.0.1`) for
 [browser review pages](surfaces.md#review-pages). Anyone admitted to a held
 terminal or a loopback page connection acts with your OS user's local Machine
 authority.

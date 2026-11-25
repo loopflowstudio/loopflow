@@ -174,7 +174,12 @@
     } catch (_) {}
   }
 
+  // `persist` marks an edit: the last send's sentence no longer describes the queue.
   function refresh(persist) {
+    if (persist) {
+      stripStatusText = "";
+      stripStatusKind = "";
+    }
     syncControlsFromState();
     renderNotesTray();
     renderHighlights();
@@ -413,6 +418,7 @@
         const answer = input.value;
         if (!oneLine(answer)) delete state.questions[qid];
         else state.questions[qid] = { label, answer };
+        stripStatusText = "";
         saveState();
         renderStrip();
       });
@@ -784,9 +790,10 @@
           const sentence =
             (result && result.delivery && result.delivery.sentence) ||
             "Steer saved.";
+          clearDrafts({ markReported: true });
           stripStatusText = sentence;
           stripStatusKind = "ok";
-          clearDrafts({ markReported: true });
+          renderStrip();
         },
         (err) => {
           stripStatusText = errorMessage(err);
@@ -851,8 +858,6 @@
 
     if (items.length > 0) {
       const clearBtn = makeButton("Clear", () => {
-        stripStatusText = "";
-        stripStatusKind = "";
         clearDrafts({ markReported: false });
       }, "lf-btn-quiet");
       const sendLabel =

@@ -88,7 +88,8 @@ setting and never re-register it behind your back.
 ## Browser review pages
 
 Beside the private Unix socket, `lf server` listens on a loopback-only TCP port
-(`127.0.0.1:0`) with a 32-byte random token held only in memory. Running
+(`127.0.0.1`, the same port each start when it is free) with a 32-byte random
+token held only in memory. Running
 `lf page open scratch/ship-review.html` outside Desktop asks the server over
 the local Unix socket for a capability URL
 (`http://127.0.0.1:<port>/<token>/f/<path>`) and opens it in your browser so
@@ -97,9 +98,10 @@ the local Unix socket for a capability URL
 - `lf server status` never prints the token, and the token is never written to
   disk.
 - Restarting or stopping `lf server` (including during `lf install`) rotates
-  the port and token or closes the socket. Any open browser tab shows a banner
+  the token. Any open browser tab shows a banner
   (`Loopflow server disconnected — run lf page open <path>`) and falls back to
-  copying replies to the clipboard until reopened.
+  copying replies to the clipboard until reopened. The port stays the same, so
+  the reopened page keeps your unsent notes and the receipts of actions it ran.
 - Loopback serving covers checkouts on this Machine. For a Task owned by
   another Machine, open the page in Loopflow Desktop.
 

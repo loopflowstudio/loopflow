@@ -8,7 +8,45 @@ img{max-width:100%;border:1px solid #ddd;border-radius:4px;margin:8px 0}.fix{bor
 table{border-collapse:collapse}td,th{border:1px solid #ddd;padding:4px 8px;text-align:left;vertical-align:top}
 @media (prefers-color-scheme:dark){body{background:#1c1a19;color:#ddd}code,pre{background:#2a2725}td,th,h2,img{border-color:#444}}
 </style></head><body>
-<h1>LOO-1109 QA: review pages in Chrome against the branch <code>lf server</code></h1>
+<h1>LOO-1109 QA, pass 2: Pass 5 and compress in Chrome</h1>
+<p>Same private Machine (<code>/tmp/lfqa-pg</code>), Task <code>c56843</code>, branch <code>lf</code> at <code>7f5a53a</code>. I added two rich-prompt controls to the page: a <code>data-choice</code> with a <code>&lt;p&gt;</code> question and a <code>data-question</code> with a <code>&lt;label&gt;</code>. Rebuilt it, opened the <code>lf page open --print</code> URL in Chrome and used it.</p>
+
+<h2>1. Prompts</h2>
+<p>The rich prompts (4, 5) draw once, selectable, at full row width. The bare <code>data-label</code> prompts (1–3) still draw. <b>Bug:</b> the decision card showed its title twice, once in its header and again above Fix here / File Task / Drop. Pass 5's <code>:not(:has(&gt; p, …))</code> guard added an element's weight to the label rule (0,2,2), so <code>.lf-decision [data-choice]::before</code> (0,2,1) stopped winning.</p>
+<img src="qa/p2-1-decision-twice.png"><img src="qa/p2-2-decision-fixed.png">
+
+<h2>2. Clear keeps <code>[already ran: …]</code></h2>
+<p>Picked Keep on question 4, then File Task now → Run: <code>Filed b51c7c</code> in place, queue still 1. Clear emptied the queue and kept the receipt. Then I dragged across "The farewell now says goodbye with a", noted "why a comma here?", picked Yes on question 1 and pressed <code>⌘↩</code>. The <code>steers</code> row:</p>
+<pre>(1) `scratch/ship-review.html` § What was built › "The farewell now says goodbye with a" why a comma here? (2) `scratch/ship-review.html` § 1. Keep the comma?: yes [already ran: task.create → b51c7c]</pre>
+<img src="qa/p2-3-steered.png">
+
+<h2>3. Server stopped under the page</h2>
+<p>Killed the server by PID, then picked No. Banner: "Loopflow server disconnected — run lf page open scratch/ship-review.html"; the strip switched to <code>Copy reply ⌘↩</code>. <b>Bug (small):</b> the strip still read "Saved de2b2b3a…; nothing reads it until c56843 runs" beside the new, unsent item, which looks as if that item was saved.</p>
+<img src="qa/p2-4-disconnected.png">
+
+<h2>4. Server restarted, page reopened</h2>
+<p><b>Bug:</b> after <code>lf page open</code> on the restarted server, the queued No was gone and so was <code>Filed b51c7c</code>. <code>File Task now</code> came back, inviting a duplicate Task. The page's <code>localStorage</code> was empty: the listener bound <code>127.0.0.1:0</code>, so every restart (including <code>lf install</code>) gave a new port, a new origin and empty storage. Dark theme reads fine.</p>
+<img src="qa/p2-5-restart-lost-dark.png">
+<p>After the fix: port 62051 before and after the restart, a new token (the old URL now gives 404), and the reopened page still has the queued No and <code>Filed bf9df8</code>.</p>
+<img src="qa/p2-6-restart-kept.png">
+
+<h2>Fixes</h2>
+<ul class="fix">
+<li><code>base.css</code>: <code>.lf-decision [data-choice][data-label]::before</code> outweighs the label rule again.</li>
+<li><code>server/loopback.rs</code>: <code>Loopback::bind(socket)</code> first tries a port derived from the server's socket path (49152–65535), so each lf home keeps its origin across restarts. An ephemeral port serves if that one is taken. New test: <code>loopback_keeps_its_port_across_restarts_and_yields_a_taken_one</code>. <code>docs/server.md</code>, <code>docs/security.md</code>, the server README and <code>docs/dev/reference.md</code> no longer say <code>127.0.0.1:0</code>.</li>
+<li><code>runtime.js</code>: any edit clears the last send's sentence from the strip. The sentence is set after the post-send clear, so it still shows right after <code>⌘↩</code>. Checked: "Saved b201441a…" after the send, gone on the next pick.</li>
+<li>Rebuilt this Task's <code>scratch/ship-review.html</code> and <code>scratch/concept-review.html</code>.</li>
+</ul>
+<p>Checks: <code>cargo test -p loopflow --lib server::loopback::</code> 3/3; <code>cargo test -p loopflow --test integration page_tests::</code> 3/3; <code>cargo clippy -p loopflow --all-targets -D warnings</code> clean.</p>
+
+<h2>Open</h2>
+<ul>
+<li>Dev Desktop was not run (headless, no person to check the live Machine's Desktop is free). The bridge is untouched by this pass. Still unchecked live: switching files before sending, and clicking a <code>data-lf</code> button in Desktop.</li>
+<li>Two tabs on one page share <code>localStorage</code> but not live state: a receipt filed in one shows in the other only after a reload. Not tested; noted from the code.</li>
+<li><code>scratch/questions.md</code> 1–8 still wait for answers.</li>
+</ul>
+<hr>
+<h1>LOO-1109 QA, pass 1: review pages in Chrome against the branch <code>lf server</code></h1>
 <p>A private Machine (<code>/tmp/lfqa-pg</code>) ran the branch <code>lf server</code>. It had a disposable repository and a Task, <code>c56843</code>, whose checkout changed <code>src/lib.rs</code> and added an untracked <code>src/extra.rs</code>. A page fragment used every kit tag: two <code>&lt;lf-diff&gt;</code>, an <code>&lt;lf-file&gt;</code>, a <code>decision</code>, the three control kinds and a <code>data-lf</code> <code>task.create</code>. I built it with <code>lf page build</code>, opened it at the <code>lf page open --print</code> URL in Chrome through the <code>browse</code> extension, and used it as a reviewer would.</p>
 
 <h2>1. First open</h2>

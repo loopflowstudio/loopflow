@@ -32,7 +32,15 @@ checks are plain `curl` with WebSocket upgrade headers: no `Origin`, a foreign
 `Origin`, a wrong `Host` or token each give 404; the right three give 101.
 Stopping the server by PID under an open page shows the restart banner and
 flips the strip to `Copy reply`. Stop the server before rebuilding `lf` (the
-build replaces the binary it runs), then restart it: port and token change.
+build replaces the binary it runs), then restart it: the token changes, the
+port stays (derived from the socket path), so `localStorage` drafts and
+receipts survive into the reopened URL. Clear `localStorage` from the page
+before a first-visit check. Dismissing Chrome's debugging bar closes the
+`browse` tab; open a new one rather than reusing its id.
+
+Write each check's page into the fragment: a rich prompt (`<p>` or `<label>`
+child) beside bare `data-label` controls, and a `decision` card, whose title
+must appear once.
 
 The `.lf/qa/claude-standin.py` stand-in can't answer `-p` batches, so a
 headless `lf -b` that runs `lf page open` fails before reaching it;

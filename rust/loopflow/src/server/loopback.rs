@@ -105,6 +105,14 @@ impl Handle {
     }
 }
 
+/// A port in the dynamic range (49152–65535) derived from the server's socket path,
+/// so each lf home asks for the same one every start.
+fn preferred_port(socket: &Path) -> u16 {
+    use sha2::{Digest, Sha256};
+    let digest = Sha256::digest(socket.as_os_str().as_encoded_bytes());
+    49152 + u16::from_be_bytes([digest[0], digest[1]]) % 16384
+}
+
 /// Bound loopback TCP listener ready to serve pages and WebSocket sessions.
 pub(super) struct Loopback {
     listener: TcpListener,
@@ -112,11 +120,18 @@ pub(super) struct Loopback {
 }
 
 impl Loopback {
-    /// Bind an ephemeral loopback port (`127.0.0.1:0`) with a fresh 32-byte random token.
-    pub(super) async fn bind() -> Result<(Self, Arc<Handle>)> {
-        let listener = TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], 0)))
-            .await
-            .context("Could not bind loopback review page listener")?;
+    /// Bind the loopback port this server's socket prefers, with a fresh 32-byte random token.
+    /// A stable port keeps an open page's origin, and with it the drafts and `data-lf`
+    /// receipts it holds in `localStorage`, across server restarts. When something else
+    /// holds that port, an ephemeral one serves instead.
+    pub(super) async fn bind(socket: &Path) -> Result<(Self, Arc<Handle>)> {
+        let preferred = SocketAddr::from(([127, 0, 0, 1], preferred_port(socket)));
+        let listener = match TcpListener::bind(preferred).await {
+            Ok(listener) => listener,
+            Err(_) => TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], 0)))
+                .await
+                .context("Could not bind loopback review page listener")?,
+        };
         let port = listener.local_addr()?.port();
         let handle = Arc::new(Handle {
             port,
@@ -491,7 +506,10 @@ fn from_hex(byte: u8) -> Option<u8> {
 
 #[cfg(test)]
 mod tests {
-    use super::{constant_time_eq, decode_absolute_path, encode_absolute_path, Loopback, HTML_CSP};
+    use super::{
+        constant_time_eq, decode_absolute_path, encode_absolute_path, preferred_port, Loopback,
+        HTML_CSP,
+    };
     use crate::server::service::Clients;
     use crate::server::subscriptions::Subscriptions;
     use crate::server::ticket::Tickets;
@@ -521,6 +539,27 @@ mod tests {
             .block_on(body);
     }
 
+    fn home_socket() -> std::path::PathBuf {
+        loopflow_execution::store::lf_home_dir().join("server.sock")
+    }
+
+    #[test]
+    fn loopback_keeps_its_port_across_restarts_and_yields_a_taken_one() {
+        in_empty_home(async {
+            let socket = home_socket();
+            let (first, handle) = Loopback::bind(&socket).await.unwrap();
+            let port = handle.port;
+            assert_eq!(port, preferred_port(&socket));
+            // Held by the first server: the second still binds, elsewhere.
+            let (_second, other) = Loopback::bind(&socket).await.unwrap();
+            assert_ne!(other.port, port);
+            drop(first);
+            let (_restarted, again) = Loopback::bind(&socket).await.unwrap();
+            assert_eq!(again.port, port);
+            assert_ne!(again.token, handle.token);
+        });
+    }
+
     #[test]
     fn path_encoding_round_trips_spaces_and_rejects_parent_traversal() {
         let path = Path::new("/tmp/my repo/scratch/ship review #1.html");
@@ -538,7 +577,7 @@ mod tests {
     #[test]
     fn loopback_serves_html_with_security_headers_and_enforces_websocket_admission() {
         in_empty_home(async {
-            let (loopback, handle) = Loopback::bind().await.unwrap();
+            let (loopback, handle) = Loopback::bind(&home_socket()).await.unwrap();
             let port = handle.port;
             let token = handle.token.clone();
             let server = tokio::spawn(loopback.run(

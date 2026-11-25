@@ -568,6 +568,60 @@ fn binding_selects_the_task_conversation() {
 }
 
 #[test]
+fn reselecting_an_assigned_session_in_another_tasks_checkout_keeps_both_checkouts() {
+    let table = Table::new(false);
+    let research_root = table.worktree("research");
+    let delivery_root = table.worktree("delivery");
+    let delivery = table
+        .create("Delivery", None, Some(&delivery_root))
+        .unwrap();
+    let first = table.conversation(&research_root, "tui", None);
+    table.bind(first.id.as_str(), &delivery).unwrap();
+    assert_eq!(table.primary(&delivery), Some(first.id.clone()));
+
+    // Another Task later adopts the worktree where `first` still runs.
+    let research = table
+        .create("Research", None, Some(&research_root))
+        .unwrap();
+    assert_eq!(research.worktree.as_deref(), Some(research_root.as_path()));
+
+    // Switching Delivery's primary and re-selecting `first` keeps both checkouts untouched.
+    let second = table.conversation(&delivery_root, "tui", Some(&delivery));
+    table.bind(second.id.as_str(), &delivery).unwrap();
+    assert_eq!(table.primary(&delivery), Some(second.id.clone()));
+
+    table.bind(first.id.as_str(), &delivery).unwrap();
+    assert_eq!(table.primary(&delivery), Some(first.id.clone()));
+    assert_eq!(table.session(&first).cwd, research_root);
+    assert_eq!(
+        table.task(&delivery.id).worktree.as_deref(),
+        Some(delivery_root.as_path())
+    );
+    assert_eq!(
+        table.task(&research.id).worktree.as_deref(),
+        Some(research_root.as_path())
+    );
+
+    // A conversation started with `lf --task Delivery` inside Research's checkout
+    // can also become Delivery's primary, while refusing reassignment to Research.
+    let declared = table.conversation(&research_root, "tui", Some(&delivery));
+    table.bind(declared.id.as_str(), &delivery).unwrap();
+    assert_eq!(table.primary(&delivery), Some(declared.id.clone()));
+    assert_eq!(table.session(&declared).cwd, research_root);
+    assert_eq!(
+        table.task(&delivery.id).worktree.as_deref(),
+        Some(delivery_root.as_path())
+    );
+    assert_eq!(
+        table.task(&research.id).worktree.as_deref(),
+        Some(research_root.as_path())
+    );
+    assert!(refusal(table.bind(declared.id.as_str(), &research)).contains("different Tasks"));
+    assert_eq!(table.primary(&delivery), Some(declared.id.clone()));
+    assert_eq!(table.primary(&research), None);
+}
+
+#[test]
 fn binding_refuses_background_and_closed_sessions() {
     let table = Table::new(false);
     let root = table.worktree("prototype");

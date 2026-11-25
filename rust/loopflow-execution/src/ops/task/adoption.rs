@@ -62,7 +62,7 @@ pub(super) async fn resolve_source(
         ),
         None => None,
     };
-    resolve_checkout(store, repo, selected, options.worktree.as_deref()).await
+    resolve_checkout(store, repo, selected, options.worktree.as_deref(), None).await
 }
 
 async fn resolve_checkout(
@@ -70,6 +70,7 @@ async fn resolve_checkout(
     repo: &Path,
     mut selected: Option<LfSession>,
     worktree: Option<&Path>,
+    target: Option<&TaskId>,
 ) -> OpsResult<Source> {
     let Some(cwd) = worktree.or_else(|| selected.as_ref().map(|session| session.cwd.as_path()))
     else {
@@ -115,7 +116,7 @@ async fn resolve_checkout(
     let scope = checkout_scope(store, &root, SessionTarget::Context)
         .await
         .map_err(task_error)?;
-    let (checkout, checkout_task) = match scope {
+    let (mut checkout, mut checkout_task) = match scope {
         Some(PrimaryScope::Task(id)) => (Some(root), Some(id)),
         None => (Some(root), None),
         Some(PrimaryScope::Repository(_) | PrimaryScope::Wave(_)) => {
@@ -133,9 +134,16 @@ async fn resolve_checkout(
     let session_task = selected
         .as_ref()
         .and_then(|session| session.task_id.as_ref());
-    if let (Some(checkout_task), Some(session_task)) = (&checkout_task, session_task) {
-        if checkout_task != session_task {
-            return Err(task_error("The Session and checkout belong to different Tasks; permanent bindings are unchanged"));
+    if let (Some(owner), Some(session_task)) = (&checkout_task, session_task) {
+        if owner != session_task {
+            if worktree.is_none() && target == Some(session_task) {
+                // Re-selecting a Session already assigned to `target` keeps its
+                // directory without touching the other Task's checkout.
+                checkout = None;
+                checkout_task = None;
+            } else {
+                return Err(task_error("The Session and checkout belong to different Tasks; permanent bindings are unchanged"));
+            }
         }
     }
     let task = match session_task.or(checkout_task.as_ref()) {
@@ -252,7 +260,8 @@ fn prepare(main: &Path, root: &Path) -> OpsResult<TaskPlacement> {
 /// Bind and select one existing conversation through the adoption transaction.
 pub async fn bind_session(store: &SharedStore, session: &LfSession, task: &Task) -> OpsResult<()> {
     let repo = super::repository_for_task(store, task)?;
-    let source = resolve_checkout(store, &repo, Some(session.clone()), None).await?;
+    let source =
+        resolve_checkout(store, &repo, Some(session.clone()), None, Some(&task.id)).await?;
     let acquisition = match &task.wave_id {
         Some(wave) => Some(crate::ops::planning_sync::lock_wave_planning(wave).await?),
         None => None,

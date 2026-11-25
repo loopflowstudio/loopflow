@@ -45,29 +45,28 @@ Four places assumed a Task's primary conversation always lives at
    or `main`) and was made primary via `lf session bind`, the next idle
    `lf resume` silently rewrote `agent_sessions.cwd` to `task.worktree`.
 3. **Server recovery and Task conversation outlook requiring
-   `rtrim(s.cwd, '/') = rtrim(c.worktree, '/')`** (remaining — found in
-   post-build concept review, corroborated by QA scenario 7).
+   `rtrim(s.cwd, '/') = rtrim(c.worktree, '/')`** (fixed in this pass).
    `task_conversation_here_sql` (`rust/loopflow-storage/src/sqlite/session_recovery.rs:45`)
-   still checks `rtrim(s.cwd, '/') = rtrim(c.worktree, '/')` and populates
-   `SessionSummary.in_task_checkout`. When a Task is checked out at `X` and its
-   bound primary conversation runs in `Y` (another worktree, `main`, a Wave
+   previously checked `rtrim(s.cwd, '/') = rtrim(c.worktree, '/')` and populated
+   `SessionSummary.in_task_checkout`. When a Task was checked out at `X` and its
+   bound primary conversation ran in `Y` (another worktree, `main`, a Wave
    checkout, or a subdirectory of `X`):
-   - `task_conversations_here` excludes it, so the server's recovery pass never
-     restarts it after a crash, kill, or reboot.
-   - `session_ending` maps `in_task_checkout = false` to `Left::Elsewhere`, so
-     `lf task status` and Desktop (`WorkSurfaceView`) falsely print
+   - `task_conversations_here` excluded it, so the server's recovery pass never
+     restarted it after a crash, kill, or reboot.
+   - `session_ending` mapped `in_task_checkout = false` to `Left::Elsewhere`, so
+     `lf task status` and Desktop (`WorkSurfaceView`) falsely printed
      `"its Task is not checked out here"` for a Task that IS checked out on
      this Machine.
 4. **Re-selecting an already-assigned Session as primary refusing when another
-   Task owns its directory** (remaining — found in post-build concept review).
-   In `ops/task/adoption.rs:136`, `resolve_checkout` rejects any Session whose
-   directory belongs to a different Task (`checkout_task != session_task`) with
+   Task owns its directory** (fixed in this pass).
+   In `ops/task/adoption.rs`, `resolve_checkout` rejected any Session whose
+   directory belonged to a different Task (`checkout_task != session_task`) with
    `"The Session and checkout belong to different Tasks; permanent bindings are
    unchanged"`. If `S` was bound to Task `A` in unowned worktree `Y` and Task
-   `B` later adopts `Y` (QA scenario 6) — or if `S` was started with
+   `B` later adopted `Y` (QA scenario 6) — or if `S` was started with
    `lf --task A` inside `B`'s checkout — then repeating
    `lf session bind S --task A` or clicking **Make primary Task conversation**
-   in Desktop fails instead of re-selecting `S` as `A`'s primary.
+   in Desktop failed instead of re-selecting `S` as `A`'s primary.
 
 ## Design: once a conversation has started or been bound, its directory stays put
 
@@ -210,58 +209,46 @@ lf resume -a claude:fable                   # same Session, new thread, still in
   - Native resume (`session_lifecycle_tests.rs`) and provider-switch
     (`session_launch_contract.rs`) fixtures added/updated.
 
-### Remaining to build (from post-build concept review)
+### Built in post-concept-review pass
 
 1. **Recovery & outlook decoupled from `s.cwd == c.worktree`:**
-   - `rust/loopflow-storage/src/sqlite/session_recovery.rs`:
-     - Remove `AND rtrim({s}.cwd,'/')=rtrim({c}.worktree,'/')` from
-       `task_conversation_here_sql` (the helper no longer needs the `c`
-       parameter; `task_conversations_here` still `JOIN task_checkouts c ON
-       c.task_id=t.id` and `session_summary` still checks
-       `EXISTS(SELECT 1 FROM task_checkouts pc WHERE pc.task_id=t.id)`).
-     - Update comments to say "primary conversation of an open Task checked out
-       on this Machine" (launching in `s.cwd`).
-   - `rust/loopflow-storage/src/session.rs` & `rust/loopflow-storage/src/sqlite/sessions.rs`
-     & `rust/loopflow-execution/src/ops/human_session.rs` & `rust/loopflow-execution/src/ops/recovery.rs`:
-     - Rename internal `SessionSummary.in_task_checkout` →
-       `task_checked_out_here` (not a wire DTO field) and update comments on
-       `DownConversation.here` / `Left::Elsewhere`.
-   - Tests:
-     - `rust/loopflow-execution/src/ops/human_session/tests.rs`: update the
-       `"not checked out here"` assertion in the outlook/pass test to delete
-       the `task_checkouts` row instead of mutating `cwd='/elsewhere'`, AND add
-       an assertion that with `task_checkouts` present and `cwd='/elsewhere'`,
-       outlook is `ComingBack` and `due_task_conversations` includes the
-       Session.
-     - `rust/loopflow/src/server/recovery.rs`: add a unit test verifying a dead
-       primary conversation whose `cwd` differs from `task_checkouts.worktree`
-       is started by `recover_conversations` (and `continuing` starts it in
-       `session.cwd`, not `task.worktree`).
+   - `rust/loopflow-storage/src/sqlite/session_recovery.rs`: dropped
+     `AND rtrim({s}.cwd,'/')=rtrim({c}.worktree,'/')` and the `c` parameter from
+     `task_conversation_here_sql`; added unit test
+     `task_conversations_here_follows_task_checkout_not_session_cwd` covering
+     split-checkout inclusion, local-checkout removal, and `query_plans` index
+     check on the summary predicate.
+   - `rust/loopflow-storage/src/session.rs`, `rust/loopflow-storage/src/sqlite/sessions.rs`,
+     `rust/loopflow-execution/src/ops/human_session.rs`, `rust/loopflow-execution/src/ops/recovery.rs`:
+     renamed internal `SessionSummary.in_task_checkout` → `task_checked_out_here`
+     and updated comments on `DownConversation.here` / `Left::Elsewhere`.
+   - `rust/loopflow-execution/src/ops/human_session/tests.rs`: updated
+     `the_pass_starts_what_the_outlook_says_the_server_starts` so `cwd='/elsewhere'`
+     with `task_checkouts` present yields `ComingBack` + due recovery, and
+     deleting `task_checkouts` yields `WaitingForYou` (`"not checked out here"`).
+   - `rust/loopflow/src/server/recovery.rs`: added
+     `a_dead_task_conversation_in_another_directory_restarts_in_its_own_directory`
+     verifying `recover_conversations` starts a split-checkout primary and
+     `service::continuing` launches it in `session.cwd`, while deleting
+     `task_checkouts` leaves it down.
 2. **Re-selecting an already-assigned Session in another Task's checkout:**
-   - `rust/loopflow-execution/src/ops/task/adoption.rs`:
-     - Pass `target: Option<&TaskId>` into `resolve_checkout` (`None` from
-       `resolve_source`, `Some(&task.id)` from `bind_session`).
-     - When `worktree.is_none()`, `session_task == target` (i.e. `Some(id)`
-       matching the bind target), and `checkout_task` is a different Task, keep
-       `checkout = None` and do not return the `"belong to different Tasks"`
-       error so `bind_session` re-selects the Session as `task`'s primary
-       without touching `checkout_task`'s worktree (and still prints the
-       split-checkout diagnostic when `task` owns a checkout).
-   - Tests (`rust/loopflow-execution/src/ops/task/adoption/tests.rs`):
-     - Cover binding `S1` (in unowned `research`) to `Delivery`, then adopting
-       `research` for a second Task `Research`, switching `Delivery`'s primary
-       to another Session, and re-binding `S1` to `Delivery` — succeeds,
-       restores `S1` as `Delivery`'s primary, leaves both `Delivery`'s and
-       `Research`'s checkouts untouched, and keeps `S1.cwd == research`.
-     - Cover making a `lf --task Delivery` conversation started inside
-       `Research`'s checkout primary via `bind_session`.
-     - Keep `refusals_leave_ownership_unchanged` (`table.create("Crossed", ...)`
-       still refuses `"belong to different Tasks"`).
-3. **Docs check:**
-   - Check `rust/loopflow/src/server/README.md` (already says "open, claimed
-     and checked out here") and `docs/work.md` / `docs/dev/reference-models.md`
-     if any sentence implies recovery requires `cwd == task.worktree` or
-     re-binding fails when another Task adopts the worktree.
+   - `rust/loopflow-execution/src/ops/task/adoption.rs`: passed `target: Option<&TaskId>`
+     into `resolve_checkout` (`None` from `resolve_source`, `Some(&task.id)` from
+     `bind_session`). When `worktree.is_none()` and `target == Some(session_task)`,
+     a different Task owning the directory clears `checkout` / `checkout_task`
+     instead of refusing, so `bind_session` re-selects the Session as `task`'s
+     primary without adopting the other Task's checkout.
+   - `rust/loopflow-execution/src/ops/task/adoption/tests.rs`: added
+     `reselecting_an_assigned_session_in_another_tasks_checkout_keeps_both_checkouts`
+     covering QA scenario 6 follow-up, `lf --task` started inside another Task's
+     checkout, and refusal to reassign across Tasks.
+3. **Docs checked:** `rust/loopflow/src/server/README.md`, `docs/work.md`,
+   `docs/sessions.md`, and `docs/dev/reference-models.md` already match.
+
+### Remaining
+
+None for implementation; full native fixtures and Desktop `SessionControlsTests`
+run at gate/CI.
 
 ## Absent and error states
 

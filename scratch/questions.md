@@ -42,3 +42,14 @@
 - Waited launches keep the provider's shell status. The foreground interrupt
   flag also covers SIGHUP and SIGTERM. Rewriting all those exits to 130
   would report an external kill as a quit.
+
+- Open (QA, 2026-11-24): a retired standalone chat now leaves `lf session
+  list --all` and every other `completed_at IS NULL` read, the same as a
+  quit. Its `closed HH:MM (15 minutes without a viewer)` line is reachable
+  only through `lf resume <id>` / `session resume --prepare`. Pass 1 listed
+  it (as `died … (exit 137)`). Should closed-tab chats stay listed, or is
+  vanishing like a quit the intended reading?
+- Open (QA): retirement SIGKILLs the PTY group, so a retired Skill's launcher
+  never runs its checkpoint; `NOTE.txt` stayed uncommitted after retirement
+  and after a reopen and clean quit. The old direct path lost it on tab close
+  too.

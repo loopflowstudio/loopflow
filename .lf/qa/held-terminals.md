@@ -106,4 +106,19 @@ master (kill the driver, not the viewer). `lf session list --all` reads
 standalone chat retires about 15 minutes after its last view leaves (the
 minute pass); a Task's conversation stays. Drive views with a `pty.fork()`
 driver reading keys from a FIFO, render with `pyte` at the view's width, and
-grep the raw bytes when two widths garble the render.
+grep the raw bytes when two widths garble the render. pyte prints kitty
+keyboard pops (`ESC[<65535u`) as `65535u`; they are not input.
+
+A fresh `LF_HOME` on a debug build migrates for about 90 s after `lf server
+run` reports ready (`held the store write lock` in `logs/lf.log` marks the
+end). A chat typed in that window gets no welcome and runs unheld. Wait for
+that line first.
+
+Quit and retired standalone chats both leave `lf session list --all`: the
+capture ends `completed`, which sets `completed_at`. Read a retired one's
+ending with `lf session resume --prepare --json <id>` (`status_line`: `closed
+HH:MM (15 minutes without a viewer); …`) or the store's `agent_sessions`
+`agent_exit_code` and `agent_end_reason`. A reopened view shows "Session
+closed after 15 minutes without a viewer" above the restored screen.
+Retirement kills the whole PTY group, so a retired Skill's edits stay
+uncommitted in its worktree.

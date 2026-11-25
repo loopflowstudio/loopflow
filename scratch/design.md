@@ -72,3 +72,36 @@ Questions 2–3 from [explore.html](explore.html) were not specified separately.
 
 - **Open files when sidebar is collapsed (Q2):** Defaulting to `2a` + `2b` (clickable breadcrumb filename menu for open/recent files, plus open files at the top of `⌘P` and the sidebar; no extra tab row).
 - **Auto-scratch replacement (Q3):** Defaulting to `3a` + explicit `lf desktop files PATH[:LINE[-END]] [--mode read|diff]` (auto-pick only when empty, quiet update bar/dot on passive FSEvents writes, ~800ms settle debounce for HTML reloads).
+
+## Demo Feedback & Fixes (2026-11-24)
+
+Live demo in `Loopflow Dev` on `loopflow` (`HEAD` `407892c6d0`) confirmed `⇧⌘O` and `⌘P` work and surfaced six fixes to land before shipping (full verbatim notes in `scratch/demo-notes.md`):
+
+- **Jack Heart (2026-11-24):** "a little too compact" / "i was looking at tt 2 mostly" (left rail)
+- **Jack Heart (2026-11-24):** "cmd+click on eg ServedWrite in WorkModel.swift still oes nothing"
+- **Jack Heart (2026-11-24):** "CmdShift O, DCmdP work. cmd f weirdly horizontal scrolled ?"
+- **Jack Heart (2026-11-24):** "a little cramped and not clear at first that the entry box is an entry box an not a header"
+- **Jack Heart (2026-11-24):** "this treatment oesnt work" / "looks fine in Loopflow lgiht,"
+- **Jack Heart (2026-11-24):** "send this batch"
+
+### Fixes for `implement`
+
+Built November 24: 1–4 and the placeholder, peek-edge parts of 5. Remaining: 6, and display QA for 5.
+
+1. **`⌘-click` & click-to-underline (`gd`/`gr`) in `TaskCodeReader.swift`:**
+   - Root cause (`TaskCodeReader.swift:150-161`): `Text(...).textSelection(.enabled)` wraps an AppKit text view that swallows mouse clicks before SwiftUI `.simultaneousGesture(SpatialTapGesture())` fires on macOS.
+   - Fix: Handle single click and `⌘-click` reliably without losing drag-to-select + copy (e.g., AppKit mouse/click handling that distinguishes click from drag and checks `NSEvent.modifierFlags.contains(.command)`), so clicking an identifier underlines it for `gd`/`gr` and `⌘-click` jumps or opens `FileSymbolPeek`. Add tests exercising the actual click path.
+2. **`⌘F` horizontal scroll jump in `TaskCodeReader.swift`:**
+   - Root cause (`TaskCodeReader.swift:86-90`): `proxy.scrollTo(line - 1, anchor: .center)` inside `ScrollView([.horizontal, .vertical])` uses `UnitPoint(x: 0.5, y: 0.5)`, jumping horizontally to the midpoint of the widest line and pushing line numbers off the left edge.
+   - Fix: Scroll vertically to center and horizontally to `x: 0` when the match fits, or compute the match's horizontal anchor from `find.current.range` (reusing `scrollAnchor` logic).
+3. **Left rail (`navigator` in `TaskFilesView.swift`) density & filename readability:**
+   - Current `236pt` rail with `Spacing.xxs` row padding and `depth * 12pt` + icon indents feels cramped and middle-truncates nearly every nested filename (`Configurat...View.swift`, `ReviewStre...View.swift`).
+   - Fix: Match `ChangedFilesSidebar` breathing room (`Spacing.xs` vertical / `Spacing.sm` horizontal padding, secondary section headers with `Spacing.md` top spacing), show filename + colored `+N −M` with muted directory subtitle in `Open & Scratch` / `Changed in Task`, tighten per-level tree indent (and/or allow comfortable rail width), and keep nested filenames readable.
+4. **Search/Find entry box framing (`FileFind.swift`, `TaskFilePicker.swift`, `TaskFilesView.swift`):**
+   - Bare `PaletteSearchField` directly on `palette.background` with no surface/border and no `Divider()` under `documentRow` feels cramped and reads like a header row instead of an input field.
+   - Fix: Wrap the search input in a clear text-field container (`palette.surface`, `CornerRadius.control`, `palette.borderStrong` + focus state, comfortable inner padding) in both `FileFindBar` and `TaskFilePickerView`, and add a `Divider()` separating `documentRow` from `FileFindBar`.
+5. **Dark-theme visual treatment across Files chrome, Find, Picker, Peek, and Highlights:**
+   - Audit every new Files surface in dark themes as well as Loopflow Light (`TaskFilesView`, `FileFindBar`, `TaskFilePickerView`, `FileSymbolPeek`, `TaskCodeReader` highlights/selection/underlines, `PaletteSearchField`): verify text/placeholder/icon contrast, distinct card/bar borders (`palette.border` / `palette.borderStrong`) on `surfaceMuted` overlays like `FileSymbolPeek`, and legible `keyboardFocus` highlight opacity on dark backgrounds. Inspect both dark and light screenshots in QA.
+6. **Main-thread stalls on large files (`WorkModel.swift`):**
+   - Demo log recorded `main thread stalled ms=2011` and `ms=1059` when opening/interacting with large files in `loopflow`.
+   - Profile and remove main-thread bottlenecks in `TaskCodeReader` / `TaskFilesView` (avoid per-row comment array filtering over all items, redundant `AttributedString` / syntax painting, or synchronous heavy work on selection/find/scroll updates).

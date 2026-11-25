@@ -67,6 +67,10 @@ Mounted focus, scroll and the 360/620-point layouts continue to gate and display
 
 **Reader width.** The code reader's scroll content is as wide as its widest line. Before this, a `LazyVStack` sized to the rows it had measured, and lines wider than line 1 were clipped and out of reach. Row margins sit inside each row, so jumping to a line's start keeps the margin. Locked-screen QA on November 23 also checked presentation beside a zoomed session, distinct rail and Grep rows, Edit offers that clear on leaving Edit, and the narrow pane strip (`scratch/qa.html`). Word and gutter taps still need a display.
 
+**Demo fixes, November 24.** The live demo ([demo notes](demo-notes.md), [design](design.md#demo-feedback--fixes-2026-11-24)) found that ⌘-click and word underlines did nothing: selectable text took the click before the reader's tap gesture. The reader now watches its window's mouse events, counts a press released within 3 points as a click, maps it onto the row frames it records, and leaves drags to selection. Find scrolls to its match with the Grep anchor instead of the middle of the widest line. The rail uses the Diff sidebar's headings and padding, open and changed rows show name, directory and colored counts, and the tree steps 8 points per level. Find and the picker search are bordered fields under a divider; placeholders and the symbol peek read on dark themes.
+
+Next: main-thread stalls on large files (design fix 6: `main thread stalled ms=2011` opening files in `loopflow`) need a profile before changing anything. Display QA checks the new rail and fields in a dark theme and Loopflow Light, and a physical ⌘-click.
+
 ## Gate and demo
 
 November 23 presentation and navigation checks:
@@ -77,6 +81,12 @@ November 23 presentation and navigation checks:
 - The cropped Unicode hit test and both picker cases passed. The local and peer browser journeys passed in 14.4 seconds with the source-built CLI.
 - Display QA checks mounted focus, horizontal scrolling in the reader and pane strip, distinct rail rows for an open changed file, and the 360/620-point layouts.
 
+
+**Demo fix checks on November 24**
+
+- `swift build --build-tests --package-path swift` passed. Headless: `clickingASourceLineUnderlinesItsWordAndCommandClickLooksUpTheDefinition`, `readChordsUseTheUnderlinedOccurrenceBesideSelectableText`, `theReaderScrollsAsWideAsItsWidestLine`, `grepRevealsTheSecondOccurrenceInACroppedLongLine` (now also checks a Find match keeps the line start in view) and both Find tests passed.
+- `LOOPFLOW_NATIVE_TESTS=1 swift test --filter 'theReaderCountsAPressReleasedInPlaceAsAClickAndLeavesDragsToSelection|selectableFirstResponderReceivesReadChordsThroughTheWindowMonitor'` passed: a ⌘-press released in place reached the reader with its point and modifier, a drag did not.
+- `TaskFileBrowserJourneyTests` needs `target/debug/lf`, not built in this pass; gate runs it.
 
 **Read navigation checks on November 23**
 

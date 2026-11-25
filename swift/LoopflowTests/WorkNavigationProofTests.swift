@@ -283,9 +283,6 @@ struct WorkNavigationProofTests {
         let focusedPane = workspace.multiplexer.focusedPaneId
         var missingPlan = plan
         missingPlan["tasks"] = ["state": "unavailable", "reason": "planning offline"]
-        var missingWaves = try #require(plan["waves"] as? [[String: Any]])
-        for index in missingWaves.indices { missingWaves[index]["unavailable_tasks"] = [] }
-        missingPlan["waves"] = missingWaves
         let unavailable = String(decoding: try JSONSerialization.data(withJSONObject: missingPlan), as: UTF8.self)
         missingPlan["waves"] = []
         let absent = String(decoding: try JSONSerialization.data(withJSONObject: missingPlan), as: UTF8.self)

@@ -1,7 +1,6 @@
 //! Local-save delivery to the repository's tracker or plan carriers, and the planning
 //! store and locks every planning command shares.
 
-use crate::work::wave::Wave;
 use std::fs::OpenOptions;
 use std::future::Future;
 use std::path::Path;
@@ -11,9 +10,12 @@ use std::time::Duration;
 use crate::store::{open_store, StorageConfig, Store};
 use loopflow_model::durable::{ProjectId, TaskId};
 use loopflow_model::id::WaveId;
-use loopflow_storage::planning_sync::{ActionOwnerKind, LostAnswer, TrackerActionStatus};
+use loopflow_storage::planning_sync::{
+    ActionOwnerKind, LostAnswer, TrackerActionStatus, TrackerKind,
+};
 use loopflow_storage::sqlite::tracker_actions::{ActionOwner, ActionPhase};
 
+use super::tracker::drain::Scope;
 use super::{OpsError, OpsResult};
 
 fn message(error: impl std::fmt::Display) -> OpsError {
@@ -47,10 +49,10 @@ pub(crate) async fn find_task(
 /// runs after its reply; queued actions are durable rows, so a server that
 /// stops before it runs loses nothing. Failure leaves its successful local
 /// mutation and durable pending state intact.
-pub(crate) async fn sync_after_save(store: &Store, repo: &str, saved: &ActionOwner) {
-    let (deferred, owner) = (repo.to_owned(), saved.clone());
+pub(crate) async fn sync_after_save(store: &Store, repo: &str, saved: Option<&ActionOwner>) {
+    let (deferred, owner) = (repo.to_owned(), saved.cloned());
     if crate::journal::request::after_reply(move || {
-        after_reply(|store| async move { sync_saved(&store, &deferred, &owner).await })
+        after_reply(|store| async move { sync_saved(&store, &deferred, owner.as_ref()).await })
     })
     .is_none()
     {
@@ -82,7 +84,7 @@ where
     }
 }
 
-pub(crate) async fn sync_saved(store: &Store, repo: &str, saved: &ActionOwner) {
+pub(crate) async fn sync_saved(store: &Store, repo: &str, saved: Option<&ActionOwner>) {
     let attempt = async {
         if !super::tracker::connected(repo) {
             return super::plan_carriers::send(store, repo)
@@ -92,7 +94,7 @@ pub(crate) async fn sync_saved(store: &Store, repo: &str, saved: &ActionOwner) {
         super::tracker::drain::drain_repository(
             store,
             repo,
-            super::tracker::drain::Scope::First(saved),
+            saved.map_or(Scope::All, Scope::First),
             super::tracker::drain::Bound::PASS,
         )
         .await?;
@@ -148,25 +150,13 @@ pub fn answer_lost(repo: &Path, id: &str, answer: LostAnswer) -> OpsResult<Track
                 ))),
                 _ => WaveId::parse(&line.owner_id).ok().map(ActionOwner::Wave),
             };
-            if let Some(owner) = owner {
-                sync_after_save(&store, &repo, &owner).await;
-            }
+            sync_after_save(&store, &repo, owner.as_ref()).await;
             Ok(line)
         })
 }
 
 /// Provider exit is also a useful boundary for Taskless conversations.
 pub(crate) fn check_directory(directory: &Path) -> OpsResult<()> {
-    sync_directory(directory, false)
-}
-
-/// `wave status --sync`'s exchange with Linear or Asana, before it refreshes
-/// the Wave inventory.
-pub fn refresh_directory(directory: &Path) -> OpsResult<()> {
-    sync_directory(directory, true)
-}
-
-fn sync_directory(directory: &Path, refresh: bool) -> OpsResult<()> {
     let repo = crate::repository::discover(directory)
         .map_err(message)?
         .to_string();
@@ -181,13 +171,33 @@ fn sync_directory(directory: &Path, refresh: bool) -> OpsResult<()> {
                     .await
                     .map_err(message);
             }
-            if refresh {
-                super::tracker_events::refresh_repository(&store, &repo).await;
-            } else {
-                super::tracker_events::sync_repository(&store, &repo).await;
-            }
+            super::tracker_events::sync_repository(&store, &repo).await;
             Ok(())
         })
+}
+
+/// Exchange the repository delta and queued saves, then read the Wave's
+/// Linear inventory. Desktop runs this on a clock, so it makes no tracker
+/// Project except one a queued Task is sent into.
+pub async fn refresh_wave(wave: &crate::work::wave::Wave, tracker: TrackerKind) -> OpsResult<()> {
+    let store = planning_store().await?;
+    let project = store.sqlite.wave_project(wave.id()).map_err(message)?;
+    super::tracker_events::refresh_repository(
+        &store,
+        wave.repo(),
+        Scope::First(&ActionOwner::Project(project)),
+    )
+    .await;
+    if tracker == TrackerKind::Linear
+        && store
+            .project_of_wave(wave.id())
+            .await
+            .map_err(message)?
+            .is_some_and(|project| project.tracker_id.is_some())
+    {
+        super::linear::refresh_wave(Path::new(wave.repo()), wave.slug()).await?;
+    }
+    Ok(())
 }
 
 pub fn storage_config_from_env() -> OpsResult<crate::store::StorageConfig> {
@@ -222,7 +232,9 @@ pub(super) async fn open_planning_store(config: &StorageConfig) -> OpsResult<Sto
     .map_err(|err| OpsError::Message(format!("failed to open planning store: {err}")))
 }
 
-pub(crate) async fn lock_wave_planning(wave: &Wave) -> OpsResult<Arc<crate::store::PlanningLocks>> {
+pub(crate) async fn lock_wave_planning(
+    wave: &WaveId,
+) -> OpsResult<Arc<crate::store::PlanningLocks>> {
     // Keep the existing lock inode namespace shared with already-running callers.
     let path = crate::store::lf_home_dir().join("chapter-locks");
     #[cfg(any(test, feature = "test-support"))]
@@ -235,7 +247,7 @@ pub(crate) async fn lock_wave_planning(wave: &Wave) -> OpsResult<Arc<crate::stor
         .write(true)
         .create(true)
         .truncate(false)
-        .open(path.join(format!("{}.lock", wave.id())))
+        .open(path.join(format!("{wave}.lock")))
         .map_err(|error| OpsError::Message(error.to_string()))?;
     // The OS releases the lock if the holder exits.
     for _ in 0..300 {

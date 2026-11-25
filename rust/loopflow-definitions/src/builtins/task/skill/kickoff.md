@@ -73,8 +73,8 @@ Cover these where they matter and skip the rest:
 beside the decision it informs, with source paths. Quote what people said word
 for word; the plan describes the work and gives its reader no orders.
 
-In a Wave, derive "Done when" from its KRs and check its `MEMORY.md` for
-decisions already made.
+In a Wave, derive "Done when" from its `GOAL.md` and check its `MEMORY.md`
+for decisions already made.
 
 ## Principles
 

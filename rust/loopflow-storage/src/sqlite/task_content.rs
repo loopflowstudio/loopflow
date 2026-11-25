@@ -64,16 +64,20 @@ impl SqliteStore {
         )
     }
 
-    /// Membership and its pending effect commit together without transferring execution.
+    /// Move the Task into `wave`'s Project, or out of every Wave with none.
     pub fn move_task(
         &self,
         id: &TaskId,
         expected_project: Option<&ProjectId>,
-        destination: Option<&ProjectId>,
+        wave: Option<&loopflow_model::id::WaveId>,
     ) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        move_task_in(&tx, id, expected_project, destination)?;
+        let task = super::children::task_on(&tx, id)?.ok_or(StoreError::NotFound)?;
+        let destination = wave
+            .map(|wave| super::children::wave_project_in(&tx, wave))
+            .transpose()?;
+        move_task_in(&tx, &task, expected_project, destination.as_ref())?;
         tx.commit()?;
         Ok(())
     }
@@ -86,7 +90,8 @@ impl SqliteStore {
     ) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let snapshot = conn.savepoint()?;
-        validate_move(&snapshot, id, expected_project, destination).map(|_| ())
+        let task = super::children::task_on(&snapshot, id)?.ok_or(StoreError::NotFound)?;
+        validate_move(&snapshot, &task, expected_project, destination)
     }
 
     pub fn validate_task_edit(
@@ -176,18 +181,18 @@ fn validate_edit(
 /// Move the Task into `destination`, as one planning edit its tracker sends.
 fn move_task_in(
     conn: &rusqlite::Connection,
-    id: &TaskId,
+    task: &Task,
     expected_project: Option<&ProjectId>,
     destination: Option<&ProjectId>,
 ) -> StoreResult<()> {
-    let current = validate_move(conn, id, expected_project, destination)?;
-    if current.project_id.as_ref() == destination {
+    validate_move(conn, task, expected_project, destination)?;
+    if task.project_id.as_ref() == destination {
         return Ok(());
     }
-    super::planning_write::local(
+    planning_write::local(
         conn,
         &crate::work::edit::WorkEdit::for_target(
-            id.as_str(),
+            task.id.as_str(),
             &[Edit::TaskProject(destination.map(ToString::to_string))],
         ),
     )
@@ -196,22 +201,19 @@ fn move_task_in(
 
 fn validate_move(
     conn: &rusqlite::Connection,
-    id: &TaskId,
+    current: &Task,
     expected_project: Option<&ProjectId>,
     destination: Option<&ProjectId>,
-) -> StoreResult<Task> {
-    let current = super::children::task_on(conn, id)?.ok_or(StoreError::NotFound)?;
-    super::children::require_task_not_deleted(conn, &current)?;
+) -> StoreResult<()> {
+    super::children::require_task_not_deleted(conn, current)?;
     if current.project_id.as_ref() == destination {
-        return Ok(current);
+        return Ok(());
     }
     if current.project_id.as_ref() != expected_project {
         return Err(StoreError::InvalidAuthority(
             "Task membership changed before moving".into(),
         ));
     }
-    // A move names its Project, so any of the repository's Projects will do;
-    // only new work lands in the Wave's configured one.
     if let Some(destination) = destination {
         let same_repo: bool = conn.query_row(
             "SELECT EXISTS(SELECT 1 FROM projects p JOIN waves w ON w.id=p.wave_id JOIN repository_plans r ON r.repo=w.repo WHERE p.id=?1 AND r.id=?2)",
@@ -223,7 +225,7 @@ fn validate_move(
             ));
         }
     }
-    Ok(current)
+    Ok(())
 }
 
 #[cfg(test)]

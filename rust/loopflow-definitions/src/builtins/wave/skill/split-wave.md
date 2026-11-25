@@ -11,8 +11,6 @@ Each child gets a fresh goal, not a slice of the parent's prose:
 
 - **Intent**: written new for each child and coherent on its own, with clear
   scope lines between siblings and a concrete, domain-specific name.
-- **Metrics**: each metric moves to exactly one child. Another Wave that needs
-  it reads it from there; never duplicate a metric or its readings.
 - **Memory**: carry forward only what a child still needs: direction, exact
   quotes, past observations, outside facts.
 
@@ -31,21 +29,17 @@ Each child gets a fresh goal, not a slice of the parent's prose:
 
 4. **Create the children.**
    ```bash
-   lf wave create <wave>/<child>                    # registers it and commits its files on main
-   lf wave plan connect <wave>/<child>              # links its Linear Initiative
-   lf wave update-project --wave <wave>/<child> --file <project.json>   # {"metric_targets":[],"krs":[]}
+   lf wave create <wave>/<child>                    # registers it, commits its files on main, makes its tracker Project
    lf task create --wave <wave>/<child> --title "…" --notes "…"
    ```
-   Write each child's `GOAL.md`, `MEMORY.md` and `metrics/*.md` in its
-   directory. `update-project` replaces the current Project's KRs and targets, so
-   supply every KR and target.
+   Write each child's `GOAL.md` and `MEMORY.md` in its directory. Each child
+   is its own Project, and its Tasks are in it.
 
 5. **Move only unstarted work,** with
    `lf task move <issue> --wave <wave>/<child>`. A started Task keeps its
    worktree, PR, Sessions and Graph where they are; never move it or restart
-   its worker. Keep the parent and its Projects while its active work
+   its worker. Keep the parent and its Project while its active work
    finishes.
 
-6. **Check.** Each child has a goal, memory and a connected Initiative. Every
-   metric belongs to exactly one child. Nothing from the parent is
-   unaccounted for.
+6. **Check.** Each child has a goal, memory and a linked Project.
+   Nothing from the parent is unaccounted for.

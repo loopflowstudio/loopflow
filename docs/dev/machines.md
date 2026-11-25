@@ -75,7 +75,7 @@ need an explicit add before they can receive a login.
 ```bash
 lf session list --json                           # live conversations on this Machine
 lf graph list --runs --state current --json # live Graph runs on this Machine
-lf wave status product                 # current Project, Task conditions and Session evidence
+lf wave status product                 # Project, Task conditions and Session evidence
 
 lf --machine build-home session list   # run the same reader on build-home
 lf --machine build-home --wave product wave-operate
@@ -208,8 +208,8 @@ Nothing routes to another person's Machine, and nobody moves or unclaims
 another person's claim; moving a Task to another person is deferred. The Machine in a claim
 comment is informational. Routing reports its source: `owner`,
 `owning_machine:wave:<name>` or `owning_machine:this_machine`. Ownership does not move
-a checkout or launch a process. `lf wave status` reads planning, Task conditions,
-metrics and Session history; no process needs to be running.
+a checkout or launch a process. `lf wave status` reads planning, Task conditions
+and Session history; no process needs to be running.
 
 `RepositoryId` identifies the selected repository plan. `repository_plans` binds
 that ID to the Machine-local repository locator; it contains no copied Work or

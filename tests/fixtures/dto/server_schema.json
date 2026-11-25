@@ -2566,52 +2566,6 @@
           "properties": {
             "items": {
               "items": {
-                "$ref": "#/$defs/ProjectSummary"
-              },
-              "type": "array"
-            },
-            "state": {
-              "const": "ok",
-              "type": "string"
-            },
-            "truncated": {
-              "type": "boolean"
-            }
-          },
-          "required": [
-            "state",
-            "items",
-            "truncated"
-          ],
-          "type": "object"
-        },
-        {
-          "description": "The source could not be read. Never rendered as emptiness.",
-          "properties": {
-            "reason": {
-              "type": "string"
-            },
-            "state": {
-              "const": "unavailable",
-              "type": "string"
-            }
-          },
-          "required": [
-            "state",
-            "reason"
-          ],
-          "type": "object"
-        }
-      ]
-    },
-    "Evidence3": {
-      "description": "A reading, or the reason there is none. \"We looked and found nothing\" and\n\"we could not look\" are different facts, and an audit surface that renders\nthem the same is lying — so the wire says which.",
-      "oneOf": [
-        {
-          "description": "The source answered. `truncated` says a cap hid older items, so a full\npage never reads as \"that was all there was\".",
-          "properties": {
-            "items": {
-              "items": {
                 "$ref": "#/$defs/RoadmapTask"
               },
               "type": "array"
@@ -2650,7 +2604,7 @@
         }
       ]
     },
-    "Evidence4": {
+    "Evidence3": {
       "description": "A reading, or the reason there is none. \"We looked and found nothing\" and\n\"we could not look\" are different facts, and an audit surface that renders\nthem the same is lying — so the wire says which.",
       "oneOf": [
         {
@@ -3760,51 +3714,6 @@
         }
       ]
     },
-    "InitiativeArchive": {
-      "properties": {
-        "error": {
-          "description": "Why Linear still has it live; `None` once archived.",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "initiative": {
-          "type": "string"
-        },
-        "wave": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "wave",
-        "initiative",
-        "error"
-      ],
-      "type": "object"
-    },
-    "InitiativeRename": {
-      "properties": {
-        "error": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "initiative": {
-          "type": "string"
-        },
-        "title": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "initiative",
-        "title",
-        "error"
-      ],
-      "type": "object"
-    },
     "Inspection": {
       "description": "The effective settings of one selection: general, or a skill and its\nGraph occurrence, each with every source's candidate.",
       "properties": {
@@ -3976,13 +3885,21 @@
       "additionalProperties": false,
       "properties": {
         "created": {
+          "description": "Whether the Wave's Project is made in Linear rather than linked to one\nthat already existed.",
           "type": "boolean"
         },
         "files": {
           "$ref": "#/$defs/AuthoredFiles",
-          "description": "The binding's files (`.lf/config.yaml`, `.lf/wave/<wave>/config.yaml`) on the main checkout."
+          "description": "The binding's file (`.lf/config.yaml`) on the main checkout."
         },
-        "initiative_id": {
+        "project_id": {
+          "description": "The Linear Project the Wave's Project links; `None` while Loopflow is\nstill making it.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "project_name": {
           "type": "string"
         },
         "team_created": {
@@ -4003,7 +3920,8 @@
       },
       "required": [
         "wave",
-        "initiative_id",
+        "project_id",
+        "project_name",
         "created",
         "team_id",
         "team_key",
@@ -4533,583 +4451,6 @@
         "work"
       ],
       "type": "object"
-    },
-    "MetricContractIssueDto": {
-      "oneOf": [
-        {
-          "properties": {
-            "kind": {
-              "const": "project_unavailable",
-              "type": "string"
-            },
-            "reason": {
-              "type": "string"
-            },
-            "wave_id": {
-              "type": "string"
-            }
-          },
-          "required": [
-            "kind",
-            "wave_id",
-            "reason"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "kind": {
-              "const": "unresolved_target",
-              "type": "string"
-            },
-            "metric_id": {
-              "type": "string"
-            },
-            "wave_id": {
-              "type": "string"
-            }
-          },
-          "required": [
-            "kind",
-            "wave_id",
-            "metric_id"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "kind": {
-              "const": "malformed_contract",
-              "type": "string"
-            },
-            "message": {
-              "type": "string"
-            },
-            "path": {
-              "type": "string"
-            }
-          },
-          "required": [
-            "kind",
-            "path",
-            "message"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "contract_instrument": {
-              "type": "string"
-            },
-            "kind": {
-              "const": "instrument_mismatch",
-              "type": "string"
-            },
-            "metric_id": {
-              "type": "string"
-            },
-            "registered_instrument": {
-              "type": "string"
-            },
-            "wave_id": {
-              "type": "string"
-            }
-          },
-          "required": [
-            "kind",
-            "wave_id",
-            "metric_id",
-            "contract_instrument",
-            "registered_instrument"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "contract_revision": {
-              "type": "string"
-            },
-            "kind": {
-              "const": "invalid_graduation",
-              "type": "string"
-            },
-            "metric_id": {
-              "type": "string"
-            },
-            "reason": {
-              "type": "string"
-            },
-            "wave_id": {
-              "type": "string"
-            }
-          },
-          "required": [
-            "kind",
-            "wave_id",
-            "metric_id",
-            "contract_revision",
-            "reason"
-          ],
-          "type": "object"
-        }
-      ]
-    },
-    "MetricEvidenceDto": {
-      "oneOf": [
-        {
-          "properties": {
-            "kind": {
-              "const": "untargeted",
-              "type": "string"
-            },
-            "source_window_end": {
-              "type": "string"
-            },
-            "source_window_start": {
-              "type": "string"
-            },
-            "value": {
-              "format": "double",
-              "type": "number"
-            }
-          },
-          "required": [
-            "kind",
-            "value",
-            "source_window_start",
-            "source_window_end"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "kind": {
-              "const": "met",
-              "type": "string"
-            },
-            "source_window_end": {
-              "type": "string"
-            },
-            "source_window_start": {
-              "type": "string"
-            },
-            "value": {
-              "format": "double",
-              "type": "number"
-            }
-          },
-          "required": [
-            "kind",
-            "value",
-            "source_window_start",
-            "source_window_end"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "kind": {
-              "const": "missed",
-              "type": "string"
-            },
-            "source_window_end": {
-              "type": "string"
-            },
-            "source_window_start": {
-              "type": "string"
-            },
-            "value": {
-              "format": "double",
-              "type": "number"
-            }
-          },
-          "required": [
-            "kind",
-            "value",
-            "source_window_start",
-            "source_window_end"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "cause": {
-              "$ref": "#/$defs/MetricUnknownCauseDto"
-            },
-            "kind": {
-              "const": "unknown",
-              "type": "string"
-            }
-          },
-          "required": [
-            "kind",
-            "cause"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "kind": {
-              "const": "unavailable",
-              "type": "string"
-            },
-            "reason": {
-              "type": "string"
-            },
-            "source_as_of": {
-              "type": "string"
-            }
-          },
-          "required": [
-            "kind",
-            "reason",
-            "source_as_of"
-          ],
-          "type": "object"
-        }
-      ]
-    },
-    "MetricFreshnessDto": {
-      "oneOf": [
-        {
-          "properties": {
-            "kind": {
-              "const": "never",
-              "type": "string"
-            }
-          },
-          "required": [
-            "kind"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "expires_at": {
-              "type": "string"
-            },
-            "kind": {
-              "const": "fresh",
-              "type": "string"
-            },
-            "source_time": {
-              "type": "string"
-            }
-          },
-          "required": [
-            "kind",
-            "source_time",
-            "expires_at"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "expires_at": {
-              "type": "string"
-            },
-            "kind": {
-              "const": "stale",
-              "type": "string"
-            },
-            "source_time": {
-              "type": "string"
-            }
-          },
-          "required": [
-            "kind",
-            "source_time",
-            "expires_at"
-          ],
-          "type": "object"
-        }
-      ]
-    },
-    "MetricIdentity": {
-      "description": "Canonical Work association; metric names remain case sensitive.",
-      "properties": {
-        "metric_id": {
-          "type": "string"
-        },
-        "wave_id": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "wave_id",
-        "metric_id"
-      ],
-      "type": "object"
-    },
-    "MetricPortfolioDto": {
-      "properties": {
-        "contract_issues": {
-          "items": {
-            "$ref": "#/$defs/MetricContractIssueDto"
-          },
-          "type": "array"
-        },
-        "metrics": {
-          "items": {
-            "$ref": "#/$defs/MetricReadingDto"
-          },
-          "type": "array"
-        }
-      },
-      "required": [
-        "metrics",
-        "contract_issues"
-      ],
-      "type": "object"
-    },
-    "MetricReadingDto": {
-      "properties": {
-        "contract_revision": {
-          "type": "string"
-        },
-        "description": {
-          "type": "string"
-        },
-        "evidence": {
-          "$ref": "#/$defs/MetricEvidenceDto"
-        },
-        "freshness": {
-          "$ref": "#/$defs/MetricFreshnessDto"
-        },
-        "freshness_policy": {
-          "type": "string"
-        },
-        "identity": {
-          "$ref": "#/$defs/MetricIdentity"
-        },
-        "instrument": {
-          "type": "string"
-        },
-        "instrumented": {
-          "description": "Whether any accepted observation measured this exact contract revision.",
-          "type": "boolean"
-        },
-        "name": {
-          "type": "string"
-        },
-        "stage": {
-          "$ref": "#/$defs/MetricStage"
-        },
-        "target": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/Threshold"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "unit": {
-          "type": "string"
-        },
-        "window": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "target",
-        "identity",
-        "contract_revision",
-        "name",
-        "description",
-        "stage",
-        "instrumented",
-        "instrument",
-        "unit",
-        "window",
-        "freshness_policy",
-        "freshness",
-        "evidence"
-      ],
-      "type": "object"
-    },
-    "MetricStage": {
-      "enum": [
-        "installed",
-        "graduated"
-      ],
-      "type": "string"
-    },
-    "MetricTarget": {
-      "properties": {
-        "metric_id": {
-          "type": "string"
-        },
-        "target": {
-          "$ref": "#/$defs/Threshold"
-        }
-      },
-      "required": [
-        "metric_id",
-        "target"
-      ],
-      "type": "object"
-    },
-    "MetricUnknownCauseDto": {
-      "oneOf": [
-        {
-          "properties": {
-            "kind": {
-              "const": "never",
-              "type": "string"
-            }
-          },
-          "required": [
-            "kind"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "kind": {
-              "const": "target_unavailable",
-              "type": "string"
-            },
-            "source_window_end": {
-              "type": "string"
-            },
-            "source_window_start": {
-              "type": "string"
-            },
-            "value": {
-              "format": "double",
-              "type": "number"
-            }
-          },
-          "required": [
-            "kind",
-            "value",
-            "source_window_start",
-            "source_window_end"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "expected_contract_revision": {
-              "type": "string"
-            },
-            "kind": {
-              "const": "revision_mismatch",
-              "type": "string"
-            },
-            "observed_contract_revision": {
-              "type": "string"
-            },
-            "source_time": {
-              "type": "string"
-            }
-          },
-          "required": [
-            "kind",
-            "expected_contract_revision",
-            "observed_contract_revision",
-            "source_time"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "kind": {
-              "const": "incomplete",
-              "type": "string"
-            },
-            "source_window_end": {
-              "type": "string"
-            },
-            "source_window_start": {
-              "type": "string"
-            },
-            "value": {
-              "format": "double",
-              "type": "number"
-            }
-          },
-          "required": [
-            "kind",
-            "value",
-            "source_window_start",
-            "source_window_end"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "kind": {
-              "const": "window_mismatch",
-              "type": "string"
-            },
-            "source_window_end": {
-              "type": "string"
-            },
-            "source_window_start": {
-              "type": "string"
-            },
-            "value": {
-              "format": "double",
-              "type": "number"
-            }
-          },
-          "required": [
-            "kind",
-            "value",
-            "source_window_start",
-            "source_window_end"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "kind": {
-              "const": "stale_observation",
-              "type": "string"
-            },
-            "source_window_end": {
-              "type": "string"
-            },
-            "source_window_start": {
-              "type": "string"
-            },
-            "value": {
-              "format": "double",
-              "type": "number"
-            }
-          },
-          "required": [
-            "kind",
-            "value",
-            "source_window_start",
-            "source_window_end"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "kind": {
-              "const": "stale_unavailable",
-              "type": "string"
-            },
-            "reason": {
-              "type": "string"
-            },
-            "source_as_of": {
-              "type": "string"
-            }
-          },
-          "required": [
-            "kind",
-            "reason",
-            "source_as_of"
-          ],
-          "type": "object"
-        }
-      ]
     },
     "MoveReport": {
       "properties": {
@@ -6446,18 +5787,6 @@
         "id": {
           "type": "string"
         },
-        "krs": {
-          "items": {
-            "$ref": "#/$defs/ProjectKR"
-          },
-          "type": "array"
-        },
-        "metric_targets": {
-          "items": {
-            "$ref": "#/$defs/MetricTarget"
-          },
-          "type": "array"
-        },
         "name": {
           "type": "string"
         },
@@ -6499,8 +5828,6 @@
         "slug",
         "name",
         "description",
-        "krs",
-        "metric_targets",
         "status",
         "tracker_id",
         "tracker_synced_at",
@@ -6509,108 +5836,6 @@
         "updated_at"
       ],
       "type": "object"
-    },
-    "ProjectActivation": {
-      "properties": {
-        "completed_at": {
-          "format": "int64",
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
-        "error": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "lf_process_id": {
-          "type": "string"
-        },
-        "outcome": {
-          "type": [
-            "string",
-            "null"
-          ]
-        }
-      },
-      "required": [
-        "lf_process_id",
-        "completed_at",
-        "outcome",
-        "error"
-      ],
-      "type": "object"
-    },
-    "ProjectKR": {
-      "properties": {
-        "holds": {
-          "type": "boolean"
-        },
-        "text": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "text",
-        "holds"
-      ],
-      "type": "object"
-    },
-    "ProjectReadiness": {
-      "properties": {
-        "activation": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/ProjectActivation"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "observed_at": {
-          "format": "int64",
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
-        "pending_successor": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "project_id": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "state": {
-          "$ref": "#/$defs/ProjectReadinessState"
-        }
-      },
-      "required": [
-        "state",
-        "project_id",
-        "observed_at",
-        "pending_successor",
-        "activation"
-      ],
-      "type": "object"
-    },
-    "ProjectReadinessState": {
-      "enum": [
-        "unconfigured",
-        "unavailable",
-        "inactive",
-        "ready",
-        "terminal"
-      ],
-      "type": "string"
     },
     "ProjectStatus": {
       "description": "Shared Project status, independent of a provider’s display label.",
@@ -6626,23 +5851,8 @@
     },
     "ProjectSummary": {
       "properties": {
-        "current": {
-          "type": "boolean"
-        },
         "id": {
           "type": "string"
-        },
-        "krs": {
-          "items": {
-            "$ref": "#/$defs/ProjectKR"
-          },
-          "type": "array"
-        },
-        "metric_targets": {
-          "items": {
-            "$ref": "#/$defs/MetricTarget"
-          },
-          "type": "array"
         },
         "name": {
           "type": "string"
@@ -6661,18 +5871,31 @@
             "string",
             "null"
           ]
+        },
+        "unbound": {
+          "description": "A live Wave's Project the repository's tracker does not hold yet: what\nthat means and the command that makes it. `None` once bound, for a\nremoved Wave, or without a tracker.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "url": {
+          "description": "Where the tracker shows the Project; `None` until a read sees it.",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [
         "sync",
-        "current",
         "id",
         "tracker_id",
         "slug",
         "name",
         "status",
-        "metric_targets",
-        "krs"
+        "url",
+        "unbound"
       ],
       "type": "object"
     },
@@ -7815,7 +7038,7 @@
         },
         {
           "additionalProperties": false,
-          "description": "`lf --cwd <directory> wave plan <wave>`: one Wave's Projects and\nTasks, after syncing its repository with the tracker.",
+          "description": "`lf --cwd <directory> wave plan <wave>`: one Wave's Project and\nTasks, after syncing its repository with the tracker.",
           "properties": {
             "directory": {
               "type": "string"
@@ -8471,6 +7694,51 @@
         }
       ]
     },
+    "Reading": {
+      "description": "One value, or the reason it could not be read: the single-value form of\n`Evidence`.",
+      "oneOf": [
+        {
+          "properties": {
+            "state": {
+              "const": "ok",
+              "type": "string"
+            },
+            "value": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/ProjectSummary"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "state",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "The source could not be read. Never rendered as absence.",
+          "properties": {
+            "reason": {
+              "type": "string"
+            },
+            "state": {
+              "const": "unavailable",
+              "type": "string"
+            }
+          },
+          "required": [
+            "state",
+            "reason"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "Receipt": {
       "properties": {
         "receiving": {
@@ -8924,7 +8192,7 @@
           "type": "string"
         },
         "tasks": {
-          "$ref": "#/$defs/Evidence3",
+          "$ref": "#/$defs/Evidence2",
           "description": "Every Task once; each names its Wave."
         },
         "waves": {
@@ -15919,44 +15187,6 @@
       ],
       "type": "object"
     },
-    "Threshold": {
-      "oneOf": [
-        {
-          "properties": {
-            "kind": {
-              "const": "at_least",
-              "type": "string"
-            },
-            "value": {
-              "format": "double",
-              "type": "number"
-            }
-          },
-          "required": [
-            "kind",
-            "value"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "kind": {
-              "const": "at_most",
-              "type": "string"
-            },
-            "value": {
-              "format": "double",
-              "type": "number"
-            }
-          },
-          "required": [
-            "kind",
-            "value"
-          ],
-          "type": "object"
-        }
-      ]
-    },
     "TraceId": {
       "type": "string"
     },
@@ -16150,42 +15380,6 @@
         "input_tokens",
         "cached_input_tokens",
         "output_tokens"
-      ],
-      "type": "object"
-    },
-    "UnavailableTaskEvidence": {
-      "description": "Non-terminal durable Task Work whose historical Project is no longer in the\ncurrent PM snapshot.",
-      "properties": {
-        "owner": {
-          "$ref": "#/$defs/NextMoveOwner"
-        },
-        "reason": {
-          "type": "string"
-        },
-        "recovery": {
-          "type": "string"
-        },
-        "status": {
-          "$ref": "#/$defs/TaskState"
-        },
-        "task_id": {
-          "type": "string"
-        },
-        "task_identifier": {
-          "type": "string"
-        },
-        "work_id": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "work_id",
-        "task_id",
-        "task_identifier",
-        "status",
-        "owner",
-        "reason",
-        "recovery"
       ],
       "type": "object"
     },
@@ -16404,16 +15598,6 @@
         "name": {
           "type": "string"
         },
-        "project": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/Project"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
         "summary": {
           "items": {
             "type": "string"
@@ -16425,7 +15609,6 @@
         "id",
         "name",
         "created",
-        "project",
         "main_checkout",
         "files",
         "summary"
@@ -16436,44 +15619,28 @@
       "description": "`lf wave status <wave>` and `lf wave plan <wave>`: current planning,\nTask conditions and Session history. Wire type; no defaults.",
       "properties": {
         "history": {
-          "$ref": "#/$defs/Evidence4",
+          "$ref": "#/$defs/Evidence3",
           "description": "This Wave's Machine-local Session history, newest first."
         },
-        "metric_portfolio": {
-          "$ref": "#/$defs/MetricPortfolioDto",
-          "description": "Wave-owned live evidence derived once by Rust for every consumer."
-        },
-        "project_readiness": {
-          "$ref": "#/$defs/ProjectReadiness"
-        },
-        "projects": {
-          "$ref": "#/$defs/Evidence2"
+        "project": {
+          "$ref": "#/$defs/Reading",
+          "description": "The Wave's one Project; `None` for a Wave that has made none yet."
         },
         "setup": {
           "$ref": "#/$defs/WaveSetup",
           "description": "What the Wave's Tasks run, where, and which logins pay, with each source."
         },
         "tasks": {
-          "$ref": "#/$defs/Evidence3"
-        },
-        "unavailable_tasks": {
-          "description": "Durable Project Work that cannot join the current PM plan, including\nnon-terminal Tasks stranded under a terminal historical Project.",
-          "items": {
-            "$ref": "#/$defs/UnavailableTaskEvidence"
-          },
-          "type": "array"
+          "$ref": "#/$defs/Evidence2"
         },
         "wave": {
           "$ref": "#/$defs/WaveSnapshot"
         }
       },
       "required": [
-        "project_readiness",
         "wave",
-        "projects",
+        "project",
         "tasks",
-        "metric_portfolio",
-        "unavailable_tasks",
         "history",
         "setup"
       ],
@@ -16553,12 +15720,6 @@
         "id": {
           "$ref": "#/$defs/WaveId"
         },
-        "initiatives": {
-          "items": {
-            "$ref": "#/$defs/InitiativeArchive"
-          },
-          "type": "array"
-        },
         "moved": {
           "items": {
             "$ref": "#/$defs/RemovalTask"
@@ -16570,11 +15731,6 @@
         },
         "preview": {
           "type": "boolean"
-        },
-        "projects": {
-          "format": "uint",
-          "minimum": 0,
-          "type": "integer"
         },
         "sessions": {
           "format": "uint",
@@ -16612,9 +15768,7 @@
         "moved",
         "deleted",
         "completed_tasks",
-        "projects",
         "sessions",
-        "initiatives",
         "has_files",
         "uncommitted",
         "files",
@@ -16633,17 +15787,6 @@
         },
         "id": {
           "$ref": "#/$defs/WaveId"
-        },
-        "initiative": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/InitiativeRename"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "The connected Initiative's new title, or why Linear kept the old one."
         },
         "renamed": {
           "type": "boolean"
@@ -16664,7 +15807,6 @@
         "to",
         "renamed",
         "files",
-        "initiative",
         "summary"
       ],
       "type": "object"
@@ -16678,20 +15820,9 @@
             "null"
           ]
         },
-        "metric_portfolio": {
-          "$ref": "#/$defs/MetricPortfolioDto"
-        },
-        "project_readiness": {
-          "$ref": "#/$defs/ProjectReadiness"
-        },
-        "projects": {
-          "$ref": "#/$defs/Evidence2"
-        },
-        "unavailable_tasks": {
-          "items": {
-            "$ref": "#/$defs/UnavailableTaskEvidence"
-          },
-          "type": "array"
+        "project": {
+          "$ref": "#/$defs/Reading",
+          "description": "The Wave's one Project; `None` for a Wave that has made none yet."
         },
         "wave": {
           "$ref": "#/$defs/WaveSnapshot"
@@ -16699,11 +15830,8 @@
       },
       "required": [
         "graph",
-        "project_readiness",
         "wave",
-        "projects",
-        "metric_portfolio",
-        "unavailable_tasks"
+        "project"
       ],
       "type": "object"
     },
@@ -18487,7 +17615,7 @@
         },
         {
           "additionalProperties": false,
-          "description": "`lf wave add <wave> [--objective <objective>] --json`: the Wave, its\nauthored files and first Project; an existing Wave is unchanged.",
+          "description": "`lf wave create <wave> [--objective <objective>] --json`: the Wave and\nits authored files; an existing Wave is unchanged.",
           "properties": {
             "directory": {
               "type": "string"
@@ -18551,54 +17679,13 @@
         },
         {
           "additionalProperties": false,
-          "description": "`lf wave plan bind <wave> <project> --json`: the tracker Project\nbound as the Wave's current Project.",
-          "examples": [
-            {
-              "directory": "/repo",
-              "kind": "wave.plan.bind",
-              "project": "5e55105e-0000-4000-8000-000000000042",
-              "replace": false,
-              "wave": "product"
-            }
-          ],
-          "properties": {
-            "directory": {
-              "type": "string"
-            },
-            "kind": {
-              "const": "wave.plan.bind",
-              "type": "string"
-            },
-            "project": {
-              "type": "string"
-            },
-            "replace": {
-              "type": "boolean"
-            },
-            "wave": {
-              "type": "string"
-            }
-          },
-          "required": [
-            "kind",
-            "replace",
-            "directory",
-            "wave",
-            "project"
-          ],
-          "type": "object",
-          "x-result": {
-            "$ref": "#/$defs/Project"
-          }
-        },
-        {
-          "additionalProperties": false,
-          "description": "`lf wave plan connect [<wave>|--all] [--team-key <key>]\n[--team-name <name>] --json`: one receipt per Wave connected.",
+          "description": "`lf wave plan connect [<wave> [<project>]|--all] [--team-key <key>]\n[--team-name <name>] --json`: one receipt per Wave connected.",
           "examples": [
             {
               "all": false,
               "directory": "/repo",
               "kind": "wave.plan.connect",
+              "project": "Refunds",
               "team_key": "LOO",
               "team_name": null,
               "wave": "product"
@@ -18614,6 +17701,12 @@
             "kind": {
               "const": "wave.plan.connect",
               "type": "string"
+            },
+            "project": {
+              "type": [
+                "string",
+                "null"
+              ]
             },
             "team_key": {
               "type": [
@@ -18638,6 +17731,7 @@
             "kind",
             "directory",
             "wave",
+            "project",
             "all",
             "team_key",
             "team_name"
@@ -18655,7 +17749,8 @@
               "files": {
                 "state": "unchanged"
               },
-              "initiative_id": "init_7f3a",
+              "project_id": "5d0c1b2a-3948-4e5f-9a6b-7c8d9e0f1a2b",
+              "project_name": "Refunds",
               "team_created": false,
               "team_id": "team_01",
               "team_key": "LOO",

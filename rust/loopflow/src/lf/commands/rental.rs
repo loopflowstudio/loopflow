@@ -881,10 +881,17 @@ fn prepare(
     for provider in sign_in_order(logins.iter().copied().chain(required.into_iter().flatten())) {
         runtime.block_on(login::login(machine, provider, None, false, batch))?;
     }
-    let wave = task.wave_id.as_ref().filter(|_| linear);
-    if let Some(wave) = wave {
-        let id = loopflow_execution::machine::ssh::sh_quote(wave.as_str());
-        script.push_str(&format!(" && lf task list --wave {id} --json >/dev/null"));
+    if let Some(wave_id) = task.wave_id.as_ref().filter(|_| linear) {
+        let wave = sqlite.get_wave(wave_id)?;
+        let project = sqlite.project_of_wave(wave_id)?.and_then(|p| p.tracker_id);
+        if let (Some(wave), Some(project)) = (wave, project) {
+            let quote = loopflow_execution::machine::ssh::sh_quote;
+            let wave = quote(wave.slug());
+            let project = quote(project.as_str());
+            script.push_str(&format!(
+                " && lf wave plan connect {wave} {project} --json >/dev/null"
+            ));
+        }
     }
     let status = Command::new("ssh")
         .args(loopflow_execution::machine_route::bounded_ssh_args(
@@ -897,41 +904,6 @@ fn prepare(
         .context("could not run ssh")?;
     if !status.success() {
         return Err(anyhow!("could not prepare {origin} on {}", machine.name()));
-    }
-    if let Some(wave) = wave {
-        use crate::server::wire::Operation;
-        use loopflow_execution::machine::wire::{Secrets, Selection, Sender};
-        let sender = Sender {
-            repository: task.repository_id.clone(),
-            selection: Selection::capture(repo, None)?,
-            secrets: Secrets::default(),
-        };
-        let mut connection =
-            loopflow_execution::machine::client::Connection::open_on(machine, sender, None)?;
-        let plan = connection.request(Operation::Read(super::read::Read::WavePlan {
-            directory: repo.to_owned(),
-            wave: wave.to_string(),
-        }))?;
-        let plan: super::waves::WaveDetailSnapshot = serde_json::from_value(plan.result)?;
-        if plan.project_readiness.state
-            == loopflow_storage::sqlite::ProjectReadinessState::Unconfigured
-        {
-            let project = sqlite
-                .selected_project(wave)?
-                .and_then(|p| p.tracker_id)
-                .with_context(|| {
-                    format!(
-                        "Wave {} needs a Linear Project. Select one with `lf wave plan bind`.",
-                        plan.wave.name
-                    )
-                })?;
-            connection.request(Operation::Write(super::write::Write::WavePlanBind {
-                directory: repo.to_owned(),
-                wave: wave.to_string(),
-                project: project.as_str().to_owned(),
-                replace: false,
-            }))?;
-        }
     }
     Ok(())
 }

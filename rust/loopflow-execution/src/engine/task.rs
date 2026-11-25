@@ -190,7 +190,7 @@ pub async fn steer(
     let id = &steer.id;
     let delivery = match elsewhere {
         None => {
-            planning_sync::sync_after_save(store, &repo, &owner).await;
+            planning_sync::sync_after_save(store, &repo, Some(&owner)).await;
             let reader = super::session::task_steer_reader(&store.sqlite, task)?;
             SteerDelivery {
                 reached: SteerReached::Owner,
@@ -199,7 +199,7 @@ pub async fn steer(
             }
         }
         Some((machine, reason)) => {
-            planning_sync::sync_saved(store, &repo, &owner).await;
+            planning_sync::sync_saved(store, &repo, Some(&owner)).await;
             let name = machine.name();
             let carrier = store.sqlite.comment_carrier(&task.id, &comment)?;
             let (reached, sentence) = match carrier {

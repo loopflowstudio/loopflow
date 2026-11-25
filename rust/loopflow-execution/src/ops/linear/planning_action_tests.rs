@@ -116,3 +116,104 @@ fn a_deletion_restored_in_linear_after_a_lost_reply_retires() {
         });
     });
 }
+
+#[test]
+fn a_released_queue_delivers_after_its_chapter_projects_collapse() {
+    use crate::ops::tracker::creation_id;
+    use loopflow_model::durable::{RepositoryId, TaskId};
+    use loopflow_storage::migration_runner::{apply_before_migration, upgrade_from_migration};
+    use loopflow_storage::test_fixture::{build, observers};
+    use rusqlite::params;
+    use serde_json::json;
+
+    with_planning_task(|runtime, fixture, repo, _, state| {
+        let database = fixture.directory.path().join("released.db");
+        let conn = rusqlite::Connection::open(&database).unwrap();
+        apply_before_migration(&observers(), &build(), &conn, "remove_chapters");
+        let repository = RepositoryId::new();
+        conn.execute(
+            "INSERT INTO repository_plans(id,repo,selected) VALUES(?1,?2,1)",
+            params![repository.as_str(), repo.to_str().unwrap()],
+        )
+        .unwrap();
+        conn.execute_batch(include_str!(
+            "../../../../loopflow-storage/tests/fixtures/migrations/chapter_deliveries.sql"
+        ))
+        .unwrap();
+        let [queued, arrived, moving, moved, retry] =
+            ["Queued", "Arrived", "Moving", "Moved", "Retry"].map(|title| {
+                TaskId::from_raw(
+                    conn.query_row(
+                        "SELECT id FROM tasks WHERE issue_title=?1",
+                        [title],
+                        |row| row.get::<_, String>(0),
+                    )
+                    .unwrap(),
+                )
+            });
+        upgrade_from_migration(&observers(), &build(), &conn, "remove_chapters");
+        drop(conn);
+        let store =
+            Store::from_sqlite_for_test(loopflow_storage::test_fixture::open(&database).unwrap());
+        let arrived_id = creation_id(arrived.as_str()).unwrap();
+        {
+            let mut linear = runtime.block_on(state.lock());
+            linear.extra_projects.extend(
+                ["november", "december", "refunds"]
+                    .map(crate::test_support::planning_tasks::planning_project),
+            );
+            for (index, (id, project)) in [
+                (arrived_id.as_str(), "november"),
+                ("moving", "november"),
+                ("moved", "november"),
+                ("retry", "refunds"),
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                let mut issue = linear.issues[0].clone();
+                issue["id"] = json!(id);
+                issue["identifier"] = json!(format!("FIX-{}", index + 20));
+                issue["project"]["id"] = json!(project);
+                linear.issues.push(issue);
+            }
+        }
+        for id in [&queued, &arrived, &moving, &moved, &retry] {
+            let task = store.sqlite.task(id).unwrap().unwrap();
+            runtime.block_on(deliver(&store, repo, &task));
+            let actions = store
+                .sqlite
+                .tracker_actions_for(&ActionOwner::Task(id.clone()))
+                .unwrap();
+            assert_eq!(actions[0].phase, ActionPhase::Confirmed, "{actions:?}");
+        }
+        assert_eq!(
+            store
+                .sqlite
+                .task(&arrived)
+                .unwrap()
+                .unwrap()
+                .tracker_id
+                .unwrap()
+                .as_str(),
+            arrived_id
+        );
+        let linear = runtime.block_on(state.lock());
+        assert_eq!(linear.creation_writes, 1);
+        assert_eq!(linear.field_writes, 2);
+        for (id, project) in [
+            (creation_id(queued.as_str()).unwrap(), "december"),
+            (arrived_id, "november"),
+            ("moving".into(), "refunds"),
+            ("moved".into(), "november"),
+            ("retry".into(), "december"),
+        ] {
+            let issue = linear
+                .issues
+                .iter()
+                .find(|issue| issue["id"] == id)
+                .unwrap();
+            assert_eq!(issue["project"]["id"], project);
+        }
+    });
+}

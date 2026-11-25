@@ -7,7 +7,7 @@ struct WaveDetailReading {
 
     func plan(cached: WavePlan) -> WavePlan {
         guard let snapshot else { return cached }
-        return WavePlan(objective: snapshot.workMap.objective, projects: snapshot.workMap.projects)
+        return WavePlan(objective: snapshot.workMap.objective, project: snapshot.workMap.project)
     }
 
     mutating func update(_ snapshot: WaveRoadmap) {
@@ -20,22 +20,23 @@ struct WaveDetailReading {
     }
 }
 
-/// The Wave's Project plan, Tasks and metrics, from the window's planning reading.
+/// The Wave's Project plan and Tasks, from the window's planning reading.
 struct WaveDetailPane: View {
     let wave: WaveViewModel
     let repoPath: String
     /// This Wave's share of the window's planning reading, once one has arrived.
     let streamed: StreamedWaveDetail?
-    let isProjectActivationPending: Bool
-    let transportError: String?
-    let onActivateProject: () -> Void
     let onClose: () -> Void
     let onOpenTask: (String) -> Void
     let onTaskAction: (RoadmapTask, RoadmapTaskAction) -> Void
     let onOpenWorktree: (TaskWorktreeSnapshot) -> Void
 
     @Environment(\.palette) private var palette
-    @State private var showHistory = false
+
+    /// The Wave's one Project, from the live reading once it has arrived.
+    private var project: ProjectPlanningSnapshot? {
+        (streamed?.snapshot?.workMap.project ?? wave.plan?.project)?.present
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -46,9 +47,6 @@ struct WaveDetailPane: View {
                     plan: wave.plan ?? WavePlan(objective: ""),
                     wave: wave,
                     streamed: streamed,
-                    isProjectActivationPending: isProjectActivationPending,
-                    transportError: transportError,
-                    onActivateProject: onActivateProject,
                     onOpenTask: onOpenTask,
                     onTaskAction: onTaskAction,
                     onOpenWorktree: onOpenWorktree
@@ -56,9 +54,6 @@ struct WaveDetailPane: View {
                 .id("\(repoPath)|\(wave.id)")
                 .frame(minWidth: 230, idealWidth: 320, maxWidth: 440, maxHeight: .infinity)
             }
-        }
-        .sheet(isPresented: $showHistory) {
-            ProjectHistoryView(wave: wave.name, repo: repoPath, sourceReference: nil)
         }
     }
 
@@ -73,8 +68,7 @@ struct WaveDetailPane: View {
 
             Spacer()
 
-            Button("Project history") { showHistory = true }
-                .buttonStyle(LoopflowButtonStyle())
+            if let project { WaveHeaderProject(project: project) }
 
             Button {
                 onClose()
@@ -96,9 +90,6 @@ private struct WavePlanView: View {
     let plan: WavePlan
     let wave: WaveViewModel
     let streamed: StreamedWaveDetail?
-    let isProjectActivationPending: Bool
-    let transportError: String?
-    let onActivateProject: () -> Void
     let onOpenTask: (String) -> Void
     let onTaskAction: (RoadmapTask, RoadmapTaskAction) -> Void
     let onOpenWorktree: (TaskWorktreeSnapshot) -> Void
@@ -119,15 +110,7 @@ private struct WavePlanView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: Spacing.xl) {
                 objective
-                ProjectReadinessView(readiness: reading.snapshot?.projectReadiness,
-                                     isPending: isProjectActivationPending,
-                                     transportError: transportError, retry: onActivateProject)
                 projectAndTasks
-                if let portfolio = reading.snapshot?.metricPortfolio {
-                    WaveMetricPortfolioView(
-                        portfolio: portfolio
-                    )
-                }
             }
             .padding(Spacing.xl)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -234,7 +217,7 @@ private struct WavePlanView: View {
 
     private var projectAndTasks: some View {
         VStack(alignment: .leading, spacing: Spacing.md) {
-            if let project = displayedPlan.currentProject { WaveProjectView(project: project, repo: wave.repo) }
+            if let project = displayedPlan.project.present { WaveProjectView(project: project, repo: wave.repo) }
             if isAwaitingDetail {
                 WorkSectionHeading("Tasks")
                 ProgressView("Loading Tasks…").accessibilityIdentifier("wave-detail-loading")
@@ -280,411 +263,24 @@ private struct WavePlanView: View {
     }
 }
 
-struct WaveMetricPortfolioView: View {
-    let portfolio: MetricPortfolio
-
-    @Environment(\.palette) private var palette
-
-    private var presentation: WaveMetricPortfolioPresentation {
-        WaveMetricPortfolioPresentation(portfolio: portfolio)
-    }
-
-    private var official: [MetricReading] {
-        portfolio.metrics
-            .filter { $0.stage == .graduated }
-            .sorted { left, right in
-                let priority = left.evidence.displayPriority - right.evidence.displayPriority
-                return priority == 0 ? left.name < right.name : priority < 0
-            }
-    }
-
-    private var candidates: [MetricReading] {
-        portfolio.metrics
-            .filter { $0.stage == .installed }
-            .sorted { $0.name < $1.name }
-    }
-
-    var body: some View {
-        if !portfolio.metrics.isEmpty || !portfolio.contractIssues.isEmpty {
-            VStack(alignment: .leading, spacing: Spacing.sm) {
-                WorkSectionHeading(title: "Metrics", count: portfolio.metrics.count) {
-                    if presentation.requiresWorkCount > 0 {
-                        Label(
-                            countLabel(
-                                presentation.requiresWorkCount,
-                                singular: "measure needs work",
-                                plural: "measures need work"
-                            ),
-                            systemImage: "exclamationmark.circle.fill"
-                        )
-                        .font(Typography.meta)
-                        .foregroundStyle(palette.failure)
-                    }
-                }
-                .accessibilityIdentifier("wave-metric-summary")
-
-                Text(presentation.headline)
-                    .font(Typography.text)
-                    .foregroundStyle(palette.textSecondary)
-
-                if !portfolio.contractIssues.isEmpty {
-                    WaveContractIssueNotice(summaries: portfolio.contractIssues.map(\.summary))
-                }
-
-                if !portfolio.metrics.isEmpty {
-                    // One row per measure: official first, then candidates
-                    // still proving their instruments.
-                    VStack(spacing: 0) {
-                        WaveMetricTableHeader()
-                        ForEach(official) { metric in
-                            WaveMetricTableRow(metric: metric, candidate: false, targetUnavailable: presentation.targetUnavailable(for: metric))
-                        }
-                        ForEach(candidates) { metric in
-                            WaveMetricTableRow(metric: metric, candidate: true, targetUnavailable: presentation.targetUnavailable(for: metric))
-                        }
-                    }
-                    .workPanel()
-                    .accessibilityIdentifier(official.isEmpty ? "wave-metric-candidates" : "wave-metric-official")
-                }
-
-            }
-            .accessibilityIdentifier("wave-metric-portfolio")
-        }
-    }
-
-    private func countLabel(_ count: Int, singular: String, plural: String) -> String {
-        "\(count) \(count == 1 ? singular : plural)"
-    }
-}
-
-/// What is wrong with the Wave's metric contracts: the count, each issue's
-/// summary, and Copy, since the wire carries no recovery to offer.
-struct WaveContractIssueNotice: View {
-    let summaries: [String]
+/// The Project's name in the Wave header; a link once the tracker has it.
+struct WaveHeaderProject: View {
+    let project: ProjectPlanningSnapshot
     @Environment(\.palette) private var palette
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Spacing.xs) {
-            HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
-                Label("\(summaries.count) contract \(summaries.count == 1 ? "issue" : "issues")",
-                      systemImage: "exclamationmark.triangle")
-                    .font(Typography.textStrong)
-                    .foregroundStyle(palette.warning)
-                Spacer(minLength: Spacing.sm)
-                Button("Copy") {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(summaries.joined(separator: "\n"), forType: .string)
-                }
-                .buttonStyle(LoopflowButtonStyle())
-                .help("Copy the issues")
-                .accessibilityIdentifier("wave-metric-contract-issues-copy")
-            }
-            ForEach(Array(summaries.enumerated()), id: \.offset) { _, summary in
-                Text(summary)
-                    .font(Typography.text)
-                    .foregroundStyle(palette.text)
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+        Group {
+            if let url = project.url {
+                Link(project.name, destination: url)
+                    .foregroundStyle(palette.actionInk)
+                    .help("Open \(project.name) in the tracker")
+            } else {
+                Text(project.name).foregroundStyle(palette.textSecondary)
             }
         }
-        .padding(.horizontal, Spacing.md)
-        .padding(.vertical, Spacing.sm)
-        .overlay(RoundedRectangle(cornerRadius: CornerRadius.row).strokeBorder(palette.border, lineWidth: 1))
-        .accessibilityIdentifier("wave-metric-contract-issues")
-    }
-}
-
-/// Column widths shared by the header and every metric row.
-private enum MetricColumns {
-    static let value: CGFloat = 96
-    static let target: CGFloat = 132
-    static let window: CGFloat = 64
-    static let state: CGFloat = 104
-}
-
-private struct WaveMetricTableHeader: View {
-    @Environment(\.palette) private var palette
-
-    var body: some View {
-        HStack(spacing: Spacing.md) {
-            cell("Measure").frame(maxWidth: .infinity, alignment: .leading)
-            cell("Value").frame(width: MetricColumns.value, alignment: .leading)
-            cell("Target").frame(width: MetricColumns.target, alignment: .leading)
-            cell("Window").frame(width: MetricColumns.window, alignment: .leading)
-            cell("State").frame(width: MetricColumns.state, alignment: .leading)
-        }
-        .padding(.horizontal, Spacing.md)
-        .padding(.vertical, Spacing.sm)
-        .overlay(alignment: .bottom) { Rectangle().fill(palette.border.opacity(0.8)).frame(height: 1) }
-        .accessibilityHidden(true)
-    }
-
-    private func cell(_ text: String) -> some View {
-        Text(text)
-            .font(Typography.meta)
-            .foregroundStyle(palette.textTertiary)
-    }
-}
-
-private struct WaveMetricTableRow: View {
-    let metric: MetricReading
-    let candidate: Bool
-    let targetUnavailable: Bool
-
-    @Environment(\.palette) private var palette
-
-    var body: some View {
-        let presentation = WaveMetricRowPresentation(metric: metric, owner: "Wave", targetUnavailable: targetUnavailable)
-        VStack(alignment: .leading, spacing: Spacing.xxs) {
-            HStack(alignment: .firstTextBaseline, spacing: Spacing.md) {
-                HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
-                    Text(presentation.name)
-                        .font(Typography.textStrong)
-                        .foregroundStyle(palette.text)
-                        .lineLimit(1)
-                    if candidate {
-                        WorkChip(text: "candidate", tone: .neutral)
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                Text(presentation.value)
-                    .font(Typography.mono)
-                    .monospacedDigit()
-                    .foregroundStyle(palette.text)
-                    .frame(width: MetricColumns.value, alignment: .leading)
-                Text(presentation.target)
-                    .font(Typography.mono)
-                    .foregroundStyle(palette.textSecondary)
-                    .lineLimit(1)
-                    .frame(width: MetricColumns.target, alignment: .leading)
-                Text(presentation.window)
-                    .font(Typography.mono)
-                    .foregroundStyle(palette.textSecondary)
-                    .frame(width: MetricColumns.window, alignment: .leading)
-                WorkChip(text: presentation.state, tone: metric.evidence.tone)
-                    .frame(width: MetricColumns.state, alignment: .leading)
-            }
-            Text(detail(presentation))
-                .font(Typography.meta)
-                .foregroundStyle(metric.instrumented ? palette.textTertiary : palette.warning)
-                .lineLimit(2)
-                .fixedSize(horizontal: false, vertical: true)
-            if let reason = presentation.reason {
-                Text(reason)
-                    .font(Typography.meta)
-                    .foregroundStyle(metric.evidence.tone.ink(in: palette))
-                    .textSelection(.enabled)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-        .padding(.horizontal, Spacing.md)
-        .padding(.vertical, Spacing.sm)
-        .overlay(alignment: .top) { Rectangle().fill(palette.border.opacity(0.45)).frame(height: 1) }
-        .accessibilityIdentifier("wave-metric")
-        .accessibilityElement(children: .combine)
-    }
-
-    private func detail(_ presentation: WaveMetricRowPresentation) -> String {
-        [presentation.description, presentation.instrumentState, presentation.freshness]
-            .filter { !$0.isEmpty }
-            .joined(separator: ", ")
-    }
-}
-
-struct WaveMetricPortfolioPresentation: Equatable {
-    let officialCount: Int
-    let candidateCount: Int
-    let holdingCount: Int
-    let targetedCount: Int
-    let requiresWorkCount: Int
-    let contractIssueCount: Int
-    private let unavailableWaves: Set<String>
-
-    var projectUnavailable: Bool { !unavailableWaves.isEmpty }
-
-    func targetUnavailable(for metric: MetricReading) -> Bool {
-        unavailableWaves.contains(metric.identity.waveId)
-    }
-
-    init(portfolio: MetricPortfolio) {
-        let official = portfolio.metrics.filter { $0.stage == .graduated }
-        officialCount = official.count
-        candidateCount = portfolio.metrics.count - official.count
-        targetedCount = official.count { $0.target != nil }
-        holdingCount = official.count { $0.target != nil && $0.evidence.isHealthy }
-        requiresWorkCount = targetedCount - holdingCount
-        contractIssueCount = portfolio.contractIssues.count
-        unavailableWaves = Set(portfolio.contractIssues.compactMap {
-            if case let .projectUnavailable(waveId, _) = $0 { return waveId }
-            return nil
-        })
-    }
-
-    var headline: String {
-        if projectUnavailable { return "Project targets unavailable." }
-        if officialCount > 0 && targetedCount == 0 { return "No targets set for this Project." }
-        switch (targetedCount, holdingCount) {
-        case (0, _):
-            return "No official measures yet. Candidates remain visible while their evidence matures."
-        case (1, 1):
-            return "The official measure currently holds."
-        case (1, 0):
-            return "The official measure needs work."
-        default:
-            return "\(holdingCount) of \(targetedCount) Project targets currently hold."
-        }
-    }
-}
-
-struct WaveMetricRowPresentation: Equatable {
-    let name: String
-    let description: String
-    let state: String
-    let owner: String
-    let instrumentState: String
-    let value: String
-    let target: String
-    let window: String
-    let freshness: String
-    let reason: String?
-
-    init(metric: MetricReading, owner: String, targetUnavailable: Bool) {
-        name = metric.name
-        description = metric.description
-        state = metric.evidence.label
-        self.owner = owner
-        instrumentState = metric.instrumented ? "Instrumented" : "Awaiting instrument"
-        value = metric.evidence.value.map { metric.format($0) } ?? "—"
-        target = targetUnavailable ? "unavailable for this Project"
-            : metric.target?.display(unit: metric.unit) ?? "unset for this Project"
-        window = metric.window
-        freshness = metric.freshness.summary
-        reason = metric.evidence.reason
-    }
-}
-
-private extension MetricReading {
-    func format(_ value: Double) -> String {
-        if unit == "ratio" {
-            return value.formatted(.percent.precision(.fractionLength(0 ... 2)))
-        }
-        return "\(value.formatted(.number.precision(.fractionLength(0 ... 3)))) \(unit)"
-    }
-}
-
-private extension Threshold {
-    func display(unit: String) -> String {
-        switch self {
-        case let .atLeast(value): return "≥ \(formatted(value, unit: unit))"
-        case let .atMost(value): return "≤ \(formatted(value, unit: unit))"
-        }
-    }
-
-    private func formatted(_ value: Double, unit: String) -> String {
-        if unit == "ratio" {
-            return value.formatted(.percent.precision(.fractionLength(0 ... 2)))
-        }
-        return "\(value.formatted(.number.precision(.fractionLength(0 ... 3)))) \(unit)"
-    }
-}
-
-private extension MetricFreshness {
-    var summary: String {
-        switch self {
-        case .never: return "Never observed"
-        case let .fresh(_, expiresAt): return "Fresh until \(expiresAt)"
-        case let .stale(_, expiresAt): return "Stale since \(expiresAt)"
-        }
-    }
-}
-
-private extension MetricEvidence {
-    var tone: WorkTone {
-        switch self {
-        case .met: return .done
-        case .missed: return .failure
-        case .unknown, .untargeted: return .neutral
-        case .unavailable: return .warning
-        }
-    }
-
-    var displayPriority: Int {
-        switch self {
-        case .missed, .unavailable: return 0
-        case .unknown, .untargeted: return 1
-        case .met: return 2
-        }
-    }
-
-    var label: String {
-        switch self {
-        case .untargeted: return "No target"
-        case .met: return "Met"
-        case .missed: return "Missed"
-        case .unknown: return "Unknown"
-        case .unavailable: return "Unavailable"
-        }
-    }
-
-    var isHealthy: Bool {
-        if case .met = self { return true }
-        return false
-    }
-
-    var value: Double? {
-        switch self {
-        case let .untargeted(value, _, _), let .met(value, _, _), let .missed(value, _, _): return value
-        case let .unknown(cause): return cause.value
-        case .unavailable: return nil
-        }
-    }
-
-    var reason: String? {
-        switch self {
-        case .met, .missed, .untargeted: return nil
-        case let .unknown(cause): return cause.summary
-        case let .unavailable(reason, sourceAsOf): return "\(reason) · source time \(sourceAsOf)"
-        }
-    }
-}
-
-private extension MetricUnknownCause {
-    var value: Double? {
-        switch self {
-        case let .targetUnavailable(value, _, _),
-             let .incomplete(value, _, _),
-             let .windowMismatch(value, _, _),
-             let .staleObservation(value, _, _): return value
-        case .never, .revisionMismatch, .staleUnavailable: return nil
-        }
-    }
-
-    var summary: String {
-        switch self {
-        case .never: return "No observation has arrived."
-        case .targetUnavailable: return "Project target planning is unavailable."
-        case let .revisionMismatch(expected, observed, sourceTime):
-            return "Evidence at \(sourceTime) measured revision \(observed), not \(expected)."
-        case .incomplete: return "The latest source window is incomplete."
-        case .windowMismatch: return "The latest source window does not match the contract."
-        case .staleObservation: return "The latest observation is stale."
-        case let .staleUnavailable(reason, sourceAsOf):
-            return "The last source failure is stale: \(reason) · source time \(sourceAsOf)"
-        }
-    }
-}
-
-private extension MetricContractIssue {
-    var summary: String {
-        switch self {
-        case let .projectUnavailable(waveId, reason): return "\(waveId): Project targets unavailable: \(reason)"
-        case let .unresolvedTarget(waveId, metricId): return "\(waveId)/\(metricId): Project target has no readable instrument contract"
-        case let .malformedContract(path, message): return "\(path): \(message)"
-        case let .instrumentMismatch(waveId, metricId, contractInstrument, registeredInstrument):
-            return "\(waveId)/\(metricId) declares \(contractInstrument), but \(registeredInstrument) is registered."
-        case let .invalidGraduation(waveId, metricId, _, reason):
-            return "\(waveId)/\(metricId) cannot graduate: \(reason)."
-        }
+        .font(Typography.meta)
+        .lineLimit(1)
+        .accessibilityIdentifier("wave-header-project")
     }
 }
 
@@ -695,24 +291,16 @@ struct WaveProjectView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.xs) {
-            Text(project.name).font(Typography.lede).textSelection(.enabled)
-            TrackerSyncView(sync: project.sync, repo: repo)
-            ForEach(project.krs) { kr in
-                HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
-                    Circle()
-                        .fill(kr.holds ? palette.success : Color.clear)
-                        .overlay(Circle().strokeBorder(kr.holds ? palette.success : palette.borderStrong, lineWidth: 1.5))
-                        .frame(width: 12, height: 12)
-                        .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 4 }
-                    Text(kr.text)
-                        .font(Typography.text)
-                        .lineSpacing(2)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .textSelection(.enabled)
-                }
-                .accessibilityElement(children: .combine)
-                .accessibilityValue(kr.holds ? "Holds" : "Open")
+            HStack(alignment: .firstTextBaseline) {
+                Text(project.name).font(Typography.lede).textSelection(.enabled)
+                Text(project.status.rawValue.capitalized)
+                    .font(Typography.meta).foregroundStyle(palette.textSecondary)
             }
+            if let unbound = project.unbound {
+                Text(unbound).font(Typography.meta).foregroundStyle(palette.textSecondary)
+                    .textSelection(.enabled)
+            }
+            TrackerSyncView(sync: project.sync, repo: repo)
         }.accessibilityIdentifier("wave-project")
     }
 }

@@ -36,10 +36,8 @@ pub fn render_task_context(
     );
     if let Some(project) = project {
         context.push_str(&format!(
-            "\n\nProject: {} (source {})\n{}",
-            project.name,
-            project.id,
-            render_project_context(project)
+            "\n\nProject: {} (source {})\n{}\n",
+            project.name, project.id, project.description
         ));
     }
     if let Some(wave) = wave_name {
@@ -68,23 +66,7 @@ pub fn render_task_context(
     context
 }
 
-fn render_project_context(project: &loopflow_storage::work::project::Project) -> String {
-    let targets = serde_json::to_string_pretty(&project.metric_targets)
-        .expect("validated metric targets serialize");
-    let mut content = format!(
-        "{}\n## Metric targets\n\n```json\n{targets}\n```",
-        project.description
-    );
-    content.push_str("\n\n## KRs");
-    for kr in &project.krs {
-        let marker = if kr.holds { "x" } else { " " };
-        content.push_str(&format!("\n\n- [{marker}] {}", kr.text.trim()));
-    }
-    content.push('\n');
-    content
-}
-
-fn render_wave_context(repo: &Path, wave: &str, metric_context: &str) -> String {
+fn render_wave_context(repo: &Path, wave: &str) -> String {
     // Authored goals and memory enter once through the prompt document gatherer.
     let graphs = match crate::graph::available_graph_names(repo) {
         Ok(names) => names
@@ -95,7 +77,7 @@ fn render_wave_context(repo: &Path, wave: &str, metric_context: &str) -> String 
         Err(error) => format!("Graph catalog unavailable: {error}"),
     };
     format!(
-        "Drive the '{wave}' Wave's goal forward using its checkout-local files.\n\n<lf:goal-context>\nAvailable graphs:\n{graphs}\n</lf:goal-context>\n\n{metric_context}\n\n<lf:wave-executive-loop>\n1. What is most important?\n2. What signals are arriving?\n3. What works?\n4. What does not?\n5. What is the current strategy?\n6. How should strategy adjust?\n\nTreat metrics as evidence, never as automatic KR completion or a composite Wave score.\n</lf:wave-executive-loop>"
+        "Drive the '{wave}' Wave's goal forward using its checkout-local files.\n\n<lf:goal-context>\nAvailable graphs:\n{graphs}\n</lf:goal-context>\n\n<lf:wave-executive-loop>\n1. What is most important?\n2. What signals are arriving?\n3. What works?\n4. What does not?\n5. What is the current strategy?\n6. How should strategy adjust?\n</lf:wave-executive-loop>"
     )
 }
 
@@ -254,15 +236,6 @@ async fn bind_selected_work(
     }
 
     let wave = wave.expect("a selection without a Task has a Wave");
-    let metric_context = crate::ops::metrics::metric_prompt_section(
-        "metric-portfolio",
-        crate::ops::metrics::stored_wave_metric_portfolio(
-            store,
-            &wave,
-            time::OffsetDateTime::now_utc(),
-        )
-        .await,
-    );
     let cwd = if crate::repository::discover(Path::new(wave.repo())).is_ok_and(|canonical| {
         crate::repository::discover(repo).is_ok_and(|other| other == canonical)
     }) {
@@ -270,7 +243,7 @@ async fn bind_selected_work(
     } else {
         PathBuf::from(wave.repo())
     };
-    let context = render_wave_context(&cwd, wave.slug(), &metric_context);
+    let context = render_wave_context(&cwd, wave.slug());
     Ok(WorkBinding {
         source: selected.source,
         subjects: vec![format!("wave:{}", wave.slug())],
@@ -348,13 +321,12 @@ mod tests {
     use crate::linear::{LinearIssueId, LinearProjectId};
     use crate::store::SharedStore;
     use crate::store::StorageConfig;
-    use crate::test_linear_input::Inventory;
     use crate::work::wave::Wave;
     use loopflow_model::durable::{ProjectId, TaskId, WorkRef};
     use loopflow_model::id::WaveId;
+    use loopflow_storage::planning::ProjectInventory;
     use loopflow_storage::planning::TrackerProject;
     use loopflow_storage::work::project::Project;
-    use loopflow_storage::work::project::ProjectKR;
     use loopflow_storage::work::task::{LinearWritebackState, Observation, Task, TaskPr, TaskPrId};
     use std::path::PathBuf;
 
@@ -371,7 +343,7 @@ mod tests {
     fn project(wave: &Wave, slug: &str, planning_id: &str) -> Project {
         let now = OffsetDateTime::now_utc();
         Project {
-            id: ProjectId::new(),
+            id: ProjectId::for_wave(wave.id()),
 
             summary: String::new(),
             status: loopflow_storage::work::project::ProjectStatus::Started,
@@ -379,8 +351,6 @@ mod tests {
             slug: slug.to_string(),
             name: slug.to_string(),
             description: "Ship the requested behavior.".to_string(),
-            krs: Vec::new(),
-            metric_targets: Vec::new(),
             tracker_synced_at: Some(now.unix_timestamp()),
 
             wave_id: wave.id().clone(),
@@ -443,14 +413,6 @@ mod tests {
             created_at: now,
             updated_at: now,
         };
-        loopflow_storage::sqlite::project_selection::write_project_binding(
-            &store.sqlite,
-            wave.id(),
-            None,
-            project.tracker_id.as_ref().unwrap().as_str(),
-            &crate::store::PlanningLocks::new(tempfile::tempfile().unwrap()),
-        )
-        .unwrap();
         store.seed_task(&task, &pr).await.unwrap();
         task
     }
@@ -467,14 +429,6 @@ mod tests {
         store.create_wave(&wave).await.unwrap();
         let project = project(&wave, "runtime", "project-runtime");
         store.create_project(&project).await.unwrap();
-        loopflow_storage::sqlite::project_selection::write_project_binding(
-            &store.sqlite,
-            wave.id(),
-            None,
-            project.tracker_id.as_ref().unwrap().as_str(),
-            &crate::store::PlanningLocks::new(tempfile::tempfile().unwrap()),
-        )
-        .unwrap();
         let task = store
             .sqlite
             .create_task(&loopflow_storage::work::task::NewTask {
@@ -678,7 +632,7 @@ mod tests {
         std::fs::create_dir_all(tmp.path().join(".lf/wave/release")).unwrap();
         let goal = "---\ncrons: []\n---\n## Objective\nShip a reliable release.\n\n## Bounds\nKeep rollback available.\n";
         std::fs::write(tmp.path().join(".lf/wave/release/GOAL.md"), goal).unwrap();
-        let seed = super::render_wave_context(tmp.path(), "release", "");
+        let seed = super::render_wave_context(tmp.path(), "release");
         for (message, explicit) in [
             (None, false),
             (Some(seed.clone()), false),
@@ -1289,7 +1243,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn direct_wave_binding_carries_graphs_and_shared_metric_context() {
+    async fn direct_wave_binding_carries_graphs() {
         let (directory, store) = test_store().await;
         let repo = directory.path().join("repo");
         std::fs::create_dir_all(repo.join(".lf/wave/runtime")).unwrap();
@@ -1305,31 +1259,24 @@ mod tests {
             .create_project(&project(&wave, "loopflow-api", "project-api"))
             .await
             .unwrap();
-        let snapshot = Inventory {
-            projects: vec![TrackerProject {
+        let snapshot = ProjectInventory {
+            project: TrackerProject {
                 description: None,
                 revision: None,
                 id: "project-api".to_string(),
                 slug: "loopflow-api".to_string(),
                 name: "Loopflow API".to_string(),
                 summary: String::new(),
-
-                metric_targets: Vec::new(),
                 status: loopflow_storage::work::project::ProjectStatus::Started,
-                krs: vec![ProjectKR {
-                    text: "One model everywhere".to_string(),
-                    holds: false,
-                }],
-                initiative_ids: vec!["initiative-1".to_string()],
+                url: None,
                 team_ids: vec!["team-1".to_string()],
-            }],
+            },
             items: Vec::new(),
         };
         store
             .seed_inventory(
                 InventoryFixture {
                     wave_id: wave.id().clone(),
-                    initiative: "initiative-1".to_string(),
                     synced_at: OffsetDateTime::now_utc().unix_timestamp(),
                     snapshot,
                 },
@@ -1347,7 +1294,7 @@ mod tests {
             .contains("Drive the 'runtime' Wave's goal forward"));
         assert!(binding.context.contains("- local-delivery\n"));
         assert!(binding.context.contains("- pursue\n"));
-        assert!(binding.context.contains("metric-portfolio"));
+        assert!(!binding.context.contains("metric"));
         assert!(resolve_work_binding(&store, &repo, "project:loopflow-api")
             .await
             .is_err());

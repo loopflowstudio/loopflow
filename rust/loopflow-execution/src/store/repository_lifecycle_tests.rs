@@ -12,7 +12,7 @@ fn machine_defaults_route_unowned_tasks_until_one_is_claimed() {
     let repo = home.path().canonicalize().unwrap();
     let repo = repo.to_str().unwrap();
     let (mini, worker) = (MachineId::new(), MachineId::new());
-    let project = crate::work::wave::bootstrap::ensure_wave_project(&store, repo, "work").unwrap();
+    let project = crate::test_support::seed_wave_project(&store, repo, "work").unwrap();
     let wave = project.wave_id.clone();
     let repository = crate::repository::location::ensure_repository(&store, repo).unwrap();
     let new_task = |title: &str| {
@@ -108,8 +108,7 @@ fn a_waves_capacity_takes_its_new_tasks_until_a_nearer_machine_does() {
     let store = crate::store::opening::open_ephemeral(&home.path().join("db")).unwrap();
     let repo = home.path().canonicalize().unwrap();
     let repo = repo.to_str().unwrap();
-    let project =
-        crate::work::wave::bootstrap::ensure_wave_project(&store, repo, "infrastructure").unwrap();
+    let project = crate::test_support::seed_wave_project(&store, repo, "infrastructure").unwrap();
     let wave = DefaultScope::Wave(project.wave_id.clone());
     let repository = crate::repository::location::ensure_repository(&store, repo).unwrap();
     let task = store

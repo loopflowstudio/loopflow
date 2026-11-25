@@ -22,6 +22,8 @@ const STILL_READ: &[(&str, &str)] = &[
     ("agent_sessions.work_source", "LOO-836"),
     // Fixtures write the rows a released lf does; the bridge triggers read them.
     ("processes", "LOO-965"),
+    // Released peers still exchange a Project's Initiatives in plan records.
+    ("projects.planning_initiatives", "LOO-995"),
     ("tasks.regressed_in", "LOO-730"),
 ];
 

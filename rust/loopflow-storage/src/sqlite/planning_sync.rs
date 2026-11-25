@@ -2,7 +2,7 @@
 //! won: open and lost tracker actions, and a person's answer to a lost value.
 use std::collections::HashMap;
 
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension};
 
 use super::children::ids_json;
 use super::tracker_actions::{read_action, COLUMNS, IN_REPO};
@@ -44,6 +44,22 @@ impl SqliteStore {
             .unwrap_or_default();
         tx.commit()?;
         Ok(TrackerActions { repo, actions })
+    }
+
+    /// Where the tracker shows the Project, once a read of it saw a URL.
+    pub fn project_url(&self, project: &ProjectId) -> StoreResult<Option<String>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn
+            .query_row(
+                "SELECT t.url FROM projects p JOIN waves w ON w.id=p.wave_id
+                 JOIN tracker_projects t ON t.repo=w.repo AND t.tracker IN ('linear','asana')
+                      AND t.id=p.external_project_id
+                 WHERE p.id=?1",
+                [project.as_str()],
+                |row| row.get(0),
+            )
+            .optional()?
+            .flatten())
     }
 
     /// What `lf repo tracker` lists: every open and lost action in send order.

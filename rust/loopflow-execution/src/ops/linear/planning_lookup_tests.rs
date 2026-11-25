@@ -1,7 +1,7 @@
 #![allow(clippy::await_holding_lock)] // Serialize process-wide Machine selection for each async fixture.
 
-#[cfg(any(test, feature = "test-support"))]
-use crate::test_linear_input::{Inventory, InventoryFixture, IssueFixture, SeedLinear};
+use crate::test_linear_input::{InventoryFixture, IssueFixture, SeedLinear};
+use loopflow_storage::planning::ProjectInventory;
 use std::sync::Arc;
 
 use axum::http::StatusCode;
@@ -35,17 +35,15 @@ fn team_response() -> QueuedResponse {
 
 fn project() -> serde_json::Value {
     json!({"id":"project-1", "name":"Project", "status":{"type":"started"}, "updatedAt":"2026-09-29T11:00:00Z", "description":"", "content":"",
-        "initiatives":{"nodes":[{"id":"initiative-1"}]},
         "teams":{"nodes":[{"id":"team-1"}]}})
 }
 
 fn snapshot(wave: &WaveId, record: &IssueFixture) -> InventoryFixture {
     InventoryFixture {
         wave_id: wave.clone(),
-        initiative: "initiative-1".into(),
         synced_at: record.observed_at,
-        snapshot: Inventory {
-            projects: record.project.clone().into_iter().collect(),
+        snapshot: ProjectInventory {
+            project: record.project.clone().unwrap(),
             items: vec![record.item.clone()],
         },
     }
@@ -108,7 +106,7 @@ async fn fresh_lookup_and_wave_list_share_planning_without_execution() {
                 assert!(fixture.store.task_prs(&task.id).await.unwrap().is_empty());
                 assert!(!fixture.store.task_owned(&task.id).await.unwrap());
             }
-            assert_eq!(fixture.store.list_projects(None).await.unwrap().len(), 1);
+            assert_eq!(fixture.store.list_projects().await.unwrap().len(), 1);
             assert_eq!(fixture.wave_refresh_at(&wave), None);
 
             // A list carries membership, not another copy of the Task's title.
@@ -129,13 +127,7 @@ async fn fresh_lookup_and_wave_list_share_planning_without_execution() {
             edited.observed_at += 1;
             fixture
                 .store
-                .seed_issue(
-                    &repo.to_string_lossy(),
-                    "linear",
-                    edited.clone(),
-                    None,
-                    None,
-                )
+                .seed_issue(&repo.to_string_lossy(), "linear", edited.clone(), None)
                 .await
                 .unwrap();
             assert_eq!(
@@ -223,23 +215,19 @@ async fn refresh_returns_saved_task_fields_without_replacing_pending_edits() {
 }
 
 #[tokio::test]
-async fn rejected_project_snapshot_preserves_durable_project_facts() {
+async fn a_later_inventory_can_rename_a_project_at_the_same_revision() {
     let _lock = crate::journal::test_env_lock();
     let _restore = PlanningEnvironment::isolate();
     let fixture = Fixture::new().await;
     std::env::set_var("LF_HOME", fixture.directory.path());
     let (_repo, wave) = fixture.planning_repo().await;
-    let mut snapshot: Inventory = serde_json::from_str(include_str!(
-        "../../../../../tests/fixtures/dto/task_history_planning.json"
-    ))
-    .unwrap();
+    let mut snapshot = crate::test_linear_input::task_history_inventory();
     snapshot.items.clear();
-    snapshot.projects.truncate(1);
-    snapshot.projects[0].revision = Some("2026-10-05T12:00:00Z".into());
-    snapshot.projects[0].initiative_ids = vec!["initiative-1".into()];
+    // The Project the fixture Wave links.
+    snapshot.project.id = "project-1".into();
+    snapshot.project.revision = Some("2026-10-05T12:00:00Z".into());
     let mut snapshot = InventoryFixture {
         wave_id: wave.id().clone(),
-        initiative: "initiative-1".into(),
         synced_at: 1,
         snapshot,
     };
@@ -249,22 +237,20 @@ async fn rejected_project_snapshot_preserves_durable_project_facts() {
         .await
         .unwrap();
     // Linear can rename at the same `updatedAt`; the later read wins.
-    snapshot.snapshot.projects[0].name = "Renamed in Linear".into();
+    snapshot.snapshot.project.name = "Renamed in Linear".into();
     snapshot.synced_at = 2;
     fixture
         .store
         .seed_inventory(snapshot.clone(), None)
         .await
         .unwrap();
-    let retained = fixture.store.list_projects(Some(wave.id())).await.unwrap();
-    assert_eq!(retained[0].name, "Renamed in Linear");
-    snapshot.snapshot.projects.clear();
-    snapshot.synced_at = 3;
-    assert!(fixture.store.seed_inventory(snapshot, None).await.is_err());
-    assert_eq!(
-        fixture.store.list_projects(Some(wave.id())).await.unwrap(),
-        retained
-    );
+    let retained = fixture
+        .store
+        .project_of_wave(wave.id())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(retained.name, "Renamed in Linear");
 }
 
 #[tokio::test]
@@ -318,7 +304,7 @@ async fn projectless_task_adopts_repository_ownership() {
 }
 
 #[tokio::test]
-async fn missing_and_unavailable_tasks_do_not_create_planning_or_execution() {
+async fn missing_and_unreadable_issues_do_not_create_planning_or_execution() {
     for (response, diagnostic) in [
         (
             json!({"data":{"issue":null}}),
@@ -431,7 +417,6 @@ async fn omitted_detail_fields_do_not_clear_known_planning() {
         "issue",
         "project",
         "description",
-        "project.initiatives",
         "project.teams",
         "project.content",
         "project.description",
@@ -549,13 +534,7 @@ async fn automatic_refresh_reports_failure_with_retained_observation_age() {
     .unwrap();
     fixture
         .store
-        .seed_issue(
-            &repo.to_string_lossy(),
-            "linear",
-            record.clone(),
-            None,
-            None,
-        )
+        .seed_issue(&repo.to_string_lossy(), "linear", record.clone(), None)
         .await
         .unwrap();
     let (url, _) = spawn(vec![
@@ -630,7 +609,7 @@ async fn provider_revisions_and_change_receipts_converge_without_execution() {
             confirmed.observed_at -= 1;
             fixture
                 .store
-                .seed_issue(&scope, "linear", confirmed.clone(), None, None)
+                .seed_issue(&scope, "linear", confirmed.clone(), None)
                 .await
                 .unwrap();
             list.synced_at += 10;
@@ -662,7 +641,7 @@ async fn provider_revisions_and_change_receipts_converge_without_execution() {
             stale.observed_at -= 1;
             fixture
                 .store
-                .seed_issue(&scope, "linear", stale, None, None)
+                .seed_issue(&scope, "linear", stale, None)
                 .await
                 .unwrap();
             assert_eq!(
@@ -676,7 +655,7 @@ async fn provider_revisions_and_change_receipts_converge_without_execution() {
             confirmed.observed_at += 1;
             fixture
                 .store
-                .seed_issue(&scope, "linear", confirmed.clone(), None, None)
+                .seed_issue(&scope, "linear", confirmed.clone(), None)
                 .await
                 .unwrap();
             assert_eq!(
@@ -694,7 +673,7 @@ async fn provider_revisions_and_change_receipts_converge_without_execution() {
             delayed.observed_at += 20;
             fixture
                 .store
-                .seed_issue(&scope, "linear", delayed, None, None)
+                .seed_issue(&scope, "linear", delayed, None)
                 .await
                 .unwrap();
             assert!(refresh_task_input(&repo, "FIX-1", LinearRefresh::Never)
@@ -714,7 +693,7 @@ async fn provider_revisions_and_change_receipts_converge_without_execution() {
             confirmed.item.completed = true;
             fixture
                 .store
-                .seed_issue(&scope, "linear", confirmed.clone(), None, None)
+                .seed_issue(&scope, "linear", confirmed.clone(), None)
                 .await
                 .unwrap();
             // Duplicate and older change receipts cannot invalidate an equal/newer observation.
@@ -742,7 +721,7 @@ async fn provider_revisions_and_change_receipts_converge_without_execution() {
                 .is_err());
             fixture
                 .store
-                .seed_issue(&scope, "linear", confirmed.clone(), None, None)
+                .seed_issue(&scope, "linear", confirmed.clone(), None)
                 .await
                 .unwrap();
             assert_eq!(
@@ -759,7 +738,7 @@ async fn provider_revisions_and_change_receipts_converge_without_execution() {
             confirmed.item.revision = Some("2026-09-29T12:00:00.126Z".into());
             fixture
                 .store
-                .seed_issue(&scope, "linear", confirmed, None, None)
+                .seed_issue(&scope, "linear", confirmed, None)
                 .await
                 .unwrap();
             fixture.store.seed_inventory(list, None).await.unwrap();
@@ -786,7 +765,7 @@ async fn provider_revisions_and_change_receipts_converge_without_execution() {
             uncached.item.identifier = "FIX-2".into();
             fixture
                 .store
-                .seed_issue(&scope, "linear", uncached, None, None)
+                .seed_issue(&scope, "linear", uncached, None)
                 .await
                 .unwrap();
             assert!(refresh_task_input(&repo, "FIX-2", LinearRefresh::Never)
@@ -944,7 +923,7 @@ async fn removal_during_absent_lookup_preserves_confirmed_evidence() {
 }
 
 #[tokio::test]
-async fn project_revisions_order_shared_facts_and_an_initiative_move_stays_unresolved() {
+async fn project_revisions_order_shared_facts() {
     let _lock = crate::journal::test_env_lock();
     let _restore = PlanningEnvironment::isolate();
     let fixture = Fixture::new().await;
@@ -977,7 +956,7 @@ async fn project_revisions_order_shared_facts_and_an_initiative_move_stays_unres
             newer.observed_at -= 1;
             fixture
                 .store
-                .seed_issue(&repo.to_string_lossy(), "linear", newer.clone(), None, None)
+                .seed_issue(&repo.to_string_lossy(), "linear", newer.clone(), None)
                 .await
                 .unwrap();
             // The list arrived later but its provider revision is older.
@@ -1005,85 +984,6 @@ async fn project_revisions_order_shared_facts_and_an_initiative_move_stays_unres
                 .unwrap()
                 .unwrap();
             assert_eq!(saved_project.name, "Renamed project");
-            let mut omitted = list.clone();
-            omitted.snapshot.projects.clear();
-            omitted.snapshot.items.clear();
-            assert!(fixture
-                .store
-                .seed_inventory(omitted, None)
-                .await
-                .unwrap_err()
-                .to_string()
-                .contains("missing from its Initiative"));
-            assert_eq!(
-                fixture
-                    .store
-                    .get_task_by_issue("FIX-1")
-                    .await
-                    .unwrap()
-                    .unwrap(),
-                saved
-            );
-            for revision in [
-                Some("2026-09-29T11:00:00Z"),
-                None,
-                Some("2026-09-29T11:00:00.000000001Z"),
-                Some("2026-09-29T12:00:00Z"),
-            ] {
-                let mut conflicting = newer.clone();
-                let project = conflicting.project.as_mut().unwrap();
-                project.revision = revision.map(str::to_string);
-                project.initiative_ids = vec!["different-wave".into()];
-                let result = fixture
-                    .store
-                    .seed_issue(&repo.to_string_lossy(), "linear", conflicting, None, None)
-                    .await;
-                if revision != Some("2026-09-29T11:00:00Z") {
-                    assert!(result.is_err());
-                } else {
-                    result.unwrap();
-                }
-                let evidence = fixture
-                    .store
-                    .linear_issue_state(&repo.to_string_lossy(), "FIX-1")
-                    .await
-                    .unwrap();
-                assert_eq!(evidence.observed_at, Some(stored.observed_at));
-                assert_eq!(fixture.retained_task(&repo, "issue-1"), stored);
-                assert_eq!(
-                    evidence.state,
-                    if revision != Some("2026-09-29T11:00:00Z") {
-                        crate::store::PlanningState::Invalid
-                    } else {
-                        crate::store::PlanningState::Available
-                    }
-                );
-            }
-            // Replaying old membership cannot clear the explicit uncertainty.
-            fixture
-                .store
-                .seed_inventory(list.clone(), None)
-                .await
-                .unwrap();
-            assert!(refresh_task_input(&repo, "FIX-1", LinearRefresh::Never)
-                .await
-                .is_err());
-            assert_ne!(
-                fixture
-                    .store
-                    .linear_issue_state(&repo.to_string_lossy(), "FIX-1")
-                    .await
-                    .unwrap()
-                    .state,
-                crate::store::PlanningState::Available
-            );
-            fixture.store.sqlite.conn.lock().unwrap().execute(
-                "UPDATE tracker_projects SET archived=1 WHERE repo=?1 AND tracker='linear' AND id=?2",
-                rusqlite::params![repo.to_string_lossy(), newer.project.unwrap().id],
-            ).unwrap();
-            list.snapshot.projects.clear();
-            list.snapshot.items.clear();
-            fixture.store.seed_inventory(list, None).await.unwrap();
             for task in fixture.store.list_tasks(None).await.unwrap() {
                 assert!(task.worktree.is_none());
                 assert!(fixture.store.task_prs(&task.id).await.unwrap().is_empty());
@@ -1095,7 +995,7 @@ async fn project_revisions_order_shared_facts_and_an_initiative_move_stays_unres
 
 #[tokio::test]
 async fn cold_detail_resolves_configured_wave_before_projecting() {
-    for ownership in ["same", "foreign", "unmapped"] {
+    for ownership in ["same", "unlinked"] {
         let _lock = crate::journal::test_env_lock();
         let _restore = PlanningEnvironment::isolate();
         let fixture = Fixture::new().await;
@@ -1105,31 +1005,9 @@ async fn cold_detail_resolves_configured_wave_before_projecting() {
         let mut refreshed = project();
         refreshed["name"] = "Refreshed plan".into();
         refreshed["updatedAt"] = "2026-09-30T11:00:00Z".into();
-        if ownership != "same" {
-            refreshed["initiatives"]["nodes"][0]["id"] = "elsewhere".into();
-        }
-        if ownership == "foreign" {
-            std::fs::create_dir_all(repo.join(".lf/wave/other")).unwrap();
-            std::fs::write(
-                repo.join(".lf/wave/other/GOAL.md"),
-                "---\nlinear:\n  initiative: elsewhere\n---\nOther work.\n",
-            )
-            .unwrap();
-            fixture
-                .store
-                .create_wave(&crate::work::wave::Wave::new(
-                    WaveId::new(),
-                    "other".into(),
-                    repo.to_string_lossy().into_owned(),
-                ))
-                .await
-                .unwrap();
-            crate::work::wave::bootstrap::ensure_wave(
-                &fixture.store.sqlite,
-                repo.to_str().unwrap(),
-                "other",
-            )
-            .unwrap();
+        // An issue moved into a Linear Project no Wave links is not planned here.
+        if ownership == "unlinked" {
+            refreshed["id"] = "unlinked-project".into();
         }
         let (url, _) = spawn(vec![
             team_response(),
@@ -1146,10 +1024,10 @@ async fn cold_detail_resolves_configured_wave_before_projecting() {
                     .unwrap();
                 let original = fixture
                     .store
-                    .list_projects(Some(wave.id()))
+                    .project_of_wave(wave.id())
                     .await
                     .unwrap()
-                    .remove(0);
+                    .unwrap();
                 // Evict normalized provider facts, retaining durable work as on a cold detail read.
                 let conn = rusqlite::Connection::open(&fixture.database).unwrap();
                 conn.execute_batch(
@@ -1172,11 +1050,14 @@ async fn cold_detail_resolves_configured_wave_before_projecting() {
                     assert_eq!(current.wave_id, original.wave_id);
                     assert_eq!(current.name, "Refreshed plan");
                 } else {
-                    assert!(result.refresh_error.is_some());
                     assert_eq!(current, original);
                     assert_eq!(
-                        fixture.store.list_projects(None).await.unwrap(),
-                        vec![original]
+                        fixture
+                            .store
+                            .project_of_wave(&original.wave_id)
+                            .await
+                            .unwrap(),
+                        Some(original)
                     );
                 }
                 assert_eq!(fixture.wave_refresh_at(&wave), None);
@@ -1211,12 +1092,7 @@ async fn cancelled_acceptance(detail: bool) {
     } else {
         vec![
             team_response(),
-            json_response(
-                StatusCode::OK,
-                json!({"data":{"initiative":{"projects":{
-                    "nodes":[project()],"pageInfo":{"hasNextPage":false,"endCursor":null}
-                }}}}),
-            ),
+            json_response(StatusCode::OK, json!({"data":{"project":project()}})),
             json_response(
                 StatusCode::OK,
                 json!({"data":{"project":{"issues":{
@@ -1226,9 +1102,7 @@ async fn cancelled_acceptance(detail: bool) {
         ]
     };
     responses.extend([
-        json_response(StatusCode::OK, json!({"data":{"initiative":{"projects":{
-            "nodes":[project()],"pageInfo":{"hasNextPage":false,"endCursor":null}
-        }}}})),
+        json_response(StatusCode::OK, json!({"data":{"project":project()}})),
         json_response(StatusCode::OK, json!({"data":{"project":{"issues":{
             "nodes":[issue(project())["data"]["issue"]],"pageInfo":{"hasNextPage":false,"endCursor":null}
         }}}})),
@@ -1260,8 +1134,8 @@ async fn cancelled_acceptance(detail: bool) {
                     .await
                     .map(|_| ())
             } else {
-                let (ctx, initiative) = super::resolve_context(&write_repo, "product").await?;
-                super::refresh_inventory(&write_repo, "product", &ctx, &initiative)
+                let ctx = super::resolve_repository_context(&write_repo).await?;
+                super::refresh_inventory(&write_repo, "product", &ctx)
                     .await
                     .map(|_| ())
             }
@@ -1377,13 +1251,7 @@ async fn delayed_absence_preserves_a_newer_accepted_task() {
                     entered.wait().await;
                     fixture
                         .store
-                        .seed_issue(
-                            &repo.to_string_lossy(),
-                            "linear",
-                            confirmed.clone(),
-                            None,
-                            None,
-                        )
+                        .seed_issue(&repo.to_string_lossy(), "linear", confirmed.clone(), None)
                         .await
                         .unwrap();
                     release.wait().await;
@@ -1452,7 +1320,7 @@ async fn refresh_reads_ownership_without_reconstructing_tracker_content() {
             )
             .unwrap();
             conn.execute(
-                "UPDATE tracker_projects SET name='[]',krs='unrelated bad content' WHERE id='project-1'",
+                "UPDATE tracker_projects SET name='[]',summary='unrelated bad content' WHERE id='project-1'",
                 [],
             )
             .unwrap();
@@ -1470,7 +1338,7 @@ async fn refresh_reads_ownership_without_reconstructing_tracker_content() {
                     .unwrap(),
                 before
             );
-            for column in ["membership_unresolved", "archived"] {
+            for column in ["archived"] {
                 conn.execute(
                     &format!("UPDATE tracker_projects SET {column}=1 WHERE id='project-1'"),
                     [],
@@ -1518,53 +1386,6 @@ async fn refresh_reads_ownership_without_reconstructing_tracker_content() {
             assert_eq!(fixture.wave_refresh_at(&wave), wave_age);
         })
         .await;
-}
-
-#[tokio::test]
-async fn inventory_refresh_retains_unmapped_local_projects() {
-    let _lock = crate::journal::test_env_lock();
-    let _restore = PlanningEnvironment::isolate();
-    let fixture = Fixture::new().await;
-    let (repo, wave) = fixture.planning_repo().await;
-    let local = crate::work::wave::bootstrap::ensure_wave_project(
-        &fixture.store.sqlite,
-        repo.to_str().unwrap(),
-        "product",
-    )
-    .unwrap();
-    assert!(local.tracker_id.is_none());
-    let (url, _) = spawn(vec![json_response(
-        StatusCode::OK,
-        json!({
-            "data": {"initiative": {"projects": {
-                "nodes": [], "pageInfo": {"hasNextPage": false, "endCursor": null}
-            }}}
-        }),
-    )])
-    .await;
-    let repository = super::LinearRepository {
-        client: crate::linear::LinearClient::with_base_url(
-            "fixture".into(),
-            Some("team-1".into()),
-            url,
-        ),
-        repo_id: crate::repository::RepoId::parse("loopflowstudio/fixture").unwrap(),
-        team_id: "team-1".into(),
-    };
-    let observed = super::checked_projects_with_store(
-        &repo,
-        &repository,
-        "initiative-1",
-        wave.slug(),
-        &fixture.store,
-    )
-    .await
-    .unwrap();
-    assert!(observed.managed.is_empty());
-    assert_eq!(
-        fixture.store.get_project(&local.id).await.unwrap(),
-        Some(local)
-    );
 }
 
 #[tokio::test]

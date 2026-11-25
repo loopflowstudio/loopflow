@@ -66,8 +66,7 @@ async fn graphql(
     let data = if query.contains("query ListTeams") {
         json!({"teams": {"nodes": [{"id":"team-1","name":"Fixture","key":"FIX",
             "description":"<!-- loopflow-repository: loopflowstudio/fixture -->"}]}})
-    } else if query.contains("query ListInitiativeProjects") || query.contains("query TeamChanges")
-    {
+    } else if query.contains("query ProjectOwnership") || query.contains("query TeamChanges") {
         // Comment delivery remains independent of unavailable repository inventory.
         return Json(json!({"errors":[{"message":"inventory unavailable"}]}));
     } else if query.contains("query IssueOwnership") {
@@ -76,7 +75,7 @@ async fn graphql(
             "state":{"type":"unstarted"},"team":{"id":"team-1"},
             "project":{"id":"project-1","name":"Project","description":"","content":"workflow: feature",
                 "status":{"type":"started"},
-                "initiatives":{"nodes":[{"id":"initiative-1"}]},"teams":{"nodes":[{"id":"team-1"}]}}}})
+                "teams":{"nodes":[{"id":"team-1"}]}}}})
     } else if query.contains("mutation SyncComment") {
         if thread == Thread::Failing {
             return Json(json!({"errors":[{"message":"offline"}]}));
@@ -199,12 +198,8 @@ async fn task_comments_read_and_publish_without_starting_work() {
         "planning:\n  provider: linear\n  team: team-1\n",
     )
     .unwrap();
-    for (wave, initiative) in [("product", "initiative-1"), ("other", "initiative-2")] {
-        std::fs::write(
-            repo.join(format!(".lf/wave/{wave}/GOAL.md")),
-            format!("---\nlinear:\n  initiative: {initiative}\n---\nMandate.\n"),
-        )
-        .unwrap();
+    for wave in ["product", "other"] {
+        std::fs::write(repo.join(format!(".lf/wave/{wave}/GOAL.md")), "Mandate.\n").unwrap();
     }
     let repo = std::fs::canonicalize(repo).unwrap();
     let database = directory.path().join("loopflow.db");
@@ -227,14 +222,28 @@ async fn task_comments_read_and_publish_without_starting_work() {
         .await
         .unwrap();
     for name in ["product", "other"] {
-        store
-            .create_wave(&crate::work::wave::Wave::new(
-                loopflow_model::id::WaveId::new(),
-                name.into(),
-                repo.display().to_string(),
-            ))
-            .await
+        let wave = crate::work::wave::Wave::new(
+            loopflow_model::id::WaveId::new(),
+            name.into(),
+            repo.display().to_string(),
+        );
+        store.create_wave(&wave).await.unwrap();
+        // Product's Project links Linear Project `project-1`; other's links none.
+        if name == "product" {
+            let project = serde_json::from_value(json!({
+                "id": "project-1", "revision": null, "slug": "project", "name": "Project",
+                "summary": "", "status": "started", "team_ids": ["team-1"]
+            }))
             .unwrap();
+            loopflow_storage::sqlite::linear_events::link_wave_project_in(
+                &store.sqlite,
+                wave.id(),
+                &project,
+                0,
+                loopflow_storage::planning_sync::TrackerKind::Linear,
+            )
+            .unwrap();
+        }
     }
     let provider = Arc::new(Mutex::new(Provider {
         thread: Thread::Paged,

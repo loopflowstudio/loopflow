@@ -347,7 +347,7 @@ mod tests {
         let task = TaskId::new();
         {
             let conn = store.conn.lock().unwrap();
-            conn.execute("INSERT INTO projects(id,wave_id,created_at,updated_at,project_slug,project_name,description)
+            conn.execute("INSERT OR REPLACE INTO projects(id,wave_id,created_at,updated_at,project_slug,project_name,description)
                 VALUES(?1,?2,1,1,'planning','Planning','')", rusqlite::params![project.as_str(), wave.id()]).unwrap();
             conn.execute("INSERT INTO tasks(repository_id,id,project_id,issue_identifier,issue_title,issue_description,created_at,updated_at,workspace_slug)
                 VALUES((SELECT id FROM repository_plans WHERE selected=1),?1,?2,'FIX-2','Attribute','',1,1,'attribute')", rusqlite::params![task.as_str(), project.as_str()]).unwrap();
@@ -393,7 +393,7 @@ mod tests {
         let task = TaskId::new();
         {
             let conn = store.conn.lock().unwrap();
-            conn.execute("INSERT INTO projects(id,wave_id,created_at,updated_at,project_slug,project_name,description)
+            conn.execute("INSERT OR REPLACE INTO projects(id,wave_id,created_at,updated_at,project_slug,project_name,description)
                 VALUES(?1,?2,1,1,'planning','Planning','')", rusqlite::params![project.as_str(), wave.id()]).unwrap();
             conn.execute("INSERT INTO repository_plans(id,repo,selected) SELECT 'repo_'||lower(hex(randomblob(16))),w.repo,1 FROM waves w WHERE NOT EXISTS(SELECT 1 FROM repository_plans r WHERE r.repo=w.repo AND r.selected=1) GROUP BY w.repo", []).unwrap();
             conn.execute("INSERT INTO tasks(repository_id,id,project_id,external_issue_id,issue_identifier,issue_title,issue_description,created_at,updated_at,workspace_slug)

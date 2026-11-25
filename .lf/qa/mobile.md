@@ -1,3 +1,5 @@
+Read when the change touches phone access over Tailscale.
+
 # Phone access against the Mac's real Tailscale
 
 Use a fresh private `LF_HOME` and the same branch binary for all commands.

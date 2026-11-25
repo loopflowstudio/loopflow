@@ -3,6 +3,22 @@ extends: builtin
 ---
 ## Desktop
 
+Check whether the display is locked before launching a GUI or calling
+WindowServer:
+
+```bash
+ioreg -n Root -d1 | grep -oE '"(IOConsoleLocked|CGSSessionScreenIsLocked)"\s*=\s*\w+'
+```
+
+- **Locked** (either key reads `Yes`): skip interactive GUI/WindowServer clicks
+  and go straight to headless `scripts/test_desktop.sh`,
+  `lf desktop state --json`, `-ui-test-mode live` snapshots, or production
+  `QAHook` (which covers windows, clicks, views, and Ghostty/keyboard via
+  `key post`/`key send`). Report hover, system drags, menus/`⌘` chords, `+`
+  popovers/sheets, file panels, Settings pixels, and visual terminal-face checks
+  as open instead of retrying them.
+- **Unlocked** (`No` or absent): proceed with isolated Dev bundle checks.
+
 Use the [isolated Dev bundle](../qa/desktop.md#loopflow-dev-on-the-live-machine)
 and disposable Work. Check whether launch can attach to or resize personal
 terminals before opening the live Machine. For visual acceptance, capture the
@@ -20,45 +36,7 @@ with older responses, including an extra field and an unsupported operation.
 Verify that the failure stays local and supported reads and actions still work.
 Keep the installed server and schema for the live run.
 
-## Starting a Task on a private Machine
+## CLI and server
 
-For CLI and server changes, use the branch `lf` with a
-[private Machine and repository](../qa/served-launches.md).
-Before the first Start, add `.lf/graphs/qa.yaml` (`- cmd: help task` then
-`- interactive: demo`), set `graph: qa` in `.lf/config.yaml`, and commit and
-push to the disposable repository's origin.
-Then `lf task create '<request>' --run --json` (stdin closed) or a served
-`task.create {run: true}` admits the Task, holds its conversation and starts
-the Graph from setup. Pass the words positionally: `--title` alone records no
-request, so the conversation prints no words above `Checkout ready`.
-
-Attach with `lf session resume <session>` in a PTY to read the setup lines.
-Setup and server steps are `loopflow::start_timing` lines in
-`$LF_HOME/logs/lf.log`, keyed by request ID; the CLI waits for `sync_planning`
-after the answer, a served client does not. A `<repo>.ready` worktree sits
-beside the Task checkouts; `ls -di` before and after a Start shows the take.
-To reopen a conversation after killing its stand-in provider, write a line to
-`$CLAUDE_CONFIG_DIR/projects/<cwd with / and . as ->/<thread>.jsonl` for both
-the `/tmp/…` and `/private/tmp/…` spellings of the checkout.
-
-A served request needs the whole envelope, `"select": null, "sender": null,
-"request_id": null` included: without any one of them the server answers "this
-server has no operation `<kind>`". To stop setup on purpose, `chmod a-w` the
-directory holding the checkouts before Start (the answer stays `admitted`;
-`lf task status` shows "Setup stopped: …"), restore it, and reopen from a PTY
-running `sh -c 'tty; exec lf session resume <id>'`: the printed tty tells your
-view apart from a held terminal that takes it ("moved to ttysN"). Replacing a
-binary a live server runs: `rm` it and copy the new one, or macOS SIGKILLs the
-next exec (status exits 137); then restart the private server.
-
-## Shared build cache
-
-Drive `scripts/build_cache.py` in an isolated `HOME` and `CARGO_HOME`, keeping
-the real `RUSTUP_HOME`. Copy the installed pin's `bin/sccache` to the same
-revision path under that `HOME`; `install` then skips `cargo install`. Run the
-branch's `.venv/bin/python` directly, since `uv` under a new `HOME` refetches.
-A dependency-free two-crate workspace is enough. Give it `[profile.dev]
-incremental = false`, like the repository; never read `CARGO_MANIFEST_DIR`
-in a crate meant to hit, because that value stays verbatim in the hash. Touch a
-source before a build that must start a daemon: a fresh build compiles nothing.
-Stop that daemon by the PID `status --json` reports.
+For CLI and server changes, run the branch `lf` on a private Machine following
+[served launches](../qa/served-launches.md) and [server QA](../qa/server.md).

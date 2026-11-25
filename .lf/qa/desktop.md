@@ -1,5 +1,23 @@
 Read when the change reaches Loopflow Desktop: its windows, panes or bundled `lf`.
 
+# Display lock preflight
+
+Check whether the display is locked before launching a GUI or calling
+WindowServer:
+
+```bash
+ioreg -n Root -d1 | grep -oE '"(IOConsoleLocked|CGSSessionScreenIsLocked)"\s*=\s*\w+'
+```
+
+- **Locked** (either key reads `Yes`): skip interactive GUI/WindowServer clicks
+  and go straight to headless `scripts/test_desktop.sh`,
+  `lf desktop state --json`, `-ui-test-mode live` snapshots (below), or
+  production `QAHook` (below, which covers windows, clicks, views, and
+  Ghostty/keyboard via `key post`/`key send`). Report hover, system drags,
+  menus/`⌘` chords, `+` popovers/sheets, file panels, Settings pixels, and
+  visual terminal-face checks as open instead of retrying them.
+- **Unlocked** (`No` or absent): proceed with isolated Dev bundle checks.
+
 # Packaged Desktop
 
 A packaged Desktop must use its signed bundled `lf` for the QA server too:

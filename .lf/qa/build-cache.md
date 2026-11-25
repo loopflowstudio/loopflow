@@ -36,7 +36,7 @@ seeder skip it. A non-cloning volume: `hdiutil attach -nomount ram://65536`, `ne
 `target/` appears, and a manual `build_cache.py seed` prints `[Errno 18] Cross-device link`.
 `hdiutil detach` afterwards.
 
-In an isolated `HOME` (see the qa skill's shared-cache notes) builds run client-side: no
+In an isolated `HOME` (see Shared build cache below) builds run client-side: no
 sccache daemon starts, so there is nothing to stop.
 
 To exercise the busy-source skip on the real repository, start a build in a fresh seed and
@@ -46,3 +46,15 @@ should still have no Cargo lock files under `target/debug`. For the reverse race
 built source's locks from Python
 (`with build_cache._quiescent(Path("target/debug"))`, `sys.path` pointed at `scripts/`) and run
 `cargo build -v` there: it prints `Blocking waiting for file lock` until the block exits.
+
+## Shared build cache
+
+Drive `scripts/build_cache.py` in an isolated `HOME` and `CARGO_HOME`, keeping
+the real `RUSTUP_HOME`. Copy the installed pin's `bin/sccache` to the same
+revision path under that `HOME`; `install` then skips `cargo install`. Run the
+branch's `.venv/bin/python` directly, since `uv` under a new `HOME` refetches.
+A dependency-free two-crate workspace is enough. Give it `[profile.dev]
+incremental = false`, like the repository; never read `CARGO_MANIFEST_DIR`
+in a crate meant to hit, because that value stays verbatim in the hash. Touch a
+source before a build that must start a daemon: a fresh build compiles nothing.
+Stop that daemon by the PID `status --json` reports.

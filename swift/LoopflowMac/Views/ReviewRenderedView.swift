@@ -37,11 +37,14 @@ struct ReviewRendered: View {
     let split: Bool
     @Environment(\.palette) private var palette
 
+    private var reading: ComparisonReading { store.diffReview.reading(for: reader) }
+    private var find: FileFind? { reader == .changes ? nil : store.find }
+
     var body: some View {
-        if let sides = store.diffReview.reading(for: reader).sides(of: file) {
+        if let sides = reading.sides(of: file) {
             switch rendering {
             case .markdown:
-                ReviewMarkdown(old: sides.old?.content, new: sides.new?.content, split: split, find: reader == .changes ? nil : store.find).equatable()
+                ReviewMarkdown(old: sides.old?.content, new: sides.new?.content, split: split, find: find).equatable()
                     .padding(.horizontal, Spacing.md).padding(.vertical, Spacing.sm)
             case .image, .svg, .html:
                 ViewThatFits(in: .horizontal) {
@@ -62,7 +65,7 @@ struct ReviewRendered: View {
             page(sides.old, index: 0, count: count, absent: "Added")
             // Relative references resolve in the working tree only when the new
             // side is the working tree of a checkout on this Machine.
-            page(sides.new, index: 1, count: count, absent: "Deleted", baseURL: store.diffReview.reading(for: reader).comparison.head == nil && store.machine == nil
+            page(sides.new, index: 1, count: count, absent: "Deleted", baseURL: reading.comparison.head == nil && store.machine == nil
                  ? URL(fileURLWithPath: store.cwd).appendingPathComponent(file.path) : nil)
         } else {
             // No ideal width: a picture's natural size must not decide whether the
@@ -73,7 +76,7 @@ struct ReviewRendered: View {
     }
     @ViewBuilder private func page(_ side: TaskFileSnapshot?, index: Int, count: Int, absent: String, baseURL: URL? = nil) -> some View {
         if let html = side?.content {
-            TaskHTMLView(html: html, baseURL: baseURL, find: reader == .changes ? nil : store.find, pageIndex: index, pageCount: count)
+            TaskHTMLView(html: html, baseURL: baseURL, find: find, pageIndex: index, pageCount: count)
                 .id("html-side-\(index)")
                 .containerRelativeFrame(.vertical)
                 .frame(maxWidth: .infinity)
@@ -120,30 +123,56 @@ struct ReviewMarkdown: View, Equatable {
         let rows = redline.entries.map { entry in
             split ? [column(entry, showing: .removed), column(entry, showing: .added)] : [column(entry)]
         }
-        VStack(alignment: .leading, spacing: Spacing.sm) {
-            ForEach(rows.indices, id: \.self) { index in
-                if split {
-                    HStack(alignment: .top, spacing: Spacing.md) {
-                        block(rows[index][0], index: index * 2).frame(maxWidth: .infinity, alignment: .leading)
-                        Divider()
-                        block(rows[index][1], index: index * 2 + 1).frame(maxWidth: .infinity, alignment: .leading)
+        Rows(rows: rows, split: split, find: find)
+    }
+
+    private struct Rows: View {
+        let rows: [[Column?]]
+        let split: Bool
+        let find: FileFind?
+        @Environment(\.palette) private var palette
+
+        var body: some View {
+            VStack(alignment: .leading, spacing: Spacing.sm) {
+                ForEach(rows.indices, id: \.self) { index in
+                    if split {
+                        HStack(alignment: .top, spacing: Spacing.md) {
+                            block(rows[index][0], index: index * 2).frame(maxWidth: .infinity, alignment: .leading)
+                            Divider()
+                            block(rows[index][1], index: index * 2 + 1).frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    } else {
+                        block(rows[index][0], index: index * 2).frame(maxWidth: 720, alignment: .leading)
                     }
-                } else {
-                    block(rows[index][0], index: index * 2).frame(maxWidth: 720, alignment: .leading)
                 }
             }
-        }
-        .task(id: FileFind.Scan(query: find?.query, revision: rows)) {
-            if let find, !find.query.isEmpty {
-                await find.search(rows.enumerated().flatMap { index, row in
-                    row.enumerated().flatMap { side, column in column?.block.searchCells(index: index * 2 + side) ?? [] }
-                })
+            .task(id: FileFind.Scan(query: find?.query, revision: rows)) {
+                if let find, !find.query.isEmpty {
+                    await find.search(rows.enumerated().flatMap { index, row in
+                        row.enumerated().flatMap { side, column in column?.block.searchCells(index: index * 2 + side) ?? [] }
+                    })
+                }
             }
+            .textSelection(.enabled)
+            .tint(palette.linkInk)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityIdentifier(split ? "changes-markdown-columns" : "changes-markdown-redline")
         }
-        .textSelection(.enabled)
-        .tint(palette.linkInk)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .accessibilityIdentifier(split ? "changes-markdown-columns" : "changes-markdown-redline")
+
+        @ViewBuilder private func block(_ column: Column?, index: Int) -> some View {
+            if let column {
+                let row = MarkdownBlocks.Row(block: column.block.highlighted(find, index: index, color: palette.keyboardFocus.opacity(0.45)))
+                Group {
+                    if let change = column.change {
+                        let tone = change == .removed ? palette.failureTone : palette.successTone
+                        row.padding(.horizontal, Spacing.xs).padding(.vertical, Spacing.xxs)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(tone.fill)
+                            .overlay(alignment: .leading) { Rectangle().fill(tone.ink).frame(width: 2) }
+                    } else { row }
+                }.id(MarkdownBlocks.anchor(index))
+            } else { Color.clear.frame(height: 1) }
+        }
     }
 
     private struct Column: Equatable {
@@ -159,21 +188,6 @@ struct ReviewMarkdown: View, Equatable {
         case .changed(let old, let new, let words):
             return Column(block: text(words, old: old, new: new, showing: side.map { [.same, $0] } ?? [.same, .removed, .added]))
         }
-    }
-
-    @ViewBuilder private func block(_ column: Column?, index: Int) -> some View {
-        if let column {
-            let row = MarkdownBlocks.Row(block: column.block.highlighted(find, index: index, color: palette.keyboardFocus.opacity(0.45)))
-            Group {
-                if let change = column.change {
-                    let tone = change == .removed ? palette.failureTone : palette.successTone
-                    row.padding(.horizontal, Spacing.xs).padding(.vertical, Spacing.xxs)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(tone.fill)
-                        .overlay(alignment: .leading) { Rectangle().fill(tone.ink).frame(width: 2) }
-                } else { row }
-            }.id(MarkdownBlocks.anchor(index))
-        } else { Color.clear.frame(height: 1) }
     }
 
     private func struck(_ block: MarkdownBlocks.Block) -> MarkdownBlocks.Block {

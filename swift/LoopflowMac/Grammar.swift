@@ -233,7 +233,7 @@ extension Grammar.Highlight {
 }
 
 /// One displayed source line and its colors from the whole-file parse.
-struct CodeLine: Sendable {
+struct CodeLine: Equatable, Sendable {
     let text: String
     let highlights: [Grammar.Highlight]
 

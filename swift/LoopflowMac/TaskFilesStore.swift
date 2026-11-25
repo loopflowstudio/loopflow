@@ -412,7 +412,7 @@ final class TaskFilesStore {
         }
         guard !Task.isCancelled, comparisonChanged else { return }
         await workingTree.refresh(afterWrite: true)
-        if page == .changes, diffReview.comparison != workingTree.comparison { await diffReview.reviewReading.refresh() }
+        if page == .changes, diffReview.reviewReading !== workingTree { await diffReview.reviewReading.refresh() }
         if !Task.isCancelled, mode == .diff { await loadDiff() }
         if !Task.isCancelled, page == .changes { await diffReview.loadReview(changed: committed ? nil : visible) }
     }
@@ -547,7 +547,7 @@ final class TaskFilesStore {
     func refresh() async {
         if machine != nil { observeFiles() }
         await workingTree.refresh()
-        if page == .changes, diffReview.comparison != workingTree.comparison { await diffReview.reviewReading.refresh() }
+        if page == .changes, diffReview.reviewReading !== workingTree { await diffReview.reviewReading.refresh() }
     }
 
     /// Try the Machine again after an outage or before a checkout existed:

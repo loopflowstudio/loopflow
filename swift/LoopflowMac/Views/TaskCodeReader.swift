@@ -12,7 +12,6 @@ struct TaskCodeReader: View {
     var addToConversation: ((String) -> Bool)?
     let ready: () -> Void
     @Environment(\.palette) private var palette
-    @Environment(\.theme) private var theme
     @State private var parsedVersion = 0
     @State private var lines: [CodeLine]?
     @State private var widestLine: CGFloat = 0
@@ -20,7 +19,7 @@ struct TaskCodeReader: View {
     @State private var scrolling = false
     /// Not observed: the rows report their frames on every scroll without re-running the reader.
     @State var rows = RowFrames()
-    static let space = "files-code-reader"
+    nonisolated static let space = "files-code-reader"
 
     var body: some View {
         Group {
@@ -44,8 +43,9 @@ struct TaskCodeReader: View {
                 let tree = grammar?.parse(text)
                 let highlights = tree.flatMap { grammar?.highlights(in: $0, text: text) } ?? []
                 let lines = CodeLine.read(text, highlights: highlights)
-                return (lines, needsOutline ? FileOutline(tree: tree, text: text, path: path) : nil,
-                        lines.map { CTLineGetTypographicBounds(Self.typeset($0.text), nil, nil, nil) }.max() ?? 0)
+                let font = Self.monoFont()
+                let widest = lines.reduce(0.0) { max($0, CTLineGetTypographicBounds(Self.typeset($1.text, font: font), nil, nil, nil)) }
+                return (lines, needsOutline ? FileOutline(tree: tree, text: text, path: path) : nil, widest)
             }.value
             guard !Task.isCancelled else { return }
             if let outline = result.1, let version { document?.receive(outline, version: version) }
@@ -108,26 +108,27 @@ struct TaskCodeReader: View {
 
     func row(_ index: Int, in lines: [CodeLine]) -> some View {
         let number = index + 1
+        let isCommentSelected = selected(number)
         return VStack(alignment: .leading, spacing: 0) {
-            NumberedLine(number: number, line: lines[index], marks: marks(number, in: lines[index]), review: store.map { store in
-                NumberedLine.Review(selected: selected(number), tone: changeTone(number, in: store), rows: rows) {
-                    store.comments.select(path: path, source: .file(draft: store.selectedDocument?.dirty == true),
-                                          line: number, extend: NSEvent.modifierFlags.contains(.shift))
-                }
-            }).equatable()
+            NumberedLine(number: number, line: lines[index], marks: marks(number, in: lines[index]),
+                         gutter: store.map { NumberedLine.Gutter(selected: isCommentSelected, tone: changeTone(number, in: $0)) },
+                         rows: store == nil ? nil : rows,
+                         select: store.map { store in {
+                             store.comments.select(path: path, source: .file(draft: store.selectedDocument?.dirty == true),
+                                                   line: number, extend: NSEvent.modifierFlags.contains(.shift))
+                         } }).equatable()
             if let store {
-                if let selection = store.comments.selection, selected(index + 1), selection.last == index + 1 {
+                if let selection = store.comments.selection, isCommentSelected, selection.last == number {
                     ReviewCommentEditor(store: store, selection: selection, excerpt: {
                         lines[(selection.first - 1)...index].map(\.text)
                     }, addToConversation: addToConversation)
                 }
                 ForEach(store.comments.items.filter {
-                    !$0.detached && $0.original.source.isFile && $0.original.path == path && $0.selection.last == index + 1
+                    !$0.detached && $0.original.source.isFile && $0.original.path == path && $0.selection.last == number
                 }) { ReviewCommentRow(store: store, comment: $0) }
-            }
-            if let store, let peek = store.jumps.peek, peek.lookup != .outline,
-               peek.origin.line == index + 1 {
-                FileSymbolPeek(store: store, peek: peek)
+                if let peek = store.jumps.peek, peek.lookup != .outline, peek.origin.line == number {
+                    FileSymbolPeek(store: store, peek: peek)
+                }
             }
         }
         // Inside the row, so scrolling to a row's leading edge keeps the margin.
@@ -163,10 +164,13 @@ struct TaskCodeReader: View {
         }
     }
 
-    private nonisolated static func typeset(_ text: String) -> CTLine {
-        let font = NSFont(name: Typography.monoFace, size: Typography.monoSize)
+    private nonisolated static func monoFont() -> NSFont {
+        NSFont(name: Typography.monoFace, size: Typography.monoSize)
             ?? .monospacedSystemFont(ofSize: Typography.monoSize, weight: .regular)
-        return CTLineCreateWithAttributedString(NSAttributedString(string: text, attributes: [.font: font]))
+    }
+
+    private nonisolated static func typeset(_ text: String, font: NSFont? = nil) -> CTLine {
+        CTLineCreateWithAttributedString(NSAttributedString(string: text, attributes: [.font: font ?? monoFont()]))
     }
 
     func scrollAnchor(for visit: FileVisit, text: String, width: CGFloat) -> UnitPoint {
@@ -228,42 +232,40 @@ struct TaskCodeReader: View {
 /// A line number and its source. Equatable on what they show, so the rows a lazy
 /// stack keeps built skip their bodies when the reader redraws for another line.
 struct NumberedLine: View, Equatable {
-    struct Marks: Equatable {
+    struct Marks: Equatable, Sendable {
         var underline: NSRange?
         var selected = false
         var hit: NSRange?
         var find: NSRange?
     }
 
-    /// A gutter that selects lines for review comments, and where the source was laid out.
-    struct Review {
+    struct Gutter: Equatable, Sendable {
         let selected: Bool
         let tone: ThemeTone?
-        let rows: RowFrames
-        let select: () -> Void
     }
 
     let number: Int
     let line: CodeLine
     let marks: Marks
-    let review: Review?
+    let gutter: Gutter?
+    let rows: RowFrames?
+    let select: (() -> Void)?
     @Environment(\.palette) private var palette
     @Environment(\.theme) private var theme
 
     nonisolated static func == (a: Self, b: Self) -> Bool {
-        a.number == b.number && a.marks == b.marks && a.line.text == b.line.text && a.line.highlights == b.line.highlights
-            && (a.review == nil) == (b.review == nil) && a.review?.selected == b.review?.selected && a.review?.tone == b.review?.tone
+        a.number == b.number && a.marks == b.marks && a.line == b.line && a.gutter == b.gutter
     }
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: Spacing.md) {
-            if let review {
-                ReviewGutter(number: number, selected: review.selected, tone: review.tone, select: review.select)
+            if let gutter, let rows, let select {
+                ReviewGutter(number: number, selected: gutter.selected, tone: gutter.tone, select: select)
                 Text(painted).textSelection(.enabled)
                     .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(TaskCodeReader.space)) } action: { [number] in
-                        review.rows.frames[number] = $0
+                        rows.frames[number] = $0
                     }
-                    .onDisappear { [number] in review.rows.frames[number] = nil }
+                    .onDisappear { [number] in rows.frames[number] = nil }
             } else {
                 Text(verbatim: String(number)).foregroundStyle(palette.textSecondary)
                 Text(painted).textSelection(.enabled)

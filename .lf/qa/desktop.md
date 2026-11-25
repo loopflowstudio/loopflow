@@ -687,7 +687,7 @@ without it the command answers "Several panes are eligible". `lf desktop files
 <path>[:LINE[-END]]` presents a file and builds jump history for `files-back` and
 `files-forward`. A relaunch can restore with the session pane zoomed, which hides
 Files while `desktop files` still answers `files`: `desktop zoom --off -p session`.
-With the QA hook (see above): `fill Find file|<text>` (or `Find in file`, `Search
+With the QA hook (see above): `field Find file|<text>` (or `Find in file`, `Search
 checkout text`) types into the picker or Find bar, and `windowkey 0 - down|return|escape`
 drives the focused field. `click` presses Buttons (Read, Edit, Diff, the sidebar
 toggle; it toggles, so send it once). SwiftUI tap gestures never fire from the
@@ -707,7 +707,7 @@ reader. To trace a SwiftUI task, append to a file under the private directory:
 builtin). `sips --cropOffset` takes y, then x.
 
 In-memory view state (the layout picker's `reviewLayout`, Source,
-`TaskFilesStore.sourceFiles`) and the change stepper (`]`) have no
+`DiffReviewState.sourceFiles`) and the change stepper (`]`) have no
 control command. Use the QA hook above to click Source, the layout picker
 or the stepper in an instrumented build.
 

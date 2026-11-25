@@ -239,13 +239,15 @@ struct DesktopAction {
     static func binding(characters: String?, keyCode: UInt16 = 0, specialKey: NSEvent.SpecialKey? = nil,
                         modifiers: NSEvent.ModifierFlags,
                         context: @autoclosure () -> DesktopActionContext? = nil) -> (DesktopAction, [String: String])? {
+        var resolved: DesktopActionContext??
         var windowBinding: (DesktopAction, [String: String])?
         for action in all {
             guard let binding = action.keys.first(where: {
                 $0.matches(characters: characters, keyCode: keyCode, specialKey: specialKey, modifiers: modifiers)
             }) else { continue }
-            if let context = context() {
-                guard action.available(context.with(args: binding.args)) else { continue }
+            let current = resolved ?? { let value = context(); resolved = .some(value); return value }()
+            if let current {
+                guard action.available(current.with(args: binding.args)) else { continue }
                 if action.scope == .window {
                     windowBinding = (action, binding.args)
                     continue

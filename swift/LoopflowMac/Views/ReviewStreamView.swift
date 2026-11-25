@@ -21,6 +21,9 @@ struct ReviewStream: View {
     @Environment(\.palette) private var palette
     @Environment(\.theme) private var theme
 
+    private var reading: ComparisonReading { store.diffReview.reading(for: reader) }
+    private var revision: String { store.diffReview.revision(for: reader) }
+
     private var presentedLines: ClosedRange<Int>? {
         guard case .file(let path) = reader, store.selection == path else { return nil }
         return store.visit?.lines
@@ -29,7 +32,7 @@ struct ReviewStream: View {
     var body: some View {
         if reader == .changes {
             // A comment whose file left the comparison still waits to be sent.
-            ForEach(store.comments.items.filter { $0.original.source.revision == store.diffReview.revision(for: reader) && store.diffReview.review?.file($0.selection.path) == nil }) { comment in
+            ForEach(store.comments.items.filter { $0.original.source.revision == revision && store.diffReview.review?.file($0.selection.path) == nil }) { comment in
                 ReviewCommentRow(store: store, comment: comment)
             }
         }
@@ -46,7 +49,7 @@ struct ReviewStream: View {
             if headsFirstFile || file.path != files.first?.path {
                 fileHeader(file, headed: headings[file.path] != nil).id("file:\(file.path)")
             }
-            ForEach(store.comments.items.filter { $0.detached && $0.original.source.revision == store.diffReview.revision(for: reader) && $0.selection.path == file.path }) { comment in
+            ForEach(store.comments.items.filter { $0.detached && $0.original.source.revision == revision && $0.selection.path == file.path }) { comment in
                 ReviewCommentRow(store: store, comment: comment)
             }
             if reader == .changes, store.diffReview.isViewed(file) {
@@ -57,7 +60,7 @@ struct ReviewStream: View {
                     .onDisappear { store.diffReview.setNear(file.path, false) }
             } else {
                 if let rendering = store.diffReview.rendering(of: file, in: reader) {
-                    if let error = store.diffReview.reading(for: reader).sideErrors[file.path] {
+                    if let error = reading.sideErrors[file.path] {
                         ReviewSidesFailed(store: store, reader: reader, file: file, error: error).id(ReviewStop.rendered(file.path).id)
                         // A file with Source falls back to its line Diff.
                         if rendering.hasSource { lines(file, note: note) }
@@ -75,7 +78,7 @@ struct ReviewStream: View {
 
     /// The file's line Diff: its hunks, or what stands in when it has none.
     @ViewBuilder private func lines(_ file: ReviewFile, note: DiffReviewState.FileNote?) -> some View {
-        if let machine = store.diffReview.reading(for: reader).openedGaps[file.path]?.failure {
+        if let machine = reading.openedGaps[file.path]?.failure {
             FailureLine("Skipped lines did not load.", machine: machine).reviewNoticeInset()
         }
         if file.status == .binary {
@@ -337,13 +340,13 @@ struct ReviewStream: View {
     /// numbers the row shows.
     @ViewBuilder private func attachments(old: Int?, new: Int?, file: ReviewFile) -> some View {
         if let selection = store.comments.selection, selection.path == file.path,
-           case .diff(let side, let revision) = selection.source, revision == store.diffReview.revision(for: reader),
+           case .diff(let side, let selectionRevision) = selection.source, selectionRevision == revision,
            selection.last == (side == .old ? old : new) {
             ReviewCommentEditor(store: store, selection: selection, excerpt: { selection.excerpt(in: file) }, addToConversation: addToConversation)
         }
         ForEach(store.comments.items.filter { comment in
-            guard case .diff(let side, let revision) = comment.selection.source else { return false }
-            return revision == store.diffReview.revision(for: reader) && !comment.detached && comment.selection.path == file.path
+            guard case .diff(let side, let commentRevision) = comment.selection.source else { return false }
+            return commentRevision == revision && !comment.detached && comment.selection.path == file.path
                 && comment.selection.last == (side == .old ? old : new)
         }) { comment in
             ReviewCommentRow(store: store, comment: comment)
@@ -374,7 +377,7 @@ struct ReviewStream: View {
     private func isSelected(_ line: ReviewLine, side: ReviewSelection.Side, path: String) -> Bool {
         if side == .new, let number = line.new, presentedLines?.contains(number) == true { return true }
         guard let selection = store.comments.selection, selection.path == path,
-              selection.source == .diff(side: side, revision: store.diffReview.revision(for: reader)),
+              selection.source == .diff(side: side, revision: revision),
               let number = side == .old ? line.old : line.new else { return false }
         return (selection.first...selection.last).contains(number)
     }
@@ -427,7 +430,7 @@ struct ReviewStream: View {
     /// Copies code without the patch's + and − or the line numbers.
     @ViewBuilder private func copyMenu(_ line: ReviewLine, side: ReviewSelection.Side, file: ReviewFile) -> some View {
         Button("Copy line") { Self.copy(line.text) }
-        if let selection = store.comments.selection, selection.path == file.path, selection.source == .diff(side: side, revision: store.diffReview.revision(for: reader)),
+        if let selection = store.comments.selection, selection.path == file.path, selection.source == .diff(side: side, revision: revision),
            selection.first != selection.last, isSelected(line, side: side, path: file.path) {
             Button("Copy \(selection.last - selection.first + 1) selected lines") { Self.copy(selection.excerpt(in: file).joined(separator: "\n")) }
         }
@@ -462,7 +465,7 @@ struct ReviewStream: View {
     }
 
     private func select(_ number: Int, side: ReviewSelection.Side, path: String) {
-        store.comments.select(path: path, source: .diff(side: side, revision: store.diffReview.revision(for: reader)),
+        store.comments.select(path: path, source: .diff(side: side, revision: revision),
                               line: number, extend: NSEvent.modifierFlags.contains(.shift))
     }
 }

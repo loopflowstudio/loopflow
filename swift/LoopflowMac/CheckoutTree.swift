@@ -25,9 +25,11 @@ final class CheckoutTree {
         case more(directory: String, depth: Int)
         case failed(directory: String, reason: String, depth: Int)
 
+        static func entryID(_ path: String) -> String { "entry:" + path }
+
         var id: String {
             switch self {
-            case .entry(let entry, _, _): "entry:\(entry.path)"
+            case .entry(let entry, _, _): Self.entryID(entry.path)
             case .loading(let directory, _): "loading:\(directory)"
             case .more(let directory, _): "more:\(directory)"
             case .failed(let directory, _, _): "failed:\(directory)"

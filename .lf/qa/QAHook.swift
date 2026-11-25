@@ -77,7 +77,7 @@ enum QAHook {
             let pieces = arg.split(separator: "|", maxSplits: 1, omittingEmptySubsequences: false).map(String.init)
             guard pieces.count == 2 else { return "usage: field placeholder|text" }
             func search(_ view: NSView) -> NSTextField? {
-                if let field = view as? NSTextField, field.placeholderString == pieces[0] { return field }
+                if let field = view as? NSTextField, field.isEditable, field.placeholderString == pieces[0] { return field }
                 for child in view.subviews { if let found = search(child) { return found } }
                 return nil
             }
@@ -125,11 +125,6 @@ enum QAHook {
         case "web":
             // `web <png path>`: WebKit's own snapshot of the first web view, plus its body text and scroll offset.
             // `snap` reads WebKit content reliably only right after a load.
-            func webView(_ view: NSView?) -> WKWebView? {
-                guard let view else { return nil }
-                if let web = view as? WKWebView { return web }
-                return view.subviews.lazy.compactMap(webView).first
-            }
             guard let web = windows.lazy.compactMap({ webView($0.contentView) }).first else { return "no web view" }
             web.takeSnapshot(with: nil) { image, _ in
                 guard let tiff = image?.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff) else { return }
@@ -141,11 +136,6 @@ enum QAHook {
             return "web \(arg)"
         case "webscroll":
             // `webscroll <y>`: scrolls the first web view as a wheel would, for scroll-restoration checks.
-            func webView(_ view: NSView?) -> WKWebView? {
-                guard let view else { return nil }
-                if let web = view as? WKWebView { return web }
-                return view.subviews.lazy.compactMap(webView).first
-            }
             guard let web = windows.lazy.compactMap({ webView($0.contentView) }).first else { return "no web view" }
             web.evaluateJavaScript("scrollTo(0, \(Int(arg) ?? 0))")
             return "scrolled"
@@ -212,17 +202,6 @@ enum QAHook {
                 }
             }
             return "typed"
-        case "fill":
-            // `fill <placeholder>|<text>`: focuses the text field showing that placeholder and inserts text through its field editor.
-            let pieces = arg.split(separator: "|", maxSplits: 1).map(String.init)
-            guard pieces.count == 2 else { return "usage: fill placeholder|text" }
-            for window in windows {
-                guard let field = textField(in: window.contentView, placeholder: pieces[0]) else { continue }
-                window.makeFirstResponder(field)
-                (window.firstResponder as? NSTextView)?.insertText(pieces[1], replacementRange: NSRange(location: NSNotFound, length: 0))
-                return "filled \(window.title)"
-            }
-            return "no field"
         case "windowkey":
             // `windowkey <window> <mods> <chars|return|escape|up|down>`: a key event sent straight to that window's first responder.
             let pieces = arg.split(separator: " ").map(String.init)
@@ -322,11 +301,10 @@ enum QAHook {
         }
     }
 
-    private static func textField(in view: NSView?, placeholder: String) -> NSTextField? {
+    private static func webView(_ view: NSView?) -> WKWebView? {
         guard let view else { return nil }
-        if let field = view as? NSTextField, field.isEditable, field.placeholderString == placeholder { return field }
-        for child in view.subviews { if let found = textField(in: child, placeholder: placeholder) { return found } }
-        return nil
+        if let web = view as? WKWebView { return web }
+        return view.subviews.lazy.compactMap(webView).first
     }
 
     private static func terminalView(_ view: NSView?) -> GhosttyMetalView? {

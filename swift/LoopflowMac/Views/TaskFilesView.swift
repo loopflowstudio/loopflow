@@ -71,7 +71,7 @@ struct TaskFilesView: View {
         .task(id: "\(page)|\(checkoutBase ?? "")") {
             store.observeFiles()
             if page == .files { await store.enterFiles() }
-            else if store.workingChanges == nil, page == .brief || store.diffReview.comparison != .workingTree(base: "parent") {
+            else if store.workingChanges == nil, page == .brief || store.diffReview.reviewReading !== store.workingTree {
                 await store.workingTree.refresh()
             }
         }
@@ -249,7 +249,7 @@ struct TaskFilesView: View {
             .onScrollGeometryChange(for: CGPoint.self, of: \.contentOffset) { _, offset in store.tree.offset = offset }
             .focusable().focused($treeFocused).focusEffectDisabled()
             .onChange(of: store.tree.selection) { _, path in
-                if let path { proxy.scrollTo("entry:" + path) }
+                if let path { proxy.scrollTo(CheckoutTree.Row.entryID(path)) }
             }
             .onKeyPress(keys: [.upArrow, .downArrow, .leftArrow, .rightArrow, .return]) { press in
                 let move: CheckoutTree.Move = switch press.key {
@@ -530,7 +530,7 @@ struct TaskFileReadingView: View {
         case "md" where store.visit == nil:
             ScrollViewReader { proxy in
                 ScrollView {
-                    MarkdownBlocks(source: document.text, find: store.find)
+                    MarkdownBlocks(source: document.text, find: store.find).equatable()
                         .frame(maxWidth: 720, alignment: .leading)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(Spacing.md).textSelection(.enabled)

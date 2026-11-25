@@ -1325,7 +1325,6 @@ impl Write {
             loopflow_execution::ops::session_move::move_session(
                 id,
                 remote.machine.id.as_str(),
-                false,
                 run_task,
             )?;
         }

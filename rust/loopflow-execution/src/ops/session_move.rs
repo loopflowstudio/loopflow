@@ -3,7 +3,9 @@
 //! and resuming a Task's conversation on M move a Task with its conversation.
 //! `send` runs where the work lives and `receive` on M, each locally when that
 //! side is this Machine, otherwise over one SSH request, so laptop → mini,
-//! rental → laptop and rental → mini are the same relay.
+//! rental → laptop and rental → mini are the same relay. Every request names
+//! the Machine it expects, which refuses it if the route reaches another, so
+//! no identity probe runs before each one.
 
 use anyhow::{anyhow, bail, Context, Result};
 
@@ -17,7 +19,7 @@ use loopflow_storage::work::task::Task;
 /// it, to `target` unless it is already there. A Task's conversation moves only
 /// with its Task, as `lf task move` moves it, and is the conversation the Task
 /// carries, its Graph continuing through `run`.
-pub fn move_session(id: &str, target: &str, forward_agent: bool, run: ContinueRun) -> Result<()> {
+pub fn move_session(id: &str, target: &str, run: ContinueRun) -> Result<()> {
     let task = tokio::runtime::Runtime::new()?.block_on(async {
         let Some(store) = crate::store::open_existing_store().await? else {
             return Ok(None);
@@ -26,7 +28,7 @@ pub fn move_session(id: &str, target: &str, forward_agent: bool, run: ContinueRu
         let Some(session) = crate::ops::human_session::session_by_id(&store, id).await? else {
             return Ok(None);
         };
-        let target = crate::machine::connection::resolve_target(target, forward_agent).await?;
+        let target = crate::machine::connection::find_registered_machine(target).await?;
         if let Some(task) = moves::conversation_task(&store.sqlite, &session.id)? {
             let route = store.task_execution_route(&task).await?;
             return Ok((route.machine_id != target.id).then_some((task, session.id)));
@@ -187,7 +189,7 @@ async fn relay_task(
     let target = if target == local {
         None
     } else {
-        Some(crate::machine::connection::resolve_target(target.as_str(), false).await?)
+        Some(crate::machine::connection::find_registered_machine(target.as_str()).await?)
     };
     let to = target
         .as_ref()
@@ -336,7 +338,7 @@ fn sender(
 pub fn arrived_on(task: &loopflow_model::durable::TaskId, to: &MachineId) -> Result<bool> {
     tokio::runtime::Runtime::new()?.block_on(async {
         let asked = async {
-            let target = crate::machine::connection::resolve_target(to.as_str(), false).await?;
+            let target = crate::machine::connection::find_registered_machine(to.as_str()).await?;
             let args = ["session", "receive", "--arrived", task.as_str()].map(String::from);
             crate::machine::ssh::request(&target, &args, None).await
         };
@@ -389,7 +391,7 @@ async fn send_from(
     to: &MachineId,
     last: Option<&str>,
 ) -> Result<Vec<u8>> {
-    let source = crate::machine::connection::resolve_target(source.as_str(), false).await?;
+    let source = crate::machine::connection::find_registered_machine(source.as_str()).await?;
     let mut args = vec![
         "--repo-id".to_string(),
         repository.to_string(),

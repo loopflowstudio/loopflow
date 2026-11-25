@@ -86,6 +86,13 @@ pub async fn request(
         .await
         .context("Machine command unavailable: peer timed out")??;
     let said = String::from_utf8_lossy(&output.stderr);
+    // SSH's own failure: no `lf` ran, and what SSH said names the check.
+    if matches!(output.status.code(), Some(255) | None) {
+        return Err(super::connection::transport_failure(
+            &machine.route,
+            said.trim(),
+        ));
+    }
     anyhow::ensure!(
         output.status.success(),
         "Machine command unavailable: {}",

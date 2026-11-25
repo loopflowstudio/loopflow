@@ -126,12 +126,7 @@ pub(super) fn run_with_io(
     let runtime = tokio::runtime::Runtime::new()?;
     if let Some(id) = super::work_route::resumed_session(cli).filter(|_| !preview) {
         // Resuming a Session that lives here, or moved elsewhere, moves it (or its Task) there first.
-        loopflow_execution::ops::session_move::move_session(
-            id,
-            target,
-            forward_agent,
-            super::write::run_task,
-        )?;
+        loopflow_execution::ops::session_move::move_session(id, target, super::write::run_task)?;
     }
     let source = if preview || resident_operation {
         None

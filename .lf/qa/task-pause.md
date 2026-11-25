@@ -117,3 +117,28 @@ Without a GitHub PR, `land` fails three times and the Task reads `Run: land`.
 
 To stop the private home from zsh, put the PIDs in an array (`P=(…); kill -STOP $P`).
 A scalar `P="1 2"` is one word in zsh and `kill` answers "illegal pid".
+
+# Clicking the workflow track on the Mac
+
+Use the hook route in [desktop](desktop.md) ("Driving the app with the screen
+locked") with a Graph of sub-Graphs whose single step is `cmd: help graph`.
+Have the `LF_BIN` wrapper hold that step until `<dir>/<checkout basename>` exists.
+`- graph: forge`, `- interactive: demo`, `- graph: finish`, `- graph: settle`
+gives a chip reading `forge · help graph` and three step buttons. At 1500 pt the
+bar sits at y = 56 pt: ▶/⏸ at x = 268, Auto at 1440, ✓ at 1474. Step buttons and
+the chip move with the chip's text, so read their x from a fresh `snap` first.
+Narrow the window with the hook's `size`: at 700 pt the bar folds to ▶ + chip.
+
+A held `cmd:` step drains on pause (it is an lf command, possibly a mutation):
+the chip reads `Pausing: <step>` until the go file is touched. Use an agent step
+for a pause that stops the step at once.
+
+Complete posts a Notice whose Undo lives for six seconds. Click Undo within
+about a second of ✓, from the same shell command; a `snap` between them can
+outlast the Notice. Complete moves the window to the next Task, and Undo
+doesn't move it back, so reselect before the next click. The hook's `tree`
+doesn't list the bar's controls, and the chip's menu is unreachable (the hook
+timer stops while an `NSMenu` tracks).
+
+`sips --cropOffset` crops from the center on macOS. To cut the bar out of a
+snapshot, use a small Swift `CGImage.cropping(to:)` tool.

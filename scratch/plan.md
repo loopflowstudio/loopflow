@@ -10,7 +10,7 @@ During a build, `lf task pause INF-123` stops the worker, every subprocess in th
 
 ## Remaining, in order
 
-1. **C1 walkthrough on the Mac Dev app.** Click the live track: ▶/⏸, a step button starting from its step, the chip menu, hover sentence, the narrow fold, Auto and ✓ with its `completed · Undo` notice. After a real GitHub merge, an interrupted verify keeps its Run action beside the accented ✓. Served and CLI halves already passed on a private Machine (`scratch/qa.html`).
+1. **C1 walkthrough on the Mac Dev app: done** (`scratch/qa.html`). ▶/⏸, a step button, the fold, Auto and ✓ with `completed · Undo` all worked on a private Machine. The chip menu and hover can't be driven from the hook, and the interrupted verify after a real GitHub merge wasn't reached. Both stay with the headless tests.
 2. **Gate.** `test(lifecycle_tests::)` (its frozen fixture's labels changed); a test for `ops::task::pause::parked` covering `lf task unpause --run` at ship-review, at a landing stop with auto off, and at end; then CI: five-harness worker matrix, Linux session enumeration, lifeline/attachment/hosted-terminal suites.
 3. **Named gaps for the PR.** Separate-session Codex 0.171.0 tool jobs can survive pause. A pause first issued after a move's payload is sent can need a retry on arrival.
 4. **Kept by decision:** paused sidebar rows may still show `Available`; the Task Session and the worker are separate (`scratch/questions.md`).

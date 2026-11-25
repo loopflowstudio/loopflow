@@ -93,3 +93,8 @@ A pending Run or Interrupt changes no row; the chip reads Starting… or
 Interrupting… until a reading covers the answer. Auto patches the switch and
 the row's auto mark, and moves an Active Working row to Shipping; turning it
 off leaves the group for the Machine to say.
+
+## From the C1 walkthrough (open)
+
+- Should Undo after Complete reselect the reopened Task? Today the window stays on the Task that Complete moved to.
+- A `cmd:` step drained by pause runs again on `unpause --run`, because the cursor stays on it. That is harmless for `land`; should a non-idempotent `cmd:` step advance past itself once it exits 0?

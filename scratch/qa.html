@@ -23,6 +23,50 @@
 </style>
 </head>
 <body>
+<h1>File browser QA · third pass</h1>
+<p class="meta">November 25, after the Nov 24 demo fixes (window click monitor, rail spacing, bordered fields, Find anchor) and the large-file repaint work, on the tree merged with main #2040. Branch <code>lf</code> (6681bfaf3c) on a private Machine under <code>/tmp/lfqfb</code>, and a hook-instrumented isolated Dev bundle opened behind the active windows (<code>open -n -g</code>). Task <code>6a8e34</code> in a disposable <code>shop</code> repository: uncommitted edits to <code>main.rs</code> (+6 −1, two <code>render_total</code> calls), nested <code>src/billing/invoices/render/mod.rs</code> with two declarations, a copy of <code>WorkModel.swift</code> (3,765 lines) as the large file, a 2 MB <code>huge.rs</code>, ignored <code>scratch/</code> pages.</p>
+
+<h2>1 · ⌘-click did nothing (fixed)</h2>
+<p><span class="bad">Broken.</span> A new hook command, <code>tap</code>, posts mouse-down and mouse-up through the event queue so the reader's window monitor sees them. Plain clicks underlined the word under the pointer. <b>⌘-clicks did nothing</b>, and neither did the first click after opening a file. Logging inside <code>ReaderClicks</code> showed why: the monitor saw every mouse-down, but for those presses the mouse-up never arrived. The selectable text view runs its own tracking loop for a ⌘-press (that's how AppKit adds a selection) and pulls the release off the queue, past every local monitor. The Nov 24 native test sends events to a bare <code>NSView</code>, so it never met that loop.</p>
+<p><span class="fixed">Fixed</span> in <code>TaskCodeReader.swift</code>. After a press, the monitor schedules a check in the run loop's default mode, which resumes only once a tracking loop ends. If the release never came through, the application's current event is the mouse-up the loop took, and the monitor counts it like any other. The same drift test (3 pt) still separates clicks from drags. In the relaunched app the log read <code>1 mods=⌘ … 2 mods=⌘ … click (420, 105) command=true</code>, and the first click registered too.</p>
+<div class="pair">
+<figure><img src="qa/t-a5c.png"><figcaption>Before: two ⌘-taps on line 7's <code>render_total</code>. The underline stays on the earlier plain click.</figcaption></figure>
+<figure><img src="qa/t-c1c.png"><figcaption>After: ⌘-click opens “Definitions of render_total” with both declarations.</figcaption></figure>
+</div>
+<p>Picking <code>render_total</code> opened <code>render/mod.rs</code>, and <code>files-back</code> returned to <code>main.rs</code>. In the large file, ⌘-click on <code>scopeName</code> (line 3749) moved the reading line to its declaration at 3740 (breadcrumb <code>› scopeName</code>).</p>
+<p>No automated test was kept. Three versions of a native test that let a queued release pass through a tracking-mode <code>nextEvent</code> either made the test process exit silently or needed a display-dependent offset: queued events in an off-screen window read back shifted by the display height (90 → −895). The headless suite passes; gate should run a physical ⌘-click on a display.</p>
+
+<h2>2 · A deep path read as a bare <code>mod.rs</code> (fixed)</h2>
+<p><span class="bad">Broken.</span> In a ~490 pt Files pane, the breadcrumb's <code>ViewThatFits</code> fell back from the whole path to just the filename. Opened from the peek, <code>src/billing/invoices/render/mod.rs</code> read as <code>mod.rs</code> with no folders and no symbol, the same name as two other files in that tree.
+<span class="fixed">Fixed</span> in <code>TaskFilesView.swift</code>: two intermediate fallbacks keep the nearest folder after an ellipsis, with and then without the symbol.</p>
+<div class="pair">
+<figure><img src="qa/t-c3c.png"><figcaption>Before: <code>mod.rs</code> alone.</figcaption></figure>
+<figure><img src="qa/t-d0c.png"><figcaption>After: <code>… / render / mod.rs › render_total</code>.</figcaption></figure>
+</div>
+
+<h2>3 · Find in a large file</h2>
+<p><span class="ok">Works.</span> <code>files-find-text</code> on <code>WorkModel.swift</code>, then <code>workflowOutline</code>: “1 of 2”, the reader at line 3756, and the scroll view's visible x stays 0, so the Nov 24 anchor fix holds. The field reads as a bordered input under a divider. Opening this file showed lines after about 6 s on this loaded Machine. Frame timing needs a display; this pass took no timings.</p>
+<figure><img src="qa/t-e3c.png" style="width:60%"><figcaption>Far Find match, no sideways scroll.</figcaption></figure>
+
+<h2>4 · Rail, scratch write after the main merge, Loopflow Light</h2>
+<p><span class="ok">Works.</span> With Files zoomed, the docked rail shows Open &amp; Scratch and Changed in Task with name over directory, <code>+6 −1</code> counts and an 8 pt tree step. Rewriting <code>scratch/explore.html</code> while reading <code>main.rs</code> badged it and raised “Updated scratch/explore.html · Open ×” without moving the reader. That path now runs on main's served <code>task.files.watch</code>. In Loopflow Light, the picker's bordered field, fuzzy match (<code>rendmod</code>), preview, and Return to open all worked, and the breadcrumb showed every folder at full width.</p>
+<figure><img src="qa/t-f0.png"><figcaption>Dark: docked rail and the update bar after a scratch rewrite.</figcaption></figure>
+<figure><img src="qa/t-g0.png"><figcaption>Loopflow Light: picker with preview.</figcaption></figure>
+
+<h2>5 · A file over 1 MB</h2>
+<p><span class="open">Slow.</span> <code>lf desktop files src/huge.rs</code> (2 MB): the CLI answers <code>"state": "truncated"</code>. Desktop showed an empty reader with no spinner for at least 6 s before “File exceeds 1 MB · preview unavailable”. The message uses the shared <code>EmptyState</code> title style.</p>
+<figure><img src="qa/t-g3.png"><figcaption>The oversize file, once the message arrived.</figcaption></figure>
+
+<h2>Third pass: what works, what doesn't</h2>
+<table>
+<tr><td class=ok>Works</td><td>Word underline on click; ⌘-click to definitions, with the peek, pick and Back; same-file definitions in a 3,765-line file; Find to a far match without sideways scroll; bordered Find and picker fields; docked rail layout; scratch rewrite badge and bar over the merged watch path; Loopflow Light; the truncated state.</td></tr>
+<tr><td class=open>Couldn't reach</td><td>Frame timing and scroll feel in the large file, and a physical ⌘-click and drag-selection: someone was using the display, so the app stayed behind their windows and took no focus. Gutter comment taps and rail row taps are SwiftUI tap gestures, still unreachable from the hook.</td></tr>
+<tr><td class=bad>Still wrong, worst first</td><td>1. A definition jump marks nothing at its destination. After choosing <code>render_total</code>, line 4 of <code>mod.rs</code> had no highlight or underline, and the same was true of line 3740 in the large file. A presentation marks its range; a jump should probably mark its line the same way.<br>
+2. A file over 1 MB shows a blank reader, with no spinner, for several seconds before its message.<br>
+3. The Find bar keeps its query across files: after switching from <code>WorkModel.swift</code> to <code>main.rs</code> it read “workflowOutline · No matches”. This may be intended.</td></tr>
+<tr><td>Checks</td><td><code>LOOPFLOW_NATIVE_TESTS=1 swift test --filter theReaderCountsAPressReleasedInPlace…</code> passed. <code>scripts/test_desktop.sh --skip-build --filter TaskFilesTests</code>: 82 passed.</td></tr>
+</table>
+
 <h1>File browser QA · second pass</h1>
 <p class="meta">November 23, after the zoom, rail, pane-strip, Grep and Read-chord commits. Branch <code>lf</code> (c932209fe0) and a hook-instrumented isolated Dev bundle on a private Machine under <code>/tmp/lfqf</code>, with the screen locked. Task <code>ff9742</code> in a disposable <code>shop</code> repository: uncommitted edits to <code>main.rs</code> (+3 −1, two <code>render_total</code> calls on line 8) and <code>config.rs</code> (−1), ignored <code>scratch/</code> pages and <code>target/</code>.</p>
 

@@ -83,6 +83,8 @@ The test fails if the scroll median exceeds 90 ms. It reports the other timings 
 
 Next for large files, only if display QA still feels a stall: the first far jump and opening still build every row of a per-line SwiftUI `LazyVStack`. Removing `.textSelection` showed no measurable gain under load. The structural option is one TextKit view for the whole reader, with gutter, comments and peek as overlays. Opening takes 3–5 s of wall time, mostly the background Tree-sitter parse and the width measurement (the reader shows a spinner meanwhile). Display QA checks the new rail and fields in a dark theme and Loopflow Light, and a physical ⌘-click.
 
+**QA, November 25** ([qa](qa.html), third pass). ⌘-click still did nothing in the real app. The selectable text view tracks a ⌘-press in its own loop and takes the mouse-up off the queue before the reader's window monitor sees it. The monitor now picks that release up from the application's current event once default mode resumes. A deep path's breadcrumb keeps `… / <folder> / <file>` instead of dropping to the bare filename. Open: a definition jump marks nothing at its destination, a file over 1 MB shows a blank reader for seconds before its message, and frame timing plus a physical ⌘-click still need a display.
+
 Main's #2040 merged in (`8423d1360b`); `swift build --build-tests --package-path swift` passed on the merged tree on November 24.
 
 ## Gate and demo

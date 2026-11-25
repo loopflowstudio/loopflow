@@ -340,6 +340,15 @@ struct ReaderClicks: NSViewRepresentable {
             }
             if event.type == .leftMouseDown {
                 pressed = point
+                // Selectable text tracks some presses itself (⌘-click extends a selection) and takes the
+                // mouse-up off the queue before any monitor sees it. Default mode resumes only once that
+                // loop ends, and the up it took is then the application's current event.
+                RunLoop.main.perform(inModes: [.default]) { [weak self] in
+                    MainActor.assumeIsolated {
+                        guard let self, self.pressed != nil, let up = NSApp.currentEvent, up.type == .leftMouseUp else { return }
+                        self.handle(up)
+                    }
+                }
             } else if let start = pressed {
                 pressed = nil
                 if hypot(point.x - start.x, point.y - start.y) <= 3 { clicked(point, event.modifierFlags) }

@@ -77,7 +77,8 @@ enum QAHook {
             let pieces = arg.split(separator: "|", maxSplits: 1, omittingEmptySubsequences: false).map(String.init)
             guard pieces.count == 2 else { return "usage: field placeholder|text" }
             func search(_ view: NSView) -> NSTextField? {
-                if let field = view as? NSTextField, field.isEditable, field.placeholderString == pieces[0] { return field }
+                if let field = view as? NSTextField, field.isEditable,
+                   (field.placeholderString ?? field.placeholderAttributedString?.string) == pieces[0] { return field }
                 for child in view.subviews { if let found = search(child) { return found } }
                 return nil
             }
@@ -122,6 +123,31 @@ enum QAHook {
             if let up = event(.leftMouseUp) { NSApp.postEvent(up, atStart: false) }
             if let down = event(.leftMouseDown) { window.sendEvent(down) }
             return "clicked \(window.title) \(point)"
+        case "tap":
+            // `tap <window> <x> <y> [m|s|c|o…]`: down and up both through the event queue, so local
+            // event monitors (the code reader's word clicks) see them in a window that isn't key.
+            let n = arg.split(separator: " ").map(String.init)
+            guard n.count >= 3, let index = Int(n[0]), windows.indices.contains(index),
+                  let x = Double(n[1]), let y = Double(n[2]) else { return "usage: tap window x y [mods]" }
+            let window = windows[index]
+            let height = window.contentView?.frame.height ?? window.frame.height
+            var flags = NSEvent.ModifierFlags()
+            for letter in n.count > 3 ? n[3] : "" {
+                switch letter {
+                case "s": flags.insert(.shift)
+                case "c": flags.insert(.control)
+                case "o": flags.insert(.option)
+                case "m": flags.insert(.command)
+                default: break
+                }
+            }
+            for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+                guard let event = NSEvent.mouseEvent(with: type, location: NSPoint(x: x, y: height - y), modifierFlags: flags,
+                                                     timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                                                     context: nil, eventNumber: 0, clickCount: 1, pressure: 1) else { return "no event" }
+                NSApp.postEvent(event, atStart: false)
+            }
+            return "tapped \(window.title) \(x),\(y) flags \(flags.rawValue)"
         case "web":
             // `web <png path>`: WebKit's own snapshot of the first web view, plus its body text and scroll offset.
             // `snap` reads WebKit content reliably only right after a load.

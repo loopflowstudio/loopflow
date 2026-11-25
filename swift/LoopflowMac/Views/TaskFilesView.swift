@@ -122,11 +122,21 @@ struct TaskFilesView: View {
                     .accessibilityLabel(back ? "Back in Files" : "Forward in Files")
             }
             if let path = store.selection {
+                // Narrower panes drop leading folders first: a bare `mod.rs` or `index.ts` names nothing.
                 ViewThatFits(in: .horizontal) {
                     HStack(spacing: Spacing.xxs) {
                         folders(path)
                         filename(path)
                         ReadingSymbol(store: store)
+                    }.fixedSize()
+                    HStack(spacing: Spacing.xxs) {
+                        folders(path, last: 1)
+                        filename(path)
+                        ReadingSymbol(store: store)
+                    }.fixedSize()
+                    HStack(spacing: Spacing.xxs) {
+                        folders(path, last: 1)
+                        filename(path)
                     }.fixedSize()
                     filename(path)
                 }
@@ -167,24 +177,31 @@ struct TaskFilesView: View {
             .accessibilityIdentifier("files-open")
     }
 
-    private func folders(_ path: String) -> some View {
+    /// The path's folders as menus, or only the `last` few after an ellipsis.
+    private func folders(_ path: String, last: Int? = nil) -> some View {
         let parts = path.split(separator: "/").dropLast()
-        return ForEach(parts.indices, id: \.self) { index in
-            let parent = parts.prefix(index).joined(separator: "/")
-            Menu(String(parts[index])) {
-                ForEach(store.tree.listings[parent]?.entries ?? [], id: \.path) { entry in
-                    Button((entry.path as NSString).lastPathComponent) {
-                        if entry.kind == .directory {
-                            store.browser.showsRail = true
-                            Task { await store.tree.revealDirectory(entry.path); store.tree.selection = entry.path }
-                        } else { read(entry.path) }
+        let shown = last.map { parts.suffix($0) } ?? parts[...]
+        return Group {
+            if shown.startIndex > parts.startIndex {
+                Text("… /").foregroundStyle(palette.textSecondary)
+            }
+            ForEach(shown.indices, id: \.self) { index in
+                let parent = parts.prefix(index).joined(separator: "/")
+                Menu(String(parts[index])) {
+                    ForEach(store.tree.listings[parent]?.entries ?? [], id: \.path) { entry in
+                        Button((entry.path as NSString).lastPathComponent) {
+                            if entry.kind == .directory {
+                                store.browser.showsRail = true
+                                Task { await store.tree.revealDirectory(entry.path); store.tree.selection = entry.path }
+                            } else { read(entry.path) }
+                        }
                     }
-                }
-                if store.tree.listings[parent]?.nextCursor != nil {
-                    Button("Load more") { Task { await store.tree.readDirectory(parent, more: true) } }
-                }
-            }.menuStyle(.borderlessButton).fixedSize()
-            Text("/").foregroundStyle(palette.textSecondary)
+                    if store.tree.listings[parent]?.nextCursor != nil {
+                        Button("Load more") { Task { await store.tree.readDirectory(parent, more: true) } }
+                    }
+                }.menuStyle(.borderlessButton).fixedSize()
+                Text("/").foregroundStyle(palette.textSecondary)
+            }
         }
     }
 

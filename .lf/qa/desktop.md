@@ -691,8 +691,11 @@ With the QA hook (see above): `field Find file|<text>` (or `Find in file`, `Sear
 checkout text`) types into the picker or Find bar, and `windowkey 0 - down|return|escape`
 drives the focused field. `click` presses Buttons (Read, Edit, Diff, the sidebar
 toggle; it toggles, so send it once). SwiftUI tap gestures never fire from the
-hook in a window that isn't key: code-reader word taps (`gd`, ⌘-click), gutter
-comment taps, rail and outline rows and the update bar's Open. `snap` shows
+hook in a window that isn't key: gutter comment taps, rail and outline rows and
+the update bar's Open. Code-reader word clicks do: `tap <window> <x> <y> [m]`
+posts down and up through the event queue, where the reader's window monitor
+reads them (`m` holds ⌘; the definitions peek's rows then answer `click`).
+`field` matches a placeholder set as plain or attributed text. `snap` shows
 WebKit pages only right after a load and goes blank once the display sleeps;
 `web <png>` takes WebKit's own snapshot and writes body text and `scrollY` beside
 it, and `webscroll <y>` scrolls the page, which is how the settled HTML reload and

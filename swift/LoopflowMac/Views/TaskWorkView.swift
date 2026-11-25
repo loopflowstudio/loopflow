@@ -468,32 +468,9 @@ private struct TaskCompleteSheet: View {
             )
 
             VStack(alignment: .leading, spacing: Spacing.sm) {
-                if allMerged {
-                    optionRow(
-                        choice: .abandon,
-                        title: TaskCompleteConfirmation.settleTitle(allMerged: true),
-                        detail: TaskCompleteConfirmation.settleDetail(descendants: flatDescendants),
-                        identifier: "task-complete-abandon"
-                    )
-                    optionRow(
-                        choice: .rehome,
-                        title: TaskCompleteConfirmation.moveTitle(to: destination),
-                        detail: TaskCompleteConfirmation.moveDetail(to: destination),
-                        identifier: "task-complete-rehome"
-                    )
-                } else {
-                    optionRow(
-                        choice: .rehome,
-                        title: TaskCompleteConfirmation.moveTitle(to: destination),
-                        detail: TaskCompleteConfirmation.moveDetail(to: destination),
-                        identifier: "task-complete-rehome"
-                    )
-                    optionRow(
-                        choice: .abandon,
-                        title: TaskCompleteConfirmation.settleTitle(allMerged: false),
-                        detail: TaskCompleteConfirmation.settleDetail(descendants: flatDescendants),
-                        identifier: "task-complete-abandon"
-                    )
+                // The first choice is the one that keeps work.
+                ForEach(allMerged ? [TaskChildPolicy.abandon, .rehome] : [.rehome, .abandon], id: \.self) {
+                    optionRow($0)
                 }
             }
 
@@ -560,13 +537,14 @@ private struct TaskCompleteSheet: View {
         return (child.lifecycle.rawValue, palette.textSecondary, palette.surfaceMuted)
     }
 
-    private func optionRow(
-        choice: TaskChildPolicy,
-        title: String,
-        detail: String,
-        identifier: String
-    ) -> some View {
+    private func optionRow(_ choice: TaskChildPolicy) -> some View {
         let selected = policy == choice
+        let title = choice == .rehome
+            ? TaskCompleteConfirmation.moveTitle(to: destination)
+            : TaskCompleteConfirmation.settleTitle(allMerged: allMerged)
+        let detail = choice == .rehome
+            ? TaskCompleteConfirmation.moveDetail(to: destination)
+            : TaskCompleteConfirmation.settleDetail(descendants: flatDescendants)
         return Button {
             policy = choice
         } label: {
@@ -599,7 +577,7 @@ private struct TaskCompleteSheet: View {
             .contentShape(RoundedRectangle(cornerRadius: CornerRadius.row))
         }
         .buttonStyle(.plain)
-        .accessibilityIdentifier(identifier)
+        .accessibilityIdentifier("task-complete-\(choice.rawValue)")
     }
 }
 

@@ -2863,10 +2863,6 @@ final class WorkModel {
         taskIndex.openChildren[task.task.id]?.count ?? 0
     }
 
-    func openDescendants(of task: RoadmapTask) -> [RoadmapTask] {
-        openDescendantTree(of: task).map(\.task)
-    }
-
     func openDescendantTree(of task: RoadmapTask) -> [(task: RoadmapTask, depth: Int)] {
         let children = taskIndex.openChildren
         var descendants: [(task: RoadmapTask, depth: Int)] = []

@@ -70,6 +70,16 @@ public final class NoticeCenter {
         }
     }
 
+    /// Keep the Machine's refusal visible while the affected lists reread.
+    /// A later action or dismissal can still replace it.
+    func reread(keeping notice: Notice, _ refresh: @MainActor () async -> Void) async {
+        rereadingFor = notice.id
+        defer { if rereadingFor == notice.id { rereadingFor = nil } }
+        await refresh()
+    }
+
+    @ObservationIgnored private var rereadingFor: UUID?
+
     /// End the Notice keyed `key`: its condition is over, or its event no longer holds.
     public func clear(key: String) {
         conditions.removeAll { $0.key == key }
@@ -89,12 +99,15 @@ public final class NoticeCenter {
             return
         }
         guard previous == nil || heldFailures.contains(part) else { return }
-        guard link == .connected else { heldFailures.insert(part); return }
+        if link != .connected || (rereadingFor != nil && event?.id == rereadingFor) {
+            heldFailures.insert(part)
+            return
+        }
         heldFailures.remove(part)
         post(Notice("\(what) couldn't be read: \(reason)", key: key, action: action))
     }
 
-    /// Parts whose failure began while the link was lost and has not been posted.
+    /// Read failures held back while the Machine was away or explaining a refused write.
     @ObservationIgnored private var heldFailures: Set<String> = []
 
     /// Put away what is shown: the event, else the newest condition.

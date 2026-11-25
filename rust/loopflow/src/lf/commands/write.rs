@@ -6,6 +6,7 @@
 
 use std::path::{Path, PathBuf};
 
+use super::desktop::TileEdit;
 use anyhow::{anyhow, Context};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
@@ -955,8 +956,7 @@ writes! {
         directory,
         &format!("query:{id}"),
         member,
-        "hide",
-        &Default::default(),
+        TileEdit::Hide,
     )?,
 
     /// `lf desktop dashboard show query:<id>/<member>`.
@@ -971,8 +971,7 @@ writes! {
         directory,
         &format!("query:{id}"),
         member,
-        "show",
-        &Default::default(),
+        TileEdit::Show,
     )?,
 
     /// `lf desktop dashboard slots query:<id> --revision <revision>`, with
@@ -1000,26 +999,27 @@ writes! {
     )?,
 
     /// `lf desktop dashboard move <board>/<member> --destination <destination>`:
-    /// a Dashboard's tile (`query:<id>`) or the shared Task order (`working-tasks`).
+    /// move to the target's slot, or place the member on its chosen side with `--side before|after`.
     #[serde(rename = "desktop.dashboard.move")]
     DesktopDashboardMove {
         directory: PathBuf,
         board: String,
         member: String,
         destination: String,
+        side: Option<loopflow_storage::work::selection::DropSide>,
     } => crate::lf::commands::desktop::DesktopTileRecord;
     {
         board,
         member,
         destination,
+        side,
         ..
     } => super::desktop::save_tile(
         None,
         directory,
         board,
         member,
-        "move",
-        &[("destination".to_owned(), destination.clone())].into(),
+        TileEdit::Move { to: destination, side: *side },
     )?,
 
     /// `lf config set <key> <value> <destination flags> --json`: declare a

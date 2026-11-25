@@ -40,7 +40,7 @@ struct ProgramStatusTests {
         surface.receive(.report(report(.clear, id: "lf/launcher")), incarnation: surface.incarnation)
         try await eventually { surface.snapshot.summary?.state == .idle }
 
-        for (raw, state, label) in [(1, ProgramStatusState.working, "Busy"), (2, .done, "Done"),
+        for (raw, state, label) in [(1, ProgramStatusState.working, "Busy"), (2, .done, "Available"),
                                     (0, .idle, "Available"), (3, .blocked, "Blocked"),
                                     (1, .working, "Busy"), (5, .clear, nil)] {
             let event = try #require(copyProgramStatusEvent(event: 0, state: raw, kind: -1, progress: -1,
@@ -49,11 +49,12 @@ struct ProgramStatusTests {
             let expected: ProgramStatusState? = state == .clear ? nil : state
             try await eventually { surface.snapshot.summary?.state == expected }
             session["program_status"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(surface.snapshot))
+            session["availability"] = state == .done ? "available" : NSNull() as Any
             let record = try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: session))
             #expect(SessionProgramStatus(sessions: [record], unavailable: nil).label == label)
-            if let label {
+            if label != nil {
                 let view = try #require(StatusMark(status: surface.snapshot))
-                #expect(try view.inspect().find(text: label).string() == label)
+                #expect(try view.inspect().find(text: state.label).string() == state.label)
             } else {
                 #expect(surface.snapshot.seen)
                 #expect(surface.snapshot.records.isEmpty)

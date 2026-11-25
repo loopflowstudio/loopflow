@@ -62,6 +62,13 @@ def test_dev_app_runs_under_its_own_executable_name(
     swift = tmp_path / "swift"
     (swift / ".build/debug").mkdir(parents=True)
     (swift / ".build/debug/LoopflowMac").write_bytes(b"fresh")
+    fonts = Path("LoopflowSwift_Loopflow.bundle/Fonts")
+    font_source = Path(__file__).resolve().parents[2] / "swift/Loopflow/Fonts"
+    bundled_fonts = swift / ".build/debug" / fonts
+    bundled_fonts.mkdir(parents=True)
+    faces = ["OldStandard-Regular.ttf", "AtkinsonHyperlegibleNext-Regular.ttf"]
+    for face in faces:
+        (bundled_fonts / face).write_bytes((font_source / face).read_bytes())
     (swift / "LoopflowMac").mkdir()
     (swift / "LoopflowMac/AppIcon.icns").write_bytes(b"icon")
     with (swift / "LoopflowMac/Info.plist").open("wb") as file:
@@ -96,6 +103,9 @@ def test_dev_app_runs_under_its_own_executable_name(
     assert not agents.exists()
     assert sorted(path.name for path in macos.iterdir()) == ["Loopflow Dev"]
     assert (macos / "Loopflow Dev").read_bytes() == b"fresh"
+    for face in faces:
+        installed = app / "Contents/Resources" / fonts / face
+        assert installed.read_bytes() == (font_source / face).read_bytes()
     # The release app is untouched: its plist still names `Loopflow`.
     source = plistlib.loads((swift / "LoopflowMac/Info.plist").read_bytes())
     assert source["CFBundleExecutable"] == "Loopflow"

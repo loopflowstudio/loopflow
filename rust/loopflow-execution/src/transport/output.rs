@@ -121,6 +121,12 @@ impl Output {
         self.terminal().map(ghostty_vt::Terminal::program_status)
     }
 
+    pub fn acknowledge_results(&mut self) {
+        if let Self::Terminal(terminal) = self {
+            terminal.terminal.acknowledge_results();
+        }
+    }
+
     /// Feed the program's output to the retained state. Returns the replies
     /// its queries are owed while no viewer's terminal is there to answer.
     pub fn process(&mut self, stream: u8, bytes: &[u8], detached: bool) -> Vec<u8> {

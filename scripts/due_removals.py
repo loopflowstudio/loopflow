@@ -8,7 +8,8 @@
 
 A migration marks what the product stopped using with `-- leaving: <member>
 <Task ID>`. A Task is due once its marking migration has been on origin/main for
-`STAGING_DAYS`. A member a contract already dropped is no longer listed.
+`STAGING_DAYS`. A member a contract already dropped, or a later migration kept
+with `-- keeping: <member> <Task ID>`, is no longer listed.
 `--start` runs `lf task run <ID> -a claude` only for Tasks `lf task status`
 shows `unstarted`, so running it again never restarts work.
 
@@ -54,17 +55,16 @@ def removals(local: dict[str, bytes], added: dict[str, dt.datetime]) -> list[Rem
     catalog = check_migrations.Catalog(local, added)
     schema = check_migrations._schema(catalog.replay())
     by_task: dict[str, Removal] = {}
-    for name in catalog.ordered():
-        for mark in check_migrations.leaving_marks(name, local[name].decode()):
-            if not schema.has(mark.member):
-                continue
-            removal = by_task.setdefault(mark.task, Removal(mark.task))
-            removal.members.append(mark.member)
-            if name not in added:
-                removal.merged = False
-                continue
-            date = check_migrations.drop_after(added[name])
-            removal.drop_after = max(filter(None, (removal.drop_after, date)))
+    for member, (name, mark) in check_migrations.active_leaving_marks(catalog).items():
+        if not schema.has(member):
+            continue
+        removal = by_task.setdefault(mark.task, Removal(mark.task))
+        removal.members.append(member)
+        if name not in added:
+            removal.merged = False
+            continue
+        date = check_migrations.drop_after(added[name])
+        removal.drop_after = max(filter(None, (removal.drop_after, date)))
     return sorted(by_task.values(), key=lambda removal: removal.task)
 
 

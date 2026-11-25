@@ -2270,7 +2270,7 @@
           "$ref": "#/$defs/Dashboard"
         },
         {
-          "description": "The moved Task's order among its Project's Tasks.",
+          "description": "The repository's Working Task order.",
           "items": {
             "type": "string"
           },
@@ -2391,6 +2391,14 @@
         "checks"
       ],
       "type": "object"
+    },
+    "DropSide": {
+      "description": "Where a dragged member lands relative to its target.",
+      "enum": [
+        "before",
+        "after"
+      ],
+      "type": "string"
     },
     "EffectiveSetting": {
       "properties": {
@@ -9504,6 +9512,7 @@
           "enum": [
             "open",
             "blocked",
+            "error",
             "idle",
             "active",
             "moving",
@@ -16224,6 +16233,13 @@
             "null"
           ]
         },
+        "graph_step": {
+          "description": "Where this Task stands on its captured Graph, including a running step.\nOlder Machines omit this field.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "identifier": {
           "description": "A Task's short name, as people say it: `LOO-809`.",
           "type": [
@@ -16272,6 +16288,7 @@
         "title",
         "states",
         "identifier",
+        "graph_step",
         "primary_session",
         "location",
         "argv",
@@ -19869,7 +19886,7 @@
         },
         {
           "additionalProperties": false,
-          "description": "`lf desktop dashboard move <board>/<member> --destination <destination>`:\na Dashboard's tile (`query:<id>`) or the shared Task order (`working-tasks`).",
+          "description": "`lf desktop dashboard move <board>/<member> --destination <destination>`:\nmove to the target's slot, or place the member on its chosen side with `--side before|after`.",
           "properties": {
             "board": {
               "type": "string"
@@ -19886,6 +19903,16 @@
             },
             "member": {
               "type": "string"
+            },
+            "side": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/DropSide"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           },
           "required": [
@@ -19893,7 +19920,8 @@
             "directory",
             "board",
             "member",
-            "destination"
+            "destination",
+            "side"
           ],
           "type": "object",
           "x-result": {

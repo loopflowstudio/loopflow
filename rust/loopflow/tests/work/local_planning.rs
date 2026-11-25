@@ -879,7 +879,7 @@ fn public_local_task_places_and_runs_without_a_planning_provider() {
     let home = tempfile::tempdir().unwrap();
     repo.create_file(
         ".lf/graphs/proof.yaml",
-        "- cmd: graph show proof\n- interactive: demo\n- cmd: graph show proof\n",
+        "- cmd: graph show proof\n- break: demo\n- cmd: graph show proof\n",
     );
     let definition = repo.path().join(".lf/graphs/proof.yaml");
     repo.stage_all();
@@ -946,7 +946,7 @@ fn public_local_task_places_and_runs_without_a_planning_provider() {
     let status = loop {
         let status = lf(repo.path(), home.path(), &["desktop", "task", id, "--json"]);
         let work = &status["execution"]["work"];
-        if work["graph"]["position"]["kind"] == "at"
+        if work["graph"]["position"]["kind"] == "breakpoint"
             && work["graph_processes"]
                 .as_array()
                 .unwrap()
@@ -3269,13 +3269,13 @@ fn task_graph(repo: &Path, home: &Path, id: &str) -> Value {
 }
 
 /// Run `lf task run …` bare, which may return as its Graph registers, and
-/// wait until the Task stands at an interactive step or `end`.
+/// wait until the Task reaches a breakpoint or `end`.
 fn run_until_waiting(repo: &Path, home: &Path, args: &[&str], id: &str) -> Value {
     lf(repo, home, args);
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
     loop {
         let graph = task_graph(repo, home, id);
-        if graph["position"]["kind"] == "at" {
+        if graph["position"]["kind"] == "breakpoint" || graph["position"]["step"] == "end" {
             return graph;
         }
         assert!(std::time::Instant::now() < deadline, "{graph}");
@@ -3291,7 +3291,7 @@ fn waveless_task_lifecycle() {
     std::fs::write(repo.path().join(".lf/config.yaml"), "graph: proof\n").unwrap();
     repo.create_file(
         ".lf/graphs/proof.yaml",
-        "- cmd: graph show proof\n- interactive: {name: demo, id: review}\n",
+        "- cmd: graph show proof\n- break: review\n",
     );
     repo.stage_all();
     repo.commit("Configure the repository graph");
@@ -3377,7 +3377,25 @@ fn waveless_task_lifecycle() {
 #[test]
 fn unconfigured_repository_runs_tasks_on_the_builtin_code_graph() {
     let repo = TestRepo::new();
-    let home = tempfile::tempdir().unwrap();
+    let home = tempfile::tempdir_in("/tmp").unwrap();
+    std::fs::create_dir(home.path().join("bin")).unwrap();
+    let provider = home.path().join("bin/codex");
+    std::fs::write(
+        &provider,
+        crate::test_support::codex_app_server_script(
+            r#"{"decision":"advance","summary":"Ready for review","reason":null}"#,
+            r#"if [ "$1" = --version ]; then exit 0; fi"#,
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(provider, std::fs::Permissions::from_mode(0o755)).unwrap();
+    std::fs::write(home.path().join("config.yaml"), "default_agent: codex\n").unwrap();
+    let path = format!("{}:/usr/bin:/bin", home.path().join("bin").display());
+    let _server = loopflow_test_support::MachineServer::start_with_path(
+        loopflow_test_support::lf_binary(),
+        home.path(),
+        &path,
+    );
     // Stand in for the agent steps of plan and build; the Task's graph stays
     // the builtin.
     repo.create_file(".lf/graphs/plan.yaml", "- cmd: graph show plan\n");
@@ -3396,7 +3414,7 @@ fn unconfigured_repository_runs_tasks_on_the_builtin_code_graph() {
     assert_eq!(listed[0]["graph_name"], "code");
     let shown = run_until_waiting(repo.path(), home.path(), &["task", "run", id], id);
     assert_eq!(shown["name"], "code");
-    assert_eq!(shown["position"]["step"], "ship-review");
+    assert_eq!(shown["position"]["step"], "after-ship-review");
 }
 
 #[test]
@@ -3413,7 +3431,7 @@ fn graph_defaults_follow_task_wave_and_repository() {
     ] {
         repo.create_file(
             &format!(".lf/graphs/{name}.yaml"),
-            &format!("- graph: proof\n- interactive: {{name: demo, id: {step}}}\n"),
+            &format!("- graph: proof\n- break: {step}\n"),
         );
     }
     repo.stage_all();

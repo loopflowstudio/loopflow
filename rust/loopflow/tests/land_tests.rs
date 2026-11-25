@@ -1949,7 +1949,7 @@ fn waited_task_landing(destination: &str, failed_startup: bool) {
     // The graph lands, then reaches an interactive step or its end.
     let mut graph = "- cmd: graph show deliver\n- cmd: pr land --wait-and-fix --strict --title waited-repair --body Repair-without-Desktop\n".to_string();
     if destination != "end" {
-        graph.push_str("- interactive: {name: demo, id: review}\n");
+        graph.push_str("- break: review\n");
     }
     for (path, contents) in [
         ("feature.txt", "keep the feature"),

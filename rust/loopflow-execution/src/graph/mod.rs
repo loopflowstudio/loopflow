@@ -571,10 +571,7 @@ fn resolve_graph_with_catalog(
     catalog: &SkillCatalog,
 ) -> Result<Vec<ResolvedGraphItem>, LoadError> {
     let mut resolved = compile_with_sources(graph, catalog, &[])?;
-    name_interactive_steps(&mut resolved);
     name_breakpoints(&mut resolved)?;
-    let items = flatten_resolved(&resolved);
-    validate_interactive_steps(&items)?;
     Ok(resolved)
 }
 
@@ -618,7 +615,6 @@ fn name_breakpoints(items: &mut [ResolvedGraphItem]) -> Result<(), LoadError> {
                 ResolvedGraphItem::Skill(skill) => {
                     used.insert(skill.skill.name.clone());
                     used.extend(skill.id.iter().cloned());
-                    used.extend(skill.interactive_step().map(str::to_owned));
                 }
                 ResolvedGraphItem::Command(op) => {
                     used.insert(op.item.command.clone());
@@ -650,89 +646,21 @@ fn name_breakpoints(items: &mut [ResolvedGraphItem]) -> Result<(), LoadError> {
     })?;
     visit(items, &mut None, &mut |stop, previous| {
         if stop.name.is_empty() {
-            let base = previous.map_or_else(|| "break".into(), |name| format!("after-{name}"));
-            let mut candidate = base.clone();
-            let mut suffix = 2;
-            while !used.insert(candidate.clone()) {
-                candidate = format!("{base}#{suffix}");
-                suffix += 1;
-            }
-            stop.name = candidate;
+            stop.name = breakpoint_name(previous, &mut used);
         }
         Ok(())
     })
 }
 
-// Settings retain authored IDs; Task navigation names repeated interactive stops
-// distinctly in the captured graph so continuation never returns to the first copy.
-fn name_interactive_steps(items: &mut [ResolvedGraphItem]) {
-    fn visit(items: &mut [ResolvedGraphItem], f: &mut impl FnMut(&mut ConcreteSkill)) {
-        for item in items {
-            match item {
-                ResolvedGraphItem::Skill(skill) => f(skill),
-                ResolvedGraphItem::Group { items, .. } => visit(items, f),
-                ResolvedGraphItem::Xor { paths, .. } => {
-                    let mut names: Vec<_> = paths.keys().cloned().collect();
-                    names.sort();
-                    for name in names {
-                        visit(&mut paths.get_mut(&name).expect("path exists").items, f);
-                    }
-                }
-                _ => {}
-            }
-        }
+pub(crate) fn breakpoint_name(previous: Option<&str>, used: &mut HashSet<String>) -> String {
+    let base = previous.map_or_else(|| "break".into(), |name| format!("after-{name}"));
+    let mut candidate = base.clone();
+    let mut suffix = 2;
+    while !used.insert(candidate.clone()) {
+        candidate = format!("{base}#{suffix}");
+        suffix += 1;
     }
-    let mut counts = HashMap::<String, usize>::new();
-    visit(items, &mut |skill| {
-        if let Some(name) = skill.interactive_step() {
-            *counts.entry(name.into()).or_default() += 1;
-        }
-    });
-    let mut used: HashSet<_> = counts.keys().cloned().collect();
-    visit(items, &mut |skill| {
-        let Some(name) = skill.interactive_step().map(str::to_owned) else {
-            return;
-        };
-        if counts[&name] > 1 {
-            let mut index = 1;
-            while !used.insert(format!("{name}#{index}")) {
-                index += 1;
-            }
-            skill.interactive_name = Some(format!("{name}#{index}"));
-        }
-    });
-}
-
-/// Every interactive step has its own id, and no autonomous loop returns across one: a
-/// person decides there, so nothing automatic may run back over it.
-fn validate_interactive_steps(items: &[ConcreteStep]) -> Result<(), LoadError> {
-    for (index, item) in items.iter().enumerate() {
-        match item {
-            ConcreteStep::Skill(skill) => {
-                if let Some(target) = (!skill.interactive)
-                    .then(|| return_target(items, index))
-                    .flatten()
-                {
-                    if let Some(crossed) = items[target..index].iter().find_map(|step| match step {
-                        ConcreteStep::Skill(step) => step.interactive_step(),
-                        _ => None,
-                    }) {
-                        return Err(LoadError::InvalidGraph(format!(
-                            "loop at {} returns across interactive step {crossed:?}; a person decides there",
-                            skill.skill.name
-                        )));
-                    }
-                }
-            }
-            ConcreteStep::Xor(branch) => {
-                for path in branch.paths.values() {
-                    validate_interactive_steps(&path.steps)?;
-                }
-            }
-            ConcreteStep::Breakpoint(_) | ConcreteStep::Command(_) => {}
-        }
-    }
-    Ok(())
+    candidate
 }
 
 /// Index of the earlier step the deciding skill at `index` returns to.
@@ -1353,35 +1281,45 @@ fn compile_steps(
                     items: compile_with_sources(graph, catalog, sources)?,
                 });
             }
-            Target::Skill(skill) => items.push(ResolvedGraphItem::Skill(ConcreteSkill {
-                skill: {
-                    let mut resolved = resolve_skill_reference(skill, catalog)?;
-                    resolved.occurrence = Some(match &skill.occurrence {
-                        Some(occurrence) => occurrence.clone(),
-                        None => {
-                            let graph = sources.last().expect("compiling a defining graph");
-                            let source = catalog
-                                .repo
-                                .as_deref()
-                                .map(|repo| find_graph_source_path(graph, repo))
-                                .transpose()?
-                                .flatten();
-                            Box::new(crate::config::settings::OccurrenceSettings::capture(
-                                graph,
-                                step.id.as_deref(),
-                                crate::config::settings::definition_source(source.as_deref()),
-                                skill,
-                            )?)
-                        }
-                    });
-                    resolved
-                },
-                id: step.id.clone(),
-                interactive: step.interactive,
-                interactive_name: None,
-                returns: None,
-                sources: sources.to_vec(),
-            })),
+            Target::Skill(skill) => {
+                items.push(ResolvedGraphItem::Skill(ConcreteSkill {
+                    skill: {
+                        let mut resolved = resolve_skill_reference(skill, catalog)?;
+                        resolved.occurrence = Some(match &skill.occurrence {
+                            Some(occurrence) => occurrence.clone(),
+                            None => {
+                                let graph = sources.last().expect("compiling a defining graph");
+                                let source = catalog
+                                    .repo
+                                    .as_deref()
+                                    .map(|repo| find_graph_source_path(graph, repo))
+                                    .transpose()?
+                                    .flatten();
+                                Box::new(crate::config::settings::OccurrenceSettings::capture(
+                                    graph,
+                                    step.id.as_deref(),
+                                    crate::config::settings::definition_source(source.as_deref()),
+                                    skill,
+                                )?)
+                            }
+                        });
+                        resolved
+                    },
+                    id: step.id.clone(),
+                    interactive: false,
+                    interactive_name: None,
+                    returns: None,
+                    sources: sources.to_vec(),
+                }));
+                // LOO-1100: released interactive items spell a worker and its review together.
+                if step.interactive {
+                    items.push(ResolvedGraphItem::Breakpoint(Breakpoint {
+                        name: String::new(),
+                        sources: sources.to_vec(),
+                        returns: None,
+                    }));
+                }
+            }
             Target::Xor(branch) => items.push(compile_branch(branch, catalog, sources)?),
             Target::Loop(block) => {
                 let mut body = compile_steps(block, catalog, sources)?;
@@ -1633,12 +1571,12 @@ mod tests {
         let steps: Vec<_> = items
             .iter()
             .filter_map(|item| match item {
-                ConcreteStep::Skill(skill) => skill.interactive_step().map(str::to_owned),
+                ConcreteStep::Breakpoint(stop) => Some(stop.name.clone()),
                 _ => None,
             })
             .collect();
-        assert_eq!(steps, ["explore", "final-demo"]);
-        let ConcreteStep::Skill(demo) = &items[1] else {
+        assert_eq!(steps, ["after-explore", "after-final-demo"]);
+        let ConcreteStep::Skill(demo) = &items[2] else {
             panic!("demo compiles to a skill step");
         };
         assert_eq!(
@@ -1782,7 +1720,7 @@ mod tests {
             panic!("nested review node must compile to a skill")
         };
         assert_eq!(step.id.as_deref(), Some("review_kickoff"));
-        assert!(step.interactive);
+        assert!(!step.interactive);
         assert_eq!(step.sources, vec!["outer", "inner"]);
     }
 
@@ -1807,15 +1745,28 @@ mod tests {
             name: "duplicate".into(),
             steps,
         };
-        let stops = captured.interactive_steps();
-        assert_eq!(stops[0].1.interactive_step(), Some("review_kickoff#1"));
-        assert_eq!(stops[1].1.interactive_step(), Some("review_kickoff#2"));
-        assert_eq!(captured.after(&stops[0].0), Some(stops[1].0.clone()));
         assert_eq!(
-            captured.interactive_step("review_kickoff#2"),
-            Some(stops[1].0.clone())
+            captured
+                .find("after-review_kickoff")
+                .unwrap()
+                .cursor()
+                .index,
+            1
         );
-        assert_eq!(stops[0].1.skill.occurrence, stops[1].1.skill.occurrence);
+        assert_eq!(
+            captured
+                .find("after-review_kickoff#2")
+                .unwrap()
+                .cursor()
+                .index,
+            3
+        );
+        let (ConcreteStep::Skill(first), ConcreteStep::Skill(second)) =
+            (&captured.steps[0], &captured.steps[2])
+        else {
+            panic!("two review workers")
+        };
+        assert_eq!(first.skill.occurrence, second.skill.occurrence);
         fs::write(
             graphs.join("duplicate.yaml"),
             "- step: {name: explore, id: same}\n- step: {name: demo, id: same}\n",
@@ -2373,10 +2324,13 @@ Design the feature.
         let ConcreteStep::Skill(review) = &branch.paths["proceed"].steps[0] else {
             panic!("review")
         };
-        assert_eq!(review.interactive_step(), Some("review"));
+        assert_eq!(review.id.as_deref(), Some("review"));
+        assert!(
+            matches!(&branch.paths["proceed"].steps[1], ConcreteStep::Breakpoint(stop) if stop.name == "after-review")
+        );
         assert_eq!(review.skill.content.as_deref(), Some("Captured work"));
         assert_eq!(review.sources, ["outer", "inner"]);
-        let ConcreteStep::Command(command) = &branch.paths["proceed"].steps[1] else {
+        let ConcreteStep::Command(command) = &branch.paths["proceed"].steps[2] else {
             panic!("command")
         };
         assert_eq!(command.item.argv(), ["lf", "pr", "land", "--local"]);

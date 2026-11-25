@@ -365,7 +365,17 @@ fn sidebar_step_follows_the_captured_cursor_and_disappears_without_a_graph() {
     let started = loopflow_storage::graph_process::ExecutionStart::reserved(1);
     let run_from = |step: &str, cursor: &str| {
         assert!(store
-            .start_task_graph_run(&id, step, None, cursor, (&carrier, &started))
+            .start_task_graph_run(
+                &id,
+                loopflow_storage::sqlite::task_work::TaskGraphClaim {
+                    graph: &serde_json::to_string(&graph).unwrap(),
+                    step,
+                    stopped: None,
+                    arrival: None
+                },
+                (cursor, None),
+                (&carrier, &started)
+            )
             .unwrap());
     };
     run_from("review", &serde_json::to_string(&cursor).unwrap());
@@ -1223,4 +1233,80 @@ fn a_view_plan_names_who_a_claim_here_would_make_owner() {
         viewer.machine.id,
         Some(store.saved_local_machine().unwrap().id)
     );
+}
+
+#[test]
+fn a_moved_capture_changes_sidebar_coordinates_only_when_the_run_is_claimed() {
+    use crate::store::task_work::{
+        place_moved_task_graph, start_task_graph_run, task_graph_record, task_graph_row,
+    };
+    use loopflow_model::durable::TaskId;
+    use loopflow_storage::graph_process::ExecutionStart;
+
+    let (_dir, store, repo) = fixture();
+    let task = TaskId::parse("task_22222222222222222222222222222222").unwrap();
+    let worker = |name, interactive| {
+        serde_json::json!({"Skill":{
+            "skill":{"name":name},"id":null,"interactive":interactive,"returns":null,"sources":["released"]
+        }})
+    };
+    let capture = serde_json::json!({"name":"released","steps":[worker("demo",true),worker("implement",false)]}).to_string();
+    store.take_up_task_graph(&task, &capture).unwrap();
+    store.set_task_graph_step(&task, "demo").unwrap();
+    let moved = task_graph_record(&store, &task).unwrap().unwrap();
+    let imported = serde_json::from_slice(&serde_json::to_vec(&moved).unwrap()).unwrap();
+    place_moved_task_graph(&store, &task, &imported, None).unwrap();
+    assert_eq!(task_graph_record(&store, &task).unwrap().unwrap(), moved);
+    // An old carrier completed the pending worker before its Machine upgraded.
+    let by = store.test_lf_process();
+    let here = ExecutionStart::reserved(1);
+    let old = task_graph_row(&store, &task).unwrap().unwrap();
+    let cursor = old.graph.find("implement").unwrap().cursor();
+    // A competing capture at the same named wait can win before this claim.
+    store
+        .take_up_task_graph(&task, r#"{"name":"other","steps":[]}"#)
+        .unwrap();
+    store.set_task_graph_step(&task, "demo").unwrap();
+    assert!(!start_task_graph_run(&store, &task, &old, &cursor, None, (&by, &here)).unwrap());
+    place_moved_task_graph(&store, &task, &imported, None).unwrap();
+    assert!(start_task_graph_run(&store, &task, &old, &cursor, None, (&by, &here)).unwrap());
+    let sidebar = || {
+        selections::view_plan(&store, &repo, None)
+            .unwrap()
+            .contents
+            .into_iter()
+            .find(|row| row.work.id == task.as_str())
+            .unwrap()
+            .graph_step
+            .unwrap()
+    };
+    assert_eq!(sidebar(), "implement");
+    let mut next = task_graph_row(&store, &task).unwrap().unwrap();
+    assert!(next.prepare_continuation().0);
+    assert_eq!(next.run.as_ref().unwrap().0.index, 2);
+    assert_eq!(
+        task_graph_row(&store, &task)
+            .unwrap()
+            .unwrap()
+            .run
+            .unwrap()
+            .0
+            .index,
+        1
+    );
+    let replacement = store.test_lf_process();
+    assert!(start_task_graph_run(
+        &store,
+        &task,
+        &next,
+        &next.run.as_ref().unwrap().0,
+        Some(&next.graph),
+        (&replacement, &here)
+    )
+    .unwrap());
+    assert_eq!(sidebar(), "implement");
+    let saved = task_graph_row(&store, &task).unwrap().unwrap();
+    assert_eq!(saved.graph, next.graph);
+    assert_eq!(saved.run.unwrap().0.index, 2);
+    assert!(!start_task_graph_run(&store, &task, &old, &cursor, None, (&by, &here)).unwrap());
 }

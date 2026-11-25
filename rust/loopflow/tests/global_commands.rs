@@ -1136,7 +1136,10 @@ fn task_run_explain_explicit_and_checkout_inferred_actions_preserve_all_state() 
         explicit["resolution"]["task"]["value"],
         registered.task.id.as_str()
     );
-    assert!(!explicit["action"].is_null(), "{explicit}");
+    assert_eq!(
+        explicit["action"],
+        serde_json::json!({"kind":"run","graph":"captured","take_up":false,"from":"review","stops_at":"after-review"})
+    );
     for other in [&inferred, &scoped] {
         assert_eq!(explicit["action"], other["action"]);
         assert_eq!(explicit["impediments"], other["impediments"]);

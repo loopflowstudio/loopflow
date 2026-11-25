@@ -491,7 +491,17 @@ mod tests {
             ..loopflow_storage::graph_process::ExecutionStart::reserved(1)
         };
         store
-            .start_task_graph_run(&task, "start", None, None, r#"{"index":0}"#, (&run, &start))
+            .start_task_graph_run(
+                &task,
+                loopflow_storage::sqlite::task_work::TaskGraphClaim {
+                    graph: &serde_json::to_string(&graph).unwrap(),
+                    step: "start",
+                    stopped: None,
+                    arrival: None,
+                },
+                (r#"{"index":0}"#, None),
+                (&run, &start),
+            )
             .unwrap();
         let saved = serde_json::json!({
             "position": {"kind":"run","step":"start","at":"earlier step","lf_process_id":run,"running":true},

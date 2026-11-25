@@ -431,11 +431,12 @@ fn dual_kind_clients_share_selection_and_explicit_skill_steps_keep_review_metada
     )
     .unwrap();
     let expanded = compile_graph(&load_graph("outer", repo.path()).unwrap(), repo.path()).unwrap();
-    assert_eq!(expanded.len(), 3);
+    assert_eq!(expanded.len(), 4);
+    assert!(matches!(&expanded[3], ConcreteStep::Breakpoint(stop) if stop.name == "after-review"));
     assert!(matches!(&expanded[0], ConcreteStep::Skill(step) if step.skill.name == "solo"));
     assert!(matches!(&expanded[1], ConcreteStep::Skill(step) if step.skill.name == "solo"));
     assert!(
-        matches!(&expanded[2], ConcreteStep::Skill(step) if step.skill.name == "paired" && step.interactive)
+        matches!(&expanded[2], ConcreteStep::Skill(step) if step.skill.name == "paired" && !step.interactive)
     );
     fs::write(repo.path().join(".lf/graphs/paired.yaml"), "malformed: [").unwrap();
     assert!(resolve_definition(repo.path(), "paired", None)
@@ -968,7 +969,7 @@ fn graph_help_validates_expansion_and_review_boundaries_without_effects() {
         home.path(),
         &["help", "graph", "inspection"],
     ));
-    assert!(String::from_utf8_lossy(&output).contains("solo (interactive)"));
+    assert!(String::from_utf8_lossy(&output).contains("solo → break"));
     for (definition, expected) in [
         ("- graph: absent-graph\n", "absent-graph"),
         ("- step:\n    name: solo\n    human: true\n", "retired"),

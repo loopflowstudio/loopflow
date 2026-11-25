@@ -68,7 +68,7 @@ pub fn run(
 /// `lf --task ISSUE graph run`: carry the Task's Graph from the cursor its
 /// `lf task run`, this process's parent, recorded: where the run began, then
 /// the step after each one finished. The Graph writes where it left the Task:
-/// before the interactive step it stopped at, or at `end`.
+/// at its breakpoint or at `end`.
 pub fn run_task_graph(cli: &Cli, repo: &Path, binding: Option<&WorkBinding>) -> Result<()> {
     let Some(WorkRef::Task(task)) = binding.map(|binding| &binding.work) else {
         anyhow::bail!("`lf graph run` carries a Task's Graph; `lf task run` starts it");
@@ -405,16 +405,7 @@ pub fn carry_task_run(
         Ok(())
     };
     let (step, merges) = match start {
-        TaskRunStart::Run {
-            step,
-            merges,
-            stands_in,
-        } => {
-            if let Some(step) = stands_in {
-                eprintln!("{issue}: standing in at {step}");
-            }
-            (step, merges)
-        }
+        TaskRunStart::Run { step, merges } => (step, merges),
         TaskRunStart::Live { run, graph_process } => {
             return announce(&TaskRun::Running {
                 log: Some(loopflow_execution::process::launch_log::graph_log_path(
@@ -426,7 +417,6 @@ pub fn carry_task_run(
                 graph_process,
             })
         }
-        TaskRunStart::Waiting(step) => return announce(&TaskRun::Waiting { issue, step }),
         TaskRunStart::Ended => return announce(&TaskRun::Ended { issue }),
     };
     // This process carries the run; its Graph process writes where the
@@ -633,20 +623,14 @@ fn execute(
         journal::mark_run_owner(RunOwner::GraphRun);
         drop(admission);
         let outcome = drive(&running, start).await?;
-        // A Task run's Graph writes where it left the Task. Blocked at an
-        // interactive step, the Task waits there: what blocks it is for a
-        // person, and nothing before it runs again.
         if let (Some(carrier), Some(task)) = (task_run, &running.task) {
-            let blocked_at = match (&outcome, running.current()) {
-                (GraphOutcome::Blocked(_), Some(ConcreteStep::Skill(skill))) => {
-                    skill.interactive_step().map(str::to_owned)
+            let step = match (&outcome, running.current()) {
+                (GraphOutcome::Completed, _) => Some(loopflow_execution::task_graph::END),
+                (GraphOutcome::StoppedAt(step), _) => Some(step.as_str()),
+                (GraphOutcome::Blocked(_), Some(ConcreteStep::Breakpoint(stop))) => {
+                    Some(stop.name.as_str())
                 }
                 _ => None,
-            };
-            let step = match &outcome {
-                GraphOutcome::Completed => Some(loopflow_execution::task_graph::END),
-                GraphOutcome::StoppedAt(step) => Some(step.as_str()),
-                _ => blocked_at.as_deref(),
             };
             if let Some(step) = step {
                 let review = if matches!(running.current(), Some(ConcreteStep::Breakpoint(_))) {
@@ -807,13 +791,7 @@ fn render_pipeline_lines(items: &[ConcreteStep]) -> Vec<String> {
     let mut lines = Vec::new();
     for item in items {
         match item {
-            ConcreteStep::Skill(skill) => match skill.interactive_step() {
-                Some(step) if step != skill.skill.name => {
-                    lines.push(format!("{} [interactive {step}]", skill.skill.name))
-                }
-                Some(_) => lines.push(format!("{} [interactive]", skill.skill.name)),
-                None => lines.push(skill.skill.name.clone()),
-            },
+            ConcreteStep::Skill(skill) => lines.push(skill.skill.name.clone()),
             ConcreteStep::Breakpoint(stop) => lines.push(format!("break: {}", stop.name)),
             ConcreteStep::Command(command) => lines.push(command.item.to_string()),
             ConcreteStep::Xor(branch) => lines.extend(render_branch_lines(branch)),
@@ -959,29 +937,6 @@ impl RunningGraph<'_> {
             loopflow_execution::ops::task::auto::landing_wait(&step, &stop, &issue)
         );
         Ok(Some(step))
-    }
-
-    /// Whether this run stands in for the person at interactive `skill`, or
-    /// stops before it (`None`). `-b` always stands in and `-i` runs it with
-    /// the person here; a bare Task run reads auto as it gets there, so
-    /// turning it on mid-run counts. A Graph outside a Task run launches the
-    /// step as `lf skill` would.
-    fn stands_in(&self, skill: &ConcreteSkill) -> Result<Option<bool>> {
-        if !skill.interactive || self.launcher.interactive {
-            return Ok(Some(false));
-        }
-        if self.launcher.batch {
-            return Ok(Some(true));
-        }
-        let Some(task) = self.task.as_ref().filter(|_| self.task_run.is_some()) else {
-            return Ok(Some(false));
-        };
-        let on = self
-            .store
-            .sqlite
-            .task_auto(task)?
-            .is_some_and(|mark| mark.state == AutoState::On);
-        Ok(on.then_some(true))
     }
 
     /// Whether someone interrupted this Graph's Task after its run began.
@@ -1223,22 +1178,6 @@ impl RunningGraph<'_> {
     }
 }
 
-/// What a headless agent reads at an interactive step. With a loop behind the
-/// step it answers advance or iterate; blocked repeats with the blocker.
-fn stand_in_message(step: &str, repeats: bool) -> String {
-    let person = loopflow_execution::config::participant_name()
-        .ok()
-        .flatten()
-        .unwrap_or_else(|| "the person who started this run".into());
-    let mut message = format!(
-        "\n\nNo one is available. You are standing in for {person} at {step}. Decide as they would, record why in your final message, and continue."
-    );
-    if repeats {
-        message.push_str(" Advance when the work before this step holds; iterate only for a concrete, repairable gap, naming it; there is no one to hand a blocker to.");
-    }
-    message
-}
-
 /// The JSON value a final answer carries: the answer itself, or the object
 /// inside the prose or code fence a provider wrapped it in.
 fn answer_value(text: &str) -> Result<serde_json::Value, String> {
@@ -1335,11 +1274,6 @@ impl SkillExecutor for &RunningGraph<'_> {
         skill: &ConcreteSkill,
         ctx: ExecutionContext,
     ) -> Result<(SkillOutcome, Option<loopflow_model::id::LfProcessId>)> {
-        let Some(standing_in) = self.stands_in(skill)? else {
-            let step = skill.interactive_step().unwrap_or(&skill.skill.name);
-            eprintln!("Stopped at {step}; the Task waits there for its conversation.");
-            return Ok((SkillOutcome::StopsAt(step.to_owned()), None));
-        };
         if let Some(step) = self.stopped_landing()? {
             return Ok((SkillOutcome::StopsAt(step), None));
         }
@@ -1370,20 +1304,13 @@ impl SkillExecutor for &RunningGraph<'_> {
                 "\n\nPrevious step feedback or iteration direction:\n{direction}"
             ));
         }
-        // Standing in, an interactive step runs headless for the person.
-        if standing_in {
-            let step = skill.interactive_step().unwrap_or(name);
-            message.push_str(&stand_in_message(step, skill.returns.is_some()));
-        }
         let output = GraphOutput::append_step_instructions(body, index, &mut message);
         let mut step_cli = self.launcher.process_options();
         // spawn carries verbosity for skills, operations, and correction turns.
         step_cli.verbose = false;
         step_cli.output_schema = output.as_ref().map(GraphOutput::schema);
-        // Workers run headless. A legacy interactive occurrence still uses
-        // its terminal until the captured Graph is converted (LOO-1100).
-        step_cli.interactive = self.launcher.interactive && skill.interactive;
-        step_cli.batch = !step_cli.interactive && (!skill.interactive || standing_in);
+        step_cli.interactive = false;
+        step_cli.batch = true;
         // The child receives this occurrence's captured source, not a later
         // catalog selection. Keep the file alive through every child/readback.
         let mut input = tempfile::NamedTempFile::new()?;
@@ -1742,31 +1669,31 @@ mod tests {
     }
 
     #[test]
-    fn builtin_task_graphs_compile_and_name_their_interactive_steps() {
+    fn builtin_task_graphs_compile_and_name_their_breakpoints() {
         let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        for name in ["task-design", "pursue", "queue", "deliver"] {
-            let graph = loopflow_execution::graph::load_graph(name, &repo).unwrap();
-            let items = loopflow_execution::graph::compile_graph(&graph, &repo).unwrap();
-            assert!(
-                items
-                    .iter()
-                    .all(|item| !matches!(item, ConcreteStep::Skill(skill) if skill.interactive)),
-                "{name} has an interactive step"
-            );
-        }
-        for name in ["feature", "code", "research"] {
+        for (name, first_review) in [
+            ("task-design", None),
+            ("pursue", None),
+            ("queue", None),
+            ("deliver", None),
+            ("feature", Some("after-explore")),
+            ("code", Some("after-ship-review")),
+            ("research", Some("after-research")),
+            ("redesign", Some("after-design")),
+        ] {
             let graph = loopflow_execution::task_graph::CapturedGraph::load(name, &repo)
                 .unwrap()
                 .unwrap_or_else(|| panic!("{name} is a builtin graph"));
-            assert!(
-                graph.next_interactive(&Default::default()).is_some(),
-                "{name} has a place to review"
+            assert_eq!(
+                graph.next_breakpoint(&Default::default()),
+                first_review,
+                "{name}"
             );
         }
     }
 
     #[test]
-    fn pipeline_lines_mark_interactive_steps_hidden_in_xor_paths() {
+    fn pipeline_lines_mark_breakpoints_in_xor_paths() {
         let repo = tempdir().unwrap();
         let graphs = repo.path().join(".lf/graphs");
         fs::create_dir_all(&graphs).unwrap();
@@ -1779,7 +1706,7 @@ mod tests {
         let items = loopflow_execution::graph::compile_graph(&graph, repo.path()).unwrap();
         assert!(render_pipeline_lines(&items)
             .iter()
-            .any(|line| line.contains("explore [interactive review_choice]")));
+            .any(|line| line.contains("explore → break: after-review_choice")));
     }
 
     #[test]
@@ -1794,8 +1721,6 @@ mod tests {
                 args.contains(&"--interactive".to_owned()),
             )
         };
-        // A bare run stops at interactive steps; `-b` runs straight through
-        // headless, `-i` with the person at every step.
         assert_eq!(mode(&["lf", "task", "run", "INF-1"]), (false, false));
         assert_eq!(mode(&["lf", "-b", "task", "run", "INF-1"]), (true, false));
         assert_eq!(mode(&["lf", "-i", "task", "run", "INF-1"]), (false, true));

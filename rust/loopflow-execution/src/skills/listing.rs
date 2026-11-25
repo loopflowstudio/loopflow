@@ -65,7 +65,7 @@ pub fn format_written_steps(steps: &[Step]) -> String {
 fn format_written_step(step: &Step) -> String {
     match &step.target {
         Target::Graph(graph) => graph.name.clone(),
-        Target::Skill(skill) if step.interactive => format!("{} (interactive)", skill.name),
+        Target::Skill(skill) if step.interactive => format!("{} → break", skill.name),
         target => format_target(target),
     }
 }

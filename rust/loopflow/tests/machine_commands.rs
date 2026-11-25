@@ -3744,7 +3744,9 @@ fn mini_starts_nothing_for_a_task_that_moved_back() {
     fs::create_dir_all(repo.path().join(".lf/graphs")).unwrap();
     fs::write(
         repo.path().join(".lf/graphs/hold.yaml"),
-        format!("- cmd: task status {task}\n- cmd: task wait {task} --timeout 120s\n- interactive: demo\n"),
+        format!(
+            "- cmd: task status {task}\n- cmd: task wait {task} --timeout 120s\n- break: demo\n"
+        ),
     )
     .unwrap();
     git(repo.path(), &["add", ".lf/graphs/hold.yaml"]);
@@ -4130,7 +4132,9 @@ fn start_hold_run(
         worktree.join(".lf/graphs/hold.yaml"),
         // A first step that finishes, so restarting at the stopped step differs
         // from restarting the route.
-        format!("- cmd: task status {task}\n- cmd: task wait {task} --timeout 120s\n- interactive: demo\n"),
+        format!(
+            "- cmd: task status {task}\n- cmd: task wait {task} --timeout 120s\n- break: demo\n"
+        ),
     )
     .unwrap();
     let mut run = fixture

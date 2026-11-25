@@ -108,8 +108,7 @@ pub struct TaskProcessOptions {
     /// Place a new branch from the refs the last fetch left, without the
     /// network: the caller exchanges planning and the assignee afterwards.
     pub from_last_fetch: bool,
-    /// `lf task auto on`: the run turns auto on, lifting an off, and stands in at
-    /// the interactive step the Task waits at.
+    /// `lf task auto on`: the run turns auto on and takes the default at breakpoints.
     pub auto_on: bool,
 }
 
@@ -699,22 +698,14 @@ pub(crate) async fn task_work_status(store: &Store, task: &Task) -> OpsResult<Wo
 pub enum TaskRunStart {
     /// A run of the Task's Graph from this step; the caller starts it as
     /// `lf --task ISSUE graph run`. With `merges`, the run may merge the PR:
-    /// Auto is on, or no interactive step is left ahead, and nobody turned auto off.
-    /// With `stands_in`, a person asked for auto and the run sets out at that
-    /// interactive step.
-    Run {
-        step: String,
-        merges: bool,
-        stands_in: Option<String>,
-    },
+    /// Auto is on, or no breakpoint lies ahead, and nobody turned auto off.
+    Run { step: String, merges: bool },
     /// A person asked for auto while the Task's run was live: auto is on, and
     /// that run carries on.
     Live {
         run: String,
         graph_process: loopflow_model::id::LfProcessId,
     },
-    /// The Task now waits at this interactive step; nothing runs.
-    Waiting(String),
     /// Nothing remained: the Task reached `end`.
     Ended,
 }
@@ -751,14 +742,12 @@ pub fn task_place(
     })
 }
 
-/// How a Task run meets its interactive steps.
+/// Whether a Task run stops at breakpoints.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TaskRunMode {
-    /// Stop before the next one; the Task waits there in its conversation.
+    /// Present the finished work in the Task conversation.
     Stop,
-    /// Run each with a person in this terminal (`-i`).
-    InPlace,
-    /// Run each headless, standing in for the person (`-b`).
+    /// Continue through each review with the worker’s decision (`-b`).
     Headless,
 }
 
@@ -770,13 +759,8 @@ impl TaskRunMode {
     ) -> Option<&'a str> {
         match self {
             Self::Headless => None,
-            Self::InPlace => graph.next_stop(place, false),
-            Self::Stop => graph.next_interactive(place),
+            Self::Stop => graph.next_breakpoint(place),
         }
-    }
-
-    pub fn runs_through(self) -> bool {
-        self != Self::Stop
     }
 }
 
@@ -784,7 +768,8 @@ impl TaskRunMode {
 /// explanation without writing anything.
 #[derive(Debug)]
 pub struct TaskRunSelection {
-    arrival: Option<loopflow_model::id::LfProcessId>,
+    previous: Option<crate::store::task_work::TaskGraphRow>,
+    converted: bool,
     pub graph: crate::task_graph::CapturedGraph,
     /// Whether the Task takes `graph` up first: it has none, or named another.
     pub take_up: bool,
@@ -810,7 +795,7 @@ impl From<crate::task_graph::Place> for RunStart {
 }
 
 impl TaskRunSelection {
-    /// Whether the run reaches `end`: it runs through interactive steps, or
+    /// Whether the run reaches `end`: it bypasses breakpoints, or
     /// none lies ahead. Such a run hands the Task off, granting merge authority.
     pub fn reaches_end(&self, mode: TaskRunMode) -> bool {
         self.start
@@ -891,22 +876,23 @@ pub fn select_task_run(
     let issue = &task.identifier;
     let requested = options.graph.as_deref();
     let from = options.from.as_deref();
-    let current =
-        crate::store::task_work::task_graph_row(&store.sqlite, &task.id).map_err(task_error)?;
-    let (graph, row) = match (current, requested) {
-        (Some(row), None) => (row.graph.clone(), Some(row)),
-        (Some(row), Some(name)) if name == row.graph.name => (row.graph.clone(), Some(row)),
-        (_, Some(name)) => (load_graph(name, "", checkout)?, None),
+    let mut row = crate::store::task_work::task_graph_row(&store.sqlite, &task.id)
+        .map_err(task_error)?
+        .filter(|row| requested.is_none_or(|name| row.graph.name == name));
+    let take_up = row.is_none();
+    let (converted, pending) = row
+        .as_mut()
+        .map(crate::store::task_work::TaskGraphRow::prepare_continuation)
+        .unwrap_or_default();
+    let graph = match (&row, requested) {
+        (Some(row), _) => row.graph.clone(),
+        (None, Some(name)) => load_graph(name, "", checkout)?,
         (None, None) => {
             let (name, source) = task_graph_default(store, task)?;
             let repo = repository_for_task(store, task)?;
-            (
-                load_graph(&name, &format!("{} default ", source.as_str()), &repo)?,
-                None,
-            )
+            load_graph(&name, &format!("{} default ", source.as_str()), &repo)?
         }
     };
-    let take_up = row.is_none();
     let parked = row.as_ref().and_then(|row| row.breakpoint.as_ref());
     if let Some(expected) = &options.at_arrival {
         if parked.is_none_or(|arrival| arrival.id != *expected) {
@@ -953,10 +939,18 @@ pub fn select_task_run(
         ),
         // A run that stopped starts again at the step it stopped at, with the
         // passes and routes it had: the steps before it are done.
-        (None, Some((cursor, _)), _) => graph.place_of(cursor).map(|place| RunStart {
-            place,
-            cursor: cursor.clone(),
-        }),
+        (None, Some((cursor, _)), _) => {
+            let mut cursor = cursor.clone();
+            // Released checkpoints may stand at the end of a selected XOR body.
+            if cursor.child.is_some() && graph.place_of(&cursor).is_none() {
+                cursor.finish(&graph.steps).map_err(task_error)?;
+            }
+            match graph.place_of(&cursor) {
+                Some(place) => Some(RunStart { place, cursor }),
+                None if cursor.index == graph.steps.len() && cursor.child.is_none() => None,
+                None => return Err(task_error("saved cursor is outside its captured graph")),
+            }
+        }
         (None, None, Some(arrival)) => {
             let mut cursor = arrival.cursor.clone();
             if let Some(decision) = options.decision {
@@ -978,26 +972,14 @@ pub fn select_task_run(
                 graph.describe_steps()
             )))
         }
-        // Waiting at a step that merges, the Task starts at it again.
-        (None, None, None) => match graph.landing_step(step, merges) {
-            Some(landing) => Some(landing.into()),
-            None => {
-                let place = graph.interactive_step(step).ok_or_else(|| {
-                    task_error(format!(
-                        "Task {issue} is at {step:?}, which graph {} no longer names; `lf task run {issue} --from <step>` chooses where to go on. Steps: {}",
-                        graph.name,
-                        graph.describe_steps()
-                    ))
-                })?;
-                // A bare run means the person finished this step; a run asked
-                // for auto stands in at it.
-                if options.auto_on {
-                    Some(place.into())
-                } else {
-                    graph.after(&place).map(RunStart::from)
-                }
-            }
-        },
+        (None, None, None) => {
+            let place = pending.as_ref().and_then(|cursor| graph.place_of(cursor))
+                .or_else(|| graph.landing_step(step, merges)).ok_or_else(|| task_error(format!(
+                    "Task {issue} is at {step:?}, which graph {} no longer names; `lf task run {issue} --from <step>` chooses where to go on. Steps: {}",
+                    graph.name, graph.describe_steps()
+                )))?;
+            Some(place.into())
+        }
     };
     if let (Some(_), Some(start), Some(reason)) = (parked, &mut start, &options.reason) {
         if !reason.trim().is_empty() {
@@ -1005,7 +987,8 @@ pub fn select_task_run(
         }
     }
     Ok(TaskRunSelection {
-        arrival: row.and_then(|row| row.breakpoint.map(|stop| stop.id)),
+        previous: row,
+        converted,
         graph,
         take_up,
         start,
@@ -1013,7 +996,7 @@ pub fn select_task_run(
 }
 
 /// Put the Task where `lf task run` sets out: on a run carried by this
-/// process, at the interactive step `--from` names, or at `end` when nothing
+/// process, or at `end` when nothing
 /// remains. What the run asks of auto is written once the Task has its Graph.
 /// Two runs setting out together leave one: the other reads the Task again.
 async fn start_task_run(
@@ -1045,8 +1028,7 @@ async fn try_start_task_run(
         .map_err(task_error)?
         .filter(|row| auto_on && requested.is_none_or(|name| name == row.graph.name));
     match standing.as_ref().map(|row| (row, &row.run)) {
-        // A live run reads auto at each interactive step, so it stands in
-        // from here without being started again. The mark is written before
+        // A live run reads auto at each breakpoint. The mark is written before
         // the wait for its Graph, so a slow registration cannot lose it.
         Some((row, Some((cursor, carrier))))
             if crate::store::task_work::carrier_may_run(carrier) =>
@@ -1072,7 +1054,8 @@ async fn try_start_task_run(
     let selection = select_task_run(store, task, task.worktree()?, options, merges)?;
     let reaches_end = selection.reaches_end(mode);
     let TaskRunSelection {
-        arrival,
+        previous,
+        converted,
         graph,
         take_up,
         start,
@@ -1104,59 +1087,53 @@ async fn try_start_task_run(
     if auto_on {
         auto::turn_on(store, task)?;
     }
-    // Auto on runs through the interactive steps, standing in at each;
-    // off, no run merges.
-    let (on, merges) = match store
+    // Auto bypasses reviews. Turning it off also withholds merge authority.
+    let merges = match store
         .sqlite
         .task_auto(&task.id)
         .map_err(task_error)?
         .map(|mark| mark.state)
     {
-        Some(loopflow_storage::sqlite::AutoState::On) => (true, true),
-        Some(loopflow_storage::sqlite::AutoState::Off) => (false, false),
-        None => (false, reaches_end),
+        Some(loopflow_storage::sqlite::AutoState::On) => true,
+        Some(loopflow_storage::sqlite::AutoState::Off) => false,
+        None => reaches_end,
     };
-    let through = mode.runs_through() || on;
-    let row = crate::store::task_work::task_graph_row(&store.sqlite, &task.id)
-        .map_err(task_error)?
-        .ok_or_else(|| task_error(format!("Task {issue} lost its graph while starting")))?;
-    if row.breakpoint.as_ref().map(|stop| &stop.id) != arrival.as_ref() {
-        return Err(task_error(format!(
-            "Task {issue} moved while continuing; read its current position"
-        )));
-    }
-    // The start below replaces the carrier this row names. One that set out
-    // since the selection was read is live, not stopped: read the Task again.
-    if row
-        .run
-        .as_ref()
-        .is_some_and(|(_, carrier)| crate::store::task_work::carrier_may_run(carrier))
-    {
-        return Ok(None);
-    }
+    let row = match previous {
+        Some(row) => row,
+        None => {
+            let Some(row) = crate::store::task_work::task_graph_row(&store.sqlite, &task.id)
+                .map_err(task_error)?
+            else {
+                return Ok(None);
+            };
+            if row.step != crate::task_graph::START || row.run.is_some() || row.graph != graph {
+                return Ok(None);
+            }
+            row
+        }
+    };
+    let arrival = row.breakpoint.as_ref().map(|stop| &stop.id);
     let Some(start) = start else {
-        if store
-            .sqlite
-            .end_task_graph(&task.id, arrival.as_ref())
-            .map_err(task_error)?
-        {
+        let ended = match &row.run {
+            Some((_, carrier)) => {
+                store
+                    .sqlite
+                    .arrive_task_graph(&task.id, &carrier.id, crate::task_graph::END, None)
+            }
+            None => store.sqlite.end_task_graph(&task.id, arrival),
+        }
+        .map_err(task_error)?;
+        if ended {
             settle_pending_completion(store, task).await?;
         } else if arrival.is_some() {
             return Err(task_error(format!(
                 "Task {issue} already continued from this breakpoint"
             )));
+        } else {
+            return Ok(None);
         }
         return Ok(Some(TaskRunStart::Ended));
     };
-    // Starting at an interactive step without running past it puts the Task there.
-    let interactive = graph.interactive_at(&start.place);
-    if let Some(step) = interactive.filter(|_| !through && arrival.is_none()) {
-        store
-            .sqlite
-            .set_task_graph_step(&task.id, step)
-            .map_err(task_error)?;
-        return Ok(Some(TaskRunStart::Waiting(step.to_owned())));
-    }
     let label = if start.place == crate::task_graph::Place::default() {
         format!("{} from start", graph.name)
     } else {
@@ -1167,6 +1144,7 @@ async fn try_start_task_run(
         &task.id,
         &row,
         &start.cursor,
+        converted.then_some(&graph),
         (&process, &carrier),
     )
     .map_err(task_error)?
@@ -1181,7 +1159,6 @@ async fn try_start_task_run(
     Ok(Some(TaskRunStart::Run {
         step: label,
         merges,
-        stands_in: interactive.filter(|_| auto_on).map(str::to_owned),
     }))
 }
 

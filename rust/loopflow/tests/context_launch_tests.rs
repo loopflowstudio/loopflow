@@ -1108,7 +1108,7 @@ fn a_task_run_starts_its_conversation_and_abandon_stops_it() {
 
 fn assert_background_conversation(run_graph: bool) {
     let repo = TestRepo::new();
-    repo.create_file(".lf/graphs/pause.yaml", "- interactive: demo\n");
+    repo.create_file(".lf/graphs/pause.yaml", "- break: demo\n");
     repo.stage_all();
     repo.commit("Add a graph that waits for review");
     repo.push();

@@ -791,50 +791,23 @@ fn graph_parsing_parity() {
 }
 
 #[test]
-fn interactive_graph_keeps_input_and_advances_only_after_each_provider_exits() {
+fn foreground_graph_asks_at_the_breakpoint_before_running_the_suffix() {
     use std::io::Write;
     use std::os::fd::FromRawFd;
     use std::os::unix::process::CommandExt;
     use std::process::Stdio;
 
-    for (flags, stop) in [
-        (vec!["-i", "graph", "conversation"], false),
-        (vec!["graph", "conversation", "-i"], false),
-        (vec!["-i", "graph", "conversation"], true),
-    ] {
+    for stop in [false, true] {
+        let flags = ["-i", "graph", "conversation"];
         let repo = loopflow_test_support::TestRepo::new();
         let home = TempDir::new().unwrap();
         let bin = home.path().join("bin");
         fs::create_dir(&bin).unwrap();
-        for name in ["first", "second"] {
-            write_skill(repo.path(), name, "Ask for input, then exit.");
-        }
-        write_graph(repo.path(), "conversation", "- first\n- second\n");
-        write_executable(
-            &bin.join("claude"),
-            r#"#!/bin/sh
-set -eu
-if [ "${1-}" = --version ]; then echo '2.1.0 (fixture)'; exit 0; fi
-while [ "$#" -gt 0 ]; do
-    case "$1" in
-        --print|--output-format) echo 'unexpected headless launch' >&2; exit 1;;
-        --append-system-prompt-file|--settings) shift;;
-    esac
-    shift
-done
-first_turn=$(cat)
-case "$first_turn" in
-    *'<lf:skill:first>'*) step=first;;
-    *'<lf:skill:second>'*) step=second;;
-    *) exit 2;;
-esac
-touch "$LF_HOME/$step.ready"
-IFS= read -r answer < /dev/tty
-printf '%s' "$answer" > "$LF_HOME/$step.answer"
-[ "$answer" != stop ] || exit 130
-"#,
+        write_graph(
+            repo.path(),
+            "conversation",
+            "- cmd: graph show research\n- break\n- cmd: graph show feature\n",
         );
-
         let path = format!("{}:/usr/bin:/bin", bin.display());
         // First-open migrations in a debug build take most of the deadline;
         // finish them before the clock starts.
@@ -913,20 +886,14 @@ printf '%s' "$answer" > "$LF_HOME/$step.answer"
                 std::thread::sleep(std::time::Duration::from_millis(20));
             }
         };
-        wait(&|| home.path().join("first.ready").exists());
-        assert!(!home.path().join("second.ready").exists());
+        wait(&|| {
+            fs::read_to_string(&log_path)
+                .unwrap()
+                .contains("Continue? [y/N]")
+        });
         master
-            .write_all(if stop { b"stop\n" } else { b"blue\n" })
+            .write_all(if stop { b"n\n" } else { b"y\n" })
             .unwrap();
-        if !stop {
-            wait(&|| home.path().join("second.ready").exists());
-            assert_eq!(
-                fs::read_to_string(home.path().join("first.answer")).unwrap(),
-                "blue"
-            );
-            master.write_all(b"green\n").unwrap();
-            wait(&|| home.path().join("second.answer").exists());
-        }
         let status = loop {
             if let Some(status) = child.try_wait().unwrap() {
                 break status;
@@ -942,20 +909,12 @@ printf '%s' "$answer" > "$LF_HOME/$step.answer"
             std::thread::sleep(std::time::Duration::from_millis(20));
         };
         reader.join().unwrap();
+        let output = fs::read_to_string(&log_path).unwrap();
         assert_eq!(
-            status.success(),
+            output.contains("op: graph show feature"),
             !stop,
-            "{}",
-            fs::read_to_string(log_path).unwrap()
+            "{status}: {output}"
         );
-        if stop {
-            assert!(!home.path().join("second.ready").exists());
-        } else {
-            assert_eq!(
-                fs::read_to_string(home.path().join("second.answer")).unwrap(),
-                "green"
-            );
-        }
     }
 }
 
@@ -2236,6 +2195,140 @@ fn three_nested_loops_each_return_to_their_own_first_step() {
 }
 
 #[test]
+fn breakpoint_runs_the_released_pending_worker_once() {
+    run_first_feature_review(true);
+}
+
+#[test]
+fn breakpoint_runs_explore_before_a_new_feature_stops() {
+    run_first_feature_review(false);
+}
+
+fn install_review_primary(home: &Path, checkout: &Path, task: &support::RegisteredTask) -> String {
+    let (session, thread) = support::stopped_claude_conversation(home, checkout);
+    let store = &task.store.sqlite;
+    let captured = store.session(&session).unwrap().unwrap().captured;
+    loopflow_execution::store::sessions::bind_session(store, &session, captured, &task.task.id)
+        .unwrap();
+    store.choose_task_primary(&task.task.id, &session).unwrap();
+    store
+        .conn
+        .lock()
+        .unwrap()
+        .execute(
+            "UPDATE agent_sessions SET agent_exit_code=0,agent_ended_at=1 WHERE id=?1",
+            [&session],
+        )
+        .unwrap();
+    thread
+}
+
+fn start_review_server(home: &Path) -> MachineServer {
+    fs::write(home.join("config.yaml"), "default_agent: codex\n").unwrap();
+    let path = format!("{}:/usr/bin:/bin", home.join("bin").display());
+    MachineServer::start_with_path(lf_binary(), home, &path)
+}
+
+fn run_first_feature_review(released: bool) {
+    let repo = loopflow_test_support::TestRepo::new();
+    support::bind_task_planning(&repo);
+    let checkout = repo.path().canonicalize().unwrap();
+    let home = tempfile::tempdir_in("/tmp").unwrap();
+    let task = support::register_task_without_pr(
+        home.path(),
+        &checkout,
+        "feature-review",
+        &repo.head_sha(),
+    );
+    let store = &task.store.sqlite;
+    install_review_primary(home.path(), &checkout, &task);
+    let _server = start_review_server(home.path());
+    observe_planning(&task, &checkout);
+    repo.create_branch("feature-review");
+    let history = released.then(|| {
+        store.test_graph(
+            "old-feature",
+            checkout.to_str().unwrap(),
+            &[
+                ("explore", Some("succeeded")),
+                ("explore", Some("succeeded")),
+            ],
+            Some("succeeded"),
+        )
+    });
+    let mut args = vec!["task", "run", "INF-123"];
+    if released {
+        // This completed prefix and the pending worker have the same skill
+        // name, as in the released research Graph. Only the latter may run.
+        let capture = serde_json::json!({"name":"old-feature","steps":[
+            {"Skill":{"skill":{"name":"explore","content":"A finished prefix."},"id":null,"interactive":false,"returns":null,"sources":["old-feature"]}},
+            {"Skill":{"skill":{"name":"explore","content":"Explore the captured layout."},"id":null,"human":true,"returns":null,"sources":["old-feature"]}}
+        ]});
+        store
+            .take_up_task_graph(&task.task.id, &capture.to_string())
+            .unwrap();
+        store.set_task_graph_step(&task.task.id, "explore").unwrap();
+    } else {
+        assert!(store.task_graph_row(&task.task.id).unwrap().is_none());
+        args.push("feature");
+    }
+    let result = "Compare the two layouts in scratch/explore.html.";
+    let (_bin, path) = scripted_provider(home.path(), &[result]);
+    let run = run_lf(&checkout, home.path(), &args, Some(&path));
+    assert!(
+        run.status.success(),
+        "{}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    wait_for("the worker to finish and park its review", || {
+        store
+            .task_graph_row(&task.task.id)
+            .unwrap()
+            .is_some_and(|row| row.breakpoint.is_some())
+    });
+    let row = store.task_graph_row(&task.task.id).unwrap().unwrap();
+    assert_eq!(row.step, "after-explore");
+    let stop: loopflow_execution::store::task_work::BreakpointArrival =
+        serde_json::from_str(row.breakpoint.as_ref().unwrap()).unwrap();
+    assert_eq!(stop.cursor.index, if released { 2 } else { 1 });
+    let review = store
+        .steer_by_source(&format!("breakpoint:{}", task.task.id), stop.id.as_str())
+        .unwrap()
+        .unwrap();
+    assert!(review.text.contains(result), "{}", review.text);
+    assert!(support::first_inputs(home.path(), 1).contains(result));
+    let contexts = received_contexts(home.path());
+    assert_eq!(contexts.len(), 1);
+    if released {
+        assert!(contexts[0].contains("Explore the captured layout."));
+        let run = history.unwrap();
+        let previous = lf_json(
+            &checkout,
+            home.path(),
+            &["graph", "show", run.as_str(), "--json"],
+        );
+        assert_eq!(step_fields(&previous, "key"), [0, 1]);
+        assert_eq!(step_fields(&previous, "label"), ["explore", "explore"]);
+        let end = run_lf(
+            &checkout,
+            home.path(),
+            &["task", "run", "INF-123"],
+            Some(&path),
+        );
+        assert!(
+            end.status.success(),
+            "{}",
+            String::from_utf8_lossy(&end.stderr)
+        );
+        assert_eq!(
+            store.task_graph_row(&task.task.id).unwrap().unwrap().step,
+            "end"
+        );
+        assert_eq!(received_contexts(home.path()).len(), 1);
+    }
+}
+
+#[test]
 fn breakpoint_batch_accepts_the_verdict_without_parking() {
     let repo = loopflow_test_support::TestRepo::new();
     support::bind_task_planning(&repo);
@@ -2287,24 +2380,8 @@ fn breakpoint_presents_finished_work() {
     let checkout = repo.path().canonicalize().unwrap();
     let task =
         support::register_task_without_pr(home.path(), &checkout, "research-end", &repo.head_sha());
-    let (session, thread) = support::stopped_claude_conversation(home.path(), &checkout);
-    let store = &task.store.sqlite;
-    let captured = store.session(&session).unwrap().unwrap().captured;
-    loopflow_execution::store::sessions::bind_session(store, &session, captured, &task.task.id)
-        .unwrap();
-    store.choose_task_primary(&task.task.id, &session).unwrap();
-    store
-        .conn
-        .lock()
-        .unwrap()
-        .execute(
-            "UPDATE agent_sessions SET agent_exit_code=0,agent_ended_at=1 WHERE id=?1",
-            [&session],
-        )
-        .unwrap();
-    fs::write(home.path().join("config.yaml"), "default_agent: codex\n").unwrap();
-    let server_path = format!("{}:/usr/bin:/bin", home.path().join("bin").display());
-    let start_server = || MachineServer::start_with_path(lf_binary(), home.path(), &server_path);
+    let thread = install_review_primary(home.path(), &checkout, &task);
+    let start_server = || start_review_server(home.path());
     let server = start_server();
     observe_planning(&task, &checkout);
     repo.create_branch("research-end");

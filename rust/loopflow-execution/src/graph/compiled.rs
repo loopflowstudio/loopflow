@@ -400,15 +400,20 @@ mod tests {
             [
                 ("plan", false),
                 ("build", false),
-                ("ship-review", true),
+                ("ship-review", false),
+                ("after-ship-review", true),
                 ("deliver", false),
-                ("verify", true)
+                ("verify", false),
+                ("after-verify", true)
             ]
         );
-        assert_eq!(code.sentence, "You take part at ship-review and verify.");
+        assert_eq!(
+            code.sentence,
+            "You take part at after-ship-review and after-verify."
+        );
         assert_eq!(
             outline("feature").unwrap().sentence,
-            "You take part at explore, ship-review and verify."
+            "You take part at after-explore, after-ship-review and after-verify."
         );
 
         let conditional = outline("conditional").unwrap();
@@ -419,7 +424,7 @@ mod tests {
             .map(|step| step.name.as_str())
             .collect();
         assert_eq!(interactive, ["xor-route"]);
-        assert_eq!(conditional.sentence, "You take part at demo.");
+        assert_eq!(conditional.sentence, "You take part at after-demo.");
 
         assert_eq!(outline("alone").unwrap().sentence, "Runs on its own.");
         assert_eq!(outline("broken"), None);

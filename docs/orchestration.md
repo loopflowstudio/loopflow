@@ -265,8 +265,9 @@ To give a breakpoint a name, write `- break: layout-choice`.
 `lf task run <ID> --from explore` runs the Skill again. A jump straight to
 a breakpoint shows where continuing will take you. In an existing Graph,
 `interactive: explore` means `explore` followed by a breakpoint. If your Task
-was already waiting to start that Skill, its next run does the work before
-stopping for review.
+was already waiting to start that Skill, its next run uses the captured Skill
+and stops with its result. A run already in progress finishes in its original
+Graph. Its recorded step numbers stay the same in history.
 
 Run `lf explore` to develop the alternatives together in your terminal.
 Run a Graph directly with `lf graph feature` to review its finished steps

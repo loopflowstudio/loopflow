@@ -12,7 +12,7 @@ use super::{select_task_run, TaskProcessOptions, TaskRunSelection};
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum TaskRunAction {
-    /// Run `graph` from the step `from` until the interactive step
+    /// Run `graph` from the step `from` until the breakpoint
     /// `stops_at`, or to the end when `None`.
     Run {
         graph: String,
@@ -20,7 +20,7 @@ pub enum TaskRunAction {
         from: String,
         stops_at: Option<String>,
     },
-    /// Put the Task at the interactive step `step`, running nothing.
+    /// A released preview stopped before running the interactive worker.
     Wait {
         graph: String,
         take_up: bool,
@@ -178,21 +178,11 @@ async fn read_task_run(
                 take_up,
             }
         }
-        Some(start) => match graph
-            .interactive_at(&start.place)
-            .filter(|_| !mode.runs_through())
-        {
-            Some(step) => TaskRunAction::Wait {
-                graph: name,
-                take_up,
-                step: step.into(),
-            },
-            None => TaskRunAction::Run {
-                from: graph.step_name(&start.place),
-                stops_at: mode.next_stop(&graph, &start.place).map(str::to_owned),
-                graph: name,
-                take_up,
-            },
+        Some(start) => TaskRunAction::Run {
+            from: graph.step_name(&start.place),
+            stops_at: mode.next_stop(&graph, &start.place).map(str::to_owned),
+            graph: name,
+            take_up,
         },
     });
     report

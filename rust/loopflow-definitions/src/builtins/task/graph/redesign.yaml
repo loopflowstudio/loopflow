@@ -1,4 +1,5 @@
 description: Rethink a started Task. You settle the new design, then it is planned, built and published.
 steps:
-- interactive: design
+- step: design
+- break
 - graph: pursue

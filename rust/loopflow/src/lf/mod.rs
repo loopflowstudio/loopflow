@@ -244,9 +244,7 @@ impl Cli {
 
     pub fn task_run_mode(&self) -> loopflow_execution::ops::task::TaskRunMode {
         use loopflow_execution::ops::task::TaskRunMode;
-        if self.interactive {
-            TaskRunMode::InPlace
-        } else if self.batch {
+        if self.batch {
             TaskRunMode::Headless
         } else {
             TaskRunMode::Stop
@@ -2238,20 +2236,19 @@ pub enum TaskCommand {
     #[command(
         after_help = "A Task runs the graph it took up: its Wave's default, its repository's \
 `graph:`, or `code`. At a breakpoint the preceding step is finished. Continue to accept its \
-proposal or use --decision and --reason to choose another loop pass. A run also stops before a legacy interactive step, where the Task waits for its \
-conversation; the next `lf task run` continues after it. A run that fails starts again at the \
-step that failed; the steps before it stay done, and --from reruns them. `-i` runs legacy interactive \
-steps in this terminal. Ordinary skills run headless and Task breakpoints open in the Task conversation. \
+proposal or use --decision and --reason to choose another loop pass. A run that fails starts again at the \
+step that failed. Use --from to rerun an earlier step. `-i` keeps the run in this terminal. \
+Workers run headless and the Task conversation presents their results at breakpoints. \
 A run that reaches a merging step, as `-b` does, may merge the PR \
 unless someone turned auto off; then it waits at the landing step until `lf task auto on`. `-b` turns \
-no auto on: a run carried again after it dies stops at its next interactive step. Add --open to open its primary conversation locally when the launch returns, \
+no auto on: a run carried again after it dies stops at its next breakpoint. Add --open to open its primary conversation locally when the launch returns, \
 using lf open's ordinary host selection. Preview and --quote open nothing."
     )]
     Run {
         issue: Option<String>,
         /// A graph to take up in place of the Task's own
         graph: Option<String>,
-        /// Start at this step instead: to go back, skip ahead, or wait at an interactive step
+        /// Start at this step instead: to go back, skip ahead, or stop at a named breakpoint
         #[arg(long, value_name = "STEP")]
         from: Option<String>,
         /// Continue only the breakpoint visit this conversation reviewed

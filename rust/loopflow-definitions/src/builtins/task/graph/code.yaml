@@ -4,6 +4,8 @@ steps:
 - loop:
     - loop:
         - graph: build
-        - interactive: ship-review     # you read the page; iterate goes back to build
+        - step: ship-review
+        - break
     - graph: deliver
-    - interactive: verify
+    - step: verify
+    - break

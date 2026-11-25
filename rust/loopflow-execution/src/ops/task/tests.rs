@@ -3082,7 +3082,7 @@ fn breakpoint_in_a_task_terminal_still_waits_for_its_conversation() {
         .unwrap();
     let start = crate::task_graph::Place::default();
     assert_eq!(
-        super::TaskRunMode::InPlace.next_stop(&graph, &start),
+        super::TaskRunMode::Stop.next_stop(&graph, &start),
         Some("after-research")
     );
     assert_eq!(super::TaskRunMode::Headless.next_stop(&graph, &start), None);

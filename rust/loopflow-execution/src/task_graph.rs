@@ -1,9 +1,6 @@
-//! A Task's Graph: the graph it took up, compiled then and fixed from then on,
-//! and where the Task stands on it. A step written `interactive: <skill>` is
-//! where a person takes part. `lf graph` runs that step in place; `lf task run`
-//! stops before it, and the Task waits there for the Task conversation. The
-//! next `lf task run` continues after it, or `--from <step>` starts anywhere.
-//! Other Graphs run in the Task's checkout never move it.
+//! A Task runs its captured workers and reviews their results at Graph breakpoints.
+
+mod legacy;
 
 use std::path::Path;
 
@@ -198,46 +195,22 @@ impl CapturedGraph {
 
     /// The first interactive step a run from `place` reaches, looking into
     /// every XOR path in name order; `None` when it runs to the end.
-    pub fn next_interactive(&self, place: &Place) -> Option<&str> {
-        self.next_stop(place, true)
-    }
-
-    pub(crate) fn next_stop(
-        &self,
-        place: &Place,
-        include_interactive_skills: bool,
-    ) -> Option<&str> {
-        fn scan(
-            body: &[ConcreteStep],
-            from: usize,
-            include_interactive_skills: bool,
-        ) -> Option<&str> {
-            for step in &body[from..] {
-                match step {
-                    ConcreteStep::Skill(skill) if include_interactive_skills => {
-                        if let Some(step) = skill.interactive_step() {
-                            return Some(step);
-                        }
-                    }
-                    ConcreteStep::Xor(branch) => {
-                        if let Some(step) = branch
-                            .paths
-                            .values()
-                            .find_map(|path| scan(&path.steps, 0, include_interactive_skills))
-                        {
-                            return Some(step);
-                        }
-                    }
-                    ConcreteStep::Breakpoint(stop) => return Some(&stop.name),
-                    ConcreteStep::Skill(_) | ConcreteStep::Command(_) => {}
+    pub fn next_breakpoint(&self, place: &Place) -> Option<&str> {
+        fn scan(body: &[ConcreteStep], from: usize) -> Option<&str> {
+            body[from..].iter().find_map(|step| match step {
+                ConcreteStep::Breakpoint(stop) => Some(stop.name.as_str()),
+                ConcreteStep::Xor(branch) => {
+                    branch.paths.values().find_map(|path| scan(&path.steps, 0))
                 }
-            }
-            None
+                // A live released carrier still stops before its interactive worker.
+                ConcreteStep::Skill(skill) => skill.interactive_step(),
+                ConcreteStep::Command(_) => None,
+            })
         }
         let mut path = place.path.clone();
         let mut from = place.index;
         loop {
-            if let Some(step) = scan(body(&self.steps, &path), from, include_interactive_skills) {
+            if let Some(step) = scan(body(&self.steps, &path), from) {
                 return Some(step);
             }
             let (index, _) = path.pop()?;
@@ -273,14 +246,6 @@ impl CapturedGraph {
 
     fn step_at(&self, place: &Place) -> &ConcreteStep {
         &body(&self.steps, &place.path)[place.index]
-    }
-
-    /// The interactive step at `place`, if it is one.
-    pub fn interactive_at(&self, place: &Place) -> Option<&str> {
-        match self.step_at(place) {
-            ConcreteStep::Skill(skill) => skill.interactive_step(),
-            _ => None,
-        }
     }
 
     /// What a person calls the step at `place`; an operation by the display
@@ -437,7 +402,7 @@ pub struct TaskGraph {
     #[serde(deserialize_with = "Option::deserialize")]
     pub current_step: Option<u32>,
     /// Where the Task stands, in one sentence: "build is running implement.
-    /// You are next needed at ship-review."
+    /// You are next needed at after-ship-review."
     pub sentence: String,
 }
 
@@ -554,7 +519,7 @@ impl TaskGraph {
                     let next = place
                         .as_ref()
                         .and_then(|place| graph.after(place))
-                        .and_then(|place| graph.next_interactive(&place));
+                        .and_then(|place| graph.next_breakpoint(&place));
                     match (next, auto) {
                         (None, _) => running,
                         (Some(next), Some(AutoState::On)) => {
@@ -631,7 +596,7 @@ pub(crate) fn validate_graph_name(name: &str) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{interactive_summary, CapturedGraph, TaskGraph, TaskGraphRun};
+    use super::{CapturedGraph, TaskGraph, TaskGraphRun};
     use loopflow_storage::sqlite::{Auto, AutoState};
 
     fn write(repo: &std::path::Path, path: &str, content: &str) {
@@ -646,11 +611,16 @@ mod tests {
         let feature = CapturedGraph::load("feature", repo.path())
             .unwrap()
             .unwrap();
-        let steps: Vec<_> = interactive_summary(&feature.steps)
-            .into_iter()
-            .map(|step| step.name)
-            .collect();
-        assert_eq!(steps, ["explore", "ship-review", "verify"]);
+        let mut steps = Vec::new();
+        super::walk(&feature.steps, &[], &mut |_, step| {
+            if let crate::graph::ConcreteStep::Breakpoint(stop) = step {
+                steps.push(stop.name.as_str());
+            }
+        });
+        assert_eq!(
+            steps,
+            ["after-explore", "after-ship-review", "after-verify"]
+        );
         let pursue = CapturedGraph::load("pursue", repo.path()).unwrap().unwrap();
         assert!(pursue.interactive_steps().is_empty());
         assert!(CapturedGraph::load("no-such-graph", repo.path())
@@ -664,9 +634,9 @@ mod tests {
         let graph = CapturedGraph::load("feature", repo.path())
             .unwrap()
             .unwrap();
-        let explore = graph.interactive_step("explore").unwrap();
+        let explore = graph.find("after-explore").unwrap();
         let next = graph.after(&explore).unwrap();
-        assert_eq!(graph.next_interactive(&next), Some("ship-review"));
+        assert_eq!(graph.next_breakpoint(&next), Some("after-ship-review"));
         // A composed graph's name finds its first step.
         let plan = graph.find("plan").unwrap();
         assert_eq!(plan.cursor().index, next.cursor().index);
@@ -681,10 +651,10 @@ mod tests {
         assert_eq!(graph.find("start").unwrap().cursor().index, 0);
         assert!(graph.find("no-such-step").is_none());
         // After the last interactive step nothing remains.
-        let verify = graph.interactive_step("verify").unwrap();
+        let verify = graph.find("after-verify").unwrap();
         assert!(graph
             .after(&verify)
-            .is_none_or(|place| graph.next_interactive(&place).is_none()));
+            .is_none_or(|place| graph.next_breakpoint(&place).is_none()));
     }
 
     #[test]
@@ -699,11 +669,11 @@ mod tests {
             .unwrap()
             .unwrap();
         let start = graph.find("start").unwrap();
-        assert_eq!(graph.next_interactive(&start), Some("demo"));
-        let demo = graph.interactive_step("demo").unwrap();
+        assert_eq!(graph.next_breakpoint(&start), Some("after-demo"));
+        let demo = graph.find("after-demo").unwrap();
         let after = graph.after(&demo).unwrap();
         assert_eq!(after.cursor().index, 2);
-        assert_eq!(graph.next_interactive(&after), None);
+        assert_eq!(graph.next_breakpoint(&after), None);
     }
 
     #[test]
@@ -730,7 +700,7 @@ mod tests {
             at("land").waiting_to_land(Some(&mark(AutoState::On)), "INF-1"),
             None
         );
-        assert_eq!(at("ship-review").waiting_to_land(Some(&off), "INF-1"), None);
+
         assert_eq!(at("end").waiting_to_land(Some(&off), "INF-1"), None);
     }
 
@@ -766,9 +736,11 @@ mod tests {
             [
                 ("plan", false),
                 ("build", false),
-                ("ship-review", true),
+                ("ship-review", false),
+                ("after-ship-review", true),
                 ("deliver", false),
-                ("verify", true)
+                ("verify", false),
+                ("after-verify", true)
             ]
         );
         assert_eq!(
@@ -785,12 +757,12 @@ mod tests {
         assert_eq!(implement.current_step, Some(1));
         assert_eq!(
             implement.sentence,
-            "build is running implement. You are next needed at ship-review."
+            "build is running implement. You are next needed at after-ship-review."
         );
         let auto = read("plan", Some(("implement", true)), Some(AutoState::On));
         assert_eq!(
             auto.sentence,
-            "build is running implement. Auto stands in next at ship-review."
+            "build is running implement. Auto stands in next at after-ship-review."
         );
         let stopped = read("plan", Some(("implement", false)), None);
         assert_eq!(
@@ -799,7 +771,7 @@ mod tests {
         );
         let review = read("ship-review", None, None);
         assert_eq!(review.current_step, Some(2));
-        assert_eq!(review.sentence, "Waiting for you at ship-review.");
+        assert_eq!(review.sentence, "Waiting at ship-review.");
     }
 
     #[test]

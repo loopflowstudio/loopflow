@@ -496,7 +496,7 @@ fn task_run_open_while_running(fail_open: bool) {
     task.repo.create_file(".lf/graphs/held.yaml", HOLD_STEP);
     task.repo.create_file(
         ".lf/graphs/held-flow.yaml",
-        "- graph: held\n- interactive: {name: demo, id: review}\n",
+        "- graph: held\n- break: review\n",
     );
     let out = task.home.path().join("open.out");
     let log = fs::File::create(&out).unwrap();
@@ -739,6 +739,7 @@ fn task_run_open_opens_the_selected_waiting_task() {
             "--task", "INF-123", "task", "run", "--from", "review", "--open",
         ],
     ] {
+        let previous = task.graph()["position"]["arrival"].clone();
         let waiting = command(task.repo.path(), task.home.path(), &args)
             .env("LF_BIN", &lf)
             .stdin(std::process::Stdio::null())
@@ -755,8 +756,12 @@ fn task_run_open_opens_the_selected_waiting_task() {
             "opening-primary"
         );
         fs::remove_file(&opened).unwrap();
+        wait_for("the run to park", || {
+            let position = &task.graph()["position"];
+            at_breakpoint(position, "review") && position["arrival"] != previous
+        });
     }
-    assert!(support::recorded_graphs(task.home.path()).is_empty());
+    assert_eq!(support::recorded_graphs(task.home.path()).len(), 5);
 }
 
 #[test]
@@ -768,7 +773,7 @@ fn task_run_returns_while_its_graph_keeps_running() {
     );
     task.repo.create_file(
         ".lf/graphs/held-flow.yaml",
-        "- graph: held\n- interactive: {name: demo, id: review}\n",
+        "- graph: held\n- break: review\n",
     );
     task.select_wave_graph("held-flow");
     let home = task.home.path();
@@ -854,7 +859,7 @@ fn task_run_returns_while_its_graph_keeps_running() {
     assert!(steps >= 2, "the second step never ran: {steps}");
     // The carrier writes the arrival after its Graph exits.
     let deadline = Instant::now() + Duration::from_secs(30);
-    while task.graph()["position"] != at("review") {
+    while !at_breakpoint(&task.graph()["position"], "review") {
         assert!(Instant::now() < deadline, "{}", task.graph());
         std::thread::sleep(Duration::from_millis(50));
     }
@@ -956,7 +961,7 @@ fn a_task_run_takes_its_waves_agent_without_flags() {
         (".lf/skills/probe.md", "Probe."),
         (
             ".lf/graphs/proof.yaml",
-            "- step: {name: probe}\n- interactive: {name: demo}\n",
+            "- step: {name: probe}\n- break: review\n",
         ),
     ] {
         repo.create_file(path, content);
@@ -1130,7 +1135,7 @@ os.execv({binary}, [{binary}, *sys.argv[1:]])
             // Accepting fails until `late` exists.
             (
                 ".lf/graphs/gated.yaml",
-                "- graph: proof\n- interactive: {name: demo, id: review}\n- graph: gate\n- interactive: {name: demo, id: accepted}\n",
+                "- graph: proof\n- break: review\n- graph: gate\n- break: accepted\n",
             ),
             // A step that is done, then one that a limit can hold.
             (
@@ -1140,22 +1145,22 @@ os.execv({binary}, [{binary}, *sys.argv[1:]])
             // The same, with a stop for a person: running it turns no auto on.
             (
                 ".lf/graphs/held-review.yaml",
-                "- cmd: task sync --plan\n- cmd: graph show late\n- interactive: {name: demo, id: review}\n",
+                "- cmd: task sync --plan\n- cmd: graph show late\n- break: review\n",
             ),
             // The Wave's default, `feature`, as this repository defines it.
             (
                 ".lf/graphs/feature.yaml",
-                "- graph: proof\n- interactive: {name: demo, id: review}\n",
+                "- graph: proof\n- break: review\n",
             ),
             // No PR: nothing runs after the findings.
             (
                 ".lf/graphs/findings.yaml",
-                "- graph: proof\n- interactive: {name: research, id: findings}\n",
+                "- graph: proof\n- break: findings\n",
             ),
             // Merged work is checked at a last interactive step before `end`.
             (
                 ".lf/graphs/verified.yaml",
-                "- graph: proof\n- interactive: {name: demo, id: review}\n- graph: land-proof\n- interactive: {name: verify, id: check}\n",
+                "- graph: proof\n- break: review\n- graph: land-proof\n- break: check\n",
             ),
         ] {
             let path = repo.path().join(path);
@@ -1399,6 +1404,14 @@ fn at(step: &str) -> serde_json::Value {
     serde_json::json!({"kind": "at", "step": step})
 }
 
+fn at_breakpoint(position: &serde_json::Value, step: &str) -> bool {
+    position["kind"] == "breakpoint"
+        && position["step"] == step
+        && position["arrival"]
+            .as_str()
+            .is_some_and(|id| !id.is_empty())
+}
+
 fn refusal(output: std::process::Output) -> String {
     assert!(!output.status.success());
     String::from_utf8_lossy(&output.stderr).to_string()
@@ -1454,7 +1467,7 @@ fn checkout_leaves_graph_selection_to_the_first_run() {
     let select = |name: &str| {
         fs::write(
             fixture.repo.path().join(format!(".lf/graphs/{name}.yaml")),
-            "- graph: proof\n- interactive: {name: demo, id: review}\n",
+            "- graph: proof\n- break: review\n",
         )
         .unwrap();
         support::select_wave_graph(
@@ -1479,10 +1492,10 @@ fn checkout_leaves_graph_selection_to_the_first_run() {
         .graph
         .unwrap();
     assert_eq!(captured.name, "at-first-run");
-    assert_eq!(
-        serde_json::to_value(&captured.position).unwrap(),
-        at("review")
-    );
+    assert!(at_breakpoint(
+        &serde_json::to_value(&captured.position).unwrap(),
+        "review"
+    ));
     select("after-first-run");
     fixture.task_run_ok(&["task", "run", "INF-124"]);
     let retained = loopflow_execution::store::task_work::task_work(&sqlite, &task.id)
@@ -1500,8 +1513,7 @@ fn a_task_takes_up_its_waves_graph_and_keeps_the_one_it_named() {
     task.task_run_ok(&["task", "run"]);
     let graph = task.graph();
     assert_eq!(graph["name"], "feature");
-    assert_eq!(graph["position"], at("review"));
-    assert_eq!(graph["interactive_steps"][0]["skill"], "demo");
+    assert!(at_breakpoint(&graph["position"], "review"));
     let output = task.run(&["task", "status", "INF-123", "--json"]);
     assert!(output.status.success(), "{output:?}");
     let status: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
@@ -1585,13 +1597,13 @@ fn task_create_run_starts_the_graph_and_admits_the_request_as_first_turn() {
     wait_for("the created Task to reach review", || {
         let status = task.run(&["desktop", "task", issue, "--json"]);
         let status: serde_json::Value = serde_json::from_slice(&status.stdout).unwrap();
-        status["execution"]["work"]["graph"]["position"] == at("review")
+        at_breakpoint(&status["execution"]["work"]["graph"]["position"], "review")
     });
     let status = task.run(&["desktop", "task", issue, "--json"]);
     let status: serde_json::Value = serde_json::from_slice(&status.stdout).unwrap();
     let graph = &status["execution"]["work"]["graph"];
     assert_eq!(graph["name"], "feature");
-    assert_eq!(graph["position"], at("review"));
+    assert!(at_breakpoint(&graph["position"], "review"));
     // The admitted primary conversation opens with the request, word for word.
     let session = receipt["session_id"].as_str().unwrap();
     let first_turn: String = db
@@ -1640,17 +1652,16 @@ fn task_create_run_starts_the_graph_and_admits_the_request_as_first_turn() {
 }
 
 #[test]
-fn nothing_after_the_last_interactive_step_reaches_end_without_a_pr() {
+fn continuing_the_last_breakpoint_reaches_end_without_a_pr() {
     let task = GraphTask::new();
     task.task_run_ok(&["task", "run", "INF-123", "findings"]);
     let graph = task.graph();
     assert_eq!(graph["name"], "findings");
-    assert_eq!(graph["interactive_steps"][0]["skill"], "research");
-    assert_eq!(graph["position"], at("findings"));
+    assert!(at_breakpoint(&graph["position"], "findings"));
     assert_eq!(task.state(), "active");
     let status = task.text_status();
     assert!(
-        status.contains("Graph findings: Waiting for you at findings."),
+        status.contains("Graph findings: At breakpoint findings."),
         "{status}"
     );
     assert_eq!(support::recorded_graphs(task.home.path()).len(), 1);
@@ -1686,31 +1697,23 @@ fn a_run_continues_after_the_step_it_stopped_at_and_from_goes_back_or_skips() {
     )
     .unwrap();
     task.task_run_ok(&["task", "run", "INF-123", "gated"]);
-    assert_eq!(task.graph()["position"], at("review"));
+    assert!(at_breakpoint(&task.graph()["position"], "review"));
     // The next run continues after review and stops before accepted.
     task.task_run_ok(&["task", "run", "INF-123"]);
-    assert_eq!(task.graph()["position"], at("accepted"));
+    assert!(at_breakpoint(&task.graph()["position"], "accepted"));
     assert_eq!(support::recorded_graphs(task.home.path()).len(), 2);
-    // The demo was not good enough after all: go back to review. Nothing runs.
-    let waits = task.task_run(&["task", "run", "INF-123", "--from", "review"]);
-    assert!(waits.success(), "{}", waits.text);
-    assert!(waits.text.contains("waits at review"), "{}", waits.text);
-    assert_eq!(task.graph()["position"], at("review"));
-    assert_eq!(support::recorded_graphs(task.home.path()).len(), 2);
-    // With `--json` it prints what `task.run` returns to a client.
-    let waits = task.run(&["task", "run", "INF-123", "--from", "review", "--json"]);
-    assert!(waits.status.success(), "{}", refusal(waits.clone()));
-    assert_eq!(
-        serde_json::from_slice::<serde_json::Value>(&waits.stdout).unwrap(),
-        serde_json::json!({"state": "waiting", "issue": "INF-123", "step": "review"})
-    );
-    // From a step that runs, the run starts there: proof again, to review.
+    // Going straight to the marker records a new visit without replaying proof.
+    task.task_run_ok(&["task", "run", "INF-123", "--from", "review"]);
+    assert!(at_breakpoint(&task.graph()["position"], "review"));
+    let graphs = support::recorded_graphs(task.home.path());
+    assert_eq!(graphs.len(), 3);
+    assert!(graphs[2].1.is_empty());
     task.task_run_ok(&["task", "run", "INF-123", "--from", "proof"]);
-    assert_eq!(task.graph()["position"], at("review"));
-    assert_eq!(support::recorded_graphs(task.home.path()).len(), 3);
+    assert!(at_breakpoint(&task.graph()["position"], "review"));
+    assert_eq!(support::recorded_graphs(task.home.path()).len(), 4);
     // Skip ahead to accepted.
     task.task_run_ok(&["task", "run", "INF-123", "--from", "accepted"]);
-    assert_eq!(task.graph()["position"], at("accepted"));
+    assert!(at_breakpoint(&task.graph()["position"], "accepted"));
     let error = refusal(task.run(&["task", "run", "INF-123", "--from", "nowhere"]));
     assert!(
         error.contains("graph gated has no step \"nowhere\""),
@@ -1721,7 +1724,7 @@ fn a_run_continues_after_the_step_it_stopped_at_and_from_goes_back_or_skips() {
     task.task_run_ok(&["task", "run", "INF-123", "findings"]);
     let graph = task.graph();
     assert_eq!(graph["name"], "findings");
-    assert_eq!(graph["position"], at("findings"));
+    assert!(at_breakpoint(&graph["position"], "findings"));
 }
 
 #[test]
@@ -2015,15 +2018,13 @@ sys.exit(code)
     assert_eq!(graphs[0].1.len(), 2);
     assert_eq!(graphs[1].1.len(), 1);
     assert_eq!(graphs[1].1[0]["label"], "graph show late");
-    assert_eq!(task.graph()["position"], at("review"));
+    assert!(at_breakpoint(&task.graph()["position"], "review"));
 }
 
 /// `worker`: one `implement` step, then a person's review.
 fn define_worker_graph(task: &GraphTask) {
-    task.repo.create_file(
-        ".lf/graphs/worker.yaml",
-        "- implement\n- interactive: {name: demo, id: review}\n",
-    );
+    task.repo
+        .create_file(".lf/graphs/worker.yaml", "- implement\n- break: review\n");
     task.repo.stage_all();
     task.repo.commit("Define a worker followed by a review");
 }
@@ -2096,7 +2097,10 @@ fn a_task_step_runs_as_a_worker_on_every_harness() {
         fs::write(home.join("tool-done"), "").unwrap();
         let ran = task.ran(started);
         assert!(ran.success(), "{provider}: {}", ran.text);
-        assert_eq!(task.graph()["position"], at("review"), "{provider}");
+        assert!(
+            at_breakpoint(&task.graph()["position"], "review"),
+            "{provider}"
+        );
         let graphs = support::recorded_graphs(task.home.path());
         assert_eq!(graphs.len(), 1, "{provider}");
         assert_eq!(graphs[0].1.len(), 1, "{provider}");
@@ -2214,7 +2218,10 @@ fn a_question_with_nobody_there_ends_the_step() {
         .unwrap();
         fs::write(home.join("tool-done"), "").unwrap();
         task.task_run_ok(&["task", "run", "INF-123", "-a", agent]);
-        assert_eq!(task.graph()["position"], at("review"), "{provider}");
+        assert!(
+            at_breakpoint(&task.graph()["position"], "review"),
+            "{provider}"
+        );
         let heard = ["hook-context", "hook-steer"]
             .map(|hook| fs::read_to_string(home.join(hook)).unwrap())
             .join("\n");
@@ -2304,7 +2311,10 @@ fn interrupt_a_worker(provider: &str, agent: &str, script: &str, answer: &str) {
         // Nobody continues a Run: the step starts again in a conversation of its own.
         fs::remove_file(home.join("hold-turn")).unwrap();
         task.task_run_ok(&["task", "run", "INF-123", "-a", agent]);
-        assert_eq!(task.graph()["position"], at("review"), "{provider}");
+        assert!(
+            at_breakpoint(&task.graph()["position"], "review"),
+            "{provider}"
+        );
         let (resumed, _, turn) = worker("AND s.completed_at IS NOT NULL");
         assert_ne!(resumed, interrupted, "{provider}");
         assert_eq!(turn.as_deref(), Some("completed"), "{provider}");
@@ -2357,7 +2367,7 @@ fn a_step_that_cannot_launch_is_not_started_again() {
     ]);
     let moved = task.task_run(&["task", "run", "INF-123"]);
     assert!(moved.success(), "{}", moved.text);
-    assert_eq!(task.graph()["position"], at("review"));
+    assert!(at_breakpoint(&task.graph()["position"], "review"));
     assert_eq!(support::recorded_graphs(task.home.path()).len(), 2);
     let db = rusqlite::Connection::open(task.home.path().join("loopflow.db")).unwrap();
     let ran_on_codex: bool = db
@@ -2430,7 +2440,7 @@ fn from_starts_a_stopped_run_where_it_names() {
     let steps = &graphs.last().unwrap().1;
     assert_eq!(steps.len(), 2);
     assert_eq!(steps[0]["label"], "sync --plan");
-    assert_eq!(task.graph()["position"], at("review"));
+    assert!(at_breakpoint(&task.graph()["position"], "review"));
 }
 
 #[test]
@@ -2460,7 +2470,7 @@ fn a_run_that_failed_after_moving_agents_starts_again_at_the_step_that_failed() 
     let steps = &graphs.last().unwrap().1;
     assert_eq!(steps.len(), 1);
     assert_eq!(steps[0]["label"], "graph show late");
-    assert_eq!(task.graph()["position"], at("review"));
+    assert!(at_breakpoint(&task.graph()["position"], "review"));
 }
 
 #[test]
@@ -2508,7 +2518,7 @@ fn a_stopped_run_is_started_again_at_the_step_that_failed() {
     );
     assert!(ran.success(), "{}", ran.text);
     // The bare run started the stopped run again at the gate, not after review.
-    assert_eq!(task.graph()["position"], at("accepted"));
+    assert!(at_breakpoint(&task.graph()["position"], "accepted"));
     assert_eq!(
         attempts(task.home.path(), mark),
         ["failed", "failed", "succeeded"]
@@ -2561,7 +2571,7 @@ fn an_interrupt_during_an_operation_stops_the_graph_before_its_next_step() {
         ),
         (
             ".lf/graphs/interrupted.yaml",
-            "- graph: interrupting\n- interactive: {name: demo, id: review}\n",
+            "- graph: interrupting\n- break: review\n",
         ),
     ] {
         fs::write(task.repo.path().join(path), content).unwrap();
@@ -2653,7 +2663,7 @@ fn completion_is_independent_of_graph_position() {
     assert_eq!(task.state(), "idle");
     // At an interactive step, then a stopped run: both between start and end.
     task.task_run_ok(&["task", "run", "INF-123", "gated"]);
-    assert_eq!(task.graph()["position"], at("review"));
+    assert!(at_breakpoint(&task.graph()["position"], "review"));
     assert_eq!(task.state(), "active");
     // Wait for the carrier to exit before reading the stopped position.
     let failed = task.task_run(&["-b", "task", "run", "INF-123"]);
@@ -3039,6 +3049,16 @@ for line in sys.stdin:
 
 fn stand_in_task() -> GraphTask {
     let task = GraphTask::with_tools(&[("claude", STAND_IN_CLAUDE)]);
+    task.repo.create_file(
+        ".lf/graphs/feature.yaml",
+        "- graph: proof\n- demo\n- break: review\n",
+    );
+    task.repo.create_file(
+        ".lf/graphs/verified.yaml",
+        "- demo\n- break: review\n- graph: land-proof\n- verify\n- break: check\n",
+    );
+    task.repo.stage_all();
+    task.repo.commit("Exercise workers before their reviews");
 
     loopflow_execution::config::files::update(&task.home.path().join("config.yaml"), |value| {
         value["agent"] = "claude".into();
@@ -3100,7 +3120,7 @@ fn wait_for(what: &str, mut ready: impl FnMut() -> bool) {
 }
 
 #[test]
-fn a_batch_task_run_runs_straight_through_its_interactive_steps_to_the_end() {
+fn a_batch_task_run_runs_through_breakpoints_to_the_end() {
     let task = stand_in_task();
     let output = task.run(&["-b", "task", "run", "INF-123"]);
     assert!(
@@ -3109,18 +3129,18 @@ fn a_batch_task_run_runs_straight_through_its_interactive_steps_to_the_end() {
         String::from_utf8_lossy(&output.stderr)
     );
     assert_eq!(task.graph()["position"], at("end"));
-    // One Graph process ran proof, then review headless, standing in.
+    // One Graph process ran proof and the demo worker.
     assert_eq!(support::recorded_graphs(task.home.path()).len(), 1);
     let turns = stand_ins(&task);
     assert_eq!(turns.len(), 1);
-    assert!(turns[0].contains("at review"), "{}", turns[0]);
+    assert!(turns[0].contains("lf:skill:demo"), "{}", turns[0]);
     assert_eq!(task.state(), "done");
     // `-b` stood in for its own run; it turned no auto on.
     assert!(task.status()["auto"].is_null());
 }
 
 #[test]
-fn auto_on_runs_every_remaining_step_standing_in_at_each_interactive_step() {
+fn auto_on_runs_workers_through_their_breakpoints() {
     let task = stand_in_task();
     let output = task.run(&[
         "-b",
@@ -3141,11 +3161,10 @@ fn auto_on_runs_every_remaining_step_standing_in_at_each_interactive_step() {
     assert_eq!(handoffs(&task).len(), 1);
     // `--reason` is the run's direction: a steer on the Task.
     assert!(steered(&task, "good to go"));
-    // The review step ran headless with its skill, standing in for a person.
+    // The review uses the ordinary demo worker.
     let turns = stand_ins(&task);
     assert_eq!(turns.len(), 1);
-    assert!(turns[0].contains("You are standing in for"), "{}", turns[0]);
-    assert!(turns[0].contains("at review"), "{}", turns[0]);
+    assert!(turns[0].contains("lf:skill:demo"), "{}", turns[0]);
     // Reaching the end completed the Task; nothing remains to run.
     assert_eq!(task.state(), "done");
     let error = refusal(task.run(&["-b", "--task", "INF-123", "task", "auto", "on"]));
@@ -3153,40 +3172,30 @@ fn auto_on_runs_every_remaining_step_standing_in_at_each_interactive_step() {
 }
 
 #[test]
-fn a_waited_auto_on_stands_in_at_the_step_the_task_waits_at() {
+fn a_waited_auto_on_accepts_the_last_review_without_replaying_its_worker() {
     let task = stand_in_task();
     task.task_run_ok(&["task", "run", "INF-123"]);
-    assert_eq!(task.graph()["position"], at("review"));
+    assert!(at_breakpoint(&task.graph()["position"], "review"));
     let output = task.run(&["-b", "--task", "INF-123", "task", "auto", "on"]);
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(output.status.success(), "{stderr}");
-    assert!(
-        stderr.contains("INF-123: standing in at review"),
-        "{stderr}"
-    );
     assert_eq!(task.graph()["position"], at("end"));
-    // Proof is not run again: the run set out from review.
-    assert_eq!(support::recorded_graphs(task.home.path()).len(), 2);
+    assert_eq!(support::recorded_graphs(task.home.path()).len(), 1);
     assert_eq!(stand_ins(&task).len(), 1);
     assert_eq!(task.state(), "done");
 }
 
 #[test]
-fn auto_on_at_a_waiting_step_stands_in_there_with_one_graph_run() {
+fn auto_on_at_the_last_breakpoint_completes_without_another_graph_run() {
     let task = stand_in_task();
     task.task_run_ok(&["task", "run", "INF-123"]);
-    assert_eq!(task.graph()["position"], at("review"));
+    assert!(at_breakpoint(&task.graph()["position"], "review"));
     let graphs = support::recorded_graphs(task.home.path()).len();
     // Turning auto on is `lf task auto on`: nobody is waited for, so the Task runs.
     let on = task.task_run(&["task", "auto", "on", "INF-123", "--reason", "good to go"]);
     assert!(on.success(), "{}", on.text);
-    assert!(
-        on.text.contains("INF-123: standing in at review"),
-        "{}",
-        on.text
-    );
     assert_eq!(task.graph()["position"], at("end"));
-    assert_eq!(support::recorded_graphs(task.home.path()).len(), graphs + 1);
+    assert_eq!(support::recorded_graphs(task.home.path()).len(), graphs);
     assert_eq!(stand_ins(&task).len(), 1);
     assert_eq!(handoffs(&task).len(), 1);
     // `--reason` is the run's direction: a steer on the Task.
@@ -3202,7 +3211,7 @@ fn auto_on_a_task_that_never_ran_leaves_exactly_one_run() {
     let on = task.task_run(&["task", "auto", "on", "INF-123"]);
     assert!(on.success(), "{}", on.text);
     assert!(on.text.contains("running as Graph run"), "{}", on.text);
-    // The one run took every step, standing in at review.
+    // One run completed the worker and accepted its result.
     assert_eq!(task.graph()["position"], at("end"));
     assert_eq!(support::recorded_graphs(task.home.path()).len(), 1);
     assert_eq!(stand_ins(&task).len(), 1);
@@ -3226,7 +3235,7 @@ fn a_waves_auto_on_takes_every_step_of_its_tasks_and_an_off_still_wins() {
     task.ok(&["task", "reopen", "INF-123"]);
     task.ok(&["task", "auto", "off", "INF-123"]);
     task.task_run_ok(&["task", "run", "INF-123", "findings"]);
-    assert_eq!(task.graph()["position"], at("findings"));
+    assert!(at_breakpoint(&task.graph()["position"], "findings"));
     assert_eq!(stand_ins(&task).len(), 1);
     assert!(
         task.text_status().contains("auto: off by "),
@@ -3244,8 +3253,8 @@ fn an_off_before_the_first_run_outlasts_a_waves_auto_on() {
     let off = String::from_utf8_lossy(&off.stdout);
     assert!(off.contains("INF-123: auto off"), "{off}");
     task.task_run_ok(&["task", "run", "INF-123"]);
-    assert_eq!(task.graph()["position"], at("review"));
-    assert!(stand_ins(&task).is_empty());
+    assert!(at_breakpoint(&task.graph()["position"], "review"));
+    assert_eq!(stand_ins(&task).len(), 1);
     assert!(
         task.text_status().contains("auto: off by "),
         "{}",
@@ -3282,7 +3291,7 @@ fn auto_on_a_running_task_reports_its_run_and_starts_nothing() {
         "{text}{}",
         String::from_utf8_lossy(&shipped.stderr)
     );
-    assert!(text.contains("at review running as Graph run"), "{text}");
+    assert!(text.contains("at demo running as Graph run"), "{text}");
     assert!(text.contains("merges:"), "{text}");
     assert!(
         task.text_status().contains("auto: on by "),
@@ -3447,7 +3456,7 @@ fn an_auto_run_completes_when_its_pr_merges_mid_run() {
 fn an_auto_run_meets_a_hand_merged_pr_at_its_landing_step() {
     let task = stand_in_task();
     task.task_run_ok(&["task", "run", "INF-123", "verified"]);
-    assert_eq!(task.graph()["position"], at("review"));
+    assert!(at_breakpoint(&task.graph()["position"], "review"));
     // Someone merged the PR by hand while the Task waited at review.
     task.publish(true);
     let output = task.run(&["-b", "--task", "INF-123", "task", "auto", "on"]);
@@ -3457,13 +3466,12 @@ fn an_auto_run_meets_a_hand_merged_pr_at_its_landing_step() {
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
-    // The run stood in at review, its landing step met the merge, and a
-    // stand-in checked the merged work at `check`.
+    // The run continued through landing and checked the merged work.
     assert_eq!(task.state(), "done");
     assert_eq!(task.graph()["position"], at("end"));
     let turns = stand_ins(&task);
     assert_eq!(turns.len(), 2, "{turns:?}");
-    assert!(turns[1].contains("at check"), "{}", turns[1]);
+    assert!(turns[1].contains("lf:skill:verify"), "{}", turns[1]);
 }
 
 #[test]
@@ -3558,17 +3566,15 @@ fn kill_a_carried_run(task: &GraphTask, args: &[&str], carrier: bool, before: im
 #[test]
 fn a_killed_graph_is_started_again_by_its_carrier() {
     let task = stand_in_task();
-    task.repo.create_file(
-        ".lf/graphs/carried.yaml",
-        "- demo\n- interactive: {name: demo, id: review}\n",
-    );
+    task.repo
+        .create_file(".lf/graphs/carried.yaml", "- demo\n- break: review\n");
     task.repo.stage_all();
     task.repo.commit("Define a Graph with a step before review");
     // A SIGKILL is no person's stop: the carrier starts the Graph again.
     kill_a_carried_run(&task, &["carried"], false, || {});
     fs::remove_file(task.home.path().join("hold")).unwrap();
     wait_for("the run to stop at review", || {
-        task.graph()["position"] == at("review")
+        at_breakpoint(&task.graph()["position"], "review")
     });
     let graphs = support::recorded_graphs(task.home.path());
     assert_eq!(graphs.len(), 2, "{}", debug_run(&task));
@@ -3578,10 +3584,8 @@ fn a_killed_graph_is_started_again_by_its_carrier() {
 #[test]
 fn a_task_run_whose_carrier_died_is_carried_again_and_gives_up_after_five() {
     let task = stand_in_task();
-    task.repo.create_file(
-        ".lf/graphs/carried.yaml",
-        "- demo\n- interactive: {name: demo, id: review}\n",
-    );
+    task.repo
+        .create_file(".lf/graphs/carried.yaml", "- demo\n- break: review\n");
     task.repo.stage_all();
     task.repo.commit("Define a Graph with a step before review");
     kill_a_carried_run(&task, &["carried"], true, || {});
@@ -3589,7 +3593,7 @@ fn a_task_run_whose_carrier_died_is_carried_again_and_gives_up_after_five() {
     // The recovery pass runs `lf task run` again, which stops at review as
     // the first one would have; nothing turned auto on.
     wait_for("the carried run to stop at review", || {
-        task.graph()["position"] == at("review")
+        at_breakpoint(&task.graph()["position"], "review")
     });
     assert!(task.status()["auto"].is_null());
     let graphs = support::recorded_graphs(task.home.path()).len();
@@ -3719,7 +3723,7 @@ fn an_auto_run_blocked_at_verification_waits_there_without_building_again() {
     .unwrap();
     task.repo.create_file(
         ".lf/graphs/verifying.yaml",
-        "- loop:\n    - graph: proof\n    - interactive: {name: verify, id: check}\n",
+        "- loop:\n    - graph: proof\n    - verify\n    - break: check\n",
     );
     task.repo.stage_all();
     task.repo.commit("Define the verifying Graph");
@@ -3735,27 +3739,26 @@ fn an_auto_run_blocked_at_verification_waits_there_without_building_again() {
         "verifying",
     ]);
     assert_eq!(first.status.code(), held, "{first:?}");
-    // The stand-in at check reported a dependency: the Task waits at check.
-    assert_eq!(
-        task.graph()["position"],
-        at("check"),
-        "{}",
-        String::from_utf8_lossy(&first.stderr)
-    );
-    let status = task.text_status();
-    assert!(
-        status.contains("Graph is blocked: Main-source checks pass; the installed release must be checked first"),
-        "{status}"
-    );
+    let position = task.graph()["position"].clone();
+    assert!(at_breakpoint(&position, "check"), "{position}");
+    assert!(task
+        .text_status()
+        .contains("the installed release must be checked first"));
+    let again = task.run(&["task", "run", "INF-123"]);
+    assert!(!again.status.success());
+    assert_eq!(task.graph()["position"], position);
+    task.task_run_ok(&[
+        "task",
+        "run",
+        "INF-123",
+        "--at-arrival",
+        position["arrival"].as_str().unwrap(),
+        "--decision",
+        "advance",
+        "--reason",
+        "Checked the installed release",
+    ]);
+    assert_eq!(task.graph()["position"], at("end"));
     assert_eq!(stand_ins(&task).len(), 1);
-    let again = task.run(&["-b", "--task", "INF-123", "task", "auto", "on"]);
-    let stderr = String::from_utf8_lossy(&again.stderr);
-    assert_eq!(again.status.code(), held, "{again:?}");
-    assert!(stderr.contains("INF-123: standing in at check"), "{stderr}");
-    assert_eq!(task.graph()["position"], at("check"));
-    assert_eq!(stand_ins(&task).len(), 2);
-    // The second run set out from check: proof did not run again.
-    let graphs = support::recorded_graphs(task.home.path());
-    assert_eq!(graphs.len(), 2);
-    assert_eq!(graphs[1].1.len(), 1, "{graphs:?}");
+    assert_eq!(support::recorded_graphs(task.home.path()).len(), 1);
 }

@@ -215,30 +215,39 @@ fn task_graph_row(
     }))
 }
 
+/// The captured definition and position a run claims in its start transaction.
+#[derive(Debug)]
+pub struct TaskGraphClaim<'a> {
+    pub graph: &'a str,
+    pub step: &'a str,
+    pub stopped: Option<&'a LfProcessId>,
+    pub arrival: Option<&'a LfProcessId>,
+}
+
 /// Put the Task on a run from `cursor`, carried by `by` as it started at
 /// `start`, if it still stands where the caller read it: at `step`, with `stopped` the run that last left
 /// it, if any.
 fn start_run_in(
     tx: &rusqlite::Transaction<'_>,
     task: &TaskId,
-    (step, stopped, arrival): (&str, Option<&LfProcessId>, Option<&LfProcessId>),
+    from: TaskGraphClaim<'_>,
     cursor: &str,
     (by, start): (&LfProcessId, &ExecutionStart),
 ) -> StoreResult<bool> {
     let left = tx.execute(
         "UPDATE task_graphs SET breakpoint=NULL,run_start=?2,lf_process_id=?3,run_pid=?7,run_os_started_at=?8,
             run_died_at=NULL,updated_at=?4
-         WHERE task_id=?1 AND step=?5 AND lf_process_id IS ?6 AND json_extract(breakpoint,'$.id') IS ?9",
+         WHERE task_id=?1 AND step=?5 AND lf_process_id IS ?6 AND json_extract(breakpoint,'$.id') IS ?9 AND graph=?10",
         rusqlite::params![
             task.as_str(),
             cursor,
             by.as_str(),
             crate::rows::now_unix(),
-            step,
-            stopped.map(LfProcessId::as_str),
+            from.step,
+            from.stopped.map(LfProcessId::as_str),
             start.pid,
             start.os_started_at,
-            arrival.map(LfProcessId::as_str)
+            from.arrival.map(LfProcessId::as_str), from.graph
         ],
     )?;
     Ok(left > 0)
@@ -809,15 +818,24 @@ impl SqliteStore {
     pub fn start_task_graph_run(
         &self,
         task: &TaskId,
-        step: &str,
-        stopped: Option<&LfProcessId>,
-        arrival: Option<&LfProcessId>,
-        cursor: &str,
+        from: TaskGraphClaim<'_>,
+        (cursor, converted): (&str, Option<&str>),
         carrier: (&LfProcessId, &ExecutionStart),
     ) -> StoreResult<bool> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction()?;
-        let started = start_run_in(&tx, task, (step, stopped, arrival), cursor, carrier)?;
+        let started = start_run_in(&tx, task, from, cursor, carrier)?;
+        if let Some(graph) = converted.filter(|_| started) {
+            // A capture is immutable. Replace the claimed row in this transaction,
+            // retaining its checkpoint, carrier identity and recovery history.
+            tx.execute(
+                "INSERT OR REPLACE INTO task_graphs
+                 (task_id,graph,step,run_start,lf_process_id,updated_at,run_pid,run_os_started_at,restarts,restarted_at)
+                 SELECT task_id,?2,step,run_start,lf_process_id,updated_at,run_pid,run_os_started_at,restarts,restarted_at
+                 FROM task_graphs WHERE task_id=?1",
+                rusqlite::params![task.as_str(), graph],
+            )?;
+        }
         tx.commit()?;
         Ok(started)
     }

@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>LOO-1098 Concept Review — Harness Parity, Waking Work Sessions &amp; Displaying Steers in Antigravity</title>
+<title>LOO-1098 Concept Review — Harness Parity &amp; Waking Idle Work Sessions</title>
 <style>
   :root {
     --bg: #ffffff;
@@ -75,13 +75,13 @@
     color: var(--fg);
     font: 15px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
   }
-  main { max-width: 1040px; margin: 0 auto; }
+  main { max-width: 1060px; margin: 0 auto; }
   header { border-bottom: 1px solid var(--border); padding-bottom: 1.25rem; margin-bottom: 2rem; }
   h1 { font-size: 1.62rem; margin: 0 0 0.45rem; letter-spacing: -0.015em; }
   h2 { font-size: 1.24rem; margin: 2.25rem 0 0.75rem; padding-bottom: 0.35rem; border-bottom: 1px solid var(--border); }
-  h3 { font-size: 1.02rem; margin: 1.25rem 0 0.5rem; }
+  h3 { font-size: 1.02rem; margin: 1.15rem 0 0.5rem; }
   p { margin: 0.5rem 0 0.85rem; }
-  .lead { font-size: 1.02rem; margin: 0.35rem 0; }
+  .lead { font-size: 1.01rem; margin: 0.35rem 0; }
   .meta { font-size: 0.86rem; color: var(--fg-muted); display: flex; flex-wrap: wrap; gap: 0.75rem 1.5rem; margin-top: 0.65rem; }
   code {
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
@@ -128,7 +128,7 @@
   th { background: var(--bg-subtle); font-weight: 600; }
   .grid-2 {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(330px, 1fr));
     gap: 1rem;
     margin: 0.9rem 0 1.25rem;
   }
@@ -143,31 +143,6 @@
   .card.ok { background: var(--bg-ok); border-color: var(--border-ok); }
   .card.warn { background: var(--bg-warn); border-color: var(--border-warn); }
   .card h3 { margin-top: 0; display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
-  .tui {
-    background: var(--tui-bg);
-    color: var(--tui-fg);
-    border: 1px solid var(--tui-border);
-    border-radius: 8px;
-    padding: 0.85rem 1rem;
-    font: 12.8px/1.55 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-    margin: 0.65rem 0 0.9rem;
-  }
-  .tui .dim { color: var(--tui-muted); }
-  .tui .pill {
-    display: inline-block;
-    border: 1px solid var(--tui-border);
-    border-radius: 5px;
-    padding: 0.05rem 0.45rem;
-    color: var(--tui-muted);
-    font-size: 0.82em;
-  }
-  .tui .steer-box {
-    border-left: 3px solid var(--tui-accent);
-    padding: 0.35rem 0.7rem;
-    margin: 0.45rem 0;
-    background: rgba(121, 192, 255, 0.08);
-    border-radius: 0 5px 5px 0;
-  }
   .flow {
     display: flex;
     flex-wrap: wrap;
@@ -185,15 +160,21 @@
   .node.proposed { border-color: var(--border-proposed); background: var(--bg-proposed); }
   .node.broken { border-color: var(--no-fg); background: var(--no-bg); color: var(--no-fg); }
   .arrow { color: var(--fg-muted); font-weight: 700; }
+  .timeline {
+    font: 12.6px/1.6 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    background: var(--tui-bg);
+    color: var(--tui-fg);
+    border: 1px solid var(--tui-border);
+    border-radius: 8px;
+    padding: 0.85rem 1rem;
+    margin: 0.65rem 0 0.9rem;
+    overflow-x: auto;
+  }
+  .timeline .dim { color: var(--tui-muted); }
+  .timeline .bad { color: #ff7b72; }
+  .timeline .good { color: #56d364; }
   ul, ol { padding-left: 1.3rem; margin: 0.4rem 0 0.85rem; }
   li { margin: 0.32rem 0; }
-  blockquote {
-    margin: 0.6rem 0 0.9rem;
-    padding: 0.5rem 0.9rem;
-    border-left: 3px solid var(--accent);
-    background: var(--bg-subtle);
-    border-radius: 0 6px 6px 0;
-  }
   .q-card {
     border: 1px solid var(--border);
     border-radius: 10px;
@@ -204,7 +185,7 @@
   .q-card strong.q-title { display: block; margin-bottom: 0.45rem; font-size: 0.98rem; }
   .opts { list-style: none; padding-left: 0; margin: 0.45rem 0 0; }
   .opts li {
-    padding: 0.4rem 0.6rem;
+    padding: 0.45rem 0.65rem;
     border-radius: 6px;
     margin: 0.35rem 0;
     background: var(--bg);
@@ -217,50 +198,57 @@
 <body>
 <main>
   <header>
-    <h1>Concept Review: Harness Parity, Waking Work Sessions &amp; Displaying Steers in Antigravity</h1>
+    <h1>Concept Review: Harness Parity &amp; Waking Idle Work Sessions</h1>
     <p class="lead">
-      <strong>Area reviewed:</strong> How Loopflow defines, enforces, and verifies top-level behavior
-      across all five harnesses (<code>Claude</code>, <code>Codex</code>, <code>OpenCode</code>,
-      <code>Pi</code>, <code>Antigravity</code>) — covering the <code>Harness</code> / <code>Launcher</code>
-      interface, idle/reopen wake dispatch, hook reply delivery (<code>emit_block</code> &amp;
-      <code>hook_reply</code>), and cross-harness contract suites.
+      <strong>Area reviewed:</strong> How Loopflow defines, enforces, and wakes interactive work sessions across
+      all five harnesses (<code>Claude</code>, <code>Codex</code>, <code>OpenCode</code>, <code>Pi</code>,
+      <code>Antigravity</code>) — covering the <code>Harness</code> / <code>Launcher</code> /
+      <code>Capabilities</code> contract, storage idle-candidate selection, server wake &amp; boundary follow-up,
+      VT-guarded held-terminal prompt injection, reopen steer delivery, and cross-harness contract suites.
     </p>
     <div class="meta">
-      <span><strong>Task:</strong> LOO-1098 (Decision pass 2, post-build)</span>
-      <span><strong>Built at HEAD:</strong> <code>76ff5e7438</code> vs base <code>3c9f1979fc</code></span>
-      <span><strong>Legend:</strong> <span class="badge badge-existing">Built at HEAD</span> vs <span class="badge badge-proposed">Proposed pass 3 in scratch/plan.md</span></span>
+      <span><strong>Task:</strong> LOO-1098 (Post-build review after Pass 4)</span>
+      <span><strong>Built at HEAD:</strong> <code>771d2d2967</code> vs base <code>989b41c3bb</code></span>
+      <span><strong>Legend:</strong> <span class="badge badge-existing">Built at HEAD</span> vs <span class="badge badge-proposed">Proposed Pass 5 in scratch/plan.md</span></span>
     </div>
   </header>
 
   <div class="card ok">
-    <h3>What Pass 2 built &amp; verified at <code>76ff5e7438</code></h3>
+    <h3>What is built &amp; verified at <code>771d2d2967</code></h3>
     <p>
-      Every mismatch raised in Pass 1's review is now built, committed, and verified live on real
-      <code>agy 1.5.16</code>, Claude Code, and Codex <code>0.172.0</code> (<code>scratch/qa.html</code>):
-      <code>harness/parity.rs</code> and the README gap table are gone; <code>Harness</code> and
-      <code>Launcher</code> demand caller markers, driver recognition, sign-in advice, and
-      <code>idle_reach</code>; storage returns raw idle candidates and the launcher owns endpoint selection
-      (also closing a latent real-store bug where 974 Codex rows had <code>agent_inbox</code> populated);
-      <code>Capabilities</code> separates <code>initial_prompt_on_resume</code> from
-      <code>reopen_steers</code>; and all behavior suites iterate <code>HarnessKind::ALL</code>.
+      The core architecture across Passes 1–4 holds together cleanly and has been verified live against real
+      <code>agy 1.5.16/1.5.17</code>, Claude Code, and Codex <code>0.172.0</code> (<code>scratch/qa.html</code>):
+      <code>harness/parity.rs</code> and the prose README parity table are gone; <code>Harness</code> and
+      <code>Launcher</code> require full capabilities, caller markers, driver recognition, sign-in advice, and
+      <code>idle_reach</code>; storage returns raw <code>IdleCandidate</code> rows and each launcher chooses its
+      own wake endpoint; all five harnesses in <code>HarnessKind::ALL</code> pass idle wake unconditionally;
+      Antigravity wakes both on reopen (<code>-i WAKE_PROMPT</code>) and when already open and idle via
+      VT-guarded bracketed paste (preserving drafts, slash menus, dialogs, and unviewed sessions).
     </p>
   </div>
 
   <div class="card warn" style="margin-top: 1rem;">
-    <h3>Why we iterate once more (Pass 3)</h3>
-    <blockquote>
-      "is this also ging to make it so that agy *displays* the steers it gets" / "Just go ahead and put this in the task please, lets go back"
-    </blockquote>
+    <h3>Why one more pass (Pass 5) is needed before gate</h3>
     <p>
-      At <code>76ff5e7438</code>, Antigravity receives waiting steers and Task updates through
-      <code>PreInvocation</code>, but the TUI buries them inside a collapsed <em>"System Message"</em> row
-      because <code>emit_block</code> glues steers and reference context into a single string before
-      <code>Launcher::hook_reply</code>, and <code>Antigravity::hook_reply</code> emits no
-      <code>metadata.user_markdown</code>. Pass 3 splits reference context from steers across
-      <code>ClaimedSteers</code>, <code>ContextDelivery</code>, <code>Launcher::hook_reply</code>, and
-      <code>emit_block</code> so Antigravity renders steers and Task updates inline in clean markdown while
-      keeping background reference context collapsed.
+      Reviewing the whole built change against <code>989b41c3bb</code> surfaced <strong>two concrete mismatches</strong>
+      introduced in Pass 4:
     </p>
+    <ol>
+      <li>
+        <strong>Provider logic leaked into provider-agnostic terminal transport:</strong>
+        <code>Hosted::wake_idle_prompt</code> in <code>transport/hosted.rs</code> hardcodes
+        <code>crate::harness::antigravity::prompt_ready</code> — the only provider-specific import in all of
+        <code>transport/</code>. Any future harness returning <code>IdleReach::Terminal</code> would silently test
+        its screen against Antigravity's box/footer strings and never wake.
+      </li>
+      <li>
+        <strong>Deferred turn-end wakes can stall up to 60 seconds:</strong>
+        When a steer arrives during an Antigravity turn and the person has a draft open (or <code>agy</code> redraws
+        past 600 ms after <code>Stop</code>), <code>boundary::wake</code> flips a process-global
+        <code>static DEFERRED: AtomicBool</code> without waking <code>StoreChanges::wait(60s)</code> on macOS.
+        Clearing the draft can sit quiet for up to a full minute.
+      </li>
+    </ol>
   </div>
 
   <h2>1. Do the product's concepts and the code's concepts line up?</h2>
@@ -268,186 +256,212 @@
     <thead>
       <tr>
         <th style="width:23%">Product concept<br><span class="small">What a person expects &amp; does</span></th>
-        <th style="width:31%">Code concept <span class="badge badge-existing">Built at HEAD</span><br><span class="small">Types, records, and APIs at <code>76ff5e7438</code></span></th>
+        <th style="width:31%">Code concept <span class="badge badge-existing">Built at HEAD</span><br><span class="small">Types, records, and APIs at <code>771d2d2967</code></span></th>
         <th style="width:9%">Lines up?</th>
-        <th style="width:37%">Status (or what Pass 3 changes)</th>
+        <th style="width:37%">Finding (and what Pass 5 changes)</th>
       </tr>
     </thead>
     <tbody>
       <tr>
-        <td><strong>Incoming steers &amp; Task updates are visible inline in Antigravity's TUI</strong>, while startup/compact reference context stays collapsed.</td>
-        <td><code>Antigravity::hook_reply(_event, text)</code> emits one <code>{"injectSteps":[{"systemMessage":{"systemMessage":text}}]}</code>; <code>ClaimedSteers</code> has only model-facing XML <code>text</code>.</td>
+        <td><strong>Each harness owns how Loopflow recognizes and wakes its provider;</strong> held terminals are generic PTY hosts.</td>
+        <td><code>IdleReach::Terminal(TerminalId)</code> carries only an ID; <code>Hosted::wake_idle_prompt</code> hardcodes <code>antigravity::prompt_ready</code>.</td>
         <td><span class="badge badge-no">No</span></td>
-        <td><strong>One step, no human view.</strong> Steers disappear into a collapsed "System Message" row alongside raw XML and prompt paths. <strong>Pass 3:</strong> add <code>ClaimedSteers.display</code> (clean markdown) and emit a dedicated <code>injectSteps</code> entry with <code>metadata.user_markdown</code> for steers only.</td>
+        <td><strong>Provider rule in generic transport.</strong> A second terminal-woken harness could not supply its own screen guard and would silently run Antigravity's. <strong>Pass 5:</strong> carry <code>prompt_ready: fn(&amp;Terminal) -&gt; bool</code> on <code>IdleReach::Terminal</code> and pass it into <code>Registry</code> / <code>Hosted</code>.</td>
       </tr>
       <tr>
-        <td><strong>Hook delivery separates background reference context from live steers/updates</strong> while respecting single-string provider size limits.</td>
-        <td><code>emit_block</code> pastes steers into reference context via <code>delivery.block_with_prefix</code> before calling <code>hook_reply(event, &amp;text)</code>.</td>
+        <td><strong>Clearing a draft or closing a menu wakes a waiting Antigravity session within ~2 s</strong> whether the steer arrived while idle or during the last turn.</td>
+        <td><code>Watcher</code> sleeps up to 60 s in <code>StoreChanges::wait</code>; <code>boundary::wake</code> retries 3&times;300 ms then sets <code>static DEFERRED: AtomicBool</code> without waking <code>kqueue</code>.</td>
         <td><span class="badge badge-no">No</span></td>
-        <td><strong>Two concepts merged too early.</strong> Once glued into one <code>&amp;str</code>, a harness cannot style or isolate steers from reference files. <strong>Pass 3:</strong> <code>delivery.block_reserving(moment, reserve)</code> + <code>Launcher::hook_reply(event, context, steers)</code>.</td>
+        <td><strong>Split deferral state with no wakeup signal.</strong> On macOS, <code>session_activity</code> writes don't advance steer/update revisions, so <code>Watcher</code> sleeps 60 s after <code>note_deferred()</code>. <strong>Pass 5:</strong> add <code>StoreChanges::waker()</code> (<code>EVFILT_USER</code> / <code>Condvar</code>) and pass a per-watcher <code>WakeNudge</code> handle to <code>boundary</code>, deleting the global <code>static AtomicBool</code>.</td>
       </tr>
       <tr>
-        <td><strong>Adding a harness gives it all the good stuff</strong> — no opt-out table where missing features quietly pass.</td>
+        <td><strong>Adding a harness gives it all the good stuff</strong> — no prose table or opt-out enum where missing features quietly pass.</td>
         <td><code>parity.rs</code> and README table deleted; <code>Harness</code>, <code>Launcher</code>, and <code>Capabilities</code> require full plumbing; suites iterate <code>HarnessKind::ALL</code>.</td>
         <td><span class="badge badge-yes">Yes</span></td>
-        <td>Built at <code>89b2c33aa5</code>. Only two explicit legacy <code>TODO</code> arms remain (<code>LOO-1099</code>, <code>Task 48edb9</code>), with no wildcards.</td>
+        <td>Built and verified. Only one legacy inline <code>TODO</code> remains (pre-existing <code>Task 48edb9</code> for headless unanswered questions), with no wildcards.</td>
       </tr>
       <tr>
-        <td><strong>Waking an idle work session</strong> — each harness chooses its own endpoint; storage stores facts only.</td>
-        <td><code>sqlite/steers.rs::idle_conversation_candidates</code> returns raw <code>IdleCandidate</code>; <code>steer.rs</code> dispatches via <code>Launcher::idle_reach</code> before checking OS process liveness.</td>
+        <td><strong>Every idle work session wakes for steers, comments, and settled Graph runs</strong> — storage holds facts, each harness selects its endpoint.</td>
+        <td><code>sqlite/steers.rs::idle_conversation_candidates</code> returns raw <code>IdleCandidate</code>; <code>steer.rs</code> dispatches via <code>Launcher::idle_reach</code> before OS process liveness checks.</td>
         <td><span class="badge badge-yes">Yes</span></td>
-        <td>Built &amp; compressed (<code>89b2c33aa5</code>, <code>4414e34eb5</code>); verified live on Claude and Codex (<code>76ff5e7438</code>). Unreachable sessions incur zero OS syscalls.</td>
+        <td>All five harnesses pass <code>server::wake::tests::every_harness_wakes_its_idle_work_session</code> unconditionally. Also closed a real store hazard (974 Codex rows with <code>agent_inbox</code> set).</td>
       </tr>
       <tr>
-        <td><strong>Reopening a work session with waiting steers</strong> — distinct from Codex's empty-thread bootstrap.</td>
-        <td><code>Capabilities.initial_prompt_on_resume: bool</code> + <code>reopen_steers: ReopenSteers::{ServerBoundary, PromptHook}</code>; tests partition <code>HarnessKind::ALL</code> exhaustively.</td>
+        <td><strong>Reopening a closed work session delivers waiting steers once before you type</strong>, and stays quiet when nothing is waiting.</td>
+        <td><code>Capabilities.reopen_steers: ReopenSteers::{ServerBoundary, PromptHook}</code> separated from Codex's <code>initial_prompt_on_resume: bool</code>; <code>Antigravity</code> opens with <code>-i WAKE_PROMPT</code> only when steers wait and claims them in <code>PreInvocation</code>.</td>
         <td><span class="badge badge-yes">Yes</span></td>
-        <td>Built at <code>89b2c33aa5</code>. Both variants deliver waiting steers; no unsupported variant exists.</td>
+        <td>Keeping <code>PromptHook</code> beside <code>IdleReach::Terminal</code> is intentional: reopen still delivers steers even when the Machine server is down (no held terminal) and avoids a 0–2 s poll delay on startup.</td>
       </tr>
       <tr>
-        <td><strong>Antigravity reopen runs waiting steers once, quietly when empty</strong>, and drops nothing if launch fails.</td>
-        <td><code>native_session::prompt_for_waiting_steers</code> writes Task updates, checks <code>has_undelivered_steers</code>, passes <code>-i</code> only when non-empty; <code>PreInvocation</code> claims and stamps delivery.</td>
+        <td><strong>An open idle Antigravity session never loses a steer or clobbers typed input</strong> (drafts, slash menus, model picker, trust dialog, open pastes).</td>
+        <td><code>antigravity::prompt_ready</code> checks VT screen, cursor, dim mode hint, bracketed paste, alternate screen, and OSC 7501; <code>Hosted</code> guards open pastes and 2 s user-key quiet time (ignoring mouse/focus/query replies); steers stay unstamped until <code>PreInvocation</code>.</td>
         <td><span class="badge badge-yes">Yes</span></td>
-        <td>Verified live on <code>agy 1.5.16</code> in pass 1 and pass 2 (<code>SAFFRON</code> reply, quiet empty reopen).</td>
+        <td>Verified live on <code>agy 1.5.17</code> across 8 scenarios (<code>scratch/qa.html</code> Pass 4), including unviewed sessions and draft/menu deferral.</td>
       </tr>
       <tr>
-        <td><strong>Missing-CLI test matches sandbox isolation</strong> on developer machines with host providers installed.</td>
-        <td><code>task_graph_launch_tests</code> checks the same four system tool dirs hidden by <code>scripts/test_network.py</code> across <code>HarnessKind::ALL</code>.</td>
+        <td><strong>Freshly opened Antigravity work sessions with no initial prompt still wake later</strong> if a steer arrives before anyone types.</td>
+        <td><code>Antigravity::open</code> records <code>record_first_boundary</code> best-effort when opened managed without <code>-i</code>; <code>idle_conversation_candidates</code> allows <code>held_terminal_id IS NOT NULL</code> before <code>provider_thread</code> exists; <code>read_news</code> checks <code>!prompt</code> so <code>PreInvocation</code> always claims.</td>
         <td><span class="badge badge-yes">Yes</span></td>
-        <td>Built at <code>89b2c33aa5</code>.</td>
+        <td>If launch fails before exec, <code>finish_admission</code> sets <code>agent_ended_at</code> so the failed session is never treated as idle.</td>
       </tr>
       <tr>
-        <td><strong>Pass-through resilience</strong> — a down server or locked store never blocks typing or breaks a conversation.</td>
-        <td>Reopen hook reads SQLite directly when the server is down; held terminals remain pass-through.</td>
+        <td><strong>Pass-through resilience</strong> — a down server or locked store never breaks typing or a provider turn.</td>
+        <td>Hooks read SQLite directly on server outage, record a <code>RecordingGap</code>, and exit 0; held terminals forward typed bytes independently of store availability.</td>
         <td><span class="badge badge-yes">Yes</span></td>
-        <td>Unchanged by Pass 3 (hook formatting stays in-process).</td>
+        <td>Unchanged by Pass 5.</td>
       </tr>
     </tbody>
   </table>
 
-  <h2>2. Biggest remaining mismatch — Before &amp; After</h2>
-  <p>
-    What a person actually sees in <code>agy</code> when reopening a Task conversation with a waiting steer or receiving a steer mid-session:
-  </p>
+  <h2>2. Biggest mismatches — Before &amp; After</h2>
 
+  <h3>Mismatch A: Harness readiness hardcoded inside generic terminal transport</h3>
   <div class="grid-2">
     <div class="card existing">
-      <h3><span class="badge badge-existing">Built at HEAD</span> One collapsed System Message</h3>
-      <div class="tui">
-        <div><span class="dim">&gt;</span> Read the waiting steers and Task updates for this Session.</div>
-        <div style="margin: 0.45rem 0;"><span class="pill">&#9656; System Message (collapsed — 9.8 KB)</span></div>
-        <div>SAFFRON</div>
-      </div>
+      <h3><span class="badge badge-existing">Built at HEAD</span> Transport depends on Antigravity</h3>
       <div class="flow">
-        <span class="node">steers + context</span>
+        <span class="node">Launcher::idle_reach</span>
         <span class="arrow">&rarr;</span>
-        <span class="node broken">block_with_prefix &rarr; 1 &amp;str</span>
+        <span class="node">IdleReach::Terminal(id)</span>
         <span class="arrow">&rarr;</span>
-        <span class="node broken">1 collapsed systemMessage</span>
+        <span class="node broken">Hosted::wake_idle_prompt &rarr; antigravity::prompt_ready</span>
       </div>
-      <pre>// Antigravity::hook_reply (HEAD)
-{"injectSteps": [{
-  "systemMessage": {
-    "systemMessage": "This Session: ...\n&lt;lf:steers&gt;...\nCurrent reference context..."
-  }
-}]}</pre>
+      <pre>// transport/hosted.rs (HEAD)
+!self.output.terminal()
+    .is_some_and(crate::harness::antigravity::prompt_ready)</pre>
+      <p class="small">
+        Only place in <code>transport/</code> that imports a specific provider. A new harness returning
+        <code>IdleReach::Terminal</code> compiles and silently checks Antigravity's screen layout.
+      </p>
     </div>
 
     <div class="card proposed">
-      <h3><span class="badge badge-proposed">Pass 3</span> Collapsed context + inline steer markdown</h3>
-      <div class="tui">
-        <div><span class="dim">&gt;</span> Read the waiting steers and Task updates for this Session.</div>
-        <div style="margin: 0.45rem 0;"><span class="pill">&#9656; System Message (collapsed — reference context)</span></div>
-        <div class="steer-box">
-          <div><strong>Steer</strong> <span class="dim">(Jack Heart)</span></div>
-          <div>If you read this, answer with exactly the one word SAFFRON and nothing else.</div>
-        </div>
-        <div>SAFFRON</div>
-      </div>
+      <h3><span class="badge badge-proposed">Pass 5</span> Harness supplies its own readiness predicate</h3>
       <div class="flow">
-        <span class="node">context (reserved)</span>
-        <span class="arrow">+</span>
-        <span class="node proposed">ClaimedSteers { text, display }</span>
+        <span class="node proposed">Antigravity::idle_reach</span>
         <span class="arrow">&rarr;</span>
-        <span class="node proposed">2 injectSteps (user_markdown on steers only)</span>
+        <span class="node proposed">IdleReach::Terminal { terminal, prompt_ready }</span>
+        <span class="arrow">&rarr;</span>
+        <span class="node proposed">Hosted checks prompt_ready(vt)</span>
       </div>
-      <pre>// Antigravity::hook_reply (Pass 3)
-{"injectSteps": [
-  {"systemMessage": {"systemMessage": "&lt;reference context&gt;"}},
-  {"systemMessage": {
-    "systemMessage": "&lt;lf:steers&gt;...&lt;/lf:steers&gt;",
-    "metadata": {
-      "user_markdown": "**Steer** (Jack Heart)\n\nIf you read this..."
-    }
-  }}
-]}</pre>
+      <pre>// steer.rs (Pass 5)
+IdleReach::Terminal {
+    terminal: TerminalId,
+    prompt_ready: fn(&amp;Terminal) -&gt; bool,
+}
+// transport/hosted.rs (Pass 5)
+!self.output.terminal().is_some_and(prompt_ready)</pre>
+      <p class="small">
+        Zero provider imports in <code>transport/</code>. Compiler forces any terminal-woken harness to supply
+        its own VT screen check beside <code>idle_reach</code>.
+      </p>
     </div>
   </div>
 
-  <h2>3. Concrete interaction walk &amp; counterexamples (Pass 3)</h2>
+  <h3>Mismatch B: Deferred turn-end wake cannot wake the sleeping watcher</h3>
+  <div class="grid-2">
+    <div class="card existing">
+      <h3><span class="badge badge-existing">Built at HEAD</span> Up to 60 s stall after clearing a draft</h3>
+      <div class="timeline">
+<span class="dim">t=0.0s</span> agy turn running; steer saved; person types draft
+<span class="dim">t=1.0s</span> Stop hook writes session_activity (no rev bump)
+<span class="dim">t=1.0s</span> Watcher wakes on WAL, !moved &amp;&amp; !deferred &rarr; <span class="bad">kqueue sleep 60s</span>
+<span class="dim">t=1.6s</span> boundary::wake exhausts 3&times;300ms &rarr; <span class="bad">DEFERRED = true</span>
+<span class="dim">t=3.0s</span> person clears draft (empty prompt ready)
+<span class="dim">t=3–61s</span> <span class="bad">Watcher still asleep in kqueue(60s) &mdash; silent!</span>
+<span class="dim">t=61.0s</span> timeout expires &rarr; finally wakes agy
+      </div>
+      <p class="small">
+        Also uses a process-global <code>static DEFERRED: AtomicBool</code> that leaks across parallel tests.
+      </p>
+    </div>
+
+    <div class="card proposed">
+      <h3><span class="badge badge-proposed">Pass 5</span> Instance-owned <code>WakeNudge</code> wakes <code>kqueue</code></h3>
+      <div class="timeline">
+<span class="dim">t=0.0s</span> agy turn running; steer saved; person types draft
+<span class="dim">t=1.0s</span> Stop hook runs &rarr; Watcher asleep in kqueue(60s)
+<span class="dim">t=1.6s</span> boundary::wake defers &rarr; <span class="good">nudge.retry_deferred()</span>
+<span class="dim">t=1.6s</span> <span class="good">EVFILT_USER wakes kqueue immediately</span> &rarr; 2s retry cadence
+<span class="dim">t=3.0s</span> person clears draft (empty prompt ready)
+<span class="dim">t=3.6s</span> <span class="good">Watcher retries on 2s tick &rarr; wakes agy</span>
+      </div>
+      <p class="small">
+        <code>StoreChanges::waker()</code> uses <code>EVFILT_USER</code> on macOS (same persistent <code>kqueue</code>)
+        and <code>Condvar</code> elsewhere. No global static.
+      </p>
+    </div>
+  </div>
+
+  <h2>3. Concrete interaction walk, failure modes &amp; counterexamples</h2>
   <table>
     <thead>
       <tr>
         <th style="width:22%">Scenario</th>
-        <th style="width:43%">What happens under Pass 3</th>
-        <th style="width:35%">Counterexample tested &amp; caught</th>
+        <th style="width:42%">Behavior (HEAD + Pass 5)</th>
+        <th style="width:36%">Failure / counterexample checked</th>
       </tr>
     </thead>
     <tbody>
       <tr>
-        <td><strong>Reopen Antigravity with waiting steers or Task update</strong><br><span class="small"><code>lf resume --task &lt;id&gt;</code></span></td>
-        <td><code>PreInvocation</code> runs as <code>Start</code>. <code>emit_block</code> builds reference context via <code>block_reserving</code> and claims steers via <code>steer::claim</code>. <code>Antigravity::hook_reply</code> emits two <code>injectSteps</code>: collapsed context first, then steers with <code>metadata.user_markdown</code>. The person sees the steer/update inline right above the reply.</td>
-        <td><em>Reference context leakage:</em> if <code>metadata.user_markdown</code> were placed on the combined block, 9 KB of file listings and scratch files would dump into the TUI. Separate <code>injectSteps</code> guarantees reference context never gets <code>metadata.user_markdown</code>.</td>
+        <td><strong>Normal idle wake on Antigravity</strong><br><span class="small"><code>lf steer</code> or Graph settles</span></td>
+        <td><code>Watcher</code> sees revision move &rarr; <code>idle_conversations</code> resolves <code>IdleReach::Terminal { terminal, prompt_ready: antigravity::prompt_ready }</code> &rarr; <code>Hosted</code> verifies empty prompt &amp; quiet input &rarr; pastes <code>WAKE_PROMPT</code> + <code>\r</code> &rarr; <code>record_woken</code> &rarr; <code>PreInvocation</code> claims &amp; stamps steer.</td>
+        <td><em>Dim mode hint on empty prompt:</em> QA Pass 4 caught that <code>agy 1.5.17</code> renders dim <code>Auto mode: … (shift+tab to cycle)</code> with cursor at col 2; fixed in <code>771d2d2967</code>, while typed drafts move cursor past col 2.</td>
       </tr>
       <tr>
-        <td><strong>Fresh Antigravity start or reopen with nothing waiting</strong><br><span class="small"><code>steers == None</code></span></td>
-        <td>On fresh start, <code>emit_block</code> emits 1 <code>injectSteps</code> entry (collapsed reference context, no <code>metadata</code>). On reopen with nothing waiting, <code>-i</code> is omitted and no turn runs.</td>
-        <td><em>Empty inline box:</em> <code>Antigravity::hook_reply</code> only pushes the steers step when <code>steers.is_some()</code>, so no blank markdown block can ever appear.</td>
+        <td><strong>Steer arrives during a turn while person has a draft or slash menu open</strong><br><span class="small">Post-<code>Stop</code> deferral</span></td>
+        <td><code>boundary::wake</code> tries 3&times;300 ms, gets <code>NotReady</code>, calls <code>nudge.retry_deferred()</code> (Pass 5) which wakes <code>Watcher</code> immediately into 2 s polling. Once draft/menu clears, next tick injects wake prompt.</td>
+        <td><em>Caught in this review:</em> without waking <code>StoreChanges::wait</code>, macOS <code>kqueue</code> slept up to 60 s after <code>note_deferred()</code>. Fixed in Pass 5 with <code>StoreWaker</code>.</td>
       </tr>
       <tr>
-        <td><strong>Mid-session Antigravity turn / post-tool steer</strong><br><span class="small"><code>Tool</code> or <code>Steer</code> moment</span></td>
-        <td><code>context</code> is <code>None</code>. <code>Antigravity::hook_reply</code> emits 1 <code>injectSteps</code> entry with <code>systemMessage</code> (model XML) and <code>metadata.user_markdown</code> (clean human markdown).</td>
-        <td><em>Escaping &amp; long bodies:</em> model-facing <code>text</code> escapes <code>$</code> to <code>&amp;#36;</code> and caps at 400 B with a prompt-log path; <code>display</code> renders raw unescaped markdown (so <code>$PATH</code> reads as <code>$PATH</code>) and truncates only very large bodies (&gt; 2 KB) on a char boundary.</td>
+        <td><strong>Paste injected, but <code>agy</code> drops it or exits before <code>PreInvocation</code></strong><br><span class="small">Injected turn never starts</span></td>
+        <td><code>record_woken</code> sets <code>yielded = 0</code> right after injection so <code>Watcher</code> does not loop-paste every 2 s. Because steers are left unstamped until <code>PreInvocation</code>, nothing is lost: the steer delivers on the next typed turn or reopen.</td>
+        <td><em>Tradeoff checked:</em> keeping <code>yielded = 1</code> would risk repeating paste into a stuck TUI; setting <code>yielded = 0</code> fails safe (no spam, no lost steer).</td>
       </tr>
       <tr>
-        <td><strong>Claude / Codex / OpenCode / Pi Start or Compact with steers</strong><br><span class="small">Single-string <code>additionalContext</code></span></td>
-        <td><code>delivery.block_reserving(moment, steers.text.len())</code> reserves the exact steer byte count inside <code>HOOK_CONTEXT_BYTES</code> (10,000 B). Default <code>Launcher::hook_reply</code> concatenates <code>steers.text + context</code> into <code>hookSpecificOutput.additionalContext</code>.</td>
-        <td><em>10 KB hook overflow:</em> generating a full 10 KB context block and appending steers afterward would exceed Claude's 10,000-character hook limit and Codex's 2,500-token budget. Reserving <code>steers.text.len()</code> inside <code>block_reserving</code> keeps the combined output &le; 10,000 bytes.</td>
+        <td><strong>Reopen closed Antigravity session with waiting steers while server is down</strong><br><span class="small"><code>lf resume --task</code></span></td>
+        <td><code>ReopenSteers::PromptHook</code> passes <code>-i WAKE_PROMPT</code>; <code>PreInvocation</code> reads SQLite directly and claims steers with no server required.</td>
+        <td><em>Why <code>PromptHook</code> stays beside <code>IdleReach::Terminal</code>:</em> collapsing reopen onto held-terminal wake would break offline/bare reopen and add a 0–2 s redraw poll delay.</td>
       </tr>
       <tr>
-        <td><strong>Headless Antigravity worker</strong><br><span class="small"><code>agy --output-format stream-json</code></span></td>
-        <td><code>PreInvocation</code> emits the same valid <code>injectSteps</code> with <code>metadata.user_markdown</code> on mid-turn steers; the model still reads only <code>systemMessage</code>.</td>
-        <td><em>Worker protocol break:</em> verified both in <code>agy_cli.py</code> fixtures (<code>task_graph_launch_tests</code>) and live against real <code>agy 1.5.16</code> in QA.</td>
+        <td><strong>Server restarts while Antigravity is open and idle with a draft</strong><br><span class="small">Terminal adoption</span></td>
+        <td><code>Registry::readopt</code> replays the holder's ring and blocks wake while <code>Nudge::Replaying</code> or <code>child.position() &lt; replayed_through</code>; afterward <code>prompt_ready</code> reads the rebuilt VT screen and sees the draft without needing prior keystroke history.</td>
+        <td><em>Narrow pane wrapping / future agy hint wording:</em> if a narrow pane wraps the hint or a future <code>agy</code> rewords it, <code>prompt_ready</code> conservatively returns <code>false</code> (fail-safe: no clobber, steer waits for next typed turn or reopen).</td>
+      </tr>
+      <tr>
+        <td><strong>Steer saved in the ~10 ms gap between <code>prompt_for_waiting_steers</code> and <code>Antigravity::open</code></strong><br><span class="small">Empty-reopen launch race</span></td>
+        <td><code>Antigravity::open</code> calls <code>record_first_boundary</code> locally without bumping steer/update revisions; if a steer landed in that ~10 ms window before <code>yielded=1</code>, it waits for the next revision move, 60 s <code>UNSIGNALLED</code> sweep, or typed turn.</td>
+        <td><em>Accepted tiny window:</em> <code>Antigravity::open</code> must stay best-effort/offline without requiring a server RPC; worst case is bounded by <code>UNSIGNALLED</code> (60 s) and loses nothing.</td>
       </tr>
     </tbody>
   </table>
 
   <h2>4. Outside this work (separate outcomes)</h2>
   <ul>
-    <li><strong>Already-open idle Antigravity wake (LOO-1099):</strong> Live PTY probes on <code>agy 1.5.16</code> proved <code>?2004h</code> paste-mode transitions fire at the trust dialog and do not toggle on slash menus or model pickers, and server adoption has no draft history.</li>
+    <li><strong>Inline steer &amp; Task-update display in Antigravity TUI (LOO-1103):</strong> Split per Jack Heart's direction after native QA on <code>agy 1.5.16/1.5.17</code> proved <code>metadata.user_markdown</code> is rejected by protobuf decoding and <code>renderInfo.markdown</code> stays hidden.</li>
     <li><strong>Multi-viewer handoff on Antigravity (LOO-1097):</strong> Opening an <code>agy</code> session in a second viewer closes the first.</li>
     <li><strong>Headless unanswered questions on Claude, Codex, Antigravity (Task 48edb9):</strong> Decoders do not yet fail a headless turn on unanswered interactive questions.</li>
-    <li><strong>Same steer, different response on Claude vs. Codex/Antigravity (observed in pass 2 QA, <code>scratch/qa.html</code>):</strong> Claude <code>task-session</code> primaries receive steers wrapped in <code>&lt;cross-session-message&gt;</code>, acknowledge them, and wait for typed confirmation, whereas Codex and Antigravity act on them immediately. Delivery parity is done; prompt/wrapper framing is a separate outcome.</li>
+    <li><strong>Claude cross-session steer framing (observed in Pass 2 QA, <code>scratch/qa.html</code>):</strong> Claude <code>task-session</code> primaries acknowledge <code>&lt;cross-session-message&gt;</code> steers and wait for typed confirmation while Codex and Antigravity act immediately.</li>
   </ul>
 
-  <h2>5. Open questions for review</h2>
-  <p class="small">Reversible choices made for Pass 3 so it can be reviewed as built. Reply with a number and letter (e.g. <code>1b</code>) to reverse any of them.</p>
+  <h2>5. Open choices for review</h2>
+  <p class="small">Reversible choices carried into Pass 5 so the branch can be reviewed as built. Reply with a number and letter (e.g. <code>1b</code>) to reverse any of them.</p>
 
   <div class="q-card">
-    <strong class="q-title">1. When a steer or Task update displays inline in Antigravity, how much detail should appear on screen?</strong>
-    <p class="small">The model still gets the full machine metadata (steer ID, source, revision, prompt-log path). This choice is only what the person sees in the terminal.</p>
+    <strong class="q-title">1. When an Antigravity work session wakes automatically, what should appear on the prompt line in the terminal?</strong>
+    <p class="small">Both reopen and already-open idle wake trigger Antigravity's turn hook by submitting a short prompt so steers are never marked read before Antigravity actually starts the turn.</p>
     <ul class="opts">
-      <li class="chosen"><strong>1a (chosen for Pass 3):</strong> Clean label + body only — e.g. <code>**Steer** (Jack Heart)</code> or <code>**Task update**</code> followed by the message text (plus a short <em>"N more waiting"</em> line if more steers remain queued), hiding internal IDs and <code>.lf/prompts/</code> paths.</li>
-      <li><strong>1b:</strong> Include the steer ID and source/revision header inline as well, matching the model-facing <code>&lt;lf:steers&gt;</code> text verbatim.</li>
+      <li class="chosen"><strong>1a (chosen, built across Passes 1–4):</strong> Keep the fixed prompt <em>"Read the waiting steers and Task updates for this Session."</em> on both reopen and idle wake, keeping steers unstamped until Antigravity's hook runs (no steer loss on crash or dropped paste, and inline display stays cleanly tracked in LOO-1103).</li>
+      <li><strong>1b:</strong> Paste the full steer text directly into the prompt box instead of the generic trigger line (shows the steer text immediately, at the cost of either marking steers read before Antigravity confirms receipt or risking duplicate delivery if the paste fails).</li>
     </ul>
   </div>
 
   <div class="q-card">
-    <strong class="q-title">2. When you reopen a closed Antigravity Task conversation with waiting steers, what should appear as the opening user line above the inline steer?</strong>
-    <p class="small">Antigravity needs an opening prompt to trigger the hook that loads waiting steers before you type, so that line still appears above the newly visible inline steer.</p>
+    <strong class="q-title">2. How long should Loopflow pause after your last keypress before waking an idle Antigravity terminal?</strong>
+    <p class="small">Mouse clicks, scroll wheel, and window focus changes never reset this timer; only actual keystrokes do, and any text left in the prompt box blocks wake indefinitely until cleared.</p>
     <ul class="opts">
-      <li class="chosen"><strong>2a (chosen, built in Pass 1):</strong> Keep the short generic line <em>"Read the waiting steers and Task updates for this Session."</em> and display the actual steers inline right below it via <code>user_markdown</code> — nothing is marked delivered until the hook runs, so a failed launch never loses a steer.</li>
-      <li><strong>2b:</strong> Put the actual steer text directly as the opening prompt (no generic line, at the cost of marking steers read before Antigravity starts and losing Task updates that exceed prompt size).</li>
+      <li class="chosen"><strong>2a (chosen, built in Pass 4):</strong> 2 seconds quiet time after a real keystroke, retried every 2 seconds (and woken immediately after a turn ends once Pass 5 lands) — fast enough to feel live once you backspace a draft, long enough not to race mid-shortcut.</li>
+      <li><strong>2b:</strong> Longer quiet window (e.g. 5 seconds) to give more breathing room between clearing a draft and starting a new sentence.</li>
     </ul>
   </div>
 </main>

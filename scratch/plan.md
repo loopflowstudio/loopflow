@@ -2,7 +2,7 @@
 
 ## Outcome
 
-Status: built in `78bde1d766`; nothing remains before compress, qa and gate.
+Status: built (`78bde1d766`), compressed (`c6eab6e222`), QA'd (`73abaa380c`), and reviewed (`scratch/concept-review.html`). Two small prose seams remain for `ship-review` / `gate` (see `## Post-build review findings`).
 
 
 A Task on `code`, `feature`, `pursue` or `redesign` runs `compress` and `qa`
@@ -415,12 +415,25 @@ uv run python scripts/test.py --reuse-passing \
 
 One pass; it is prose, four YAML files, docs, and test expectations.
 
-- Built in one pass (`78bde1d766`):
+- Built in one pass (`78bde1d766`), compressed (`c6eab6e222`), and QA'd (`73abaa380c`):
   - Reordered `build.yaml` and `plan.yaml`; added `ui.yaml` (two-sentence description so Desktop's Start menu fits on one line, synced with `docs/surfaces.md`) and `fix.yaml`.
-  - Updated `concept-review.md`, `realign.md`, `wave_session.md`, `implement.md` (110 lines), `demo.md`, `verify.md`, `kickoff.md`, `advance.md`, `write-docs.md`, `ship-review.md`; regenerated `tests/goldens/builtin_{implement,realign}.md`.
-  - Updated Rust graph expectations in `compiled.rs` (including `fix` and `ui` cases), `graph/mod.rs` (`edges()` reports relative offsets `1` and `3`, not absolute indices), `commands/graph.rs`, and `task_graph.rs:631` (`write-docs` shifted by +1 after `realign` joined `plan`).
-  - Verified `builtins::`, `graph::`, `task_graph::`, `lf::commands::graph::tests::`, `golden_prompt`, `documented_commands::`, and live `lf graph show` / `lf list graph` in an empty repo.
-- Remaining: none; ready for review, compress, qa, and gate.
+  - Updated `concept-review.md`, `realign.md`, `wave_session.md`, `implement.md` (109 lines after QA tightening), `demo.md`, `verify.md`, `kickoff.md`, `advance.md`, `write-docs.md`, `ship-review.md`; regenerated `tests/goldens/builtin_{implement,realign}.md`.
+  - Updated Rust graph expectations in `compiled.rs` (including `fix` and `ui` cases and pinned return edges), `graph/mod.rs` (`edges()` reports relative offsets `1` and `3`, not absolute indices), `commands/graph.rs`, and `task_graph.rs:631` (`write-docs` shifted by +1 after `realign` joined `plan`).
+  - QA (`scratch/qa.html`) verified `lf graph show`, `lf list graph`, Desktop `StartFlow` labels, `lf help`, and real Claude haiku decider runs for `build`'s inner loop, `fix` bounded brief, read-only `concept-review`, and `fix` oversized brief (caught and fixed in `73abaa380c`: no-plan `implement` now blocks oversized briefs before writing any plan or code).
+- Remaining: two small prose seams for `ship-review` / `gate` below; the Graph model, ownership map, code, docs, and tests hold.
+
+## Post-build review findings
+
+Recorded by post-build `concept-review` against base `23ce1a69f9` (`scratch/concept-review.html`). The overall model holds; neither item warrants re-running the 6-step `build` loop, and both fit cleanly in `ship-review` / `gate`:
+
+1. **`realign.md` reversible-choice handoff (`rust/loopflow-definitions/src/builtins/task/skill/realign.md`, plus `tests/goldens/builtin_realign.md`):** `concept-review.md:48-50` shows a reversible product choice as a recommendation with what was passed over, and `ship-review.md:13` reads "choices agents made" from `scratch/plan.md`, while `realign.md:25-26` says "A change that needs a product decision is written as the exact open choice. Nothing goes into the plan as settled unless someone said so" and `## After a review` omits reversible product choices. Add 2–3 sentences to `realign.md` so headless `realign` adopts a recommended reversible choice into the plan marked "made for review" (with what was passed over, never written as settled), while irreversible choices still `blocked` (in a loop) or go to `scratch/questions.md` (outside a loop), then regenerate `tests/goldens/builtin_realign.md`.
+2. **`verify.md` `<qa head>` pointer (`rust/loopflow-definitions/src/builtins/task/skill/verify.md:18`):** Clarify that `<qa head>` is the branch's `lf qa:` commit (from `scratch/qa.html` finding #3).
+
+## Deferred findings
+
+- **Update `.lf/wave/intelligence/MEMORY.md`:** read-only in a Task checkout; replace the 2026-09-28 entry ("`realign` now owns memory curation") with "`wave-session` owns memory curation" in an intelligence Wave session once LOO-1104 lands.
+- **Step-commit `-a` propagation (`scratch/qa.html` #1):** with `-a claude:haiku` and no `default_agent`, `lf commit --step` falls back to `lf <skill>: checkpoint`. Outside LOO-1104's scope; `.lf/qa/skills.md` documents the current behavior.
+- **Repo-local `.lf/graphs/pursue-auto.yaml` & automatic Graph selection:** separate outcomes outside this Task.
 
 Done when `lf list graph` shows `ui` and `fix` beside the reordered `build`
 and `plan`; `lf graph show code` runs `concept-review` and `realign` before

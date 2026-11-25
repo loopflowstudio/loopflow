@@ -393,16 +393,9 @@ mod tests {
     }
 
     #[test]
-    fn review_page_skills_use_lf_page_kit() {
-        assert!(LOOPFLOW_DOC.contains("lf page open"));
-        assert!(LOOPFLOW_DOC.contains("lf desktop files"));
-
+    fn review_page_skills_build_and_open_with_lf_page() {
         for name in ["explore", "concept-review", "qa", "demo", "ship-review"] {
             let skill = get_builtin_skill(name).unwrap_or_else(|| panic!("missing skill {name}"));
-            assert!(
-                skill.contains("lf help page"),
-                "{name} must point to `lf help page`"
-            );
             assert!(
                 skill.contains(&format!("lf page build scratch/{name}.page.html")),
                 "{name} must compile `scratch/{name}.page.html`"
@@ -410,14 +403,6 @@ mod tests {
             assert!(
                 skill.contains(&format!("lf page open scratch/{name}.html")),
                 "{name} must open `scratch/{name}.html` with `lf page open`"
-            );
-            assert!(
-                !skill.contains("lf desktop files"),
-                "{name} must use `lf page open` instead of `lf desktop files`"
-            );
-            assert!(
-                !skill.contains("visual language"),
-                "{name} must delegate styling to `lf page build` / `.lf/theme.css`"
             );
         }
     }

@@ -30,20 +30,32 @@
   // Draft & receipt state.
   // Notes, choices, multiselects, questions, and offline actions enter the reply queue.
   // Executed direct `data-lf` receipts stay separate and only ride as a suffix on ⌘↩.
-  let state = {
-    notes: [],
-    choices: {},
-    multiselects: {},
-    questions: {},
-    offlineActions: [],
-    receipts: [],
-  };
+  function emptyState() {
+    return {
+      notes: [],
+      choices: {},
+      multiselects: {},
+      questions: {},
+      offlineActions: [],
+      receipts: [],
+    };
+  }
+
+  let state = emptyState();
 
   function oneLine(text) {
     return String(text || "")
       .replace(/[\r\n\t\x00-\x1f]+/g, " ")
       .replace(/\s+/g, " ")
       .trim();
+  }
+
+  function buttonValue(btn) {
+    return btn.getAttribute("data-value") || oneLine(btn.textContent);
+  }
+
+  function resultTaskId(result) {
+    return result && ((result.task && result.task.identifier) || result.identifier);
   }
 
   function randomId() {
@@ -152,16 +164,17 @@
     } catch (_) {}
   }
 
+  function refresh(persist) {
+    syncControlsFromState();
+    renderNotesTray();
+    renderHighlights();
+    if (persist) saveState();
+    renderStrip();
+  }
+
   function applyState(loaded) {
     if (!loaded || typeof loaded !== "object") {
-      state = {
-        notes: [],
-        choices: {},
-        multiselects: {},
-        questions: {},
-        offlineActions: [],
-        receipts: [],
-      };
+      state = emptyState();
     } else {
       state = {
         notes: Array.isArray(loaded.notes) ? loaded.notes : [],
@@ -173,10 +186,7 @@
         receipts: Array.isArray(loaded.receipts) ? loaded.receipts : [],
       };
     }
-    syncControlsFromState();
-    renderNotesTray();
-    renderHighlights();
-    renderStrip();
+    refresh(false);
   }
 
   // Desktop Swift bridge calls this on `ready` reply or after `ReviewComments.insert(into:)` clears.
@@ -268,34 +278,20 @@
 
   function sendOperation(operation, requestId) {
     if (desktopHandler) {
-      return new Promise((resolve, reject) => {
-        try {
-          const id = "op-" + nextReqId++;
-          window.__lfDesktopOpCallbacks = window.__lfDesktopOpCallbacks || {};
-          window.__lfDesktopOpCallbacks[id] = { resolve, reject };
-          const reply = desktopHandler.postMessage({
+      try {
+        return Promise.resolve(
+          desktopHandler.postMessage({
             type: "operation",
-            id: id,
             operation: operation,
             request_id: requestId || null,
-          });
-          if (reply && typeof reply.then === "function") {
-            reply.then(
-              (result) => {
-                delete window.__lfDesktopOpCallbacks[id];
-                if (result && result.error) reject(new Error(result.error));
-                else resolve(result && result.result !== undefined ? result.result : result);
-              },
-              (err) => {
-                delete window.__lfDesktopOpCallbacks[id];
-                reject(err);
-              }
-            );
-          }
-        } catch (err) {
-          reject(err);
-        }
-      });
+          })
+        ).then((result) => {
+          if (result && result.error) throw new Error(result.error);
+          return result && result.result !== undefined ? result.result : result;
+        });
+      } catch (err) {
+        return Promise.reject(err);
+      }
     }
     if (!socket || socket.readyState !== WebSocket.OPEN) {
       return Promise.reject(new Error("Loopflow server is not connected"));
@@ -353,7 +349,7 @@
       const label = groupEl.getAttribute("data-label") || group;
       groupEl.querySelectorAll("button").forEach((btn) => {
         btn.addEventListener("click", () => {
-          const value = btn.getAttribute("data-value") || oneLine(btn.textContent);
+          const value = buttonValue(btn);
           if (state.choices[group] && state.choices[group].value === value) {
             delete state.choices[group];
           } else {
@@ -372,7 +368,7 @@
       const label = groupEl.getAttribute("data-label") || group;
       groupEl.querySelectorAll("button").forEach((btn) => {
         btn.addEventListener("click", () => {
-          const value = btn.getAttribute("data-value") || oneLine(btn.textContent);
+          const value = buttonValue(btn);
           const current = (state.multiselects[group] && state.multiselects[group].values) || [];
           const idx = current.indexOf(value);
           const next = idx >= 0 ? current.filter((v) => v !== value) : current.concat([value]);
@@ -420,8 +416,7 @@
       const group = groupEl.getAttribute("data-choice");
       const selected = state.choices[group] && state.choices[group].value;
       groupEl.querySelectorAll("button").forEach((btn) => {
-        const value = btn.getAttribute("data-value") || oneLine(btn.textContent);
-        const active = selected === value;
+        const active = selected === buttonValue(btn);
         btn.classList.toggle("is-selected", active);
         btn.setAttribute("aria-pressed", active ? "true" : "false");
       });
@@ -430,8 +425,7 @@
       const group = groupEl.getAttribute("data-multiselect");
       const values = (state.multiselects[group] && state.multiselects[group].values) || [];
       groupEl.querySelectorAll("button").forEach((btn) => {
-        const value = btn.getAttribute("data-value") || oneLine(btn.textContent);
-        const active = values.includes(value);
+        const active = values.includes(buttonValue(btn));
         btn.classList.toggle("is-selected", active);
         btn.setAttribute("aria-pressed", active ? "true" : "false");
       });
@@ -469,7 +463,7 @@
 
   function formatReceipt(kind, result) {
     if (result && typeof result === "object") {
-      const taskId = (result.task && result.task.identifier) || result.identifier;
+      const taskId = resultTaskId(result);
       if (kind === "task.create" && taskId) return "Filed " + taskId;
       if (result.delivery && result.delivery.sentence) return result.delivery.sentence;
       if (taskId) return kind + " → " + taskId;
@@ -522,8 +516,7 @@
       sendOperation(op, requestId).then(
         (result) => {
           const text = formatReceipt(op.kind, result);
-          const idSummary =
-            (result && ((result.task && result.task.identifier) || result.identifier)) || text;
+          const idSummary = resultTaskId(result) || text;
           state.receipts.push({ key: actionKey, kind: op.kind, summary: idSummary });
           const receipt = document.createElement("span");
           receipt.className = "lf-action-receipt";
@@ -768,16 +761,10 @@
   }
 
   function clearDrafts() {
-    state.notes = [];
-    state.choices = {};
-    state.multiselects = {};
-    state.questions = {};
-    state.offlineActions = [];
-    syncControlsFromState();
-    renderNotesTray();
-    renderHighlights();
-    saveState();
-    renderStrip();
+    const receipts = state.receipts;
+    state = emptyState();
+    state.receipts = receipts;
+    refresh(true);
   }
 
   function submitReply() {

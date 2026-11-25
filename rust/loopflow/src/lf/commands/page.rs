@@ -9,10 +9,16 @@ use crate::lf::commands::open::{viewed_placement, OpenHost};
 use crate::lf::{Cli, DesktopCommand, DesktopTargetArgs, PageCommand, PageHost};
 use crate::server::wire::{Operation, PageUrl, ServerOperation};
 
+mod build;
+mod components;
+mod diff;
+mod html;
+mod operations;
+
 pub fn run(cli: &Cli, cmd: &PageCommand) -> Result<()> {
     match cmd {
         PageCommand::Build { source, base } => {
-            let output = super::page_build::build(cli, source, base.as_deref())?;
+            let output = build::build(cli, source, base.as_deref())?;
             println!("{}", output.display());
             Ok(())
         }
@@ -32,13 +38,12 @@ fn open(cli: &Cli, page: &Path, host: PageHost, print_only: bool) -> Result<()> 
     }
 
     let resolved = resolve_existing_file(page)?;
-    if print_only {
-        let url = mint_loopback_url(&resolved)?;
-        println!("{url}");
-        return Ok(());
-    }
-
-    match decide_open_route(host) {
+    let route = if print_only {
+        OpenRoute::PrintQuiet
+    } else {
+        decide_open_route(host)
+    };
+    match route {
         OpenRoute::Desktop => open_in_desktop(cli, page),
         OpenRoute::Browser => {
             let url = mint_loopback_url(&resolved)?;
@@ -115,11 +120,7 @@ fn is_page_source(path: &Path) -> bool {
 }
 
 fn resolve_existing_file(path: &Path) -> Result<PathBuf> {
-    let absolute = if path.is_absolute() {
-        path.to_path_buf()
-    } else {
-        std::env::current_dir()?.join(path)
-    };
+    let absolute = std::env::current_dir()?.join(path);
     let canonical = std::fs::canonicalize(&absolute)
         .with_context(|| format!("Page not found: {}", path.display()))?;
     if !canonical.is_file() {

@@ -1,4 +1,4 @@
-at: 929e95f0a68af7a4888d10691645f98e8098c901
+at: 884a2d10c877127e97d3872361b10e1c0cbf3769
 first:
   - path: docs/surfaces.md
     why: Review page UX across browser, Desktop, headless, and offline
@@ -14,8 +14,8 @@ first:
     why: Shared Messages carrier and local-only page.url dispatch
   - path: rust/loopflow/src/lf/commands/page.rs
     why: lf page build/open dispatch and caller host routing
-  - path: rust/loopflow/src/lf/commands/page_build.rs
-    why: Fragment compiler, diff/component/data-lf expansion, build checks
+  - path: rust/loopflow/src/lf/commands/page/
+    why: Fragment compiler split into build, components, diff, operations, html
   - path: rust/loopflow-definitions/src/builtins/page/runtime.js
     why: Shared highlight notes, choices, loopback WS, Desktop bridge
   - path: swift/LoopflowMac/Views/TaskHTMLView.swift
@@ -29,7 +29,7 @@ first:
   - path: rust/loopflow/tests/page_tests.rs
     why: End-to-end loopback, admission, steer, and build integration tests
   - path: swift/LoopflowTests/TaskFilesTests.swift
-    why: Headless Desktop bridge state, clear-on-send, and op forwarding tests
+    why: Focused Desktop bridge state, send, and operation forwarding tests
 hide:
   - path: tests/fixtures/dto/server_schema.json
     why: Regenerated server JSON Schema for page.url

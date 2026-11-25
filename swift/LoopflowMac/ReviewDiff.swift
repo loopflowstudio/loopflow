@@ -770,6 +770,10 @@ struct ReviewComment: Equatable, Sendable, Identifiable {
         }
     }
 
+    func isPage(_ path: String) -> Bool {
+        if case .page(let itemPath, _) = target { itemPath == path } else { false }
+    }
+
     /// The original line selection for a `.lines` comment; nil for `.page`.
     var original: ReviewSelection? {
         guard case .lines(let selection) = target else { return nil }
@@ -813,8 +817,9 @@ struct ReviewComment: Equatable, Sendable, Identifiable {
     }
 
     static func oneLine(_ text: String) -> String {
+        let space = UnicodeScalar(" ")
         let cleaned = String(String.UnicodeScalarView(text.unicodeScalars.map { scalar in
-            (scalar.value < 0x20 || scalar.value == 0x7f) ? UnicodeScalar(0x20)! : scalar
+            (scalar.value < 0x20 || scalar.value == 0x7f) ? space : scalar
         }))
         return cleaned.split(whereSeparator: \.isWhitespace).joined(separator: " ")
     }
@@ -876,36 +881,32 @@ final class ReviewComments {
     /// or `nil` when absent, cleared after send, or rebuilt with a new `buildID` (clearing
     /// any stale state and items left over from an earlier build of `path`).
     func pageReady(path: String, buildID: String) -> JSONValue? {
-        let key = PageKey(path: path, buildID: buildID)
-        if let saved = pageStates[key] { return saved }
-        let staleKeys = pageStates.keys.filter { $0.path == path && $0.buildID != buildID }
-        if !staleKeys.isEmpty {
-            for stale in staleKeys { pageStates.removeValue(forKey: stale) }
-            items.removeAll {
-                if case .page(let itemPath, _) = $0.target { itemPath == path } else { false }
-            }
+        if let saved = pageStates[PageKey(path: path, buildID: buildID)] { return saved }
+        if removeStalePageStates(for: path, keeping: buildID) {
+            items.removeAll { $0.isPage(path) }
         }
         return nil
     }
 
     /// Store `state` for `(path, buildID)` and replace `path`'s `.page` entries in `items`.
     func syncPage(path: String, buildID: String, state: JSONValue, items pageItems: [PageItem]) {
-        for stale in pageStates.keys where stale.path == path && stale.buildID != buildID {
-            pageStates.removeValue(forKey: stale)
-        }
+        _ = removeStalePageStates(for: path, keeping: buildID)
         pageStates[PageKey(path: path, buildID: buildID)] = state
-        let firstIndex = items.firstIndex {
-            if case .page(let itemPath, _) = $0.target { itemPath == path } else { false }
-        }
-        items.removeAll {
-            if case .page(let itemPath, _) = $0.target { itemPath == path } else { false }
-        }
+        let firstIndex = items.firstIndex { $0.isPage(path) }
+        items.removeAll { $0.isPage(path) }
         let replacements = pageItems.map { ReviewComment(pagePath: path, reference: $0.reference, text: $0.text) }
         if let firstIndex, firstIndex <= items.count {
             items.insert(contentsOf: replacements, at: firstIndex)
         } else {
             items.append(contentsOf: replacements)
         }
+    }
+
+    @discardableResult
+    private func removeStalePageStates(for path: String, keeping buildID: String) -> Bool {
+        let staleKeys = pageStates.keys.filter { $0.path == path && $0.buildID != buildID }
+        for stale in staleKeys { pageStates.removeValue(forKey: stale) }
+        return !staleKeys.isEmpty
     }
 
     func reconcile(_ document: TaskFileDocument) {

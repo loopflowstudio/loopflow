@@ -22,7 +22,6 @@ pub mod mutation;
 pub mod open;
 pub mod ops;
 pub mod page;
-mod page_build;
 pub mod people;
 pub mod read;
 pub mod rental;

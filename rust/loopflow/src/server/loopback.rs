@@ -381,14 +381,14 @@ async fn handle_file(encoded: &str) -> Response<Full<Bytes>> {
     let Ok(bytes) = tokio::fs::read(&path).await else {
         return empty(StatusCode::NOT_FOUND);
     };
-    let (content_type, is_html) = content_type_for(&path);
+    let content_type = content_type_for(&path);
     let mut builder = Response::builder()
         .status(StatusCode::OK)
         .header(CONTENT_TYPE, content_type)
         .header(REFERRER_POLICY, "no-referrer")
         .header(CACHE_CONTROL, "no-store")
         .header(X_CONTENT_TYPE_OPTIONS, "nosniff");
-    if is_html {
+    if content_type.starts_with("text/html") {
         builder = builder.header(CONTENT_SECURITY_POLICY, HTML_CSP);
     }
     builder
@@ -396,26 +396,26 @@ async fn handle_file(encoded: &str) -> Response<Full<Bytes>> {
         .expect("file HTTP response is valid")
 }
 
-fn content_type_for(path: &Path) -> (&'static str, bool) {
+fn content_type_for(path: &Path) -> &'static str {
     let ext = path
         .extension()
         .and_then(|ext| ext.to_str())
         .map(|ext| ext.to_ascii_lowercase());
     match ext.as_deref() {
-        Some("html" | "htm") => ("text/html; charset=utf-8", true),
-        Some("css") => ("text/css; charset=utf-8", false),
-        Some("js" | "mjs") => ("text/javascript; charset=utf-8", false),
-        Some("json") => ("application/json; charset=utf-8", false),
-        Some("svg") => ("image/svg+xml", false),
-        Some("png") => ("image/png", false),
-        Some("jpg" | "jpeg") => ("image/jpeg", false),
-        Some("gif") => ("image/gif", false),
-        Some("webp") => ("image/webp", false),
-        Some("ico") => ("image/x-icon", false),
-        Some("woff2") => ("font/woff2", false),
-        Some("woff") => ("font/woff", false),
-        Some("txt" | "md") => ("text/plain; charset=utf-8", false),
-        _ => ("application/octet-stream", false),
+        Some("html" | "htm") => "text/html; charset=utf-8",
+        Some("css") => "text/css; charset=utf-8",
+        Some("js" | "mjs") => "text/javascript; charset=utf-8",
+        Some("json") => "application/json; charset=utf-8",
+        Some("svg") => "image/svg+xml",
+        Some("png") => "image/png",
+        Some("jpg" | "jpeg") => "image/jpeg",
+        Some("gif") => "image/gif",
+        Some("webp") => "image/webp",
+        Some("ico") => "image/x-icon",
+        Some("woff2") => "font/woff2",
+        Some("woff") => "font/woff",
+        Some("txt" | "md") => "text/plain; charset=utf-8",
+        _ => "application/octet-stream",
     }
 }
 

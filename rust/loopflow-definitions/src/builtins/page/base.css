@@ -260,14 +260,14 @@ th {
 }
 
 /* Controls: choices, questions, direct actions */
-.lf-choices, [data-choice], [data-multiselect] {
+[data-choice], [data-multiselect] {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
   margin-top: 8px;
 }
 
-button, .lf-btn {
+button {
   appearance: none;
   font-family: var(--lf-font-sans);
   font-size: 13px;
@@ -280,7 +280,7 @@ button, .lf-btn {
   cursor: pointer;
 }
 
-button:hover, .lf-btn:hover {
+button:hover {
   background: var(--lf-surface-muted);
 }
 
